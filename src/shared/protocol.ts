@@ -142,8 +142,8 @@ export type RendererCallResult<T> =
 
 /**
  * The Import Fidelity Review's content classes (ADR 0086 §1). A review parsed under
- * `ai7-docx-fflate-saxes/2` carries all ten, in this order; one recorded under `/1` carries the eight
- * it had, without `text-boxes` and `fields`. `round-trip-export` is the closing 预计往返 card.
+ * `ai7-docx-fflate-saxes/2` or `/3` carries all ten, in this order; one recorded under `/1` carries the
+ * eight it had, without `text-boxes` and `fields`. `round-trip-export` is the closing 预计往返 card.
  */
 export type FidelityCategoryKey =
   | 'inline-styles'

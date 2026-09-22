@@ -107,7 +107,7 @@ describe('parseDocx', () => {
     });
 
     expect(parsed.parserIdentity).toBe(DOCX_PARSER_IDENTITY);
-    expect(DOCX_PARSER_IDENTITY).toBe('ai7-docx-fflate-saxes/2');
+    expect(DOCX_PARSER_IDENTITY).toBe('ai7-docx-fflate-saxes/3');
     expect(parsed.blockCount).toBe(4);
     expect(blocks.map((block) => block.kind)).toEqual(['title', 'heading', 'heading', 'paragraph']);
     expect(blocks.map((block) => block.level)).toEqual([1, 1, 2, null]);
@@ -228,6 +228,7 @@ describe('parseDocx', () => {
       outcome: 'clean-import-no-round-trip',
       degradations: [],
       textBoxDisposition: null,
+      importedMarks: 0,
     });
   });
 
@@ -409,6 +410,7 @@ describe('deriveImportFidelityPlan and isCleanTracerFidelity', () => {
       outcome: 'clean-import-no-round-trip',
       degradations: [],
       textBoxDisposition: null,
+      importedMarks: 0,
     });
     expect(fidelity.every((category) => category.key === 'round-trip-export' || category.count === 0)).toBe(true);
   });
@@ -450,6 +452,7 @@ describe('deriveImportFidelityPlan and isCleanTracerFidelity', () => {
       outcome: 'clean-import-no-round-trip',
       degradations: [],
       textBoxDisposition: null,
+      importedMarks: 0,
     });
   });
 
@@ -468,6 +471,7 @@ describe('deriveImportFidelityPlan and isCleanTracerFidelity', () => {
       outcome: 'degraded-import-no-round-trip',
       degradations: [{ categoryKey: 'notes', label: '脚注与尾注', count: 1 }],
       textBoxDisposition: null,
+      importedMarks: 0,
     });
   });
 
@@ -527,6 +531,7 @@ describe('deriveImportFidelityPlan and isCleanTracerFidelity', () => {
         { categoryKey: 'tables', label: '表格', count: 1 },
       ],
       textBoxDisposition: null,
+      importedMarks: 0,
     });
     // A parser's own report is equally not a converted one, whichever way it is read.
     expect(deriveImportFidelityPlan(report, 'a'.repeat(64), 1024, { ...conversion, sourceFormat: 'TXT' }))
@@ -549,6 +554,7 @@ describe('deriveImportFidelityPlan and isCleanTracerFidelity', () => {
       outcome: 'degraded-import-no-round-trip',
       degradations: [{ categoryKey: 'headers-footers', label: '页眉与页脚', count: 1 }],
       textBoxDisposition: null,
+      importedMarks: 0,
     };
     expect(deriveImportFidelityPlan(textReport, 'a'.repeat(64), 1024, text)).toEqual(planned);
     expect(deriveImportFidelityPlan(legacyReport, 'a'.repeat(64), 1024, legacy)).toEqual(planned);
@@ -581,12 +587,13 @@ describe('parser identity /1 reviews', () => {
         { categoryKey: 'sections', label: '分节', count: 1 },
       ],
       textBoxDisposition: null,
+      importedMarks: 0,
     });
     // Eight rows are not a revision-2 report, and ten are not a revision-1 one.
     expect(deriveImportFidelityPlan(SAMPLE1_V1_REPORT, 'a'.repeat(64), 1024)).toBeUndefined();
     const v2 = buildFidelityReport({ ...NO_SIGNALS, inlineStyles: 266, sections: 1 }, 0);
     expect(deriveImportFidelityPlan(v2, 'a'.repeat(64), 1024, undefined, DOCX_PARSER_IDENTITY_V1)).toBeUndefined();
-    expect(deriveImportFidelityPlan(v2, 'a'.repeat(64), 1024, undefined, 'ai7-docx-fflate-saxes/3')).toBeUndefined();
+    expect(deriveImportFidelityPlan(v2, 'a'.repeat(64), 1024, undefined, 'ai7-docx-fflate-saxes/4')).toBeUndefined();
     // A one-character change to a frozen detail no longer rebuilds.
     const drifted = SAMPLE1_V1_REPORT.map((category, index) => index === 0 ? { ...category, detail: `${category.detail} ` } : category);
     expect(deriveImportFidelityPlan(drifted, 'a'.repeat(64), 1024, undefined, DOCX_PARSER_IDENTITY_V1)).toBeUndefined();
@@ -671,6 +678,7 @@ describe('parseDocx: text boxes, fields, and source paragraphs (ADR 0086)', () =
       outcome: 'clean-import-no-round-trip',
       degradations: [],
       textBoxDisposition: 'retain',
+      importedMarks: 0,
     });
   });
 
@@ -728,6 +736,7 @@ describe('parseDocx: text boxes, fields, and source paragraphs (ADR 0086)', () =
       outcome: 'degraded-import-no-round-trip',
       degradations: [{ categoryKey: 'fields', label: '域（目录等）', count: 2 }],
       textBoxDisposition: null,
+      importedMarks: 0,
     });
   });
 
@@ -754,6 +763,7 @@ describe('parseDocx: text boxes, fields, and source paragraphs (ADR 0086)', () =
       outcome: 'clean-import-no-round-trip',
       degradations: [],
       textBoxDisposition: null,
+      importedMarks: 0,
     });
   });
 
@@ -777,6 +787,7 @@ describe('parseDocx: text boxes, fields, and source paragraphs (ADR 0086)', () =
       outcome: 'clean-import-no-round-trip',
       degradations: [],
       textBoxDisposition: null,
+      importedMarks: 0,
     });
   });
 
@@ -807,6 +818,7 @@ describe('parseDocx: text boxes, fields, and source paragraphs (ADR 0086)', () =
       outcome: 'degraded-import-no-round-trip',
       degradations: [{ categoryKey: 'fields', label: '域（目录等）', count: 3 }],
       textBoxDisposition: null,
+      importedMarks: 0,
     });
   });
 
@@ -834,6 +846,7 @@ describe('parseDocx: text boxes, fields, and source paragraphs (ADR 0086)', () =
       outcome: 'degraded-import-no-round-trip',
       degradations: [{ categoryKey: 'fields', label: '域（目录等）', count: 5 }],
       textBoxDisposition: null,
+      importedMarks: 0,
     });
   });
 
@@ -893,6 +906,7 @@ describe('parseDocx: text boxes, fields, and source paragraphs (ADR 0086)', () =
       outcome: 'clean-import-no-round-trip',
       degradations: [],
       textBoxDisposition: null,
+      importedMarks: 0,
     });
     // Ninety-eight paragraphs, one of them empty: every block names its own, strictly in order.
     expect(blocks.every((block, index) => index === 0 || block.sourceParagraphIndex > blocks[index - 1]!.sourceParagraphIndex)).toBe(true);

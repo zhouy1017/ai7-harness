@@ -428,7 +428,7 @@ describe('conversion to a DOCX working representation over the real store', () =
         expect(sources[0]).toMatchObject({
           format,
           source_digest: originalDigest,
-          parser_identity: 'ai7-docx-fflate-saxes/2',
+          parser_identity: 'ai7-docx-fflate-saxes/3',
           converter_identity: 'ai7-text-to-docx/1',
         });
         expect(sources[0]!.working_object_digest).not.toBe(originalDigest);
@@ -539,7 +539,7 @@ describe.skipIf(!localOnlyAvailable(LOCAL_ONLY_DOC))('legacy .doc conversion ove
       expect(sourceRecord).toMatchObject({
         format: 'DOC',
         sourceDigest: LOCAL_DOC_SHA256,
-        parserIdentity: 'ai7-docx-fflate-saxes/2',
+        parserIdentity: 'ai7-docx-fflate-saxes/3',
         converterIdentity: DOC_CONVERTER,
         workingObjectDigest: LOCAL_DOC_WORKING_SHA256,
       });
@@ -555,7 +555,7 @@ describe.skipIf(!localOnlyAvailable(LOCAL_ONLY_DOC))('legacy .doc conversion ove
       expect(sources).toEqual([{
         format: 'DOC',
         source_digest: LOCAL_DOC_SHA256,
-        parser_identity: 'ai7-docx-fflate-saxes/2',
+        parser_identity: 'ai7-docx-fflate-saxes/3',
         working_object_digest: LOCAL_DOC_WORKING_SHA256,
         converter_identity: DOC_CONVERTER,
       }]);
