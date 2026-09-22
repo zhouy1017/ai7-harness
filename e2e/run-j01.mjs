@@ -24,7 +24,15 @@ const LOCAL_DOC_SHA256 = '931d8035946f7689aaaa25c14c5822f46eedc59d23925081ded7b0
 /** What this converter makes of it: a derived object's digest and its body paragraph count. */
 const LOCAL_DOC_BLOCKS = 5_815;
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
-const BROWSER_LAUNCH_TIMEOUT_MS = 35_000;
+// Every wait for the product or its renderer to reach a state, including the launch it starts from.
+// J-02, J-03 and J-12 allow sixty seconds for the same waits; J-01 allowed thirty, and hosted macOS —
+// several times slower than a background test guest — lost `renderer-ready` on it (Issue #510).
+// `waitForTransientControl` keeps its own short wait: it proves a control appears at once, not that
+// the product starts.
+const PRODUCT_READY_TIMEOUT_MS = 60_000;
+// Five seconds past the launch's own timeout, so Playwright states why a launch failed before this
+// outer race gives up on it — the relationship this pair has always had.
+const BROWSER_LAUNCH_TIMEOUT_MS = PRODUCT_READY_TIMEOUT_MS + 5_000;
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
 const BROWSER_LAUNCH_TIMEOUT = new Error('J-01/browser-launch-timeout');
 const BROWSER_CLOSE_TIMEOUT = new Error('J-01/browser-close-timeout');
@@ -183,7 +191,7 @@ function productEnvironment(executable) {
 }
 
 async function attachRendererTarget(browser) {
-  const deadline = Date.now() + 30_000;
+  const deadline = Date.now() + PRODUCT_READY_TIMEOUT_MS;
   const withBrowserConnection = (operation) =>
     settleOnBrowserDisconnect(browser, operation, {
       disconnectError: BROWSER_DISCONNECTED,
@@ -193,7 +201,7 @@ async function attachRendererTarget(browser) {
     withBrowserConnection(browser.newBrowserCDPSession()),
     deadline,
   );
-  const sendRoot = (method, params = {}, operationDeadline = Date.now() + 30_000) =>
+  const sendRoot = (method, params = {}, operationDeadline = Date.now() + PRODUCT_READY_TIMEOUT_MS) =>
     awaitCdpOperation(withBrowserConnection(rootSession.send(method, params)), operationDeadline);
   let pageTarget;
   while (Date.now() < deadline) {
@@ -242,7 +250,7 @@ async function attachRendererTarget(browser) {
     for (const completion of pending.values()) completion.reject(RENDERER_SESSION_CLOSED);
     pending.clear();
   });
-  const send = async (method, params = {}, operationDeadline = Date.now() + 30_000) => {
+  const send = async (method, params = {}, operationDeadline = Date.now() + PRODUCT_READY_TIMEOUT_MS) => {
     const id = nextId++;
     const remaining = operationDeadline - Date.now();
     requireJourney(remaining > 0, 'renderer-carrier-timeout');
@@ -310,7 +318,7 @@ async function attachRendererTarget(browser) {
 }
 
 async function createRendererManager(browser) {
-  const rootDeadline = Date.now() + 30_000;
+  const rootDeadline = Date.now() + PRODUCT_READY_TIMEOUT_MS;
   const withBrowserConnection = (operation) =>
     settleOnBrowserDisconnect(browser, operation, {
       disconnectError: BROWSER_DISCONNECTED,
@@ -324,7 +332,7 @@ async function createRendererManager(browser) {
   const pending = new Map();
   const detachedSessions = new Set();
   let nextId = 1;
-  const sendRoot = (method, params = {}, deadline = Date.now() + 30_000) =>
+  const sendRoot = (method, params = {}, deadline = Date.now() + PRODUCT_READY_TIMEOUT_MS) =>
     awaitCdpOperation(withBrowserConnection(root.send(method, params)), deadline);
   root.on('Target.receivedMessageFromTarget', ({ sessionId, message }) => {
     let response;
@@ -352,9 +360,9 @@ async function createRendererManager(browser) {
   const attach = async (target) => {
     if (renderers.has(target.targetId)) return renderers.get(target.targetId);
     const attached = (async () => {
-      const carrierDeadline = Date.now() + 30_000;
+      const carrierDeadline = Date.now() + PRODUCT_READY_TIMEOUT_MS;
       const { sessionId } = await sendRoot('Target.attachToTarget', { targetId: target.targetId, flatten: false });
-      const send = async (method, params = {}, deadline = Date.now() + 30_000) => {
+      const send = async (method, params = {}, deadline = Date.now() + PRODUCT_READY_TIMEOUT_MS) => {
         if (detachedSessions.has(sessionId)) throw RENDERER_SESSION_CLOSED;
         const id = nextId++;
         const key = `${sessionId}:${id}`;
@@ -444,7 +452,7 @@ async function createRendererManager(browser) {
 }
 
 async function waitForRendererCount(manager, count, location) {
-  const deadline = Date.now() + 30_000;
+  const deadline = Date.now() + PRODUCT_READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const renderers = await manager.list();
     if (renderers.length === count) return renderers;
@@ -454,7 +462,7 @@ async function waitForRendererCount(manager, count, location) {
 }
 
 async function waitFor(renderer, expression, location) {
-  const deadline = Date.now() + 30_000;
+  const deadline = Date.now() + PRODUCT_READY_TIMEOUT_MS;
   let latestEvaluationError;
   while (Date.now() < deadline) {
     try {
@@ -2011,7 +2019,7 @@ async function main() {
         ignoreDefaultArgs: true,
         args: productArgs,
         env: productEnvironment(executable),
-        timeout: 30_000,
+        timeout: PRODUCT_READY_TIMEOUT_MS,
       });
       launchPromise.catch(() => undefined);
       let launchTimeout;
