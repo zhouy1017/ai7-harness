@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   MAX_DELIVERABLE_MILESTONES,
+  MAX_EXPORT_DESTINATION_CODE_UNITS,
+  MAX_EXPORT_RECORDS_LISTED,
   MAX_FRAME_BYTES,
   MAX_MILESTONE_PURPOSE_CODE_UNITS,
   MAX_PUBLICATION_BASIS_CHARACTERS,
@@ -106,6 +108,22 @@ describe('the words of 发稿', () => {
         statement: PUBLICATION_VERSION_STATEMENT,
         actualsPrompt: { eventId: identity, publicationVersionId: identity, label: PUBLICATION_ACTUALS_PROMPT_LABEL, stateLabel: PUBLICATION_ACTUALS_PROMPT_STATE, recordedAt: time },
       },
+      // Issue #413: the listed exports, each at its widest — a destination of a BMP character at its bound
+      // in code units, a file name of 255, and a longer outcome detail than the ledger writes.
+      exports: Array.from({ length: MAX_EXPORT_RECORDS_LISTED }, () => ({
+        bookId: identity,
+        preparationId: identity,
+        target: { kind: 'milestone' as const, milestoneId: identity, milestoneLabel: label, revisionId: identity, revisionLabel: 'r9999999' },
+        outcome: 'ambiguous' as const,
+        outcomeLabel: '结果待确认',
+        detail: '导'.repeat(120),
+        fileName: '文'.repeat(250) + '.docx',
+        destination: `C:\\${'径'.repeat(MAX_EXPORT_DESTINATION_CODE_UNITS - 3)}`,
+        byteLength: null,
+        recordedAt: time,
+        revealAvailable: false,
+        technical: { approvalId: identity, receiptId: identity, receiptDigest: digest, fileSha256: null, failureCode: 'EXPORT_COMMIT_UNCERTAIN' },
+      })),
     };
     const answer: PublicationDesignationProjection = {
       bookId: identity,

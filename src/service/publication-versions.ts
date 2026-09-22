@@ -249,9 +249,12 @@ function requireRecord(json: SQLOutputValue | undefined, digest: SQLOutputValue 
  */
 export class PublicationVersionStore {
   readonly #db: DatabaseSync;
+  readonly #exportsOf: (bookId: string) => DeliverablesProjection['exports'];
 
-  constructor(db: DatabaseSync) {
+  /** `exportsOf` reads a Book's approved exports from the export ledger (Issue #413), which 交付物 lists too. */
+  constructor(db: DatabaseSync, exportsOf: (bookId: string) => DeliverablesProjection['exports'] = () => []) {
     this.#db = db;
+    this.#exportsOf = exportsOf;
   }
 
   /**
@@ -292,6 +295,7 @@ export class PublicationVersionStore {
         statement: PUBLICATION_VERSION_STATEMENT,
         actualsPrompt: current?.actualsPrompt ?? null,
       },
+      exports: this.#exportsOf(bookId),
     };
   }
 

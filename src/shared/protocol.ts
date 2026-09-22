@@ -4549,6 +4549,11 @@ export interface DeliverablesProjection {
     statement: typeof PUBLICATION_VERSION_STATEMENT;
     actualsPrompt: PublicationActualsPromptProjection | null;
   };
+  /**
+   * The Book's approved exports newest first, at most `MAX_EXPORT_RECORDS_LISTED` (Issue #413): each with what it
+   * came to — a receipt, a failure that changed nothing, or `结果待确认`.
+   */
+  exports: ReadonlyArray<ManuscriptExportReceiptProjection>;
 }
 
 /**
@@ -4721,6 +4726,8 @@ export interface GlobalAttentionProjection {
   actionableCount: number;
   /** A Run is in flight now, or a Review Run is being driven: a reader follows it slowly until it ends. */
   running: boolean;
+}
+
 // ---- ④ 导出 · DOCX (Issue #413, plan slice S64; editor-surfaces §7 导出, V2-UX-EXP-001 to EXP-024) ------
 
 /**
@@ -4792,6 +4799,132 @@ export interface ExportFidelityRowProjection {
   /** The 1-based manuscript positions where the class is not written as it was, in order. */
   positions: ReadonlyArray<number>;
   positionsTruncated: boolean;
+}
+
+/** The exact version one export is of: the current revision, or one Milestone Version and the revision it froze. */
+export interface ManuscriptExportTargetProjection {
+  kind: 'current' | 'milestone';
+  milestoneId: string | null;
+  milestoneLabel: string | null;
+  revisionId: string;
+  revisionLabel: string;
+}
+
+/** One format as the export card offers it: DOCX now, PDF and the Markdown 备用格式 later (S64b). */
+export interface ManuscriptExportFormatProjection {
+  format: ManuscriptExportFormat;
+  label: string;
+  available: boolean;
+  note: string;
+}
+
+/**
+ * The Export Fidelity Review of one exact version under one set of options (V2-UX-EXP-007 to EXP-009), before
+ * any destination is chosen. Nothing is recorded by reading it; a current revision whose working state held
+ * unsaved edits was first saved as a revision for the export (`savedForExport`).
+ */
+export interface ManuscriptExportReviewProjection {
+  bookId: string;
+  bookTitle: string;
+  target: ManuscriptExportTargetProjection;
+  savedForExport: boolean;
+  format: 'docx';
+  formats: ReadonlyArray<ManuscriptExportFormatProjection>;
+  options: ManuscriptExportOptions;
+  /** Whether retained content is restored from the original file, or the file is written fresh from the text. */
+  restoration: 'from-original' | 'regenerated';
+  /** One sentence on how the file is written, in the editor's words. */
+  restorationLine: string;
+  /** What DOCX promises (V2-UX-EXP-009). */
+  formatLine: string;
+  fidelity: ReadonlyArray<ExportFidelityRowProjection>;
+  /** Some class is `降级导出` or `无法导出`: `按上述方式导出` then accepts them for this export (EXP-008). */
+  degraded: boolean;
+  suggestedFileName: string;
+  /** Binds a later preparation to exactly this review. */
+  reviewDigest: string;
+  technical: { revisionDigest: string; sourceVersionId: string | null; writerIdentity: string; inputDigest: string };
+}
+
+/** Whether the chosen file is created or replaces the one the platform's dialog confirmed replacing (EXP-019). */
+export type ManuscriptExportDisposition = 'create' | 'replace';
+
+/**
+ * One frozen Local Export Preparation (External Export Policy v2 per-file requirements): the exact version,
+ * format, options, fidelity, file name, final local path as the system dialog returned it, create-or-replace
+ * disposition and payload digest, recorded after the destination was chosen and before any approval.
+ */
+export interface ManuscriptExportPreparationProjection {
+  bookId: string;
+  preparationId: string;
+  target: ManuscriptExportTargetProjection;
+  options: ManuscriptExportOptions;
+  fidelity: ReadonlyArray<ExportFidelityRowProjection>;
+  degraded: boolean;
+  fileName: string;
+  /** The path exactly as the system dialog returned it; never a path inside AI7's own data. */
+  destination: string;
+  disposition: ManuscriptExportDisposition;
+  dispositionLabel: string;
+  payloadBytes: number;
+  preparedAt: string;
+  technical: { effectIntentId: string; payloadDigest: string; recordDigest: string; policy: string };
+}
+
+/**
+ * What one approved export came to (V2-UX-EXP-012, EXP-017, EXP-021): a verified created or replaced file with
+ * its Effect Receipt — `已导出到所选位置` — or a classified outcome: `未能导出` when nothing at the destination
+ * changed, `结果待确认` when AI7 cannot tell, which never retries by itself.
+ */
+export interface ManuscriptExportReceiptProjection {
+  bookId: string;
+  preparationId: string;
+  target: ManuscriptExportTargetProjection;
+  outcome: 'created' | 'replaced' | 'ambiguous' | 'failed';
+  outcomeLabel: string;
+  detail: string;
+  fileName: string;
+  destination: string;
+  byteLength: number | null;
+  recordedAt: string | null;
+  /** Whether 在文件夹中显示 can be offered: only for a verified file. */
+  revealAvailable: boolean;
+  technical: { approvalId: string; receiptId: string | null; receiptDigest: string | null; fileSha256: string | null; failureCode: string | null };
+}
+
+/** At most this many exports are listed on 交付物, newest first. */
+export const MAX_EXPORT_RECORDS_LISTED = 10;
+/**
+ * The longest local path an export binds, in UTF-16 code units: above macOS's PATH_MAX and the Windows path
+ * the system dialogs return, and small enough that the most 交付物 lists stays within one service frame.
+ */
+export const MAX_EXPORT_DESTINATION_CODE_UNITS = 1024;
+
+export interface ReviewManuscriptExportInput {
+  bookId: string;
+  target: ManuscriptExportTargetInput;
+  options: ManuscriptExportOptions;
+}
+
+/** Freeze one preparation: the main process adds the destination the system dialog returned. */
+export interface PrepareManuscriptExportInput {
+  bookId: string;
+  revisionId: string;
+  target: ManuscriptExportTargetInput;
+  options: ManuscriptExportOptions;
+  reviewDigest: string;
+  destination: string;
+}
+
+export interface ApproveManuscriptExportInput {
+  bookId: string;
+  preparationId: string;
+}
+
+/** The main process's own read of a receipt, to reveal the verified file in the system file manager. */
+export interface InspectManuscriptExportReceiptInput {
+  bookId: string;
+  preparationId: string;
 }
 
 export interface DurableHistoryProjection {

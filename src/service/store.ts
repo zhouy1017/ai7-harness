@@ -8,6 +8,13 @@ import type {
   InspectTaskPlanInput,
   TaskPlanProjection,
   GlobalAttentionProjection,
+  ApproveManuscriptExportInput,
+  InspectManuscriptExportReceiptInput,
+  ManuscriptExportPreparationProjection,
+  ManuscriptExportReceiptProjection,
+  ManuscriptExportReviewProjection,
+  PrepareManuscriptExportInput,
+  ReviewManuscriptExportInput,
   DeliverablesProjection,
   ProposalConflictDraftSaveProjection,
   ProposalConflictProjection,
@@ -173,6 +180,7 @@ import {
   stageImportedMarks,
   stagedImportedMarksMatch,
 } from './imported-marks.js';
+import { ExportLedgerError, ManuscriptExportStore, initializeExportLedgerSchema } from './manuscript-export.js';
 import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
 import { reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './review/category-configuration.js';
 import { reviewCategoryKindDefinition } from './review/review-category-kind.js';
@@ -230,6 +238,7 @@ import {
   PROPOSAL_CONFLICT_SCHEMA_VERSION,
   IMPORT_RETENTION_SCHEMA_VERSION,
   IMPORTED_MARK_SCHEMA_VERSION,
+  EXPORT_LEDGER_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1433,7 +1442,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
       currentVersion === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       currentVersion === PUBLICATION_VERSION_SCHEMA_VERSION || currentVersion === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      currentVersion === IMPORT_RETENTION_SCHEMA_VERSION || currentVersion === IMPORTED_MARK_SCHEMA_VERSION,
+      currentVersion === IMPORT_RETENTION_SCHEMA_VERSION || currentVersion === IMPORTED_MARK_SCHEMA_VERSION ||
+      currentVersion === EXPORT_LEDGER_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1459,7 +1469,8 @@ function initializeSchema(db: DatabaseSync): void {
     currentVersion === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
     currentVersion === EDITORIAL_REVIEW_SCHEMA_VERSION ||
     currentVersion === PUBLICATION_VERSION_SCHEMA_VERSION || currentVersion === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      currentVersion === IMPORT_RETENTION_SCHEMA_VERSION || currentVersion === IMPORTED_MARK_SCHEMA_VERSION
+      currentVersion === IMPORT_RETENTION_SCHEMA_VERSION || currentVersion === IMPORTED_MARK_SCHEMA_VERSION ||
+      currentVersion === EXPORT_LEDGER_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1799,7 +1810,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION,
+      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
+      version === EXPORT_LEDGER_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1814,7 +1826,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION) return;
+      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
+      version === EXPORT_LEDGER_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -1921,7 +1934,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION,
+      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
+      version === EXPORT_LEDGER_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1935,7 +1949,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION) return;
+      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
+      version === EXPORT_LEDGER_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2228,7 +2243,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== IMPORTED_MARK_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== EXPORT_LEDGER_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2246,6 +2261,7 @@ function validateModelServiceSchema(
       version >= PROPOSAL_CONFLICT_SCHEMA_VERSION,
       version >= IMPORT_RETENTION_SCHEMA_VERSION,
       version >= IMPORTED_MARK_SCHEMA_VERSION,
+      version >= EXPORT_LEDGER_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2287,7 +2303,8 @@ function initializeModelServiceSchema(
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION,
+      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
+      version === EXPORT_LEDGER_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2301,7 +2318,8 @@ function initializeModelServiceSchema(
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION) {
+      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
+      version === EXPORT_LEDGER_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3073,6 +3091,7 @@ export class EditorialStore {
   readonly #manuscriptApply: ManuscriptApplyStore;
   readonly #reviewRuns: ReviewRunStore;
   readonly #publicationVersions: PublicationVersionStore;
+  readonly #manuscriptExport: ManuscriptExportStore;
   readonly #proposalConflicts: ProposalConflictStore;
   readonly #workflowProfile: BuiltInWorkflowProfile;
   readonly #lifetimeId: string;
@@ -3121,7 +3140,13 @@ export class EditorialStore {
       ledgerOf: (entry) => this.#reviewLedgerOf(entry),
       baseline: () => this.#baselineAnalysis,
     });
-    this.#publicationVersions = new PublicationVersionStore(authority);
+    this.#manuscriptExport = new ManuscriptExportStore(authority, {
+      readObject: (objectDigest) => this.#readContentObject(objectDigest),
+      dataRoot,
+      checkpointOwner: boundedAuthority,
+    });
+    // 交付物 lists a Book's approved exports beside its 发稿 (Issue #413), read from the export ledger.
+    this.#publicationVersions = new PublicationVersionStore(authority, (bookId) => this.#manuscriptExport.records(bookId));
     this.#proposalConflicts = new ProposalConflictStore(authority, this.#editorialMarks);
     this.#workflowProfile = workflowProfile;
     this.#lifetimeId = lifetimeId;
@@ -3183,7 +3208,7 @@ export class EditorialStore {
       // relations, and the version stamp is the only other move. Revision 27 (Issue #410) widens
       // `import_fidelity_categories` and adds the import-retention relations here, in one transaction.
       // Revision 28 (Issue #411) widens `proposal_change_items` to the `insert` kind and adds the staged
-      // imported marks here, in one transaction.
+      // imported marks here, in one transaction. Revision 29 (Issue #413) adds the export ledger here.
       initializeManuscriptIntakeSchema(authority);
       initializeTextConversionSchema(authority);
       initializeManuscriptEntryPositionSchema(authority);
@@ -3194,6 +3219,7 @@ export class EditorialStore {
       initializeProposalConflictSchema(authority);
       initializeImportRetentionSchema(authority);
       initializeImportedMarkSchema(authority);
+      initializeExportLedgerSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -8644,6 +8670,38 @@ export class EditorialStore {
     return this.#publicationCall(() => this.#publicationVersions.designate(input));
   }
 
+  // ---- ④ 导出 · DOCX (Issue #413, plan slice S64) ------------------------------------------------------
+
+  /**
+   * The Export Fidelity Review of one exact version (V2-UX-EXP-007). `available` is the launch's verified
+   * External Export Policy: without it nothing about an export proceeds. A current revision with unsaved edits
+   * is saved as a revision for the export first.
+   */
+  async reviewManuscriptExport(input: ReviewManuscriptExportInput, available: boolean): Promise<ManuscriptExportReviewProjection> {
+    return this.#exportCall(() => this.#manuscriptExport.review(input, available));
+  }
+
+  /** Freeze one Local Export Preparation for the destination the system dialog returned (V2-UX-EXP-010). */
+  async prepareManuscriptExport(input: PrepareManuscriptExportInput, available: boolean): Promise<ManuscriptExportPreparationProjection> {
+    return this.#exportCall(() => this.#manuscriptExport.prepare(input, available));
+  }
+
+  /** `按上述方式导出`: the approval, the atomic write and its receipt or classified outcome (V2-UX-EXP-012, EXP-017). */
+  async approveManuscriptExport(input: ApproveManuscriptExportInput, available: boolean): Promise<ManuscriptExportReceiptProjection> {
+    return this.#exportCall(() => this.#manuscriptExport.approve(input, available));
+  }
+
+  /** What one approved export came to, read by the main process before it reveals the file. */
+  inspectManuscriptExportReceipt(input: InspectManuscriptExportReceiptInput): ManuscriptExportReceiptProjection {
+    this.#assertAvailable();
+    try {
+      return this.#manuscriptExport.receipt(input);
+    } catch (error) {
+      if (error instanceof ExportLedgerError || error instanceof AnalysisError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
+  }
+
   // ---- 稿件冲突 of a single 修改建议 (Issue #57, plan slice S22) ----------------------------------------
 
   /** The Three-way Proposal Conflict of one 修改建议, read against the working state as it is now. */
@@ -11787,6 +11845,49 @@ export class EditorialStore {
       if (error instanceof BoundedStoreError) throw new StoreError(error.code, error.message);
       throw error;
     }
+  }
+
+  /**
+   * An export call (Issue #413) reaches the export ledger, the canonical form it records in and the bounded
+   * manuscript's checkpoint: each refusal is the caller's `StoreError`, and a fatal bounded error or a failed
+   * rollback poisons the store exactly as it does anywhere else.
+   */
+  async #exportCall<T>(operation: () => Promise<T>): Promise<T> {
+    this.#assertAvailable();
+    try {
+      return await operation();
+    } catch (error) {
+      if (error instanceof ExportLedgerError || error instanceof AnalysisError) throw new StoreError(error.code, error.message);
+      if (error instanceof BoundedStoreFatalError) {
+        this.#poisoned = true;
+        throw new StoreFatalError(error);
+      }
+      if (error instanceof BoundedStoreError) throw new StoreError(error.code, error.message);
+      if (error instanceof AggregateError) {
+        this.#poisoned = true;
+        throw new StoreFatalError(error);
+      }
+      throw error;
+    }
+  }
+
+  /** A content object's exact bytes, verified against the digest it is stored under. */
+  async #readContentObject(objectDigest: string): Promise<Uint8Array> {
+    const object = one(
+      this.#authority.prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?').all(objectDigest) as SqlRow[],
+      'EXPORT_SOURCE_MISSING',
+      '原文件对象记录缺失，无法导出。',
+    );
+    const path = this.#contentObjectPath(objectDigest, asString(object.relative_key));
+    let bytes: Uint8Array;
+    try {
+      bytes = new Uint8Array(await readFile(path));
+    } catch {
+      throw new ExportLedgerError('EXPORT_SOURCE_MISSING', '原文件对象无法读取，无法导出。');
+    }
+    requireStore(bytes.byteLength === asNumber(object.byte_length) && sha256(bytes) === objectDigest,
+      'EXPORT_SOURCE_MISSING', '原文件对象校验失败，无法导出。');
+    return bytes;
   }
 
   async #artifactCall<T>(operation: () => Promise<T>): Promise<T> {
