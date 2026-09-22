@@ -41,9 +41,11 @@ V2-UX-CONFLICT-002 requires the non-interaction to be explained. When the block 
 Of V2-UX-CONFLICT-005's four unselected paths:
 
 - **`保留当前稿件`** records the Proposal's rejection with the reason 「保留当前稿件」, so that later counts can tell it from an ordinary rejection. The manuscript does not change.
-- **`暂不处理`** records a deferral: who deferred it and when. The conflict stays unresolved and listed, and its Resolution Draft is kept.
+- **`暂不处理`** records a deferral: who deferred it and when. The conflict stays unresolved and listed, and its Resolution Draft is kept. The deferral is a record of the conflict, not a Proposal Change Disposition: an unresolved conflict stays a blocking state (V2-UX-PDEC-001).
 
 `自行编辑解决草稿` and `基于当前稿件重新生成建议` are unchanged.
+
+A conflict met while reversing an Apply — the words the Apply wrote were edited afterwards (V2-UX-EREC-012) — has no undecided Proposal to reject. There, `保留当前稿件` keeps the Apply in force and records only the conflict's outcome, and a new version saved from the Resolution Draft is a Correction Proposal, applied like any other 修改建议.
 
 ### 4. What stays
 
