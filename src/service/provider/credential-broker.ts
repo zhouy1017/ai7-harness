@@ -61,6 +61,19 @@ export class CredentialBroker {
   }
 
   /**
+   * The same readiness before any Execution Binding exists (Issue #420, S74a A3): whether the value behind
+   * the slot and Credential Reference a frozen plan names is present, for the authorization bar that offers
+   * 开始任务. The value is resolved and discarded inside this call and never returned; nothing is released.
+   */
+  async checkPlanReadiness(slot: CredentialSlot, credentialReference: string): Promise<CredentialReadiness> {
+    if (!CREDENTIAL_SLOTS.has(slot) || !CREDENTIAL_REFERENCE_PATTERN.test(credentialReference)) {
+      throw new CredentialBrokerError('CREDENTIAL_BINDING_INVALID', '凭据槽位绑定无效。');
+    }
+    const value = await this.#resolver.resolve(credentialReference);
+    return typeof value === 'string' && value.length > 0 ? 'present' : 'missing';
+  }
+
+  /**
    * Release the value to exactly one consumer inside the final adapter's transmit step. The ticket
    * must be the gate's `transmit-remote` decision for this exact binding; anything else refuses
    * before the store is touched.

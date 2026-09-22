@@ -560,14 +560,19 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     // Issue #418 (S72): the Task Drawer beside the card — its two modes, the keyboard, the column at
     // 1120 px and the overlay below, 200% and forced colours, and the one side slot it shares with 导航.
     'drawer-plan-compact',
+    // Issue #420 (S74a): the authorization bar in the drawer's footer, record-only for this Task (ADR 0055).
+    'drawer-bar-record-only',
     'drawer-plan-full',
     'drawer-keyboard',
     'drawer-push-overlay',
     'drawer-reflow-forced-colors',
     'drawer-one-slot-with-navigation',
     'cross-book-route-guard',
+    // Issue #420 (S74a): 保存草稿 records nothing; the recording is the bar's 开始任务; then the way to the record.
+    'drawer-save-draft',
     'authorization-recorded',
     'drawer-authorization-refresh',
+    'drawer-run-link',
     'foreground-boundary-check',
     'post-authorization-edit',
     'restart-immutable',
@@ -603,8 +608,11 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'coverage-manifest',
     // Issue #418 (S72): the plan the preparation froze, in the Task Drawer beside ②A.
     'analysis-plan-drawer',
+    // Issue #420 (S74a): the drawer's authorization bar before the start and, the Run settled, after it.
+    'analysis-bar-ready',
     'authorize-dispatch',
     'result-set-revision',
+    'analysis-bar-started',
     'cross-unit-reduction',
     'assurance-sampling',
     'run-report',
@@ -633,6 +641,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'plan-revision-drift',
     // Issue #418 (S72 D8): the drift in the drawer's words; then #288's range, the one version 2 froze.
     'plan-revision-drawer-diff',
+    // Issue #420 (S74a A4): a changed plan's bar offers 重新确认计划 and 查看计划修订, and no start.
+    'plan-revision-bar',
     'plan-revision-stale-authorize',
     'plan-revision-revert',
     'plan-revision-reconfirm',
@@ -643,6 +653,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'review-destination',
     'review-sheet',
     'review-prepare',
+    // Issue #420 (S74a): the Run's one approval is the drawer bar's 开始任务.
+    'review-bar-ready',
     'review-authorize',
     'review-marks-on-manuscript',
     'review-batch-apply',

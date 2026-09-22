@@ -1,5 +1,6 @@
 import type {
   AnalysisReusePlanCounts,
+  BaselineAnalysisPlanRevisionProjection,
   BaselineAnalysisProjection,
   BaselineAnalysisSelectedRange,
   PlanRevisionDiffEntryProjection,
@@ -9,6 +10,7 @@ import type {
   TaskAuthorizationProjection,
   TaskPlanDriftEntryProjection,
   TaskPlanProjection,
+  TaskPlanStartProjection,
   TaskPlanStepProjection,
 } from '../shared/protocol.js';
 import { namedNonEffects } from './analysis/baseline-analysis-store.js';
@@ -27,6 +29,10 @@ import type { ReviewRunPlanFacts } from './review/review-runs.js';
  * — a stored diff's label, a stored step list, a named non-effect — stays in the technical layer exactly as
  * it is stored, and the editor's words beside it are derived here from the field key or the state that
  * record carries (S72 D2, D7, D8).
+ *
+ * Since Issue #420 (plan slice S74a) each plan also says what the drawer's authorization bar offers —
+ * `start` — read from the same records: whether 开始任务 dispatches, only records, or waits on a changed
+ * plan or a model connection, and the exact digests one activation binds. Reading it authorizes nothing.
  */
 
 export class TaskPlanError extends Error {
@@ -189,6 +195,69 @@ export function driftEntry(entry: PlanRevisionDiffEntryProjection, blocks: Reado
   };
 }
 
+// ---- the authorization bar (Issue #420, plan slice S74a; editor-surfaces §6 常驻授权条) ------------------
+
+/**
+ * What the bar offers once the Task has been started (AUTH-007): nothing to bind, only the Run's state.
+ * `needsModelConnection` still says what the route is, so a reader never has to infer it from the state.
+ */
+function startedBar(needsModelConnection: boolean): TaskPlanStartProjection {
+  return { readiness: 'started', needsModelConnection, planEnvelopeDigest: null, categoryDigests: [], reconfirm: null };
+}
+
+/** 模型未连接 (editor-surfaces §6 状态, §10): the pill of a plan whose route cannot reach its model service now. */
+export const MODEL_UNCONNECTED_STATE = { key: 'unconnected', label: '模型未连接' } as const;
+
+/**
+ * Route-aware readiness (S74a A3; V2-UX-AUTH-005, MODEL-008, OFF-009): a plan whose route sends to a model
+ * service can start only while the credential that route resolves is present. `credential` is what the
+ * service found — the readiness check dispatch makes, with the value resolved and discarded — or `null`
+ * when the launch holds no such credential at all. A plan whose route sends nothing, one already started,
+ * and one whose key content changed read exactly as they came. The blocker is the Run's, never the
+ * plan's: `drift` and every frozen fact stay as they were, so a missing credential invents no revision.
+ */
+export function withConnectionReadiness(plan: TaskPlanProjection, credential: 'present' | 'missing' | null): TaskPlanProjection {
+  if (!plan.start.needsModelConnection || credential === 'present' || plan.start.readiness !== 'ready') return plan;
+  return {
+    ...plan,
+    state: { ...MODEL_UNCONNECTED_STATE },
+    start: { ...plan.start, readiness: 'needs-connection', planEnvelopeDigest: null, categoryDigests: [] },
+  };
+}
+
+/**
+ * 重新确认计划's request for a baseline Task whose key content changed: the same Task Intent's goal, its
+ * mode, and — for 重新分析所选范围 — the range the pending revision proposes, exactly as ②A sent it before
+ * the action moved into the bar.
+ */
+function reconfirmRequest(projection: BaselineAnalysisProjection, revision: BaselineAnalysisPlanRevisionProjection): TaskPlanStartProjection['reconfirm'] {
+  const intent = projection.taskIntent!;
+  return {
+    goal: intent.goal,
+    update: intent.mode === 'first-baseline'
+      ? null
+      : { mode: intent.mode, selectedRange: intent.mode === 'reanalyze-range' ? revision.proposed.selectedRange : null },
+  };
+}
+
+/** The bar of the Book's baseline analysis Task: the ledger's own `canAuthorize` and `canReconfirmPlan`, read. */
+function baselineStart(projection: BaselineAnalysisProjection, planEnvelopeDigest: string): TaskPlanStartProjection {
+  const route = projection.providerResolutionPlan!.executionRoute;
+  const needsModelConnection = route.kind === 'opencode-go';
+  if (projection.authorization !== null) return startedBar(needsModelConnection);
+  const revision = projection.planRevision;
+  if (!projection.actions.canAuthorize) {
+    return {
+      readiness: 'changed',
+      needsModelConnection,
+      planEnvelopeDigest: null,
+      categoryDigests: [],
+      reconfirm: revision !== null && projection.actions.canReconfirmPlan ? reconfirmRequest(projection, revision) : null,
+    };
+  }
+  return { readiness: route.kind === 'none' ? 'no-route' : 'ready', needsModelConnection, planEnvelopeDigest, categoryDigests: [], reconfirm: null };
+}
+
 // ---- J-03's fixed task ----------------------------------------------------------------------------------
 
 /**
@@ -288,6 +357,11 @@ export function fixedTaskPlan(input: {
         { key: 'run-record', label: '运行记录', value: `${projection.runRecord.runRecordId} · ${projection.runRecord.state} · ${projection.runRecord.recordedAt}` },
       ]),
     ],
+    // ADR 0055: this Task is only ever recorded. Its route sends nothing, so it needs no credential, and its
+    // record never enters the scheduler, a wait, or an automatic start.
+    start: recorded || !projection.actions.canAuthorize
+      ? startedBar(false)
+      : { readiness: 'record-only', needsModelConnection: false, planEnvelopeDigest: envelope.digest, categoryDigests: [], reconfirm: null },
   };
 }
 
@@ -419,8 +493,9 @@ export function baselineAnalysisPlan(input: {
     drift: revision === null ? null : {
       reasons: ['计划冻结之后，它的关键内容已经变化；原计划不能再开始。'],
       entries: revision.diff.map((entry) => driftEntry(entry, blocks)),
+      // Issue #420 (S74a A4): 重新确认计划 is the drawer's own action now, in its authorization bar.
       resolution: projection.actions.canReconfirmPlan
-        ? '在「分析 › 历史与更新」里重新确认计划后，新的计划版本才能开始。'
+        ? '重新确认计划后，新的计划版本才能开始。'
         : '要更新的那一份分析已不是最新的一份；请在「分析」里基于最新的一份重新准备。',
     },
     technical: [
@@ -467,6 +542,7 @@ export function baselineAnalysisPlan(input: {
         { key: 'run-record', label: '运行记录', value: `${projection.run.runRecordId} · ${projection.run.state} · ${projection.run.recordedAt}` },
       ]),
     ],
+    start: baselineStart(projection, envelope.digest),
   };
 }
 
@@ -540,6 +616,22 @@ export function reviewRunPlan(input: {
     : refused.map((category) => `「${category.label}」没有开始：${category.detail ?? category.stateLabel}`);
   const riskPoints = categories.some((category) => category.riskPointsOnly);
   const scopeWords = scope.kind === 'whole' ? '全书' : scope.kind === 'changed' ? '改动过的章' : scope.kind === 'selection' ? '所选文字' : position;
+  // The bar (Issue #420, S74a): the one approval binds every Task-backed category's exact digest, and the
+  // route every category froze decides whether starting needs a model connection. A Run has no revision
+  // route, so a plan that moved is only ever `changed`; the leads alone need nothing and start as they are.
+  const routes = tasks.map((category) => frozenRoute(category.task!.components).kind);
+  const needsModelConnection = routes.includes('opencode-go');
+  const start: TaskPlanStartProjection = facts.state !== 'prepared' || facts.authorizedAt !== null
+    ? startedBar(needsModelConnection)
+    : facts.staleReasons.length > 0
+      ? { readiness: 'changed', needsModelConnection, planEnvelopeDigest: null, categoryDigests: [], reconfirm: null }
+      : {
+          readiness: routes.includes('none') ? 'no-route' : 'ready',
+          needsModelConnection,
+          planEnvelopeDigest: null,
+          categoryDigests: tasks.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.task!.planEnvelopeDigest })),
+          reconfirm: null,
+        };
   return {
     bookId: input.bookId,
     kind: 'review-run',
@@ -632,5 +724,6 @@ export function reviewRunPlan(input: {
       })),
       ...(facts.authorizedAt === null ? [] : [{ key: 'authorization', label: '审阅授权', value: facts.authorizedAt }]),
     ],
+    start,
   };
 }

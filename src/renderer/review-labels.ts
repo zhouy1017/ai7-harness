@@ -54,7 +54,6 @@ export const REVIEW_ACTION_LABELS = {
   'quick-start': '开始审阅',
   'cancel-preparation': '取消准备',
   'close-sheet': '取消',
-  authorize: '授权并开始审阅',
   revise: '返回修改',
   continue: '继续审阅',
   'go-to-text': '回到原文',
@@ -75,7 +74,10 @@ export const REVIEW_ACTION_LABELS = {
   export: '导出',
   'open-manuscript': '打开稿件',
   'open-review': '打开审阅',
-  /** S72 D4: a prepared Run's plan opens in the Task Drawer. */
+  /**
+   * S72 D4: a prepared Run's plan opens in the Task Drawer. Since S74a (A5) the Run's one approval is the
+   * drawer bar's 开始任务, so a prepared Run's entry reads `查看计划并开始` (TASK_PLAN_OPEN_START).
+   */
   'view-plan': '查看计划',
 } as const;
 export type ReviewAction = keyof typeof REVIEW_ACTION_LABELS;
@@ -236,12 +238,11 @@ export function reviewPreparationLine(progress: { completed: number; total: numb
 // ---- the plan ---------------------------------------------------------------------------------------
 
 /**
- * A prepared Run's plan on the destination is one line and 查看计划 (S72 D4): every category's plan — what it
- * reads, reuses and sends, its route and its ceiling — reads in the Task Drawer.
+ * A prepared Run's plan on the destination is one line and 查看计划并开始 (S72 D4, S74a A5): every category's
+ * plan — what it reads, reuses and sends, its route and its ceiling — reads in the Task Drawer, and its bar
+ * carries AUTH-003's statement beside the Run's one approval.
  */
 export const REVIEW_PLAN_HEADING = '审阅计划';
-/** AUTH-003's spoken form, for the one approval of a whole Review Run. */
-export const REVIEW_AUTHORIZE_NOTE = '只是让 AI7 按这份计划审这一次；接受修改建议、处理每一条发现都仍由你另行决定。';
 
 export function reviewPlanCategoriesLine(categories: number): string {
   return `${categories} 个类别，授权一次后逐类审阅`;
@@ -472,12 +473,9 @@ export const REVIEW_STATUS_LINES = {
   opened: '审阅已打开',
   refreshFailed: '无法刷新审阅。',
   preparing: '正在准备审阅计划…',
-  prepared: '审阅计划已冻结；请查看计划后授权。',
+  prepared: '审阅计划已冻结；可在任务计划里开始审阅。',
   preparationCancelled: '审阅计划准备已取消；稿件与审阅记录保持不变。',
   preparationFailed: '无法准备审阅计划。',
-  authorizing: '正在记录授权并开始审阅…',
-  authorized: '已授权，开始逐类审阅。',
-  authorizeFailed: '无法授权这次审阅。',
   continuing: '正在继续审阅…',
   continued: '已继续审阅。',
   continueFailed: '无法继续这次审阅。',

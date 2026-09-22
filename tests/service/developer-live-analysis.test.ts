@@ -956,6 +956,48 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
     expect([...DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS]).toEqual([SAMPLE1_SOURCE_DIGEST]);
   });
 
+  it('offers 开始任务 on a live plan only while the credential its route resolves is present (Issue #420, S74a A3)', async () => {
+    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
+    const input = { bookId, kind: 'baseline-analysis' as const, ref: prepared.taskIntent!.taskIntentId };
+    const plan = store.inspectTaskPlan(input);
+    // The live route sends to a model service, so starting it needs its credential; the plan itself reads
+    // ready whatever the credential is, and binds the envelope it froze.
+    expect(plan.start).toEqual({ readiness: 'ready', needsModelConnection: true, planEnvelopeDigest: prepared.planEnvelope!.digest, categoryDigests: [], reconfirm: null });
+    // The readiness dispatch checks, asked before any authorization: the value resolved and discarded.
+    const calls: StubCall[] = [];
+    const present = owner(store, stubTransport({ calls, responses: new Map() }));
+    const absent = new BaselineAnalysisExecutionOwner({
+      ledger: store.baselineAnalysisLedger,
+      launchPolicy,
+      fixture: null,
+      secretResolver: { resolve: async () => null },
+      developerLive: { launch: { runBudgetCeiling: CEILING, providerCacheRoot: cacheRoot }, nativeFetch: stubTransport({ calls, responses: new Map() }) },
+    });
+    try {
+      expect(await present.liveCredentialReadiness()).toBe('present');
+      expect(await absent.liveCredentialReadiness()).toBe('missing');
+      expect(await store.inspectTaskPlanWithConnection(input, () => present.liveCredentialReadiness())).toEqual(plan);
+      const unconnected = await store.inspectTaskPlanWithConnection(input, () => absent.liveCredentialReadiness());
+      // 模型未连接 with 开始任务 withheld, and nothing bound (MODEL-008).
+      expect(unconnected.state).toEqual({ key: 'unconnected', label: '模型未连接' });
+      expect(unconnected.start).toEqual({ readiness: 'needs-connection', needsModelConnection: true, planEnvelopeDigest: null, categoryDigests: [], reconfirm: null });
+      // The blocker is the Run's, never the plan's (OFF-009): no revision is invented and the ledger still
+      // reads the plan current and authorizable, every frozen fact as it was.
+      expect(unconnected.drift).toBeNull();
+      expect({ ...unconnected, state: plan.state, start: plan.start }).toEqual(plan);
+      const ledger = store.inspectBaselineAnalysis(bookId);
+      expect(ledger.planRevision).toBeNull();
+      expect(ledger.actions.canAuthorize).toBe(true);
+      expect(ledger.planVersions).toHaveLength(1);
+      // Nothing was transmitted and no Run exists: the check reads a credential, it starts nothing.
+      expect(calls).toHaveLength(0);
+      expect(ledger.authorization).toBeNull();
+    } finally {
+      await present.dispose();
+      await absent.dispose();
+    }
+  });
+
   it('refuses to prepare a baseline analysis Task whose lineage is not exact sample1, before any transport, workspace-profile pin, or credential is touched', async () => {
     // A manuscript composed from an excerpt of the one admitted Public SampleBook: real prose, and a
     // lineage that must never reach a Run Authorization, let alone dispatch. Composing from exact

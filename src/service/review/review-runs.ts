@@ -56,6 +56,7 @@ import {
   sha256Hex,
 } from '../analysis/canonical.js';
 import { deriveCoverageManifest } from '../analysis/coverage-manifest.js';
+import { EXECUTION_SLOT_BUSY, EXECUTION_SLOT_BUSY_REASON } from '../analysis/execution-error.js';
 import { graphemeCount, sliceGraphemes } from '../analysis/factual-review-contract.js';
 import type { EditorialMarkStore, ProducedEditorialMarkInput } from '../editorial-marks.js';
 import {
@@ -965,8 +966,12 @@ export class ReviewRunStore {
    * Task, still prepared, with no pending Plan Revision — so an approval never names a plan already
    * stale. The ledgers' own authorizations are written later, one category at a time, when the drive
    * loop reaches each; a plan that moves in between is refused there, with the ledger's reason.
+   *
+   * `slotBusy` is the execution owner's word that another Run holds its one slot (Issue #420, S74a A2): a
+   * new approval is then refused before anything is written, so the Run never waits in a queue; a repeat
+   * of an approval already recorded answers as it always has.
    */
-  recordAuthorization(bookId: string, reviewRunId: string, planDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>): void {
+  recordAuthorization(bookId: string, reviewRunId: string, planDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>, slotBusy = false): void {
     const snapshot = this.#runOfBook(bookId, reviewRunId);
     const existing = this.#authorizationOf(reviewRunId);
     const tasks = snapshot.categories.filter((category) => category.task !== null);
@@ -987,6 +992,7 @@ export class ReviewRunStore {
         projection.actions.canAuthorize && projection.planEnvelope?.digest === category.task!.planEnvelopeDigest,
       'REVIEW_PLAN_CHANGED', `「${category.entry.label}」的计划已经变化；请重新准备这次审阅。`);
     }
+    requireReview(!slotBusy, EXECUTION_SLOT_BUSY, EXECUTION_SLOT_BUSY_REASON);
     const authorizedAt = new Date().toISOString();
     const record = canonicalRecord({
       schema: AUTHORIZATION_SCHEMA,

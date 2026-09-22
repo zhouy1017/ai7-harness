@@ -40,9 +40,15 @@ const REUSE_PLAN_SCHEMA = 'ai7.baseline-manuscript-analysis.reuse-plan/1';
 // taken on, and each update mode's own button with the two ways to begin behind it.
 // Synchronized delta with Issue #417: 可信程度's pointer at 审阅 is a working `打开审阅` now (V2-UX-REV-011).
 // Synchronized delta with Issue #418 (S72 D4): the plan is one line and `查看计划`, which opens the Task Drawer.
-const ANALYSIS_ACTIONS = ['return-to-range', 'sync-current', 'reanalyze-range', 'reanalyze-book', 'open-revision', 'close-revision', 'cancel-preparation', 'view-plan-revision', 'reconfirm-plan',
+// Synchronized delta with Issue #420 (S74a A4, A5): `查看计划修订` and `重新确认计划` moved into the drawer's
+// authorization bar with the start itself, so the card never carries them again.
+const ANALYSIS_ACTIONS = ['return-to-range', 'sync-current', 'reanalyze-range', 'reanalyze-book', 'open-revision', 'close-revision', 'cancel-preparation',
   'select-tab', 'go-history', 'go-chapters', 'choose-sync-current', 'choose-reanalyze-range', 'choose-reanalyze-book', 'quick-sync-current', 'quick-reanalyze-range', 'quick-reanalyze-book',
   'open-review', 'view-plan'];
+/** Every button on screen and in the drawer whose words name 授权: AUTH-002 keeps the word off every start (ADR 0077). */
+const AUTHORIZE_LABELED_BUTTONS = `Array.from(document.querySelectorAll('#screen button, #task-drawer button')).filter((button)=>/授权/u.test(button.textContent??'')).length`;
+/** The words the authorization bar says before every start (AUTH-003 as ADR 0077 revised it). */
+const BAR_STATEMENT = '只是让 AI7 按这份计划做这一次；接受修改建议、批准受控动作、保存里程碑版本、设为发稿版本都仍由你另行决定';
 // Synchronized delta with Issue #408: the renderer now carries exactly one Apply surface — AI7 Apply for
 // a Change Suggestion on the manuscript — and the analysis still gains none. Anything else named like an
 // execution, effect, apply or export member remains a failure here.
@@ -494,7 +500,9 @@ async function reviewAction(renderer, selector, name) {
 /**
  * The Task Drawer as an editor reads it (Issue #418, S72): its state, the goal block, the rows of 精简 or
  * the sections of 完整, the two columns, a changed plan's diff, every exact identity of 查看技术详情 by
- * its key, and the mode this renderer remembers.
+ * its key, and the mode this renderer remembers. Since Issue #420 (S74a) it also reads the authorization
+ * bar in the footer: its state, summary, statement, note and status, and each action with whether it is
+ * available and, when it is not, the reason it names.
  */
 async function readDrawer(renderer) {
   return renderer.evaluate(`(() => {
@@ -524,8 +532,39 @@ async function readDrawer(renderer) {
       columns:texts('.task-plan-boundary h4'), adaptable:texts('[data-task-plan-boundary="adaptable"] li'), askFirst:texts('[data-task-plan-boundary="ask-first"] li'),
       technical:pairs('[data-task-plan-technical]','taskPlanTechnical'), footer:drawer.querySelector('.task-drawer-footer')?.textContent,
       actions:drawer.querySelectorAll('[data-analysis-action], [data-review-action], [data-task-authorization-action]').length,
+      bar:(() => {
+        const bar=drawer.querySelector('.task-drawer-bar');
+        if(!(bar instanceof HTMLElement)||bar.hidden)return null;
+        const text=(selector)=>bar.querySelector(selector)?.textContent??null;
+        return {
+          state:bar.dataset.taskBar, start:drawer.dataset.taskPlanStart??null,
+          summary:text('.task-bar-summary'), statement:text('.task-bar-statement'), note:text('.task-bar-note'),
+          status:text('.task-bar-status'), refusal:text('.task-bar-refusal'),
+          actions:Array.from(bar.querySelectorAll('button[data-task-drawer-control]')).map((node)=>{
+            const described=node.getAttribute('aria-describedby');
+            return { name:node.dataset.taskDrawerControl, text:node.textContent, disabled:node.disabled, reason:described===null?null:(document.getElementById(described)?.textContent??null) };
+          }),
+        };
+      })(),
     };
   })()`);
+}
+
+/** The bar's actions by name, text and availability, as `readDrawer` reads them. */
+function barActions(drawer) {
+  return (drawer?.bar?.actions ?? []).map((action) => `${action.name}:${action.text}:${action.disabled ? 'disabled' : 'enabled'}`).join('|');
+}
+
+/**
+ * Start the prepared baseline Task from the drawer's authorization bar (Issue #420, S74a A2): the drawer
+ * shows the Task the preparation opened it for, and the card's 查看计划并开始 opens it when it does not. One
+ * activation of 开始任务 records the authorization and the Run and hands the Run to the one slot.
+ */
+async function startFromBar(renderer, name) {
+  const showing = await renderer.evaluate(`(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer==='open' && drawer.dataset.taskPlanKind==='baseline-analysis' && drawer.dataset.taskPlanRef===document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId; })()`);
+  if (!showing) await reviewAction(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', `${name}-open-plan`);
+  await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready' && document.querySelector('#task-drawer')?.dataset.taskPlanRef===document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, `${name}-bar-ready`);
+  await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start"]', `${name}-start-click`);
 }
 
 /** Wait for the drawer to show one Task's plan in one state, then read it. */
@@ -773,10 +812,15 @@ function requireSuccessorShape(revision, expected, attempt, fixtureDigest, name)
   `${name}-successor`, { expected, revision: revision === null || revision === undefined ? revision : { ...revision, units: undefined, sections: undefined, synthesis: undefined } });
 }
 
+/**
+ * Synchronized delta with Issue #420 (S74a): every Run starts from the drawer's bar, and once it settles the
+ * same region of the bar reads `已完成` beside the way to the Run's surface — nothing that starts it again.
+ */
 async function settleAuthorizedRun(renderer, name) {
-  await click(renderer, '授权并开始任务', `${name}-authorize-click`);
+  await startFromBar(renderer, name);
   await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, `${name}-settled`, 180_000);
   await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, `${name}-settled-state`);
+  await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started' && document.querySelector('#task-drawer .task-bar-status')?.textContent==='已完成' && document.querySelector('#task-drawer [data-task-drawer-control="run-link"]')?.textContent==='查看运行' && !document.querySelector('#task-drawer [data-task-drawer-control="start"]')`, `${name}-bar-settled`);
   return renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
 }
 
@@ -1189,10 +1233,12 @@ async function main() {
       prepared.authorization === null && prepared.run === null && prepared.resultSetRevision === null && prepared.taskOutcome === null &&
       prepared.actions?.canPrepare === false && prepared.actions?.canAuthorize === true,
     'prepared-exact-envelope', { fixtureDigest, plan, executionPlan: prepared.executionPlan, planEnvelope: prepared.planEnvelope, actions: prepared.actions });
-    // Synchronized delta with Issue #418 (S72 D4): ②A names the plan in one line beside 查看计划. The eight
-    // manifest units, the manifest digest, the fixture route and the policy reading the card used to list
-    // read in the Task Drawer the preparation opened, asserted in the next stage.
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const authorize=card?.querySelector('[data-analysis-action="authorize"]'); const open=card?.querySelector('.analysis-plan-summary [data-analysis-action="view-plan"]'); return card?.dataset.coverageManifestDigest===${JSON.stringify(manifest.digest)} && card.dataset.analysisUnits===${JSON.stringify(String(SAMPLE1_UNITS))} && card.dataset.planEnvelopeDigest===${JSON.stringify(prepared.planEnvelope.digest)} && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：首次基线分析 · 全书 · ${SAMPLE1_UNITS} 个阅读范围 · 任务输入修订版 r1 · 计划版本 1`)} && open instanceof HTMLButtonElement && open.textContent==='查看计划' && open.dataset.taskPlanOpen==='baseline-analysis' && !card.querySelector('[data-manifest-unit], [data-reuse-plan-unit], .analysis-plan-boundary') && authorize instanceof HTMLButtonElement && !authorize.disabled && authorize.textContent==='授权并开始任务' && !card.querySelector('[data-analysis-action="prepare"]'); })()`, 'prepared-preview');
+    // Synchronized delta with Issue #418 (S72 D4): ②A names the plan in one line. The eight manifest units,
+    // the manifest digest, the fixture route and the policy reading the card used to list read in the Task
+    // Drawer the preparation opened, asserted in the next stage. Synchronized delta with Issue #420 (S74a
+    // A5): the start left the card for the drawer's bar, so the card's one action reads 查看计划并开始, and
+    // the plan versions are its closed technical layer.
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const open=card?.querySelector('.analysis-plan-summary [data-analysis-action="view-plan"]'); const versions=card?.querySelector('details.analysis-plan-versions-technical'); return card?.dataset.coverageManifestDigest===${JSON.stringify(manifest.digest)} && card.dataset.analysisUnits===${JSON.stringify(String(SAMPLE1_UNITS))} && card.dataset.planEnvelopeDigest===${JSON.stringify(prepared.planEnvelope.digest)} && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：首次基线分析 · 全书 · ${SAMPLE1_UNITS} 个阅读范围 · 任务输入修订版 r1 · 计划版本 1`)} && open instanceof HTMLButtonElement && !open.disabled && open.textContent==='查看计划并开始' && open.dataset.taskPlanOpen==='baseline-analysis' && !card.querySelector('[data-manifest-unit], [data-reuse-plan-unit], .analysis-plan-boundary') && !card.querySelector('[data-analysis-action="authorize"], [data-analysis-action="prepare"]') && versions instanceof HTMLDetailsElement && !versions.open && versions.querySelector('.analysis-plan-versions [data-plan-version-ordinal="1"][data-plan-version-state="current"]')!==null && ${AUTHORIZE_LABELED_BUTTONS}===0; })()`, 'prepared-preview');
 
     at('analysis-plan-drawer');
     // The plan the preparation froze, in the drawer beside ②A: 精简 first, then 完整, whose 查看技术详情
@@ -1236,9 +1282,22 @@ async function main() {
       firstTechnical['selected-range'] === undefined && firstTechnical['reuse-plan'] === undefined,
     'analysis-drawer-full-plan', firstFull);
 
+    at('analysis-bar-ready');
+    // Issue #420 (S74a): the drawer's footer is the authorization bar. The deterministic route sends nothing,
+    // so the credential this Book holds — `missing` since the model setup above — is not needed: 开始任务 is
+    // offered. The summary names the plan version, and the word 授权 is on no button anywhere.
+    requireJourney(missingConnection?.credentialOperationState === 'missing' && firstFull?.bar?.state === 'ready' && firstFull.bar.start === 'ready' &&
+      firstFull.bar.summary === `《${bookName}》 · 全书 · 计划版本 1 · 主编辑角色 · 未设置任务预算上限 · 产出：一份基线分析 · 不改稿` &&
+      firstFull.bar.statement === BAR_STATEMENT && firstFull.bar.note === null && firstFull.bar.status === null && firstFull.bar.refusal === null &&
+      barActions(firstFull) === 'start:开始任务:enabled|revise:返回修改:disabled|save-draft:保存草稿:enabled' &&
+      firstFull.bar.actions[1]?.reason === '随计划编辑提供', 'analysis-bar-ready', firstFull?.bar);
+    await assertRenderer(renderer, `${AUTHORIZE_LABELED_BUTTONS}===0`, 'analysis-bar-no-authorize-label');
+
     at('authorize-dispatch');
     cancellation.throwIfRequested();
-    await click(renderer, '授权并开始任务', 'authorize-click');
+    // Synchronized delta with Issue #420 (S74a A2): one activation of the bar's 开始任务 records the
+    // authorization and the Run and hands it to the one slot; ②A beside the drawer follows the Run.
+    await startFromBar(renderer, 'authorize');
     await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, 'run-settled', 180_000);
     await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'run-settled-state');
     cancellation.throwIfRequested();
@@ -1443,6 +1502,16 @@ async function main() {
         return /\\d{4}\\/\\d{2}\\/\\d{2}\\s\\d{2}:\\d{2}:\\d{2}/u.test(decision) && !decision.includes(exact[index]);
       });
     })()`, 'run-timeline-local-time-with-exact-instant');
+
+    at('analysis-bar-started');
+    // Issue #420 (S74a, AUTH-007): once started, the bar is the Run's state — `已完成` now — with the way to
+    // the Run's surface and nothing that would start it again; the status line never claims a state the
+    // Run has left (V2-UX-LIVE-004).
+    const startedDrawer = await drawerShowing(renderer, prepared.taskIntent.taskIntentId, 'settled', 'analysis-bar-started-drawer');
+    requireJourney(startedDrawer?.bar?.state === 'started' && startedDrawer.bar.start === 'started' && startedDrawer.bar.status === '已完成' &&
+      startedDrawer.bar.statement === null && barActions(startedDrawer) === 'run-link:查看运行:enabled' && startedDrawer.actions === 0,
+    'analysis-bar-started', startedDrawer?.bar);
+    await assertRenderer(renderer, `!['正在开始任务…','已进入调度器'].some((text)=>(document.querySelector('#persistence-status')?.textContent??'').includes(text))`, 'analysis-bar-status-settled');
 
     // Synchronized delta (#274): after the unit stage, the same Run asked the model once more about
     // the whole book and recorded typed cross-unit findings beside the three deterministic kinds. The
@@ -1815,7 +1884,7 @@ async function main() {
     // Synchronized delta with Issue #418 (S72 D4): the card keeps the reuse plan's counts and digests as its
     // own data and names the plan in one line; the plan unit by unit, the goal and the predecessor it names
     // read in the Task Drawer, which opened in 完整 — the mode chosen before the restart (PLAN-010).
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='sync-current' && card.dataset.planReused==='6' && card.dataset.planRecomputed==='2' && card.dataset.planInvalidated==='2' && card.dataset.planBypassed==='0' && card.dataset.reusePlanDigest===${JSON.stringify(preparedSync.update.reusePlanDigest)} && card.dataset.planEnvelopeDigest===${JSON.stringify(preparedSync.planEnvelope.digest)} && card.dataset.coverageManifestDigest===${JSON.stringify(syncManifest.digest)} && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：同步到当前稿件 · 全书 · 重新分析 2 个阅读范围，沿用 6 个 · 任务输入修订版 ${preparedSync.checkpoint.revisionLabel} · 计划版本 1`)} && card.querySelector('[data-analysis-action="authorize"]') instanceof HTMLButtonElement && !card.querySelector('[data-analysis-action="authorize"]').disabled && !card.querySelector('[data-analysis-action="prepare"]'); })()`, 'sync-plan-preview');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='sync-current' && card.dataset.planReused==='6' && card.dataset.planRecomputed==='2' && card.dataset.planInvalidated==='2' && card.dataset.planBypassed==='0' && card.dataset.reusePlanDigest===${JSON.stringify(preparedSync.update.reusePlanDigest)} && card.dataset.planEnvelopeDigest===${JSON.stringify(preparedSync.planEnvelope.digest)} && card.dataset.coverageManifestDigest===${JSON.stringify(syncManifest.digest)} && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：同步到当前稿件 · 全书 · 重新分析 2 个阅读范围，沿用 6 个 · 任务输入修订版 ${preparedSync.checkpoint.revisionLabel} · 计划版本 1`)} && card.querySelector('[data-task-plan-open="baseline-analysis"]')?.textContent==='查看计划并开始' && !card.querySelector('[data-analysis-action="authorize"], [data-analysis-action="prepare"]'); })()`, 'sync-plan-preview');
     const syncDrawer = await drawerShowing(renderer, preparedSync.taskIntent.taskIntentId, 'ready', 'sync-drawer');
     requireJourney(syncDrawer?.mode === 'full' && syncDrawer.stored === 'full' && syncDrawer.chips.position === '全书' &&
       syncDrawer.chips.revision === `任务输入修订版 ${preparedSync.checkpoint.revisionLabel}` &&
@@ -1927,7 +1996,7 @@ async function main() {
     'range-prepared-plan', { rangeExpected, update: preparedRange?.update, unitScope: preparedRange?.runSourceScope?.unitScope });
     // Synchronized delta with Issue #418 (S72 D4, D5): the plan names the range as the paragraphs it holds;
     // the exact block range and the plan unit by unit read in the drawer's 查看技术详情.
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='reanalyze-range' && card.dataset.planReused==='5' && card.dataset.planRecomputed==='3' && card.dataset.planInvalidated==='1' && card.dataset.planBypassed==='2' && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：重新分析所选范围 · 第 ${selectedRange.startPosition}–${selectedRange.endPosition} 段 · 重新分析 3 个阅读范围，沿用 5 个 · 任务输入修订版 ${preparedRange.checkpoint.revisionLabel} · 计划版本 1`)} && card.querySelector('[data-analysis-action="authorize"]') instanceof HTMLButtonElement; })()`, 'range-plan-preview');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='reanalyze-range' && card.dataset.planReused==='5' && card.dataset.planRecomputed==='3' && card.dataset.planInvalidated==='1' && card.dataset.planBypassed==='2' && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：重新分析所选范围 · 第 ${selectedRange.startPosition}–${selectedRange.endPosition} 段 · 重新分析 3 个阅读范围，沿用 5 个 · 任务输入修订版 ${preparedRange.checkpoint.revisionLabel} · 计划版本 1`)} && card.querySelector('[data-task-plan-open="baseline-analysis"]')?.textContent==='查看计划并开始' && !card.querySelector('[data-analysis-action="authorize"]'); })()`, 'range-plan-preview');
     const rangeDrawer = await drawerShowing(renderer, preparedRange.taskIntent.taskIntentId, 'ready', 'range-drawer');
     requireJourney(rangeDrawer?.chips.position === `第 ${selectedRange.startPosition}–${selectedRange.endPosition} 段` && /^已选 [\d,]+ 字$/u.test(rangeDrawer.chips.selected ?? '') &&
       rangeDrawer.sentence === '重新分析所选范围，其余阅读范围沿用上一份' && rangeDrawer.technical.goal === RANGE_GOAL &&
@@ -2175,16 +2244,18 @@ async function main() {
     'safe-retry-prepared-plan', { update: preparedRetry?.update, planVersion: preparedRetry?.planVersion, boundary: retryBoundary, route: preparedRetry?.providerResolutionPlan?.executionRoute, actions: preparedRetry?.actions });
     // Synchronized delta with Issue #418 (S72 D6, PLAN-012): the Plan Boundary Split reads in the drawer as
     // its two columns — what AI7 may adjust during the Run, and what makes it stop and ask, each locked —
-    // with the fifteen fields whose change suspends the plan and the fixture route in 查看技术详情. The plan
-    // versions and the recording action stay on ②A until S74.
+    // with the fifteen fields whose change suspends the plan and the fixture route in 查看技术详情.
+    // Synchronized delta with Issue #420 (S74a A4, A5): the plan versions are ②A's closed technical layer,
+    // and the start is the drawer bar's, so the card's one action reads 查看计划并开始.
     await assertRenderer(renderer, `(() => {
       const card=document.querySelector('.baseline-analysis-card');
-      const authorize=card?.querySelector('[data-analysis-action="authorize"]');
+      const open=card?.querySelector('[data-task-plan-open="baseline-analysis"]');
+      const versions=card?.querySelector('details.analysis-plan-versions-technical');
       return card?.dataset.planVersion==='1' && card.dataset.planVersionCount==='1' && card.dataset.planRevisionPending==='false' &&
-        !card.querySelector('.analysis-plan-boundary') &&
-        card.querySelector('.analysis-plan-versions')?.dataset.planVersionCount==='1' && card.querySelector('[data-plan-version-ordinal="1"][data-plan-version-state="current"]')!==null &&
-        !card.querySelector('.analysis-plan-revision') && !card.querySelector('[data-analysis-action="view-plan-revision"], [data-analysis-action="reconfirm-plan"]') &&
-        authorize instanceof HTMLButtonElement && !authorize.disabled && authorize.textContent==='授权并开始任务';
+        !card.querySelector('.analysis-plan-boundary') && versions instanceof HTMLDetailsElement && !versions.open &&
+        versions.querySelector('.analysis-plan-versions')?.dataset.planVersionCount==='1' && card.querySelector('[data-plan-version-ordinal="1"][data-plan-version-state="current"]')!==null &&
+        !card.querySelector('.analysis-plan-drift-note') && !card.querySelector('[data-analysis-action="view-plan-revision"], [data-analysis-action="reconfirm-plan"], [data-analysis-action="authorize"]') &&
+        open instanceof HTMLButtonElement && !open.disabled && open.textContent==='查看计划并开始';
     })()`, 'safe-retry-plan-preview');
     const retryDrawer = await drawerShowing(renderer, preparedRetry.taskIntent.taskIntentId, 'ready', 'safe-retry-drawer');
     requireJourney(retryDrawer?.version === '1' && JSON.stringify(retryDrawer.columns) === JSON.stringify(['运行中 AI7 可以自己调整', '这些一变就先停下来问你']) &&
@@ -2259,7 +2330,7 @@ async function main() {
       preparedDrift.planRevision === null && preparedDrift.planVersions?.length === 1 && preparedDrift.actions?.canAuthorize === true && preparedDrift.actions?.canReconfirmPlan === false &&
       sameRecord(preparedDrift.update?.reusePlan?.counts, driftOptionA.expected),
     'plan-revision-prepared-plan', { update: preparedDrift?.update, planVersion: preparedDrift?.planVersion, actions: preparedDrift?.actions });
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const authorize=card?.querySelector('[data-analysis-action="authorize"]'); return card?.dataset.planVersion==='1' && card.dataset.planRevisionPending==='false' && authorize instanceof HTMLButtonElement && authorize.textContent==='授权并开始任务' && !card.querySelector('[data-analysis-action="view-plan-revision"], [data-analysis-action="reconfirm-plan"]'); })()`, 'plan-revision-preview-current');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const open=card?.querySelector('[data-task-plan-open="baseline-analysis"]'); return card?.dataset.planVersion==='1' && card.dataset.planRevisionPending==='false' && open instanceof HTMLButtonElement && open.textContent==='查看计划并开始' && !card.querySelector('.analysis-plan-drift-note, [data-analysis-action="view-plan-revision"], [data-analysis-action="reconfirm-plan"], [data-analysis-action="authorize"]'); })()`, 'plan-revision-preview-current');
 
     at('plan-revision-drift');
     cancellation.throwIfRequested();
@@ -2282,21 +2353,20 @@ async function main() {
       sameRecord(drifted.update?.selectedRange, rangeA) && drifted.authorization === null && drifted.run === null &&
       drifted.actions?.canAuthorize === false && drifted.actions?.canReconfirmPlan === true,
     'plan-revision-diff', { planRevision: pendingRevision, planVersion: drifted?.planVersion, actions: drifted?.actions });
-    // The stale preview keeps no start action; 查看计划修订 opens the diff naming the selected range and the reuse-plan counts.
+    // The stale preview keeps no start action (AUTH-006). Synchronized delta with Issue #420 (S74a A4): ②A says
+    // in one line that the plan changed, and the diff, 查看计划修订 and 重新确认计划 are the drawer's — the
+    // next stages read them there; the pending revision stays in ②A's technical layer, exactly identified.
     await assertRenderer(renderer, `(() => {
       const card=document.querySelector('.baseline-analysis-card');
-      const block=card?.querySelector('.analysis-plan-revision');
-      const view=block?.querySelector('[data-analysis-action="view-plan-revision"]');
-      const diff=block?.querySelector('.analysis-plan-revision-diff');
-      if(!(view instanceof HTMLButtonElement)||view.textContent!=='查看计划修订'||!(diff instanceof HTMLElement)||!diff.hidden||card.querySelector('[data-analysis-action="authorize"]')) return false;
-      view.click();
-      return !diff.hidden && view.getAttribute('aria-expanded')==='true' && block.dataset.planRevisionState==='pending' && block.dataset.planRevisionFields==='selectedRange,reusePlan.counts' &&
-        diff.querySelector('[data-plan-revision-field="selectedRange"][data-plan-revision-materiality="material"]')!==null &&
-        diff.querySelector('[data-plan-revision-field="reusePlan.counts"][data-plan-revision-materiality="derived"]')!==null &&
-        diff.textContent.includes(${JSON.stringify(`内容块 ${rangeA.startPosition}–${rangeA.endPosition}`)}) && diff.textContent.includes(${JSON.stringify(`内容块 ${rangeB.startPosition}–${rangeB.endPosition}`)}) &&
+      const note=card?.querySelector('.analysis-plan-summary .analysis-plan-drift-note');
+      const open=card?.querySelector('[data-task-plan-open="baseline-analysis"]');
+      return note instanceof HTMLElement && note.dataset.planRevisionState==='pending' && note.dataset.planRevisionPrior==='1' && note.dataset.planRevisionFields==='selectedRange,reusePlan.counts' &&
+        note.textContent==='计划的关键内容已变化：原计划不能再开始；在任务计划里查看计划修订并重新确认计划后，新的计划版本才能开始。' &&
+        open instanceof HTMLButtonElement && open.textContent==='查看计划并开始' &&
+        !card.querySelector('.analysis-plan-revision, [data-analysis-action="authorize"], [data-analysis-action="view-plan-revision"], [data-analysis-action="reconfirm-plan"]') &&
         card.dataset.planVersion==='1' && card.dataset.planRevisionPending==='true' && card.querySelector('[data-plan-version-ordinal="1"][data-plan-version-state="superseded"]')!==null &&
         card.querySelector('.analysis-plan-versions [data-plan-revision-prior="1"][data-plan-revision-resolved="false"]')!==null &&
-        block.textContent.includes(${JSON.stringify(pendingRevision.label)}) && block.querySelector('[data-analysis-action="reconfirm-plan"]') instanceof HTMLButtonElement && ${ONLY_ANALYSIS_ACTIONS};
+        card.querySelector('.analysis-plan-versions [data-plan-revision-resolved="false"]')?.textContent.includes(${JSON.stringify(pendingRevision.label)}) === true && ${ONLY_ANALYSIS_ACTIONS};
     })()`, 'plan-revision-surface');
 
     at('plan-revision-drawer-diff');
@@ -2305,10 +2375,12 @@ async function main() {
     // holds. The chips still name the range the superseded version froze.
     const driftDrawer = await drawerShowing(renderer, preparedDrift.taskIntent.taskIntentId, 'changed', 'plan-revision-drawer');
     const priorCount = /^已选 ([\d,]+) 字$/u.exec(driftDrawer?.chips?.selected ?? '')?.[1];
+    // Synchronized delta with Issue #420 (S74a A4): 重新确认计划 is the drawer's own action now, so the
+    // resolution no longer sends the editor to ②A.
     requireJourney(driftDrawer?.pill === '计划已变化' && driftDrawer.version === '1' && priorCount !== undefined &&
       driftDrawer.chips.position === `第 ${rangeA.startPosition}–${rangeA.endPosition} 段` &&
       driftDrawer.drift?.kind === 'diff' && driftDrawer.drift.heading === '计划的关键内容已变化' && driftDrawer.drift.tableHidden === true &&
-      JSON.stringify(driftDrawer.drift.text) === JSON.stringify(['计划冻结之后，它的关键内容已经变化；原计划不能再开始。', '在「分析 › 历史与更新」里重新确认计划后，新的计划版本才能开始。']) &&
+      JSON.stringify(driftDrawer.drift.text) === JSON.stringify(['计划冻结之后，它的关键内容已经变化；原计划不能再开始。', '重新确认计划后，新的计划版本才能开始。']) &&
       driftDrawer.actions === 0, 'plan-revision-drawer-diff', driftDrawer);
     await reviewAction(renderer, '#task-drawer [data-task-drawer-control="view-plan-revision"]', 'plan-revision-drawer-view');
     const driftTable = (await readDrawer(renderer))?.drift;
@@ -2318,6 +2390,16 @@ async function main() {
       JSON.stringify(driftRange) === JSON.stringify(['selectedRange', 'material', '处理范围', `第 ${rangeA.startPosition}–${rangeA.endPosition} 段 · ${priorCount} 字`, `第 ${rangeB.startPosition}–${rangeB.endPosition} 段 · ${proposedCount} 字`, '关键内容']) &&
       JSON.stringify(driftTable.rows[1]) === JSON.stringify(['reusePlan.counts', 'derived', '重新分析与沿用的阅读范围', `重新分析 ${driftOptionA.expected.recomputed} 个，沿用 ${driftOptionA.expected.reused} 个`, `重新分析 ${driftOptionB.expected.recomputed} 个，沿用 ${driftOptionB.expected.reused} 个`, '随之变化']),
     'plan-revision-drawer-rows', driftTable);
+
+    at('plan-revision-bar');
+    // Issue #420 (S74a, AUTH-006): the bar of a changed plan offers no start at all — 重新确认计划 and
+    // 查看计划修订 (whose table is open now) take its place, with the resolution beside them.
+    const driftBar = await readDrawer(renderer);
+    requireJourney(driftBar?.bar?.state === 'changed' && driftBar.bar.start === 'changed' && driftBar.bar.statement === BAR_STATEMENT &&
+      driftBar.bar.note === '重新确认计划后，新的计划版本才能开始。' && driftBar.bar.status === null &&
+      barActions(driftBar) === 'reconfirm-plan:重新确认计划:enabled|view-plan-revision:查看计划修订:enabled|revise:返回修改:disabled|save-draft:保存草稿:enabled' &&
+      driftBar.drift?.tableHidden === false, 'plan-revision-bar', driftBar?.bar);
+    await assertRenderer(renderer, `!document.querySelector('#task-drawer [data-task-drawer-control="start"]') && document.querySelector('#task-drawer [data-task-drawer-control="view-plan-revision"]')?.getAttribute('aria-expanded')==='true' && document.querySelector('#task-drawer [data-task-drawer-control="view-plan-revision"]')?.getAttribute('aria-controls')===document.querySelector('#task-drawer .task-plan-drift-table')?.id`, 'plan-revision-bar-no-start');
 
     at('plan-revision-stale-authorize');
     cancellation.throwIfRequested();
@@ -2331,8 +2413,8 @@ async function main() {
     at('plan-revision-revert');
     cancellation.throwIfRequested();
     // (iv) The way back (Issue #281). Preparing again at the range version 1 froze records the revert
-    // as its own append-only revision, settles the pending one, and returns 授权并开始任务 to the version
-    // that was never replaced: the same envelope digest, still one plan version, nothing rewritten.
+    // as its own append-only revision, settles the pending one, and returns 开始任务 to the version that was
+    // never replaced: the same envelope digest, still one plan version, nothing rewritten.
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-3'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-select-a');
     await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'plan-revision-revert-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planRevisionPending==='false'`, 'plan-revision-reverted', 120_000);
@@ -2355,10 +2437,11 @@ async function main() {
       reverted.planRevision === null && sameRecord(reverted.update?.selectedRange, rangeA) && reverted.authorization === null && reverted.run === null &&
       reverted.actions?.canAuthorize === true && reverted.actions?.canReconfirmPlan === false,
     'plan-revision-revert-record', { planRevisions: reverted?.planRevisions, planVersions: reverted?.planVersions, actions: reverted?.actions });
-    // The 计划已被取代 block is gone, both revisions read as settled, and the start action is back.
+    // The 计划已被取代 note is gone, both revisions read as settled, and the start is back — in the drawer's bar
+    // since Issue #420 (S74a), with the card's one action reading 查看计划并开始 again.
     await assertRenderer(renderer, `(() => {
       const card=document.querySelector('.baseline-analysis-card');
-      const authorize=card?.querySelector('[data-analysis-action="authorize"]');
+      const open=card?.querySelector('[data-task-plan-open="baseline-analysis"]');
       return card?.dataset.planVersion==='1' && card.dataset.planVersionCount==='1' && card.dataset.planRevisionPending==='false' &&
         card.dataset.planEnvelopeDigest===${JSON.stringify(v1Digest)} && card.querySelector('[data-plan-version-ordinal="1"][data-plan-version-state="current"]')!==null &&
         card.querySelector('.analysis-plan-versions')?.dataset.planRevisionCount==='2' &&
@@ -2366,13 +2449,15 @@ async function main() {
         card.querySelectorAll('.analysis-plan-versions [data-plan-revision-resolved="true"]').length===2 &&
         card.querySelector('.analysis-plan-versions [data-plan-revision-prior="1"][data-plan-revision-next="1"][data-plan-revision-resolved="true"]')!==null &&
         card.querySelectorAll('.analysis-plan-revision-list li')[1]?.textContent.includes(${JSON.stringify(revertRevision.label)})===true &&
-        !card.querySelector('.analysis-plan-revision') && !card.querySelector('[data-analysis-action="view-plan-revision"], [data-analysis-action="reconfirm-plan"]') &&
-        authorize instanceof HTMLButtonElement && !authorize.disabled && authorize.textContent==='授权并开始任务';
+        !card.querySelector('.analysis-plan-drift-note, [data-analysis-action="authorize"], [data-analysis-action="view-plan-revision"], [data-analysis-action="reconfirm-plan"]') &&
+        open instanceof HTMLButtonElement && !open.disabled && open.textContent==='查看计划并开始';
     })()`, 'plan-revision-revert-surface');
-    // The drawer follows the way back: the plan version 1 froze is the plan again, and nothing reads as changed.
+    // The drawer follows the way back: the plan version 1 froze is the plan again, nothing reads as changed,
+    // and its bar offers 开始任务 again.
     const revertedDrawer = await drawerShowing(renderer, preparedDrift.taskIntent.taskIntentId, 'ready', 'plan-revision-revert-drawer');
     requireJourney(revertedDrawer?.drift === null && revertedDrawer.version === '1' && revertedDrawer.pill === '尚未开始' &&
-      revertedDrawer.chips.position === `第 ${rangeA.startPosition}–${rangeA.endPosition} 段` && revertedDrawer.chips.selected === `已选 ${priorCount} 字`,
+      revertedDrawer.chips.position === `第 ${rangeA.startPosition}–${rangeA.endPosition} 段` && revertedDrawer.chips.selected === `已选 ${priorCount} 字` &&
+      revertedDrawer.bar?.state === 'ready' && barActions(revertedDrawer) === 'start:开始任务:enabled|revise:返回修改:disabled|save-draft:保存草稿:enabled',
     'plan-revision-revert-drawer-plan', revertedDrawer);
     // Back to the change this Task means to confirm: the same range drift, pending on its own again.
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-8'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-select-b');
@@ -2391,7 +2476,10 @@ async function main() {
 
     at('plan-revision-reconfirm');
     cancellation.throwIfRequested();
-    await click(renderer, '重新确认计划', 'plan-revision-reconfirm-click');
+    // Synchronized delta with Issue #420 (S74a A4): 重新确认计划 is the drawer bar's; the re-drift opened the
+    // drawer on the changed plan, and ②A beside it reads version 2 once it is frozen.
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(preparedDrift.taskIntent.taskIntentId)} && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='changed' && document.querySelector('#task-drawer [data-task-drawer-control="reconfirm-plan"]')?.disabled===false`, 'plan-revision-reconfirm-ready');
+    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="reconfirm-plan"]', 'plan-revision-reconfirm-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planVersion==='2'`, 'plan-revision-version-2', 120_000);
     const reconfirmed = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const v2Digest = reconfirmed?.planEnvelope?.digest;
@@ -2406,7 +2494,7 @@ async function main() {
       JSON.stringify(reconfirmed.runSourceScope?.unitScope?.recomputedUnitOrdinals) === JSON.stringify([2, 8]) &&
       reconfirmed.authorization === null && reconfirmed.actions?.canAuthorize === true && reconfirmed.actions?.canReconfirmPlan === false,
     'plan-revision-reconfirmed', { planVersion: reconfirmed?.planVersion, planVersions: reconfirmed?.planVersions, planRevisions: reconfirmed?.planRevisions, update: reconfirmed?.update });
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const authorize=card?.querySelector('[data-analysis-action="authorize"]'); return card?.dataset.planVersion==='2' && card.dataset.planVersionCount==='2' && card.dataset.planRevisionPending==='false' && card.dataset.planEnvelopeDigest===${JSON.stringify(v2Digest)} && card.dataset.planReused==='6' && card.dataset.planRecomputed==='2' && card.querySelector('[data-plan-version-ordinal="1"][data-plan-version-state="superseded"]')!==null && card.querySelector('[data-plan-version-ordinal="2"][data-plan-version-state="current"]')!==null && card.querySelector('.analysis-plan-versions [data-plan-revision-prior="1"][data-plan-revision-next="2"][data-plan-revision-resolved="true"]')!==null && !card.querySelector('.analysis-plan-revision') && authorize instanceof HTMLButtonElement && !authorize.disabled && authorize.textContent==='授权并开始任务' && card.textContent.includes(${JSON.stringify(`内容块 ${rangeB.startPosition}–${rangeB.endPosition}`)}); })()`, 'plan-revision-version-2-surface');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const open=card?.querySelector('[data-task-plan-open="baseline-analysis"]'); return card?.dataset.planVersion==='2' && card.dataset.planVersionCount==='2' && card.dataset.planRevisionPending==='false' && card.dataset.planEnvelopeDigest===${JSON.stringify(v2Digest)} && card.dataset.planReused==='6' && card.dataset.planRecomputed==='2' && card.querySelector('[data-plan-version-ordinal="1"][data-plan-version-state="superseded"]')!==null && card.querySelector('[data-plan-version-ordinal="2"][data-plan-version-state="current"]')!==null && card.querySelector('.analysis-plan-versions [data-plan-revision-prior="1"][data-plan-revision-next="2"][data-plan-revision-resolved="true"]')!==null && !card.querySelector('.analysis-plan-drift-note, [data-analysis-action="authorize"]') && open instanceof HTMLButtonElement && !open.disabled && open.textContent==='查看计划并开始' && card.textContent.includes(${JSON.stringify(`内容块 ${rangeB.startPosition}–${rangeB.endPosition}`)}); })()`, 'plan-revision-version-2-surface');
 
     at('plan-revision-drawer-range');
     // #288's visible half: once version 2 is the plan, the range it names is the one version 2 froze —
@@ -2418,7 +2506,11 @@ async function main() {
       v2Drawer.terms['要处理']?.includes(`第 ${rangeB.startPosition}–${rangeB.endPosition} 段 · ${proposedCount} 字 · 重新分析 ${driftOptionB.expected.recomputed} 个阅读范围，沿用 ${driftOptionB.expected.reused} 个`) &&
       v2Drawer.technical['selected-range'] === `内容块 ${rangeB.startPosition}–${rangeB.endPosition}` &&
       v2Drawer.technical['plan-versions'] === `版本 1 · superseded · ${v1Digest}；版本 2 · current · ${v2Digest}` &&
-      v2Drawer.technical['plan-envelope'] === v2Digest, 'plan-revision-drawer-range', v2Drawer);
+      v2Drawer.technical['plan-envelope'] === v2Digest &&
+      // Issue #420 (S74a): version 2 is startable from the bar, whose summary names it.
+      v2Drawer.bar?.state === 'ready' && v2Drawer.bar.summary?.includes(' · 计划版本 2 · ') === true &&
+      barActions(v2Drawer) === 'start:开始任务:enabled|revise:返回修改:disabled|save-draft:保存草稿:enabled',
+    'plan-revision-drawer-range', v2Drawer);
     await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card .analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：重新分析所选范围 · 第 ${rangeB.startPosition}–${rangeB.endPosition} 段 · 重新分析 ${driftOptionB.expected.recomputed} 个阅读范围，沿用 ${driftOptionB.expected.reused} 个 · 任务输入修订版 ${reconfirmed.checkpoint.revisionLabel} · 计划版本 2`)}`, 'plan-revision-summary-range');
 
     at('plan-revision-dispatch');
@@ -2482,15 +2574,16 @@ async function main() {
 
     at('review-prepare');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for (const id of ['typos-and-usage','style-and-format','plot-consistency']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'review-prepare-start');
-    // Synchronized delta with Issue #418 (S72 D4): the prepared Run is one line and 查看计划 on ②B, beside
-    // the one authorization for the whole Run; its plan opens in the Task Drawer.
+    // Synchronized delta with Issue #418 (S72 D4): the prepared Run is one line on ②B; its plan opens in the
+    // Task Drawer. Synchronized delta with Issue #420 (S74a A5): the Run's one approval left ②B for the
+    // drawer's bar, so ②B offers 查看计划并开始 beside 返回修改 and no authorization button.
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared' && document.querySelector('section.review-plans')?.dataset.reviewCategories==='typos-and-usage,style-and-format,plot-consistency'`, 'review-prepared', 120_000);
     const preparedReview = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
     const taskBacked = (preparedReview?.categories ?? []).filter((category) => (category.planEnvelopeDigest ?? '').length === 64);
     requireJourney(preparedReview?.state === 'prepared' && UUID_PATTERN.test(preparedReview.reviewRunId) &&
       JSON.stringify(preparedReview.categories.map((category) => category.categoryId)) === JSON.stringify(['typos-and-usage', 'style-and-format', 'plot-consistency']) &&
       JSON.stringify(taskBacked.map((category) => category.categoryId)) === JSON.stringify(['typos-and-usage', 'style-and-format']), 'review-prepared-run', preparedReview?.categories);
-    await assertRenderer(renderer, `(() => { const plans=document.querySelector('section.review-plans'); const open=plans?.querySelector('[data-review-action="view-plan"]'); return plans?.querySelector('.task-plan-summary-line')?.textContent===${JSON.stringify(`计划：3 个类别，授权一次后逐类审阅 · ${preparedReview.scope.label} · 任务输入修订版 ${preparedReview.manuscript.revisionLabel}`)} && open instanceof HTMLButtonElement && open.textContent==='查看计划' && open.dataset.taskPlanOpen==='review-run' && document.querySelectorAll('[data-review-action="authorize"]').length===1 && document.querySelector('dialog.review-sheet')?.open!==true; })()`, 'review-plans');
+    await assertRenderer(renderer, `(() => { const plans=document.querySelector('section.review-plans'); const open=plans?.querySelector('[data-review-action="view-plan"]'); return plans?.querySelector('.task-plan-summary-line')?.textContent===${JSON.stringify(`计划：3 个类别，授权一次后逐类审阅 · ${preparedReview.scope.label} · 任务输入修订版 ${preparedReview.manuscript.revisionLabel}`)} && open instanceof HTMLButtonElement && open.textContent==='查看计划并开始' && open.dataset.taskPlanOpen==='review-run' && plans.querySelector('[data-review-action="revise"]')?.textContent==='返回修改' && document.querySelectorAll('[data-review-action="authorize"]').length===0 && !plans.querySelector('.review-authorize-note') && ${AUTHORIZE_LABELED_BUTTONS}===0 && document.querySelector('dialog.review-sheet')?.open!==true; })()`, 'review-plans');
     // One step per category — the leads read the baseline and freeze no model plan — and 汇总; each
     // model-read category's own frozen plan one step away in 查看技术详情 (S72 D7).
     const reviewDrawer = await drawerShowing(renderer, preparedReview.reviewRunId, 'ready', 'review-drawer');
@@ -2503,8 +2596,19 @@ async function main() {
       JSON.stringify(reviewDrawer.participation) === JSON.stringify(['预计无需中途参与', '结束后：每一类完成后，它的发现立即可以处理：修改建议由你接受并应用，批注由你标记为已处理或忽略并说明']) &&
       reviewDrawer.actions === 0 && reviewDrawer.footer === '计划说明，不是运行授权', 'review-drawer-plan', reviewDrawer);
 
+    at('review-bar-ready');
+    // Issue #420 (S74a): the Run's one approval is the bar's 开始任务; the categories' deterministic route
+    // needs no credential, so it is offered while the Book's credential stays `missing`.
+    requireJourney(reviewDrawer.bar?.state === 'ready' && reviewDrawer.bar.start === 'ready' &&
+      reviewDrawer.bar.summary === `《${bookName}》 · 全书 · 主编辑角色 · 未设置任务预算上限 · 产出：审阅发现与审阅报告 · 不改稿` &&
+      reviewDrawer.bar.statement === BAR_STATEMENT && reviewDrawer.bar.note === null &&
+      barActions(reviewDrawer) === 'start:开始任务:enabled|revise:返回修改:disabled|save-draft:保存草稿:enabled',
+    'review-bar-ready', reviewDrawer.bar);
+
     at('review-authorize');
-    await reviewAction(renderer, '[data-review-action="authorize"]', 'review-authorize-click');
+    // Synchronized delta with Issue #420 (S74a A2): one activation of the bar's 开始任务 records the Run's one
+    // approval and hands it to its drive loop; ②B beside the drawer follows the Run to its end.
+    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start"]', 'review-authorize-click');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'review-settled', 180_000);
     const reviewed = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
     const reviewedCategories = reviewed?.run?.categories ?? [];
@@ -2519,7 +2623,8 @@ async function main() {
     await assertRenderer(renderer, `document.querySelectorAll('ol.review-progress > li[data-category-state="settled"]').length===3 && document.querySelectorAll('section.review-group[data-review-category]').length>=2`, 'review-groups');
     // The drawer beside ②B read the plan again as the Run moved; it now states the Run's end.
     const settledReviewDrawer = await drawerShowing(renderer, preparedReview.reviewRunId, 'settled', 'review-drawer-settled');
-    requireJourney(settledReviewDrawer?.pill === '已完成' && settledReviewDrawer.drift === null && typeof settledReviewDrawer.technical.authorization === 'string',
+    requireJourney(settledReviewDrawer?.pill === '已完成' && settledReviewDrawer.drift === null && typeof settledReviewDrawer.technical.authorization === 'string' &&
+      settledReviewDrawer.bar?.state === 'started' && settledReviewDrawer.bar.status === '已完成' && barActions(settledReviewDrawer) === 'run-link:查看审阅:enabled',
       'review-drawer-settled-plan', settledReviewDrawer);
 
     at('review-marks-on-manuscript');
@@ -2580,7 +2685,8 @@ async function main() {
 
     at('zero-activity');
     // Synchronized delta with Issue #418: the Task Drawer, open beside ②A since 审阅, holds no action of
-    // the surfaces that raise a Task — it states a plan and authorizes nothing (PLAN-007).
+    // the surfaces that raise a Task — the plan authorizes nothing (PLAN-007). Synchronized delta with Issue
+    // #420: its only start is its own bar's, and no card anywhere carries one.
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.analysisState==='settled' && card.dataset.resultRevisionOrdinal==='6' && ${ONLY_ANALYSIS_ACTIONS} && !document.querySelector('[data-analysis-action="prepare"], [data-analysis-action="authorize"]') && !document.querySelector('#task-drawer [data-analysis-action], #task-drawer [data-review-action], #task-drawer [data-task-authorization-action]') && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress|effect|enrol|apply|export/i.test(key) && !${JSON.stringify(CHANGE_SUGGESTION_APPLY_MEMBERS)}.includes(key)); })()`, 'no-execution-surface');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-network-provider-session');
   } finally {

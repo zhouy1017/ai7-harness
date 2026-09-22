@@ -368,7 +368,9 @@ async function pressKey(renderer, descriptor) {
 /**
  * The Task Drawer as an editor reads it (Issue #418, S72): its state, the goal block, the five rows of
  * 精简 or the six sections of 完整, the two columns, every exact identity of 查看技术详情 by its key, the
- * controls with their state, and the mode this renderer remembers.
+ * controls with their state, and the mode this renderer remembers. Since Issue #420 (S74a) it also reads the
+ * authorization bar in the footer: its state, its summary, statement, note and status, and each action
+ * with whether it is available and, when it is not, the reason it names.
  */
 async function readDrawer(renderer) {
   return renderer.evaluate(`(() => {
@@ -395,10 +397,27 @@ async function readDrawer(renderer) {
       technical:pairs('[data-task-plan-technical]','taskPlanTechnical'),
       controls:Object.fromEntries(Array.from(drawer.querySelectorAll('[data-task-drawer-control]')).map((node)=>[node.dataset.taskDrawerControl,{text:node.textContent,disabled:node instanceof HTMLButtonElement?node.disabled:null,pressed:node.getAttribute('aria-pressed')}])),
       footer:drawer.querySelector('.task-drawer-footer')?.textContent,
+      bar:(() => {
+        const bar=drawer.querySelector('.task-drawer-bar');
+        if(!(bar instanceof HTMLElement)||bar.hidden)return null;
+        const text=(selector)=>bar.querySelector(selector)?.textContent??null;
+        return {
+          state:bar.dataset.taskBar, start:drawer.dataset.taskPlanStart??null,
+          summary:text('.task-bar-summary'), statement:text('.task-bar-statement'), note:text('.task-bar-note'),
+          status:text('.task-bar-status'), refusal:text('.task-bar-refusal'),
+          actions:Array.from(bar.querySelectorAll('button[data-task-drawer-control]')).map((node)=>{
+            const described=node.getAttribute('aria-describedby');
+            return { name:node.dataset.taskDrawerControl, text:node.textContent, disabled:node.disabled, reason:described===null?null:(document.getElementById(described)?.textContent??null) };
+          }),
+        };
+      })(),
       focus:document.activeElement?.id||document.activeElement?.dataset?.taskDrawerControl||null,
     };
   })()`);
 }
+
+/** Every button on screen and in the drawer whose words name 授权: AUTH-002 keeps the word off every start (ADR 0077). */
+const AUTHORIZE_LABELED_BUTTONS = `Array.from(document.querySelectorAll('#screen button, #task-drawer button')).filter((button)=>/授权/u.test(button.textContent??'')).length`;
 
 async function importSample1(renderer, cancellation) {
   await click(renderer, '导入稿件', 'import-open');
@@ -855,10 +874,11 @@ async function main() {
       prepared.planEnvelope?.providerStatus === 'denied' && DIGEST_PATTERN.test(prepared.planEnvelope?.digest) &&
       prepared.actions?.canAuthorize === true && prepared.authorization === null && prepared.runRecord === null,
     'prepared-exact-envelope');
-    // Synchronized delta with Issue #418 (S72 D4): the card keeps one line naming the plan, 查看计划 and the
-    // recording action, which stays here until S74; the plan itself — every identity the card's preview
-    // used to show included — opens in the Task Drawer, where the stages below read it.
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.task-authorization-card'); const open=card?.querySelector('[data-task-authorization-action="view-plan"]'); const button=card?.querySelector('[data-task-authorization-action="authorize-no-dispatch"]'); return card?.querySelector('.task-plan-summary-line')?.textContent==='计划：固定任务 · 全书 · 任务输入修订版 r2 · 不发送任何内容' && open instanceof HTMLButtonElement && !open.disabled && open.textContent==='查看计划' && open.dataset.taskPlanOpen==='fixed-task' && open.getAttribute('aria-controls')==='task-drawer' && !card.querySelector('dl.task-authorization-facts, .task-authorization-non-effects') && !card.textContent.includes('空（无）') && button?.textContent==='记录本次运行授权（不派发）'; })()`, 'prepared-preview');
+    // Synchronized delta with Issue #418 (S72 D4): the card keeps one line naming the plan and the way to
+    // it; the plan itself — every identity the card's preview used to show included — opens in the Task
+    // Drawer, where the stages below read it. Synchronized delta with Issue #420 (S74a A5): the recording
+    // action left the card for the drawer's authorization bar, so the card's one action is 查看计划并开始.
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.task-authorization-card'); const open=card?.querySelector('[data-task-authorization-action="view-plan"]'); return card?.querySelector('.task-plan-summary-line')?.textContent==='计划：固定任务 · 全书 · 任务输入修订版 r2 · 不发送任何内容' && open instanceof HTMLButtonElement && !open.disabled && open.textContent==='查看计划并开始' && open.dataset.taskPlanOpen==='fixed-task' && open.getAttribute('aria-controls')==='task-drawer' && !card.querySelector('dl.task-authorization-facts, .task-authorization-non-effects') && !card.textContent.includes('空（无）') && !card.querySelector('[data-task-authorization-action="authorize-no-dispatch"]') && Array.from(card.querySelectorAll('button')).every((button)=>button.dataset.taskAuthorizationAction==='view-plan') && ${AUTHORIZE_LABELED_BUTTONS}===0; })()`, 'prepared-preview');
 
     at('drawer-plan-compact');
     // Preparing opened the plan it froze beside the card, in 精简, with focus on the drawer's title.
@@ -885,6 +905,35 @@ async function main() {
       compact.controls['mode-full']?.text === '完整' && compact.controls['mode-full'].pressed === 'false' &&
       compact.controls['full-link']?.text === '完整计划（6 段）' && compact.controls.close?.text === '关闭' &&
       compact.footer === '计划说明，不是运行授权', 'drawer-compact-plan', compact);
+
+    at('drawer-bar-record-only');
+    // Issue #420 (S74a): the footer is the authorization bar. It sums the plan up in one line, states what
+    // starting decides (AUTH-003), and offers 开始任务 — which here only records, and says so (ADR 0055) —
+    // beside 返回修改, shown with its reason until plan editing arrives, and 保存草稿. The Book's credential is
+    // `missing`, and this Task's route sends nothing, so the start needs none: it is offered all the same.
+    requireJourney(missingConnection?.credentialOperationState === 'missing' && compact.bar !== null &&
+      compact.bar.state === 'record-only' && compact.bar.start === 'record-only' &&
+      compact.bar.summary === '《J-03 sample1 任务授权》 · 全书 · 主编辑角色 · 未设置任务预算上限 · 产出：一条运行记录（不派发） · 不改稿' &&
+      compact.bar.statement === '只是让 AI7 按这份计划做这一次；接受修改建议、批准受控动作、保存里程碑版本、设为发稿版本都仍由你另行决定' &&
+      compact.bar.note === '此任务只记录运行，不会派发' && compact.bar.status === null && compact.bar.refusal === null &&
+      JSON.stringify(compact.bar.actions) === JSON.stringify([
+        { name: 'start', text: '开始任务', disabled: false, reason: null },
+        { name: 'revise', text: '返回修改', disabled: true, reason: '随计划编辑提供' },
+        { name: 'save-draft', text: '保存草稿', disabled: false, reason: null },
+      ]), 'drawer-bar-record-only', compact.bar);
+    // LAYER-005: the start is on screen without scrolling, wherever the plan above it is scrolled to.
+    await assertRenderer(renderer, `(async () => {
+      const body=document.querySelector('#task-drawer .task-drawer-body');
+      const start=document.querySelector('#task-drawer [data-task-drawer-control="start"]');
+      if(!(body instanceof HTMLElement)||!(start instanceof HTMLButtonElement))return false;
+      const inView=()=>{ const box=start.getBoundingClientRect(); return box.top>=0 && box.bottom<=innerHeight && box.width>0 && box.height>0; };
+      const top=inView();
+      body.scrollTop=body.scrollHeight;
+      await new Promise((resolve)=>requestAnimationFrame(()=>resolve()));
+      const bottom=inView();
+      body.scrollTop=0;
+      return top && bottom && !body.contains(start);
+    })()`, 'drawer-bar-reachable-without-scrolling');
 
     at('drawer-plan-full');
     // 完整: the six sections, PLAN-012's two columns, and every identity the card's preview used to show,
@@ -962,9 +1011,10 @@ async function main() {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await assertRenderer(renderer, `(() => { const details=document.querySelector('#task-drawer details.task-plan-technical'); if(!(details instanceof HTMLDetailsElement))return false; details.open=true; return true; })()`, 'drawer-technical-open');
-    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); const body=drawer?.querySelector('.task-drawer-body'); const head=drawer?.querySelector('.task-drawer-head'); if(!(drawer instanceof HTMLElement)||drawer.hidden||!body||!head)return false; const viewport=document.documentElement; return viewport.scrollWidth<=viewport.clientWidth+2 && body.scrollWidth<=body.clientWidth+2 && head.scrollWidth<=head.clientWidth+2 && drawer.getBoundingClientRect().width<=viewport.clientWidth && getComputedStyle(document.body).paddingRight==='0px'; })()`, 'drawer-zoom-reflow');
+    // Synchronized delta with Issue #420 (S74a): the authorization bar wraps inside the footer too.
+    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); const body=drawer?.querySelector('.task-drawer-body'); const head=drawer?.querySelector('.task-drawer-head'); const foot=drawer?.querySelector('.task-drawer-foot'); if(!(drawer instanceof HTMLElement)||drawer.hidden||!body||!head||!(foot instanceof HTMLElement)||!foot.querySelector('[data-task-drawer-control="start"]'))return false; const viewport=document.documentElement; return viewport.scrollWidth<=viewport.clientWidth+2 && body.scrollWidth<=body.clientWidth+2 && head.scrollWidth<=head.clientWidth+2 && foot.scrollWidth<=foot.clientWidth+2 && drawer.getBoundingClientRect().width<=viewport.clientWidth && getComputedStyle(document.body).paddingRight==='0px'; })()`, 'drawer-zoom-reflow');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
-    await assertRenderer(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); const pill=drawer?.querySelector('.task-drawer-pill'); const chosen=drawer?.querySelector('[data-task-drawer-mode][aria-pressed="true"]'); return matchMedia('(forced-colors: active)').matches && drawer instanceof HTMLElement && getComputedStyle(drawer).boxShadow==='none' && getComputedStyle(drawer).borderLeftStyle!=='none' && pill instanceof HTMLElement && getComputedStyle(pill).borderStyle!=='none' && chosen instanceof HTMLElement && getComputedStyle(chosen).outlineStyle!=='none'; })()`, 'drawer-forced-colors');
+    await assertRenderer(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); const pill=drawer?.querySelector('.task-drawer-pill'); const chosen=drawer?.querySelector('[data-task-drawer-mode][aria-pressed="true"]'); const foot=drawer?.querySelector('.task-drawer-foot'); return matchMedia('(forced-colors: active)').matches && drawer instanceof HTMLElement && getComputedStyle(drawer).boxShadow==='none' && getComputedStyle(drawer).borderLeftStyle!=='none' && pill instanceof HTMLElement && getComputedStyle(pill).borderStyle!=='none' && chosen instanceof HTMLElement && getComputedStyle(chosen).outlineStyle!=='none' && foot instanceof HTMLElement && getComputedStyle(foot).borderTopStyle!=='none'; })()`, 'drawer-forced-colors');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await renderer.send('Emulation.clearDeviceMetricsOverride');
@@ -989,12 +1039,26 @@ async function main() {
     'prepare-sender-owned-book-route-idempotent');
     await assertRenderer(renderer, `document.querySelector('.book-overview')?.dataset.bookId===${JSON.stringify(imported.bookId)} && document.querySelector('.task-authorization-card')?.dataset.taskAuthorizationState==='prepared'`, 'prepare-route-remained-current-book');
 
+    at('drawer-save-draft');
+    cancellation.throwIfRequested();
+    // Issue #420 (S74a): 保存草稿 closes the drawer and records nothing — the prepared plan already is a
+    // durable record — and focus goes back to the card's 查看计划并开始.
+    await clickSelector(renderer, '[data-task-plan-open="fixed-task"]', 'save-draft-drawer-open');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='ready' && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='record-only'`, 'save-draft-drawer-ready');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="save-draft"]', 'save-draft-click');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden===true && document.body.dataset.taskDrawer==='closed' && document.querySelector('#persistence-status')?.textContent==='计划已保存，可稍后开始' && document.activeElement?.dataset.taskAuthorizationAction==='view-plan'`, 'save-draft-closed');
+    const afterDraft = await renderer.evaluate(`window.ai7.inspectTaskAuthorization()`);
+    requireJourney(afterDraft?.state === 'prepared' && afterDraft.authorization === null && afterDraft.runRecord === null &&
+      afterDraft.taskIntent?.taskIntentId === prepared.taskIntent.taskIntentId && afterDraft.planEnvelope?.digest === prepared.planEnvelope.digest,
+    'save-draft-records-nothing', { state: afterDraft?.state, authorization: afterDraft?.authorization, runRecord: afterDraft?.runRecord });
+
     at('authorization-recorded');
     cancellation.throwIfRequested();
-    // The plan is open beside the card while the recording action, still the card's, is taken.
+    // Synchronized delta with Issue #420 (S74a A2): the recording is the drawer bar's 开始任务 now — one
+    // activation and no second confirmation (AUTH-004) — and the card beside the drawer shows the record.
     await clickSelector(renderer, '[data-task-plan-open="fixed-task"]', 'authorize-drawer-open');
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='ready' && document.querySelector('#task-drawer')?.dataset.taskDrawerMode==='full'`, 'authorize-drawer-ready');
-    await click(renderer, '记录本次运行授权（不派发）', 'authorize-click');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='ready' && document.querySelector('#task-drawer')?.dataset.taskDrawerMode==='full' && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='record-only'`, 'authorize-drawer-ready');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'authorize-click');
     await waitFor(renderer, `document.querySelector('[data-task-authorization-terminal="recorded-not-dispatched"]')?.textContent==='已记录授权 · 未派发'`, 'authorized');
     const authorized = await renderer.evaluate(`window.ai7.inspectTaskAuthorization()`);
     requireJourney(authorized?.state === 'authorized' && UUID_PATTERN.test(authorized.authorization?.authorizationId) &&
@@ -1008,16 +1072,28 @@ async function main() {
     cancellation.throwIfRequested();
 
     at('drawer-authorization-refresh');
-    // The drawer reads the plan again once the card recorded the authorization: it states the record, and
-    // it still holds no action of its own that records anything (PLAN-007).
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='recorded'`, 'drawer-recorded');
+    // The drawer reads the plan again once its bar recorded the authorization: it states the record, and
+    // the bar is the record's state now (AUTH-007) — 已记录（不派发） and the way to the card that holds it,
+    // with focus there — offering nothing that would record again.
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='recorded' && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started'`, 'drawer-recorded');
     const recordedDrawer = await readDrawer(renderer);
     requireJourney(recordedDrawer?.ref === authorized.taskIntent.taskIntentId && recordedDrawer.pill === '已记录 · 未派发' && recordedDrawer.pillShape === 'dash' &&
       recordedDrawer.technical.authorization?.startsWith(`${authorized.authorization.authorizationId} · standard-direct · `) &&
       recordedDrawer.technical['run-record']?.startsWith(`${authorized.runRecord.runRecordId} · recorded-not-dispatched · `) &&
-      recordedDrawer.technical['plan-envelope'] === authorized.planEnvelope.digest && recordedDrawer.footer === '计划说明，不是运行授权',
+      recordedDrawer.technical['plan-envelope'] === authorized.planEnvelope.digest && recordedDrawer.footer === '计划说明，不是运行授权' &&
+      recordedDrawer.bar?.state === 'started' && recordedDrawer.bar.status === '已记录（不派发）' && recordedDrawer.bar.statement === null &&
+      recordedDrawer.bar.note === null && recordedDrawer.bar.summary === '《J-03 sample1 任务授权》 · 全书 · 主编辑角色 · 未设置任务预算上限 · 产出：一条运行记录（不派发） · 不改稿' &&
+      JSON.stringify(recordedDrawer.bar.actions) === JSON.stringify([{ name: 'run-link', text: '查看运行记录', disabled: false, reason: null }]),
     'drawer-recorded-plan', recordedDrawer);
-    await assertRenderer(renderer, `!document.querySelector('#task-drawer [data-task-authorization-action]') && Array.from(document.querySelectorAll('#task-drawer button')).filter((button)=>!button.disabled).map((button)=>button.dataset.taskDrawerControl).sort().join(',')==='close,mode-compact,mode-full'`, 'drawer-records-nothing');
+    await assertRenderer(renderer, `!document.querySelector('#task-drawer [data-task-authorization-action]') && Array.from(document.querySelectorAll('#task-drawer button')).filter((button)=>!button.disabled).map((button)=>button.dataset.taskDrawerControl).sort().join(',')==='close,mode-compact,mode-full,run-link' && document.activeElement?.dataset.taskDrawerControl==='run-link' && ${AUTHORIZE_LABELED_BUTTONS}===0`, 'drawer-records-nothing');
+
+    at('drawer-run-link');
+    // 查看运行记录 leads to the record's own surface — 工作概览's card — and the drawer stays beside it. The
+    // page on screen is remembered first, so only the page the link opened, with its card read, counts.
+    await assertRenderer(renderer, `(() => { const page=document.querySelector('.book-overview'); if(!(page instanceof HTMLElement))return false; globalThis.__j03PageBeforeRunLink=page; return true; })()`, 'run-link-page-before');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="run-link"]', 'run-link-click');
+    await waitFor(renderer, `(() => { const page=document.querySelector('[data-screen="book-overview"] .book-overview[data-book-id=${JSON.stringify(imported.bookId)}]'); return page instanceof HTMLElement && page!==globalThis.__j03PageBeforeRunLink && page.querySelector('[data-task-authorization-terminal="recorded-not-dispatched"]')?.textContent==='已记录授权 · 未派发' && page.querySelector('[data-task-authorization-action="inspect-foreground-boundary"]') instanceof HTMLButtonElement && document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started'; })()`, 'run-link-overview');
+    await assertRenderer(renderer, `delete globalThis.__j03PageBeforeRunLink`, 'run-link-page-forget');
 
     at('foreground-boundary-check');
     await assertRenderer(renderer, `document.querySelector('[data-task-authorization-action="inspect-foreground-boundary"]')?.textContent==='核对前台执行边界（不派发）'`, 'foreground-boundary-action-visible');
@@ -1092,16 +1168,18 @@ async function main() {
     requireJourney(restartedDrawer?.mode === 'full' && restartedDrawer.stored === 'full' && restartedDrawer.controls['mode-full']?.pressed === 'true' &&
       restartedDrawer.sections.length === 6 && restartedDrawer.pill === '已记录 · 未派发' && restartedDrawer.chips.revision === '任务输入修订版 r2' &&
       restartedDrawer.technical.authorization?.startsWith(`${authorized.authorization.authorizationId} · standard-direct · `) &&
-      restartedDrawer.technical['run-record']?.startsWith(`${authorized.runRecord.runRecordId} · recorded-not-dispatched · `),
+      restartedDrawer.technical['run-record']?.startsWith(`${authorized.runRecord.runRecordId} · recorded-not-dispatched · `) &&
+      restartedDrawer.bar?.state === 'started' && restartedDrawer.bar.status === '已记录（不派发）',
     'drawer-mode-remembered', restartedDrawer);
 
     at('zero-activity');
-    // Synchronized delta with Issue #418: 查看计划 is the card's one other control, and the drawer beside it
-    // holds nothing but its own view controls.
+    // Synchronized delta with Issue #418: 查看计划 is the card's one other control. Synchronized delta with
+    // Issue #420: the drawer beside it holds its own view controls and, the record made, the bar's way to it.
     await assertRenderer(renderer, `document.querySelector('[data-task-authorization-terminal="recorded-not-dispatched"]')?.textContent==='已记录授权 · 未派发' &&
       document.querySelector('[data-foreground-execution-state="blocked-before-dispatch"]')?.textContent.includes('前台执行已拒绝 · 未启动') &&
       !Array.from(document.querySelectorAll('.task-authorization-card button')).some((button)=>!['inspect-foreground-boundary','view-plan'].includes(button.dataset.taskAuthorizationAction)) &&
-      Array.from(document.querySelectorAll('#task-drawer button')).filter((button)=>!button.disabled).map((button)=>button.dataset.taskDrawerControl).sort().join(',')==='close,mode-compact,mode-full' &&
+      document.querySelector('.task-authorization-card [data-task-authorization-action="view-plan"]')?.textContent==='查看计划' &&
+      Array.from(document.querySelectorAll('#task-drawer button')).filter((button)=>!button.disabled).map((button)=>button.dataset.taskDrawerControl).sort().join(',')==='close,mode-compact,mode-full,run-link' &&
       !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress/i.test(key))`, 'no-execution-surface');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-network-provider-session');
 

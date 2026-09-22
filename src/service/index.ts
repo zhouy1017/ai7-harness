@@ -269,9 +269,16 @@ async function dispatch(
         op: request.op,
         result: store.inspectTaskAuthorization(request.input.bookId),
       };
-    // The Task Drawer (Issue #418, plan slice S72): a read of the Task's plan in the editor's words.
+    // The Task Drawer (Issue #418, plan slice S72): a read of the Task's plan in the editor's words. Its
+    // authorization bar (Issue #420, S74a) is route-aware: a plan whose route sends to a model service is
+    // offered 开始任务 only while the credential that route resolves is present.
     case 'inspectTaskPlan':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectTaskPlan(request.input) };
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: await store.inspectTaskPlanWithConnection(request.input, () => analysisExecution.liveCredentialReadiness()),
+      };
     case 'inspectForegroundExecutionBoundary':
       return {
         id: request.id,
@@ -320,10 +327,13 @@ async function dispatch(
         result: jobs.startBaselineAnalysisPreparation(request.input.bookId, request.input.goal, request.input.update, launchPolicy, request.input.reconfirm),
       };
     case 'authorizeBaselineAnalysis': {
+      // One slot, no queue (Issue #420, S74a A2): while a Run holds the slot, a start that would dispatch is
+      // refused before anything is recorded. Nothing runs between this read and the admission below.
       const authorized = store.authorizeBaselineAnalysis(
         request.input.bookId,
         request.input.taskIntentId,
         request.input.planEnvelopeDigest,
+        analysisExecution.busy,
       );
       if (authorized.dispatchRunRecordId !== null) {
         try {
@@ -365,8 +375,9 @@ async function dispatch(
       };
     case 'authorizeReviewRun':
       // The one approval, then the drive loop at once: an approved Run nobody drives reads `partial`, so
-      // the answer is read only after the loop has taken the Run and reads it `running`.
-      store.authorizeReviewRun(request.input.bookId, request.input.reviewRunId, request.input.planDigests);
+      // the answer is read only after the loop has taken the Run and reads it `running`. While another Run
+      // holds the one slot, a new approval is refused before it is written (Issue #420, S74a A2).
+      store.authorizeReviewRun(request.input.bookId, request.input.reviewRunId, request.input.planDigests, analysisExecution.busy);
       driveReviewRun(reviewRuns, request.input.reviewRunId);
       return {
         id: request.id,

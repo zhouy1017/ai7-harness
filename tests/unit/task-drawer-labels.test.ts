@@ -1,6 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import type { TaskPlanProjection, TaskPlanStateKey } from '../../src/shared/protocol.js';
+import type { TaskPlanProjection, TaskPlanStartProjection, TaskPlanStateKey } from '../../src/shared/protocol.js';
 import {
+  TASK_BAR_CONNECT,
+  TASK_BAR_NOTES,
+  TASK_BAR_OUTCOMES,
+  TASK_BAR_RECONFIRM,
+  TASK_BAR_RECORDED,
+  TASK_BAR_REVISE,
+  TASK_BAR_REVISE_REASON,
+  TASK_BAR_RUN_LINKS,
+  TASK_BAR_SAVE_DRAFT,
+  TASK_BAR_SAVED,
+  TASK_BAR_SLOT_BUSY,
+  TASK_BAR_START,
+  TASK_BAR_STATEMENT,
   TASK_DRAWER_BACK,
   TASK_DRAWER_BACK_REASON,
   TASK_DRAWER_FOOTER,
@@ -14,15 +27,19 @@ import {
   TASK_PLAN_DEFAULT_RULE,
   TASK_PLAN_DRIFT_COLUMNS,
   TASK_PLAN_DRIFT_HEADING,
+  TASK_PLAN_DRIFT_VIEW,
   TASK_PLAN_EDIT_REASON,
   TASK_PLAN_FULL_LINK,
   TASK_PLAN_MATERIALITY_LABELS,
   TASK_PLAN_OPEN,
+  TASK_PLAN_OPEN_START,
   TASK_PLAN_SCOPE_TERMS,
   TASK_PLAN_SECTIONS,
   TASK_PLAN_SERVICE_TERMS,
   TASK_PLAN_STATE_PILLS,
   groupedCount,
+  taskBarSummary,
+  taskBarView,
   taskDrawerModeOf,
   taskPlanChips,
   taskPlanCompactRows,
@@ -67,8 +84,15 @@ function plan(overrides: Partial<TaskPlanProjection> = {}): TaskPlanProjection {
     boundary: { adaptable: [], askFirst: [] },
     drift: null,
     technical: [],
+    start: { readiness: 'ready', needsModelConnection: false, planEnvelopeDigest: 'a'.repeat(64), categoryDigests: [], reconfirm: null },
     ...overrides,
   };
+}
+
+/** The same plan with only its bar's facts moved. */
+function barOf(start: Partial<TaskPlanStartProjection>, overrides: Partial<TaskPlanProjection> = {}): TaskPlanProjection {
+  const base = plan(overrides);
+  return { ...base, start: { ...base.start, ...start } };
 }
 
 describe('the drawer', () => {
@@ -95,9 +119,12 @@ describe('the drawer', () => {
   });
 
   it('gives every state a tone and a shape, so the pill never speaks by colour alone', () => {
-    const keys: TaskPlanStateKey[] = ['ready', 'changed', 'recorded', 'blocked', 'running', 'settled', 'stopped'];
+    const keys: TaskPlanStateKey[] = ['ready', 'changed', 'unconnected', 'recorded', 'blocked', 'running', 'settled', 'stopped'];
     expect(Object.keys(TASK_PLAN_STATE_PILLS).sort()).toEqual([...keys].sort());
     expect(new Set(keys.map((key) => TASK_PLAN_STATE_PILLS[key].shape)).size).toBeGreaterThan(4);
+    // 模型未连接 is its own shape among the pre-start states: it never reads as 计划已变化 without colour.
+    expect(TASK_PLAN_STATE_PILLS.unconnected.shape).not.toBe(TASK_PLAN_STATE_PILLS.changed.shape);
+    expect(TASK_PLAN_STATE_PILLS.unconnected.shape).not.toBe(TASK_PLAN_STATE_PILLS.ready.shape);
   });
 });
 
@@ -165,5 +192,100 @@ describe('a plan whose key content changed (D8) and the surfaces that raise a Ta
   it('names a plan in one line, leaving out an empty part', () => {
     expect(taskPlanSummaryLine(['固定任务', '全书', '任务输入修订版 r2', '不发送任何内容'])).toBe('计划：固定任务 · 全书 · 任务输入修订版 r2 · 不发送任何内容');
     expect(taskPlanSummaryLine(['首次基线分析', '全书', ''])).toBe('计划：首次基线分析 · 全书');
+  });
+
+  it('names the card\'s one action 查看计划并开始 while the Task has not been started (S74a A5)', () => {
+    expect(TASK_PLAN_OPEN_START).toBe('查看计划并开始');
+  });
+});
+
+// Issue #420 (plan slice S74a): the authorization bar in the drawer's footer (§6 常驻授权条; V2-UX-AUTH-001 to
+// 007, MODEL-008, OFF-009, ADR 0055). Every state is pinned as data: its summary, its statement, its note and
+// which actions it offers, each with its reason when it is shown and unavailable.
+describe('the authorization bar (S74a)', () => {
+  const names = (view: ReturnType<typeof taskBarView>): string[] => view.actions.map((action) => action.name);
+  const action = (view: ReturnType<typeof taskBarView>, name: string) => view.actions.find((entry) => entry.name === name);
+
+  it('speaks §6\'s and ADR 0077\'s words: 开始任务 without 授权, the statement, 去设置连接, and the one-slot refusal', () => {
+    expect(TASK_BAR_START).toBe('开始任务');
+    expect(TASK_BAR_START).not.toContain('授权');
+    expect(TASK_BAR_REVISE).toBe('返回修改');
+    expect(TASK_BAR_REVISE_REASON).toBe('随计划编辑提供');
+    expect(TASK_BAR_SAVE_DRAFT).toBe('保存草稿');
+    expect(TASK_BAR_SAVED).toBe('计划已保存，可稍后开始');
+    expect(TASK_BAR_STATEMENT).toBe('只是让 AI7 按这份计划做这一次；接受修改建议、批准受控动作、保存里程碑版本、设为发稿版本都仍由你另行决定');
+    expect(TASK_BAR_CONNECT).toBe('去设置连接');
+    expect(TASK_BAR_RECONFIRM).toBe('重新确认计划');
+    expect(TASK_BAR_SLOT_BUSY).toBe('另一项任务正在运行；它结束后再开始');
+    expect(TASK_BAR_RECORDED).toBe('已记录（不派发）');
+    expect(TASK_BAR_NOTES).toEqual({
+      'record-only': '此任务只记录运行，不会派发',
+      'no-route': '这份计划没有可执行的路由：开始任务只记录运行，派发前会被阻止',
+      'needs-connection': '模型未连接：这份计划要发送到模型服务，所需的凭据还没有就绪；连接好之后才能开始',
+    });
+    expect(TASK_BAR_OUTCOMES).toEqual({ 'fixed-task': '一条运行记录（不派发）', 'baseline-analysis': '一份基线分析', 'review-run': '审阅发现与审阅报告' });
+    expect(TASK_BAR_RUN_LINKS).toEqual({ 'fixed-task': '查看运行记录', 'baseline-analysis': '查看运行', 'review-run': '查看审阅' });
+  });
+
+  it('sums the plan up in one line: 书 · 范围 · 计划版本 · 模型角色 · 预算上限 · 产出 · 不改稿 (AUTH-001)', () => {
+    expect(taskBarSummary(plan())).toBe('《合成书名》 · 全书 · 计划版本 1 · 主编辑角色 · 未设置任务预算上限 · 产出：一份基线分析 · 不改稿');
+    // A kind that keeps no plan versions names none rather than inventing one.
+    expect(taskBarSummary(plan({ kind: 'fixed-task', planVersion: null }))).toBe('《合成书名》 · 全书 · 主编辑角色 · 未设置任务预算上限 · 产出：一条运行记录（不派发） · 不改稿');
+    expect(taskBarSummary(plan({ kind: 'review-run', planVersion: null, goal: { ...plan().goal, chips: { ...plan().goal.chips, position: '「第一章」至「第三章」' } } })))
+      .toBe('《合成书名》 · 「第一章」至「第三章」 · 主编辑角色 · 未设置任务预算上限 · 产出：审阅发现与审阅报告 · 不改稿');
+  });
+
+  it('offers 开始任务, 返回修改 with its reason and 保存草稿 while the plan can start (AUTH-002)', () => {
+    const view = taskBarView(plan());
+    expect(view).toMatchObject({ readiness: 'ready', statement: TASK_BAR_STATEMENT, note: null, status: null });
+    expect(names(view)).toEqual(['start', 'revise', 'save-draft']);
+    expect(action(view, 'start')).toEqual({ name: 'start', label: '开始任务', tone: 'primary', disabledReason: null });
+    expect(action(view, 'revise')?.disabledReason).toBe('随计划编辑提供');
+    expect(action(view, 'save-draft')?.disabledReason).toBeNull();
+  });
+
+  it('says J-03\'s Task is only recorded, and a plan without a route is blocked before dispatch, beside the same start (ADR 0055)', () => {
+    const recordOnly = taskBarView(barOf({ readiness: 'record-only' }, { kind: 'fixed-task', planVersion: null }));
+    expect(recordOnly.note).toBe('此任务只记录运行，不会派发');
+    expect(names(recordOnly)).toEqual(['start', 'revise', 'save-draft']);
+    expect(action(recordOnly, 'start')?.disabledReason).toBeNull();
+    const noRoute = taskBarView(barOf({ readiness: 'no-route' }));
+    expect(noRoute.note).toBe(TASK_BAR_NOTES['no-route']);
+    expect(action(noRoute, 'start')?.disabledReason).toBeNull();
+  });
+
+  it('keeps 开始任务 disabled with the reason and offers 去设置连接 while the model is not connected (MODEL-008)', () => {
+    const view = taskBarView(barOf({ readiness: 'needs-connection', needsModelConnection: true, planEnvelopeDigest: null }, { state: { key: 'unconnected', label: '模型未连接' } }));
+    expect(names(view)).toEqual(['start', 'connect', 'revise', 'save-draft']);
+    expect(action(view, 'start')?.disabledReason).toBe(TASK_BAR_NOTES['needs-connection']);
+    expect(action(view, 'connect')).toEqual({ name: 'connect', label: '去设置连接', tone: 'secondary', disabledReason: null });
+    expect(view.note).toBe(TASK_BAR_NOTES['needs-connection']);
+  });
+
+  it('removes 开始任务 from a changed plan, offering 重新确认计划 when it can be and 查看计划修订 when there is a diff (AUTH-006)', () => {
+    const drift = { reasons: ['计划冻结之后，它的关键内容已经变化；原计划不能再开始。'], entries: [{ field: 'selectedRange', label: '处理范围', prior: '第 1–2 段 · 10 字', proposed: '第 3–4 段 · 20 字', materiality: 'material' as const }], resolution: '重新确认计划后，新的计划版本才能开始。' };
+    const reconfirmable = taskBarView(barOf({ readiness: 'changed', planEnvelopeDigest: null, reconfirm: { goal: '重新分析所选范围：绕过所选内容块范围及其重叠闭包的既有模型结果，复用其余兼容单元，追加一个结果集修订版。', update: { mode: 'reanalyze-range', selectedRange: { startPosition: 3, endPosition: 4 } } } }, { drift }));
+    expect(names(reconfirmable)).toEqual(['reconfirm-plan', 'view-plan-revision', 'revise', 'save-draft']);
+    expect(action(reconfirmable, 'reconfirm-plan')?.label).toBe('重新确认计划');
+    expect(action(reconfirmable, 'view-plan-revision')?.label).toBe(TASK_PLAN_DRIFT_VIEW);
+    expect(reconfirmable.note).toBe('重新确认计划后，新的计划版本才能开始。');
+    // A Review Run has no revision route, and its reasons carry no diff: neither action is offered.
+    const review = taskBarView(barOf({ readiness: 'changed', planEnvelopeDigest: null }, { kind: 'review-run', drift: { reasons: ['这次审阅的计划已被之后准备的一次取代；请授权最新的一次。'], entries: [], resolution: '审阅没有计划修订：请在「审阅」里点「返回修改」重新准备这次审阅。' } }));
+    expect(names(review)).toEqual(['revise', 'save-draft']);
+    expect(review.note).toBe('审阅没有计划修订：请在「审阅」里点「返回修改」重新准备这次审阅。');
+    for (const view of [reconfirmable, review]) expect(names(view)).not.toContain('start');
+  });
+
+  it('becomes the Run\'s state and the way to its surface once started, offering nothing that would start it again (AUTH-007)', () => {
+    const recorded = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { kind: 'fixed-task', planVersion: null, state: { key: 'recorded', label: '已记录 · 未派发' } }));
+    expect(recorded).toMatchObject({ readiness: 'started', statement: null, note: null, status: '已记录（不派发）' });
+    expect(recorded.actions).toEqual([{ name: 'run-link', label: '查看运行记录', tone: 'secondary', disabledReason: null }]);
+    const running = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'running', label: '运行中' } }));
+    expect(running.status).toBe('运行中');
+    expect(names(running)).toEqual(['run-link']);
+    expect(action(running, 'run-link')?.label).toBe('查看运行');
+    const review = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { kind: 'review-run', state: { key: 'settled', label: '已完成' } }));
+    expect(review.status).toBe('已完成');
+    expect(action(review, 'run-link')?.label).toBe('查看审阅');
   });
 });

@@ -1,4 +1,4 @@
-import type { TaskPlanProjection, TaskPlanStateKey } from '../shared/protocol.js';
+import type { TaskPlanKind, TaskPlanProjection, TaskPlanStartReadiness, TaskPlanStateKey } from '../shared/protocol.js';
 import type { ReviewPill } from './review-labels.js';
 
 /**
@@ -6,8 +6,10 @@ import type { ReviewPill } from './review-labels.js';
  * V2-UX-PLAN-001 to 012, TASK-030, TASK-039/040, LAYER-002) that the plan projection does not carry.
  * The projection's own sentences — the goal, the steps, what is sent, what the Run will not do — are
  * shown as they come; these are the words around them: the header, the two modes, the section names, the
- * footer PLAN-007 fixes, and the reasons the actions this slice does not bring yet are unavailable. Pure,
- * so the unit suite pins every string byte for byte.
+ * footer PLAN-007 fixes, and the reasons the actions this slice does not bring yet are unavailable. Since
+ * Issue #420 (S74a) they include the authorization bar's (§6 常驻授权条, V2-UX-AUTH-001 to 007): its summary,
+ * its statement, and which of its actions each state offers. Pure, so the unit suite pins every string
+ * byte for byte.
  */
 
 // ---- the drawer ---------------------------------------------------------------------------------------
@@ -20,10 +22,15 @@ export const TASK_DRAWER_CLOSE = '关闭';
 export const TASK_DRAWER_MODE_GROUP = '计划显示方式';
 export const TASK_DRAWER_LOADING = '正在读取任务计划…';
 export const TASK_DRAWER_UNAVAILABLE = '无法读取这项任务的计划。';
-/** V2-UX-PLAN-007: the plan surface says, whatever else it shows, that it authorizes nothing. */
+/** V2-UX-PLAN-007: the plan surface says, whatever else it shows, that the plan itself authorizes nothing. */
 export const TASK_DRAWER_FOOTER = '计划说明，不是运行授权';
 /** The entry each surface that raises a Task offers beside its one-line summary (S72 D4). */
 export const TASK_PLAN_OPEN = '查看计划';
+/**
+ * The same entry while the Task has not been started (S74a A5): the authorization moved off every card
+ * into the drawer's bar, so the card's one action now names where the start is.
+ */
+export const TASK_PLAN_OPEN_START = '查看计划并开始';
 
 /** The two modes (V2-UX-PLAN-010): 精简 by default, remembered per editor. */
 export type TaskDrawerMode = 'compact' | 'full';
@@ -48,6 +55,7 @@ export const TASK_DRAWER_SCREENS: ReadonlyArray<string> = ['editor', 'book-overv
 export const TASK_PLAN_STATE_PILLS: Readonly<Record<TaskPlanStateKey, ReviewPill>> = {
   ready: { tone: 'neutral', shape: 'ring' },
   changed: { tone: 'attention', shape: 'triangle' },
+  unconnected: { tone: 'blocked', shape: 'diamond' },
   recorded: { tone: 'neutral', shape: 'dash' },
   blocked: { tone: 'blocked', shape: 'square' },
   running: { tone: 'progress', shape: 'half' },
@@ -129,6 +137,155 @@ export const TASK_PLAN_DRIFT_VIEW = '查看计划修订';
 export const TASK_PLAN_DRIFT_COLUMNS = ['内容', '原计划', '重新确认后', '性质'] as const;
 /** §10: 物质字段 / 派生后果 read 关键内容 / 随之变化. */
 export const TASK_PLAN_MATERIALITY_LABELS = { material: '关键内容', derived: '随之变化' } as const satisfies Record<'material' | 'derived', string>;
+
+// ---- the authorization bar (Issue #420, S74a; §6 常驻授权条, V2-UX-AUTH-001 to 007, §10) --------------------
+
+/** AUTH-002 as ADR 0077 revised it: the one start action; the word 授权 is never on the button. */
+export const TASK_BAR_START = '开始任务';
+/** 返回修改 returns to the plan's editing, which arrives with S73; until then it is shown with its reason. */
+export const TASK_BAR_REVISE = '返回修改';
+export const TASK_BAR_REVISE_REASON = '随计划编辑提供';
+/** 保存草稿 closes the drawer and writes nothing: the prepared plan is already a durable record. */
+export const TASK_BAR_SAVE_DRAFT = '保存草稿';
+export const TASK_BAR_SAVED = '计划已保存，可稍后开始';
+/** AUTH-003 as ADR 0077 revised it: what starting decides, and everything it leaves to the editor. */
+export const TASK_BAR_STATEMENT = '只是让 AI7 按这份计划做这一次；接受修改建议、批准受控动作、保存里程碑版本、设为发稿版本都仍由你另行决定';
+/** §10: 凭据引用 readiness missing reads 未连接 · 缺少凭据 → 去设置连接, never 设置模型服务. */
+export const TASK_BAR_CONNECT = '去设置连接';
+/** AUTH-006: a plan whose key content changed offers these two, and no start. */
+export const TASK_BAR_RECONFIRM = '重新确认计划';
+/** One slot and no queue (S74a A2): the start is refused with this reason and nothing waits for the slot. */
+export const TASK_BAR_SLOT_BUSY = '另一项任务正在运行；它结束后再开始';
+/** The fallback when a start is refused for a reason the service does not word. */
+export const TASK_BAR_START_FAILED = '无法开始这项任务。';
+/** J-03's record, as the bar states it once made (§6 AUTH-007: 运行中 / 已记录（不派发）). */
+export const TASK_BAR_RECORDED = '已记录（不派发）';
+
+/**
+ * The one sentence a pre-start state adds beside the actions: J-03's fixed Task is only ever recorded (ADR
+ * 0055); a plan without a route is recorded and blocked before dispatch; a route whose model service is not
+ * connected cannot start (MODEL-008) — which is the Run's blocker, never a change to the plan (OFF-009).
+ */
+export const TASK_BAR_NOTES = {
+  'record-only': '此任务只记录运行，不会派发',
+  'no-route': '这份计划没有可执行的路由：开始任务只记录运行，派发前会被阻止',
+  'needs-connection': '模型未连接：这份计划要发送到模型服务，所需的凭据还没有就绪；连接好之后才能开始',
+} as const satisfies Partial<Record<TaskPlanStartReadiness, string>>;
+
+/** What each kind leaves behind, as the summary line names it (§6: 产出). */
+export const TASK_BAR_OUTCOMES: Readonly<Record<TaskPlanKind, string>> = {
+  'fixed-task': '一条运行记录（不派发）',
+  'baseline-analysis': '一份基线分析',
+  'review-run': '审阅发现与审阅报告',
+};
+
+/** Where each kind's Run is followed once it started (AUTH-007): the record's card, ②A or ②B. */
+export const TASK_BAR_RUN_LINKS: Readonly<Record<TaskPlanKind, string>> = {
+  'fixed-task': '查看运行记录',
+  'baseline-analysis': '查看运行',
+  'review-run': '查看审阅',
+};
+
+/** The bar's actions, each by the `data-task-drawer-control` it carries. */
+export type TaskBarActionName = 'start' | 'reconfirm-plan' | 'view-plan-revision' | 'connect' | 'revise' | 'save-draft' | 'run-link';
+
+export interface TaskBarAction {
+  readonly name: TaskBarActionName;
+  readonly label: string;
+  readonly tone: 'primary' | 'secondary' | 'quiet';
+  /** Why the action is shown and not available, in words beside it; `null` while it is available. */
+  readonly disabledReason: string | null;
+}
+
+/** The whole bar of one plan as data, so every state is pinned without a DOM. */
+export interface TaskBarView {
+  readonly readiness: TaskPlanStartReadiness;
+  /** AUTH-001's one line: 书 · 范围 · 计划版本 · 模型角色 · 预算上限 · 产出 · 不改稿. */
+  readonly summary: string;
+  /** AUTH-003's statement while the Task is still to be started; `null` once it has been. */
+  readonly statement: string | null;
+  /** The sentence a state adds beside its actions; `null` when it adds none. */
+  readonly note: string | null;
+  /** Once started, the Run's state in the same region (AUTH-007); `null` before. */
+  readonly status: string | null;
+  readonly actions: ReadonlyArray<TaskBarAction>;
+}
+
+/** AUTH-001 and §6: the bar's one summary line, from the plan it states. */
+export function taskBarSummary(plan: TaskPlanProjection): string {
+  return [
+    `《${plan.goal.chips.book}》`,
+    plan.goal.chips.position,
+    ...(plan.planVersion === null ? [] : [`计划版本 ${plan.planVersion}`]),
+    plan.service.role,
+    plan.service.budgetCeiling,
+    `产出：${TASK_BAR_OUTCOMES[plan.kind]}`,
+    '不改稿',
+  ].join(' · ');
+}
+
+const REVISE: TaskBarAction = { name: 'revise', label: TASK_BAR_REVISE, tone: 'quiet', disabledReason: TASK_BAR_REVISE_REASON };
+const SAVE_DRAFT: TaskBarAction = { name: 'save-draft', label: TASK_BAR_SAVE_DRAFT, tone: 'secondary', disabledReason: null };
+
+/**
+ * What the bar offers for one plan (§6 常驻授权条; AUTH-002, AUTH-006, AUTH-007): `开始任务` while the plan can
+ * be started — disabled with its reason while the model is not connected, beside `去设置连接`; never while the
+ * key content changed, when `重新确认计划` and `查看计划修订` take its place; and once started, the Run's state
+ * and the way to its surface instead of any action that starts it again.
+ */
+export function taskBarView(plan: TaskPlanProjection): TaskBarView {
+  const readiness = plan.start.readiness;
+  const summary = taskBarSummary(plan);
+  if (readiness === 'started') {
+    return {
+      readiness,
+      summary,
+      statement: null,
+      note: null,
+      status: plan.state.key === 'recorded' ? TASK_BAR_RECORDED : plan.state.label,
+      actions: [{ name: 'run-link', label: TASK_BAR_RUN_LINKS[plan.kind], tone: 'secondary', disabledReason: null }],
+    };
+  }
+  if (readiness === 'changed') {
+    return {
+      readiness,
+      summary,
+      statement: TASK_BAR_STATEMENT,
+      note: plan.drift?.resolution ?? TASK_PLAN_DRIFT_HEADING,
+      status: null,
+      actions: [
+        ...(plan.start.reconfirm === null ? [] : [{ name: 'reconfirm-plan', label: TASK_BAR_RECONFIRM, tone: 'primary', disabledReason: null } as const]),
+        ...(plan.drift === null || plan.drift.entries.length === 0 ? [] : [{ name: 'view-plan-revision', label: TASK_PLAN_DRIFT_VIEW, tone: 'secondary', disabledReason: null } as const]),
+        REVISE,
+        SAVE_DRAFT,
+      ],
+    };
+  }
+  if (readiness === 'needs-connection') {
+    const note = TASK_BAR_NOTES['needs-connection'];
+    return {
+      readiness,
+      summary,
+      statement: TASK_BAR_STATEMENT,
+      note,
+      status: null,
+      actions: [
+        { name: 'start', label: TASK_BAR_START, tone: 'primary', disabledReason: note },
+        { name: 'connect', label: TASK_BAR_CONNECT, tone: 'secondary', disabledReason: null },
+        REVISE,
+        SAVE_DRAFT,
+      ],
+    };
+  }
+  return {
+    readiness,
+    summary,
+    statement: TASK_BAR_STATEMENT,
+    note: readiness === 'ready' ? null : TASK_BAR_NOTES[readiness],
+    status: null,
+    actions: [{ name: 'start', label: TASK_BAR_START, tone: 'primary', disabledReason: null }, REVISE, SAVE_DRAFT],
+  };
+}
 
 // ---- the surfaces that raise a Task (S72 D4) ---------------------------------------------------------------
 

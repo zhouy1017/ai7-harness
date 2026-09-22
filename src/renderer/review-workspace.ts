@@ -21,11 +21,10 @@ import {
 } from '../shared/protocol.js';
 import { applyOnce } from './manuscript-apply.js';
 import { localInstantLabel } from './plan-preview-labels.js';
-import { taskPlanSummaryLine } from './task-drawer-labels.js';
+import { TASK_PLAN_OPEN_START, taskPlanSummaryLine } from './task-drawer-labels.js';
 import {
   REVIEW_ACTION_LABELS,
   REVIEW_ANCHOR_CHANGED,
-  REVIEW_AUTHORIZE_NOTE,
   REVIEW_BATCH_ALL_OR_NONE,
   REVIEW_BATCH_NOTHING,
   REVIEW_BATCH_REFUSED,
@@ -153,13 +152,15 @@ export interface ReviewFocus {
 export interface ReviewWorkspaceSurface {
   /** Read the workspace for the first time; called once the destination is on screen. */
   start(): void;
+  /** Read the workspace again: the Task Drawer's bar just approved the Run on show (Issue #420, S74a). */
+  refresh(): void;
   /** Stop polling, close the sheet, and let nothing still in flight paint again: the screen is being replaced. */
   destroy(): void;
 }
 
 type ReviewApi = Pick<
   RendererApi,
-  'inspectReviewWorkspace' | 'prepareReviewRun' | 'authorizeReviewRun' | 'continueReviewRun' | 'recordReviewFindingDisposition' |
+  'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'recordReviewFindingDisposition' |
   'generateReviewReport' | 'cancelServiceJob' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' |
   'updateEditorialMark' | 'getEditorialMarkCard'
 >;
@@ -180,9 +181,9 @@ export interface MountReviewWorkspaceOptions {
   openManuscript(): Promise<void>;
   /** 回到原文: the manuscript at the finding's block, with the mark's card open when the mark still stands. */
   goToText(target: { manuscriptId: string; branchId: string; blockId: string; markId: string | null }): Promise<void>;
-  /** 查看计划 (S72 D4): a Review Run's plan opens in the Task Drawer beside the destination. */
+  /** 查看计划并开始 (S72 D4, S74a A5): a Review Run's plan opens in the Task Drawer, whose bar approves it. */
   openPlan(reviewRunId: string): void;
-  /** The Run on show was approved: the drawer reads its plan again if it shows it. */
+  /** The Run on show changed state: the drawer reads its plan again if it shows it. */
   planChanged(): void;
 }
 
@@ -698,33 +699,31 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   }
 
   /**
-   * A prepared Run's plan (S72 D4): one line naming it and 查看计划, which opens every category's plan in
-   * the Task Drawer. The one approval stays here until S74 brings the authorization bar into the drawer.
+   * A prepared Run's plan (S72 D4): one line naming it and 查看计划并开始, which opens every category's plan
+   * in the Task Drawer, whose authorization bar holds the Run's one approval (S74a A5). 返回修改 stays here:
+   * it prepares the Run again from the choices it was made from.
    */
   function renderPlan(run: ReviewRunProjection): HTMLElement {
     const section = el('section', 'review-plans task-plan-summary');
     section.dataset['reviewCategories'] = run.categories.map((category) => category.categoryId).join(',');
-    const open = actionButton('view-plan', 'secondary', () => options.openPlan(run.reviewRunId));
-    open.dataset['taskPlanOpen'] = 'review-run';
-    open.setAttribute('aria-controls', 'task-drawer');
     section.append(
       el('h5', undefined, REVIEW_PLAN_HEADING),
       el('p', 'task-plan-summary-line', taskPlanSummaryLine([reviewPlanCategoriesLine(run.categories.length), run.scope.label, `任务输入修订版 ${run.manuscript.revisionLabel}`])),
-      open,
     );
     // A category that cannot go ahead says so here too: it is what the one approval would be refused for.
     for (const category of run.categories) {
       if (category.detail !== null) section.append(el('p', 'attention-note', `${category.label}：${category.detail}`));
     }
-    section.append(el('p', 'review-authorize-note', REVIEW_AUTHORIZE_NOTE));
     const actions = el('div', 'button-row review-plan-actions');
-    const authorize = actionButton('authorize', 'primary', () => void authorizeRun(run));
+    const open = actionButton('view-plan', 'primary', () => options.openPlan(run.reviewRunId), TASK_PLAN_OPEN_START);
+    open.dataset['taskPlanOpen'] = 'review-run';
+    open.setAttribute('aria-controls', 'task-drawer');
     const revise = actionButton('revise', 'secondary', () => openSheet(prefillOf(run), revise));
     if (working) {
-      authorize.disabled = true;
+      open.disabled = true;
       revise.disabled = true;
     }
-    actions.append(authorize, revise);
+    actions.append(open, revise);
     section.append(actions);
     return section;
   }
@@ -1404,18 +1403,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     card?.querySelector<HTMLElement>(`section.review-group[data-review-category="${categoryId}"] [data-review-action="batch-prepare"]`)?.focus();
   }
 
-  async function authorizeRun(run: ReviewRunProjection): Promise<void> {
-    const planDigests = run.categories
-      .filter((category) => category.planEnvelopeDigest !== null)
-      .map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest! }));
-    await act(REVIEW_STATUS_LINES.authorizing, REVIEW_STATUS_LINES.authorizeFailed, async () => {
-      await api.authorizeReviewRun({ reviewRunId: run.reviewRunId, planDigests });
-      options.setStatus(REVIEW_STATUS_LINES.authorized, 'success');
-      focusRunHeading = true;
-      options.planChanged();
-    });
-  }
-
   async function continueRun(run: ReviewRunProjection): Promise<void> {
     await act(REVIEW_STATUS_LINES.continuing, REVIEW_STATUS_LINES.continueFailed, async () => {
       await api.continueReviewRun({ reviewRunId: run.reviewRunId });
@@ -1725,6 +1712,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   return {
     start: () => refresh(true),
+    refresh: () => refresh(true),
     destroy: () => {
       destroyed = true;
       generation += 1;
