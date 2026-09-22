@@ -269,6 +269,9 @@ async function dispatch(
         op: request.op,
         result: store.inspectTaskAuthorization(request.input.bookId),
       };
+    // The Task Drawer (Issue #418, plan slice S72): a read of the Task's plan in the editor's words.
+    case 'inspectTaskPlan':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectTaskPlan(request.input) };
     case 'inspectForegroundExecutionBoundary':
       return {
         id: request.id,

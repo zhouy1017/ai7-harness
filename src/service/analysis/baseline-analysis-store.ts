@@ -813,6 +813,43 @@ export class BaselineAnalysisStore {
   }
 
   /**
+   * One frozen plan version of one of this ledger's Tasks, named by the envelope digest a reader holds
+   * for it: its Task Input checkpoint and its components, read back exactly as `inspect` reads the
+   * latest Task's (Issue #418). A Review Run's category keeps naming its own Task after later Tasks of
+   * the same kind exist, so the Task Drawer reads that plan here rather than through `inspect`. Nothing
+   * is written.
+   */
+  frozenPlan(taskIntentId: string, planEnvelopeDigest: string): {
+    checkpoint: NonNullable<BaselineAnalysisProjection['checkpoint']>;
+    planVersion: number;
+    components: Readonly<Record<string, unknown>>;
+  } {
+    requireAnalysis(UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest), 'ANALYSIS_RECORD_INVALID', '任务计划标识无效。');
+    const intent = this.#db.prepare('SELECT kind FROM analysis_task_intents WHERE task_intent_id = ?').get(taskIntentId) as SqlRow | undefined;
+    requireAnalysis(intent !== undefined && intent.kind === this.#definition.kind, 'ANALYSIS_RECORD_INVALID', '任务计划不属于该分析种类。');
+    const version = this.#planVersionByEnvelopeDigest(planEnvelopeDigest);
+    requireAnalysis(version !== undefined && version.taskIntentId === taskIntentId, 'ANALYSIS_RECORD_INVALID', '任务计划版本缺失。');
+    const checkpoint = this.#db.prepare('SELECT * FROM analysis_task_input_checkpoints WHERE task_intent_id = ?').get(taskIntentId) as SqlRow | undefined;
+    requireAnalysis(checkpoint !== undefined, 'ANALYSIS_RECORD_INVALID', '任务输入固定点缺失。');
+    const components = this.#planRecords(taskIntentId, 'any', version.ordinal);
+    requireAnalysis(this.#planDigests(taskIntentId, version.ordinal)['plan-envelope'] === planEnvelopeDigest, 'ANALYSIS_RECORD_INVALID', '计划版本与其计划信封不一致。');
+    return {
+      checkpoint: {
+        manuscriptId: asString(checkpoint.manuscript_id),
+        branchId: asString(checkpoint.branch_id),
+        revisionId: asString(checkpoint.revision_id),
+        revisionLabel: asString(checkpoint.revision_label),
+        revisionDigest: asString(checkpoint.revision_digest),
+        journalSequence: asNumber(checkpoint.journal_sequence),
+        purpose: TASK_INPUT_CHECKPOINT_PURPOSE,
+        createdForDirtyJournal: asNumber(checkpoint.created_for_dirty_journal) === 1,
+      },
+      planVersion: version.ordinal,
+      components,
+    };
+  }
+
+  /**
    * One Task Outcome as a reader receives it, its Run Report included.
    *
    * A Task Outcome recorded before Issue #276 carries no report. It is immutable history and is read

@@ -1967,6 +1967,27 @@ function registerRendererHandlers(
       return result;
     }),
   );
+  // The Task Drawer (Issue #418, plan slice S72) reads one Task's plan of the route's Book: the renderer
+  // names the kind and the Task, never the Book, and the answer must be that Book's plan of that Task. The
+  // kind and the Task travel as the renderer gave them; the request frame decides whether they are well
+  // formed. It is a read, held to the route's read epoch like every other.
+  ipcMain.handle(IPC_CHANNELS.inspectTaskPlan, (event, input?: Omit<ServiceOperationMap['inspectTaskPlan']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const kind = input?.kind as ServiceOperationMap['inspectTaskPlan']['input']['kind'];
+      const ref = typeof input?.ref === 'string' ? input.ref : null;
+      const result = await service.call('inspectTaskPlan', { bookId: route.bookId, kind, ref });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      if (result.bookId !== route.bookId || result.kind !== kind || (ref !== null && result.ref !== ref)) {
+        throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '任务计划不属于当前图书工作台。');
+      }
+      return result;
+    }),
+  );
   ipcMain.handle(
     IPC_CHANNELS.inspectForegroundExecutionBoundary,
     (event, input: Omit<ServiceOperationMap['inspectForegroundExecutionBoundary']['input'], 'bookId'>) =>

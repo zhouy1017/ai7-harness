@@ -15,7 +15,6 @@ import {
   REVIEW_FILTER_LABELS,
   REVIEW_IGNORE_LABEL,
   REVIEW_IGNORE_REQUIRED,
-  REVIEW_LEADS_PLAN,
   REVIEW_NOT_DO,
   REVIEW_QUICK_START_REASON,
   REVIEW_REPORT_OVERVIEW_COLUMNS,
@@ -54,9 +53,7 @@ import {
   reviewLiveLine,
   reviewManuscriptLine,
   reviewOverviewLine,
-  reviewPlanHeading,
-  reviewPlanIntro,
-  reviewPlanUnits,
+  reviewPlanCategoriesLine,
   reviewPreparationLine,
   reviewReadConsequence,
   reviewReplacementLine,
@@ -123,6 +120,7 @@ describe('the words of the 审阅 destination', () => {
       export: '导出',
       'open-manuscript': '打开稿件',
       'open-review': '打开审阅',
+      'view-plan': '查看计划',
     });
     expect(reviewGenerateReportLabel(null)).toBe('生成报告');
     expect(reviewGenerateReportLabel(2)).toBe('生成新版本');
@@ -179,12 +177,9 @@ describe('the words of the 审阅 destination', () => {
     expect(reviewPreparationLine({ completed: 0, total: 0, label: '排队中' })).toBe('排队中');
   });
 
-  it('reads a plan for its one approval, the leads included', () => {
-    expect(reviewPlanIntro(3)).toBe('这次审阅有 3 个类别，授权一次后按顺序逐类审阅；每一类完成后，它的发现立即可以处理。');
-    expect(reviewPlanHeading({ label: '错别字与规范用语', modeLabel: '全书审阅', taskIntentId: 'task' })).toBe('错别字与规范用语 · 全书审阅');
-    expect(reviewPlanHeading({ label: '情节逻辑与前后一致', modeLabel: null, taskIntentId: null })).toBe('情节逻辑与前后一致 · 直接读取基线分析的线索');
-    expect(reviewPlanUnits({ units: 8, recomputed: 3, reused: 4, unreviewed: 1 })).toBe('8 个阅读范围：重新审阅 3 个 · 沿用上次 4 个 · 不在本次范围 1 个');
-    expect(REVIEW_LEADS_PLAN).toBe('基线分析的前后不一致线索与未决事项；不调用模型，不发送任何内容。');
+  it('names a prepared plan in one line beside 查看计划, which opens the rest in the Task Drawer (S72)', () => {
+    expect(reviewPlanCategoriesLine(3)).toBe('3 个类别，授权一次后逐类审阅');
+    expect(REVIEW_ACTION_LABELS['view-plan']).toBe('查看计划');
     expect(REVIEW_AUTHORIZE_NOTE).toBe('只是让 AI7 按这份计划审这一次；接受修改建议、处理每一条发现都仍由你另行决定。');
   });
 

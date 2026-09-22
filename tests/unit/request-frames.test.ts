@@ -172,6 +172,21 @@ describe('decodeRequest accepts well-formed frames', () => {
       expect(decodeRequest(frameOf(request))).toEqual(request);
     }
   });
+
+  it('accepts the Task Drawer read for each of the three kinds, naming the Task or the current one', () => {
+    const bookId = randomUUID();
+    const inputs: ReadonlyArray<Record<string, unknown>> = [
+      { bookId, kind: 'fixed-task', ref: null },
+      { bookId, kind: 'fixed-task', ref: randomUUID() },
+      { bookId, kind: 'baseline-analysis', ref: null },
+      { bookId, kind: 'baseline-analysis', ref: randomUUID() },
+      { bookId, kind: 'review-run', ref: randomUUID() },
+    ];
+    for (const input of inputs) {
+      const request = { id: randomUUID(), op: 'inspectTaskPlan', input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+  });
 });
 
 describe('decodeRequest enforces size limits', () => {
@@ -476,6 +491,29 @@ describe('decodeRequest rejects malformed frames', () => {
     ];
     for (const { op, input } of refused) {
       expect(rejectionFor(frameOf({ id, op, input })).requestId).toBe(id);
+    }
+  });
+
+  it('rejects a Task Drawer read whose kind, Task or key set is wrong, and a review that is not named', () => {
+    const id = randomUUID();
+    const bookId = randomUUID();
+    const refused: ReadonlyArray<unknown> = [
+      {},
+      { bookId, kind: 'fixed-task' },
+      { kind: 'fixed-task', ref: null },
+      { bookId: 'not-a-uuid', kind: 'fixed-task', ref: null },
+      // A kind with no ledger of its own has no plan to read yet (S72 D1).
+      { bookId, kind: 'writing', ref: null },
+      { bookId, kind: 'selection-task', ref: null },
+      { bookId, kind: null, ref: null },
+      { bookId, kind: 'baseline-analysis', ref: 'latest' },
+      { bookId, kind: 'baseline-analysis', ref: 42 },
+      // A Review Run is always named: there is no "current" review.
+      { bookId, kind: 'review-run', ref: null },
+      { bookId, kind: 'review-run', ref: randomUUID(), findingsAfterOrdinal: 1 },
+    ];
+    for (const input of refused) {
+      expect(rejectionFor(frameOf({ id, op: 'inspectTaskPlan', input })).requestId).toBe(id);
     }
   });
 

@@ -615,6 +615,52 @@ interface RunView {
   readonly canContinue: boolean;
 }
 
+/**
+ * What the Task Drawer reads of one Review Run (Issue #418, plan slice S72): the Run as it was prepared,
+ * where it stands, each category with the plan its own ledger froze, and — while the Run waits for its one
+ * approval — why that approval would now be refused, in the words the refusal itself uses (D8).
+ */
+export interface ReviewRunPlanFacts {
+  readonly reviewRunId: string;
+  readonly ordinal: number;
+  readonly label: string;
+  readonly createdAt: string;
+  readonly state: ReviewRunState;
+  readonly stateLabel: string;
+  readonly canContinue: boolean;
+  readonly authorizedAt: string | null;
+  readonly manuscript: RunSnapshot['manuscript'];
+  readonly scope: RunSnapshot['scope'];
+  readonly configuration: RunSnapshot['configuration'];
+  /** The Task Input revision the Run's Task-backed categories read; the Run's own revision for the leads alone. */
+  readonly inputRevision: { readonly revisionId: string; readonly revisionLabel: string; readonly createdForDirtyJournal: boolean };
+  /** The launch the categories' ledgers were bound to: the live binding under developer-live, `null` otherwise. */
+  readonly live: BaselineAnalysisStore['launch']['live'];
+  readonly categories: ReadonlyArray<{
+    readonly categoryId: string;
+    readonly label: string;
+    readonly output: ReviewCategoryConfigurationEntry['output'];
+    readonly riskPointsOnly: boolean;
+    readonly modelFree: boolean;
+    readonly basisStatement: string;
+    readonly procedure: { readonly title: string; readonly version: string };
+    readonly guidelineDocuments: ReadonlyArray<{ readonly title: string; readonly issuer: string; readonly version: string }>;
+    readonly state: ReviewRunCategoryState;
+    readonly stateLabel: string;
+    readonly detail: string | null;
+    readonly task: null | {
+      readonly taskIntentId: string;
+      readonly modeLabel: string;
+      readonly planEnvelopeDigest: string;
+      readonly planVersion: number;
+      readonly plan: ReviewRunCategoryPlanProjection;
+      readonly components: Readonly<Record<string, unknown>>;
+    };
+  }>;
+  /** Why the one approval would be refused now; empty while the prepared plans still stand, and once approved. */
+  readonly staleReasons: ReadonlyArray<string>;
+}
+
 export type ReviewRunPrepareInput =
   | { phase: 'start'; bookId: string; categoryIds: ReadonlyArray<string>; scope: ReviewRunScopeRequest; launchPolicy: LaunchPolicyProjection }
   | { phase: 'advance'; workId: string }
@@ -982,6 +1028,86 @@ export class ReviewRunStore {
   /** The Book check alone, for a caller about to hand a Run to the Book-agnostic drive loop. */
   requireRunOfBook(bookId: string, reviewRunId: string): void {
     this.#runOfBook(bookId, reviewRunId);
+  }
+
+  /**
+   * What the Task Drawer shows of one Review Run (Issue #418, plan slice S72). Each Task-backed category's
+   * plan is read back from its own ledger by the envelope digest the Run froze, so an older Run keeps its
+   * own plans after later Runs prepared newer ones. While the Run waits for its one approval, the checks
+   * `recordAuthorization` makes are made here too — a newer Run, a category plan that moved — and what
+   * they would refuse with is reported, never acted on. Nothing is written.
+   */
+  planFacts(bookId: string, reviewRunId: string): ReviewRunPlanFacts {
+    const snapshot = this.#runOfBook(bookId, reviewRunId);
+    const view = this.#runView(snapshot);
+    const categories = view.categories.map((categoryView) => {
+      const { category } = categoryView;
+      const frozen = category.task === null ? null : this.#ledgers.ledgerOf(category.entry).frozenPlan(category.task.taskIntentId, category.task.planEnvelopeDigest);
+      return {
+        categoryId: category.categoryId,
+        label: category.entry.label,
+        output: category.entry.output,
+        riskPointsOnly: category.entry.riskPointsOnly,
+        modelFree: category.executor === 'baseline-leads',
+        basisStatement: category.basisStatement,
+        procedure: { title: category.entry.procedure.title, version: category.entry.procedure.version },
+        guidelineDocuments: category.entry.guidelineDocuments.map((document) => ({ title: document.title, issuer: document.issuer, version: document.version })),
+        state: categoryView.state,
+        stateLabel: REVIEW_RUN_CATEGORY_STATE_LABELS[categoryView.state],
+        detail: categoryView.detail,
+        task: category.task === null || frozen === null ? null : {
+          taskIntentId: category.task.taskIntentId,
+          modeLabel: category.task.modeLabel,
+          planEnvelopeDigest: category.task.planEnvelopeDigest,
+          planVersion: frozen.planVersion,
+          plan: category.task.plan,
+          components: frozen.components,
+        },
+        checkpoint: frozen?.checkpoint ?? null,
+      };
+    });
+    const staleReasons: string[] = [];
+    if (view.authorization === null) {
+      const latest = this.#db.prepare('SELECT review_run_id FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC LIMIT 1').get(bookId) as SqlRow;
+      if (text(latest.review_run_id) !== reviewRunId) {
+        staleReasons.push('这次审阅的计划已被之后准备的一次取代；请授权最新的一次。');
+      } else {
+        for (const category of snapshot.categories) {
+          if (category.task === null) continue;
+          let current: AnalysisProjection | null = null;
+          try {
+            current = this.#ledgers.ledgerOf(category.entry).inspect(bookId);
+          } catch (error) {
+            if (!(error instanceof AnalysisError)) throw error;
+          }
+          if (current === null || current.taskIntent?.taskIntentId !== category.task.taskIntentId || current.state !== 'prepared' ||
+              !current.actions.canAuthorize || current.planEnvelope?.digest !== category.task.planEnvelopeDigest) {
+            staleReasons.push(`「${category.entry.label}」的计划已经变化；请重新准备这次审阅。`);
+          }
+        }
+      }
+    }
+    const firstCheckpoint = categories.find((category) => category.checkpoint !== null)?.checkpoint ?? null;
+    const firstTask = snapshot.categories.find((category) => category.task !== null);
+    return {
+      reviewRunId: snapshot.reviewRunId,
+      ordinal: snapshot.ordinal,
+      label: `第 ${snapshot.ordinal} 次`,
+      createdAt: snapshot.createdAt,
+      state: view.state,
+      stateLabel: reviewRunStateLabel(view.state, view.canContinue),
+      canContinue: view.canContinue,
+      authorizedAt: view.authorization?.authorizedAt ?? null,
+      manuscript: snapshot.manuscript,
+      scope: snapshot.scope,
+      configuration: snapshot.configuration,
+      inputRevision: firstCheckpoint === null
+        ? { revisionId: snapshot.manuscript.revisionId, revisionLabel: snapshot.manuscript.revisionLabel, createdForDirtyJournal: false }
+        : { revisionId: firstCheckpoint.revisionId, revisionLabel: firstCheckpoint.revisionLabel, createdForDirtyJournal: firstCheckpoint.createdForDirtyJournal },
+      live: (firstTask === undefined ? this.#ledgers.baseline() : this.#ledgers.ledgerOf(firstTask.entry)).launch.live,
+      categories: categories.map(({ checkpoint: _checkpoint, ...category }) => category),
+      staleReasons,
+    };
   }
 
   #snapshotOf(row: SqlRow): RunSnapshot {

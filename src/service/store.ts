@@ -3,8 +3,10 @@ import { closeSync, constants, createReadStream, fstatSync, lstatSync, openSync,
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { J03_TASK_GOAL, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
+import { J03_TASK_GOAL, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, TASK_PLAN_KINDS, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
+  InspectTaskPlanInput,
+  TaskPlanProjection,
   DeliverablesProjection,
   DesignatePublicationVersionInput,
   MilestonePurposeKind,
@@ -133,6 +135,7 @@ import {
 import { initializeManuscriptEffectSchema, ManuscriptApplyStore } from './manuscript-apply.js';
 import { initializeReviewRunSchema, ReviewRunError, ReviewRunStore, type ReviewRunPreparationProgress } from './review/review-runs.js';
 import { initializePublicationVersionSchema, PublicationVersionError, PublicationVersionStore } from './publication-versions.js';
+import { baselineAnalysisPlan, fixedTaskPlan, reviewRunPlan, TaskPlanError } from './task-plan.js';
 import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
 import { reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './review/category-configuration.js';
 import { reviewCategoryKindDefinition } from './review/review-category-kind.js';
@@ -3474,6 +3477,56 @@ export class EditorialStore {
       write: (reviewRunId, categoryId) => this.#reviewCall(() => runs.write(reviewRunId, categoryId)),
       fail: (reviewRunId, categoryId, code, message) => this.#reviewCall(() => runs.fail(reviewRunId, categoryId, code, message)),
     };
+  }
+
+  // ---- The Task Drawer (Issue #418, plan slice S72) ------------------------------------------------
+
+  /**
+   * The plan of one Task as the Task Drawer shows it (editor-surfaces §6 ③): J-03's fixed task, the Book's
+   * baseline analysis Task, or one Review Run, read from the records each kind already keeps and put in
+   * the editor's words (`task-plan.ts`). It is a read: nothing is written and no stored byte changes, so
+   * every envelope, row and digest a Task froze reads exactly as it did before, and J-03's startup byte
+   * checks see the same ledger. The range the chips name is the current plan version's (#288).
+   */
+  inspectTaskPlan(input: InspectTaskPlanInput): TaskPlanProjection {
+    this.#assertAvailable();
+    requireStore(typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) && TASK_PLAN_KINDS.includes(input.kind) &&
+      (input.ref === null || (typeof input.ref === 'string' && UUID_PATTERN.test(input.ref))), 'TASK_PLAN_INVALID', '任务计划请求无效。');
+    const book = this.#authority.prepare('SELECT title FROM books WHERE book_id = ?').get(input.bookId) as SqlRow | undefined;
+    requireStore(book !== undefined, 'TASK_PLAN_BOOK_NOT_FOUND', '这本书不存在。');
+    const bookTitle = asString(book.title);
+    const current = (taskIntentId: string): void => requireStore(input.ref === null || input.ref === taskIntentId,
+      'TASK_PLAN_NOT_CURRENT', '这项任务已不是这本书当前的任务；请从它所在的位置重新打开计划。');
+    if (input.kind === 'fixed-task') {
+      const projection = this.#taskCall(() => this.#taskAuthorization.inspect(input.bookId));
+      const checkpoint = projection.checkpoint;
+      requireStore(projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', '这项任务还没有准备计划。');
+      current(projection.taskIntent.taskIntentId);
+      const blocks = this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
+      return this.#taskPlanCall(() => fixedTaskPlan({ projection, bookTitle, blocks }));
+    }
+    if (input.kind === 'baseline-analysis') {
+      const projection = this.#analysisCall(() => this.#baselineAnalysis.inspect(input.bookId)) as BaselineAnalysisProjection;
+      const checkpoint = projection.checkpoint;
+      requireStore(projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', '这项分析还没有准备计划。');
+      current(projection.taskIntent.taskIntentId);
+      const blocks = this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
+      return this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks }));
+    }
+    const reviewRunId = input.ref;
+    requireStore(reviewRunId !== null, 'TASK_PLAN_INVALID', '审阅的计划要指明是哪一次审阅。');
+    const facts = this.#reviewCall(() => this.#reviewRuns.planFacts(input.bookId, reviewRunId));
+    const blocks = this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(facts.manuscript.manuscriptId, facts.inputRevision.revisionId));
+    return this.#taskPlanCall(() => reviewRunPlan({ bookId: input.bookId, facts, bookTitle, blocks }));
+  }
+
+  #taskPlanCall<T>(operation: () => T): T {
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof TaskPlanError || error instanceof AnalysisError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
   }
 
   createBaselineAnalysisPreparationWork(

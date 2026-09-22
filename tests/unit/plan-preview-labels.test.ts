@@ -20,24 +20,21 @@ import {
   elapsedLabel,
   launchPolicyIntegritySentence,
   localInstantLabel,
-  providerProcessingLabel,
-  remoteBindingPolicyReading,
-  remoteBindingRowLabel,
   runBudgetCeilingLabel,
   runStepIsStale,
   taskAuthorizationDispatchNote,
 } from '../../src/renderer/plan-preview-labels.js';
 
 /*
- * The four renderer scope statements of #337 derive from the launch their projection carries. Under
+ * The renderer scope statements of #337 derive from the launch their projection carries. Under
  * `development-ci` every one of them must still render the exact bytes it rendered as a fixed string
- * at `dev@5f3c4b44`, which is what these four literals are: captured before the derivation existed,
- * asserted here so a derivation that drifts fails in `test` rather than in a Journey.
+ * at `dev@5f3c4b44`, which is what these literals are: captured before the derivation existed, asserted
+ * here so a derivation that drifts fails in `test` rather than in a Journey. The frozen plan's own
+ * readings — its remote binding and its Provider Processing pin — moved with the plan into the Task
+ * Drawer (Issue #418), and are pinned where the drawer's projection makes them (tests/unit/task-plan.test.ts).
  */
 const CAPTURED_DEVELOPMENT_CI = {
   analysisKindSubtitle: '一个精确版本化的覆盖式分析种类；远程绑定被 Provider Processing v1 拒绝，结果集修订版不修改稿件。',
-  remoteBindingRowLabel: '远程绑定（被拒绝）',
-  remoteBindingPolicyReading: 'development-ci · v1 · 0 次实时传输',
   taskAuthorizationDispatchNote: '本流程只冻结并记录本次标准直接授权；Provider Processing v1 固定拒绝派发。',
   launchPolicyIntegritySentence: '策略完整性：已验证。当前开发与持续集成范围保持零次实时传输。',
 } as const;
@@ -60,39 +57,6 @@ describe('runBudgetCeilingLabel', () => {
     expect(runBudgetCeilingLabel('unset' satisfies RunBudgetCeilingState)).toBe('未设置任务预算上限');
     expect(runBudgetCeilingLabel({ kind: 'tokens', maxTotalTokens: 250_000 } satisfies RunBudgetCeilingState))
       .toBe('任务运行预算上限：250000 tokens');
-  });
-});
-
-describe('providerProcessingLabel', () => {
-  it('renders the byte-identical development-ci reading J-03 pins today', () => {
-    const pin: ProviderProcessingPin = { operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 };
-    expect(providerProcessingLabel(pin)).toBe('development-ci · v1 · 拒绝 · 0 次实时传输');
-  });
-
-  it('renders a developer-live pin with the bounded-by-run token verbatim', () => {
-    const pin: ProviderProcessingPin = { operationalScope: 'developer-live', version: 'v5', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' };
-    expect(providerProcessingLabel(pin)).toBe('developer-live · v5 · eligible-only · bounded-by-run 次实时传输');
-  });
-});
-
-describe('remoteBindingPolicyReading', () => {
-  it('reproduces the development-ci bytes the frozen plan row rendered as a fixed string', () => {
-    expect(remoteBindingPolicyReading(DENIED_PIN)).toBe(CAPTURED_DEVELOPMENT_CI.remoteBindingPolicyReading);
-  });
-
-  it('states a developer-live pin as the bound it is, never as a transmission count', () => {
-    expect(remoteBindingPolicyReading(ELIGIBLE_PIN)).toBe('developer-live · v5 · 受运行边界约束');
-    expect(remoteBindingPolicyReading(ELIGIBLE_PIN)).not.toContain('次实时传输');
-  });
-});
-
-describe('remoteBindingRowLabel', () => {
-  it('reproduces the denied row label the frozen plan rendered as a fixed string', () => {
-    expect(remoteBindingRowLabel(DENIED_PIN.decision)).toBe(CAPTURED_DEVELOPMENT_CI.remoteBindingRowLabel);
-  });
-
-  it('names an eligible-only binding as eligible rather than as denied', () => {
-    expect(remoteBindingRowLabel(ELIGIBLE_PIN.decision)).toBe('远程绑定（仅限资格）');
   });
 });
 
