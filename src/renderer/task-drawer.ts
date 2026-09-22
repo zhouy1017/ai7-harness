@@ -321,12 +321,12 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     if (focusTitle) {
       focusTitle = false;
       title.focus();
-    } else if (restore !== null) {
-      const again = root.querySelector<HTMLElement>(`[data-task-drawer-control="${restore}"]:not(:disabled)`);
-      if (again) again.focus();
-      else if (focusBar) bar.querySelector<HTMLElement>('button:not(:disabled), .task-bar-status')?.focus();
+    } else if (restore !== null && root.querySelector<HTMLElement>(`[data-task-drawer-control="${restore}"]:not(:disabled)`) !== null) {
+      root.querySelector<HTMLElement>(`[data-task-drawer-control="${restore}"]:not(:disabled)`)!.focus();
     } else if (focusBar) {
-      bar.querySelector<HTMLElement>('button:not(:disabled), .task-bar-status')?.focus();
+      // The action that had focus is gone — the start the Run's state replaced — so focus goes to the bar's
+      // first action, and to its state when it offers none; the state itself is announced as it changes.
+      (bar.querySelector<HTMLElement>('button:not(:disabled)') ?? bar.querySelector<HTMLElement>('.task-bar-status'))?.focus();
     }
     focusBar = false;
     schedulePoll(next);
