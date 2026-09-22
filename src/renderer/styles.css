@@ -344,7 +344,16 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .ProseMirror .editorial-mark-personal-highlight[data-mark-color="2"] { background: var(--mark-highlight-2); }
 .ProseMirror .editorial-mark-personal-highlight[data-mark-color="3"] { background: var(--mark-highlight-3); }
 .ProseMirror .editorial-mark[data-mark-status="resolved"] { background: transparent; border-bottom-style: dashed; }
+.ProseMirror .editorial-mark[data-mark-status="applied"] { background: transparent; border-bottom: 1px dotted var(--mark-suggestion); }
 .ProseMirror .editorial-mark[data-mark-anchor="drifted"] { background: transparent; border-bottom-style: dashed; border-bottom-width: 2px; }
+/* Where a mark stands on no text — the point an applied deletion left — a thin upright line in the
+   mark's colour marks the place. It takes no room in the line: its margins give back the reach its
+   padding offers the pointer. Dashed once the text around it changed. */
+.ProseMirror .editorial-mark-point { --mark-point: var(--mark-suggestion); display: inline-block; width: 2px; height: 1.15em; margin: 0 -4px; padding: 0 3px; vertical-align: -.2em; background: var(--mark-point) content-box; cursor: pointer; }
+.ProseMirror .editorial-mark-point-annotation { --mark-point: var(--mark-annotation); }
+.ProseMirror .editorial-mark-point-editor-note { --mark-point: var(--mark-note); }
+.ProseMirror .editorial-mark-point-personal-highlight { --mark-point: var(--mark-highlight-line); }
+.ProseMirror .editorial-mark-point[data-mark-anchor="drifted"] { background: repeating-linear-gradient(var(--mark-point) 0 3px, transparent 3px 5px) content-box; }
 .ProseMirror .editorial-mark-active { outline: 2px solid #416458; outline-offset: 1px; }
 .ProseMirror .editorial-mark-previewed { text-decoration: line-through; text-decoration-color: var(--mark-suggestion); color: #7b7f76; }
 .ProseMirror .editorial-mark-preview { margin-left: .15em; text-decoration: none; background: var(--mark-suggestion-fill); border-bottom: 2px solid var(--mark-suggestion); border-radius: 2px; }
@@ -391,6 +400,9 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .editorial-mark-unavailable { display: inline-flex; flex-direction: column; align-items: flex-start; gap: .15rem; max-width: 18rem; }
 .editorial-mark-basis, .editorial-mark-replies { margin: .25rem 0; padding-left: 1.2rem; }
 .editorial-mark-basis-quote { margin-left: .4rem; color: #4b5148; }
+.editorial-mark-receipt { margin: .4rem 0; }
+.editorial-mark-receipt summary { cursor: pointer; font-weight: 700; }
+.editorial-mark-receipt dd { margin: 0 0 .3rem; overflow-wrap: anywhere; font-size: .82rem; }
 .editorial-mark-card .technical-details { margin-top: .8rem; }
 .editorial-mark-card .technical-details dd { overflow-wrap: anywhere; }
 .window-actions { position: sticky; bottom: 0; display: grid; grid-template-columns: auto auto minmax(100px, 1fr) auto; align-items: center; gap: .7rem; padding: .7rem 1rem; border-top: 1px solid #ddd8cc; background: rgba(250, 248, 241, .97); }
@@ -465,6 +477,10 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .ProseMirror .editorial-mark-editor-note { border-bottom: 2px dotted CanvasText; }
   .ProseMirror .editorial-mark-personal-highlight { border-bottom: 0; outline: 1px solid CanvasText; }
   .ProseMirror .editorial-mark[data-mark-anchor="drifted"], .ProseMirror .editorial-mark[data-mark-status="resolved"] { border-bottom-style: dashed; }
+  /* An applied suggestion is still a suggestion by its line: thinner, never another kind's style. */
+  .ProseMirror .editorial-mark-change-suggestion[data-mark-status="applied"] { border-bottom: 1px solid CanvasText; }
+  /* The point where a mark stands on no text keeps its upright line in the text's own colour. */
+  .ProseMirror .editorial-mark-point { --mark-point: CanvasText; forced-color-adjust: none; }
   .ProseMirror .editorial-mark-active { outline: 2px solid Highlight; }
   .ProseMirror .editorial-mark-preview, .ProseMirror .editorial-mark-preview-label { color: CanvasText; background: Canvas; border-color: CanvasText; forced-color-adjust: none; }
   .ProseMirror [data-block-id][data-mark-line] { border-left-color: CanvasText; }

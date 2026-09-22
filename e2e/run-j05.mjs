@@ -11,8 +11,10 @@ import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabl
 // highlight, a 批注, a 备注 and a 修改建议, reads each on its Mark Card with its source, previews a
 // suggestion in place without the manuscript changing, records a Proposal Decision apart from any
 // change to the text, converts marks along the allowed routes, keeps typing while the marks follow
-// the text or disclose 原文已变, and finds everything again after a restart. The Apply half of J-05 —
-// 接受并应用, its Effect Approval and Receipt — is Issue #408's.
+// the text or disclose 原文已变, and finds everything again after a restart. Issue #408 adds the Apply:
+// 接受并应用 writes the text with its Effect Receipt, 修改后接受 writes the editor's wording, a drifted target is
+// refused, 准备撤销本次应用 reverses with a new Effect, and an acknowledgement that never arrives is answered
+// from the records without a second write.
 //
 // The input is composed at run time from the one admitted Public SampleBook under the content rule in
 // docs/agents/ci-test-boundaries.md; every string this runner types is authored here, and every
@@ -31,11 +33,13 @@ const ACCEPTED_TEXT = '〔编辑改定〕';
 const ACCEPTED_REASON = '更贴近作者的语气。';
 const CONVERTED_NOTE = '由高亮转来的备注。';
 const CONVERTED_SUGGESTION = '〔转换建议〕';
+const APPLIED_TEXT = '〔一键应用〕';
+const LOST_ACK_TEXT = '〔确认未达〕';
 const TYPED_BEFORE = '新增';
 const TYPED_INSIDE = '改';
 // Four ranges inside one paragraph and one inside another, in graphemes of the durable text. The
 // paragraphs are chosen at run time so that in their first 80 code units a grapheme is a code unit.
-const RANGES = Object.freeze({ highlight: [2, 8], annotation: [10, 16], note: [18, 24], suggestion: [26, 32], second: [3, 9] });
+const RANGES = Object.freeze({ highlight: [2, 8], annotation: [10, 16], note: [18, 24], suggestion: [26, 32], second: [3, 9], applied: [20, 26] });
 
 let location = 'entry';
 let electronExecutable;
@@ -425,13 +429,14 @@ async function main() {
     const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
-    const launch = async ({ picker } = {}) => {
+    const launch = async ({ picker, loseFirstApplyAcknowledgement = false } = {}) => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
         '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
         resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
       ];
       if (picker) args.push('--j05-picker-path', picker);
+      if (loseFirstApplyAcknowledgement) args.push('--j05-apply-control', 'lose-first-acknowledgement');
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       cancellation.throwIfRequested();
       browserAcquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args, env: productEnvironment(executable), timeout: 60_000 });
@@ -559,7 +564,7 @@ async function main() {
     // 预览 · 未应用: the replacement shows in place, labelled, while the manuscript stays the original.
     await assertRenderer(renderer, `(() => { const preview = document.querySelector('[data-mark-preview]'); const mark = window.__j05.mark('change-suggestion', ${JSON.stringify(first)})[0]; return preview?.querySelector('.editorial-mark-preview-text')?.textContent === ${JSON.stringify(SUGGESTED_TEXT)} && preview.querySelector('.editorial-mark-preview-label')?.textContent === '预览 · 未应用' && preview.contentEditable === 'false' && mark.classList.contains('editorial-mark-previewed') && getComputedStyle(mark).textDecorationLine.includes('line-through') && window.__j05.text(${JSON.stringify(first)}) === window.__j05Original.first; })()`, 'suggestion-previews-in-place');
     await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } }); window.__j05Journal = page.journalSequence; return page.blocks.find((block) => block.blockId === ${JSON.stringify(first)})?.text === window.__j05Original.first && page.marks.length === 4 && page.marksTruncated === false; })()`, 'suggestion-durable-text-unchanged');
-    await assertRenderer(renderer, `(() => { const card = window.__j05.card(); const regions = Array.from(card.querySelectorAll('[data-mark-region]')).map((region) => region.dataset.markRegion + ':' + region.querySelector('h4')?.textContent); const accept = card.querySelector('[data-mark-action="accept-and-apply"]'); return regions.join('|') === 'content:修改内容|rationale:修改理由|basis:依据与核查|disposition:你的处理' && card.querySelector('[data-mark-region="content"] del')?.textContent === window.__j05Original.first.slice(${RANGES.suggestion[0]}, ${RANGES.suggestion[1]}) && card.querySelector('[data-mark-region="content"] ins')?.textContent === ${JSON.stringify(SUGGESTED_TEXT)} && card.querySelector('[data-mark-region="rationale"]').textContent.includes(${JSON.stringify(SUGGESTED_REASON)}) && accept?.disabled === true && accept.textContent === '接受并应用' && document.getElementById(accept.getAttribute('aria-describedby'))?.textContent.includes('尚未接通') && card.querySelector('[data-mark-action="reject"]')?.disabled === false && card.querySelector('[data-mark-action="accept-with-edit"]')?.disabled === false && card.querySelector('[data-mark-decision]') === null && card.querySelector('[data-mark-state]').textContent === '待你处理'; })()`, 'suggestion-card-four-regions');
+    await assertRenderer(renderer, `(() => { const card = window.__j05.card(); const regions = Array.from(card.querySelectorAll('[data-mark-region]')).map((region) => region.dataset.markRegion + ':' + region.querySelector('h4')?.textContent); const accept = card.querySelector('[data-mark-action="accept-and-apply"]'); return regions.join('|') === 'content:修改内容|rationale:修改理由|basis:依据与核查|disposition:你的处理' && card.querySelector('[data-mark-region="content"] del')?.textContent === window.__j05Original.first.slice(${RANGES.suggestion[0]}, ${RANGES.suggestion[1]}) && card.querySelector('[data-mark-region="content"] ins')?.textContent === ${JSON.stringify(SUGGESTED_TEXT)} && card.querySelector('[data-mark-region="rationale"]').textContent.includes(${JSON.stringify(SUGGESTED_REASON)}) && accept?.disabled === false && accept.textContent === '接受并应用' && accept.classList.contains('primary') && card.querySelector('[data-mark-action="reject"]')?.disabled === false && card.querySelector('[data-mark-action="accept-with-edit"]')?.disabled === false && card.querySelector('[data-mark-decision]') === null && card.querySelector('[data-mark-state]').textContent === '待你处理'; })()`, 'suggestion-card-four-regions');
 
     // A card that opens below the pane's edge is brought into view, and that scroll is the surface's own:
     // the pane does not take it for the reader reaching the window's end.
@@ -575,13 +580,58 @@ async function main() {
     await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-decision]') === null && window.__j05.card().querySelector('[data-mark-state]').textContent === '待你处理' && document.querySelector('[data-mark-preview]') !== null`, 'withdrawn-returns-to-undecided');
     await assertRenderer(renderer, `window.__j05.act('accept-with-edit')`, 'accept-with-edit-open');
     await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-form="accept-with-edit"] [data-mark-field="proposedText"]')?.value === ${JSON.stringify(SUGGESTED_TEXT)}`, 'accept-with-edit-form');
-    await assertRenderer(renderer, `window.__j05.card().querySelector('[data-mark-form] label:last-of-type span').textContent.startsWith('为什么这样改？（可选') && window.__j05.write('proposedText', ${JSON.stringify(ACCEPTED_TEXT)}) && window.__j05.write('reason', ${JSON.stringify(ACCEPTED_REASON)}) && window.__j05.act('submit')`, 'accept-with-edit-submit');
-    await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-decision]')?.dataset.markDecision === 'accepted-with-edit'`, 'accept-with-edit-recorded');
-    // A filled 为什么这样改 is the reason: no second prompt follows (V2-UX-FDBK-003).
-    await assertRenderer(renderer, `(() => { const card = window.__j05.card(); return card.querySelector('[data-mark-decision]').textContent.includes('尚未写入稿件') && card.querySelector('[data-mark-reason]')?.dataset.markReason === 'reason-field' && card.querySelector('[data-mark-reason]').textContent.includes(${JSON.stringify(ACCEPTED_REASON)}) && card.querySelector('[data-mark-reasons]') === null && card.querySelector('[data-mark-region="content"] ins').textContent === ${JSON.stringify(ACCEPTED_TEXT)} && document.querySelector('[data-mark-preview] .editorial-mark-preview-text')?.textContent === ${JSON.stringify(ACCEPTED_TEXT)} && window.__j05.text(${JSON.stringify(first)}) === window.__j05Original.first; })()`, 'accepted-is-recorded-not-applied');
-    await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } }); return page.journalSequence === window.__j05Journal && page.blocks.find((block) => block.blockId === ${JSON.stringify(first)})?.text === window.__j05Original.first; })()`, 'decisions-wrote-no-manuscript-text');
+    await assertRenderer(renderer, `window.__j05.card().querySelector('[data-mark-form] label:last-of-type span').textContent.startsWith('为什么这样改？（可选') && window.__j05.card().querySelector('[data-mark-form] [data-mark-action="submit"]').textContent === '接受修改后的版本并应用' && window.__j05.write('proposedText', ${JSON.stringify(ACCEPTED_TEXT)}) && window.__j05.write('reason', ${JSON.stringify(ACCEPTED_REASON)}) && window.__j05.act('submit')`, 'accept-with-edit-submit');
+    await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-application]') && window.__j05.mark('change-suggestion', ${JSON.stringify(first)})[0]?.dataset.markStatus === 'applied'`, 'accept-with-edit-applied');
+    // One interaction recorded the decision and its reason, approved the Effect and wrote the text; 已应用 is said of the receipt.
+    await assertRenderer(renderer, `(() => { const card = window.__j05.card(); window.__j05Original.first = window.__j05Original.first.slice(0, ${RANGES.suggestion[0]}) + ${JSON.stringify(ACCEPTED_TEXT)} + window.__j05Original.first.slice(${RANGES.suggestion[1]}); const terms = Array.from(card.querySelectorAll('[data-mark-receipt] dt')).map((term) => term.textContent); return card.querySelector('[data-mark-state]').textContent === '已应用' && card.querySelector('[data-mark-application]').textContent.startsWith('已应用 · 已写入稿件') && card.querySelector('[data-mark-reason]')?.dataset.markReason === 'reason-field' && card.querySelector('[data-mark-reason]').textContent.includes(${JSON.stringify(ACCEPTED_REASON)}) && card.querySelector('[data-mark-reasons]') === null && card.querySelector('[data-mark-region="content"] ins').textContent === ${JSON.stringify(ACCEPTED_TEXT)} && document.querySelector('[data-mark-preview]') === null && !card.querySelector('[data-mark-receipt]').open && ['应用（Effect）', '提案决定', '应用批准（Effect Approval）', '派发', '应用凭据（Effect Receipt）', '应用前的稿件', '应用后的稿件'].every((term) => terms.includes(term)) && card.querySelector('[data-mark-action="prepare-reverse"]')?.disabled === false && card.querySelector('[data-mark-action="accept-and-apply"]') === null && window.__j05.text(${JSON.stringify(first)}) === window.__j05Original.first && window.__j05.markText('change-suggestion', ${JSON.stringify(first)}) === ${JSON.stringify(ACCEPTED_TEXT)}; })()`, 'accepted-with-edit-is-applied-with-its-receipt');
+    await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } }); const wrote = page.journalSequence === window.__j05Journal + 1; window.__j05Journal = page.journalSequence; return wrote && page.blocks.find((block) => block.blockId === ${JSON.stringify(first)})?.text === window.__j05Original.first; })()`, 'apply-wrote-the-manuscript-once');
+    // A committed Apply is not taken back by 撤销: reversing it is an Effect of its own.
+    await press(renderer, 'Escape');
+    await click(renderer, '撤销', 'undo-after-apply');
+    await waitFor(renderer, `window.__j05.status().includes('没有可撤销的编辑') && window.__j05.text(${JSON.stringify(first)}) === window.__j05Original.first`, 'apply-is-not-undone-by-history', 15_000);
+    await openMarkCard(renderer, 'change-suggestion', first, 'applied-card-again');
     await assertRenderer(renderer, `(() => { const details = window.__j05.card().querySelector('details.technical-details'); details.open = true; const terms = Array.from(details.querySelectorAll('dt')).map((term) => term.textContent); return terms.includes('提案修改项') && terms.includes('提案决定') && terms.includes('标记时的修订版'); })()`, 'technical-identities-are-one-step-away');
     await press(renderer, 'Escape');
+
+    at('apply-accept-and-apply');
+    // 接受并应用: one click on a suggestion the editor has not decided. The text is written, the mark stands on it.
+    await openSelectionMenu(renderer, second, RANGES.applied[0], RANGES.applied[1], 'apply-menu');
+    await chooseMenuItem(renderer, 'add-change-suggestion', 'apply-suggestion-choose');
+    await waitFor(renderer, `window.__j05.composer()?.dataset.markComposer === 'create-change-suggestion'`, 'apply-suggestion-composer');
+    await assertRenderer(renderer, `window.__j05.write('proposedText', ${JSON.stringify(APPLIED_TEXT)}) && window.__j05.act('submit')`, 'apply-suggestion-submit');
+    await waitFor(renderer, `window.__j05.mark('change-suggestion', ${JSON.stringify(second)}).length > 0 && window.__j05.composer() === null`, 'apply-suggestion-drawn');
+    await openMarkCard(renderer, 'change-suggestion', second, 'apply-card');
+    await assertRenderer(renderer, `window.__j05.act('accept-and-apply')`, 'accept-and-apply');
+    await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-application]') && window.__j05.text(${JSON.stringify(second)}) === window.__j05Original.second.slice(0, ${RANGES.applied[0]}) + ${JSON.stringify(APPLIED_TEXT)} + window.__j05Original.second.slice(${RANGES.applied[1]})`, 'accept-and-apply-wrote-the-text');
+    await assertRenderer(renderer, `(() => { const card = window.__j05.card(); const mark = window.__j05.mark('change-suggestion', ${JSON.stringify(second)})[0]; return card.querySelector('[data-mark-state]').textContent === '已应用' && mark.dataset.markStatus === 'applied' && mark.dataset.markDisposition === 'accepted' && window.__j05.markText('change-suggestion', ${JSON.stringify(second)}) === ${JSON.stringify(APPLIED_TEXT)} && window.__j05.block(${JSON.stringify(second)}).dataset.markLine === undefined && window.__j05.status().includes('已应用这条修改建议'); })()`, 'accept-and-apply-recorded-and-receipted');
+    await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } }); const wrote = page.journalSequence === window.__j05Journal + 1; window.__j05Journal = page.journalSequence; return wrote; })()`, 'accept-and-apply-wrote-once');
+
+    at('apply-reverse');
+    // 准备撤销本次应用 says what it will write before the button that writes it, and is a new Effect.
+    await assertRenderer(renderer, `window.__j05.act('prepare-reverse')`, 'prepare-reverse');
+    await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-form="reverse-apply"] [data-mark-form-note]')?.textContent.includes('换回')`, 'reverse-preparation');
+    await assertRenderer(renderer, `(() => { const form = window.__j05.card().querySelector('[data-mark-form="reverse-apply"]'); const note = form.querySelector('[data-mark-form-note]'); const submit = form.querySelector('[data-mark-action="submit"]'); return submit.textContent === '确认撤销本次应用' && Boolean(note.compareDocumentPosition(submit) & Node.DOCUMENT_POSITION_FOLLOWING) && note.textContent.includes('原来的应用记录保留') && window.__j05.text(${JSON.stringify(second)}).includes(${JSON.stringify(APPLIED_TEXT)}); })()`, 'reverse-states-its-write-before-the-button');
+    await assertRenderer(renderer, `window.__j05.act('submit')`, 'confirm-reverse');
+    await waitFor(renderer, `window.__j05.text(${JSON.stringify(second)}) === window.__j05Original.second && window.__j05.card()?.querySelector('[data-mark-state]')?.textContent === '待你处理' && window.__j05.mark('change-suggestion', ${JSON.stringify(second)})[0]?.dataset.markStatus === 'open'`, 'reverse-wrote-the-original-back');
+    await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } }); const wrote = page.journalSequence === window.__j05Journal + 1; window.__j05Journal = page.journalSequence; return wrote && window.__j05.card().querySelector('[data-mark-action="accept-and-apply"]')?.disabled === false && document.querySelector('[data-mark-preview]') !== null; })()`, 'reverse-is-one-new-write-and-the-suggestion-is-open-again');
+    await press(renderer, 'Escape');
+
+    at('apply-drift-refused');
+    // Text typed into the words a suggestion would replace: the suggestion says 原文已变 and cannot be applied.
+    await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(second)}, ${RANGES.applied[0] + 2}, ${RANGES.applied[0] + 2}) && document.execCommand('insertText', false, ${JSON.stringify(TYPED_INSIDE)})`, 'type-inside-suggestion');
+    await settled(renderer, 'drift-settled');
+    await openMarkCard(renderer, 'change-suggestion', second, 'drifted-suggestion');
+    await assertRenderer(renderer, `(() => { const card = window.__j05.card(); const accept = card.querySelector('[data-mark-action="accept-and-apply"]'); return card.dataset.markAnchor === 'drifted' && accept?.disabled === true && document.getElementById(accept.getAttribute('aria-describedby'))?.textContent.includes('原文已变') && card.querySelector('[data-mark-action="accept-with-edit"]')?.disabled === true && document.querySelector('[data-mark-preview]') === null; })()`, 'drifted-suggestion-cannot-be-applied');
+    await press(renderer, 'Escape');
+    await click(renderer, '撤销', 'undo-drift');
+    await waitFor(renderer, `window.__j05.text(${JSON.stringify(second)}) === window.__j05Original.second && window.__j05.mark('change-suggestion', ${JSON.stringify(second)}).every((mark) => mark.dataset.markAnchor === 'exact')`, 'undo-makes-the-suggestion-exact-again');
+    await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } }); window.__j05Journal = page.journalSequence; return true; })()`, 'journal-read-after-drift');
+    // The suggestion leaves the way an undecided one may: as a comment, which is then deleted.
+    await openMarkCard(renderer, 'change-suggestion', second, 'retire-suggestion');
+    await assertRenderer(renderer, `window.__j05.act('convert-annotation')`, 'retire-to-annotation');
+    await waitFor(renderer, `window.__j05.card()?.dataset.markKind === 'annotation'`, 'retired-to-annotation');
+    await assertRenderer(renderer, `window.__j05.act('remove')`, 'retire-remove');
+    await waitFor(renderer, `window.__j05.card() === null && window.__j05.block(${JSON.stringify(second)}).querySelectorAll('.editorial-mark').length === 0`, 'second-paragraph-clean-before-conversions');
 
     at('mark-conversions');
     await openSelectionMenu(renderer, second, RANGES.second[0], RANGES.second[1], 'second-menu');
@@ -708,18 +758,35 @@ async function main() {
     await close();
 
     at('marks-survive-restart');
-    renderer = await launch();
+    renderer = await launch({ loseFirstApplyAcknowledgement: true });
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]') && document.querySelector('.recent-work-item button')`, 'restart-prior-work');
     await assertRenderer(renderer, `(() => { document.querySelector('.recent-work-item button').click(); return true; })()`, 'restart-open');
     await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('[data-testid="manuscript-editor"] .editorial-mark')`, 'restart-editor-with-marks');
     await assertRenderer(renderer, PAGE_HELPERS, 'restart-page-helpers');
-    await assertRenderer(renderer, `(() => { const kinds = ['personal-highlight', 'annotation', 'editor-note', 'change-suggestion']; const block = window.__j05.block(${JSON.stringify(first)}); return kinds.every((kind) => window.__j05.mark(kind, ${JSON.stringify(first)}).length > 0 && window.__j05.mark(kind, ${JSON.stringify(first)}).every((mark) => mark.dataset.markAnchor === 'exact')) && window.__j05.mark('personal-highlight', ${JSON.stringify(first)})[0].dataset.markColor === '2' && window.__j05.mark('change-suggestion', ${JSON.stringify(first)})[0].dataset.markDisposition === 'accepted-with-edit' && block.dataset.markLine === 'change-suggestion' && window.__j05.block(${JSON.stringify(second)}).querySelectorAll('.editorial-mark').length === 0; })()`, 'restart-marks-where-they-were');
+    await assertRenderer(renderer, `(() => { const kinds = ['personal-highlight', 'annotation', 'editor-note', 'change-suggestion']; const block = window.__j05.block(${JSON.stringify(first)}); return kinds.every((kind) => window.__j05.mark(kind, ${JSON.stringify(first)}).length > 0 && window.__j05.mark(kind, ${JSON.stringify(first)}).every((mark) => mark.dataset.markAnchor === 'exact')) && window.__j05.mark('personal-highlight', ${JSON.stringify(first)})[0].dataset.markColor === '2' && window.__j05.mark('change-suggestion', ${JSON.stringify(first)})[0].dataset.markStatus === 'applied' && block.dataset.markLine === 'annotation' && window.__j05.block(${JSON.stringify(second)}).querySelectorAll('.editorial-mark').length === 0; })()`, 'restart-marks-where-they-were');
     await openMarkCard(renderer, 'change-suggestion', first, 'restart-suggestion');
-    await assertRenderer(renderer, `(() => { const card = window.__j05.card(); return card.querySelector('[data-mark-decision]')?.dataset.markDecision === 'accepted-with-edit' && card.querySelector('[data-mark-reason]')?.textContent.includes(${JSON.stringify(ACCEPTED_REASON)}) && card.querySelector('[data-mark-region="content"] ins').textContent === ${JSON.stringify(ACCEPTED_TEXT)} && document.querySelector('[data-mark-preview] .editorial-mark-preview-text')?.textContent === ${JSON.stringify(ACCEPTED_TEXT)}; })()`, 'restart-decision-and-reason-kept');
+    await assertRenderer(renderer, `(() => { const card = window.__j05.card(); return card.querySelector('[data-mark-state]').textContent === '已应用' && card.querySelector('[data-mark-application]') !== null && card.querySelector('[data-mark-receipt]') !== null && card.querySelector('[data-mark-reason]')?.textContent.includes(${JSON.stringify(ACCEPTED_REASON)}) && card.querySelector('[data-mark-region="content"] ins').textContent === ${JSON.stringify(ACCEPTED_TEXT)} && document.querySelector('[data-mark-preview]') === null; })()`, 'restart-applied-with-its-receipt-and-reason');
     await press(renderer, 'Escape');
     await openMarkCard(renderer, 'annotation', first, 'restart-annotation');
     await assertRenderer(renderer, `window.__j05.card().querySelector('[data-mark-region="replies"]')?.textContent.includes(${JSON.stringify(ANNOTATION_REPLY)}) && window.__j05.card().querySelector('[data-mark-body]').textContent === ${JSON.stringify(ANNOTATION_BODY)}`, 'restart-replies-kept');
     await press(renderer, 'Escape');
+
+    at('apply-lost-acknowledgement');
+    // This launch withholds the first Apply's acknowledgement. The Apply is committed; the surface hears
+    // nothing, asks the records by the same Effect identity, and shows 已应用 — with the text written once.
+    await assertRenderer(renderer, `(async () => { window.__j05Second = window.__j05.text(${JSON.stringify(second)}); const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } }); window.__j05Journal = page.journalSequence; return typeof window.__j05Second === 'string'; })()`, 'lost-ack-before');
+    await openSelectionMenu(renderer, second, RANGES.applied[0], RANGES.applied[1], 'lost-ack-menu');
+    await chooseMenuItem(renderer, 'add-change-suggestion', 'lost-ack-suggestion-choose');
+    await waitFor(renderer, `window.__j05.composer()?.dataset.markComposer === 'create-change-suggestion'`, 'lost-ack-composer');
+    await assertRenderer(renderer, `window.__j05.write('proposedText', ${JSON.stringify(LOST_ACK_TEXT)}) && window.__j05.act('submit')`, 'lost-ack-suggestion-submit');
+    await waitFor(renderer, `window.__j05.mark('change-suggestion', ${JSON.stringify(second)}).length > 0 && window.__j05.composer() === null`, 'lost-ack-suggestion-drawn');
+    await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } }); window.__j05Journal = page.journalSequence; return true; })()`, 'lost-ack-journal-before');
+    await openMarkCard(renderer, 'change-suggestion', second, 'lost-ack-card');
+    await assertRenderer(renderer, `window.__j05.act('accept-and-apply')`, 'lost-ack-accept-and-apply');
+    await waitFor(renderer, `window.__j05.status().includes('写入结果已从记录确认') && window.__j05.card()?.querySelector('[data-mark-application]') && window.__j05.text(${JSON.stringify(second)}) === window.__j05Second.slice(0, ${RANGES.applied[0]}) + ${JSON.stringify(LOST_ACK_TEXT)} + window.__j05Second.slice(${RANGES.applied[1]})`, 'lost-ack-answered-from-the-records');
+    await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } }); return page.journalSequence === window.__j05Journal + 1 && window.__j05.card().querySelector('[data-mark-action="accept-and-apply"]') === null && window.__j05.card().querySelector('[data-mark-state]').textContent === '已应用'; })()`, 'lost-ack-wrote-exactly-once');
+    await press(renderer, 'Escape');
+    await settled(renderer, 'lost-ack-settled');
 
     at('completion-browser-close');
     await close();

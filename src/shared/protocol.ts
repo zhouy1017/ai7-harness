@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 31 as const;
+export const SERVICE_PROTOCOL_VERSION = 32 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -79,6 +79,9 @@ export const IPC_CHANNELS = {
   updateEditorialMark: 'ai7:j05:update-editorial-mark',
   recordChangeSuggestionDecision: 'ai7:j05:record-change-suggestion-decision',
   recordProposalDecisionReason: 'ai7:j05:record-proposal-decision-reason',
+  applyChangeSuggestion: 'ai7:j05:apply-change-suggestion',
+  reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
+  getManuscriptApplyOutcome: 'ai7:j05:get-manuscript-apply-outcome',
   runEditorClipboardCommand: 'ai7:j05:run-editor-clipboard-command',
   listPriorWork: 'ai7:j02:list-prior-work',
   getManuscriptWindowAt: 'ai7:j02:get-manuscript-window-at',
@@ -909,8 +912,9 @@ export const MAX_MARK_REPLIES = 100;
  */
 export type EditorialMarkKind = 'change-suggestion' | 'annotation' | 'editor-note' | 'personal-highlight';
 export type PersonalHighlightColor = 1 | 2 | 3;
-export type EditorialMarkStatus = 'open' | 'resolved';
-export type ProposalItemDisposition = 'rejected' | 'accepted-with-edit';
+/** `applied`: a Change Suggestion whose replacement an AI7 Apply wrote; the mark now stands on the applied text. */
+export type EditorialMarkStatus = 'open' | 'resolved' | 'applied';
+export type ProposalItemDisposition = 'accepted' | 'rejected' | 'accepted-with-edit';
 
 /**
  * Who a mark comes from (V2-UX-MARK-002): the editor, AI7 with what produced it — a Task, a review
@@ -938,6 +942,11 @@ export interface EditorialMarkAnchorProjection {
   sourceKind: EditorialMarkSourceProjection['kind'];
   /** The current Proposal Decision of a Change Suggestion, which the surface shows without a card. */
   disposition: ProposalItemDisposition | null;
+  /**
+   * The words an applied 修改建议 deleted, where the mark is the point they left (pinned on no text);
+   * `null` for every other mark. The surface names them on the point it draws there.
+   */
+  deletedText: string | null;
 }
 
 /** One basis a mark or a suggestion rests on: a labelled place in the manuscript, quoted exactly. */
@@ -975,7 +984,10 @@ export interface EditorialMarkCardProjection {
   blockId: string;
   fromGrapheme: number;
   toGrapheme: number;
-  /** The exact text the mark was made on. */
+  /**
+   * The exact text the mark stands on: what it was made on, or what an Apply wrote there. Empty where
+   * an applied 修改建议 deleted its words: the mark is then the point between two graphemes where they were.
+   */
   pinnedText: string;
   source: EditorialMarkSourceProjection;
   body: string;
@@ -988,6 +1000,8 @@ export interface EditorialMarkCardProjection {
     rationale: string;
     atomicGroupId: string | null;
     decision: ProposalItemDecisionProjection | null;
+    /** The committed Apply that wrote this item, as its Effect Receipt states it; `null` until one has. */
+    application: ManuscriptApplyProjection | null;
   };
   convertedFrom: null | { markId: string; kind: EditorialMarkKind; sourceKind: EditorialMarkSourceProjection['kind'] };
   /** What an export does with this mark unless the editor says otherwise (V2-UX-MARK-006, MARK-007). */
@@ -1068,6 +1082,77 @@ export interface EditorialMarkCommandProjection {
   marks: ReadonlyArray<EditorialMarkAnchorProjection>;
   marksTruncated: boolean;
   card: EditorialMarkCardProjection | null;
+}
+
+/** One exact state of a manuscript: the Revision it rests on, the journal position, and the working digest. */
+export interface ManuscriptStateProjection {
+  revisionId: string;
+  journalSequence: number;
+  workingDigest: string;
+}
+
+/**
+ * One committed AI7 Apply as its Effect Receipt states it (V2-UX-EREC-002). Identities, digests, times
+ * and the two manuscript states only: a receipt holds no manuscript text. The Effect Approval and the
+ * dispatch are records of their own, named here by identity; the Proposal Decision is the item's.
+ */
+export interface ManuscriptApplyProjection {
+  effectId: string;
+  kind: 'apply' | 'reverse-apply';
+  interaction: 'accept-and-apply' | 'accept-edited-and-apply' | 'apply-recorded-decision' | 'confirm-batch-apply' | 'confirm-reverse-apply';
+  approvalId: string;
+  dispatchId: string;
+  receiptId: string;
+  changeCount: number;
+  payloadDigest: string;
+  receiptDigest: string;
+  before: ManuscriptStateProjection;
+  after: ManuscriptStateProjection;
+  committedAt: string;
+  reversesEffectId: string | null;
+  reversedByEffectId: string | null;
+}
+
+/**
+ * 接受并应用 for one inline 修改建议 (V2-UX-PDEC-012, EAPP-003 to 006): one interaction records the
+ * Proposal Decision, records the Effect Approval and dispatches the Apply. `clientEffectId` is the
+ * Effect's idempotency key: the same key never writes twice, and asking again with it answers with
+ * the receipt it already has.
+ */
+export interface ApplyChangeSuggestionInput extends EditorialMarkBindingInput {
+  markId: string;
+  clientEffectId: string;
+  interaction: 'accept-and-apply' | 'accept-edited-and-apply' | 'apply-recorded-decision';
+  editedText: string | null;
+  reason: string | null;
+}
+
+/** 确认应用 on the batch confirmation strip: one Effect over the exact suggestions the strip named, all or none. */
+export interface ApplyChangeSuggestionBatchInput extends EditorialMarkBindingInput {
+  markIds: ReadonlyArray<string>;
+  clientEffectId: string;
+}
+
+/** 确认撤销本次应用: a Reverse Apply is a new Effect with its own approval and receipt (UI ADR 0003). */
+export interface ReverseAppliedChangeSuggestionInput extends EditorialMarkBindingInput {
+  markId: string;
+  clientEffectId: string;
+}
+
+export interface ManuscriptApplyCommandProjection extends EditorialMarkCommandProjection {
+  application: ManuscriptApplyProjection;
+  /** The window the command was issued from, as the working state holds it now. */
+  window: ManuscriptWindowProjection;
+}
+
+/**
+ * Apply Outcome Recovery (V2-UX-EREC-004): what the store holds for one Effect identity. The text and
+ * its receipt are written in one transaction, so there is no third answer: `committed` with the
+ * receipt, or `not-committed` and the manuscript unchanged by that Effect.
+ */
+export interface ManuscriptApplyOutcomeProjection {
+  state: 'committed' | 'not-committed';
+  application: ManuscriptApplyProjection | null;
 }
 
 /** The text-processing commands of the selection menu, run by the window that owns the clipboard. */
@@ -3448,6 +3533,17 @@ export interface ServiceOperationMap {
   recordChangeSuggestionDecision: { input: RecordChangeSuggestionDecisionInput; output: EditorialMarkCommandProjection };
   recordProposalDecisionReason: { input: RecordProposalDecisionReasonInput; output: EditorialMarkCommandProjection };
   /**
+   * AI7 Apply for Change Suggestions (Issue #408). The batch form has no renderer member yet: its
+   * confirmation strip belongs to 审阅's results, and until that surface exists only the service runs it.
+   */
+  applyChangeSuggestion: { input: ApplyChangeSuggestionInput; output: ManuscriptApplyCommandProjection };
+  applyChangeSuggestionBatch: { input: ApplyChangeSuggestionBatchInput; output: ManuscriptApplyCommandProjection };
+  reverseAppliedChangeSuggestion: { input: ReverseAppliedChangeSuggestionInput; output: ManuscriptApplyCommandProjection };
+  getManuscriptApplyOutcome: {
+    input: { manuscriptId: string; branchId: string; clientEffectId: string };
+    output: ManuscriptApplyOutcomeProjection;
+  };
+  /**
    * Remember where the editor is, so the next entry into this Book returns there (V2-UX-RET-002).
    * The pair is the editor's own caret, in the window projection's vocabulary; what it answers is
    * only that the position was taken, because a remembered position settles nothing and a surface
@@ -3624,6 +3720,9 @@ export interface RendererApi {
   updateEditorialMark(input: UpdateEditorialMarkInput): Promise<EditorialMarkCommandProjection>;
   recordChangeSuggestionDecision(input: RecordChangeSuggestionDecisionInput): Promise<EditorialMarkCommandProjection>;
   recordProposalDecisionReason(input: RecordProposalDecisionReasonInput): Promise<EditorialMarkCommandProjection>;
+  applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
+  reverseAppliedChangeSuggestion(input: ReverseAppliedChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
+  getManuscriptApplyOutcome(input: ServiceOperationMap['getManuscriptApplyOutcome']['input']): Promise<ManuscriptApplyOutcomeProjection>;
   /** Cut, copy or paste in the focused editor through the window itself; the page has no clipboard permission. */
   runEditorClipboardCommand(input: { command: EditorClipboardCommand }): Promise<{ state: 'done' }>;
   recordManuscriptEntryPosition(

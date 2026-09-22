@@ -4,6 +4,7 @@ import { Schema, type DOMOutputSpec, type Node as ProseMirrorNode } from 'prosem
 import { EditorState, Plugin, TextSelection, type Transaction } from 'prosemirror-state';
 import { Decoration, DecorationSet, EditorView } from 'prosemirror-view';
 import { deriveSpanEdit, followSpanEdit } from '../shared/mark-anchor.js';
+import { markPointLabel } from './editorial-mark-labels.js';
 import {
   MAX_BLOCK_CODE_UNITS,
   MAX_BLOCK_GRAPHEMES,
@@ -399,7 +400,38 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         }
         const from = position(followed.fromGrapheme);
         const to = position(followed.toGrapheme);
-        if (to <= from) continue;
+        if (to <= from) {
+          // No text is left under the mark — the point an applied deletion left, or a mark whose own
+          // words an edit took away — so a point is drawn there: no part of the document, no room in
+          // the line, text typed at it landing in front of it, and a click on it opening the mark's
+          // card as a click on a mark does, without moving the caret.
+          const label = markPointLabel(mark, drifted);
+          const active = activeMark?.markId === mark.markId;
+          const anchor = drifted ? 'drifted' : 'exact';
+          decorations.push(Decoration.widget(from, () => {
+            const point = window.document.createElement('span');
+            point.className = ['editorial-mark-point', `editorial-mark-point-${mark.kind}`, ...(active ? ['editorial-mark-active'] : [])].join(' ');
+            point.contentEditable = 'false';
+            point.setAttribute('role', 'img');
+            point.setAttribute('aria-label', label);
+            point.title = label;
+            point.dataset['markId'] = mark.markId;
+            point.dataset['markKind'] = mark.kind;
+            point.dataset['markSource'] = mark.sourceKind;
+            point.dataset['markStatus'] = mark.status;
+            point.dataset['markAnchor'] = anchor;
+            if (mark.disposition !== null) point.dataset['markDisposition'] = mark.disposition;
+            point.addEventListener('mousedown', (event) => {
+              if (event.button === 0) event.preventDefault();
+            });
+            return point;
+          }, {
+            side: 1,
+            ignoreSelection: true,
+            key: `point:${mark.markId}:${mark.status}:${mark.disposition ?? ''}:${anchor}:${active ? 'active' : ''}:${label}`,
+          }));
+          continue;
+        }
         const previewing = activeMark?.markId === mark.markId && activeMark.previewText !== null && !drifted;
         decorations.push(Decoration.inline(from, to, {
           class: [

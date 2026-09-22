@@ -265,6 +265,12 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['recordChangeSuggestionDecision']['output']>(IPC_CHANNELS.recordChangeSuggestionDecision, input),
   recordProposalDecisionReason: (input: ServiceOperationMap['recordProposalDecisionReason']['input']) =>
     invoke<ServiceOperationMap['recordProposalDecisionReason']['output']>(IPC_CHANNELS.recordProposalDecisionReason, input),
+  applyChangeSuggestion: (input: ServiceOperationMap['applyChangeSuggestion']['input']) =>
+    invoke<ServiceOperationMap['applyChangeSuggestion']['output']>(IPC_CHANNELS.applyChangeSuggestion, input),
+  reverseAppliedChangeSuggestion: (input: ServiceOperationMap['reverseAppliedChangeSuggestion']['input']) =>
+    invoke<ServiceOperationMap['reverseAppliedChangeSuggestion']['output']>(IPC_CHANNELS.reverseAppliedChangeSuggestion, input),
+  getManuscriptApplyOutcome: (input: ServiceOperationMap['getManuscriptApplyOutcome']['input']) =>
+    invoke<ServiceOperationMap['getManuscriptApplyOutcome']['output']>(IPC_CHANNELS.getManuscriptApplyOutcome, input),
   runEditorClipboardCommand: (input: { command: EditorClipboardCommand }) =>
     invoke<{ state: 'done' }>(IPC_CHANNELS.runEditorClipboardCommand, input),
   recordManuscriptEntryPosition: (input: ServiceOperationMap['recordManuscriptEntryPosition']['input']) =>

@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   DECISION_REASON_CHIPS,
   MARK_KIND_LABELS,
+  markDriftNote,
+  markPointLabel,
   markSourceLine,
   markStateLabel,
   markTimeLabel,
+  reverseApplyNote,
   selectionMenuReason,
 } from '../../src/renderer/editorial-mark-labels.js';
 import type { EditorialMarkCardProjection } from '../../src/shared/protocol.js';
@@ -22,6 +25,7 @@ function suggestionState(disposition: 'rejected' | 'accepted-with-edit' | null):
       proposedText: '改后',
       rationale: '',
       atomicGroupId: null,
+      application: null,
       decision: disposition === null ? null : {
         decisionId: 'decision', disposition, editedText: disposition === 'rejected' ? null : '改后二', reason: null, reasonSource: null, recordedAt: '2026-09-21T00:00:00.000Z',
       },
@@ -52,8 +56,28 @@ describe('the wording of the Mark surface', () => {
     expect(markStateLabel(suggestionState('rejected'))).toBe('已拒绝');
     expect(markStateLabel(suggestionState('accepted-with-edit'))).toBe('已记录 · 尚未写入稿件');
     expect(markStateLabel({ ...suggestionState(null), anchorState: 'drifted' })).toBe('待你处理 · 原文已变');
+    expect(markStateLabel({ ...suggestionState(null), status: 'applied' })).toBe('已应用');
+    expect(markStateLabel({ ...suggestionState(null), status: 'applied', anchorState: 'drifted' })).toBe('已应用 · 之后又改过');
     expect(markStateLabel({ kind: 'annotation', status: 'resolved', anchorState: 'exact', suggestion: null })).toBe('已处理');
     expect(markStateLabel({ kind: 'editor-note', status: 'open', anchorState: 'exact', suggestion: null })).toBe('仅自己可见');
+  });
+
+  it('says what reversing an Apply will write, and writes a deletion\'s words in again where they were', () => {
+    expect(reverseApplyNote('改后', '原文')).toBe('会把「改后」换回「原文」，并记为一次新的应用；原来的应用记录保留，不会被改写。');
+    expect(reverseApplyNote('', '原文')).toBe('会在原处重新写入「原文」，并记为一次新的应用；原来的应用记录保留，不会被改写。');
+  });
+
+  it('quotes what a drifted mark was made on, or the words an applied deletion took away', () => {
+    const { suggestion } = suggestionState(null);
+    expect(markDriftNote({ pinnedText: '原文', suggestion })).toBe('原文已变：标记时的文字是「原文」，这段文字后来改过，标记仍留在原处。');
+    expect(markDriftNote({ pinnedText: '批注的文字', suggestion: null })).toBe('原文已变：标记时的文字是「批注的文字」，这段文字后来改过，标记仍留在原处。');
+    expect(markDriftNote({ pinnedText: '', suggestion })).toBe('原文已变：这里删去了「原文」，删去处后来又改过，标记仍留在原处。');
+  });
+
+  it('names the point a mark on no text is drawn as: what was deleted there, or which mark waits there', () => {
+    expect(markPointLabel({ kind: 'change-suggestion', deletedText: '原文' }, false)).toBe('已删去「原文」');
+    expect(markPointLabel({ kind: 'change-suggestion', deletedText: '原文' }, true)).toBe('已删去「原文」 · 原文已变');
+    expect(markPointLabel({ kind: 'annotation', deletedText: null }, true)).toBe('批注 · 原文已变');
   });
 
   it('offers reason chips without a preselection and explains an unavailable mark entry', () => {

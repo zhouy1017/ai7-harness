@@ -65,6 +65,8 @@ interface LaunchArguments {
   foregroundExecutionControl: J03ForegroundExecutionControl | undefined;
   recoveryControl: J08RecoveryControl | undefined;
   modelAdapterControl: J04ModelAdapterControl | undefined;
+  /** J-05 only: the first Apply commits and its acknowledgement is withheld from the renderer, once. */
+  applyControl: 'lose-first-acknowledgement' | undefined;
   observeJ12Reveal: boolean;
   launcherPid: number;
 }
@@ -161,6 +163,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j03-foreground-execution-control' ||
           key === '--j08-recovery-control' ||
           key === '--j04-model-adapter' ||
+          key === '--j05-apply-control' ||
           key === '--j12-observe-reveal' ||
           key === '--launcher-pid' ||
           key === TRUSTED_SCOPE_ARGUMENT ||
@@ -236,6 +239,9 @@ function parseArguments(argv: string[]): LaunchArguments {
   const modelAdapterControl = modelAdapterControlValue !== undefined && J04_MODEL_ADAPTER_CONTROL_PATTERN.test(modelAdapterControlValue)
     ? modelAdapterControlValue
     : undefined;
+  const applyControlValue = values.get('--j05-apply-control');
+  const applyControl = applyControlValue === 'lose-first-acknowledgement' ? applyControlValue : undefined;
+  requireDesktop(applyControlValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-05' && applyControl !== undefined));
   const observeJ12RevealValue = values.get('--j12-observe-reveal');
   const observeJ12Reveal = observeJ12RevealValue === 'true';
   const launcherPid = Number(values.get('--launcher-pid'));
@@ -262,7 +268,8 @@ function parseArguments(argv: string[]): LaunchArguments {
   requireDesktop(
     launchForm.trustedOperationalScope === 'development-ci' ||
       (process.env.AI7_E2E_JOURNEY === undefined && injectedPickerPath === undefined && observeJ12RevealValue === undefined &&
-        importControlValue === undefined && foregroundExecutionControlValue === undefined && recoveryControlValue === undefined && modelAdapterControlValue === undefined),
+        importControlValue === undefined && foregroundExecutionControlValue === undefined && recoveryControlValue === undefined && modelAdapterControlValue === undefined &&
+        applyControlValue === undefined),
   );
   return {
     dataRoot,
@@ -272,6 +279,7 @@ function parseArguments(argv: string[]): LaunchArguments {
     foregroundExecutionControl,
     recoveryControl,
     modelAdapterControl,
+    applyControl,
     observeJ12Reveal,
     launcherPid,
   };
@@ -348,6 +356,7 @@ function registerRendererHandlers(
   getModelServiceSettings: () => Promise<ModelServiceSettingsProjection>,
   saveModelServiceCredential: (input: { connectionName: string; secret: string }) => Promise<ModelServiceSettingsProjection>,
   removeModelServiceCredential: () => Promise<ModelServiceSettingsProjection>,
+  consumeLostApplyAcknowledgement: () => boolean,
 ): () => void {
   const AMBIGUOUS_SERVICE_FAILURES = new Set([
     'COMMIT_PROOF_INCONCLUSIVE',
@@ -1649,6 +1658,45 @@ function registerRendererHandlers(
         });
       }),
   );
+  // AI7 Apply (Issue #408) writes the manuscript, so it is gated as a journal write is and serialized
+  // with every other effect; the window's capability is re-read from the window the Apply answers with.
+  ipcMain.handle(IPC_CHANNELS.applyChangeSuggestion, (event, input: ServiceOperationMap['applyChangeSuggestion']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        requireManuscriptCapability(owned, input);
+        const result = await service.call('applyChangeSuggestion', input);
+        rememberManuscriptCapability(owned, result.window, input, owned.routeGeneration);
+        // J-05's launch control: the Apply is committed and its answer never reaches the renderer, which
+        // must then learn the outcome from the records by the same Effect identity and never send a second.
+        if (consumeLostApplyAcknowledgement()) throw new ServiceCallError('AI7_APPLY_ACKNOWLEDGEMENT_LOST', '应用的确认没有送达。');
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.reverseAppliedChangeSuggestion,
+    (event, input: ServiceOperationMap['reverseAppliedChangeSuggestion']['input']) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          requireManuscriptCapability(owned, input);
+          const result = await service.call('reverseAppliedChangeSuggestion', input);
+          rememberManuscriptCapability(owned, result.window, input, owned.routeGeneration);
+          return result;
+        });
+      }),
+  );
+  ipcMain.handle(IPC_CHANNELS.getManuscriptApplyOutcome, (event, input: ServiceOperationMap['getManuscriptApplyOutcome']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      requireManuscriptCapability(owned, input);
+      return service.call('getManuscriptApplyOutcome', input);
+    }),
+  );
   // The selection menu's 文字处理 group. The page holds no clipboard permission, so the window that
   // owns the focused editor runs the command itself; it reaches no service and takes nothing but the
   // command's name, and the editor's own paste and cut handling still decides what enters the text.
@@ -2830,6 +2878,14 @@ export async function runApplication(): Promise<void> {
       settingsProjection,
       saveModelServiceCredential,
       removeModelServiceCredential,
+      (() => {
+        let pending = launch.applyControl === 'lose-first-acknowledgement';
+        return (): boolean => {
+          const lose = pending;
+          pending = false;
+          return lose;
+        };
+      })(),
     );
     startupLocation = 'renderer-first-paint';
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);

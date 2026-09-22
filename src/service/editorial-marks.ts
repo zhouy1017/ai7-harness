@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   followGraphemeEdit,
+  followPoint,
   graphemesOf,
   resolvePinnedRange,
   deriveSpanEdit,
@@ -19,6 +20,8 @@ import {
   type EditorialMarkCommandProjection,
   type EditorialMarkKind,
   type EditorialMarkSourceProjection,
+  type EditorialMarkStatus,
+  type ManuscriptApplyProjection,
   type PersonalHighlightColor,
   type ProposalItemDecisionProjection,
   type ProposalItemDisposition,
@@ -44,6 +47,12 @@ import {
  * The two vocabularies are written whole here although this revision's commands write only part of
  * them: a plain `accepted` decision and an `applied` mark are what 接受并应用 records (Issue #408), and
  * a CHECK that admits them now spares the next revision a rebuild of relations one revision old.
+ *
+ * Revision 23 (Issue #408) widened `editorial_marks` for the one pin that is empty: a 修改建议 whose
+ * Apply deleted its words is pinned on no text, at the zero-width range where they were, and is exact
+ * there until an edit spans that point. A new store is created with the widened text; a store that
+ * revision 22 created is rebuilt to it (`widenEditorialMarks`), and revision 22's text is kept only to
+ * recognise and validate such a store (`EDITORIAL_MARK_REVISION_22_SQL`).
  */
 export const EDITORIAL_MARK_SCHEMA_SQL = {
   editorial_marks: `CREATE TABLE editorial_marks (
@@ -59,8 +68,8 @@ export const EDITORIAL_MARK_SCHEMA_SQL = {
   pinned_journal_sequence INTEGER NOT NULL CHECK(pinned_journal_sequence >= 0),
   pinned_block_digest TEXT NOT NULL,
   pinned_from_grapheme INTEGER NOT NULL CHECK(pinned_from_grapheme >= 0),
-  pinned_to_grapheme INTEGER NOT NULL CHECK(pinned_to_grapheme > pinned_from_grapheme),
-  pinned_text TEXT NOT NULL CHECK(length(pinned_text) > 0),
+  pinned_to_grapheme INTEGER NOT NULL CHECK(pinned_to_grapheme >= pinned_from_grapheme),
+  pinned_text TEXT NOT NULL,
   pinned_text_digest TEXT NOT NULL,
   from_grapheme INTEGER NOT NULL CHECK(from_grapheme >= 0),
   to_grapheme INTEGER NOT NULL CHECK(to_grapheme >= from_grapheme),
@@ -81,7 +90,9 @@ export const EDITORIAL_MARK_SCHEMA_SQL = {
   CHECK((source_kind = 'ai7') = (source_origin IS NOT NULL)),
   CHECK(source_kind = 'editor' OR source_label IS NOT NULL),
   CHECK(kind NOT IN ('editor-note', 'personal-highlight') OR source_kind = 'editor'),
-  CHECK(anchor_state <> 'exact' OR to_grapheme > from_grapheme),
+  CHECK((pinned_to_grapheme > pinned_from_grapheme) = (pinned_text <> '')),
+  CHECK(pinned_text <> '' OR kind = 'change-suggestion'),
+  CHECK(anchor_state <> 'exact' OR (to_grapheme > from_grapheme) = (pinned_text <> '')),
   UNIQUE(branch_id, block_id, mark_id)
 ) STRICT`,
   editorial_mark_replies: `CREATE TABLE editorial_mark_replies (
@@ -127,6 +138,52 @@ export const EDITORIAL_MARK_SCHEMA_SQL = {
   reason TEXT NOT NULL CHECK(length(reason) > 0),
   reason_source TEXT NOT NULL CHECK(reason_source IN ('reason-field', 'suggested', 'free-text')),
   recorded_at TEXT NOT NULL
+) STRICT`,
+} as const;
+
+/**
+ * `editorial_marks` exactly as schema revision 22 created it (Issue #407): no pin may be empty and no
+ * exact anchor zero-width. It is kept only to recognise and validate, exactly, a store that revision 22
+ * created before revision 23 rebuilds the relation; nothing is ever created from it.
+ */
+export const EDITORIAL_MARK_REVISION_22_SQL = {
+  editorial_marks: `CREATE TABLE editorial_marks (
+  mark_id TEXT PRIMARY KEY,
+  client_mark_id TEXT NOT NULL UNIQUE,
+  book_id TEXT NOT NULL REFERENCES books(book_id),
+  manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+  branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+  block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+  kind TEXT NOT NULL CHECK(kind IN ('change-suggestion', 'annotation', 'editor-note', 'personal-highlight')),
+  highlight_color INTEGER CHECK(highlight_color IN (1, 2, 3)),
+  pinned_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+  pinned_journal_sequence INTEGER NOT NULL CHECK(pinned_journal_sequence >= 0),
+  pinned_block_digest TEXT NOT NULL,
+  pinned_from_grapheme INTEGER NOT NULL CHECK(pinned_from_grapheme >= 0),
+  pinned_to_grapheme INTEGER NOT NULL CHECK(pinned_to_grapheme > pinned_from_grapheme),
+  pinned_text TEXT NOT NULL CHECK(length(pinned_text) > 0),
+  pinned_text_digest TEXT NOT NULL,
+  from_grapheme INTEGER NOT NULL CHECK(from_grapheme >= 0),
+  to_grapheme INTEGER NOT NULL CHECK(to_grapheme >= from_grapheme),
+  anchor_state TEXT NOT NULL CHECK(anchor_state IN ('exact', 'drifted', 'detached')),
+  followed_journal_sequence INTEGER NOT NULL CHECK(followed_journal_sequence >= 0),
+  body TEXT NOT NULL,
+  source_kind TEXT NOT NULL CHECK(source_kind IN ('editor', 'ai7', 'imported-author')),
+  source_origin TEXT CHECK(source_origin IN ('task', 'review-category', 'analysis')),
+  source_label TEXT,
+  source_task_id TEXT,
+  basis_json TEXT NOT NULL,
+  export_disposition TEXT NOT NULL CHECK(export_disposition IN ('exported-by-default', 'only-when-included', 'never-exported')),
+  status TEXT NOT NULL CHECK(status IN ('open', 'resolved', 'applied', 'removed', 'converted')),
+  converted_from_mark_id TEXT REFERENCES editorial_marks(mark_id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  CHECK((kind = 'personal-highlight') = (highlight_color IS NOT NULL)),
+  CHECK((source_kind = 'ai7') = (source_origin IS NOT NULL)),
+  CHECK(source_kind = 'editor' OR source_label IS NOT NULL),
+  CHECK(kind NOT IN ('editor-note', 'personal-highlight') OR source_kind = 'editor'),
+  CHECK(anchor_state <> 'exact' OR to_grapheme > from_grapheme),
+  UNIQUE(branch_id, block_id, mark_id)
 ) STRICT`,
 } as const;
 
@@ -180,7 +237,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const BLOCK_PATTERN = /^blk_[0-9a-f]{24}$/;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const KINDS: ReadonlyArray<EditorialMarkKind> = ['change-suggestion', 'annotation', 'editor-note', 'personal-highlight'];
-const LIVE_STATUSES = "('open', 'resolved')";
+const LIVE_STATUSES = "('open', 'resolved', 'applied')";
 
 /** What each kind may become (V2-UX-MARK-003, MARK-006, MARK-007); a kind absent here converts to nothing. */
 const CONVERSIONS: Readonly<Record<EditorialMarkKind, ReadonlyArray<EditorialMarkKind>>> = {
@@ -247,6 +304,56 @@ export function initializeEditorialMarkSchema(db: DatabaseSync): void {
   requireMark(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
 }
 
+/** A relation's text with its whitespace folded, the way `task-authorization.ts` compares exact texts. */
+function foldedSql(value: string): string {
+  return value.trim().replace(/\s+/gu, ' ');
+}
+
+/**
+ * Which of its two texts `editorial_marks` holds: revision 22's, or the current one that admits the
+ * empty pin of an applied deletion. No other text was ever created, so any other is refused.
+ */
+export function editorialMarksShape(db: DatabaseSync): 'revision-22' | 'current' {
+  const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'editorial_marks'").get() as SqlRow | undefined;
+  const sql = row === undefined ? '' : foldedSql(text(row.sql));
+  if (sql === foldedSql(EDITORIAL_MARK_SCHEMA_SQL.editorial_marks)) return 'current';
+  requireMark(sql === foldedSql(EDITORIAL_MARK_REVISION_22_SQL.editorial_marks), 'SCHEMA_MIGRATION_FAILED', '标记表结构不兼容。');
+  return 'revision-22';
+}
+
+/**
+ * Revision 22 → 23 for `editorial_marks` (Issue #408): the relation is rebuilt from its current text,
+ * which admits the one empty pin — a 修改建议 whose Apply deleted its words — with every row copied byte
+ * for byte, rowid included, in rowid order, and every index or trigger on it re-armed from its own
+ * text (revision 22 created none; the indexes behind its keys come back with the table). It runs in
+ * the caller's transaction with foreign keys off, so the replies, the Proposal Change Items and the
+ * marks converted from other marks keep their texts and rows while the relation they reference is
+ * re-created; the caller checks every reference before it commits.
+ */
+export function widenEditorialMarks(db: DatabaseSync): void {
+  requireMark(
+    db.isTransaction && integer((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys) === 0,
+    'SCHEMA_MIGRATION_FAILED',
+    '标记表只能在停用引用校验的事务中重建。',
+  );
+  const columnsOf = (): string => (db.prepare("SELECT name FROM pragma_table_info('editorial_marks') ORDER BY cid").all() as SqlRow[])
+    .map((row) => text(row.name)).join(', ');
+  const rows = (): number => integer((db.prepare('SELECT count(*) total FROM editorial_marks').get() as SqlRow).total);
+  const columns = columnsOf();
+  const before = rows();
+  const attached = (db.prepare(
+    "SELECT sql FROM sqlite_schema WHERE tbl_name = 'editorial_marks' AND type IN ('index', 'trigger') AND sql IS NOT NULL ORDER BY type, name",
+  ).all() as SqlRow[]).map((row) => text(row.sql));
+  db.exec('CREATE TEMP TABLE migrate_editorial_marks AS SELECT rowid AS migrate_rowid, * FROM editorial_marks');
+  db.exec('DROP TABLE editorial_marks');
+  db.exec(EDITORIAL_MARK_SCHEMA_SQL.editorial_marks);
+  requireMark(columnsOf() === columns, 'SCHEMA_MIGRATION_FAILED', '标记表迁移前后的列不一致。');
+  db.exec(`INSERT INTO editorial_marks(rowid, ${columns}) SELECT migrate_rowid, ${columns} FROM temp.migrate_editorial_marks ORDER BY migrate_rowid`);
+  db.exec('DROP TABLE temp.migrate_editorial_marks');
+  for (const sql of attached) db.exec(sql);
+  requireMark(rows() === before, 'SCHEMA_MIGRATION_FAILED', '标记表迁移未保留全部记录。');
+}
+
 const relationSeen = new WeakSet<DatabaseSync>();
 
 /**
@@ -287,7 +394,8 @@ function liveMarksOfBlock(db: DatabaseSync, branchId: string, blockId: string): 
  * `edits` are the spans the caller replaced, each against the text the previous one left; without
  * them the one span between the two texts is derived. Runs on every durable text change — a journal
  * edit, a replacement, an undo or a redo — so a mark's range is never read against text it was not
- * followed through.
+ * followed through. A mark pinned on no text, where an applied suggestion deleted its words, is a
+ * point: it carries its state through the spans (`followPoint`) instead of being found again.
  */
 export function followBlockTextChangeForMarks(
   db: DatabaseSync,
@@ -316,17 +424,21 @@ export function followBlockTextChangeForMarks(
     const next = index === spans.length - 1
       ? finalText
       : [...current.slice(0, span.fromGrapheme), ...span.inserted, ...current.slice(span.toGrapheme)];
+    // Points that stand at one place — two deletions applied side by side — have lost the order between
+    // them: text inserted exactly there could belong between them, so none can say which side it is on.
+    const crowded = followed.filter((mark) => mark.pinned.length === 0 && mark.state === 'exact' &&
+      mark.fromGrapheme === span.fromGrapheme && mark.toGrapheme === span.toGrapheme);
     for (const mark of followed) {
-      const result = followGraphemeEdit(mark, mark.pinned, next, span);
+      const result = mark.pinned.length === 0 ? followPoint(mark, current, next, span) : followGraphemeEdit(mark, mark.pinned, next, span);
       mark.fromGrapheme = result.fromGrapheme;
       mark.toGrapheme = result.toGrapheme;
-      mark.state = result.state;
+      mark.state = crowded.length > 1 && crowded.includes(mark) ? 'drifted' : result.state;
     }
     current = next;
   });
   if (spans.length === 0) {
     for (const mark of followed) {
-      const result = resolvePinnedRange(finalText, mark.pinned, mark, mark);
+      const result = mark.pinned.length === 0 ? followPoint(mark, finalText, finalText, null) : resolvePinnedRange(finalText, mark.pinned, mark, mark);
       mark.fromGrapheme = result.fromGrapheme;
       mark.toGrapheme = result.toGrapheme;
       mark.state = result.state;
@@ -340,7 +452,8 @@ export function followBlockTextChangeForMarks(
  * to follow. Every live mark is resolved against what its block holds now: `exact` where its pinned
  * text stands at its range or stands alone in the block, `drifted` otherwise, and `detached` when
  * the block is no longer part of the working state. A detached mark that finds its block again is
- * resolved like any other.
+ * resolved like any other. A point pinned on no text has nothing to be found by, so it resolves
+ * `drifted`: rewritten text never proves where an applied suggestion deleted its words.
  */
 export function resolveBranchMarksAfterRewrite(db: DatabaseSync, branchId: string): void {
   if (!marksRelationExists(db)) return;
@@ -377,8 +490,52 @@ export function resolveBranchMarksAfterRewrite(db: DatabaseSync, branchId: strin
   }
 }
 
+/**
+ * The latest committed Apply of one Proposal Change Item, as its Effect Receipt states it, with the
+ * Reverse Apply that counteracted it when there is one. Read from the Effect ledger revision 23 adds;
+ * a store without it has applied nothing.
+ */
+export function applicationOfItem(db: DatabaseSync, itemId: string): ManuscriptApplyProjection | null {
+  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'manuscript_effect_receipts'").get() === undefined) return null;
+  const row = db.prepare(
+    `SELECT i.effect_id, i.kind, i.payload_digest, i.target_count, i.base_revision_id, i.base_journal_sequence, i.base_working_digest,
+            i.reverses_effect_id, a.approval_id, a.interaction, d.dispatch_id, r.receipt_id, r.receipt_digest, r.committed_at,
+            r.resulting_revision_id, r.resulting_journal_sequence, r.resulting_working_digest,
+            (SELECT x.effect_id FROM manuscript_effect_intents x
+               JOIN manuscript_effect_receipts xr ON xr.effect_id = x.effect_id
+              WHERE x.reverses_effect_id = i.effect_id LIMIT 1) reversed_by
+     FROM manuscript_effect_targets t
+     JOIN manuscript_effect_intents i ON i.effect_id = t.effect_id AND i.kind = 'apply'
+     JOIN manuscript_effect_approvals a ON a.effect_id = i.effect_id
+     JOIN manuscript_effect_dispatches d ON d.effect_id = i.effect_id
+     JOIN manuscript_effect_receipts r ON r.effect_id = i.effect_id
+     WHERE t.item_id = ? ORDER BY r.resulting_journal_sequence DESC LIMIT 1`,
+  ).get(itemId) as SqlRow | undefined;
+  return row === undefined ? null : applyProjection(row);
+}
+
+export function applyProjection(row: SqlRow): ManuscriptApplyProjection {
+  return {
+    effectId: text(row.effect_id),
+    kind: text(row.kind) as ManuscriptApplyProjection['kind'],
+    interaction: text(row.interaction) as ManuscriptApplyProjection['interaction'],
+    approvalId: text(row.approval_id),
+    dispatchId: text(row.dispatch_id),
+    receiptId: text(row.receipt_id),
+    changeCount: integer(row.target_count),
+    payloadDigest: text(row.payload_digest),
+    receiptDigest: text(row.receipt_digest),
+    before: { revisionId: text(row.base_revision_id), journalSequence: integer(row.base_journal_sequence), workingDigest: text(row.base_working_digest) },
+    after: { revisionId: text(row.resulting_revision_id), journalSequence: integer(row.resulting_journal_sequence), workingDigest: text(row.resulting_working_digest) },
+    committedAt: text(row.committed_at),
+    reversesEffectId: nullableText(row.reverses_effect_id),
+    reversedByEffectId: nullableText(row.reversed_by),
+  };
+}
+
 const ANCHOR_SELECT = `SELECT em.mark_id, em.kind, em.block_id, em.from_grapheme, em.to_grapheme, em.anchor_state, em.status,
        em.highlight_color, em.source_kind,
+       CASE WHEN em.pinned_text = '' THEN (SELECT i.current_text FROM proposal_change_items i WHERE i.mark_id = em.mark_id) END deleted_text,
        (SELECT d.disposition FROM proposal_change_items i
           JOIN proposal_item_decisions d ON d.item_id = i.item_id
          WHERE i.mark_id = em.mark_id ORDER BY d.ordinal DESC LIMIT 1) current_disposition
@@ -394,10 +551,11 @@ function anchorProjection(row: SqlRow): EditorialMarkAnchorProjection {
     fromGrapheme: integer(row.from_grapheme),
     toGrapheme: integer(row.to_grapheme),
     anchorState: text(row.anchor_state) as 'exact' | 'drifted',
-    status: text(row.status) as 'open' | 'resolved',
+    status: text(row.status) as EditorialMarkStatus,
     highlightColor: row.highlight_color === null ? null : integer(row.highlight_color) as PersonalHighlightColor,
     sourceKind: text(row.source_kind) as EditorialMarkSourceProjection['kind'],
     disposition: disposition === null || disposition === 'withdrawn' ? null : disposition as ProposalItemDisposition,
+    deletedText: nullableText(row.deleted_text),
   };
 }
 
@@ -529,7 +687,7 @@ export class EditorialMarkStore {
        JOIN manuscript_revisions mr ON mr.revision_id = em.pinned_revision_id
        WHERE em.mark_id = ? AND em.manuscript_id = ? AND em.branch_id = ?`,
     ).get(markId, manuscriptId, branchId) as SqlRow | undefined;
-    requireMark(row !== undefined && (row.status === 'open' || row.status === 'resolved'), 'MARK_NOT_FOUND', '这条标记已不存在。');
+    requireMark(row !== undefined && (row.status === 'open' || row.status === 'resolved' || row.status === 'applied'), 'MARK_NOT_FOUND', '这条标记已不存在。');
     const kind = text(row.kind) as EditorialMarkKind;
     const replies = (this.#db.prepare(
       'SELECT reply_id, body, created_at FROM editorial_mark_replies WHERE mark_id = ? ORDER BY ordinal',
@@ -540,7 +698,7 @@ export class EditorialMarkStore {
     return {
       markId,
       kind,
-      status: text(row.status) as 'open' | 'resolved',
+      status: text(row.status) as EditorialMarkStatus,
       anchorState: text(row.anchor_state) as EditorialMarkCardProjection['anchorState'],
       highlightColor: row.highlight_color === null ? null : integer(row.highlight_color) as PersonalHighlightColor,
       blockId: text(row.block_id),
@@ -625,6 +783,7 @@ export class EditorialMarkStore {
     transact(this.#db, () => {
       const mark = this.#liveMark(input);
       requireMark(mark.kind === 'change-suggestion', 'MARK_ACTION_INVALID', '只有修改建议可以这样处理。');
+      requireMark(mark.status !== 'applied', 'MARK_DECISION_INVALID', '这条修改建议已经应用；要改回去，请准备撤销本次应用。');
       const item = this.#db.prepare('SELECT item_id, current_text FROM proposal_change_items WHERE mark_id = ?').get(input.markId) as SqlRow | undefined;
       requireMark(item !== undefined, 'MARK_STORE_INVALID', '修改建议缺少提案修改项。');
       const itemId = text(item.item_id);
@@ -708,6 +867,7 @@ export class EditorialMarkStore {
   #convert(input: UpdateEditorialMarkInput, mark: SqlRow, kind: EditorialMarkKind, now: string): string {
     const target = input.targetKind;
     requireMark(target !== null && CONVERSIONS[kind].includes(target), 'MARK_ACTION_INVALID', '这种标记不能这样转换。');
+    requireMark(mark.status !== 'applied', 'MARK_ACTION_INVALID', '已经应用的修改建议不能转换。');
     requireMark(mark.anchor_state === 'exact', 'MARK_ANCHOR_CHANGED', '原文已变，请先重新标注再转换。');
     const pinnedText = text(mark.pinned_text);
     let source: EditorialMarkSourceProjection = { kind: 'editor', origin: null, label: null, taskId: null };
@@ -782,7 +942,105 @@ export class EditorialMarkStore {
       rationale: text(item.rationale),
       atomicGroupId: nullableText(item.atomic_group_id),
       decision,
+      application: applicationOfItem(this.#db, text(item.item_id)),
     };
+  }
+
+  /**
+   * The seam the Apply owner works through (Issue #408), always inside its own transaction: what one
+   * Change Suggestion asks to have written, the Proposal Decision the one interaction records, and
+   * where the mark stands once the text under it is the applied text — or the restored one.
+   */
+  suggestionTarget(binding: { manuscriptId: string; branchId: string; markId: string }): {
+    itemId: string; blockId: string; fromGrapheme: number; toGrapheme: number; anchorState: string; status: string;
+    currentText: string; proposedText: string; standingText: string;
+    decision: { decisionId: string; disposition: string; editedText: string | null } | null;
+  } {
+    const mark = this.#liveMark(binding);
+    requireMark(mark.kind === 'change-suggestion', 'MARK_ACTION_INVALID', '只有修改建议可以应用。');
+    const item = this.#db.prepare('SELECT item_id, current_text, proposed_text FROM proposal_change_items WHERE mark_id = ?').get(binding.markId) as SqlRow | undefined;
+    requireMark(item !== undefined, 'MARK_STORE_INVALID', '修改建议缺少提案修改项。');
+    const decision = this.#db.prepare(
+      'SELECT decision_id, disposition, edited_text FROM proposal_item_decisions WHERE item_id = ? ORDER BY ordinal DESC LIMIT 1',
+    ).get(text(item.item_id)) as SqlRow | undefined;
+    return {
+      itemId: text(item.item_id),
+      blockId: text(mark.block_id),
+      fromGrapheme: integer(mark.from_grapheme),
+      toGrapheme: integer(mark.to_grapheme),
+      anchorState: text(mark.anchor_state),
+      status: text(mark.status),
+      currentText: text(item.current_text),
+      proposedText: text(item.proposed_text),
+      standingText: text(mark.pinned_text),
+      decision: decision === undefined || decision.disposition === 'withdrawn' ? null : {
+        decisionId: text(decision.decision_id),
+        disposition: text(decision.disposition),
+        editedText: nullableText(decision.edited_text),
+      },
+    };
+  }
+
+  recordDecisionForApply(
+    binding: { manuscriptId: string; branchId: string },
+    itemId: string,
+    blockId: string,
+    disposition: 'accepted' | 'accepted-with-edit' | 'withdrawn',
+    editedText: string | null,
+    reason: string | null,
+    now: string,
+  ): string {
+    const current = this.#db.prepare(
+      'SELECT decision_id, ordinal FROM proposal_item_decisions WHERE item_id = ? ORDER BY ordinal DESC LIMIT 1',
+    ).get(itemId) as SqlRow | undefined;
+    const state = this.#branchState(binding.manuscriptId, binding.branchId);
+    const block = this.#db.prepare('SELECT digest FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(binding.branchId, blockId) as SqlRow | undefined;
+    const decisionId = randomUUID();
+    this.#db.prepare(
+      `INSERT INTO proposal_item_decisions(
+         decision_id, client_decision_id, item_id, ordinal, disposition, edited_text, supersedes_decision_id,
+         decided_revision_id, decided_journal_sequence, decided_block_digest, actor, recorded_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'editor', ?)`,
+    ).run(
+      decisionId, randomUUID(), itemId, current === undefined ? 1 : integer(current.ordinal) + 1, disposition, editedText,
+      current === undefined ? null : text(current.decision_id), state.revisionId, state.journalSequence,
+      block === undefined ? null : text(block.digest), now,
+    );
+    if (reason !== null) {
+      this.#db.prepare(
+        "INSERT INTO proposal_decision_reasons(decision_id, reason, reason_source, recorded_at) VALUES (?, ?, 'reason-field', ?)",
+      ).run(decisionId, this.#body(reason), now);
+    }
+    return decisionId;
+  }
+
+  /**
+   * Put a mark on the text an Apply — or its reversal — just wrote. The mark is the mutable relation:
+   * it is re-pinned to what now stands under it, and what stood there before stays in the Proposal
+   * Change Item and in the Effect's own target record. An Apply that deleted its words wrote no text:
+   * the mark is pinned, exactly like any other, on the empty range at the point where they were.
+   */
+  standMarkOn(
+    markId: string,
+    status: 'applied' | 'open',
+    pin: { revisionId: string; journalSequence: number; blockDigest: string; fromGrapheme: number; toGrapheme: number; text: string },
+    now: string,
+  ): void {
+    const updated = this.#db.prepare(
+      `UPDATE editorial_marks SET status = ?, pinned_revision_id = ?, pinned_journal_sequence = ?, pinned_block_digest = ?,
+         pinned_from_grapheme = ?, pinned_to_grapheme = ?, pinned_text = ?, pinned_text_digest = ?,
+         from_grapheme = ?, to_grapheme = ?, anchor_state = 'exact', followed_journal_sequence = ?, updated_at = ?
+       WHERE mark_id = ?`,
+    ).run(
+      status, pin.revisionId, pin.journalSequence, pin.blockDigest, pin.fromGrapheme, pin.toGrapheme, pin.text, sha256(pin.text),
+      pin.fromGrapheme, pin.toGrapheme, pin.journalSequence, now, markId,
+    );
+    requireMark(updated.changes === 1, 'MARK_STORE_INVALID', '标记记录无效。');
+  }
+
+  commandProjection(binding: { manuscriptId: string; branchId: string; windowStartBlockId: string }, markId: string): EditorialMarkCommandProjection {
+    this.#requireBinding(binding);
+    return this.#command(binding, markId);
   }
 
   #command(binding: { manuscriptId: string; branchId: string; windowStartBlockId: string }, markId: string, gone = false): EditorialMarkCommandProjection {

@@ -446,10 +446,11 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
   try {
     database.exec('PRAGMA query_only = ON;');
     const version = database.prepare('PRAGMA user_version').get();
-    // Synchronized delta with Issues #467 and #407: schema revision 21 added the manuscript
-    // entry-position relation and revision 22 adds the editorial-mark relations, so this pin moves
-    // with the terminal version the service stamps (`EDITORIAL_MARK_SCHEMA_VERSION`).
-    requireJourney(version?.user_version === 22, 'credential-cleanup-metadata-version');
+    // Synchronized delta with Issues #467, #407 and #408: schema revision 21 added the manuscript
+    // entry-position relation, revision 22 the editorial-mark relations and revision 23 the
+    // manuscript-effect relations, so this pin moves with the terminal version the service stamps
+    // (`MANUSCRIPT_EFFECT_SCHEMA_VERSION`).
+    requireJourney(version?.user_version === 23, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, connection_name, provider_id, model_id,
               adapter_revision, configuration_revision, approved_fallback_chain,

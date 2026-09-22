@@ -1,4 +1,5 @@
 import type {
+  EditorialMarkAnchorProjection,
   EditorialMarkCardProjection,
   EditorialMarkKind,
   PersonalHighlightColor,
@@ -22,6 +23,7 @@ export const HIGHLIGHT_COLOR_LABELS: Readonly<Record<PersonalHighlightColor, str
 
 /** The optional reason chips of V2-UX-PDEC-009; none is ever preselected, and 自行输入 stands beside them. */
 export const DECISION_REASON_CHIPS: Readonly<Record<ProposalItemDisposition, ReadonlyArray<string>>> = {
+  accepted: ['语言更准确', '保持作者风格'],
   rejected: ['证据不足', '方向不合适', '保持作者风格'],
   'accepted-with-edit': ['语言更准确', '保持作者风格'],
 };
@@ -43,6 +45,8 @@ export function markSourceLine(card: Pick<EditorialMarkCardProjection, 'source' 
 export function markStateLabel(card: Pick<EditorialMarkCardProjection, 'kind' | 'status' | 'anchorState' | 'suggestion'>): string {
   const drifted = card.anchorState === 'exact' ? '' : ' · 原文已变';
   if (card.kind === 'change-suggestion') {
+    // 已应用 is the state of a verified Effect Receipt, never of a decision alone (V2-UX-EAPP-011).
+    if (card.status === 'applied') return card.anchorState === 'exact' ? '已应用' : '已应用 · 之后又改过';
     const disposition = card.suggestion?.decision?.disposition;
     if (disposition === 'rejected') return `已拒绝${drifted}`;
     if (disposition === 'accepted-with-edit') return `已记录 · 尚未写入稿件${drifted}`;
@@ -50,6 +54,35 @@ export function markStateLabel(card: Pick<EditorialMarkCardProjection, 'kind' | 
   }
   if (card.kind === 'annotation') return `${card.status === 'resolved' ? '已处理' : '待你处理'}${drifted}`;
   return `仅自己可见${drifted}`;
+}
+
+/**
+ * 原文已变 on a Mark Card: the text the mark was made on — or, for a suggestion whose Apply deleted its
+ * words and which is pinned on no text, the words it deleted.
+ */
+export function markDriftNote(card: Pick<EditorialMarkCardProjection, 'pinnedText' | 'suggestion'>): string {
+  if (card.pinnedText.length === 0 && card.suggestion !== null) {
+    return `原文已变：这里删去了「${card.suggestion.currentText}」，删去处后来又改过，标记仍留在原处。`;
+  }
+  return `原文已变：标记时的文字是「${card.pinnedText}」，这段文字后来改过，标记仍留在原处。`;
+}
+
+/**
+ * What 准备撤销本次应用 says it will write, before the button that writes it (V2-UX-EREC-010): the applied
+ * text changed back to the original, or — where the Apply deleted the words — the words written in again.
+ */
+export function reverseApplyNote(appliedText: string, originalText: string): string {
+  const write = appliedText.length === 0 ? `会在原处重新写入「${originalText}」` : `会把「${appliedText}」换回「${originalText}」`;
+  return `${write}，并记为一次新的应用；原来的应用记录保留，不会被改写。`;
+}
+
+/**
+ * The name of the point drawn where a mark stands on no text: the words an applied deletion took away,
+ * or — for a mark whose own words an edit removed — which kind of mark waits there.
+ */
+export function markPointLabel(mark: Pick<EditorialMarkAnchorProjection, 'kind' | 'deletedText'>, drifted: boolean): string {
+  const what = mark.deletedText === null ? MARK_KIND_LABELS[mark.kind] : `已删去「${mark.deletedText}」`;
+  return drifted ? `${what} · 原文已变` : what;
 }
 
 export function markTimeLabel(iso: string): string {

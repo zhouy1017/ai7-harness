@@ -472,6 +472,19 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.recordChangeSuggestionDecision(request.input) };
     case 'recordProposalDecisionReason':
       return { id: request.id, ok: true, op: request.op, result: store.recordProposalDecisionReason(request.input) };
+    case 'applyChangeSuggestion':
+      return { id: request.id, ok: true, op: request.op, result: store.applyChangeSuggestion(request.input) };
+    case 'applyChangeSuggestionBatch':
+      return { id: request.id, ok: true, op: request.op, result: store.applyChangeSuggestionBatch(request.input) };
+    case 'reverseAppliedChangeSuggestion':
+      return { id: request.id, ok: true, op: request.op, result: store.reverseAppliedChangeSuggestion(request.input) };
+    case 'getManuscriptApplyOutcome':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.getManuscriptApplyOutcome(request.input.manuscriptId, request.input.branchId, request.input.clientEffectId),
+      };
     case 'recordManuscriptEntryPosition':
       store.recordManuscriptEntryPosition(
         request.input.manuscriptId,

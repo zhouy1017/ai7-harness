@@ -59,6 +59,7 @@ import {
   J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
   EDITORIAL_MARK_SCHEMA_VERSION,
+  MANUSCRIPT_EFFECT_SCHEMA_VERSION,
   MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
   MANUSCRIPT_INTAKE_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
@@ -70,12 +71,18 @@ import {
 } from './task-authorization.js';
 import {
   EDITORIAL_MARK_FOREIGN_KEYS,
+  EDITORIAL_MARK_REVISION_22_SQL,
   EDITORIAL_MARK_SCHEMA_SQL,
   EDITORIAL_MARK_TRIGGER_SQL,
   followBlockTextChangeForMarks,
   marksOfWindow,
   resolveBranchMarksAfterRewrite,
 } from './editorial-marks.js';
+import {
+  MANUSCRIPT_EFFECT_FOREIGN_KEYS,
+  MANUSCRIPT_EFFECT_SCHEMA_SQL,
+  MANUSCRIPT_EFFECT_TRIGGER_SQL,
+} from './manuscript-apply.js';
 
 /**
  * The analysis ledger as revision 15 created it, as revision 16 rebuilt two of its relations, as
@@ -180,6 +187,41 @@ export const MANUSCRIPT_ENTRY_POSITION_SCHEMA_SQL = `CREATE TABLE manuscript_ent
 ) STRICT`;
 
 type SqlRow = Record<string, SQLOutputValue>;
+
+/** The most exact ranges one AI7 Apply may replace; a batch beyond it is prepared as more than one. */
+export const MAX_EXACT_REPLACEMENT_TARGETS = 500;
+
+/** One exact range of the working state and the text that replaces it. */
+export interface ExactReplacementTarget {
+  blockId: string;
+  fromGrapheme: number;
+  toGrapheme: number;
+  expectedText: string;
+  insertText: string;
+}
+
+export interface ManuscriptStateIdentity {
+  revisionId: string;
+  journalSequence: number;
+  workingDigest: string;
+}
+
+/** What one committed Apply did: the manuscript state before and after, and where each target stands now. */
+export interface ExactReplacementCommit {
+  commandGroupId: string;
+  bookId: string;
+  before: ManuscriptStateIdentity;
+  after: ManuscriptStateIdentity;
+  targets: Array<{
+    index: number;
+    blockId: string;
+    beforeBlockDigest: string;
+    afterBlockDigest: string;
+    resultingFromGrapheme: number;
+    resultingToGrapheme: number;
+  }>;
+  committedAt: string;
+}
 
 const COMMON_SCHEMA_SQL = {
   content_objects: `CREATE TABLE content_objects (
@@ -1667,6 +1709,8 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   // Revision 22 (Issue #407): Editorial Marks and the Proposal Change Item ledgers, owned and spelled
   // by `editorial-marks.ts`.
   ...EDITORIAL_MARK_FOREIGN_KEYS,
+  // Revision 23 (Issue #408): the Effect ledger of AI7 Apply, owned and spelled by `manuscript-apply.ts`.
+  ...MANUSCRIPT_EFFECT_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2263,6 +2307,7 @@ function requireManuscriptReimportTargetSchema(
   includePlanVersionTables = false,
   includeManuscriptEntryPositionTable = false,
   includeEditorialMarkTables = false,
+  includeManuscriptEffectTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2289,7 +2334,12 @@ function requireManuscriptReimportTargetSchema(
       ...(includeManuscriptEntryPositionTable
         ? { manuscript_entry_positions: MANUSCRIPT_ENTRY_POSITION_SCHEMA_SQL }
         : {}),
-      ...(includeEditorialMarkTables ? EDITORIAL_MARK_SCHEMA_SQL : {}),
+      // Revision 23 widened `editorial_marks` in the transaction that created the Effect relations: a
+      // store without them holds revision 22's text of it, and a store with them only the widened one.
+      ...(includeEditorialMarkTables
+        ? { ...EDITORIAL_MARK_SCHEMA_SQL, ...(includeManuscriptEffectTables ? {} : EDITORIAL_MARK_REVISION_22_SQL) }
+        : {}),
+      ...(includeManuscriptEffectTables ? MANUSCRIPT_EFFECT_SCHEMA_SQL : {}),
     },
     MANUSCRIPT_REIMPORT_INDEX_SQL,
     true,
@@ -2299,6 +2349,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeTaskAuthorizationTables ? TASK_AUTHORIZATION_TRIGGER_SQL : {}),
       ...(includeAnalysisLedgerTables ? analysisTriggers : {}),
       ...(includeEditorialMarkTables ? EDITORIAL_MARK_TRIGGER_SQL : {}),
+      ...(includeManuscriptEffectTables ? MANUSCRIPT_EFFECT_TRIGGER_SQL : {}),
     },
   );
 }
@@ -4944,6 +4995,7 @@ export function validateManuscriptReimportSchemaTruth(
   includePlanVersionTables = false,
   includeManuscriptEntryPositionTable = false,
   includeEditorialMarkTables = false,
+  includeManuscriptEffectTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -4955,6 +5007,7 @@ export function validateManuscriptReimportSchemaTruth(
     includePlanVersionTables,
     includeManuscriptEntryPositionTable,
     includeEditorialMarkTables,
+    includeManuscriptEffectTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5014,7 +5067,8 @@ export function initializeBoundedSchema(
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION,
+      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
+      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5024,9 +5078,9 @@ export function initializeBoundedSchema(
       version === SUCCESSIVE_TASK_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === MANUSCRIPT_INTAKE_SCHEMA_VERSION || version === TEXT_CONVERSION_SCHEMA_VERSION ||
       version === FACTUAL_REVIEW_SCHEMA_VERSION || version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION ||
-      version === EDITORIAL_MARK_SCHEMA_VERSION) {
+      version === EDITORIAL_MARK_SCHEMA_VERSION || version === MANUSCRIPT_EFFECT_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== EDITORIAL_MARK_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== MANUSCRIPT_EFFECT_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5038,6 +5092,7 @@ export function initializeBoundedSchema(
           version >= TASK_AUTHORIZATION_SCHEMA_VERSION,
           version >= MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
           version >= EDITORIAL_MARK_SCHEMA_VERSION,
+          version >= MANUSCRIPT_EFFECT_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);
@@ -7262,6 +7317,176 @@ export class BoundedManuscriptStore {
       };
     });
     return result;
+  }
+
+  /**
+   * The one write path of AI7 Apply (Issue #408; ARCHITECTURE › Proposal and Effect). Exact ranges are
+   * replaced as one atomic command: every target is rechecked against the text its block holds now —
+   * the range must still hold exactly the text the caller expects — and either all of them commit or
+   * none does. It journals as a `replacement` command, which is what it is to the manuscript and what
+   * the recovery chain can replay; what makes it an Apply is the Effect Receipt `record` writes inside
+   * this same transaction, so the text and its receipt are published together or not at all.
+   *
+   * A committed Apply is a history boundary, as a recovery restoration is: plain 撤销 cannot take it
+   * back, because reversing it is a governed Effect of its own (V2-UX-EREC-013, UI ADR 0003).
+   */
+  commitExactReplacements<Result>(
+    manuscriptId: string,
+    branchId: string,
+    targets: ReadonlyArray<ExactReplacementTarget>,
+    serviceLifetimeId: string,
+    record: (commit: ExactReplacementCommit) => Result,
+  ): Result {
+    requireBounded(UUID_PATTERN.test(serviceLifetimeId), 'LIFETIME_INVALID', '本地服务生命周期标识无效。');
+    requireBounded(targets.length > 0 && targets.length <= MAX_EXACT_REPLACEMENT_TARGETS, 'APPLY_INVALID', '应用范围无效。');
+    return transact(this.#db, () => {
+      const binding = this.#binding(manuscriptId, branchId);
+      this.#requireBranchEditable(branchId);
+      const byBlock = new Map<string, Array<ExactReplacementTarget & { index: number }>>();
+      targets.forEach((target, index) => {
+        // An empty range is an insertion at that point — reversing an Apply that deleted its words: it
+        // expects no text there and brings some.
+        requireBounded(
+          BLOCK_PATTERN.test(target.blockId) && Number.isSafeInteger(target.fromGrapheme) && Number.isSafeInteger(target.toGrapheme) &&
+            target.fromGrapheme >= 0 && target.toGrapheme >= target.fromGrapheme && target.insertText.isWellFormed() &&
+            target.insertText !== target.expectedText && (target.toGrapheme > target.fromGrapheme || target.expectedText === ''),
+          'APPLY_INVALID',
+          '应用范围无效。',
+        );
+        const list = byBlock.get(target.blockId);
+        if (list) list.push({ ...target, index });
+        else byBlock.set(target.blockId, [{ ...target, index }]);
+      });
+      const groupId = randomUUID();
+      const ordinal = binding.historySequence + 1;
+      const now = new Date().toISOString();
+      const sequence = binding.journalSequence + 1;
+      this.#db.prepare(
+        `INSERT INTO manuscript_command_groups(
+           command_group_id, branch_id, ordinal, kind, status, source_group_id,
+           before_working_digest, after_working_digest, created_at
+         ) VALUES (?, ?, ?, 'replacement', 'applied', NULL, ?, ?, ?)`,
+      ).run(groupId, branchId, ordinal, binding.workingDigest, '0'.repeat(64), now);
+      const insertEdit = this.#db.prepare(
+        `INSERT INTO manuscript_command_edits(
+           command_group_id, position, block_id, before_text, before_digest, after_text, after_digest
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      );
+      const committed: ExactReplacementCommit['targets'][number][] = [];
+      const blocks = (this.#db.prepare(
+        `SELECT block_id, position, kind, level, text, digest FROM working_blocks
+         WHERE branch_id = ? AND block_id IN (${[...byBlock.keys()].map(() => '?').join(', ')}) ORDER BY position`,
+      ).all(branchId, ...byBlock.keys()) as SqlRow[]);
+      // A target whose block left the working state has drifted as surely as one whose text changed.
+      requireBounded(blocks.length === byBlock.size, 'APPLY_TARGET_DRIFTED', '原文已变，本次应用没有写入稿件。');
+      let editPosition = 0;
+      let totalDelta = 0;
+      let firstBlockId: string | undefined;
+      let firstDigest: string | undefined;
+      let firstInsert = '';
+      for (const row of blocks) {
+        const blockId = asString(row.block_id);
+        const beforeText = asString(row.text);
+        const before = graphemes(beforeText);
+        const ordered = byBlock.get(blockId)!.sort((left, right) => left.fromGrapheme - right.fromGrapheme);
+        ordered.forEach((target, index) => {
+          // Targets never overlap, and an insertion shares its point with no other target, so where each
+          // one lands never depends on the order they were given in. The recheck of an empty range is
+          // its point lying inside the block.
+          const previous = index === 0 ? undefined : ordered[index - 1]!;
+          requireBounded(
+            target.toGrapheme <= before.length &&
+              (previous === undefined || previous.toGrapheme < target.fromGrapheme ||
+                (previous.toGrapheme === target.fromGrapheme && previous.toGrapheme > previous.fromGrapheme && target.toGrapheme > target.fromGrapheme)) &&
+              before.slice(target.fromGrapheme, target.toGrapheme).join('') === target.expectedText,
+            'APPLY_TARGET_DRIFTED',
+            '原文已变，本次应用没有写入稿件。',
+          );
+        });
+        const text = [...before];
+        const spans: Array<{ fromGrapheme: number; toGrapheme: number; insertedGraphemes: number; inserted: string[] }> = [];
+        for (const target of [...ordered].reverse()) {
+          const inserted = graphemes(target.insertText);
+          text.splice(target.fromGrapheme, target.toGrapheme - target.fromGrapheme, ...inserted);
+          spans.push({ fromGrapheme: target.fromGrapheme, toGrapheme: target.toGrapheme, insertedGraphemes: inserted.length, inserted });
+        }
+        const afterText = text.join('');
+        const after = graphemes(afterText);
+        requireBounded(afterText.length <= MAX_BLOCK_CODE_UNITS && after.length <= MAX_BLOCK_GRAPHEMES, 'APPLY_TOO_LARGE', '应用后内容块超出安全范围。');
+        const kind = asString(row.kind) as ManuscriptBlockProjection['kind'];
+        const level = row.level === null ? null : asNumber(row.level);
+        const afterDigest = blockDigest(kind, level, afterText);
+        editPosition += 1;
+        insertEdit.run(groupId, editPosition, blockId, beforeText, asString(row.digest), afterText, afterDigest);
+        const delta = after.length - before.length;
+        const update = this.#db.prepare(
+          'UPDATE working_blocks SET text = ?, digest = ?, grapheme_length = ? WHERE branch_id = ? AND block_id = ? AND digest = ?',
+        ).run(afterText, afterDigest, after.length, branchId, blockId, asString(row.digest));
+        requireBounded(update.changes === 1, 'APPLY_TARGET_DRIFTED', '原文已变，本次应用没有写入稿件。');
+        updateWorkingOffsetNodes(this.#db, branchId, asNumber(row.position), delta);
+        this.#refreshBlockIndexes(branchId, blockId, asNumber(row.position), kind, level, afterText, afterDigest);
+        followBlockTextChangeForMarks(this.#db, branchId, blockId, beforeText, afterText, sequence, spans);
+        totalDelta += delta;
+        let shift = 0;
+        for (const target of ordered) {
+          const insertedLength = graphemes(target.insertText).length;
+          committed.push({
+            index: target.index,
+            blockId,
+            beforeBlockDigest: asString(row.digest),
+            afterBlockDigest: afterDigest,
+            resultingFromGrapheme: target.fromGrapheme + shift,
+            resultingToGrapheme: target.fromGrapheme + shift + insertedLength,
+          });
+          shift += insertedLength - (target.toGrapheme - target.fromGrapheme);
+        }
+        if (firstBlockId === undefined) {
+          firstBlockId = blockId;
+          firstDigest = afterDigest;
+          firstInsert = ordered[0]!.insertText;
+        }
+      }
+      const workingDigest = recoveryWorkingDigest(
+        binding.workingDigest, sequence, 'replacement', groupId, recoveryCommandEvidenceDigest(this.#db, groupId),
+      );
+      requireBounded(
+        this.#db.prepare(
+          `UPDATE manuscript_command_groups SET after_working_digest = ?
+           WHERE command_group_id = ? AND after_working_digest = ?`,
+        ).run(workingDigest, groupId, '0'.repeat(64)).changes === 1,
+        'HISTORY_CORRUPT',
+        '应用命令证据无法绑定工作状态链。',
+      );
+      this.#db.prepare(
+        `INSERT INTO edit_journal_entries(
+           journal_entry_id, client_edit_id, request_fingerprint, manuscript_id, branch_id, base_revision_id,
+           sequence, block_id, from_grapheme, to_grapheme, insert_text, resulting_block_digest,
+           resulting_working_digest, durable_at, command_group_id, command_kind, service_lifetime_id
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, 'replacement', ?)`,
+      ).run(randomUUID(), randomUUID(), sha256(canonicalJson({ applyCommandGroupId: groupId })), manuscriptId, branchId,
+        binding.revisionId, sequence, firstBlockId!, firstInsert, firstDigest!, workingDigest, now, groupId, serviceLifetimeId);
+      // Everything typed before this point can no longer be undone past it, and the Apply itself never
+      // by 撤销: the history boundary moves to this command.
+      this.#db.prepare(
+        `UPDATE manuscript_command_groups SET status = 'superseded'
+         WHERE branch_id = ? AND ordinal <= ? AND status IN ('applied', 'undone')`,
+      ).run(branchId, ordinal);
+      const state = this.#db.prepare(
+        `UPDATE branch_working_state SET journal_sequence = ?, working_digest = ?, history_sequence = ?,
+           history_boundary_sequence = ?, total_graphemes = total_graphemes + ?
+         WHERE branch_id = ? AND journal_sequence = ? AND working_digest = ?`,
+      ).run(sequence, workingDigest, ordinal, ordinal, totalDelta, branchId, binding.journalSequence, binding.workingDigest);
+      requireBounded(state.changes === 1, 'APPLY_TARGET_DRIFTED', '应用提交时稿件状态已变化。');
+      this.#recordLifetimeJournalWrite(serviceLifetimeId, binding, sequence, workingDigest, now);
+      return record({
+        commandGroupId: groupId,
+        bookId: binding.bookId,
+        before: { revisionId: binding.revisionId, journalSequence: binding.journalSequence, workingDigest: binding.workingDigest },
+        after: { revisionId: binding.revisionId, journalSequence: sequence, workingDigest },
+        targets: committed.sort((left, right) => left.index - right.index),
+        committedAt: now,
+      });
+    });
   }
 
   cancelReplacement(previewId: string): boolean {

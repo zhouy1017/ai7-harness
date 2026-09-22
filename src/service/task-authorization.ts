@@ -68,6 +68,16 @@ export const MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION = 21;
  * additive revision keeps the same Data Version). This is the terminal version.
  */
 export const EDITORIAL_MARK_SCHEMA_VERSION = 22;
+/**
+ * The manuscript-effect revision (Issue #408): five additive, append-only relations hold the Effect
+ * Intent with its exact targets, the Effect Approval, the dispatch and the Effect Receipt of every AI7
+ * Apply and Reverse Apply, and `editorial_marks` widens three CHECKs so that a 修改建议 whose Apply
+ * deleted its words can stand exactly on the empty range they left. `manuscript-apply.ts` creates the
+ * relations and, in the same transaction, rebuilds a revision-22 `editorial_marks` with every row
+ * copied byte for byte; no existing row changes and each stays valid, so the revision is additive
+ * (ADR 0079: an additive revision keeps the same Data Version). This is the terminal version.
+ */
+export const MANUSCRIPT_EFFECT_SCHEMA_VERSION = 23;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
@@ -917,7 +927,7 @@ function validateRevision16AnalysisLedgerSchema(db: DatabaseSync): void {
 
 export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
-  requireTask(version === EDITORIAL_MARK_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
+  requireTask(version === MANUSCRIPT_EFFECT_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
   validateJ03TaskAuthorizationSchema(db);
   validateAnalysisLedgerSchema(db);
 }
@@ -1052,7 +1062,7 @@ function migrateAnalysisLedgerToRevision17(db: DatabaseSync, from: typeof J04_BA
         db.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_delete`]!);
       }
       seedInitialPlanVersions(db);
-      db.exec(`PRAGMA user_version = ${EDITORIAL_MARK_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${MANUSCRIPT_EFFECT_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -1103,7 +1113,7 @@ function migrateAnalysisLedgerToRevision20(db: DatabaseSync): void {
                   mode, predecessor_revision_id, selected_start_position, selected_end_position
            FROM temp.migrate_analysis_task_intents ORDER BY migrate_rowid`);
       rebuildResultSetRelations(db);
-      db.exec(`PRAGMA user_version = ${EDITORIAL_MARK_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${MANUSCRIPT_EFFECT_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -1122,16 +1132,16 @@ function migrateAnalysisLedgerToRevision20(db: DatabaseSync): void {
 }
 
 /**
- * Revision 20 or 21 → 22. The relations revisions 21 and 22 add are `bounded-manuscript.ts`'s and
- * `editorial-marks.ts`'s, and `EditorialStore.open` creates them before this runs, so no ledger
- * relation, trigger, or row moves: the version alone advances, inside one transaction that validates
- * the terminal shape first.
+ * Revision 20, 21 or 22 → 23. The relations revisions 21, 22 and 23 add are `bounded-manuscript.ts`'s,
+ * `editorial-marks.ts`'s and `manuscript-apply.ts`'s, and `EditorialStore.open` creates them before
+ * this runs, so no ledger relation, trigger, or row moves: the version alone advances, inside one
+ * transaction that validates the terminal shape first.
  */
 function advanceToTerminalRevision(db: DatabaseSync): void {
   migrateInTransaction(
     db,
-    `PRAGMA user_version = ${EDITORIAL_MARK_SCHEMA_VERSION};`,
-    'Editorial marks',
+    `PRAGMA user_version = ${MANUSCRIPT_EFFECT_SCHEMA_VERSION};`,
+    'Manuscript effects',
   );
 }
 
@@ -1141,7 +1151,7 @@ function advanceToTerminalRevision(db: DatabaseSync): void {
  * untouched; a revision-15 or revision-16 store has its rebuilt relations copied forward with every
  * row's canonical JSON and digest preserved and its frozen plans seeded as plan version 1; a
  * revision-17 or revision-18 store only moves its version; a revision-19 store is validated whole;
- * a revision-20 or revision-21 store is validated whole and only moves its version.
+ * a revision-20, revision-21 or revision-22 store is validated whole and only moves its version.
  */
 export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
@@ -1150,14 +1160,16 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION,
+      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
+      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === EDITORIAL_MARK_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
-  if (version === FACTUAL_REVIEW_SCHEMA_VERSION || version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION) {
-    // Revisions 21 and 22 add no task-authorization or analysis relation, so the ledger a revision-20
-    // or revision-21 store carries is already the terminal one: it is validated as revision 20 left
-    // it, and nothing but the version moves.
+  if (version === MANUSCRIPT_EFFECT_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === FACTUAL_REVIEW_SCHEMA_VERSION || version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION ||
+      version === EDITORIAL_MARK_SCHEMA_VERSION) {
+    // Revisions 21 to 23 add no task-authorization or analysis relation, so the ledger a revision-20,
+    // revision-21 or revision-22 store carries is already the terminal one: it is validated as
+    // revision 20 left it, and nothing but the version moves.
     validateJ03TaskAuthorizationSchema(db);
     validateAnalysisLedgerSchema(db);
     return advanceToTerminalRevision(db);
@@ -1182,7 +1194,7 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   }
   const analysisStatements = `${Object.values(ANALYSIS_LEDGER_SCHEMA_SQL).join(';\n')};
       ${Object.values(ANALYSIS_LEDGER_TRIGGER_SQL).join(';\n')};
-      PRAGMA user_version = ${EDITORIAL_MARK_SCHEMA_VERSION};`;
+      PRAGMA user_version = ${MANUSCRIPT_EFFECT_SCHEMA_VERSION};`;
   if (version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION) {
     validateJ03TaskAuthorizationSchema(db);
     return migrateInTransaction(db, analysisStatements, 'Analysis ledger');

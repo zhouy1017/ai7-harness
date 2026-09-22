@@ -5,6 +5,7 @@ import type {
   EditorialMarkCardProjection,
   EditorialMarkCommandProjection,
   EditorialMarkKind,
+  ManuscriptApplyCommandProjection,
   PersonalHighlightColor,
   RendererApi,
   UpdateEditorialMarkInput,
@@ -13,9 +14,11 @@ import {
   DECISION_REASON_CHIPS,
   HIGHLIGHT_COLOR_LABELS,
   MARK_KIND_LABELS,
+  markDriftNote,
   markSourceLine,
   markStateLabel,
   markTimeLabel,
+  reverseApplyNote,
   selectionMenuReason,
 } from './editorial-mark-labels.js';
 
@@ -45,9 +48,16 @@ interface MountOptions {
   api: Pick<
     RendererApi,
     'createEditorialMark' | 'getEditorialMarkCard' | 'updateEditorialMark' | 'recordChangeSuggestionDecision' |
-    'recordProposalDecisionReason' | 'runEditorClipboardCommand'
+    'recordProposalDecisionReason' | 'runEditorClipboardCommand' | 'applyChangeSuggestion' | 'reverseAppliedChangeSuggestion' |
+    'getManuscriptApplyOutcome'
   >;
   busy(): boolean;
+  /**
+   * Run one write of the manuscript the way the surface runs every authoritative one — local edits
+   * settled, the editor locked, the window reloaded from the service and checked against the state the
+   * Effect Receipt names. `undefined` when it did not complete; the surface has then said why.
+   */
+  writeManuscript<T extends ManuscriptApplyCommandProjection>(operation: () => Promise<T>, done: string): Promise<T | undefined>;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
 }
@@ -228,8 +238,13 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     cancel.addEventListener('click', () => config.cancel());
     const row = el('div', 'button-row');
     row.append(submit, cancel);
+    // What the action will do is said before the button that does it.
+    if (config.note) {
+      const note = el('p', 'editorial-mark-form-note', config.note);
+      note.dataset['markFormNote'] = config.id;
+      form.append(note);
+    }
     form.append(problem, row);
-    if (config.note) form.append(el('p', 'muted', config.note));
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       const values = { body: '', proposedText: '', rationale: '', reason: '' };
@@ -480,7 +495,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     panel.append(header);
 
     if (card.anchorState !== 'exact') {
-      const drifted = el('p', 'editorial-mark-drifted', `原文已变：标记时的文字是「${card.pinnedText}」，这段文字后来改过，标记仍留在原处。`);
+      const drifted = el('p', 'editorial-mark-drifted', markDriftNote(card));
       drifted.dataset['markDrifted'] = 'true';
       panel.append(drifted);
     }
@@ -503,22 +518,74 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (card.kind === 'change-suggestion' && card.suggestion !== null) {
       const suggestion = card.suggestion;
       const decision = suggestion.decision;
+      const applied = card.status === 'applied' ? suggestion.application : null;
       const shown = decision?.editedText ?? suggestion.proposedText;
       const content = el('p', 'editorial-mark-change');
       const from = el('del', undefined, suggestion.currentText);
       const to = el('ins', undefined, shown.length === 0 ? '（删去）' : shown);
       content.append(from, ' → ', to);
       panel.append(
-        region('content', '修改内容', content, el('p', 'muted', exact && decision?.disposition !== 'rejected'
-          ? '正文里显示的是替换后的样子（预览 · 未应用）；稿件本身仍是原文。'
-          : '稿件本身仍是原文。')),
+        region('content', '修改内容', content, el('p', 'muted', applied !== null
+          ? '这处修改已经写入稿件；正文里是应用后的文字。'
+          : exact && decision?.disposition !== 'rejected'
+            ? '正文里显示的是替换后的样子（预览 · 未应用）；稿件本身仍是原文。'
+            : '稿件本身仍是原文。')),
         region('rationale', '修改理由', el('p', undefined, suggestion.rationale.length > 0 ? suggestion.rationale : '没有填写修改理由。')),
         region('basis', '依据与核查', basisList(card)),
       );
       const yours = region('disposition', '你的处理');
-      if (decision === null) {
+      if (applied !== null) {
+        // 已应用 is said only of a verified Effect Receipt (V2-UX-EAPP-011, EREC-002); what it binds is one step away.
+        const receipt = el('p', 'editorial-mark-recorded', `已应用 · 已写入稿件 · ${markTimeLabel(applied.committedAt)} · 你`);
+        receipt.dataset['markApplication'] = applied.effectId;
+        yours.append(receipt);
+        if (decision?.reason) {
+          const reason = el('p', 'muted', `你的原因：${decision.reason}`);
+          reason.dataset['markReason'] = decision.reasonSource ?? '';
+          yours.append(reason);
+        }
+        const credentials = el('details', 'editorial-mark-receipt');
+        credentials.dataset['markReceipt'] = applied.receiptId;
+        credentials.append(el('summary', undefined, '查看完整凭据'));
+        const bound = el('dl');
+        for (const [term, value] of [
+          ['应用（Effect）', applied.effectId],
+          ['提案决定', decision?.decisionId ?? ''],
+          ['应用批准（Effect Approval）', applied.approvalId],
+          ['派发', applied.dispatchId],
+          ['应用凭据（Effect Receipt）', `${applied.receiptId} · ${applied.receiptDigest}`],
+          ['应用前的稿件', `${applied.before.revisionId} · 修订日志序号 ${applied.before.journalSequence} · ${applied.before.workingDigest}`],
+          ['应用后的稿件', `${applied.after.revisionId} · 修订日志序号 ${applied.after.journalSequence} · ${applied.after.workingDigest}`],
+          ['写入处数', String(applied.changeCount)],
+        ] as ReadonlyArray<readonly [string, string]>) {
+          bound.append(el('dt', undefined, term), el('dd', undefined, value));
+        }
+        credentials.append(bound, el('p', 'muted', '凭据只证明这次写入发生了，不证明内容的对错。'));
+        yours.append(credentials);
+        if (form) {
+          yours.append(buildForm(form(reopen)));
+        } else if (exact) {
+          disposition.append(actionButton('prepare-reverse', '准备撤销本次应用', 'secondary', () => showCard(card, (cancel) => ({
+            id: 'reverse-apply',
+            title: '撤销本次应用',
+            quote: null,
+            fields: [],
+            submitLabel: '确认撤销本次应用',
+            note: reverseApplyNote(shown, suggestion.currentText),
+            submit: () => writeManuscript(card.markId, (clientEffectId) => api.reverseAppliedChangeSuggestion({ ...binding(), markId: card.markId, clientEffectId }), '已撤销本次应用；原文已写回稿件。'),
+            cancel,
+          }))));
+          yours.append(disposition);
+        } else {
+          yours.append(disabledAction('prepare-reverse', '准备撤销本次应用', '应用后的文字又改过，不能直接撤销这次应用。'));
+        }
+      } else if (decision === null) {
         disposition.append(
-          disabledAction('accept-and-apply', '接受并应用', '一键写入稿件尚未接通；现在可以拒绝，或先记录「修改后接受」。'),
+          exact
+            ? actionButton('accept-and-apply', '接受并应用', 'primary', () => void writeManuscript(card.markId, (clientEffectId) => api.applyChangeSuggestion({
+                ...binding(), markId: card.markId, clientEffectId, interaction: 'accept-and-apply', editedText: null, reason: null,
+              }), '已应用这条修改建议。'))
+            : disabledAction('accept-and-apply', '接受并应用', '原文已变，无法应用这条修改建议。'),
           actionButton('reject', '拒绝', 'secondary', () => void decide(card, 'rejected', null, null)),
           exact
             ? actionButton('accept-with-edit', '修改后接受', 'secondary', () => showCard(card, (cancel) => ({
@@ -529,32 +596,42 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
                   { name: 'proposedText', label: '编辑建议文本', value: suggestion.proposedText, required: false, hint: '留空表示删去这段文字。' },
                   { name: 'reason', label: '为什么这样改？（可选 · 帮助 AI7 学习你的判断）', value: '', required: false },
                 ],
-                submitLabel: '记录修改后接受',
-                note: '这一步只记录你的处理；写入稿件随「接受并应用」接通后进行。',
-                submit: (values) => decide(card, 'accepted-with-edit', values.proposedText, values.reason.trim().length > 0 ? values.reason : null),
+                submitLabel: '接受修改后的版本并应用',
+                submit: (values) => writeManuscript(card.markId, (clientEffectId) => api.applyChangeSuggestion({
+                  ...binding(), markId: card.markId, clientEffectId, interaction: 'accept-edited-and-apply',
+                  editedText: values.proposedText, reason: values.reason.trim().length > 0 ? values.reason : null,
+                }), '已按你改定的文字应用。'),
                 cancel,
               })))
             : disabledAction('accept-with-edit', '修改后接受', '原文已变，无法接受这条修改建议。'),
           convertOrExplain('annotation'),
         );
-        yours.append(disposition, el('p', 'muted', '都不预选。'));
+        yours.append(disposition, el('p', 'muted', '都不预选；接受即写入稿件，之后可以撤销本次应用。'));
+        if (form) yours.append(buildForm(form(reopen)));
       } else {
         const recorded = el('p', 'editorial-mark-recorded', decision.disposition === 'rejected'
           ? '已拒绝 · 原文保留'
           : '已记录 · 修改后接受（尚未写入稿件）');
         recorded.dataset['markDecision'] = decision.disposition;
+        if (decision.disposition === 'accepted-with-edit') {
+          disposition.append(exact
+            ? actionButton('apply-recorded', '应用到稿件', 'primary', () => void writeManuscript(card.markId, (clientEffectId) => api.applyChangeSuggestion({
+                ...binding(), markId: card.markId, clientEffectId, interaction: 'apply-recorded-decision', editedText: null, reason: null,
+              }), '已按你改定的文字应用。'))
+            : disabledAction('apply-recorded', '应用到稿件', '原文已变，无法应用这条修改建议。'));
+        }
         disposition.append(actionButton('withdraw', '撤回', 'quiet', () => void decide(card, 'withdrawn', null, null)));
         yours.append(recorded, disposition);
         if (decision.reason !== null) {
           const reason = el('p', 'muted', `你的原因：${decision.reason}`);
           reason.dataset['markReason'] = decision.reasonSource ?? '';
           yours.append(reason);
-        } else {
+        } else if (decision.disposition !== 'accepted') {
           yours.append(reasonChips(card, decision.decisionId, decision.disposition));
         }
+        if (form) yours.append(buildForm(form(reopen)));
       }
       if (card.source.kind === 'ai7') yours.append(disabledAction('view-task', '查看任务', '任务面接通后可以从这里打开。'));
-      if (form) yours.append(buildForm(form(reopen)));
       panel.append(yours);
     } else {
       const body = el('p', 'editorial-mark-body', card.body);
@@ -634,7 +711,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     floatingBlockId = card.blockId;
     openCardId = card.markId;
     panel.scrollIntoView({ block: 'nearest' });
-    const previews = card.suggestion !== null && card.anchorState === 'exact' && card.suggestion.decision?.disposition !== 'rejected';
+    const previews = card.suggestion !== null && card.status !== 'applied' && card.anchorState === 'exact' && card.suggestion.decision?.disposition !== 'rejected';
     editor.setActiveMark({
       markId: card.markId,
       previewText: previews ? card.suggestion!.decision?.editedText ?? card.suggestion!.proposedText : null,
@@ -695,6 +772,37 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       );
       if (result.card) showCard(result.card);
     }, '你的处理未能记录。');
+  }
+
+  /**
+   * One manuscript write through AI7 Apply. The Effect identity is made here, once, before anything is
+   * sent: if the acknowledgement never arrives the same identity is asked about, never sent again as a
+   * new one, so a lost answer cannot become a second Apply (V2-UX-EAPP-006, EREC-004).
+   */
+  async function writeManuscript(
+    markId: string,
+    run: (clientEffectId: string) => Promise<ManuscriptApplyCommandProjection>,
+    done: string,
+  ): Promise<void> {
+    if (destroyed || refuseWhileBusy()) return;
+    working = true;
+    const clientEffectId = crypto.randomUUID();
+    const current = editor.currentWindow();
+    try {
+      options.setStatus('正在应用到稿件…', 'busy');
+      const result = await options.writeManuscript(() => run(clientEffectId), done);
+      if (result !== undefined) {
+        if (result.card !== null) showCard(result.card);
+        return;
+      }
+      const outcome = await api.getManuscriptApplyOutcome({ manuscriptId: current.manuscriptId, branchId: current.branchId, clientEffectId });
+      if (outcome.state === 'committed') options.setStatus(`${done}写入结果已从记录确认。`, 'success');
+      await openCard(markId);
+    } catch (error) {
+      options.setStatus(options.errorMessage(error, '无法确认这次应用的结果；请重新打开这条修改建议查看。'), 'error');
+    } finally {
+      working = false;
+    }
   }
 
   const openCard = async (markId: string, form?: (card: EditorialMarkCardProjection, cancel: () => void) => FormConfig): Promise<void> => {
@@ -905,8 +1013,18 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     } else {
       items = [
         { action: 'open-card', label: '打开修改建议', run: () => void openCard(mark.markId) },
-        { action: 'accept-and-apply', label: '接受并应用', disabledReason: '一键写入稿件尚未接通' },
-        ...(mark.disposition === null ? [convert('annotation')] : []),
+        mark.status === 'applied'
+          ? { action: 'prepare-reverse', label: '准备撤销本次应用', run: () => void openCard(mark.markId) }
+          : mark.disposition === null && exact
+            ? {
+                action: 'accept-and-apply',
+                label: '接受并应用',
+                run: () => void writeManuscript(mark.markId, (clientEffectId) => api.applyChangeSuggestion({
+                  ...binding(), markId: mark.markId, clientEffectId, interaction: 'accept-and-apply', editedText: null, reason: null,
+                }), '已应用这条修改建议。'),
+              }
+            : { action: 'accept-and-apply', label: '接受并应用', disabledReason: exact ? '这条修改建议已经处理过' : '原文已变，无法应用' },
+        ...(mark.disposition === null && mark.status !== 'applied' ? [convert('annotation')] : []),
         ...(mark.sourceKind === 'ai7' ? [
           { action: 'view-task', label: '查看任务', disabledReason: AI7_TASK_REASON },
           { action: 'view-basis', label: '看依据', run: () => void openCard(mark.markId) },
