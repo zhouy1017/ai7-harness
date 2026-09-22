@@ -35,6 +35,9 @@ const STATEMENT = '仅表示此版本可用于上述发稿范围；AI7 不会发
 const FORBIDDEN_WORDS = Object.freeze(['已发布', '已发送', '已交付', '已确认送达']);
 const ACTUALS_PROMPT = '录入定价与首印 · 随评估功能提供';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// 导出's four members (Issue #413): the only renderer members named like an export, and none publishes or sends.
+const EXPORT_MEMBERS = Object.freeze(['approveManuscriptExport', 'chooseManuscriptExportDestination', 'revealManuscriptExport', 'reviewManuscriptExport']);
+const EXPORT_MEMBERS_ONLY = `JSON.stringify(Object.keys(window.ai7).filter((key) => /export|publish|send/i.test(key)).sort()) === ${JSON.stringify(JSON.stringify(EXPORT_MEMBERS))}`;
 
 let location = 'entry';
 let electronExecutable;
@@ -422,8 +425,8 @@ async function main() {
     at('import-and-open');
     let renderer = await launch({ picker: manuscript });
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true'`, 'product-ready');
-    // The renderer holds the two 交付物 members and nothing that could export, publish or send.
-    await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && typeof window.ai7.inspectDeliverables === 'function' && typeof window.ai7.designatePublicationVersion === 'function' && !Object.keys(window.ai7).some((key) => /export|publish|send/i.test(key))`, 'renderer-api-boundary');
+    // The renderer holds the two 交付物 members and 导出's four, and nothing that could publish or send.
+    await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && typeof window.ai7.inspectDeliverables === 'function' && typeof window.ai7.designatePublicationVersion === 'function' && ${EXPORT_MEMBERS_ONLY}`, 'renderer-api-boundary');
     await renderer.send('Page.setBypassCSP', { enabled: true });
     try {
       const fetchRejected = await renderer.evaluate(`(async()=>{try{await fetch(${JSON.stringify(loopback.url)});return false}catch{return true}})()`);
@@ -685,7 +688,8 @@ async function main() {
     // nothing anywhere says published, sent, delivered or received; and nothing exports, publishes or sends.
     await assertRenderer(renderer, `(() => { const prompt = window.__j07.block().querySelector('.publication-actuals-prompt'); return prompt?.textContent === ${JSON.stringify(ACTUALS_PROMPT)} && prompt.querySelectorAll('button, a, input, select, textarea, [tabindex]').length === 0 && prompt.closest('button, a') === null; })()`, 'actuals-prompt-pending-without-action');
     await assertNoForbiddenWords(renderer, 'restart-without-forbidden-words');
-    await assertRenderer(renderer, `(() => { const controls = Array.from(document.querySelectorAll('button, a, [role="button"], [role="menuitem"]')); const actions = Array.from(window.__j07.block().querySelectorAll('[data-publication-action]')).map((node) => node.dataset.publicationAction); return !controls.some((node) => /导出|发布|发送/.test(node.textContent ?? '')) && JSON.stringify(actions) === '["designate"]' && !Object.keys(window.ai7).some((key) => /export|publish|send/i.test(key)); })()`, 'no-export-action');
+    // The only controls that name 导出 are 导出… of each version (Issue #413); nothing publishes or sends.
+    await assertRenderer(renderer, `(() => { const controls = Array.from(document.querySelectorAll('button, a, [role="button"], [role="menuitem"]')); const actions = Array.from(window.__j07.block().querySelectorAll('[data-publication-action]')).map((node) => node.dataset.publicationAction); return !controls.some((node) => /发布|发送/.test(node.textContent ?? '')) && controls.filter((node) => /导出/.test(node.textContent ?? '')).every((node) => node.dataset.exportAction === 'open' && node.textContent === '导出…') && JSON.stringify(actions) === '["designate"]' && ${EXPORT_MEMBERS_ONLY}; })()`, 'no-publish-or-send-action');
 
     at('j14-designate-keyboard');
     // The form without a pointer: Enter on 设为发稿版本… opens it on its first choice, an arrow chooses, Tab

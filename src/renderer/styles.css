@@ -507,6 +507,48 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-plan-summary h4 { margin: 0; }
 .task-plan-summary-line { margin: .45rem 0 .6rem; font-weight: 700; overflow-wrap: anywhere; }
 .analysis-plan-summary { padding-top: 1rem; border-top: 1px solid #d5dcd9; }
+/* ④ 导出 (Issue #413): the card beside 交付物's 发稿 block, one version at a time, and the export records. */
+.deliverables-export-slot:empty { display: none; }
+.export-open-row { margin-top: .6rem; }
+.manuscript-export { margin-top: 1rem; padding: 1rem 1.15rem; border: 1px solid #c9d6d2; border-radius: 12px; background: #fffdf8; overflow-wrap: anywhere; }
+.manuscript-export h4, .manuscript-export h5 { margin: 0; }
+.manuscript-export h5 { font-size: .95rem; }
+.manuscript-export > p { margin: .45rem 0 0; }
+.export-local-line { color: #4e564c; font-size: .9rem; }
+.export-formats, .export-options { display: grid; gap: .45rem; min-width: 0; margin: .8rem 0 0; padding: 0; border: 0; }
+.export-formats legend, .export-options legend { margin-bottom: .35rem; font-size: .95rem; font-weight: 800; }
+.export-format-option, .export-option { display: flex; align-items: flex-start; gap: .6rem; min-width: 0; padding: .5rem .7rem; border: 1px solid #d5dcd9; border-radius: 9px; background: white; }
+.export-format-option:has(input:disabled) { background: #f6f5f1; color: #5d635b; }
+.export-format-option:has(input:checked), .export-option:has(input:checked) { border-color: #416458; box-shadow: inset 0 0 0 1px #416458; }
+.export-format-option input, .export-option input { flex: none; width: 18px; height: 18px; margin-top: .2rem; }
+.export-format-text, .export-option-text { display: grid; gap: .15rem; min-width: 0; }
+.export-format-text .field-note, .export-option-text .field-note, .export-format-line { margin-top: 0; }
+.export-fidelity, .export-destination { margin-top: 1rem; padding-top: .9rem; border-top: 1px solid #d5dcd9; }
+.export-restoration-line { margin: .4rem 0 0; }
+.export-fidelity-list { display: grid; gap: .5rem; margin: .6rem 0 0; padding: 0; list-style: none; }
+.export-fidelity-row { display: grid; grid-template-columns: minmax(140px, .8fr) minmax(120px, .6fr) 2fr; gap: .7rem; align-items: start; min-width: 0; padding: .65rem .75rem; border: 1px solid #e0ddd4; border-radius: 9px; background: white; }
+.export-fidelity-name { font-weight: 800; }
+.export-fidelity-detail { margin: 0; color: #565d53; font-size: .9rem; line-height: 1.5; }
+.export-fidelity-positions { display: block; margin-top: .25rem; font-weight: 700; }
+/* A status reads in its shape and its words as well as in its colour. */
+.export-status-preserved { background: #e5f1e7; color: #28533a; }
+.export-status-degraded { background: #fff0cf; color: #76530f; }
+.export-status-unavailable { background: #f3e4e0; color: #753a31; }
+.export-status-excluded { background: #eceae4; color: #4e564c; }
+.export-degraded-note { margin: .7rem 0 0; }
+.export-destination-line { margin: .4rem 0 .6rem; }
+.export-actions { margin-top: .9rem; }
+.export-approve-reason { margin: 0; }
+.export-approve-reason[hidden], .export-problem[hidden] { display: none; }
+.export-problem { margin: .6rem 0 0; color: #842f28; font-weight: 700; }
+.export-receipt { margin-top: .9rem; padding: .75rem .85rem; border: 1px solid #9bb0a8; border-radius: 10px; background: #f4f9f7; }
+.export-receipt[data-export-outcome="ambiguous"], .export-receipt[data-export-outcome="failed"] { border-color: #c9a28a; background: #fff7f0; }
+.export-receipt p { margin: .35rem 0 0; }
+.export-records-section { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #d5dcd9; }
+.export-records { display: grid; gap: .5rem; margin: .55rem 0 0; padding-left: 1.4rem; }
+.export-records > li { min-width: 0; padding: .6rem .7rem; border: 1px solid #d5dcd9; border-radius: 9px; background: #fffdf8; }
+.export-records p { margin: .3rem 0 0; }
+.export-record-detail { color: #4e564c; font-size: .9rem; }
 dt { color: #6b7068; font-size: .86rem; }
 dd { margin: 0; overflow-wrap: anywhere; }
 /* The Technical Identity Layer (V2-UX-LAYER-001). One rank below the decision content beside it — the
@@ -789,6 +831,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 @media (max-width: 960px) {
   .hero, .review-grid, .recovery-candidate-grid, .model-role-grid { grid-template-columns: 1fr; }
   .fidelity-row { grid-template-columns: 1fr; }
+  .export-fidelity-row { grid-template-columns: 1fr; }
   .screen { width: min(100% - 1.25rem, 900px); margin-top: .75rem; }
   .app-header { align-items: flex-start; padding: 1rem; }
   .editor-toolbar { align-items: flex-start; flex-direction: column; }
@@ -859,7 +902,8 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .task-drawer, .task-drawer-head, .task-drawer-footer, .task-drawer-modes, .task-plan-goal, .task-plan-compact,
   .task-plan-chip, .task-plan-boundary, .task-plan-lock, .task-plan-section-number,
   .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal,
-  .global-attention-group, .global-attention-item {
+  .global-attention-group, .global-attention-item,
+  .manuscript-export, .export-format-option, .export-option, .export-fidelity-row, .export-receipt, .export-records > li {
     color: CanvasText;
     background: Canvas;
     border-color: CanvasText;
@@ -888,6 +932,10 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .publication-milestone-option:has(input:checked), .milestone-section .milestone-purpose-option:has(input:checked) { border-width: 3px; }
   .publication-change-notice { border: 2px solid CanvasText; }
   .publication-statement { border-left: 4px solid CanvasText; }
+  /* Without colour a chosen format or option keeps a heavier border, and the outcome of an export its frame. */
+  .export-format-option:has(input:checked), .export-option:has(input:checked) { border-width: 3px; }
+  .export-receipt { border: 2px solid CanvasText; }
+  .export-degraded-note { border: 2px solid CanvasText; }
   .book-deliverables textarea:focus-visible { outline-color: Highlight; }
   .primary, .secondary, .quiet, .status-pill {
     color: ButtonText;

@@ -333,6 +333,14 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['designatePublicationVersion']['output']>(IPC_CHANNELS.designatePublicationVersion, input),
   inspectGlobalAttention: () =>
     invoke<ServiceOperationMap['inspectGlobalAttention']['output']>(IPC_CHANNELS.inspectGlobalAttention, {}),
+  reviewManuscriptExport: (input: Parameters<RendererApi['reviewManuscriptExport']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['reviewManuscriptExport']>>>(IPC_CHANNELS.reviewManuscriptExport, input),
+  chooseManuscriptExportDestination: (input: Parameters<RendererApi['chooseManuscriptExportDestination']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['chooseManuscriptExportDestination']>>>(IPC_CHANNELS.chooseManuscriptExportDestination, input),
+  approveManuscriptExport: (input: Parameters<RendererApi['approveManuscriptExport']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['approveManuscriptExport']>>>(IPC_CHANNELS.approveManuscriptExport, input),
+  revealManuscriptExport: (input: Parameters<RendererApi['revealManuscriptExport']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['revealManuscriptExport']>>>(IPC_CHANNELS.revealManuscriptExport, input),
   undoManuscript: (input: ServiceOperationMap['undoManuscript']['input']) =>
     invoke<ServiceOperationMap['undoManuscript']['output']>(IPC_CHANNELS.undoManuscript, input),
   redoManuscript: (input: ServiceOperationMap['redoManuscript']['input']) =>

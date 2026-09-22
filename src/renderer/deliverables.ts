@@ -53,6 +53,8 @@ import {
   publicationsTruncatedLine,
 } from './deliverables-labels.js';
 import { localInstantLabel } from './plan-preview-labels.js';
+import { EXPORT_ACTION_LABELS, EXPORT_RECORDS_HEADING, EXPORT_TECHNICAL_TERMS, exportOpenAccessibleName, exportRecordLine } from './manuscript-export-labels.js';
+import { mountManuscriptExport } from './manuscript-export.js';
 
 /**
  * ⑥ 交付物 as far as plan slice S65 reaches (Issue #414; editor-surfaces §9, V2-UX-MILE-008, PUB-002 to
@@ -73,7 +75,8 @@ export interface DeliverablesSurface {
   destroy(): void;
 }
 
-type DeliverablesApi = Pick<RendererApi, 'inspectDeliverables' | 'designatePublicationVersion'>;
+type DeliverablesApi = Pick<RendererApi, 'inspectDeliverables' | 'designatePublicationVersion' | 'reviewManuscriptExport' |
+  'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport'>;
 
 export interface MountDeliverablesOptions {
   /** The destination's panel: the surface appends its heading and its host, and the caller its persistent actions after them. */
@@ -122,6 +125,7 @@ function focusKeyOf(node: HTMLElement): string {
     node.tagName,
     node.dataset['publicationAction'] ?? '',
     node.dataset['publicationField'] ?? '',
+    node.dataset['exportAction'] ?? '',
     node instanceof HTMLInputElement && node.type === 'radio' ? node.value : '',
     node.closest<HTMLElement>('ol.milestone-list > li')?.dataset['milestoneId'] ?? '',
     node.closest<HTMLElement>('ol.publication-versions > li')?.dataset['publicationVersionId'] ?? '',
@@ -139,12 +143,26 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
 
   const host = el('div', 'deliverables-host');
   host.dataset['deliverablesBookId'] = bookId;
+  // The 发稿 block is drawn again on every read; the export card (Issue #413) keeps its own slot beside it, so an
+  // export in progress is never redrawn away.
+  const blockSlot = el('div', 'deliverables-block-slot');
+  const exportSlot = el('div', 'deliverables-export-slot');
+  host.append(blockSlot, exportSlot);
   options.root.append(
     el('p', 'section-label', DELIVERABLES_SECTION_LABEL),
     el('h2', undefined, options.bookTitle),
     el('p', 'lede', DELIVERABLES_LEDE),
     host,
   );
+  const exporter = mountManuscriptExport({
+    root: exportSlot,
+    bookId,
+    api,
+    technicalDetails: options.technicalDetails,
+    setStatus: options.setStatus,
+    errorMessage: options.errorMessage,
+    onExported: () => refresh(),
+  });
 
   // ---- reading --------------------------------------------------------------------------------------
 
@@ -171,7 +189,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
 
   function swap(next: HTMLElement): void {
     if (block?.isConnected === true) block.replaceWith(next);
-    else host.replaceChildren(next);
+    else blockSlot.replaceChildren(next);
     block = next;
   }
 
@@ -214,13 +232,19 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     heading.id = headingId;
     section.setAttribute('aria-labelledby', headingId);
     section.append(heading, el('p', 'field-note deliverables-manuscript-line', deliverablesManuscriptLine(next.manuscript)));
+    // 导出… of the current revision (Issue #413): a dirty working state is saved as a revision for it first.
+    if (next.manuscript !== null) {
+      const row = el('div', 'button-row export-open-row');
+      row.append(exportOpenButton({ kind: 'current' }, null));
+      section.append(row);
+    }
     if (publication.changeNotice !== null) {
       const notice = el('p', 'publication-change-notice attention-note');
       notice.dataset['publicationVersionId'] = publication.changeNotice.publicationVersionId;
       notice.append(el('strong', undefined, publication.changeNotice.label), ` · ${publicationChangeNoticeDetail(publication.changeNotice)}`);
       section.append(notice);
     }
-    section.append(renderMilestones(next), renderDesignate(next), renderHistory(next));
+    section.append(renderMilestones(next), renderDesignate(next), renderHistory(next), renderExports(next));
     if (publication.actualsPrompt !== null) {
       // Recorded with the designation and pending until the evaluation features take it up: no action yet.
       const prompt = el('p', 'publication-actuals-prompt', publicationActualsPromptLine(publication.actualsPrompt));
@@ -294,6 +318,9 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     item.append(heading, el('p', 'milestone-meta', milestoneMetaLine(milestone, localInstantLabel(milestone.createdAt))));
     if (milestone.note !== null) item.append(el('p', 'milestone-note', milestoneNoteLine(milestone.note)));
     if (milestone.changedSinceLabel !== null) item.append(el('p', 'milestone-changed-since', milestone.changedSinceLabel));
+    const exportRow = el('div', 'button-row export-open-row');
+    exportRow.append(exportOpenButton({ kind: 'milestone', milestoneId: milestone.milestoneId }, milestone.label));
+    item.append(exportRow);
     item.append(options.technicalDetails(
       'deliverables-facts',
       ...fact(DELIVERABLES_TECHNICAL_TERMS.milestone, milestone.milestoneId),
@@ -571,11 +598,58 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     }
   }
 
+  // ---- 导出 (Issue #413) ----------------------------------------------------------------------------------
+
+  /** 导出… for one version: the card opens beside the block, and focus comes back here when it closes. */
+  function exportOpenButton(target: { kind: 'current' } | { kind: 'milestone'; milestoneId: string }, label: string | null): HTMLButtonElement {
+    const button = el('button', 'secondary', EXPORT_ACTION_LABELS.open);
+    button.type = 'button';
+    button.dataset['exportAction'] = 'open';
+    button.dataset['exportTarget'] = target.kind;
+    button.setAttribute('aria-label', exportOpenAccessibleName(target.kind === 'current' ? { kind: 'current' } : { kind: 'milestone', label: label ?? '' }));
+    button.disabled = working || exporter.busy();
+    button.addEventListener('click', () => {
+      if (working || exporter.busy()) return;
+      exporter.open(target, label, button);
+    });
+    return button;
+  }
+
+  /** Every approved export newest first, with what it came to (EXP-017, EXP-021); none of them is sending. */
+  function renderExports(next: DeliverablesProjection): HTMLElement {
+    const section = el('section', 'export-records-section');
+    section.dataset['exportRecords'] = String(next.exports.length);
+    section.append(el('h4', undefined, EXPORT_RECORDS_HEADING));
+    if (next.exports.length === 0) return section;
+    const list = el('ol', 'export-records');
+    for (const record of next.exports) {
+      const item = el('li');
+      item.dataset['preparationId'] = record.preparationId;
+      item.dataset['exportOutcome'] = record.outcome;
+      item.append(
+        el('p', 'export-record-line', exportRecordLine(record, record.recordedAt === null ? null : localInstantLabel(record.recordedAt))),
+        el('p', 'export-record-detail', record.detail),
+        options.technicalDetails(
+          'deliverables-facts',
+          ...fact(EXPORT_TECHNICAL_TERMS.preparation, record.preparationId),
+          ...fact(EXPORT_TECHNICAL_TERMS.approval, record.technical.approvalId),
+          ...fact(EXPORT_TECHNICAL_TERMS.receipt, record.technical.receiptId ?? '—'),
+          ...fact(EXPORT_TECHNICAL_TERMS.fileSha256, record.technical.fileSha256 ?? '—'),
+          ...fact(EXPORT_TECHNICAL_TERMS.failure, record.technical.failureCode ?? '—'),
+        ),
+      );
+      list.append(item);
+    }
+    section.append(list);
+    return section;
+  }
+
   return {
     start: () => refresh(),
     destroy: () => {
       destroyed = true;
       generation += 1;
+      exporter.destroy();
     },
   };
 }

@@ -419,11 +419,13 @@ export async function resolveSourceCheckoutLaunchPolicy(
         externalPolicy['authoritySeparations']['policyEligibilityIsEffectApproval'] === false,
     );
 
+    // External Export Policy v2 verified: a local export Effect can be offered (Issue #413), each file still
+    // needing its own preparation and approval.
     const externalExport = {
       version: 'v2' as const,
       policyEligibilityIsEffectApproval: false as const,
-      currentExportEffectAvailable: false as const,
-      label: '对外导出策略独立；当前未提供导出受控动作' as const,
+      currentExportEffectAvailable: true,
+      label: '对外导出策略 v2 已校验：只导出到本机所选位置，每个文件单独批准' as const,
     };
     const publicReleasePermission = { present: false as const, label: '公开发布许可：不存在' as const };
     if (requestedScope === 'developer-live') {

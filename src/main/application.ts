@@ -44,6 +44,7 @@ import {
   type EditorClipboardCommand,
   type ProductDataLocationProjection,
   type ProductDataLocationRevealProjection,
+  type RendererApi,
   type RendererCallResult,
   type ResolvedBookWorkbenchRoute,
   type ReviewBeforeManuscriptReimportProjection,
@@ -67,6 +68,8 @@ interface LaunchArguments {
   /** The trusted launch form (ADR 0065): scope, ceiling, and cache root exactly as the launcher passed them. */
   launchForm: TrustedLaunchForm;
   injectedPickerPath: string | undefined;
+  /** J-07 only (Issue #413): the one answer the Save dialog gives, once, in place of the platform's own. */
+  injectedSavePath: string | undefined;
   importControl: J01ImportControl | undefined;
   foregroundExecutionControl: J03ForegroundExecutionControl | undefined;
   recoveryControl: J08RecoveryControl | undefined;
@@ -173,6 +176,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j06-picker-path' ||
           key === '--j07-picker-path' ||
           key === '--j09-picker-path' ||
+          key === '--j07-save-path' ||
           key === '--j01-import-control' ||
           key === '--j03-foreground-execution-control' ||
           key === '--j08-recovery-control' ||
@@ -245,6 +249,12 @@ function parseArguments(argv: string[]): LaunchArguments {
   const injectedPickerPath =
     j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath ?? j04PickerPath ?? j05PickerPath ?? j06PickerPath ??
       j07PickerPath ?? j09PickerPath;
+    j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath ?? j04PickerPath ?? j05PickerPath ?? j06PickerPath ?? j07PickerPath;
+  // The Save dialog's launch control is guarded exactly as the picker controls are: J-07's own, and absolute.
+  const injectedSavePath = values.get('--j07-save-path');
+  requireDesktop(
+    injectedSavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-07' && isAbsolute(injectedSavePath)),
+  );
   const importControlValue = values.get('--j01-import-control');
   const importControl =
     importControlValue === 'before-commit' ||
@@ -302,12 +312,13 @@ function parseArguments(argv: string[]): LaunchArguments {
     launchForm.trustedOperationalScope === 'development-ci' ||
       (process.env.AI7_E2E_JOURNEY === undefined && injectedPickerPath === undefined && observeJ12RevealValue === undefined &&
         importControlValue === undefined && foregroundExecutionControlValue === undefined && recoveryControlValue === undefined && modelAdapterControlValue === undefined &&
-        applyControlValue === undefined),
+        applyControlValue === undefined && injectedSavePath === undefined),
   );
   return {
     dataRoot,
     launchForm,
     injectedPickerPath,
+    injectedSavePath,
     importControl,
     foregroundExecutionControl,
     recoveryControl,
@@ -390,6 +401,7 @@ function registerRendererHandlers(
   saveModelServiceCredential: (input: { connectionName: string; secret: string }) => Promise<ModelServiceSettingsProjection>,
   removeModelServiceCredential: () => Promise<ModelServiceSettingsProjection>,
   consumeLostApplyAcknowledgement: () => boolean,
+  consumeInjectedSavePath: () => string | undefined,
 ): () => void {
   const AMBIGUOUS_SERVICE_FAILURES = new Set([
     'COMMIT_PROOF_INCONCLUSIVE',
@@ -1035,6 +1047,32 @@ function registerRendererHandlers(
     }
     requireDesktop(selectedPath !== undefined && isAbsolute(selectedPath));
     return selectedPath;
+  };
+  /**
+   * 选择保存位置… (Issue #413): the platform's own Save dialog, which owns an existing file's replace-or-rename
+   * choice (V2-UX-EXP-019), offering the review's file name in the documents folder. J-07 alone may answer it
+   * once with a launch control instead, exactly as it answers the picker; `undefined` is a cancelled dialog.
+   */
+  const chooseExportDestination = async (owned: OwnedRendererWindow, suggestedFileName: unknown): Promise<string | undefined> => {
+    const injected = consumeInjectedSavePath();
+    if (injected !== undefined) {
+      requireDesktop(isAbsolute(injected));
+      return injected;
+    }
+    const offered = typeof suggestedFileName === 'string' && suggestedFileName.isWellFormed()
+      ? basename(suggestedFileName).replace(/[\\/:*?"<>|]/gu, '_').slice(0, 180)
+      : '';
+    const fileName = extname(offered).toLowerCase() === '.docx' ? offered : '稿件.docx';
+    const chosen = await dialog.showSaveDialog(owned.window, {
+      title: '选择导出位置',
+      buttonLabel: '选择此位置',
+      defaultPath: resolve(app.getPath('documents'), fileName),
+      filters: [{ name: 'Word 文档', extensions: ['docx'] }],
+      properties: ['createDirectory', 'showOverwriteConfirmation'],
+    });
+    if (chosen.canceled || chosen.filePath === undefined || chosen.filePath.length === 0) return undefined;
+    requireDesktop(isAbsolute(chosen.filePath));
+    return chosen.filePath;
   };
 
   ipcMain.on(MAIN_EVENTS.closeRiskChanged, closeRiskListener);
@@ -2406,6 +2444,88 @@ function registerRendererHandlers(
       return result;
     }),
   );
+  // ④ 导出 (Issue #413, plan slice S64) belongs to 交付物's Book the same way: the renderer never names a Book
+  // and never a path. The review may save a revision, so it is serialized with every other effect; the
+  // destination comes only from the system's own Save dialog, which the main process owns, and whose
+  // replace-or-rename choice the platform makes (V2-UX-EXP-019); the answer of each call must be that Book's.
+  const requireExportOfRoute = <Result extends { bookId: string }>(
+    route: Extract<ResolvedBookWorkbenchRoute, { kind: 'book' }>,
+    result: Result,
+  ): Result => {
+    if (result.bookId !== route.bookId) {
+      throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '导出不属于当前图书工作台。');
+    }
+    return result;
+  };
+  ipcMain.handle(IPC_CHANNELS.reviewManuscriptExport, (event, input: Parameters<RendererApi['reviewManuscriptExport']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('reviewManuscriptExport', { bookId: route.bookId, target: input.target, options: input.options });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        return requireExportOfRoute(route, result);
+      });
+    }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.chooseManuscriptExportDestination,
+    (event, input: Parameters<RendererApi['chooseManuscriptExportDestination']>[0]) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async (): Promise<Awaited<ReturnType<RendererApi['chooseManuscriptExportDestination']>>> => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const destination = await chooseExportDestination(owned, input.suggestedFileName);
+          // A cancelled dialog records nothing at all (V2-UX-EXP-020).
+          if (destination === undefined) return { outcome: 'cancelled' };
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          const preparation = await service.call('prepareManuscriptExport', {
+            bookId: route.bookId,
+            revisionId: input.revisionId,
+            target: input.target,
+            options: input.options,
+            reviewDigest: input.reviewDigest,
+            destination,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          return { outcome: 'prepared', preparation: requireExportOfRoute(route, preparation) };
+        });
+      }),
+  );
+  ipcMain.handle(IPC_CHANNELS.approveManuscriptExport, (event, input: Parameters<RendererApi['approveManuscriptExport']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('approveManuscriptExport', { bookId: route.bookId, preparationId: input.preparationId });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        return requireExportOfRoute(route, result);
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.revealManuscriptExport, (event, input: Parameters<RendererApi['revealManuscriptExport']>[0]) =>
+    envelope(async (): Promise<{ state: 'revealed' }> => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const receipt = requireExportOfRoute(route, await service.call('inspectManuscriptExportReceipt', {
+        bookId: route.bookId,
+        preparationId: input.preparationId,
+      }));
+      // Only a verified file is shown, at the path the system dialog returned for it.
+      if (!receipt.revealAvailable || !isAbsolute(receipt.destination)) {
+        throw new ServiceCallError('AI7_EXPORT_REVEAL_UNAVAILABLE', '这次导出没有可以显示的文件。');
+      }
+      shell.showItemInFolder(receipt.destination);
+      return { state: 'revealed' };
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.startSearch, (event, input: ServiceOperationMap['startSearch']['input']) =>
     envelope(async () => {
       const owned = requireSender(event);
@@ -3237,6 +3357,15 @@ export async function runApplication(): Promise<void> {
           const lose = pending;
           pending = false;
           return lose;
+        };
+      })(),
+      // J-07's Save-dialog answer is single-use, like the picker's: every later choice is the platform's own.
+      (() => {
+        let pending = launch.injectedSavePath;
+        return (): string | undefined => {
+          const path = pending;
+          pending = undefined;
+          return path;
         };
       })(),
     );
