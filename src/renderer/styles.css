@@ -545,10 +545,21 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .count { color: #656d63; font-weight: 500; }
 .status-pill { display: inline-flex; width: fit-content; align-items: center; gap: .35rem; padding: .22rem .55rem; border-radius: 999px; font-size: .84rem; font-weight: 800; }
 .status-preserved { background: #e5f1e7; color: #28533a; }
+/* ADR 0086: present and kept with the Source Version; its own shape (◆) as well as its own colour. */
+.status-retained { background: #e3eef4; color: #234e63; }
 .status-degraded { background: #fff0cf; color: #76530f; }
 .status-unsupported { background: #f3e4e0; color: #753a31; }
 .fidelity-detail { color: #565d53; font-size: .9rem; line-height: 1.5; }
 .roundtrip-note { display: block; margin-top: .35rem; font-weight: 800; color: #6b4037; }
+.roundtrip-card { margin-top: .65rem; padding: .8rem; border-radius: 9px; background: #f6f4ee; border: 1px dashed #c9c3b4; }
+.roundtrip-card h4 { margin: 0 0 .35rem; font-size: .92rem; }
+.roundtrip-card p { margin: 0; }
+.fidelity-summary { margin: .65rem 0 0; color: #3f473d; line-height: 1.5; }
+.fidelity-details { margin-top: .5rem; }
+.fidelity-details > summary { cursor: pointer; font-weight: 800; color: #416458; }
+.text-box-choice { display: grid; gap: .5rem; margin: .65rem 0 0; padding: 0; border: 0; }
+.text-box-choice legend { font-weight: 800; color: #3f473d; margin-bottom: .35rem; }
+.text-box-choice .choice { padding: .6rem .75rem; }
 
 .review-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 .review-section h3 { margin: 0 0 .75rem; font-size: 1rem; }
