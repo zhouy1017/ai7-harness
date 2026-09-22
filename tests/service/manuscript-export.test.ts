@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { parseDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
 import { EDITOR_AUTHOR_LABEL } from '../../src/service/docx-export.js';
-import { EXPORT_LEDGER_SCHEMA_SQL } from '../../src/service/manuscript-export.js';
+import { EXPORT_LEDGER_SCHEMA_SQL, writeAtomically } from '../../src/service/manuscript-export.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { EXPORT_LEDGER_SCHEMA_VERSION, IMPORTED_MARK_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
@@ -455,4 +455,85 @@ describe('④ 导出: the Export Fidelity Review, the preparation, the approval 
       expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     });
   }, 300_000);
+});
+
+// The publication itself (V2-UX-EXP-012), over real files in a temporary folder. The name is taken by the
+// filesystem, not by a check before it: these cases pin what an export may never do to a file it did not write.
+describe('taking the chosen name', () => {
+  const PAYLOAD = new TextEncoder().encode('AI7 export payload');
+  const OTHER = new TextEncoder().encode('another application wrote this');
+
+  /** Every name this write staged under is removed; a partial left behind would be read as the export. */
+  async function partials(): Promise<string[]> {
+    return (await readdir(outbox)).filter((entry) => entry.endsWith('.ai7-partial'));
+  }
+
+  it('creates the chosen name and leaves no partial behind', async () => {
+    const destination = join(outbox, '新建.docx');
+    const written = await writeAtomically(destination, PAYLOAD, digest(PAYLOAD), 'create', randomUUID());
+    expect(written).toEqual({ outcome: 'created', bytes: PAYLOAD.byteLength, sha256: digest(PAYLOAD) });
+    expect(new Uint8Array(await readFile(destination))).toEqual(PAYLOAD);
+    expect(await partials()).toEqual([]);
+  });
+
+  it('publishes the chosen name once when two exports race for it', async () => {
+    const destination = join(outbox, '同名.docx');
+    const [first, second] = await Promise.all([
+      writeAtomically(destination, PAYLOAD, digest(PAYLOAD), 'create', randomUUID()),
+      writeAtomically(destination, OTHER, digest(OTHER), 'create', randomUUID()),
+    ]);
+    const outcomes = [first.outcome, second.outcome].sort();
+    expect(outcomes).toEqual(['created', 'failed']);
+    const refused = first.outcome === 'failed' ? first : second;
+    expect(refused).toEqual({ outcome: 'failed', code: 'EXPORT_TARGET_CHANGED' });
+    // The winner's file is whole: the one that lost the name neither overwrote it nor removed it.
+    const landed = new Uint8Array(await readFile(destination));
+    const created = first.outcome === 'created' ? PAYLOAD : OTHER;
+    expect(landed).toEqual(created);
+    expect(await partials()).toEqual([]);
+  });
+
+  it('leaves a file that took the chosen name untouched', async () => {
+    const destination = join(outbox, '已被占用.docx');
+    await writeFile(destination, OTHER);
+    const written = await writeAtomically(destination, PAYLOAD, digest(PAYLOAD), 'create', randomUUID());
+    expect(written).toEqual({ outcome: 'failed', code: 'EXPORT_TARGET_CHANGED' });
+    expect(new Uint8Array(await readFile(destination))).toEqual(OTHER);
+    expect(await partials()).toEqual([]);
+  });
+
+  it('never removes a file standing where an earlier build staged its write', async () => {
+    const effectIntentId = randomUUID();
+    const destination = join(outbox, '旧暂存.docx');
+    const legacyStage = join(outbox, `.${'旧暂存.docx'}.${effectIntentId.slice(0, 8)}.ai7-partial`);
+    await writeFile(legacyStage, OTHER);
+    const written = await writeAtomically(destination, PAYLOAD, digest(PAYLOAD), 'create', effectIntentId);
+    expect(written.outcome).toBe('created');
+    expect(new Uint8Array(await readFile(legacyStage))).toEqual(OTHER);
+    expect(new Uint8Array(await readFile(destination))).toEqual(PAYLOAD);
+  });
+
+  it('replaces exactly the file the editor chose to replace', async () => {
+    const destination = join(outbox, '覆盖.docx');
+    await writeFile(destination, OTHER);
+    const written = await writeAtomically(destination, PAYLOAD, digest(PAYLOAD), 'replace', randomUUID());
+    expect(written).toEqual({ outcome: 'replaced', bytes: PAYLOAD.byteLength, sha256: digest(PAYLOAD) });
+    expect(new Uint8Array(await readFile(destination))).toEqual(PAYLOAD);
+    expect(await partials()).toEqual([]);
+  });
+
+  it('refuses a replace whose file is gone, and writes nothing in its place', async () => {
+    const destination = join(outbox, '已被删除.docx');
+    const written = await writeAtomically(destination, PAYLOAD, digest(PAYLOAD), 'replace', randomUUID());
+    expect(written).toEqual({ outcome: 'failed', code: 'EXPORT_TARGET_CHANGED' });
+    expect(existsSync(destination)).toBe(false);
+    expect(await partials()).toEqual([]);
+  });
+
+  it('writes nothing when the folder the dialog resolved is gone', async () => {
+    const destination = join(outbox, '不存在的文件夹', '稿件.docx');
+    const written = await writeAtomically(destination, PAYLOAD, digest(PAYLOAD), 'create', randomUUID());
+    expect(written).toEqual({ outcome: 'failed', code: 'EXPORT_STAGE_FAILED' });
+    expect(existsSync(destination)).toBe(false);
+  });
 });
