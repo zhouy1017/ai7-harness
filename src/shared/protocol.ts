@@ -115,6 +115,10 @@ export const IPC_CHANNELS = {
   inspectDeliverables: 'ai7:j07:inspect-deliverables',
   designatePublicationVersion: 'ai7:j07:designate-publication-version',
   inspectGlobalAttention: 'ai7:j09:inspect-global-attention',
+  reviewManuscriptExport: 'ai7:j07:review-manuscript-export',
+  chooseManuscriptExportDestination: 'ai7:j07:choose-manuscript-export-destination',
+  approveManuscriptExport: 'ai7:j07:approve-manuscript-export',
+  revealManuscriptExport: 'ai7:j07:reveal-manuscript-export',
   undoManuscript: 'ai7:j02:undo-manuscript',
   redoManuscript: 'ai7:j02:redo-manuscript',
   openBookWorkbench: 'ai7:j12:open-book-workbench',
@@ -1596,8 +1600,12 @@ export interface LaunchPolicyProjection {
   externalExport: {
     version: 'v2' | null;
     policyEligibilityIsEffectApproval: false;
-    currentExportEffectAvailable: false;
-    label: '对外导出策略独立；当前未提供导出受控动作';
+    /**
+     * Whether a local export Effect can be offered (Issue #413): only once External Export Policy v2 verified at
+     * this launch; policy eligibility is still no approval.
+     */
+    currentExportEffectAvailable: boolean;
+    label: '对外导出策略独立；当前未提供导出受控动作' | '对外导出策略 v2 已校验：只导出到本机所选位置，每个文件单独批准';
   };
   publicReleasePermission: {
     present: false;
@@ -4927,6 +4935,21 @@ export interface InspectManuscriptExportReceiptInput {
   preparationId: string;
 }
 
+/** 选择保存位置… as the renderer asks for it: the exact review it read, and no path. */
+export interface ChooseManuscriptExportDestinationInput {
+  revisionId: string;
+  target: ManuscriptExportTargetInput;
+  options: ManuscriptExportOptions;
+  reviewDigest: string;
+  /** The file name the dialog offers first; the editor may change it there. */
+  suggestedFileName: string;
+}
+
+/** The system dialog was cancelled — nothing is recorded (V2-UX-EXP-020) — or a preparation was frozen. */
+export type ManuscriptExportDestinationResult =
+  | { outcome: 'cancelled' }
+  | { outcome: 'prepared'; preparation: ManuscriptExportPreparationProjection };
+
 export interface DurableHistoryProjection {
   action: 'undo' | 'redo';
   branchId: string;
@@ -5449,6 +5472,10 @@ export interface ServiceOperationMap {
    * no Book, because it reads across them; it is a read and records nothing.
    */
   inspectGlobalAttention: { input: Record<string, never>; output: GlobalAttentionProjection };
+  reviewManuscriptExport: { input: ReviewManuscriptExportInput; output: ManuscriptExportReviewProjection };
+  prepareManuscriptExport: { input: PrepareManuscriptExportInput; output: ManuscriptExportPreparationProjection };
+  approveManuscriptExport: { input: ApproveManuscriptExportInput; output: ManuscriptExportReceiptProjection };
+  inspectManuscriptExportReceipt: { input: InspectManuscriptExportReceiptInput; output: ManuscriptExportReceiptProjection };
   undoManuscript: {
     input: { manuscriptId: string; branchId: string; expectedWorkingDigest: string };
     output: DurableHistoryProjection;
@@ -5641,6 +5668,20 @@ export interface RendererApi {
   designatePublicationVersion(input: Omit<DesignatePublicationVersionInput, 'bookId'>): Promise<PublicationDesignationProjection>;
   /** 待我处理 across every Book (Issue #424): a read in any window, whatever it shows; it holds and grants nothing. */
   inspectGlobalAttention(): Promise<GlobalAttentionProjection>;
+  /**
+   * ④ 导出 (Issue #413): the Export Fidelity Review of one exact version of that Book's Manuscript. A current
+   * revision with unsaved edits is saved as a revision first.
+   */
+  reviewManuscriptExport(input: Omit<ReviewManuscriptExportInput, 'bookId'>): Promise<ManuscriptExportReviewProjection>;
+  /**
+   * 选择保存位置…: the system's own Save dialog, owned by the main process; a destination it returns freezes one
+   * Local Export Preparation. The renderer never names a path.
+   */
+  chooseManuscriptExportDestination(input: ChooseManuscriptExportDestinationInput): Promise<ManuscriptExportDestinationResult>;
+  /** 按上述方式导出: the approval of one unchanged preparation, the atomic write and what it came to. */
+  approveManuscriptExport(input: Omit<ApproveManuscriptExportInput, 'bookId'>): Promise<ManuscriptExportReceiptProjection>;
+  /** 在文件夹中显示: the system file manager at one verified exported file. */
+  revealManuscriptExport(input: Omit<InspectManuscriptExportReceiptInput, 'bookId'>): Promise<{ state: 'revealed' }>;
   undoManuscript(input: ServiceOperationMap['undoManuscript']['input']): Promise<DurableHistoryProjection>;
   redoManuscript(input: ServiceOperationMap['redoManuscript']['input']): Promise<DurableHistoryProjection>;
   openBookWorkbench(input: BookWorkbenchRoute): Promise<BookWorkbenchOpenProjection>;

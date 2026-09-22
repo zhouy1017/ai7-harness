@@ -56,6 +56,9 @@ const BAR_STATEMENT = '只是让 AI7 按这份计划做这一次；接受修改�
 // Apply its renderer member, `applyChangeSuggestionBatch` — 确认应用 over exactly the suggestions the
 // strip listed, one Effect, all or none. It is the same Apply surface, so it joins this allow-list.
 const CHANGE_SUGGESTION_APPLY_MEMBERS = ['applyChangeSuggestion', 'applyChangeSuggestionBatch', 'getManuscriptApplyOutcome'];
+// Synchronized delta with Issue #413: 交付物's four 导出 members, the only ones named like an export. They reach
+// no Provider, session or scheduler: a local file the system dialog chose, approved per file.
+const EXPORT_MEMBERS = ['reviewManuscriptExport', 'chooseManuscriptExportDestination', 'approveManuscriptExport', 'revealManuscriptExport'];
 // Synchronized delta with Issue #417: 审阅's seven members. None is named like an execution, effect,
 // apply or export member, so the two pins below hold them without an exception.
 const REVIEW_MEMBERS = ['inspectReviewWorkspace', 'prepareReviewRun', 'authorizeReviewRun', 'continueReviewRun',
@@ -330,9 +333,9 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     database.exec('PRAGMA query_only = ON;');
     // Synchronized delta with Issue #467: this reads the same Agent Data Root store J-03 and J-12
     // read, so the pin moves with the terminal version the service stamps
-    // (`IMPORTED_MARK_SCHEMA_VERSION` since Issue #411). It read 19 until #467 — one revision
+    // (`EXPORT_LEDGER_SCHEMA_VERSION` since Issue #413). It read 19 until #467 — one revision
     // behind, because only a failed product cleanup reaches this fallback, so revision 20 never met it.
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 28, 'credential-cleanup-metadata-version');
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 29, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
               approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
@@ -2688,7 +2691,7 @@ async function main() {
     // Synchronized delta with Issue #418: the Task Drawer, open beside ②A since 审阅, holds no action of
     // the surfaces that raise a Task — the plan authorizes nothing (PLAN-007). Synchronized delta with Issue
     // #420: its only start is its own bar's, and no card anywhere carries one.
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.analysisState==='settled' && card.dataset.resultRevisionOrdinal==='6' && ${ONLY_ANALYSIS_ACTIONS} && !document.querySelector('[data-analysis-action="prepare"], [data-analysis-action="authorize"]') && !document.querySelector('#task-drawer [data-analysis-action], #task-drawer [data-review-action], #task-drawer [data-task-authorization-action]') && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress|effect|enrol|apply|export/i.test(key) && !${JSON.stringify(CHANGE_SUGGESTION_APPLY_MEMBERS)}.includes(key)); })()`, 'no-execution-surface');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.analysisState==='settled' && card.dataset.resultRevisionOrdinal==='6' && ${ONLY_ANALYSIS_ACTIONS} && !document.querySelector('[data-analysis-action="prepare"], [data-analysis-action="authorize"]') && !document.querySelector('#task-drawer [data-analysis-action], #task-drawer [data-review-action], #task-drawer [data-task-authorization-action]') && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress|effect|enrol|apply|export/i.test(key) && ![...${JSON.stringify(CHANGE_SUGGESTION_APPLY_MEMBERS)}, ...${JSON.stringify(EXPORT_MEMBERS)}].includes(key)); })()`, 'no-execution-surface');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-network-provider-session');
   } finally {
     finalCleanupRequested = true;

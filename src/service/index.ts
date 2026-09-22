@@ -701,6 +701,24 @@ async function dispatch(
     // slot say which Run is in flight, exactly as the analysis inspections read them; nothing is written.
     case 'inspectGlobalAttention':
       return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAttention(analysisProgress, analysisExecution.busy) };
+    // ④ 导出 (Issue #413, plan slice S64): local only, and only under this launch's verified External Export Policy.
+    case 'reviewManuscriptExport':
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: await store.reviewManuscriptExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
+      };
+    case 'prepareManuscriptExport':
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: await store.prepareManuscriptExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
+      };
+    case 'approveManuscriptExport':
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: await store.approveManuscriptExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
+      };
+    case 'inspectManuscriptExportReceipt':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectManuscriptExportReceipt(request.input) };
     case 'undoManuscript':
       return {
         id: request.id,

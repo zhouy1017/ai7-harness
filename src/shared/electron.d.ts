@@ -43,7 +43,7 @@ declare module 'electron' {
   export const app: {
     commandLine: { getSwitchValue(name: string): string };
     enableSandbox(): void;
-    getPath(name: 'userData'): string;
+    getPath(name: 'userData' | 'documents'): string;
     requestSingleInstanceLock(): boolean;
     setPath(name: 'userData', path: string): void;
     whenReady(): Promise<void>;
@@ -58,6 +58,10 @@ declare module 'electron' {
       window: BrowserWindow,
       options: Record<string, unknown>,
     ): Promise<{ canceled: boolean; filePaths: string[] }>;
+    showSaveDialog(
+      window: BrowserWindow,
+      options: Record<string, unknown>,
+    ): Promise<{ canceled: boolean; filePath?: string }>;
   };
   export const ipcMain: {
     handle(channel: string, listener: (event: IpcMainInvokeEvent, input?: any) => unknown): void;
