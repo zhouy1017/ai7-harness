@@ -4326,6 +4326,7 @@ function renderTargetChoice(
             expectedDraftVersion: staged.draftVersion,
             target: { kind: 'new-book', choiceId: selectedChoice.id, confirmedTitle },
             acceptDegradation: false,
+            textBoxDisposition: 'retain',
           });
           renderReview(review, recoveryNotice, recoveryReturn);
         }
@@ -4356,6 +4357,7 @@ function renderTargetChoice(
           expectedDraftVersion: staged.draftVersion,
           target: { kind: 'existing-book', bookId: selectedChoice.bookId, relationship: 'first-manuscript' },
           acceptDegradation: false,
+          textBoxDisposition: 'retain',
         });
         renderReview(review, recoveryNotice, recoveryReturn);
         setStatus('导入前复核已准备', 'success');
@@ -5291,6 +5293,7 @@ function renderReview(
                   relationship: review.target.relationship,
                 },
             acceptDegradation: true,
+            textBoxDisposition: review.textBoxDisposition ?? 'retain',
           });
           setStatus('已接受本次导入的完整降级集合', 'success');
           renderReview(acceptedReview, recoveryNotice, recoveryReturn);
