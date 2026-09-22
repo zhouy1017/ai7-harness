@@ -13,6 +13,7 @@ import {
   MAX_SEARCH_QUERY_GRAPHEMES,
   MAX_SEARCH_RESULTS,
   MAX_WINDOW_BLOCKS,
+  fidelityStatusLabel,
   milestonePurposeKindOf,
   type DurableHistoryProjection,
   type FidelityCategoryProjection,
@@ -44,7 +45,7 @@ import {
   type SearchResultsProjection,
   type SearchSummaryProjection,
 } from '../shared/protocol.js';
-import { deriveImportFidelityPlan, type FidelityConversionIdentity } from './docx.js';
+import { DOCX_PARSER_IDENTITY_V1, deriveImportFidelityPlan, type FidelityConversionIdentity } from './docx.js';
 import type { BuiltInWorkflowProfile } from './native-workflow-profile.js';
 import {
   EDITORIAL_WORKSPACE_PROFILE_BOOK_PINS_SCHEMA_SQL,
@@ -70,6 +71,7 @@ import {
   MANUSCRIPT_INTAKE_SCHEMA_VERSION,
   PUBLICATION_VERSION_SCHEMA_VERSION,
   PROPOSAL_CONFLICT_SCHEMA_VERSION,
+  IMPORT_RETENTION_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -107,6 +109,13 @@ import {
   PROPOSAL_CONFLICT_SCHEMA_SQL,
   PROPOSAL_CONFLICT_TRIGGER_SQL,
 } from './proposal-conflicts.js';
+import {
+  IMPORT_FIDELITY_CATEGORIES_REVISION_26_SQL,
+  IMPORT_FIDELITY_CATEGORIES_SQL,
+  IMPORT_RETENTION_FOREIGN_KEYS,
+  IMPORT_RETENTION_SCHEMA_SQL,
+  IMPORT_RETENTION_TRIGGER_SQL,
+} from './import-retention.js';
 
 /**
  * The analysis ledger as revision 15 created it, as revision 16 rebuilt two of its relations, as
@@ -374,17 +383,11 @@ const COMMON_SCHEMA_SQL = {
     round_trip_guaranteed INTEGER NOT NULL CHECK(round_trip_guaranteed = 0),
     created_at TEXT NOT NULL
   ) STRICT`,
-  import_fidelity_categories: `CREATE TABLE import_fidelity_categories (
-    fidelity_review_id TEXT NOT NULL REFERENCES import_fidelity_reviews(fidelity_review_id),
-    category_key TEXT NOT NULL,
-    display_label TEXT NOT NULL,
-    item_count INTEGER NOT NULL CHECK(item_count >= 0),
-    status TEXT NOT NULL CHECK(status IN ('preserved', 'degraded', 'unsupported')),
-    detail TEXT NOT NULL,
-    position INTEGER NOT NULL CHECK(position BETWEEN 1 AND 8),
-    PRIMARY KEY(fidelity_review_id, category_key),
-    UNIQUE(fidelity_review_id, position)
-  ) STRICT`,
+  // Revision 27 (Issue #410) widens the relation to the ten classes and the `retained` status. Below it
+  // the store holds revision 26's text; revision 27's own exact validation accepts only the widened one,
+  // and so does a store an earlier build planted after this one had already widened it — its rows are
+  // the rows this build wrote, and `initializeImportRetentionSchema` has nothing left to rebuild.
+  import_fidelity_categories: [IMPORT_FIDELITY_CATEGORIES_REVISION_26_SQL, IMPORT_FIDELITY_CATEGORIES_SQL],
   import_degradation_decisions: `CREATE TABLE import_degradation_decisions (
     degradation_decision_id TEXT PRIMARY KEY,
     fidelity_review_id TEXT NOT NULL UNIQUE REFERENCES import_fidelity_reviews(fidelity_review_id),
@@ -1751,6 +1754,8 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...PUBLICATION_VERSION_FOREIGN_KEYS,
   // Revision 26 (Issue #57): the proposal-conflict relations, owned and spelled by `proposal-conflicts.ts`.
   ...PROPOSAL_CONFLICT_FOREIGN_KEYS,
+  // Revision 27 (Issue #410): the import-retention relations, owned and spelled by `import-retention.ts`.
+  ...IMPORT_RETENTION_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2351,6 +2356,7 @@ function requireManuscriptReimportTargetSchema(
   includeReviewRunTables = false,
   includePublicationVersionTables = false,
   includeProposalConflictTables = false,
+  includeImportRetentionTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2391,6 +2397,12 @@ function requireManuscriptReimportTargetSchema(
       // their own, and revision 26 (Issue #57) the proposal-conflict relations.
       ...(includePublicationVersionTables ? PUBLICATION_VERSION_SCHEMA_SQL : {}),
       ...(includeProposalConflictTables ? PROPOSAL_CONFLICT_SCHEMA_SQL : {}),
+      // Revision 27 (Issue #410) adds the import-retention relations the same way, and widened
+      // `import_fidelity_categories` in the transaction that created them: a store with them holds only
+      // the widened text of it.
+      ...(includeImportRetentionTables
+        ? { ...IMPORT_RETENTION_SCHEMA_SQL, import_fidelity_categories: IMPORT_FIDELITY_CATEGORIES_SQL }
+        : {}),
     },
     MANUSCRIPT_REIMPORT_INDEX_SQL,
     true,
@@ -2404,6 +2416,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeReviewRunTables ? REVIEW_RUN_TRIGGER_SQL : {}),
       ...(includePublicationVersionTables ? PUBLICATION_VERSION_TRIGGER_SQL : {}),
       ...(includeProposalConflictTables ? PROPOSAL_CONFLICT_TRIGGER_SQL : {}),
+      ...(includeImportRetentionTables ? IMPORT_RETENTION_TRIGGER_SQL : {}),
     },
   );
 }
@@ -4863,23 +4876,26 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
           `SELECT fc.category_key, fc.display_label, fc.item_count, fc.status, fc.detail
            FROM manuscript_reimport_records rr
            JOIN import_fidelity_categories fc ON fc.fidelity_review_id = rr.fidelity_review_id
-           WHERE rr.comparison_id = ? ORDER BY fc.position LIMIT 9`,
+           WHERE rr.comparison_id = ? ORDER BY fc.position LIMIT 11`,
         ).all(comparisonId) as SqlRow[];
         reviewFidelity = fidelityRows.map((row) => {
           const status = asString(row.status) as FidelityCategoryProjection['status'];
           return {
             key: asString(row.category_key) as FidelityCategoryProjection['key'],
             label: asString(row.display_label), count: asNumber(row.item_count), status,
-            statusLabel: status === 'preserved' ? '完整保留' : status === 'degraded' ? '降级导入' : '不支持导入',
+            statusLabel: fidelityStatusLabel(status),
             detail: asString(row.detail),
           };
         });
       }
+      // A review rebuilds under the parser identity its staged file was read with (ADR 0086): the ten
+      // classes of `/2`, or the eight a `/1` review recorded.
       const reviewPlan = deriveImportFidelityPlan(
         reviewFidelity,
         asString(comparison.staged_source_digest),
         asNumber(reviewedDraft.source_bytes),
         rowFidelityConversion(reviewedDraft.converter_identity, reviewedDraft.source_format),
+        asString(comparison.staged_parser_identity),
       );
       requireBounded(reviewPlan !== undefined, 'SCHEMA_INVALID', '稿件重新导入保真复核不符合受限边界。');
       const degradationDecisionState = reviewPlan.degradations.length === 0
@@ -4918,7 +4934,7 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
       requireBounded(reviewDigest === asString(reviewedDraft.review_digest),
         'SCHEMA_INVALID', '稿件重新导入复核摘要无效。');
       const record = db.prepare(
-        `SELECT rr.*, sv.source_digest, sv.format, sv.converter_identity, co.byte_length source_bytes,
+        `SELECT rr.*, sv.source_digest, sv.format, sv.converter_identity, sv.parser_identity, co.byte_length source_bytes,
                 fr.outcome fidelity_outcome, fr.review_digest fidelity_review_digest,
                 dd.decision degradation_decision
          FROM manuscript_reimport_records rr
@@ -4951,10 +4967,12 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
         requireBounded(recordDigest === asString(record.record_digest), 'SCHEMA_INVALID', '稿件重新导入记录摘要无效。');
         const categoryRows = db.prepare(
           `SELECT category_key, display_label, item_count, status, detail, position
-           FROM import_fidelity_categories WHERE fidelity_review_id = ? ORDER BY position LIMIT 9`,
+           FROM import_fidelity_categories WHERE fidelity_review_id = ? ORDER BY position LIMIT 11`,
         ).all(asString(record.fidelity_review_id)) as SqlRow[];
-        requireBounded(categoryRows.length === 8 && categoryRows.every((row, index) => asNumber(row.position) === index + 1),
-          'SCHEMA_INVALID', '稿件重新导入保真证据必须精确包含八类。');
+        // Ten classes under parser identity `/2`, the eight of a `/1` review otherwise (ADR 0086).
+        const expectedCategoryCount = asString(record.parser_identity) === DOCX_PARSER_IDENTITY_V1 ? 8 : 10;
+        requireBounded(categoryRows.length === expectedCategoryCount && categoryRows.every((row, index) => asNumber(row.position) === index + 1),
+          'SCHEMA_INVALID', '稿件重新导入保真证据必须精确包含其解析器版本的全部内容类。');
         const categories = categoryRows.map((row) => {
           const status = asString(row.status) as FidelityCategoryProjection['status'];
           return {
@@ -4962,8 +4980,7 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
             label: asString(row.display_label),
             count: asNumber(row.item_count),
             status,
-            statusLabel: status === 'preserved' ? '完整保留' as const
-              : status === 'degraded' ? '降级导入' as const : '不支持导入' as const,
+            statusLabel: fidelityStatusLabel(status),
             detail: asString(row.detail),
           };
         });
@@ -4972,6 +4989,7 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
           asString(record.source_digest),
           asNumber(record.source_bytes),
           rowFidelityConversion(record.converter_identity, record.format),
+          asString(record.parser_identity),
         );
         const degradationDecision = plan && plan.degradations.length > 0
           ? canonicalJson({
@@ -5053,6 +5071,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeReviewRunTables = false,
   includePublicationVersionTables = false,
   includeProposalConflictTables = false,
+  includeImportRetentionTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5068,6 +5087,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeReviewRunTables,
     includePublicationVersionTables,
     includeProposalConflictTables,
+    includeImportRetentionTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5129,7 +5149,8 @@ export function initializeBoundedSchema(
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION || version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
-      version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION,
+      version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
+      version === IMPORT_RETENTION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5141,9 +5162,10 @@ export function initializeBoundedSchema(
       version === FACTUAL_REVIEW_SCHEMA_VERSION || version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION ||
       version === EDITORIAL_MARK_SCHEMA_VERSION || version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
-      version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION) {
+      version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
+      version === IMPORT_RETENTION_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== PROPOSAL_CONFLICT_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== IMPORT_RETENTION_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5159,6 +5181,7 @@ export function initializeBoundedSchema(
           version >= EDITORIAL_REVIEW_SCHEMA_VERSION,
           version >= PUBLICATION_VERSION_SCHEMA_VERSION,
           version >= PROPOSAL_CONFLICT_SCHEMA_VERSION,
+          version >= IMPORT_RETENTION_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);

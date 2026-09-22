@@ -40,9 +40,10 @@ export async function importSample1Book(
   const choice = staged.targetChoices.find((entry) => entry.kind === 'new-book');
   expect(choice).toBeDefined();
   const target = { kind: 'new-book', choiceId: choice!.id as 'new-book' | 'new-book-distinct-intended-work', confirmedTitle: title } as const;
-  const pending = store.prepareNewBookReview(staged.draftId, staged.draftVersion, target, false);
-  expect(pending.degradationDecision.state).toBe('required-unselected');
-  const review = store.prepareNewBookReview(pending.draftId, pending.draftVersion, target, true);
+  // ADR 0086: sample1's inline styles and its one section are retained with the file, so its review
+  // asks for no Import Degradation Decision and is formed at once.
+  const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion, target, false);
+  expect(review.degradationDecision.state).toBe('not-required-clean-import');
   expect(review.reviewDigest).not.toBeNull();
   const commitId = randomUUID();
   const commit = await store.commitNewBookImport({

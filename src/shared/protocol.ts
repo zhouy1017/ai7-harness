@@ -696,6 +696,11 @@ export interface ReviewBeforeImportProjection {
   source: StagedImportProjection['source'];
   identityFindings: ReadonlyArray<ImportIdentityFindingProjection>;
   fidelity: ReadonlyArray<FidelityCategoryProjection>;
+  /**
+   * The review's choice for the file's text boxes (ADR 0086 §2), which its `text-boxes` row states:
+   * `retain` (保留为文本框, the default) or `merge` (并入正文); null when the file has none it can choose for.
+   */
+  textBoxDisposition: TextBoxDisposition | null;
   recordsToCreate: ReadonlyArray<string>;
   nonEffects: ReadonlyArray<string>;
   workflowProfile: {

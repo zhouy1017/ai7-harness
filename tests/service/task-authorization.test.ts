@@ -7,7 +7,7 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import {
   ANALYSIS_LEDGER_SCHEMA_SQL,
-  PROPOSAL_CONFLICT_SCHEMA_VERSION,
+  IMPORT_RETENTION_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TaskAuthorizationError,
   canonicalRecord,
@@ -82,7 +82,7 @@ async function requireExactSample1(): Promise<void> {
   expect(createHash('sha256').update(await readFile(sample1Path())).digest('hex')).toBe(SAMPLE1_SHA256);
 }
 
-/** Import exact `sample1` as a new Book, accepting the fidelity degradations its review reports. */
+/** Import exact `sample1` as a new Book: its review is clean, so it asks for no degradation decision. */
 async function importSample1(store: EditorialStore): Promise<{ bookId: string; manuscriptId: string }> {
   const staged = await store.stageSelectedManuscript(randomUUID(), sample1Path());
   expect(staged.source.format).toBe('DOCX');
@@ -90,14 +90,11 @@ async function importSample1(store: EditorialStore): Promise<{ bookId: string; m
   expect(staged.source.sourceBytes).toBe(SAMPLE1_BYTES);
 
   const target = { kind: 'new-book', choiceId: 'new-book', confirmedTitle: CONFIRMED_TITLE } as const;
-  // `sample1` carries reported degradations, so the first review withholds its digest until the
-  // acceptance the product collects on its review screen is passed back, exactly as J-03 does.
-  const pending = store.prepareNewBookReview(staged.draftId, staged.draftVersion, target, false);
-  expect(pending.reviewDigest).toBeNull();
-  expect(pending.degradationDecision.state).toBe('required-unselected');
-  const review = store.prepareNewBookReview(pending.draftId, pending.draftVersion, target, true);
+  // ADR 0086: `sample1`'s inline styles and its one section are retained with the file, so the first
+  // review is formed at once and carries its digest, exactly as J-03 now sees it.
+  const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion, target, false);
   expect(review.reviewDigest).not.toBeNull();
-  expect(review.degradationDecision.state).toBe('accepted-complete-set');
+  expect(review.degradationDecision.state).toBe('not-required-clean-import');
   expect(review.target.kind).toBe('new-book');
 
   const commitId = randomUUID();
@@ -447,7 +444,7 @@ describe('task authorization over the real store on exact sample1', () => {
     const database = new DatabaseSync(storeDatabasePath());
     try {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
-        .toBe(PROPOSAL_CONFLICT_SCHEMA_VERSION);
+        .toBe(IMPORT_RETENTION_SCHEMA_VERSION);
       expect(ANALYSIS_LEDGER_TABLES.length).toBeGreaterThan(0);
       for (const table of ANALYSIS_LEDGER_TABLES) {
         const rows = database.prepare(`SELECT count(*) total FROM ${table}`).get() as { total: number };
