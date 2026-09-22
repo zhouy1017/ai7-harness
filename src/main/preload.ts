@@ -206,6 +206,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['enableEditorialWorkspaceProfile']['output']>(IPC_CHANNELS.enableEditorialWorkspaceProfile),
   inspectTaskAuthorization: () =>
     invoke<ServiceOperationMap['inspectTaskAuthorization']['output']>(IPC_CHANNELS.inspectTaskAuthorization),
+  inspectTaskPlan: (input: Omit<ServiceOperationMap['inspectTaskPlan']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['inspectTaskPlan']['output']>(IPC_CHANNELS.inspectTaskPlan, input),
   inspectForegroundExecutionBoundary: (input: Omit<
     ServiceOperationMap['inspectForegroundExecutionBoundary']['input'],
     'bookId'

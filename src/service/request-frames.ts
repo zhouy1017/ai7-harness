@@ -18,6 +18,7 @@ import {
   REVIEW_FINDING_SEVERITIES,
   REVIEW_FINDING_STATUSES,
   REVIEW_SCOPE_KINDS,
+  TASK_PLAN_KINDS,
   isReviewCategoryId,
   publicationText,
   type BaselineAnalysisUpdateMode,
@@ -26,6 +27,7 @@ import {
   type ReviewFindingStatus,
   type ReviewScopeKind,
   type ServiceRequest,
+  type TaskPlanKind,
 } from '../shared/protocol.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -333,6 +335,16 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectTaskAuthorization': {
       const input = requireInput(value.input, ['bookId'], tentativeId);
       if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // The Task Drawer (Issue #418): one of the three kinds, and the Task — a Review Run is always named;
+    // the other two may ask for the Book's current Task with `null`.
+    case 'inspectTaskPlan': {
+      const input = requireInput(value.input, ['bookId', 'kind', 'ref'], tentativeId);
+      if (!validUuid(input.bookId) || !TASK_PLAN_KINDS.includes(input.kind as TaskPlanKind) ||
+          !(input.ref === null ? input.kind !== 'review-run' : validUuid(input.ref))) {
         throw new ProtocolError(tentativeId);
       }
       break;

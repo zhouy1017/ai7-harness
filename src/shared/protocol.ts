@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 35 as const;
+export const SERVICE_PROTOCOL_VERSION = 36 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -52,6 +52,7 @@ export const IPC_CHANNELS = {
   installEditorialWorkspaceProfile: 'ai7:j15:install-editorial-workspace-profile',
   enableEditorialWorkspaceProfile: 'ai7:j15:enable-editorial-workspace-profile',
   inspectTaskAuthorization: 'ai7:j03:inspect-task-authorization',
+  inspectTaskPlan: 'ai7:j03:inspect-task-plan',
   inspectForegroundExecutionBoundary: 'ai7:j03:inspect-foreground-execution-boundary',
   prepareTaskAuthorization: 'ai7:j03:prepare-task-authorization',
   authorizeTaskAuthorization: 'ai7:j03:authorize-task-authorization',
@@ -4666,6 +4667,11 @@ export interface ServiceOperationMap {
     input: { bookId: string };
     output: TaskAuthorizationProjection;
   };
+  /**
+   * The Task Drawer (Issue #418, plan slice S72): the plan of one Task of the Book — J-03's fixed task,
+   * the baseline analysis, or a Review Run — in the editor's words. A read; it records nothing.
+   */
+  inspectTaskPlan: { input: InspectTaskPlanInput; output: TaskPlanProjection };
   inspectForegroundExecutionBoundary: {
     input: { bookId: string; runRecordId: string };
     output: ForegroundExecutionBoundaryProjection;
@@ -4960,6 +4966,8 @@ export interface RendererApi {
   installEditorialWorkspaceProfile(): Promise<EditorialWorkspaceProfileProjection>;
   enableEditorialWorkspaceProfile(): Promise<EditorialWorkspaceProfileProjection>;
   inspectTaskAuthorization(): Promise<TaskAuthorizationProjection>;
+  /** The Task Drawer's plan of one Task of the Book the window is showing (Issue #418). */
+  inspectTaskPlan(input: Omit<InspectTaskPlanInput, 'bookId'>): Promise<TaskPlanProjection>;
   inspectForegroundExecutionBoundary(input: Omit<
     ServiceOperationMap['inspectForegroundExecutionBoundary']['input'],
     'bookId'
