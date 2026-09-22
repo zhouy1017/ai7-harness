@@ -567,7 +567,7 @@ function createDocumentParser(
       const position = blockCount + 1;
       const digest = sha256(canonicalJson({ kind, level, text }));
       const block = {
-        blockId: `blk_${sha256(`${position} ${digest}`).slice(0, 24)}`,
+        blockId: `blk_${sha256(`${position}\u0000${digest}`).slice(0, 24)}`,
         position,
         kind,
         level,
@@ -576,7 +576,7 @@ function createDocumentParser(
         graphemeLength: blockGraphemes,
         sourceParagraphIndex: paragraph.sourceParagraphIndex,
       } satisfies ParsedDocxBlock;
-      if (blockCount > 0) contentHash.update('');
+      if (blockCount > 0) contentHash.update('\u001e');
       contentHash.update(text);
       if (blockCount > 0) structureHash.update(',');
       structureHash.update(canonicalJson({ blockId: block.blockId, position, kind, level, digest }));
