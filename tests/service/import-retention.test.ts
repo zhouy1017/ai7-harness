@@ -248,6 +248,31 @@ describe('import retention over the real store (ADR 0086)', () => {
     }
   }, 120_000);
 
+  it('keeps a merge chosen on a review that must first accept its degradation', async () => {
+    const { path, blocks } = await composed({
+      ...TEXT_BOX_EXCERPT, title: '文本框与域组稿',
+      retention: { ...TEXT_BOX_EXCERPT.retention, field: { block: 1 } },
+    });
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const staged = await store.stageSelectedManuscript(randomUUID(), path);
+      const target = { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '文本框与域组稿' } as const;
+      const pending = store.prepareNewBookReview(staged.draftId, staged.draftVersion, target, false, 'merge');
+      // The unaccepted review already states the choice, so the renderer can repeat it with the acceptance.
+      expect([pending.reviewDigest, pending.degradationDecision.state, pending.textBoxDisposition]).toEqual([null, 'required-unselected', 'merge']);
+      const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion, target, true, pending.textBoxDisposition!);
+      expect([review.degradationDecision.state, review.textBoxDisposition]).toEqual(['accepted-complete-set', 'merge']);
+      const commit = await store.commitNewBookImport({
+        draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest!, commitId: randomUUID(),
+      });
+      expect(workingBlocks(store, commit.manuscriptId, commit.branchId)).toHaveLength(blocks.length + 2);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    expect(textBoxChoices()).toEqual([{ category_key: 'text-boxes', choice: 'merge' }]);
+  }, 120_000);
+
   it('maps every block of a reimported revision to the paragraph of the file it came from', async () => {
     const first = await composed({ source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 6, title: '重新导入组稿' });
     const second = await composed({ ...TEXT_BOX_EXCERPT, blocks: 7, title: '重新导入组稿' });
