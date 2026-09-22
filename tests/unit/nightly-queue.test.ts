@@ -334,3 +334,72 @@ describe('the tree the queue builds', () => {
     expect(queue.candidateRef(449, '123456')).toBe('refs/heads/nightly/candidate-449-123456');
   });
 });
+
+// The orchestrator's own shape. A called workflow may only narrow the caller's token: a scope it asks
+// for and the call site withholds refuses the whole run before a single job exists, with no log to read
+// — which is how the queue of 2026-09-22 died (Issue #504). These cases are text over the workflow
+// files, because the repository has no YAML parser and this invariant needs none.
+describe('the orchestrator grants every scope the workflows it calls ask for', () => {
+  const WORKFLOWS = new URL('../../.github/workflows/', import.meta.url);
+  const SCOPE = /^(\s*)([a-z-]+): (read|write|none)$/;
+
+  /** Every `permissions:` block of one workflow, as maps from scope to level, in file order. */
+  function permissionBlocks(text: string): Map<string, string>[] {
+    const lines = text.split('\n');
+    const blocks: Map<string, string>[] = [];
+    for (let index = 0; index < lines.length; index += 1) {
+      const opener = /^(\s*)permissions:\s*$/.exec(lines[index]!);
+      if (opener === null) continue;
+      const block = new Map<string, string>();
+      for (let scan = index + 1; scan < lines.length; scan += 1) {
+        const scope = SCOPE.exec(lines[scan]!);
+        if (scope === null || scope[1]!.length <= opener[1]!.length) break;
+        block.set(scope[2]!, scope[3]!);
+      }
+      blocks.push(block);
+    }
+    return blocks;
+  }
+
+  /** Every job of the calling workflow that calls another workflow of this repository, with what it grants. */
+  function callSites(text: string): { called: string; granted: Map<string, string> }[] {
+    const lines = text.split('\n');
+    const sites: { called: string; granted: Map<string, string> }[] = [];
+    let granted = new Map<string, string>();
+    for (let index = 0; index < lines.length; index += 1) {
+      const opener = /^(\s{4})permissions:\s*$/.exec(lines[index]!);
+      if (opener !== null) {
+        granted = new Map<string, string>();
+        for (let scan = index + 1; scan < lines.length; scan += 1) {
+          const scope = SCOPE.exec(lines[scan]!);
+          if (scope === null || scope[1]!.length <= 4) break;
+          granted.set(scope[2]!, scope[3]!);
+        }
+      }
+      const call = /^\s{4}uses: \.\/\.github\/workflows\/(\S+)$/.exec(lines[index]!);
+      if (call !== null) sites.push({ called: call[1]!, granted: new Map(granted) });
+    }
+    return sites;
+  }
+
+  it('reads the call sites of the queue', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const text = await readFile(new URL('e2e-nightly-queue.yml', WORKFLOWS), 'utf8');
+    expect(callSites(text).map((site) => site.called)).toEqual(['e2e-candidate.yml', 'e2e-nightly.yml']);
+  });
+
+  it('withholds no scope a called workflow asks to write', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const caller = await readFile(new URL('e2e-nightly-queue.yml', WORKFLOWS), 'utf8');
+    const withheld: string[] = [];
+    for (const site of callSites(caller)) {
+      const called = await readFile(new URL(site.called, WORKFLOWS), 'utf8');
+      for (const block of permissionBlocks(called)) {
+        for (const [scope, level] of block) {
+          if (level === 'write' && site.granted.get(scope) !== 'write') withheld.push(`${site.called} asks ${scope}: write`);
+        }
+      }
+    }
+    expect(withheld).toEqual([]);
+  });
+});
