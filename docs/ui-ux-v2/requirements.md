@@ -238,7 +238,7 @@ Added by [ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-sept
 ## Manuscript import and fidelity
 
 - **V2-UX-IMP-001**: Manuscript import begins through the current platform's user-selected native file picker and performs parsing and fidelity preflight locally without requiring a model provider, credential, Harness, or network.
-- **V2-UX-IMP-002**: Before editable import commits, an Import Fidelity Review separately classifies inline styles, comments/revisions, notes, tables, images/captions, sections, headers/footers with page setup, text boxes, fields such as a table of contents, and expected round-trip export behavior; the first nine are its rows and the round-trip class is its closing 预计往返 card (ADR 0086).
+- **V2-UX-IMP-002**: Before editable import commits, an Import Fidelity Review separately classifies inline styles, comments/revisions, notes, tables, images/captions, sections with page setup, headers/footers, text boxes, fields such as a table of contents, and expected round-trip export behavior; the first nine are its rows and the round-trip class is its closing 预计往返 card (ADR 0086).
 - **V2-UX-IMP-003**: Each content class is labeled `完整保留`, `降级导入`, or `不支持导入` with text and icon/shape as well as color.
 - **V2-UX-IMP-004**: Every material degradation shows exact count, representative examples, affected behavior, and expected export consequence before the editor may decide.
 - **V2-UX-IMP-005**: Proceeding with degradation requires an explicit Import Degradation Decision using wording such as `按上述降级方式导入`; no degradation is preselected and generic `继续` is insufficient.

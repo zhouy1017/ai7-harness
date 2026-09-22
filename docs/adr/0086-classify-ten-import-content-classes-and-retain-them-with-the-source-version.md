@@ -30,38 +30,39 @@ On 2026-09-22 the Owner chose the class table S61 (#410) needs before it is buil
 
 The Import Fidelity Review records ten classes, in this order:
 
-1. 内联样式
+1. 行内样式
 2. 批注与修订
-3. 脚注
+3. 脚注与尾注
 4. 表格
 5. 图片与图注
-6. 分节
-7. 页眉页脚 · 页面设置
+6. 分节（含页面设置）
+7. 页眉与页脚
 8. 文本框
 9. 域（目录等）
 10. 预计往返
 
-The review shows the first nine as rows under the columns 内容类 · 数量 · 怎样进来 · 例子 · 以后导出. The tenth is shown as a closing 预计往返 card: it summarises what a DOCX export restores.
+The review shows the first nine as rows under the columns 内容类 · 数量 · 怎样进来 · 例子 · 以后导出. The tenth is shown as a closing 预计往返 card: it summarises what a DOCX export restores, and names the style sheet, which is kept with the file without being counted. The first seven keep the keys and labels the review already uses. A class that is absent reads `完整保留`; `完整保留（随文件保留）` names a class that is present.
 
 ### 2. The label each class carries
 
 | Class | At import |
 | --- | --- |
-| 内联样式 | `完整保留（随文件保留）`, with 「改过的段落，导出时逐段说明格式能否原样恢复」 |
+| 行内样式 | `完整保留（随文件保留）`, with 「改过的段落，导出时逐段说明格式能否原样恢复」 |
 | 批注与修订 | Unchanged by this record. S62 (#411) imports them as marks |
-| 脚注 | `降级导入` until the manuscript has a note block. The notes stay with the Source Version, and the row states what the manuscript shows and what export restores (IMP-004) |
-| 表格 | `完整保留（随文件保留）`, with the same line as 内联样式 |
-| 图片与图注 | `完整保留（随文件保留）`. The image stays with the Source Version, and the body shows a placeholder with its caption |
-| 分节 | `完整保留（随文件保留）` |
-| 页眉页脚 · 页面设置 | `完整保留（随文件保留）`, the style sheet included |
-| 文本框 | `完整保留（随文件保留）`, with `保留为文本框` (default) or `并入正文`, which moves its text into the body where it stood |
-| 域（目录等） | `降级导入` |
+| 脚注与尾注 | `降级导入` until the manuscript has a note block. The manuscript shows neither the reference nor the note; the notes stay with the Source Version; the row says both (IMP-004) |
+| 表格 | `完整保留（随文件保留）`, with the same line as 行内样式. The cells' text enters the manuscript as paragraphs in reading order; the table's structure stays with the file |
+| 图片与图注 | `完整保留（随文件保留）`. The image stays with the Source Version and is restored on export. The manuscript keeps the caption as text and draws no placeholder yet: a placeholder needs a non-text block, which the manuscript does not have |
+| 分节（含页面设置） | `完整保留（随文件保留）`. Page size, margins, columns and the document grid are section properties, so page setup is counted here |
+| 页眉与页脚 | `完整保留（随文件保留）` |
+| 文本框 | `完整保留（随文件保留）`, with `保留为文本框` (the default) or `并入正文`. Kept as a text box, it stays with the file, is not shown in the manuscript, and is restored on export. Merged, its paragraphs enter the manuscript right after the paragraph that anchors it, and export no longer writes the original box. A file with a text box, refused today, can be imported |
+| 域（目录等） | `降级导入`. Every field in the body — a table of contents, a cross-reference, a hyperlink — enters as the text it currently displays, and no longer updates |
 
 Only a `降级导入` class requires IMP-005's unselected decision. A file with none imports without it, and sample1 is such a file: its 266 inline-style items and one section become `完整保留（随文件保留）`.
 
 Where the prototype differs, this record decides:
-- For 内联样式 and 表格, `原样恢复` holds only for unedited paragraphs (§3).
-- 图片与图注 is retained, as IMP-055 names images.
+- For 行内样式 and 表格, `原样恢复` holds only for unedited paragraphs (§3).
+- 图片与图注 is retained, as IMP-055 names images, and its placeholder waits for a non-text block.
+- The prototype's 页眉页脚 · 页面设置 row is split: page setup stays with 分节, where the section properties carry it.
 
 ### 3. What `随文件保留` means
 
@@ -94,6 +95,7 @@ Where the prototype differs, this record decides:
 ## Consequences
 
 - **The editor imports a manuscript like sample1 without being asked to accept a degradation.** J-01's fidelity rows, and the `#accept-import-degradation` steps of J-01 to J-04, change with S61.
+- **A DOCX with a text box can be imported;** until now the whole file was refused.
 - **S61 needs a schema revision** for the mapping and the two new classes. Its fidelity plan must still be rebuilt exactly from counts, now for ten classes.
 - **S62, S64, S66 and S67 can be scheduled.**
 
