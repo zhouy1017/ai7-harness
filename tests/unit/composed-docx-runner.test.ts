@@ -14,9 +14,12 @@ const {
   IMPORTED_MARKS_OTHER_AUTHOR,
   IMPORTED_MARKS_RECIPE,
   IMPORTED_MARKS_REJECTED_BLOCKS,
+  admittedParagraphs,
   admittedSpanText,
   composeAdmittedDocx,
+  composeExportAdmittedDocx,
   composeRevisedAdmittedDocx,
+  readExportedDocx,
 } = (await import(new URL('../../e2e/composed-docx.mjs', import.meta.url).href)) as {
   ADMITTED_BASELINE_DOCX: string;
   IMPORTED_MARKS_AUTHOR: string;
@@ -24,9 +27,19 @@ const {
   IMPORTED_MARKS_OTHER_AUTHOR: string;
   IMPORTED_MARKS_RECIPE: Record<string, unknown>;
   IMPORTED_MARKS_REJECTED_BLOCKS: ReadonlyArray<number>;
+  admittedParagraphs(request: { source: string; startBlock: number; blocks: number }): Promise<string[]>;
   admittedSpanText(source: string, span: { block: number; from?: number; to?: number }): Promise<string>;
   composeAdmittedDocx(path: string, request: Record<string, unknown>): Promise<Uint8Array>;
+  composeExportAdmittedDocx(path: string, request: Record<string, unknown>): Promise<Uint8Array>;
   composeRevisedAdmittedDocx(path: string, request: Record<string, unknown>): Promise<Uint8Array>;
+  readExportedDocx(path: string): Promise<{
+    parts: Record<string, string>;
+    paragraphs: Array<{ digest: string; bold: boolean }>;
+    insertions: Array<{ author: string; digest: string }>;
+    deletions: Array<{ author: string; digest: string }>;
+    comments: Array<{ author: string; digest: string }>;
+    headerReference: boolean;
+  }>;
 };
 
 // Unit suite for the runner twin's retention content (Issue #410; ADR 0086). Every assertion is a count,
@@ -90,6 +103,41 @@ describe('the runners\' composed-docx helper', () => {
     expect(parsed.fidelity.filter((category) => category.count > 0).map((category) => [category.key, category.count, category.status]))
       .toEqual([['inline-styles', 1, 'retained'], ['comments-revisions', IMPORTED_MARKS_COUNT, 'preserved']]);
     expect(deriveImportFidelityPlan(parsed.fidelity, parsed.sourceDigest, parsed.archiveBytes)?.outcome).toBe('clean-import-no-round-trip');
+  });
+
+  it('writes J-07\'s export input — a header, a styled run, a comment and a tracked replacement — as a clean import (Issue #413)', async () => {
+    const path = join(sandbox, 'export.docx');
+    const recipe = {
+      source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 30, title: '导出组稿',
+      header: { sourceBlock: 20 },
+      styledRun: { block: 13 },
+      comment: { block: 8, from: 10, to: 20, author: IMPORTED_MARKS_AUTHOR, text: { block: 14, from: 0, to: 10 } },
+      replacement: { block: 10, from: 5, to: 9, author: IMPORTED_MARKS_AUTHOR, date: '2026-09-01T10:02:00Z', insert: { block: 14, from: 0, to: 6 } },
+    };
+    await composeExportAdmittedDocx(path, recipe);
+    const blocks: ParsedDocxBlock[] = [];
+    const parsed = await parseDocx(path, 'export.docx', (block) => blocks.push(block));
+    const digest = (value: string): string => createHash('sha256').update(value, 'utf8').digest('hex');
+    const excerpt = await admittedParagraphs({ source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 30 });
+    // Read with every revision rejected, it is the excerpt itself.
+    expect(blocks.map((block) => digest(block.text))).toEqual(excerpt.map(digest));
+    expect(parsed.importedMarks.map((mark) => [mark.blockPosition, mark.kind, mark.origin, mark.authorLabel, mark.fromGrapheme, mark.toGrapheme])).toEqual([
+      [8, 'annotation', 'comment', IMPORTED_MARKS_AUTHOR, 10, 20],
+      [10, 'change-suggestion', 'replacement', IMPORTED_MARKS_AUTHOR, 5, 9],
+    ]);
+    expect(parsed.fidelity.filter((category) => category.count > 0).map((category) => [category.key, category.count, category.status])).toEqual([
+      ['inline-styles', 1, 'retained'], ['comments-revisions', 2, 'preserved'], ['sections', 1, 'retained'], ['headers-footers', 1, 'retained'],
+    ]);
+    expect(deriveImportFidelityPlan(parsed.fidelity, parsed.sourceDigest, parsed.archiveBytes)?.outcome).toBe('clean-import-no-round-trip');
+    // The runner's own reading of a DOCX agrees with the parser on every paragraph, and sees the marks.
+    const read = await readExportedDocx(path);
+    expect(read.paragraphs.map((paragraph) => paragraph.digest)).toEqual(excerpt.map(digest));
+    expect(read.paragraphs.map((paragraph, index) => paragraph.bold ? index + 1 : 0).filter(Boolean)).toEqual([13]);
+    expect(read.comments).toEqual([{ author: IMPORTED_MARKS_AUTHOR, digest: digest(await admittedSpanText(ADMITTED_BASELINE_DOCX, { block: 14, from: 0, to: 10 })) }]);
+    expect(read.insertions).toEqual([{ author: IMPORTED_MARKS_AUTHOR, digest: digest(await admittedSpanText(ADMITTED_BASELINE_DOCX, { block: 14, from: 0, to: 6 })) }]);
+    expect(read.deletions.map((entry) => entry.author)).toEqual([IMPORTED_MARKS_AUTHOR]);
+    expect(read.headerReference).toBe(true);
+    expect(Object.keys(read.parts).sort()).toEqual(['[Content_Types].xml', 'docProps/core.xml', 'word/_rels/document.xml.rels', 'word/comments.xml', 'word/document.xml', 'word/header1.xml']);
   });
 
   it('writes a field and a footnote that the parser reads as the two classes that need the decision', async () => {

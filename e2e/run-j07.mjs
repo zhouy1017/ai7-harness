@@ -1,10 +1,11 @@
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { lstat, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { ADMITTED_BASELINE_DOCX, composeAdmittedDocx } from './composed-docx.mjs';
+import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx } from './composed-docx.mjs';
 import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 // J-07 (Issue #414, plan slice S65): ⑥ 发稿. An editor saves Milestone Versions of the manuscript — each
@@ -12,13 +13,23 @@ import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabl
 // 自「标签」后有修改 once the manuscript changes, and designates one exact milestone 发稿版本 with a 发稿范围
 // and a 依据, the fixed sentence on screen before the confirm. An identical repeat records nothing, an edit
 // raises the change notice, a newer designation is a separate record that leaves the older one as it was,
-// and a restart moves nothing. Nothing is exported, sent or published, and no page says anything was.
+// and a restart moves nothing. Nothing is sent or published, and no page says anything was.
+//
+// Issue #413 (plan slice S64, E6) extends it with ④ 导出 · DOCX: the input also carries a header, a styled run
+// in a paragraph no stage edits, and one comment and one tracked replacement by the file's author; the editor
+// adds one 备注. 导出… of the current revision saves the unsaved edits as a revision, reviews its fidelity, takes
+// the destination from the Save dialog's launch control, and 按上述方式导出 writes the file, whose receipt 交付物
+// lists and a restart keeps. The runner reads the written file itself — the comment and the tracked change by
+// their author, the header byte for byte, the untouched paragraph's bold run, and no 备注. Cancelling after the
+// destination was chosen writes nothing, and the card is reached by keyboard, reflows at 200% and keeps its
+// shapes without colour.
 //
 // The input is composed at run time from the one admitted Public SampleBook under the content rule in
 // docs/agents/ci-test-boundaries.md; every string this runner types is authored here, and the only
-// manuscript text it touches — the paragraph it appends to — stays inside the page. 交付物's service
-// projection is read through `window.ai7.inspectDeliverables()` only to cross-check what the page shows;
-// the runner never reads the product database.
+// manuscript text it touches — the paragraph it appends to, and the one it puts a 备注 on — stays inside the
+// page, and the exported file is compared with the excerpt by digest only. 交付物's service projection is read
+// through `window.ai7.inspectDeliverables()`, and one export review through `window.ai7.reviewManuscriptExport()`,
+// only to cross-check what the page shows; the runner never reads the product database.
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -33,6 +44,31 @@ const KEYBOARD = Object.freeze({ scope: '键盘可达校验', basis: '只用键�
 // The service's own words (`src/shared/protocol.ts`), pinned against it by tests/unit/deliverables-labels.test.ts.
 const STATEMENT = '仅表示此版本可用于上述发稿范围；AI7 不会发布或发送';
 const FORBIDDEN_WORDS = Object.freeze(['已发布', '已发送', '已交付', '已确认送达']);
+// Issue #413: what the composed input carries beyond the excerpt, every word sample1's own (positions are 1-based
+// in the excerpt), and the 备注 the editor adds on a paragraph no stage edits.
+const EXPORT_INPUT = Object.freeze({
+  header: { sourceBlock: 20 },
+  styledRun: { block: 13 },
+  comment: { block: 8, from: 10, to: 20, author: IMPORTED_MARKS_AUTHOR, text: { block: 14, from: 0, to: 10 } },
+  replacement: { block: 10, from: 5, to: 9, author: IMPORTED_MARKS_AUTHOR, date: '2026-09-01T10:02:00Z', insert: { block: 14, from: 0, to: 6 } },
+});
+const NOTE = Object.freeze({ block: 15, from: 2, to: 8, body: '备注：导出前再核对这一段。' });
+const EXPORT_FILE = '发稿旅程甲.docx';
+const CANCELLED_FILE = '取消的导出.docx';
+// The review rows of the current revision with the default options: every class present, and the 备注 left out.
+const EXPORT_ROWS = Object.freeze(['inline-styles:preserved:1', 'annotations:preserved:1', 'change-suggestions:preserved:1', 'editor-notes:excluded:1', 'sections:preserved:1', 'headers-footers:preserved:1']);
+// The service's and the card's own words (`src/service/docx-export.ts`, `src/service/manuscript-export.ts`,
+// `src/renderer/manuscript-export-labels.ts`), pinned there by the unit suites.
+const EXPORT_LOCAL_LINE = '导出只写到本机你选择的位置；AI7 不会发送、上传或发布这个文件。';
+// Three paragraphs are written anew — the edited one and the two that carry the file's marks — and the rest restored.
+const EXPORT_RESTORATION_LINE = '未改过、也没有带出标记的 27 段从原文件恢复；其余 3 段按稿件文字重新写出。';
+const EXPORT_ABSENT_LINE = '未检测到：脚注与尾注、表格、图片与图注、文本框、域（目录等）、原文件中的修订。';
+const EXPORT_NOTE_EXCLUDED = '备注默认不随导出（稿件上 1 条）；勾选「含备注」后作为批注写出，作者为「备注」。';
+const EXPORT_DESTINATION_UNCHOSEN = '还没有选择保存位置。所选位置已有同名文件时，由系统的保存对话框询问是否替换。';
+const EXPORTED_LABEL = '已导出到所选位置';
+const EXPORT_CLOSED = '已关闭导出，没有写入任何文件。';
+// The written package: the original's parts, the comments the export writes, and the package relationships it adds.
+const EXPORTED_PARTS = Object.freeze(['[Content_Types].xml', '_rels/.rels', 'docProps/core.xml', 'word/_rels/document.xml.rels', 'word/comments.xml', 'word/commentsExtended.xml', 'word/document.xml', 'word/header1.xml']);
 const ACTUALS_PROMPT = '录入定价与首印 · 随评估功能提供';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 // 导出's four members (Issue #413): the only renderer members named like an export, and none publishes or sends.
@@ -195,7 +231,14 @@ async function fill(renderer, selector, value, name) {
 const KEYS = Object.freeze({
   Tab: Object.freeze({ key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 }),
   ArrowDown: Object.freeze({ key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 }),
+  Escape: Object.freeze({ key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }),
 });
+/** Space as a keyboard sends it: the key that carries its text toggles the focused checkbox. */
+async function pressSpace(renderer) {
+  const space = { key: ' ', code: 'Space', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 };
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...space, text: ' ', unmodifiedText: ' ' });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...space });
+}
 async function press(renderer, name) {
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...KEYS[name] });
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...KEYS[name] });
@@ -235,9 +278,119 @@ const PAGE_HELPERS = `(() => {
       for (const layer of clone.querySelectorAll('details.technical-details')) layer.remove();
       return clone.textContent ?? '';
     },
+    // ④ 导出 (Issue #413): the card in its own slot beside the block, its controls, rows and facts, and the records.
+    exportCard: () => document.querySelector('[data-screen="book-deliverables"] .deliverables-export-slot > section.manuscript-export'),
+    exportAction: (name) => window.__j07.exportCard()?.querySelector('[data-export-action="' + name + '"]') ?? null,
+    exportOption: (key) => window.__j07.exportCard()?.querySelector('input[type="checkbox"][data-export-option="' + key + '"]') ?? null,
+    exportOpener: (kind, milestoneId) => block()?.querySelector(kind === 'current'
+      ? '[data-export-action="open"][data-export-target="current"]'
+      : 'ol.milestone-list > li[data-milestone-id="' + milestoneId + '"] [data-export-action="open"]') ?? null,
+    exportRows: () => Array.from(window.__j07.exportCard()?.querySelectorAll('ol.export-fidelity-list > li.export-fidelity-row') ?? [])
+      .map((row) => row.dataset.exportFidelity + ':' + row.dataset.exportStatus + ':' + row.dataset.exportCount),
+    exportFact: (term) => Array.from(window.__j07.exportCard()?.querySelectorAll('details.technical-details dt') ?? [])
+      .find((node) => node.textContent === term)?.nextElementSibling?.textContent ?? null,
+    exportRecords: () => Array.from(block()?.querySelectorAll('section.export-records-section ol.export-records > li') ?? []),
   };
   return true;
 })()`;
+
+// What the page needs to put one 备注 on the manuscript as a hand would (the pattern J-05 proves): read a
+// paragraph's durable text by its position, select a span of it by offset, right-click it, and act on the
+// floating Mark surface by its data attributes.
+const MARK_HELPERS = `(() => {
+  if (window.__j07m) return true;
+  const editor = () => document.querySelector('[data-testid="manuscript-editor"]');
+  const blocks = () => Array.from(editor()?.querySelectorAll(':scope > [data-block-id]') ?? []);
+  const nth = (position) => blocks()[position - 1] ?? null;
+  const durable = (root) => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) => node.parentElement?.closest('[data-mark-preview]') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    return nodes;
+  };
+  const point = (root, offset) => {
+    let left = offset;
+    for (const node of durable(root)) {
+      if (left <= node.data.length) return [node, left];
+      left -= node.data.length;
+    }
+    return null;
+  };
+  const layer = () => document.querySelector('.editorial-mark-layer');
+  window.__j07m = {
+    blocks,
+    nth,
+    text: (position) => { const root = nth(position); return root ? durable(root).map((node) => node.data).join('') : null; },
+    place: (position, from, to) => {
+      const root = nth(position);
+      if (!root) return false;
+      editor().focus();
+      const start = point(root, from);
+      const end = point(root, to);
+      if (!start || !end) return false;
+      const range = document.createRange();
+      range.setStart(start[0], start[1]);
+      range.setEnd(end[0], end[1]);
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return selection.toString().length === to - from;
+    },
+    rightClick: (element) => {
+      if (!(element instanceof HTMLElement)) return false;
+      const rect = element.getBoundingClientRect();
+      const init = { bubbles: true, cancelable: true, button: 2, buttons: 2, clientX: rect.left + Math.min(10, rect.width / 2), clientY: rect.top + Math.min(24, rect.height / 2) };
+      element.dispatchEvent(new MouseEvent('mousedown', init));
+      element.dispatchEvent(new MouseEvent('mouseup', { ...init, buttons: 0 }));
+      element.dispatchEvent(new MouseEvent('contextmenu', { ...init, buttons: 0 }));
+      return true;
+    },
+    marks: () => Array.from(editor()?.querySelectorAll('.editorial-mark') ?? []),
+    mark: (kind, position) => Array.from(nth(position)?.querySelectorAll('.editorial-mark[data-mark-kind="' + kind + '"]') ?? []),
+    markText: (kind, position) => window.__j07m.mark(kind, position).map((node) => durable(node).map((part) => part.data).join('')).join(''),
+    menu: () => document.querySelector('.editorial-mark-menu-layer [data-mark-menu]'),
+    item: (action) => document.querySelector('.editorial-mark-menu-layer [data-mark-menu] [data-mark-action="' + action + '"]'),
+    composer: () => layer()?.querySelector('[data-mark-composer]') ?? null,
+    act: (action) => {
+      const control = layer()?.querySelector('[data-mark-composer] [data-mark-action="' + action + '"]');
+      if (!(control instanceof HTMLButtonElement) || control.disabled) return false;
+      control.click();
+      return true;
+    },
+    write: (field, value) => {
+      const input = layer()?.querySelector('[data-mark-field="' + field + '"]');
+      if (!(input instanceof HTMLTextAreaElement)) return false;
+      input.value = value;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    },
+  };
+  return true;
+})()`;
+
+/**
+ * Open the selection menu on a span with the pointer. The editor reads a selection a tick after the page sets
+ * it, and a slow runner makes that tick long, so the menu is asked for again until it shows the span.
+ */
+async function openSelectionMenu(renderer, position, from, to, name) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    await assertRenderer(renderer, `window.__j07m.place(${position}, ${from}, ${to})`, `${name}-prepare`);
+    await new Promise((resolveWait) => setTimeout(resolveWait, 80));
+    await assertRenderer(renderer, `window.__j07m.rightClick(window.__j07m.nth(${position}))`, `${name}-right-click`);
+    if (await renderer.evaluate(`window.__j07m.menu()?.dataset.markMenu === 'selection' && window.__j07m.menu().textContent.includes('已选 ${to - from} 字')`)) return;
+    await press(renderer, 'Escape');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 120));
+  }
+  throw new Error(`J-07/${name}`);
+}
+
+/** Press a control of the open export card by its action, refusing one that is missing or disabled. */
+async function exportAct(renderer, action, name) {
+  await clickSelector(renderer, `[data-screen="book-deliverables"] .deliverables-export-slot > section.manuscript-export [data-export-action="${action}"]`, name);
+}
 
 /** 交付物 as the service answers it, reduced to what the page is checked against: identities, words and states. */
 const READ_PUBLICATION = `window.ai7.inspectDeliverables().then((deliverables) => ({
@@ -399,19 +552,26 @@ async function main() {
     const inputs = resolve(runRoot, 'composed-inputs');
     await mkdir(inputs);
     const manuscript = resolve(inputs, 'publication.docx');
-    await composeAdmittedDocx(manuscript, EXCERPT);
+    await composeExportAdmittedDocx(manuscript, { ...EXCERPT, ...EXPORT_INPUT });
+    // Issue #413: the folder the Save dialog's launch control names, beside the data and outside it.
+    const exportsRoot = resolve(runRoot, 'exports');
+    await mkdir(exportsRoot);
+    const exportPath = resolve(exportsRoot, EXPORT_FILE);
+    const cancelledPath = resolve(exportsRoot, CANCELLED_FILE);
     const metadata = await lstat(manuscript);
     requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size > 1_000, 'fixture-composed');
     const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
-    const launch = async ({ picker } = {}) => {
+    const launch = async ({ picker, save } = {}) => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
         '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
         resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
       ];
       if (picker) args.push('--j07-picker-path', picker);
+      // Issue #413: the Save dialog's one answer for this launch, in place of the platform's own.
+      if (save) args.push('--j07-save-path', save);
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       cancellation.throwIfRequested();
       browserAcquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args, env: productEnvironment(executable), timeout: 60_000 });
@@ -423,7 +583,7 @@ async function main() {
     const close = async () => { await browser.close(); browser = undefined; };
 
     at('import-and-open');
-    let renderer = await launch({ picker: manuscript });
+    let renderer = await launch({ picker: manuscript, save: exportPath });
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true'`, 'product-ready');
     // The renderer holds the two 交付物 members and 导出's four, and nothing that could publish or send.
     await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && typeof window.ai7.inspectDeliverables === 'function' && typeof window.ai7.designatePublicationVersion === 'function' && ${EXPORT_MEMBERS_ONLY}`, 'renderer-api-boundary');
@@ -657,12 +817,162 @@ async function main() {
     'older-designation-kept-as-it-was', twice);
     cancellation.throwIfRequested();
 
+    at('export-note-added');
+    // The file's own 批注 and 修改建议 stand where the import put them, open and under the author's name; the
+    // editor adds one 备注 on a paragraph no stage edits.
+    await openManuscript(renderer, 'note');
+    await assertRenderer(renderer, MARK_HELPERS, 'mark-helpers');
+    await assertRenderer(renderer, `(() => { const head = window.__j07m.text(${NOTE.block})?.slice(0, ${NOTE.to}) ?? ''; return window.__j07m.blocks().length === ${EXCERPT.blocks} && head.length === ${NOTE.to} && Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(head)).length === ${NOTE.to}; })()`, 'note-paragraph-markable');
+    await assertRenderer(renderer, `(() => {
+      const annotation = window.__j07m.mark('annotation', ${EXPORT_INPUT.comment.block});
+      const suggestion = window.__j07m.mark('change-suggestion', ${EXPORT_INPUT.replacement.block});
+      const standing = (nodes) => nodes.length > 0 && nodes.every((node) => node.dataset.markSource === 'imported-author' && node.dataset.markStatus === 'open' && node.dataset.markAnchor === 'exact');
+      return standing(annotation) && standing(suggestion) && window.__j07m.marks().length === annotation.length + suggestion.length;
+    })()`, 'imported-marks-stand');
+    await openSelectionMenu(renderer, NOTE.block, NOTE.from, NOTE.to, 'note-menu');
+    await clickSelector(renderer, '.editorial-mark-menu-layer [data-mark-menu] [data-mark-action="add-editor-note"]', 'note-choose');
+    await waitFor(renderer, `window.__j07m.composer()?.dataset.markComposer === 'create-editor-note'`, 'note-composer', 15_000);
+    await assertRenderer(renderer, `window.__j07m.write('body', ${JSON.stringify(NOTE.body)}) && window.__j07m.act('submit')`, 'note-submit');
+    await waitFor(renderer, `window.__j07m.composer() === null && window.__j07m.mark('editor-note', ${NOTE.block}).length > 0`, 'note-drawn', 30_000);
+    await assertRenderer(renderer, `window.__j07m.markText('editor-note', ${NOTE.block}) === window.__j07m.text(${NOTE.block}).slice(${NOTE.from}, ${NOTE.to})`, 'note-on-its-words');
+
+    at('export-open-current');
+    // 导出… of the current revision: the unsaved edit becomes revision r3 — not a milestone — and the card reviews
+    // it with 含批注 and 含修改建议（作为修订） on and 含备注 off, DOCX the one format offered, focus on it.
+    await openDeliverables(renderer, 'export');
+    await assertRenderer(renderer, `(() => { const openers = Array.from(document.querySelectorAll('[data-screen="book-deliverables"] [data-export-action="open"]')); return window.__j07.exportCard() === null && openers.every((node) => node.textContent === '导出…' && !node.disabled) && JSON.stringify(openers.map((node) => node.getAttribute('aria-label'))) === ${JSON.stringify(JSON.stringify(['导出当前修订版…', `导出里程碑版本「${SECOND.label}」…`, `导出里程碑版本「${FIRST.label}」…`]))} && window.__j07.block().querySelector('section.export-records-section')?.dataset.exportRecords === '0'; })()`, 'export-openers-name-their-version');
+    await clickSelector(renderer, '[data-screen="book-deliverables"] section.deliverables-publication [data-export-action="open"][data-export-target="current"]', 'export-open');
+    await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'ready' && window.__j07.exportCard().querySelector('section.export-fidelity') !== null && window.__j07.status() === '导出保真审阅已就绪'`, 'export-reviewed', 120_000);
+    await assertRenderer(renderer, `(() => {
+      const card = window.__j07.exportCard();
+      const formats = Array.from(card.querySelectorAll('input[name="export-format"]'));
+      const option = window.__j07.exportOption;
+      return card.dataset.exportTarget === 'current' && card.querySelector('h4')?.textContent === '导出 · 当前修订版 r3' &&
+        card.querySelector('.export-saved-line')?.textContent === '未保存的修改已为导出保存为修订版 r3；这不是里程碑版本。' &&
+        card.querySelector('.export-local-line')?.textContent === ${JSON.stringify(EXPORT_LOCAL_LINE)} &&
+        JSON.stringify(formats.map((radio) => radio.value + ':' + radio.checked + ':' + radio.disabled)) === '["docx:true:false","pdf:false:true","markdown:false:true"]' &&
+        option('includeAnnotations')?.checked === true && option('includeSuggestions')?.checked === true && option('includeEditorNotes')?.checked === false &&
+        document.activeElement === formats[0] && window.__j07.tone() === 'success';
+    })()`, 'export-card-states-the-version');
+    // The saved revision is the manuscript's current one, and 交付物 reads it so.
+    await waitFor(renderer, `(window.__j07.block()?.querySelector('.deliverables-manuscript-line')?.textContent ?? '').startsWith('当前稿件：修订版 r3 · ')`, 'export-saved-revision-is-current', 30_000);
+
+    at('export-fidelity-table');
+    // Every class the revision holds, one row each with its count and status in words and shape; the classes
+    // found nowhere summarized on one line; nothing degraded, so nothing asks to be accepted.
+    await assertRenderer(renderer, `(() => {
+      const fidelity = window.__j07.exportCard().querySelector('section.export-fidelity');
+      const pills = Array.from(fidelity.querySelectorAll('li.export-fidelity-row .status-pill')).map((pill) => pill.textContent);
+      return JSON.stringify(window.__j07.exportRows()) === ${JSON.stringify(JSON.stringify(EXPORT_ROWS))} &&
+        JSON.stringify(pills) === ${JSON.stringify(JSON.stringify(EXPORT_ROWS.map((row) => row.includes(':excluded:') ? '○ 本次不含' : '✓ 完整保留')))} &&
+        fidelity.querySelector('h5')?.textContent === '导出保真审阅' && fidelity.dataset.exportDegraded === 'false' && fidelity.dataset.exportRestoration === 'from-original' &&
+        fidelity.querySelector('.export-restoration-line')?.textContent === ${JSON.stringify(EXPORT_RESTORATION_LINE)} &&
+        fidelity.querySelector('.export-absent-line')?.textContent === ${JSON.stringify(EXPORT_ABSENT_LINE)} &&
+        fidelity.querySelector('li[data-export-fidelity="editor-notes"] .export-fidelity-detail')?.textContent === ${JSON.stringify(EXPORT_NOTE_EXCLUDED)} &&
+        fidelity.querySelector('.export-degraded-note') === null && fidelity.querySelector('.export-fidelity-positions') === null;
+    })()`, 'export-review-rows');
+    // The page shows the service's review: the same review asked of the service directly — the edits saved
+    // already, so nothing is saved again — carries the digest the card's technical layer names.
+    const reviewed = await renderer.evaluate(`window.ai7.reviewManuscriptExport({ target: { kind: 'current' }, options: { includeAnnotations: true, includeSuggestions: true, includeEditorNotes: false } }).then((review) => ({ savedForExport: review.savedForExport, revisionLabel: review.target.revisionLabel, reviewDigest: review.reviewDigest, rows: review.fidelity.filter((row) => row.count > 0 || row.status !== 'preserved').map((row) => row.key + ':' + row.status + ':' + row.count), suggestedFileName: review.suggestedFileName }))`);
+    requireJourney(reviewed?.savedForExport === false && reviewed.revisionLabel === 'r3' && JSON.stringify(reviewed.rows) === JSON.stringify(EXPORT_ROWS) &&
+      /^[0-9a-f]{64}$/.test(reviewed.reviewDigest ?? '') && reviewed.suggestedFileName === `${EXCERPT.title} · r3.docx`, 'service-agrees-review', reviewed);
+    await assertRenderer(renderer, `window.__j07.exportFact('保真审阅摘要') === ${JSON.stringify(reviewed.reviewDigest)} && !window.__j07.exportCard().querySelector('details.technical-details').open`, 'export-review-is-the-service-review');
+
+    at('export-save-dialog');
+    // 按上述方式导出 waits for the destination with its reason beside it; 选择保存位置… takes it from the system's
+    // Save dialog — this launch's control answers for it — and shows it exactly as the dialog returned it, with
+    // 按上述方式导出 then available and focused. Nothing is written yet.
+    await assertRenderer(renderer, `(() => {
+      const card = window.__j07.exportCard();
+      const approve = window.__j07.exportAction('approve');
+      const reason = card.querySelector('.export-approve-reason');
+      const destination = card.querySelector('section.export-destination');
+      return destination?.dataset.exportDestination === 'unchosen' && destination.querySelector('.export-destination-line')?.textContent === ${JSON.stringify(EXPORT_DESTINATION_UNCHOSEN)} &&
+        window.__j07.exportAction('choose')?.textContent === '选择保存位置…' && !window.__j07.exportAction('choose').disabled &&
+        approve instanceof HTMLButtonElement && approve.disabled && approve.textContent === '按上述方式导出' &&
+        reason instanceof HTMLElement && !reason.hidden && reason.textContent === '先选择保存位置。' && approve.getAttribute('aria-describedby') === reason.id &&
+        window.__j07.exportAction('cancel')?.textContent === '取消';
+    })()`, 'export-approve-waits-for-a-destination');
+    await exportAct(renderer, 'choose', 'export-choose');
+    await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'prepared' && window.__j07.status() === '已准备好导出文件，等待你确认。'`, 'export-prepared', 120_000);
+    await assertRenderer(renderer, `(() => {
+      const card = window.__j07.exportCard();
+      const approve = window.__j07.exportAction('approve');
+      const destination = card.querySelector('section.export-destination');
+      return destination.dataset.exportDestination === 'create' && destination.querySelector('.export-destination-line')?.textContent === ${JSON.stringify(`${exportPath}（新建文件）`)} &&
+        window.__j07.exportAction('choose')?.textContent === '重新选择保存位置…' && approve instanceof HTMLButtonElement && !approve.disabled &&
+        document.activeElement === approve && card.querySelector('.export-approve-reason')?.hidden === true && card.querySelector('.export-problem')?.hidden === true;
+    })()`, 'export-destination-bound');
+    requireJourney(!existsSync(exportPath) && (await readdir(exportsRoot)).length === 0, 'export-nothing-written-before-approval');
+
+    at('export-approved');
+    // 按上述方式导出 writes the file at the chosen place and ends at 已导出到所选位置 with its receipt; the choices
+    // that made it no longer change.
+    await exportAct(renderer, 'approve', 'export-approve');
+    await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'done' && window.__j07.status() === ${JSON.stringify(EXPORTED_LABEL)} && window.__j07.tone() === 'success'`, 'export-written', 120_000);
+    await assertRenderer(renderer, `(() => {
+      const receipt = window.__j07.exportCard().querySelector('.export-receipt');
+      const actions = Array.from(receipt?.querySelectorAll('[data-export-action]') ?? []).map((node) => node.dataset.exportAction + ':' + node.textContent);
+      return receipt?.dataset.exportOutcome === 'created' && receipt.getAttribute('role') === 'status' &&
+        receipt.querySelector('.export-outcome')?.textContent === ${JSON.stringify(EXPORTED_LABEL)} &&
+        receipt.querySelector('.export-outcome-detail')?.textContent === ${JSON.stringify(`已新建「${EXPORT_FILE}」。`)} &&
+        (receipt.querySelector('.export-receipt-meta')?.textContent ?? '').startsWith(${JSON.stringify(`「${EXPORT_FILE}」 · `)}) &&
+        JSON.stringify(actions) === '["reveal:在文件夹中显示","close:完成"]' && document.activeElement === receipt.querySelector('[data-export-action="reveal"]') &&
+        window.__j07.exportAction('approve') === null && window.__j07.exportAction('choose') === null &&
+        ['includeAnnotations', 'includeSuggestions', 'includeEditorNotes'].every((key) => window.__j07.exportOption(key)?.disabled === true);
+    })()`, 'export-receipt-shown');
+
+    at('export-receipt-recorded');
+    // 交付物 lists the export with what it came to; the service's receipt names the file on disk byte for byte,
+    // and the chosen folder holds that one file and nothing half-written.
+    await waitFor(renderer, `window.__j07.block()?.querySelector('section.export-records-section')?.dataset.exportRecords === '1'`, 'export-record-listed', 30_000);
+    const recorded = await renderer.evaluate(`window.ai7.inspectDeliverables().then((deliverables) => deliverables.exports.map((record) => ({ preparationId: record.preparationId, outcome: record.outcome, outcomeLabel: record.outcomeLabel, fileName: record.fileName, destination: record.destination, target: record.target, byteLength: record.byteLength, revealAvailable: record.revealAvailable, fileSha256: record.technical.fileSha256 })))`);
+    const written = await readFile(exportPath);
+    requireJourney(Array.isArray(recorded) && recorded.length === 1 && recorded[0].outcome === 'created' && recorded[0].outcomeLabel === EXPORTED_LABEL &&
+      recorded[0].fileName === EXPORT_FILE && recorded[0].destination === exportPath && recorded[0].target?.kind === 'current' && recorded[0].target.milestoneId === null &&
+      recorded[0].target.revisionLabel === 'r3' && recorded[0].revealAvailable === true && recorded[0].byteLength === written.length &&
+      recorded[0].fileSha256 === createHash('sha256').update(written).digest('hex') && UUID_PATTERN.test(recorded[0].preparationId),
+    'service-receipt-names-the-file', Array.isArray(recorded) ? recorded.map((record) => ({ outcome: record.outcome, byteLength: record.byteLength, onDisk: written.length })) : recorded);
+    requireJourney(JSON.stringify(await readdir(exportsRoot)) === JSON.stringify([EXPORT_FILE]), 'export-folder-holds-one-file');
+    await assertRenderer(renderer, `(() => {
+      const records = window.__j07.exportRecords();
+      const layer = records[0]?.querySelector('details.technical-details');
+      return records.length === 1 && records[0].dataset.preparationId === ${JSON.stringify(recorded[0].preparationId)} && records[0].dataset.exportOutcome === 'created' &&
+        (records[0].querySelector('.export-record-line')?.textContent ?? '').startsWith(${JSON.stringify(`${EXPORTED_LABEL} · 「${EXPORT_FILE}」 · 修订版 r3 · `)}) &&
+        records[0].querySelector('.export-record-detail')?.textContent === ${JSON.stringify(`已新建「${EXPORT_FILE}」。`)} &&
+        layer instanceof HTMLDetailsElement && !layer.open && !/[0-9a-f]{64}/.test(records[0].querySelector('.export-record-line').textContent);
+    })()`, 'export-record-reads-the-receipt');
+
+    at('export-file-parsed');
+    // The written file read back by the runner: the manuscript's paragraphs as they stand — the two edits in the
+    // first — with the untouched paragraph's bold run and the header byte for byte from the original, the author's
+    // 批注 and tracked replacement under the author's name, and no 备注.
+    const digestOf = (value) => createHash('sha256').update(value, 'utf8').digest('hex');
+    const spanDigest = async (span) => digestOf(await admittedSpanText(EXCERPT.source, span));
+    const excerpt = await admittedParagraphs(EXCERPT);
+    const expectedParagraphs = excerpt.map((text, index) => digestOf(index === 0 ? `${text}${FIRST_EDIT}${SECOND_EDIT}` : text));
+    const original = await readExportedDocx(manuscript);
+    const exported = await readExportedDocx(exportPath);
+    requireJourney(JSON.stringify(exported.paragraphs.map((paragraph) => paragraph.digest)) === JSON.stringify(expectedParagraphs), 'export-paragraphs-as-the-manuscript',
+      { paragraphs: exported.paragraphs.length, differing: exported.paragraphs.map((paragraph, index) => paragraph.digest === expectedParagraphs[index] ? 0 : index + 1).filter(Boolean) });
+    requireJourney(JSON.stringify(exported.paragraphs.map((paragraph, index) => paragraph.bold ? index + 1 : 0).filter(Boolean)) === JSON.stringify([EXPORT_INPUT.styledRun.block]), 'export-keeps-the-styled-run');
+    requireJourney(exported.headerReference === true && typeof exported.parts['word/header1.xml'] === 'string' && exported.parts['word/header1.xml'] === original.parts['word/header1.xml'], 'export-keeps-the-header');
+    requireJourney(JSON.stringify(exported.comments) === JSON.stringify([{ author: IMPORTED_MARKS_AUTHOR, digest: await spanDigest(EXPORT_INPUT.comment.text) }]),
+      'export-writes-the-annotation-and-no-note', exported.comments.map((comment) => comment.author === IMPORTED_MARKS_AUTHOR ? 'file-author' : comment.author === '备注' ? 'note' : 'other'));
+    requireJourney(JSON.stringify(exported.insertions) === JSON.stringify([{ author: IMPORTED_MARKS_AUTHOR, digest: await spanDigest(EXPORT_INPUT.replacement.insert) }]) &&
+      JSON.stringify(exported.deletions) === JSON.stringify([{ author: IMPORTED_MARKS_AUTHOR, digest: await spanDigest({ block: EXPORT_INPUT.replacement.block, from: EXPORT_INPUT.replacement.from, to: EXPORT_INPUT.replacement.to }) }]),
+    'export-writes-the-suggestion-as-a-revision', { insertions: exported.insertions.length, deletions: exported.deletions.length });
+    requireJourney(JSON.stringify(Object.keys(exported.parts).sort()) === JSON.stringify(EXPORTED_PARTS), 'export-package-parts', Object.keys(exported.parts).sort());
+    // 完成 closes the card; 交付物 drew its 导出… again after the export, and focus finds the one it came from.
+    await exportAct(renderer, 'close', 'export-close');
+    await waitFor(renderer, `window.__j07.exportCard() === null && document.activeElement === window.__j07.exportOpener('current')`, 'export-closed-focus-returns', 10_000);
+
     at('restart-keeps-everything');
     // A restart moves nothing: 交付物 answers byte for byte as before, and 工作概览 reads it as one line.
     const beforeRestart = await renderer.evaluate(`window.ai7.inspectDeliverables().then((deliverables) => JSON.stringify(deliverables))`);
     requireJourney(typeof beforeRestart === 'string' && beforeRestart.length > 0, 'restart-read-before');
     await close();
-    renderer = await launch();
+    renderer = await launch({ save: cancelledPath });
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]') && document.querySelector('.recent-work-item button')`, 'restart-prior-work');
     await assertRenderer(renderer, PAGE_HELPERS, 'restart-page-helpers');
     await assertRenderer(renderer, `(() => { document.querySelector('.recent-work-item button').click(); return true; })()`, 'restart-open');
@@ -690,6 +1000,23 @@ async function main() {
     await assertNoForbiddenWords(renderer, 'restart-without-forbidden-words');
     // The only controls that name 导出 are 导出… of each version (Issue #413); nothing publishes or sends.
     await assertRenderer(renderer, `(() => { const controls = Array.from(document.querySelectorAll('button, a, [role="button"], [role="menuitem"]')); const actions = Array.from(window.__j07.block().querySelectorAll('[data-publication-action]')).map((node) => node.dataset.publicationAction); return !controls.some((node) => /发布|发送/.test(node.textContent ?? '')) && controls.filter((node) => /导出/.test(node.textContent ?? '')).every((node) => node.dataset.exportAction === 'open' && node.textContent === '导出…') && JSON.stringify(actions) === '["designate"]' && ${EXPORT_MEMBERS_ONLY}; })()`, 'no-publish-or-send-action');
+
+    at('export-cancel-creates-nothing');
+    // This launch's Save dialog answers once more. 一审稿's 导出… reviews that milestone exactly as it was saved —
+    // nothing to save first — and takes the destination; 取消 then closes the card with focus back on its opener,
+    // and nothing is written or recorded.
+    await assertRenderer(renderer, `window.__j07.exportCard() === null`, 'cancel-no-card-after-restart');
+    await clickSelector(renderer, `[data-screen="book-deliverables"] ol.milestone-list > li[data-milestone-id="${first}"] [data-export-action="open"]`, 'cancel-open');
+    await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'ready' && window.__j07.exportCard().querySelector('section.export-fidelity') !== null`, 'cancel-reviewed', 120_000);
+    await assertRenderer(renderer, `(() => { const card = window.__j07.exportCard(); return card.dataset.exportTarget === 'milestone' && card.dataset.milestoneId === ${JSON.stringify(first)} && card.querySelector('h4')?.textContent === ${JSON.stringify(`导出 · 里程碑版本「${FIRST.label}」 · r1`)} && card.querySelector('.export-saved-line') === null && card.querySelector('section.export-destination')?.dataset.exportDestination === 'unchosen'; })()`, 'cancel-card-names-the-milestone');
+    await exportAct(renderer, 'choose', 'cancel-choose');
+    await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'prepared'`, 'cancel-prepared', 120_000);
+    await assertRenderer(renderer, `window.__j07.exportCard().querySelector('.export-destination-line')?.textContent === ${JSON.stringify(`${cancelledPath}（新建文件）`)} && window.__j07.exportAction('approve')?.disabled === false`, 'cancel-destination-bound');
+    await exportAct(renderer, 'cancel', 'cancel-close');
+    await waitFor(renderer, `window.__j07.exportCard() === null && window.__j07.status() === ${JSON.stringify(EXPORT_CLOSED)} && document.activeElement === window.__j07.exportOpener('milestone', ${JSON.stringify(first)})`, 'cancel-closed', 10_000);
+    requireJourney(!existsSync(cancelledPath) && JSON.stringify(await readdir(exportsRoot)) === JSON.stringify([EXPORT_FILE]), 'cancel-wrote-nothing');
+    const afterCancel = await renderer.evaluate(`window.ai7.inspectDeliverables().then((deliverables) => deliverables.exports.map((record) => record.preparationId))`);
+    requireJourney(JSON.stringify(afterCancel) === JSON.stringify([recorded[0].preparationId]) && (await renderer.evaluate(`window.__j07.exportRecords().length`)) === 1, 'cancel-recorded-nothing');
 
     at('j14-designate-keyboard');
     // The form without a pointer: Enter on 设为发稿版本… opens it on its first choice, an arrow chooses, Tab
@@ -744,6 +1071,68 @@ async function main() {
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
     await clickSelector(renderer, '[data-screen="book-deliverables"] [data-publication-action="cancel"]', 'forced-colors-form-cancel');
     await waitFor(renderer, `window.__j07.form() === null`, 'forced-colors-form-closed', 10_000);
+
+    at('j14-export-keyboard');
+    // The card without a pointer: Enter on 导出… opens it on its first choice; Tab reaches each option with visible
+    // focus, and Space on 含备注 reviews again — the 备注 now written under 「备注」 — with focus kept; Tab reaches
+    // 选择保存位置…, left alone because this launch's Save dialog has answered, and 取消, whose Enter closes the
+    // card with focus back on the opener and nothing written.
+    await assertRenderer(renderer, `(() => { const open = window.__j07.exportOpener('current'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.focus(); return document.activeElement === open; })()`, 'export-keyboard-opener-focused');
+    await pressEnter(renderer);
+    await waitFor(renderer, `(() => { const card = window.__j07.exportCard(); const docx = card?.querySelector('input[name="export-format"][value="docx"]'); return card?.dataset.exportPhase === 'ready' && docx instanceof HTMLInputElement && docx.checked && document.activeElement === docx; })()`, 'export-keyboard-opens-on-its-first-choice', 60_000);
+    await assertRenderer(renderer, `window.__j07.exportCard().querySelector('h4')?.textContent === '导出 · 当前修订版 r3' && window.__j07.exportCard().querySelector('.export-saved-line') === null`, 'export-keyboard-nothing-to-save');
+    for (const key of ['includeAnnotations', 'includeSuggestions', 'includeEditorNotes']) {
+      await press(renderer, 'Tab');
+      await waitFor(renderer, `document.activeElement === window.__j07.exportOption(${JSON.stringify(key)}) && document.activeElement.matches(':focus-visible')`, `export-keyboard-${key}-reached`, 10_000);
+    }
+    await pressSpace(renderer);
+    await waitFor(renderer, `(() => { const box = window.__j07.exportOption('includeEditorNotes'); return window.__j07.exportCard()?.dataset.exportPhase === 'ready' && box?.checked === true && document.activeElement === box && window.__j07.exportRows().includes('editor-notes:preserved:1') && !window.__j07.exportRows().some((row) => row.includes(':excluded:')); })()`, 'export-keyboard-space-includes-the-note', 60_000);
+    await press(renderer, 'Tab');
+    await waitFor(renderer, `document.activeElement === window.__j07.exportAction('choose') && document.activeElement.matches(':focus-visible')`, 'export-keyboard-choose-reached', 10_000);
+    await press(renderer, 'Tab');
+    await waitFor(renderer, `document.activeElement === window.__j07.exportAction('cancel') && document.activeElement.matches(':focus-visible') && window.__j07.exportAction('approve')?.disabled === true`, 'export-keyboard-cancel-reached', 10_000);
+    await pressEnter(renderer);
+    await waitFor(renderer, `window.__j07.exportCard() === null && window.__j07.status() === ${JSON.stringify(EXPORT_CLOSED)} && document.activeElement === window.__j07.exportOpener('current')`, 'export-keyboard-cancel-returns-focus', 10_000);
+    requireJourney(JSON.stringify(await readdir(exportsRoot)) === JSON.stringify([EXPORT_FILE]), 'export-keyboard-wrote-nothing');
+
+    at('j14-export-zoom-200-reflow');
+    // At 200% the card, its review, its destination and actions, and the export records reflow into the width.
+    await clickSelector(renderer, '[data-screen="book-deliverables"] section.deliverables-publication [data-export-action="open"][data-export-target="current"]', 'export-zoom-open');
+    await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'ready' && window.__j07.exportCard().querySelector('section.export-fidelity') !== null`, 'export-zoom-reviewed', 60_000);
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
+    await waitFor(renderer, `(() => {
+      const root = document.documentElement;
+      const card = window.__j07.exportCard();
+      const parts = [card, card?.querySelector('fieldset.export-options'), card?.querySelector('section.export-fidelity'), card?.querySelector('ol.export-fidelity-list'),
+        ...Array.from(card?.querySelectorAll('li.export-fidelity-row') ?? []), card?.querySelector('section.export-destination'), card?.querySelector('.export-actions'),
+        window.__j07.block()?.querySelector('section.export-records-section'), ...window.__j07.exportRecords()];
+      return parts.every((part) => part instanceof HTMLElement && part.scrollWidth <= part.clientWidth + 2) && root.scrollWidth <= root.clientWidth + 2;
+    })()`, 'export-reflow-at-200', 10_000);
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
+
+    at('j14-export-forced-colors');
+    // Without colour the card and every export record keep their frames, a chosen option a heavier border than
+    // one left off, and every status its shape and words.
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
+    await assertRenderer(renderer, `(() => {
+      if (!matchMedia('(forced-colors: active)').matches) return false;
+      const style = (node) => getComputedStyle(node);
+      const card = window.__j07.exportCard();
+      const on = window.__j07.exportOption('includeAnnotations')?.closest('label');
+      const off = window.__j07.exportOption('includeEditorNotes')?.closest('label');
+      const pills = Array.from(card?.querySelectorAll('li.export-fidelity-row .status-pill') ?? []);
+      const records = window.__j07.exportRecords();
+      return card instanceof HTMLElement && style(card).borderTopStyle === 'solid' && style(card).boxShadow === 'none' &&
+        on instanceof HTMLElement && off instanceof HTMLElement && parseFloat(style(on).borderTopWidth) > parseFloat(style(off).borderTopWidth) &&
+        pills.length === ${EXPORT_ROWS.length} && pills.every((pill) => style(pill).borderTopStyle === 'solid' && /^[✓△⊘○] \\S/.test(pill.textContent ?? '')) &&
+        new Set(pills.map((pill) => (pill.textContent ?? '').slice(0, 1))).size === 2 &&
+        records.length === 1 && records.every((record) => style(record).borderTopStyle === 'solid');
+    })()`, 'export-speaks-without-colour');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
+    await exportAct(renderer, 'cancel', 'export-forced-colors-cancel');
+    await waitFor(renderer, `window.__j07.exportCard() === null`, 'export-forced-colors-closed', 10_000);
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
