@@ -54,11 +54,15 @@ jobs:
     needs: list
     if: ${{ needs.list.outputs.count != '0' }}
     # A called workflow can only restrict the caller's token, never widen it: `contents: read` here
-    # would stop `prepare` pushing the candidate ref and `merge` commenting. The candidate jobs that
-    # only test narrow themselves to `contents: read` inside `e2e-candidate.yml`.
+    # would stop `prepare` pushing the candidate ref and `merge` commenting, and a permission the
+    # called workflow asks for and this call site withholds refuses the whole run before any job
+    # exists. Every scope `e2e-candidate.yml` names is therefore granted here — `issues: write` for
+    # the Issues a merged candidate closes. The candidate jobs that only test narrow themselves to
+    # `contents: read` inside `e2e-candidate.yml`.
     permissions:
       contents: write
       pull-requests: write
+      issues: write
     strategy:
       fail-fast: false
       # Candidates are independent runs: one failing never stops the queue, and a merge changes
