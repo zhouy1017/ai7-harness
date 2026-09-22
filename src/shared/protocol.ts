@@ -3746,6 +3746,117 @@ export interface ReviewFindingOfMarkProjection {
   findingId: string;
 }
 
+// ---- The Task Drawer (Issue #418, plan slice S72; editor-surfaces §6 ③) ----------------------------------
+
+/**
+ * The Task kinds the Task Drawer shows a plan for: the three that hold a plan today (S72 D1) — J-03's
+ * fixed task, the baseline analysis, and a Review Run. A kind with no ledger of its own arrives with the
+ * slice that brings its ledger; nothing here is an authority record of its own.
+ */
+export type TaskPlanKind = 'fixed-task' | 'baseline-analysis' | 'review-run';
+export const TASK_PLAN_KINDS: readonly TaskPlanKind[] = ['fixed-task', 'baseline-analysis', 'review-run'];
+
+/** Which plan the drawer reads. The Book is always the route's; the renderer never names it. */
+export interface InspectTaskPlanInput {
+  bookId: string;
+  kind: TaskPlanKind;
+  /**
+   * The Task: its Task Intent for the fixed task and the baseline analysis, its Review Run for a review.
+   * `null` reads the Book's current Task of the kind; a review is always named.
+   */
+  ref: string | null;
+}
+
+/** Where a plan stands, as the drawer's state pill says it (editor-surfaces §6 状态). */
+export type TaskPlanStateKey = 'ready' | 'changed' | 'recorded' | 'blocked' | 'running' | 'settled' | 'stopped';
+
+/** One editorial business step and what it leaves behind (V2-UX-PLAN-003). */
+export interface TaskPlanStepProjection {
+  label: string;
+  result: string;
+}
+
+/**
+ * One line of the concise diff of a plan whose key content changed (V2-UX-PLAN-009, PLAN-012). The words
+ * are the drawer's own, derived from the field key the stored diff names — never the stored label, whose
+ * bytes are part of an immutable record.
+ */
+export interface TaskPlanDriftEntryProjection {
+  field: string;
+  label: string;
+  prior: string;
+  proposed: string;
+  materiality: 'material' | 'derived';
+}
+
+/**
+ * The plan of one Task as the Task Drawer shows it (V2-UX-PLAN-001 to 012, TASK-030, TASK-039/040,
+ * LAYER-002, MODEL-013/014). It is a read of records that already exist, in the editor's words: no
+ * envelope, row or digest is written or changed to produce it, and every exact identity it names is in
+ * `technical`, unabridged. It states the plan and grants nothing (PLAN-007): the actions that record an
+ * authorization stay on the surfaces that raise each Task.
+ */
+export interface TaskPlanProjection {
+  bookId: string;
+  kind: TaskPlanKind;
+  /** The Task Intent or the Review Run this plan belongs to. */
+  ref: string;
+  state: { key: TaskPlanStateKey; label: string };
+  /** The plan version shown; `null` for a kind that keeps no plan versions. */
+  planVersion: number | null;
+  goal: {
+    sentence: string;
+    chips: {
+      book: string;
+      /** The chapter headings the range holds, `第 a–b 段` when it holds none, `全书`, or the scope's own words. */
+      position: string;
+      /** Graphemes of the current plan version's range of the Task Input revision; `null` when the scope names no one range. */
+      selectedGraphemes: number | null;
+      /** The Task Input revision's label (`r2`). */
+      taskInputRevision: string;
+      procedure: string;
+    };
+    /** Preparing the Task saved its Task Input revision for acknowledged edits (TASK-039/040). */
+    savedForEdits: boolean;
+  };
+  /** 要处理 · 允许参考 · 可能发送 · 不会读, each stated apart (TASK-030). */
+  scope: { process: string; reference: ReadonlyArray<string>; send: string; notRead: string };
+  steps: ReadonlyArray<TaskPlanStepProjection>;
+  /** Where the editor takes part (PLAN-005): during the Run, and afterwards. */
+  participation: { during: string; after: string | null };
+  service: {
+    role: string;
+    provider: string;
+    /** The Provider decision (LAYER-002). */
+    decision: string;
+    send: string;
+    /** The Outbound Data Category in the editor's words (LAYER-002). */
+    sendCategory: string;
+    /** 用量上限: what the Run may use at most, or that it uses nothing. */
+    usage: string;
+    /** Whether `usage` is a ceiling, which is labelled a ceiling and never a prediction. */
+    usageIsCeiling: boolean;
+    duration: string;
+    /** The exact Run Budget Ceiling state (MODEL-013): `未设置任务预算上限` by default. */
+    budgetCeiling: string;
+    /** The Provider Account Limit, never a fabricated value (MODEL-014). */
+    accountLimit: string;
+  };
+  outcomes: ReadonlyArray<string>;
+  /** 不会做, split (editor-surfaces §10): what the editor cares about, and the technical statements. */
+  notDo: { editorial: ReadonlyArray<string>; technical: ReadonlyArray<string> };
+  /** The Plan Boundary Split in the editor's words (PLAN-004, PLAN-012). */
+  boundary: { adaptable: ReadonlyArray<string>; askFirst: ReadonlyArray<string> };
+  /** The plan's key content changed since it froze, and how that is settled; `null` while it stands. */
+  drift: null | {
+    reasons: ReadonlyArray<string>;
+    entries: ReadonlyArray<TaskPlanDriftEntryProjection>;
+    resolution: string;
+  };
+  /** Every exact identity of the plan (LAYER-001, LAYER-007), one step below the decision content. */
+  technical: ReadonlyArray<{ key: string; label: string; value: string }>;
+}
+
 /** Every analysis projection, discriminated on `kind`. */
 export type AnalysisProjection = BaselineAnalysisProjection | FactualReviewProjection | ReviewCategoryProjection;
 
