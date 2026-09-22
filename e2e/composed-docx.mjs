@@ -134,14 +134,85 @@ export async function admittedParagraphs({ source, startBlock, blocks }) {
   return available.slice(startBlock - 1, lastBlock).map((block) => block.text);
 }
 
+const MC = 'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"';
+const WP = 'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"';
+const A = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"';
+const WPS = 'xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"';
+const V = 'xmlns:v="urn:schemas-microsoft-com:vml"';
+
+function runXml(text) {
+  return `<w:r><w:t>${escapeXml(text)}</w:t></w:r>`;
+}
+
+function styledParagraphXml(block, runs) {
+  const style = block.style === undefined ? '' : `<w:pPr><w:pStyle w:val="${escapeXml(block.style)}"/></w:pPr>`;
+  return `<w:p>${style}${runs}</w:p>`;
+}
+
+/**
+ * The composed body with the content ADR 0086 classifies beyond plain paragraphs, every word of it still
+ * the admitted source's — the twin of `retentionParts` in `tests/support/composed-fixture.ts`:
+ * - `textBox: { anchorBlock, sourceStartBlock, blocks }` anchors a text box at the end of the excerpt's
+ *   `anchorBlock`-th paragraph holding the source's blocks `[sourceStartBlock, sourceStartBlock + blocks)`,
+ *   written the way Word writes one (DrawingML in `mc:Choice`, the same paragraphs in VML in `mc:Fallback`);
+ * - `field: { block }` displays the excerpt's `block`-th paragraph through a simple field, text unchanged;
+ * - `footnote: { block, noteSourceBlock }` adds a footnote reference after the excerpt's `block`-th
+ *   paragraph, whose note in `word/footnotes.xml` is the source's `noteSourceBlock`.
+ */
+function retentionParts(excerpt, available, retention, strToU8) {
+  const range = (start, count) => {
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(count) || start < 1 || count < 1 || start + count - 1 > available.length) {
+      throw new Error('composed retention content out of range');
+    }
+    return available.slice(start - 1, start + count - 1);
+  };
+  const inExcerpt = (block) => {
+    if (!Number.isSafeInteger(block) || block < 1 || block > excerpt.length) throw new Error('composed retention anchor outside the excerpt');
+  };
+  const box = retention.textBox;
+  if (box !== undefined) inExcerpt(box.anchorBlock);
+  if (retention.field !== undefined) inExcerpt(retention.field.block);
+  if (retention.footnote !== undefined) inExcerpt(retention.footnote.block);
+  const boxParagraphs = box === undefined ? '' : range(box.sourceStartBlock, box.blocks)
+    .map((block) => styledParagraphXml(block, runXml(block.text))).join('');
+  const body = excerpt.map((block, index) => {
+    const position = index + 1;
+    const text = runXml(block.text);
+    const displayed = retention.field?.block === position ? `<w:fldSimple w:instr=" TITLE ">${text}</w:fldSimple>` : text;
+    const note = retention.footnote?.block === position ? '<w:r><w:footnoteReference w:id="1"/></w:r>' : '';
+    const anchored = box?.anchorBlock === position
+      ? `<w:r><mc:AlternateContent ${MC}><mc:Choice Requires="wps"><w:drawing><wp:anchor ${WP}><a:graphic ${A}><a:graphicData>` +
+        `<wps:wsp ${WPS}><wps:txbx><w:txbxContent>${boxParagraphs}</w:txbxContent></wps:txbx></wps:wsp></a:graphicData>` +
+        `</a:graphic></wp:anchor></w:drawing></mc:Choice><mc:Fallback><w:pict><v:shape ${V}><v:textbox><w:txbxContent>` +
+        `${boxParagraphs}</w:txbxContent></v:textbox></v:shape></w:pict></mc:Fallback></mc:AlternateContent></w:r>`
+      : '';
+    return styledParagraphXml(block, `${displayed}${note}${anchored}`);
+  }).join('');
+  const parts = {
+    'word/document.xml': strToU8(
+      '<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      `<w:body>${body}<w:sectPr/></w:body></w:document>`,
+    ),
+  };
+  if (retention.footnote !== undefined) {
+    const [note] = range(retention.footnote.noteSourceBlock, 1);
+    parts['word/footnotes.xml'] = strToU8(
+      '<?xml version="1.0" encoding="UTF-8"?><w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      `<w:footnote w:id="1"><w:p>${runXml(note.text)}</w:p></w:footnote></w:footnotes>`,
+    );
+  }
+  return parts;
+}
+
 /**
  * Compose one DOCX at `path` from the contiguous 1-based excerpt `[startBlock, startBlock + blocks)` of
  * `source` under exact root `SampleBooks/`, carrying the caller's `title` as the package's `dc:title` —
- * the title is always authored and never taken from the source. Returns the archive bytes. The same
- * request yields the same bytes: the excerpt is deterministic and the archive mtime is fixed, so a
- * composed digest is stable across runs and processes.
+ * the title is always authored and never taken from the source. `retention`, when given, adds the text
+ * box, field or footnote `retentionParts` describes, all of it the source's own words. Returns the
+ * archive bytes. The same request yields the same bytes: the excerpt is deterministic and the archive
+ * mtime is fixed, so a composed digest is stable across runs and processes.
  */
-export async function composeAdmittedDocx(path, { source, startBlock, blocks, title }) {
+export async function composeAdmittedDocx(path, { source, startBlock, blocks, title, retention }) {
   const { zipSync, strToU8 } = await carriers();
   const available = await admittedBlocks(source);
   const lastBlock = startBlock + blocks - 1;
@@ -149,10 +220,13 @@ export async function composeAdmittedDocx(path, { source, startBlock, blocks, ti
     throw new Error(`composed excerpt out of range: blocks ${startBlock}-${lastBlock} of ${available.length} in ${admittedSourcePath(source)}`);
   }
   const excerpt = available.slice(startBlock - 1, lastBlock);
+  const body = retention === undefined
+    ? { 'word/document.xml': strToU8(`<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${excerpt.map(paragraphXml).join('')}</w:body></w:document>`) }
+    : retentionParts(excerpt, available, retention, strToU8);
   const archive = zipSync({
     '[Content_Types].xml': strToU8('<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>'),
     'docProps/core.xml': strToU8(`<?xml version="1.0" encoding="UTF-8"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${escapeXml(title)}</dc:title></cp:coreProperties>`),
-    'word/document.xml': strToU8(`<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${excerpt.map(paragraphXml).join('')}</w:body></w:document>`),
+    ...body,
   }, { level: 6, mtime: new Date('2026-01-01T00:00:00.000Z') });
   await writeFile(path, archive, { flag: 'wx' });
   return archive;

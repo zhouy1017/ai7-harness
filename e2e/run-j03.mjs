@@ -437,10 +437,11 @@ async function importSample1(renderer, cancellation) {
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'import-review-ready');
   at('sample1-import-review');
   cancellation.throwIfRequested();
-  await assertRenderer(renderer, `(() => { const acceptance=document.querySelector('#accept-import-degradation'); if(!(acceptance instanceof HTMLInputElement)||acceptance.checked)return false; acceptance.click(); return acceptance.checked; })()`, 'import-degradation-explicit');
-  await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='按上述降级方式新建图书并导入稿件'&&!button.disabled)`, 'import-degradation-accepted');
+  // Synchronized delta with Issue #410 (ADR 0086): sample1's inline styles and its one section are
+  // retained with the file, so its review asks for no Import Degradation Decision.
+  await waitFor(renderer, `!document.querySelector('#accept-import-degradation')&&Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='新建图书并导入稿件'&&!button.disabled)`, 'import-review-clean');
   cancellation.throwIfRequested();
-  await click(renderer, '按上述降级方式新建图书并导入稿件', 'import-commit');
+  await click(renderer, '新建图书并导入稿件', 'import-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"] .book-overview[data-manuscript-state="populated"]')`, 'import-completed', 180_000);
   at('sample1-import-completed');
   await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged==='true'`, 'import-acknowledged', 180_000);
