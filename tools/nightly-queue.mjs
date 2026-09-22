@@ -16,7 +16,12 @@ export const OWNER_RESERVED_ADR_PREFIX = 'docs/adr/';
 export const OWNER_RESERVED_POLICY_PREFIX = 'docs/policies/';
 
 const MERGEABLE = 'MERGEABLE';
+const UNKNOWN = 'UNKNOWN';
 const DEV = 'dev';
+// How long the listing waits for GitHub to answer what it asked. Four more listings over about
+// half a minute: enough for an ordinary answer, far short of delaying the night.
+const MERGEABILITY_ATTEMPTS = 5;
+const MERGEABILITY_PAUSE_MS = 7_000;
 // An ADR declares its status either in frontmatter (`status: accepted`) or in an inline heading
 // (`Status: **accepted** — …`), and only the one word before any prose decides the reservation.
 const ADR_STATUS_LINE = /^status:\s*(.+?)\s*$/iu;
@@ -81,8 +86,22 @@ export function selectCandidates(records) {
 }
 
 /**
- * The candidate set as the orchestrator consumes it. `mergeable` is computed lazily by GitHub, so
- * an occurrence that reads `UNKNOWN` leaves that pull request to the next night and says so.
+ * The pull requests whose mergeability GitHub has not answered yet, ascending. It computes `mergeable`
+ * lazily and a listing is itself what asks, so the first answer of a night is `UNKNOWN` for every pull
+ * request nothing else has warmed; the listing asks again while any of these remain (Issue #507). Only
+ * a pull request the queue would otherwise consider counts — a draft or one aimed elsewhere is not
+ * waited for.
+ */
+export function pendingMergeability(records) {
+  return records
+    .filter((record) => record.isDraft === false && record.baseRefName === DEV && record.mergeable === UNKNOWN)
+    .map((record) => record.number)
+    .sort((left, right) => left - right);
+}
+
+/**
+ * The candidate set as the orchestrator consumes it. A pull request still `UNKNOWN` when the listing
+ * has finished asking is left to the next night and said so.
  */
 export function assembleCandidateSet(records) {
   const candidates = selectCandidates(records);
@@ -335,10 +354,45 @@ function pullRequestFiles(repo, pr) {
   });
 }
 
-function openPullRequests(repo) {
-  const listed = parseJson(
+/** A pause this file can take: every `gh` call here is synchronous, so the listing waits the same way. */
+function pause(milliseconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+/**
+ * List until GitHub has answered, or until the attempts run out. Asking is what starts the
+ * computation (Issue #507), so a night that asked once would read its own cold answer as a no and
+ * merge nothing, every night. `list` is one listing and `waitFor` is given the pull requests still
+ * unanswered, once per wait; both are the caller's, so this decides only how often to ask.
+ */
+export function listUntilAnswered(list, waitFor, attempts = MERGEABILITY_ATTEMPTS) {
+  let listed = list();
+  let asked = 1;
+  while (asked < attempts) {
+    const pending = pendingMergeability(listed);
+    if (pending.length === 0) break;
+    waitFor(pending);
+    listed = list();
+    asked += 1;
+  }
+  return { listed, pending: pendingMergeability(listed), asked };
+}
+
+function listOpenPullRequests(repo) {
+  return parseJson(
     ghOrThrow(['pr', 'list', '--repo', repo, '--state', 'open', '--limit', '200', '--json', PR_LIST_FIELDS]),
     'gh pr list',
+  );
+}
+
+/** Every open pull request with its changed paths, listed until GitHub has stated mergeability. */
+function openPullRequests(repo) {
+  const { listed } = listUntilAnswered(
+    () => listOpenPullRequests(repo),
+    (pending) => {
+      process.stdout.write(`queue: asking again for the mergeability of ${pending.map((number) => `#${number}`).join(', ')}\n`);
+      pause(MERGEABILITY_PAUSE_MS);
+    },
   );
   return listed.map((record) => ({ ...record, files: pullRequestFiles(repo, record.number) }));
 }
