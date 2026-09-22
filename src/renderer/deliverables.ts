@@ -161,7 +161,10 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     technicalDetails: options.technicalDetails,
     setStatus: options.setStatus,
     errorMessage: options.errorMessage,
-    onExported: () => refresh(),
+    onChanged: () => refresh(),
+    openerOf: (target) => block?.querySelector<HTMLElement>(target.kind === 'current'
+      ? '[data-export-action="open"][data-export-target="current"]'
+      : `ol.milestone-list > li[data-milestone-id="${CSS.escape(target.milestoneId)}"] [data-export-action="open"]`) ?? null,
   });
 
   // ---- reading --------------------------------------------------------------------------------------

@@ -66,8 +66,10 @@ export interface MountManuscriptExportOptions {
   technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
-  /** An approved export changed 交付物's records: read them again. */
-  onExported(): void;
+  /** 交付物 changed under the card — a revision saved for the export, or an approved export: read it again. */
+  onChanged(): void;
+  /** The 导出… of a version as 交付物 draws it now, for focus to return to once the one that opened the card was redrawn. */
+  openerOf(target: ManuscriptExportTargetInput): HTMLElement | null;
 }
 
 type Phase = 'reviewing' | 'ready' | 'choosing' | 'prepared' | 'writing' | 'done';
@@ -123,7 +125,8 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
 
   function close(announce: boolean): void {
     if (state === null || working()) return;
-    const opener = state.opener;
+    // 交付物 redraws its 导出… whenever it reads again, so the opener is found anew when the first one is gone.
+    const opener = state.opener?.isConnected === true ? state.opener : options.openerOf(state.target);
     state = null;
     ticket += 1;
     card = null;
@@ -156,6 +159,8 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
         current.phase = 'ready';
         render(focus);
         options.setStatus(EXPORT_STATUS_LINES.reviewed, 'success');
+        // The unsaved edits became a revision: 交付物's manuscript line reads it.
+        if (next.savedForExport) options.onChanged();
       },
       (error) => {
         if (destroyed || state !== current || request !== ticket) return;
@@ -224,7 +229,7 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
       render('result');
       const exported = receipt.outcome === 'created' || receipt.outcome === 'replaced';
       options.setStatus(receipt.outcomeLabel, exported ? 'success' : 'error');
-      options.onExported();
+      options.onChanged();
     } catch (error) {
       if (destroyed || state !== current || request !== ticket) return;
       current.phase = 'prepared';
@@ -337,7 +342,8 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
       const box = el('input');
       box.type = 'checkbox';
       box.checked = current.options[key];
-      box.disabled = busy || current.receipt !== null;
+      // A review in flight never locks the switches: a newer choice supersedes it, and focus stays where it was.
+      box.disabled = (busy && current.phase !== 'reviewing') || current.receipt !== null;
       box.dataset['exportOption'] = key;
       const note = el('small', 'field-note', EXPORT_OPTION_NOTES[key]);
       note.id = uid(`${key}-note`);
