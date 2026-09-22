@@ -14,10 +14,12 @@ import type {
 import {
   DECISION_REASON_CHIPS,
   HIGHLIGHT_COLOR_LABELS,
+  INSERTION_CONVERT_REASON,
   MARK_KIND_LABELS,
   RESOLVE_CONFLICT_LABEL,
   REVERSAL_CORRECTION_LINE,
   SAFE_MERGE_LINE,
+  insertionLine,
   markDriftNote,
   markSourceLine,
   markStateLabel,
@@ -632,15 +634,24 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       };
       const applied = card.status === 'applied' ? suggestion.application : null;
       const shown = decision?.editedText ?? suggestion.proposedText;
+      // An insertion a file's author proposed stands at a point and replaces nothing (Issue #411).
+      const inserts = suggestion.changeType === 'insert';
       const content = el('p', 'editorial-mark-change');
-      const from = el('del', undefined, suggestion.currentText);
-      const to = el('ins', undefined, shown.length === 0 ? '（删去）' : shown);
-      content.append(from, ' → ', to);
+      content.dataset['markChange'] = suggestion.changeType;
+      if (inserts) {
+        content.append(el('ins', undefined, insertionLine(shown)));
+      } else {
+        const from = el('del', undefined, suggestion.currentText);
+        const to = el('ins', undefined, shown.length === 0 ? '（删去）' : shown);
+        content.append(from, ' → ', to);
+      }
       panel.append(
         region('content', '修改内容', content, el('p', 'muted', applied !== null
           ? '这处修改已经写入稿件；正文里是应用后的文字。'
           : exact && decision?.disposition !== 'rejected'
-            ? '正文里显示的是替换后的样子（预览 · 未应用）；稿件本身仍是原文。'
+            ? inserts
+              ? '正文里在插入处显示要插入的文字（预览 · 未应用）；稿件本身仍是原文。'
+              : '正文里显示的是替换后的样子（预览 · 未应用）；稿件本身仍是原文。'
             : '稿件本身仍是原文。')),
         region('rationale', '修改理由', el('p', undefined, suggestion.rationale.length > 0 ? suggestion.rationale : '没有填写修改理由。')),
         region('basis', '依据与核查', basisList(card)),
@@ -709,9 +720,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
             ? actionButton('accept-with-edit', '修改后接受', 'secondary', () => showCard(card, (cancel) => ({
                 id: 'accept-with-edit',
                 title: '修改后接受',
-                quote: suggestion.currentText,
+                quote: inserts ? null : suggestion.currentText,
                 fields: [
-                  { name: 'proposedText', label: '编辑建议文本', value: suggestion.proposedText, required: false, hint: '留空表示删去这段文字。' },
+                  {
+                    name: 'proposedText', label: '编辑建议文本', value: suggestion.proposedText, required: false,
+                    hint: inserts ? '填写要在此插入的文字。' : '留空表示删去这段文字。',
+                  },
                   { name: 'reason', label: '为什么这样改？（可选 · 帮助 AI7 学习你的判断）', value: '', required: false },
                 ],
                 submitLabel: '接受修改后的版本并应用',
@@ -722,7 +736,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
                 cancel,
               })))
             : disabledAction('accept-with-edit', '修改后接受', '原文已变，无法接受这条修改建议。'),
-          convertOrExplain('annotation'),
+          inserts ? disabledAction('convert-annotation', CONVERT_LABELS.annotation, INSERTION_CONVERT_REASON) : convertOrExplain('annotation'),
         );
         yours.append(disposition, ...safeMerge(), el('p', 'muted', '都不预选；接受即写入稿件，之后可以撤销本次应用。'));
         if (form) yours.append(buildForm(form(reopen)));
@@ -1076,10 +1090,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const showMarkMenu = (mark: EditorialMarkAnchorProjection, at: { x: number; y: number }): void => {
     const exact = mark.anchorState === 'exact';
     const drifted = '原文已变，无法在这段文字上转换。';
+    // A pending insertion stands at a point, with no text for a 批注 to stand on (Issue #411).
+    const insertion = mark.insertedText !== null;
     const convert = (target: EditorialMarkKind): MenuItem => ({
       action: `convert-${target}`,
       label: CONVERT_LABELS[target],
-      ...(exact ? {
+      ...(insertion ? { disabledReason: INSERTION_CONVERT_REASON } : exact ? {
         run: () => {
           if (mark.kind === 'personal-highlight') {
             void (async () => {

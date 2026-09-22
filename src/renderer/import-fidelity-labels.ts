@@ -63,17 +63,34 @@ export function fidelityDisclosureSummary(fidelity: ReadonlyArray<FidelityCatego
 }
 
 /**
+ * Whether a class was found in the file. Every class the service reports as not found reads 未检测到… and
+ * counts nothing; one it found may still count nothing — 批注与修订 of a file whose only revisions are
+ * formatting ones stays with the file and becomes no mark (Issue #411).
+ */
+function fidelityClassFound(category: FidelityCategoryProjection): boolean {
+  return category.count > 0 || !category.detail.startsWith('未检测到');
+}
+
+/**
  * The concise reading of a review that asks for no decision (interaction-spec, New-Book fidelity review
- * contains only 完整保留): how many classes there are, which are kept with the file and how many, and how
- * many were not found at all.
+ * contains only 完整保留): how many classes there are, which are kept with the file and how many, which
+ * become marks on the manuscript and how many (Issue #411: a file's comments and tracked changes, which are
+ * `完整保留` with a count and are not kept with the file), and how many were not found at all.
  */
 export function fidelitySummaryLine(fidelity: ReadonlyArray<FidelityCategoryProjection>): string {
   const rows = fidelityRows(fidelity);
-  const retained = rows.filter((category) => category.count > 0);
-  const absent = rows.length - retained.length;
-  if (retained.length === 0) return `${rows.length} 类内容都未检测到，稿件完整保留，不需要导入降级决定。`;
-  const kept = retained.map((category) => `${category.label}${fidelityCountText(category.count)}`).join('、');
-  return `${rows.length} 类内容都完整保留，不需要导入降级决定：${kept}随文件保留` +
+  const found = rows.filter(fidelityClassFound);
+  const absent = rows.length - found.length;
+  if (found.length === 0) return `${rows.length} 类内容都未检测到，稿件完整保留，不需要导入降级决定。`;
+  const converted = found.filter((category) => category.status === 'preserved' && category.count > 0);
+  const kept = found.filter((category) => !converted.includes(category));
+  const counted = (category: FidelityCategoryProjection): string =>
+    category.count > 0 ? `${category.label}${fidelityCountText(category.count)}` : category.label;
+  const clauses = [
+    ...(kept.length > 0 ? [`${kept.map(counted).join('、')}随文件保留`] : []),
+    ...(converted.length > 0 ? [`${converted.map(counted).join('、')}转为稿件上的批注与修改建议`] : []),
+  ];
+  return `${rows.length} 类内容都完整保留，不需要导入降级决定：${clauses.join('；')}` +
     (absent > 0 ? `，其余 ${absent} 类未检测到。` : '。');
 }
 

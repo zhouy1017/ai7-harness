@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   DECISION_REASON_CHIPS,
+  INSERTION_CONVERT_REASON,
   MARK_KIND_LABELS,
   RESOLVE_CONFLICT_LABEL,
   REVERSAL_CORRECTION_LINE,
   SAFE_MERGE_LINE,
+  insertionLine,
   markDriftNote,
+  markPointKind,
   markPointLabel,
   markSourceLine,
   markStateLabel,
@@ -113,6 +116,20 @@ describe('the wording of the Mark surface', () => {
     expect(markPointLabel({ kind: 'change-suggestion', deletedText: '原文' }, false)).toBe('已删去「原文」');
     expect(markPointLabel({ kind: 'change-suggestion', deletedText: '原文' }, true)).toBe('已删去「原文」 · 原文已变');
     expect(markPointLabel({ kind: 'annotation', deletedText: null }, true)).toBe('批注 · 原文已变');
+  });
+
+  it('words an insertion a file\'s author proposed: at its point, on its card, and when it is reversed (Issue #411)', () => {
+    expect(insertionLine('插入的字')).toBe('在此插入「插入的字」');
+    expect(markPointLabel({ kind: 'change-suggestion', deletedText: null, insertedText: '插入的字' }, false)).toBe('待插入「插入的字」');
+    expect(markPointLabel({ kind: 'change-suggestion', deletedText: null, insertedText: '插入的字' }, true)).toBe('待插入「插入的字」 · 原文已变');
+    expect(markPointKind({ deletedText: null, insertedText: '插入的字' })).toBe('insertion');
+    expect(markPointKind({ deletedText: '原文', insertedText: null })).toBe('deletion');
+    expect(markPointKind({ deletedText: null, insertedText: null })).toBe('mark');
+    const { suggestion } = suggestionState(null);
+    const insertion = { ...suggestion!, changeType: 'insert' as const, currentText: '', proposedText: '插入的字' };
+    expect(markDriftNote({ pinnedText: '', suggestion: insertion })).toBe('原文已变：这里原本建议插入「插入的字」，插入处后来又改过，标记仍留在原处。');
+    expect(reverseApplyNote('插入的字', '')).toBe('会删去在此插入的「插入的字」，并记为一次新的应用；原来的应用记录保留，不会被改写。');
+    expect(INSERTION_CONVERT_REASON).toBe('插入建议没有原文可以批注，不能转为批注。');
   });
 
   it('offers reason chips without a preselection and explains an unavailable mark entry', () => {
