@@ -476,7 +476,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'prepareNewBookReview': {
       const input = requireInput(
         value.input,
-        ['draftId', 'expectedDraftVersion', 'target', 'acceptDegradation'],
+        ['draftId', 'expectedDraftVersion', 'target', 'acceptDegradation', 'textBoxDisposition'],
         tentativeId,
       );
       const target = input.target;
@@ -493,7 +493,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         !UUID_PATTERN.test(input.draftId) ||
         !isSafeInteger(input.expectedDraftVersion, 1) ||
         !validTarget ||
-        typeof input.acceptDegradation !== 'boolean'
+        typeof input.acceptDegradation !== 'boolean' ||
+        (input.textBoxDisposition !== 'retain' && input.textBoxDisposition !== 'merge')
       ) {
         throw new ProtocolError(tentativeId);
       }

@@ -2505,7 +2505,7 @@ async function main() {
     requireJourney(
       textManuscriptRecord?.['格式'] === 'TXT' &&
         textManuscriptRecord?.['原文件 SHA-256'] === syntheticTxtSha256 &&
-        textManuscriptRecord?.['解析器'] === 'ai7-docx-fflate-saxes/1' &&
+        textManuscriptRecord?.['解析器'] === 'ai7-docx-fflate-saxes/2' &&
         textManuscriptRecord?.['转换器'] === 'ai7-text-to-docx/1' &&
         /^[0-9a-f]{64}$/.test(textManuscriptRecord?.['工作表示 SHA-256'] ?? '') &&
         textManuscriptRecord?.['工作表示 SHA-256'] !== syntheticTxtSha256,
@@ -2613,7 +2613,7 @@ async function main() {
       requireJourney(
         docManuscriptRecord?.['格式'] === 'DOC' &&
           docManuscriptRecord?.['原文件 SHA-256'] === LOCAL_DOC_SHA256 &&
-          docManuscriptRecord?.['解析器'] === 'ai7-docx-fflate-saxes/1' &&
+          docManuscriptRecord?.['解析器'] === 'ai7-docx-fflate-saxes/2' &&
           docManuscriptRecord?.['转换器'] === 'ai7-doc-to-docx/1' &&
           /^[0-9a-f]{64}$/.test(docManuscriptRecord?.['工作表示 SHA-256'] ?? '') &&
           docManuscriptRecord?.['工作表示 SHA-256'] !== LOCAL_DOC_SHA256,

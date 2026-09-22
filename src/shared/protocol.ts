@@ -5067,6 +5067,11 @@ export interface ServiceOperationMap {
       expectedDraftVersion: number;
       target: ImportTargetSelection;
       acceptDegradation: boolean;
+      /**
+       * The review's choice for the file's text boxes (ADR 0086 §2): `retain` — the default the review
+       * preselects — or `merge`. A file without a text box can only be reviewed with `retain`.
+       */
+      textBoxDisposition: TextBoxDisposition;
     };
     output: ReviewBeforeImportProjection;
   };
