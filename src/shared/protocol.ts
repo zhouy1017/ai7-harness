@@ -4721,6 +4721,77 @@ export interface GlobalAttentionProjection {
   actionableCount: number;
   /** A Run is in flight now, or a Review Run is being driven: a reader follows it slowly until it ends. */
   running: boolean;
+// ---- ④ 导出 · DOCX (Issue #413, plan slice S64; editor-surfaces §7 导出, V2-UX-EXP-001 to EXP-024) ------
+
+/**
+ * What one Manuscript export carries beyond its text (V2-UX-EXP-023, EXP-024, MARK-006; ADR 0079 §3):
+ * 含批注 and 含修改建议（作为修订） are on by default, 含备注 is off by default. An option changes the exported
+ * file only, never the manuscript or its marks. Highlights and AI7's basis never leave (hard exclusions).
+ */
+export interface ManuscriptExportOptions {
+  includeAnnotations: boolean;
+  includeSuggestions: boolean;
+  includeEditorNotes: boolean;
+}
+
+export const DEFAULT_MANUSCRIPT_EXPORT_OPTIONS: Readonly<ManuscriptExportOptions> = Object.freeze({
+  includeAnnotations: true,
+  includeSuggestions: true,
+  includeEditorNotes: false,
+});
+
+/** DOCX is the one format S64 writes; PDF and the Markdown 备用格式 are shown and not yet offered (S64b). */
+export type ManuscriptExportFormat = 'docx' | 'pdf' | 'markdown';
+
+/** Which version is exported: the current revision (a dirty working state is saved first) or one milestone. */
+export type ManuscriptExportTargetInput = { kind: 'current' } | { kind: 'milestone'; milestoneId: string };
+
+/**
+ * The classes of the Export Fidelity Review (V2-UX-EXP-007): the content classes ADR 0086 retains with the
+ * Source Version, the three marks an export may carry, and the file's own revision markup that did not become
+ * a mark.
+ */
+export type ExportFidelityKey =
+  | 'inline-styles'
+  | 'annotations'
+  | 'change-suggestions'
+  | 'editor-notes'
+  | 'notes'
+  | 'tables'
+  | 'images-captions'
+  | 'sections'
+  | 'headers-footers'
+  | 'text-boxes'
+  | 'fields'
+  | 'file-revisions';
+
+/** `excluded`: a mark kind the editor left out of this export — a choice, not a loss. */
+export type ExportFidelityStatus = 'preserved' | 'degraded' | 'unavailable' | 'excluded';
+
+export const EXPORT_FIDELITY_STATUS_LABELS = Object.freeze({
+  preserved: '完整保留',
+  degraded: '降级导出',
+  unavailable: '无法导出',
+  excluded: '本次不含',
+} as const);
+
+export type ExportFidelityStatusLabel = (typeof EXPORT_FIDELITY_STATUS_LABELS)[ExportFidelityStatus];
+
+/** At most this many manuscript positions are named on one row; the count always says how many there are. */
+export const MAX_EXPORT_FIDELITY_POSITIONS = 20;
+
+/** One row of the Export Fidelity Review, in the service's own words. */
+export interface ExportFidelityRowProjection {
+  key: ExportFidelityKey;
+  label: string;
+  /** How many items of the class the export concerns. */
+  count: number;
+  status: ExportFidelityStatus;
+  statusLabel: ExportFidelityStatusLabel;
+  detail: string;
+  /** The 1-based manuscript positions where the class is not written as it was, in order. */
+  positions: ReadonlyArray<number>;
+  positionsTruncated: boolean;
 }
 
 export interface DurableHistoryProjection {
