@@ -609,6 +609,18 @@ const WP = 'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordproce
 const A = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"';
 const WPS = 'xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"';
 const V = 'xmlns:v="urn:schemas-microsoft-com:vml"';
+const R = 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+
+/** A complex field as Word writes one: begin, its instruction, separate, what it displays, end. */
+function complexField(instruction: string, shown: string): string {
+  return '<w:r><w:fldChar w:fldCharType="begin"/></w:r>' +
+    `<w:r><w:instrText xml:space="preserve">${instruction}</w:instrText></w:r>` +
+    `<w:r><w:fldChar w:fldCharType="separate"/></w:r>${shown}<w:r><w:fldChar w:fldCharType="end"/></w:r>`;
+}
+
+function textRun(text: string): string {
+  return `<w:r><w:t xml:space="preserve">${text}</w:t></w:r>`;
+}
 
 /** A text box the way Word writes one: DrawingML in `mc:Choice`, the same content again in VML in `mc:Fallback`. */
 function wordTextBox(paragraphs: string): string {
@@ -717,6 +729,135 @@ describe('parseDocx: text boxes, fields, and source paragraphs (ADR 0086)', () =
       degradations: [{ categoryKey: 'fields', label: '域（目录等）', count: 2 }],
       textBoxDisposition: null,
     });
+  });
+
+  // A link is not a field (#410): a `w:hyperlink` or a HYPERLINK field is one inline-style item, kept with
+  // the file; every other field is one item of 域.
+  it('counts a w:hyperlink as one inline-style item kept with the file, and asks for no decision', async () => {
+    const { parsed, blocks } = await parseFixture({
+      extraEntries: {
+        'word/document.xml': bodyDocumentXml(
+          `<w:p>${textRun('参见')}<w:hyperlink ${R} r:id="rId9">${textRun('外部链接')}</w:hyperlink></w:p>` +
+            `<w:p><w:hyperlink w:anchor="_Ref1">${textRun('书签链接')}</w:hyperlink></w:p><w:sectPr/>`,
+        ),
+      },
+    });
+    // The manuscript keeps each link's text; the link itself stays with the Source Version.
+    expect(blocks.map((block) => block.text)).toEqual(['参见外部链接', '书签链接']);
+    expect(parsed.fidelity.filter((category) => category.count > 0).map((category) => [category.key, category.count, category.status]))
+      .toEqual([['inline-styles', 2, 'retained']]);
+    // Said of the class, so a file whose only inline items are links is told of no font it does not have.
+    expect(parsed.fidelity.find((category) => category.key === 'inline-styles')!.detail).toBe(
+      '字体、字号、粗体、颜色等行内样式与超链接随来源版本保留；稿件只编辑文字，超链接只留下显示的文字；未改过的段落导出时从原文件恢复。改过的段落，导出时逐段说明格式能否原样恢复。',
+    );
+    expect(deriveImportFidelityPlan(parsed.fidelity, parsed.sourceDigest, parsed.archiveBytes)).toEqual({
+      outcome: 'clean-import-no-round-trip',
+      degradations: [],
+      textBoxDisposition: null,
+    });
+  });
+
+  it('counts a HYPERLINK field as a link rather than a field, however its instruction is written', async () => {
+    const { parsed, blocks } = await parseFixture({
+      extraEntries: {
+        'word/document.xml': bodyDocumentXml(
+          `<w:p><w:fldSimple w:instr=" HYPERLINK &quot;https://example.org/&quot; ">${textRun('简单链接域')}</w:fldSimple></w:p>` +
+            // Word may split an instruction across runs; the field's name is read case-insensitively.
+            '<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> hyper</w:instrText></w:r>' +
+            '<w:r><w:instrText xml:space="preserve">link \\l "_Ref2" </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r>' +
+            `${textRun('复杂链接域')}<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p><w:sectPr/>`,
+        ),
+      },
+    });
+    // Only the text each link displays enters the manuscript; its instruction never does.
+    expect(blocks.map((block) => block.text)).toEqual(['简单链接域', '复杂链接域']);
+    expect(parsed.fidelity.filter((category) => category.count > 0).map((category) => [category.key, category.count, category.status]))
+      .toEqual([['inline-styles', 2, 'retained']]);
+    expect(deriveImportFidelityPlan(parsed.fidelity, parsed.sourceDigest, parsed.archiveBytes)).toEqual({
+      outcome: 'clean-import-no-round-trip',
+      degradations: [],
+      textBoxDisposition: null,
+    });
+  });
+
+  it('counts a table of contents as Word writes one: the TOC and each page reference are fields, each entry\'s link is not', async () => {
+    const entry = (bookmark: string, title: string, page: string): string =>
+      `<w:hyperlink w:anchor="${bookmark}" w:history="1">${textRun(title)}<w:r><w:tab/></w:r>` +
+      `${complexField(` PAGEREF ${bookmark} \\h `, textRun(page))}</w:hyperlink>`;
+    const { parsed, blocks } = await parseFixture({
+      extraEntries: {
+        'word/document.xml': bodyDocumentXml(
+          // The TOC field opens in its first entry's paragraph and closes in a paragraph of its own.
+          '<w:p><w:pPr><w:pStyle w:val="TOC1"/></w:pPr><w:r><w:fldChar w:fldCharType="begin"/></w:r>' +
+            '<w:r><w:instrText xml:space="preserve"> TOC \\o "1-3" \\h \\z \\u </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r>' +
+            `${entry('_Toc1', '第一章', '1')}</w:p>` +
+            `<w:p><w:pPr><w:pStyle w:val="TOC1"/></w:pPr>${entry('_Toc2', '第二章', '5')}</w:p>` +
+            `<w:p><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p><w:p>${textRun('正文')}</w:p><w:sectPr/>`,
+        ),
+      },
+    });
+    expect(blocks.map((block) => block.text)).toEqual(['第一章 1', '第二章 5', '正文']);
+    expect(parsed.fidelity.filter((category) => category.count > 0).map((category) => [category.key, category.count, category.status]))
+      .toEqual([['inline-styles', 2, 'retained'], ['fields', 3, 'degraded']]);
+    // The row names no link among its examples: a link is never one of its items.
+    expect(parsed.fidelity.find((category) => category.key === 'fields')!.detail).toBe(
+      '目录、交叉引用、页码等域按当前显示的文字进入稿件，之后不再更新；未改过的段落导出时从原文件恢复，改过的段落在导出保真审阅里逐段说明。',
+    );
+    expect(deriveImportFidelityPlan(parsed.fidelity, parsed.sourceDigest, parsed.archiveBytes)).toEqual({
+      outcome: 'degraded-import-no-round-trip',
+      degradations: [{ categoryKey: 'fields', label: '域（目录等）', count: 3 }],
+      textBoxDisposition: null,
+    });
+  });
+
+  it('counts a mixed document exactly: every link one inline-style item, every other field one item of 域', async () => {
+    const { parsed, blocks } = await parseFixture({
+      extraEntries: {
+        'word/document.xml': bodyDocumentXml(
+          `<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>加粗</w:t></w:r><w:hyperlink w:anchor="_Ref1">${textRun('书签链接')}</w:hyperlink></w:p>` +
+            // A HYPERLINK field whose displayed text holds a page reference: a link around a field.
+            `<w:p>${complexField(' HYPERLINK \\l "_Ref1" ', `${textRun('见第')}${complexField(' PAGEREF _Ref1 \\h ', textRun('5'))}${textRun('页')}`)}</w:p>` +
+            `<w:p>${textRun('图 ')}<w:fldSimple w:instr=" SEQ 图 \\* ARABIC ">${textRun('1')}</w:fldSimple>${textRun('，共 ')}` +
+            `<w:fldSimple w:instr=" NUMPAGES ">${textRun('9')}</w:fldSimple>${textRun(' 页')}</w:p>` +
+            `<w:p>${complexField(' DATE \\@ "yyyy-MM-dd" ', textRun('2026-09-22'))}${textRun('，')}` +
+            `<w:fldSimple w:instr=" hyperlink &quot;https://example.org/&quot; ">${textRun('外链')}</w:fldSimple>` +
+            `${complexField(' REF _Ref1 \\h ', textRun('引用'))}</w:p><w:sectPr/>`,
+        ),
+      },
+    });
+    expect(blocks.map((block) => block.text)).toEqual(['加粗书签链接', '见第5页', '图 1，共 9 页', '2026-09-22，外链引用']);
+    // Inline-style items: the bold run and three links — the w:hyperlink and both HYPERLINK fields.
+    // Fields: PAGEREF, SEQ, NUMPAGES, DATE and REF.
+    expect(parsed.fidelity.filter((category) => category.count > 0).map((category) => [category.key, category.count, category.status]))
+      .toEqual([['inline-styles', 4, 'retained'], ['fields', 5, 'degraded']]);
+    expect(deriveImportFidelityPlan(parsed.fidelity, parsed.sourceDigest, parsed.archiveBytes)).toEqual({
+      outcome: 'degraded-import-no-round-trip',
+      degradations: [{ categoryKey: 'fields', label: '域（目录等）', count: 5 }],
+      textBoxDisposition: null,
+    });
+  });
+
+  it('counts each field once even when its marks are unbalanced or its instruction starts with another field', async () => {
+    const { parsed, blocks } = await parseFixture({
+      extraEntries: {
+        'word/document.xml': bodyDocumentXml(
+          // An end mark with no field open counts nothing.
+          `<w:p><w:r><w:fldChar w:fldCharType="end"/></w:r>${textRun('孤立的结束标记')}</w:p>` +
+            // An instruction that starts with a nested field never names the outer field, which counts in 域
+            // whatever follows the nested one.
+            '<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:fldChar w:fldCharType="begin"/></w:r>' +
+            '<w:r><w:instrText> REF _Ref1 </w:instrText></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>' +
+            '<w:r><w:instrText> HYPERLINK "x" </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r>' +
+            `${textRun('嵌套指令')}<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>` +
+            // A field still open when the part ends is counted there, by what its instruction said.
+            `<w:p>${textRun('未闭合')}<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText>HYPERLINK</w:instrText></w:r></w:p>` +
+            '<w:sectPr/>',
+        ),
+      },
+    });
+    expect(blocks.map((block) => block.text)).toEqual(['孤立的结束标记', '嵌套指令', '未闭合']);
+    const counts = Object.fromEntries(parsed.fidelity.map((category) => [category.key, category.count]));
+    expect([counts['inline-styles'], counts['fields']]).toEqual([1, 2]);
   });
 
   it('rebuilds a text-box report under the disposition it states, and only one it can state', async () => {

@@ -35,10 +35,16 @@ const MAX_XML_NESTING_DEPTH = 128;
 /** A document may carry at most this many text boxes; each is one record the review can offer to merge. */
 const MAX_TEXT_BOXES = 10_000;
 /**
+ * The one field instruction that makes a link rather than a field (#410): a HYPERLINK field, like a
+ * `w:hyperlink` element, is one inline-style item retained with the file, never an item of 域.
+ */
+const HYPERLINK_FIELD = 'HYPERLINK';
+/**
  * The parser identity every review is rebuilt under (ADR 0086). Revision 2 reads text boxes instead of
- * refusing the file, counts fields, records which source paragraph every block came from, and reports
- * ten content classes; revision 1's eight-row report stays rebuildable through its frozen builder, so a
- * review recorded under it still reads back exactly (`buildFidelityReportV1`).
+ * refusing the file, counts fields — and a link as an inline style — records which source paragraph
+ * every block came from, and reports ten content classes; revision 1's eight-row report stays
+ * rebuildable through its frozen builder, so a review recorded under it still reads back exactly
+ * (`buildFidelityReportV1`).
  */
 export const DOCX_PARSER_IDENTITY = 'ai7-docx-fflate-saxes/2';
 /** The identity of every review written before revision 2: eight classes, rebuilt by the frozen builder. */
@@ -119,6 +125,10 @@ export interface ParsedDocx {
 }
 
 export interface DocumentSignals {
+  /**
+   * A `w:rPr` that sets anything, a bare toggle outside one, and every link: a `w:hyperlink` element or a
+   * field whose instruction is HYPERLINK. Every other field counts in `fields`.
+   */
   inlineStyles: number;
   commentsRevisions: number;
   notes: number;
@@ -324,6 +334,11 @@ function createDocumentParser(
   let characterCount = 0;
   let blockCount = 0;
   let textDepth = 0;
+  let instructionDepth = 0;
+  // A complex field's instruction follows its begin mark in `w:instrText`, possibly split across runs. It
+  // is read only until its first word is known, and the field is counted then — or at its separate or end
+  // mark, or at the end of the part, when the instruction never finished that word.
+  let fieldInstruction: string | undefined;
   let closed = false;
   const ancestors: string[] = [];
   let runProperties: { depth: number; styled: boolean } | undefined;
@@ -371,6 +386,24 @@ function createDocumentParser(
 
   /** Text belongs to the innermost open paragraph: a text box's own, while one is open. */
   const openParagraph = (): OpenParagraph | undefined => (textBox === undefined ? paragraph : boxParagraph);
+
+  /**
+   * One field, counted by the first word of its instruction: HYPERLINK makes it a link, one inline-style
+   * item like a `w:hyperlink` element; every other field — TOC, REF, PAGEREF, SEQ, PAGE, NUMPAGES, DATE
+   * and the rest — is one item of 域 (ADR 0086 §1, as #410 decided).
+   */
+  const countField = (instruction: string): void => {
+    const word = /^[A-Za-z]*/.exec(instruction.trimStart())![0];
+    if (word.toUpperCase() === HYPERLINK_FIELD) signals.inlineStyles += 1;
+    else signals.fields += 1;
+  };
+
+  /** Count the complex field whose instruction is being read, if one is. */
+  const settleField = (): void => {
+    if (fieldInstruction === undefined) return;
+    countField(fieldInstruction);
+    fieldInstruction = undefined;
+  };
 
   const appendParagraphText = (addition: string): void => {
     const target = openParagraph();
@@ -481,12 +514,28 @@ function createDocumentParser(
         signals.textBoxes += 1;
         break;
       }
-      case 'fldSimple':
-        signals.fields += 1;
+      case 'hyperlink':
+        // A link is not a field: its text enters the Manuscript, and the link stays with the Source Version.
+        signals.inlineStyles += 1;
         break;
-      case 'fldChar':
-        // A complex field is counted once, at its begin mark; its separate and end marks close it.
-        if (attributeValue(tag, 'fldCharType') === 'begin') signals.fields += 1;
+      case 'fldSimple':
+        countField(attributeValue(tag, 'instr') ?? '');
+        break;
+      case 'fldChar': {
+        // A complex field is counted once. Its begin mark opens its instruction, first settling a field
+        // whose instruction never named it (one that starts with a nested field); its separate or end mark
+        // settles it if its first word is still unknown.
+        const type = attributeValue(tag, 'fldCharType');
+        if (type === 'begin') {
+          settleField();
+          fieldInstruction = '';
+        } else if (type === 'separate' || type === 'end') {
+          settleField();
+        }
+        break;
+      }
+      case 'instrText':
+        instructionDepth += 1;
         break;
       case 'sectPr':
         if (parent === 'body') {
@@ -505,7 +554,13 @@ function createDocumentParser(
     ancestors.push(tag.local);
   });
   parser.on('text', (text) => {
-    if (skippedFrom === undefined && textDepth > 0) appendParagraphText(text);
+    if (skippedFrom !== undefined) return;
+    if (textDepth > 0) appendParagraphText(text);
+    if (instructionDepth > 0 && fieldInstruction !== undefined) {
+      // Only the first word counts, so no more than one character past HYPERLINK is ever kept.
+      fieldInstruction = (fieldInstruction + text).trimStart().slice(0, HYPERLINK_FIELD.length + 1);
+      if (/[^A-Za-z]/.test(fieldInstruction) || fieldInstruction.length > HYPERLINK_FIELD.length) settleField();
+    }
   });
   parser.on('closetag', (tag) => {
     requireDocx(ancestors.pop() === tag.local, 'document element stack mismatch');
@@ -514,6 +569,7 @@ function createDocumentParser(
       return;
     }
     if (tag.local === 't') textDepth -= 1;
+    if (tag.local === 'instrText') instructionDepth -= 1;
     if (tag.local === 'rPr') {
       requireDocx(runProperties?.depth === ancestors.length, 'run properties state mismatch');
       if (runProperties.styled) signals.inlineStyles += 1;
@@ -612,11 +668,13 @@ function createDocumentParser(
       requireDocx(closed, 'document XML stream incomplete');
       requireDocx(
         paragraph === undefined && boxParagraph === undefined && textBox === undefined && skippedFrom === undefined &&
-          drawings.length === 0 && alternates.length === 0 && textDepth === 0 && ancestors.length === 0 &&
-          runProperties === undefined && terminalSection === undefined,
+          drawings.length === 0 && alternates.length === 0 && textDepth === 0 && instructionDepth === 0 &&
+          ancestors.length === 0 && runProperties === undefined && terminalSection === undefined,
         'incomplete document XML state',
       );
       requireDocx(blockCount > 0, 'DOCX contains no editable text blocks');
+      // A field left open at the end of the part is still one field.
+      settleField();
       return {
         blockCount,
         characterCount,
@@ -778,9 +836,10 @@ const TEXT_BOX_DETAILS: Readonly<Record<TextBoxDisposition, string>> = {
  * are rows; the tenth, `round-trip-export`, is the closing 预计往返 card and always counts nothing.
  *
  * A class present in a natively read file is `完整保留（随文件保留）` when its content stays with the Source
- * Version and is restored on export — inline styles, tables, images, sections, headers and footers, text
- * boxes — and `降级导入` when it cannot be retained: notes, until the Manuscript has a note block, and
- * fields, whose displayed text no longer updates. Comments and revisions stay `不支持导入` until S62.
+ * Version and is restored on export — inline styles (links among them), tables, images, sections, headers
+ * and footers, text boxes — and `降级导入` when it cannot be retained: notes, until the Manuscript has a
+ * note block, and fields, whose displayed text no longer updates. Comments and revisions stay `不支持导入`
+ * until S62.
  *
  * A `conversion` adds its loss to the parser's counts and names itself in those classes' details. What a
  * converter lost is not in the working representation, so it cannot be retained: such a class keeps the
@@ -830,7 +889,9 @@ export function buildFidelityReport(
     row('inline-styles', '行内样式', 'inlineStyles', '未检测到行内样式。',
       {
         status: RETAINED,
-        detail: `检测到字体、字号、粗体、颜色等行内样式；稿件只编辑文字，这些样式随来源版本保留，未改过的段落导出时从原文件恢复。${EDITED_PARAGRAPH_LINE}`,
+        // Said of the class rather than of what was found: a file whose only items are links has no font to
+        // report, and a file of styled runs has no link to report.
+        detail: `字体、字号、粗体、颜色等行内样式与超链接随来源版本保留；稿件只编辑文字，超链接只留下显示的文字；未改过的段落导出时从原文件恢复。${EDITED_PARAGRAPH_LINE}`,
       },
       { status: DEGRADED, detail: '行内样式没有成为可编辑格式；可编辑内容块只保留文字，导出无法恢复这些样式。' }),
     row('comments-revisions', '批注与修订', 'commentsRevisions', '未检测到批注或修订标记。',
@@ -863,7 +924,7 @@ export function buildFidelityReport(
     row('fields', '域（目录等）', 'fields', '未检测到域。',
       {
         status: DEGRADED,
-        detail: '目录、交叉引用、超链接等域按当前显示的文字进入稿件，之后不再更新；未改过的段落导出时从原文件恢复，改过的段落在导出保真审阅里逐段说明。',
+        detail: '目录、交叉引用、页码等域按当前显示的文字进入稿件，之后不再更新；未改过的段落导出时从原文件恢复，改过的段落在导出保真审阅里逐段说明。',
       },
       { status: DEGRADED, detail: '域只保留当前显示的文字，之后不再更新。' }),
     {
