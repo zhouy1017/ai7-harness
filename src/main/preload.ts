@@ -271,6 +271,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['reverseAppliedChangeSuggestion']['output']>(IPC_CHANNELS.reverseAppliedChangeSuggestion, input),
   getManuscriptApplyOutcome: (input: ServiceOperationMap['getManuscriptApplyOutcome']['input']) =>
     invoke<ServiceOperationMap['getManuscriptApplyOutcome']['output']>(IPC_CHANNELS.getManuscriptApplyOutcome, input),
+  getManuscriptRail: (input: ServiceOperationMap['getManuscriptRail']['input']) =>
+    invoke<ServiceOperationMap['getManuscriptRail']['output']>(IPC_CHANNELS.getManuscriptRail, input),
   runEditorClipboardCommand: (input: { command: EditorClipboardCommand }) =>
     invoke<{ state: 'done' }>(IPC_CHANNELS.runEditorClipboardCommand, input),
   recordManuscriptEntryPosition: (input: ServiceOperationMap['recordManuscriptEntryPosition']['input']) =>

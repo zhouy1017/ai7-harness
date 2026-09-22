@@ -47,6 +47,7 @@ import type {
 import { BASELINE_ANALYSIS_TASK_GOAL, J03_TASK_GOAL, MAX_REPLACEMENT_EXCLUSIONS } from '../shared/protocol.js';
 import { mountBoundedEditor, type BoundedEditor, type EditorContinuity } from './editor.js';
 import { mountEditorialMarks, type EditorialMarksSurface } from './editorial-marks.js';
+import { mountPositionRail, type PositionRail } from './position-rail.js';
 import {
   ANALYSIS_CONFLICT_KIND_LABELS,
   ANALYSIS_ENTITY_KIND_LABELS,
@@ -84,6 +85,7 @@ if (!window.ai7) throw new Error('AI7_RENDERER_BOOTSTRAP_INVALID');
 
 let editor: BoundedEditor | undefined;
 let editorialMarks: EditorialMarksSurface | undefined;
+let manuscriptRail: PositionRail | undefined;
 let authorityInterrupted = false;
 
 interface RecoveryReturnContext {
@@ -200,6 +202,8 @@ function applyAuthorityInterruption(): void {
 function replaceScreen(state: string, content: HTMLElement): void {
   editorialMarks?.destroy();
   editorialMarks = undefined;
+  manuscriptRail?.destroy();
+  manuscriptRail = undefined;
   editor?.destroy();
   editor = undefined;
   screen.dataset['screen'] = state;
@@ -5377,6 +5381,10 @@ function renderEditorWindow(
   const milestoneButton = button('保存为里程碑版本', 'secondary', () => void saveMilestone());
   milestoneSection.append(milestoneSummary, milestoneLabel, milestoneName, purposeLabel, purpose, noteLabel, note, milestoneButton);
   navigator.append(outlineSection, searchSection, milestoneSection);
+  // The outline and the search are one 导航 panel, opened on demand over the manuscript's right side and
+  // closed by default, so the manuscript stays the central object (V2-UX-ED-015).
+  navigator.id = 'manuscript-navigation-panel';
+  navigator.hidden = true;
 
   const manuscript = element('main', 'manuscript-surface');
   const editorWindow = element('section', 'editor-window');
@@ -5395,9 +5403,54 @@ function renderEditorWindow(
   const nextWindow = button('向后浏览', 'quiet', () => void navigateCursor('next'));
   const windowActions = element('nav', 'window-actions');
   windowActions.setAttribute('aria-label', '稿件窗口');
-  windowActions.append(previousWindow, positionRailLabel, positionRail, nextWindow);
+  windowActions.append(previousWindow, nextWindow);
   manuscript.append(editorWindow, windowActions);
-  workspace.append(navigator, manuscript);
+
+  // The right edge (editor-surfaces §1 右缘一列): three entries and the one persistent whole-manuscript
+  // control. The rail stays visible while the panel is closed; the pane's own scrollbar shows only
+  // while it scrolls, so two scrollbars never stand side by side (V2-UX-ED-059).
+  const edge = element('aside', 'editor-edge');
+  edge.setAttribute('aria-label', '稿件导航');
+  const navigationEntry = button('导航', 'quiet', () => setNavigationOpen(navigator.hidden === true));
+  navigationEntry.dataset['edgeEntry'] = 'navigation';
+  navigationEntry.setAttribute('aria-controls', navigator.id);
+  navigationEntry.setAttribute('aria-expanded', 'false');
+  navigationEntry.title = '大纲与全稿查找';
+  const analysisEntry = button('分析', 'quiet', () => openAnalysis.click());
+  analysisEntry.dataset['edgeEntry'] = 'analysis';
+  analysisEntry.title = '打开这本书的分析';
+  const tasksEntry = button('任务', 'quiet', () => undefined);
+  tasksEntry.dataset['edgeEntry'] = 'tasks';
+  tasksEntry.disabled = true;
+  tasksEntry.title = '任务面接通后可用';
+  const edgeEntries = element('div', 'edge-entries');
+  edgeEntries.append(navigationEntry, analysisEntry, tasksEntry);
+  const railTrack = element('div', 'rail-track');
+  railTrack.append(positionRail);
+  const railColumn = element('div', 'rail-column');
+  railColumn.append(positionRailLabel, railTrack);
+  edge.append(edgeEntries, railColumn);
+  workspace.append(manuscript, navigator, edge);
+
+  const setNavigationOpen = (open: boolean): void => {
+    navigator.hidden = !open;
+    navigationEntry.setAttribute('aria-expanded', open ? 'true' : 'false');
+    workspace.dataset['navigation'] = open ? 'open' : 'closed';
+  };
+  navigator.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || event.defaultPrevented) return;
+    event.preventDefault();
+    setNavigationOpen(false);
+    navigationEntry.focus();
+  });
+  let scrollingTimer: number | undefined;
+  editorWindow.addEventListener('scroll', () => {
+    editorWindow.dataset['scrolling'] = 'true';
+    if (scrollingTimer !== undefined) window.clearTimeout(scrollingTimer);
+    scrollingTimer = window.setTimeout(() => {
+      delete editorWindow.dataset['scrolling'];
+    }, 900);
+  }, { passive: true });
 
   const identities = element('details', 'editor-identities');
   identities.append(element('summary', undefined, '当前业务绑定'));
@@ -5468,6 +5521,7 @@ function renderEditorWindow(
     recoveredState.hidden = currentWindow.recoveredStateReview === null;
     positionRail.value = String(Math.round(currentWindow.position.proportion * 1_000_000));
     positionRail.setAttribute('aria-valuetext', `全稿 ${(currentWindow.position.proportion * 100).toFixed(3)}%`);
+    manuscriptRail?.setPosition(currentWindow.position.proportion);
     previousWindow.disabled = authoritativeMutationBusy() || currentWindow.previousCursor === null;
     nextWindow.disabled = authoritativeMutationBusy() || currentWindow.nextCursor === null;
   };
@@ -6279,6 +6333,7 @@ function renderEditorWindow(
           currentWindow = editorWindowProjection;
           updateWindowChrome();
           void loadOutline(null);
+          scheduleRailRefresh();
         }
         if (!authoritativeMutationBusy() && searchStateIsStale()) {
           void invalidateSearchState('稿件状态已变化；先前搜索结果、替换预览和查找返回位置已失效。').catch((error) => {
@@ -6289,19 +6344,41 @@ function renderEditorWindow(
     },
     onAnnouncement: setStatus,
     onCommand: (command) => {
-      if (command === 'search') searchInput.focus();
-      else if (command === 'replace') replacementInput.focus();
+      if (command === 'search' || command === 'replace') {
+        setNavigationOpen(true);
+        (command === 'search' ? searchInput : replacementInput).focus();
+      }
       else if (command === 'undo' || command === 'redo') void runHistory(command);
       else void navigateCursor(command === 'previous-window' ? 'previous' : 'next');
     },
     onWindowLoaded: () => editorialMarks?.close(),
   });
+  // Typing moves every place behind the caret a little; the rail is read again once the typing rests,
+  // never per keystroke, and its cost follows the chapters and marks, not the manuscript's length.
+  let railRefreshTimer: number | undefined;
+  const scheduleRailRefresh = (): void => {
+    if (railRefreshTimer !== undefined) window.clearTimeout(railRefreshTimer);
+    railRefreshTimer = window.setTimeout(() => {
+      railRefreshTimer = undefined;
+      manuscriptRail?.refresh();
+    }, 1_200);
+  };
+  manuscriptRail = mountPositionRail({
+    track: railTrack,
+    api: window.ai7,
+    binding: () => ({ manuscriptId: currentWindow.manuscriptId, branchId: currentWindow.branchId }),
+    jumpToBlock: (blockId) => void navigate({ kind: 'block', blockId }),
+    onError: (error) => setStatus(rendererErrorMessage(error, '全稿位置轨未能更新。'), 'error'),
+  });
+  manuscriptRail.setPosition(initialWindow.position.proportion);
+  manuscriptRail.refresh();
   editorialMarks = mountEditorialMarks({
     scroll: editorWindow,
     host: editorHost,
     editor,
     api: window.ai7,
     busy: () => authoritativeMutationBusy() || serviceJobBusy(),
+    marksChanged: () => manuscriptRail?.refresh(),
     // An Apply is an authoritative write like a replacement or an undo: the window is reloaded from the
     // service and must show exactly the manuscript state the Effect Receipt names.
     writeManuscript: async (operation, done) => {
@@ -6313,6 +6390,7 @@ function renderEditorWindow(
         await loadOutline(null, true);
       });
       if (written) setStatus(done, 'success');
+      manuscriptRail?.refresh();
       return written;
     },
     setStatus,

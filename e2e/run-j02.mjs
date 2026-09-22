@@ -420,6 +420,23 @@ async function editThenInvokeOnDirty(renderer, suffix, actionLabels, location) {
   requireJourney(started === true, location);
 }
 
+/**
+ * Synchronized delta with Issue #409: the outline, the search and the milestone form are one 导航 panel
+ * that opens on demand from the right edge and is closed when the manuscript opens. The rail stays
+ * visible either way, and the panel is first seen closed.
+ */
+async function openNavigation(renderer, location) {
+  await assertRenderer(renderer, `(() => { const entry = document.querySelector('[data-edge-entry="navigation"]'); const panel = document.querySelector('#manuscript-navigation-panel'); const rail = document.querySelector('.rail-track .position-rail'); return entry?.getAttribute('aria-expanded') === 'false' && panel?.hidden === true && rail instanceof HTMLInputElement && rail.getBoundingClientRect().height > rail.getBoundingClientRect().width; })()`, `${location}-closed-with-rail`);
+  await assertRenderer(renderer, `(() => { const entry = document.querySelector('[data-edge-entry="navigation"]'); const panel = document.querySelector('#manuscript-navigation-panel'); if (!(entry instanceof HTMLButtonElement) || !(panel instanceof HTMLElement)) return false; if (entry.getAttribute('aria-expanded') !== 'true') entry.click(); return entry.getAttribute('aria-expanded') === 'true' && !panel.hidden; })()`, location);
+  // The rail draws the manuscript's chapters as ticks, bounded however long the manuscript is, and says
+  // when the bound cut them; the pane's own scrollbar shows only while the pane scrolls (V2-UX-ED-059).
+  await waitFor(renderer, `(() => { const track = document.querySelector('.rail-track'); const chapters = Number(track?.dataset.railChapters); return chapters > 0 && chapters <= 400 && track.querySelectorAll('.rail-tick').length === chapters && track.dataset.railAnalysed === 'false' && track.querySelectorAll('.rail-marker').length === 0; })()`, `${location}-rail-ticks`, 30_000);
+  await assertRenderer(renderer, `(() => { const pane = document.querySelector('.editor-window'); if (pane.dataset.scrolling !== undefined) return false; pane.scrollTop += 24; return true; })()`, `${location}-scrollbar-at-rest`);
+  await waitFor(renderer, `document.querySelector('.editor-window').dataset.scrolling === 'true'`, `${location}-scrollbar-while-scrolling`, 5_000);
+  await waitFor(renderer, `document.querySelector('.editor-window').dataset.scrolling === undefined`, `${location}-scrollbar-rests-again`, 5_000);
+  await assertRenderer(renderer, `(() => { const pane = document.querySelector('.editor-window'); pane.scrollTop = 0; return true; })()`, `${location}-scroll-back`);
+}
+
 async function clickButton(renderer, label, location) {
   await assertRenderer(
     renderer,
@@ -473,6 +490,7 @@ async function importAndOpen(renderer) {
   at('import-editor-open');
   await clickButton(renderer, '打开稿件', 'editor-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'editor');
+  await openNavigation(renderer, 'editor-navigation-open');
 }
 
 async function milestoneObjectTimeoutCategory(dataRoot) {
@@ -1022,7 +1040,7 @@ async function runAccessibilityJourney(renderer) {
   // assertions behind one name cannot say which of them a hosted runner failed (#474).
   const modifier = process.platform === 'darwin' ? 4 : 2;
   at('j14-composition-focus');
-  await assertRenderer(renderer, `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); if (!(editor instanceof HTMLElement)) return false; editor.focus(); return document.activeElement === editor; })()`, 'composition-focus');
+  await assertRenderer(renderer, `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); if (!(editor instanceof HTMLElement)) return false; editor.focus({ preventScroll: true }); return document.activeElement === editor; })()`, 'composition-focus');
   at('j14-ime-command-guard');
   await renderer.send('Input.imeSetComposition', { text: '编', selectionStart: 1, selectionEnd: 1, replacementStart: 0, replacementEnd: 0 });
   // The guard can only be judged against a composition that exists, so what the composition did is
@@ -1098,9 +1116,20 @@ async function runAccessibilityJourney(renderer) {
   }
   await assertRenderer(renderer, `Number(document.querySelector('#manuscript-position')?.value) < ${beforeFocus.position}`, 'top-edge-paged-to-an-earlier-window');
   at('j14-keyboard-window-crossing');
-  await renderer.evaluate(`(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); editor?.focus(); globalThis.__ai7BeforePageKey = editor?.firstElementChild?.dataset.blockId; })()`);
+  // The caret returns to the text the way a hand puts it there: without moving the pane. A plain
+  // `focus()` scrolls the pane to the editor's top, which the surface rightly reads as the reader
+  // reaching the top edge and answers by paging back — the PageDown under test was then refused, and
+  // this step passed on a navigation it never asked for (found while building Issue #409).
+  await renderer.evaluate(`(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); editor?.focus({ preventScroll: true }); globalThis.__ai7BeforePageKey = editor?.firstElementChild?.dataset.blockId; globalThis.__ai7BeforePagePosition = Number(document.querySelector('.position-rail')?.value); })()`);
   await press(renderer, 'PageDown');
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')?.firstElementChild?.dataset.blockId !== globalThis.__ai7BeforePageKey`, 'keyboard-window-crossing');
+  // PageDown moves forward: the window that answered is a later one, not the one before. The rail's
+  // value is the whole-manuscript position in millionths, so the direction is a plain comparison.
+  const crossed = await renderer.evaluate(`({ before: globalThis.__ai7BeforePagePosition, after: Number(document.querySelector('.position-rail')?.value) })`);
+  if (!(crossed?.after > crossed?.before)) {
+    at('j14-keyboard-window-crossing-went-backward');
+    requireJourney(false, 'keyboard-window-crossing-forward', crossed);
+  }
   at('j14-fine-scroll-window-crossing');
   await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   await renderer.evaluate(`(async () => { const surface = document.querySelector('.editor-window'); globalThis.__ai7BeforeFineScroll = document.querySelector('[data-testid="manuscript-editor"]')?.firstElementChild?.dataset.blockId; surface.scrollTop = Math.floor((surface.scrollHeight - surface.clientHeight) / 2); await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); surface.scrollTop = surface.scrollHeight; })()`);
@@ -1108,7 +1137,10 @@ async function runAccessibilityJourney(renderer) {
   at('j14-zoom-200-reflow');
   await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
   await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
-  await assertRenderer(renderer, `getComputedStyle(document.querySelector('.editor-workspace')).gridTemplateColumns.split(' ').length === 1 && document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2`, 'zoom-200-reflow');
+  // Synchronized delta with Issue #409: at 200% the manuscript keeps the narrow rail beside it — the one
+  // persistent whole-manuscript control — the 导航 panel lies over the manuscript instead of beside it, and
+  // nothing scrolls sideways.
+  await assertRenderer(renderer, `(() => { const columns = getComputedStyle(document.querySelector('.editor-workspace')).gridTemplateColumns.split(' '); const edge = document.querySelector('.editor-edge').getBoundingClientRect(); const panel = document.querySelector('#manuscript-navigation-panel'); return columns.length === 2 && edge.width <= 64 && getComputedStyle(panel).position === 'absolute' && document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2; })()`, 'zoom-200-reflow');
   at('j14-forced-colors');
   await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
   await assertRenderer(renderer, `matchMedia('(forced-colors: active)').matches && getComputedStyle(document.querySelector('.editor-shell')).boxShadow === 'none' && getComputedStyle(document.querySelector('button')).borderStyle !== 'none'`, 'forced-colors');

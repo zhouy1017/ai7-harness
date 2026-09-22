@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 32 as const;
+export const SERVICE_PROTOCOL_VERSION = 33 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -82,6 +82,7 @@ export const IPC_CHANNELS = {
   applyChangeSuggestion: 'ai7:j05:apply-change-suggestion',
   reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
   getManuscriptApplyOutcome: 'ai7:j05:get-manuscript-apply-outcome',
+  getManuscriptRail: 'ai7:j02:get-manuscript-rail',
   runEditorClipboardCommand: 'ai7:j05:run-editor-clipboard-command',
   listPriorWork: 'ai7:j02:list-prior-work',
   getManuscriptWindowAt: 'ai7:j02:get-manuscript-window-at',
@@ -898,6 +899,38 @@ export interface ManuscriptWindowProjection {
    */
   marks: ReadonlyArray<EditorialMarkAnchorProjection>;
   marksTruncated: boolean;
+}
+
+/** The most chapters and marks the Whole-manuscript Position Rail draws; beyond them it says it is sparse. */
+export const MAX_RAIL_CHAPTERS = 400;
+export const MAX_RAIL_MARKS = 2_000;
+
+/**
+ * What the Whole-manuscript Position Rail draws beside its track (Issue #409; V2-UX-ED-015, ED-020):
+ * chapter ticks on one side, and on the other the open 修改建议, 批注 and 备注 with the ranges the
+ * analysis left unread. Every place is a proportion of the whole manuscript's characters, so the rail
+ * never needs the manuscript's text; nothing here is a durable record.
+ */
+export interface ManuscriptRailProjection {
+  manuscriptId: string;
+  branchId: string;
+  revisionId: string;
+  journalSequence: number;
+  totalCharacters: number;
+  chapters: ReadonlyArray<{
+    blockId: string;
+    title: string;
+    level: number;
+    proportion: number;
+    suggestions: number;
+    annotations: number;
+    notes: number;
+  }>;
+  chaptersTruncated: boolean;
+  marks: ReadonlyArray<{ kind: 'change-suggestion' | 'annotation' | 'editor-note'; blockId: string; proportion: number }>;
+  marksTruncated: boolean;
+  /** `null` while the Book has no analysis to have gaps; otherwise the ranges its latest analysis left unread. */
+  uncovered: ReadonlyArray<{ fromProportion: number; toProportion: number; reason: string }> | null;
 }
 
 /** The most marks one window projection carries; the rest stay reachable once the window moves. */
@@ -3543,6 +3576,7 @@ export interface ServiceOperationMap {
     input: { manuscriptId: string; branchId: string; clientEffectId: string };
     output: ManuscriptApplyOutcomeProjection;
   };
+  getManuscriptRail: { input: { manuscriptId: string; branchId: string }; output: ManuscriptRailProjection };
   /**
    * Remember where the editor is, so the next entry into this Book returns there (V2-UX-RET-002).
    * The pair is the editor's own caret, in the window projection's vocabulary; what it answers is
@@ -3723,6 +3757,7 @@ export interface RendererApi {
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   reverseAppliedChangeSuggestion(input: ReverseAppliedChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   getManuscriptApplyOutcome(input: ServiceOperationMap['getManuscriptApplyOutcome']['input']): Promise<ManuscriptApplyOutcomeProjection>;
+  getManuscriptRail(input: ServiceOperationMap['getManuscriptRail']['input']): Promise<ManuscriptRailProjection>;
   /** Cut, copy or paste in the focused editor through the window itself; the page has no clipboard permission. */
   runEditorClipboardCommand(input: { command: EditorClipboardCommand }): Promise<{ state: 'done' }>;
   recordManuscriptEntryPosition(

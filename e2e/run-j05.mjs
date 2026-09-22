@@ -570,6 +570,14 @@ async function main() {
     // the pane does not take it for the reader reaching the window's end.
     await waitFor(renderer, `(() => { const card = window.__j05.card().getBoundingClientRect(); const pane = document.querySelector('.editor-window').getBoundingClientRect(); return (card.bottom <= pane.bottom + 2 || card.top <= pane.top + 2) && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId !== undefined && window.__j05.block(${JSON.stringify(first)}) !== null; })()`, 'card-brought-into-view', 10_000);
 
+    at('rail-lanes');
+    // The right edge's rail marks where the open 修改建议, 批注 and 备注 stand, each kind in its own lane; a
+    // highlight carries no meaning and draws nothing there (Issue #409).
+    await press(renderer, 'Escape');
+    await waitFor(renderer, `(() => { const kinds = Array.from(document.querySelectorAll('.rail-marker')).map((marker) => marker.dataset.railKind + ':' + marker.dataset.railLane).sort(); return kinds.join('|') === 'annotation:2|change-suggestion:1|editor-note:3' && document.querySelector('.rail-track').dataset.railMarks === '3'; })()`, 'rail-shows-the-three-kinds', 15_000);
+    await assertRenderer(renderer, `(() => { const track = document.querySelector('.rail-track'); const markers = Array.from(track.querySelectorAll('.rail-marker')); const lefts = new Set(markers.map((marker) => Math.round(marker.getBoundingClientRect().left))); const entries = Array.from(document.querySelectorAll('.edge-entries button')).map((entry) => entry.textContent + ':' + entry.disabled); return lefts.size === 3 && markers.every((marker) => marker.getAttribute('aria-label').includes('处')) && track.dataset.railAnalysed === 'false' && track.querySelectorAll('.rail-gap').length === 0 && entries.join('|') === '导航:false|分析:false|任务:true' && document.querySelector('#manuscript-navigation-panel').hidden === true; })()`, 'rail-lanes-and-edge-entries');
+    await openMarkCard(renderer, 'change-suggestion', first, 'rail-suggestion-card-again');
+
     at('suggestion-decisions');
     await assertRenderer(renderer, `window.__j05.act('reject')`, 'reject');
     await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-decision]')?.dataset.markDecision === 'rejected' && document.querySelector('[data-mark-preview]') === null`, 'rejected-recorded');
@@ -698,17 +706,43 @@ async function main() {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await waitFor(renderer, `(() => { const card = window.__j05.card(); const pane = document.querySelector('.editor-window'); const block = window.__j05.block(${JSON.stringify(first)}).getBoundingClientRect(); const box = card.getBoundingClientRect(); return card.scrollWidth <= card.clientWidth + 2 && box.right <= pane.getBoundingClientRect().right + 2 && Math.abs(box.left - block.left) <= 2 && box.top >= block.bottom - 1 && document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2; })()`, 'card-reflows-at-200', 10_000);
+    // The narrow column still holds all three lanes: no marker hangs over its edge.
+    await assertRenderer(renderer, `(() => { const edge = document.querySelector('.editor-edge').getBoundingClientRect(); const markers = Array.from(document.querySelectorAll('.rail-marker')); return markers.length > 0 && markers.every((marker) => { const box = marker.getBoundingClientRect(); return box.left >= edge.left && box.right <= edge.right + 0.5; }); })()`, 'rail-lanes-inside-the-narrow-column');
     await press(renderer, 'Escape');
 
     at('menu-stays-open-at-the-pane-edge');
     // On a narrow window a menu opened at the text column's right edge has nowhere to go but over the
     // pane's edge. It floats over the window, so it neither brings a scrollbar into the pane nor is
     // closed by the pane's own reflow — which is what closed it, the moment it opened, on hosted runners.
+    // A pointer can only ask for a menu at a point that is on screen, so the paragraph is brought into
+    // view first: on hosted runners the card of the step before had scrolled it above the window, and
+    // the step asked for a menu up there. The step also starts from a pane at rest — a pane still
+    // settling closes the menu, as any scroll of the pane rightly does — watches what happens to the
+    // menu, and names what it found: a hosted runner says nothing but a stage name.
+    await assertRenderer(renderer, `(() => { window.__j05.block(${JSON.stringify(first)}).scrollIntoView({ block: 'start' }); return true; })()`, 'edge-paragraph-into-view');
+    await renderer.evaluate(`new Promise((resolve) => { const pane = document.querySelector('.editor-window'); let last = pane.scrollTop; let quiet = 0; const tick = () => { if (pane.scrollTop !== last) { last = pane.scrollTop; quiet = 0; } else quiet += 1; if (quiet >= 10) resolve(true); else requestAnimationFrame(tick); }; requestAnimationFrame(tick); })`);
     await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(first)}, 0, 0)`, 'edge-caret');
     await new Promise((resolveWait) => setTimeout(resolveWait, 120));
-    await assertRenderer(renderer, `(() => { window.__j05Pane = document.querySelector('.editor-window').scrollWidth; return window.__j05.rightClick(window.__j05.block(${JSON.stringify(first)}), true); })()`, 'edge-right-click');
+    const clickPoint = await renderer.evaluate(`(() => { const rect = window.__j05.block(${JSON.stringify(first)}).getBoundingClientRect(); const y = rect.top + Math.min(24, rect.height / 2); return { y: Math.round(y), height: window.innerHeight, onScreen: y >= 0 && y <= window.innerHeight }; })()`);
+    if (clickPoint?.onScreen !== true) {
+      at('menu-stays-open-at-the-pane-edge-click-point-off-screen');
+      requireJourney(false, 'edge-click-point-on-screen', clickPoint);
+    }
+    await assertRenderer(renderer, `(() => { const pane = document.querySelector('.editor-window'); const layer = document.querySelector('.editorial-mark-menu-layer'); const seen = { opened: false, paneScrolled: false, windowResized: false }; const observer = new MutationObserver(() => { if (layer.querySelector('[data-mark-menu]')) seen.opened = true; }); observer.observe(layer, { childList: true, subtree: true }); const onScroll = () => { if (seen.opened) seen.paneScrolled = true; }; const onResize = () => { if (seen.opened) seen.windowResized = true; }; pane.addEventListener('scroll', onScroll, { passive: true }); window.addEventListener('resize', onResize); window.__j05Edge = { seen, stop: () => { observer.disconnect(); pane.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onResize); } }; window.__j05Pane = pane.scrollWidth; return window.__j05.rightClick(window.__j05.block(${JSON.stringify(first)}), true); })()`, 'edge-right-click');
     await new Promise((resolveWait) => setTimeout(resolveWait, 400));
-    await assertRenderer(renderer, `(() => { const menu = window.__j05.menu(); if (menu === null) return false; const box = menu.getBoundingClientRect(); const pane = document.querySelector('.editor-window'); return box.left >= 0 && box.right <= window.innerWidth && box.top >= 0 && pane.scrollWidth <= window.__j05Pane && document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2; })()`, 'edge-menu-open-and-inside-the-window');
+    const edge = await renderer.evaluate(`(() => { const { seen, stop } = window.__j05Edge; stop(); const menu = window.__j05.menu(); const box = menu?.getBoundingClientRect(); const pane = document.querySelector('.editor-window'); return { ...seen, open: menu !== null, inside: menu !== null && box.left >= 0 && box.right <= window.innerWidth && box.top >= 0, box: menu === null ? null : { left: Math.round(box.left), right: Math.round(box.right), top: Math.round(box.top), width: window.innerWidth }, paneKept: pane.scrollWidth <= window.__j05Pane, pageKept: document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2 }; })()`);
+    if (edge?.open !== true || edge.inside !== true || edge.paneKept !== true || edge.pageKept !== true) {
+      if (edge?.opened !== true) at('menu-stays-open-at-the-pane-edge-never-opened');
+      else if (edge.open !== true && edge.paneScrolled === true) at('menu-stays-open-at-the-pane-edge-closed-by-pane-scroll');
+      else if (edge.open !== true && edge.windowResized === true) at('menu-stays-open-at-the-pane-edge-closed-by-window-resize');
+      else if (edge.open !== true) at('menu-stays-open-at-the-pane-edge-closed-otherwise');
+      else if (edge.inside !== true && edge.box.top < 0) at('menu-stays-open-at-the-pane-edge-above-the-window');
+      else if (edge.inside !== true && edge.box.left < 0) at('menu-stays-open-at-the-pane-edge-left-of-the-window');
+      else if (edge.inside !== true) at('menu-stays-open-at-the-pane-edge-right-of-the-window');
+      else if (edge.paneKept !== true) at('menu-stays-open-at-the-pane-edge-pane-grew');
+      else at('menu-stays-open-at-the-pane-edge-page-scrolls-sideways');
+      requireJourney(false, 'edge-menu-open-and-inside-the-window', edge);
+    }
     await press(renderer, 'Escape');
     await waitFor(renderer, `window.__j05.menu() === null`, 'edge-menu-closed', 15_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });

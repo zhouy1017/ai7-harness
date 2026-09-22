@@ -208,6 +208,8 @@ async function importBook(renderer, title, token, openEditor = false) {
 }
 
 async function saveMilestone(renderer, label, token) {
+  // Synchronized delta with Issue #409: the milestone form lives in the 导航 panel, which opens on demand.
+  await assertRenderer(renderer, `(() => { const entry=document.querySelector('[data-edge-entry="navigation"]'); const panel=document.querySelector('#manuscript-navigation-panel'); if(!(entry instanceof HTMLButtonElement) || !(panel instanceof HTMLElement)) return false; if(entry.getAttribute('aria-expanded')!=='true') entry.click(); return entry.getAttribute('aria-expanded')==='true' && !panel.hidden; })()`, `${token}-navigation`);
   await assertRenderer(renderer, `(() => { const details=document.querySelector('.milestone-section'); if (!(details instanceof HTMLDetailsElement)) return false; details.open=true; return true; })()`, `${token}-details`);
   await fill(renderer, '#milestone-label', label, `${token}-label`);
   await fill(renderer, '#milestone-purpose', '恢复边界校验', `${token}-purpose`);

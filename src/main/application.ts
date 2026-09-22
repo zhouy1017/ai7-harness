@@ -1697,6 +1697,14 @@ function registerRendererHandlers(
       return service.call('getManuscriptApplyOutcome', input);
     }),
   );
+  ipcMain.handle(IPC_CHANNELS.getManuscriptRail, (event, input: ServiceOperationMap['getManuscriptRail']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      requireManuscriptCapability(owned, input);
+      return service.call('getManuscriptRail', input);
+    }),
+  );
   // The selection menu's 文字处理 group. The page holds no clipboard permission, so the window that
   // owns the focused editor runs the command itself; it reaches no service and takes nothing but the
   // command's name, and the editor's own paste and cut handling still decides what enters the text.

@@ -456,6 +456,47 @@ describe('Editorial Marks on a manuscript', () => {
     }
   }, 300_000);
 
+  it('places chapters, open marks and nothing else on the position rail', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const empty = store.getManuscriptRail(book.manuscriptId, book.branchId);
+      expect(empty.marks).toEqual([]);
+      expect(empty.uncovered).toBeNull();
+      expect(empty.chapters.every((chapter, index, all) => chapter.proportion >= 0 && chapter.proportion <= 1 && (index === 0 || chapter.proportion >= all[index - 1]!.proportion))).toBe(true);
+      expect(empty.totalCharacters).toBe(window.position.totalCharacters);
+
+      const paragraphs = window.blocks.filter((candidate) => candidate.kind === 'paragraph' && graphemesOf(candidate.text).length >= 40);
+      const [first, second] = paragraphs;
+      store.createEditorialMark(markInput(book, window, first!.blockId, 2, 6, 'personal-highlight'));
+      let current = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      store.createEditorialMark(markInput(book, current, first!.blockId, 8, 12, 'change-suggestion'));
+      current = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const annotation = store.createEditorialMark(markInput(book, current, second!.blockId, 3, 9, 'annotation')).markId;
+      current = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      store.createEditorialMark(markInput(book, current, second!.blockId, 12, 16, 'editor-note'));
+
+      const rail = store.getManuscriptRail(book.manuscriptId, book.branchId);
+      // A highlight carries no meaning and draws nothing on the rail; the three system kinds stand in reading order.
+      expect(rail.marks.map((mark) => mark.kind)).toEqual(['change-suggestion', 'annotation', 'editor-note']);
+      expect(rail.marks.map((mark) => mark.blockId)).toEqual([first!.blockId, second!.blockId, second!.blockId]);
+      expect(rail.marks.every((mark, index, all) => index === 0 || mark.proportion >= all[index - 1]!.proportion)).toBe(true);
+      expect(rail.marksTruncated).toBe(false);
+      // Each mark is counted by the chapter it stands in: the last one that starts at or before it. The
+      // composed excerpt may open before its first heading, so the expectation is read from the places.
+      const counted = rail.chapters.reduce((sum, chapter) => sum + chapter.suggestions + chapter.annotations + chapter.notes, 0);
+      const firstChapter = rail.chapters[0]?.proportion;
+      expect(counted).toBe(firstChapter === undefined ? 0 : rail.marks.filter((mark) => mark.proportion >= firstChapter).length);
+      // A comment that is dealt with asks for nothing on the rail any more.
+      store.updateEditorialMark(change(book, current, annotation, 'set-status', { status: 'resolved' }));
+      expect(store.getManuscriptRail(book.manuscriptId, book.branchId).marks.map((mark) => mark.kind)).toEqual(['change-suggestion', 'editor-note']);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 300_000);
+
   it('migrates a revision-21 store forward, adding the mark and effect relations and keeping what it held', async () => {
     const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
