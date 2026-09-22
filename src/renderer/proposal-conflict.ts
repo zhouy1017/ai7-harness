@@ -481,6 +481,13 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
         note.textContent = CONFLICT_REGENERATE_REASON;
         note.dataset['conflictUnavailable'] = 'regenerate';
       }
+      // Where the words were deleted there is nothing a new version could stand on: the draft path is
+      // unavailable, and its reason names the two paths that remain.
+      if (choice === 'edit-draft' && !next.newVersion.available) {
+        radio.disabled = true;
+        note.textContent = conflictSaveReason('target-deleted', 0) ?? '';
+        note.dataset['conflictUnavailable'] = 'edit-draft';
+      }
       radio.addEventListener('change', () => {
         if (!radio.checked) return;
         path = choice;
