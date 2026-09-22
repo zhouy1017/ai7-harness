@@ -24,6 +24,7 @@ function suggestionState(disposition: 'rejected' | 'accepted-with-edit' | null):
     anchorState: 'exact',
     suggestion: {
       itemId: 'item',
+      changeType: 'replace',
       currentText: '原文',
       proposedText: '改后',
       rationale: '',
