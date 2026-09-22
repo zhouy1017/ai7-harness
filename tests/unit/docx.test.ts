@@ -2,22 +2,36 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   DOCX_PARSER_IDENTITY,
+  DOCX_PARSER_IDENTITY_V1,
   buildFidelityReport,
   deriveImportFidelityPlan,
   isCleanTracerFidelity,
   parseDocx,
+  withTextBoxDisposition,
+  type DocumentSignals,
   type ParsedDocxBlock,
 } from '../../src/service/docx.js';
+import type { ConversionLoss } from '../../src/service/text-manuscript.js';
 import type { FidelityCategoryProjection } from '../../src/shared/protocol.js';
 import { buildSyntheticDocx, writeSyntheticDocx, type SyntheticDocxOptions } from '../support/synthetic-docx.js';
+
+const NO_SIGNALS: DocumentSignals = {
+  inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0, textBoxes: 0, fields: 0,
+};
+const NO_LOSS: ConversionLoss = {
+  inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0, headersFooters: 0,
+  textBoxes: 0, fields: 0,
+};
 
 // Every fixture in this suite is generated, and stays generated: the subject throughout is the DOCX
 // container — packaging, parts, entry and size bounds, fidelity classes, and the shapes the parser must
 // refuse — where the block text is irrelevant by construction. A manuscript composed from an admitted
-// Public SampleBook would say nothing here that a generated container does not already say.
+// Public SampleBook would say nothing here that a generated container does not already say. The one
+// exception reads exact `sample1` itself for counts alone, because its fidelity outcome is the subject.
 //
 // Size bounds a small synthetic archive cannot exercise (decision 3 of #353), with the size each would need,
 // and which of them a `zipSync` of zeros reaches under 4 MiB instead:
@@ -92,10 +106,13 @@ describe('parseDocx', () => {
     });
 
     expect(parsed.parserIdentity).toBe(DOCX_PARSER_IDENTITY);
+    expect(DOCX_PARSER_IDENTITY).toBe('ai7-docx-fflate-saxes/2');
     expect(parsed.blockCount).toBe(4);
     expect(blocks.map((block) => block.kind)).toEqual(['title', 'heading', 'heading', 'paragraph']);
     expect(blocks.map((block) => block.level)).toEqual([1, 1, 2, null]);
     expect(blocks.map((block) => block.position)).toEqual([1, 2, 3, 4]);
+    expect(blocks.map((block) => block.sourceParagraphIndex)).toEqual([0, 1, 2, 3]);
+    expect(parsed.textBoxes).toEqual([]);
     expect(blocks.map((block) => block.text)).toEqual([
       '合成书稿',
       '第一章 起源',
@@ -123,6 +140,8 @@ describe('parseDocx', () => {
     expect(blocks).toHaveLength(1);
     expect(blocks[0]?.text).toBe('多余 空格');
     expect(blocks[0]?.position).toBe(1);
+    // An empty paragraph makes no block but is still a paragraph of the source part.
+    expect(blocks[0]?.sourceParagraphIndex).toBe(1);
   });
 
   it('prefers the DOCX title metadata and falls back to the file name', async () => {
@@ -194,16 +213,20 @@ describe('parseDocx', () => {
     expect(sections?.statusLabel).toBe('完整保留');
   });
 
-  it('counts a terminal section that carries attributes and children exactly once', async () => {
+  it('counts a terminal section that carries attributes and children exactly once, retained with the file', async () => {
     const { parsed } = await parseFixture({
       terminalSection: { attributes: { rsidR: '00AB12CD' }, children: ['pgSz', 'pgMar', 'cols', 'docGrid'] },
     });
     const sections = parsed.fidelity.find((category) => category.key === 'sections');
     expect(sections?.count).toBe(1);
-    expect(sections?.statusLabel).toBe('降级导入');
+    expect(sections?.label).toBe('分节（含页面设置）');
+    expect(sections?.status).toBe('retained');
+    expect(sections?.statusLabel).toBe('完整保留（随文件保留）');
+    // Page setup is retained with the Source Version, so it asks for no degradation decision (ADR 0086 §2).
     expect(deriveImportFidelityPlan(parsed.fidelity, parsed.sourceDigest, parsed.archiveBytes)).toEqual({
-      outcome: 'degraded-import-no-round-trip',
-      degradations: [{ categoryKey: 'sections', label: '分节', count: 1 }],
+      outcome: 'clean-import-no-round-trip',
+      degradations: [],
+      textBoxDisposition: null,
     });
   });
 
@@ -384,11 +407,33 @@ describe('deriveImportFidelityPlan and isCleanTracerFidelity', () => {
     expect(deriveImportFidelityPlan(fidelity, sourceDigest, archiveBytes)).toEqual({
       outcome: 'clean-import-no-round-trip',
       degradations: [],
+      textBoxDisposition: null,
     });
     expect(fidelity.every((category) => category.key === 'round-trip-export' || category.count === 0)).toBe(true);
   });
 
-  it('plans a degraded import for a degraded projection that is not the compatibility baseline', async () => {
+  it('reports the ten classes in their order, with 预计往返 as the closing card', async () => {
+    const { fidelity } = await cleanFidelity();
+    expect(fidelity.map((category) => [category.key, category.label])).toEqual([
+      ['inline-styles', '行内样式'],
+      ['comments-revisions', '批注与修订'],
+      ['notes', '脚注与尾注'],
+      ['tables', '表格'],
+      ['images-captions', '图片与图注'],
+      ['sections', '分节（含页面设置）'],
+      ['headers-footers', '页眉与页脚'],
+      ['text-boxes', '文本框'],
+      ['fields', '域（目录等）'],
+      ['round-trip-export', '预计往返'],
+    ]);
+    // An absent class reads 完整保留; 预计往返 counts nothing and never asks for a decision.
+    expect(fidelity.slice(0, 9).every((category) => category.status === 'preserved' && category.statusLabel === '完整保留')).toBe(true);
+    const roundTrip = fidelity.at(-1)!;
+    expect(roundTrip.count).toBe(0);
+    expect(roundTrip.detail).toContain('样式表');
+  });
+
+  it('retains inline styles with the file instead of asking for a degradation decision', async () => {
     const { parsed } = await parseFixture({
       extraEntries: {
         'word/document.xml': bodyDocumentXml(
@@ -397,13 +442,17 @@ describe('deriveImportFidelityPlan and isCleanTracerFidelity', () => {
       },
     });
     expect(isCleanTracerFidelity(parsed.fidelity)).toBe(false);
+    const inline = parsed.fidelity.find((category) => category.key === 'inline-styles')!;
+    expect([inline.count, inline.status, inline.statusLabel]).toEqual([1, 'retained', '完整保留（随文件保留）']);
+    expect(inline.detail).toContain('改过的段落，导出时逐段说明格式能否原样恢复');
     expect(deriveImportFidelityPlan(parsed.fidelity, parsed.sourceDigest, parsed.archiveBytes)).toEqual({
-      outcome: 'degraded-import-no-round-trip',
-      degradations: [{ categoryKey: 'inline-styles', label: '行内样式', count: 1 }],
+      outcome: 'clean-import-no-round-trip',
+      degradations: [],
+      textBoxDisposition: null,
     });
   });
 
-  it('lists an unsupported category with a positive count as a degradation', async () => {
+  it('lists a note as 降级导入: neither the reference nor the note is in the manuscript', async () => {
     const { parsed } = await parseFixture({
       extraEntries: {
         'word/document.xml': bodyDocumentXml(
@@ -411,11 +460,13 @@ describe('deriveImportFidelityPlan and isCleanTracerFidelity', () => {
         ),
       },
     });
-    const notes = parsed.fidelity.find((category) => category.key === 'notes');
-    expect(notes?.statusLabel).toBe('不支持导入');
+    const notes = parsed.fidelity.find((category) => category.key === 'notes')!;
+    expect([notes.status, notes.statusLabel]).toEqual(['degraded', '降级导入']);
+    expect(notes.detail).toContain('注文随来源版本保留');
     expect(deriveImportFidelityPlan(parsed.fidelity, parsed.sourceDigest, parsed.archiveBytes)).toEqual({
       outcome: 'degraded-import-no-round-trip',
       degradations: [{ categoryKey: 'notes', label: '脚注与尾注', count: 1 }],
+      textBoxDisposition: null,
     });
   });
 
@@ -439,17 +490,15 @@ describe('deriveImportFidelityPlan and isCleanTracerFidelity', () => {
   // The two conversion cases of #356; everything else in this file is #353's.
   it('names the converter in every class a conversion carried loss into, and nowhere else', () => {
     const report = buildFidelityReport(
-      { inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0 },
+      NO_SIGNALS,
       0,
       {
         identity: 'ai7-text-to-docx/1',
         sourceFormat: 'MD',
-        loss: {
-          inlineStyles: 2, commentsRevisions: 0, notes: 0, tables: 1,
-          imagesCaptions: 0, sections: 0, headersFooters: 0,
-        },
+        loss: { ...NO_LOSS, inlineStyles: 2, tables: 1 },
       },
     );
+    // What a converter lost is not in the working representation, so it is never retained with the file.
     expect(report.map((category) => [category.key, category.count, category.statusLabel])).toEqual([
       ['inline-styles', 2, '降级导入'],
       ['comments-revisions', 0, '完整保留'],
@@ -458,6 +507,8 @@ describe('deriveImportFidelityPlan and isCleanTracerFidelity', () => {
       ['images-captions', 0, '完整保留'],
       ['sections', 0, '完整保留'],
       ['headers-footers', 0, '完整保留'],
+      ['text-boxes', 0, '完整保留'],
+      ['fields', 0, '完整保留'],
       ['round-trip-export', 0, '不支持导入'],
     ]);
     const named = report.filter((category) => category.detail.startsWith('由 ai7-text-to-docx/1 从 MD 转换保留为原文字符：'));
@@ -466,17 +517,7 @@ describe('deriveImportFidelityPlan and isCleanTracerFidelity', () => {
 
   it('refuses to plan a converted report unless the conversion that made it is named', () => {
     const conversion = { identity: 'ai7-text-to-docx/1', sourceFormat: 'MD' as const };
-    const report = buildFidelityReport(
-      { inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0 },
-      0,
-      {
-        ...conversion,
-        loss: {
-          inlineStyles: 2, commentsRevisions: 0, notes: 0, tables: 1,
-          imagesCaptions: 0, sections: 0, headersFooters: 0,
-        },
-      },
-    );
+    const report = buildFidelityReport(NO_SIGNALS, 0, { ...conversion, loss: { ...NO_LOSS, inlineStyles: 2, tables: 1 } });
     expect(deriveImportFidelityPlan(report, 'a'.repeat(64), 1024)).toBeUndefined();
     expect(deriveImportFidelityPlan(report, 'a'.repeat(64), 1024, conversion)).toEqual({
       outcome: 'degraded-import-no-round-trip',
@@ -484,6 +525,7 @@ describe('deriveImportFidelityPlan and isCleanTracerFidelity', () => {
         { categoryKey: 'inline-styles', label: '行内样式', count: 2 },
         { categoryKey: 'tables', label: '表格', count: 1 },
       ],
+      textBoxDisposition: null,
     });
     // A parser's own report is equally not a converted one, whichever way it is read.
     expect(deriveImportFidelityPlan(report, 'a'.repeat(64), 1024, { ...conversion, sourceFormat: 'TXT' }))
@@ -492,29 +534,241 @@ describe('deriveImportFidelityPlan and isCleanTracerFidelity', () => {
 
   // #351's case: one prefix per converter, and an identity this build cannot phrase is refused.
   it('says what each converter did to the content, and refuses an identity it cannot phrase', () => {
-    const signals = { inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0 };
-    const loss = {
-      inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0,
-      imagesCaptions: 0, sections: 0, headersFooters: 1,
-    };
+    const loss = { ...NO_LOSS, headersFooters: 1 };
     const text = { identity: 'ai7-text-to-docx/1', sourceFormat: 'TXT' as const };
     const legacy = { identity: 'ai7-doc-to-docx/1', sourceFormat: 'DOC' as const };
-    const textReport = buildFidelityReport(signals, 0, { ...text, loss });
-    const legacyReport = buildFidelityReport(signals, 0, { ...legacy, loss });
+    const textReport = buildFidelityReport(NO_SIGNALS, 0, { ...text, loss });
+    const legacyReport = buildFidelityReport(NO_SIGNALS, 0, { ...legacy, loss });
     const detail = (report: FidelityCategoryProjection[]): string =>
       report.find((category) => category.key === 'headers-footers')!.detail;
     // The text conversion kept the author's characters; the legacy one could not.
     expect(detail(textReport).startsWith('由 ai7-text-to-docx/1 从 TXT 转换保留为原文字符：')).toBe(true);
     expect(detail(legacyReport).startsWith('由 ai7-doc-to-docx/1 从 DOC 转换时未能保留：')).toBe(true);
-    const planned = { outcome: 'degraded-import-no-round-trip', degradations: [{ categoryKey: 'headers-footers', label: '页眉与页脚', count: 1 }] };
+    const planned = {
+      outcome: 'degraded-import-no-round-trip',
+      degradations: [{ categoryKey: 'headers-footers', label: '页眉与页脚', count: 1 }],
+      textBoxDisposition: null,
+    };
     expect(deriveImportFidelityPlan(textReport, 'a'.repeat(64), 1024, text)).toEqual(planned);
     expect(deriveImportFidelityPlan(legacyReport, 'a'.repeat(64), 1024, legacy)).toEqual(planned);
     // Each rebuilds under its own identity alone: the prefixes no longer read the same.
     expect(deriveImportFidelityPlan(legacyReport, 'a'.repeat(64), 1024, { ...text, sourceFormat: 'DOC' }))
       .toBeUndefined();
     const unknown = { identity: 'ai7-unwritten-converter/1', sourceFormat: 'DOC' as const };
-    expect(() => buildFidelityReport(signals, 0, { ...unknown, loss }))
+    expect(() => buildFidelityReport(NO_SIGNALS, 0, { ...unknown, loss }))
       .toThrow('DOCX_REJECTED:unknown converter identity');
     expect(deriveImportFidelityPlan(legacyReport, 'a'.repeat(64), 1024, unknown)).toBeUndefined();
+  });
+
+  it('keeps a converter\'s dropped text boxes and fields in their own classes, 降级导入 and never merged', () => {
+    const legacy = { identity: 'ai7-doc-to-docx/1', sourceFormat: 'DOC' as const };
+    const report = buildFidelityReport(NO_SIGNALS, 0, { ...legacy, loss: { ...NO_LOSS, textBoxes: 2, fields: 3 } });
+    expect(report.filter((category) => category.count > 0).map((category) => [category.key, category.count, category.status]))
+      .toEqual([['text-boxes', 2, 'degraded'], ['fields', 3, 'degraded']]);
+    expect(deriveImportFidelityPlan(report, 'a'.repeat(64), 1024, legacy)?.textBoxDisposition).toBeNull();
+    expect(withTextBoxDisposition(report, 'merge', legacy)).toBeUndefined();
+    expect(withTextBoxDisposition(report, 'retain', legacy)).toEqual(report);
+  });
+});
+
+/**
+ * The eight rows exact `sample1` carried under parser identity `/1`, as the frozen builder must still
+ * rebuild them for every review recorded before ADR 0086: this is the text J-01 pinned until then.
+ */
+const SAMPLE1_V1_REPORT: FidelityCategoryProjection[] = [
+  { key: 'inline-styles', label: '行内样式', count: 266, status: 'degraded', statusLabel: '降级导入', detail: '检测到字体与字号（rFonts、sz、szCs）等行内样式；可编辑内容块仅保留文字顺序，后续导出无法恢复这些样式。' },
+  { key: 'comments-revisions', label: '批注与修订', count: 0, status: 'preserved', statusLabel: '完整保留', detail: '未检测到批注或修订标记。' },
+  { key: 'notes', label: '脚注与尾注', count: 0, status: 'preserved', statusLabel: '完整保留', detail: '未检测到脚注或尾注。' },
+  { key: 'tables', label: '表格', count: 0, status: 'preserved', statusLabel: '完整保留', detail: '未检测到表格。' },
+  { key: 'images-captions', label: '图片与图注', count: 0, status: 'preserved', statusLabel: '完整保留', detail: '未检测到图片或图注。' },
+  { key: 'sections', label: '分节', count: 1, status: 'degraded', statusLabel: '降级导入', detail: '检测到页尺寸、页边距、分栏与文档网格等分节设置；正文按单一连续稿件顺序导入，后续导出无法恢复原分节版式。' },
+  { key: 'headers-footers', label: '页眉与页脚', count: 0, status: 'preserved', statusLabel: '完整保留', detail: '未检测到页眉或页脚。' },
+  { key: 'round-trip-export', label: 'DOCX 往返与导出预期', count: 0, status: 'unsupported', statusLabel: '不支持导入', detail: '本导入功能不提供 DOCX 导出，因此无法建立往返行为、版式复原或导出结果保证。' },
+];
+
+describe('parser identity /1 reviews', () => {
+  it('still rebuild exactly through the frozen eight-class builder, under their own identity only', () => {
+    expect(deriveImportFidelityPlan(SAMPLE1_V1_REPORT, 'a'.repeat(64), 1024, undefined, DOCX_PARSER_IDENTITY_V1)).toEqual({
+      outcome: 'degraded-import-no-round-trip',
+      degradations: [
+        { categoryKey: 'inline-styles', label: '行内样式', count: 266 },
+        { categoryKey: 'sections', label: '分节', count: 1 },
+      ],
+      textBoxDisposition: null,
+    });
+    // Eight rows are not a revision-2 report, and ten are not a revision-1 one.
+    expect(deriveImportFidelityPlan(SAMPLE1_V1_REPORT, 'a'.repeat(64), 1024)).toBeUndefined();
+    const v2 = buildFidelityReport({ ...NO_SIGNALS, inlineStyles: 266, sections: 1 }, 0);
+    expect(deriveImportFidelityPlan(v2, 'a'.repeat(64), 1024, undefined, DOCX_PARSER_IDENTITY_V1)).toBeUndefined();
+    expect(deriveImportFidelityPlan(v2, 'a'.repeat(64), 1024, undefined, 'ai7-docx-fflate-saxes/3')).toBeUndefined();
+    // A one-character change to a frozen detail no longer rebuilds.
+    const drifted = SAMPLE1_V1_REPORT.map((category, index) => index === 0 ? { ...category, detail: `${category.detail} ` } : category);
+    expect(deriveImportFidelityPlan(drifted, 'a'.repeat(64), 1024, undefined, DOCX_PARSER_IDENTITY_V1)).toBeUndefined();
+  });
+
+  it('rebuild a converted revision-1 review under its converter, as before', () => {
+    const legacy = { identity: 'ai7-doc-to-docx/1', sourceFormat: 'DOC' as const };
+    const converted = SAMPLE1_V1_REPORT.map((category) => category.key === 'headers-footers'
+      ? { ...category, count: 1, status: 'degraded' as const, statusLabel: '降级导入' as const, detail: '由 ai7-doc-to-docx/1 从 DOC 转换时未能保留：页眉页脚不进入稿件正文；本次受限导入不提交该分支。' }
+      : category.key === 'inline-styles' || category.key === 'sections'
+        ? { ...category, count: 0, status: 'preserved' as const, statusLabel: '完整保留' as const, detail: category.key === 'inline-styles' ? '未检测到行内样式。' : '未检测到额外分节；单节正文顺序完整保留，且不据此建立版式往返保证。' }
+        : category);
+    expect(deriveImportFidelityPlan(converted, 'a'.repeat(64), 1024, legacy, DOCX_PARSER_IDENTITY_V1)?.degradations)
+      .toEqual([{ categoryKey: 'headers-footers', label: '页眉与页脚', count: 1 }]);
+  });
+});
+
+const MC = 'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"';
+const WP = 'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"';
+const A = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"';
+const WPS = 'xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"';
+const V = 'xmlns:v="urn:schemas-microsoft-com:vml"';
+
+/** A text box the way Word writes one: DrawingML in `mc:Choice`, the same content again in VML in `mc:Fallback`. */
+function wordTextBox(paragraphs: string): string {
+  return `<w:r><mc:AlternateContent ${MC}><mc:Choice Requires="wps"><w:drawing><wp:anchor ${WP}><a:graphic ${A}>` +
+    `<a:graphicData><wps:wsp ${WPS}><wps:txbx><w:txbxContent>${paragraphs}</w:txbxContent></wps:txbx></wps:wsp>` +
+    `</a:graphicData></a:graphic></wp:anchor></w:drawing></mc:Choice><mc:Fallback><w:pict><v:shape ${V}><v:textbox>` +
+    `<w:txbxContent>${paragraphs}</w:txbxContent></v:textbox></v:shape></w:pict></mc:Fallback></mc:AlternateContent></w:r>`;
+}
+
+describe('parseDocx: text boxes, fields, and source paragraphs (ADR 0086)', () => {
+  it('reads a Word text box once, keeps its paragraphs out of the body, and anchors it to its paragraph', async () => {
+    const { parsed, blocks } = await parseFixture({
+      extraEntries: {
+        'word/document.xml': bodyDocumentXml(
+          '<w:p><w:r><w:t>锚定段落</w:t></w:r>' +
+            wordTextBox('<w:p><w:r><w:t>框内第一段</w:t></w:r></w:p><w:p/><w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>框内标题</w:t></w:r></w:p>') +
+            '<w:r><w:t>锚后文字</w:t></w:r></w:p><w:p><w:r><w:t>下一段</w:t></w:r></w:p><w:sectPr/>',
+        ),
+      },
+    });
+    expect(blocks.map((block) => [block.text, block.sourceParagraphIndex])).toEqual([
+      ['锚定段落锚后文字', 0],
+      // Three paragraphs in the Choice and the same three in the Fallback come between: every `w:p`
+      // takes an index, read or skipped.
+      ['下一段', 7],
+    ]);
+    expect(parsed.textBoxes).toHaveLength(1);
+    const [box] = parsed.textBoxes;
+    expect([box!.boxOrdinal, box!.anchorParagraphIndex]).toEqual([1, 0]);
+    expect(box!.paragraphs.map((paragraph) => [
+      paragraph.boxParagraphOrdinal, paragraph.sourceParagraphIndex, paragraph.kind, paragraph.level, paragraph.text,
+    ])).toEqual([
+      [1, 1, 'paragraph', null, '框内第一段'],
+      [2, 3, 'heading', 2, '框内标题'],
+    ]);
+    for (const paragraph of box!.paragraphs) {
+      expect(paragraph.digest).toMatch(/^[0-9a-f]{64}$/);
+      expect(paragraph.graphemeLength).toBe(Array.from(paragraph.text).length);
+    }
+    const counts = Object.fromEntries(parsed.fidelity.map((category) => [category.key, category.count]));
+    // The drawing that holds the box is the box, not an image; its VML fallback is not a second box.
+    expect(counts['text-boxes']).toBe(1);
+    expect(counts['images-captions']).toBe(0);
+    const row = parsed.fidelity.find((category) => category.key === 'text-boxes')!;
+    expect([row.status, row.statusLabel]).toEqual(['retained', '完整保留（随文件保留）']);
+    expect(row.detail.startsWith('保留为文本框：')).toBe(true);
+    expect(deriveImportFidelityPlan(parsed.fidelity, parsed.sourceDigest, parsed.archiveBytes)).toEqual({
+      outcome: 'clean-import-no-round-trip',
+      degradations: [],
+      textBoxDisposition: 'retain',
+    });
+  });
+
+  it('reads a VML-only text box and still counts a plain drawing as an image, once per alternative', async () => {
+    const { parsed } = await parseFixture({
+      extraEntries: {
+        'word/document.xml': bodyDocumentXml(
+          `<w:p><w:r><w:pict><v:shape ${V}><v:textbox><w:txbxContent><w:p><w:r><w:t>旧式文本框</w:t></w:r></w:p></w:txbxContent></v:textbox></v:shape></w:pict></w:r></w:p>` +
+            '<w:p><w:r><w:drawing/></w:r><w:r><w:t>图注</w:t></w:r></w:p>' +
+            `<w:p><w:r><mc:AlternateContent ${MC}><mc:Choice Requires="wps"><w:drawing/></mc:Choice><mc:Fallback><w:pict/></mc:Fallback></mc:AlternateContent></w:r><w:r><w:t>第二图注</w:t></w:r></w:p>` +
+            '<w:sectPr/>',
+        ),
+      },
+    });
+    const counts = Object.fromEntries(parsed.fidelity.map((category) => [category.key, category.count]));
+    expect([counts['text-boxes'], counts['images-captions']]).toEqual([1, 2]);
+    // The box's anchor paragraph holds no text of its own, so it makes no block.
+    expect(parsed.blockCount).toBe(2);
+    expect(parsed.textBoxes[0]!.anchorParagraphIndex).toBe(0);
+    expect(parsed.textBoxes[0]!.paragraphs.map((paragraph) => paragraph.sourceParagraphIndex)).toEqual([1]);
+  });
+
+  it('still refuses a text box inside a text box, a text box outside a paragraph, and a nested paragraph', async () => {
+    const inner = `<w:r><w:pict><v:shape ${V}><v:textbox><w:txbxContent><w:p><w:r><w:t>内层</w:t></w:r></w:p></w:txbxContent></v:textbox></v:shape></w:pict></w:r>`;
+    await expect(parseFixture({
+      extraEntries: {
+        'word/document.xml': bodyDocumentXml(
+          `<w:p><w:r><w:t>正文</w:t></w:r><w:r><w:pict><v:shape ${V}><v:textbox><w:txbxContent><w:p>${inner}</w:p></w:txbxContent></v:textbox></v:shape></w:pict></w:r></w:p><w:sectPr/>`,
+        ),
+      },
+    })).rejects.toThrow('DOCX_REJECTED:nested text box');
+    await expect(parseFixture({
+      extraEntries: { 'word/document.xml': bodyDocumentXml('<w:txbxContent><w:p/></w:txbxContent><w:p><w:r><w:t>正文</w:t></w:r></w:p><w:sectPr/>') },
+    })).rejects.toThrow('DOCX_REJECTED:text box outside a paragraph');
+    await expect(parseFixture({
+      extraEntries: { 'word/document.xml': bodyDocumentXml('<w:p><w:r><w:t>正文</w:t></w:r><w:p/></w:p><w:sectPr/>') },
+    })).rejects.toThrow('DOCX_REJECTED:nested paragraph');
+  });
+
+  it('counts every field once and keeps only the text it displays, which asks for a degradation decision', async () => {
+    const { parsed, blocks } = await parseFixture({
+      extraEntries: {
+        'word/document.xml': bodyDocumentXml(
+          '<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText> TOC \\o "1-3" </w:instrText></w:r>' +
+            '<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>目录项</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>' +
+            '<w:p><w:r><w:t>第 </w:t></w:r><w:fldSimple w:instr=" PAGE "><w:r><w:t>3</w:t></w:r></w:fldSimple><w:r><w:t> 页</w:t></w:r></w:p>' +
+            '<w:sectPr/>',
+        ),
+      },
+    });
+    expect(blocks.map((block) => block.text)).toEqual(['目录项', '第 3 页']);
+    const fields = parsed.fidelity.find((category) => category.key === 'fields')!;
+    expect([fields.count, fields.status, fields.statusLabel]).toEqual([2, 'degraded', '降级导入']);
+    expect(deriveImportFidelityPlan(parsed.fidelity, parsed.sourceDigest, parsed.archiveBytes)).toEqual({
+      outcome: 'degraded-import-no-round-trip',
+      degradations: [{ categoryKey: 'fields', label: '域（目录等）', count: 2 }],
+      textBoxDisposition: null,
+    });
+  });
+
+  it('rebuilds a text-box report under the disposition it states, and only one it can state', async () => {
+    const { parsed } = await parseFixture({
+      extraEntries: {
+        'word/document.xml': bodyDocumentXml(
+          `<w:p><w:r><w:t>正文</w:t></w:r>${wordTextBox('<w:p><w:r><w:t>框内</w:t></w:r></w:p>')}</w:p><w:sectPr/>`,
+        ),
+      },
+    });
+    const merged = withTextBoxDisposition(parsed.fidelity, 'merge')!;
+    expect(merged.find((category) => category.key === 'text-boxes')!.detail.startsWith('并入正文：')).toBe(true);
+    // Only the text-box row moves: the rest of the report is the parser's.
+    expect(merged.filter((category) => category.key !== 'text-boxes'))
+      .toEqual(parsed.fidelity.filter((category) => category.key !== 'text-boxes'));
+    expect(deriveImportFidelityPlan(merged, parsed.sourceDigest, parsed.archiveBytes)?.textBoxDisposition).toBe('merge');
+    expect(withTextBoxDisposition(merged, 'retain')).toEqual(parsed.fidelity);
+    // A report without a text box cannot be merged, and a malformed one is refused either way.
+    const { parsed: plain } = await parseFixture({});
+    expect(withTextBoxDisposition(plain.fidelity, 'merge')).toBeUndefined();
+    expect(withTextBoxDisposition(plain.fidelity, 'retain')).toEqual(plain.fidelity);
+    expect(withTextBoxDisposition([{ key: 'text-boxes' }], 'retain')).toBeUndefined();
+  });
+
+  it('reads exact sample1 as clean: its inline styles and its one section are retained with the file', async () => {
+    const path = fileURLToPath(new URL('../../SampleBooks/sample1.docx', import.meta.url));
+    const blocks: ParsedDocxBlock[] = [];
+    const parsed = await parseDocx(path, 'sample1.docx', (block) => blocks.push(block));
+    expect(parsed.blockCount).toBe(97);
+    expect(parsed.fidelity.filter((category) => category.count > 0).map((category) => [category.key, category.count, category.status]))
+      .toEqual([['inline-styles', 266, 'retained'], ['sections', 1, 'retained']]);
+    expect(deriveImportFidelityPlan(parsed.fidelity, parsed.sourceDigest, parsed.archiveBytes)).toEqual({
+      outcome: 'clean-import-no-round-trip',
+      degradations: [],
+      textBoxDisposition: null,
+    });
+    // Ninety-eight paragraphs, one of them empty: every block names its own, strictly in order.
+    expect(blocks.every((block, index) => index === 0 || block.sourceParagraphIndex > blocks[index - 1]!.sourceParagraphIndex)).toBe(true);
+    expect(blocks.at(-1)!.sourceParagraphIndex).toBeLessThanOrEqual(97);
   });
 });

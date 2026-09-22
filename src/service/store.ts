@@ -944,7 +944,10 @@ function conversionFidelityReport(
   loss: ConversionLoss,
 ): FidelityCategoryProjection[] {
   return buildFidelityReport(
-    { inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0 },
+    {
+      inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0,
+      textBoxes: 0, fields: 0,
+    },
     0,
     { identity: conversion.converterIdentity, sourceFormat: conversion.sourceFormat, loss },
   );
