@@ -70,6 +70,21 @@ describe('the import fidelity review words', () => {
     expect(FIDELITY_DETAILS_SUMMARY).toBe('展开各类明细');
   });
 
+  it('reads a file\'s comments and tracked changes as marks it becomes, never as kept with the file (Issue #411)', () => {
+    const converted = buildFidelityReport({ ...NO_SIGNALS, inlineStyles: 266, sections: 1, commentsRevisions: 8 }, 0);
+    expect(fidelityPillText(converted[1]!)).toBe('✓ 完整保留');
+    expect(needsDegradationDecision(converted)).toBe(false);
+    expect(fidelitySummaryLine(converted)).toBe(
+      '9 类内容都完整保留，不需要导入降级决定：行内样式 · 266 项、分节（含页面设置） · 1 项随文件保留；' +
+      '批注与修订 · 8 项转为稿件上的批注与修改建议，其余 6 类未检测到。',
+    );
+    expect(fidelitySummaryLine(buildFidelityReport({ ...NO_SIGNALS, commentsRevisions: 3 }, 0)))
+      .toBe('9 类内容都完整保留，不需要导入降级决定：批注与修订 · 3 项转为稿件上的批注与修改建议，其余 8 类未检测到。');
+    // Formatting revisions alone become no mark, but the class was found: it stays with the file.
+    const formattingOnly = buildFidelityReport({ ...NO_SIGNALS, commentsRevisionsPresent: true }, 0);
+    expect(fidelitySummaryLine(formattingOnly)).toBe('9 类内容都完整保留，不需要导入降级决定：批注与修订随文件保留，其余 8 类未检测到。');
+  });
+
   it('offers the text-box choice, 保留为文本框 first and preselected, only for a natively read file with a box', () => {
     expect(TEXT_BOX_CHOICE_LEGEND).toBe('文本框怎样进来');
     expect(TEXT_BOX_CHOICE_OPTIONS.map((option) => [option.disposition, option.label])).toEqual([

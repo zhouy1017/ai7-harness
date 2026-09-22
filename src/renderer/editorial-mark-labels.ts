@@ -79,11 +79,14 @@ export function markStateLabel(
 }
 
 /**
- * 原文已变 on a Mark Card: the text the mark was made on — or, for a suggestion whose Apply deleted its
- * words and which is pinned on no text, the words it deleted.
+ * 原文已变 on a Mark Card: the text the mark was made on — or, for a suggestion pinned on no text, the words
+ * its Apply deleted there, or the words it would insert there (Issue #411).
  */
 export function markDriftNote(card: Pick<EditorialMarkCardProjection, 'pinnedText' | 'suggestion'>): string {
   if (card.pinnedText.length === 0 && card.suggestion !== null) {
+    if (card.suggestion.changeType === 'insert') {
+      return `原文已变：这里原本建议插入「${card.suggestion.proposedText}」，插入处后来又改过，标记仍留在原处。`;
+    }
     return `原文已变：这里删去了「${card.suggestion.currentText}」，删去处后来又改过，标记仍留在原处。`;
   }
   return `原文已变：标记时的文字是「${card.pinnedText}」，这段文字后来改过，标记仍留在原处。`;
@@ -91,20 +94,44 @@ export function markDriftNote(card: Pick<EditorialMarkCardProjection, 'pinnedTex
 
 /**
  * What 准备撤销本次应用 says it will write, before the button that writes it (V2-UX-EREC-010): the applied
- * text changed back to the original, or — where the Apply deleted the words — the words written in again.
+ * text changed back to the original; where the Apply deleted the words, the words written in again; and
+ * where it inserted words at a point (Issue #411), those words taken out again.
  */
 export function reverseApplyNote(appliedText: string, originalText: string): string {
-  const write = appliedText.length === 0 ? `会在原处重新写入「${originalText}」` : `会把「${appliedText}」换回「${originalText}」`;
+  const write = appliedText.length === 0
+    ? `会在原处重新写入「${originalText}」`
+    : originalText.length === 0
+      ? `会删去在此插入的「${appliedText}」`
+      : `会把「${appliedText}」换回「${originalText}」`;
   return `${write}，并记为一次新的应用；原来的应用记录保留，不会被改写。`;
 }
 
+/** What a 修改建议 that inserts proposes (Issue #411, D7): its words, written at the point it stands on. */
+export function insertionLine(text: string): string {
+  return `在此插入「${text}」`;
+}
+
+/** Why an insertion offers no 转为批注: a 批注 needs text to stand on, and an insertion stands at a point. */
+export const INSERTION_CONVERT_REASON = '插入建议没有原文可以批注，不能转为批注。';
+
 /**
- * The name of the point drawn where a mark stands on no text: the words an applied deletion took away,
- * or — for a mark whose own words an edit removed — which kind of mark waits there.
+ * The name of the point drawn where a mark stands on no text: the words an applied deletion took away, the
+ * words a pending insertion would write there (Issue #411), or — for a mark whose own words an edit removed
+ * — which kind of mark waits there.
  */
-export function markPointLabel(mark: Pick<EditorialMarkAnchorProjection, 'kind' | 'deletedText'>, drifted: boolean): string {
-  const what = mark.deletedText === null ? MARK_KIND_LABELS[mark.kind] : `已删去「${mark.deletedText}」`;
+export function markPointLabel(
+  mark: Pick<EditorialMarkAnchorProjection, 'kind' | 'deletedText'> & Partial<Pick<EditorialMarkAnchorProjection, 'insertedText'>>,
+  drifted: boolean,
+): string {
+  const what = mark.insertedText !== null && mark.insertedText !== undefined
+    ? `待插入「${mark.insertedText}」`
+    : mark.deletedText === null ? MARK_KIND_LABELS[mark.kind] : `已删去「${mark.deletedText}」`;
   return drifted ? `${what} · 原文已变` : what;
+}
+
+/** Which point a mark draws where it stands on no text: a pending insertion, an applied deletion, or another. */
+export function markPointKind(mark: Pick<EditorialMarkAnchorProjection, 'deletedText' | 'insertedText'>): 'insertion' | 'deletion' | 'mark' {
+  return mark.insertedText !== null ? 'insertion' : mark.deletedText !== null ? 'deletion' : 'mark';
 }
 
 export function markTimeLabel(iso: string): string {
