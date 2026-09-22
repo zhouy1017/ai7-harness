@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, open, readFile, realpath, rename, rm } from 'node:fs/promises';
+import { link, lstat, open, readFile, realpath, rename, rm } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -373,13 +373,52 @@ type WriteOutcome =
   | { outcome: 'created' | 'replaced'; bytes: number; sha256: string }
   | { outcome: 'failed' | 'ambiguous'; code: string };
 
+/** A volume that has no hard links answers with one of these; the chosen name is then taken by an exclusive create. */
+const NO_HARD_LINKS = new Set(['EPERM', 'EACCES', 'EINVAL', 'EMLINK', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV']);
+
+/**
+ * Take `destination` for the staged file without replacing anything, for an export approved as `create`
+ * (V2-UX-EXP-012). The filesystem decides whether the name is free at the instant it is taken, not a check
+ * before it: a hard link fails with `EEXIST` when a file appeared since the destination was resolved, and a
+ * volume with no hard links takes the name with an exclusive create that the staged file is then renamed over —
+ * this write's own empty file, never another writer's. The staged file stays the caller's to discard.
+ */
+async function takeFreeName(staged: string, destination: string): Promise<'taken' | 'exists' | 'failed' | 'uncertain'> {
+  try {
+    await link(staged, destination);
+    return 'taken';
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code ?? '';
+    if (code === 'EEXIST') return 'exists';
+    if (!NO_HARD_LINKS.has(code)) return 'failed';
+  }
+  let placeholder;
+  try {
+    placeholder = await open(destination, 'wx');
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EEXIST' ? 'exists' : 'failed';
+  }
+  await placeholder.close().catch(() => undefined);
+  try {
+    await rename(staged, destination);
+    return 'taken';
+  } catch {
+    // The exclusive create above is what made the name this write's own, so removing it leaves the chosen
+    // name as free as this write found it — and an empty file nobody can read as the export never stays.
+    await rm(destination, { force: true }).catch(() => undefined);
+    return (await targetState(destination)) === 'absent' ? 'failed' : 'uncertain';
+  }
+}
+
 /**
  * Write `payload` at `destination` atomically (V2-UX-EXP-012): stage it beside the destination under a name no
- * one could take for the result, sync and verify it, check the destination is still what the dialog resolved,
- * rename it over the chosen name and verify the final file. Nothing at the destination changes before the rename;
- * after it, a file that cannot be verified is `ambiguous`, never retried.
+ * one could take for the result and that only this write owns, sync and verify it, check the destination is
+ * still what the dialog resolved, take the chosen name under the approved disposition, and verify the final
+ * file. A `create` never publishes over a file that appeared meanwhile, and a `replace` replaces exactly the
+ * file the editor chose to replace. Nothing at the destination changes before the name is taken; after it, a
+ * file that cannot be verified is `ambiguous`, never retried.
  */
-async function writeAtomically(
+export async function writeAtomically(
   destination: string,
   payload: Uint8Array,
   payloadSha256: string,
@@ -387,13 +426,19 @@ async function writeAtomically(
   effectIntentId: string,
 ): Promise<WriteOutcome> {
   const directory = dirname(destination);
-  const staged = join(directory, `.${basename(destination)}.${effectIntentId.slice(0, 8)}.ai7-partial`);
+  const stem = Array.from(basename(destination)).slice(0, 80).join('');
+  const staged = join(directory, `.${stem}.${effectIntentId}.${randomUUID()}.ai7-partial`);
+  // Only a stage this write created may be removed: an exclusive open that found a file leaves it to its owner.
+  let owned = false;
   const discard = async (): Promise<void> => {
+    if (!owned) return;
+    owned = false;
     await rm(staged, { force: true }).catch(() => undefined);
   };
   let handle;
   try {
     handle = await open(staged, 'wx');
+    owned = true;
     await handle.writeFile(payload);
     await handle.sync();
   } catch {
@@ -413,24 +458,34 @@ async function writeAtomically(
     await discard();
     return { outcome: 'failed', code: 'EXPORT_TARGET_CHANGED' };
   }
-  try {
-    await rename(staged, destination);
-  } catch {
-    const landed = await fileDigest(destination);
-    if (landed?.sha256 === payloadSha256) {
-      await discard();
-      return { outcome: disposition === 'create' ? 'created' : 'replaced', bytes: landed.bytes, sha256: landed.sha256 };
+  if (disposition === 'create') {
+    const taken = await takeFreeName(staged, destination);
+    // After a link both names hold the payload; after the rename the stage is gone. Either way it is not left behind.
+    await discard();
+    if (taken === 'exists') return { outcome: 'failed', code: 'EXPORT_TARGET_CHANGED' };
+    if (taken === 'failed') return { outcome: 'failed', code: 'EXPORT_COMMIT_FAILED' };
+    if (taken === 'uncertain') return { outcome: 'ambiguous', code: 'EXPORT_COMMIT_UNCERTAIN' };
+  } else {
+    try {
+      await rename(staged, destination);
+      owned = false;
+    } catch {
+      const landed = await fileDigest(destination);
+      if (landed?.sha256 === payloadSha256) {
+        await discard();
+        return { outcome: 'replaced', bytes: landed.bytes, sha256: landed.sha256 };
+      }
+      if ((await targetState(staged)) === 'file') {
+        await discard();
+        return { outcome: 'failed', code: 'EXPORT_COMMIT_FAILED' };
+      }
+      return { outcome: 'ambiguous', code: 'EXPORT_COMMIT_UNCERTAIN' };
     }
-    if ((await targetState(staged)) === 'file') {
-      await discard();
-      return { outcome: 'failed', code: 'EXPORT_COMMIT_FAILED' };
-    }
-    return { outcome: 'ambiguous', code: 'EXPORT_COMMIT_UNCERTAIN' };
   }
   try {
     await syncDirectory(directory);
   } catch {
-    // The rename is what publishes the file; a folder that cannot be synced is verified by reading back below.
+    // Taking the name is what publishes the file; a folder that cannot be synced is verified by reading back below.
   }
   const final = await fileDigest(destination);
   if (final?.sha256 !== payloadSha256 || final.bytes !== payload.byteLength) return { outcome: 'ambiguous', code: 'EXPORT_VERIFY_UNCERTAIN' };
