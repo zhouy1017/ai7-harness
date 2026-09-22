@@ -402,6 +402,29 @@ export function mergeBody(body, trailers) {
  * `failed` for anything else — a missing identity, unrelated histories — which is never the pull
  * request's fault and is raised as the tool's own error instead of a conflict comment.
  */
+/**
+ * The Issues in this repository a merged pull request's closing keywords linked, once each and in
+ * ascending order. A merge made with the workflow's token does not close them the way a person's
+ * merge does (#496), so the queue closes the ones still open itself.
+ */
+export function linkedIssues(references, repo) {
+  if (!Array.isArray(references)) return [];
+  const [owner, name] = String(repo).split('/');
+  const numbers = references
+    .filter((reference) =>
+      reference !== null && typeof reference === 'object' &&
+      Number.isInteger(reference.number) && reference.number > 0 &&
+      reference.repository?.name === name && reference.repository?.owner?.login === owner)
+    .map((reference) => reference.number);
+  return [...new Set(numbers)].sort((left, right) => left - right);
+}
+
+/** The comment the queue closes such an Issue with: the pull request, the line and the commit only. */
+export function closingComment({ pr, dev, commit }) {
+  return `Integrated by pull request #${pr}, squashed onto \`${dev}\` by the nightly merge queue (ADR 0081) as \`${String(commit).slice(0, 12)}\`. ` +
+    'A merge made with the workflow\'s token does not close the Issues a pull request links, so the queue closes this one (#496).';
+}
+
 export function squashOutcome({ status, stdout, stderr }) {
   if (status === 0) return 'merged';
   if (/^CONFLICT \(/mu.test(stdout) || /Automatic merge failed/u.test(stderr)) return 'conflict';
@@ -524,6 +547,34 @@ function prepareCommand(options) {
 
 // ---- merge and cleanup ----------------------------------------------------------------------
 
+/**
+ * Closes the open Issues the merged pull request links. The merge has already happened, so a failure
+ * here is reported on the job's output and never undoes or fails it.
+ */
+function closeLinkedIssues(repo, pr, dev) {
+  let merged;
+  try {
+    merged = parseJson(
+      ghOrThrow(['pr', 'view', String(pr), '--repo', repo, '--json', 'closingIssuesReferences,mergeCommit']),
+      `gh pr view ${pr}`,
+    );
+  } catch (error) {
+    process.stdout.write(`queue: #${pr} merged; its linked Issues could not be read: ${error.message}\n`);
+    return;
+  }
+  for (const issue of linkedIssues(merged.closingIssuesReferences, repo)) {
+    try {
+      const state = ghOrThrow(['issue', 'view', String(issue), '--repo', repo, '--json', 'state', '--jq', '.state']).trim();
+      if (state !== 'OPEN') continue;
+      const comment = closingComment({ pr, dev, commit: merged.mergeCommit?.oid ?? '' });
+      ghOrThrow(['issue', 'close', String(issue), '--repo', repo, '--reason', 'completed', '--comment', comment]);
+      process.stdout.write(`queue: closed #${issue}, which #${pr} links\n`);
+    } catch (error) {
+      process.stdout.write(`queue: #${pr} merged; #${issue} could not be closed: ${error.message}\n`);
+    }
+  }
+}
+
 function mergeCommand(options) {
   const { repo, pr, remote, dev, expectedDevTip, head, dryRun } = options;
   const devTip = fetchRef(remote, `refs/heads/${dev}`, `refs/remotes/origin/${dev}`);
@@ -552,6 +603,7 @@ function mergeCommand(options) {
   }
   ghOrThrow(args, { input: body });
   process.stdout.write(`queue: #${pr} squashed onto ${dev}@${devTip.slice(0, 12)}\n`);
+  closeLinkedIssues(repo, pr, dev);
   return 0;
 }
 
