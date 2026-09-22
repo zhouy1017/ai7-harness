@@ -5020,6 +5020,11 @@ export interface RendererApi {
   }): Promise<TaskAuthorizationProjection>;
   inspectBaselineAnalysis(input?: { revisionId: string | null }): Promise<BaselineAnalysisProjection>;
   prepareBaselineAnalysis(input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean }): Promise<ServiceJobProjection>;
+  /**
+   * The Task Drawer bar's 开始任务 for the analysis (Issue #420, S74a): records the Run Authorization and the
+   * Run Record and admits the Run to the one slot; refused with `EXECUTION_BUSY`, before anything is
+   * recorded, while another Run holds it.
+   */
   authorizeBaselineAnalysis(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisProjection>;
   /**
    * 审阅 of the Book the window is showing (Issue #417). Inspecting without a Run opens the latest; a
@@ -5028,7 +5033,11 @@ export interface RendererApi {
   inspectReviewWorkspace(input?: Omit<InspectReviewWorkspaceInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
   /** 先看计划: a `review-run-preparation` job, followed with `pollServiceJob` and stopped with `cancelServiceJob`. */
   prepareReviewRun(input: Omit<PrepareReviewRunInput, 'bookId'>): Promise<ServiceJobProjection>;
-  /** 授权并开始审阅: the one approval; the Run is already being driven when the answer arrives. */
+  /**
+   * The one approval — the Task Drawer bar's 开始任务 since Issue #420 (S74a); the Run is already being driven
+   * when the answer arrives. Refused with `EXECUTION_BUSY`, before anything is written, while a Run holds
+   * the one slot.
+   */
   authorizeReviewRun(input: Omit<AuthorizeReviewRunInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
   continueReviewRun(input: Omit<ContinueReviewRunInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
   /** 忽略并说明; every other decision on a finding is the mark and Apply operations' with its `markId`. */
