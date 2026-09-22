@@ -16,7 +16,7 @@ import { buildSyntheticDocx, type SyntheticDocxParagraph } from './synthetic-doc
 /**
  * The one admitted DOCX Public SampleBook after ADR 0079 §5 narrowed the repository to exact
  * `sample1`: the ADR 0044 compatibility baseline, 97 blocks at parser identity
- * `ai7-docx-fflate-saxes/1`, as the import-verdict table in `SampleBooks/README.md` records. Every
+ * `ai7-docx-fflate-saxes/1` and `/2` alike, as the import-verdict table in `SampleBooks/README.md` records. Every
  * composed fixture excerpts it, and the composed container never reproduces its digest.
  */
 export const ADMITTED_BASELINE_DOCX = 'sample1.docx';

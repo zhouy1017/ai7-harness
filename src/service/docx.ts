@@ -9,8 +9,15 @@ import {
   type FidelityCategoryKey,
   type FidelityCategoryProjection,
   type ManuscriptConversionProjection,
+  type TextBoxDisposition,
 } from '../shared/protocol.js';
 import type { ConversionLoss } from './text-manuscript.js';
+
+/**
+ * How a text box enters the Manuscript (ADR 0086 §2): kept as a text box with the Source Version, the
+ * default, or merged into the body right after the paragraph that anchors it.
+ */
+export type { TextBoxDisposition };
 
 /** The intake router applies this same bound to a file of any format before it is retained. */
 export const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024;
@@ -25,7 +32,17 @@ const MAX_XML_FEED_BYTES = MAX_BLOCK_CODE_UNITS;
 const MAX_XML_TEXT_TOKEN_CODE_UNITS = MAX_BLOCK_CODE_UNITS;
 const MAX_XML_MARKUP_TOKEN_CODE_UNITS = MAX_BLOCK_CODE_UNITS * 8;
 const MAX_XML_NESTING_DEPTH = 128;
-export const DOCX_PARSER_IDENTITY = 'ai7-docx-fflate-saxes/1';
+/** A document may carry at most this many text boxes; each is one record the review can offer to merge. */
+const MAX_TEXT_BOXES = 10_000;
+/**
+ * The parser identity every review is rebuilt under (ADR 0086). Revision 2 reads text boxes instead of
+ * refusing the file, counts fields, records which source paragraph every block came from, and reports
+ * ten content classes; revision 1's eight-row report stays rebuildable through its frozen builder, so a
+ * review recorded under it still reads back exactly (`buildFidelityReportV1`).
+ */
+export const DOCX_PARSER_IDENTITY = 'ai7-docx-fflate-saxes/2';
+/** The identity of every review written before revision 2: eight classes, rebuilt by the frozen builder. */
+export const DOCX_PARSER_IDENTITY_V1 = 'ai7-docx-fflate-saxes/1';
 
 export interface ImportFidelityDegradation {
   categoryKey: FidelityCategoryKey;
@@ -36,6 +53,12 @@ export interface ImportFidelityDegradation {
 export interface ImportFidelityPlan {
   outcome: 'clean-import-no-round-trip' | 'degraded-import-no-round-trip';
   degradations: ImportFidelityDegradation[];
+  /**
+   * The disposition a revision-2 report of a natively read file states for its text boxes, or null
+   * when it has none to state: no text box, a converted file (whose converter dropped them), or a
+   * revision-1 report (which refused every file that had one).
+   */
+  textBoxDisposition: TextBoxDisposition | null;
 }
 
 export interface ParsedDocxBlock {
@@ -46,6 +69,37 @@ export interface ParsedDocxBlock {
   text: string;
   digest: string;
   graphemeLength: number;
+  /**
+   * Which `w:p` of `word/document.xml` the block came from: the 0-based index of that element among
+   * every `w:p` start tag of the part, in document order (ADR 0086 §3). Nothing else in the block
+   * depends on it, so block identities and digests stay what revision 1 made them.
+   */
+  sourceParagraphIndex: number;
+}
+
+/** One non-empty paragraph of a text box, in the form it would take as a Manuscript block. */
+export interface ParsedTextBoxParagraph {
+  /** 1-based among the non-empty paragraphs of its box. */
+  boxParagraphOrdinal: number;
+  /** The paragraph's own `w:p` index, counted exactly as a block's is. */
+  sourceParagraphIndex: number;
+  kind: 'title' | 'heading' | 'paragraph';
+  level: number | null;
+  text: string;
+  digest: string;
+  graphemeLength: number;
+}
+
+/**
+ * One text box as the parser read it (ADR 0086 §2): which body paragraph anchors it and its non-empty
+ * paragraphs. Its paragraphs are never blocks of the body; the review decides whether they merge.
+ */
+export interface ParsedTextBox {
+  /** 1-based, in document order. */
+  boxOrdinal: number;
+  /** The `w:p` index of the body paragraph the box is anchored in. */
+  anchorParagraphIndex: number;
+  paragraphs: ParsedTextBoxParagraph[];
 }
 
 export interface ParsedDocx {
@@ -57,6 +111,7 @@ export interface ParsedDocx {
   blockCount: number;
   characterCount: number;
   fidelity: FidelityCategoryProjection[];
+  textBoxes: ParsedTextBox[];
   titleSuggestion: {
     value: string;
     sourceLabel: 'DOCX 标题元数据' | '文件名';
@@ -70,17 +125,30 @@ export interface DocumentSignals {
   tables: number;
   imagesCaptions: number;
   sections: number;
+  textBoxes: number;
+  fields: number;
 }
 
+/** The six body signals a revision-1 report counted; kept only to rebuild such a report exactly. */
+type DocumentSignalsV1 = Omit<DocumentSignals, 'textBoxes' | 'fields'>;
+
 /**
- * A conversion whose loss the report counts and names (ADR 0072 §3). The classes stay the design's
- * eight and the labels stay the class's: what changes is that a class carrying conversion loss says
- * who converted the file and what that converter did with the content.
+ * A conversion whose loss the report counts and names (ADR 0072 §3). The labels stay the class's:
+ * what changes is that a class carrying conversion loss says who converted the file and what that
+ * converter did with the content. What a converter lost is never retained with the file — the working
+ * representation does not hold it — so such a class keeps the label it had before ADR 0086.
  */
 export interface FidelityConversion {
   identity: string;
   sourceFormat: ManuscriptConversionProjection['sourceFormat'];
   loss: ConversionLoss;
+}
+
+/** A revision-1 conversion: the seven counted classes that report carried. */
+interface FidelityConversionV1 {
+  identity: string;
+  sourceFormat: ManuscriptConversionProjection['sourceFormat'];
+  loss: Omit<ConversionLoss, 'textBoxes' | 'fields'>;
 }
 
 /**
@@ -110,6 +178,7 @@ interface DocumentParseResult {
   contentDigest: string;
   structureDigest: string;
   signals: DocumentSignals;
+  textBoxes: ParsedTextBox[];
 }
 
 function requireDocx(condition: unknown, message: string): asserts condition {
@@ -207,6 +276,33 @@ function parseCoreTitle(xml: string | undefined): string | undefined {
   return normalized.length > 0 && normalized.length <= 180 ? normalized : undefined;
 }
 
+interface OpenParagraph {
+  text: string;
+  style: string | undefined;
+  sourceParagraphIndex: number;
+}
+
+/** What a paragraph style makes of a block: a title, a heading of level 1 to 6, or a body paragraph. */
+function blockShape(style: string | undefined): { kind: ParsedDocxBlock['kind']; level: number | null } {
+  const normalized = style?.toLocaleLowerCase('en-US') ?? '';
+  const headingMatch = /(?:heading|标题)\s*([1-6])/.exec(normalized);
+  const kind = normalized === 'title' || normalized === '标题' ? 'title' : headingMatch ? 'heading' : 'paragraph';
+  return { kind, level: kind === 'title' ? 1 : headingMatch ? Number(headingMatch[1]) : null };
+}
+
+/** A paragraph's collected text as a block carries it, or the empty string for one that holds none. */
+function paragraphBlockText(open: OpenParagraph): string {
+  requireDocx(open.text.isWellFormed(), 'paragraph contains invalid text');
+  return open.text.normalize('NFC').replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').trim();
+}
+
+/**
+ * Read `word/document.xml` as a stream. Every body paragraph with text becomes one block; a text box
+ * (`w:txbxContent`, whether DrawingML's `wps:txbx` or VML's `v:textbox` holds it) is read as a box of
+ * its own instead of being refused, and its paragraphs are kept apart from the body (ADR 0086 §2).
+ * Markup-compatibility alternatives are read once: the first `mc:Choice` of an `mc:AlternateContent`,
+ * never its `mc:Fallback`, which repeats the same content — so a Word text box is one box, not two.
+ */
 function createDocumentParser(
   onBlock: (block: ParsedDocxBlock) => void,
 ): { write(chunk: Uint8Array, final: boolean): void; finish(): DocumentParseResult } {
@@ -217,6 +313,8 @@ function createDocumentParser(
     tables: 0,
     imagesCaptions: 0,
     sections: 0,
+    textBoxes: 0,
+    fields: 0,
   };
   const decoder = new TextDecoder('utf-8', { fatal: true });
   const contentHash = createHash('sha256');
@@ -231,7 +329,18 @@ function createDocumentParser(
   let runProperties: { depth: number; styled: boolean } | undefined;
   let terminalSectionSeen = false;
   let terminalSection: { depth: number; attributeCount: number; descendantCount: number } | undefined;
-  let paragraph: { text: string; style: string | undefined } | undefined;
+  // Every `w:p` start tag of the part takes the next index, whether it is read or skipped, so an
+  // index names exactly one element of `word/document.xml` (ADR 0086 §3).
+  let nextParagraphIndex = 0;
+  let paragraph: OpenParagraph | undefined;
+  let textBox: { record: ParsedTextBox; depth: number } | undefined;
+  let boxParagraph: OpenParagraph | undefined;
+  let boxParagraphCount = 0;
+  const textBoxes: ParsedTextBox[] = [];
+  // A drawing (`w:drawing`, `w:pict`) that holds a text box counts as that text box, never as an image.
+  const drawings: Array<{ depth: number; holdsTextBox: boolean }> = [];
+  const alternates: Array<{ depth: number; choiceRead: boolean }> = [];
+  let skippedFrom: number | undefined;
   let xmlTokenCodeUnits = 0;
   let inXmlMarkup = false;
   let xmlMarkupQuote: '"' | "'" | undefined;
@@ -260,17 +369,21 @@ function createDocumentParser(
     }
   };
 
+  /** Text belongs to the innermost open paragraph: a text box's own, while one is open. */
+  const openParagraph = (): OpenParagraph | undefined => (textBox === undefined ? paragraph : boxParagraph);
+
   const appendParagraphText = (addition: string): void => {
-    if (!paragraph || addition.length === 0) return;
+    const target = openParagraph();
+    if (!target || addition.length === 0) return;
     requireDocx(addition.length <= MAX_BLOCK_CODE_UNITS, 'paragraph text chunk exceeds the bounded block size');
     requireDocx(
-      paragraph.text.length <= MAX_BLOCK_CODE_UNITS - addition.length,
+      target.text.length <= MAX_BLOCK_CODE_UNITS - addition.length,
       'paragraph exceeds the bounded block size',
     );
     requireDocx(textCodeUnits <= MAX_TEXT_CODE_UNITS - addition.length, 'document text is too large');
-    const nextText = paragraph.text + addition;
+    const nextText = target.text + addition;
     requireDocx(graphemeCount(nextText) <= MAX_BLOCK_GRAPHEMES, 'paragraph exceeds the bounded block size');
-    paragraph.text = nextText;
+    target.text = nextText;
     textCodeUnits += addition.length;
   };
 
@@ -279,19 +392,43 @@ function createDocumentParser(
   parser.on('processinginstruction', () => requireDocx(false, 'processing instruction in document XML'));
   parser.on('opentag', (tag) => {
     requireDocx(ancestors.length < MAX_XML_NESTING_DEPTH, 'document XML nesting exceeds its safe bound');
+    const sourceParagraphIndex = tag.local === 'p' ? nextParagraphIndex++ : -1;
+    if (skippedFrom !== undefined) {
+      ancestors.push(tag.local);
+      return;
+    }
     const parent = ancestors.at(-1);
     const grandparent = ancestors.at(-2);
     if (terminalSectionSeen && parent === 'body') requireDocx(false, 'terminal section properties are not terminal');
     if (terminalSection && tag.local !== 'sectPr') terminalSection.descendantCount += 1;
     if (runProperties) runProperties.styled = true;
     switch (tag.local) {
+      case 'AlternateContent':
+        alternates.push({ depth: ancestors.length, choiceRead: false });
+        break;
+      case 'Choice':
+      case 'Fallback': {
+        const alternate = alternates.at(-1);
+        if (alternate !== undefined && alternate.depth === ancestors.length - 1) {
+          if (tag.local === 'Choice' && !alternate.choiceRead) alternate.choiceRead = true;
+          else skippedFrom = ancestors.length;
+        }
+        break;
+      }
       case 'p':
-        requireDocx(paragraph === undefined, 'nested paragraph');
-        paragraph = { text: '', style: undefined };
+        if (textBox === undefined) {
+          requireDocx(paragraph === undefined, 'nested paragraph');
+          paragraph = { text: '', style: undefined, sourceParagraphIndex };
+        } else {
+          requireDocx(boxParagraph === undefined, 'nested paragraph');
+          boxParagraph = { text: '', style: undefined, sourceParagraphIndex };
+        }
         break;
-      case 'pStyle':
-        if (paragraph) paragraph.style = attributeValue(tag, 'val');
+      case 'pStyle': {
+        const open = openParagraph();
+        if (open) open.style = attributeValue(tag, 'val');
         break;
+      }
       case 't':
         textDepth += 1;
         break;
@@ -329,7 +466,27 @@ function createDocumentParser(
         break;
       case 'drawing':
       case 'pict':
-        signals.imagesCaptions += 1;
+        drawings.push({ depth: ancestors.length, holdsTextBox: false });
+        break;
+      case 'txbxContent': {
+        requireDocx(textBox === undefined, 'nested text box');
+        requireDocx(paragraph !== undefined, 'text box outside a paragraph');
+        requireDocx(textBoxes.length < MAX_TEXT_BOXES, 'too many text boxes');
+        const drawing = drawings.at(-1);
+        if (drawing !== undefined) drawing.holdsTextBox = true;
+        textBox = {
+          record: { boxOrdinal: textBoxes.length + 1, anchorParagraphIndex: paragraph.sourceParagraphIndex, paragraphs: [] },
+          depth: ancestors.length,
+        };
+        signals.textBoxes += 1;
+        break;
+      }
+      case 'fldSimple':
+        signals.fields += 1;
+        break;
+      case 'fldChar':
+        // A complex field is counted once, at its begin mark; its separate and end marks close it.
+        if (attributeValue(tag, 'fldCharType') === 'begin') signals.fields += 1;
         break;
       case 'sectPr':
         if (parent === 'body') {
@@ -348,10 +505,14 @@ function createDocumentParser(
     ancestors.push(tag.local);
   });
   parser.on('text', (text) => {
-    if (paragraph && textDepth > 0) appendParagraphText(text);
+    if (skippedFrom === undefined && textDepth > 0) appendParagraphText(text);
   });
   parser.on('closetag', (tag) => {
     requireDocx(ancestors.pop() === tag.local, 'document element stack mismatch');
+    if (skippedFrom !== undefined) {
+      if (ancestors.length === skippedFrom) skippedFrom = undefined;
+      return;
+    }
     if (tag.local === 't') textDepth -= 1;
     if (tag.local === 'rPr') {
       requireDocx(runProperties?.depth === ancestors.length, 'run properties state mismatch');
@@ -363,30 +524,59 @@ function createDocumentParser(
       terminalSectionSeen = true;
       terminalSection = undefined;
     }
+    if (tag.local === 'AlternateContent' && alternates.at(-1)?.depth === ancestors.length) alternates.pop();
+    if ((tag.local === 'drawing' || tag.local === 'pict') && drawings.at(-1)?.depth === ancestors.length) {
+      if (!drawings.pop()!.holdsTextBox) signals.imagesCaptions += 1;
+    }
+    if (tag.local === 'txbxContent' && textBox?.depth === ancestors.length) {
+      requireDocx(boxParagraph === undefined, 'text box paragraph state mismatch');
+      textBoxes.push(textBox.record);
+      textBox = undefined;
+    }
     if (tag.local !== 'p') return;
+    if (textBox !== undefined) {
+      requireDocx(boxParagraph, 'paragraph state missing');
+      const text = paragraphBlockText(boxParagraph);
+      if (text.length > 0) {
+        const graphemeLength = graphemeCount(text);
+        requireDocx(text.length <= MAX_BLOCK_CODE_UNITS && graphemeLength <= MAX_BLOCK_GRAPHEMES, 'paragraph exceeds the bounded block size');
+        // A merged box paragraph becomes a block, so the body and every box share the block bound.
+        requireDocx(blockCount + boxParagraphCount < MAX_BLOCK_COUNT, 'too many manuscript blocks');
+        const { kind, level } = blockShape(boxParagraph.style);
+        textBox.record.paragraphs.push({
+          boxParagraphOrdinal: textBox.record.paragraphs.length + 1,
+          sourceParagraphIndex: boxParagraph.sourceParagraphIndex,
+          kind,
+          level,
+          text,
+          digest: sha256(canonicalJson({ kind, level, text })),
+          graphemeLength,
+        });
+        boxParagraphCount += 1;
+      }
+      boxParagraph = undefined;
+      return;
+    }
     requireDocx(paragraph, 'paragraph state missing');
-    requireDocx(paragraph.text.isWellFormed(), 'paragraph contains invalid text');
-    const text = paragraph.text.normalize('NFC').replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').trim();
+    const text = paragraphBlockText(paragraph);
     if (text.length > 0) {
       const blockGraphemes = graphemeCount(text);
       requireDocx(text.length <= MAX_BLOCK_CODE_UNITS && blockGraphemes <= MAX_BLOCK_GRAPHEMES, 'paragraph exceeds the bounded block size');
-      requireDocx(blockCount < MAX_BLOCK_COUNT, 'too many manuscript blocks');
-      const style = paragraph.style?.toLocaleLowerCase('en-US') ?? '';
-      const headingMatch = /(?:heading|标题)\s*([1-6])/.exec(style);
-      const kind = style === 'title' || style === '标题' ? 'title' : headingMatch ? 'heading' : 'paragraph';
-      const level = kind === 'title' ? 1 : headingMatch ? Number(headingMatch[1]) : null;
+      requireDocx(blockCount + boxParagraphCount < MAX_BLOCK_COUNT, 'too many manuscript blocks');
+      const { kind, level } = blockShape(paragraph.style);
       const position = blockCount + 1;
       const digest = sha256(canonicalJson({ kind, level, text }));
       const block = {
-        blockId: `blk_${sha256(`${position}\u0000${digest}`).slice(0, 24)}`,
+        blockId: `blk_${sha256(`${position} ${digest}`).slice(0, 24)}`,
         position,
         kind,
         level,
         text,
         digest,
         graphemeLength: blockGraphemes,
+        sourceParagraphIndex: paragraph.sourceParagraphIndex,
       } satisfies ParsedDocxBlock;
-      if (blockCount > 0) contentHash.update('\u001e');
+      if (blockCount > 0) contentHash.update('');
       contentHash.update(text);
       if (blockCount > 0) structureHash.update(',');
       structureHash.update(canonicalJson({ blockId: block.blockId, position, kind, level, digest }));
@@ -421,7 +611,9 @@ function createDocumentParser(
     finish() {
       requireDocx(closed, 'document XML stream incomplete');
       requireDocx(
-        paragraph === undefined && textDepth === 0 && ancestors.length === 0 && runProperties === undefined && terminalSection === undefined,
+        paragraph === undefined && boxParagraph === undefined && textBox === undefined && skippedFrom === undefined &&
+          drawings.length === 0 && alternates.length === 0 && textDepth === 0 && ancestors.length === 0 &&
+          runProperties === undefined && terminalSection === undefined,
         'incomplete document XML state',
       );
       requireDocx(blockCount > 0, 'DOCX contains no editable text blocks');
@@ -431,6 +623,7 @@ function createDocumentParser(
         contentDigest: contentHash.digest('hex'),
         structureDigest: structureHash.update(']').digest('hex'),
         signals,
+        textBoxes,
       };
     },
   };
@@ -562,16 +755,133 @@ function fidelityReport(signals: DocumentSignals, entryNames: string[]): Fidelit
   return buildFidelityReport(signals, entryNames.filter((name) => /^word\/(header|footer)\d*\.xml$/i.test(name)).length);
 }
 
+/** The status a class present in the file carries when its content stays with the Source Version. */
+const RETAINED = { status: 'retained', statusLabel: '完整保留（随文件保留）' } as const;
+const PRESERVED = { status: 'preserved', statusLabel: '完整保留' } as const;
+const DEGRADED = { status: 'degraded', statusLabel: '降级导入' } as const;
+const UNSUPPORTED = { status: 'unsupported', statusLabel: '不支持导入' } as const;
+
+/** What an edit costs a retained class, stated when it is known — at export — and never guessed here. */
+const EDITED_PARAGRAPH_LINE = '改过的段落，导出时逐段说明格式能否原样恢复。';
+
 /**
- * The eight content classes with their counts, labels, and details (V2-UX-IMP-002 to 004). A
- * `conversion` adds its loss to the parser's counts for the classes it kept as literal text and
- * names itself in those classes' details; it never re-classifies one, because the label states what
- * became of the content and not what caused it.
+ * The text-box row's detail under each disposition (ADR 0086 §2): the one class whose detail depends on
+ * a choice, which is why a review is rebuilt from its counts and that choice.
+ */
+const TEXT_BOX_DETAILS: Readonly<Record<TextBoxDisposition, string>> = {
+  retain: '保留为文本框：文本框随来源版本保留，不显示在稿件中，导出时恢复。',
+  merge: '并入正文：文本框中的段落进入稿件，紧接在锚定它的段落之后；导出时不再写出原文本框。',
+};
+
+/**
+ * The ten content classes with their counts, labels, and details (V2-UX-IMP-002 to 004, ADR 0086). Nine
+ * are rows; the tenth, `round-trip-export`, is the closing 预计往返 card and always counts nothing.
+ *
+ * A class present in a natively read file is `完整保留（随文件保留）` when its content stays with the Source
+ * Version and is restored on export — inline styles, tables, images, sections, headers and footers, text
+ * boxes — and `降级导入` when it cannot be retained: notes, until the Manuscript has a note block, and
+ * fields, whose displayed text no longer updates. Comments and revisions stay `不支持导入` until S62.
+ *
+ * A `conversion` adds its loss to the parser's counts and names itself in those classes' details. What a
+ * converter lost is not in the working representation, so it cannot be retained: such a class keeps the
+ * label it carried before ADR 0086, and the two new classes read `降级导入` (ADR 0086 §3).
  */
 export function buildFidelityReport(
   signals: DocumentSignals,
   headersFooters: number,
   conversion?: FidelityConversion,
+  textBoxDisposition: TextBoxDisposition = 'retain',
+): FidelityCategoryProjection[] {
+  const loss = conversion?.loss;
+  const count = {
+    inlineStyles: signals.inlineStyles + (loss?.inlineStyles ?? 0),
+    commentsRevisions: signals.commentsRevisions + (loss?.commentsRevisions ?? 0),
+    notes: signals.notes + (loss?.notes ?? 0),
+    tables: signals.tables + (loss?.tables ?? 0),
+    imagesCaptions: signals.imagesCaptions + (loss?.imagesCaptions ?? 0),
+    sections: signals.sections + (loss?.sections ?? 0),
+    headersFooters: headersFooters + (loss?.headersFooters ?? 0),
+    textBoxes: signals.textBoxes + (loss?.textBoxes ?? 0),
+    fields: signals.fields + (loss?.fields ?? 0),
+  };
+  const phrase = conversion === undefined ? undefined : CONVERSION_LOSS_PHRASES[conversion.identity];
+  requireDocx(conversion === undefined || phrase !== undefined, 'unknown converter identity');
+  const converted = (key: keyof typeof count): boolean => conversion !== undefined && loss![key] > 0;
+  /**
+   * One class: `absent` when it counts nothing; otherwise the converter's loss when a conversion
+   * carried it, or the native reading when the parser found it.
+   */
+  const row = (
+    key: FidelityCategoryKey,
+    label: string,
+    signal: keyof typeof count,
+    absent: string,
+    native: { status: typeof RETAINED | typeof DEGRADED | typeof UNSUPPORTED; detail: string },
+    lost: { status: typeof DEGRADED | typeof UNSUPPORTED; detail: string },
+  ): FidelityCategoryProjection => {
+    const total = count[signal];
+    if (total === 0) return { key, label, count: 0, ...PRESERVED, detail: absent };
+    if (converted(signal)) {
+      return { key, label, count: total, ...lost.status, detail: `由 ${conversion!.identity} 从 ${conversion!.sourceFormat} ${phrase}：${lost.detail}` };
+    }
+    return { key, label, count: total, ...native.status, detail: native.detail };
+  };
+  return [
+    row('inline-styles', '行内样式', 'inlineStyles', '未检测到行内样式。',
+      {
+        status: RETAINED,
+        detail: `检测到字体、字号、粗体、颜色等行内样式；稿件只编辑文字，这些样式随来源版本保留，未改过的段落导出时从原文件恢复。${EDITED_PARAGRAPH_LINE}`,
+      },
+      { status: DEGRADED, detail: '行内样式没有成为可编辑格式；可编辑内容块只保留文字，导出无法恢复这些样式。' }),
+    row('comments-revisions', '批注与修订', 'commentsRevisions', '未检测到批注或修订标记。',
+      { status: UNSUPPORTED, detail: '本次受限导入不导入批注或修订标记。' },
+      { status: UNSUPPORTED, detail: '本次受限导入不导入批注或修订标记。' }),
+    row('notes', '脚注与尾注', 'notes', '未检测到脚注或尾注。',
+      {
+        status: DEGRADED,
+        detail: '稿件中既不显示脚注或尾注的引用标记，也不显示注文；注文随来源版本保留，稿件有注释块之前不能在稿件中编辑。未改过的段落导出时连同注释从原文件恢复。',
+      },
+      { status: UNSUPPORTED, detail: '本次受限导入不导入脚注或尾注。' }),
+    row('tables', '表格', 'tables', '未检测到表格。',
+      {
+        status: RETAINED,
+        detail: `单元格文字按阅读顺序作为段落进入稿件；表格结构随来源版本保留，未改过的段落导出时从原文件恢复。${EDITED_PARAGRAPH_LINE}`,
+      },
+      { status: DEGRADED, detail: '表格结构没有进入工作表示；稿件中只有其文字，导出无法恢复表格结构。' }),
+    row('images-captions', '图片与图注', 'imagesCaptions', '未检测到图片或图注。',
+      { status: RETAINED, detail: '图片随来源版本保留，导出时恢复；图注作为文字留在稿件中，稿件暂不显示图片占位。' },
+      { status: DEGRADED, detail: '图片没有进入工作表示，稿件中不含图片，导出无法恢复。' }),
+    row('sections', '分节（含页面设置）', 'sections', '未检测到分节或页面设置；正文按单一连续稿件顺序导入。',
+      { status: RETAINED, detail: '页尺寸、页边距、分栏与文档网格等分节设置随来源版本保留，导出时恢复；稿件按单一连续顺序编辑正文。' },
+      { status: DEGRADED, detail: '分节与页面设置没有进入工作表示；正文按单一连续稿件顺序导入，导出无法恢复原分节版式。' }),
+    row('headers-footers', '页眉与页脚', 'headersFooters', '未检测到页眉或页脚。',
+      { status: RETAINED, detail: '页眉与页脚不进入稿件正文，随来源版本保留，导出时恢复。' },
+      { status: DEGRADED, detail: '页眉与页脚没有进入工作表示，不进入稿件，导出无法恢复。' }),
+    row('text-boxes', '文本框', 'textBoxes', '未检测到文本框。',
+      { status: RETAINED, detail: TEXT_BOX_DETAILS[textBoxDisposition] },
+      { status: DEGRADED, detail: '文本框没有进入工作表示，不进入稿件，导出无法恢复。' }),
+    row('fields', '域（目录等）', 'fields', '未检测到域。',
+      {
+        status: DEGRADED,
+        detail: '目录、交叉引用、超链接等域按当前显示的文字进入稿件，之后不再更新；未改过的段落导出时从原文件恢复，改过的段落在导出保真审阅里逐段说明。',
+      },
+      { status: DEGRADED, detail: '域只保留当前显示的文字，之后不再更新。' }),
+    {
+      key: 'round-trip-export', label: '预计往返', count: 0, ...UNSUPPORTED,
+      detail: 'DOCX 导出将在后续提供。届时从原文件恢复未改过的段落，以及随文件保留的页眉与页脚、页面设置、样式表、图片和保留为文本框的文本框；改过的段落在导出保真审阅里逐段说明能否原样恢复。样式表随文件保留，不单独计数。',
+    },
+  ];
+}
+
+/**
+ * The eight classes exactly as parser identity `ai7-docx-fflate-saxes/1` reported them. Frozen: it
+ * builds nothing new and exists so that a review recorded under revision 1 — staged, committed, or
+ * reimported — still rebuilds byte for byte from its counts. Nothing may change a character of it.
+ */
+function buildFidelityReportV1(
+  signals: DocumentSignalsV1,
+  headersFooters: number,
+  conversion?: FidelityConversionV1,
 ): FidelityCategoryProjection[] {
   const loss = conversion?.loss;
   const count = {
@@ -639,11 +949,12 @@ export function buildFidelityReport(
   ];
 }
 
+const NO_SIGNALS: DocumentSignals = {
+  inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0, textBoxes: 0, fields: 0,
+};
+
 export function isCleanTracerFidelity(fidelity: ReadonlyArray<FidelityCategoryProjection>): boolean {
-  return hasExactFidelityProjection(
-    fidelity,
-    fidelityReport({ inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0 }, []),
-  );
+  return hasExactFidelityProjection(fidelity, fidelityReport(NO_SIGNALS, []));
 }
 
 function hasExactFidelityProjection(value: unknown, expected: readonly FidelityCategoryProjection[]): value is FidelityCategoryProjection[] {
@@ -658,16 +969,9 @@ function hasExactFidelityProjection(value: unknown, expected: readonly FidelityC
   });
 }
 
-/**
- * The report the eight categories would carry for these counts, or `undefined` when the counts are
- * not readable. A converted report is rebuilt from the other side of the same addition: the parser
- * contributed nothing, so every count is the conversion's loss.
- */
-function reportForCandidateCounts(
-  value: unknown,
-  conversion?: FidelityConversionIdentity,
-): FidelityCategoryProjection[] | undefined {
-  if (!Array.isArray(value) || value.length !== 8) return undefined;
+/** The row counts of a candidate report, or `undefined` when a row carries no readable count. */
+function candidateCounts(value: unknown, rows: number): number[] | undefined {
+  if (!Array.isArray(value) || value.length !== rows) return undefined;
   const counts: number[] = [];
   for (const candidate of value) {
     if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) return undefined;
@@ -675,46 +979,113 @@ function reportForCandidateCounts(
     if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) return undefined;
     counts.push(count);
   }
-  const signals: DocumentSignals = {
-    inlineStyles: counts[0]!, commentsRevisions: counts[1]!, notes: counts[2]!,
-    tables: counts[3]!, imagesCaptions: counts[4]!, sections: counts[5]!,
-  };
-  if (!conversion) return buildFidelityReport(signals, counts[6]!);
-  // A converter this build cannot phrase is not one whose report this build can rebuild.
-  if (CONVERSION_LOSS_PHRASES[conversion.identity] === undefined) return undefined;
-  return buildFidelityReport(
-    { inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0 },
-    0,
-    { ...conversion, loss: { ...signals, headersFooters: counts[6]! } },
-  );
+  return counts;
 }
 
 /**
- * Plans any well-formed fidelity report (ADR 0072 §4): a report whose eight categories carry the keys,
- * labels, statuses, status labels, details, and non-negative integer counts `fidelityReport` would emit
- * yields `clean-import-no-round-trip` when every count is zero and `degraded-import-no-round-trip`
- * otherwise, listing every category with a positive count in report order — `不支持导入` classes
- * included, because the editor accepts them in the same Import Degradation Decision. Anything that is
- * not such a report yields `undefined`. `sourceDigest` and `sourceBytes` no longer decide anything and
- * are kept only so the store's and the reimport path's call sites do not move.
+ * Every report the classes could carry for these counts under `parserIdentity`, each with the text-box
+ * disposition it states; empty when the counts are not readable or the identity is not one this build
+ * can rebuild. A converted report is rebuilt from the other side of the same addition: the parser
+ * contributed nothing, so every count is the conversion's loss.
+ */
+function reportsForCandidateCounts(
+  value: unknown,
+  conversion: FidelityConversionIdentity | undefined,
+  parserIdentity: string,
+): Array<{ report: FidelityCategoryProjection[]; textBoxDisposition: TextBoxDisposition | null }> {
+  // A converter this build cannot phrase is not one whose report this build can rebuild.
+  if (conversion !== undefined && CONVERSION_LOSS_PHRASES[conversion.identity] === undefined) return [];
+  if (parserIdentity === DOCX_PARSER_IDENTITY_V1) {
+    const counts = candidateCounts(value, 8);
+    if (counts === undefined) return [];
+    const signals: DocumentSignalsV1 = {
+      inlineStyles: counts[0]!, commentsRevisions: counts[1]!, notes: counts[2]!,
+      tables: counts[3]!, imagesCaptions: counts[4]!, sections: counts[5]!,
+    };
+    const report = conversion === undefined
+      ? buildFidelityReportV1(signals, counts[6]!)
+      : buildFidelityReportV1(
+        { inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0 },
+        0,
+        { ...conversion, loss: { ...signals, headersFooters: counts[6]! } },
+      );
+    return [{ report, textBoxDisposition: null }];
+  }
+  if (parserIdentity !== DOCX_PARSER_IDENTITY) return [];
+  const counts = candidateCounts(value, 10);
+  if (counts === undefined) return [];
+  const signals: DocumentSignals = {
+    inlineStyles: counts[0]!, commentsRevisions: counts[1]!, notes: counts[2]!, tables: counts[3]!,
+    imagesCaptions: counts[4]!, sections: counts[5]!, textBoxes: counts[7]!, fields: counts[8]!,
+  };
+  if (conversion !== undefined) {
+    const { textBoxes, fields, ...rest } = signals;
+    return [{
+      report: buildFidelityReport(NO_SIGNALS, 0, {
+        ...conversion,
+        loss: { ...rest, headersFooters: counts[6]!, textBoxes, fields },
+      }),
+      textBoxDisposition: null,
+    }];
+  }
+  if (signals.textBoxes === 0) return [{ report: buildFidelityReport(signals, counts[6]!), textBoxDisposition: null }];
+  return (['retain', 'merge'] as const).map((disposition) => ({
+    report: buildFidelityReport(signals, counts[6]!, undefined, disposition),
+    textBoxDisposition: disposition,
+  }));
+}
+
+/**
+ * Plans any well-formed fidelity report (ADR 0072 §4, ADR 0086). A report whose classes carry the keys,
+ * labels, statuses, status labels, details, and non-negative integer counts the builder of its parser
+ * identity would emit — the ten classes of `ai7-docx-fflate-saxes/2`, or the frozen eight of `/1` — yields
+ * `degraded-import-no-round-trip` when some class is `降级导入` or `不支持导入` with a positive count, listing
+ * each such class in report order, and `clean-import-no-round-trip` otherwise: a class retained with the
+ * file asks for no Import Degradation Decision. Anything that is not such a report yields `undefined`.
+ * `sourceDigest` and `sourceBytes` no longer decide anything and are kept only so the store's and the
+ * reimport path's call sites do not move.
  *
- * A report a converter's loss was merged into is planned by passing the same `conversion` its
- * details name (ADR 0072 §3): without it the merged details do not reconstruct and the report
- * refuses as malformed, so a converted review can never be read back as if it had been parsed.
+ * A report a converter's loss was merged into is planned by passing the same `conversion` its details
+ * name (ADR 0072 §3): without it the merged details do not reconstruct and the report refuses as
+ * malformed, so a converted review can never be read back as if it had been parsed. A revision-2 report
+ * of a natively read file with text boxes rebuilds under exactly one disposition, which the plan states.
  */
 export function deriveImportFidelityPlan(
   fidelity: unknown,
   sourceDigest: string,
   sourceBytes: number,
   conversion?: FidelityConversionIdentity,
+  parserIdentity: string = DOCX_PARSER_IDENTITY,
 ): ImportFidelityPlan | undefined {
-  const expected = reportForCandidateCounts(fidelity, conversion);
-  if (expected === undefined || !hasExactFidelityProjection(fidelity, expected)) return undefined;
-  const degradations = fidelity.filter((category) => category.count > 0)
+  const match = reportsForCandidateCounts(fidelity, conversion, parserIdentity)
+    .find((candidate) => hasExactFidelityProjection(fidelity, candidate.report));
+  if (match === undefined) return undefined;
+  const degradations = match.report
+    .filter((category) => (category.status === 'degraded' || category.status === 'unsupported') && category.count > 0)
     .map((category) => ({ categoryKey: category.key, label: category.label, count: category.count }));
-  return degradations.length === 0
-    ? { outcome: 'clean-import-no-round-trip', degradations: [] }
-    : { outcome: 'degraded-import-no-round-trip', degradations };
+  return {
+    outcome: degradations.length === 0 ? 'clean-import-no-round-trip' : 'degraded-import-no-round-trip',
+    degradations,
+    textBoxDisposition: match.textBoxDisposition,
+  };
+}
+
+/**
+ * The same report stating `disposition` for its text boxes (ADR 0086 §2), or `undefined` when `fidelity`
+ * is not a report this build can rebuild or the choice is not one it can state: only a revision-2
+ * report of a natively read file with a text box can be merged, and any other keeps its text boxes, if
+ * it has any, as they are.
+ */
+export function withTextBoxDisposition(
+  fidelity: unknown,
+  disposition: TextBoxDisposition,
+  conversion?: FidelityConversionIdentity,
+  parserIdentity: string = DOCX_PARSER_IDENTITY,
+): FidelityCategoryProjection[] | undefined {
+  const candidates = reportsForCandidateCounts(fidelity, conversion, parserIdentity);
+  if (!candidates.some((candidate) => hasExactFidelityProjection(fidelity, candidate.report))) return undefined;
+  const chosen = candidates.find((candidate) => (candidate.textBoxDisposition ?? 'retain') === disposition);
+  return chosen?.report;
 }
 
 export async function parseDocx(
@@ -749,6 +1120,7 @@ export async function parseDocx(
     blockCount: archive.document.blockCount,
     characterCount: archive.document.characterCount,
     fidelity,
+    textBoxes: archive.document.textBoxes,
     titleSuggestion,
   };
 }

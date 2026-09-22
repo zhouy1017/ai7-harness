@@ -44,6 +44,8 @@ const NO_LOSS: ConversionLoss = {
   imagesCaptions: 0,
   sections: 0,
   headersFooters: 0,
+  textBoxes: 0,
+  fields: 0,
 };
 
 let sandbox: string;
