@@ -29,6 +29,12 @@ type GateResult = {
 const queue = (await import(new URL('../../tools/nightly-queue.mjs', import.meta.url).href)) as {
   selectCandidates: (records: readonly QueueRecord[]) => readonly Candidate[];
   assembleCandidateSet: (records: readonly QueueRecord[]) => CandidateSet;
+  pendingMergeability: (records: readonly QueueRecord[]) => readonly number[];
+  listUntilAnswered: (
+    list: () => readonly QueueRecord[],
+    waitFor: (pending: readonly number[]) => void,
+    attempts?: number,
+  ) => { listed: readonly QueueRecord[]; pending: readonly number[]; asked: number };
   toMatrix: (set: CandidateSet) => { include: ReadonlyArray<{ number: number; merge: boolean }> };
   ownerReservation: (files: readonly { path: string; text?: string }[]) => { kind: string; path: string } | null;
   adrStatus: (text: string) => string | null;
@@ -75,6 +81,81 @@ const ACCEPTED_ADR = {
   path: 'docs/adr/0079-record-the-owner-s-decisions-of-2026-09-10.md',
   text: '---\nstatus: accepted\ndate: 2026-09-10\n---\n\n# 0079 · Record the Owner decisions\n',
 };
+
+// GitHub computes `mergeable` lazily and a listing is what asks, so the first answer of a night is
+// `UNKNOWN`; the listing asks again while any candidate is still unanswered (Issue #507).
+describe('waiting for GitHub to state mergeability', () => {
+  it('waits for an open, non-draft pull request against dev whose answer has not come', () => {
+    expect(queue.pendingMergeability([record({ number: 42, mergeable: 'UNKNOWN' })])).toEqual([42]);
+  });
+
+  it('waits for none of a draft, a pull request aimed elsewhere, or one already answered', () => {
+    expect(
+      queue.pendingMergeability([
+        record({ number: 1, mergeable: 'UNKNOWN', isDraft: true }),
+        record({ number: 2, mergeable: 'UNKNOWN', baseRefName: 'main' }),
+        record({ number: 3, mergeable: 'MERGEABLE' }),
+        record({ number: 4, mergeable: 'CONFLICTING' }),
+      ]),
+    ).toEqual([]);
+  });
+
+  it('names every unanswered pull request, ascending, so the wait says what it waits for', () => {
+    expect(
+      queue.pendingMergeability([
+        record({ number: 9, mergeable: 'UNKNOWN' }),
+        record({ number: 4, mergeable: 'MERGEABLE' }),
+        record({ number: 7, mergeable: 'UNKNOWN' }),
+      ]),
+    ).toEqual([7, 9]);
+  });
+
+  it('asks again until the answer comes, and waits only for what is unanswered', () => {
+    const answers = [
+      [record({ number: 7, mergeable: 'UNKNOWN' }), record({ number: 9, mergeable: 'UNKNOWN' })],
+      [record({ number: 7, mergeable: 'MERGEABLE' }), record({ number: 9, mergeable: 'UNKNOWN' })],
+      [record({ number: 7, mergeable: 'MERGEABLE' }), record({ number: 9, mergeable: 'MERGEABLE' })],
+    ];
+    const waited: readonly number[][] = [];
+    const outcome = queue.listUntilAnswered(
+      () => answers.shift() ?? [],
+      (pending) => { (waited as number[][]).push([...pending]); },
+    );
+    expect(outcome.asked).toBe(3);
+    expect(waited).toEqual([[7, 9], [9]]);
+    expect(outcome.pending).toEqual([]);
+    expect(queue.assembleCandidateSet(outcome.listed).count).toBe(2);
+  });
+
+  it('asks once when the first answer is already there', () => {
+    let listings = 0;
+    const outcome = queue.listUntilAnswered(
+      () => { listings += 1; return [record({ number: 3 })]; },
+      () => { throw new Error('nothing was unanswered, so nothing may be waited for'); },
+    );
+    expect([listings, outcome.asked]).toEqual([1, 1]);
+  });
+
+  it('stops asking after the bounded attempts and hands the night what it has', () => {
+    let listings = 0;
+    const outcome = queue.listUntilAnswered(
+      () => { listings += 1; return [record({ number: 3 }), record({ number: 8, mergeable: 'UNKNOWN' })]; },
+      () => undefined,
+      4,
+    );
+    expect([listings, outcome.asked]).toEqual([4, 4]);
+    expect(outcome.pending).toEqual([8]);
+    const set = queue.assembleCandidateSet(outcome.listed);
+    expect(set.count).toBe(1);
+    expect(set.unmergeable).toEqual([{ number: 8, reason: 'unknown' }]);
+  });
+
+  it('leaves a pull request still unanswered to the next night, as it did before', () => {
+    const set = queue.assembleCandidateSet([record({ number: 7, mergeable: 'UNKNOWN' })]);
+    expect(set.count).toBe(0);
+    expect(set.unmergeable).toEqual([{ number: 7, reason: 'unknown' }]);
+  });
+});
 
 describe('the nightly merge queue filter', () => {
   it('lists an open, mergeable, non-draft pull request against dev', () => {
