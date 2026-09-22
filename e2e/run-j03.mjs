@@ -1088,9 +1088,12 @@ async function main() {
     await assertRenderer(renderer, `!document.querySelector('#task-drawer [data-task-authorization-action]') && Array.from(document.querySelectorAll('#task-drawer button')).filter((button)=>!button.disabled).map((button)=>button.dataset.taskDrawerControl).sort().join(',')==='close,mode-compact,mode-full,run-link' && document.activeElement?.dataset.taskDrawerControl==='run-link' && ${AUTHORIZE_LABELED_BUTTONS}===0`, 'drawer-records-nothing');
 
     at('drawer-run-link');
-    // 查看运行记录 leads to the record's own surface — 工作概览's card — and the drawer stays beside it.
+    // 查看运行记录 leads to the record's own surface — 工作概览's card — and the drawer stays beside it. The
+    // page on screen is remembered first, so only the page the link opened, with its card read, counts.
+    await assertRenderer(renderer, `(() => { const page=document.querySelector('.book-overview'); if(!(page instanceof HTMLElement))return false; globalThis.__j03PageBeforeRunLink=page; return true; })()`, 'run-link-page-before');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="run-link"]', 'run-link-click');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-book-id=${JSON.stringify(imported.bookId)}]') && document.querySelector('[data-task-authorization-terminal="recorded-not-dispatched"]')?.textContent==='已记录授权 · 未派发' && document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started'`, 'run-link-overview');
+    await waitFor(renderer, `(() => { const page=document.querySelector('[data-screen="book-overview"] .book-overview[data-book-id=${JSON.stringify(imported.bookId)}]'); return page instanceof HTMLElement && page!==globalThis.__j03PageBeforeRunLink && page.querySelector('[data-task-authorization-terminal="recorded-not-dispatched"]')?.textContent==='已记录授权 · 未派发' && page.querySelector('[data-task-authorization-action="inspect-foreground-boundary"]') instanceof HTMLButtonElement && document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started'; })()`, 'run-link-overview');
+    await assertRenderer(renderer, `delete globalThis.__j03PageBeforeRunLink`, 'run-link-page-forget');
 
     at('foreground-boundary-check');
     await assertRenderer(renderer, `document.querySelector('[data-task-authorization-action="inspect-foreground-boundary"]')?.textContent==='核对前台执行边界（不派发）'`, 'foreground-boundary-action-visible');
