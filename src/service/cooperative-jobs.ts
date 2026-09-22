@@ -116,7 +116,7 @@ export class CooperativeJobOwner {
         progress: {
           completed: work.done ? work.total : 0,
           total: work.total,
-          label: work.done ? '任务授权计划准备完成' : '正在有界准备任务输入固定点…',
+          label: work.done ? '任务计划已准备' : '正在为任务保存修订版…',
         },
         result: work.projection,
         failure: null,
@@ -151,7 +151,7 @@ export class CooperativeJobOwner {
         progress: {
           completed: work.done ? work.total : 0,
           total: work.total,
-          label: work.done ? '基线稿件分析计划准备完成' : '正在有界固定任务输入并派生覆盖清单…',
+          label: work.done ? '基线分析的任务计划已准备' : '正在为任务保存修订版并整理阅读范围…',
         },
         result: work.projection,
         failure: null,
@@ -337,9 +337,9 @@ export class CooperativeJobOwner {
           label: job.projection.kind === 'reimport-preparation'
             ? '重新导入比较准备已取消'
             : job.projection.kind === 'task-authorization-preparation'
-              ? '任务授权计划准备已取消'
+              ? '任务计划准备已取消'
             : job.projection.kind === 'baseline-analysis-preparation'
-              ? '基线稿件分析计划准备已取消'
+              ? '基线分析的任务计划准备已取消'
             : job.projection.kind === 'review-run-preparation'
               ? '审阅计划准备已取消'
             : job.projection.kind === 'reimport-resolution'
@@ -442,7 +442,7 @@ export class CooperativeJobOwner {
           progress: {
             completed: progress.completed,
             total: progress.total,
-            label: progress.done ? '任务授权计划准备完成' : '正在有界准备任务输入固定点…',
+            label: progress.done ? '任务计划已准备' : '正在为任务保存修订版…',
           },
           result: progress.projection,
         };
@@ -457,7 +457,7 @@ export class CooperativeJobOwner {
           progress: {
             completed: progress.completed,
             total: progress.total,
-            label: progress.done ? '基线稿件分析计划准备完成' : '正在有界固定任务输入并派生覆盖清单…',
+            label: progress.done ? '基线分析的任务计划已准备' : '正在为任务保存修订版并整理阅读范围…',
           },
           result: progress.projection,
         };

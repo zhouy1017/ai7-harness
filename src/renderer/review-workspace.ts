@@ -21,6 +21,7 @@ import {
 } from '../shared/protocol.js';
 import { applyOnce } from './manuscript-apply.js';
 import { localInstantLabel } from './plan-preview-labels.js';
+import { taskPlanSummaryLine } from './task-drawer-labels.js';
 import {
   REVIEW_ACTION_LABELS,
   REVIEW_ANCHOR_CHANGED,
@@ -56,7 +57,6 @@ import {
   REVIEW_FILTER_NOTE,
   REVIEW_IGNORE_LABEL,
   REVIEW_IGNORE_NOTE,
-  REVIEW_LEADS_PLAN,
   REVIEW_LEDE,
   REVIEW_NOT_DO,
   REVIEW_NO_FILTERED_FINDINGS,
@@ -66,7 +66,6 @@ import {
   REVIEW_PICK_CHAPTERS,
   REVIEW_PICK_SCOPE,
   REVIEW_PLAN_HEADING,
-  REVIEW_PLAN_TERMS,
   REVIEW_PREPARING_ESCAPE,
   REVIEW_PROGRESS_HEADING,
   REVIEW_QUICK_START_REASON,
@@ -111,9 +110,7 @@ import {
   reviewIgnoreReasonProblem,
   reviewLiveLine,
   reviewManuscriptLine,
-  reviewPlanHeading,
-  reviewPlanIntro,
-  reviewPlanUnits,
+  reviewPlanCategoriesLine,
   reviewPreparationLine,
   reviewQuote,
   reviewReadConsequence,
@@ -183,6 +180,10 @@ export interface MountReviewWorkspaceOptions {
   openManuscript(): Promise<void>;
   /** 回到原文: the manuscript at the finding's block, with the mark's card open when the mark still stands. */
   goToText(target: { manuscriptId: string; branchId: string; blockId: string; markId: string | null }): Promise<void>;
+  /** 查看计划 (S72 D4): a Review Run's plan opens in the Task Drawer beside the destination. */
+  openPlan(reviewRunId: string): void;
+  /** The Run on show was approved: the drawer reads its plan again if it shows it. */
+  planChanged(): void;
 }
 
 type Filters = Omit<ReviewFindingPageRequest, 'findingsAfterOrdinal'>;
@@ -398,6 +399,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   function show(next: ReviewWorkspaceProjection): void {
     const previous = projection;
     projection = next;
+    // The drawer beside 审阅 states where the Run stands; it reads the plan again when that changes.
+    if (previous?.run !== null && previous?.run !== undefined && previous.run.reviewRunId === next.run?.reviewRunId &&
+        previous.run.state !== next.run.state) options.planChanged();
     if (query.reviewRunId === null && next.run !== null) query.reviewRunId = next.run.reviewRunId;
     const key = stableKeyOf(next);
     if (previous !== null && key === stableKey && card?.isConnected === true) {
@@ -693,31 +697,24 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     return section;
   }
 
+  /**
+   * A prepared Run's plan (S72 D4): one line naming it and 查看计划, which opens every category's plan in
+   * the Task Drawer. The one approval stays here until S74 brings the authorization bar into the drawer.
+   */
   function renderPlan(run: ReviewRunProjection): HTMLElement {
-    const section = el('section', 'review-plans');
-    section.append(el('h5', undefined, REVIEW_PLAN_HEADING), el('p', undefined, reviewPlanIntro(run.categories.length)));
+    const section = el('section', 'review-plans task-plan-summary');
+    section.dataset['reviewCategories'] = run.categories.map((category) => category.categoryId).join(',');
+    const open = actionButton('view-plan', 'secondary', () => options.openPlan(run.reviewRunId));
+    open.dataset['taskPlanOpen'] = 'review-run';
+    open.setAttribute('aria-controls', 'task-drawer');
+    section.append(
+      el('h5', undefined, REVIEW_PLAN_HEADING),
+      el('p', 'task-plan-summary-line', taskPlanSummaryLine([reviewPlanCategoriesLine(run.categories.length), run.scope.label, `任务输入修订版 ${run.manuscript.revisionLabel}`])),
+      open,
+    );
+    // A category that cannot go ahead says so here too: it is what the one approval would be refused for.
     for (const category of run.categories) {
-      const plan = el('section', 'review-plan');
-      plan.dataset['reviewCategory'] = category.categoryId;
-      if (category.planEnvelopeDigest !== null) plan.dataset['planEnvelopeDigest'] = category.planEnvelopeDigest;
-      plan.append(el('h6', undefined, reviewPlanHeading(category)), el('p', 'review-category-basis', category.basisStatement));
-      const facts = el('dl', 'review-facts');
-      if (category.plan === null) {
-        facts.append(el('dt', undefined, REVIEW_PLAN_TERMS[0]), el('dd', undefined, category.taskIntentId === null ? REVIEW_LEADS_PLAN : category.stateLabel));
-      } else {
-        const values = [reviewPlanUnits(category.plan), category.plan.taskInputRevisionLabel, category.plan.routeLabel, category.plan.providerStatusLabel, category.plan.budgetCeilingLabel];
-        REVIEW_PLAN_TERMS.forEach((term, index) => facts.append(el('dt', undefined, term), el('dd', undefined, values[index] ?? '')));
-      }
-      plan.append(facts);
-      if (category.detail !== null) plan.append(el('p', 'attention-note', category.detail));
-      if (category.taskIntentId !== null) {
-        plan.append(options.technicalDetails(
-          'review-facts',
-          el('dt', undefined, '计划权限边界'), el('dd', 'technical-identity', category.planEnvelopeDigest ?? '无'),
-          el('dt', undefined, '任务'), el('dd', 'technical-identity', category.taskIntentId),
-        ));
-      }
-      section.append(plan);
+      if (category.detail !== null) section.append(el('p', 'attention-note', `${category.label}：${category.detail}`));
     }
     section.append(el('p', 'review-authorize-note', REVIEW_AUTHORIZE_NOTE));
     const actions = el('div', 'button-row review-plan-actions');
@@ -1415,6 +1412,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       await api.authorizeReviewRun({ reviewRunId: run.reviewRunId, planDigests });
       options.setStatus(REVIEW_STATUS_LINES.authorized, 'success');
       focusRunHeading = true;
+      options.planChanged();
     });
   }
 
@@ -1680,9 +1678,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (sheet.open) sheet.close();
       generation += 1;
       stableKey = '';
-      focusRunHeading = true;
       if (host.isConnected) show(result);
       options.setStatus(REVIEW_STATUS_LINES.prepared, 'success');
+      // S72 D4: 先看计划 opens the plan the preparation froze in the Task Drawer, which takes focus; closing
+      // it brings focus back to this Run's 查看计划.
+      options.openPlan(result.run.reviewRunId);
     } catch (error) {
       if (destroyed) return;
       state.job = null;

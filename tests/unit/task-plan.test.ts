@@ -7,6 +7,7 @@ import {
   budgetCeilingLabel,
   driftEntry,
   groupedCount,
+  pinReading,
   positionLabel,
   readRange,
 } from '../../src/service/task-plan.js';
@@ -75,6 +76,14 @@ describe('the words the ceiling, the account limit and the boundary are fixed to
     expect(budgetCeilingLabel({ kind: 'tokens', maxTotalTokens: 30000 })).toBe('任务运行预算上限：30,000 tokens');
     expect(ACCOUNT_LIMIT_UNKNOWN).toBe('未知 · 提供方未返回');
     for (const text of [BUDGET_NOT_SET, ACCOUNT_LIMIT_UNKNOWN]) expect(text).not.toMatch(/^0$|免费|无限/u);
+  });
+
+  it('reads the Provider Processing pin byte for byte as the frozen plan always did, whatever the scope', () => {
+    // Captured from the J-03 card's plan preview before the plan moved into the drawer (Issue #418).
+    expect(pinReading({ operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 }))
+      .toBe('development-ci · v1 · 拒绝 · 0 次实时传输');
+    expect(pinReading({ operationalScope: 'developer-live', version: 'v5', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' }))
+      .toBe('developer-live · v5 · eligible-only · bounded-by-run 次实时传输');
   });
 
   it('locks the three groups the authorization rules fix (PLAN-004)', () => {

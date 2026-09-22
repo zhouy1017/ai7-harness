@@ -7,7 +7,6 @@ import type {
   BaselineAnalysisSelectedRange,
   BaselineAnalysisUpdateMode,
   BaselineAnalysisUpdateRequest,
-  PlanBoundarySplitProjection,
   PlanRevisionDiffValue,
   BookCreationReviewProjection,
   BookManuscriptAnchorProjection,
@@ -43,6 +42,7 @@ import type {
   StagedImportProjection,
   StartupProjection,
   TaskAuthorizationProjection,
+  TaskPlanKind,
 } from '../shared/protocol.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
@@ -70,6 +70,16 @@ import { mountBoundedEditor, type BoundedEditor, type EditorContinuity } from '.
 import { mountEditorialMarks, type EditorialMarksSurface } from './editorial-marks.js';
 import { mountPositionRail, type PositionRail } from './position-rail.js';
 import { mountReviewWorkspace, type ReviewFocus, type ReviewWorkspaceSurface } from './review-workspace.js';
+import { mountTaskDrawer } from './task-drawer.js';
+import {
+  TASK_DRAWER_TITLE,
+  TASK_PLAN_DRIFT_COLUMNS,
+  TASK_PLAN_DRIFT_HEADING,
+  TASK_PLAN_DRIFT_VIEW,
+  TASK_PLAN_MATERIALITY_LABELS,
+  TASK_PLAN_OPEN,
+  taskPlanSummaryLine,
+} from './task-drawer-labels.js';
 import {
   REVIEW_ACTION_LABELS,
   REVIEW_CARD_HEADING,
@@ -81,6 +91,7 @@ import {
   reviewOverviewLine,
 } from './review-labels.js';
 import {
+  ANALYSIS_EDITORIAL_NOT_DO,
   ANALYSIS_ENTITY_KIND_LABELS,
   RUN_LIVENESS_STAGE_LABELS,
   RUN_REPORT_CLASSIFICATION_LABELS,
@@ -94,9 +105,6 @@ import {
   elapsedLabel,
   launchPolicyIntegritySentence,
   localInstantLabel,
-  providerProcessingLabel,
-  remoteBindingPolicyReading,
-  remoteBindingRowLabel,
   runBudgetCeilingLabel,
   runReportUnitsSentence,
   runStepIsStale,
@@ -112,6 +120,39 @@ function requiredElement(selector: string): HTMLElement {
 const screen = requiredElement('#screen');
 const persistenceStatus = requiredElement('#persistence-status');
 if (!window.ai7) throw new Error('AI7_RENDERER_BOOTSTRAP_INVALID');
+
+/**
+ * The one supporting side slot (IA › 右缘一列: only one supporting side surface expands at a time). The
+ * manuscript's 导航 registers how to close itself while it is on screen, and the Task Drawer closes it on
+ * opening; opening 导航 closes the drawer the same way.
+ */
+let closeNavigation: (() => void) | null = null;
+
+/**
+ * The Task Drawer (Issue #418, plan slice S72): mounted once, at the shell, beside whichever central
+ * destination of the same Book is on screen (task-drawer.ts). The surfaces that raise a Task only open it.
+ */
+const taskDrawer = mountTaskDrawer({
+  root: requiredElement('#task-drawer'),
+  shell: document.body,
+  api: window.ai7,
+  technicalDetails,
+  errorMessage: rendererErrorMessage,
+  onOpen: () => closeNavigation?.(),
+});
+
+/** Open one Task's plan in the drawer (S72 D4); closing it returns focus to the surface's 查看计划. */
+function openTaskPlan(bookId: string, kind: TaskPlanKind, ref: string | null): void {
+  taskDrawer.open({ bookId, kind, ref }, () => screen.querySelector<HTMLElement>(`[data-task-plan-open="${kind}"]:not(:disabled)`));
+}
+
+/** The 查看计划 a surface offers beside its one-line summary; each surface adds its own action attribute. */
+function taskPlanOpenButton(kind: TaskPlanKind, open: () => void): HTMLButtonElement {
+  const node = button(TASK_PLAN_OPEN, 'secondary', open);
+  node.dataset['taskPlanOpen'] = kind;
+  node.setAttribute('aria-controls', 'task-drawer');
+  return node;
+}
 
 let editor: BoundedEditor | undefined;
 let editorialMarks: EditorialMarksSurface | undefined;
@@ -229,6 +270,7 @@ function applyAuthorityInterruption(): void {
   for (const control of screen.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input')) {
     control.disabled = true;
   }
+  taskDrawer.interrupt();
   if (editor) editor.interrupt();
   else setStatus('本地业务服务已中断；当前业务操作已停止。', 'error');
 }
@@ -244,6 +286,7 @@ function replaceScreen(state: string, content: HTMLElement): void {
   deliverablesSurface = undefined;
   editor?.destroy();
   editor = undefined;
+  closeNavigation = null;
   screen.dataset['screen'] = state;
   screen.replaceChildren(content);
   if (authorityInterrupted) {
@@ -251,6 +294,8 @@ function replaceScreen(state: string, content: HTMLElement): void {
       control.disabled = true;
     }
   }
+  // The drawer stays beside another central destination of the Book whose plan it shows (S72 D3).
+  taskDrawer.followScreen(state, content.dataset['bookId'] ?? null);
 }
 
 function panel(): HTMLElement {
@@ -1523,6 +1568,8 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
       });
       renderEditorWindow(opened, bookTitle, undefined, undefined, target.markId ?? undefined);
     },
+    openPlan: (reviewRunId) => openTaskPlan(bookId, 'review-run', reviewRunId),
+    planChanged: () => taskDrawer.refresh('review-run'),
   });
   const actions = element('div', 'button-row workbench-actions');
   const openManuscript = button(REVIEW_DESTINATION_ACTIONS[0], 'primary', async () => {
@@ -1717,8 +1764,8 @@ function renderBookOverview(
         const unavailable = element('section', 'task-authorization-card attention-note');
         unavailable.dataset['taskAuthorizationState'] = 'unavailable';
         unavailable.append(
-          element('h3', undefined, '任务运行授权'),
-          element('p', undefined, rendererErrorMessage(error, '无法读取本地图书任务授权记录。')),
+          element('h3', undefined, TASK_DRAWER_TITLE),
+          element('p', undefined, rendererErrorMessage(error, '无法读取本地图书的任务记录。')),
         );
         taskHost.replaceChildren(unavailable);
       },
@@ -2429,13 +2476,15 @@ function renderBaselineAnalysisOverview(
   synopsis.append(technical);
 }
 
-/** The frozen reuse plan of an update Task, disclosed in Plan Preview before authorization. */
-function renderReusePlanPreview(card: HTMLElement, projection: BaselineAnalysisProjection): void {
+/**
+ * The frozen reuse plan of an update Task, as the facts the card carries about its Task. What the plan
+ * reuses and recomputes, unit by unit, is part of the plan and reads in the Task Drawer (S72 D4); the
+ * card keeps its counts and digest as attributes, wherever in its tabs the plan's summary is placed.
+ */
+function markReusePlan(card: HTMLElement, projection: BaselineAnalysisProjection): void {
   const update = projection.update;
   if (update === null || update.reusePlan === null) return;
   const plan: AnalysisReusePlanProjection = update.reusePlan;
-  // The plan renders inside 历史与更新 once the Book holds a revision, but what it froze is a fact about
-  // the card's Task, so the readings stay on the card itself wherever the section is placed.
   const owner = card.closest<HTMLElement>('.baseline-analysis-card') ?? card;
   owner.dataset['reusePlanDigest'] = update.reusePlanDigest ?? '';
   owner.dataset['planReused'] = String(plan.counts.reused);
@@ -2443,44 +2492,6 @@ function renderReusePlanPreview(card: HTMLElement, projection: BaselineAnalysisP
   owner.dataset['planInvalidated'] = String(plan.counts.invalidated);
   owner.dataset['planBypassed'] = String(plan.counts.bypassed);
   owner.dataset['planUpdateMode'] = plan.mode;
-  const section = element('section', 'analysis-reuse-plan');
-  section.dataset['reusePlanMode'] = plan.mode;
-  section.append(element('h4', undefined, `复用计划 · ${update.modeLabel}`));
-  const facts = element('dl', 'analysis-facts');
-  // Whether the target is still the latest revision is a decision the editor must weigh before starting
-  // an update, so it stays at full rank; only the identity of that target goes one step away.
-  facts.append(
-    element('dt', undefined, '更新含义'), element('dd', undefined, update.meaning),
-    element('dt', undefined, '目标修订版'), element('dd', undefined, `Revision ${update.predecessor.ordinal} · 绑定 ${update.predecessor.manuscriptPin.revisionLabel}${update.predecessorCurrent ? '' : ' · 已不再是最新修订版'}`),
-    element('dt', undefined, '所选范围'), element('dd', undefined, rangeText(update.selectedRange)),
-    element('dt', undefined, '复用与重算'), element('dd', undefined, reuseCountsText(plan.counts)),
-  );
-  section.append(facts, technicalDetails(
-    'analysis-facts',
-    element('dt', undefined, '目标修订版身份'), element('dd', 'technical-identity', `${update.predecessor.revisionId} · ${update.predecessor.digest}`),
-    element('dt', undefined, '复用计划摘要'), element('dd', 'technical-identity', update.reusePlanDigest ?? ''),
-  ));
-  const list = element('ul', 'analysis-list analysis-reuse-plan-units');
-  for (const unit of plan.units) {
-    const item = element('li', undefined, unit.disposition === 'reused' && unit.reusedFrom !== null
-      ? `单元 ${unit.unitOrdinal} · 内容块 ${unit.startPosition}–${unit.endPosition} · 复用自 Revision ${unit.reusedFrom.revisionOrdinal} / 单元 ${unit.reusedFrom.unitOrdinal}`
-      : `单元 ${unit.unitOrdinal} · 内容块 ${unit.startPosition}–${unit.endPosition} · 重算（${unit.reason}）`);
-    item.dataset['reusePlanUnit'] = String(unit.unitOrdinal);
-    item.dataset['reuseDisposition'] = unit.disposition;
-    item.dataset['reuseReason'] = unit.reason;
-    list.append(item);
-  }
-  section.append(list);
-  const predecessors = element('ul', 'analysis-list analysis-reuse-plan-predecessors');
-  for (const unit of plan.predecessorUnits) {
-    const item = element('li', undefined, `前一修订版单元 ${unit.unitOrdinal}（${unit.state === 'closed' ? '已闭合' : '缺口'}）· ${
-      unit.disposition === 'reused' ? `被单元 ${unit.successorUnitOrdinal} 复用` : unit.disposition === 'bypassed' ? `兼容但被绕过（单元 ${unit.successorUnitOrdinal} 重算）` : '失效'}`);
-    item.dataset['reusePredecessorUnit'] = String(unit.unitOrdinal);
-    item.dataset['reusePredecessorDisposition'] = unit.disposition;
-    predecessors.append(item);
-  }
-  section.append(element('h5', undefined, '前一修订版单元去向'), predecessors);
-  card.append(section);
 }
 
 function diffValueText(value: PlanRevisionDiffValue): string {
@@ -2490,41 +2501,6 @@ function diffValueText(value: PlanRevisionDiffValue): string {
   if ('revisionId' in value) return `Revision ${value.ordinal} · ${value.revisionId} · ${value.digest}`;
   if ('kind' in value) return runBudgetCeilingLabel(value);
   return reuseCountsText(value);
-}
-
-/** The Plan Boundary Split the canonical envelope carries: declared adaptations, material fields, expected participation, and the preview footer. */
-function renderPlanBoundarySplit(card: HTMLElement, boundary: PlanBoundarySplitProjection | null): void {
-  const section = element('section', 'analysis-plan-boundary');
-  section.dataset['planBoundary'] = boundary === null ? 'absent' : 'present';
-  section.append(element('h4', undefined, '计划边界分栏'));
-  if (boundary === null) {
-    section.append(element('p', 'field-note', '该计划信封记录于计划边界分栏存在之前；重新准备后将携带分栏。'));
-    card.append(section);
-    return;
-  }
-  section.dataset['adaptationClasses'] = boundary.adaptable.map((entry) => entry.adaptationClass).join(',');
-  section.dataset['materialFieldCount'] = String(boundary.material.length);
-  const adaptable = element('ul', 'analysis-list analysis-plan-adaptable');
-  for (const entry of boundary.adaptable) {
-    const item = element('li', undefined, `${entry.label}（${entry.adaptationClass}）· ${entry.statement}`);
-    item.dataset['adaptationClass'] = entry.adaptationClass;
-    adaptable.append(item);
-  }
-  const material = element('ul', 'analysis-list analysis-plan-material');
-  for (const entry of boundary.material) {
-    const item = element('li', undefined, entry.label);
-    item.dataset['materialField'] = entry.field;
-    material.append(item);
-  }
-  const participation = element('p', 'analysis-plan-participation', boundary.participation.statement);
-  participation.dataset['participationExpected'] = boundary.participation.expected ? 'true' : 'false';
-  section.append(
-    element('h5', undefined, '运行中可调整'), adaptable,
-    element('h5', undefined, '变化后必须暂停并重新授权'), material,
-    element('h5', undefined, '需要你参与的位置'), participation,
-    element('p', 'field-note analysis-plan-preview-footer', '计划说明，不是运行授权'),
-  );
-  card.append(section);
 }
 
 /** Every plan version of the Task and every Plan Revision between them, immutable and linked. */
@@ -2572,15 +2548,16 @@ function renderPlanRevision(card: HTMLElement, projection: BaselineAnalysisProje
   section.dataset['planRevisionState'] = revision.planRevisionId === null ? 'live' : 'pending';
   section.dataset['planRevisionPrior'] = String(revision.priorOrdinal);
   section.dataset['planRevisionFields'] = revision.changedFields.join(',');
+  // §10: 物质变化 · 计划已被取代 reads 计划的关键内容已变化, and 物质字段 / 派生后果 read 关键内容 / 随之变化.
   section.append(
-    element('h4', undefined, '物质变化 · 计划已被取代'),
-    element('p', undefined, `${revision.label}。原计划预览保持不变且不能被授权；查看修订内容并重新确认计划后，新的计划版本才可授权。`),
+    element('h4', undefined, TASK_PLAN_DRIFT_HEADING),
+    element('p', undefined, `${revision.label}。原计划保持不变，不能再按它开始；查看计划修订并重新确认计划后，新的计划版本才能开始。`),
   );
   const diff = element('div', 'analysis-plan-revision-diff');
   diff.hidden = true;
   const table = element('table', 'analysis-plan-revision-table');
   const head = element('tr');
-  head.append(element('th', undefined, '字段'), element('th', undefined, '原值'), element('th', undefined, '拟定值'), element('th', undefined, '性质'));
+  head.append(...TASK_PLAN_DRIFT_COLUMNS.map((column) => element('th', undefined, column)));
   table.append(head);
   for (const entry of revision.diff) {
     const row = element('tr');
@@ -2590,13 +2567,13 @@ function renderPlanRevision(card: HTMLElement, projection: BaselineAnalysisProje
       element('td', undefined, entry.label),
       element('td', 'technical-identity', diffValueText(entry.prior)),
       element('td', 'technical-identity', diffValueText(entry.proposed)),
-      element('td', undefined, entry.materiality === 'material' ? '物质字段' : '派生后果'),
+      element('td', undefined, TASK_PLAN_MATERIALITY_LABELS[entry.materiality]),
     );
     table.append(row);
   }
   diff.append(table);
   const actions = element('div', 'button-row analysis-actions');
-  const view = button('查看计划修订', 'secondary', () => {
+  const view = button(TASK_PLAN_DRIFT_VIEW, 'secondary', () => {
     diff.hidden = !diff.hidden;
     view.setAttribute('aria-expanded', diff.hidden ? 'false' : 'true');
   });
@@ -2606,7 +2583,7 @@ function renderPlanRevision(card: HTMLElement, projection: BaselineAnalysisProje
   if (projection.actions.canReconfirmPlan) {
     const reconfirm = button('重新确认计划', 'primary', async () => {
       reconfirm.disabled = true;
-      setStatus('正在按拟定的物质输入重新确认计划…', 'busy');
+      setStatus('正在按变化后的关键内容重新确认计划…', 'busy');
       try {
         const mode = projection.taskIntent!.mode;
         const update: BaselineAnalysisUpdateRequest | null = mode === 'first-baseline'
@@ -2620,6 +2597,8 @@ function renderPlanRevision(card: HTMLElement, projection: BaselineAnalysisProje
         if (host.isConnected && completed.result.bookId === host.dataset['analysisBookId']) {
           renderBaselineAnalysis(host, completed.result, bookTitle);
           setStatus(`计划已重新确认为版本 ${completed.result.planVersion?.ordinal ?? '?'}；等待授权。`, 'success');
+          // The next plan version is the plan now: the drawer shows it.
+          openTaskPlan(completed.result.bookId, 'baseline-analysis', completed.result.taskIntent?.taskIntentId ?? null);
         }
       } catch (error) {
         reconfirm.disabled = false;
@@ -2629,7 +2608,7 @@ function renderPlanRevision(card: HTMLElement, projection: BaselineAnalysisProje
     reconfirm.dataset['analysisAction'] = 'reconfirm-plan';
     actions.append(reconfirm);
   } else {
-    section.append(element('p', 'field-note', '该物质变化需要基于最新修订版重新准备更新任务。'));
+    section.append(element('p', 'field-note', '这项变化要基于最新的一份分析重新准备更新任务。'));
   }
   section.append(actions, diff);
   card.append(section);
@@ -2675,7 +2654,7 @@ async function startAnalysisPreparation(
   start.disabled = true;
   for (const other of others) other.disabled = true;
   cancel.hidden = false;
-  setStatus(input.update === null ? '正在有界固定任务输入并派生覆盖清单…' : '正在有界固定任务输入、派生覆盖清单并计算复用计划…', 'busy');
+  setStatus('正在为任务保存修订版…', 'busy');
   try {
     const initial = await window.ai7.prepareBaselineAnalysis(input as Parameters<typeof window.ai7.prepareBaselineAnalysis>[0]);
     cancel.dataset['serviceJobId'] = initial.jobId;
@@ -2695,8 +2674,10 @@ async function startAnalysisPreparation(
     if (host.isConnected && completed.result.bookId === host.dataset['analysisBookId']) {
       renderBaselineAnalysis(host, completed.result, bookTitle);
       setStatus(completed.result.planRevision !== null
-        ? '物质输入已变化：计划已被取代，请查看计划修订并重新确认计划。'
-        : input.update === null ? '覆盖清单已派生，计划已冻结；等待授权。' : '覆盖清单与复用计划已派生，计划已冻结；等待授权。', 'success');
+        ? '计划的关键内容已变化：请查看计划修订并重新确认计划。'
+        : '任务计划已准备；等待授权。', 'success');
+      // S72 D4: 先看计划 opens the plan the preparation froze in the Task Drawer beside ②A.
+      openTaskPlan(completed.result.bookId, 'baseline-analysis', completed.result.taskIntent?.taskIntentId ?? null);
     }
   } catch (error) {
     start.disabled = false;
@@ -2988,7 +2969,7 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
       startAnalysisPreparation(host, bookTitle, { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false }, { start, cancel, others: [] }));
     start.dataset['analysisAction'] = 'prepare';
     actions.append(start, cancel);
-    form.append(label, goal, element('p', 'field-note', '开始后先固定任务输入修订版并派生确定性覆盖清单；不会构造模型请求。'), actions);
+    form.append(label, goal, element('p', 'field-note', '开始后先为任务保存修订版并整理阅读范围，计划在右侧的任务计划里打开；不会构造模型请求。'), actions);
     card.append(form);
     host.replaceChildren(card);
     return;
@@ -3031,62 +3012,47 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
   renderAnalysisUpdateControls(records, projection, host, bookTitle);
   renderAnalysisHistory(records, projection, host, bookTitle);
 
-  const nonEffects = element('ul', 'analysis-list');
-  for (const statement of projection.namedNonEffects) nonEffects.append(element('li', undefined, statement));
-  card.append(element('h4', undefined, '明确不会发生'), nonEffects);
+  // §10: 明确不会发生 reads 不会做 in the editor's words, and the engineer's statements — every one of them,
+  // unabridged — are one step away in 查看技术详情.
+  const notDo = element('ul', 'analysis-list analysis-not-do');
+  for (const statement of ANALYSIS_EDITORIAL_NOT_DO) notDo.append(element('li', undefined, statement));
+  const nonEffects = element('dd', 'technical-identity analysis-named-non-effects', projection.namedNonEffects.join('；'));
+  card.append(element('h4', undefined, '不会做'), notDo, technicalDetails('analysis-facts', element('dt', undefined, '技术性的不会做'), nonEffects));
   host.replaceChildren(card);
+  // The drawer beside ②A states where this Task stands; it reads the plan again when that changes.
+  const previousState = host.dataset['analysisRenderedState'];
+  host.dataset['analysisRenderedState'] = projection.state;
+  if (previousState !== undefined && previousState !== projection.state) taskDrawer.refresh('baseline-analysis');
   if (projection.state === 'admitted' || projection.state === 'executing') refreshLater();
 }
 
-/** The execution route of the frozen plan: the deterministic fixture pin, or the live route's endpoint. */
-function executionRouteLabel(route: NonNullable<BaselineAnalysisProjection['providerResolutionPlan']>['executionRoute']): string {
-  if (route.kind === 'none') return '无（未提供 J-04 本地确定性模型适配器控制）';
-  if (route.kind === 'opencode-go') return `${route.kind} · ${route.model} · ${route.endpoint}`;
-  return `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}`;
-}
-
-/** The frozen plan of the latest Task: checkpoint, manifest, Provider plan, envelope, reuse plan, authorization, Run. */
+/**
+ * The latest Task's plan on ②A (S72 D4): one line naming it and 查看计划, which opens the whole plan in the
+ * Task Drawer. The plan's versions and a pending Plan Revision stay here with 重新确认计划 and the
+ * authorization action, which S74 moves into the drawer's bar; so does the Run the plan was authorized for.
+ */
 function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysisProjection, host: HTMLElement, bookTitle: string): void {
   const checkpoint = projection.checkpoint!;
   const manifest = projection.coverageManifest!;
-  const provider = projection.providerResolutionPlan!;
   const envelope = projection.planEnvelope!;
-  const facts = element('dl', 'analysis-facts');
-  facts.append(
-    element('dt', undefined, '任务目标'), element('dd', undefined, projection.taskIntent!.goal),
-    element('dt', undefined, '更新方式'), element('dd', undefined, projection.taskIntent!.modeLabel),
-    element('dt', undefined, '预期结果'), element('dd', undefined, projection.taskIntent!.expectedOutcome),
-    element('dt', undefined, '任务输入修订版'), element('dd', undefined, checkpoint.revisionLabel),
-    // How much of the manuscript this Run would cover is what the plan costs, so it reads at full rank.
-    element('dt', undefined, '覆盖清单'), element('dd', undefined, `${manifest.units.length} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · 单元预算 ${manifest.parameters.unitBudgetGraphemes} 字素 · 重叠 ${manifest.parameters.overlapBlocks} 块`),
-    element('dt', undefined, '模型角色'), element('dd', undefined, provider.role),
-    element('dt', undefined, remoteBindingRowLabel(provider.remoteBinding.providerProcessing.decision)),
-    element('dd', undefined, `${provider.remoteBinding.providerId} · ${provider.remoteBinding.modelId} · adapter r${provider.remoteBinding.adapterRevision} · config r${provider.remoteBinding.configurationRevision} · 凭据 ${provider.remoteBinding.credentialReadiness} · ${remoteBindingPolicyReading(provider.remoteBinding.providerProcessing)}`),
-    element('dt', undefined, '外发数据类别'), element('dd', undefined, provider.outboundDataCategory),
-    element('dt', undefined, '任务运行预算上限'), element('dd', undefined, runBudgetCeilingLabel(provider.runBudgetCeiling)),
-    element('dt', undefined, '计划版本'), element('dd', undefined, projection.planVersion === null
-      ? '未记录'
-      : `版本 ${projection.planVersion.ordinal} · ${projection.planVersion.state === 'bound' ? '已被运行授权绑定' : projection.planVersion.state === 'current' ? '当前 · 待授权' : '已被取代'}`),
-    element('dt', undefined, '派发状态'), element('dd', undefined, envelope.summary),
+  markReusePlan(card, projection);
+  const range = projection.planVersion?.materialInputs.selectedRange ?? null;
+  const counts = projection.update?.reusePlan?.counts ?? null;
+  const open = taskPlanOpenButton('baseline-analysis', () => openTaskPlan(projection.bookId, 'baseline-analysis', projection.taskIntent!.taskIntentId));
+  open.dataset['analysisAction'] = 'view-plan';
+  const summary = element('section', 'task-plan-summary analysis-plan-summary');
+  summary.append(
+    element('h4', undefined, TASK_DRAWER_TITLE),
+    element('p', 'task-plan-summary-line', taskPlanSummaryLine([
+      projection.taskIntent!.modeLabel,
+      range === null ? '全书' : `第 ${range.startPosition}–${range.endPosition} 段`,
+      counts === null ? `${manifest.units.length} 个阅读范围` : `重新分析 ${counts.recomputed} 个阅读范围，沿用 ${counts.reused} 个`,
+      `任务输入修订版 ${checkpoint.revisionLabel}`,
+      projection.planVersion === null ? '' : `计划版本 ${projection.planVersion.ordinal}`,
+    ])),
+    open,
   );
-  card.append(element('h4', undefined, '覆盖清单与计划预览'), facts, technicalDetails(
-    'analysis-facts',
-    element('dt', undefined, '任务输入修订版身份'), element('dd', 'technical-identity', `${checkpoint.revisionId} · ${checkpoint.revisionDigest}`),
-    element('dt', undefined, '覆盖清单摘要'), element('dd', 'technical-identity', manifest.digest),
-    element('dt', undefined, '执行路由'), element('dd', 'technical-identity', executionRouteLabel(provider.executionRoute)),
-    element('dt', undefined, '提示契约摘要'), element('dd', 'technical-identity', envelope.promptContractDigest),
-    element('dt', undefined, '行为组合摘要'), element('dd', 'technical-identity', envelope.behaviorCompositionDigest),
-    element('dt', undefined, '计划权限边界'), element('dd', 'technical-identity', envelope.digest),
-  ));
-  const unitList = element('ul', 'analysis-list analysis-manifest-units');
-  for (const unit of manifest.units) {
-    const item = element('li', undefined, `单元 ${unit.ordinal} · 结构段 ${unit.sectionOrdinal}${unit.headingText === null ? '' : `「${unit.headingText}」`} ${unit.subUnitIndex}/${unit.subUnitCount} · 内容块 ${unit.startPosition}–${unit.endPosition} · ${unit.graphemes} 字素 · 重叠 ${unit.overlapBlockIds.length} 块`);
-    item.dataset['manifestUnit'] = String(unit.ordinal);
-    unitList.append(item);
-  }
-  card.append(unitList);
-  renderReusePlanPreview(card, projection);
-  renderPlanBoundarySplit(card, envelope.boundary);
+  card.append(summary);
   renderPlanVersions(card, projection);
   if (projection.authorization === null) renderPlanRevision(card, projection, host, bookTitle);
 
@@ -3156,7 +3122,7 @@ function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysi
     runSection.append(runFacts, technicalDetails(
       'analysis-facts',
       element('dt', undefined, '任务运行记录'), element('dd', 'technical-identity', run.runRecordId),
-      element('dt', undefined, '任务运行授权'), element('dd', 'technical-identity', `${projection.authorization!.authorizationId} · 信封 ${projection.authorization!.planEnvelopeDigest}`),
+      element('dt', undefined, '运行授权'), element('dd', 'technical-identity', `${projection.authorization!.authorizationId} · 信封 ${projection.authorization!.planEnvelopeDigest}`),
       ...(run.attempt === null ? [] : [
         element('dt', undefined, '执行尝试'), element('dd', 'technical-identity', run.attempt.attemptId),
         element('dt', undefined, '执行绑定'), element('dd', 'technical-identity', run.attempt.executionBinding === null ? '尚未持久化' : `${run.attempt.executionBinding.bindingDigest} · Session ${run.attempt.executionBinding.harnessSessionId}`),
@@ -3226,7 +3192,7 @@ function renderForegroundExecutionBoundary(
     element('dt', undefined, '图书'), element('dd', 'technical-identity', projection.bookId),
     element('dt', undefined, '任务意图'), element('dd', 'technical-identity', projection.taskIntentId),
     element('dt', undefined, '计划权限边界'), element('dd', 'technical-identity', projection.planEnvelopeDigest),
-    element('dt', undefined, '任务运行授权'), element('dd', 'technical-identity', projection.authorizationId),
+    element('dt', undefined, '运行授权'), element('dd', 'technical-identity', projection.authorizationId),
     element('dt', undefined, '任务运行记录'), element('dd', 'technical-identity', projection.runRecordId),
   ));
   host.replaceChildren(result);
@@ -3240,7 +3206,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
   if (projection.planEnvelope) card.dataset['planEnvelopeDigest'] = projection.planEnvelope.digest;
   const heading = element('div', 'task-authorization-heading');
   heading.append(
-    element('h3', undefined, '任务运行授权'),
+    element('h3', undefined, TASK_DRAWER_TITLE),
     element(
       'span',
       `status-pill task-authorization-status task-authorization-status-${projection.state}`,
@@ -3261,7 +3227,8 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
     goal.maxLength = J03_TASK_GOAL.length;
     goal.autocomplete = 'off';
     const actions = element('div', 'button-row task-authorization-actions');
-    const prepare = button('准备任务授权计划', 'primary', async () => {
+    // §10: 准备任务授权计划 reads 准备任务, and its progress speaks TASK-040's words.
+    const prepare = button('准备任务', 'primary', async () => {
       if (goal.value !== J03_TASK_GOAL) {
         goal.setAttribute('aria-invalid', 'true');
         setStatus('任务目标必须与本次固定目标完全一致。', 'error');
@@ -3270,7 +3237,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
       goal.removeAttribute('aria-invalid');
       prepare.disabled = true;
       cancel.hidden = false;
-      setStatus('正在有界固定任务输入并准备计划…', 'busy');
+      setStatus('正在为任务保存修订版…', 'busy');
       try {
         const initial = await window.ai7.prepareTaskAuthorization({ goal: J03_TASK_GOAL });
         cancel.dataset['serviceJobId'] = initial.jobId;
@@ -3285,15 +3252,17 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
           return;
         }
         if (completed.kind !== 'task-authorization-preparation' || completed.result === null ||
-            !('runRecord' in completed.result)) throw new Error('任务授权准备未返回计划。');
+            !('runRecord' in completed.result)) throw new Error('任务准备未返回计划。');
         if (host.isConnected && completed.result.bookId === host.dataset['taskAuthorizationBookId']) {
           renderTaskAuthorization(host, completed.result);
-          setStatus('任务授权计划已冻结；当前仍未派发。', 'success');
+          setStatus('任务计划已准备；当前仍未派发。', 'success');
+          // S72 D4: the plan the preparation froze opens in the Task Drawer beside this card.
+          openTaskPlan(completed.result.bookId, 'fixed-task', completed.result.taskIntent?.taskIntentId ?? null);
         }
       } catch (error) {
         prepare.disabled = false;
         cancel.hidden = true;
-        setStatus(rendererErrorMessage(error, '无法准备任务授权计划。'), 'error');
+        setStatus(rendererErrorMessage(error, '无法准备任务。'), 'error');
       }
     });
     prepare.dataset['taskAuthorizationAction'] = 'prepare';
@@ -3314,66 +3283,18 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
     card.append(form);
   } else {
     const checkpoint = projection.checkpoint!;
-    const manuscriptPin = projection.manuscriptPin!;
-    const sourceScope = projection.runSourceScope!;
-    const artifact = projection.artifactPin!;
-    const provider = projection.providerResolutionPlan!;
-    const plan = projection.executionPlan!;
     const envelope = projection.planEnvelope!;
-    const facts = element('dl', 'task-authorization-facts');
-    // A field the plan declared nothing for no longer costs a full-weight row (ADR 0071 §2). Nothing
-    // leaves the record: the labels collect into one `未声明` row that closes the record, in the order
-    // they read in, so the reading is still that this plan declared none of them.
-    const undeclared: string[] = [];
-    const declaredRow = (label: string, values: ReadonlyArray<string>): ReadonlyArray<HTMLElement> => {
-      if (values.length === 0) {
-        undeclared.push(label);
-        return [];
-      }
-      return [element('dt', undefined, label), element('dd', undefined, values.join('、'))];
-    };
-    facts.append(
-      element('dt', undefined, '任务目标'), element('dd', undefined, projection.taskIntent!.goal),
-      element('dt', undefined, '预期结果'), element('dd', undefined, projection.taskIntent!.expectedOutcome),
-      element('dt', undefined, '目标修订版'), element('dd', undefined, checkpoint.revisionLabel),
-      element('dt', undefined, '任务输入固定点'), element('dd', undefined, `${checkpoint.purpose} · ${checkpoint.createdForDirtyJournal ? '由已确认编辑创建' : '复用当前精确修订版'}`),
-      // V2-UX-LAYER-002 names the scope of reading un-demotable, so both scope statements read at full
-      // rank: what this Run may read, and that the lineage evidence is outside it. Only the bare
-      // identifier of that evidence is technical, and it is disclosed as its own row below.
-      element('dt', undefined, '来源版本证据'), element('dd', undefined, '仅血缘证据，不属于可读范围'),
-      element('dt', undefined, '可读范围'), element('dd', undefined, `仅图书 ${sourceScope.bookId} · 主稿件 ${sourceScope.manuscriptId} · Task Input 修订版 ${sourceScope.taskInputRevision.revisionId} · ${sourceScope.taskInputRevision.revisionDigest}`),
-      element('dt', undefined, '原生构件'), element('dd', undefined, `${artifact.identity}@${artifact.version}`),
-      element('dt', undefined, '权限侧车'), element('dd', undefined, `${artifact.sidecarIdentity} · Revision ${artifact.sidecarRevision}`),
-      element('dt', undefined, '模型角色'), element('dd', undefined, provider.role),
-      ...declaredRow('AI7 能力', provider.capabilities),
-      // Which provider and which model this Run would reach is the binding an editor weighs; the adapter
-      // and configuration revisions that froze it are identities, and they read in the disclosure below.
-      element('dt', undefined, '模型提供方绑定'), element('dd', undefined, `${provider.providerId} · ${provider.modelId}`),
-      ...declaredRow('已批准备用链', provider.approvedFallbackChain),
-      element('dt', undefined, '凭据引用'), element('dd', undefined, `readiness ${provider.credentialReadiness}`),
-      element('dt', undefined, '外发数据类别'), element('dd', undefined, provider.outboundDataCategory),
-      element('dt', undefined, '任务运行预算上限'), element('dd', undefined, runBudgetCeilingLabel(provider.runBudgetCeiling)),
-      element('dt', undefined, '模型服务数据处理策略'), element('dd', undefined, providerProcessingLabel(provider.providerProcessing)),
-      element('dt', undefined, '计划步骤'), element('dd', undefined, plan.steps.join(' → ')),
-      ...declaredRow('受控动作', plan.effects),
-      element('dt', undefined, '派发状态'), element('dd', undefined, envelope.summary),
+    // S72 D4: the plan itself lives in the Task Drawer; the card keeps one line naming it and the way to
+    // it. What the plan reads, sends and will not do — the engineer's non-effects included, now in its
+    // 查看技术详情 (§10) — is stated there, and the recording action stays here until S74.
+    const summary = element('section', 'task-plan-summary');
+    const open = taskPlanOpenButton('fixed-task', () => openTaskPlan(projection.bookId, 'fixed-task', projection.taskIntent!.taskIntentId));
+    open.dataset['taskAuthorizationAction'] = 'view-plan';
+    summary.append(
+      element('p', 'task-plan-summary-line', taskPlanSummaryLine(['固定任务', '全书', `任务输入修订版 ${checkpoint.revisionLabel}`, '不发送任何内容'])),
+      open,
     );
-    if (undeclared.length > 0) {
-      facts.append(element('dt', undefined, '未声明'), element('dd', undefined, undeclared.join('、')));
-    }
-    card.append(element('h4', undefined, '计划预览'), facts, technicalDetails(
-      'task-authorization-facts',
-      element('dt', undefined, '目标修订版身份'), element('dd', 'technical-identity', `${checkpoint.revisionId} · ${manuscriptPin.revisionDigest}`),
-      element('dt', undefined, '来源版本证据 ID'), element('dd', 'technical-identity', sourceScope.sourceVersionEvidence.sourceVersionId),
-      element('dt', undefined, '原生构件摘要'), element('dd', 'technical-identity', artifact.nativeCarrierSha256),
-      element('dt', undefined, '权限侧车摘要'), element('dd', 'technical-identity', artifact.sidecarSha256),
-      element('dt', undefined, '模型提供方绑定（适配器与契约）'), element('dd', 'technical-identity', `adapter r${provider.adapterRevision} · config r${provider.configurationRevision}`),
-      element('dt', undefined, '凭据引用'), element('dd', 'technical-identity', provider.credentialReference),
-      element('dt', undefined, '计划权限边界'), element('dd', 'technical-identity', envelope.digest),
-    ));
-    const nonEffects = element('ul', 'task-authorization-non-effects');
-    for (const statement of projection.namedNonEffects) nonEffects.append(element('li', undefined, statement));
-    card.append(element('h4', undefined, '明确不会发生'), nonEffects);
+    card.append(summary);
     if (projection.actions.canAuthorize) {
       const actions = element('div', 'button-row task-authorization-actions');
       const authorize = button('记录本次运行授权（不派发）', 'primary', async () => {
@@ -3387,10 +3308,11 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
           if (host.isConnected && authorized.bookId === host.dataset['taskAuthorizationBookId']) {
             renderTaskAuthorization(host, authorized);
             setStatus('已记录授权 · 未派发', 'success');
+            taskDrawer.refresh('fixed-task');
           }
         } catch (error) {
           authorize.disabled = false;
-          setStatus(rendererErrorMessage(error, '无法记录任务运行授权。'), 'error');
+          setStatus(rendererErrorMessage(error, '无法记录运行授权。'), 'error');
         }
       });
       authorize.dataset['taskAuthorizationAction'] = 'authorize-no-dispatch';
@@ -5738,6 +5660,8 @@ function renderEditorWindow(
   workspace.append(manuscript, navigator, edge);
 
   const setNavigationOpen = (open: boolean): void => {
+    // One supporting side surface at a time (IA): 导航 opening closes the Task Drawer beside the manuscript.
+    if (open) taskDrawer.close(false);
     navigator.hidden = !open;
     navigationEntry.setAttribute('aria-expanded', open ? 'true' : 'false');
     workspace.dataset['navigation'] = open ? 'open' : 'closed';
@@ -5773,6 +5697,10 @@ function renderEditorWindow(
   identities.append(identityGrid);
   content.append(toolbar, workspace, identities);
   replaceScreen('editor', content);
+  // …and the drawer opening closes 导航: the slot is this manuscript's while it is on screen.
+  closeNavigation = () => {
+    if (!navigator.hidden) setNavigationOpen(false);
+  };
   if (entryNotice !== undefined) showEntryNotice(content, entryNotice);
 
   let currentWindow = initialWindow;

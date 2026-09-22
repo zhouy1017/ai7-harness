@@ -357,6 +357,63 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .book-deliverables-summary { margin-top: 1.3rem; padding: 1rem 1.15rem; border: 1px solid #c9d6d2; border-radius: 12px; background: #f4f9f7; }
 .book-deliverables-summary h3 { margin: 0; }
 .book-deliverables-summary p { margin: .45rem 0 .7rem; overflow-wrap: anywhere; }
+/* The Task Drawer (editor-surfaces §6 ③, §0.3; Issue #418): one supporting side panel for every Task's plan,
+   beside the central destination. Below 1120 px it lies over the page (§0.3: 所有面都要在 1120 px 以下把右侧辅助面
+   改为覆盖抽屉); at 1120 px and wider the page makes room for it, so the manuscript stays visible beside the plan.
+   It never scrolls sideways, its header and footer stay in view, and its content wraps at 200% zoom. */
+:root { --task-drawer-width: min(26rem, 34vw); }
+.task-drawer { position: fixed; z-index: 30; top: 0; right: 0; bottom: 0; display: flex; flex-direction: column; width: min(26rem, calc(100vw - 1rem)); min-width: 0; border-left: 1px solid #c9d6d2; background: #fffdf8; color: #242720; box-shadow: -18px 0 40px rgba(36, 39, 32, .18); overflow-wrap: anywhere; }
+.task-drawer[hidden] { display: none; }
+@media (min-width: 1120px) {
+  body[data-task-drawer="open"] { padding-right: var(--task-drawer-width); }
+  body[data-task-drawer="open"] .status-bar { right: calc(var(--task-drawer-width) + 1.2rem); }
+  .task-drawer { width: var(--task-drawer-width); box-shadow: none; }
+}
+.task-drawer-head { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .5rem; padding: .55rem .8rem; border-bottom: 1px solid #d5dcd9; background: #f7f4ec; }
+.task-drawer-title { flex: 1 1 auto; margin: 0; font-size: 1.05rem; }
+.task-drawer-title:focus-visible { outline: 3px solid #416458; outline-offset: 2px; }
+.task-drawer-head .quiet { min-height: 36px; padding: .3rem .45rem; }
+.task-drawer-modes { display: inline-flex; border: 1px solid #90998d; border-radius: 8px; overflow: hidden; }
+.task-drawer-mode { min-height: 34px; padding: .2rem .7rem; border: 0; background: transparent; color: #4e564c; font: inherit; font-size: .88rem; cursor: pointer; }
+.task-drawer-mode + .task-drawer-mode { border-left: 1px solid #90998d; }
+.task-drawer-mode[aria-pressed="true"] { background: #e3ecf6; color: #1f2a24; font-weight: 800; box-shadow: inset 0 -3px 0 #2f5d8a; }
+.task-drawer-mode:focus-visible { outline: 3px solid #416458; outline-offset: -3px; }
+.task-drawer-hidden-reason { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.task-drawer-body { display: grid; flex: 1 1 auto; align-content: start; gap: .9rem; min-height: 0; padding: .9rem 1rem 1.2rem; overflow-x: hidden; overflow-y: auto; }
+.task-drawer-footer { margin: 0; padding: .6rem 1rem; border-top: 1px solid #d5dcd9; background: #f7f4ec; color: #4e564c; font-size: .86rem; font-weight: 800; }
+.task-plan-goal, .task-plan-compact { padding: .75rem .85rem; border: 1px solid #d5dcd9; border-radius: 10px; background: #f4f9f7; }
+.task-plan-compact { background: #fffdf8; }
+.task-plan-sentence { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .3rem .6rem; }
+.task-plan-sentence-text { flex: 1 1 12rem; margin: 0; font-weight: 800; line-height: 1.55; }
+.task-plan-unavailable { display: inline-flex; flex-direction: column; align-items: flex-start; gap: .1rem; max-width: 100%; }
+.task-plan-unavailable .quiet { min-height: 32px; padding: .2rem .4rem; }
+.task-plan-chips { display: flex; flex-wrap: wrap; gap: .3rem; margin: .55rem 0 0; padding: 0; list-style: none; }
+.task-plan-chip { max-width: 100%; padding: .1rem .55rem; border: 1px solid #9db8d4; border-radius: 999px; background: #e7eef6; color: #2f4a6b; font-size: .82rem; font-weight: 700; }
+.task-plan-chip-book { font-family: "Noto Serif CJK SC", "Songti SC", serif; }
+.task-plan-saved { margin-top: .5rem; }
+.task-plan-drift { margin: 0; }
+.task-plan-drift h3 { margin: 0 0 .35rem; font-size: 1rem; }
+.task-plan-drift p { margin: .3rem 0; }
+.task-plan-drift-table { width: 100%; margin-top: .5rem; border-collapse: collapse; font-size: .86rem; }
+.task-plan-drift-table th, .task-plan-drift-table td { padding: .3rem .4rem; border-bottom: 1px solid #ded9cd; text-align: left; vertical-align: top; }
+.task-plan-rows, .task-plan-facts, .task-plan-technical-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .45rem .8rem; margin: 0; }
+.task-plan-full-link { min-height: 36px; margin-top: .5rem; padding: .3rem .2rem; }
+.task-plan-full { display: grid; gap: 1rem; }
+.task-plan-section h3 { display: flex; align-items: center; gap: .5rem; margin: 0 0 .45rem; font-size: .98rem; }
+.task-plan-section-number { display: inline-grid; flex: none; place-items: center; width: 1.4rem; height: 1.4rem; border: 1px solid #9db8d4; border-radius: 50%; color: #2f4a6b; font-size: .78rem; }
+.task-plan-list, .task-plan-steps { margin: 0; padding-left: 1.2rem; line-height: 1.6; }
+.task-plan-steps { padding-left: 1.4rem; }
+.task-plan-step-result { display: block; color: #4e564c; font-size: .9rem; }
+.task-plan-ceiling-note { display: block; margin-top: .1rem; }
+.task-plan-boundary { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: .6rem; padding: .7rem; border: 1px solid #d5dcd9; border-radius: 10px; background: #f4f9f7; }
+.task-plan-boundary h4 { margin: 0 0 .35rem; font-size: .9rem; }
+.task-plan-lock { display: inline-block; margin-right: .35rem; padding: 0 .35rem; border: 1px solid #76530f; border-radius: 4px; color: #76530f; font-size: .74rem; font-weight: 800; }
+.task-plan-technical { margin-top: 0; }
+/* On a surface that raises a Task, the plan is one line and 查看计划 (S72 D4). */
+.task-plan-summary { margin-top: 1rem; }
+.task-plan-summary h4 { margin: 0; }
+.task-plan-summary-line { margin: .45rem 0 .6rem; font-weight: 700; overflow-wrap: anywhere; }
+.analysis-plan-summary { padding-top: 1rem; border-top: 1px solid #d5dcd9; }
 dt { color: #6b7068; font-size: .86rem; }
 dd { margin: 0; overflow-wrap: anywhere; }
 /* The Technical Identity Layer (V2-UX-LAYER-001). One rank below the decision content beside it — the
@@ -686,12 +743,19 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .review-consequences, .book-review-summary,
   .deliverables-publication, .milestone-list > li, .publication-versions > li, .publication-change-notice, .publication-actuals-prompt,
   .publication-designate, .publication-milestone-option, .publication-designate-summary, .publication-statement,
-  .book-deliverables-summary, .milestone-section .milestone-purpose-option {
+  .book-deliverables-summary, .milestone-section .milestone-purpose-option,
+  .task-drawer, .task-drawer-head, .task-drawer-footer, .task-drawer-modes, .task-plan-goal, .task-plan-compact,
+  .task-plan-chip, .task-plan-boundary, .task-plan-lock, .task-plan-section-number {
     color: CanvasText;
     background: Canvas;
     border-color: CanvasText;
     box-shadow: none;
   }
+  /* Without colour the chosen mode keeps a heavier outline of its own, and the drawer its edge. */
+  .task-drawer { border-left: 2px solid CanvasText; }
+  .task-drawer-mode { color: ButtonText; background: ButtonFace; forced-color-adjust: auto; }
+  .task-drawer-mode[aria-pressed="true"] { outline: 2px solid Highlight; outline-offset: -3px; box-shadow: none; }
+  .task-drawer-title:focus-visible, .task-drawer-mode:focus-visible { outline-color: Highlight; }
   /* Without colour, the 发稿版本 mark keeps its outline and the item it marks a heavier border; a chosen card
      or milestone keeps a heavier border too. */
   .publication-version-mark, .publication-current-mark { color: CanvasText; background: Canvas; border: 2px solid CanvasText; forced-color-adjust: none; }

@@ -26,32 +26,11 @@ export function runBudgetCeilingLabel(ceiling: RunBudgetCeilingState): string {
 }
 
 /**
- * The exact Provider Processing pin wording. `development-ci · v1 · 拒绝 · 0 次实时传输` is the only
- * reading J-03 ever produces today; the shape carries every scope's pin so a future scope's reading
- * renders faithfully instead of repeating the development-ci constant.
+ * ②A's 不会做 in the editor's words (editor-surfaces §10, S72 D9): what an analysis never does whatever its
+ * mode. The analysis kind's own statements — its named non-effects, the launch's Provider decision among
+ * them — stay whole, one step away in the card's 查看技术详情, and in full in the Task Drawer.
  */
-export function providerProcessingLabel(pin: ProviderProcessingPin): string {
-  const decisionLabel = pin.decision === 'deny' ? '拒绝' : pin.decision;
-  return `${pin.operationalScope} · ${pin.version} · ${decisionLabel} · ${pin.authorizedLiveTransmissionCount} 次实时传输`;
-}
-
-/**
- * The frozen plan's remote-binding reading in the Decision Layer's own phrasing: the scope, the pin
- * version, and what the pin bounds. `0` is a count and reads as one; `bounded-by-run` is not a count,
- * so it reads as the bound it is rather than as `bounded-by-run 次实时传输`, which would state a
- * transmission count no launch ever authorized.
- */
-export function remoteBindingPolicyReading(pin: ProviderProcessingPin): string {
-  const bound = pin.authorizedLiveTransmissionCount === 'bounded-by-run'
-    ? '受运行边界约束'
-    : `${pin.authorizedLiveTransmissionCount} 次实时传输`;
-  return `${pin.operationalScope} · ${pin.version} · ${bound}`;
-}
-
-/** The frozen plan's remote-binding row label, which states the pin's decision rather than assuming denial. */
-export function remoteBindingRowLabel(decision: ProviderProcessingPin['decision']): string {
-  return decision === 'deny' ? '远程绑定（被拒绝）' : '远程绑定（仅限资格）';
-}
+export const ANALYSIS_EDITORIAL_NOT_DO = ['不会直接修改稿件', '不读这本书以外的内容', '不导出或发布', '不存里程碑版本', '不作事实判定'] as const;
 
 /**
  * What the authorization flow will and will not do, derived from the plan it froze (V2-UX-LAYER-002):

@@ -95,8 +95,11 @@ export function budgetCeilingLabel(ceiling: RunBudgetCeilingState): string {
   return ceiling === 'unset' ? BUDGET_NOT_SET : `任务运行预算上限：${groupedCount(ceiling.maxTotalTokens)} tokens`;
 }
 
-/** The Provider Processing pin exactly as the technical layer has always read it. */
-function pinReading(pin: ProviderProcessingPin): string {
+/**
+ * The Provider Processing pin exactly as the plan has always read it: `development-ci · v1 · 拒绝 · 0 次实时传输`
+ * is the reading J-03 pins; a future scope's pin reads faithfully instead of repeating that constant.
+ */
+export function pinReading(pin: ProviderProcessingPin): string {
   return `${pin.operationalScope} · ${pin.version} · ${pin.decision === 'deny' ? '拒绝' : pin.decision} · ${pin.authorizedLiveTransmissionCount} 次实时传输`;
 }
 

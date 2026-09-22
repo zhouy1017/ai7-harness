@@ -7,7 +7,6 @@ import {
   type ReviewFindingProjection,
   type ReviewFindingSeverity,
   type ReviewFindingStatus,
-  type ReviewRunCategoryPlanProjection,
   type ReviewRunCategoryProjection,
   type ReviewRunCategoryState,
   type ReviewRunState,
@@ -76,6 +75,8 @@ export const REVIEW_ACTION_LABELS = {
   export: '导出',
   'open-manuscript': '打开稿件',
   'open-review': '打开审阅',
+  /** S72 D4: a prepared Run's plan opens in the Task Drawer. */
+  'view-plan': '查看计划',
 } as const;
 export type ReviewAction = keyof typeof REVIEW_ACTION_LABELS;
 
@@ -234,22 +235,16 @@ export function reviewPreparationLine(progress: { completed: number; total: numb
 
 // ---- the plan ---------------------------------------------------------------------------------------
 
+/**
+ * A prepared Run's plan on the destination is one line and 查看计划 (S72 D4): every category's plan — what it
+ * reads, reuses and sends, its route and its ceiling — reads in the Task Drawer.
+ */
 export const REVIEW_PLAN_HEADING = '审阅计划';
-export const REVIEW_PLAN_TERMS = ['会读', '任务输入修订版', '模型服务', '提供方状态', '预算上限'] as const;
-export const REVIEW_LEADS_PLAN = '基线分析的前后不一致线索与未决事项；不调用模型，不发送任何内容。';
 /** AUTH-003's spoken form, for the one approval of a whole Review Run. */
 export const REVIEW_AUTHORIZE_NOTE = '只是让 AI7 按这份计划审这一次；接受修改建议、处理每一条发现都仍由你另行决定。';
 
-export function reviewPlanIntro(categories: number): string {
-  return `这次审阅有 ${categories} 个类别，授权一次后按顺序逐类审阅；每一类完成后，它的发现立即可以处理。`;
-}
-
-export function reviewPlanHeading(category: Pick<ReviewRunCategoryProjection, 'label' | 'modeLabel' | 'taskIntentId'>): string {
-  return category.taskIntentId === null ? `${category.label} · 直接读取基线分析的线索` : `${category.label} · ${category.modeLabel ?? '审阅'}`;
-}
-
-export function reviewPlanUnits(plan: Pick<ReviewRunCategoryPlanProjection, 'units' | 'recomputed' | 'reused' | 'unreviewed'>): string {
-  return `${plan.units} 个阅读范围：重新审阅 ${plan.recomputed} 个 · 沿用上次 ${plan.reused} 个 · 不在本次范围 ${plan.unreviewed} 个`;
+export function reviewPlanCategoriesLine(categories: number): string {
+  return `${categories} 个类别，授权一次后逐类审阅`;
 }
 
 // ---- running ----------------------------------------------------------------------------------------
