@@ -52,7 +52,7 @@ const STATES: ReadonlyArray<GlobalAttentionStateKey> = [
   'import-outcome-uncertain', 'import-cleanup-pending', 'recovery-pending', 'recovery-deferred',
   'manuscript-conflict', 'manuscript-conflict-deferred', 'analysis-failed',
   'analysis-interrupted', 'analysis-blocked', 'analysis-orphaned', 'review-failed', 'review-stopped',
-  'analysis-plan-revision', 'analysis-queued', 'analysis-running', 'review-running', 'review-continuable',
+  'analysis-plan-revision', 'analysis-queued', 'analysis-running', 'analysis-cancelling', 'review-running', 'review-continuable',
   'analysis-completed', 'analysis-completed-with-gaps', 'review-completed',
 ];
 
@@ -151,6 +151,7 @@ describe('each item', () => {
       'analysis-plan-revision': '计划修订',
       'analysis-queued': '正在排队',
       'analysis-running': '运行中',
+      'analysis-cancelling': '正在取消',
       'review-running': '运行中',
       'review-continuable': '中途停止 · 可继续审阅',
       'analysis-completed': '已完成',
@@ -226,6 +227,7 @@ describe('each item', () => {
       'analysis-plan-revision': globalAttentionReason(item('analysis-plan-revision')),
       'analysis-queued': globalAttentionReason(item('analysis-queued')),
       'analysis-running': globalAttentionReason(item('analysis-running', { facts: { progress: { stage: 'units', unitsSettled: 3, unitsTotal: 8 }, categories: [], revisionOrdinal: null } })),
+      'analysis-cancelling': globalAttentionReason(item('analysis-cancelling', { facts: { progress: { stage: 'units', unitsSettled: 2, unitsTotal: 8 }, categories: [], revisionOrdinal: null } })),
       'review-running': globalAttentionReason(item('review-running', { facts: { progress: { stage: 'cross-unit-reduction', unitsSettled: 8, unitsTotal: 8 }, categories: categories([['体例与格式', 'running', null]]), revisionOrdinal: null } })),
       'review-continuable': globalAttentionReason(item('review-continuable', { facts: { progress: null, categories: categories([['体例与格式', 'waiting', '尚未开始；继续审阅时从这一类接着审。']]), revisionOrdinal: null } })),
       'analysis-completed': globalAttentionReason(item('analysis-completed', { facts: { progress: null, categories: [], revisionOrdinal: 1 } })),
@@ -248,6 +250,7 @@ describe('each item', () => {
       'analysis-plan-revision': '计划冻结之后，它的关键内容已经变化；原计划不能再开始。',
       'analysis-queued': '已进入 AI7 调度器（单槽位）。',
       'analysis-running': '正在逐个阅读范围分析 · 已完成 3/8 个阅读范围',
+      'analysis-cancelling': '你取消了这项任务；正在进行的这一步完成后停止，之后不再发送任何内容 · 正在逐个阅读范围分析 · 已完成 2/8 个阅读范围',
       'review-running': '正在审阅「体例与格式」 · 正在跨范围比对',
       'review-continuable': '「体例与格式」尚未开始；继续审阅时从这一类接着审。',
       'analysis-completed': '已形成第 1 份基线分析。',

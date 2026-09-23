@@ -252,6 +252,7 @@ export const RUN_REPORT_CLASSIFICATION_LABELS: Record<RunReportRecordProjection[
   'completed-with-gaps': '已完成，保留了没读成的部分',
   failed: '失败',
   interrupted: '已中断',
+  cancelled: '已取消',
 };
 
 /** How long a stage's own work took, in the reader's units; a stage that never ran has no duration to state. */

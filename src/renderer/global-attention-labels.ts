@@ -117,6 +117,7 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   'analysis-plan-revision': '计划修订',
   'analysis-queued': '正在排队',
   'analysis-running': '运行中',
+  'analysis-cancelling': '正在取消',
   'review-running': '运行中',
   // A Review Run a stopped service left mid-way; there is no pause yet, so it is never called 已暂停.
   'review-continuable': '中途停止 · 可继续审阅',
@@ -142,6 +143,7 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
   'analysis-plan-revision': { tone: 'attention', shape: 'triangle' },
   'analysis-queued': { tone: 'progress', shape: 'half' },
   'analysis-running': { tone: 'progress', shape: 'half' },
+  'analysis-cancelling': { tone: 'attention', shape: 'half' },
   'review-running': { tone: 'progress', shape: 'half' },
   'review-continuable': { tone: 'attention', shape: 'ring' },
   'analysis-completed': { tone: 'good', shape: 'check' },
@@ -249,6 +251,8 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
       return '已进入 AI7 调度器（单槽位）。';
     case 'analysis-running':
       return runningReason(facts.progress);
+    case 'analysis-cancelling':
+      return `你取消了这项任务；正在进行的这一步完成后停止，之后不再发送任何内容 · ${runningReason(facts.progress)}`;
     case 'review-running': {
       const current = facts.categories[0];
       if (current === undefined) return '正在审阅';

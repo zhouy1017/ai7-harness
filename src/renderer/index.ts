@@ -3138,7 +3138,7 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
     // A Task in flight is what the editor came for, so the card opens where its plan and its Run are;
     // a choice the editor made themselves always wins over either default.
     const taskInFlight = projection.state === 'prepared' || projection.state === 'authorized-blocked' ||
-      projection.state === 'waiting' || projection.state === 'admitted' || projection.state === 'executing';
+      projection.state === 'waiting' || projection.state === 'admitted' || projection.state === 'executing' || projection.state === 'cancelling';
     const { panels, select } = analysisTabs(card, projection.bookId, taskInFlight ? 'history' : 'synopsis');
     renderBaselineAnalysisOverview(card, panels, select, projection, revision, bookTitle, projection.inspectedRevision !== null
       ? { historical: true, current: projection.inspectedRevision.current }
@@ -3176,7 +3176,8 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
   const previousState = host.dataset['analysisRenderedState'];
   host.dataset['analysisRenderedState'] = projection.state;
   if (previousState !== undefined && previousState !== projection.state) taskDrawer.refresh('baseline-analysis');
-  if (projection.state === 'admitted' || projection.state === 'executing') refreshLater();
+  // A Run stopping at the editor's cancellation is followed as a running one is, until it reads 已取消 (Issue #422).
+  if (projection.state === 'admitted' || projection.state === 'executing' || projection.state === 'cancelling') refreshLater();
   // A Run in Connectivity Wait is followed too, more slowly — it may wait a long time (Issue #502) — so the card
   // moves on by itself once Reconnect Preflight admits it.
   if (projection.state === 'waiting') refreshLater(2_000);
