@@ -929,7 +929,7 @@ choose `回退并调整方向`
 - The Proposal Change Navigator virtualizes rows and supports next/previous keyboard movement, type/state filters, heading context, and whole-manuscript markers. It never materializes the full manuscript or every full diff.
 - Selecting a navigator row fetches the exact base/proposed/current bounded neighborhood and restores focus without changing the authoritative Manuscript selection.
 - Rationale is a concise result explanation, not hidden reasoning. Source/evidence expansion links to exact records and displays Reference Integrity, Claim Support, and Factual Verification independently.
-- A proposal based on an older revision is not automatically a conflict: AI7 first classifies exact non-interaction versus same-block/structural ambiguity. Until classified, the UI says `提案基准已变化` rather than `可应用`.
+- A proposal based on an older revision is not automatically a conflict: AI7 first classifies exact non-interaction versus an interaction with the Proposal's range — its whole block for a Proposal that rewrites whole blocks — or structural ambiguity (ADR 0085). Until classified, the UI says `提案基准已变化` rather than `可应用`.
 - Review-state affordances may record navigation/progress only if explicitly saved; they never masquerade as Proposal Decision. No default action mutates manuscript text.
 - Dedicated Work Workspace entry and exit are editor actions. Proposal arrival, stale detection, or background completion never switches the central surface automatically.
 
