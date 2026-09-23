@@ -27,6 +27,7 @@ const RUNNER_FILES: Readonly<Record<string, string>> = Object.freeze({
   'J-05': 'run-j05.mjs',
   'J-06': 'run-j06.mjs',
   'J-07': 'run-j07.mjs',
+  'J-09': 'run-j09.mjs',
 });
 
 /*

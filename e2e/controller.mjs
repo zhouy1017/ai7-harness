@@ -92,7 +92,7 @@ if (isJourneyRunner) {
   }
 }
 
-export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15', 'J-03', 'J-04', 'J-05', 'J-06', 'J-07']);
+export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15', 'J-03', 'J-04', 'J-05', 'J-06', 'J-07', 'J-09']);
 
 // The bounded pull-request subset of ADMITTED_JOURNEYS under ADR 0075. Every member launches the
 // same production-shaped subject, so a broken build, launch, IPC, data root, or service still fails
@@ -177,6 +177,7 @@ const JOURNEY_MODULES = Object.freeze({
   'J-05': new URL('./run-j05.mjs', import.meta.url),
   'J-06': new URL('./run-j06.mjs', import.meta.url),
   'J-07': new URL('./run-j07.mjs', import.meta.url),
+  'J-09': new URL('./run-j09.mjs', import.meta.url),
 });
 
 const J01_LAUNCH_SCENARIOS = Object.freeze([
@@ -774,6 +775,39 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-designate-keyboard',
     'j14-deliverables-zoom-200-reflow',
     'j14-deliverables-forced-colors',
+    'zero-loopback-requests',
+    'completion-browser-close',
+    'completion-cleanup',
+  ]),
+  // J-09 (Issue #424, plan slice S78): 待我处理 — the cross-Book attention view, its four groups and its count,
+  // made from two Books of exact `sample1`. Each stage is one thing an editor does or finds, so a hosted
+  // failure names the behaviour that broke.
+  'J-09': Object.freeze([
+    'entry',
+    'controller-loopback-sentinel',
+    'controller-imports',
+    'exact-sample1',
+    'renderer-api-boundary',
+    'entry-in-the-header',
+    'first-book-import',
+    'first-book-prerequisites',
+    'model-credential-saved',
+    'model-credential-removed',
+    'first-book-blocked-run',
+    'count-after-blocked',
+    'second-book-launch',
+    'second-book-import',
+    'second-book-completed-run',
+    'second-book-plan-revision',
+    'attention-groups',
+    'attention-count',
+    'attention-writes-nothing',
+    'open-blocked-run',
+    'open-plan-revision',
+    'open-completion',
+    'j14-attention-keyboard',
+    'j14-attention-zoom-200-reflow',
+    'j14-attention-forced-colors',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',
