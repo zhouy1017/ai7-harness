@@ -77,6 +77,8 @@ export const TASK_PLAN_STATE_PILLS: Readonly<Record<TaskPlanStateKey, ReviewPill
   pausing: { tone: 'attention', shape: 'half' },
   paused: { tone: 'neutral', shape: 'half' },
   resumable: { tone: 'attention', shape: 'ring' },
+  // 任务等待你的说明 (Issue #422, S76d): a ring that asks for the editor, as 可续行's does.
+  'awaiting-clarification': { tone: 'attention', shape: 'ring' },
 };
 
 // ---- the goal block (S72 D5) ------------------------------------------------------------------------------
@@ -202,8 +204,16 @@ export function taskPlanEditWithdraw(label: string): string {
 export const TASK_PLAN_EDIT_RESTORE = '恢复';
 /** Why the rest of the steps take no edit: the analysis's steps are its procedure. */
 export const TASK_PLAN_EDIT_STEPS_NOTE = '这项分析的步骤由分析工序决定：可以去掉「核对与抽检」，不能改写、增加或调换顺序。';
-/** Moving an adaptation into the right column needs a Run that can stop and ask, which Clarification Requests bring. */
-export const TASK_PLAN_EDIT_ASK_FIRST_NOTE = '改成「先问你」要等澄清请求，暂不提供。';
+/**
+ * 先问你 (Issue #422, S76d; PLAN-011, PLAN-012): an adaptation moved into the right column. The Run asks the editor
+ * before it makes it, in a Clarification Request, and only the step that waits for the answer stops.
+ */
+export const TASK_PLAN_EDIT_ASK_FIRST_NOTE = '「先问你」：运行中遇到这种情况，AI7 先停下这一步来问你，其余阅读范围照常进行。';
+export const TASK_PLAN_EDIT_ADAPTATION_ASK_FIRST = '先问你';
+/** The move's control, named for what it does. */
+export function taskPlanEditAskFirst(label: string): string {
+  return `改成先问你：${label}`;
+}
 /** PLAN-011's count of what the editor changed and has not yet made the plan. */
 export function taskPlanEditCount(count: number): string {
   return `你改了 ${count} 处`;
@@ -390,6 +400,35 @@ const SAVE_DRAFT: TaskBarAction = { name: 'save-draft', label: TASK_BAR_SAVE_DRA
  * key content changed, when `重新确认计划` and `查看计划修订` take its place; and once started, the Run's state
  * and the way to its surface instead of any action that starts it again.
  */
+// ---- Clarification Requests (Issue #422, plan slice S76d; CLAR-001 to CLAR-007, INPUT-001 to INPUT-004) ---------
+
+/** The card's heading, and the words of its controls (editor-surfaces §6 澄清卡). */
+export const TASK_PLAN_CLARIFICATION_HEADING = '需要你回答';
+export const TASK_PLAN_CLARIFICATION_RECOMMENDED = '推荐';
+export const TASK_PLAN_CLARIFICATION_SUBMIT = '提交回答';
+export const TASK_PLAN_CLARIFICATION_DEFER = '暂不回答';
+export const TASK_PLAN_CLARIFICATION_REOPEN = '回答';
+/** Why 提交回答 waits: a choice is the answer; the note only qualifies it (INPUT-004). */
+export const TASK_PLAN_CLARIFICATION_SUBMIT_REASON = '先选一个回答';
+export const TASK_PLAN_CLARIFICATION_SUBMITTED = '已记下你的回答。';
+export const TASK_PLAN_CLARIFICATION_FAILED = '无法提交回答。';
+/** What the Run asked and how it was answered, below the activity card. */
+export const TASK_PLAN_CLARIFICATION_RECORD = '问过你的问题';
+/** The bar's status while the Run waits for the editor's answer (§6 授权后同一区域变为状态与控制: 等你回答). */
+export const TASK_BAR_AWAITING_ANSWER = '等你回答';
+
+/** 暂不回答's quiet line, and the bar's note while questions wait (CLAR-007: quiet, never a repeated dialog). */
+export function taskBarQuestionsNote(count: number): string {
+  return `有 ${count} 个问题等你回答`;
+}
+export function taskBarAwaitingAnswerNote(settled: number, total: number, count: number): string {
+  return `已读完 ${settled} / ${total} 个阅读范围；${count} 个问题等你回答，回答后接着做`;
+}
+
+function openQuestions(plan: TaskPlanProjection): number {
+  return plan.clarifications.filter((card) => card.state === 'open').length;
+}
+
 export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBarView {
   const readiness = plan.start.readiness;
   const summary = taskBarSummary(plan);
@@ -456,6 +495,24 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
       if (control.pausing) {
         return { readiness, summary, statement: null, note: TASK_BAR_PAUSING_NOTE, status: plan.state.label, actions: [runLink] };
       }
+      // 任务等待你的说明 (Issue #422, S76d; CLAR-004): 等你回答 — the card above the plan says what to decide — with
+      // 取消任务 and 改计划重做 beside it; nothing goes on until the editor answers.
+      if (plan.state.key === 'awaiting-clarification') {
+        const continuation = control.continuation;
+        const asked = openQuestions(plan);
+        return {
+          readiness,
+          summary,
+          statement: null,
+          note: continuation === null ? taskBarQuestionsNote(asked) : taskBarAwaitingAnswerNote(continuation.unitsSettled, continuation.unitsTotal, asked),
+          status: TASK_BAR_AWAITING_ANSWER,
+          actions: [
+            { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
+            { name: 'redo', label: TASK_BAR_REDO, tone: control.redo.reason === null ? 'secondary' : 'quiet', disabledReason: control.redo.reason },
+            runLink,
+          ],
+        };
+      }
       // A stopped Run — 已暂停, or 任务已中断 · 可续行 (CONT-014, CONT-015): 续行 when its revalidation holds, else why not;
       // 取消任务, whose summary says what it kept; and the way to the Run.
       if (control.resume !== null) {
@@ -474,11 +531,13 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
           ],
         };
       }
+      // A Run that asked while it reads on says so (Issue #422, S76d): the question waits above the plan.
+      const asked = openQuestions(plan);
       return {
         readiness,
         summary,
         statement: null,
-        note: null,
+        note: asked === 0 ? null : taskBarQuestionsNote(asked),
         status: plan.state.label,
         actions: [
           { name: 'pause', label: TASK_BAR_PAUSE, tone: 'secondary', disabledReason: control.pause.reason },

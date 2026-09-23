@@ -114,6 +114,8 @@ export interface AnalysisTaskAttentionReading {
     readonly recordedAt: string;
     /** The execution owner's reading while the Run is in flight; `null` when nothing executes it. */
     readonly progress: RunProgress | null;
+    /** The first question the Run asked that still waits for the editor's answer (Issue #422, S76d); `null` when none. */
+    readonly openClarification?: null | { readonly requestId: string; readonly unitOrdinal: number; readonly raisedAt: string };
   };
   /** A prepared Task's pending Plan Revision that 重新确认计划 settles; `null` otherwise. */
   readonly planRevision: null | {
@@ -320,6 +322,22 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading): GlobalAttentio
     { key: 'state-at', label: '状态记录时间', value: run.stateAt },
   ];
   const itemId = `analysis:${reading.taskIntentId}`;
+  // A question the Run asked that waits for the editor (Issue #422, S76d; ATTN-003): a named decision in 等待你的决定,
+  // counted, and blocking when the Run itself waits for it. It opens the plan, where the card is answered.
+  const asked = run.openClarification ?? null;
+  if (asked !== null) {
+    return item('decisions', 'analysis-clarification', {
+      itemId,
+      blocked: run.state === 'awaiting-clarification',
+      at: asked.raisedAt,
+      book,
+      object,
+      ...(run.progress === null ? {} : { facts: { progress: progressFact(run.progress) } }),
+      nextStep: 'answer-clarification',
+      target: { kind: 'analysis-plan', bookId: reading.bookId, taskIntentId: reading.taskIntentId },
+      technical: [...technical, { key: 'clarification', label: '澄清请求', value: `${asked.requestId} · 第 ${asked.unitOrdinal} 个阅读范围` }],
+    });
+  }
   if (ACTIVE_RUN_STATES.has(run.state)) {
     if (run.progress !== null) {
       // 正在取消 stays visible wherever the editor looks until the Run has stopped (Issue #422, CTRL-005).
@@ -346,6 +364,9 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading): GlobalAttentio
       return item('active', 'analysis-paused', { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
     case 'resumable':
       return item('active', 'analysis-resumable', { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
+    // Answered, and waiting its turn in the slot to go on (Issue #422, S76d).
+    case 'awaiting-clarification':
+      return item('active', 'analysis-queued', { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
     default:
       return null;
   }

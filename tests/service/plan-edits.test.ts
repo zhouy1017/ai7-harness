@@ -8,7 +8,7 @@ import { ASSURANCE_SAMPLING_REMOVED, NO_PLAN_EDITS, SAFE_RETRY_WITHHELD, planEdi
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { PLAN_EDIT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { CLARIFICATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { PLAN_EDIT_DRIFT_REASON, PLAN_EDIT_STARTED_REASON } from '../../src/service/task-plan.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
@@ -17,6 +17,7 @@ import {
   type BaselineAnalysisUpdateRequest,
   type LaunchPolicyProjection,
 } from '../../src/shared/protocol.js';
+import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js';
 import { planRevisionsShapeAt33, plantRevision33Relations } from '../support/plan-edits.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -153,11 +154,13 @@ describe('schema revision 34 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(PLAN_EDIT_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(CLARIFICATION_SCHEMA_VERSION);
       expect(planRevisionsShapeAt33(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_plan_revisions ORDER BY rowid').all()).toEqual(before.revisions);
       const after = relationTruth(database);
-      expect([...after.keys()]).toEqual([...before.truth.keys()]);
+      // Revision 35's relations arrive empty on the way (Issue #422, S76d).
+      expect([...after.keys()]).toEqual([...before.truth.keys(), ...CLARIFICATION_RELATIONS_DROP_ORDER].sort());
+      for (const relation of CLARIFICATION_RELATIONS_DROP_ORDER) expect(after.get(relation)?.content).toMatch(/^0:/);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name)).toEqual(['analysis_plan_revisions']);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['service_lifetimes']);
       // Still a ledger: nothing rewrites or removes a Plan Revision.
@@ -185,7 +188,7 @@ describe('更新计划 over the real store', () => {
         ['reduction', '汇总全书', false, false],
         ['assurance-sampling', '核对与抽检', true, false],
       ]);
-      expect(proposed.boundary.adaptable).toEqual([{ id: 'safe-retry', label: '模型服务暂时出错时，同一个阅读范围安全地再试一次', removable: true, removed: false }]);
+      expect(proposed.boundary.adaptable).toEqual([{ id: 'safe-retry', label: '模型服务暂时出错时，同一个阅读范围安全地再试一次', removable: true, removed: false, movable: true, askFirst: false }]);
       expect(proposed.edit).toEqual({ editable: true, reason: null, lastEdit: null });
       expect(prepared.planVersion?.edits).toEqual(NO_PLAN_EDITS);
       expect(prepared.executionPlan).not.toHaveProperty('editorEdits');

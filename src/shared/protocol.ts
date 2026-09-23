@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 48 as const;
+export const SERVICE_PROTOCOL_VERSION = 49 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -68,6 +68,7 @@ export const IPC_CHANNELS = {
   pauseBaselineAnalysisRun: 'ai7:j04:pause-baseline-analysis-run',
   resumeBaselineAnalysisRun: 'ai7:j04:resume-baseline-analysis-run',
   editBaselineAnalysisPlan: 'ai7:j04:edit-baseline-analysis-plan',
+  answerBaselineAnalysisClarification: 'ai7:j04:answer-baseline-analysis-clarification',
   runReconnectPreflight: 'ai7:j04:run-reconnect-preflight',
   quickStartBaselineAnalysis: 'ai7:j04:quick-start-baseline-analysis',
   setDefaultExecutionRule: 'ai7:j04:set-default-execution-rule',
@@ -2456,7 +2457,10 @@ export type BaselineAnalysisRunState =
   // it read is kept, and 任务已中断 · 可续行 for a Run AI7 stopped under, its authorization kept for 续行.
   | 'pausing'
   | 'paused'
-  | 'resumable';
+  | 'resumable'
+  // 任务等待你的说明 (Issue #422, S76d; CLAR-004): every unit the Run could read is read, and it waits — holding nothing —
+  // for the editor's answer to what it asked before the rest can go on.
+  | 'awaiting-clarification';
 
 export type BaselineAnalysisUnitProjection =
   | {
@@ -2555,6 +2559,11 @@ export interface PlanEditsProjection {
   removedSteps: ReadonlyArray<'assurance-sampling'>;
   /** 不允许 the safe retry: a retry-safe failure settles as a gap. */
   disallowedAdaptations: ReadonlyArray<'safe-retry'>;
+  /**
+   * 先问你 (Issue #422, S76d; PLAN-011): the Run asks the editor before it makes the safe retry — a Clarification
+   * Request — and makes it only once the editor answered 再试一次. Named only when it holds something.
+   */
+  askFirstAdaptations?: ReadonlyArray<'safe-retry'>;
 }
 
 /** The field a Plan Revision diff names for one edited item. */
@@ -2563,8 +2572,11 @@ export type PlanEditField = 'steps.assurance-sampling' | 'adaptations.safe-retry
 /** The Plan Boundary Split inside the canonical envelope: declared in-envelope adaptations, material fields, and expected editor participation. */
 export interface PlanBoundarySplitProjection {
   adaptable: ReadonlyArray<{ adaptationClass: 'safe-retry'; label: string; statement: string }>;
+  /** The adaptations the editor moved into 先问你 (Issue #422, S76d); named only when there is one. */
+  askFirst?: ReadonlyArray<{ adaptationClass: 'safe-retry'; label: string; statement: string }>;
   material: ReadonlyArray<{ field: MaterialPlanField; label: string }>;
-  participation: { expected: false; statement: string };
+  /** Whether the editor may be asked mid-Run, and where (PLAN-005). */
+  participation: { expected: boolean; statement: string };
 }
 
 /** One immutable plan version of a Task Intent; only the latest can be `current` or `bound`. */
@@ -2842,7 +2854,7 @@ export interface BaselineAnalysisProjection {
   kind: typeof BASELINE_ANALYSIS_KIND;
   contractVersion: typeof BASELINE_ANALYSIS_CONTRACT_VERSION;
   state: 'available' | 'prepared' | 'authorized-blocked' | 'waiting' | 'admitted' | 'executing' | 'settled' | 'failed' | 'interrupted' | 'cancelled' | 'cancelling'
-    | 'pausing' | 'paused' | 'resumable';
+    | 'pausing' | 'paused' | 'resumable' | 'awaiting-clarification';
   stateLabel: string;
   taskIntent: null | {
     taskIntentId: string;
@@ -4025,11 +4037,12 @@ export interface InspectTaskPlanInput {
  * 等待运行名额 (OFF-006) — and `cancelled` one the editor cancelled before it read anything (Issue #502).
  * `cancelling` is 正在取消: the editor cancelled a Run under way, which stops at the next unit boundary, and
  * `cancelled-after-start` the 已取消 of a Run cancelled after it began reading (Issue #422, CTRL-005). `pausing`,
- * `paused` and `resumable` are 正在暂停, 已暂停 and 任务已中断 · 可续行 (S76b; CTRL-001, CONT-014).
+ * `paused` and `resumable` are 正在暂停, 已暂停 and 任务已中断 · 可续行 (S76b; CTRL-001, CONT-014), and
+ * `awaiting-clarification` 任务等待你的说明: the Run read what it could and waits for the editor's answer (S76d; CLAR-004).
  */
 export type TaskPlanStateKey =
   | 'ready' | 'changed' | 'unconnected' | 'offline' | 'recorded' | 'blocked' | 'waiting' | 'running' | 'settled' | 'stopped'
-  | 'cancelled' | 'cancelling' | 'cancelled-after-start' | 'pausing' | 'paused' | 'resumable';
+  | 'cancelled' | 'cancelling' | 'cancelled-after-start' | 'pausing' | 'paused' | 'resumable' | 'awaiting-clarification';
 
 /**
  * A started Run's controls in the drawer's bar and its activity above the plan (Issue #422, plan slice S76a;
@@ -4138,6 +4151,10 @@ export interface TaskPlanAdaptationProjection {
   removable: boolean;
   /** Withdrawn from this plan version at the editor's word. */
   removed: boolean;
+  /** Whether the editor may move it into 先问你 (Issue #422, S76d; PLAN-011). */
+  movable: boolean;
+  /** Moved into 先问你 in this plan version: the Run asks the editor before it makes it. */
+  askFirst: boolean;
 }
 
 /**
@@ -4243,6 +4260,37 @@ export interface TaskPlanProjection {
   runControl: TaskPlanRunControlProjection | null;
   /** 改计划重做 while it can be made (Issue #422, S76c): on a stopped Run, or one cancelled after it began; else `null`. */
   redo: TaskPlanRedoProjection | null;
+  /** What the Task's Run asked the editor (Issue #422, S76d; CLAR-001 to CLAR-007): open questions first; empty when none. */
+  clarifications: ReadonlyArray<TaskPlanClarificationProjection>;
+}
+
+/** The answers a question about a safe retry can have (Issue #422, S76d; CLAR-006, INPUT-002). */
+export type ClarificationOptionId = 'retry' | 'record-gap';
+
+/**
+ * One Clarification Request of the Task's Run as the drawer's card shows it (Issue #422, S76d; V2-UX-CLAR-001 to
+ * CLAR-007, INPUT-001 to INPUT-004): the question and why it is asked, what waits and what goes on, what happens after an
+ * answer, the choices — none chosen, one 推荐 with its reason — and the note that may qualify one; once answered, the
+ * answer as it was recorded. `unanswered` is a question whose Run ended before an answer came.
+ */
+export interface TaskPlanClarificationProjection {
+  requestId: string;
+  unitOrdinal: number;
+  planVersion: number;
+  raisedAt: string;
+  question: string;
+  why: string;
+  /** What the model service reported, in the Run's own words. */
+  detail: string;
+  /** 「该步骤等待说明 · 其他步骤仍在继续」 while other units go on; 「任务等待你的说明」 once nothing else can. */
+  scope: string;
+  after: string;
+  options: ReadonlyArray<{ id: ClarificationOptionId; label: string; consequence: string; recommended: string | null }>;
+  note: { label: string; hint: string; maxLength: number };
+  state: 'open' | 'answered' | 'unanswered';
+  answer: null | { optionId: ClarificationOptionId; label: string; note: string | null; answeredAt: string; line: string };
+  /** Why the editor cannot answer now; `null` when they can. */
+  answerable: { reason: string | null };
 }
 
 /**
@@ -4893,6 +4941,7 @@ export type GlobalAttentionStateKey =
   | 'review-failed'
   | 'review-stopped'
   | 'analysis-plan-revision'
+  | 'analysis-clarification'
   | 'analysis-queued'
   | 'analysis-running'
   | 'analysis-cancelling'
@@ -4917,10 +4966,11 @@ export type GlobalAttentionNextStep =
   | 'return-to-recovery'
   | 'retry-abandon-cleanup'
   | 'await-local-check'
-  | 'resolve-conflict';
+  | 'resolve-conflict'
+  | 'answer-clarification';
 export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'view-run', 'view-review', 'reconfirm-plan', 'continue-review', 'return-to-recovery', 'retry-abandon-cleanup', 'await-local-check',
-  'resolve-conflict',
+  'resolve-conflict', 'answer-clarification',
 ];
 
 /**
@@ -5602,7 +5652,19 @@ export interface ServiceOperationMap {
       planEnvelopeDigest: string;
       removedSteps: ReadonlyArray<string>;
       disallowedAdaptations: ReadonlyArray<string>;
+      /** 先问你 (Issue #422, S76d): absent reads as none, so an S73 request still means what it meant. */
+      askFirstAdaptations?: ReadonlyArray<string>;
     };
+    output: BaselineAnalysisProjection;
+  };
+  /**
+   * 提交回答 (Issue #422, S76d; CLAR-005, CLAR-006, INPUT-004): the editor's one answer to a question the Book's current
+   * Task's Run asked — the option chosen and the note that qualifies it — recorded with who and when; a Run that waits
+   * for it goes on inside its unchanged envelope. It grants no authority, and a question already answered, or one whose
+   * Run has ended, is refused.
+   */
+  answerBaselineAnalysisClarification: {
+    input: { bookId: string; taskIntentId: string; requestId: string; optionId: ClarificationOptionId; note: string | null };
     output: BaselineAnalysisProjection;
   };
   /**
@@ -5958,6 +6020,14 @@ export interface RendererApi {
     planEnvelopeDigest: string;
     removedSteps: ReadonlyArray<string>;
     disallowedAdaptations: ReadonlyArray<string>;
+    askFirstAdaptations?: ReadonlyArray<string>;
+  }): Promise<BaselineAnalysisProjection>;
+  /** 提交回答 (Issue #422, S76d): the editor's answer to a question the Book's baseline analysis Run asked. */
+  answerBaselineAnalysisClarification(input: {
+    taskIntentId: string;
+    requestId: string;
+    optionId: ClarificationOptionId;
+    note: string | null;
   }): Promise<BaselineAnalysisProjection>;
   runReconnectPreflight(): Promise<ReconnectPreflightProjection>;
   /** 快速开始 of the Book the window is showing, after 先看计划's preparation (Issue #421). */

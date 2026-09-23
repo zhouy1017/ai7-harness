@@ -52,7 +52,7 @@ const STATES: ReadonlyArray<GlobalAttentionStateKey> = [
   'import-outcome-uncertain', 'import-cleanup-pending', 'recovery-pending', 'recovery-deferred',
   'manuscript-conflict', 'manuscript-conflict-deferred', 'analysis-failed',
   'analysis-interrupted', 'analysis-blocked', 'analysis-orphaned', 'review-failed', 'review-stopped',
-  'analysis-plan-revision', 'analysis-queued', 'analysis-running', 'analysis-cancelling', 'analysis-pausing', 'analysis-paused', 'analysis-resumable',
+  'analysis-plan-revision', 'analysis-clarification', 'analysis-queued', 'analysis-running', 'analysis-cancelling', 'analysis-pausing', 'analysis-paused', 'analysis-resumable',
   'review-running', 'review-continuable',
   'analysis-completed', 'analysis-completed-with-gaps', 'review-completed',
 ];
@@ -150,6 +150,7 @@ describe('each item', () => {
       'review-failed': '运行失败',
       'review-stopped': '中途停止',
       'analysis-plan-revision': '计划修订',
+      'analysis-clarification': '等你回答',
       'analysis-queued': '正在排队',
       'analysis-running': '运行中',
       'analysis-cancelling': '正在取消',
@@ -185,6 +186,7 @@ describe('each item', () => {
       'retry-abandon-cleanup': '重试放弃清理',
       'await-local-check': '等待本地核对',
       'resolve-conflict': '解决冲突…',
+      'answer-clarification': '回答问题',
     });
     // Pinned to the words the record's own surface uses there.
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['resolve-conflict']).toBe(RESOLVE_CONFLICT_LABEL);
@@ -233,6 +235,7 @@ describe('each item', () => {
       'review-failed': globalAttentionReason(item('review-failed', { facts: { progress: null, revisionOrdinal: null, categories: categories([['错别字与规范用语', 'failed', null], ['体例与格式', 'refused', null]]) } })),
       'review-stopped': globalAttentionReason(item('review-stopped', { facts: { progress: null, revisionOrdinal: null, categories: categories([['事实核查', 'interrupted', null]]) } })),
       'analysis-plan-revision': globalAttentionReason(item('analysis-plan-revision')),
+      'analysis-clarification': globalAttentionReason(item('analysis-clarification', { blocked: true })),
       'analysis-queued': globalAttentionReason(item('analysis-queued')),
       'analysis-running': globalAttentionReason(item('analysis-running', { facts: { progress: { stage: 'units', unitsSettled: 3, unitsTotal: 8 }, categories: [], revisionOrdinal: null } })),
       'analysis-cancelling': globalAttentionReason(item('analysis-cancelling', { facts: { progress: { stage: 'units', unitsSettled: 2, unitsTotal: 8 }, categories: [], revisionOrdinal: null } })),
@@ -259,6 +262,8 @@ describe('each item', () => {
       'review-failed': '「错别字与规范用语」运行失败；「体例与格式」未能开始',
       'review-stopped': '「事实核查」已中断',
       'analysis-plan-revision': '计划冻结之后，它的关键内容已经变化；原计划不能再开始。',
+      // Issue #422 (S76d; CLAR-004): the Task waits for the answer; a question asked while the Run reads on says so.
+      'analysis-clarification': '任务等待你的说明：它想知道要不要把一个阅读范围安全地再试一次。',
       'analysis-queued': '已进入 AI7 调度器（单槽位）。',
       'analysis-running': '正在逐个阅读范围分析 · 已完成 3/8 个阅读范围',
       'analysis-cancelling': '你取消了这项任务；正在进行的这一步完成后停止，之后不再发送任何内容 · 正在逐个阅读范围分析 · 已完成 2/8 个阅读范围',
@@ -309,5 +314,14 @@ describe('material and knowledge-base items (V2-UX-ATTN-009)', () => {
     for (const entry of GLOBAL_ATTENTION_MATERIAL_GROUPS) expect(GLOBAL_ATTENTION_GROUP_KEYS).toContain(entry.group);
     // None of these records exists yet, so no state of 待我处理 speaks of one.
     for (const label of Object.values(GLOBAL_ATTENTION_STATE_LABELS)) expect(label).not.toMatch(/留存|资料库|学习准入|索引/u);
+  });
+});
+
+// Issue #422 (plan slice S76d; ATTN-003, CLAR-004): a question asked while the Run reads on is only that step's wait.
+describe('a Clarification Request in 待我处理 (S76d)', () => {
+  it('says whether only its step waits or the whole Task', () => {
+    expect(globalAttentionReason(item('analysis-clarification', { blocked: false })))
+      .toBe('该步骤等待说明 · 其他步骤仍在继续：它想知道要不要把一个阅读范围安全地再试一次。');
+    expect(GLOBAL_ATTENTION_STATE_PILLS['analysis-clarification']).toEqual({ tone: 'attention', shape: 'triangle' });
   });
 });

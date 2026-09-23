@@ -444,12 +444,25 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     // 更新计划 (Issue #419): the Task, the version the editor read, and the full set of what the plan leaves out — a few
     // short identities, each once; the ledger decides which of them the plan can leave out.
     case 'editBaselineAnalysisPlan': {
-      const input = requireInput(value.input, ['bookId', 'taskIntentId', 'planEnvelopeDigest', 'removedSteps', 'disallowedAdaptations'], tentativeId);
+      // `askFirstAdaptations` (Issue #422, S76d) is optional: an S73 frame without it still means what it meant.
+      const input = requireInputWithOptional(value.input, ['bookId', 'taskIntentId', 'planEnvelopeDigest', 'removedSteps', 'disallowedAdaptations'],
+        ['askFirstAdaptations'], tentativeId);
       const identities = (list: unknown): boolean => Array.isArray(list) && list.length <= 8 &&
         list.every((entry) => isBoundedString(entry, 64) && /^[a-z][a-z-]*$/u.test(entry)) && new Set(list).size === list.length;
       if (!validUuid(input.bookId) || !validUuid(input.taskIntentId) ||
           !isBoundedString(input.planEnvelopeDigest, 64) || !HEX_DIGEST_PATTERN.test(input.planEnvelopeDigest) ||
-          !identities(input.removedSteps) || !identities(input.disallowedAdaptations)) {
+          !identities(input.removedSteps) || !identities(input.disallowedAdaptations) ||
+          (Object.hasOwn(input, 'askFirstAdaptations') && !identities(input.askFirstAdaptations))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // 提交回答 (Issue #422, S76d): the question and the Task it belongs to, the one option chosen, and a note or none.
+    case 'answerBaselineAnalysisClarification': {
+      const input = requireInput(value.input, ['bookId', 'taskIntentId', 'requestId', 'optionId', 'note'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.taskIntentId) || !validUuid(input.requestId) ||
+          (input.optionId !== 'retry' && input.optionId !== 'record-gap') ||
+          !(input.note === null || isBoundedString(input.note, 500))) {
         throw new ProtocolError(tentativeId);
       }
       break;

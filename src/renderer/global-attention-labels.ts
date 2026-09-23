@@ -115,6 +115,8 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   'review-stopped': '中途停止',
   // V2-UX-ATTN-003: the named decision itself, never a generic 待审批.
   'analysis-plan-revision': '计划修订',
+  // A Clarification Request (Issue #422, S76d): the bar's own words for it.
+  'analysis-clarification': '等你回答',
   'analysis-queued': '正在排队',
   'analysis-running': '运行中',
   'analysis-cancelling': '正在取消',
@@ -144,6 +146,7 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
   'review-failed': { tone: 'blocked', shape: 'square' },
   'review-stopped': { tone: 'blocked', shape: 'square' },
   'analysis-plan-revision': { tone: 'attention', shape: 'triangle' },
+  'analysis-clarification': { tone: 'attention', shape: 'triangle' },
   'analysis-queued': { tone: 'progress', shape: 'half' },
   'analysis-running': { tone: 'progress', shape: 'half' },
   'analysis-cancelling': { tone: 'attention', shape: 'half' },
@@ -172,7 +175,11 @@ export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionN
   'retry-abandon-cleanup': '重试放弃清理',
   'await-local-check': '等待本地核对',
   'resolve-conflict': RESOLVE_CONFLICT_LABEL,
+  'answer-clarification': '回答问题',
 };
+/** The two scopes a question can have (CLAR-004), in the card's own words. */
+export const GLOBAL_ATTENTION_CLARIFICATION_WAITING = '任务等待你的说明';
+export const GLOBAL_ATTENTION_CLARIFICATION_CONTINUING = '该步骤等待说明 · 其他步骤仍在继续';
 /** The prefix the product already puts before a record's safe next action. */
 export const GLOBAL_ATTENTION_NEXT_STEP_PREFIX = '安全的下一步：';
 
@@ -253,6 +260,11 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
         : facts.categories.map((category) => `「${category.label}」${category.stateLabel}`).join('；');
     case 'analysis-plan-revision':
       return '计划冻结之后，它的关键内容已经变化；原计划不能再开始。';
+    // Issue #422 (S76d; CLAR-004): whether only that step waits, or the whole Task.
+    case 'analysis-clarification':
+      return item.blocked
+        ? `${GLOBAL_ATTENTION_CLARIFICATION_WAITING}：它想知道要不要把一个阅读范围安全地再试一次。`
+        : `${GLOBAL_ATTENTION_CLARIFICATION_CONTINUING}：它想知道要不要把一个阅读范围安全地再试一次。`;
     case 'analysis-queued':
       return '已进入 AI7 调度器（单槽位）。';
     case 'analysis-running':

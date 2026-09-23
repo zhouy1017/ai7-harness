@@ -527,6 +527,31 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-bar-cancel-impact h4 { margin: 0; }
 .task-bar-cancel-impact h4:focus-visible { outline: 3px solid #416458; outline-offset: 2px; }
 .task-bar-cancel-lines { display: grid; gap: .3rem; margin: 0; padding-left: 1.1rem; font-size: .86rem; line-height: 1.5; }
+/* 澄清卡 (Issue #422, S76d; CLAR-002, INPUT-002): the question first in the drawer, its choices unselected and
+   each with its consequence, 推荐 as words beside one, and the note that may qualify a choice. */
+.task-drawer-questions:empty { display: none; }
+.task-drawer-questions { display: grid; gap: .6rem; margin-bottom: .8rem; }
+.task-plan-clarification { display: grid; gap: .45rem; padding: .75rem; border: 2px solid #b0701d; border-radius: 10px; background: #fff8ec; }
+.task-plan-clarification h4 { margin: 0; }
+.task-plan-clarification h4:focus-visible { outline: 3px solid #416458; outline-offset: 2px; }
+.task-plan-clarification p { margin: 0; }
+.task-plan-clarification-scope { font-weight: 700; color: #6b4a10; }
+.task-plan-clarification-choices { display: grid; gap: .4rem; margin: 0; padding: 0; border: 0; }
+.task-plan-clarification-question { padding: 0; font-weight: 700; line-height: 1.5; overflow-wrap: anywhere; }
+.task-plan-choice { display: grid; grid-template-columns: auto 1fr; gap: .45rem; align-items: start; padding: .5rem .6rem; border: 1px solid #c9b58f; border-radius: 8px; background: #fff; cursor: pointer; }
+.task-plan-choice:has(input:checked) { border-width: 2px; border-color: #6b4a10; }
+.task-plan-choice input { margin-top: .2rem; }
+.task-plan-choice-text { display: grid; gap: .2rem; min-width: 0; }
+.task-plan-choice-label { font-weight: 700; }
+.task-plan-choice-recommended { justify-self: start; padding: 0 .35rem; border: 1px solid #416458; border-radius: 4px; color: #2f4c42; font-size: .74rem; font-weight: 700; }
+.task-plan-clarification-note { width: 100%; min-height: 4.5rem; box-sizing: border-box; font: inherit; }
+.task-plan-clarification-deferred { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: 0; padding: .45rem .6rem; border: 1px dashed #b0701d; border-radius: 8px; }
+.task-plan-clarification-record { display: grid; gap: .35rem; margin-top: .8rem; }
+.task-plan-clarification-record h4 { margin: 0; }
+.task-plan-clarification-record li { display: grid; gap: .15rem; }
+.task-plan-asked { margin-bottom: .45rem; }
+.task-plan-edit-ask-first { margin-left: .35rem; padding: 0 .4rem; border: 1px solid #b9c3bf; border-radius: 6px; background: #fff; color: #4e564c; font-size: .78rem; }
+.task-plan-edit-ask-first::before { content: '先问你'; }
 /* 知识库 › 工序与规则: one card per rule, its state in words and shape. */
 .default-rule-list { display: grid; gap: .8rem; }
 .default-rule-card { display: grid; gap: .45rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
@@ -936,7 +961,8 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal,
   .global-attention-group, .global-attention-item,
   .manuscript-export, .export-format-option, .export-option, .export-fidelity-row, .export-receipt, .export-records > li,
-  .task-plan-default-rule-confirm, .default-rule-card, .task-plan-activity, .task-bar-cancel-impact {
+  .task-plan-default-rule-confirm, .default-rule-card, .task-plan-activity, .task-bar-cancel-impact,
+  .task-plan-clarification, .task-plan-choice, .task-plan-choice-recommended, .task-plan-clarification-deferred, .task-plan-edit-ask-first {
     color: CanvasText;
     background: Canvas;
     border-color: CanvasText;
@@ -961,6 +987,10 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   /* A Run stopping at the editor's word keeps a heavier edge than one simply running, and the summary its outline. */
   .task-plan-activity[data-task-plan-activity="cancelling"], .task-bar-cancel-impact { border-width: 2px; }
   .task-bar-cancel-impact h4:focus-visible { outline-color: Highlight; }
+  /* Without colour a question keeps its heavier edge, and the chosen answer its own. */
+  .task-plan-clarification { border-width: 3px; }
+  .task-plan-choice:has(input:checked) { outline: 2px solid Highlight; outline-offset: -3px; }
+  .task-plan-clarification h4:focus-visible { outline-color: Highlight; }
   /* Without colour, the 发稿版本 mark keeps its outline and the item it marks a heavier border; a chosen card
      or milestone keeps a heavier border too. */
   .publication-version-mark, .publication-current-mark { color: CanvasText; background: Canvas; border: 2px solid CanvasText; forced-color-adjust: none; }

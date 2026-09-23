@@ -23,6 +23,18 @@ import {
   RUN_CONTROL_PAUSE_REASON,
   RUN_CONTROL_REDO_REASON,
   redoGoalSentence,
+  CLARIFICATION_AFTER,
+  CLARIFICATION_NOTE,
+  CLARIFICATION_OPTIONS,
+  CLARIFICATION_SCOPE_CONTINUING,
+  CLARIFICATION_SCOPE_PAUSED,
+  CLARIFICATION_SCOPE_RESUMABLE,
+  CLARIFICATION_SCOPE_WAITING,
+  CLARIFICATION_UNANSWERABLE_CANCELLING,
+  CLARIFICATION_UNANSWERABLE_ENDED,
+  CLARIFICATION_WHY,
+  clarificationAnsweredLine,
+  clarificationQuestion,
   RESUME_BLOCKED_BINDING,
   RESUME_BLOCKED_CONNECTION,
   RESUME_BLOCKED_OFFLINE,
@@ -141,6 +153,7 @@ describe('route-aware readiness of the authorization bar (S74a A3; AUTH-005, MOD
       defaultRule: { canSet: false, reason: '这份计划不能设为快速开始默认。', planEnvelopeDigest: null, current: null, binds: [], startedBy: null },
       runControl: null,
       redo: null,
+      clarifications: [],
     };
   }
 
@@ -296,5 +309,27 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
       '它已读完的阅读范围的结果没有保存下来，不会形成结果集修订版。',
       CANCELLATION_NO_EFFECTS,
     ]);
+  });
+});
+
+// Issue #422 (plan slice S76d; CLAR-002, INPUT-002, INPUT-003): the question card's own words.
+describe('a Clarification Request card (S76d)', () => {
+  it('asks in the editor\'s words, with two choices — one 推荐 with its reason — and a note that qualifies one', () => {
+    expect(clarificationQuestion(5)).toBe('第 5 个阅读范围：模型服务暂时出错，这一次没有读成。要安全地再试一次吗？');
+    expect(CLARIFICATION_WHY).toBe('你把「模型服务暂时出错时，同一个阅读范围安全地再试一次」改成了「先问你」，所以 AI7 先停下这一步来问你。');
+    expect([CLARIFICATION_SCOPE_CONTINUING, CLARIFICATION_SCOPE_WAITING]).toEqual(['该步骤等待说明 · 其他步骤仍在继续', '任务等待你的说明']);
+    expect(CLARIFICATION_SCOPE_PAUSED).toBe('任务已暂停：回答会先记下，续行后按它接着做');
+    expect(CLARIFICATION_SCOPE_RESUMABLE).toBe('任务已中断：回答会先记下，续行后按它接着做');
+    expect(CLARIFICATION_AFTER).toBe('回答后：选「再试一次」，AI7 把这个阅读范围再发送一次；选「不重试，记为缺口」，它记为缺口。之后接着做归纳和抽样。');
+    expect(CLARIFICATION_OPTIONS.map((option) => [option.id, option.label, option.recommended])).toEqual([
+      ['retry', '再试一次', '推荐：这类错误通常是暂时的，再试一次就能安全地补上这个阅读范围'],
+      ['record-gap', '不重试，记为缺口', null],
+    ]);
+    expect(CLARIFICATION_NOTE).toEqual({ label: '自行说明…', hint: '补充你的考虑，和所选的回答一起记下；不改变所选回答的意思。', maxLength: 500 });
+    expect(clarificationAnsweredLine('再试一次', null)).toBe('你已回答：再试一次');
+    expect(clarificationAnsweredLine('不重试，记为缺口', '先看看')).toBe('你已回答：不重试，记为缺口 · 说明：先看看');
+    expect([CLARIFICATION_UNANSWERABLE_ENDED, CLARIFICATION_UNANSWERABLE_CANCELLING])
+      .toEqual(['这次运行已经结束，这个问题不再等你回答', '任务正在取消，这个问题不再等你回答']);
+    expect(RESUME_BLOCKED_BINDING.endsWith('请改计划重做。')).toBe(true);
   });
 });

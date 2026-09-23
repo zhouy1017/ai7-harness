@@ -295,7 +295,7 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
       });
       expect(firstPlan.steps.map((step) => step.label)).toEqual(['逐章读取', '汇总全书', '核对与抽检']);
       expect(firstPlan.steps.map((step) => step.result)).toEqual(['各章摘要', '梗概与人物、事件、关系、设定', '可信程度说明']);
-      expect(firstPlan.boundary.adaptable).toEqual([{ id: 'safe-retry', label: '模型服务暂时出错时，同一个阅读范围安全地再试一次', removable: true, removed: false }]);
+      expect(firstPlan.boundary.adaptable).toEqual([{ id: 'safe-retry', label: '模型服务暂时出错时，同一个阅读范围安全地再试一次', removable: true, removed: false, movable: true, askFirst: false }]);
       // Issue #419: of the three steps only 核对与抽检 can be left out, and the prepared plan takes edits.
       expect(firstPlan.steps.map((step) => [step.id, step.removable, step.removed])).toEqual([['units', false, false], ['reduction', false, false], ['assurance-sampling', true, false]]);
       expect(firstPlan.edit).toEqual({ editable: true, reason: null, lastEdit: null });
