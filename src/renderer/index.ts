@@ -53,6 +53,7 @@ import {
   type MilestonePurposeKind,
 } from '../shared/protocol.js';
 import { mountDeliverables, type DeliverablesSurface } from './deliverables.js';
+import { mountProposalConflict, type ProposalConflictSurface } from './proposal-conflict.js';
 import {
   DELIVERABLES_DESTINATION_ACTIONS,
   DELIVERABLES_ENTRY_LABEL,
@@ -191,6 +192,8 @@ let manuscriptRail: PositionRail | undefined;
 let reviewWorkspace: ReviewWorkspaceSurface | undefined;
 /** ⑥ 交付物 while it is on screen: nothing still in flight paints once the screen is replaced. */
 let deliverablesSurface: DeliverablesSurface | undefined;
+/** 稿件冲突 while it is on screen: a draft save still in flight never paints once the screen is replaced. */
+let proposalConflictSurface: ProposalConflictSurface | undefined;
 let authorityInterrupted = false;
 
 interface RecoveryReturnContext {
@@ -314,6 +317,8 @@ function replaceScreen(state: string, content: HTMLElement): void {
   reviewWorkspace = undefined;
   deliverablesSurface?.destroy();
   deliverablesSurface = undefined;
+  proposalConflictSurface?.destroy();
+  proposalConflictSurface = undefined;
   editor?.destroy();
   editor = undefined;
   closeNavigation = null;
@@ -1647,6 +1652,48 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
  * `deliverables.ts`; this only routes to it and gives it the workbench's persistent way out, appended last
  * so the sticky region stays on screen for the whole page (V2-UX-LAYER-005).
  */
+/**
+ * 稿件冲突 of one 修改建议 as a Dedicated Work Workspace (Issue #57; ED-003, IA › Proposal conflict workspace).
+ * It takes the manuscript view's place; the surface is `proposal-conflict.ts`, and this only routes to it
+ * and back: 返回稿件 — and every way the conflict is left — opens the manuscript at the conflict's paragraph
+ * with the card it came from, or the new version's, open again.
+ */
+function renderProposalConflict(target: { bookId: string; manuscriptId: string; branchId: string; markId: string }, bookTitle: string): void {
+  const content = panel();
+  content.classList.add('proposal-conflict-workspace');
+  content.dataset['bookId'] = target.bookId;
+  const surface = mountProposalConflict({
+    root: content,
+    manuscriptId: target.manuscriptId,
+    branchId: target.branchId,
+    markId: target.markId,
+    bookTitle,
+    platform: window.ai7.platform,
+    api: window.ai7,
+    technicalDetails,
+    setStatus,
+    errorMessage: rendererErrorMessage,
+    errorCode: (error) => rendererErrorData(error)?.code ?? null,
+    returnToManuscript: async (at, completion) => {
+      if (at === null) {
+        await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId: target.bookId, bookTitle });
+      } else {
+        const opened = await window.ai7.getManuscriptWindowAt({
+          manuscriptId: target.manuscriptId,
+          branchId: target.branchId,
+          target: { kind: 'block', blockId: at.blockId },
+        });
+        renderEditorWindow(opened, bookTitle, undefined, undefined, at.markId);
+      }
+      if (completion !== null) setStatus(completion, 'success');
+    },
+    openConflict: (markId) => renderProposalConflict({ ...target, markId }, bookTitle),
+  });
+  replaceScreen('proposal-conflict', content);
+  proposalConflictSurface = surface;
+  surface.start();
+}
+
 function renderBookDeliverables(bookId: string, bookTitle: string): void {
   const content = panel();
   content.classList.add('book-deliverables');
@@ -5347,6 +5394,18 @@ function renderEditorWindow(
     openReview.disabled = true;
     if (!(await leaveForReview(null))) openReview.disabled = authoritativeMutationBusy();
   });
+  // 解决冲突… leaves the manuscript for 稿件冲突 (Issue #57): local edits are settled and the position taken
+  // first, so the comparison reads the durable text and 返回稿件 comes back to where the editor was.
+  const leaveForConflict = async (markId: string): Promise<void> => {
+    setStatus('正在保存并打开稿件冲突…', 'busy');
+    try {
+      if (!(await settleLocalEdit())) return;
+      await rememberEntryPosition();
+      renderProposalConflict({ bookId: currentWindow.bookId, manuscriptId: currentWindow.manuscriptId, branchId: currentWindow.branchId, markId }, bookTitle);
+    } catch (error) {
+      setStatus(rendererErrorMessage(error, '无法打开稿件冲突。'), 'error');
+    }
+  };
   openReview.dataset['workDestination'] = 'review';
   // Leaving for 交付物 is leaving the manuscript as well: local edits are settled and the position taken first.
   const openDeliverables = button(DELIVERABLES_ENTRY_LABEL, 'secondary', async () => {
@@ -6553,6 +6612,7 @@ function renderEditorWindow(
     busy: () => authoritativeMutationBusy() || serviceJobBusy(),
     marksChanged: () => manuscriptRail?.refresh(),
     openReviewFinding: (target) => void leaveForReview({ reviewRunId: target.reviewRunId, findingId: target.findingId }),
+    openConflict: (markId) => void leaveForConflict(markId),
     // An Apply is an authoritative write like a replacement or an undo: the window is reloaded from the
     // service and must show exactly the manuscript state the Effect Receipt names.
     writeManuscript: async (operation, done) => {

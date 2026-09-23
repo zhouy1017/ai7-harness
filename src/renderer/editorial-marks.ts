@@ -15,6 +15,9 @@ import {
   DECISION_REASON_CHIPS,
   HIGHLIGHT_COLOR_LABELS,
   MARK_KIND_LABELS,
+  RESOLVE_CONFLICT_LABEL,
+  REVERSAL_CORRECTION_LINE,
+  SAFE_MERGE_LINE,
   markDriftNote,
   markSourceLine,
   markStateLabel,
@@ -61,6 +64,11 @@ interface MountOptions {
    * finding in view. Without it, 查看任务 stays disabled for every mark.
    */
   openReviewFinding?(target: ReviewFindingOfMarkProjection): void;
+  /**
+   * 解决冲突… on a 修改建议 in a Three-way Proposal Conflict (Issue #57): leave for 稿件冲突 on that mark.
+   * Without it, the entry is not offered.
+   */
+  openConflict?(markId: string): void;
   busy(): boolean;
   /** The set of marks changed: whatever counts them elsewhere on the surface reads again. */
   marksChanged?(): void;
@@ -606,6 +614,22 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (card.kind === 'change-suggestion' && card.suggestion !== null) {
       const suggestion = card.suggestion;
       const decision = suggestion.decision;
+      // A conflict that is not resolved yet blocks the Apply; 解决冲突… stands beside what it blocks (Issue #57).
+      const conflictOpen = card.conflict !== null && (card.conflict.state === 'unresolved' || card.conflict.state === 'deferred');
+      const openConflict = options.openConflict;
+      const resolveConflict = (): HTMLButtonElement[] => conflictOpen && openConflict !== undefined
+        ? [actionButton('resolve-conflict', RESOLVE_CONFLICT_LABEL, 'primary', () => {
+            close();
+            openConflict(card.markId);
+          })]
+        : [];
+      // ADR 0085 §2: said beside an available 接受并应用 or 应用到稿件, never beside a blocked one.
+      const safeMerge = (): HTMLElement[] => {
+        if (!exact || !card.changedElsewhere) return [];
+        const line = el('p', 'editorial-mark-safe-merge', SAFE_MERGE_LINE);
+        line.dataset['markSafeMerge'] = 'true';
+        return [line];
+      };
       const applied = card.status === 'applied' ? suggestion.application : null;
       const shown = decision?.editedText ?? suggestion.proposedText;
       const content = el('p', 'editorial-mark-change');
@@ -665,7 +689,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           }))));
           yours.append(disposition);
         } else {
-          yours.append(disabledAction('prepare-reverse', '准备撤销本次应用', '应用后的文字又改过，不能直接撤销这次应用。'));
+          yours.append(disabledAction('prepare-reverse', '准备撤销本次应用', '应用后的文字又改过，不能直接撤销这次应用。'), ...resolveConflict());
+          if (card.conflict?.state === 'resolved' && card.conflict.outcome === 'new-version') {
+            const correction = el('p', 'muted', REVERSAL_CORRECTION_LINE);
+            correction.dataset['markCorrection'] = card.conflict.newMarkId ?? '';
+            yours.append(correction);
+          }
         }
       } else if (decision === null) {
         disposition.append(
@@ -674,6 +703,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
                 ...binding(), markId: card.markId, clientEffectId, interaction: 'accept-and-apply', editedText: null, reason: null,
               }), '已应用这条修改建议。'))
             : disabledAction('accept-and-apply', '接受并应用', '原文已变，无法应用这条修改建议。'),
+          ...resolveConflict(),
           actionButton('reject', '拒绝', 'secondary', () => void decide(card, 'rejected', null, null)),
           exact
             ? actionButton('accept-with-edit', '修改后接受', 'secondary', () => showCard(card, (cancel) => ({
@@ -694,11 +724,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
             : disabledAction('accept-with-edit', '修改后接受', '原文已变，无法接受这条修改建议。'),
           convertOrExplain('annotation'),
         );
-        yours.append(disposition, el('p', 'muted', '都不预选；接受即写入稿件，之后可以撤销本次应用。'));
+        yours.append(disposition, ...safeMerge(), el('p', 'muted', '都不预选；接受即写入稿件，之后可以撤销本次应用。'));
         if (form) yours.append(buildForm(form(reopen)));
       } else {
         const recorded = el('p', 'editorial-mark-recorded', decision.disposition === 'rejected'
-          ? '已拒绝 · 原文保留'
+          ? card.conflict?.outcome === 'keep-current' ? '已拒绝 · 保留当前稿件' : '已拒绝 · 原文保留'
           : '已记录 · 修改后接受（尚未写入稿件）');
         recorded.dataset['markDecision'] = decision.disposition;
         if (decision.disposition === 'accepted-with-edit') {
@@ -706,10 +736,13 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
             ? actionButton('apply-recorded', '应用到稿件', 'primary', () => void writeManuscript(card.markId, (clientEffectId) => api.applyChangeSuggestion({
                 ...binding(), markId: card.markId, clientEffectId, interaction: 'apply-recorded-decision', editedText: null, reason: null,
               }), '已按你改定的文字应用。'))
-            : disabledAction('apply-recorded', '应用到稿件', '原文已变，无法应用这条修改建议。'));
+            : disabledAction('apply-recorded', '应用到稿件', '原文已变，无法应用这条修改建议。'), ...resolveConflict());
         }
-        disposition.append(actionButton('withdraw', '撤回', 'quiet', () => void decide(card, 'withdrawn', null, null)));
-        yours.append(recorded, disposition);
+        // 保留当前稿件 resolved a conflict with this rejection; that resolution is final (Issue #57).
+        if (card.conflict?.outcome !== 'keep-current') {
+          disposition.append(actionButton('withdraw', '撤回', 'quiet', () => void decide(card, 'withdrawn', null, null)));
+        }
+        yours.append(recorded, disposition, ...(decision.disposition === 'accepted-with-edit' ? safeMerge() : []));
         if (decision.reason !== null) {
           const reason = el('p', 'muted', `你的原因：${decision.reason}`);
           reason.dataset['markReason'] = decision.reasonSource ?? '';
@@ -1121,6 +1154,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
                 }), '已应用这条修改建议。'),
               }
             : { action: 'accept-and-apply', label: '接受并应用', disabledReason: exact ? '这条修改建议已经处理过' : '原文已变，无法应用' },
+        ...((mark.conflict === 'unresolved' || mark.conflict === 'deferred') && options.openConflict !== undefined
+          ? [{ action: 'resolve-conflict', label: RESOLVE_CONFLICT_LABEL, run: () => options.openConflict!(mark.markId) }]
+          : []),
         ...(mark.disposition === null && mark.status !== 'applied' ? [convert('annotation')] : []),
         ...(mark.sourceKind === 'ai7' ? [
           { action: 'view-task', label: '查看任务', disabledReason: AI7_TASK_REASON, ...viewTaskMenuResolver(mark.markId) },

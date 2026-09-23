@@ -338,6 +338,56 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .publication-milestone-options { display: grid; gap: .45rem; }
 .publication-milestone-option { display: flex; align-items: flex-start; gap: .6rem; min-width: 0; padding: .55rem .7rem; border: 1px solid #d5dcd9; border-radius: 9px; background: white; cursor: pointer; }
 .publication-milestone-option:has(input:checked) { border-color: #416458; box-shadow: inset 0 0 0 1px #416458; background: #f4f7f1; }
+/* 稿件冲突 (Issue #57; visual direction: conflict resolution without developer jargon). The three read-only
+   panes align unit by unit; which pane is which, and what each unit is, is said in words, by typography —
+   the current manuscript upright and bold, the proposal in italics — and by borders, never by red and
+   green alone, so it reads in forced colours. Below 760 px the panes stack and every cell keeps its pane's
+   label, so a 200% zoom never scrolls sideways. */
+.proposal-conflict { overflow-wrap: anywhere; }
+.proposal-conflict-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem 1rem; }
+.proposal-conflict-header h2 { margin: 0; }
+.proposal-conflict-position { margin: 0; font-weight: 700; }
+.proposal-conflict-navigator { margin: 0 0 0 auto; }
+.proposal-conflict-classification { margin-top: .8rem; padding: .6rem .8rem; border: 1px dashed #b98b2f; border-radius: 8px; background: #fdf6e3; }
+.proposal-conflict-classification p { margin: .3rem 0 0; }
+.proposal-conflict-comparison { margin-top: 1rem; }
+.proposal-conflict-context p { margin: .2rem 0; color: #4b5148; }
+.proposal-conflict-panes { display: grid; gap: .4rem; margin-top: .6rem; }
+.proposal-conflict-row { display: grid; grid-template-columns: minmax(6.5rem, .6fr) repeat(3, minmax(0, 1fr)); gap: .5rem; align-items: start; }
+.proposal-conflict-head { padding: 0 .5rem; color: #3f463d; font-size: .86rem; font-weight: 800; }
+.proposal-conflict-unit { padding: .45rem .5rem; border: 1px solid #d5dcd9; border-radius: 8px; background: #fffdf8; }
+.proposal-conflict-unit[data-unit-kind="same"] { border-style: dotted; background: transparent; color: #61685e; }
+.proposal-conflict-unit[data-unit-kind="conflict"] { border-width: 2px 2px 2px 5px; }
+.proposal-conflict-unit-label { margin: 0; font-size: .84rem; font-weight: 700; }
+.proposal-conflict-unit[data-unit-kind="conflict"] .proposal-conflict-unit-label { font-weight: 800; }
+.proposal-conflict-cell { min-width: 0; }
+.proposal-conflict-cell-label { display: none; color: #6b7068; font-size: .78rem; }
+.proposal-conflict-words { font-family: "Noto Serif CJK SC", "Songti SC", serif; white-space: pre-wrap; }
+.proposal-conflict-cell[data-conflict-pane="current"] .proposal-conflict-words { font-weight: 700; }
+.proposal-conflict-cell[data-conflict-pane="proposed"] .proposal-conflict-words { font-style: italic; }
+.proposal-conflict-paths { min-width: 0; margin: 1rem 0 0; padding: .8rem .9rem; border: 1px solid #d5dcd9; border-radius: 10px; }
+.proposal-conflict-paths legend { font-weight: 800; }
+.proposal-conflict-path { display: flex; flex-wrap: wrap; align-items: baseline; gap: .3rem .6rem; margin: .35rem 0; padding: .45rem .6rem; border: 1px solid #d5dcd9; border-radius: 8px; cursor: pointer; }
+.proposal-conflict-path small { flex-basis: 100%; }
+.proposal-conflict-path:has(input:checked) { border-color: #416458; box-shadow: inset 0 0 0 1px #416458; background: #f4f7f1; }
+.proposal-conflict-path:has(input:disabled) { color: #6b7068; cursor: default; }
+.proposal-conflict-path-detail { margin-top: .6rem; }
+.proposal-conflict-consequence { margin: 0 0 .5rem; }
+.proposal-conflict-draft { padding: .8rem .9rem; border: 1px dashed #9bb0a8; border-radius: 10px; background: #fffdf8; }
+.proposal-conflict-draft h3, .proposal-conflict-draft h4 { margin: 0; }
+.proposal-conflict-draft > p { margin: .3rem 0 0; }
+.proposal-conflict-keyboard { display: block; margin-top: .3rem; }
+.proposal-conflict-draft-units { display: grid; gap: .5rem; margin: .6rem 0 0; padding-left: 1.4rem; }
+.proposal-conflict-draft-unit { min-width: 0; padding: .5rem .6rem; border: 1px solid #d5dcd9; border-radius: 8px; }
+.proposal-conflict-draft-unit[data-unit-resolution="unresolved"] { border-style: dashed; border-width: 2px; }
+.proposal-conflict-resolved-words { margin: .25rem 0; }
+.proposal-conflict-order, .proposal-conflict-unit-editor { margin-top: .45rem; }
+.proposal-conflict-reference { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .2rem .6rem; margin: 0; }
+.proposal-conflict-reference dd { margin: 0; }
+.proposal-conflict-draft-text { margin-top: .8rem; padding-top: .6rem; border-top: 1px solid #d5dcd9; }
+.proposal-conflict-draft-text p { margin: .3rem 0 0; }
+.proposal-conflict-draft-status { min-height: 1.2em; margin: .5rem 0 0; font-weight: 700; }
+.proposal-conflict-save-reason { display: block; margin-top: .3rem; }
 .publication-milestone-option input { flex: none; width: 18px; height: 18px; margin-top: .2rem; }
 .publication-milestone-option-text { display: grid; gap: .15rem; min-width: 0; }
 .publication-milestone-option-meta { color: #4e564c; font-size: .9rem; }
@@ -659,6 +709,8 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .editorial-mark-change del { color: #7b7f76; }
 .editorial-mark-change ins { text-decoration: none; background: var(--mark-suggestion-fill); border-bottom: 2px solid var(--mark-suggestion); }
 .editorial-mark-drifted { margin: .6rem 0 0; padding: .45rem .6rem; border: 1px dashed #b98b2f; border-radius: 6px; background: #fdf6e3; }
+/* ADR 0085 §2 beside an available 接受并应用: a quiet line with its own border, never an alarm. */
+.editorial-mark-safe-merge { margin: .45rem 0 0; padding: .35rem .55rem; border-left: 3px solid #9bb0a8; color: #4b5148; }
 .editorial-mark-quote { margin: .3rem 0 .6rem; padding: .3rem .6rem; border-left: 3px solid #cfc9ba; color: #4b5148; font-family: "Noto Serif CJK SC", "Songti SC", serif; overflow-wrap: anywhere; }
 .editorial-mark-field { display: grid; gap: .2rem; margin: .5rem 0; font-weight: 700; }
 .editorial-mark-field textarea { width: 100%; padding: .45rem .55rem; border: 1px solid #b9b39f; border-radius: 6px; font: inherit; font-weight: 400; resize: vertical; }
@@ -731,6 +783,12 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .review-coverage td[data-label]::before, .review-report-table td[data-label]::before { content: attr(data-label) "："; color: #6b7068; font-size: .84rem; }
   .review-group-heading > button { margin-left: 0; }
   .review-sheet { padding: 1rem; }
+  /* 稿件冲突's panes stack, each cell saying its pane; the header row stays for assistive technology. */
+  .proposal-conflict-row { grid-template-columns: 1fr; }
+  .proposal-conflict-head { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .proposal-conflict-cell-label { display: block; }
+  .proposal-conflict-navigator { margin-left: 0; }
+  .proposal-conflict-reference { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 560px) {
@@ -831,4 +889,10 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .rail-marker[data-rail-lane="2"] { border-radius: 0; }
   .rail-marker[data-rail-lane="3"] { border-radius: 0; transform: rotate(45deg); }
   .editor-window[data-scrolling="true"]::-webkit-scrollbar-thumb { background: CanvasText; }
+  /* 稿件冲突: every box keeps its border in the text colour; a chosen path and an unresolved unit say so by
+     the border's weight and style, and the §2 line by its own. */
+  .proposal-conflict-classification, .proposal-conflict-unit, .proposal-conflict-paths, .proposal-conflict-path,
+  .proposal-conflict-draft, .proposal-conflict-draft-unit, .editorial-mark-safe-merge { border-color: CanvasText; forced-color-adjust: auto; }
+  .proposal-conflict-path:has(input:checked) { box-shadow: none; border-width: 3px; }
+  .proposal-conflict textarea:focus-visible, .proposal-conflict [tabindex="-1"]:focus-visible { outline-color: Highlight; }
 }

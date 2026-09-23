@@ -29,7 +29,7 @@ concurrency:
 
 jobs:
   full:
-    name: J-01 + J-02 + J-08 + J-12 + J-15 + J-03 + J-04 + J-05 + J-07 (${{ matrix.label }})
+    name: J-01 + J-02 + J-08 + J-12 + J-15 + J-03 + J-04 + J-05 + J-06 + J-07 (${{ matrix.label }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:

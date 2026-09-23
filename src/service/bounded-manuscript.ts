@@ -69,6 +69,7 @@ import {
   MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
   MANUSCRIPT_INTAKE_SCHEMA_VERSION,
   PUBLICATION_VERSION_SCHEMA_VERSION,
+  PROPOSAL_CONFLICT_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -101,6 +102,11 @@ import {
   PUBLICATION_VERSION_SCHEMA_SQL,
   PUBLICATION_VERSION_TRIGGER_SQL,
 } from './publication-versions.js';
+import {
+  PROPOSAL_CONFLICT_FOREIGN_KEYS,
+  PROPOSAL_CONFLICT_SCHEMA_SQL,
+  PROPOSAL_CONFLICT_TRIGGER_SQL,
+} from './proposal-conflicts.js';
 
 /**
  * The analysis ledger as revision 15 created it, as revision 16 rebuilt two of its relations, as
@@ -1743,6 +1749,8 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...REVIEW_RUN_FOREIGN_KEYS,
   // Revision 25 (Issue #414): the Publication Version relations, owned and spelled by `publication-versions.ts`.
   ...PUBLICATION_VERSION_FOREIGN_KEYS,
+  // Revision 26 (Issue #57): the proposal-conflict relations, owned and spelled by `proposal-conflicts.ts`.
+  ...PROPOSAL_CONFLICT_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2342,6 +2350,7 @@ function requireManuscriptReimportTargetSchema(
   includeManuscriptEffectTables = false,
   includeReviewRunTables = false,
   includePublicationVersionTables = false,
+  includeProposalConflictTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2379,8 +2388,9 @@ function requireManuscriptReimportTargetSchema(
       // flag of their own, as revisions 22 and 23 did.
       ...(includeReviewRunTables ? REVIEW_RUN_SCHEMA_SQL : {}),
       // Revision 25 (Issue #414) adds the Publication Version relations the same way, behind a flag of
-      // their own.
+      // their own, and revision 26 (Issue #57) the proposal-conflict relations.
       ...(includePublicationVersionTables ? PUBLICATION_VERSION_SCHEMA_SQL : {}),
+      ...(includeProposalConflictTables ? PROPOSAL_CONFLICT_SCHEMA_SQL : {}),
     },
     MANUSCRIPT_REIMPORT_INDEX_SQL,
     true,
@@ -2393,6 +2403,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeManuscriptEffectTables ? MANUSCRIPT_EFFECT_TRIGGER_SQL : {}),
       ...(includeReviewRunTables ? REVIEW_RUN_TRIGGER_SQL : {}),
       ...(includePublicationVersionTables ? PUBLICATION_VERSION_TRIGGER_SQL : {}),
+      ...(includeProposalConflictTables ? PROPOSAL_CONFLICT_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5041,6 +5052,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeManuscriptEffectTables = false,
   includeReviewRunTables = false,
   includePublicationVersionTables = false,
+  includeProposalConflictTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5055,6 +5067,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeManuscriptEffectTables,
     includeReviewRunTables,
     includePublicationVersionTables,
+    includeProposalConflictTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5116,7 +5129,7 @@ export function initializeBoundedSchema(
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION || version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
-      version === PUBLICATION_VERSION_SCHEMA_VERSION,
+      version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5128,9 +5141,9 @@ export function initializeBoundedSchema(
       version === FACTUAL_REVIEW_SCHEMA_VERSION || version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION ||
       version === EDITORIAL_MARK_SCHEMA_VERSION || version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
-      version === PUBLICATION_VERSION_SCHEMA_VERSION) {
+      version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== PUBLICATION_VERSION_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== PROPOSAL_CONFLICT_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5145,6 +5158,7 @@ export function initializeBoundedSchema(
           version >= MANUSCRIPT_EFFECT_SCHEMA_VERSION,
           version >= EDITORIAL_REVIEW_SCHEMA_VERSION,
           version >= PUBLICATION_VERSION_SCHEMA_VERSION,
+          version >= PROPOSAL_CONFLICT_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);

@@ -165,6 +165,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j03-picker-path' ||
           key === '--j04-picker-path' ||
           key === '--j05-picker-path' ||
+          key === '--j06-picker-path' ||
           key === '--j07-picker-path' ||
           key === '--j01-import-control' ||
           key === '--j03-foreground-execution-control' ||
@@ -196,9 +197,10 @@ function parseArguments(argv: string[]): LaunchArguments {
   const j03PickerPath = values.get('--j03-picker-path');
   const j04PickerPath = values.get('--j04-picker-path');
   const j05PickerPath = values.get('--j05-picker-path');
+  const j06PickerPath = values.get('--j06-picker-path');
   const j07PickerPath = values.get('--j07-picker-path');
   requireDesktop(
-    [j01PickerPath, j02PickerPath, j08PickerPath, j12PickerPath, j03PickerPath, j04PickerPath, j05PickerPath, j07PickerPath]
+    [j01PickerPath, j02PickerPath, j08PickerPath, j12PickerPath, j03PickerPath, j04PickerPath, j05PickerPath, j06PickerPath, j07PickerPath]
       .filter(Boolean).length <= 1,
   );
   // The picker-path launch controls carry whatever their Journey selects, in any recognised format
@@ -225,10 +227,13 @@ function parseArguments(argv: string[]): LaunchArguments {
     j05PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-05' && isAbsolute(j05PickerPath)),
   );
   requireDesktop(
+    j06PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-06' && isAbsolute(j06PickerPath)),
+  );
+  requireDesktop(
     j07PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-07' && isAbsolute(j07PickerPath)),
   );
   const injectedPickerPath =
-    j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath ?? j04PickerPath ?? j05PickerPath ?? j07PickerPath;
+    j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath ?? j04PickerPath ?? j05PickerPath ?? j06PickerPath ?? j07PickerPath;
   const importControlValue = values.get('--j01-import-control');
   const importControl =
     importControlValue === 'before-commit' ||
@@ -1732,6 +1737,53 @@ function registerRendererHandlers(
       requireAuthority();
       requireManuscriptCapability(owned, input);
       return service.call('getManuscriptApplyOutcome', input);
+    }),
+  );
+  // 稿件冲突 (Issue #57, plan slice S22) is a record about one manuscript's 修改建议, so each operation is gated
+  // exactly as the mark commands are — the window's manuscript capability within the route's Book — and
+  // the two that record are serialized with every other effect of this window's authority. The answer
+  // must be of that Book and that manuscript. None of them writes the manuscript.
+  const requireConflictOfCapability = <T extends { manuscriptId: string; branchId: string }>(
+    capability: { bookId: string; manuscriptId: string; branchId: string },
+    result: T & { bookId?: string },
+  ): T => {
+    if (result.bookId !== undefined && result.bookId !== capability.bookId) {
+      throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '稿件冲突不属于当前图书工作台。');
+    }
+    requireResourceIdentity(capability, result);
+    return result;
+  };
+  ipcMain.handle(IPC_CHANNELS.inspectProposalConflict, (event, input: ServiceOperationMap['inspectProposalConflict']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const capability = requireManuscriptCapability(owned, input);
+      return requireConflictOfCapability(capability, await service.call('inspectProposalConflict', input));
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.saveProposalConflictDraft, (event, input: ServiceOperationMap['saveProposalConflictDraft']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const capability = requireManuscriptCapability(owned, input);
+        const result = await service.call('saveProposalConflictDraft', input);
+        if (result.markId !== input.markId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '解决草稿不属于这处冲突。');
+        requireConflictOfCapability(capability, { manuscriptId: input.manuscriptId, branchId: input.branchId });
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.resolveProposalConflict, (event, input: ServiceOperationMap['resolveProposalConflict']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        requireManuscriptCapability(owned, input);
+        const result = await service.call('resolveProposalConflict', input);
+        if (result.markId !== input.markId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '处理结果不属于这处冲突。');
+        return result;
+      });
     }),
   );
   ipcMain.handle(IPC_CHANNELS.getManuscriptRail, (event, input: ServiceOperationMap['getManuscriptRail']['input']) =>

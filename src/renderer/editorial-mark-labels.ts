@@ -28,7 +28,19 @@ export const DECISION_REASON_CHIPS: Readonly<Record<ProposalItemDisposition, Rea
   'accepted-with-edit': ['语言更准确', '保持作者风格'],
 };
 
-export function markSourceLine(card: Pick<EditorialMarkCardProjection, 'source' | 'convertedFrom'>): string {
+/**
+ * ADR 0085 §2 beside an available 接受并应用: the paragraph changed elsewhere after the suggestion was made,
+ * and its own words did not. A label only — it records and decides nothing.
+ */
+export const SAFE_MERGE_LINE = '本段后来改过别处，没有碰到这条建议的原文';
+
+/** The entry into 稿件冲突 beside every action a conflict blocks (Issue #57). */
+export const RESOLVE_CONFLICT_LABEL = '解决冲突…';
+
+/** A reversal conflict resolved by a new version: the Correction Proposal waits on the manuscript. */
+export const REVERSAL_CORRECTION_LINE = '已为这处冲突生成更正建议；它在稿件上等你处理，尚未应用。';
+
+export function markSourceLine(card: Pick<EditorialMarkCardProjection, 'source' | 'convertedFrom'> & Partial<Pick<EditorialMarkCardProjection, 'resolvedFrom'>>): string {
   const { source } = card;
   const who = source.kind === 'editor'
     ? '你'
@@ -37,20 +49,30 @@ export function markSourceLine(card: Pick<EditorialMarkCardProjection, 'source' 
       : source.origin === 'analysis'
         ? 'AI7 · 分析'
         : `AI7 · ${source.origin === 'review-category' ? '审阅' : '任务'}「${source.label ?? ''}」`;
+  // A version saved from a conflict is no conversion: it says what it came from (Issue #57).
+  if (card.resolvedFrom) return `${who} · ${card.resolvedFrom.conflictKind === 'reversal' ? '由撤销冲突生成的更正建议' : '由冲突解决生成的新版本'}`;
   if (card.convertedFrom === null) return who;
   const from = MARK_KIND_LABELS[card.convertedFrom.kind];
   return `${who} · 由${card.convertedFrom.sourceKind === 'ai7' ? ' AI7 的' : ''}${from}转来`;
 }
 
-export function markStateLabel(card: Pick<EditorialMarkCardProjection, 'kind' | 'status' | 'anchorState' | 'suggestion'>): string {
+export function markStateLabel(
+  card: Pick<EditorialMarkCardProjection, 'kind' | 'status' | 'anchorState' | 'suggestion'> & Partial<Pick<EditorialMarkCardProjection, 'conflict'>>,
+): string {
   const drifted = card.anchorState === 'exact' ? '' : ' · 原文已变';
+  // 暂不处理 is a record of the conflict, not a decision: the state still says what the suggestion is (ADR 0085 §3).
+  const deferred = card.conflict?.state === 'deferred' && card.conflict.deferredAt !== null ? ` · 暂不处理 · ${markTimeLabel(card.conflict.deferredAt)}` : '';
+  const keptCurrent = card.conflict?.state === 'resolved' && card.conflict.outcome === 'keep-current';
   if (card.kind === 'change-suggestion') {
     // 已应用 is the state of a verified Effect Receipt, never of a decision alone (V2-UX-EAPP-011).
-    if (card.status === 'applied') return card.anchorState === 'exact' ? '已应用' : '已应用 · 之后又改过';
+    if (card.status === 'applied') {
+      if (keptCurrent) return '已保留当前稿件';
+      return card.anchorState === 'exact' ? '已应用' : `已应用 · 之后又改过${deferred}`;
+    }
     const disposition = card.suggestion?.decision?.disposition;
-    if (disposition === 'rejected') return `已拒绝${drifted}`;
-    if (disposition === 'accepted-with-edit') return `已记录 · 尚未写入稿件${drifted}`;
-    return `待你处理${drifted}`;
+    if (disposition === 'rejected') return keptCurrent ? '已拒绝 · 保留当前稿件' : `已拒绝${drifted}`;
+    if (disposition === 'accepted-with-edit') return `已记录 · 尚未写入稿件${drifted}${deferred}`;
+    return `待你处理${drifted}${deferred}`;
   }
   if (card.kind === 'annotation') return `${card.status === 'resolved' ? '已处理' : '待你处理'}${drifted}`;
   return `仅自己可见${drifted}`;

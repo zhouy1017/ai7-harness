@@ -92,7 +92,7 @@ if (isJourneyRunner) {
   }
 }
 
-export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15', 'J-03', 'J-04', 'J-05', 'J-07']);
+export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15', 'J-03', 'J-04', 'J-05', 'J-06', 'J-07']);
 
 // The bounded pull-request subset of ADMITTED_JOURNEYS under ADR 0075. Every member launches the
 // same production-shaped subject, so a broken build, launch, IPC, data root, or service still fails
@@ -175,6 +175,7 @@ const JOURNEY_MODULES = Object.freeze({
   'J-03': new URL('./run-j03.mjs', import.meta.url),
   'J-04': new URL('./run-j04.mjs', import.meta.url),
   'J-05': new URL('./run-j05.mjs', import.meta.url),
+  'J-06': new URL('./run-j06.mjs', import.meta.url),
   'J-07': new URL('./run-j07.mjs', import.meta.url),
 });
 
@@ -718,6 +719,35 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'marks-settled-before-restart',
     'marks-survive-restart',
     'apply-lost-acknowledgement',
+    'completion-browser-close',
+    'completion-cleanup',
+  ]),
+  // J-06 (Issue #57, plan slice S22; ADR 0085): 稿件冲突 of a single 修改建议 — its three texts, the §2 line, the
+  // Resolution Draft across a restart, the three ways out and a reversal's Correction Proposal. Each stage is
+  // one thing an editor does or finds, so a hosted failure names the behaviour that broke.
+  'J-06': Object.freeze([
+    'entry',
+    'controller-loopback-sentinel',
+    'controller-imports',
+    'import-and-open',
+    'conflict-open',
+    'conflict-three-texts',
+    'safe-merge-line',
+    'draft-quick-actions',
+    'draft-undo-redo',
+    'draft-edited-unit',
+    'draft-restart',
+    'new-version',
+    'new-version-applied',
+    'keep-current',
+    'defer',
+    'reversal',
+    'reversal-correction-applied',
+    'j14-conflict-keyboard',
+    'j14-conflict-zoom-200-reflow',
+    'j14-conflict-forced-colors',
+    'restart-keeps-every-record',
+    'zero-activity',
     'completion-browser-close',
     'completion-cleanup',
   ]),

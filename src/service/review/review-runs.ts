@@ -18,6 +18,7 @@ import {
   type BaselineAnalysisProjection,
   type BaselineAnalysisResultSetRevisionProjection,
   type EditorialMarkBasisProjection,
+  type EditorialMarkKind,
   type FactualReviewResultSetRevisionProjection,
   type FactualSeverityTier,
   type LaunchPolicyProjection,
@@ -73,6 +74,7 @@ import {
   REVIEW_RUN_CATEGORY_STATE_LABELS,
   TERMINAL_CATEGORY_EVENTS,
   reviewFindingStatus,
+  newestSuggestionVersion,
   reviewRunCategoryState,
   reviewRunState,
   reviewRunStateLabel,
@@ -572,6 +574,18 @@ interface MaterializedFinding {
 }
 
 /** One finding row read back with the mark it names and everything its status is derived from. */
+/** What a finding reads of one version of its 修改建议 (Issue #57). */
+interface SuggestionVersionView {
+  readonly markId: string | null;
+  readonly kind: EditorialMarkKind | null;
+  readonly markStatus: ReviewMarkStatus | null;
+  readonly anchor: string | null;
+  readonly from: number | null;
+  readonly to: number | null;
+  readonly decision: string | null;
+  readonly convertedTo: EditorialMarkKind | null;
+}
+
 interface FindingView {
   readonly findingId: string;
   readonly categoryId: string;
@@ -588,7 +602,10 @@ interface FindingView {
   readonly replacement: string | null;
   readonly clauseRef: string | null;
   readonly stateLine: string | null;
+  /** The mark the finding reads: its own, or the newest version a conflict saved it as (Issue #57). */
   readonly markId: string | null;
+  /** The mark the review made for the finding. */
+  readonly originMarkId: string | null;
   readonly markStatus: ReviewMarkStatus | null;
   readonly anchorState: ReviewFindingProjection['anchorState'];
   readonly blockPosition: number | null;
@@ -1669,6 +1686,7 @@ export class ReviewRunStore {
       requireReview(finding !== undefined, 'REVIEW_FINDING_NOT_FOUND', '这次审阅没有这条发现。');
       requireReview(finding.status === 'pending', 'REVIEW_FINDING_NOT_PENDING',
         finding.status === 'ignored' ? '这条发现已经忽略过。' : '这条发现已经处理过，不能再忽略。');
+      requireReview(finding.markId === finding.originMarkId, 'REVIEW_FINDING_NOT_PENDING', '这条发现已在稿件上保存为新的修改建议版本，请在稿件上处理它。');
       const now = new Date().toISOString();
       const last = this.#db.prepare('SELECT max(ordinal) last FROM review_finding_dispositions WHERE review_run_id = ? AND finding_id = ?')
         .get(reviewRunId, findingId) as SqlRow;
@@ -1707,7 +1725,7 @@ export class ReviewRunStore {
           findingId,
           kindRef: finding.kindRef,
           severity: finding.severity,
-          markId: finding.markId,
+          markId: finding.originMarkId,
           resultSetRevisionId: materialized?.resultSetRevisionId ?? null,
         },
         disposition: { dispositionId, disposition: 'ignored', reason },
@@ -1715,8 +1733,8 @@ export class ReviewRunStore {
       this.#db.prepare(
         `INSERT INTO quality_signals(signal_id, book_id, kind, review_run_id, category_id, finding_id, disposition_id, mark_id, reason, recorded_at, canonical_json, sha256)
          VALUES (?, ?, 'review-finding-ignored', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(signalId, bookId, reviewRunId, finding.categoryId, findingId, dispositionId, finding.markId, reason, now, signal.json, signal.digest);
-      if (finding.markId !== null) this.#marks.setAsideProduced(finding.markId, now);
+      ).run(signalId, bookId, reviewRunId, finding.categoryId, findingId, dispositionId, finding.originMarkId, reason, now, signal.json, signal.digest);
+      if (finding.originMarkId !== null) this.#marks.setAsideProduced(finding.originMarkId, now);
     });
   }
 
@@ -2122,7 +2140,7 @@ export class ReviewRunStore {
    */
   #findingViews(reviewRunId: string, branchId: string, findingId: string | null): FindingView[] {
     const rows = this.#db.prepare(
-      `SELECT f.*, em.status mark_status, em.anchor_state mark_anchor, em.from_grapheme mark_from, em.to_grapheme mark_to,
+      `SELECT f.*, em.kind mark_kind, em.status mark_status, em.anchor_state mark_anchor, em.from_grapheme mark_from, em.to_grapheme mark_to,
               (SELECT d.disposition FROM proposal_change_items i JOIN proposal_item_decisions d ON d.item_id = i.item_id
                 WHERE i.mark_id = f.mark_id ORDER BY d.ordinal DESC LIMIT 1) decision,
               (SELECT c.kind FROM editorial_marks c WHERE c.converted_from_mark_id = f.mark_id ORDER BY c.created_at LIMIT 1) converted_to,
@@ -2139,16 +2157,18 @@ export class ReviewRunStore {
        ORDER BY f.ordinal`,
     ).all(branchId, reviewRunId, findingId, findingId) as SqlRow[];
     return rows.map((row): FindingView => {
-      const markId = nullableText(row.mark_id);
-      const markStatus = nullableText(row.mark_status) as ReviewMarkStatus | null;
-      const decision = nullableText(row.decision);
+      const originMarkId = nullableText(row.mark_id);
       const ignoreReason = nullableText(row.ignore_reason);
+      // A suggestion a conflict saved as a new version is the same finding's: it reads the newest version.
+      const mark = newestSuggestionVersion(this.#versionView(row), (version) =>
+        version.convertedTo === 'change-suggestion' && version.markId !== null ? this.#nextVersion(version.markId) : null);
+      const { markId, markStatus, decision } = mark;
       const { status, statusDetail } = reviewFindingStatus({
         ignored: ignoreReason !== null,
         markId,
         markStatus,
         decision: decision === null || decision === 'withdrawn' ? null : decision as 'accepted' | 'accepted-with-edit' | 'rejected',
-        convertedTo: nullableText(row.converted_to) as ReviewFindingProjection['output'] | null,
+        convertedTo: mark.convertedTo,
       });
       return {
         findingId: text(row.finding_id),
@@ -2159,22 +2179,50 @@ export class ReviewRunStore {
         output: text(row.output) as FindingView['output'],
         riskPoint: integer(row.risk_point) === 1,
         blockId: text(row.block_id),
-        fromGrapheme: markId === null || row.mark_from === null ? integer(row.from_grapheme) : integer(row.mark_from),
-        toGrapheme: markId === null || row.mark_to === null ? integer(row.to_grapheme) : integer(row.mark_to),
+        fromGrapheme: markId === null || mark.from === null ? integer(row.from_grapheme) : mark.from,
+        toGrapheme: markId === null || mark.to === null ? integer(row.to_grapheme) : mark.to,
         quote: text(row.quote),
         note: text(row.note),
         replacement: nullableText(row.replacement),
         clauseRef: nullableText(row.clause_ref),
         stateLine: nullableText(row.state_line),
         markId,
+        originMarkId,
         markStatus,
-        anchorState: markId === null ? 'anchor-changed' : text(row.mark_anchor) as FindingView['anchorState'],
+        anchorState: markId === null ? 'anchor-changed' : mark.anchor as FindingView['anchorState'],
         blockPosition: row.block_position === null || row.block_position === undefined ? null : integer(row.block_position),
         ignoreReason,
         status,
         statusDetail,
       };
     });
+  }
+
+  /** A finding's own mark as `#findingViews` read it, in the shape its next versions are read in. */
+  #versionView(row: SqlRow): SuggestionVersionView {
+    return {
+      markId: nullableText(row.mark_id),
+      kind: nullableText(row.mark_kind) as EditorialMarkKind | null,
+      markStatus: nullableText(row.mark_status) as ReviewMarkStatus | null,
+      anchor: nullableText(row.mark_anchor),
+      from: row.mark_from === null || row.mark_from === undefined ? null : integer(row.mark_from),
+      to: row.mark_to === null || row.mark_to === undefined ? null : integer(row.mark_to),
+      decision: nullableText(row.decision),
+      convertedTo: nullableText(row.converted_to) as EditorialMarkKind | null,
+    };
+  }
+
+  /** The 修改建议 saved from a mark as its next version, with what the finding reads of it, or `null`. */
+  #nextVersion(markId: string): SuggestionVersionView | null {
+    const row = this.#db.prepare(
+      `SELECT c.mark_id, c.kind mark_kind, c.status mark_status, c.anchor_state mark_anchor, c.from_grapheme mark_from, c.to_grapheme mark_to,
+              (SELECT d.disposition FROM proposal_change_items i JOIN proposal_item_decisions d ON d.item_id = i.item_id
+                WHERE i.mark_id = c.mark_id ORDER BY d.ordinal DESC LIMIT 1) decision,
+              (SELECT x.kind FROM editorial_marks x WHERE x.converted_from_mark_id = c.mark_id ORDER BY x.created_at LIMIT 1) converted_to
+       FROM editorial_marks c WHERE c.converted_from_mark_id = ? AND c.kind = 'change-suggestion'
+       ORDER BY c.created_at LIMIT 1`,
+    ).get(markId) as SqlRow | undefined;
+    return row === undefined ? null : this.#versionView(row);
   }
 
   #summary(view: RunView): ReviewRunSummaryProjection {

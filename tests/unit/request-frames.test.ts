@@ -6,7 +6,9 @@ import {
   BASELINE_ANALYSIS_MODE_GOALS,
   BASELINE_ANALYSIS_TASK_GOAL,
   MAX_EDIT_CODE_UNITS,
+  MAX_MARK_BODY_CODE_UNITS,
   MAX_MILESTONE_PURPOSE_CODE_UNITS,
+  MAX_PROPOSAL_CONFLICT_UNITS,
   MAX_PUBLICATION_BASIS_CHARACTERS,
   MAX_PUBLICATION_SCOPE_CHARACTERS,
   MAX_REPLACEMENT_EXCLUSIONS,
@@ -184,6 +186,33 @@ describe('decodeRequest accepts well-formed frames', () => {
     ];
     for (const input of inputs) {
       const request = { id: randomUUID(), op: 'inspectTaskPlan', input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+  });
+
+  it('accepts the three 稿件冲突 operations with their exact inputs, and a draft of every resolution at its bounds', () => {
+    const conflict = { manuscriptId: randomUUID(), branchId: randomUUID(), markId: randomUUID() };
+    const basisDigest = 'b'.repeat(64);
+    const units = [
+      { resolution: null, text: null },
+      { resolution: 'unresolved', text: null },
+      { resolution: 'current', text: null },
+      { resolution: 'proposed', text: null },
+      { resolution: 'both-current-first', text: null },
+      { resolution: 'both-proposed-first', text: null },
+      { resolution: 'edited', text: '' },
+      { resolution: 'edited', text: '合'.repeat(MAX_MARK_BODY_CODE_UNITS) },
+    ];
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'inspectProposalConflict', input: conflict },
+      { op: 'saveProposalConflictDraft', input: { ...conflict, basisDigest, units } },
+      { op: 'saveProposalConflictDraft', input: { ...conflict, basisDigest, units: Array.from({ length: MAX_PROPOSAL_CONFLICT_UNITS }, () => ({ resolution: null, text: null })) } },
+      { op: 'resolveProposalConflict', input: { ...conflict, basisDigest, outcome: 'keep-current', draftOrdinal: null } },
+      { op: 'resolveProposalConflict', input: { ...conflict, basisDigest, outcome: 'defer', draftOrdinal: null } },
+      { op: 'resolveProposalConflict', input: { ...conflict, basisDigest, outcome: 'new-version', draftOrdinal: 7 } },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
       expect(decodeRequest(frameOf(request))).toEqual(request);
     }
   });
@@ -514,6 +543,44 @@ describe('decodeRequest rejects malformed frames', () => {
     ];
     for (const input of refused) {
       expect(rejectionFor(frameOf({ id, op: 'inspectTaskPlan', input })).requestId).toBe(id);
+    }
+  });
+
+  it('rejects a 稿件冲突 operation whose identities, basis, key set, draft or outcome are wrong', () => {
+    const id = randomUUID();
+    const conflict = { manuscriptId: randomUUID(), branchId: randomUUID(), markId: randomUUID() };
+    const basisDigest = 'c'.repeat(64);
+    const draft = { ...conflict, basisDigest, units: [{ resolution: 'current', text: null }] };
+    const resolution = { ...conflict, basisDigest, outcome: 'keep-current', draftOrdinal: null };
+    const refused: ReadonlyArray<{ op: string; input: unknown }> = [
+      { op: 'inspectProposalConflict', input: { manuscriptId: conflict.manuscriptId, branchId: conflict.branchId } },
+      { op: 'inspectProposalConflict', input: { ...conflict, markId: 'not-a-mark' } },
+      { op: 'inspectProposalConflict', input: { ...conflict, windowStartBlockId: `blk_${'0'.repeat(24)}` } },
+      // A draft is bound to a basis digest and holds one entry per unit, each exactly a resolution and its words.
+      { op: 'saveProposalConflictDraft', input: { ...draft, basisDigest: 'C'.repeat(64) } },
+      { op: 'saveProposalConflictDraft', input: { ...draft, basisDigest: 'c'.repeat(63) } },
+      { op: 'saveProposalConflictDraft', input: { ...draft, units: [] } },
+      { op: 'saveProposalConflictDraft', input: { ...draft, units: Array.from({ length: MAX_PROPOSAL_CONFLICT_UNITS + 1 }, () => ({ resolution: null, text: null })) } },
+      { op: 'saveProposalConflictDraft', input: { ...draft, units: [{ resolution: 'guessed', text: null }] } },
+      { op: 'saveProposalConflictDraft', input: { ...draft, units: [{ resolution: 'current', text: '多余' }] } },
+      { op: 'saveProposalConflictDraft', input: { ...draft, units: [{ resolution: null, text: '' }] } },
+      { op: 'saveProposalConflictDraft', input: { ...draft, units: [{ resolution: 'edited', text: null }] } },
+      { op: 'saveProposalConflictDraft', input: { ...draft, units: [{ resolution: 'edited', text: '合'.repeat(MAX_MARK_BODY_CODE_UNITS + 1) }] } },
+      { op: 'saveProposalConflictDraft', input: { ...draft, units: [{ resolution: 'edited', text: '\uD800' }] } },
+      { op: 'saveProposalConflictDraft', input: { ...draft, units: [{ resolution: 'current' }] } },
+      { op: 'saveProposalConflictDraft', input: { ...draft, units: [{ resolution: 'current', text: null, extra: 1 }] } },
+      // An outcome is one of three; only a new version names the draft it saves.
+      { op: 'resolveProposalConflict', input: { ...resolution, outcome: 'auto-resolve-all' } },
+      { op: 'resolveProposalConflict', input: { ...resolution, draftOrdinal: 1 } },
+      { op: 'resolveProposalConflict', input: { ...resolution, outcome: 'defer', draftOrdinal: 1 } },
+      { op: 'resolveProposalConflict', input: { ...resolution, outcome: 'new-version' } },
+      { op: 'resolveProposalConflict', input: { ...resolution, outcome: 'new-version', draftOrdinal: 0 } },
+      { op: 'resolveProposalConflict', input: { ...resolution, outcome: 'new-version', draftOrdinal: 1.5 } },
+      { op: 'resolveProposalConflict', input: { ...conflict, basisDigest, outcome: 'defer' } },
+      { op: 'resolveProposalConflict', input: { ...resolution, basisDigest: null } },
+    ];
+    for (const { op, input } of refused) {
+      expect(rejectionFor(frameOf({ id, op, input })).requestId).toBe(id);
     }
   });
 

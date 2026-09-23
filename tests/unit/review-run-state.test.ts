@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ANCHOR_CHANGED_STATE_LINE,
+  newestSuggestionVersion,
   reviewFindingStatus,
   reviewRunCategoryState,
   reviewRunState,
@@ -33,6 +34,28 @@ describe('a finding\'s status, derived from its mark (MARK-010)', () => {
     ]) {
       expect(reviewFindingStatus(input).status).toBe('handled');
     }
+  });
+
+  it('follows a 修改建议 a conflict saved as a new version to the newest version, and reads that one (Issue #57)', () => {
+    type Version = { markId: string; kind: 'change-suggestion' | 'annotation'; markStatus: 'open' | 'converted' | 'applied' };
+    const chain: Record<string, Version> = {
+      first: { markId: 'first', kind: 'change-suggestion', markStatus: 'converted' },
+      second: { markId: 'second', kind: 'change-suggestion', markStatus: 'converted' },
+      third: { markId: 'third', kind: 'change-suggestion', markStatus: 'applied' },
+    };
+    const successor: Record<string, string> = { first: 'second', second: 'third' };
+    const next = (mark: Version): Version | null => chain[successor[mark.markId] ?? ''] ?? null;
+    expect(newestSuggestionVersion(chain.first!, next).markId).toBe('third');
+    // Its state is the newest version's: applied, not 已转为修改建议.
+    expect(reviewFindingStatus({ ...OPEN, markStatus: newestSuggestionVersion(chain.first!, next).markStatus }).statusDetail).toBe('已接受并应用');
+    // A mark that was not retired into a version, or became a 批注, is read as it is.
+    expect(newestSuggestionVersion(chain.third!, next).markId).toBe('third');
+    const toAnnotation = (): Version => ({ markId: 'note', kind: 'annotation', markStatus: 'open' });
+    expect(newestSuggestionVersion(chain.first!, toAnnotation).markId).toBe('first');
+    expect(newestSuggestionVersion({ markId: 'note', kind: 'annotation', markStatus: 'converted' } as Version, next).markId).toBe('note');
+    // A chain is followed only so far.
+    const loop = (mark: Version): Version => ({ ...mark, markId: `${mark.markId}+` });
+    expect(newestSuggestionVersion(chain.first!, loop, 3).markId).toBe('first+++');
   });
 
   it('is ignored once a disposition says so, whatever its mark reads', () => {

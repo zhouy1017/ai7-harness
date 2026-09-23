@@ -6,6 +6,7 @@ import {
   MAX_EDIT_CODE_UNITS,
   MAX_MARK_BODY_CODE_UNITS,
   MAX_MILESTONE_PURPOSE_CODE_UNITS,
+  MAX_PROPOSAL_CONFLICT_UNITS,
   MAX_PUBLICATION_BASIS_CHARACTERS,
   MAX_PUBLICATION_SCOPE_CHARACTERS,
   MAX_REPLACEMENT_EXCLUSIONS,
@@ -29,6 +30,7 @@ import {
   type ServiceRequest,
   type TaskPlanKind,
 } from '../shared/protocol.js';
+import { CONFLICT_RESOLUTIONS, type ConflictResolution } from '../shared/conflict-units.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HEX_DIGEST_PATTERN = /^[0-9a-f]{64}$/;
@@ -98,6 +100,14 @@ function validHighlightColor(value: unknown): boolean {
 
 function validUuid(value: unknown): value is string {
   return isBoundedString(value, 36) && UUID_PATTERN.test(value);
+}
+
+/** One unit of a Resolution Draft: a resolution or `null`, and words — possibly none — only when edited. */
+function validConflictUnitResolution(value: unknown): boolean {
+  if (!isRecord(value) || !hasExactKeys(value, ['resolution', 'text'])) return false;
+  if (value.resolution === null) return value.text === null;
+  if (!CONFLICT_RESOLUTIONS.includes(value.resolution as ConflictResolution)) return false;
+  return value.resolution === 'edited' ? isBoundedString(value.text, MAX_MARK_BODY_CODE_UNITS, true) : value.text === null;
 }
 
 /** Distinct category identities, between `minimum` and the most one Review Run request names. */
@@ -780,6 +790,39 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         !isBoundedString(input.manuscriptId, 36) || !UUID_PATTERN.test(input.manuscriptId) ||
         !isBoundedString(input.branchId, 36) || !UUID_PATTERN.test(input.branchId) ||
         !isBoundedString(input.clientEffectId, 36) || !UUID_PATTERN.test(input.clientEffectId)
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // 稿件冲突 (Issue #57). Every operation names its 修改建议 within one manuscript; the two records are bound
+    // to the basis digest the read answered. A draft is one entry per unit of the comparison — a resolution,
+    // or `null` for a unit that needs none, and the editor's words exactly for an edited one — and whether
+    // it fits this conflict's units is the store's to decide.
+    case 'inspectProposalConflict': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'markId'], tentativeId);
+      if (!validUuid(input.manuscriptId) || !validUuid(input.branchId) || !validUuid(input.markId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'saveProposalConflictDraft': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'markId', 'basisDigest', 'units'], tentativeId);
+      if (
+        !validUuid(input.manuscriptId) || !validUuid(input.branchId) || !validUuid(input.markId) ||
+        !isBoundedString(input.basisDigest, 64) || !HEX_DIGEST_PATTERN.test(input.basisDigest) ||
+        !Array.isArray(input.units) || input.units.length === 0 || input.units.length > MAX_PROPOSAL_CONFLICT_UNITS ||
+        !input.units.every(validConflictUnitResolution)
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'resolveProposalConflict': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'markId', 'basisDigest', 'outcome', 'draftOrdinal'], tentativeId);
+      if (
+        !validUuid(input.manuscriptId) || !validUuid(input.branchId) || !validUuid(input.markId) ||
+        !isBoundedString(input.basisDigest, 64) || !HEX_DIGEST_PATTERN.test(input.basisDigest) ||
+        (input.outcome !== 'keep-current' && input.outcome !== 'defer' && input.outcome !== 'new-version') ||
+        (input.outcome === 'new-version' ? !isSafeInteger(input.draftOrdinal, 1) : input.draftOrdinal !== null)
       ) {
         throw new ProtocolError(tentativeId);
       }

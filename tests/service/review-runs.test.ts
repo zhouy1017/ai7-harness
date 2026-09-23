@@ -462,6 +462,39 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(workspace(session, book).runs[0]!.reportVersion).toBe(2);
     });
   }, 300_000);
+  it('follows a finding\'s 修改建议 into the new version its conflict saved, and reads that version, never 已转为修改建议 (Issue #57)', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+      const finding = run.findings.find((candidate) => candidate.output === 'change-suggestion' && candidate.status === 'pending' && candidate.markId !== null)!;
+      expect(finding).toBeDefined();
+      const card = session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, finding.markId!);
+      // The editor types inside the words the finding's suggestion replaces: 原文已变, a suggestion conflict.
+      const at = session.store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: card.blockId });
+      const block = at.blocks.find((candidate) => candidate.blockId === card.blockId)!;
+      session.store.flushJournalEdit({
+        clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: at.revisionId, blockId: card.blockId,
+        windowStartBlockId: at.blocks[0]!.blockId, baseBlockDigest: block.digest, expectedJournalSequence: at.journalSequence,
+        fromGrapheme: card.fromGrapheme + 1, toGrapheme: card.fromGrapheme + 1, insertText: '〔改〕',
+      });
+      const conflict = session.store.inspectProposalConflict({ manuscriptId: book.manuscriptId, branchId: book.branchId, markId: finding.markId! });
+      const draft = session.store.saveProposalConflictDraft({
+        manuscriptId: book.manuscriptId, branchId: book.branchId, markId: finding.markId!, basisDigest: conflict.basisDigest,
+        units: conflict.units.map((unit) => (unit.kind === 'same' ? { resolution: null, text: null } : { resolution: 'proposed', text: null })),
+      });
+      const saved = session.store.resolveProposalConflict({
+        manuscriptId: book.manuscriptId, branchId: book.branchId, markId: finding.markId!, basisDigest: conflict.basisDigest,
+        outcome: 'new-version', draftOrdinal: draft.draft.ordinal,
+      });
+      const read = (): typeof finding => workspace(session, book, run.reviewRunId).run!.findings.find((candidate) => candidate.findingId === finding.findingId)!;
+      // The finding is the new version's: still pending, on the words it stands on now, and reached by its mark.
+      expect(read()).toMatchObject({ status: 'pending', statusDetail: '待处理', markId: saved.newMarkId, markStatus: 'open', anchorState: 'exact' });
+      expect(storeMessage(() => session.store.recordReviewFindingDisposition(book.bookId, run.reviewRunId, finding.findingId, '不再需要')))
+        .toBe('这条发现已在稿件上保存为新的修改建议版本，请在稿件上处理它。');
+      session.store.applyChangeSuggestion({ ...binding(session, book), markId: saved.newMarkId!, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+      expect(read()).toMatchObject({ status: 'handled', statusDetail: '已接受并应用', markId: saved.newMarkId, markStatus: 'applied' });
+    });
+  }, 300_000);
+
   it('reads 选章 by the analysis units of a manuscript without headings, and keeps only the leads anchored there', async () => {
     await withBook('sample1-review-authored', async (session, book) => {
       await runBaseline(session, book);
