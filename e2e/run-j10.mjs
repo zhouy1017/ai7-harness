@@ -238,9 +238,9 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
   }
   try {
     database.exec('PRAGMA query_only = ON;');
-    // The terminal version the service stamps (`RUN_CANCELLATION_SCHEMA_VERSION`, as J-04 reads it): 取消任务's own
+    // The terminal version the service stamps (`RUN_CONTINUATION_SCHEMA_VERSION`, as J-04 reads it): 暂停 and 续行's
     // revision, and after it this pin moves with whatever revision a later slice takes.
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 32, 'credential-cleanup-metadata-version');
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 33, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
               approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
