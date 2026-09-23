@@ -188,6 +188,13 @@ describe('schema revision 33 over the real store', () => {
 });
 
 describe('暂停 and 续行 over the real store', () => {
+  it('says where 续行 goes on: the next range, or, with every range read, the reduction and the sample', () => {
+    expect(pausedDetail(3, SAMPLE1_UNITS)).toBe('已在阅读范围之间暂停：已读完 3 / 8 个阅读范围，结果都已保存。点「续行」从下一个阅读范围接着读。');
+    expect(pausedDetail(SAMPLE1_UNITS, SAMPLE1_UNITS)).toBe('已暂停：全部 8 个阅读范围都已读完，结果都已保存。点「续行」接着做之后的归纳与抽样。');
+    expect(resumableDetail(2, SAMPLE1_UNITS)).toBe('AI7 关闭时这项任务正在运行：已读完 2 / 8 个阅读范围，结果都已保存。点「续行」从下一个阅读范围接着读；在此之前不会发送任何内容。');
+    expect(resumableDetail(SAMPLE1_UNITS, SAMPLE1_UNITS)).toBe('AI7 关闭时这项任务正在运行：全部 8 个阅读范围都已读完，结果都已保存。点「续行」接着做之后的归纳与抽样；在此之前不会发送任何内容。');
+  });
+
   it('pauses at the next unit boundary keeping what it read, frees the slot, and 续行 goes on to the end in the same attempt', async () => {
     const store = await openWithRoute();
     const execution = owner(store);
