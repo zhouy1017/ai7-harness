@@ -326,6 +326,11 @@ describe('decodeRequest accepts well-formed frames', () => {
       },
       { op: 'approveManuscriptExport', input: { bookId, preparationId: randomUUID() } },
       { op: 'inspectManuscriptExportReceipt', input: { bookId, preparationId: randomUUID() } },
+      // Issue #500 (S64b): the format, named or not, and the main process's staging step for a PDF.
+      { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'current' }, options, format: 'pdf' } },
+      { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'current' }, options, format: 'markdown' } },
+      { op: 'prepareManuscriptExport', input: { bookId, revisionId: randomUUID(), target: milestone, options, reviewDigest: 'f'.repeat(64), destination, format: 'docx' } },
+      { op: 'stageManuscriptExport', input: { bookId, preparationId: randomUUID() } },
     ];
     for (const { op, input } of inputs) {
       const request = { id: randomUUID(), op, input };
@@ -731,7 +736,10 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'prepareManuscriptExport', input: { ...preparation, destination: null } },
       { op: 'prepareManuscriptExport', input: { ...preparation, reviewDigest: 'A'.repeat(64) } },
       { op: 'prepareManuscriptExport', input: { ...preparation, revisionId: 'current' } },
-      { op: 'prepareManuscriptExport', input: { ...preparation, format: 'pdf' } },
+      // Issue #500: a format is optional, and only one of the three.
+      { op: 'prepareManuscriptExport', input: { ...preparation, format: 'odt' } },
+      { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'current' }, options, format: 'PDF' } },
+      { op: 'stageManuscriptExport', input: { bookId, preparationId: 'last' } },
       { op: 'approveManuscriptExport', input: { bookId, preparationId: 'last' } },
       { op: 'approveManuscriptExport', input: { bookId, preparationId: randomUUID(), destination } },
       { op: 'inspectManuscriptExportReceipt', input: { preparationId: randomUUID() } },

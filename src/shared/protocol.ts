@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 51 as const;
+export const SERVICE_PROTOCOL_VERSION = 52 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -5191,7 +5191,7 @@ export interface ManuscriptExportTargetProjection {
   revisionLabel: string;
 }
 
-/** One format as the export card offers it: DOCX now, PDF and the Markdown 备用格式 later (S64b). */
+/** One format as the export card offers it: DOCX, the optional PDF, and the Markdown 备用格式 (Issue #500, S64b). */
 export interface ManuscriptExportFormatProjection {
   format: ManuscriptExportFormat;
   label: string;
@@ -5209,14 +5209,15 @@ export interface ManuscriptExportReviewProjection {
   bookTitle: string;
   target: ManuscriptExportTargetProjection;
   savedForExport: boolean;
-  format: 'docx';
+  /** The format this review is of (Issue #500, S64b): each format has its own review (EXP-007). */
+  format: ManuscriptExportFormat;
   formats: ReadonlyArray<ManuscriptExportFormatProjection>;
   options: ManuscriptExportOptions;
   /** Whether retained content is restored from the original file, or the file is written fresh from the text. */
   restoration: 'from-original' | 'regenerated';
   /** One sentence on how the file is written, in the editor's words. */
   restorationLine: string;
-  /** What DOCX promises (V2-UX-EXP-009). */
+  /** What the format promises, in the editor's words (V2-UX-EXP-009). */
   formatLine: string;
   fidelity: ReadonlyArray<ExportFidelityRowProjection>;
   /** Some class is `降级导出` or `无法导出`: `按上述方式导出` then accepts them for this export (EXP-008). */
@@ -5239,6 +5240,7 @@ export interface ManuscriptExportPreparationProjection {
   bookId: string;
   preparationId: string;
   target: ManuscriptExportTargetProjection;
+  format: ManuscriptExportFormat;
   options: ManuscriptExportOptions;
   fidelity: ReadonlyArray<ExportFidelityRowProjection>;
   degraded: boolean;
@@ -5261,6 +5263,8 @@ export interface ManuscriptExportReceiptProjection {
   bookId: string;
   preparationId: string;
   target: ManuscriptExportTargetProjection;
+  /** The format the receipt binds (V2-UX-EXP-013). */
+  format: ManuscriptExportFormat;
   outcome: 'created' | 'replaced' | 'ambiguous' | 'failed';
   outcomeLabel: string;
   detail: string;
@@ -5285,6 +5289,8 @@ export interface ReviewManuscriptExportInput {
   bookId: string;
   target: ManuscriptExportTargetInput;
   options: ManuscriptExportOptions;
+  /** Absent reads as DOCX, so a request made before S64b (Issue #500) still means what it meant. */
+  format?: ManuscriptExportFormat;
 }
 
 /** Freeze one preparation: the main process adds the destination the system dialog returned. */
@@ -5295,6 +5301,22 @@ export interface PrepareManuscriptExportInput {
   options: ManuscriptExportOptions;
   reviewDigest: string;
   destination: string;
+  format?: ManuscriptExportFormat;
+}
+
+/**
+ * The main process's step before it approves a PDF (Issue #500, S64b): the service lays out the page the preparation
+ * bound, checks it is still exactly that page, and stages it inside AI7's own data for the main process to print — a
+ * print needs a Chromium the service does not have. `print` names the page and where the printed file goes; `null`
+ * for a format the service writes itself.
+ */
+export interface StageManuscriptExportInput {
+  bookId: string;
+  preparationId: string;
+}
+export interface ManuscriptExportStageProjection {
+  format: ManuscriptExportFormat;
+  print: null | { pagePath: string; pdfPath: string };
 }
 
 export interface ApproveManuscriptExportInput {
@@ -5316,6 +5338,8 @@ export interface ChooseManuscriptExportDestinationInput {
   reviewDigest: string;
   /** The file name the dialog offers first; the editor may change it there. */
   suggestedFileName: string;
+  /** The format the review was of (Issue #500, S64b); absent reads as DOCX. */
+  format?: ManuscriptExportFormat;
 }
 
 /** The system dialog was cancelled — nothing is recorded (V2-UX-EXP-020) — or a preparation was frozen. */
@@ -5955,6 +5979,8 @@ export interface ServiceOperationMap {
   prepareManuscriptExport: { input: PrepareManuscriptExportInput; output: ManuscriptExportPreparationProjection };
   approveManuscriptExport: { input: ApproveManuscriptExportInput; output: ManuscriptExportReceiptProjection };
   inspectManuscriptExportReceipt: { input: InspectManuscriptExportReceiptInput; output: ManuscriptExportReceiptProjection };
+  /** Main-only (Issue #500, S64b): stage a prepared PDF's page for the main process to print before it approves. */
+  stageManuscriptExport: { input: StageManuscriptExportInput; output: ManuscriptExportStageProjection };
   undoManuscript: {
     input: { manuscriptId: string; branchId: string; expectedWorkingDigest: string };
     output: DurableHistoryProjection;

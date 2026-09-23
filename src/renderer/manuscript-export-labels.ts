@@ -5,6 +5,7 @@ import type {
   ManuscriptExportPreparationProjection,
   ManuscriptExportReceiptProjection,
   ManuscriptExportTargetProjection,
+  ManuscriptExportFormat,
 } from '../shared/protocol.js';
 
 /**
@@ -62,6 +63,23 @@ export const EXPORT_OPTION_NOTES: Readonly<Record<keyof ManuscriptExportOptions,
   includeSuggestions: '待处理的修改建议作为 Word 修订写出，保留作者名。',
   includeEditorNotes: '备注默认不随导出；勾选后作为批注写出，作者为「备注」。',
 };
+/** What each option writes in the two formats laid out from the manuscript's words (Issue #500, S64b). */
+export const EXPORT_OPTION_NOTES_BY_FORMAT: Readonly<Record<'pdf' | 'markdown', Readonly<Record<keyof ManuscriptExportOptions, string>>>> = {
+  pdf: {
+    includeAnnotations: '在正文中标出编号，连同作者名与回复列在文末。',
+    includeSuggestions: '待处理的修改建议以删除线与双下划线标在正文中，并列在文末。',
+    includeEditorNotes: '备注默认不随导出；勾选后列在文末，作者为「备注」。',
+  },
+  markdown: {
+    includeAnnotations: '写成脚注，保留作者名与回复。',
+    includeSuggestions: '待处理的修改建议写成 CriticMarkup 标记，作者写在脚注里。',
+    includeEditorNotes: '备注默认不随导出；勾选后写成脚注，作者为「备注」。',
+  },
+};
+/** The note under one option, in the words of the format the card is reviewing. */
+export function exportOptionNote(key: keyof ManuscriptExportOptions, format: ManuscriptExportFormat): string {
+  return format === 'docx' ? EXPORT_OPTION_NOTES[key] : EXPORT_OPTION_NOTES_BY_FORMAT[format][key];
+}
 /** The order the options are offered in (V2-UX-EXP-023, EXP-024). */
 export const EXPORT_OPTION_ORDER: ReadonlyArray<keyof ManuscriptExportOptions> = ['includeAnnotations', 'includeSuggestions', 'includeEditorNotes'];
 /** Selecting an option changes the file only (V2-UX-EXP-023). */

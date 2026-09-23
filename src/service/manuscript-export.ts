@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { link, lstat, open, readFile, realpath, rename, rm } from 'node:fs/promises';
+import { link, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -10,16 +10,20 @@ import {
   type ExportFidelityRowProjection,
   type InspectManuscriptExportReceiptInput,
   type ManuscriptExportDisposition,
+  type ManuscriptExportFormat,
   type ManuscriptExportFormatProjection,
   type ManuscriptExportOptions,
   type ManuscriptExportPreparationProjection,
   type ManuscriptExportReceiptProjection,
   type ManuscriptExportReviewProjection,
+  type ManuscriptExportStageProjection,
   type ManuscriptExportTargetInput,
   type ManuscriptExportTargetProjection,
   type PrepareManuscriptExportInput,
   type ReviewManuscriptExportInput,
+  type StageManuscriptExportInput,
 } from '../shared/protocol.js';
+import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
 import type { ManuscriptCheckpointBinding, ManuscriptCheckpointProgress, ManuscriptCheckpointPurpose } from './bounded-manuscript.js';
 import {
@@ -35,6 +39,7 @@ import {
   type DocxExportSource,
   type DocxExportSourceRow,
 } from './docx-export.js';
+import { MARKDOWN_EXPORT_WRITER_IDENTITY, PDF_EXPORT_WRITER_IDENTITY, renderMarkdownExport, renderPdfHtmlExport } from './text-export.js';
 
 /**
  * Local export of a Manuscript version to DOCX (Issue #413, plan slice S64; External Export Policy v2; ADR 0038,
@@ -201,10 +206,30 @@ export const EXPORT_DISPOSITION_LABELS: Readonly<Record<ManuscriptExportDisposit
 };
 export const EXPORT_FORMATS: ReadonlyArray<ManuscriptExportFormatProjection> = [
   { format: 'docx', label: 'DOCX', available: true, note: '主要可编辑格式：可在 Word 中继续修改，批注与修订按下面的选项写出。' },
-  { format: 'pdf', label: 'PDF', available: false, note: '随后提供 · 固定版式，不支持可编辑往返。' },
-  { format: 'markdown', label: 'Markdown（备用格式）', available: false, note: '随后提供 · 只保留文字与基本结构。' },
+  // Issue #500 (S64b; EXP-005, EXP-006): PDF, optional, and Markdown only as the 备用格式 — never in place of a DOCX.
+  { format: 'pdf', label: 'PDF', available: true, note: '可选 · 固定版式，适合阅读与打印；不能继续编辑，也不能导回 AI7。' },
+  { format: 'markdown', label: 'Markdown（备用格式）', available: true, note: '备用格式 · 只写出文字与标题层级，用于迁移或留底。' },
 ];
 export const EXPORT_DOCX_LINE = 'DOCX 可在 Word 中继续编辑；稿件本身和稿件上的标记不会因为导出而改变。';
+/** What PDF and Markdown promise (V2-UX-EXP-009), before any approval. */
+export const EXPORT_PDF_LINE = 'PDF 是固定版式：按稿件文字排成 A4 页面，适合阅读与打印，不能在 PDF 里继续修改，也不能导回 AI7；稿件本身和稿件上的标记不会因为导出而改变。';
+export const EXPORT_MARKDOWN_LINE = 'Markdown 是备用格式：只写出文字与标题层级，批注写成脚注，修改建议写成 CriticMarkup 标记，其余内容不随导出；稿件本身和稿件上的标记不会因为导出而改变。';
+const FORMAT_LINES: Readonly<Record<ManuscriptExportFormat, string>> = { docx: EXPORT_DOCX_LINE, pdf: EXPORT_PDF_LINE, markdown: EXPORT_MARKDOWN_LINE };
+const FORMAT_EXTENSIONS: Readonly<Record<ManuscriptExportFormat, string>> = { docx: '.docx', pdf: '.pdf', markdown: '.md' };
+const FORMAT_WRITERS: Readonly<Record<ManuscriptExportFormat, string>> = {
+  docx: DOCX_EXPORT_WRITER_IDENTITY,
+  pdf: PDF_EXPORT_WRITER_IDENTITY,
+  markdown: MARKDOWN_EXPORT_WRITER_IDENTITY,
+};
+/** How a format laid out from the manuscript's words alone is written, in the editor's words. */
+export const EXPORT_TEXT_RESTORATION_LINES: Readonly<Record<'pdf' | 'markdown', string>> = {
+  pdf: '这份 PDF 按稿件文字排版生成：书名、章节标题与段落按稿件写出，不从原文件恢复任何内容。',
+  markdown: '这份 Markdown 按稿件文字生成：标题层级写成 #，段落之间空一行，不从原文件恢复任何内容。',
+};
+/** A PDF whose page was not printed yet cannot be approved: nothing is written, and the editor approves again. */
+export const EXPORT_PDF_NOT_PRINTED = 'PDF 还没有排版好，没有写入，所选位置没有变化；请再点一次「按上述方式导出」。';
+/** The folder inside AI7's own data where a PDF's page and its printed file wait between staging and the write. */
+export const EXPORT_STAGING_DIRECTORY = 'export-staging';
 const FAILURE_DETAILS: Readonly<Record<string, string>> = {
   EXPORT_STAGE_FAILED: '无法在所选文件夹中写入导出文件，所选位置没有变化。',
   EXPORT_STAGE_VERIFY_FAILED: '写入的临时文件校验不一致，已经删除，所选位置没有变化。',
@@ -324,6 +349,12 @@ function requireOptions(value: unknown): ManuscriptExportOptions {
   return { includeAnnotations: value.includeAnnotations, includeSuggestions: value.includeSuggestions, includeEditorNotes: value.includeEditorNotes };
 }
 
+/** The format a request names; absent reads as DOCX, so a request made before S64b (Issue #500) means what it meant. */
+function requireFormat(value: unknown): ManuscriptExportFormat {
+  requireExport(value === undefined || value === 'docx' || value === 'pdf' || value === 'markdown', 'EXPORT_FORMAT_INVALID', '导出格式无效。');
+  return value ?? 'docx';
+}
+
 function requireTarget(value: unknown): ManuscriptExportTargetInput {
   requireExport(
     isRecord(value) && ((value.kind === 'current' && Object.keys(value).length === 1) ||
@@ -335,10 +366,10 @@ function requireTarget(value: unknown): ManuscriptExportTargetInput {
 }
 
 /** A file name the platform's dialog can offer: the Book's title and the version, without characters a path cannot hold. */
-export function suggestedExportFileName(bookTitle: string, versionLabel: string): string {
+export function suggestedExportFileName(bookTitle: string, versionLabel: string, format: ManuscriptExportFormat = 'docx'): string {
   const stem = `${bookTitle} · ${versionLabel}`.normalize('NFC').replace(INVALID_FILE_NAME_CHARACTERS, '_').replace(/\s+/gu, ' ').trim();
   const bounded = Array.from(stem).slice(0, 120).join('').replace(/[. ]+$/u, '');
-  return `${bounded.length > 0 ? bounded : '稿件'}.docx`;
+  return `${bounded.length > 0 ? bounded : '稿件'}${FORMAT_EXTENSIONS[format]}`;
 }
 
 function isInsideOrEqual(parent: string, candidate: string): boolean {
@@ -552,10 +583,11 @@ export class ManuscriptExportStore {
     requireExport(isRecord(input) && typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId), 'BOOK_INVALID', '图书标识无效。');
     const target = requireTarget(input.target);
     const options = requireOptions(input.options);
+    const format = requireFormat(input.format);
     const resolved = await this.#resolve(input.bookId, target, true);
-    const plan = await this.#plan(input.bookId, resolved, options);
-    const rendered = this.#render(plan.input, false);
-    return this.#reviewOf(input.bookId, resolved, options, plan, rendered);
+    const plan = await this.#plan(input.bookId, resolved, options, format);
+    const rendered = this.#render(plan.input, format, false);
+    return this.#reviewOf(input.bookId, resolved, options, format, plan, rendered);
   }
 
   /**
@@ -574,12 +606,13 @@ export class ManuscriptExportStore {
     );
     const target = requireTarget(input.target);
     const options = requireOptions(input.options);
-    const destination = await this.#requireDestination(input.destination);
+    const format = requireFormat(input.format);
+    const destination = await this.#requireDestination(input.destination, format);
     const resolved = await this.#resolve(input.bookId, target, false);
     requireExport(resolved.revisionId === input.revisionId, 'EXPORT_REVIEW_CHANGED', '稿件在查看导出后有了新的修订版，请重新查看导出。');
-    const plan = await this.#plan(input.bookId, resolved, options);
-    const rendered = this.#render(plan.input, true);
-    const review = this.#reviewOf(input.bookId, resolved, options, plan, rendered);
+    const plan = await this.#plan(input.bookId, resolved, options, format);
+    const rendered = this.#render(plan.input, format, true);
+    const review = this.#reviewOf(input.bookId, resolved, options, format, plan, rendered);
     requireExport(review.reviewDigest === input.reviewDigest, 'EXPORT_REVIEW_CHANGED', '导出保真审阅在查看后有了变化，请重新查看导出。');
     const payload = rendered.bytes!;
     const preparationId = randomUUID();
@@ -598,7 +631,7 @@ export class ManuscriptExportStore {
       revisionDigest: resolved.revisionDigest,
       revisionLabel: resolved.revisionLabel,
       milestoneLabel: resolved.milestoneLabel,
-      format: 'docx',
+      format,
       options,
       fidelitySha256: sha256Hex(fidelityJson),
       degraded: review.degraded,
@@ -612,7 +645,7 @@ export class ManuscriptExportStore {
       payloadBytes: payload.byteLength,
       policyId: POLICY.id,
       policyVersion: POLICY.version,
-      writer: DOCX_EXPORT_WRITER_IDENTITY,
+      writer: FORMAT_WRITERS[format],
       createdAt,
     });
     transact(this.#db, () => {
@@ -621,10 +654,10 @@ export class ManuscriptExportStore {
            preparation_id, effect_intent_id, book_id, target_kind, target_id, revision_id, revision_digest, format,
            options_json, fidelity_json, degraded, review_digest, file_name, destination, disposition, payload_sha256,
            payload_bytes, policy_id, policy_version, created_at, canonical_json, sha256
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'docx', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         preparationId, effectIntentId, input.bookId, resolved.targetKind, resolved.targetId, resolved.revisionId,
-        resolved.revisionDigest, canonicalJson(options), fidelityJson, review.degraded ? 1 : 0, review.reviewDigest,
+        resolved.revisionDigest, format, canonicalJson(options), fidelityJson, review.degraded ? 1 : 0, review.reviewDigest,
         destination.fileName, destination.path, destination.disposition, payloadSha256, payload.byteLength, POLICY.id,
         POLICY.version, createdAt, record.json, record.digest,
       );
@@ -651,11 +684,14 @@ export class ManuscriptExportStore {
     const prior = this.#outcomeRow(input.preparationId);
     if (prior !== undefined) return this.#receiptProjection(row, prior);
     const resolved = this.#preparedTarget(input.bookId, row);
-    const plan = await this.#plan(input.bookId, resolved, preparation.options);
-    const rendered = this.#render(plan.input, true);
-    const payload = rendered.bytes!;
-    requireExport(sha256Hex(payload) === preparation.technical.payloadDigest, 'EXPORT_PAYLOAD_CHANGED',
+    const plan = await this.#plan(input.bookId, resolved, preparation.options, preparation.format);
+    const rendered = this.#render(plan.input, preparation.format, true);
+    requireExport(sha256Hex(rendered.bytes!) === preparation.technical.payloadDigest, 'EXPORT_PAYLOAD_CHANGED',
       '稿件或标记在准备导出后有了变化，请重新准备导出。');
+    // A PDF is the page the main process printed (Issue #500, S64b): the page is what the preparation bound, and the
+    // printed file is what is written and receipted. Nothing is approved before it exists.
+    const payload = preparation.format === 'pdf' ? await this.#printed(preparation) : rendered.bytes!;
+    const payloadSha256 = sha256Hex(payload);
     const state = await targetState(preparation.destination);
     const replaces = this.#replacedFileOf(row);
     const standing = preparation.disposition === 'replace' ? await fileDigest(preparation.destination) : null;
@@ -686,8 +722,9 @@ export class ManuscriptExportStore {
       ).run(approvalId, input.preparationId, preparation.technical.effectIntentId, preparation.technical.payloadDigest, ACTOR,
         approvedAt, approval.json, approval.digest);
     });
-    const written = await writeAtomically(preparation.destination, payload, preparation.technical.payloadDigest,
+    const written = await writeAtomically(preparation.destination, payload, payloadSha256,
       preparation.disposition, preparation.technical.effectIntentId, replaces);
+    if (preparation.format === 'pdf') await this.#clearStaging(preparation.technical.effectIntentId);
     const receiptId = randomUUID();
     const recordedAt = new Date().toISOString();
     const verified = written.outcome === 'created' || written.outcome === 'replaced' ? written : null;
@@ -715,6 +752,61 @@ export class ManuscriptExportStore {
         verified?.sha256 ?? null, failureCode, recordedAt, receipt.json, receipt.digest);
     });
     return this.#receiptProjection(row, this.#outcomeRow(input.preparationId)!);
+  }
+
+  /**
+   * The main process's step before it approves a PDF (Issue #500, S64b): the page the preparation bound is laid out
+   * again, checked against it, and staged inside AI7's own data, with where the printed file goes. A format the service
+   * writes itself, or a preparation already approved, needs no print.
+   */
+  async stage(input: StageManuscriptExportInput, available: boolean): Promise<ManuscriptExportStageProjection> {
+    this.#requireAvailable(available);
+    requireExport(
+      isRecord(input) && typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) &&
+        typeof input.preparationId === 'string' && UUID_PATTERN.test(input.preparationId),
+      'EXPORT_APPROVAL_INVALID',
+      '导出批准请求无效。',
+    );
+    const row = this.#preparationRow(input.bookId, input.preparationId);
+    const preparation = this.#preparationProjection(row);
+    if (preparation.format !== 'pdf' || this.#outcomeRow(input.preparationId) !== undefined) return { format: preparation.format, print: null };
+    const resolved = this.#preparedTarget(input.bookId, row);
+    const plan = await this.#plan(input.bookId, resolved, preparation.options, 'pdf');
+    const page = this.#render(plan.input, 'pdf', true).bytes!;
+    requireExport(sha256Hex(page) === preparation.technical.payloadDigest, 'EXPORT_PAYLOAD_CHANGED',
+      '稿件或标记在准备导出后有了变化，请重新准备导出。');
+    const { pagePath, pdfPath } = await this.#stagingPaths(preparation.technical.effectIntentId);
+    await rm(pdfPath, { force: true });
+    await writeFile(pagePath, page);
+    return { format: 'pdf', print: { pagePath, pdfPath } };
+  }
+
+  async #stagingPaths(effectIntentId: string): Promise<{ pagePath: string; pdfPath: string }> {
+    const directory = await ensureCanonicalDataDirectory(this.#environment.dataRoot, EXPORT_STAGING_DIRECTORY);
+    return { pagePath: join(directory, `${effectIntentId}.html`), pdfPath: join(directory, `${effectIntentId}.pdf`) };
+  }
+
+  /** The printed PDF of one preparation: it must exist and read as a PDF, or nothing is approved. */
+  async #printed(preparation: ManuscriptExportPreparationProjection): Promise<Uint8Array> {
+    const { pdfPath } = await this.#stagingPaths(preparation.technical.effectIntentId);
+    let bytes: Uint8Array;
+    try {
+      const info = await lstat(pdfPath);
+      requireExport(info.isFile() && !info.isSymbolicLink(), 'EXPORT_PDF_NOT_PRINTED', EXPORT_PDF_NOT_PRINTED);
+      bytes = await readFile(pdfPath);
+    } catch (error) {
+      if (error instanceof ExportLedgerError) throw error;
+      throw new ExportLedgerError('EXPORT_PDF_NOT_PRINTED', EXPORT_PDF_NOT_PRINTED);
+    }
+    requireExport(bytes.byteLength > 5 && new TextDecoder().decode(bytes.subarray(0, 5)) === '%PDF-', 'EXPORT_PDF_NOT_PRINTED', EXPORT_PDF_NOT_PRINTED);
+    return bytes;
+  }
+
+  /** The page and the printed file are AI7's own intermediates: once the write is over, neither is kept. */
+  async #clearStaging(effectIntentId: string): Promise<void> {
+    const { pagePath, pdfPath } = await this.#stagingPaths(effectIntentId);
+    await rm(pagePath, { force: true }).catch(() => undefined);
+    await rm(pdfPath, { force: true }).catch(() => undefined);
   }
 
   /** What one approved export came to, as the main process reads it before revealing the file. */
@@ -750,14 +842,15 @@ export class ManuscriptExportStore {
     requireExport(available, 'EXPORT_POLICY_UNAVAILABLE', '对外导出策略未通过本次启动的校验，导出不可用。');
   }
 
-  async #requireDestination(value: unknown): Promise<{ path: string; fileName: string; disposition: ManuscriptExportDisposition; replaces: ReplacedFileIdentity | null }> {
+  async #requireDestination(value: unknown, format: ManuscriptExportFormat): Promise<{ path: string; fileName: string; disposition: ManuscriptExportDisposition; replaces: ReplacedFileIdentity | null }> {
     requireExport(
       typeof value === 'string' && value.isWellFormed() && value.length > 0 && value.length <= MAX_EXPORT_DESTINATION_CODE_UNITS &&
         !value.includes('\u0000') && isAbsolute(value),
       'EXPORT_DESTINATION_INVALID',
       '所选保存位置无效。',
     );
-    requireExport(extname(value).toLowerCase() === '.docx', 'EXPORT_DESTINATION_INVALID', '请以 .docx 作为文件名的结尾。');
+    const extension = FORMAT_EXTENSIONS[format];
+    requireExport(extname(value).toLowerCase() === extension, 'EXPORT_DESTINATION_INVALID', `请以 ${extension} 作为文件名的结尾。`);
     const fileName = basename(value);
     requireExport(fileName.length > 0 && fileName.length <= 255, 'EXPORT_DESTINATION_INVALID', '所选文件名无效。');
     let directory: string;
@@ -913,7 +1006,7 @@ export class ManuscriptExportStore {
   // ---- the export input ---------------------------------------------------------------------------------
 
   /** Everything the file is written from: the version's blocks, its source, the mapping and the marks on it. */
-  async #plan(bookId: string, target: ResolvedTarget, options: ManuscriptExportOptions): Promise<ExportPlan> {
+  async #plan(bookId: string, target: ResolvedTarget, options: ManuscriptExportOptions, format: ManuscriptExportFormat): Promise<ExportPlan> {
     const blocks = (this.#db.prepare(
       'SELECT block_id, position, kind, level, text, digest FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position',
     ).all(target.revisionId) as SqlRow[]).map((row): DocxExportBlock => ({
@@ -952,7 +1045,7 @@ export class ManuscriptExportStore {
     const input: DocxExportInput = { title: target.bookTitle, blocks, marks, options, source: exportSource };
     const inputDigest = canonicalRecord({
       schema: INPUT_SCHEMA,
-      writer: DOCX_EXPORT_WRITER_IDENTITY,
+      writer: FORMAT_WRITERS[format],
       revisionId: target.revisionId,
       revisionDigest: target.revisionDigest,
       source: exportSource.kind === 'mapped' ? { kind: 'mapped', objectDigest, textBoxes: exportSource.textBoxes } : { kind: 'fresh', reason: exportSource.reason, objectDigest },
@@ -1067,7 +1160,16 @@ export class ManuscriptExportStore {
     return marks;
   }
 
-  #render(input: DocxExportInput, emit: boolean): DocxExportResult {
+  /** The file of one format, or only its review (`emit: false`): DOCX restores from the original; PDF and Markdown do not. */
+  #render(input: DocxExportInput, format: ManuscriptExportFormat, emit: boolean): DocxExportResult {
+    if (format !== 'docx') {
+      const laid = format === 'pdf' ? renderPdfHtmlExport(input, { emit }) : renderMarkdownExport(input, { emit });
+      return { ...laid, restoration: 'regenerated', restoredBlocks: 0, regeneratedBlocks: input.blocks.length };
+    }
+    return this.#renderDocx(input, emit);
+  }
+
+  #renderDocx(input: DocxExportInput, emit: boolean): DocxExportResult {
     try {
       return renderDocxExport(input, { emit });
     } catch (error) {
@@ -1084,6 +1186,7 @@ export class ManuscriptExportStore {
     bookId: string,
     target: ResolvedTarget,
     options: ManuscriptExportOptions,
+    format: ManuscriptExportFormat,
     plan: ExportPlan,
     rendered: DocxExportResult,
   ): ManuscriptExportReviewProjection {
@@ -1094,35 +1197,39 @@ export class ManuscriptExportStore {
       bookId,
       target: { kind: target.targetKind, id: target.targetId, revisionId: target.revisionId },
       revisionDigest: target.revisionDigest,
-      format: 'docx',
+      format,
       options,
       inputDigest: plan.inputDigest,
       fidelity,
     }).digest;
-    const restorationLine = rendered.restoration === 'from-original'
-      ? `未改过、也没有带出标记的 ${rendered.restoredBlocks} 段从原文件恢复；其余 ${rendered.regeneratedBlocks} 段按稿件文字重新写出。`
-      : plan.input.source.kind === 'mapped' || (plan.input.source.kind === 'fresh' && plan.input.source.reason === 'unprefixed')
-        ? EXPORT_UNPREFIXED_RESTORATION_LINE
-        : '这份稿件没有可以对应的原文件段落，导出按稿件文字重新生成 DOCX。';
+    // A PDF or a Markdown file is written from the manuscript's text (Issue #500, S64b); only a DOCX restores from the
+    // original, or says why it cannot.
+    const restorationLine = format !== 'docx'
+      ? EXPORT_TEXT_RESTORATION_LINES[format]
+      : rendered.restoration === 'from-original'
+        ? `未改过、也没有带出标记的 ${rendered.restoredBlocks} 段从原文件恢复；其余 ${rendered.regeneratedBlocks} 段按稿件文字重新写出。`
+        : plan.input.source.kind === 'mapped' || (plan.input.source.kind === 'fresh' && plan.input.source.reason === 'unprefixed')
+          ? EXPORT_UNPREFIXED_RESTORATION_LINE
+          : '这份稿件没有可以对应的原文件段落，导出按稿件文字重新生成 DOCX。';
     return {
       bookId,
       bookTitle: target.bookTitle,
       target: targetProjection,
       savedForExport: target.savedForExport,
-      format: 'docx',
+      format,
       formats: EXPORT_FORMATS,
       options,
       restoration: rendered.restoration,
       restorationLine,
-      formatLine: EXPORT_DOCX_LINE,
+      formatLine: FORMAT_LINES[format],
       fidelity,
       degraded: rendered.degraded,
-      suggestedFileName: suggestedExportFileName(target.bookTitle, target.milestoneLabel ?? target.revisionLabel),
+      suggestedFileName: suggestedExportFileName(target.bookTitle, target.milestoneLabel ?? target.revisionLabel, format),
       reviewDigest,
       technical: {
         revisionDigest: target.revisionDigest,
         sourceVersionId: plan.sourceVersionId,
-        writerIdentity: DOCX_EXPORT_WRITER_IDENTITY,
+        writerIdentity: FORMAT_WRITERS[format],
         inputDigest: plan.inputDigest,
       },
     };
@@ -1205,6 +1312,7 @@ export class ManuscriptExportStore {
         revisionId,
         revisionLabel: revision.revisionLabel,
       },
+      format: requireFormat(text(row.format)),
       options,
       fidelity: fidelity as ExportFidelityRowProjection[],
       degraded: integer(row.degraded) === 1,
@@ -1243,6 +1351,7 @@ export class ManuscriptExportStore {
       bookId: preparation.bookId,
       preparationId: preparation.preparationId,
       target: preparation.target,
+      format: preparation.format,
       fileName: preparation.fileName,
       destination: preparation.destination,
     };

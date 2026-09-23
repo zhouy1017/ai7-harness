@@ -114,6 +114,8 @@ describe('the words of 发稿', () => {
         bookId: identity,
         preparationId: identity,
         target: { kind: 'milestone' as const, milestoneId: identity, milestoneLabel: label, revisionId: identity, revisionLabel: 'r9999999' },
+        // Issue #500: the longest format name the receipt binds.
+        format: 'markdown' as const,
         outcome: 'ambiguous' as const,
         outcomeLabel: '结果待确认',
         detail: '导'.repeat(120),
