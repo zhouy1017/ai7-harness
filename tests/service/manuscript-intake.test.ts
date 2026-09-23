@@ -7,7 +7,7 @@ import { EditorialStore } from '../../src/service/store.js';
 import {
   MANUSCRIPT_INTAKE_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
-  CONNECTIVITY_WAIT_SCHEMA_VERSION,
+  DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import type { SourceFormat } from '../../src/shared/protocol.js';
 import { LOCAL_ONLY_DOC, localOnlyAvailable, localOnlyPath } from '../support/local-only-manuscripts.js';
@@ -19,6 +19,7 @@ import { PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER } from '../support/proposal-conf
 import { IMPORT_RETENTION_RELATIONS_DROP_ORDER } from '../support/import-retention.js';
 import { IMPORTED_MARK_RELATIONS_DROP_ORDER } from '../support/imported-marks.js';
 import { EXPORT_LEDGER_RELATIONS_DROP_ORDER } from '../support/manuscript-export.js';
+import { DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER } from '../support/default-execution-rules.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2) for multi-format intake (ADR 0072 §1–2). It drives the real
@@ -139,7 +140,7 @@ function downgradeToRevision17(databasePath: string): void {
       ALTER TABLE import_drafts DROP COLUMN working_object_digest;
       ALTER TABLE import_drafts DROP COLUMN converter_identity;
       ALTER TABLE import_abandonment_cleanup_intents DROP COLUMN working_object_digest;
-      ${[...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER].map((relation) => `DROP TABLE ${relation};`).join(' ')}
+      ${[...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER].map((relation) => `DROP TABLE ${relation};`).join(' ')}
       ${PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join(' ')}
       ${PUBLICATION_VERSION_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join(' ')}
       ${REVIEW_RUN_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join(' ')}
@@ -630,7 +631,7 @@ describe('schema revision 18 over the real store', () => {
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
       expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
-        .toBe(CONNECTIVITY_WAIT_SCHEMA_VERSION);
+        .toBe(DEFAULT_EXECUTION_RULE_SCHEMA_VERSION);
       // Every row is the row it was: the parsed DOCX keeps its digests, its parser, and its format.
       expect(tableRows(after, 'source_versions', REVISION_17_SOURCE_VERSION_COLUMNS)).toEqual(sourceVersionsBefore);
       expect(tableRows(after, 'source_provenance', REVISION_17_PROVENANCE_COLUMNS)).toEqual(provenanceBefore);
@@ -669,7 +670,7 @@ function downgradeToRevision18(databasePath: string): void {
       ALTER TABLE import_drafts DROP COLUMN working_object_digest;
       ALTER TABLE import_drafts DROP COLUMN converter_identity;
       ALTER TABLE import_abandonment_cleanup_intents DROP COLUMN working_object_digest;
-      ${[...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER].map((relation) => `DROP TABLE ${relation};`).join(' ')}
+      ${[...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER].map((relation) => `DROP TABLE ${relation};`).join(' ')}
       ${PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join(' ')}
       ${PUBLICATION_VERSION_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join(' ')}
       ${REVIEW_RUN_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join(' ')}
@@ -734,7 +735,7 @@ describe('schema revision 19 over the real store', () => {
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
       expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
-        .toBe(CONNECTIVITY_WAIT_SCHEMA_VERSION);
+        .toBe(DEFAULT_EXECUTION_RULE_SCHEMA_VERSION);
       // Every row is the row it was; a DOCX read natively gains two columns and fills neither.
       expect(tableRows(after, 'source_versions', REVISION_18_SOURCE_VERSION_COLUMNS)).toEqual(sourceVersionsBefore);
       expect(tableRows(after, 'import_drafts', `${REVISION_17_DRAFT_COLUMNS}, source_format`)).toEqual(draftsBefore);

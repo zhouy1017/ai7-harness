@@ -6,7 +6,7 @@ import { COMMENTS_REVISIONS_DETAIL, REIMPORT_COMMENTS_REVISIONS_DETAIL } from '.
 import { EditorialMarkStore, proposalChangeItemsShape } from '../../src/service/editorial-marks.js';
 import { ImportedMarkError, createImportedMarks, stageImportedMarks } from '../../src/service/imported-marks.js';
 import { EditorialStore, StoreError, importedMarksRecord } from '../../src/service/store.js';
-import { CONNECTIVITY_WAIT_SCHEMA_VERSION, IMPORT_RETENTION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { DEFAULT_EXECUTION_RULE_SCHEMA_VERSION, IMPORT_RETENTION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import type { EditorialMarkAnchorProjection, ManuscriptBlockProjection } from '../../src/shared/protocol.js';
 import {
   ADMITTED_BASELINE_DOCX,
@@ -18,6 +18,7 @@ import {
 } from '../support/composed-fixture.js';
 import { IMPORTED_MARK_RELATIONS_DROP_ORDER, downgradeProposalChangeItemsToRevision27 } from '../support/imported-marks.js';
 import { EXPORT_LEDGER_RELATIONS_DROP_ORDER } from '../support/manuscript-export.js';
+import { DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER } from '../support/default-execution-rules.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2) for imported marks (Issue #411, plan slice S62) over the real `EditorialStore`
@@ -392,7 +393,7 @@ describe('schema revision 28 over the real store', () => {
       store.close();
     }
     const before = withDatabase(false, (database) => {
-      for (const relation of EXPORT_LEDGER_RELATIONS_DROP_ORDER) database.exec(`DROP TABLE ${relation}`);
+      for (const relation of [...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER]) database.exec(`DROP TABLE ${relation}`);
       for (const relation of IMPORTED_MARK_RELATIONS_DROP_ORDER) database.exec(`DROP TABLE ${relation}`);
       downgradeProposalChangeItemsToRevision27(database);
       database.exec(`PRAGMA user_version = ${IMPORT_RETENTION_SCHEMA_VERSION}`);
@@ -414,7 +415,7 @@ describe('schema revision 28 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(CONNECTIVITY_WAIT_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DEFAULT_EXECUTION_RULE_SCHEMA_VERSION);
       expect(proposalChangeItemsShape(database)).toBe('current');
       const items = database.prepare('SELECT rowid, * FROM proposal_change_items ORDER BY rowid').all() as Row[];
       expect(items.slice(0, 2)).toEqual(before.items);
