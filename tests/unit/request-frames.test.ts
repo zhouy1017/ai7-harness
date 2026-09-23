@@ -140,6 +140,14 @@ describe('decodeRequest accepts well-formed frames', () => {
     expect(rejectionFor(frameOf({ ...startWhenOnline, input: { ...startWhenOnline.input, planEnvelopeDigest: 'b'.repeat(63) } }))).toBeInstanceOf(ProtocolError);
   });
 
+  it('accepts 取消任务 by the Task Intent within the route\'s Book, and nothing more (Issue #422)', () => {
+    const cancel = { id: randomUUID(), op: 'cancelBaselineAnalysisRun', input: { bookId: randomUUID(), taskIntentId: randomUUID() } };
+    expect(decodeRequest(frameOf(cancel))).toEqual(cancel);
+    expect(rejectionFor(frameOf({ ...cancel, input: { ...cancel.input, runRecordId: randomUUID() } }))).toBeInstanceOf(ProtocolError);
+    expect(rejectionFor(frameOf({ ...cancel, input: { bookId: randomUUID(), taskIntentId: 'not-a-uuid' } }))).toBeInstanceOf(ProtocolError);
+    expect(rejectionFor(frameOf({ ...cancel, input: { taskIntentId: randomUUID() } }))).toBeInstanceOf(ProtocolError);
+  });
+
   it('accepts the seven 审阅 operations with their exact inputs', () => {
     const bookId = randomUUID();
     const reviewRunId = randomUUID();
