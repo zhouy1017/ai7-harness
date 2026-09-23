@@ -2631,7 +2631,8 @@ async function main() {
     const onlineStates = onlineSettled?.run?.transitions?.map((transition) => transition.state) ?? [];
     requireJourney(onlineSettled?.state === 'settled' && onlineSettled.taskIntent?.taskIntentId === againIntent &&
       JSON.stringify(onlineStates.slice(0, 4)) === JSON.stringify(['authorized', 'awaiting-connectivity', 'admitted', 'executing']) &&
-      onlineSettled.run?.attempt !== null && onlineSettled.taskOutcome?.resultSetRevisionId === onlineSettled.resultSetRevision?.revisionId,
+      onlineSettled.run?.attempt !== null && onlineSettled.taskOutcome?.resultSetRevisionId === onlineSettled.resultSetRevision?.revisionId &&
+      onlineSettled.resultSetRevision?.ordinal === 7 && onlineSettled.resultSetRevision?.update?.mode === 'sync-current',
     'online-settled-run', { state: onlineSettled?.state, transitions: onlineStates });
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started' && document.querySelector('#task-drawer .task-bar-status')?.textContent==='已完成' && document.querySelector('#task-drawer [data-task-drawer-control="run-link"]')?.textContent==='查看运行' && !document.querySelector('#task-drawer [data-task-drawer-control="cancel-wait"]')`, 'online-bar-settled');
 
@@ -2772,8 +2773,9 @@ async function main() {
     at('zero-activity');
     // Synchronized delta with Issue #418: the Task Drawer, open beside ②A since 审阅, holds no action of
     // the surfaces that raise a Task — the plan authorizes nothing (PLAN-007). Synchronized delta with Issue
-    // #420: its only start is its own bar's, and no card anywhere carries one.
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.analysisState==='settled' && card.dataset.resultRevisionOrdinal==='6' && ${ONLY_ANALYSIS_ACTIONS} && !document.querySelector('[data-analysis-action="prepare"], [data-analysis-action="authorize"]') && !document.querySelector('#task-drawer [data-analysis-action], #task-drawer [data-review-action], #task-drawer [data-task-authorization-action]') && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress|effect|enrol|apply|export/i.test(key) && ![...${JSON.stringify(CHANGE_SUGGESTION_APPLY_MEMBERS)}, ...${JSON.stringify(EXPORT_MEMBERS)}].includes(key)); })()`, 'no-execution-surface');
+    // #420: its only start is its own bar's, and no card anywhere carries one. Since #502 the Run that waited for
+    // the network settled a seventh Result Set Revision before 审阅, so the card ends there.
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.analysisState==='settled' && card.dataset.resultRevisionOrdinal==='7' && ${ONLY_ANALYSIS_ACTIONS} && !document.querySelector('[data-analysis-action="prepare"], [data-analysis-action="authorize"]') && !document.querySelector('#task-drawer [data-analysis-action], #task-drawer [data-review-action], #task-drawer [data-task-authorization-action]') && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress|effect|enrol|apply|export/i.test(key) && ![...${JSON.stringify(CHANGE_SUGGESTION_APPLY_MEMBERS)}, ...${JSON.stringify(EXPORT_MEMBERS)}].includes(key)); })()`, 'no-execution-surface');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-network-provider-session');
   } finally {
     finalCleanupRequested = true;
