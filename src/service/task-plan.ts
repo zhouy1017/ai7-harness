@@ -461,6 +461,13 @@ function baselineState(projection: BaselineAnalysisProjection): TaskPlanProjecti
         : { key: 'cancelled', label: '已取消' };
     case 'cancelling':
       return { key: 'cancelling', label: '正在取消' };
+    // 暂停 and 续行 (Issue #422, S76b; CTRL-001, CONT-014).
+    case 'pausing':
+      return { key: 'pausing', label: '正在暂停' };
+    case 'paused':
+      return { key: 'paused', label: '已暂停' };
+    case 'resumable':
+      return { key: 'resumable', label: '任务已中断 · 可续行' };
     case 'admitted':
       return { key: 'running', label: '正在排队' };
     case 'executing':
@@ -487,6 +494,8 @@ export function baselineAnalysisPlan(input: {
   blocks: ReadonlyArray<ManifestBlockInput>;
   /** What the store read of the Book's rules for this plan (Issue #421); absent reads as a plan no rule can come from. */
   defaultRule?: TaskPlanDefaultRuleProjection;
+  /** What the store read of the Task's stopped Run (Issue #422, S76b); absent while no Run of it is stopped. */
+  stopped?: BaselineStoppedRunFacts;
 }): TaskPlanProjection {
   const { projection, bookTitle, blocks } = input;
   const intent = projection.taskIntent;
@@ -624,18 +633,20 @@ export function baselineAnalysisPlan(input: {
     ],
     start: baselineStart(projection, envelope.digest),
     defaultRule: input.defaultRule ?? noDefaultRule(BASELINE_NO_RULE),
-    runControl: baselineRunControl(projection),
+    runControl: baselineRunControl(projection, input.stopped),
   };
 }
 
 // ---- 取消任务 and the activity card (Issue #422, plan slice S76a) -----------------------------------------------
 
-/** 暂停 and 续行 need a durable per-unit continuation point, which S76b brings; until then 暂停 says so. */
-export const RUN_CONTROL_PAUSE_REASON = '暂停与续行随后提供';
+/** 暂停 is offered while a Run executes or waits its turn in the slot (CTRL-001, CTRL-008); otherwise it says why not. */
+export const RUN_CONTROL_PAUSE_REASON = '这项任务现在没有在运行，不能暂停；可以取消它';
 /** 改计划重做 redoes the work under a changed plan, which needs S73's plan editing; until then it says so. */
 export const RUN_CONTROL_REDO_REASON = '改计划重做随计划编辑提供';
 /** Once the editor confirmed 取消任务 nothing more is offered: the Run is stopping. */
 export const RUN_CONTROL_CANCELLING_REASON = '已在取消：正在进行的这一步完成后停止';
+/** While the Run pauses, 取消任务 waits for it to have stopped. */
+export const RUN_CONTROL_PAUSING_REASON = '正在暂停：正在进行的这一步完成后停下';
 /** What the analysis never does, so there is nothing a cancellation could leave committed (CTRL-007). */
 export const CANCELLATION_NO_EFFECTS = '这项分析不改稿，没有需要撤回的受控动作。';
 
@@ -653,7 +664,23 @@ const STAGE_WORDS: Readonly<Record<'cross-unit-reduction' | 'assurance-sampling'
 export function baselineCancellationImpact(
   run: NonNullable<BaselineAnalysisProjection['run']>,
   update: TaskPlanRunControlProjection['update'] = null,
+  continuation: { unitsSettled: number; unitsTotal: number } | null = null,
 ): ReadonlyArray<string> {
+  // An update Run reads only the ranges it recomputes: the rest it names as such, and the ranges it reuses are kept.
+  const reusedKept = update === null || update.reusedUnits === 0 ? '' : `，连同沿用上一份分析的 ${update.reusedUnits} 个阅读范围，`;
+  const restOf = (count: number): string => update === null ? `其余 ${count} 个阅读范围` : `其余 ${count} 个要重新分析的阅读范围`;
+  // A Run that stopped — paused, or left 可续行 — has nothing in flight: what it kept becomes its partial revision.
+  if (continuation !== null) {
+    const { unitsSettled, unitsTotal } = continuation;
+    if (unitsSettled === 0) {
+      return ['这项任务还没有读完任何阅读范围；取消后不会发送任何内容，也不会形成结果集修订版。', CANCELLATION_NO_EFFECTS];
+    }
+    return [
+      `这项任务已经停下；${restOf(Math.max(0, unitsTotal - unitsSettled))}和之后的归纳、抽样都不再进行，不再发送任何内容。`,
+      `已读完的 ${unitsSettled} 个阅读范围的结果与缺口${reusedKept}会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。`,
+      CANCELLATION_NO_EFFECTS,
+    ];
+  }
   if (run.state === 'admitted') {
     return ['这项任务还没有开始阅读；取消后不会发送任何内容，也不会形成结果集修订版。', CANCELLATION_NO_EFFECTS];
   }
@@ -668,15 +695,12 @@ export function baselineCancellationImpact(
   }
   const inFlight = progress.stage === 'units' && progress.currentUnitOrdinal !== null;
   const remaining = Math.max(0, progress.unitsTotal - progress.unitsSettled - (inFlight ? 1 : 0));
-  // An update Run reads only the ranges it recomputes: the rest it names as such, and the ranges it reuses are kept.
-  const rest = update === null ? `其余 ${remaining} 个阅读范围` : `其余 ${remaining} 个要重新分析的阅读范围`;
   const stops = progress.stage !== 'units'
     ? `正在进行的${STAGE_WORDS[progress.stage]}完成后停止，之后的步骤都不再进行，不再发送任何内容。`
     : inFlight
-      ? `正在读的第 ${progress.currentUnitOrdinal} 个阅读范围读完后停止；${rest}和之后的归纳、抽样都不再进行，不再发送任何内容。`
-      : `在这两个阅读范围之间停止；${rest}和之后的归纳、抽样都不再进行，不再发送任何内容。`;
-  const reused = update === null || update.reusedUnits === 0 ? '' : `，连同沿用上一份分析的 ${update.reusedUnits} 个阅读范围，`;
-  const kept = `已读完的 ${progress.unitsSettled} 个阅读范围${inFlight ? '和正在读的这一个' : ''}的结果与缺口${reused}会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。`;
+      ? `正在读的第 ${progress.currentUnitOrdinal} 个阅读范围读完后停止；${restOf(remaining)}和之后的归纳、抽样都不再进行，不再发送任何内容。`
+      : `在这两个阅读范围之间停止；${restOf(remaining)}和之后的归纳、抽样都不再进行，不再发送任何内容。`;
+  const kept = `已读完的 ${progress.unitsSettled} 个阅读范围${inFlight ? '和正在读的这一个' : ''}的结果与缺口${reusedKept}会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。`;
   return [
     stops,
     kept,
@@ -690,24 +714,64 @@ export function baselineCancellationImpact(
  * summary, and 暂停 and 改计划重做 with the reasons they are not offered yet. `null` once the Run has ended, and
  * before it was admitted — a Run waiting for the network has its own 取消 (Issue #502).
  */
-function baselineRunControl(projection: BaselineAnalysisProjection): TaskPlanRunControlProjection | null {
+function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: BaselineStoppedRunFacts): TaskPlanRunControlProjection | null {
   const run = projection.run;
-  if (run === null || !(run.state === 'admitted' || run.state === 'executing' || run.state === 'cancelling')) return null;
+  if (run === null) return null;
+  const under = run.state === 'admitted' || run.state === 'executing' || run.state === 'cancelling' || run.state === 'pausing' ||
+    run.state === 'paused' || run.state === 'resumable';
+  if (!under) return null;
+  const held = run.progress !== null;
   // Stopping at the editor's word while an execution holds it. One AI7 left 正在取消 when it closed has none, and is
   // offered 取消任务 again, which settles it at once.
-  const cancelling = run.state === 'cancelling' && run.progress !== null;
+  const cancelling = run.state === 'cancelling' && held;
+  const pausing = run.state === 'pausing' && held;
+  const continuation = (run.state === 'paused' || run.state === 'resumable') && stopped !== undefined
+    ? { unitsSettled: stopped.unitsSettled, unitsTotal: stopped.unitsTotal }
+    : null;
   const counts = projection.update?.reusePlan?.counts ?? null;
   const update = counts === null ? null : { manuscriptUnits: projection.coverageManifest?.units.length ?? counts.recomputed + counts.reused, reusedUnits: counts.reused };
   return {
     runRecordId: run.runRecordId,
     cancelling,
-    cancel: { reason: cancelling ? RUN_CONTROL_CANCELLING_REASON : null, impact: cancelling ? [] : baselineCancellationImpact(run, update) },
-    pause: { reason: RUN_CONTROL_PAUSE_REASON },
+    pausing,
+    cancel: {
+      reason: cancelling ? RUN_CONTROL_CANCELLING_REASON : pausing ? RUN_CONTROL_PAUSING_REASON : null,
+      impact: cancelling || pausing ? [] : baselineCancellationImpact(run, update, continuation),
+    },
+    // CTRL-001 and CTRL-008: a Run executing its units, or admitted and waiting its turn, pauses in one click.
+    pause: { reason: (run.state === 'executing' || run.state === 'admitted') && held ? null : RUN_CONTROL_PAUSE_REASON },
+    resume: continuation === null ? null : { reason: stopped!.blockers.length === 0 ? null : stopped!.blockers.join('') },
     redo: { reason: RUN_CONTROL_REDO_REASON },
     activity: run.progress,
     executingSince: run.transitions.find((transition) => transition.state === 'executing')?.recordedAt ?? null,
+    continuation,
     update,
   };
+}
+
+/**
+ * What the store reads of a stopped Run for the drawer (Issue #422, S76b): how many of the units it submits it kept,
+ * and why 续行 cannot go on now, if it cannot — the plan moved, its progress no longer reads back, or, read by the
+ * service, the model service, the network or the slot.
+ */
+export interface BaselineStoppedRunFacts {
+  readonly unitsSettled: number;
+  readonly unitsTotal: number;
+  readonly blockers: ReadonlyArray<string>;
+}
+
+/** 续行's own words when the service cannot let the Run go on now (CONT-015): each names what it waits for. */
+export const RESUME_BLOCKED_SLOT = '另一项任务正在运行；它结束后再续行。';
+export const RESUME_BLOCKED_CONNECTION = '模型未连接：续行要发送到模型服务，所需的凭据还没有就绪；连接好之后才能续行。';
+export const RESUME_BLOCKED_OFFLINE = '离线：续行要连到模型服务，而这台设备现在没有网络；联网后再续行。';
+
+/** The drawer's plan with the service's own reasons 续行 must wait added to the stopped Run's (CONT-015). */
+export function withResumeBlockers(plan: TaskPlanProjection, blockers: ReadonlyArray<string>): TaskPlanProjection {
+  const control = plan.runControl;
+  if (control === null || control.resume === null || blockers.length === 0) return plan;
+  // Each reason is a sentence of its own, ending with its full stop, so they run on as Chinese does.
+  const reason = [control.resume.reason, ...blockers].filter((entry): entry is string => entry !== null).join('');
+  return { ...plan, runControl: { ...control, resume: { reason } } };
 }
 
 // ---- a Review Run ---------------------------------------------------------------------------------------

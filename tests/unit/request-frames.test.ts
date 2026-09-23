@@ -148,6 +148,16 @@ describe('decodeRequest accepts well-formed frames', () => {
     expect(rejectionFor(frameOf({ ...cancel, input: { taskIntentId: randomUUID() } }))).toBeInstanceOf(ProtocolError);
   });
 
+  it('accepts 暂停 and 续行 by the Task Intent within the route\'s Book, and nothing more (Issue #422, S76b)', () => {
+    for (const op of ['pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun']) {
+      const request = { id: randomUUID(), op, input: { bookId: randomUUID(), taskIntentId: randomUUID() } };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+      expect(rejectionFor(frameOf({ ...request, input: { ...request.input, runRecordId: randomUUID() } }))).toBeInstanceOf(ProtocolError);
+      expect(rejectionFor(frameOf({ ...request, input: { bookId: randomUUID(), taskIntentId: 'not-a-uuid' } }))).toBeInstanceOf(ProtocolError);
+      expect(rejectionFor(frameOf({ ...request, input: { taskIntentId: randomUUID() } }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('accepts the seven 审阅 operations with their exact inputs', () => {
     const bookId = randomUUID();
     const reviewRunId = randomUUID();
