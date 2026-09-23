@@ -853,8 +853,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'completion-browser-close',
     'completion-cleanup',
   ]),
-  // J-10 (Issue #422, plan slice S76a): 取消任务 on a Run under way — its activity card, its controls, the inline
-  // Cancellation Impact Summary, 正在取消 while the range in flight finishes, and 已取消 with what it read kept.
+  // J-10 (Issue #422, plan slices S76a and S76b): a Run under way — its activity card and its controls; 暂停 with
+  // 正在暂停 while the range in flight finishes, 已暂停, and 续行 in the same Run; 取消任务 with its inline Cancellation
+  // Impact Summary, 正在取消, and 已取消 with what it read kept; and a Run AI7 closed under, 任务已中断 · 可续行 on the
+  // next launch, and 续行 to its end.
   'J-10': Object.freeze([
     'entry',
     'controller-loopback-sentinel',
@@ -868,6 +870,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'run-under-way',
     'activity-card',
     'run-controls',
+    'pause-requested',
+    'pause-holds',
+    'paused',
+    'resumed',
     'cancel-impact-summary',
     'cancel-keep-running',
     'j14-cancel-keyboard',
@@ -877,6 +883,12 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'cancel-settled',
     'partial-revision-kept',
     'nothing-sent-after',
+    'relaunch-for-second-book',
+    'second-book-import',
+    'second-run-held',
+    'closed-under-run',
+    'relaunched-resumable',
+    'resumed-after-restart',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',
