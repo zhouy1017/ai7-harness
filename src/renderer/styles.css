@@ -52,12 +52,20 @@ button:focus-visible, input:focus-visible, .ProseMirror:focus-visible {
 
 .app-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 2rem;
+  gap: .75rem 2rem;
   padding: 2.1rem clamp(2rem, 5vw, 5rem) 1.5rem;
   border-bottom: 1px solid rgba(53, 64, 51, 0.2);
 }
+/* The shell's global destinations (IA-007): 待我处理 with its number, in the header of every window. */
+.app-destinations { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-left: auto; }
+.global-attention-entry { display: inline-flex; align-items: center; gap: .5rem; min-height: 44px; padding: .55rem 1rem; border: 1px solid #6f796d; border-radius: 999px; background: #fffdf8; color: #2c463b; font-weight: 800; cursor: pointer; }
+.global-attention-entry:hover:not(:disabled) { background: #f1f4ec; }
+/* The number is a word inside its own outline, never a coloured dot alone. */
+.global-attention-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 1.7em; height: 1.7em; padding: 0 .45em; border: 2px solid currentColor; border-radius: 999px; background: #fff0cf; color: #76530f; font-size: .85rem; font-weight: 800; }
+.global-attention-badge[hidden] { display: none; }
 
 .app-header h1 { margin: .15rem 0 0; font-family: "Noto Serif CJK SC", "Songti SC", serif; font-size: clamp(1.75rem, 3vw, 2.7rem); font-weight: 650; }
 .eyebrow { margin: 0; color: #566457; font-size: .78rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
@@ -311,6 +319,26 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .review-pill-blocked { background: #f3e4e0; color: #753a31; }
 .review-pill-progress { background: #e3ecf6; color: #2f4a6b; }
 .review-pill-neutral { background: #f1ede3; color: #50574e; }
+/* 待我处理 (editor-surfaces §8.1): four groups in their fixed order, each item a card whose state is a pill with
+   its shape and whose blocked work has a heavier left rule beside its words; every line wraps, none scrolls. */
+.global-attention-findings-note { margin-top: -.8rem; }
+.global-attention-host { display: grid; gap: 1rem; margin-top: 1rem; }
+.global-attention-group { min-width: 0; padding: 1rem 1.15rem; border: 1px solid #d5dcd9; border-radius: 12px; background: #faf8f1; overflow-wrap: anywhere; }
+.global-attention-group-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: .3rem .8rem; margin: 0; font-size: 1.12rem; }
+.global-attention-group-count { color: #4e564c; font-size: .9rem; font-weight: 700; }
+.global-attention-empty { margin: .55rem 0 0; color: #697064; }
+.global-attention-items { display: grid; gap: .7rem; margin: .8rem 0 0; padding: 0; list-style: none; }
+.global-attention-item { display: grid; gap: .3rem; min-width: 0; padding: .75rem .9rem; border: 1px solid #ded9cd; border-left: 4px solid #c9d0c5; border-radius: 10px; background: #fffdf8; }
+.global-attention-item[data-attention-blocked="true"] { border-left: 6px solid #753a31; }
+.global-attention-book { margin: 0; color: #4e564c; font-size: .9rem; }
+.global-attention-object { margin: 0; font-size: 1rem; }
+.global-attention-open { min-height: 32px; padding: 0; border: 0; background: transparent; color: #1f4032; font: inherit; font-weight: 800; text-align: left; text-decoration: underline; text-underline-offset: .2em; cursor: pointer; overflow-wrap: anywhere; }
+.global-attention-open:disabled { cursor: not-allowed; }
+.global-attention-state { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .7rem; margin: 0; }
+.global-attention-time { color: #697064; font-size: .86rem; }
+.global-attention-reason, .global-attention-next { margin: 0; line-height: 1.6; }
+.global-attention-next { font-weight: 700; }
+.global-attention-title:focus-visible { outline: 3px solid #416458; outline-offset: 3px; }
 /* ⑥ 交付物 (editor-surfaces §9): the 发稿 · 稿件 block in the analysis family's card. Its lists and its form
    wrap rather than scroll sideways, and the 发稿版本 mark, the current item and the change notice each speak
    by a border and their words as well as by colour, so they still read in forced colours. */
@@ -819,12 +847,21 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .book-deliverables-summary, .milestone-section .milestone-purpose-option,
   .task-drawer, .task-drawer-head, .task-drawer-footer, .task-drawer-modes, .task-plan-goal, .task-plan-compact,
   .task-plan-chip, .task-plan-boundary, .task-plan-lock, .task-plan-section-number,
-  .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal {
+  .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal,
+  .global-attention-group, .global-attention-item {
     color: CanvasText;
     background: Canvas;
     border-color: CanvasText;
     box-shadow: none;
   }
+  /* Without colour 待我处理's number keeps its outline, blocked work its heavier left rule, and an item's way
+     to its record its underline. */
+  .global-attention-entry { color: ButtonText; background: ButtonFace; border: 1px solid ButtonText; forced-color-adjust: auto; }
+  .global-attention-badge { color: CanvasText; background: Canvas; border: 2px solid CanvasText; forced-color-adjust: none; }
+  .global-attention-item { border-left: 2px solid CanvasText; }
+  .global-attention-item[data-attention-blocked="true"] { border-left: 6px solid CanvasText; }
+  .global-attention-open { color: LinkText; }
+  .global-attention-title:focus-visible, .global-attention-open:focus-visible { outline-color: Highlight; }
   /* Without colour the chosen mode keeps a heavier outline of its own, and the drawer its edge; the bar keeps
      the rule that sets it apart from the plan, and a blocker its own left edge beside the words. */
   .task-drawer { border-left: 2px solid CanvasText; }

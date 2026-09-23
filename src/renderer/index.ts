@@ -17,6 +17,7 @@ import type {
   ContinueImportProjection,
   EditorialWorkspaceProfileProjection,
   ForegroundExecutionBoundaryProjection,
+  GlobalAttentionItemProjection,
   ImportCommitProjection,
   ImportDraftRecoveryProjection,
   ImportStartupProjection,
@@ -68,6 +69,13 @@ import {
   publicationStateOf,
 } from './deliverables-labels.js';
 import { mountBoundedEditor, type BoundedEditor, type EditorContinuity } from './editor.js';
+import {
+  createGlobalAttentionReader,
+  mountGlobalAttention,
+  mountGlobalAttentionEntry,
+  type GlobalAttentionSurface,
+} from './global-attention.js';
+import { GLOBAL_ATTENTION_ACTIONS, GLOBAL_ATTENTION_STATUS_LINES } from './global-attention-labels.js';
 import { mountEditorialMarks, type EditorialMarksSurface } from './editorial-marks.js';
 import { mountPositionRail, type PositionRail } from './position-rail.js';
 import { mountReviewWorkspace, type ReviewFocus, type ReviewWorkspaceSurface } from './review-workspace.js';
@@ -194,7 +202,29 @@ let reviewWorkspace: ReviewWorkspaceSurface | undefined;
 let deliverablesSurface: DeliverablesSurface | undefined;
 /** 稿件冲突 while it is on screen: a draft save still in flight never paints once the screen is replaced. */
 let proposalConflictSurface: ProposalConflictSurface | undefined;
+/** 待我处理 while it is on screen: it stops painting once the screen is replaced. */
+let globalAttentionSurface: GlobalAttentionSurface | undefined;
+/**
+ * What leaving the surface on screen asks first when the shell's header leads away from it (Issue #424): the
+ * manuscript settles its local edits and takes its position, and 稿件冲突 saves its draft, exactly as their own
+ * ways out do. Every screen change clears it; a surface that needs one registers it once it is on screen.
+ */
+let leaveGuard: (() => Promise<boolean>) | null = null;
 let authorityInterrupted = false;
+
+/**
+ * 待我处理 (Issue #424, plan slice S78): one reader for the whole window, read on every screen change and
+ * whenever the window gains focus, and slowly on its own while a Run is in flight; the header's entry and the
+ * screen paint the same answer (global-attention.ts).
+ */
+const globalAttentionReader = createGlobalAttentionReader(window.ai7);
+const globalAttentionEntry = ((): HTMLButtonElement => {
+  const node = requiredElement('#global-attention-entry');
+  if (!(node instanceof HTMLButtonElement)) throw new Error('AI7_RENDERER_BOOTSTRAP_INVALID');
+  return node;
+})();
+mountGlobalAttentionEntry({ button: globalAttentionEntry, reader: globalAttentionReader, open: () => void openGlobalAttention() });
+window.addEventListener('focus', () => globalAttentionReader.refresh());
 
 interface RecoveryReturnContext {
   attentionId: string;
@@ -303,6 +333,8 @@ function applyAuthorityInterruption(): void {
   for (const control of screen.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input')) {
     control.disabled = true;
   }
+  globalAttentionReader.interrupt();
+  globalAttentionEntry.disabled = true;
   taskDrawer.interrupt();
   if (editor) editor.interrupt();
   else setStatus('本地业务服务已中断；当前业务操作已停止。', 'error');
@@ -319,9 +351,12 @@ function replaceScreen(state: string, content: HTMLElement): void {
   deliverablesSurface = undefined;
   proposalConflictSurface?.destroy();
   proposalConflictSurface = undefined;
+  globalAttentionSurface?.destroy();
+  globalAttentionSurface = undefined;
   editor?.destroy();
   editor = undefined;
   closeNavigation = null;
+  leaveGuard = null;
   taskSurfaceRefresh = {};
   screen.dataset['screen'] = state;
   screen.replaceChildren(content);
@@ -332,6 +367,88 @@ function replaceScreen(state: string, content: HTMLElement): void {
   }
   // The drawer stays beside another central destination of the Book whose plan it shows (S72 D3).
   taskDrawer.followScreen(state, content.dataset['bookId'] ?? null);
+  // 待我处理's number follows the screens the editor moves through (Issue #424).
+  globalAttentionReader.refresh();
+}
+
+/**
+ * 待我处理 from the header (Issue #424): the screen opens in the library state — the window leaves the Book it
+ * showed, as 返回图书列表 does — after the surface on screen has settled what it must first.
+ */
+async function openGlobalAttention(): Promise<void> {
+  if (authorityInterrupted) return;
+  const guard = leaveGuard;
+  if (guard !== null) {
+    setStatus(GLOBAL_ATTENTION_STATUS_LINES.leaving, 'busy');
+    try {
+      if (!(await guard())) {
+        // The surface's own refusal stands; only a silent one is named here.
+        if (persistenceStatus.textContent === GLOBAL_ATTENTION_STATUS_LINES.leaving) setStatus(GLOBAL_ATTENTION_STATUS_LINES.stayed, 'error');
+        return;
+      }
+    } catch (error) {
+      setStatus(rendererErrorMessage(error, GLOBAL_ATTENTION_STATUS_LINES.unavailable), 'error');
+      return;
+    }
+  }
+  try {
+    await window.ai7.leaveBookWorkbench();
+    renderGlobalAttention();
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, GLOBAL_ATTENTION_STATUS_LINES.unavailable), 'error');
+  }
+}
+
+/** 待我处理's screen (editor-surfaces §8.1): the surface is `global-attention.ts`; this gives it its way out. */
+function renderGlobalAttention(): void {
+  const content = panel();
+  content.classList.add('global-attention');
+  const surface = mountGlobalAttention({
+    root: content,
+    reader: globalAttentionReader,
+    technicalDetails,
+    setStatus,
+    errorMessage: rendererErrorMessage,
+    open: openGlobalAttentionItem,
+  });
+  const actions = element('div', 'button-row workbench-actions');
+  actions.append(button(GLOBAL_ATTENTION_ACTIONS[0], 'secondary', () => returnToLibrary()));
+  content.append(actions);
+  replaceScreen('global-attention', content);
+  globalAttentionSurface = surface;
+  surface.start();
+  setStatus(GLOBAL_ATTENTION_STATUS_LINES.opened);
+}
+
+/**
+ * An item opens its own record in this window (V2-UX-ATTN-007, D-006): the import or manuscript recovery the
+ * startup would show, ②A with its Run, ②A with the plan in the Task Drawer where 重新确认计划 is, or ②B with
+ * the Review Run open. A Book another window already shows is shown there, as 书库 does. Opening decides
+ * nothing; a Recovery Attention State is claimed for this window only while no other window holds it.
+ */
+async function openGlobalAttentionItem(item: GlobalAttentionItemProjection): Promise<void> {
+  const target = item.target;
+  switch (target.kind) {
+    case 'manuscript-recovery':
+      await returnToRecoveryComparison(target.attentionId);
+      return;
+    case 'import-recovery':
+      await renderStartupProjection(await window.ai7.getImportStartup());
+      return;
+    case 'analysis':
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => renderBookAnalysis(route.bookId, route.bookTitle));
+      return;
+    case 'analysis-plan':
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
+        renderBookAnalysis(route.bookId, route.bookTitle);
+        openTaskPlan(route.bookId, 'baseline-analysis', target.taskIntentId);
+      });
+      return;
+    case 'review':
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>
+        renderBookReview(route.bookId, route.bookTitle, { reviewRunId: target.reviewRunId, findingId: null }));
+      return;
+  }
 }
 
 function panel(): HTMLElement {
@@ -1691,6 +1808,8 @@ function renderProposalConflict(target: { bookId: string; manuscriptId: string; 
   });
   replaceScreen('proposal-conflict', content);
   proposalConflictSurface = surface;
+  // Leaving for 待我处理 from the header saves the draft on screen first, as 返回稿件 does (Issue #424).
+  leaveGuard = () => surface.settle();
   surface.start();
 }
 
@@ -5712,6 +5831,14 @@ function renderEditorWindow(
 
   const serviceJobBusy = (): boolean => serviceJobStarting || activeJob !== undefined;
   const authoritativeMutationBusy = (): boolean => authoritativeMutationStarting || authoritativeMutation;
+  // Leaving for 待我处理 from the header is leaving the manuscript (Issue #424): local edits are settled and the
+  // position is taken first, exactly as for 分析 and 审阅; while a write is under way, nothing leaves.
+  leaveGuard = async () => {
+    if (authoritativeMutationBusy()) return false;
+    if (!(await settleLocalEdit())) return false;
+    await rememberEntryPosition();
+    return true;
+  };
   const updateExclusionSummary = (): void => {
     exclusionSummary.textContent =
       `最多排除 ${MAX_REPLACEMENT_EXCLUSIONS.toLocaleString('zh-CN')} 处，且至少保留 1 处；当前排除 ${excludedMatchIds.size.toLocaleString('zh-CN')} 处。`;

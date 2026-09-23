@@ -181,6 +181,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'getImportStartup':
     case 'listPriorWork':
     case 'getModelServiceStoredState':
+    // 待我处理 (Issue #424) reads across every Book, so it names none.
+    case 'inspectGlobalAttention':
     case 'shutdown': {
       requireInput(value.input, [], tentativeId);
       break;

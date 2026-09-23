@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
+  BASELINE_ANALYSIS_KIND,
   type AnalysisGoal,
   type AnalysisKindId,
   type AnalysisProjection,
   type AnalysisTaskMode,
+  type BaselineAnalysisTaskMode,
   type FactualReviewProjection,
   type FactualReviewHistoryProjection,
   type FactualReviewResultSetRevisionProjection,
@@ -90,6 +92,7 @@ import { baselineAnalysisKindDefinition } from './kind-definition.js';
 import { EXECUTION_SLOT_BUSY, EXECUTION_SLOT_BUSY_REASON } from './execution-error.js';
 import { describeComposition } from '../harness/primary-agent-harness.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provider/egress-gate.js';
+import type { AnalysisOutcomeAttentionReading, AnalysisTaskAttentionReading } from '../global-attention.js';
 
 type SqlRow = Record<string, SQLOutputValue>;
 
@@ -848,6 +851,126 @@ export class BaselineAnalysisStore {
       planVersion: version.ordinal,
       components,
     };
+  }
+
+  // ---- 待我处理 (Issue #424, plan slice S78) ------------------------------------------------------------
+
+  /**
+   * What 待我处理 reads of this ledger's kind across every Book (V2-UX-ATTN-002 to 005): each Book's latest
+   * Task — exactly the one `inspect` reads — with its Run's last recorded state, and, for a prepared Task,
+   * the pending Plan Revision that 重新确认计划 would settle, derived exactly as `inspect` derives it: a
+   * stored revision still pending on the current version first, then a live difference of the material
+   * inputs. A difference in the predecessor revision is left out, because no reconfirmation settles it.
+   * Then the Task Outcomes that completed since `since`, newest first.
+   *
+   * A read: nothing is written. A Run left admitted or executing is reported with the owner's `progress`
+   * reading of it, which is `null` when nothing executes it; what that means is the reader's to say.
+   */
+  attentionReadings(progress: ProgressReader, since: string, limit: number): {
+    tasks: AnalysisTaskAttentionReading[];
+    outcomes: AnalysisOutcomeAttentionReading[];
+  } {
+    const kind = this.#definition.kind;
+    // 待我处理 names the baseline analysis alone: every other kind's Tasks run inside a Review Run, which
+    // the Review Run ledger reads as one item of its own.
+    requireAnalysis(kind === BASELINE_ANALYSIS_KIND, 'ANALYSIS_KIND_INVALID', '待我处理只读取基线分析的任务。');
+    // Each Book's latest Task, exactly as `#latestIntentRow` orders them, kept only when it could need the
+    // editor: prepared and not yet started, or with a Run whose last state is not a completion — whose
+    // outcome is read below instead.
+    const lastState = `(SELECT s.state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1)`;
+    const rows = this.#db.prepare(
+      `SELECT t.*, b.title book_title, r.run_record_id, r.recorded_at run_recorded_at,
+              ${lastState} last_state,
+              (SELECT s.recorded_at FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1) last_state_at,
+              (SELECT 1 FROM analysis_run_authorizations a WHERE a.task_intent_id = t.task_intent_id) has_authorization
+       FROM analysis_task_intents t
+       JOIN books b ON b.book_id = t.book_id
+       LEFT JOIN analysis_run_records r ON r.task_intent_id = t.task_intent_id
+       WHERE t.kind = ? AND t.rowid = (
+           SELECT t2.rowid FROM analysis_task_intents t2 WHERE t2.book_id = t.book_id AND t2.kind = t.kind
+           ORDER BY t2.created_at DESC, t2.rowid DESC LIMIT 1)
+         AND EXISTS (SELECT 1 FROM analysis_task_input_checkpoints c WHERE c.task_intent_id = t.task_intent_id)
+         AND (r.run_record_id IS NULL OR ${lastState} NOT IN ('completed', 'completed-with-gaps'))
+       ORDER BY t.created_at, t.task_intent_id LIMIT ?`,
+    ).all(kind, limit) as SqlRow[];
+    const tasks: AnalysisTaskAttentionReading[] = [];
+    for (const row of rows) {
+      const base = {
+        bookId: asString(row.book_id),
+        bookTitle: asString(row.book_title),
+        taskIntentId: asString(row.task_intent_id),
+        mode: asString(row.mode) as BaselineAnalysisTaskMode,
+        createdAt: asString(row.created_at),
+      };
+      if (row.run_record_id !== null) {
+        const runRecordId = asString(row.run_record_id);
+        requireAnalysis(row.last_state !== null, 'ANALYSIS_RECORD_INVALID', '运行记录缺少状态转换。');
+        const state = asString(row.last_state) as BaselineAnalysisRunState;
+        tasks.push({
+          ...base,
+          run: {
+            runRecordId,
+            state,
+            stateAt: asString(row.last_state_at),
+            recordedAt: asString(row.run_recorded_at),
+            progress: state === 'admitted' || state === 'executing' ? progress(runRecordId) : null,
+          },
+          planRevision: null,
+        });
+        continue;
+      }
+      if (row.has_authorization !== null) continue;
+      tasks.push({ ...base, run: null, planRevision: this.#pendingPlanRevision(row) });
+    }
+    const outcomes = (this.#db.prepare(
+      `SELECT o.outcome_id, o.task_intent_id, o.run_record_id, o.classification, o.recorded_at, o.result_set_revision_id,
+              t.book_id, t.mode, b.title book_title, r.ordinal revision_ordinal
+       FROM analysis_task_outcomes o
+       JOIN analysis_task_intents t ON t.task_intent_id = o.task_intent_id
+       JOIN books b ON b.book_id = t.book_id
+       LEFT JOIN analysis_result_set_revisions r ON r.revision_id = o.result_set_revision_id
+       WHERE t.kind = ? AND o.classification IN ('completed', 'completed-with-gaps') AND o.recorded_at >= ?
+       ORDER BY o.recorded_at DESC, o.outcome_id LIMIT ?`,
+    ).all(kind, since, limit) as SqlRow[]).map((row): AnalysisOutcomeAttentionReading => ({
+      bookId: asString(row.book_id),
+      bookTitle: asString(row.book_title),
+      taskIntentId: asString(row.task_intent_id),
+      mode: asString(row.mode) as BaselineAnalysisTaskMode,
+      outcomeId: asString(row.outcome_id),
+      runRecordId: asString(row.run_record_id),
+      classification: asString(row.classification) as 'completed' | 'completed-with-gaps',
+      recordedAt: asString(row.recorded_at),
+      revisionId: row.result_set_revision_id === null ? null : asString(row.result_set_revision_id),
+      revisionOrdinal: row.revision_ordinal === null ? null : asNumber(row.revision_ordinal),
+    }));
+    return { tasks, outcomes };
+  }
+
+  /**
+   * A prepared Task's pending Plan Revision, as `inspect` finds it: the latest stored one still pending on
+   * the current version, else a live difference between the version's frozen material inputs and durable
+   * state now. `null` when the plan stands, and when the only way on is a new Task — a difference in the
+   * predecessor revision, which no reconfirmation settles (`canReconfirmPlan` is false for it).
+   */
+  #pendingPlanRevision(intentRow: SqlRow): AnalysisTaskAttentionReading['planRevision'] {
+    const intent = this.#intentFacts(intentRow);
+    const versions = this.#planVersionFacts(intent.taskIntentId);
+    const current = versions.at(-1);
+    requireAnalysis(current !== undefined, 'ANALYSIS_RECORD_INVALID', '任务计划缺少计划版本。');
+    const stored = this.#planRevisionProjections(intent.taskIntentId, versions)
+      .filter((entry) => entry.state === 'pending' && entry.priorPlanVersionId === current.planVersionId).at(-1);
+    let revision: { planRevisionId: string | null; at: string; changedFields: ReadonlyArray<string> } | null = stored === undefined
+      ? null
+      : { planRevisionId: stored.planRevisionId, at: stored.detectedAt ?? current.createdAt, changedFields: stored.changedFields };
+    if (revision === null) {
+      const plan = this.#planRecords(intent.taskIntentId, intent.mode, current.ordinal);
+      const manifest = plan['coverage-manifest'] as CoverageManifestProjection;
+      const frozen = materialPlanInputsOfComponents(plan, intent.record);
+      const diff = diffMaterialPlanInputs(frozen, this.#currentMaterialInputs(intent.bookId, intent.mode, frozen.selectedRange, manifest.units.length));
+      revision = diff.length === 0 ? null : { planRevisionId: null, at: current.createdAt, changedFields: diff.map((entry) => entry.field) };
+    }
+    if (revision === null || revision.changedFields.includes('predecessorRevision')) return null;
+    return { ...revision, priorOrdinal: current.ordinal };
   }
 
   /**

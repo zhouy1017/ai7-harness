@@ -696,6 +696,10 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectDeliverables(request.input.bookId) };
     case 'designatePublicationVersion':
       return { id: request.id, ok: true, op: request.op, result: store.designatePublicationVersion(request.input) };
+    // 待我处理 (Issue #424, plan slice S78): a read across every Book. The one owner's progress reader and its
+    // slot say which Run is in flight, exactly as the analysis inspections read them; nothing is written.
+    case 'inspectGlobalAttention':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAttention(analysisProgress, analysisExecution.busy) };
     case 'undoManuscript':
       return {
         id: request.id,
@@ -797,8 +801,9 @@ function parseArguments(argv: string[]): {
       (foregroundExecutionControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-03')) ||
     (recoveryControlValue !== undefined &&
       (recoveryControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-08')) ||
+    // The model adapter binds a Journey whose Runs execute: J-04's analysis, and J-09's 运行中 and 最近完成.
     (modelAdapterControlValue !== undefined &&
-      (modelAdapterControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-04')) ||
+      (modelAdapterControl === undefined || (process.env.AI7_E2E_JOURNEY !== 'J-04' && process.env.AI7_E2E_JOURNEY !== 'J-09'))) ||
     [importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length > 1 ||
     // developer-live is a human-attended developer-host launch: never a Journey launch, never with a Journey control.
     (launchForm.trustedOperationalScope !== 'development-ci' &&

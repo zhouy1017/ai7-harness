@@ -66,6 +66,11 @@ export interface ProposalConflictSurface {
   start(): void;
   /** Let nothing still in flight paint again: the screen is being replaced. */
   destroy(): void;
+  /**
+   * Before the shell's header leads away (待我处理, Issue #424): the draft on screen is saved first, exactly as
+   * 返回稿件 does. Answers whether the workspace may be left; a failed save, or a resolution under way, keeps it.
+   */
+  settle(): Promise<boolean>;
 }
 
 type ConflictApi = Pick<RendererApi, 'inspectProposalConflict' | 'saveProposalConflictDraft' | 'resolveProposalConflict'>;
@@ -852,6 +857,15 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
     destroy: () => {
       destroyed = true;
       if (saveTimer !== undefined) window.clearTimeout(saveTimer);
+    },
+    settle: async () => {
+      if (destroyed) return true;
+      if (working) return false;
+      if (projection !== null && dirty() && !(await saveNow())) {
+        options.setStatus(conflictDraftUnsaved(saveState.kind === 'failed' ? saveState.reason : '请稍候再试。'), 'error');
+        return false;
+      }
+      return true;
     },
   };
 }
