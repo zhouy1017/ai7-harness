@@ -61,6 +61,12 @@ export const TASK_PLAN_STATE_PILLS: Readonly<Record<TaskPlanStateKey, ReviewPill
   running: { tone: 'progress', shape: 'half' },
   settled: { tone: 'good', shape: 'circle' },
   stopped: { tone: 'blocked', shape: 'square' },
+  // Connectivity Wait (Issue #502): 离线 before a start — its own shape among the pre-start states — a Run that
+  // waits, hollow beside the half-filled 运行中, and one cancelled while it waited, whose dash says nothing ran and
+  // never reads as the square of 已中断 (OFF-012).
+  offline: { tone: 'attention', shape: 'dash' },
+  waiting: { tone: 'progress', shape: 'ring' },
+  cancelled: { tone: 'neutral', shape: 'dash' },
 };
 
 // ---- the goal block (S72 D5) ------------------------------------------------------------------------------
@@ -160,6 +166,22 @@ export const TASK_BAR_SLOT_BUSY = '另一项任务正在运行；它结束后再
 export const TASK_BAR_START_FAILED = '无法开始这项任务。';
 /** J-03's record, as the bar states it once made (§6 AUTH-007: 运行中 / 已记录（不派发）). */
 export const TASK_BAR_RECORDED = '已记录（不派发）';
+/** §6 离线 (AUTH-002, OFF-004, Issue #502): the deferred start — one activation records the Run, which waits for the network. */
+export const TASK_BAR_START_WHEN_ONLINE = '联网后开始任务';
+/** §6 离线: the draft action in the words OFF-004 gives it beside 联网后开始任务. Neither of the two is preselected. */
+export const TASK_BAR_SAVE_DRAFT_ONLY = '仅保存任务草稿';
+/** §6 AUTH-007 `等待网络`（取消）: a waiting Run's one direct control (OFF-010) — nothing ran, so nothing to weigh first. */
+export const TASK_BAR_CANCEL_WAIT = '取消';
+/** A cancelled wait, as the status line states it: nothing was sent. */
+export const TASK_BAR_CANCELLED = '已取消 · 未发送任何内容';
+/** The fallback when 取消 is refused for a reason the service does not word. */
+export const TASK_BAR_CANCEL_FAILED = '无法取消这项任务。';
+/** What a waiting Run needs the editor for (OFF-009): the connection, fixed in 设置 — the one wait with an action beside it. */
+export const TASK_BAR_WAITING_FOR_CONNECTION = '需要处理模型连接';
+/** The sentence beside a waiting Run: recorded, and it starts by itself once it can — never implying it began (OFF-005). */
+export const TASK_BAR_WAITING_NOTE = '已记录这次授权。联网、并确认计划没有变化后会自动开始；在此之前不会发送任何内容';
+/** A Review Run cannot wait yet (Issue #502): offline, its start is shown disabled with this reason. */
+export const TASK_BAR_REVIEW_OFFLINE = '离线：审阅要连到模型服务，而这台设备现在没有网络；联网后再开始审阅';
 
 /**
  * The one sentence a pre-start state adds beside the actions: J-03's fixed Task is only ever recorded (ADR
@@ -170,6 +192,7 @@ export const TASK_BAR_NOTES = {
   'record-only': '此任务只记录运行，不会派发',
   'no-route': '这份计划没有可执行的路由：开始任务只记录运行，派发前会被阻止',
   'needs-connection': '模型未连接：这份计划要发送到模型服务，所需的凭据还没有就绪；连接好之后才能开始',
+  offline: '离线：这份计划要连到模型服务，而这台设备现在没有网络。联网后开始任务会先记录这次授权，联网后自动开始；在此之前不会发送任何内容',
 } as const satisfies Partial<Record<TaskPlanStartReadiness, string>>;
 
 /** What each kind leaves behind, as the summary line names it (§6: 产出). */
@@ -187,7 +210,16 @@ export const TASK_BAR_RUN_LINKS: Readonly<Record<TaskPlanKind, string>> = {
 };
 
 /** The bar's actions, each by the `data-task-drawer-control` it carries. */
-export type TaskBarActionName = 'start' | 'reconfirm-plan' | 'view-plan-revision' | 'connect' | 'revise' | 'save-draft' | 'run-link';
+export type TaskBarActionName =
+  | 'start'
+  | 'start-when-online'
+  | 'reconfirm-plan'
+  | 'view-plan-revision'
+  | 'connect'
+  | 'revise'
+  | 'save-draft'
+  | 'cancel-wait'
+  | 'run-link';
 
 export interface TaskBarAction {
   readonly name: TaskBarActionName;
@@ -236,14 +268,59 @@ const SAVE_DRAFT: TaskBarAction = { name: 'save-draft', label: TASK_BAR_SAVE_DRA
 export function taskBarView(plan: TaskPlanProjection): TaskBarView {
   const readiness = plan.start.readiness;
   const summary = taskBarSummary(plan);
+  const runLink: TaskBarAction = { name: 'run-link', label: TASK_BAR_RUN_LINKS[plan.kind], tone: 'secondary', disabledReason: null };
   if (readiness === 'started') {
+    // A Run in Connectivity Wait (Issue #502; AUTH-007, OFF-006): what it waits for, cancelled directly, and the
+    // connection setting beside it when the connection is what it waits for (OFF-009).
+    if (plan.state.key === 'waiting') {
+      return {
+        readiness,
+        summary,
+        statement: null,
+        note: TASK_BAR_WAITING_NOTE,
+        status: plan.state.label,
+        actions: [
+          ...(plan.state.label === TASK_BAR_WAITING_FOR_CONNECTION
+            ? [{ name: 'connect', label: TASK_BAR_CONNECT, tone: 'secondary', disabledReason: null } as const]
+            : []),
+          { name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null },
+          runLink,
+        ],
+      };
+    }
     return {
       readiness,
       summary,
       statement: null,
       note: null,
-      status: plan.state.key === 'recorded' ? TASK_BAR_RECORDED : plan.state.label,
-      actions: [{ name: 'run-link', label: TASK_BAR_RUN_LINKS[plan.kind], tone: 'secondary', disabledReason: null }],
+      status: plan.state.key === 'recorded' ? TASK_BAR_RECORDED : plan.state.key === 'cancelled' ? TASK_BAR_CANCELLED : plan.state.label,
+      actions: [runLink],
+    };
+  }
+  if (readiness === 'offline') {
+    // 离线 (§6; AUTH-002, OFF-004): the one start this state offers records the Run and it waits; the draft
+    // action sits beside it in OFF-004's words, and neither is preselected. A Review Run cannot wait yet.
+    if (plan.kind === 'review-run') {
+      return {
+        readiness,
+        summary,
+        statement: TASK_BAR_STATEMENT,
+        note: TASK_BAR_REVIEW_OFFLINE,
+        status: null,
+        actions: [{ name: 'start', label: TASK_BAR_START, tone: 'primary', disabledReason: TASK_BAR_REVIEW_OFFLINE }, REVISE, SAVE_DRAFT],
+      };
+    }
+    return {
+      readiness,
+      summary,
+      statement: TASK_BAR_STATEMENT,
+      note: TASK_BAR_NOTES.offline,
+      status: null,
+      actions: [
+        { name: 'start-when-online', label: TASK_BAR_START_WHEN_ONLINE, tone: 'primary', disabledReason: null },
+        { name: 'save-draft', label: TASK_BAR_SAVE_DRAFT_ONLY, tone: 'secondary', disabledReason: null },
+        REVISE,
+      ],
     };
   }
   if (readiness === 'changed') {

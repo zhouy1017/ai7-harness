@@ -124,6 +124,22 @@ describe('decodeRequest accepts well-formed frames', () => {
     }
   });
 
+  it('accepts the three Connectivity Wait operations with their exact inputs, and refuses anything more (Issue #502)', () => {
+    const startWhenOnline = {
+      id: randomUUID(),
+      op: 'startBaselineAnalysisWhenOnline',
+      input: { bookId: randomUUID(), taskIntentId: randomUUID(), planEnvelopeDigest: 'b'.repeat(64) },
+    };
+    const cancel = { id: randomUUID(), op: 'cancelWaitingBaselineAnalysis', input: { bookId: randomUUID(), taskIntentId: randomUUID() } };
+    const preflight = { id: randomUUID(), op: 'runReconnectPreflight', input: {} };
+    for (const request of [startWhenOnline, cancel, preflight]) expect(decodeRequest(frameOf(request))).toEqual(request);
+    // Reconnect Preflight names no Book; a waiting Run is named by its Task Intent; a digest is 64 hex digits.
+    expect(rejectionFor(frameOf({ ...preflight, input: { bookId: randomUUID() } }))).toBeInstanceOf(ProtocolError);
+    expect(rejectionFor(frameOf({ ...cancel, input: { ...cancel.input, runRecordId: randomUUID() } }))).toBeInstanceOf(ProtocolError);
+    expect(rejectionFor(frameOf({ ...cancel, input: { bookId: randomUUID(), taskIntentId: 'not-a-uuid' } }))).toBeInstanceOf(ProtocolError);
+    expect(rejectionFor(frameOf({ ...startWhenOnline, input: { ...startWhenOnline.input, planEnvelopeDigest: 'b'.repeat(63) } }))).toBeInstanceOf(ProtocolError);
+  });
+
   it('accepts the seven 审阅 operations with their exact inputs', () => {
     const bookId = randomUUID();
     const reviewRunId = randomUUID();
