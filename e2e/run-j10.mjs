@@ -9,17 +9,23 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
-// J-10 (Issue #422, plan slice S76a): 取消任务 on a Run under way — the first of J-10's operations told apart by
-// their consequence (V2-UX-AUTH-010, AUTH-011, CTRL-004 to CTRL-009). One Book is made from the one admitted
-// input, exact `sample1`, through the product's own UI, and its first baseline analysis runs on the J-04 model
-// adapter. J-10's unit hold keeps the third reading range in flight once two have settled, so the Journey can
-// watch a Run under way: the Task Drawer's activity card names the phase, the range in flight, the time, the
-// attempt, the last update and the milestones, and its bar offers 暂停 and 改计划重做 with why they wait, and
-// 取消任务. 取消任务 opens one inline Cancellation Impact Summary and records nothing; 继续运行 closes it; confirming
-// records 正在取消 at once, which holds while the range in flight finishes — a sent turn is never cut off — and
-// 已取消 follows only once that range is done and the terminal state is recorded: three ranges kept in a partial
-// Result Set Revision, five named not attempted, and nothing sent after them. 续行, 重试, 回退运行方向, 重做 and 重放
-// are J-10's later operations, not this slice's.
+// J-10 (Issue #422, plan slices S76a and S76b): the operations on a Run under way, told apart by their consequence
+// (V2-UX-AUTH-010, AUTH-011, CTRL-001 to CTRL-009, CONT-014, CONT-015). Books are made from the one admitted input,
+// exact `sample1`, through the product's own UI, and their first baseline analyses run on the J-04 model adapter.
+// J-10's unit hold keeps a reading range in flight once the Journey's number of ranges have settled, so the Journey
+// can watch and steer a Run under way.
+//
+// On the first Book: the Task Drawer's activity card names the phase, the range in flight, the time, the attempt,
+// the last update and the milestones, and its bar offers 暂停, 取消任务, 改计划重做 with why it waits, and 查看运行.
+// 暂停 is one click: 正在暂停 holds while the range in flight finishes, and 已暂停 follows with three ranges kept and
+// the slot free. 续行 goes on in the same Run from the fourth range, and with the sixth in flight 取消任务 opens one
+// inline Cancellation Impact Summary that records nothing; 继续运行 closes it; confirming — by keyboard alone — records
+// 正在取消, which holds while that range finishes, and 已取消 follows with six ranges kept in a partial Result Set
+// Revision, two named not attempted, and nothing sent after them.
+//
+// On the second Book: AI7 closes while a range is in flight, and on the next launch the Run reads
+// 任务已中断 · 可续行 with what it had read kept and nothing dispatched; 续行 goes on in the same Run and attempt to
+// its end. 重试, 回退运行方向, 重做 and 重放 are J-10's later operations, not these slices'.
 //
 // The runner writes J-10's unit-hold file, and reads the service's projections through `window.ai7` only to
 // cross-check what the drawer and ②A show — never as the oracle of what they say.
@@ -31,17 +37,22 @@ const SAMPLE1_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f4
 /** The J-04 model adapter's base fixture: every unit, the reduction and the sample of exact `sample1` answered. */
 const FIXTURE_IDENTITY = 'sample1-baseline-happy';
 const BOOK = Object.freeze({ title: '取消任务旅程' });
-/** Exact `sample1`'s reading ranges, and how many J-10 lets settle before it cancels with the next in flight. */
+const SECOND_BOOK = Object.freeze({ title: '续行旅程' });
+/** Exact `sample1`'s reading ranges. */
 const SAMPLE1_UNITS = 8;
-const SETTLED_BEFORE_CANCEL = 2;
+/** Two ranges settle before 暂停 with the third in flight; after 续行, five have settled before 取消任务 with the sixth. */
+const FIRST_HOLD = 2;
+const RESUMED_HOLD = 5;
 // The drawer's own words (`src/renderer/task-drawer-labels.ts` and `src/service/task-plan.ts`), pinned there by
 // their unit suites.
-const PAUSE_REASON = '暂停与续行随后提供';
 const REDO_REASON = '改计划重做随计划编辑提供';
 const CANCELLING_NOTE = '已记下你的取消；正在进行的这一步完成后停止，此后不会再发送任何内容';
+const PAUSING_NOTE = '已记下你的暂停；正在进行的这一步完成后停下，已完成的部分都会保存';
+const PAUSED_NOTE = '已读完 3 / 8 个阅读范围，结果都已保存；续行时从第 4 个接着读，不重复已读完的部分';
+const RESUMABLE_NOTE = '已读完 2 / 8 个阅读范围，结果都已保存；续行时从第 3 个接着读，不重复已读完的部分';
 const IMPACT = Object.freeze([
-  `正在读的第 3 个阅读范围读完后停止；其余 ${SAMPLE1_UNITS - 3} 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。`,
-  '已读完的 2 个阅读范围和正在读的这一个的结果与缺口会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。',
+  `正在读的第 6 个阅读范围读完后停止；其余 ${SAMPLE1_UNITS - 6} 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。`,
+  '已读完的 5 个阅读范围和正在读的这一个的结果与缺口会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。',
   '这项分析不改稿，没有需要撤回的受控动作。',
   '正在等待的那一轮模型回答不会被中途切断，它的结果照常计入。',
 ]);
@@ -473,6 +484,50 @@ const READ_DRAWER = `(() => {
   };
 })()`;
 
+/** The drawer following a Run under way with `settled` reading ranges read and the next one in flight. */
+function runningWith(settled) {
+  return `(() => { const drawer=document.querySelector('#task-drawer'); const activity=drawer?.querySelector('.task-plan-activity'); return drawer?.dataset.taskDrawer==='open' && drawer.dataset.taskPlanState==='running' && activity?.dataset.taskPlanActivity==='running' && activity.dataset.taskPlanActivityProgress===${JSON.stringify(`${settled}/${SAMPLE1_UNITS}`)} && activity.dataset.taskPlanActivityUnit===${JSON.stringify(String(settled + 1))}; })()`;
+}
+/** The bar of a Run under way (AUTH-010): 暂停 and 取消任务 act on it, 改计划重做 says why it waits. */
+const RUNNING_ACTIONS = Object.freeze([
+  ['pause', '暂停', 'enabled', null],
+  ['cancel-run', '取消任务', 'enabled', null],
+  ['redo', '改计划重做', 'disabled', REDO_REASON],
+  ['run-link', '查看运行', 'enabled', null],
+]);
+/** The bar of a stopped Run that can go on (CONT-015): 续行 first, then 取消任务, 改计划重做 and the way to the Run. */
+const STOPPED_ACTIONS = Object.freeze([
+  ['resume', '续行', 'enabled', null],
+  ['cancel-run', '取消任务', 'enabled', null],
+  ['redo', '改计划重做', 'disabled', REDO_REASON],
+  ['run-link', '查看运行', 'enabled', null],
+]);
+
+/**
+ * Wait until the drawer's bar reads exactly what the editor should see — its state, pill, status, note and actions —
+ * and fail with the last reading, since a bar that is a moment behind the Run settles on its next read.
+ */
+async function waitForBar(renderer, expected, name, timeout = 60_000) {
+  const view = `(() => { const drawer=${READ_DRAWER}; return drawer === null ? null : JSON.stringify({ state: drawer.state, pill: drawer.pill, status: drawer.status, note: drawer.note, actions: drawer.actions }); })()`;
+  const want = JSON.stringify({ state: expected.state, pill: expected.pill, status: expected.status, note: expected.note, actions: expected.actions });
+  const deadline = Date.now() + timeout;
+  let last = null;
+  while (Date.now() < deadline) {
+    last = await renderer.evaluate(view).catch(() => null);
+    if (last === want) return;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  requireJourney(false, name, last);
+}
+/** Whether 待我处理 names the Book's analysis among what is under way, in the given state. */
+async function attentionNames(renderer, bookId, state) {
+  const attention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
+  return {
+    named: attention?.groups?.find((group) => group.key === 'active')?.items?.some((item) => item.book?.bookId === bookId && item.state === state) === true,
+    groups: attention?.groups?.map((group) => ({ key: group.key, states: group.items.map((item) => item.state) })),
+  };
+}
+
 async function main() {
   parseJourney();
   let browser;
@@ -667,7 +722,7 @@ async function main() {
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
     electronExecutableForCleanup = executable;
-    // The one launch names the picker's file, the J-04 model adapter and J-10's unit hold; a cleanup launch none.
+    // Every Journey launch names the picker's file, the J-04 model adapter and J-10's unit hold; a cleanup launch none.
     const holdPath = resolve(runRoot, 'j10-unit-hold.txt');
     const launchArgs = ({ forCleanup }) => {
       const args = [
@@ -699,15 +754,15 @@ async function main() {
     const sample = await lstat(SAMPLE1_PATH);
     requireJourney(sample.isFile() && !sample.isSymbolicLink() && sample.size === SAMPLE1_BYTES && (await digestFile(SAMPLE1_PATH)) === SAMPLE1_SHA256, 'sample1-identity');
 
-    // ---- one launch, bound to the J-04 model adapter and J-10's unit hold -----------------------------------
+    // ---- the first launch, bound to the J-04 model adapter and J-10's unit hold -----------------------------
     at('renderer-api-boundary');
     // Two reading ranges may settle; the third waits, in flight, until the Journey writes the next number.
-    await writeFile(holdPath, String(SETTLED_BEFORE_CANCEL), 'utf8');
+    await writeFile(holdPath, String(FIRST_HOLD), 'utf8');
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'product-ready');
-    // One member of its own for 取消任务, and nothing that pauses, resumes, redoes, retries, replays or rewinds a Run yet
-    // (the manuscript's own `redoManuscript` is the editor's undo and redo, not a Run's).
-    await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && typeof window.ai7.cancelBaselineAnalysisRun === 'function' && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress/i.test(key)) && !Object.keys(window.ai7).some((key)=>/(pause|resume|redo|retry|replay|rewind)[A-Za-z]*(Run|Analysis|Task)$/i.test(key))`, 'renderer-api-boundary');
+    // One member each for 取消任务, 暂停 and 续行, and nothing that redoes, retries, replays or rewinds a Run yet (the
+    // manuscript's own `redoManuscript` is the editor's undo and redo, not a Run's).
+    await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && ['cancelBaselineAnalysisRun', 'pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun'].every((key)=>typeof window.ai7[key] === 'function') && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress/i.test(key)) && !Object.keys(window.ai7).some((key)=>/(redo|retry|replay|rewind)[A-Za-z]*(Run|Analysis|Task)$/i.test(key))`, 'renderer-api-boundary');
     await renderer.send('Page.setBypassCSP', { enabled: true });
     try {
       const fetchRejected = await renderer.evaluate(`(async()=>{try{await fetch(${JSON.stringify(loopback.url)});return false}catch{return true}})()`);
@@ -754,11 +809,11 @@ async function main() {
     // 开始任务 from the drawer: the drawer follows the Run, two ranges settle, and the third stays in flight.
     await openAnalysisOf(renderer, bookId, 'analysis');
     await startFirstBaseline(renderer, 'ready', 'baseline');
-    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); const activity=drawer?.querySelector('.task-plan-activity'); return drawer?.dataset.taskDrawer==='open' && drawer.dataset.taskPlanState==='running' && activity?.dataset.taskPlanActivity==='running' && activity.dataset.taskPlanActivityProgress===${JSON.stringify(`${SETTLED_BEFORE_CANCEL}/${SAMPLE1_UNITS}`)} && activity.dataset.taskPlanActivityUnit==='3'; })()`, 'third-range-in-flight', 180_000);
+    await waitFor(renderer, runningWith(FIRST_HOLD), 'third-range-in-flight', 180_000);
     const executing = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const taskIntentId = executing?.taskIntent?.taskIntentId ?? '';
     requireJourney(UUID_PATTERN.test(taskIntentId) && executing.bookId === bookId && executing.state === 'executing' && executing.run?.state === 'executing' &&
-      executing.run.progress?.unitsSettled === SETTLED_BEFORE_CANCEL && executing.run.progress.currentUnitOrdinal === 3 && executing.run.progress.unitsTotal === SAMPLE1_UNITS,
+      executing.run.progress?.unitsSettled === FIRST_HOLD && executing.run.progress.currentUnitOrdinal === FIRST_HOLD + 1 && executing.run.progress.unitsTotal === SAMPLE1_UNITS,
     'run-executing-record', { state: executing?.state, run: executing?.run?.state, progress: executing?.run?.progress });
     const running = await renderer.evaluate(READ_DRAWER);
     requireJourney(running?.ref === taskIntentId && running.kind === 'baseline-analysis' && running.start === 'started' && running.pill === '运行中' && running.status === '运行中', 'drawer-follows-the-run', running);
@@ -769,19 +824,70 @@ async function main() {
     const rows = running.activity?.rows ?? {};
     requireJourney(running.activity?.title === '运行动态' && rows['阶段'] === '正在逐个阅读范围分析' && rows['当前'] === `第 3 个阅读范围（共 ${SAMPLE1_UNITS} 个）` &&
       /^本步 \d\d:\d\d · 运行 \d\d:\d\d$/u.test(rows['用时'] ?? '') && rows['尝试'] === '已派发' && typeof rows['上次更新'] === 'string' && rows['上次更新'].length > 0 &&
-      rows['进展'] === `已读完 ${SETTLED_BEFORE_CANCEL} / ${SAMPLE1_UNITS} 个阅读范围 · 已完成模型回合 ${SETTLED_BEFORE_CANCEL} 次`,
+      rows['进展'] === `已读完 ${FIRST_HOLD} / ${SAMPLE1_UNITS} 个阅读范围 · 已完成模型回合 ${FIRST_HOLD} 次`,
     'activity-card-rows', running.activity);
     // LIVE-003's own words once the held step has run longer than this Run's own steps did.
     await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-activity')?.dataset.runLiveness==='stale' && document.querySelector('#task-drawer .task-plan-activity .attention-note')?.textContent==='本步骤用时已超过通常水平'`, 'activity-step-stale', 30_000);
 
     at('run-controls');
-    // AUTH-010: 暂停 and 改计划重做 say why they wait, beside 取消任务 and the way to the Run's surface.
-    requireJourney(JSON.stringify(running.actions) === JSON.stringify([
-      ['pause', '暂停', 'disabled', PAUSE_REASON],
-      ['cancel-run', '取消任务', 'enabled', null],
-      ['redo', '改计划重做', 'disabled', REDO_REASON],
-      ['run-link', '查看运行', 'enabled', null],
-    ]) && running.impact === null, 'run-controls', running.actions);
+    // AUTH-010: 暂停 and 取消任务 act on the Run, 改计划重做 says why it waits, and the way to the Run's surface.
+    requireJourney(JSON.stringify(running.actions) === JSON.stringify(RUNNING_ACTIONS) && running.impact === null, 'run-controls', running.actions);
+
+    // ---- 暂停 and 续行 (Issue #422, S76b; CTRL-001, CONT-015) ----------------------------------------------
+    at('pause-requested');
+    // CTRL-001: 暂停 is one click and asks nothing. 正在暂停 is recorded at once, and nothing more is offered while
+    // the range in flight finishes.
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="pause"]', 'pause');
+    await waitForBar(renderer, { state: 'pausing', pill: '正在暂停', status: '正在暂停', note: PAUSING_NOTE, actions: [['run-link', '查看运行', 'enabled', null]] }, 'pausing-bar', 30_000);
+    await assertRenderer(renderer, `document.querySelector('#task-drawer .task-plan-activity')?.dataset.taskPlanActivity==='pausing' && document.querySelector('#task-drawer-cancel-impact')===null`, 'pausing-activity');
+    const pausing = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(pausing?.state === 'pausing' && pausing.stateLabel === '正在暂停' && pausing.run?.state === 'pausing' &&
+      JSON.stringify(pausing.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'pausing']) &&
+      pausing.run.progress?.unitsSettled === FIRST_HOLD && pausing.run.progress.currentUnitOrdinal === FIRST_HOLD + 1,
+    'pausing-record', { state: pausing?.state, run: pausing?.run?.state, progress: pausing?.run?.progress });
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='正在暂停'`, 'pausing-card-label', 30_000);
+    const pausingAttention = await attentionNames(renderer, bookId, 'analysis-pausing');
+    requireJourney(pausingAttention.named, 'pausing-in-attention', pausingAttention.groups);
+
+    at('pause-holds');
+    // 已暂停 is never claimed early: while the range in flight has not finished, the Run stays 正在暂停.
+    await new Promise((settle) => setTimeout(settle, 2_000));
+    const pauseHeld = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(pauseHeld?.run?.state === 'pausing' && pauseHeld.run.attempt?.spans?.length === FIRST_HOLD &&
+      (await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanState`)) === 'pausing', 'pause-holds', { run: pauseHeld?.run?.state, spans: pauseHeld?.run?.attempt?.spans?.length });
+
+    at('paused');
+    // The range in flight finishes and is kept; the Run waits at the boundary after it, holding nothing, and reads
+    // 已暂停 with where 续行 will go on — and 续行 is offered, since nothing else holds the slot.
+    await writeFile(holdPath, String(FIRST_HOLD + 1), 'utf8');
+    await waitForBar(renderer, { state: 'paused', pill: '已暂停', status: '已暂停', note: PAUSED_NOTE, actions: STOPPED_ACTIONS }, 'paused-bar');
+    await assertRenderer(renderer, `(() => { const activity=document.querySelector('#task-drawer .task-plan-activity'); return activity?.dataset.taskPlanActivity==='stopped' && activity.dataset.taskPlanActivityProgress===${JSON.stringify(`${FIRST_HOLD + 1}/${SAMPLE1_UNITS}`)} && activity.querySelector('.field-note')?.textContent===${JSON.stringify(PAUSED_NOTE)}; })()`, 'paused-activity');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='paused' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='已暂停'`, 'paused-card-label', 30_000);
+    const paused = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const pausedAttempt = paused?.run?.attempt;
+    requireJourney(paused?.state === 'paused' && paused.stateLabel === '已暂停' && paused.run?.state === 'paused' && paused.run.runRecordId === executing.run.runRecordId &&
+      JSON.stringify(paused.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'pausing', 'paused']) &&
+      UUID_PATTERN.test(pausedAttempt?.attemptId ?? '') && JSON.stringify(pausedAttempt.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2, 3]) &&
+      (paused.taskOutcome ?? null) === null && (paused.resultSetRevision ?? null) === null,
+    'paused-record', { state: paused?.state, run: paused?.run?.state, spans: pausedAttempt?.spans?.map((span) => span.unitOrdinal), outcome: paused?.taskOutcome ?? null });
+    const pausedAttention = await attentionNames(renderer, bookId, 'analysis-paused');
+    requireJourney(pausedAttention.named, 'paused-in-attention', pausedAttention.groups);
+
+    at('resumed');
+    // CONT-015: 续行 goes on in the same Run and attempt from the fourth range, reading none of the first three again;
+    // two more settle, and the sixth stays in flight.
+    await writeFile(holdPath, String(RESUMED_HOLD), 'utf8');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="resume"]', 'resume');
+    await waitFor(renderer, runningWith(RESUMED_HOLD), 'sixth-range-in-flight', 120_000);
+    const resumed = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(resumed?.state === 'executing' && resumed.run?.runRecordId === executing.run.runRecordId && resumed.run.state === 'executing' &&
+      JSON.stringify(resumed.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'pausing', 'paused', 'admitted', 'executing']) &&
+      resumed.run.progress?.unitsSettled === RESUMED_HOLD && resumed.run.progress.currentUnitOrdinal === RESUMED_HOLD + 1 &&
+      resumed.run.attempt?.attemptId === pausedAttempt.attemptId &&
+      JSON.stringify(resumed.run.attempt.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2, 3, 4, 5]),
+    'resumed-record', { state: resumed?.state, run: resumed?.run?.state, progress: resumed?.run?.progress, spans: resumed?.run?.attempt?.spans?.map((span) => span.unitOrdinal) });
+    await waitForBar(renderer, { state: 'running', pill: '运行中', status: '运行中', note: null, actions: RUNNING_ACTIONS }, 'resumed-bar', 30_000);
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='executing'`, 'resumed-card', 30_000);
 
     at('cancel-impact-summary');
     // CTRL-004: 取消任务 opens one inline Cancellation Impact Summary, focus on it, and records nothing.
@@ -793,14 +899,14 @@ async function main() {
       JSON.stringify(planned?.runControl?.cancel?.impact) === JSON.stringify(IMPACT) && summary.impact.confirm === '确认取消任务' && summary.impact.keep === '继续运行',
     'impact-summary', summary?.impact);
     const unrecorded = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
-    requireJourney(unrecorded?.run?.state === 'executing' && unrecorded.run.transitions.length === executing.run.transitions.length, 'summary-records-nothing');
+    requireJourney(unrecorded?.run?.state === 'executing' && unrecorded.run.transitions.length === resumed.run.transitions.length, 'summary-records-nothing');
 
     at('cancel-keep-running');
     // 继续运行 closes the summary and returns focus to 取消任务; the Run never noticed.
     await clickSelector(renderer, '#task-drawer-cancel-impact [data-task-drawer-control="keep-running"]', 'keep-running');
     await waitFor(renderer, `document.querySelector('#task-drawer-cancel-impact') === null && document.activeElement === document.querySelector('#task-drawer [data-task-drawer-control="cancel-run"]')`, 'summary-closed', 10_000);
     const kept = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
-    requireJourney(kept?.run?.state === 'executing' && kept.run.transitions.length === executing.run.transitions.length, 'keep-running-records-nothing');
+    requireJourney(kept?.run?.state === 'executing' && kept.run.transitions.length === resumed.run.transitions.length, 'keep-running-records-nothing');
 
     at('j14-cancel-keyboard');
     // Without a pointer: Enter on 取消任务 opens the summary with its heading focused, Tab reaches 确认取消任务 with
@@ -819,20 +925,19 @@ async function main() {
       cancellingDrawer.impact === null, 'cancelling-bar', cancellingDrawer);
     const cancelling = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(cancelling?.state === 'cancelling' && cancelling.stateLabel === '正在取消' && cancelling.run?.state === 'cancelling' &&
-      JSON.stringify(cancelling.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'cancelling']) &&
-      cancelling.run.progress?.unitsSettled === SETTLED_BEFORE_CANCEL && cancelling.run.progress.currentUnitOrdinal === 3,
+      JSON.stringify(cancelling.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'pausing', 'paused', 'admitted', 'executing', 'cancelling']) &&
+      cancelling.run.progress?.unitsSettled === RESUMED_HOLD && cancelling.run.progress.currentUnitOrdinal === RESUMED_HOLD + 1,
     'cancelling-record', { state: cancelling?.state, run: cancelling?.run?.state, progress: cancelling?.run?.progress });
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='正在取消'`, 'cancelling-card-label', 30_000);
     // 待我处理 names it as well, wherever the editor looks, until it has stopped.
-    const attention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
-    requireJourney(attention?.groups?.find((group) => group.key === 'active')?.items?.some((item) => item.book?.bookId === bookId && item.state === 'analysis-cancelling') === true,
-      'cancelling-in-attention', attention?.groups?.map((group) => ({ key: group.key, states: group.items.map((item) => item.state) })));
+    const cancellingAttention = await attentionNames(renderer, bookId, 'analysis-cancelling');
+    requireJourney(cancellingAttention.named, 'cancelling-in-attention', cancellingAttention.groups);
 
     at('cancelling-holds');
     // 已取消 is never claimed early: while the range in flight has not finished, the Run stays 正在取消.
     await new Promise((settle) => setTimeout(settle, 2_000));
     const held = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
-    requireJourney(held?.run?.state === 'cancelling' && held.run.attempt?.spans?.length === SETTLED_BEFORE_CANCEL &&
+    requireJourney(held?.run?.state === 'cancelling' && held.run.attempt?.spans?.length === RESUMED_HOLD &&
       (await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanState`)) === 'cancelling', 'cancelling-holds', { run: held?.run?.state, spans: held?.run?.attempt?.spans?.length });
 
     at('j14-cancelling-forced-colors');
@@ -849,25 +954,26 @@ async function main() {
 
     at('cancel-settled');
     // The range in flight finishes; the Run stops at the boundary after it and reads 已取消.
-    await writeFile(holdPath, String(SETTLED_BEFORE_CANCEL + 1), 'utf8');
+    await writeFile(holdPath, String(RESUMED_HOLD + 1), 'utf8');
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskPlanState==='cancelled-after-start' && drawer.querySelector('.task-drawer-pill')?.textContent==='已取消' && drawer.querySelector('.task-bar-status')?.textContent==='已取消' && drawer.querySelector('.task-plan-activity')===null; })()`, 'cancelled-shown', 60_000);
     const cancelledDrawer = await renderer.evaluate(READ_DRAWER);
     requireJourney(JSON.stringify(cancelledDrawer?.actions) === JSON.stringify([['run-link', '查看运行', 'enabled', null]]) && cancelledDrawer.note === null, 'cancelled-bar', cancelledDrawer);
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='cancelled' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='已取消'`, 'cancelled-card-label', 30_000);
 
     at('partial-revision-kept');
-    // CTRL-006: the three ranges it read are kept in a partial revision, the five it never reached named not
-    // attempted, and its outcome and report say it was cancelled — never 已中断.
+    // CTRL-006: the six ranges it read across both executions are kept in a partial revision, the two it never
+    // reached named not attempted, and its outcome and report say it was cancelled — never 已中断.
     const cancelled = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const revision = cancelled?.resultSetRevision;
     const report = cancelled?.taskOutcome?.report;
     requireJourney(cancelled?.state === 'cancelled' && cancelled.stateLabel === '已取消' && cancelled.run?.stateLabel === '已取消' &&
-      JSON.stringify(cancelled.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'cancelling', 'cancelled']) &&
-      cancelled.run.attempt?.spans?.length === SETTLED_BEFORE_CANCEL + 1 &&
+      JSON.stringify(cancelled.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'pausing', 'paused', 'admitted', 'executing', 'cancelling', 'cancelled']) &&
+      cancelled.run.attempt?.attemptId === pausedAttempt.attemptId &&
+      JSON.stringify(cancelled.run.attempt.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2, 3, 4, 5, 6]) &&
       cancelled.taskOutcome?.classification === 'cancelled' && cancelled.taskOutcome.label === '任务结果：已取消' &&
-      revision?.coverage?.unitsTotal === SAMPLE1_UNITS && revision.coverage.unitsClosed === SETTLED_BEFORE_CANCEL + 1 &&
+      revision?.coverage?.unitsTotal === SAMPLE1_UNITS && revision.coverage.unitsClosed === RESUMED_HOLD + 1 &&
       cancelled.taskOutcome.resultSetRevisionId === revision.revisionId &&
-      JSON.stringify(revision.gaps.map((gap) => [gap.unitOrdinal, gap.code])) === JSON.stringify([4, 5, 6, 7, 8].map((ordinal) => [ordinal, 'not-attempted'])) &&
+      JSON.stringify(revision.gaps.map((gap) => [gap.unitOrdinal, gap.code])) === JSON.stringify([7, 8].map((ordinal) => [ordinal, 'not-attempted'])) &&
       report?.classification === 'cancelled' && report.ifRedone?.reason === REFLECTION_CANCELLED &&
       JSON.stringify(report.stages.map((stage) => [stage.stage, stage.state])) === JSON.stringify([['units', 'closed-with-gaps'], ['cross-unit-reduction', 'not-run'], ['assurance-sampling', 'not-run'], ['reduction', 'closed']]),
     'partial-revision', { state: cancelled?.state, run: cancelled?.run?.state, outcome: cancelled?.taskOutcome?.classification, closed: revision?.coverage?.unitsClosed, gaps: revision?.gaps?.length });
@@ -876,8 +982,82 @@ async function main() {
     // Nothing more is recorded or sent once the Run has stopped.
     await new Promise((settle) => setTimeout(settle, 1_000));
     const after = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
-    requireJourney(after?.run?.state === 'cancelled' && after.run.attempt?.spans?.length === SETTLED_BEFORE_CANCEL + 1 &&
+    requireJourney(after?.run?.state === 'cancelled' && after.run.attempt?.spans?.length === RESUMED_HOLD + 1 &&
       JSON.stringify(after.run.transitions) === JSON.stringify(cancelled.run.transitions), 'nothing-sent-after');
+
+    // ---- 任务已中断 · 可续行: AI7 closes under a Run, and the Run goes on after it (CONT-014, CONT-015) ---------
+    at('relaunch-for-second-book');
+    // One range of the second Book's Run may settle; the second is in flight when AI7 closes.
+    await closeOwnedBrowser();
+    cancellation.throwIfRequested();
+    await writeFile(holdPath, '1', 'utf8');
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'second-ready');
+
+    at('second-book-import');
+    const secondBookId = await importSample1(renderer, SECOND_BOOK.title, true, 'second-import');
+    requireJourney(secondBookId !== bookId, 'two-books');
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'second-artifact-enable-ready');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'second-artifact-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'second-artifact-enabled');
+    await click(renderer, '返回图书列表', 'second-return-library');
+
+    at('second-run-held');
+    await openAnalysisOf(renderer, secondBookId, 'second-analysis');
+    await startFirstBaseline(renderer, 'ready', 'second-baseline');
+    await waitFor(renderer, runningWith(1), 'second-range-in-flight', 180_000);
+    const beforeClose = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(beforeClose?.bookId === secondBookId && beforeClose.state === 'executing' && beforeClose.run?.state === 'executing' &&
+      UUID_PATTERN.test(beforeClose.run.runRecordId ?? '') && beforeClose.run.progress?.unitsSettled === 1 && beforeClose.run.progress.currentUnitOrdinal === 2,
+    'second-run-executing', { state: beforeClose?.state, run: beforeClose?.run?.state, progress: beforeClose?.run?.progress });
+
+    at('closed-under-run');
+    // AI7 closes with the second range's turn back and not yet settled. A whole turn is kept, never read again, and
+    // the Run stops at the boundary after it: 任务已中断 · 可续行, holding nothing.
+    await closeOwnedBrowser();
+    cancellation.throwIfRequested();
+
+    at('relaunched-resumable');
+    // Nothing is held from here on, and nothing may run until the editor says 续行.
+    await writeFile(holdPath, 'release', 'utf8');
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'relaunched-ready');
+    const resumableAttention = await attentionNames(renderer, secondBookId, 'analysis-resumable');
+    requireJourney(resumableAttention.named, 'resumable-in-attention', resumableAttention.groups);
+    await openAnalysisOf(renderer, secondBookId, 'relaunched-analysis');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='resumable' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='任务已中断 · 可续行'`, 'resumable-card-label', 30_000);
+    const resumable = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const resumableAttempt = resumable?.run?.attempt;
+    requireJourney(resumable?.bookId === secondBookId && resumable.state === 'resumable' && resumable.stateLabel === '任务已中断 · 可续行' &&
+      resumable.run?.state === 'resumable' && resumable.run.runRecordId === beforeClose.run.runRecordId &&
+      JSON.stringify(resumable.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'resumable']) &&
+      UUID_PATTERN.test(resumableAttempt?.attemptId ?? '') && JSON.stringify(resumableAttempt.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2]) &&
+      (resumable.taskOutcome ?? null) === null,
+    'resumable-record', { state: resumable?.state, run: resumable?.run?.state, transitions: resumable?.run?.transitions?.map((transition) => transition.state), spans: resumableAttempt?.spans?.map((span) => span.unitOrdinal) });
+    await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'resumable-open-plan');
+    await waitForBar(renderer, { state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · 可续行', note: RESUMABLE_NOTE, actions: STOPPED_ACTIONS }, 'resumable-bar', 30_000);
+    // Nothing was sent since AI7 opened again.
+    await new Promise((settle) => setTimeout(settle, 1_000));
+    const stillStopped = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(stillStopped?.run?.state === 'resumable' && JSON.stringify(stillStopped.run.transitions) === JSON.stringify(resumable.run.transitions) &&
+      stillStopped.run.attempt?.spans?.length === 2, 'resumable-sends-nothing');
+
+    at('resumed-after-restart');
+    // 续行 goes on in the same Run and attempt from the third range to the end: eight ranges read once each.
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="resume"]', 'restart-resume');
+    // Followed by its record to whatever end it comes to — ②A's card reads 可续行 for a moment after the click.
+    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>(analysis?.run?.transitions?.length ?? 0) > ${resumable.run.transitions.length} && !['admitted','executing'].includes(analysis.run.state))`, 'resumed-run-ended', 180_000);
+    const finished = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const finishedRevision = finished?.resultSetRevision;
+    requireJourney(finished?.state === 'settled' && finished.run?.runRecordId === beforeClose.run.runRecordId && finished.run.state === 'completed' &&
+      JSON.stringify(finished.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'resumable', 'admitted', 'executing', 'completed']) &&
+      finished.run.attempt?.attemptId === resumableAttempt.attemptId &&
+      JSON.stringify(finished.run.attempt.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2, 3, 4, 5, 6, 7, 8]) &&
+      finishedRevision?.coverage?.unitsTotal === SAMPLE1_UNITS && finishedRevision.coverage.unitsClosed === SAMPLE1_UNITS &&
+      finished.taskOutcome?.classification === 'completed' && finished.taskOutcome.resultSetRevisionId === finishedRevision.revisionId,
+    'resumed-run-completed', { state: finished?.state, run: finished?.run?.state, transitions: finished?.run?.transitions?.map((transition) => transition.state), spans: finished?.run?.attempt?.spans?.map((span) => span.unitOrdinal), closed: finishedRevision?.coverage?.unitsClosed, outcome: finished?.taskOutcome?.classification });
+    // ②A's card and the drawer follow it there.
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled' && document.querySelector('#task-drawer')?.dataset.taskPlanState==='settled'`, 'resumed-run-shown-settled', 30_000);
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
