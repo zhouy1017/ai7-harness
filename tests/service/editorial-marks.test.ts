@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
   MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
-  PLAN_EDIT_SCHEMA_VERSION,
+  CLARIFICATION_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type {
@@ -28,6 +28,7 @@ import { IMPORTED_MARK_RELATIONS_DROP_ORDER } from '../support/imported-marks.js
 import { EXPORT_LEDGER_RELATIONS_DROP_ORDER } from '../support/manuscript-export.js';
 import { DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER } from '../support/default-execution-rules.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js';
 import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
 
 // Service-integration suite (L2) for Editorial Marks (Issue #407). It drives the real `EditorialStore`
@@ -42,7 +43,7 @@ const MARK_RELATIONS = [
   // never held its Publication Version relations.
   // A store taken back below revision 27 never held its import-retention relations, nor one below 28 its
   // staged imported marks.
-  ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER,
+  ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER,
   ...EXPORT_LEDGER_RELATIONS_DROP_ORDER,
   ...IMPORTED_MARK_RELATIONS_DROP_ORDER,
   ...IMPORT_RETENTION_RELATIONS_DROP_ORDER,
@@ -560,7 +561,7 @@ describe('Editorial Marks on a manuscript', () => {
     }
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(PLAN_EDIT_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(CLARIFICATION_SCHEMA_VERSION);
       expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     } finally {
       after.close();

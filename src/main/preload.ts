@@ -237,6 +237,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['resumeBaselineAnalysisRun']['output']>(IPC_CHANNELS.resumeBaselineAnalysisRun, input),
   editBaselineAnalysisPlan: (input: Omit<ServiceOperationMap['editBaselineAnalysisPlan']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['editBaselineAnalysisPlan']['output']>(IPC_CHANNELS.editBaselineAnalysisPlan, input),
+  answerBaselineAnalysisClarification: (input: Omit<ServiceOperationMap['answerBaselineAnalysisClarification']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['answerBaselineAnalysisClarification']['output']>(IPC_CHANNELS.answerBaselineAnalysisClarification, input),
   runReconnectPreflight: () =>
     invoke<ServiceOperationMap['runReconnectPreflight']['output']>(IPC_CHANNELS.runReconnectPreflight),
   quickStartBaselineAnalysis: (input: Omit<ServiceOperationMap['quickStartBaselineAnalysis']['input'], 'bookId'>) =>

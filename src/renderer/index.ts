@@ -3159,7 +3159,8 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
     // a choice the editor made themselves always wins over either default.
     const taskInFlight = projection.state === 'prepared' || projection.state === 'authorized-blocked' ||
       projection.state === 'waiting' || projection.state === 'admitted' || projection.state === 'executing' || projection.state === 'cancelling' ||
-      projection.state === 'pausing' || projection.state === 'paused' || projection.state === 'resumable';
+      projection.state === 'pausing' || projection.state === 'paused' || projection.state === 'resumable' ||
+      projection.state === 'awaiting-clarification';
     const { panels, select } = analysisTabs(card, projection.bookId, taskInFlight ? 'history' : 'synopsis');
     renderBaselineAnalysisOverview(card, panels, select, projection, revision, bookTitle, projection.inspectedRevision !== null
       ? { historical: true, current: projection.inspectedRevision.current }

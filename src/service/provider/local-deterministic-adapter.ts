@@ -161,17 +161,26 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
   readonly #resolveBy: FixtureResolution;
   readonly #entries: ReadonlyMap<string, ModelFixtureEntry>;
   readonly #servedByKey = new Map<string, number>();
+  readonly #attemptsBefore: ReadonlyMap<number, number>;
   #served = 0;
 
   constructor(
     fixture: ResolvedModelFixture,
     promptContractDigest: string,
     codes: DshFailureCodes,
-    options: { readonly resolveBy?: FixtureResolution } = {},
+    options: {
+      readonly resolveBy?: FixtureResolution;
+      /**
+       * What each unit attempted in the Run's earlier executions (Issue #422, S76d): a continuation's attempts carry on
+       * from there, so a retry made after the Run stopped is still that unit's second attempt.
+       */
+      readonly attemptsBefore?: ReadonlyMap<number, number>;
+    } = {},
   ) {
     this.#fixture = fixture;
     this.#promptContractDigest = promptContractDigest;
     this.#codes = codes;
+    this.#attemptsBefore = options.attemptsBefore ?? new Map();
     this.#resolveBy = options.resolveBy ?? 'request-digest';
     this.#entries = this.#resolveBy === 'content-digest' ? contentDigestEntries(fixture) : fixture.entries;
   }
@@ -245,7 +254,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
               ? reviewCategoryRequestDigest(this.#promptContractDigest, review.categoryId, review.ordinal, review.unitDigest)
               : unitRequestDigest(this.#promptContractDigest, header!.ordinal, header!.unitDigest);
     const pairKey = fixtureEntryKey(ordinal, expectedDigest);
-    const attempt = (this.#servedByKey.get(pairKey) ?? 0) + 1;
+    const attempt = (this.#servedByKey.get(pairKey) ?? (ordinal > 0 ? this.#attemptsBefore.get(ordinal) ?? 0 : 0)) + 1;
     this.#servedByKey.set(pairKey, attempt);
     const entry = resolveFixtureEntry(this.#entries, ordinal, expectedDigest, attempt);
     if (entry === undefined) {

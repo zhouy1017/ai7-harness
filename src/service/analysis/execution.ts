@@ -33,7 +33,14 @@ import type { BaselineUnitResult } from './contract.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 import { ExecutionAdmissionError } from './execution-error.js';
 import { applyAssuranceSample, type AnalysisKindDefinition, type AnalysisReductionResult } from './kind-definition.js';
-import { ASSURANCE_SAMPLING_REMOVED, SAFE_RETRY_WITHHELD, assuranceSamplingKept, safeRetryAllowed } from './plan-edits.js';
+import { ASSURANCE_SAMPLING_REMOVED, SAFE_RETRY_WITHHELD, adaptationMode, assuranceSamplingKept } from './plan-edits.js';
+import {
+  CLARIFICATION_CANCELLED_UNANSWERED,
+  CLARIFICATION_ENDED_UNANSWERED,
+  CLARIFICATION_RECORD_GAP,
+  awaitingClarificationDetail,
+  type ClarificationFacts,
+} from './clarifications.js';
 import {
   BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
   buildCrossUnitMessage,
@@ -327,6 +334,8 @@ export class BaselineAnalysisExecutionOwner {
    * meanwhile: stopped between two ranges, with what it kept.
    */
   readonly #pendingCancels: Array<{ runRecordId: string; ledger: BaselineAnalysisStore; progress: RunProgress }> = [];
+  /** Runs the editor answered while another Run held the slot (Issue #422, S76d): each goes on once it is free. */
+  readonly #pendingAnswers: Array<{ runRecordId: string; ledger: BaselineAnalysisStore }> = [];
 
   constructor(deps: ExecutionOwnerDependencies) {
     // The developer-live runtime and the bound scope are one fact: a v5 launch that reached this owner
@@ -407,8 +416,9 @@ export class BaselineAnalysisExecutionOwner {
     }
     const state = ledger.currentRunState(runRecordId);
     const resuming = options.resume === true;
+    // A Run waiting for the editor's answer (Issue #422, S76d) goes on as a continuation too, once the answer is there.
     const admissible = resuming
-      ? state === 'paused' || state === 'resumable' || (options.cancel === true && state === 'cancelling')
+      ? state === 'paused' || state === 'resumable' || state === 'awaiting-clarification' || (options.cancel === true && state === 'cancelling')
       : state === 'awaiting-connectivity' ? options.afterReconnectPreflight === true : state === 'authorized';
     if (!admissible) {
       throw new ExecutionAdmissionError('EXECUTION_STATE_INVALID', resuming
@@ -434,7 +444,11 @@ export class BaselineAnalysisExecutionOwner {
     // rather than leaving the Run 可续行 (CTRL-005, CTRL-006).
     if (!(resuming && options.cancel === true)) {
       ledger.recordRunState(runRecordId, 'admitted', {
-        detail: !resuming ? '已进入 AI7 调度器（单槽位）。' : '续行：已进入 AI7 调度器（单槽位），从已保存的进度接着读。',
+        detail: !resuming
+          ? '已进入 AI7 调度器（单槽位）。'
+          : state === 'awaiting-clarification'
+            ? '按你的回答接着做：已进入 AI7 调度器（单槽位），从已保存的进度接着读。'
+            : '续行：已进入 AI7 调度器（单槽位），从已保存的进度接着读。',
         ...(resuming ? { resumed: true } : {}),
         unitsTotal: facts.manifest.units.length,
         ...(facts.update === null ? {} : { updateMode: facts.update.mode, unitsRecomputed: submitted, unitsReused: facts.update.reusePlan.counts.reused }),
@@ -516,6 +530,29 @@ export class BaselineAnalysisExecutionOwner {
         settleCancelWithoutRevision(next.ledger, next.runRecordId, CANCELLED_WITHOUT_REVISION);
       }
     }
+    // Then a Run the editor answered while the slot was held (Issue #422, S76d), if it still waits for that answer.
+    while (this.#active === null && !this.#disposed && this.#pendingAnswers.length > 0) {
+      const next = this.#pendingAnswers.shift()!;
+      if (next.ledger.currentRunState(next.runRecordId) !== 'awaiting-clarification') continue;
+      try {
+        this.admitAndDispatch(next.runRecordId, next.ledger, { resume: true });
+      } catch {
+        // It stays 任务等待你的说明 with its answer recorded; 续行 is not needed, but the answer's next look finds it.
+      }
+    }
+  }
+
+  /**
+   * The editor answered what a Run waiting for them asked (Issue #422, S76d; CLAR-006): it goes on inside its unchanged
+   * envelope — a new span of the same attempt, as 续行 is — at once when the slot is free, or as soon as it is.
+   */
+  continueAnswered(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): 'continuing' | 'queued' {
+    if (this.#active === null && !this.#disposed) {
+      this.admitAndDispatch(runRecordId, ledger, { resume: true });
+      return 'continuing';
+    }
+    if (!this.#pendingAnswers.some((entry) => entry.runRecordId === runRecordId)) this.#pendingAnswers.push({ runRecordId, ledger });
+    return 'queued';
   }
 
   /** Resolve once no Run is executing; used by the service suites to observe settlement. */
@@ -801,7 +838,11 @@ export class BaselineAnalysisExecutionOwner {
       // accumulating Session, so J-04's proven composition is untouched.
       ...(live === null ? {} : { sessionMode: 'per-unit' as const }),
       adapterFactory: (codes) => {
-        if (live === null) return new Ai7LocalDeterministicAdapter(fixture!, promptContractDigest, codes);
+        // A continuation's retry is the unit's second attempt however many executions it took to reach it (Issue #422,
+        // S76d): the deterministic fixture serves attempts in order, so it is told what each unit attempted before.
+        if (live === null) {
+          return new Ai7LocalDeterministicAdapter(fixture!, promptContractDigest, codes, continuation === null ? {} : { attemptsBefore: ledger.unitAttemptsOf(facts.runRecordId) });
+        }
         liveAdapter.instance = new DeepSeekOpenAiCompatibleAdapter({
           broker: this.#broker,
           get slotBinding(): CredentialSlotBinding {
@@ -999,7 +1040,38 @@ export class BaselineAnalysisExecutionOwner {
         }
       }
       active.progress.unitsSettled = checkpoints.length;
-      const remainingUnits = submittedUnits.filter((unit) => !checkpointed.has(unit.ordinal));
+      // Units whose safe retry waits for the editor's answer (Issue #422, S76d; CLAR-004). A question the Run asked before
+      // it stopped is still its own, answered or not: its unit is not read again until the answer says so, and what its
+      // first attempt cost counts toward the Run as it did then.
+      type WaitingUnit = {
+        readonly unit: CoverageManifestUnitProjection;
+        readonly requestDigest: string;
+        readonly failure: ClarificationFacts['failure'];
+        readonly firstPayloadDigest: string | null;
+        readonly attempts: number;
+        readonly usage: { inputTokens: number; outputTokens: number } | null;
+        readonly wallMs: number;
+      };
+      const waiting = new Map<number, WaitingUnit>();
+      for (const request of ledger.clarificationsOf(facts.runRecordId)) {
+        const unit = submittedUnits.find((entry) => entry.ordinal === request.unitOrdinal);
+        if (unit === undefined || checkpointed.has(unit.ordinal)) continue;
+        waiting.set(unit.ordinal, {
+          unit, requestDigest: request.requestDigest, failure: request.failure, firstPayloadDigest: request.firstPayloadDigest,
+          attempts: 1, usage: request.firstUsage, wallMs: request.firstWallMs,
+        });
+        usage.requests += 1;
+        stageUsage.units.requests += 1;
+        active.progress.completedAttempts += 1;
+        if (request.firstUsage !== null) {
+          usage.inputTokens += request.firstUsage.inputTokens;
+          usage.outputTokens += request.firstUsage.outputTokens;
+          stageUsage.units.inputTokens += request.firstUsage.inputTokens;
+          stageUsage.units.outputTokens += request.firstUsage.outputTokens;
+          accumulated.push(request.firstUsage);
+        }
+      }
+      const remainingUnits = submittedUnits.filter((unit) => !checkpointed.has(unit.ordinal) && !waiting.has(unit.ordinal));
       // One technical turn for one unit attempt: the span is recorded by reference with the attempt index
       // and the admitted payload digest, and every attempt's usage counts toward the Run.
       const submitAttempt = async (unit: CoverageManifestUnitProjection, attemptIndex: number, attemptState: RunAttemptState) => {
@@ -1026,103 +1098,65 @@ export class BaselineAnalysisExecutionOwner {
         active.progress.completedAttempts += 1;
         return { turn, unitUsage, payloadDigest, canonical };
       };
-      // The `units` stage of the Run Report: first dispatch to last settled unit. A Run whose every
-      // unit was reused by lineage submits nothing and opens no segment at all.
-      if (remainingUnits.length > 0) clock.open('units');
-      for (const unit of remainingUnits) {
-        if (active.interrupted) break;
-        // 取消任务 (CTRL-005): the Run stops at this unit boundary, and the unit before it has finished.
-        if (active.cancelRequested) break;
-        // 暂停 (CTRL-001): the Run waits at this boundary, keeping every unit it settled.
-        if (active.pauseRequested) break;
-        // The ceiling is evaluated before every dispatch, not only inside the gate: reaching it ends
-        // the Run here, before the next unit forms a request at all.
-        if (ceilingState() === 'reached') {
-          liveInterruption = 'run-budget-ceiling-reached';
-          terminalClassification = 'interrupted';
-          break;
+      type SubmittedAttempt = Awaited<ReturnType<typeof submitAttempt>>;
+      // The continuation point (CONT-015): a unit is kept the moment it settles, as its revision will hold it, and the
+      // reader sees the count move and nothing in flight.
+      const keepSettled = (unit: CoverageManifestUnitProjection, wallMs: number): void => {
+        const settledRecord = unitRecords.find((record) => record.unitOrdinal === unit.ordinal);
+        if (active.resumableOnInterrupt && settledRecord !== undefined) {
+          ledger.recordUnitCheckpoint({ runRecordId: facts.runRecordId, attemptId, unit: settledRecord, observation: unitObservations.get(unit.ordinal) ?? null });
         }
-        active.progress.currentUnitOrdinal = unit.ordinal;
-        // The instant the reader computes elapsed time from; the product itself estimates nothing.
-        active.progress.currentUnitStartedAt = new Date().toISOString();
-        const unitStartedAtMs = Date.now();
-        const requestDigest = definition.requestDigest(unit.ordinal, unit.digest);
-        let attempt = await submitAttempt(unit, 1, 'dispatched');
-        // AI7 stopping under a Run it can continue cut this turn off: the unit is not settled, and 续行 reads it again
-        // (CONT-014). A turn that came back whole settles, and is kept, as any other.
-        if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) break;
-        let attempts = 1;
-        let unitUsageTotal = attempt.unitUsage;
-        // What the Run Report records about this unit, taken at the instant it settles however it
-        // settles — closed, gap, or the gap that ends the Run — so no terminal branch loses it.
-        const observe = (): void => {
-          unitObservations.set(unit.ordinal, {
-            unitOrdinal: unit.ordinal,
-            attempts,
-            wallMs: Date.now() - unitStartedAtMs,
-            usage: unitUsageTotal,
-          });
-        };
-        let firstFailure: ClassifiedModelFailure | null = null;
-        // A retry-safe failure the bound plan does not let AI7 retry (Issue #419: the editor said 不允许).
-        let retryWithheld = false;
-        // A safe retry is a further transmission, so a Run the editor cancelled meanwhile makes none.
-        if (attempt.turn.terminal === 'failed' && !active.interrupted && !active.cancelRequested) {
-          const failed = attempt.turn.signals.find((signal) => signal.kind === 'failed');
-          retryWithheld = failed?.kind === 'failed' && failed.failure.retrySafe && !safeRetryAllowed(facts.editorEdits);
-          if (failed?.kind === 'failed' && failed.failure.retrySafe && !retryWithheld) {
-            // The `safe-retry` Plan Adaptation: recorded before the retry is dispatched, inside the unchanged
-            // envelope and Execution Binding; the retry repeats the byte-identical unit message once.
-            firstFailure = failed.failure;
-            adaptationOrdinal += 1;
-            ledger.recordAdaptation({
-              attemptId,
-              runRecordId: facts.runRecordId,
-              taskIntentId: facts.taskIntentId,
-              ordinal: adaptationOrdinal,
-              unitOrdinal: unit.ordinal,
-              classifiedReason: failed.failure.reason,
-              failureCode: failed.failure.code,
-              failureClass: failed.failure.failureClass,
-              failureStatus: failed.failure.status,
-              requestDigest,
-              firstPayloadDigest: attempt.payloadDigest,
-              planEnvelopeDigest: facts.planEnvelopeDigest,
-              bindingDigest,
-            });
-            adaptedUnitOrdinals.push(unit.ordinal);
-            if (currentBindingDigest !== bindingDigest) throw new ExecutionAdmissionError('EXECUTION_BINDING_DIGEST_DRIFT', '计划内调整期间执行绑定发生变化。');
-            attempt = await submitAttempt(unit, 2, 'retrying');
-            if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) break;
-            attempts = 2;
-            // Both attempts cost the Run, so the unit's row carries what the unit cost, not what its
-            // last attempt cost.
-            unitUsageTotal = addUsage(unitUsageTotal, attempt.unitUsage);
-          }
-        }
-        const { turn, unitUsage } = attempt;
+        active.progress.unitsSettled += 1;
+        // The bar the stale case is measured against is this Run's own longest settled step, so a model
+        // that answers in ninety seconds and one that answers in ten are each judged by their own pace.
+        // A unit that settled as a gap took real time too, and counts.
+        active.progress.longestSettledUnitMs = Math.max(active.progress.longestSettledUnitMs ?? 0, wallMs);
+        // Between two units nothing is in flight, so the reader sees the count and not the unit that just settled.
+        active.progress.currentUnitOrdinal = null;
+        active.progress.currentUnitStartedAt = null;
+        active.progress.attemptState = null;
+      };
+      // A unit that settles as a gap, with what the Run Report records about it.
+      const settleGap = (unit: CoverageManifestUnitProjection, requestDigest: string, observation: RunReportUnitObservation, code: AnalysisGapProjection['code'], reason: string): void => {
+        unitObservations.set(unit.ordinal, observation);
+        outcomes.push({ unitOrdinal: unit.ordinal, state: 'gap', code, reason });
+        unitRecords.push({
+          unitOrdinal: unit.ordinal,
+          requestDigest,
+          lineage: { kind: 'recomputed' },
+          closed: { state: 'gap', gap: { unitOrdinal: unit.ordinal, code, reason, startPosition: unit.startPosition, endPosition: unit.endPosition, blockIds: [...unit.blockIds] } },
+        });
+      };
+      /**
+       * A unit settled from the turn that ends it — its only attempt, or its safe retry — closed, or the gap it is. `end` is a
+       * gap that ends the Run (a Provider Account Limit, an interruption, an ambiguous outcome), which is not kept.
+       */
+      const settleFromTurn = (s: {
+        readonly unit: CoverageManifestUnitProjection;
+        readonly requestDigest: string;
+        readonly attempt: SubmittedAttempt;
+        readonly attempts: number;
+        readonly usage: { inputTokens: number; outputTokens: number } | null;
+        readonly wallMs: number;
+        readonly firstFailure: { readonly reason: string; readonly code: string } | null;
+        readonly withheld: string | null;
+      }): 'settled' | 'end' => {
+        const { unit, requestDigest } = s;
+        const { turn, unitUsage } = s.attempt;
         const candidate = turn.signals.find((signal) => signal.kind === 'contentCandidate');
-        const gap = (code: AnalysisGapProjection['code'], reason: string): void => {
-          observe();
-          outcomes.push({ unitOrdinal: unit.ordinal, state: 'gap', code, reason });
-          unitRecords.push({
-            unitOrdinal: unit.ordinal,
-            requestDigest,
-            lineage: { kind: 'recomputed' },
-            closed: { state: 'gap', gap: { unitOrdinal: unit.ordinal, code, reason, startPosition: unit.startPosition, endPosition: unit.endPosition, blockIds: [...unit.blockIds] } },
-          });
-        };
-        if (turn.terminal === 'completed' && candidate?.kind === 'contentCandidate' && attempt.canonical?.kind === 'empty-answer') {
+        const observation: RunReportUnitObservation = { unitOrdinal: unit.ordinal, attempts: s.attempts, wallMs: s.wallMs, usage: s.usage };
+        const gap = (code: AnalysisGapProjection['code'], reason: string): void => settleGap(unit, requestDigest, observation, code, reason);
+        if (turn.terminal === 'completed' && candidate?.kind === 'contentCandidate' && s.attempt.canonical?.kind === 'empty-answer') {
           // The model was reached and answered in the channel its profile declares, and the channel
           // was empty. That is not a contract the model broke — there is nothing to parse — so the
           // empty string never reaches `parseUnitResult`, whose only reading of it is `not-json`.
           // The gap keeps the existing closed code, which is a closed union and stays one.
           acceptedOutputDigests.add(candidate.digest);
-          gap('contract-invalid', emptyAnswerGapReason(attempt.canonical.reasoningPresent));
+          gap('contract-invalid', emptyAnswerGapReason(s.attempt.canonical.reasoningPresent));
         } else if (turn.terminal === 'completed' && candidate?.kind === 'contentCandidate') {
           const parsed = definition.parseUnitResult(candidate.text, unit);
           if (parsed.ok) {
-            observe();
+            unitObservations.set(unit.ordinal, observation);
             acceptedOutputDigests.add(candidate.digest);
             outcomes.push({ unitOrdinal: unit.ordinal, state: 'closed', result: parsed.result });
             unitRecords.push({
@@ -1142,14 +1176,14 @@ export class BaselineAnalysisExecutionOwner {
           const reason = failure?.kind === 'failed' ? `${failure.failure.reason}（${failure.failure.code}）` : '适配器失败。';
           // A second failure names both attempts; the unit is never retried again. One the plan did not let AI7
           // retry says so, so the gap reads as the editor's choice and not as a retry that failed.
-          gap('adapter-failure', firstFailure !== null
-            ? `第 1 次尝试：${firstFailure.reason}（${firstFailure.code}）；安全重试后第 2 次尝试：${reason}`
-            : retryWithheld ? `${reason}；${SAFE_RETRY_WITHHELD}` : reason);
+          gap('adapter-failure', s.firstFailure !== null
+            ? `第 1 次尝试：${s.firstFailure.reason}（${s.firstFailure.code}）；安全重试后第 2 次尝试：${reason}`
+            : s.withheld !== null ? `${reason}；${s.withheld}` : reason);
           // A Provider Account Limit ends the Run outright: no retry, no fallback, no second model.
           if (failure?.kind === 'failed' && failure.failure.failureClass === 'provider-account-limit') {
             liveInterruption = 'provider-account-limit';
             terminalClassification = 'interrupted';
-            break;
+            return 'end';
           }
         } else if (turn.terminal === 'interrupted') {
           const failure = turn.signals.find((signal) => signal.kind === 'interrupted');
@@ -1158,27 +1192,176 @@ export class BaselineAnalysisExecutionOwner {
           // An egress refusal that names the ceiling is the ceiling settlement, not a bare interruption.
           if (egress && ceilingState() === 'reached') liveInterruption = 'run-budget-ceiling-reached';
           terminalClassification = 'interrupted';
-          break;
+          return 'end';
         } else {
           gap('interrupted', '技术回合结果不明确；自动重试与回退已停止。');
           terminalClassification = 'interrupted';
+          return 'end';
+        }
+        keepSettled(unit, s.wallMs);
+        return 'settled';
+      };
+      /**
+       * The `safe-retry` Plan Adaptation: recorded before the retry is dispatched, inside the unchanged envelope and Execution
+       * Binding; the retry repeats the byte-identical unit message once. The Run makes it on its own, or — moved into 先问你
+       * (Issue #422, S76d) — once the editor answered 再试一次, and then the record names that answer.
+       */
+      const safeRetry = async (
+        unit: CoverageManifestUnitProjection,
+        requestDigest: string,
+        failure: { readonly reason: string; readonly code: string; readonly failureClass: string; readonly status: number | null },
+        firstPayloadDigest: string | null,
+        answerId: string | null,
+      ): Promise<SubmittedAttempt> => {
+        adaptationOrdinal += 1;
+        ledger.recordAdaptation({
+          attemptId,
+          runRecordId: facts.runRecordId,
+          taskIntentId: facts.taskIntentId,
+          ordinal: adaptationOrdinal,
+          unitOrdinal: unit.ordinal,
+          classifiedReason: failure.reason,
+          failureCode: failure.code,
+          failureClass: failure.failureClass,
+          failureStatus: failure.status,
+          requestDigest,
+          firstPayloadDigest,
+          planEnvelopeDigest: facts.planEnvelopeDigest,
+          bindingDigest,
+          ...(answerId === null ? {} : { clarificationAnswerId: answerId }),
+        });
+        adaptedUnitOrdinals.push(unit.ordinal);
+        if (currentBindingDigest !== bindingDigest) throw new ExecutionAdmissionError('EXECUTION_BINDING_DIGEST_DRIFT', '计划内调整期间执行绑定发生变化。');
+        return submitAttempt(unit, 2, 'retrying');
+      };
+      /**
+       * An answer the editor gave, applied at a unit boundary (CLAR-006): 再试一次 makes the safe retry now, inside the
+       * unchanged envelope; 不重试，记为缺口 settles the unit as the gap it is. The ledger is read each time, so an answer
+       * given while the Run went on is found at the next boundary. `applied` when one was, `none` when nothing waited on
+       * an answer, `stopped` when the Run is stopping, and `end` when a retry's gap ended the Run.
+       */
+      const applyAnswers = async (): Promise<'none' | 'applied' | 'stopped' | 'end'> => {
+        if (waiting.size === 0) return 'none';
+        const answered = ledger.clarificationsOf(facts.runRecordId).filter((entry) => entry.answer !== null && waiting.has(entry.unitOrdinal));
+        if (answered.length === 0) return 'none';
+        for (const entry of answered) {
+          if (active.interrupted || active.cancelRequested || active.pauseRequested) return 'stopped';
+          const w = waiting.get(entry.unitOrdinal)!;
+          waiting.delete(entry.unitOrdinal);
+          active.progress.currentUnitOrdinal = w.unit.ordinal;
+          active.progress.currentUnitStartedAt = new Date().toISOString();
+          if (entry.answer!.optionId === 'record-gap') {
+            settleGap(w.unit, w.requestDigest, { unitOrdinal: w.unit.ordinal, attempts: w.attempts, wallMs: w.wallMs, usage: w.usage },
+              'adapter-failure', `${w.failure.reason}（${w.failure.code}）；${CLARIFICATION_RECORD_GAP}`);
+            keepSettled(w.unit, w.wallMs);
+            continue;
+          }
+          const startedAtMs = Date.now();
+          const attempt = await safeRetry(w.unit, w.requestDigest, w.failure, w.firstPayloadDigest, entry.answer!.answerId);
+          // AI7 stopping under the retry cut it off: the unit is not settled, and 续行 applies the answer again.
+          if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) return 'stopped';
+          const settled = settleFromTurn({
+            unit: w.unit, requestDigest: w.requestDigest, attempt, attempts: w.attempts + 1, usage: addUsage(w.usage, attempt.unitUsage),
+            wallMs: w.wallMs + (Date.now() - startedAtMs), firstFailure: { reason: w.failure.reason, code: w.failure.code }, withheld: null,
+          });
+          if (settled === 'end') return 'end';
+        }
+        return 'applied';
+      };
+      // The `units` stage of the Run Report: first dispatch to last settled unit. A Run whose every
+      // unit was reused by lineage submits nothing and opens no segment at all.
+      if (remainingUnits.length > 0 || waiting.size > 0) clock.open('units');
+      let unitsEnded = false;
+      for (const unit of remainingUnits) {
+        // An answer the editor gave meanwhile takes its unit on first (CLAR-006).
+        const answers = await applyAnswers();
+        if (answers === 'end' || answers === 'stopped') {
+          unitsEnded = true;
           break;
         }
-        // The continuation point (CONT-015): the unit is kept the moment it settles, as its revision will hold it.
-        const settledRecord = unitRecords.find((record) => record.unitOrdinal === unit.ordinal);
-        if (active.resumableOnInterrupt && settledRecord !== undefined) {
-          ledger.recordUnitCheckpoint({ runRecordId: facts.runRecordId, attemptId, unit: settledRecord, observation: unitObservations.get(unit.ordinal) ?? null });
+        if (active.interrupted) break;
+        // 取消任务 (CTRL-005): the Run stops at this unit boundary, and the unit before it has finished.
+        if (active.cancelRequested) break;
+        // 暂停 (CTRL-001): the Run waits at this boundary, keeping every unit it settled.
+        if (active.pauseRequested) break;
+        // The ceiling is evaluated before every dispatch, not only inside the gate: reaching it ends
+        // the Run here, before the next unit forms a request at all.
+        if (ceilingState() === 'reached') {
+          liveInterruption = 'run-budget-ceiling-reached';
+          terminalClassification = 'interrupted';
+          unitsEnded = true;
+          break;
         }
-        active.progress.unitsSettled += 1;
-        // The bar the stale case is measured against is this Run's own longest settled step, so a model
-        // that answers in ninety seconds and one that answers in ten are each judged by their own pace.
-        // A unit that settled as a gap took real time too, and counts.
-        const settledMs = Date.now() - unitStartedAtMs;
-        active.progress.longestSettledUnitMs = Math.max(active.progress.longestSettledUnitMs ?? 0, settledMs);
-        // Between two units nothing is in flight, so the reader sees the count and not the unit that just settled.
-        active.progress.currentUnitOrdinal = null;
-        active.progress.currentUnitStartedAt = null;
-        active.progress.attemptState = null;
+        active.progress.currentUnitOrdinal = unit.ordinal;
+        // The instant the reader computes elapsed time from; the product itself estimates nothing.
+        active.progress.currentUnitStartedAt = new Date().toISOString();
+        const unitStartedAtMs = Date.now();
+        const requestDigest = definition.requestDigest(unit.ordinal, unit.digest);
+        let attempt = await submitAttempt(unit, 1, 'dispatched');
+        // AI7 stopping under a Run it can continue cut this turn off: the unit is not settled, and 续行 reads it again
+        // (CONT-014). A turn that came back whole settles, and is kept, as any other.
+        if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) break;
+        let attempts = 1;
+        let unitUsageTotal = attempt.unitUsage;
+        let firstFailure: ClassifiedModelFailure | null = null;
+        // A retry-safe failure the bound plan does not let AI7 retry (Issue #419: the editor said 不允许).
+        let withheld: string | null = null;
+        // A safe retry is a further transmission, so a Run the editor cancelled meanwhile makes none.
+        if (attempt.turn.terminal === 'failed' && !active.interrupted && !active.cancelRequested) {
+          const failed = attempt.turn.signals.find((signal) => signal.kind === 'failed');
+          if (failed?.kind === 'failed' && failed.failure.retrySafe) {
+            const mode = adaptationMode(facts.editorEdits, 'safe-retry');
+            if (mode === 'ask-first') {
+              // 先问你 (Issue #422, S76d; CLAR-001, CLAR-004): the Run asks the editor before it retries. The unit waits,
+              // unsettled, while the units that do not depend on the answer go on.
+              const wallMs = Date.now() - unitStartedAtMs;
+              const failure = { code: failed.failure.code, failureClass: failed.failure.failureClass, status: failed.failure.status, reason: failed.failure.reason };
+              ledger.recordClarificationRequest({
+                runRecordId: facts.runRecordId,
+                attemptId,
+                taskIntentId: facts.taskIntentId,
+                unitOrdinal: unit.ordinal,
+                planVersion: facts.planVersionOrdinal,
+                planEnvelopeDigest: facts.planEnvelopeDigest,
+                requestDigest,
+                failure,
+                firstPayloadDigest: attempt.payloadDigest,
+                firstUsage: attempt.unitUsage,
+                firstWallMs: wallMs,
+              });
+              waiting.set(unit.ordinal, { unit, requestDigest, failure, firstPayloadDigest: attempt.payloadDigest, attempts: 1, usage: attempt.unitUsage, wallMs });
+              active.progress.currentUnitOrdinal = null;
+              active.progress.currentUnitStartedAt = null;
+              active.progress.attemptState = null;
+              continue;
+            }
+            if (mode === 'automatic') {
+              firstFailure = failed.failure;
+              attempt = await safeRetry(unit, requestDigest, failed.failure, attempt.payloadDigest, null);
+              if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) break;
+              attempts = 2;
+              // Both attempts cost the Run, so the unit's row carries what the unit cost, not what its
+              // last attempt cost.
+              unitUsageTotal = addUsage(unitUsageTotal, attempt.unitUsage);
+            } else {
+              withheld = SAFE_RETRY_WITHHELD;
+            }
+          }
+        }
+        const settled = settleFromTurn({
+          unit, requestDigest, attempt, attempts, usage: unitUsageTotal, wallMs: Date.now() - unitStartedAtMs,
+          firstFailure: firstFailure === null ? null : { reason: firstFailure.reason, code: firstFailure.code }, withheld,
+        });
+        if (settled === 'end') {
+          unitsEnded = true;
+          break;
+        }
+      }
+      // Every unit the Run could read is read: answers already given are applied now, one after another as they come.
+      if (!unitsEnded && !active.interrupted && !active.cancelRequested && !active.pauseRequested) {
+        let answers = await applyAnswers();
+        while (answers === 'applied') answers = await applyAnswers();
+        if (answers === 'end') unitsEnded = true;
       }
       clock.close();
       // 暂停, or AI7 stopping under a Run it can continue (Issue #422, S76b): the Run stops here keeping what it read —
@@ -1187,16 +1370,37 @@ export class BaselineAnalysisExecutionOwner {
       // it as the interruption it is, with that unit's gap kept.
       const stopWithoutEnding = (): boolean => {
         if (active.cancelRequested || liveInterruption !== null || terminalClassification === 'interrupted') return false;
-        if (!active.pauseRequested && !(active.interrupted && active.resumableOnInterrupt)) return false;
-        const settled = active.progress.unitsSettled;
-        ledger.recordRunState(facts.runRecordId, active.pauseRequested ? 'paused' : 'resumable', {
-          detail: active.pauseRequested ? pausedDetail(settled, submittedUnits.length) : resumableDetail(settled, submittedUnits.length),
-          unitsSettled: settled,
-          unitsTotal: submittedUnits.length,
-        });
-        return true;
+        if (active.pauseRequested || (active.interrupted && active.resumableOnInterrupt)) {
+          const settled = active.progress.unitsSettled;
+          ledger.recordRunState(facts.runRecordId, active.pauseRequested ? 'paused' : 'resumable', {
+            detail: active.pauseRequested ? pausedDetail(settled, submittedUnits.length) : resumableDetail(settled, submittedUnits.length),
+            unitsSettled: settled,
+            unitsTotal: submittedUnits.length,
+          });
+          return true;
+        }
+        // 任务等待你的说明 (Issue #422, S76d; CLAR-004): every unit the Run could read is read, and a question is still open.
+        // It stops at this boundary — no reduction, no revision, no outcome — holding nothing and keeping what it read, and
+        // the answer takes it on. The ledger was read for answers just now, with nothing awaited since.
+        if (waiting.size > 0 && !unitsEnded && !active.interrupted) {
+          const settled = active.progress.unitsSettled;
+          ledger.recordRunState(facts.runRecordId, 'awaiting-clarification', {
+            detail: awaitingClarificationDetail([...waiting.keys()], settled, submittedUnits.length),
+            unitsSettled: settled,
+            unitsTotal: submittedUnits.length,
+            waitingUnits: [...waiting.keys()],
+          });
+          return true;
+        }
+        return false;
       };
       if (stopWithoutEnding()) return;
+      // A question the Run's end leaves open stays on record (CLAR-005), and its unit settles as the gap it is, unretried.
+      for (const w of waiting.values()) {
+        settleGap(w.unit, w.requestDigest, { unitOrdinal: w.unit.ordinal, attempts: w.attempts, wallMs: w.wallMs, usage: w.usage },
+          'adapter-failure', `${w.failure.reason}（${w.failure.code}）；${active.cancelRequested ? CLARIFICATION_CANCELLED_UNANSWERED : CLARIFICATION_ENDED_UNANSWERED}`);
+      }
+      waiting.clear();
       if (active.interrupted && terminalClassification === 'completed') terminalClassification = 'interrupted';
       // A Run the editor cancelled ends `cancelled`, whatever else stopped it (CTRL-005), and nothing after this point
       // is sent. A failure that ends the Run is still recorded as the failure it is, by `#recordFailure`.

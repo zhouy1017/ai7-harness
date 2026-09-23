@@ -63,6 +63,7 @@ import {
   ANALYSIS_LEDGER_REVISION_31_SQL,
   ANALYSIS_LEDGER_REVISION_32_SQL,
   ANALYSIS_LEDGER_REVISION_33_SQL,
+  ANALYSIS_LEDGER_REVISION_34_SQL,
   ANALYSIS_LEDGER_REVISION_30_SQL,
   ANALYSIS_LEDGER_REVISION_17_TABLES,
   ANALYSIS_LEDGER_SCHEMA_SQL,
@@ -84,6 +85,7 @@ import {
   RUN_CANCELLATION_SCHEMA_VERSION,
   RUN_CONTINUATION_SCHEMA_VERSION,
   PLAN_EDIT_SCHEMA_VERSION,
+  CLARIFICATION_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -110,6 +112,7 @@ import {
   DEFAULT_EXECUTION_RULE_TRIGGER_SQL,
 } from './default-execution-rules.js';
 import { RUN_CHECKPOINT_FOREIGN_KEYS, RUN_CHECKPOINT_SCHEMA_SQL, RUN_CHECKPOINT_TRIGGER_SQL } from './analysis/run-checkpoints.js';
+import { CLARIFICATION_FOREIGN_KEYS, CLARIFICATION_SCHEMA_SQL, CLARIFICATION_TRIGGER_SQL } from './analysis/clarifications.js';
 import {
   MANUSCRIPT_EFFECT_FOREIGN_KEYS,
   MANUSCRIPT_EFFECT_SCHEMA_SQL,
@@ -169,6 +172,7 @@ const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | Read
   ],
   analysis_run_states: [
     ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_states,
+    ANALYSIS_LEDGER_REVISION_34_SQL.analysis_run_states,
     ANALYSIS_LEDGER_REVISION_32_SQL.analysis_run_states,
     ANALYSIS_LEDGER_REVISION_31_SQL.analysis_run_states,
     ANALYSIS_LEDGER_REVISION_29_SQL.analysis_run_states,
@@ -1800,6 +1804,8 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...DEFAULT_EXECUTION_RULE_FOREIGN_KEYS,
   // Revision 33 (Issue #422): the Run's unit checkpoints, owned and spelled by `analysis/run-checkpoints.ts`.
   ...RUN_CHECKPOINT_FOREIGN_KEYS,
+  // Revision 35 (Issue #422, S76d): the Run's Clarification Requests and answers, owned by `analysis/clarifications.ts`.
+  ...CLARIFICATION_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2405,6 +2411,7 @@ function requireManuscriptReimportTargetSchema(
   includeExportLedgerTables = false,
   includeDefaultExecutionRuleTables = false,
   includeRunCheckpointTables = false,
+  includeClarificationTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2464,6 +2471,8 @@ function requireManuscriptReimportTargetSchema(
       ...(includeExportLedgerTables ? EXPORT_LEDGER_SCHEMA_SQL : {}),
       ...(includeDefaultExecutionRuleTables ? DEFAULT_EXECUTION_RULE_SCHEMA_SQL : {}),
       ...(includeRunCheckpointTables ? RUN_CHECKPOINT_SCHEMA_SQL : {}),
+      // Revision 35 (Issue #422) the Run's Clarification Requests and answers.
+      ...(includeClarificationTables ? CLARIFICATION_SCHEMA_SQL : {}),
     },
     MANUSCRIPT_REIMPORT_INDEX_SQL,
     true,
@@ -2481,6 +2490,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeExportLedgerTables ? EXPORT_LEDGER_TRIGGER_SQL : {}),
       ...(includeDefaultExecutionRuleTables ? DEFAULT_EXECUTION_RULE_TRIGGER_SQL : {}),
       ...(includeRunCheckpointTables ? RUN_CHECKPOINT_TRIGGER_SQL : {}),
+      ...(includeClarificationTables ? CLARIFICATION_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5140,6 +5150,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeExportLedgerTables = false,
   includeDefaultExecutionRuleTables = false,
   includeRunCheckpointTables = false,
+  includeClarificationTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5160,6 +5171,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeExportLedgerTables,
     includeDefaultExecutionRuleTables,
     includeRunCheckpointTables,
+    includeClarificationTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5226,7 +5238,8 @@ export function initializeBoundedSchema(
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION,
+      version === PLAN_EDIT_SCHEMA_VERSION ||
+      version === CLARIFICATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5243,9 +5256,10 @@ export function initializeBoundedSchema(
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION) {
+      version === PLAN_EDIT_SCHEMA_VERSION ||
+      version === CLARIFICATION_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== PLAN_EDIT_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== CLARIFICATION_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5266,6 +5280,7 @@ export function initializeBoundedSchema(
           version >= EXPORT_LEDGER_SCHEMA_VERSION,
           version >= DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
           version >= RUN_CONTINUATION_SCHEMA_VERSION,
+          version >= CLARIFICATION_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);
