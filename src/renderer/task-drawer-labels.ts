@@ -72,6 +72,11 @@ export const TASK_PLAN_STATE_PILLS: Readonly<Record<TaskPlanStateKey, ReviewPill
   // still stopping; a Run cancelled after it began reading keeps the dash of every 已取消, never the square of 已中断.
   cancelling: { tone: 'attention', shape: 'half' },
   'cancelled-after-start': { tone: 'neutral', shape: 'dash' },
+  // 暂停 and 续行 (Issue #422, S76b): 正在暂停 is half-filled in attention's tone as 正在取消 is; 已暂停 keeps the half
+  // shape it stopped with, quietly; 任务已中断 · 可续行 is a ring that asks for the editor.
+  pausing: { tone: 'attention', shape: 'half' },
+  paused: { tone: 'neutral', shape: 'half' },
+  resumable: { tone: 'attention', shape: 'ring' },
 };
 
 // ---- the goal block (S72 D5) ------------------------------------------------------------------------------
@@ -225,6 +230,20 @@ export const TASK_BAR_CANCEL_RUN_FAILED = '无法取消这项任务。';
 export const TASK_BAR_CANCELLING_NOTE = '已记下你的取消；正在进行的这一步完成后停止，此后不会再发送任何内容';
 /** 取消任务 of a Run nothing was running — one waiting in the queue, or one AI7 left behind when it closed — settles at once. */
 export const TASK_BAR_CANCELLED_NOTE = '已取消这项任务；此后不会再发送任何内容';
+/** CTRL-001: what 正在暂停 says until the Run has reached its boundary — never 已暂停 early. */
+export const TASK_BAR_PAUSING_NOTE = '已记下你的暂停；正在进行的这一步完成后停下，已完成的部分都会保存';
+/** CONT-015: 续行 continues the same Run from where it stopped, under its own authorization. */
+export const TASK_BAR_RESUME = '续行';
+/** The fallbacks when 暂停 or 续行 is refused for a reason the service does not word. */
+export const TASK_BAR_PAUSE_FAILED = '无法暂停这项任务。';
+export const TASK_BAR_RESUME_FAILED = '无法续行这项任务。';
+
+/** A stopped Run's continuation point, as the bar states it beside 续行. */
+export function taskBarContinuationNote(unitsSettled: number, unitsTotal: number): string {
+  return unitsSettled >= unitsTotal
+    ? `已读完全部 ${unitsTotal} 个阅读范围，结果都已保存；续行时接着做之后的归纳与抽样`
+    : `已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存；续行时从第 ${unitsSettled + 1} 个接着读，不重复已读完的部分`;
+}
 
 /** A Review Run cannot wait yet (Issue #502): offline, its start is shown disabled with this reason. */
 export const TASK_BAR_REVIEW_OFFLINE = '离线：审阅要连到模型服务，而这台设备现在没有网络；联网后再开始审阅';
@@ -266,6 +285,7 @@ export type TaskBarActionName =
   | 'save-draft'
   | 'cancel-wait'
   | 'pause'
+  | 'resume'
   | 'cancel-run'
   | 'redo'
   | 'run-link';
@@ -343,6 +363,27 @@ export function taskBarView(plan: TaskPlanProjection): TaskBarView {
     if (control !== null) {
       if (control.cancelling) {
         return { readiness, summary, statement: null, note: TASK_BAR_CANCELLING_NOTE, status: plan.state.label, actions: [runLink] };
+      }
+      if (control.pausing) {
+        return { readiness, summary, statement: null, note: TASK_BAR_PAUSING_NOTE, status: plan.state.label, actions: [runLink] };
+      }
+      // A stopped Run — 已暂停, or 任务已中断 · 可续行 (CONT-014, CONT-015): 续行 when its revalidation holds, else why not;
+      // 取消任务, whose summary says what it kept; and the way to the Run.
+      if (control.resume !== null) {
+        const continuation = control.continuation;
+        return {
+          readiness,
+          summary,
+          statement: null,
+          note: continuation === null ? null : taskBarContinuationNote(continuation.unitsSettled, continuation.unitsTotal),
+          status: plan.state.label,
+          actions: [
+            { name: 'resume', label: TASK_BAR_RESUME, tone: 'primary', disabledReason: control.resume.reason },
+            { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
+            { name: 'redo', label: TASK_BAR_REDO, tone: 'quiet', disabledReason: control.redo.reason },
+            runLink,
+          ],
+        };
       }
       return {
         readiness,
