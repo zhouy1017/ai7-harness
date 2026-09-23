@@ -168,8 +168,34 @@ describe('decodeRequest accepts well-formed frames', () => {
       { ...edit.input, disallowedAdaptations: Array.from({ length: 9 }, (_, index) => `item-${'x'.repeat(index + 1)}`) },
       { ...edit.input, runRecordId: randomUUID() },
       { bookId: edit.input.bookId, taskIntentId: edit.input.taskIntentId, planEnvelopeDigest: edit.input.planEnvelopeDigest, removedSteps: [] },
+      // 先问你 (Issue #422, S76d) is a list of identities too, when it is named.
+      { ...edit.input, askFirstAdaptations: 'safe-retry' },
+      { ...edit.input, askFirstAdaptations: ['safe-retry', 'safe-retry'] },
     ]) {
       expect(rejectionFor(frameOf({ ...edit, input }))).toBeInstanceOf(ProtocolError);
+    }
+    const asked = { ...edit, input: { ...edit.input, askFirstAdaptations: ['safe-retry'] } };
+    expect(decodeRequest(frameOf(asked))).toEqual(asked);
+  });
+
+  it('accepts 提交回答 with the question, one option and a note or none, and refuses anything else (Issue #422, S76d)', () => {
+    const answer = {
+      id: randomUUID(),
+      op: 'answerBaselineAnalysisClarification',
+      input: { bookId: randomUUID(), taskIntentId: randomUUID(), requestId: randomUUID(), optionId: 'retry', note: null },
+    };
+    expect(decodeRequest(frameOf(answer))).toEqual(answer);
+    const noted = { ...answer, input: { ...answer.input, optionId: 'record-gap', note: '先看看服务状态' } };
+    expect(decodeRequest(frameOf(noted))).toEqual(noted);
+    for (const input of [
+      { ...answer.input, optionId: 'maybe' },
+      { ...answer.input, requestId: 'not-a-uuid' },
+      { ...answer.input, note: 'x'.repeat(501) },
+      { ...answer.input, note: 7 },
+      { bookId: answer.input.bookId, taskIntentId: answer.input.taskIntentId, requestId: answer.input.requestId, optionId: 'retry' },
+      { ...answer.input, runRecordId: randomUUID() },
+    ]) {
+      expect(rejectionFor(frameOf({ ...answer, input }))).toBeInstanceOf(ProtocolError);
     }
   });
 

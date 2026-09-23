@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { DEFAULT_EXECUTION_RULE_SCHEMA_SQL } from '../../src/service/default-execution-rules.js';
 import { ANALYSIS_LEDGER_REVISION_30_SQL } from '../../src/service/task-authorization.js';
+import { CLARIFICATION_RELATIONS_DROP_ORDER } from './clarifications.js';
 import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from './run-continuation.js';
 
 /**
@@ -52,7 +53,7 @@ export function plantRevision30Relations(database: DatabaseSync): void {
   try {
     database.exec('BEGIN IMMEDIATE');
     try {
-      for (const relation of RUN_CHECKPOINT_RELATIONS_DROP_ORDER) database.exec(`DROP TABLE IF EXISTS ${relation}`);
+      for (const relation of [...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER]) database.exec(`DROP TABLE IF EXISTS ${relation}`);
       for (const relation of DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER) database.exec(`DROP TABLE ${relation}`);
       database.exec('COMMIT');
     } catch (error) {
