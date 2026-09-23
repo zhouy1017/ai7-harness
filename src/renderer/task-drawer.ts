@@ -20,7 +20,15 @@ import {
   TASK_PLAN_BOUNDARY_COLUMNS,
   TASK_PLAN_CEILING_NOTE,
   TASK_PLAN_DEFAULT_RULE,
-  TASK_PLAN_DEFAULT_RULE_REASON,
+  TASK_PLAN_DEFAULT_RULE_CANCEL,
+  TASK_PLAN_DEFAULT_RULE_CONFIRM,
+  TASK_PLAN_DEFAULT_RULE_FAILED,
+  TASK_PLAN_DEFAULT_RULE_HEADING,
+  TASK_PLAN_DEFAULT_RULE_LEAD,
+  TASK_PLAN_VIEW_RULES,
+  taskPlanDefaultRuleCurrent,
+  taskPlanDefaultRuleSet,
+  taskPlanQuickStarted,
   TASK_PLAN_DRIFT_COLUMNS,
   TASK_PLAN_DRIFT_HEADING,
   TASK_PLAN_EDIT,
@@ -74,8 +82,11 @@ export interface TaskPlanRequest {
 }
 
 export interface TaskDrawerSurface {
-  /** Show one Task's plan; `returnFocus` finds the control focus goes back to when the drawer closes. */
-  open(request: TaskPlanRequest, returnFocus: () => HTMLElement | null): void;
+  /**
+   * Show one Task's plan; `returnFocus` finds the control focus goes back to when the drawer closes. `note` is said
+   * beside the bar's actions until the next one — why a quick start stopped at this plan (Issue #421).
+   */
+  open(request: TaskPlanRequest, returnFocus: () => HTMLElement | null, note?: string): void;
   /** Read the plan on show again when it is one of `kind`'s: the surface that raised it just recorded something. */
   refresh(kind: TaskPlanKind): void;
   close(restoreFocus: boolean): void;
@@ -96,6 +107,7 @@ type DrawerApi = Pick<
   | 'startBaselineAnalysisWhenOnline'
   | 'cancelWaitingBaselineAnalysis'
   | 'runReconnectPreflight'
+  | 'setDefaultExecutionRule'
 >;
 
 export interface MountTaskDrawerOptions {
@@ -117,6 +129,8 @@ export interface MountTaskDrawerOptions {
   openRunSurface(plan: TaskPlanProjection): void;
   /** 去设置连接: 设置's model-service connections (§10, MODEL-008). */
   openConnectionSettings(): void;
+  /** 查看规则: 知识库 › 工序与规则, where every 默认执行规则 is listed and turned off (Issue #421). */
+  openRules(): void;
 }
 
 /** How often the drawer reads a running Task's plan again, so the bar follows the Run to its end. */
@@ -182,6 +196,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   let diffShown = false;
   /** Focus belongs on the bar once the action that had it is gone: the start just replaced by the Run's state. */
   let focusBar = false;
+  /** Whether `设为快速开始默认…`'s confirmation is open; kept across the reads of the same plan version. */
+  let ruleConfirmShown = false;
+  /** Said beside the bar's actions once the plan the drawer was opened on is painted (`open`'s `note`). */
+  let pendingNote: string | null = null;
   let pollTimer: number | undefined;
 
   root.classList.add('task-drawer');
@@ -316,6 +334,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     if (!sameVersion) {
       diffShown = false;
       refusal = null;
+      ruleConfirmShown = false;
+    }
+    if (pendingNote !== null) {
+      refusal = pendingNote;
+      pendingNote = null;
     }
     const technicalOpen = sameVersion && body.querySelector<HTMLDetailsElement>('details.task-plan-technical')?.open === true;
     plan = next;
@@ -334,7 +357,12 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     pill.textContent = next.state.label;
     const active = document.activeElement;
     const restore = active instanceof HTMLElement && (body.contains(active) || bar.contains(active)) ? active.dataset['taskDrawerControl'] ?? null : null;
-    body.replaceChildren(goalBlock(next), ...(next.drift === null ? [] : [driftBlock(next.drift)]), mode === 'compact' ? compactBlock(next) : fullBlock(next));
+    body.replaceChildren(
+      goalBlock(next),
+      ...(next.defaultRule.startedBy === null ? [] : [quickStartedBlock(next.defaultRule.startedBy)]),
+      ...(next.drift === null ? [] : [driftBlock(next.drift)]),
+      mode === 'compact' ? compactBlock(next) : fullBlock(next),
+    );
     if (technicalOpen) {
       const details = body.querySelector<HTMLDetailsElement>('details.task-plan-technical');
       if (details) details.open = true;
@@ -506,7 +534,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         [TASK_PLAN_RESULT_TERMS[1], listOf(next.notDo.editorial, 'task-plan-list task-plan-not-do')],
       ])),
       boundaryBlock(next),
-      unavailable(TASK_PLAN_DEFAULT_RULE, 'default-rule', TASK_PLAN_DEFAULT_RULE_REASON),
+      defaultRuleBlock(next),
       technicalBlock(next),
     );
     return whole;
@@ -529,6 +557,93 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     askFirst.append(el('h4', undefined, TASK_PLAN_BOUNDARY_COLUMNS[1]), locked, el('p', 'field-note', TASK_PLAN_LOCKED_NOTE));
     section.append(adaptable, askFirst);
     return section;
+  }
+
+  /** 快速开始后 (S75 D5): which rule version started this Task, quietly, with the way to the rule. */
+  function quickStartedBlock(startedBy: NonNullable<TaskPlanProjection['defaultRule']['startedBy']>): HTMLElement {
+    const notice = el('p', 'field-note task-plan-quick-started');
+    notice.dataset['taskPlanQuickStarted'] = startedBy.ruleVersionId;
+    const view = control(TASK_PLAN_VIEW_RULES, 'quiet', 'view-rules');
+    view.addEventListener('click', () => options.openRules());
+    notice.append(taskPlanQuickStarted(startedBy.name), ' · ', view);
+    return notice;
+  }
+
+  /**
+   * `设为快速开始默认…` (AUTH-009, TASK-019; Issue #421): on a plan a rule may come from it opens a confirmation that
+   * lists exactly what the rule binds, and only its `设为默认` sets the rule; on any other plan it is shown, disabled,
+   * with the reason. The Book's rule for the plan's pattern is named beside it, in force or turned off.
+   */
+  function defaultRuleBlock(next: TaskPlanProjection): HTMLElement {
+    const rule = next.defaultRule;
+    const section = el('section', 'task-plan-default-rule');
+    section.dataset['taskPlanDefaultRule'] = rule.canSet ? 'offered' : 'unavailable';
+    if (rule.current !== null) {
+      const line = el('p', 'field-note task-plan-default-rule-current', taskPlanDefaultRuleCurrent(rule.current));
+      line.dataset['defaultRuleState'] = rule.current.state;
+      section.append(line);
+    }
+    if (!rule.canSet || rule.planEnvelopeDigest === null) {
+      section.append(unavailable(TASK_PLAN_DEFAULT_RULE, 'default-rule', rule.reason ?? TASK_PLAN_DEFAULT_RULE_FAILED));
+      return section;
+    }
+    const open = control(TASK_PLAN_DEFAULT_RULE, 'secondary', 'default-rule');
+    const confirm = el('div', 'task-plan-default-rule-confirm');
+    confirm.id = uid('default-rule-confirm');
+    confirm.hidden = !ruleConfirmShown;
+    confirm.setAttribute('role', 'group');
+    confirm.setAttribute('aria-label', TASK_PLAN_DEFAULT_RULE_HEADING);
+    open.setAttribute('aria-controls', confirm.id);
+    open.setAttribute('aria-expanded', ruleConfirmShown ? 'true' : 'false');
+    const binds = el('dl', 'task-plan-facts task-plan-default-rule-binds');
+    for (const row of rule.binds) {
+      const value = el('dd', undefined, row.value);
+      value.dataset['defaultRuleBind'] = row.label;
+      binds.append(el('dt', undefined, row.label), value);
+    }
+    const yes = control(TASK_PLAN_DEFAULT_RULE_CONFIRM, 'primary', 'default-rule-confirm');
+    const no = control(TASK_PLAN_DEFAULT_RULE_CANCEL, 'quiet', 'default-rule-cancel');
+    const actions = el('div', 'button-row');
+    actions.append(yes, no);
+    confirm.append(el('h4', undefined, TASK_PLAN_DEFAULT_RULE_HEADING), el('p', undefined, TASK_PLAN_DEFAULT_RULE_LEAD), binds, actions);
+    const show = (shown: boolean): void => {
+      ruleConfirmShown = shown;
+      confirm.hidden = !shown;
+      open.setAttribute('aria-expanded', shown ? 'true' : 'false');
+    };
+    open.addEventListener('click', () => {
+      show(!ruleConfirmShown);
+      if (ruleConfirmShown) yes.focus();
+    });
+    no.addEventListener('click', () => {
+      show(false);
+      open.focus();
+    });
+    yes.addEventListener('click', () => void setDefaultRule());
+    if (working) for (const button of [open, yes, no]) button.disabled = true;
+    section.append(open, confirm);
+    return section;
+  }
+
+  /** `设为默认`: the rule is set from exactly the plan on show, and every surface of the kind reads it again. */
+  async function setDefaultRule(): Promise<void> {
+    const current = plan;
+    const asked = request;
+    const planEnvelopeDigest = current?.defaultRule.planEnvelopeDigest ?? null;
+    if (current === null || planEnvelopeDigest === null || !beginWork()) return;
+    for (const button of body.querySelectorAll<HTMLButtonElement>('.task-plan-default-rule button')) button.disabled = true;
+    options.setStatus('正在设为快速开始默认…', 'busy');
+    try {
+      const rule = await api.setDefaultExecutionRule({ taskIntentId: current.ref, planEnvelopeDigest });
+      ruleConfirmShown = false;
+      options.setStatus(taskPlanDefaultRuleSet(rule.name), 'success');
+      options.onRecorded(current.kind, current.bookId);
+    } catch (error) {
+      refusal = options.errorMessage(error, TASK_PLAN_DEFAULT_RULE_FAILED);
+      options.setStatus(refusal, 'error');
+    } finally {
+      endWork(asked);
+    }
   }
 
   function technicalBlock(next: TaskPlanProjection): HTMLElement {
@@ -792,13 +907,15 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   // ---- the surface --------------------------------------------------------------------------------------
 
   const surface: TaskDrawerSurface = {
-    open(next, finder) {
+    open(next, finder, note) {
       request = next;
       returnFocus = finder;
       plan = null;
       painted = '';
       refusal = null;
+      pendingNote = note ?? null;
       diffShown = false;
+      ruleConfirmShown = false;
       clearPoll();
       root.hidden = false;
       root.dataset['taskDrawer'] = 'open';
@@ -829,6 +946,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       plan = null;
       painted = '';
       refusal = null;
+      pendingNote = null;
       root.hidden = true;
       root.dataset['taskDrawer'] = 'closed';
       shell.dataset['taskDrawer'] = 'closed';

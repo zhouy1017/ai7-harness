@@ -247,7 +247,7 @@ describe('设为快速开始默认… over the real store (AUTH-009, TASK-019)',
       const plan = prepare(store, bookId, 'reanalyze-book');
       const taskIntentId = plan.taskIntent!.taskIntentId;
       const offered = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }).defaultRule;
-      expect(offered).toMatchObject({ canSet: true, reason: null, current: null, startedBy: null });
+      expect(offered).toMatchObject({ canSet: true, reason: null, planEnvelopeDigest: plan.planEnvelope!.digest, current: null, startedBy: null });
       expect(offered.binds.map((row) => row.label)).toEqual(['模型服务', '工序', '预算上限', '发送内容类别', '会得到']);
 
       const rule = store.setDefaultExecutionRule(bookId, taskIntentId, plan.planEnvelope!.digest);
@@ -287,7 +287,7 @@ describe('设为快速开始默认… over the real store (AUTH-009, TASK-019)',
       recordMissingCredentialConnection(store, 'L2 主编辑连接');
       const first = prepare(store, imported.bookId);
       const offered = store.inspectTaskPlan({ bookId: imported.bookId, kind: 'baseline-analysis', ref: first.taskIntent!.taskIntentId }).defaultRule;
-      expect(offered).toEqual({ canSet: false, reason: SET_RULE_FIRST_BASELINE, current: null, binds: [], startedBy: null });
+      expect(offered).toEqual({ canSet: false, reason: SET_RULE_FIRST_BASELINE, planEnvelopeDigest: null, current: null, binds: [], startedBy: null });
       expect(await refusal(() => store.setDefaultExecutionRule(imported.bookId, first.taskIntent!.taskIntentId, first.planEnvelope!.digest)))
         .toBe('DEFAULT_EXECUTION_RULE_UNAVAILABLE');
       expect(store.inspectDefaultExecutionRules().rules).toEqual([]);

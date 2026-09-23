@@ -502,6 +502,19 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-plan-boundary h4 { margin: 0 0 .35rem; font-size: .9rem; }
 .task-plan-lock { display: inline-block; margin-right: .35rem; padding: 0 .35rem; border: 1px solid #76530f; border-radius: 4px; color: #76530f; font-size: .74rem; font-weight: 800; }
 .task-plan-technical { margin-top: 0; }
+/* 设为快速开始默认… (Issue #421): the Book's rule beside the action, and the confirmation listing what a rule binds. */
+.task-plan-default-rule { display: grid; gap: .45rem; justify-items: start; }
+.task-plan-default-rule-current { margin: 0; }
+.task-plan-default-rule-confirm { display: grid; gap: .45rem; width: 100%; padding: .75rem; border: 1px solid #c9c2ae; border-radius: 10px; background: #fffdf6; }
+.task-plan-default-rule-confirm h4, .task-plan-default-rule-confirm p { margin: 0; }
+.task-plan-quick-started { margin: 0; }
+/* 知识库 › 工序与规则: one card per rule, its state in words and shape. */
+.default-rule-list { display: grid; gap: .8rem; }
+.default-rule-card { display: grid; gap: .45rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
+.default-rule-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: .6rem; }
+.default-rule-heading h3 { margin: 0; overflow-wrap: anywhere; }
+.default-rule-card p { margin: 0; }
+.default-rule-state-deactivated { border-style: dashed; }
 /* On a surface that raises a Task, the plan is one line and 查看计划 (S72 D4). */
 .task-plan-summary { margin-top: 1rem; }
 .task-plan-summary h4 { margin: 0; }
@@ -903,7 +916,8 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .task-plan-chip, .task-plan-boundary, .task-plan-lock, .task-plan-section-number,
   .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal,
   .global-attention-group, .global-attention-item,
-  .manuscript-export, .export-format-option, .export-option, .export-fidelity-row, .export-receipt, .export-records > li {
+  .manuscript-export, .export-format-option, .export-option, .export-fidelity-row, .export-receipt, .export-records > li,
+  .task-plan-default-rule-confirm, .default-rule-card {
     color: CanvasText;
     background: Canvas;
     border-color: CanvasText;
