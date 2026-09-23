@@ -344,7 +344,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: jobs.startBaselineAnalysisPreparation(request.input.bookId, request.input.goal, request.input.update, launchPolicy, request.input.reconfirm),
+        result: jobs.startBaselineAnalysisPreparation(request.input.bookId, request.input.goal, request.input.update, launchPolicy, request.input.reconfirm, request.input.redoOf ?? null),
       };
     case 'authorizeBaselineAnalysis': {
       // One slot, no queue (Issue #420, S74a A2): while a Run holds the slot, a start that would dispatch is
