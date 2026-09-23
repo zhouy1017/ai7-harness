@@ -501,6 +501,15 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-plan-boundary { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: .6rem; padding: .7rem; border: 1px solid #d5dcd9; border-radius: 10px; background: #f4f9f7; }
 .task-plan-boundary h4 { margin: 0 0 .35rem; font-size: .9rem; }
 .task-plan-lock { display: inline-block; margin-right: .35rem; padding: 0 .35rem; border: 1px solid #76530f; border-radius: 4px; color: #76530f; font-size: .74rem; font-weight: 800; }
+/* The editable plan (Issue #419, PLAN-011): `×` leaves an item out, 恢复 brings it back, and a left-out item keeps its
+   words, struck through, beside the editor's 你改的 — the stroke and the tag say it without colour. */
+.task-plan-edit-remove { min-width: 1.6rem; min-height: 1.6rem; margin-left: .35rem; padding: 0 .3rem; border: 1px solid #b9c3bf; border-radius: 6px; background: #fff; color: #4e564c; line-height: 1; vertical-align: middle; }
+.task-plan-edit-remove::before { content: '×'; font-size: 1rem; font-weight: 700; }
+.task-plan-edit-restore { margin-left: .35rem; }
+.task-plan-edit-tag { display: inline-block; margin-left: .35rem; padding: 0 .35rem; border: 1px dashed #76530f; border-radius: 4px; color: #76530f; font-size: .74rem; font-weight: 700; }
+.task-plan-item-removed .task-plan-step, .task-plan-item-removed .task-plan-step-result, .task-plan-item-removed .task-plan-adaptation { text-decoration: line-through; color: #6b736a; }
+.task-plan-edit-note { margin-top: .4rem; }
+.task-plan-edit-record { margin: 0 0 .6rem; }
 .task-plan-technical { margin-top: 0; }
 /* 设为快速开始默认… (Issue #421): the Book's rule beside the action, and the confirmation listing what a rule binds. */
 .task-plan-default-rule { display: grid; gap: .45rem; justify-items: start; }
@@ -923,7 +932,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .publication-designate, .publication-milestone-option, .publication-designate-summary, .publication-statement,
   .book-deliverables-summary, .milestone-section .milestone-purpose-option,
   .task-drawer, .task-drawer-head, .task-drawer-footer, .task-drawer-modes, .task-plan-goal, .task-plan-compact,
-  .task-plan-chip, .task-plan-boundary, .task-plan-lock, .task-plan-section-number,
+  .task-plan-chip, .task-plan-boundary, .task-plan-lock, .task-plan-section-number, .task-plan-edit-remove, .task-plan-edit-tag,
   .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal,
   .global-attention-group, .global-attention-item,
   .manuscript-export, .export-format-option, .export-option, .export-fidelity-row, .export-receipt, .export-records > li,

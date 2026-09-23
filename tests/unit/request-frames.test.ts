@@ -148,6 +148,28 @@ describe('decodeRequest accepts well-formed frames', () => {
     expect(rejectionFor(frameOf({ ...cancel, input: { taskIntentId: randomUUID() } }))).toBeInstanceOf(ProtocolError);
   });
 
+  it('accepts 更新计划 with the version read and what the plan leaves out, each a short identity once (Issue #419)', () => {
+    const edit = {
+      id: randomUUID(),
+      op: 'editBaselineAnalysisPlan',
+      input: { bookId: randomUUID(), taskIntentId: randomUUID(), planEnvelopeDigest: 'a'.repeat(64), removedSteps: ['assurance-sampling'], disallowedAdaptations: [] },
+    };
+    expect(decodeRequest(frameOf(edit))).toEqual(edit);
+    // The frame carries identities only; which of them a plan can leave out is the ledger's to decide.
+    expect(decodeRequest(frameOf({ ...edit, input: { ...edit.input, removedSteps: ['units'] } }))).toMatchObject({ op: 'editBaselineAnalysisPlan' });
+    for (const input of [
+      { ...edit.input, planEnvelopeDigest: 'A'.repeat(64) },
+      { ...edit.input, removedSteps: 'assurance-sampling' },
+      { ...edit.input, removedSteps: ['assurance-sampling', 'assurance-sampling'] },
+      { ...edit.input, disallowedAdaptations: ['Safe Retry'] },
+      { ...edit.input, disallowedAdaptations: Array.from({ length: 9 }, (_, index) => `item-${'x'.repeat(index + 1)}`) },
+      { ...edit.input, runRecordId: randomUUID() },
+      { bookId: edit.input.bookId, taskIntentId: edit.input.taskIntentId, planEnvelopeDigest: edit.input.planEnvelopeDigest, removedSteps: [] },
+    ]) {
+      expect(rejectionFor(frameOf({ ...edit, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('accepts 暂停 and 续行 by the Task Intent within the route\'s Book, and nothing more (Issue #422, S76b)', () => {
     for (const op of ['pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun']) {
       const request = { id: randomUUID(), op, input: { bookId: randomUUID(), taskIntentId: randomUUID() } };
