@@ -1,4 +1,5 @@
-import type { TaskPlanKind, TaskPlanProjection, TaskPlanStartReadiness, TaskPlanStateKey } from '../shared/protocol.js';
+import type { TaskPlanKind, TaskPlanProjection, TaskPlanRunControlProjection, TaskPlanStartReadiness, TaskPlanStateKey } from '../shared/protocol.js';
+import { RUN_LIVENESS_STAGE_LABELS, attemptStateLabel, elapsedLabel, localInstantLabel, runStepIsStale } from './plan-preview-labels.js';
 import type { ReviewPill } from './review-labels.js';
 
 /**
@@ -67,6 +68,10 @@ export const TASK_PLAN_STATE_PILLS: Readonly<Record<TaskPlanStateKey, ReviewPill
   offline: { tone: 'attention', shape: 'dash' },
   waiting: { tone: 'progress', shape: 'ring' },
   cancelled: { tone: 'neutral', shape: 'dash' },
+  // 取消任务 (Issue #422): 正在取消 is half-filled like 运行中, in attention's tone and its own words, since the Run is
+  // still stopping; a Run cancelled after it began reading keeps the dash of every 已取消, never the square of 已中断.
+  cancelling: { tone: 'attention', shape: 'half' },
+  'cancelled-after-start': { tone: 'neutral', shape: 'dash' },
 };
 
 // ---- the goal block (S72 D5) ------------------------------------------------------------------------------
@@ -206,6 +211,19 @@ export const TASK_BAR_CANCEL_FAILED = '无法取消这项任务。';
 export const TASK_BAR_WAITING_FOR_CONNECTION = '需要处理模型连接';
 /** The sentence beside a waiting Run: recorded, and it starts by itself once it can — never implying it began (OFF-005). */
 export const TASK_BAR_WAITING_NOTE = '已记录这次授权。联网、并确认计划没有变化后会自动开始；在此之前不会发送任何内容';
+/** AUTH-010's three controls of a Run under way (Issue #422): 暂停 and 改计划重做 are shown with why they wait. */
+export const TASK_BAR_PAUSE = '暂停';
+export const TASK_BAR_CANCEL_RUN = '取消任务';
+export const TASK_BAR_REDO = '改计划重做';
+/** CTRL-004: 取消任务 opens this summary inline, and only its confirmation records anything. */
+export const TASK_BAR_CANCEL_IMPACT_HEADING = '取消影响摘要';
+export const TASK_BAR_CANCEL_CONFIRM = '确认取消任务';
+export const TASK_BAR_CANCEL_KEEP = '继续运行';
+/** The fallback when 取消任务 is refused for a reason the service does not word. */
+export const TASK_BAR_CANCEL_RUN_FAILED = '无法取消这项任务。';
+/** CTRL-005: what 正在取消 says beside itself until the Run has stopped — never a spinner, never 已取消 early. */
+export const TASK_BAR_CANCELLING_NOTE = '已记下你的取消；正在进行的这一步完成后停止，此后不会再发送任何内容';
+
 /** A Review Run cannot wait yet (Issue #502): offline, its start is shown disabled with this reason. */
 export const TASK_BAR_REVIEW_OFFLINE = '离线：审阅要连到模型服务，而这台设备现在没有网络；联网后再开始审阅';
 
@@ -245,6 +263,9 @@ export type TaskBarActionName =
   | 'revise'
   | 'save-draft'
   | 'cancel-wait'
+  | 'pause'
+  | 'cancel-run'
+  | 'redo'
   | 'run-link';
 
 export interface TaskBarAction {
@@ -310,6 +331,27 @@ export function taskBarView(plan: TaskPlanProjection): TaskBarView {
             ? [{ name: 'connect', label: TASK_BAR_CONNECT, tone: 'secondary', disabledReason: null } as const]
             : []),
           { name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null },
+          runLink,
+        ],
+      };
+    }
+    // A Run under way (Issue #422; AUTH-010, CTRL-004, CTRL-005): 暂停 and 改计划重做 with why they wait, 取消任务 — which
+    // opens the Cancellation Impact Summary and records nothing — and, once confirmed, 正在取消 and nothing else.
+    const control = plan.runControl;
+    if (control !== null) {
+      if (control.cancelling) {
+        return { readiness, summary, statement: null, note: TASK_BAR_CANCELLING_NOTE, status: plan.state.label, actions: [runLink] };
+      }
+      return {
+        readiness,
+        summary,
+        statement: null,
+        note: null,
+        status: plan.state.label,
+        actions: [
+          { name: 'pause', label: TASK_BAR_PAUSE, tone: 'secondary', disabledReason: control.pause.reason },
+          { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
+          { name: 'redo', label: TASK_BAR_REDO, tone: 'quiet', disabledReason: control.redo.reason },
           runLink,
         ],
       };
@@ -388,6 +430,48 @@ export function taskBarView(plan: TaskPlanProjection): TaskBarView {
     status: null,
     actions: [{ name: 'start', label: TASK_BAR_START, tone: 'primary', disabledReason: null }, REVISE, SAVE_DRAFT],
   };
+}
+
+// ---- the activity card (Issue #422, AUTH-011) -----------------------------------------------------------------
+
+export const TASK_PLAN_ACTIVITY_TITLE = '运行动态';
+/** A Run no execution of this service holds: AI7 closed while it ran, so nothing reports where it is. */
+export const TASK_PLAN_ACTIVITY_UNREPORTED = '这项任务现在没有在运行：AI7 上次关闭时它没有结束。可以取消它，再准备新的任务。';
+/** LIVE-003's words, kept as they are (ADR 0077): over this Run's own bar, the step says so and claims nothing more. */
+export const TASK_PLAN_ACTIVITY_STALE = '本步骤用时已超过通常水平';
+
+/**
+ * AUTH-011's rows, from the Run Liveness Signal the execution owner reports: the editorial phase, the current object,
+ * the time on this step and since the Run began, the attempt's state, the last update, and the milestones reached.
+ * Elapsed time is computed from the shown instants at `nowMs`, never estimated; nothing here is a percentage.
+ */
+export function taskPlanActivityRows(
+  activity: NonNullable<TaskPlanRunControlProjection['activity']>,
+  executingSince: string | null,
+  nowMs: number,
+): ReadonlyArray<readonly [string, string]> {
+  const stepMs = activity.currentUnitStartedAt === null ? null : nowMs - Date.parse(activity.currentUnitStartedAt);
+  const current = activity.stage !== 'units'
+    ? RUN_LIVENESS_STAGE_LABELS[activity.stage]
+    : activity.currentUnitOrdinal === null
+      ? '两个阅读范围之间'
+      : `第 ${activity.currentUnitOrdinal} 个阅读范围（共 ${activity.unitsTotal} 个）`;
+  return [
+    ['阶段', RUN_LIVENESS_STAGE_LABELS[activity.stage]],
+    ['当前', current],
+    ['用时', [
+      ...(stepMs === null ? [] : [`本步 ${elapsedLabel(stepMs)}`]),
+      ...(executingSince === null ? [] : [`运行 ${elapsedLabel(nowMs - Date.parse(executingSince))}`]),
+    ].join(' · ') || '—'],
+    ['尝试', activity.attemptState === null ? '—' : attemptStateLabel(activity.attemptState)],
+    ['上次更新', localInstantLabel(activity.lastTransitionAt)],
+    ['进展', `已读完 ${activity.unitsSettled} / ${activity.unitsTotal} 个阅读范围 · 已完成模型回合 ${activity.completedAttempts} 次`],
+  ];
+}
+
+/** Whether the step in flight has run longer than this Run can account for (LIVE-003), as ②A judges it. */
+export function taskPlanActivityIsStale(activity: NonNullable<TaskPlanRunControlProjection['activity']>, nowMs: number): boolean {
+  return activity.currentUnitStartedAt !== null && runStepIsStale(nowMs - Date.parse(activity.currentUnitStartedAt), activity.longestSettledUnitMs);
 }
 
 // ---- the surfaces that raise a Task (S72 D4) ---------------------------------------------------------------

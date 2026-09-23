@@ -121,6 +121,7 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   'analysis-waiting-network': '等待网络',
   'analysis-waiting-connection': '需要处理模型连接',
   'analysis-waiting-slot': '等待运行名额',
+  'analysis-cancelling': '正在取消',
   'review-running': '运行中',
   // A Review Run a stopped service left mid-way; there is no pause yet, so it is never called 已暂停.
   'review-continuable': '中途停止 · 可继续审阅',
@@ -149,6 +150,7 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
   'analysis-waiting-network': { tone: 'neutral', shape: 'ring' },
   'analysis-waiting-connection': { tone: 'attention', shape: 'triangle' },
   'analysis-waiting-slot': { tone: 'neutral', shape: 'ring' },
+  'analysis-cancelling': { tone: 'attention', shape: 'half' },
   'review-running': { tone: 'progress', shape: 'half' },
   'review-continuable': { tone: 'attention', shape: 'ring' },
   'analysis-completed': { tone: 'good', shape: 'check' },
@@ -262,6 +264,8 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
       return '另一项任务正在运行；它结束后，这项任务在联网时开始。';
     case 'analysis-running':
       return runningReason(facts.progress);
+    case 'analysis-cancelling':
+      return `你取消了这项任务；正在进行的这一步完成后停止，之后不再发送任何内容 · ${runningReason(facts.progress)}`;
     case 'review-running': {
       const current = facts.categories[0];
       if (current === undefined) return '正在审阅';
