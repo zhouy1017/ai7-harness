@@ -87,10 +87,11 @@ function prepare(store: EditorialStore, bookId: string): BaselineAnalysisProject
   return progress.projection!;
 }
 
-async function importedBook(store: EditorialStore, title: string): Promise<string> {
+async function importedBook(store: EditorialStore, title: string, connection = true): Promise<string> {
   const imported = await importSample1Book(store, roots.codeRoot, title);
   await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
-  recordMissingCredentialConnection(store, 'L2 主编辑连接');
+  // The one Main Editorial Role connection is recorded once, with the first Book.
+  if (connection) recordMissingCredentialConnection(store, 'L2 主编辑连接');
   return imported.bookId;
 }
 
@@ -353,6 +354,48 @@ describe('Clarification Requests over the real store', () => {
       store.markCleanShutdown();
     } finally {
       await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('takes a Run answered while another holds the slot on once it is free, and after AI7 closes before that', async () => {
+    const store = await openWithRoute(transient);
+    const execution = owner(store, transient, true);
+    let next: BaselineAnalysisExecutionOwner | null = null;
+    try {
+      const first = await importedBook(store, 'L2 sample1 澄清排队甲');
+      const second = await importedBook(store, 'L2 sample1 澄清排队乙', false);
+      const asking = askingRun(store, first);
+      execution.admitAndDispatch(asking.runRecordId);
+      await execution.whenIdle();
+      expect(store.inspectBaselineAnalysis(first, () => null).state).toBe('awaiting-clarification');
+      // The second Book's Run takes the slot and is held with its second range in flight.
+      const prepared = prepare(store, second);
+      writeFileSync(holdPath, '1');
+      const other = store.authorizeBaselineAnalysis(second, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+      execution.admitAndDispatch(other);
+      await until(() => execution.progressFor(other)?.currentUnitOrdinal === 2, 'the other Run in flight');
+      const card = store.inspectTaskPlan({ bookId: first, kind: 'baseline-analysis', ref: asking.taskIntentId }).clarifications[0]!;
+      const answered = store.answerBaselineAnalysisClarification({ bookId: first, taskIntentId: asking.taskIntentId, requestId: card.requestId, optionId: 'retry', note: null });
+      expect(execution.continueAnswered(answered.runRecordId, store.baselineAnalysisLedger)).toBe('queued');
+      expect(store.inspectTaskPlan({ bookId: first, kind: 'baseline-analysis', ref: asking.taskIntentId }).clarifications.map((entry) => entry.state)).toEqual(['answered']);
+      // AI7 closes before the slot is free: the answer stays recorded, and the next launch takes the Run on.
+      await execution.dispose();
+      expect(store.inspectBaselineAnalysis(first, () => null).run!.state).toBe('awaiting-clarification');
+      expect(store.inspectBaselineAnalysis(second, () => null).run!.state).toBe('resumable');
+      writeFileSync(holdPath, 'release');
+      next = owner(store, transient);
+      const reconciled = store.reconcileStoppedBaselineAnalysisRuns();
+      expect(reconciled.answered).toEqual([asking.runRecordId]);
+      for (const runRecordId of reconciled.answered) next.continueAnswered(runRecordId, store.baselineAnalysisLedger);
+      await next.whenIdle();
+      const settled = store.inspectBaselineAnalysis(first, () => null);
+      expect(settled.run!.state).toBe('completed-with-gaps');
+      expect(turns(settled).filter(([unit]) => unit === 5)).toEqual([[5, 1], [5, 2]]);
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      await next?.dispose();
       store.close();
     }
   }, 300_000);

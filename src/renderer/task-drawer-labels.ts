@@ -425,7 +425,9 @@ export function taskBarQuestionsNote(count: number): string {
   return `有 ${count} 个问题等你回答`;
 }
 export function taskBarAwaitingAnswerNote(settled: number, total: number, count: number): string {
-  return `已读完 ${settled} / ${total} 个阅读范围；${count} 个问题等你回答，回答后接着做`;
+  return count === 0
+    ? `已读完 ${settled} / ${total} 个阅读范围；你已回答，另一项任务结束后就接着做`
+    : `已读完 ${settled} / ${total} 个阅读范围；${count} 个问题等你回答，回答后接着做`;
 }
 
 function openQuestions(plan: TaskPlanProjection): number {
@@ -509,9 +511,9 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
           statement: null,
           // A kept progress that no longer reads back is never stated as a count: the questions are.
           note: continuation === null || continuation.unitsSettled === null
-            ? taskBarQuestionsNote(asked)
+            ? (asked === 0 ? null : taskBarQuestionsNote(asked))
             : taskBarAwaitingAnswerNote(continuation.unitsSettled, continuation.unitsTotal, asked),
-          status: TASK_BAR_AWAITING_ANSWER,
+          status: asked === 0 ? plan.state.label : TASK_BAR_AWAITING_ANSWER,
           actions: [
             { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
             { name: 'redo', label: TASK_BAR_REDO, tone: control.redo.reason === null ? 'secondary' : 'quiet', disabledReason: control.redo.reason },
