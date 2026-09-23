@@ -148,9 +148,20 @@ export const EXPORT_LEDGER_SCHEMA_VERSION = 29;
  * `联网后开始任务` that waits in Connectivity Wait until Reconnect Preflight admits it, and `cancelled`, a
  * waiting Run the editor cancelled before it ever dispatched. The relation is rebuilt with every row
  * copied byte for byte, once, while it still holds revision 29's exact text; nothing else moves and no
- * row changes (ADR 0079: an additive revision keeps the same Data Version). This is the terminal version.
+ * row changes (ADR 0079: an additive revision keeps the same Data Version).
  */
 export const CONNECTIVITY_WAIT_SCHEMA_VERSION = 30;
+/**
+ * The default-execution-rule revision (Issue #421, plan slice S75; V2-UX-TASK-017, TASK-019, TASK-020,
+ * TASK-028, AUTH-009): `analysis_run_authorizations.origin` widens to `default-execution-rule`, the origin of a
+ * Run started by 快速开始 under the Book's 默认执行规则, rebuilt once with every row copied byte for byte; and
+ * three additive, append-only relations record the rules, their versions and whether each is in force.
+ * `default-execution-rules.ts` owns those and creates them before this version is stamped. A rule is never a
+ * standing authorization: each Run it starts still has its own Task Intent, plan, envelope and authorization,
+ * which names the rule version (UI ADR 0001). No existing row changes (ADR 0079: an additive revision keeps the
+ * same Data Version). This is the terminal version.
+ */
+export const DEFAULT_EXECUTION_RULE_SCHEMA_VERSION = 31;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
@@ -437,6 +448,24 @@ export const ANALYSIS_LEDGER_REVISION_29_SQL = {
   ) STRICT`,
 } as const;
 
+/**
+ * The one relation revision 31 widens, exactly as revisions 15 to 30 carried it — a Run was only ever authorized
+ * `standard-direct` before 快速开始 (Issue #421). Kept, like revision 29's Run states, to recognise a store that
+ * still holds it and to let every earlier revision's shape validate before the widening.
+ */
+export const ANALYSIS_LEDGER_REVISION_30_SQL = {
+  analysis_run_authorizations: `CREATE TABLE analysis_run_authorizations (
+    authorization_id TEXT PRIMARY KEY,
+    task_intent_id TEXT NOT NULL UNIQUE REFERENCES analysis_task_intents(task_intent_id),
+    plan_envelope_sha256 TEXT NOT NULL CHECK(length(plan_envelope_sha256) = 64),
+    origin TEXT NOT NULL CHECK(origin = 'standard-direct'),
+    authority TEXT NOT NULL CHECK(authority IN ('standard-direct-dispatch', 'record-only-no-dispatch')),
+    authorized_at TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
+  ) STRICT`,
+} as const;
+
 /** The revision-16 shape of the one relation revision 17 rebuilds; kept to validate a revision-16 store exactly before its rows are copied forward. */
 export const ANALYSIS_LEDGER_REVISION_16_SQL = {
   analysis_plan_records: `CREATE TABLE analysis_plan_records (
@@ -572,7 +601,7 @@ export const ANALYSIS_LEDGER_SCHEMA_SQL = {
     authorization_id TEXT PRIMARY KEY,
     task_intent_id TEXT NOT NULL UNIQUE REFERENCES analysis_task_intents(task_intent_id),
     plan_envelope_sha256 TEXT NOT NULL CHECK(length(plan_envelope_sha256) = 64),
-    origin TEXT NOT NULL CHECK(origin = 'standard-direct'),
+    origin TEXT NOT NULL CHECK(origin IN ('standard-direct', 'default-execution-rule')),
     authority TEXT NOT NULL CHECK(authority IN ('standard-direct-dispatch', 'record-only-no-dispatch')),
     authorized_at TEXT NOT NULL,
     canonical_json TEXT NOT NULL,
@@ -1097,7 +1126,7 @@ function validateRevision16AnalysisLedgerSchema(db: DatabaseSync): void {
 
 export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
-  requireTask(version === CONNECTIVITY_WAIT_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
+  requireTask(version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
   validateJ03TaskAuthorizationSchema(db);
   validateAnalysisLedgerSchema(db);
 }
@@ -1177,22 +1206,27 @@ function rebuildResultSetRelations(db: DatabaseSync): void {
 }
 
 /**
- * Revision 30, once per store and in its own transaction (Issue #502): `analysis_run_states` is rebuilt
- * while it still holds revision 29's exact text, every row copied byte for byte in its original order,
- * with foreign keys off around the transaction exactly as revisions 17, 20 and 24 rebuilt theirs. The Run
- * states never moved before Connectivity Wait, so a store at any revision from 15 to 29 carries that same
- * text; one that already holds the current text, or has no analysis ledger yet, is left alone. Shape-
- * detected like `initializeImportedMarkSchema`, so a store that widened never widens twice, and one whose
- * relation matches neither shape is refused rather than rebuilt.
+ * One widening of one analysis relation, once per store and in its own transaction (revision 30, Issue #502;
+ * revision 31, Issue #421): the relation is rebuilt while it still holds its frozen prior text, every row
+ * copied byte for byte in its original order, with foreign keys off around the transaction exactly as
+ * revisions 17, 20 and 24 rebuilt theirs. Both relations these revisions widen never moved before, so a store
+ * at any revision from 15 up carries the prior text; one that already holds the current text, or has no
+ * analysis ledger yet, is left alone. Shape-detected like `initializeImportedMarkSchema`, so a store that widened
+ * never widens twice, and one whose relation matches neither shape is refused rather than rebuilt.
  */
-function widenAnalysisRunStates(db: DatabaseSync): void {
-  const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'analysis_run_states'").get() as SqlRow | undefined;
+function widenAnalysisRelation(
+  db: DatabaseSync,
+  table: 'analysis_run_states' | 'analysis_run_authorizations',
+  priorSql: string,
+  columns: string,
+  revision: 30 | 31,
+): void {
+  const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as SqlRow | undefined;
   if (row === undefined) return;
   const shape = normalizeSql(asString(row.sql));
-  if (shape === normalizeSql(ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_states)) return;
-  requireTask(shape === normalizeSql(ANALYSIS_LEDGER_REVISION_29_SQL.analysis_run_states),
-    'SCHEMA_INVALID', '分析任务账本表 analysis_run_states 结构不兼容。');
-  validateCanonicalRowDigests(db, ['analysis_run_states']);
+  if (shape === normalizeSql(ANALYSIS_LEDGER_SCHEMA_SQL[table])) return;
+  requireTask(shape === normalizeSql(priorSql), 'SCHEMA_INVALID', `分析任务账本表 ${table} 结构不兼容。`);
+  validateCanonicalRowDigests(db, [table]);
   const foreignKeysState = (): number => asNumber((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys);
   const restoreForeignKeys = foreignKeysState() === 1;
   db.exec('PRAGMA foreign_keys = OFF');
@@ -1200,15 +1234,13 @@ function widenAnalysisRunStates(db: DatabaseSync): void {
   try {
     try {
       db.exec('BEGIN IMMEDIATE');
-      rebuildAnalysisRelation(db, 'analysis_run_states',
-        `INSERT INTO analysis_run_states(run_record_id, sequence, state, recorded_at, canonical_json, sha256)
-         SELECT run_record_id, sequence, state, recorded_at, canonical_json, sha256
-           FROM temp.migrate_analysis_run_states ORDER BY migrate_rowid`);
+      rebuildAnalysisRelation(db, table,
+        `INSERT INTO ${table}(${columns}) SELECT ${columns} FROM temp.migrate_${table} ORDER BY migrate_rowid`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       db.exec('COMMIT');
     } catch (error) {
       try { db.exec('ROLLBACK'); } catch (rollbackError) {
-        throw new AggregateError([error, rollbackError], 'Analysis ledger revision 30 rollback failed.');
+        throw new AggregateError([error, rollbackError], `Analysis ledger revision ${revision} rollback failed.`);
       }
       throw error;
     }
@@ -1290,7 +1322,7 @@ function migrateAnalysisLedgerToRevision17(db: DatabaseSync, from: typeof J04_BA
         db.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_delete`]!);
       }
       seedInitialPlanVersions(db);
-      db.exec(`PRAGMA user_version = ${CONNECTIVITY_WAIT_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${DEFAULT_EXECUTION_RULE_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -1355,7 +1387,7 @@ function migrateAnalysisLedgerToRevision24(db: DatabaseSync): void {
  * terminal shape first.
  */
 function advanceToTerminalRevision(db: DatabaseSync): void {
-  migrateInTransaction(db, `PRAGMA user_version = ${CONNECTIVITY_WAIT_SCHEMA_VERSION};`, 'Terminal version');
+  migrateInTransaction(db, `PRAGMA user_version = ${DEFAULT_EXECUTION_RULE_SCHEMA_VERSION};`, 'Terminal version');
 }
 
 /**
@@ -1380,7 +1412,7 @@ function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24
                   mode, predecessor_revision_id, selected_start_position, selected_end_position
            FROM temp.migrate_analysis_task_intents ORDER BY migrate_rowid`);
       rebuildResultSetRelations(db);
-      db.exec(`PRAGMA user_version = ${CONNECTIVITY_WAIT_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${DEFAULT_EXECUTION_RULE_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -1421,20 +1453,25 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION || version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION,
+      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION ||
+      version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === CONNECTIVITY_WAIT_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
-  // Revision 30 widens the Run states first, for every store that has an analysis ledger: each revision
-  // from 15 to 29 carries them as revision 15 created them, so once widened, every older revision's own
-  // validation below reads the current shape and its forward copy needs nothing new.
-  widenAnalysisRunStates(db);
+  if (version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  // Revisions 30 and 31 widen the Run states and the Run Authorizations' origin first, for every store that has
+  // an analysis ledger: each revision from 15 up carries them as revision 15 created them, so once widened,
+  // every older revision's own validation below reads the current shape and its forward copy needs nothing new.
+  widenAnalysisRelation(db, 'analysis_run_states', ANALYSIS_LEDGER_REVISION_29_SQL.analysis_run_states,
+    'run_record_id, sequence, state, recorded_at, canonical_json, sha256', 30);
+  widenAnalysisRelation(db, 'analysis_run_authorizations', ANALYSIS_LEDGER_REVISION_30_SQL.analysis_run_authorizations,
+    'authorization_id, task_intent_id, plan_envelope_sha256, origin, authority, authorized_at, canonical_json, sha256', 31);
   if (version === EDITORIAL_REVIEW_SCHEMA_VERSION || version === PUBLICATION_VERSION_SCHEMA_VERSION ||
       version === PROPOSAL_CONFLICT_SCHEMA_VERSION || version === IMPORT_RETENTION_SCHEMA_VERSION ||
-      version === IMPORTED_MARK_SCHEMA_VERSION || version === EXPORT_LEDGER_SCHEMA_VERSION) {
-    // Revisions 25 to 29 add no task-authorization or analysis relation and revision 30 has just widened
-    // the one it moves, so the ledger a revision-24 to revision-29 store carries is already the terminal
-    // one: it is validated as the terminal shape, and nothing but the version moves.
+      version === IMPORTED_MARK_SCHEMA_VERSION || version === EXPORT_LEDGER_SCHEMA_VERSION ||
+      version === CONNECTIVITY_WAIT_SCHEMA_VERSION) {
+    // Revisions 25 to 29 add no task-authorization or analysis relation and revisions 30 and 31 have just
+    // widened the two they move, so the ledger a revision-24 to revision-30 store carries is already the
+    // terminal one: it is validated as the terminal shape, and nothing but the version moves.
     validateJ03TaskAuthorizationSchema(db);
     validateAnalysisLedgerSchema(db);
     return advanceToTerminalRevision(db);
@@ -1469,7 +1506,7 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   }
   const analysisStatements = `${Object.values(ANALYSIS_LEDGER_SCHEMA_SQL).join(';\n')};
       ${Object.values(ANALYSIS_LEDGER_TRIGGER_SQL).join(';\n')};
-      PRAGMA user_version = ${CONNECTIVITY_WAIT_SCHEMA_VERSION};`;
+      PRAGMA user_version = ${DEFAULT_EXECUTION_RULE_SCHEMA_VERSION};`;
   if (version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION) {
     validateJ03TaskAuthorizationSchema(db);
     return migrateInTransaction(db, analysisStatements, 'Analysis ledger');

@@ -431,6 +431,26 @@ function asNumber(value: unknown): number {
   return value;
 }
 
+/**
+ * Who started the Task, as its Run Authorization records it (Issue #421): `standard-direct` from its plan, or
+ * `default-execution-rule` — 快速开始 under a 默认执行规则 — with the rule version the authorization names.
+ */
+function authorizationOrigin(row: SqlRow): { origin: 'standard-direct' | 'default-execution-rule'; ruleVersionId: string | null } {
+  const origin = asString(row.origin);
+  if (origin === 'standard-direct') return { origin, ruleVersionId: null };
+  const record = parseCanonicalJson(asString(row.canonical_json));
+  requireAnalysis(origin === 'default-execution-rule' && isRecord(record) && record.origin === origin &&
+    typeof record.ruleVersionId === 'string' && UUID_PATTERN.test(record.ruleVersionId),
+  'ANALYSIS_RECORD_INVALID', '运行授权的来源记录无效。');
+  return { origin, ruleVersionId: record.ruleVersionId };
+}
+
+/** How a Run is authorized: from its plan, or by 快速开始 under one version of a 默认执行规则 (Issue #421). */
+export type AnalysisAuthorizationOrigin =
+  | { readonly kind: 'standard-direct' }
+  | { readonly kind: 'default-execution-rule'; readonly ruleVersionId: string };
+const STANDARD_DIRECT: AnalysisAuthorizationOrigin = { kind: 'standard-direct' };
+
 function transact<T>(db: DatabaseSync, body: () => T): T {
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -804,7 +824,7 @@ export class BaselineAnalysisStore {
         authorizationId: asString(authorization.authorization_id),
         planEnvelopeDigest: asString(authorization.plan_envelope_sha256),
         planVersionOrdinal: boundVersion?.ordinal ?? null,
-        origin: 'standard-direct',
+        ...authorizationOrigin(authorization),
         authority: asString(authorization.authority) as 'standard-direct-dispatch' | 'record-only-no-dispatch',
         authorizedAt: asString(authorization.authorized_at),
       },
@@ -1224,6 +1244,18 @@ export class BaselineAnalysisStore {
       outboundDataCategory: 'public-or-synthetic',
       expectedOutcome: this.#definition.expectedOutcome,
     };
+  }
+
+  /**
+   * The facts a 默认执行规则 binds, as the Book's durable state reads now (Issue #421): the re-derivation Reconnect
+   * Preflight compares a waiting Run's plan with, for an update of the whole Book. No rule is ever used under
+   * developer-live (Provider Processing v5 to v7: `matchingActiveDefaultExecutionRuleAllowed: false`), so this is
+   * read only outside it, where the ceiling depends on no unit count.
+   */
+  currentRuleFacts(bookId: string, mode: AnalysisTaskMode): MaterialPlanInputsProjection {
+    requireAnalysis(UUID_PATTERN.test(bookId) && this.#launch.live === null && !this.#definition.mode(mode).rangeBound,
+      'ANALYSIS_RULE_FACTS_INVALID', '无法读取默认执行规则所需的当前事实。');
+    return this.#currentMaterialInputs(bookId, mode, null, 0);
   }
 
   /** The reuse-plan counts a version would derive for the given range against the latest revision; `null` for a mode that carries no plan. */
@@ -2328,6 +2360,10 @@ export class BaselineAnalysisStore {
    * and Run Record, and the Run then waits in Connectivity Wait instead of being handed to the slot — nothing
    * sent, no usage, nothing implying it began. Only a plan that could dispatch can wait, and a waiting Run takes
    * no slot, so a busy slot refuses only a start that would dispatch now.
+   *
+   * `origin` is `default-execution-rule` for 快速开始 (Issue #421; TASK-020, TASK-028): the same records, the
+   * authorization naming the rule version the start was made under. Whether the rule may start this plan is the
+   * caller's to have settled; the rule never widens what the plan binds.
    */
   authorize(
     bookId: string,
@@ -2335,9 +2371,11 @@ export class BaselineAnalysisStore {
     planEnvelopeDigest: string,
     slotBusy = false,
     start: 'now' | 'when-online' = 'now',
+    origin: AnalysisAuthorizationOrigin = STANDARD_DIRECT,
   ): { projection: AnalysisProjection; dispatchRunRecordId: string | null } {
-    requireAnalysis(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest),
-      'ANALYSIS_AUTHORIZATION_INVALID', '任务运行授权参数无效。');
+    requireAnalysis(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest) &&
+      (origin.kind === 'standard-direct' || (start === 'now' && UUID_PATTERN.test(origin.ruleVersionId))),
+    'ANALYSIS_AUTHORIZATION_INVALID', '任务运行授权参数无效。');
     const prepared = this.inspect(bookId);
     requireAnalysis(prepared.taskIntent?.taskIntentId === taskIntentId && prepared.planEnvelope !== null && prepared.planVersion !== null,
       'ANALYSIS_AUTHORIZATION_STALE', '任务计划已经变化；无法记录该授权。');
@@ -2364,23 +2402,26 @@ export class BaselineAnalysisStore {
     const authority = dispatchAllowed ? 'standard-direct-dispatch' : 'record-only-no-dispatch';
     const authorization = canonicalRecord({
       authorizationId,
-      origin: 'standard-direct',
+      origin: origin.kind,
       planEnvelopeDigest,
       planVersionId: prepared.planVersion.planVersionId,
       planVersionOrdinal: prepared.planVersion.ordinal,
       taskIntentId,
       authority,
+      ...(origin.kind === 'default-execution-rule' ? { ruleVersionId: origin.ruleVersionId } : {}),
     });
     const run = canonicalRecord({ runRecordId, authorizationId, taskIntentId, recordedAt: instant });
     transact(this.#db, () => {
       this.#db.prepare(
         `INSERT INTO analysis_run_authorizations(authorization_id, task_intent_id, plan_envelope_sha256, origin, authority, authorized_at, canonical_json, sha256)
-         VALUES (?, ?, ?, 'standard-direct', ?, ?, ?, ?)`,
-      ).run(authorizationId, taskIntentId, planEnvelopeDigest, authority, instant, authorization.json, authorization.digest);
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(authorizationId, taskIntentId, planEnvelopeDigest, origin.kind, authority, instant, authorization.json, authorization.digest);
       this.#db.prepare(
         'INSERT INTO analysis_run_records(run_record_id, task_intent_id, authorization_id, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)',
       ).run(runRecordId, taskIntentId, authorizationId, instant, run.json, run.digest);
-      this.#insertRunState(runRecordId, 1, 'authorized', { detail: '标准直接运行授权已记录。' }, instant);
+      this.#insertRunState(runRecordId, 1, 'authorized', origin.kind === 'standard-direct'
+        ? { detail: '标准直接运行授权已记录。' }
+        : { detail: '快速开始按默认执行规则记录了运行授权。', ruleVersionId: origin.ruleVersionId }, instant);
       if (!dispatchAllowed) {
         const reasons = blockedReasons(this.#launch.live);
         this.#insertRunState(runRecordId, 2, 'blocked-before-dispatch', { detail: reasons.join(' '), reasons }, instant);
