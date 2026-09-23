@@ -705,8 +705,9 @@ async function main() {
     await writeFile(holdPath, String(SETTLED_BEFORE_CANCEL), 'utf8');
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'product-ready');
-    // One member of its own for 取消任务, and nothing that pauses, resumes, redoes, retries, replays or rewinds a Run yet.
-    await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && typeof window.ai7.cancelBaselineAnalysisRun === 'function' && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress/i.test(key)) && !Object.keys(window.ai7).some((key)=>/pause|resume|redo|retry|replay|rewind/i.test(key))`, 'renderer-api-boundary');
+    // One member of its own for 取消任务, and nothing that pauses, resumes, redoes, retries, replays or rewinds a Run yet
+    // (the manuscript's own `redoManuscript` is the editor's undo and redo, not a Run's).
+    await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && typeof window.ai7.cancelBaselineAnalysisRun === 'function' && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress/i.test(key)) && !Object.keys(window.ai7).some((key)=>/(pause|resume|redo|retry|replay|rewind)[A-Za-z]*(Run|Analysis|Task)$/i.test(key))`, 'renderer-api-boundary');
     await renderer.send('Page.setBypassCSP', { enabled: true });
     try {
       const fetchRejected = await renderer.evaluate(`(async()=>{try{await fetch(${JSON.stringify(loopback.url)});return false}catch{return true}})()`);
