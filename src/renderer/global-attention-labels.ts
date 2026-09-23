@@ -109,6 +109,8 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   'manuscript-conflict-deferred': `${PROPOSAL_CONFLICT_CLASSIFICATION} · 暂不处理`,
   'analysis-failed': '运行失败',
   'analysis-interrupted': '已中断',
+  // Run Budget Ceiling Reached (Issue #51, S16a): the drawer's own status for it (editor-surfaces §6).
+  'analysis-budget-reached': '已停止 · 预算已达上限',
   'analysis-blocked': '派发前已阻止',
   'analysis-orphaned': '已中断',
   'review-failed': '运行失败',
@@ -141,6 +143,7 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
   'manuscript-conflict-deferred': { tone: 'attention', shape: 'triangle' },
   'analysis-failed': { tone: 'blocked', shape: 'square' },
   'analysis-interrupted': { tone: 'blocked', shape: 'square' },
+  'analysis-budget-reached': { tone: 'attention', shape: 'square' },
   'analysis-blocked': { tone: 'blocked', shape: 'diamond' },
   'analysis-orphaned': { tone: 'blocked', shape: 'square' },
   'review-failed': { tone: 'blocked', shape: 'square' },
@@ -176,6 +179,8 @@ export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionN
   'await-local-check': '等待本地核对',
   'resolve-conflict': RESOLVE_CONFLICT_LABEL,
   'answer-clarification': '回答问题',
+  // The drawer's own action for a Run the ceiling stopped (Issue #51, S16a; MODEL-017).
+  'adjust-budget-redo': '调整预算并重做',
 };
 /** The two scopes a question can have (CLAR-004), in the card's own words. */
 export const GLOBAL_ATTENTION_CLARIFICATION_WAITING = '任务等待你的说明';
@@ -249,6 +254,8 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
       return '运行失败，没有形成新的结果集修订版。';
     case 'analysis-interrupted':
       return '运行已在派发后中断；已完成单元的结果与缺口均已保留。';
+    case 'analysis-budget-reached':
+      return '运行用到了你设的预算上限，已停止；读完的部分已保留。要接着读，请调整预算并重做。';
     case 'analysis-blocked':
       return '授权已记录，派发前阻止：当前启动没有可执行的路由。';
     case 'analysis-orphaned':

@@ -5,7 +5,7 @@ import { prepareExecution, type HarnessExecutionSpan, type PrimaryAgentHarnessHa
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import type { DeveloperLiveRuntime } from '../launch-policy.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
-import { evaluateRunBudgetCeiling, type ClassifiedModelFailure, type RunBudgetCeiling, type UsageFacts } from '../provider/classification.js';
+import { evaluateRunBudgetCeiling, totalTokens, type ClassifiedModelFailure, type RunBudgetCeiling, type UsageFacts } from '../provider/classification.js';
 import { DeepSeekOpenAiCompatibleAdapter, OPENCODE_GO_ROUTE_PROFILE, isProviderAccountLimit, type ProviderRouteProfile } from '../provider/deepseek-adapter.js';
 import { OPENCODE_GO_V4_FLASH_PROFILE } from '../provider/model-profile.js';
 import {
@@ -229,9 +229,10 @@ export const ASSURANCE_SAMPLING_CANCELLED = '运行已按你的要求取消，�
 export const RUN_REPORT_REFLECTION_CANCELLED = '运行已按你的要求取消，运行反思未发起。' as const;
 
 /**
- * The two developer-live interruptions the closed CHECK sets admit only as `interrupted`, with the
- * distinction carried in the state detail, the outcome summary, and the safe next action (settlement
- * l). A dedicated classification is S16's job, not this slice's, so nothing here invents one.
+ * The two interruptions the closed CHECK sets admit only as `interrupted`, with the distinction carried in the state
+ * detail, the outcome summary, and the safe next action (settlement l). Run Budget Ceiling Reached is no new result type
+ * either (DOM:100): its outcome also names the stop itself (Issue #51, S16a), and its way on is 调整预算并重做 — or,
+ * where the developer-live launch sets the ceiling, a launch with a higher one.
  */
 const LIVE_INTERRUPTIONS = {
   'run-budget-ceiling-reached': {
@@ -247,6 +248,17 @@ const LIVE_INTERRUPTIONS = {
 } as const;
 
 type LiveInterruption = keyof typeof LIVE_INTERRUPTIONS;
+
+/**
+ * 调整预算并重做 (Issue #51, S16a; V2-UX-MODEL-016, MODEL-017): the way on from a ceiling the editor set in the plan. The Run
+ * cannot go on — neither 续行 nor 重试 — so a new Task carries what it read under a ceiling raised or removed.
+ */
+export const BUDGET_REACHED_NEXT_ACTION = '点「调整预算并重做」：在新任务的计划里提高或去掉预算上限，沿用这次已读完的阅读范围接着读其余的；这次运行不能续行或重试。' as const;
+/** A safe retry the spent ceiling stopped (Issue #51, S16a): the unit's first failure is its gap, and nothing more is sent. */
+export const SAFE_RETRY_BUDGET_REACHED = '任务运行预算已达上限，没有再试一次' as const;
+/** The reduction and the sample a ceiling reached after the last unit stops, in the Run's own words. */
+export const CROSS_UNIT_BUDGET_REACHED = '任务运行预算上限已达到；跨单元归纳未派发。' as const;
+export const ASSURANCE_SAMPLING_BUDGET_REACHED = '任务运行预算上限已达到，保证抽样未发起。' as const;
 
 /**
  * What an editor reads when a unit closed as a gap the model itself produced, as opposed to one the
@@ -1224,6 +1236,15 @@ export class BaselineAnalysisExecutionOwner {
             keepSettled(w.unit, w.wallMs);
             continue;
           }
+          // 再试一次 once the ceiling is spent (Issue #51, S16a): the retry is not sent, and the Run stops as the ceiling reached.
+          if (ceilingState() === 'reached') {
+            settleGap(w.unit, w.requestDigest, { unitOrdinal: w.unit.ordinal, attempts: w.attempts, wallMs: w.wallMs, usage: w.usage },
+              'adapter-failure', `${w.failure.reason}（${w.failure.code}）；${SAFE_RETRY_BUDGET_REACHED}`);
+            keepSettled(w.unit, w.wallMs);
+            liveInterruption = 'run-budget-ceiling-reached';
+            terminalClassification = 'interrupted';
+            return 'end';
+          }
           const startedAtMs = Date.now();
           const attempt = await safeRetry(w.unit, w.requestDigest, w.failure, w.firstPayloadDigest, entry.answer!.answerId);
           // AI7 stopping under the retry cut it off: the unit is not settled, and 续行 applies the answer again.
@@ -1279,7 +1300,14 @@ export class BaselineAnalysisExecutionOwner {
           const failed = attempt.turn.signals.find((signal) => signal.kind === 'failed');
           if (failed?.kind === 'failed' && failed.failure.retrySafe) {
             const mode = adaptationMode(facts.editorEdits, 'safe-retry');
-            if (mode === 'ask-first') {
+            if (mode !== 'withheld' && ceilingState() === 'reached') {
+              // The retry is a further dispatch, and the ceiling is evaluated before every dispatch (Issue #51, S16a): the
+              // unit settles from its first attempt — no retry, and no question whose 再试一次 could not be honoured — and
+              // the Run ends as the ceiling reached, the last unit's retry too.
+              withheld = SAFE_RETRY_BUDGET_REACHED;
+              liveInterruption = 'run-budget-ceiling-reached';
+              terminalClassification = 'interrupted';
+            } else if (mode === 'ask-first') {
               // 先问你 (Issue #422, S76d; CLAR-001, CLAR-004): the Run asks the editor before it retries. The unit waits,
               // unsettled, while the units that do not depend on the answer go on.
               const wallMs = Date.now() - unitStartedAtMs;
@@ -1303,7 +1331,7 @@ export class BaselineAnalysisExecutionOwner {
               active.progress.attemptState = null;
               continue;
             }
-            if (mode === 'automatic') {
+            if (withheld === null && mode === 'automatic') {
               firstFailure = failed.failure;
               attempt = await safeRetry(unit, requestDigest, failed.failure, attempt.payloadDigest, null);
               if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) break;
@@ -1311,7 +1339,7 @@ export class BaselineAnalysisExecutionOwner {
               // Both attempts cost the Run, so the unit's row carries what the unit cost, not what its
               // last attempt cost.
               unitUsageTotal = addUsage(unitUsageTotal, attempt.unitUsage);
-            } else {
+            } else if (withheld === null) {
               withheld = SAFE_RETRY_WITHHELD;
             }
           }
@@ -1403,8 +1431,11 @@ export class BaselineAnalysisExecutionOwner {
           crossUnit = gap('policy-bounded', '跨单元归纳未派发：当前 Provider Processing 策略仅授权单元数内的传输');
         } else if (ceilingState() === 'reached') {
           // The ceiling is evaluated before this dispatch exactly as before a unit's, so a Run that has
-          // spent its bound ends here rather than spending one more turn to discover it.
-          crossUnit = gap('run-budget-ceiling-reached', '任务运行预算上限已达到；跨单元归纳未派发。');
+          // spent its bound ends here rather than spending one more turn to discover it — and ends as the
+          // ceiling reached, with every unit it read kept (Issue #51, S16a; MODEL-016).
+          crossUnit = gap('run-budget-ceiling-reached', CROSS_UNIT_BUDGET_REACHED);
+          liveInterruption = 'run-budget-ceiling-reached';
+          terminalClassification = 'interrupted';
         } else {
           const message = buildCrossUnitMessage(closedOutcomes, manifest.units.length);
           // The same set the gate reads: exactly one further user message becomes admissible, and every
@@ -1487,7 +1518,12 @@ export class BaselineAnalysisExecutionOwner {
         active, definition, harness, reduction: reduced, manifest, blocksById, admittedUserMessages,
         acceptedOutputDigests, liveAdapter, countTurn, clock, ceilingState, live, policy,
         stopped: terminalClassification === 'interrupted' || terminalClassification === 'cancelled',
+        stoppedReason: liveInterruption === 'run-budget-ceiling-reached' ? ASSURANCE_SAMPLING_BUDGET_REACHED : null,
         removedByEditor: !assuranceSamplingKept(facts.editorEdits),
+        onCeilingReached: () => {
+          liveInterruption = 'run-budget-ceiling-reached';
+          terminalClassification = 'interrupted';
+        },
       });
       if (stopWithoutEnding()) return;
       // The second reducer pass: the sample joins the revision and re-labels the assurance axis, and
@@ -1573,7 +1609,21 @@ export class BaselineAnalysisExecutionOwner {
           : interruption === null
             ? `${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`
             : `${interruption.summary}${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`,
-        safeNextAction: interruption === null ? (definition.safeNextActions ?? SAFE_NEXT_ACTIONS)[terminalClassification] : interruption.safeNextAction,
+        safeNextAction: interruption === null
+          ? (definition.safeNextActions ?? SAFE_NEXT_ACTIONS)[terminalClassification]
+          : liveInterruption === 'run-budget-ceiling-reached' && live === null ? BUDGET_REACHED_NEXT_ACTION : interruption.safeNextAction,
+        // Run Budget Ceiling Reached, named (Issue #51, S16a; MODEL-016): the ceiling, what the Run used, and what it read.
+        ...(liveInterruption === 'run-budget-ceiling-reached' && runBudgetCeiling.kind === 'tokens'
+          ? {
+              stop: {
+                reason: 'run-budget-ceiling-reached' as const,
+                maxTotalTokens: runBudgetCeiling.maxTotalTokens,
+                usedTokens: totalTokens(accumulated),
+                unitsSettled: active.progress.unitsSettled,
+                unitsTotal: submittedUnits.length,
+              },
+            }
+          : {}),
         report: buildRunReport(reportFacts, await this.#reflect({
           active, harness, runRecordId: facts.runRecordId, accounting: runReportAccounting(reportFacts),
           admittedUserMessages, acceptedOutputDigests, liveAdapter, accumulated, ceilingState, live, policy,
@@ -1602,7 +1652,7 @@ export class BaselineAnalysisExecutionOwner {
     const { active, definition, harness, reduction, manifest, live, policy } = context;
     if (definition.assurance === null) return assuranceSampleNotRun(definition.assuranceAbsentReason);
     if (active.cancelRequested) return assuranceSampleNotRun(ASSURANCE_SAMPLING_CANCELLED);
-    if (context.stopped || active.interrupted) return assuranceSampleNotRun('运行在单元阶段结束前停止，保证抽样未发起。');
+    if (context.stopped || active.interrupted) return assuranceSampleNotRun(context.stoppedReason ?? '运行在单元阶段结束前停止，保证抽样未发起。');
     if (context.removedByEditor) return assuranceSampleNotRun(ASSURANCE_SAMPLING_REMOVED);
     const candidates = definition.assurance.candidates(reduction);
     if (candidates.length === 0) return assuranceSampleNotRun('本次运行没有可抽样的发现，保证抽样未发起。');
@@ -1630,6 +1680,7 @@ export class BaselineAnalysisExecutionOwner {
       // spent its bound ends here rather than spending one more turn to discover it.
       if (context.ceilingState() === 'reached') {
         gapReasons.push(assuranceSamplingTurnGapReason(turn.unitOrdinal, '任务运行预算上限已达到，本轮未派发。'));
+        context.onCeilingReached();
         break;
       }
       const unit = manifest.units[turn.unitOrdinal - 1]!;
@@ -1896,8 +1947,12 @@ interface AssuranceSamplingContext {
   readonly policy: LaunchPolicyProjection;
   /** Whether the Run had already stopped when the unit loop ended; a stopped Run samples nothing. */
   readonly stopped: boolean;
+  /** What a stopped Run's sample says it did not draw, when the stop has its own words (Issue #51, S16a). */
+  readonly stoppedReason: string | null;
   /** Whether the bound plan leaves 核对与抽检 out (Issue #419); such a Run draws no sample at all. */
   readonly removedByEditor: boolean;
+  /** The ceiling stopped a sampling turn: the Run ends as the Run Budget Ceiling reached (Issue #51, S16a). */
+  readonly onCeilingReached: () => void;
 }
 
 /** What two attempts of one unit cost together; `null` only when neither reported any usage at all. */

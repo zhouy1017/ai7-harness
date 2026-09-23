@@ -22,7 +22,7 @@ import { BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_TASK_GOAL } from '../sh
 import type { ClarificationFacts } from './analysis/clarifications.js';
 import { namedNonEffects } from './analysis/baseline-analysis-store.js';
 import type { ManifestBlockInput } from './analysis/coverage-manifest.js';
-import { PLAN_EDITABLE_ADAPTATIONS, PLAN_EDIT_ADAPTATION_LABELS, PLAN_EDIT_STEP_LABELS } from './analysis/plan-edits.js';
+import { PLAN_CEILING_LAUNCH_REASON, PLAN_EDITABLE_ADAPTATIONS, PLAN_EDIT_ADAPTATION_LABELS, PLAN_EDIT_STEP_LABELS } from './analysis/plan-edits.js';
 import type { Connectivity } from './connectivity.js';
 import { graphemeCount, sliceGraphemes } from './analysis/factual-review-contract.js';
 import type { ReviewRunPlanFacts } from './review/review-runs.js';
@@ -84,7 +84,10 @@ const SAFE_RETRY_ADAPTATION = PLAN_EDIT_ADAPTATION_LABELS['safe-retry'];
 export const PLAN_EDIT_DRIFT_REASON = '计划的关键内容已变化：先重新确认计划，你的改动会保留';
 export const PLAN_EDIT_STARTED_REASON = '任务已经开始，计划不能再改';
 /** A plan the editor cannot edit because its kind keeps no plan versions. */
-const NOT_EDITABLE: TaskPlanProjection['edit'] = { editable: false, reason: null, lastEdit: null };
+const NOT_EDITABLE: TaskPlanProjection['edit'] = { editable: false, reason: null, lastEdit: null, budget: null };
+
+/** 已停止 · 预算已达上限 (Issue #51, S16a; editor-surfaces §6 状态): the pill of a Run the Run Budget Ceiling stopped. */
+export const BUDGET_REACHED_STATE = { key: 'budget-reached', label: '已停止 · 预算已达上限' } as const;
 /** §10's editorial 不会做: the technical half reads in 查看技术详情. */
 const EDITORIAL_NOT_DO = ['不会直接修改稿件', '不导出或发布', '不存里程碑版本'] as const;
 
@@ -444,6 +447,7 @@ export function fixedTaskPlan(input: {
     runControl: null,
     redo: null,
     clarifications: [],
+    budgetStop: null,
   };
 }
 
@@ -498,8 +502,9 @@ function baselineState(projection: BaselineAnalysisProjection): TaskPlanProjecti
       return { key: 'settled', label: '已完成' };
     case 'failed':
       return { key: 'stopped', label: '运行失败' };
+    // Run Budget Ceiling Reached (Issue #51, S16a; MODEL-016): interrupted, and its outcome names the ceiling.
     case 'interrupted':
-      return { key: 'stopped', label: '已中断' };
+      return projection.taskOutcome?.stop?.reason === 'run-budget-ceiling-reached' ? { ...BUDGET_REACHED_STATE } : { key: 'stopped', label: '已中断' };
     default:
       return { key: 'ready', label: '尚未开始' };
   }
@@ -509,16 +514,25 @@ function baselineState(projection: BaselineAnalysisProjection): TaskPlanProjecti
  * Whether the editor can edit the baseline analysis plan now, and the edit that made the version shown (Issue #419,
  * V2-UX-PLAN-011): a plan takes edits while it is prepared and unauthorized and no key-content change is pending.
  */
-function baselinePlanEdit(projection: BaselineAnalysisProjection, ordinal: number, blocks: ReadonlyArray<ManifestBlockInput>): TaskPlanProjection['edit'] {
+function baselinePlanEdit(
+  projection: BaselineAnalysisProjection,
+  ordinal: number,
+  blocks: ReadonlyArray<ManifestBlockInput>,
+  ceiling: RunBudgetCeilingState,
+  live: boolean,
+): TaskPlanProjection['edit'] {
   const started = projection.authorization !== null;
   const drifted = projection.planRevision !== null;
   const madeBy = projection.planRevisions.find((entry) => entry.trigger === 'plan-edit' && entry.state === 'resolved' && entry.nextOrdinal === ordinal);
+  const reason = started ? PLAN_EDIT_STARTED_REASON : drifted ? PLAN_EDIT_DRIFT_REASON : null;
   return {
     editable: !started && !drifted,
-    reason: started ? PLAN_EDIT_STARTED_REASON : drifted ? PLAN_EDIT_DRIFT_REASON : null,
+    reason,
     lastEdit: madeBy === undefined || madeBy.detectedAt === null
       ? null
       : { ordinal, recordedAt: madeBy.detectedAt, entries: madeBy.diff.map((entry) => driftEntry(entry, blocks)) },
+    // 设置上限… (Issue #51, S16a; MODEL-015): set with the plan's other edits — never under developer-live, whose launch sets it.
+    budget: { ceiling, settable: reason === null && !live, reason: reason ?? (live ? PLAN_CEILING_LAUNCH_REASON : null) },
   };
 }
 
@@ -607,8 +621,9 @@ export function baselineAnalysisPlan(input: {
           : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`,
       send: live ? `所读范围内的稿件正文发往 ${route.kind} · ${route.model}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
-      usage: live && ceiling !== 'unset' ? `至多 ${groupedCount(ceiling.maxTotalTokens)} tokens（${units} 个阅读范围）` : NO_USAGE,
-      usageIsCeiling: live && ceiling !== 'unset',
+      // The ceiling the Run is held to, the launch's or the editor's (Issue #51, S16a), is a ceiling and never a prediction.
+      usage: ceiling !== 'unset' ? `至多 ${groupedCount(ceiling.maxTotalTokens)} tokens（${units} 个阅读范围）` : NO_USAGE,
+      usageIsCeiling: ceiling !== 'unset',
       duration: DURATION_UNKNOWN,
       budgetCeiling: budgetCeilingLabel(ceiling),
       accountLimit: ACCOUNT_LIMIT_UNKNOWN,
@@ -640,7 +655,7 @@ export function baselineAnalysisPlan(input: {
       }),
       askFirst: [...LOCKED_BOUNDARY],
     },
-    edit: baselinePlanEdit(projection, version.ordinal, blocks),
+    edit: baselinePlanEdit(projection, version.ordinal, blocks, ceiling, live),
     drift: revision === null ? null : {
       reasons: ['计划冻结之后，它的关键内容已经变化；原计划不能再开始。'],
       entries: revision.diff.map((entry) => driftEntry(entry, blocks)),
@@ -700,7 +715,14 @@ export function baselineAnalysisPlan(input: {
     runControl: baselineRunControl(projection, input.stopped),
     redo: baselineRedo(projection, input.stopped),
     clarifications: baselineClarifications(projection, input.clarifications ?? []),
+    budgetStop: baselineBudgetStop(projection),
   };
+}
+
+/** What the Run read before the Run Budget Ceiling stopped it (Issue #51, S16a; MODEL-016); `null` for any other Run. */
+function baselineBudgetStop(projection: BaselineAnalysisProjection): TaskPlanProjection['budgetStop'] {
+  const stop = projection.run?.state === 'interrupted' ? projection.taskOutcome?.stop ?? null : null;
+  return stop === null ? null : { maxTotalTokens: stop.maxTotalTokens, usedTokens: stop.usedTokens, unitsSettled: stop.unitsSettled, unitsTotal: stop.unitsTotal };
 }
 
 // ---- Clarification Requests (Issue #422, plan slice S76d) --------------------------------------------------------
@@ -924,7 +946,10 @@ function baselineRedo(projection: BaselineAnalysisProjection, stopped?: Baseline
   if (run === null) return null;
   const cancelledAfterStart = run.state === 'cancelled' && run.transitions.some((transition) => transition.state === 'executing');
   const stoppedRun = (run.state === 'paused' || run.state === 'resumable' || run.state === 'awaiting-clarification') && stopped !== undefined;
-  if (!cancelledAfterStart && !stoppedRun) return null;
+  // 调整预算并重做 (Issue #51, S16a; MODEL-017): a Run the ceiling stopped has ended, its partial revision formed, so it is
+  // redone at once, as a cancelled one is — neither 续行 nor 重试 is offered for it.
+  const budgetReached = run.state === 'interrupted' && projection.taskOutcome?.stop?.reason === 'run-budget-ceiling-reached';
+  if (!cancelledAfterStart && !stoppedRun && !budgetReached) return null;
   // A stopped Run's kept ranges are carried only while this launch can still form them into its partial revision.
   const carries = stoppedRun
     ? stopped!.unitsSettled > 0 && stopped!.bindingHolds
@@ -1175,5 +1200,6 @@ export function reviewRunPlan(input: {
     runControl: null,
     redo: null,
     clarifications: [],
+    budgetStop: null,
   };
 }

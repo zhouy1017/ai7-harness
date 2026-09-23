@@ -221,6 +221,7 @@ import {
   QUICK_START_RULE_CHANGED,
   QUICK_START_SLOT_BUSY,
   RULE_STATE_LABELS,
+  SET_RULE_BUDGET,
   SET_RULE_CHANGED,
   SET_RULE_DEVELOPER_LIVE,
   SET_RULE_FIRST_BASELINE,
@@ -3889,6 +3890,7 @@ export class EditorialStore {
       removedSteps: ReadonlyArray<string>;
       disallowedAdaptations: ReadonlyArray<string>;
       askFirstAdaptations?: ReadonlyArray<string>;
+      runBudgetCeiling?: { kind: 'tokens'; maxTotalTokens: number } | null;
     },
     progress?: ProgressReader,
   ): BaselineAnalysisProjection {
@@ -4051,7 +4053,9 @@ export class EditorialStore {
       ? SET_RULE_DEVELOPER_LIVE
       : projection.planRevision !== null
         ? SET_RULE_CHANGED
-        : current !== null && current.state === 'active' && current.fromThisPlan ? setRuleAlreadyReason(current.name) : null;
+        : version.edits.runBudgetCeiling !== undefined
+          ? SET_RULE_BUDGET
+          : current !== null && current.state === 'active' && current.fromThisPlan ? setRuleAlreadyReason(current.name) : null;
     return {
       canSet: reason === null,
       reason,

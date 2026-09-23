@@ -1,4 +1,12 @@
-import type { TaskPlanKind, TaskPlanProjection, TaskPlanRunControlProjection, TaskPlanStartReadiness, TaskPlanStateKey } from '../shared/protocol.js';
+import type {
+  RunBudgetCeilingState,
+  TaskPlanKind,
+  TaskPlanProjection,
+  TaskPlanRunControlProjection,
+  TaskPlanStartReadiness,
+  TaskPlanStateKey,
+} from '../shared/protocol.js';
+import { RUN_BUDGET_CEILING_PATTERN } from '../shared/protocol.js';
 import { RUN_LIVENESS_STAGE_LABELS, attemptStateLabel, elapsedLabel, localInstantLabel, runStepIsStale } from './plan-preview-labels.js';
 import type { ReviewPill } from './review-labels.js';
 
@@ -79,6 +87,9 @@ export const TASK_PLAN_STATE_PILLS: Readonly<Record<TaskPlanStateKey, ReviewPill
   resumable: { tone: 'attention', shape: 'ring' },
   // 任务等待你的说明 (Issue #422, S76d): a ring that asks for the editor, as 可续行's does.
   'awaiting-clarification': { tone: 'attention', shape: 'ring' },
+  // 已停止 · 预算已达上限 (Issue #51, S16a): the square of a Run that ended, in attention's tone — the editor decides
+  // whether to go on — never the blocked square of 已中断.
+  'budget-reached': { tone: 'attention', shape: 'square' },
 };
 
 // ---- the goal block (S72 D5) ------------------------------------------------------------------------------
@@ -214,6 +225,27 @@ export const TASK_PLAN_EDIT_ADAPTATION_ASK_FIRST = '先问你';
 export function taskPlanEditAskFirst(label: string): string {
   return `改成先问你：${label}`;
 }
+// ---- 设置上限… (Issue #51, plan slice S16a; §6 ⑤, V2-UX-MODEL-013, MODEL-015) ----------------------------------------
+
+/** MODEL-013: what the ceiling — set or not — leaves to the model service's own account. */
+export const TASK_PLAN_BUDGET_NOTE = '用量和费用仍受所选模型服务的账户控制与计费条款约束。';
+export const TASK_PLAN_BUDGET_SET = '设置上限…';
+export const TASK_PLAN_BUDGET_REMOVE = '去掉上限';
+export const TASK_PLAN_BUDGET_INPUT = '预算上限（tokens）';
+export const TASK_PLAN_BUDGET_HINT = '这次运行用到这个数目就停下，不再让模型处理；读完的部分会保留。';
+export const TASK_PLAN_BUDGET_APPLY = '设定';
+export const TASK_PLAN_BUDGET_CANCEL = '取消';
+export const TASK_PLAN_BUDGET_INVALID = '请填一个大于 0 的整数，单位是 tokens。';
+/** The editor's ceiling not yet made the plan, beside 你改的. */
+export function taskPlanBudgetEdited(ceiling: RunBudgetCeilingState): string {
+  return ceiling === 'unset' ? '不设预算上限' : `预算上限 ${groupedCount(ceiling.maxTotalTokens)} tokens`;
+}
+/** A ceiling as the editor typed it — digits, grouped or not — or `null` when it is not a whole count from 1 up. */
+export function parseBudgetCeiling(text: string): number | null {
+  const digits = text.trim().replace(/[,，\s]/gu, '');
+  return RUN_BUDGET_CEILING_PATTERN.test(digits) ? Number(digits) : null;
+}
+
 /** PLAN-011's count of what the editor changed and has not yet made the plan. */
 export function taskPlanEditCount(count: number): string {
   return `你改了 ${count} 处`;
@@ -302,6 +334,16 @@ export const TASK_BAR_RESUME = '续行';
 /** The fallbacks when 暂停 or 续行 is refused for a reason the service does not word. */
 export const TASK_BAR_PAUSE_FAILED = '无法暂停这项任务。';
 export const TASK_BAR_RESUME_FAILED = '无法续行这项任务。';
+
+/**
+ * 已停止 · 预算已达上限 (Issue #51, S16a; §6 授权后: `调整预算并重做` / `查看部分结果`; MODEL-016, MODEL-017): the way on is a new
+ * Task under a ceiling raised or removed, and the partial results are ②A's to show. No 续行 and no 重试.
+ */
+export const TASK_BAR_ADJUST_BUDGET_REDO = '调整预算并重做';
+export const TASK_BAR_VIEW_PARTIAL = '查看部分结果';
+export function taskBarBudgetStopNote(stop: NonNullable<TaskPlanProjection['budgetStop']>): string {
+  return `已读完 ${stop.unitsSettled} / ${stop.unitsTotal} 个阅读范围，结果都已保留；这次运行用了 ${groupedCount(stop.usedTokens)} tokens，达到了预算上限 ${groupedCount(stop.maxTotalTokens)} tokens`;
+}
 
 /** A stopped Run's continuation point, as the bar states it beside 续行. */
 export function taskBarContinuationNote(unitsSettled: number, unitsTotal: number): string {
@@ -546,6 +588,20 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
           { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
           { name: 'redo', label: TASK_BAR_REDO, tone: 'quiet', disabledReason: control.redo.reason },
           runLink,
+        ],
+      };
+    }
+    // Run Budget Ceiling Reached (Issue #51, S16a): what the Run read and used, 调整预算并重做, and the partial results.
+    if (plan.state.key === 'budget-reached' && plan.budgetStop !== null) {
+      return {
+        readiness,
+        summary,
+        statement: null,
+        note: taskBarBudgetStopNote(plan.budgetStop),
+        status: plan.state.label,
+        actions: [
+          ...(plan.redo === null ? [] : [{ name: 'redo', label: TASK_BAR_ADJUST_BUDGET_REDO, tone: 'primary', disabledReason: null } as const]),
+          { name: 'run-link', label: TASK_BAR_VIEW_PARTIAL, tone: 'secondary', disabledReason: null },
         ],
       };
     }

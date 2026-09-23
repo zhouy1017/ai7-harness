@@ -111,6 +111,19 @@ import {
   taskPlanQuickStarted,
   taskPlanSavedLine,
   taskPlanSummaryLine,
+  parseBudgetCeiling,
+  TASK_BAR_ADJUST_BUDGET_REDO,
+  TASK_BAR_VIEW_PARTIAL,
+  TASK_PLAN_BUDGET_APPLY,
+  TASK_PLAN_BUDGET_CANCEL,
+  TASK_PLAN_BUDGET_HINT,
+  TASK_PLAN_BUDGET_INPUT,
+  TASK_PLAN_BUDGET_INVALID,
+  TASK_PLAN_BUDGET_NOTE,
+  TASK_PLAN_BUDGET_REMOVE,
+  TASK_PLAN_BUDGET_SET,
+  taskBarBudgetStopNote,
+  taskPlanBudgetEdited,
 } from '../../src/renderer/task-drawer-labels.js';
 import { localInstantLabel } from '../../src/renderer/plan-preview-labels.js';
 
@@ -149,7 +162,7 @@ function plan(overrides: Partial<TaskPlanProjection> = {}): TaskPlanProjection {
     outcomes: ['一份基线分析', '这次运行的运行报告'],
     notDo: { editorial: ['不会直接修改稿件', '不导出或发布'], technical: ['不创建或执行 Effect'] },
     boundary: { adaptable: [], askFirst: [] },
-    edit: { editable: true, reason: null, lastEdit: null },
+    edit: { editable: true, reason: null, lastEdit: null, budget: { ceiling: 'unset', settable: true, reason: null } },
     drift: null,
     technical: [],
     start: { readiness: 'ready', needsModelConnection: false, planEnvelopeDigest: 'a'.repeat(64), categoryDigests: [], reconfirm: null },
@@ -157,6 +170,7 @@ function plan(overrides: Partial<TaskPlanProjection> = {}): TaskPlanProjection {
     runControl: null,
     redo: null,
     clarifications: [],
+    budgetStop: null,
     ...overrides,
   };
 }
@@ -193,9 +207,12 @@ describe('the drawer', () => {
   it('gives every state a tone and a shape, so the pill never speaks by colour alone', () => {
     const keys: TaskPlanStateKey[] = [
       'ready', 'changed', 'unconnected', 'offline', 'recorded', 'blocked', 'waiting', 'running', 'settled', 'stopped', 'cancelled',
-      'cancelling', 'cancelled-after-start', 'pausing', 'paused', 'resumable', 'awaiting-clarification',
+      'cancelling', 'cancelled-after-start', 'pausing', 'paused', 'resumable', 'awaiting-clarification', 'budget-reached',
     ];
     expect(Object.keys(TASK_PLAN_STATE_PILLS).sort()).toEqual([...keys].sort());
+    // 已停止 · 预算已达上限 (Issue #51, S16a) asks for the editor: never the blocked square of 已中断.
+    expect(TASK_PLAN_STATE_PILLS['budget-reached']).toEqual({ tone: 'attention', shape: 'square' });
+    expect(TASK_PLAN_STATE_PILLS['budget-reached']).not.toEqual(TASK_PLAN_STATE_PILLS.stopped);
     expect(new Set(keys.map((key) => TASK_PLAN_STATE_PILLS[key].shape)).size).toBeGreaterThan(4);
     // 模型未连接 is its own shape among the pre-start states: it never reads as 计划已变化 without colour.
     expect(TASK_PLAN_STATE_PILLS.unconnected.shape).not.toBe(TASK_PLAN_STATE_PILLS.changed.shape);
@@ -344,7 +361,7 @@ describe('the authorization bar (S74a)', () => {
   });
 
   it('says J-03\'s Task is only recorded, and a plan without a route is blocked before dispatch, beside the same start (ADR 0055)', () => {
-    const recordOnly = taskBarView(barOf({ readiness: 'record-only' }, { kind: 'fixed-task', planVersion: null, edit: { editable: false, reason: null, lastEdit: null } }));
+    const recordOnly = taskBarView(barOf({ readiness: 'record-only' }, { kind: 'fixed-task', planVersion: null, edit: { editable: false, reason: null, lastEdit: null, budget: null } }));
     expect(recordOnly.note).toBe('此任务只记录运行，不会派发');
     expect(names(recordOnly)).toEqual(['start', 'revise', 'save-draft']);
     // A kind that keeps no plan versions has no editing for 返回修改 to open, and says so.
@@ -575,7 +592,8 @@ describe('the activity card (Issue #422, AUTH-011)', () => {
 // Issue #419 (plan slice S73; editor-surfaces §6 可编辑, V2-UX-PLAN-009, PLAN-011): the editable plan's words, and the
 // bar while the editor has edits the plan does not hold yet.
 describe('the editable plan (S73)', () => {
-  const edit = (overrides: Partial<TaskPlanProjection['edit']> = {}): TaskPlanProjection['edit'] => ({ editable: true, reason: null, lastEdit: null, ...overrides });
+  const edit = (overrides: Partial<TaskPlanProjection['edit']> = {}): TaskPlanProjection['edit'] =>
+    ({ editable: true, reason: null, lastEdit: null, budget: { ceiling: 'unset', settable: true, reason: null }, ...overrides });
   const rows = (view: ReturnType<typeof taskBarView>) => view.actions.map((entry) => [entry.name, entry.tone, entry.disabledReason]);
 
   it('speaks §6 可编辑\'s words, each control named for a reader who does not see its glyph', () => {
@@ -654,6 +672,49 @@ describe('改计划重做 (S76c)', () => {
     expect(TASK_BAR_REDO_CONFIRM).toBe('确认改计划重做');
     expect(TASK_BAR_REDO_KEEP).toBe('先不重做');
     expect(TASK_BAR_REDOING_NOTE).toBe('已记下改计划重做：这次运行正在取消，取消完成后准备新任务');
+  });
+});
+
+// Issue #51 (plan slice S16a; editor-surfaces §6 ⑤ and 授权后, V2-UX-MODEL-013, MODEL-015 to MODEL-017): 设置上限… in the plan,
+// and the bar of a Run the ceiling stopped.
+describe('the Run Budget Ceiling in the drawer (S16a)', () => {
+  it('speaks §6\'s words for the ceiling and its form', () => {
+    expect(TASK_PLAN_BUDGET_NOTE).toBe('用量和费用仍受所选模型服务的账户控制与计费条款约束。');
+    expect(TASK_PLAN_BUDGET_SET).toBe('设置上限…');
+    expect(TASK_PLAN_BUDGET_REMOVE).toBe('去掉上限');
+    expect(TASK_PLAN_BUDGET_INPUT).toBe('预算上限（tokens）');
+    expect(TASK_PLAN_BUDGET_HINT).toBe('这次运行用到这个数目就停下，不再让模型处理；读完的部分会保留。');
+    expect(TASK_PLAN_BUDGET_APPLY).toBe('设定');
+    expect(TASK_PLAN_BUDGET_CANCEL).toBe('取消');
+    expect(TASK_PLAN_BUDGET_INVALID).toBe('请填一个大于 0 的整数，单位是 tokens。');
+    expect(taskPlanBudgetEdited({ kind: 'tokens', maxTotalTokens: 20000 })).toBe('预算上限 20,000 tokens');
+    expect(taskPlanBudgetEdited('unset')).toBe('不设预算上限');
+  });
+
+  it('takes a whole count of tokens as typed, grouped or not, and nothing else', () => {
+    expect(parseBudgetCeiling('5000')).toBe(5000);
+    expect(parseBudgetCeiling(' 20,000 ')).toBe(20000);
+    expect(parseBudgetCeiling('20，000')).toBe(20000);
+    expect(parseBudgetCeiling('1 000 000')).toBe(1_000_000);
+    expect(parseBudgetCeiling('999999999999')).toBe(999_999_999_999);
+    for (const refused of ['', '0', '-5', '5.5', '05000', '1e4', 'abc', '5000 tokens', '1000000000000']) expect(parseBudgetCeiling(refused)).toBeNull();
+  });
+
+  it('shows a Run the ceiling stopped with what it read and used, 调整预算并重做 and 查看部分结果 — no 续行, no 重试', () => {
+    const budgetStop = { maxTotalTokens: 5000, usedTokens: 6620, unitsSettled: 4, unitsTotal: 8 };
+    expect(taskBarBudgetStopNote(budgetStop)).toBe('已读完 4 / 8 个阅读范围，结果都已保留；这次运行用了 6,620 tokens，达到了预算上限 5,000 tokens');
+    const redo = { summary: [], prepare: { goal: 'g', update: { mode: 'sync-current', selectedRange: null }, redoOf: 'r' } } as unknown as TaskPlanProjection['redo'];
+    const view = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
+      state: { key: 'budget-reached', label: '已停止 · 预算已达上限' }, budgetStop, redo,
+    }));
+    expect(view.status).toBe('已停止 · 预算已达上限');
+    expect(view.note).toBe(taskBarBudgetStopNote(budgetStop));
+    expect(view.actions.map((entry) => [entry.name, entry.label, entry.tone, entry.disabledReason])).toEqual([
+      ['redo', TASK_BAR_ADJUST_BUDGET_REDO, 'primary', null],
+      ['run-link', TASK_BAR_VIEW_PARTIAL, 'secondary', null],
+    ]);
+    expect(TASK_BAR_ADJUST_BUDGET_REDO).toBe('调整预算并重做');
+    expect(TASK_BAR_VIEW_PARTIAL).toBe('查看部分结果');
   });
 });
 

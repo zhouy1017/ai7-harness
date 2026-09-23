@@ -65,7 +65,17 @@ import {
   reusePlanCountsDiffEntry,
   sameMaterialPlanInputs,
 } from './plan-boundary.js';
-import { NO_PLAN_EDITS, canonicalPlanEdits, planEditDiff, planEditsAreEmpty, planEditsOf, type PlanEdits } from './plan-edits.js';
+import {
+  NO_PLAN_EDITS,
+  PLAN_CEILING_LAUNCH_REASON,
+  canonicalPlanEdits,
+  planEditCeiling,
+  planEditDiff,
+  planEditsAreEmpty,
+  planEditsOf,
+  withoutCeiling,
+  type PlanEdits,
+} from './plan-edits.js';
 import {
   CLARIFICATION_ANSWER_SCHEMA,
   CLARIFICATION_NOTE_MAX,
@@ -178,6 +188,34 @@ const OUTCOME_LABELS = {
   interrupted: '任务结果：已中断',
   cancelled: '任务结果：已取消',
 } as const;
+
+/** The Run Budget Ceiling Reached outcome's own words (Issue #51, S16a; V2-UX-MODEL-016, interaction-spec §706). */
+const BUDGET_REACHED_OUTCOME_LABEL = '任务结果：任务运行预算已达上限 · 已保留部分结果' as const;
+/** …and the Run's, where ②A and its card read the Run (RUN-012): a terminal partial outcome, never 已中断. */
+export const BUDGET_REACHED_RUN_LABEL = '任务运行预算已达上限 · 已保留部分结果' as const;
+
+/** Why an interrupted Run stopped, when a limit stopped it (Issue #51, S16a): the ceiling, what it used, and what it read. */
+export interface RunStop {
+  readonly reason: 'run-budget-ceiling-reached';
+  readonly maxTotalTokens: number;
+  readonly usedTokens: number;
+  readonly unitsSettled: number;
+  readonly unitsTotal: number;
+}
+
+/** A recorded stop read back: exactly the five facts, each a count; `null` for anything else, which no reader invents. */
+function runStopOf(value: unknown): RunStop | null {
+  if (!isRecord(value) || value.reason !== 'run-budget-ceiling-reached' || Object.keys(value).length !== 5) return null;
+  const counts = [value.maxTotalTokens, value.usedTokens, value.unitsSettled, value.unitsTotal];
+  if (!counts.every((count) => typeof count === 'number' && Number.isSafeInteger(count) && count >= 0)) return null;
+  return {
+    reason: 'run-budget-ceiling-reached',
+    maxTotalTokens: value.maxTotalTokens as number,
+    usedTokens: value.usedTokens as number,
+    unitsSettled: value.unitsSettled as number,
+    unitsTotal: value.unitsTotal as number,
+  };
+}
 
 /** Whether a Run began executing its units: the one fact that tells a started cancellation from a wait cancelled. */
 function runBegan(transitions: ReadonlyArray<{ state: BaselineAnalysisRunState }>): boolean {
@@ -817,7 +855,8 @@ export class BaselineAnalysisStore {
     if (authorization === undefined) {
       planRevision = revisions.filter((entry) => entry.state === 'pending' && entry.priorPlanVersionId === currentVersion.planVersionId).at(-1) ?? null;
       if (planRevision === null) {
-        const live = this.#currentMaterialInputs(bookId, intent.mode, materialInputs.selectedRange, manifest.units.length);
+        const live = this.#currentMaterialInputs(bookId, intent.mode, materialInputs.selectedRange, manifest.units.length,
+          planEditCeiling(this.#planEditsOf(intent.taskIntentId, currentVersion.ordinal)));
         const diff = diffMaterialPlanInputs(materialInputs, live);
         if (diff.length > 0) {
           const changedFields = diff.map((entry) => entry.field);
@@ -873,7 +912,9 @@ export class BaselineAnalysisStore {
               : state === 'admitted' ? '已进入调度'
                 : state === 'executing' ? '正在执行'
                   : state === 'settled' ? '已形成结果集修订版'
-                    : state === 'failed' ? '运行失败' : '运行已中断',
+                    : state === 'failed' ? '运行失败'
+                      // Run Budget Ceiling Reached keeps its own words, never 已中断's (Issue #51, S16a; RUN-012).
+                      : outcome !== undefined && run !== null && this.#runStop(run.runRecordId) !== null ? BUDGET_REACHED_RUN_LABEL : '运行已中断',
       taskIntent,
       checkpoint: {
         manuscriptId: asString(checkpoint.manuscript_id),
@@ -1047,6 +1088,8 @@ export class BaselineAnalysisStore {
             recordedAt: asString(row.run_recorded_at),
             progress: state === 'admitted' || state === 'executing' || state === 'cancelling' || state === 'pausing' ? progress(runRecordId) : null,
             openClarification: this.#openClarificationOf(runRecordId, state),
+            // 已停止 · 预算已达上限 (Issue #51, S16a): an interrupted Run whose outcome names the ceiling.
+            budgetReached: state === 'interrupted' && this.#runStop(runRecordId) !== null,
           },
           planRevision: null,
         });
@@ -1099,7 +1142,8 @@ export class BaselineAnalysisStore {
       const plan = this.#planRecords(intent.taskIntentId, intent.mode, current.ordinal);
       const manifest = plan['coverage-manifest'] as CoverageManifestProjection;
       const frozen = materialPlanInputsOfComponents(plan, intent.record);
-      const diff = diffMaterialPlanInputs(frozen, this.#currentMaterialInputs(intent.bookId, intent.mode, frozen.selectedRange, manifest.units.length));
+      const diff = diffMaterialPlanInputs(frozen, this.#currentMaterialInputs(intent.bookId, intent.mode, frozen.selectedRange, manifest.units.length,
+        planEditCeiling(this.#planEditsOf(intent.taskIntentId, current.ordinal))));
       revision = diff.length === 0 ? null : { planRevisionId: null, at: current.createdAt, changedFields: diff.map((entry) => entry.field) };
     }
     if (revision === null || revision.changedFields.includes('predecessorRevision')) return null;
@@ -1122,13 +1166,16 @@ export class BaselineAnalysisStore {
     if (report !== null) {
       requireAnalysis(runReportDigest(report) === record.reportDigest, 'ANALYSIS_RECORD_INVALID', '运行报告与其记录的摘要不一致。');
     }
+    // A stop is named only on an interrupted outcome recorded since S16a (Issue #51); every earlier one reads as it was.
+    const stop = classification === 'interrupted' ? runStopOf(record.stop) : null;
     return {
       outcomeId: asString(row.outcome_id),
       classification,
-      label: OUTCOME_LABELS[classification],
+      label: stop === null ? OUTCOME_LABELS[classification] : BUDGET_REACHED_OUTCOME_LABEL,
       recordedAt: asString(row.recorded_at),
       resultSetRevisionId: row.result_set_revision_id === null ? null : asString(row.result_set_revision_id),
       safeNextAction: asString(record.safeNextAction),
+      stop,
       report: report === null ? null : runReportProjection(report),
       reportAbsentReason: report === null ? PRE_RUN_REPORT_REASON : null,
     };
@@ -1282,7 +1329,17 @@ export class BaselineAnalysisStore {
    * a re-bound ceiling, a re-pinned sidecar, a contract that now promises another outcome class —
    * which is exactly when ADR 0009 suspends the plan for a Plan Revision.
    */
-  #currentMaterialInputs(bookId: string, mode: AnalysisTaskMode, selectedRange: BaselineAnalysisSelectedRange | null, unitCount: number): MaterialPlanInputsProjection {
+  #currentMaterialInputs(
+    bookId: string,
+    mode: AnalysisTaskMode,
+    selectedRange: BaselineAnalysisSelectedRange | null,
+    unitCount: number,
+    /**
+     * The ceiling the plan version's own edit sets (Issue #51, S16a): the editor's, which is the plan's to hold and never
+     * a drift of it. The launch sets none outside developer-live, where the launch's is the one there is.
+     */
+    editorCeiling: RunBudgetCeilingState = 'unset',
+  ): MaterialPlanInputsProjection {
     const connection = this.#db.prepare(
       `SELECT provider_id, model_id, adapter_revision, configuration_revision, credential_reference
        FROM model_service_connections WHERE connection_id = 'main-editorial-deepseek-v4-pro'`,
@@ -1327,7 +1384,7 @@ export class BaselineAnalysisStore {
       },
       selectedRange: this.#definition.mode(mode).rangeBound ? selectedRange : null,
       predecessorRevision: latest === undefined ? null : { revisionId: asString(latest.revision_id), ordinal: asNumber(latest.ordinal), digest: asString(latest.sha256) },
-      runBudgetCeiling: live === null ? 'unset' : resolveDeveloperLiveCeiling(live.runBudgetCeiling, unitCount),
+      runBudgetCeiling: live === null ? editorCeiling : resolveDeveloperLiveCeiling(live.runBudgetCeiling, unitCount),
       outboundDataCategory: 'public-or-synthetic',
       expectedOutcome: this.#definition.expectedOutcome,
     };
@@ -1428,7 +1485,8 @@ export class BaselineAnalysisStore {
     const pending = existing.planRevision;
     const instant = new Date().toISOString();
     const manifest = existing.coverageManifest;
-    const proposed = this.#currentMaterialInputs(bookId, intent.mode, requestedRange, manifest.units.length);
+    const proposed = this.#currentMaterialInputs(bookId, intent.mode, requestedRange, manifest.units.length,
+      planEditCeiling(this.#planEditsOf(intent.taskIntentId, current.ordinal)));
     const storedCounts = existing.update?.reusePlan?.counts ?? null;
     const countsFor = (inputs: MaterialPlanInputsProjection): AnalysisReusePlanCounts | null =>
       this.#reusePlanCountsFor(bookId, intent.mode, manifest, inputs.selectedRange);
@@ -1532,12 +1590,20 @@ export class BaselineAnalysisStore {
    * Nothing is recorded when the Task has been authorized, a key-content change is pending (重新确认计划 settles it
    * first; the editor's pending edits are theirs to apply after), the editor was reading another version, the edit
    * names what the plan cannot leave out, or nothing changed. An edit changes the execution plan and the envelope
-   * only: a version whose other components would differ — the route or the fixture this launch binds has moved since
-   * the plan froze — is refused rather than written.
+   * only — and, when it sets the Run Budget Ceiling (Issue #51, S16a), that one field of the Provider Resolution Plan: a
+   * version whose other components would differ — the route or the fixture this launch binds has moved since the plan
+   * froze — is refused rather than written. Under developer-live the launch sets the ceiling, so no edit does.
    */
   editPlan(
     bookId: string,
-    input: { taskIntentId: string; planEnvelopeDigest: string; removedSteps: unknown; disallowedAdaptations: unknown; askFirstAdaptations?: unknown },
+    input: {
+      taskIntentId: string;
+      planEnvelopeDigest: string;
+      removedSteps: unknown;
+      disallowedAdaptations: unknown;
+      askFirstAdaptations?: unknown;
+      runBudgetCeiling?: unknown;
+    },
   ): AnalysisProjection {
     requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND, 'ANALYSIS_PLAN_EDIT_UNSUPPORTED', '这类任务的计划不能在这里修改。');
     const existing = this.inspect(bookId);
@@ -1552,6 +1618,7 @@ export class BaselineAnalysisStore {
       'ANALYSIS_PLAN_EDIT_STALE', '计划已经变了；请重新查看计划后再修改。');
     const next = canonicalPlanEdits(input);
     requireAnalysis(next !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '这项修改不在这份计划可以改的范围内。');
+    requireAnalysis(this.#launch.live === null || next.runBudgetCeiling === undefined, 'ANALYSIS_PLAN_EDIT_INVALID', PLAN_CEILING_LAUNCH_REASON);
     const current = this.#planVersionFacts(intent.taskIntentId).at(-1);
     requireAnalysis(current !== undefined && current.ordinal === existing.planVersion.ordinal, 'ANALYSIS_RECORD_INVALID', '任务计划缺少计划版本。');
     const prior = this.#planEditsOf(intent.taskIntentId, current.ordinal);
@@ -1570,10 +1637,13 @@ export class BaselineAnalysisStore {
       createdForDirtyJournal: asNumber(checkpointRow.created_for_dirty_journal) === 1,
     };
     const stored = existing.planVersion.materialInputs;
+    // The ceiling is a material input: the version this edit yields proposes the editor's (Issue #51, S16a).
+    const proposed: MaterialPlanInputsProjection = { ...stored, runBudgetCeiling: this.#launch.live === null ? planEditCeiling(next) : stored.runBudgetCeiling };
+    const ceilingMoved = canonicalJson(stored.runBudgetCeiling) !== canonicalJson(proposed.runBudgetCeiling);
     const instant = new Date().toISOString();
     transact(this.#db, () => {
       const planRevisionId = this.#insertPlanRevision({
-        taskIntentId: intent.taskIntentId, prior: current, priorInputs: stored, proposed: stored, diff, trigger: 'plan-edit', instant, actor: 'editor',
+        taskIntentId: intent.taskIntentId, prior: current, priorInputs: stored, proposed, diff, trigger: 'plan-edit', instant, actor: 'editor',
       });
       this.#writePlanVersion({
         intent,
@@ -1587,8 +1657,11 @@ export class BaselineAnalysisStore {
       });
       const before = this.#planDigests(intent.taskIntentId, current.ordinal);
       const after = this.#planDigests(intent.taskIntentId, current.ordinal + 1);
+      // A ceiling the editor moved moves the Provider Resolution Plan too — in that one field, and nothing else.
+      const providerMoved = ceilingMoved && !this.#providerPlansDifferOnlyInCeiling(intent.taskIntentId, current.ordinal);
       const moved = Object.keys({ ...before, ...after }).filter((component) =>
-        component !== 'execution-plan' && component !== 'plan-envelope' && before[component] !== after[component]);
+        component !== 'execution-plan' && component !== 'plan-envelope' && before[component] !== after[component] &&
+        (component !== 'provider-resolution-plan' || !ceilingMoved || providerMoved));
       requireAnalysis(moved.length === 0, 'ANALYSIS_PLAN_EDIT_STALE', '这份计划准备之后，执行它的路由或所用工序已经变了；请重新准备这项任务再修改。');
     });
     return this.inspect(bookId);
@@ -1714,6 +1787,20 @@ export class BaselineAnalysisStore {
       .map((row) => [asString(row.component), asString(row.sha256)]));
   }
 
+  /** Whether one version's Provider Resolution Plan and the next differ in the Run Budget Ceiling alone (Issue #51, S16a). */
+  #providerPlansDifferOnlyInCeiling(taskIntentId: string, priorOrdinal: number): boolean {
+    const sansCeiling = (ordinal: number): string => {
+      const row = this.#db.prepare(
+        "SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = ? AND component = 'provider-resolution-plan'",
+      ).get(taskIntentId, ordinal) as SqlRow | undefined;
+      requireAnalysis(row !== undefined, 'ANALYSIS_RECORD_INVALID', '任务计划记录图不完整。');
+      const record = parseCanonicalJson(asString(row.canonical_json));
+      requireAnalysis(isRecord(record), 'ANALYSIS_RECORD_INVALID', '任务计划记录图不完整。');
+      return canonicalJson({ ...record, runBudgetCeiling: null });
+    };
+    return sansCeiling(priorOrdinal) === sansCeiling(priorOrdinal + 1);
+  }
+
   #runProjection(runRecord: SqlRow, progress: ProgressReader): NonNullable<BaselineAnalysisProjection['run']> {
     const runRecordId = asString(runRecord.run_record_id);
     const states = this.#db.prepare('SELECT * FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence').all(runRecordId) as SqlRow[];
@@ -1775,7 +1862,8 @@ export class BaselineAnalysisStore {
     return {
       runRecordId,
       state: current.state,
-      stateLabel: current.state === 'cancelled' && runBegan(transitions) ? RUN_CANCELLED_AFTER_START_LABEL : RUN_STATE_LABELS[current.state],
+      stateLabel: current.state === 'cancelled' && runBegan(transitions) ? RUN_CANCELLED_AFTER_START_LABEL
+        : current.state === 'interrupted' && this.#runStop(runRecordId) !== null ? BUDGET_REACHED_RUN_LABEL : RUN_STATE_LABELS[current.state],
       recordedAt: asString(runRecord.recorded_at),
       transitions,
       adaptations,
@@ -2220,8 +2308,12 @@ export class BaselineAnalysisStore {
     const redoOf = input.redoOf ?? null;
     if (redoOf !== null) {
       const run = existing.run;
-      requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND && run !== null && run.runRecordId === redoOf && run.state === 'cancelled' &&
-        run.transitions.some((transition) => transition.state === 'executing'), 'ANALYSIS_REDO_STALE', '只有这本书最近一项任务里开始后取消的运行可以改计划重做。');
+      // 调整预算并重做 (Issue #51, S16a; V2-UX-MODEL-017): a Run the Run Budget Ceiling stopped is redone the same way — the
+      // ceiling is raised or removed in the new Task's plan, never on the stopped Run.
+      const budgetReached = run !== null && run.state === 'interrupted' && existing.taskOutcome?.stop?.reason === 'run-budget-ceiling-reached';
+      requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND && run !== null && run.runRecordId === redoOf &&
+        ((run.state === 'cancelled' && run.transitions.some((transition) => transition.state === 'executing')) || budgetReached),
+      'ANALYSIS_REDO_STALE', '只有这本书最近一项任务里开始后取消、或因预算上限停止的运行可以改计划重做。');
       const expected = latest !== null && latest.provenance.runRecordId === redoOf
         ? { mode: 'sync-current', selectedRange: null }
         : existing.update === null ? null : { mode: existing.update.mode, selectedRange: existing.update.selectedRange };
@@ -2451,6 +2543,9 @@ export class BaselineAnalysisStore {
     // deterministic route, or the v5 live binding. Both are frozen before authorization, never chosen
     // at dispatch, so an authorized Run can never transmit somewhere its plan did not name.
     const live = this.#launch.live;
+    // The editor's ceiling is the plan's own outside developer-live (Issue #51, S16a); under it the launch sets the
+    // ceiling, so a redo that copies a ceiling the editor once set keeps the rest of the edit and not the ceiling.
+    const edits = live === null ? input.edits : withoutCeiling(input.edits);
     const promptContractDigest = this.#definition.promptContractDigest;
     const composition = live === null
       ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest)
@@ -2493,7 +2588,7 @@ export class BaselineAnalysisStore {
               fixtureLineage: this.#route.fixtureLineage,
             },
       outboundDataCategory: 'public-or-synthetic',
-      runBudgetCeiling: live === null ? 'unset' : resolveDeveloperLiveCeiling(live.runBudgetCeiling, manifest.units.length),
+      runBudgetCeiling: live === null ? planEditCeiling(edits) : resolveDeveloperLiveCeiling(live.runBudgetCeiling, manifest.units.length),
     };
     const dispatchAllowed = live !== null || this.#route !== null;
     const stopCondition = live !== null
@@ -2502,7 +2597,7 @@ export class BaselineAnalysisStore {
         ? 'Provider Processing v1 denies the remote route; execution binds only ai7-local-deterministic'
         : 'Provider Processing v1 denies the remote route and no local deterministic route is bound';
     // An edited plan names what it leaves out; a plan AI7 proposed names nothing, so its record reads as before.
-    const editorEdits = planEditsAreEmpty(input.edits) ? {} : { editorEdits: input.edits };
+    const editorEdits = planEditsAreEmpty(edits) ? {} : { editorEdits: edits };
     const executionPlan = reusePlan === null
       ? { steps: this.#definition.executionSteps, effects: [], unitCount: manifest.units.length, reducerStages: this.#definition.reducerStages, stopCondition, ...editorEdits }
       : {
@@ -2547,7 +2642,7 @@ export class BaselineAnalysisStore {
       behaviorCompositionDigest: composition.digest,
       // The plan version and the Plan Boundary Split are part of the canonical envelope (Issue #48).
       planVersion: ordinal,
-      boundary: planBoundarySplit(input.edits.disallowedAdaptations, input.edits.askFirstAdaptations ?? []),
+      boundary: planBoundarySplit(edits.disallowedAdaptations, edits.askFirstAdaptations ?? []),
     };
     const envelope = canonicalRecord(reusePlan === null ? envelopeBase : {
       ...envelopeBase,
@@ -2942,6 +3037,15 @@ export class BaselineAnalysisStore {
     return { answerId, runRecordId: run.runRecordId, runState: run.state };
   }
 
+  /** Why a Run's interrupted outcome says it stopped (Issue #51, S16a); `null` for any other Run, or one with no outcome. */
+  #runStop(runRecordId: string): RunStop | null {
+    const row = this.#db.prepare("SELECT canonical_json FROM analysis_task_outcomes WHERE run_record_id = ? AND classification = 'interrupted'")
+      .get(runRecordId) as SqlRow | undefined;
+    if (row === undefined) return null;
+    const record = parseCanonicalJson(asString(row.canonical_json));
+    return isRecord(record) ? runStopOf(record.stop) : null;
+  }
+
   /** The first question of a Run under way or stopped that still waits for its answer; `null` when none does. */
   #openClarificationOf(runRecordId: string, state: BaselineAnalysisRunState): { requestId: string; unitOrdinal: number; raisedAt: string } | null {
     if (!(state === 'admitted' || state === 'executing' || state === 'pausing' || state === 'paused' || state === 'resumable' ||
@@ -3048,7 +3152,8 @@ export class BaselineAnalysisStore {
     const plan = this.#planRecords(intent.taskIntentId, intent.mode, version.ordinal);
     const frozen = materialPlanInputsOfComponents(plan, intent.record);
     const manifest = plan['coverage-manifest'] as CoverageManifestProjection;
-    const live = this.#currentMaterialInputs(intent.bookId, intent.mode, frozen.selectedRange, manifest.units.length);
+    const live = this.#currentMaterialInputs(intent.bookId, intent.mode, frozen.selectedRange, manifest.units.length,
+      planEditCeiling(this.#planEditsOf(intent.taskIntentId, version.ordinal)));
     return diffMaterialPlanInputs(frozen, live).map((entry) => entry.label);
   }
 
@@ -3146,6 +3251,9 @@ export class BaselineAnalysisStore {
     requireAnalysis(split === undefined || (JSON.stringify(split.adaptable.map((entry) => entry.adaptationClass)) === JSON.stringify(allowed) &&
       JSON.stringify((split.askFirst ?? []).map((entry) => entry.adaptationClass)) === JSON.stringify(asked)),
       'ANALYSIS_RECORD_INVALID', '计划信封与计划修改不一致。');
+    // Outside developer-live the ceiling the Run is held to is the one the editor set in this version, or none (Issue #51).
+    requireAnalysis(live !== null || canonicalJson(runBudgetCeiling) === canonicalJson(planEditCeiling(editorEdits)),
+      'ANALYSIS_RECORD_INVALID', '计划的预算上限与计划修改不一致。');
     let update: ExecutionUpdateFacts | null = null;
     if (this.#carriesPlan(intent.mode)) {
       const latestRow = this.#revisionRows(intent.bookId).at(-1);
@@ -3474,6 +3582,8 @@ export class BaselineAnalysisStore {
      * the outcomes relation is insert-only under the immutability triggers, so nothing rewrites it.
      */
     report: RunReportRecord;
+    /** Why an interrupted Run stopped, when the Run Budget Ceiling stopped it (Issue #51, S16a); named only then. */
+    stop?: RunStop;
   }): void {
     const outcomeId = randomUUID();
     const recordedAt = new Date().toISOString();
@@ -3488,6 +3598,7 @@ export class BaselineAnalysisStore {
       report: input.report,
       reportDigest: runReportDigest(input.report),
       recordedAt,
+      ...(input.stop === undefined ? {} : { stop: { ...input.stop } }),
     });
     this.#db.prepare(
       `INSERT INTO analysis_task_outcomes(outcome_id, task_intent_id, run_record_id, classification, result_set_revision_id, recorded_at, canonical_json, sha256)

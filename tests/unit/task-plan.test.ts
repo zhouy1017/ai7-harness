@@ -146,7 +146,7 @@ describe('route-aware readiness of the authorization bar (S74a A3; AUTH-005, MOD
       outcomes: ['一份基线分析'],
       notDo: { editorial: [], technical: [] },
       boundary: { adaptable: [], askFirst: [...LOCKED_BOUNDARY] },
-      edit: { editable: true, reason: null, lastEdit: null },
+      edit: { editable: true, reason: null, lastEdit: null, budget: { ceiling: { kind: 'tokens', maxTotalTokens: 240_000 }, settable: false, reason: '这次启动的预算上限由开发者实时启动参数决定，不能在计划里设置。' } },
       drift: null,
       technical: [{ key: 'plan-envelope', label: '计划权限边界', value: 'e'.repeat(64) }],
       start: { readiness: 'ready', needsModelConnection: true, planEnvelopeDigest: 'e'.repeat(64), categoryDigests: [], reconfirm: null, ...start },
@@ -154,6 +154,7 @@ describe('route-aware readiness of the authorization bar (S74a A3; AUTH-005, MOD
       runControl: null,
       redo: null,
       clarifications: [],
+      budgetStop: null,
     };
   }
 

@@ -552,6 +552,15 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-plan-asked { margin-bottom: .45rem; }
 .task-plan-edit-ask-first { margin-left: .35rem; padding: 0 .4rem; border: 1px solid #b9c3bf; border-radius: 6px; background: #fff; color: #4e564c; font-size: .78rem; }
 .task-plan-edit-ask-first::before { content: '先问你'; }
+/* 设置上限… (Issue #51, S16a; MODEL-013, MODEL-015): section ⑤'s ceiling — the account note, the editor's pending ceiling
+   beside 你改的, and the one labelled field for a count of tokens, with why a value was not taken in words. */
+.task-plan-budget { display: grid; gap: .4rem; justify-items: start; margin-top: .45rem; }
+.task-plan-budget p { margin: 0; }
+.task-plan-budget-actions { display: flex; flex-wrap: wrap; gap: .45rem; }
+.task-plan-budget-form { display: grid; gap: .35rem; width: 100%; padding: .65rem; border: 1px solid #c9c2ae; border-radius: 10px; background: #fffdf6; }
+.task-plan-budget-input { width: min(100%, 14rem); box-sizing: border-box; font: inherit; }
+.task-plan-budget-input[aria-invalid="true"] { border: 2px solid #9a3b1c; }
+.task-plan-budget-error { color: #9a3b1c; font-weight: 700; }
 /* 知识库 › 工序与规则: one card per rule, its state in words and shape. */
 .default-rule-list { display: grid; gap: .8rem; }
 .default-rule-card { display: grid; gap: .45rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
@@ -962,7 +971,8 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .global-attention-group, .global-attention-item,
   .manuscript-export, .export-format-option, .export-option, .export-fidelity-row, .export-receipt, .export-records > li,
   .task-plan-default-rule-confirm, .default-rule-card, .task-plan-activity, .task-bar-cancel-impact,
-  .task-plan-clarification, .task-plan-choice, .task-plan-choice-recommended, .task-plan-clarification-deferred, .task-plan-edit-ask-first {
+  .task-plan-clarification, .task-plan-choice, .task-plan-choice-recommended, .task-plan-clarification-deferred, .task-plan-edit-ask-first,
+  .task-plan-budget-form, .task-plan-budget-input {
     color: CanvasText;
     background: Canvas;
     border-color: CanvasText;

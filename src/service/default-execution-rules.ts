@@ -446,6 +446,8 @@ export const SET_RULE_FIRST_BASELINE = '首次基线分析只做一次，不能�
 export const SET_RULE_RANGE = '重新分析所选范围每次都要先选范围，不能设为快速开始默认。';
 export const SET_RULE_DEVELOPER_LIVE = '开发者实时模式下不能设快速开始默认：每次都先看计划，再开始任务。';
 export const SET_RULE_CHANGED = '计划的关键内容已变化；重新确认计划后才能设为快速开始默认。';
+/** A rule binds no ceiling of the editor's yet (Issue #51, S16a): quick start prepares its Task with none. */
+export const SET_RULE_BUDGET = '设了预算上限的计划还不能设为快速开始默认：快速开始的任务不设预算上限。';
 export function setRuleAlreadyReason(ruleName: string): string {
   return `默认执行规则「${ruleName}」就是由这份计划设定的，正在使用。`;
 }

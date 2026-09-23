@@ -444,15 +444,19 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     // 更新计划 (Issue #419): the Task, the version the editor read, and the full set of what the plan leaves out — a few
     // short identities, each once; the ledger decides which of them the plan can leave out.
     case 'editBaselineAnalysisPlan': {
-      // `askFirstAdaptations` (Issue #422, S76d) is optional: an S73 frame without it still means what it meant.
+      // `askFirstAdaptations` (Issue #422, S76d) and `runBudgetCeiling` (Issue #51, S16a) are optional: a frame without
+      // them still means what it meant. A ceiling is a whole count of tokens, or `null` for none.
       const input = requireInputWithOptional(value.input, ['bookId', 'taskIntentId', 'planEnvelopeDigest', 'removedSteps', 'disallowedAdaptations'],
-        ['askFirstAdaptations'], tentativeId);
+        ['askFirstAdaptations', 'runBudgetCeiling'], tentativeId);
+      const ceiling = (candidate: unknown): boolean => isRecord(candidate) && hasExactKeys(candidate, ['kind', 'maxTotalTokens']) &&
+        candidate.kind === 'tokens' && isSafeInteger(candidate.maxTotalTokens, 1) && candidate.maxTotalTokens <= 999_999_999_999;
       const identities = (list: unknown): boolean => Array.isArray(list) && list.length <= 8 &&
         list.every((entry) => isBoundedString(entry, 64) && /^[a-z][a-z-]*$/u.test(entry)) && new Set(list).size === list.length;
       if (!validUuid(input.bookId) || !validUuid(input.taskIntentId) ||
           !isBoundedString(input.planEnvelopeDigest, 64) || !HEX_DIGEST_PATTERN.test(input.planEnvelopeDigest) ||
           !identities(input.removedSteps) || !identities(input.disallowedAdaptations) ||
-          (Object.hasOwn(input, 'askFirstAdaptations') && !identities(input.askFirstAdaptations))) {
+          (Object.hasOwn(input, 'askFirstAdaptations') && !identities(input.askFirstAdaptations)) ||
+          !optionalOrNull(input, 'runBudgetCeiling', ceiling)) {
         throw new ProtocolError(tentativeId);
       }
       break;
