@@ -437,6 +437,19 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    // 更新计划 (Issue #419): the Task, the version the editor read, and the full set of what the plan leaves out — a few
+    // short identities, each once; the ledger decides which of them the plan can leave out.
+    case 'editBaselineAnalysisPlan': {
+      const input = requireInput(value.input, ['bookId', 'taskIntentId', 'planEnvelopeDigest', 'removedSteps', 'disallowedAdaptations'], tentativeId);
+      const identities = (list: unknown): boolean => Array.isArray(list) && list.length <= 8 &&
+        list.every((entry) => isBoundedString(entry, 64) && /^[a-z][a-z-]*$/u.test(entry)) && new Set(list).size === list.length;
+      if (!validUuid(input.bookId) || !validUuid(input.taskIntentId) ||
+          !isBoundedString(input.planEnvelopeDigest, 64) || !HEX_DIGEST_PATTERN.test(input.planEnvelopeDigest) ||
+          !identities(input.removedSteps) || !identities(input.disallowedAdaptations)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     // 快速开始 (Issue #421): the Task just prepared, its exact plan, and the rule version the editor started under.
     case 'quickStartBaselineAnalysis': {
       const input = requireInput(value.input, ['bookId', 'taskIntentId', 'planEnvelopeDigest', 'ruleVersionId'], tentativeId);

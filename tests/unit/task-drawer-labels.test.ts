@@ -59,6 +59,21 @@ import {
   TASK_BAR_CANCELLED_NOTE,
   TASK_BAR_PAUSE,
   TASK_BAR_PAUSING_NOTE,
+  TASK_BAR_DISCARD_EDITS,
+  TASK_BAR_SAVE_DRAFT_EDITING_REASON,
+  TASK_BAR_UPDATE_PLAN,
+  TASK_PLAN_EDIT_ADAPTATION_WITHDRAWN,
+  TASK_PLAN_EDIT_ASK_FIRST_NOTE,
+  TASK_PLAN_EDIT_RESTORE,
+  TASK_PLAN_EDIT_STEP_REMOVED,
+  TASK_PLAN_EDIT_STEPS_NOTE,
+  TASK_PLAN_EDIT_TAG,
+  TASK_PLAN_FULL_LINK_EDITABLE,
+  taskPlanEditCount,
+  taskPlanEditCountAfterDrift,
+  taskPlanEditRemoveStep,
+  taskPlanEditWithdraw,
+  taskPlanLastEdit,
   TASK_BAR_RESUME,
   TASK_BAR_REDO,
   TASK_PLAN_ACTIVITY_STALE,
@@ -80,6 +95,7 @@ import {
   taskPlanSavedLine,
   taskPlanSummaryLine,
 } from '../../src/renderer/task-drawer-labels.js';
+import { localInstantLabel } from '../../src/renderer/plan-preview-labels.js';
 
 // The Task Drawer's own words (Issue #418, plan slice S72; editor-surfaces §6 ③, §10): the header, the two
 // modes and the one the drawer opens in, the goal block's chips (D5), the five rows of 精简 and the six
@@ -99,7 +115,7 @@ function plan(overrides: Partial<TaskPlanProjection> = {}): TaskPlanProjection {
       savedForEdits: true,
     },
     scope: { process: '《合成书名》全书 · 12,345 字 · 8 个阅读范围', reference: [], send: '不发送任何内容', notRead: '其他图书' },
-    steps: [{ label: '逐章读取', result: '各章摘要' }],
+    steps: [{ id: 'units', label: '逐章读取', result: '各章摘要', removable: false, removed: false }],
     participation: { during: '预计无需中途参与', after: null },
     service: {
       role: '主编辑角色',
@@ -116,6 +132,7 @@ function plan(overrides: Partial<TaskPlanProjection> = {}): TaskPlanProjection {
     outcomes: ['一份基线分析', '这次运行的运行报告'],
     notDo: { editorial: ['不会直接修改稿件', '不导出或发布'], technical: ['不创建或执行 Effect'] },
     boundary: { adaptable: [], askFirst: [] },
+    edit: { editable: true, reason: null, lastEdit: null },
     drift: null,
     technical: [],
     start: { readiness: 'ready', needsModelConnection: false, planEnvelopeDigest: 'a'.repeat(64), categoryDigests: [], reconfirm: null },
@@ -190,7 +207,7 @@ describe('the goal block (D5)', () => {
 
   it('says the saved revision leaves the Task untouched by later editing (TASK-039/040), and why 修改 waits', () => {
     expect(taskPlanSavedLine('r2')).toBe('已为任务保存修订版 r2，之后的编辑不影响这项任务。');
-    expect(TASK_PLAN_EDIT_REASON).toBe('随计划编辑提供');
+    expect(TASK_PLAN_EDIT_REASON).toBe('回到撰写随任务面板提供');
   });
 });
 
@@ -248,7 +265,7 @@ describe('a plan whose key content changed (D8) and the surfaces that raise a Ta
   it('reads the diff in §10\'s words', () => {
     expect(TASK_PLAN_DRIFT_HEADING).toBe('计划的关键内容已变化');
     expect(TASK_PLAN_DRIFT_COLUMNS).toEqual(['内容', '原计划', '重新确认后', '性质']);
-    expect(TASK_PLAN_MATERIALITY_LABELS).toEqual({ material: '关键内容', derived: '随之变化' });
+    expect(TASK_PLAN_MATERIALITY_LABELS).toEqual({ material: '关键内容', derived: '随之变化', edited: '你改的' });
   });
 
   it('names a plan in one line, leaving out an empty part', () => {
@@ -272,7 +289,7 @@ describe('the authorization bar (S74a)', () => {
     expect(TASK_BAR_START).toBe('开始任务');
     expect(TASK_BAR_START).not.toContain('授权');
     expect(TASK_BAR_REVISE).toBe('返回修改');
-    expect(TASK_BAR_REVISE_REASON).toBe('随计划编辑提供');
+    expect(TASK_BAR_REVISE_REASON).toBe('这类任务的计划不能在这里修改');
     expect(TASK_BAR_SAVE_DRAFT).toBe('保存草稿');
     expect(TASK_BAR_SAVED).toBe('计划已保存，可稍后开始');
     expect(TASK_BAR_STATEMENT).toBe('只是让 AI7 按这份计划做这一次；接受修改建议、批准受控动作、保存里程碑版本、设为发稿版本都仍由你另行决定');
@@ -298,19 +315,21 @@ describe('the authorization bar (S74a)', () => {
       .toBe('《合成书名》 · 「第一章」至「第三章」 · 主编辑角色 · 未设置任务预算上限 · 产出：审阅发现与审阅报告 · 不改稿');
   });
 
-  it('offers 开始任务, 返回修改 with its reason and 保存草稿 while the plan can start (AUTH-002)', () => {
+  it('offers 开始任务, 返回修改 into the plan\'s editing, and 保存草稿 while the plan can start (AUTH-002, PLAN-011)', () => {
     const view = taskBarView(plan());
     expect(view).toMatchObject({ readiness: 'ready', statement: TASK_BAR_STATEMENT, note: null, status: null });
     expect(names(view)).toEqual(['start', 'revise', 'save-draft']);
     expect(action(view, 'start')).toEqual({ name: 'start', label: '开始任务', tone: 'primary', disabledReason: null });
-    expect(action(view, 'revise')?.disabledReason).toBe('随计划编辑提供');
+    expect(action(view, 'revise')?.disabledReason).toBeNull();
     expect(action(view, 'save-draft')?.disabledReason).toBeNull();
   });
 
   it('says J-03\'s Task is only recorded, and a plan without a route is blocked before dispatch, beside the same start (ADR 0055)', () => {
-    const recordOnly = taskBarView(barOf({ readiness: 'record-only' }, { kind: 'fixed-task', planVersion: null }));
+    const recordOnly = taskBarView(barOf({ readiness: 'record-only' }, { kind: 'fixed-task', planVersion: null, edit: { editable: false, reason: null, lastEdit: null } }));
     expect(recordOnly.note).toBe('此任务只记录运行，不会派发');
     expect(names(recordOnly)).toEqual(['start', 'revise', 'save-draft']);
+    // A kind that keeps no plan versions has no editing for 返回修改 to open, and says so.
+    expect(action(recordOnly, 'revise')?.disabledReason).toBe('这类任务的计划不能在这里修改');
     expect(action(recordOnly, 'start')?.disabledReason).toBeNull();
     const noRoute = taskBarView(barOf({ readiness: 'no-route' }));
     expect(noRoute.note).toBe(TASK_BAR_NOTES['no-route']);
@@ -534,5 +553,79 @@ describe('the activity card (Issue #422, AUTH-011)', () => {
     expect(taskPlanActivityIsStale(activity, at('2026-09-24T01:01:11.000Z'))).toBe(true);
     expect(taskPlanActivityIsStale({ ...activity, currentUnitStartedAt: null }, at('2026-09-24T02:00:00.000Z'))).toBe(false);
     expect(TASK_PLAN_ACTIVITY_UNREPORTED).toBe('这项任务现在没有在运行：AI7 上次关闭时它没有结束。可以取消它，再准备新的任务。');
+  });
+});
+
+// Issue #419 (plan slice S73; editor-surfaces §6 可编辑, V2-UX-PLAN-009, PLAN-011): the editable plan's words, and the
+// bar while the editor has edits the plan does not hold yet.
+describe('the editable plan (S73)', () => {
+  const edit = (overrides: Partial<TaskPlanProjection['edit']> = {}): TaskPlanProjection['edit'] => ({ editable: true, reason: null, lastEdit: null, ...overrides });
+  const rows = (view: ReturnType<typeof taskBarView>) => view.actions.map((entry) => [entry.name, entry.tone, entry.disabledReason]);
+
+  it('speaks §6 可编辑\'s words, each control named for a reader who does not see its glyph', () => {
+    expect(TASK_PLAN_EDIT_TAG).toBe('你改的');
+    expect(TASK_PLAN_EDIT_STEP_REMOVED).toBe('不做');
+    expect(TASK_PLAN_EDIT_ADAPTATION_WITHDRAWN).toBe('不允许');
+    expect(taskPlanEditRemoveStep('核对与抽检')).toBe('去掉这一步：核对与抽检');
+    expect(taskPlanEditWithdraw('模型服务暂时出错时，同一个阅读范围安全地再试一次')).toBe('不允许：模型服务暂时出错时，同一个阅读范围安全地再试一次');
+    expect(TASK_PLAN_EDIT_RESTORE).toBe('恢复');
+    expect(TASK_PLAN_EDIT_STEPS_NOTE).toBe('这项分析的步骤由分析工序决定：可以去掉「核对与抽检」，不能改写、增加或调换顺序。');
+    expect(TASK_PLAN_EDIT_ASK_FIRST_NOTE).toBe('改成「先问你」要等澄清请求，暂不提供。');
+    expect(TASK_PLAN_FULL_LINK_EDITABLE).toBe('完整计划（6 段）· 可以改步骤与限制');
+    expect(TASK_PLAN_MATERIALITY_LABELS).toEqual({ material: '关键内容', derived: '随之变化', edited: '你改的' });
+    expect(taskPlanEditCount(2)).toBe('你改了 2 处');
+    expect(taskPlanEditCountAfterDrift(1)).toBe('你改了 1 处；重新确认计划后再更新计划');
+    expect(TASK_BAR_UPDATE_PLAN).toBe('更新计划');
+    expect(TASK_BAR_DISCARD_EDITS).toBe('撤销修改');
+    expect(TASK_BAR_SAVE_DRAFT_EDITING_REASON).toBe('先更新计划或撤销修改');
+  });
+
+  it('puts 更新计划 where 开始任务 was while edits are pending, beside 撤销修改, and holds the draft back', () => {
+    const view = taskBarView(plan(), 2);
+    expect(view).toMatchObject({ readiness: 'ready', statement: null, note: '你改了 2 处', status: null });
+    expect(view.actions).toEqual([
+      { name: 'update-plan', label: '更新计划', tone: 'primary', disabledReason: null },
+      { name: 'discard-edits', label: '撤销修改', tone: 'secondary', disabledReason: null },
+      { name: 'save-draft', label: '保存草稿', tone: 'secondary', disabledReason: '先更新计划或撤销修改' },
+    ]);
+    // The edit sends nothing, so it is the editor's to make offline and without a connection as well.
+    expect(rows(taskBarView(barOf({ readiness: 'offline' }), 1))).toEqual(rows(taskBarView(plan(), 1)));
+    expect(rows(taskBarView(barOf({ readiness: 'needs-connection', needsModelConnection: true }), 1))).toEqual(rows(taskBarView(plan(), 1)));
+    // Nothing pending: the start's bar again.
+    expect(taskBarView(plan(), 0).actions.map((entry) => entry.name)).toEqual(['start', 'revise', 'save-draft']);
+    // Once the Task has started, no edit is pending and the Run's state is the bar.
+    expect(taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'running', label: '运行中' } }), 1).note).toBeNull();
+  });
+
+  it('lets 重新确认计划 go first when the key content changed, keeping the edits for the version it writes', () => {
+    const reason = '计划的关键内容已变化：先重新确认计划，你的改动会保留';
+    const drift = { reasons: ['计划冻结之后，它的关键内容已经变化；原计划不能再开始。'], entries: [{ field: 'selectedRange', label: '处理范围', prior: '第 1–2 段 · 10 字', proposed: '第 3–4 段 · 20 字', materiality: 'material' as const }], resolution: '重新确认计划后，新的计划版本才能开始。' };
+    const changed = barOf(
+      { readiness: 'changed', planEnvelopeDigest: null, reconfirm: { goal: '重新分析所选范围：绕过所选内容块范围及其重叠闭包的既有模型结果，复用其余兼容单元，追加一个结果集修订版。', update: { mode: 'reanalyze-range', selectedRange: { startPosition: 3, endPosition: 4 } } } },
+      { drift, edit: edit({ editable: false, reason }) },
+    );
+    const view = taskBarView(changed, 1);
+    expect(view.note).toBe('你改了 1 处；重新确认计划后再更新计划');
+    expect(rows(view)).toEqual([
+      ['reconfirm-plan', 'primary', null],
+      ['view-plan-revision', 'secondary', null],
+      ['update-plan', 'secondary', reason],
+      ['discard-edits', 'secondary', null],
+      ['save-draft', 'secondary', '先更新计划或撤销修改'],
+    ]);
+    // With nothing pending, the changed plan's own bar says why 返回修改 does not open the editing now.
+    expect(taskBarView(changed).actions.find((entry) => entry.name === 'revise')?.disabledReason).toBe(reason);
+  });
+
+  it('records the edit that made the version shown, with its version, its time and each change (PLAN-011)', () => {
+    const recordedAt = '2026-09-24T02:05:00.000Z';
+    expect(taskPlanLastEdit({
+      ordinal: 3,
+      recordedAt,
+      entries: [
+        { field: 'steps.assurance-sampling', label: '步骤 · 核对与抽检', prior: '要做', proposed: '不做', materiality: 'edited' },
+        { field: 'adaptations.safe-retry', label: '可以自己调整 · 安全地再试一次', prior: '允许', proposed: '不允许', materiality: 'edited' },
+      ],
+    })).toBe(`第 3 版由你修改（${localInstantLabel(recordedAt)}）：步骤 · 核对与抽检：要做 → 不做；可以自己调整 · 安全地再试一次：允许 → 不允许`);
   });
 });
