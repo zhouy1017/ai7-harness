@@ -899,6 +899,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const heading = el('h4', undefined, TASK_BAR_CANCEL_IMPACT_HEADING);
     heading.id = uid('cancel-impact');
     heading.tabIndex = -1;
+    // Named as the bar's controls are, so a repaint while the editor reads the summary keeps focus on it.
+    heading.dataset['taskDrawerControl'] = 'cancel-impact';
     section.setAttribute('aria-labelledby', heading.id);
     const lines = el('ul', 'task-bar-cancel-lines');
     for (const line of run.cancel.impact) lines.append(el('li', undefined, line));
