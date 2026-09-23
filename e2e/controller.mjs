@@ -673,6 +673,11 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'connectivity-cancel',
     'connectivity-wait-again',
     'connectivity-online-dispatch',
+    // 快速开始 (Issue #421): 设为快速开始默认…, a quick start that stops at its plan offline, one that starts, and 停用.
+    'quick-start-set-rule',
+    'quick-start-fallback',
+    'quick-start-started',
+    'quick-start-rules-page',
     'review-relaunch',
     'review-destination',
     'review-sheet',
