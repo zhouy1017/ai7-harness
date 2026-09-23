@@ -3990,7 +3990,9 @@ export class EditorialStore {
         unitsClosed = null;
       }
       const blockers = stopped ? [...this.#baselineAnalysis.continuationBlockers(run.runRecordId), ...(bindingHolds ? [] : [RESUME_BLOCKED_BINDING])] : [];
-      return { unitsSettled, unitsClosed, unitsTotal, blockers, bindingHolds, waiting };
+      // 模型服务账户限额 (Issue #51, S16b): the stop the provider's limit made, which 续行 takes on once it clears.
+      const accountLimit = run.state === 'resumable' ? this.#baselineAnalysis.accountLimitOf(run.runRecordId) : null;
+      return { unitsSettled, unitsClosed, unitsTotal, blockers, bindingHolds, waiting, accountLimit };
     });
   }
 

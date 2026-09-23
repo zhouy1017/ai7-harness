@@ -1,0 +1,20 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-baseline-account-limit",
+  "description": "Hand-written synthetic shape (vii) layered over shape (i): identical to sample1-baseline-happy except that Analysis Unit 4 answers its first attempt with a Provider Account Limit (status 402). The entry names attempt 1 only, so once the Run goes on after the limit — its next turn for the same unit and request digest being that unit's second — the unit falls through to the base's conforming result, which models the provider-side condition clearing. J-10's account-limit stages and the L2 suite consume it. It inherits every other entry of the base, the cross-unit reduction and the sample included. Public synthetic text only; no manuscript content and no finding text.",
+  "basedOn": "sample1-baseline-happy",
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 4,
+      "requestDigest": "d7eef03bffc2df6e4b39f8d430a9841f00a3f83feb7ab68e8a96700326433c46",
+      "attempt": 1,
+      "response": {
+        "kind": "quota-exceeded",
+        "message": "Synthetic model-service account limit for Analysis Unit 4 on attempt 1 (fixture shape vii).",
+        "status": 402
+      }
+    }
+  ]
+}
