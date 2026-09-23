@@ -752,12 +752,16 @@ export class BaselineAnalysisStore {
       kind: this.#definition.kind,
       contractVersion: this.#definition.contractVersion,
       state,
+      // A Run in Connectivity Wait, or cancelled while it waited, never ran: it reads as its Run state does, never as
+      // 已中断, which OFF-012 keeps for a Run that can resume (Issue #502).
       stateLabel: state === 'prepared' ? '计划已冻结 · 待授权'
         : state === 'authorized-blocked' ? '已授权 · 派发前阻止'
-          : state === 'admitted' ? '已进入调度'
-            : state === 'executing' ? '正在执行'
-              : state === 'settled' ? '已形成结果集修订版'
-                : state === 'failed' ? '运行失败' : '运行已中断',
+          : state === 'waiting' ? RUN_STATE_LABELS['awaiting-connectivity']
+            : state === 'cancelled' ? RUN_STATE_LABELS.cancelled
+              : state === 'admitted' ? '已进入调度'
+                : state === 'executing' ? '正在执行'
+                  : state === 'settled' ? '已形成结果集修订版'
+                    : state === 'failed' ? '运行失败' : '运行已中断',
       taskIntent,
       checkpoint: {
         manuscriptId: asString(checkpoint.manuscript_id),
