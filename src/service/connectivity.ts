@@ -52,6 +52,11 @@ export interface TaskPlanConnectivity {
   reachesNetwork(routeKind: string): boolean;
   /** Whether the one execution slot is held now, so a waiting Run would wait for it. */
   slotBusy(): boolean;
+  /**
+   * Whether this launch can still carry a stopped Run under the Execution Binding it persisted — go on with it, or
+   * form what it kept into a revision when it is cancelled (Issue #422, S76c). Absent, it can.
+   */
+  carriesStoppedRun?(runRecordId: string): boolean;
 }
 
 /** A reader for callers that read plans without a service: always online, no route reaching a network, a free slot. */

@@ -719,13 +719,16 @@ const STAGE_WORDS: Readonly<Record<'cross-unit-reduction' | 'assurance-sampling'
 export function baselineCancellationImpact(
   run: NonNullable<BaselineAnalysisProjection['run']>,
   update: TaskPlanRunControlProjection['update'] = null,
-  kept: { unitsSettled: number | null; unitsTotal: number } | null = null,
+  kept: { unitsSettled: number | null; unitsTotal: number; bindingHolds?: boolean } | null = null,
 ): ReadonlyArray<string> {
   // An update Run reads only the ranges it recomputes: the rest it names as such, and the ranges it reuses are kept.
   const reusedKept = update === null || update.reusedUnits === 0 ? '' : `，连同沿用上一份分析的 ${update.reusedUnits} 个阅读范围，`;
   const restOf = (count: number): string => update === null ? `其余 ${count} 个阅读范围` : `其余 ${count} 个要重新分析的阅读范围`;
-  const partial = (unitsSettled: number): string =>
-    `已读完的 ${unitsSettled} 个阅读范围的结果与缺口${reusedKept}会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。`;
+  // What a Run nothing executes kept becomes its partial revision — unless this launch can no longer carry it under the
+  // binding it persisted, when its cancellation forms none (Issue #422, S76c).
+  const partial = (unitsSettled: number): string => kept?.bindingHolds === false
+    ? `执行绑定已经变化，已读完的 ${unitsSettled} 个阅读范围不能整理成结果集修订版；这次取消不会形成修订版。`
+    : `已读完的 ${unitsSettled} 个阅读范围的结果与缺口${reusedKept}会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。`;
   const progress = run.progress;
   // A Run nothing executes — paused, left 可续行, or left under way when AI7 closed — has nothing in flight: what its
   // checkpoints kept becomes its partial revision, and one that kept nothing, or whose kept progress no longer reads
@@ -802,9 +805,10 @@ function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: Ba
   // offered 取消任务 again, which settles it at once.
   const cancelling = run.state === 'cancelling' && held;
   const pausing = run.state === 'pausing' && held;
-  // What its checkpoints kept, read by the store for a Run nothing executes; a stopped one continues from it.
-  const kept = held || stopped === undefined ? null : { unitsSettled: stopped.unitsSettled, unitsTotal: stopped.unitsTotal };
-  const continuation = run.state === 'paused' || run.state === 'resumable' ? kept : null;
+  // What its checkpoints kept, read by the store for a Run nothing executes, with whether this launch can still carry it;
+  // a stopped one continues from it.
+  const kept = held || stopped === undefined ? null : { unitsSettled: stopped.unitsSettled, unitsTotal: stopped.unitsTotal, bindingHolds: stopped.bindingHolds };
+  const continuation = kept !== null && (run.state === 'paused' || run.state === 'resumable') ? { unitsSettled: kept.unitsSettled, unitsTotal: kept.unitsTotal } : null;
   const counts = projection.update?.reusePlan?.counts ?? null;
   const update = counts === null ? null : { manuscriptUnits: projection.coverageManifest?.units.length ?? counts.recomputed + counts.reused, reusedUnits: counts.reused };
   return {
@@ -850,7 +854,10 @@ function baselineRedo(projection: BaselineAnalysisProjection, stopped?: Baseline
   const cancelledAfterStart = run.state === 'cancelled' && run.transitions.some((transition) => transition.state === 'executing');
   const stoppedRun = (run.state === 'paused' || run.state === 'resumable') && stopped !== undefined;
   if (!cancelledAfterStart && !stoppedRun) return null;
-  const carries = stoppedRun ? (stopped!.unitsSettled ?? 0) > 0 : projection.resultSetRevision?.provenance.runRecordId === run.runRecordId;
+  // A stopped Run's kept ranges are carried only while this launch can still form them into its partial revision.
+  const carries = stoppedRun
+    ? (stopped!.unitsSettled ?? 0) > 0 && stopped!.bindingHolds
+    : projection.resultSetRevision?.provenance.runRecordId === run.runRecordId;
   const update = carries
     ? { mode: 'sync-current' as const, selectedRange: null }
     : projection.update === null ? null : { mode: projection.update.mode, selectedRange: projection.update.selectedRange };
@@ -864,10 +871,12 @@ function baselineRedo(projection: BaselineAnalysisProjection, stopped?: Baseline
         ? '这项任务会在这里停下并取消；它已保存的阅读进度无法核对，不会形成结果集修订版。'
         : kept === 0
           ? '这项任务会在这里停下并取消；它还没有读完任何阅读范围，不会形成结果集修订版。'
-          : `这项任务会在这里停下并取消；已读完的 ${kept} 个阅读范围保留在一份新的结果集修订版里，没读到的记为未尝试。`,
-      kept === 0
-        ? '然后准备一项新任务，从头读；开始之前可以先改计划。'
-        : `然后准备一项新任务：沿用这 ${kept} 个阅读范围的结果，接着读其余 ${rest} 个；开始之前可以先改计划。`,
+          : carries
+            ? `这项任务会在这里停下并取消；已读完的 ${kept} 个阅读范围保留在一份新的结果集修订版里，没读到的记为未尝试。`
+            : `这项任务会在这里停下并取消；执行绑定已经变化，已读完的 ${kept} 个阅读范围不能沿用，不会形成结果集修订版。`,
+      carries
+        ? `然后准备一项新任务：沿用这 ${kept} 个阅读范围的结果，接着读其余 ${rest} 个；开始之前可以先改计划。`
+        : '然后准备一项新任务，从头读；开始之前可以先改计划。',
       CANCELLATION_NO_EFFECTS,
       '新任务由你开始，不会自己运行。',
     ],
@@ -885,12 +894,19 @@ export interface BaselineStoppedRunFacts {
   readonly unitsSettled: number | null;
   readonly unitsTotal: number;
   readonly blockers: ReadonlyArray<string>;
+  /**
+   * Whether this launch can still carry the Run under the Execution Binding it persisted (Issue #422, S76c): go on
+   * with it, or form what it kept into its partial revision when it is cancelled. Read by the service.
+   */
+  readonly bindingHolds: boolean;
 }
 
 /** 续行's own words when the service cannot let the Run go on now (CONT-015): each names what it waits for. */
 export const RESUME_BLOCKED_SLOT = '另一项任务正在运行；它结束后再续行。';
 export const RESUME_BLOCKED_CONNECTION = '模型未连接：续行要发送到模型服务，所需的凭据还没有就绪；连接好之后才能续行。';
 export const RESUME_BLOCKED_OFFLINE = '离线：续行要连到模型服务，而这台设备现在没有网络；联网后再续行。';
+/** The Run's persisted binding no longer reads the same under this launch (CONT-016): the way on is 改计划重做. */
+export const RESUME_BLOCKED_BINDING = '这次运行授权时的执行绑定已经变化（模型服务、路由、策略或 AI7 版本不同），不能照原样续行；请改计划重做。';
 
 /** The drawer's plan with the service's own reasons 续行 must wait added to the stopped Run's (CONT-015). */
 export function withResumeBlockers(plan: TaskPlanProjection, blockers: ReadonlyArray<string>): TaskPlanProjection {
