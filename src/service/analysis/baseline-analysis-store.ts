@@ -54,6 +54,7 @@ import {
   type RunBudgetCeilingState,
 } from '../../shared/protocol.js';
 import {
+  PLAN_ADAPTATION_CLASSES,
   PLAN_REVISION_REQUIRED_REASON,
   buildPlanAdaptationRecord,
   diffMaterialPlanInputs,
@@ -2875,8 +2876,9 @@ export class BaselineAnalysisStore {
     }
     const envelope = plan['plan-envelope'] as Record<string, unknown>;
     const artifactPin = plan['artifact-pin'] as { nativeCarrierSha256: string; sidecarSha256: string };
-    // What the editor left out (Issue #419), read from the execution plan and matched by the envelope's split, which
-    // the Run Authorization bound: the two are written together and never disagree.
+    // What the editor left out (Issue #419), read from the execution plan and matched by the adaptations the envelope's
+    // split names, which the Run Authorization bound: the two are written together and never disagree. The split's
+    // words are not compared — a later release may reword them under a plan frozen before it.
     let editorEdits: PlanEdits;
     try {
       editorEdits = planEditsOf(plan['execution-plan']);
@@ -2884,7 +2886,8 @@ export class BaselineAnalysisStore {
       throw new AnalysisError('ANALYSIS_RECORD_INVALID', '计划记录的修改无效。');
     }
     const split = envelope.boundary as PlanBoundarySplitProjection | undefined;
-    requireAnalysis(split === undefined || canonicalJson(split) === canonicalJson(planBoundarySplit(editorEdits.disallowedAdaptations)),
+    const allowed = PLAN_ADAPTATION_CLASSES.filter((adaptationClass) => !editorEdits.disallowedAdaptations.includes(adaptationClass));
+    requireAnalysis(split === undefined || JSON.stringify(split.adaptable.map((entry) => entry.adaptationClass)) === JSON.stringify(allowed),
       'ANALYSIS_RECORD_INVALID', '计划信封与计划修改不一致。');
     let update: ExecutionUpdateFacts | null = null;
     if (this.#carriesPlan(intent.mode)) {
