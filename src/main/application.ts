@@ -2212,6 +2212,8 @@ function registerRendererHandlers(
             goal: input.goal,
             update: input.update,
             reconfirm: input.reconfirm === true,
+            // 改计划重做 (Issue #422, S76c) names the cancelled Run it redoes; every other preparation names none.
+            ...(input.redoOf === undefined || input.redoOf === null ? {} : { redoOf: input.redoOf }),
             bookId: route.bookId,
           });
           if (result.kind !== 'baseline-analysis-preparation') {

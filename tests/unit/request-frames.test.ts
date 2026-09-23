@@ -119,7 +119,10 @@ describe('decodeRequest accepts well-formed frames', () => {
       op: 'authorizeBaselineAnalysis',
       input: { bookId: randomUUID(), taskIntentId: randomUUID(), planEnvelopeDigest: 'a'.repeat(64) },
     };
-    for (const request of [inspect, inspectRevision, prepare, sync, range, whole, authorize]) {
+    // 改计划重做 (Issue #422, S76c): a preparation may name the cancelled Run it redoes, or say plainly that it redoes none.
+    const redo = { id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_MODE_GOALS['sync-current'], update: { mode: 'sync-current', selectedRange: null }, reconfirm: false, redoOf: randomUUID() } };
+    const redoNone = { id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false, redoOf: null } };
+    for (const request of [inspect, inspectRevision, prepare, sync, range, whole, authorize, redo, redoNone]) {
       expect(decodeRequest(frameOf(request))).toEqual(request);
     }
   });
@@ -483,6 +486,11 @@ describe('decodeRequest rejects malformed frames', () => {
     expect(rejectionFor(frameOf({ id, op: 'prepareBaselineAnalysis', input: { bookId, goal: BASELINE_ANALYSIS_TASK_GOAL, update: null } })).requestId).toBe(id);
     expect(rejectionFor(prepare(BASELINE_ANALYSIS_TASK_GOAL, null, 'yes')).requestId).toBe(id);
     expect(rejectionFor(prepare(BASELINE_ANALYSIS_TASK_GOAL, null, 1)).requestId).toBe(id);
+    // `redoOf` names a Run by its record id, and nothing else joins it.
+    for (const redoOf of ['not-a-uuid', 7, '', { runRecordId: randomUUID() }]) {
+      expect(rejectionFor(frameOf({ id, op: 'prepareBaselineAnalysis', input: { bookId, goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false, redoOf } })).requestId).toBe(id);
+    }
+    expect(rejectionFor(frameOf({ id, op: 'prepareBaselineAnalysis', input: { bookId, goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false, redoOf: null, taskIntentId: randomUUID() } })).requestId).toBe(id);
     // A goal that names another mode than `update.mode`, a range for a non-range mode, a missing range, and an inverted range.
     expect(rejectionFor(prepare(BASELINE_ANALYSIS_MODE_GOALS['sync-current'], null)).requestId).toBe(id);
     expect(rejectionFor(prepare(BASELINE_ANALYSIS_TASK_GOAL, { mode: 'sync-current', selectedRange: null })).requestId).toBe(id);

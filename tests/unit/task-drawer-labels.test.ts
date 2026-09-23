@@ -58,6 +58,10 @@ import {
   TASK_BAR_CANCELLING_NOTE,
   TASK_BAR_PAUSE,
   TASK_BAR_PAUSING_NOTE,
+  TASK_BAR_REDO_CONFIRM,
+  TASK_BAR_REDO_HEADING,
+  TASK_BAR_REDO_KEEP,
+  TASK_BAR_REDOING_NOTE,
   TASK_BAR_DISCARD_EDITS,
   TASK_BAR_SAVE_DRAFT_EDITING_REASON,
   TASK_BAR_UPDATE_PLAN,
@@ -137,6 +141,7 @@ function plan(overrides: Partial<TaskPlanProjection> = {}): TaskPlanProjection {
     start: { readiness: 'ready', needsModelConnection: false, planEnvelopeDigest: 'a'.repeat(64), categoryDigests: [], reconfirm: null },
     defaultRule: { canSet: false, reason: '这份计划不能设为快速开始默认。', planEnvelopeDigest: null, current: null, binds: [], startedBy: null },
     runControl: null,
+    redo: null,
     ...overrides,
   };
 }
@@ -417,7 +422,7 @@ describe('the authorization bar (S74a)', () => {
       cancel: { reason: null, impact: ['正在读的第 3 个阅读范围读完后停止。'] },
       pause: { reason: null },
       resume: null,
-      redo: { reason: '改计划重做随计划编辑提供' },
+      redo: { reason: '先暂停，再改计划重做' },
       activity: null,
       executingSince: null,
       continuation: null,
@@ -427,7 +432,7 @@ describe('the authorization bar (S74a)', () => {
     expect(running.actions).toEqual([
       { name: 'pause', label: '暂停', tone: 'secondary', disabledReason: null },
       { name: 'cancel-run', label: '取消任务', tone: 'secondary', disabledReason: null },
-      { name: 'redo', label: '改计划重做', tone: 'quiet', disabledReason: '改计划重做随计划编辑提供' },
+      { name: 'redo', label: '改计划重做', tone: 'quiet', disabledReason: '先暂停，再改计划重做' },
       { name: 'run-link', label: '查看运行', tone: 'secondary', disabledReason: null },
     ]);
     // Confirmed: 正在取消 and its sentence until the Run has stopped, and nothing more to press (CTRL-005).
@@ -438,10 +443,18 @@ describe('the authorization bar (S74a)', () => {
     expect(cancelling).toMatchObject({ status: '正在取消', note: TASK_BAR_CANCELLING_NOTE });
     expect(TASK_BAR_CANCELLING_NOTE).toBe('已记下你的取消；正在进行的这一步完成后停止，此后不会再发送任何内容');
     expect(names(cancelling)).toEqual(['run-link']);
-    // Stopped: 已取消, never 已中断, and only the way to the Run.
+    // Stopped: 已取消, never 已中断; 改计划重做 beside the way to the Run while it can be made (Issue #422, S76c).
     const stopped = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'cancelled-after-start', label: '已取消' } }));
     expect(stopped).toMatchObject({ statement: null, note: null, status: '已取消' });
     expect(names(stopped)).toEqual(['run-link']);
+    const redoable = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
+      state: { key: 'cancelled-after-start', label: '已取消' },
+      redo: { summary: [], prepare: { goal: '同步到当前稿件', update: { mode: 'sync-current', selectedRange: null }, redoOf: 'run' } as never },
+    }));
+    expect(redoable.actions).toEqual([
+      { name: 'redo', label: '改计划重做', tone: 'secondary', disabledReason: null },
+      { name: 'run-link', label: '查看运行', tone: 'secondary', disabledReason: null },
+    ]);
     // 正在暂停 (CTRL-001): its sentence until the Run reaches its boundary, and nothing more to press.
     const pausing = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
       state: { key: 'pausing', label: '正在暂停' },
@@ -458,7 +471,7 @@ describe('the authorization bar (S74a)', () => {
       cancel: { reason: null, impact: ['这项任务已经停下。'] },
       pause: { reason: '这项任务现在没有在运行，不能暂停；可以取消它' },
       resume: { reason: null },
-      redo: { reason: '改计划重做随计划编辑提供' },
+      redo: { reason: null },
       activity: null, executingSince: null,
       continuation: { unitsSettled: 3, unitsTotal: 8 },
     };
@@ -468,7 +481,8 @@ describe('the authorization bar (S74a)', () => {
     expect(paused.actions).toEqual([
       { name: 'resume', label: '续行', tone: 'primary', disabledReason: null },
       { name: 'cancel-run', label: '取消任务', tone: 'secondary', disabledReason: null },
-      { name: 'redo', label: '改计划重做', tone: 'quiet', disabledReason: '改计划重做随计划编辑提供' },
+      // 暂停后出现 续行 与 改计划重做 (editor-surfaces §6; Issue #422, S76c).
+      { name: 'redo', label: '改计划重做', tone: 'secondary', disabledReason: null },
       { name: 'run-link', label: '查看运行', tone: 'secondary', disabledReason: null },
     ]);
     const blocked = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
@@ -614,5 +628,15 @@ describe('the editable plan (S73)', () => {
         { field: 'adaptations.safe-retry', label: '可以自己调整 · 安全地再试一次', prior: '允许', proposed: '不允许', materiality: 'edited' },
       ],
     })).toBe(`第 3 版由你修改（${localInstantLabel(recordedAt)}）：步骤 · 核对与抽检：要做 → 不做；可以自己调整 · 安全地再试一次：允许 → 不允许`);
+  });
+});
+
+// Issue #422 (plan slice S76c; V2-UX-AUTH-010, CONT-013): 改计划重做's own words.
+describe('改计划重做 (S76c)', () => {
+  it('names its summary, its confirmation and the way back, and what the bar says while the Run stops for it', () => {
+    expect(TASK_BAR_REDO_HEADING).toBe('改计划重做摘要');
+    expect(TASK_BAR_REDO_CONFIRM).toBe('确认改计划重做');
+    expect(TASK_BAR_REDO_KEEP).toBe('先不重做');
+    expect(TASK_BAR_REDOING_NOTE).toBe('已记下改计划重做：这次运行正在取消，取消完成后准备新任务');
   });
 });

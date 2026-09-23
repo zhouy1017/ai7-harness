@@ -22,6 +22,7 @@ import {
   RUN_CONTROL_CANCELLING_REASON,
   RUN_CONTROL_PAUSE_REASON,
   RUN_CONTROL_REDO_REASON,
+  redoGoalSentence,
   RESUME_BLOCKED_CONNECTION,
   RESUME_BLOCKED_OFFLINE,
   RESUME_BLOCKED_SLOT,
@@ -138,6 +139,7 @@ describe('route-aware readiness of the authorization bar (S74a A3; AUTH-005, MOD
       start: { readiness: 'ready', needsModelConnection: true, planEnvelopeDigest: 'e'.repeat(64), categoryDigests: [], reconfirm: null, ...start },
       defaultRule: { canSet: false, reason: '这份计划不能设为快速开始默认。', planEnvelopeDigest: null, current: null, binds: [], startedBy: null },
       runControl: null,
+      redo: null,
     };
   }
 
@@ -216,7 +218,12 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
 
   it('says why 暂停 and 改计划重做 are not offered, and that the analysis leaves nothing committed', () => {
     expect(RUN_CONTROL_PAUSE_REASON).toBe('这项任务现在没有在运行，不能暂停；可以取消它');
-    expect(RUN_CONTROL_REDO_REASON).toBe('改计划重做随计划编辑提供');
+    expect(RUN_CONTROL_REDO_REASON).toBe('先暂停，再改计划重做');
+    // The redo Task's own sentence (Issue #422, S76c): what it carries, and what it reads again.
+    expect(redoGoalSentence({ reused: 6, recomputed: 2, invalidated: 2, bypassed: 0 })).toBe('改计划重做：沿用已读完的 6 个阅读范围，接着读其余 2 个');
+    // Carrying none — the first baseline again, or an update the Run kept nothing of — it starts from the beginning.
+    expect(redoGoalSentence(null)).toBe('改计划重做：上一次运行没有读完任何阅读范围，这次从头读');
+    expect(redoGoalSentence({ reused: 0, recomputed: 8, invalidated: 8, bypassed: 0 })).toBe('改计划重做：上一次运行没有读完任何阅读范围，这次从头读');
     expect(RUN_CONTROL_CANCELLING_REASON).toBe('已在取消：正在进行的这一步完成后停止');
     expect(CANCELLATION_NO_EFFECTS).toBe('这项分析不改稿，没有需要撤回的受控动作。');
   });

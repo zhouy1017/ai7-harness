@@ -55,6 +55,11 @@ import {
   TASK_PLAN_EDIT_TAG,
   TASK_PLAN_FULL_LINK_EDITABLE,
   TASK_BAR_UPDATE_FAILED,
+  TASK_BAR_REDO_CONFIRM,
+  TASK_BAR_REDO_FAILED,
+  TASK_BAR_REDO_HEADING,
+  TASK_BAR_REDO_KEEP,
+  TASK_BAR_REDOING_NOTE,
   taskPlanEditRemoveStep,
   taskPlanEditWithdraw,
   taskPlanLastEdit,
@@ -170,6 +175,7 @@ const WAITING_POLL_MS = 2_000;
 const DRIFT_TABLE_ID = 'task-drawer-drift-table';
 /** The Cancellation Impact Summary 取消任务 opens inline (Issue #422, CTRL-004); one bar, so one summary. */
 const CANCEL_IMPACT_ID = 'task-drawer-cancel-impact';
+const REDO_SUMMARY_ID = 'task-drawer-redo-summary';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -237,6 +243,15 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   let ruleConfirmShown = false;
   /** Whether 取消任务's Cancellation Impact Summary is open; kept across the reads while the Run can still be cancelled. */
   let cancelConfirmShown = false;
+  /** 改计划重做's summary is open (Issue #422, S76c). */
+  let redoConfirmShown = false;
+  /**
+   * The redo the editor confirmed on a stopped Run: once that Run reads 已取消, the new Task is prepared. It lives outside
+   * every repaint; if AI7 closes first, the cancelled Run still offers 改计划重做.
+   */
+  let redoPending: { ref: string; runRecordId: string } | null = null;
+  /** The next paint of the Task a redo prepared opens its editing: 完整, focused on the first thing that can change. */
+  let editOnOpen = false;
   /** Said beside the bar's actions once the plan the drawer was opened on is painted (`open`'s `note`). */
   let pendingNote: string | null = null;
   let pollTimer: number | undefined;
@@ -383,6 +398,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     // The summary stays open only while there is still a Run 取消任务 can name.
     if (next.runControl === null || next.runControl.cancel.reason !== null) cancelConfirmShown = false;
+    if (next.redo === null || next.redo.summary.length === 0) redoConfirmShown = false;
     if (pendingNote !== null) {
       refusal = pendingNote;
       pendingNote = null;
@@ -429,6 +445,17 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       (bar.querySelector<HTMLElement>('button:not(:disabled)') ?? bar.querySelector<HTMLElement>('.task-bar-status'))?.focus();
     }
     focusBar = false;
+    // The Task a redo prepared opens in its editing (Issue #422, S76c), as 返回修改 would open it.
+    if (editOnOpen && next.edit.editable) {
+      editOnOpen = false;
+      if (mode !== 'full') setMode('full', false);
+      body.querySelector<HTMLElement>('[data-task-plan-edit]:not(:disabled)')?.focus();
+    }
+    // The Run the editor redoes has stopped and reads 已取消: the new Task is prepared now.
+    if (redoPending !== null && redoPending.ref === next.ref && next.state.key === 'cancelled-after-start' && next.redo !== null &&
+        next.redo.prepare.redoOf === redoPending.runRecordId && !working && !interrupted) {
+      queueMicrotask(() => void redoNow());
+    }
     schedulePoll(next);
   }
 
@@ -738,6 +765,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
    */
   function paintBar(next: TaskPlanProjection): void {
     const view = taskBarView(next, pendingEdits(next));
+    const redoing = redoPending !== null && redoPending.ref === next.ref && next.state.key === 'cancelling';
     bar.hidden = false;
     bar.dataset['taskBar'] = view.readiness;
     const parts: HTMLElement[] = [el('p', 'task-bar-summary', view.summary)];
@@ -750,7 +778,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     if (view.statement !== null) parts.push(el('p', 'task-bar-statement', view.statement));
     let noteId: string | null = null;
     if (view.note !== null) {
-      const note = el('p', 'task-bar-note', view.note);
+      const note = el('p', 'task-bar-note', redoing ? TASK_BAR_REDOING_NOTE : view.note);
       note.dataset['taskBarNote'] = view.readiness;
       noteId = uid('bar-note');
       note.id = noteId;
@@ -766,6 +794,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     parts.push(actions);
     const run = next.runControl;
     if (run !== null && run.cancel.reason === null && cancelConfirmShown) parts.push(cancelImpactBlock(run));
+    if (next.redo !== null && next.redo.summary.length > 0 && redoConfirmShown) parts.push(redoSummaryBlock(next.redo));
     bar.replaceChildren(...parts);
     if (working) for (const button of bar.querySelectorAll<HTMLButtonElement>('button')) button.disabled = true;
   }
@@ -836,6 +865,21 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         button.addEventListener('click', () => {
           if (plan !== null) options.openRunSurface(plan);
         });
+        break;
+      // 改计划重做 (Issue #422, S76c): a stopped Run opens its summary first; a Run already cancelled is redone at once.
+      case 'redo':
+        if ((plan?.redo?.summary.length ?? 0) > 0) {
+          button.setAttribute('aria-controls', REDO_SUMMARY_ID);
+          button.setAttribute('aria-expanded', redoConfirmShown ? 'true' : 'false');
+          button.addEventListener('click', () => {
+            redoConfirmShown = !redoConfirmShown;
+            if (redoConfirmShown) cancelConfirmShown = false;
+            if (plan !== null) paintBar(plan);
+            bar.querySelector<HTMLElement>(redoConfirmShown ? `#${REDO_SUMMARY_ID} h4` : '[data-task-drawer-control="redo"]')?.focus();
+          });
+        } else {
+          button.addEventListener('click', () => void redoNow());
+        }
         break;
       // 返回修改 (Issue #419): the plan's editing — 完整, focused on the first thing that can change.
       case 'revise':
@@ -1063,6 +1107,91 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
    * The Cancellation Impact Summary (CTRL-004): the work that stops, what is kept, the Effects there are none of and
    * the turn not back yet, then the explicit confirmation, which is the one activation that records anything.
    */
+  /** 改计划重做's summary (Issue #422, S76c): what stops, what is kept, what the new Task does; only its confirmation records. */
+  function redoSummaryBlock(redo: NonNullable<TaskPlanProjection['redo']>): HTMLElement {
+    const section = el('section', 'task-bar-cancel-impact task-bar-redo-summary');
+    section.id = REDO_SUMMARY_ID;
+    section.setAttribute('role', 'group');
+    const heading = el('h4', undefined, TASK_BAR_REDO_HEADING);
+    heading.id = uid('redo-summary');
+    heading.tabIndex = -1;
+    heading.dataset['taskDrawerControl'] = 'redo-summary';
+    section.setAttribute('aria-labelledby', heading.id);
+    const lines = el('ul', 'task-bar-cancel-lines');
+    for (const line of redo.summary) lines.append(el('li', undefined, line));
+    const confirm = control(TASK_BAR_REDO_CONFIRM, 'primary', 'confirm-redo');
+    const keep = control(TASK_BAR_REDO_KEEP, 'secondary', 'keep-plan');
+    confirm.addEventListener('click', () => void confirmRedo());
+    keep.addEventListener('click', () => {
+      redoConfirmShown = false;
+      if (plan !== null) paintBar(plan);
+      bar.querySelector<HTMLElement>('[data-task-drawer-control="redo"]')?.focus();
+    });
+    const actions = el('div', 'button-row');
+    actions.append(confirm, keep);
+    section.append(heading, lines, actions);
+    if (working) for (const button of [confirm, keep]) button.disabled = true;
+    return section;
+  }
+
+  /** The confirmed redo of a stopped Run: 取消任务 first, and the new Task once the Run reads 已取消 (see `paint`). */
+  async function confirmRedo(): Promise<void> {
+    const current = plan;
+    const asked = request;
+    if (current === null || current.redo === null || current.runControl === null || !beginWork()) return;
+    options.setStatus('正在取消这次运行，然后准备新任务…', 'busy');
+    try {
+      await api.cancelBaselineAnalysisRun({ taskIntentId: current.ref });
+      redoPending = { ref: current.ref, runRecordId: current.runControl.runRecordId };
+      redoConfirmShown = false;
+      options.setStatus(TASK_BAR_REDOING_NOTE, 'success');
+      focusBar = true;
+      options.onRecorded(current.kind, current.bookId);
+    } catch (error) {
+      refusal = options.errorMessage(error, TASK_BAR_REDO_FAILED);
+      options.setStatus(refusal, 'error');
+    } finally {
+      endWork(asked);
+    }
+  }
+
+  /**
+   * The new Task of a redo (CONT-013): its own intent, plan and envelope, carrying what the cancelled Run read, prepared
+   * from the exact request the plan names; the drawer then opens it, in its editing, for the editor to change and start.
+   */
+  async function redoNow(): Promise<void> {
+    const current = plan;
+    const asked = request;
+    const redo = current?.redo ?? null;
+    if (current === null || redo === null || !beginWork()) return;
+    redoPending = null;
+    options.setStatus('正在准备改计划重做的新任务…', 'busy');
+    let prepared: string | null = null;
+    try {
+      const initial = await api.prepareBaselineAnalysis({ goal: redo.prepare.goal, update: redo.prepare.update, reconfirm: false, redoOf: redo.prepare.redoOf });
+      const completed = await options.awaitServiceJob(initial, (job) => options.setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy'));
+      if (completed.state === 'cancelled') {
+        options.setStatus('改计划重做的准备已取消；这次运行保持已取消。', 'success');
+        return;
+      }
+      if (completed.kind !== 'baseline-analysis-preparation' || completed.result === null || !('coverageManifest' in completed.result)) {
+        throw new Error(TASK_BAR_REDO_FAILED);
+      }
+      prepared = completed.result.taskIntent?.taskIntentId ?? null;
+      options.setStatus('新任务已准备：可以先改计划，再开始。', 'success');
+      options.onRecorded(current.kind, current.bookId);
+    } catch (error) {
+      refusal = options.errorMessage(error, TASK_BAR_REDO_FAILED);
+      options.setStatus(refusal, 'error');
+    } finally {
+      endWork(asked);
+    }
+    if (prepared !== null && !root.hidden) {
+      editOnOpen = true;
+      surface.open({ bookId: current.bookId, kind: current.kind, ref: prepared }, returnFocus);
+    }
+  }
+
   function cancelImpactBlock(run: TaskPlanRunControlProjection): HTMLElement {
     const section = el('section', 'task-bar-cancel-impact');
     section.id = CANCEL_IMPACT_ID;
