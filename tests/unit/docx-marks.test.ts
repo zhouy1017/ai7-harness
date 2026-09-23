@@ -290,6 +290,20 @@ describe('parser identity /3 reads a revised file as it reads with every revisio
     expect(parsed.fidelity[1]).toMatchObject({ count: 0, detail: COMMENTS_REVISIONS_DETAIL });
   });
 
+  // A tracked change in a note, header or footer becomes no mark; the row says it stays with the file rather than
+  // that the file carries none.
+  it('says a tracked change in a footnote stays with the file, rather than that none was found', async () => {
+    const { parsed, blocks } = await parseRevised({
+      paragraphs: [{ runs: [text(span(7))] }],
+      footnoteRevision: { text: span(8, 0, 10), author: AUTHOR, date: '2026-09-01T16:00:00Z' },
+    });
+    expect(blocks.map((block) => digest(block.text))).toEqual(await blockDigestsOf(7));
+    expect(parsed.importedMarks).toEqual([]);
+    expect(parsed.fidelity[1]).toMatchObject({ count: 0, statusLabel: '完整保留', detail: COMMENTS_REVISIONS_DETAIL });
+    const plain = await parseRevised({ paragraphs: [{ runs: [text(span(7))] }] });
+    expect(plain.parsed.fidelity[1]!.detail).not.toBe(COMMENTS_REVISIONS_DETAIL);
+  });
+
   it('keeps a formatting revision with the file instead of refusing it', async () => {
     const formatting = { author: AUTHOR, date: '2026-09-01T13:00:00Z' };
     const { parsed, blocks } = await parseRevised({

@@ -219,6 +219,8 @@ export interface ComposedRevisedRequest {
   readonly comments?: ReadonlyArray<ComposedComment>;
   /** A section-property revision in the terminal `w:sectPr`. */
   readonly sectionRevision?: { readonly author: string; readonly date: string };
+  /** One footnote in `word/footnotes.xml` whose words are an insertion: a revision revision 3 leaves with the file. */
+  readonly footnoteRevision?: { readonly text: SourceSpan; readonly author: string; readonly date: string };
 }
 
 const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
@@ -330,6 +332,15 @@ export async function composeRevisedDocx(path: string, request: ComposedRevisedR
       `${body}${section}</w:body></w:document>`,
     ),
   };
+  if (request.footnoteRevision !== undefined) {
+    const { text, author, date } = request.footnoteRevision;
+    entries['word/footnotes.xml'] = encoder.encode(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:footnote w:id="1"><w:p>' +
+      `<w:ins${attributes(author, date)}><w:r><w:t xml:space="preserve">${escapeXml(await sourceSpanText(request.source, text))}</w:t></w:r></w:ins>` +
+      '</w:p></w:footnote></w:footnotes>',
+    );
+  }
   const comments = request.comments ?? [];
   if (comments.length > 0) {
     const commentXml: string[] = [];
