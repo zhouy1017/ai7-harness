@@ -225,6 +225,7 @@ import {
   QUICK_START_RULE_CHANGED,
   QUICK_START_SLOT_BUSY,
   RULE_STATE_LABELS,
+  SET_RULE_BUDGET,
   SET_RULE_CHANGED,
   SET_RULE_DEVELOPER_LIVE,
   SET_RULE_EDITED,
@@ -3910,6 +3911,7 @@ export class EditorialStore {
       removedSteps: ReadonlyArray<string>;
       disallowedAdaptations: ReadonlyArray<string>;
       askFirstAdaptations?: ReadonlyArray<string>;
+      runBudgetCeiling?: { kind: 'tokens'; maxTotalTokens: number } | null;
     },
     progress?: ProgressReader,
   ): BaselineAnalysisProjection {
@@ -4091,8 +4093,10 @@ export class EditorialStore {
       ? SET_RULE_DEVELOPER_LIVE
       : projection.planRevision !== null
         ? SET_RULE_CHANGED
-        : version.edits.removedSteps.length > 0 || version.edits.disallowedAdaptations.length > 0 || (version.edits.askFirstAdaptations ?? []).length > 0
-          ? SET_RULE_EDITED
+        : version.edits.runBudgetCeiling !== undefined
+          ? SET_RULE_BUDGET
+          : version.edits.removedSteps.length > 0 || version.edits.disallowedAdaptations.length > 0 || (version.edits.askFirstAdaptations ?? []).length > 0
+            ? SET_RULE_EDITED
           : current !== null && current.state === 'active' && current.fromThisPlan ? setRuleAlreadyReason(current.name) : null;
     return {
       canSet: reason === null,

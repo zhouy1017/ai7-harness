@@ -117,6 +117,8 @@ export interface AnalysisTaskAttentionReading {
     readonly progress: RunProgress | null;
     /** The first question the Run asked that still waits for the editor's answer (Issue #422, S76d); `null` when none. */
     readonly openClarification?: null | { readonly requestId: string; readonly unitOrdinal: number; readonly raisedAt: string };
+    /** An interrupted Run the Run Budget Ceiling stopped (Issue #51, S16a): 已停止 · 预算已达上限. */
+    readonly budgetReached?: boolean;
   };
   /** A prepared Task's pending Plan Revision that 重新确认计划 settles; `null` otherwise. */
   readonly planRevision: null | {
@@ -376,6 +378,13 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading, waitingFor: Wai
     case 'failed':
       return item('exceptions', 'analysis-failed', { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
     case 'interrupted':
+      // 已停止 · 预算已达上限 (Issue #51, S16a; MODEL-016, MODEL-017): the way on is the plan's 调整预算并重做.
+      if (run.budgetReached === true) {
+        return item('exceptions', 'analysis-budget-reached', {
+          itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'adjust-budget-redo',
+          target: { kind: 'analysis-plan', bookId: reading.bookId, taskIntentId: reading.taskIntentId }, technical,
+        });
+      }
       return item('exceptions', 'analysis-interrupted', { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
     case 'blocked-before-dispatch':
       return item('exceptions', 'analysis-blocked', { itemId, blocked: true, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });

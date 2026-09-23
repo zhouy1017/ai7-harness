@@ -2330,8 +2330,9 @@ function registerRendererHandlers(
             planEnvelopeDigest: input.planEnvelopeDigest,
             removedSteps: input.removedSteps,
             disallowedAdaptations: input.disallowedAdaptations,
-            // 先问你 (Issue #422, S76d) rides along only when the renderer names it.
+            // 先问你 (Issue #422, S76d) and the editor's ceiling (Issue #51, S16a) ride along only when the renderer names them.
             ...(input.askFirstAdaptations === undefined ? {} : { askFirstAdaptations: input.askFirstAdaptations }),
+            ...(input.runBudgetCeiling === undefined ? {} : { runBudgetCeiling: input.runBudgetCeiling }),
           });
           requireCurrentRouteGeneration(owned, routeGeneration);
           if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '更新计划的结果不属于当前图书工作台。');
