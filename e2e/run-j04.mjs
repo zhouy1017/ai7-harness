@@ -333,9 +333,9 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     database.exec('PRAGMA query_only = ON;');
     // Synchronized delta with Issue #467: this reads the same Agent Data Root store J-03 and J-12
     // read, so the pin moves with the terminal version the service stamps
-    // (`PLAN_EDIT_SCHEMA_VERSION` since Issue #419). It read 19 until #467 — one revision
+    // (`CLARIFICATION_SCHEMA_VERSION` since Issue #422, S76d). It read 19 until #467 — one revision
     // behind, because only a failed product cleanup reaches this fallback, so revision 20 never met it.
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 34, 'credential-cleanup-metadata-version');
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 35, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
               approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
@@ -668,7 +668,8 @@ const SAFE_RETRY_ADAPTATION = '模型服务暂时出错时，同一个阅读范�
 // The editable plan (Issue #419, S73): its two notes (`src/renderer/task-drawer-labels.ts`) and what a Run that
 // leaves out 核对与抽检 says instead of a sample (`src/service/analysis/plan-edits.ts`), each pinned by its unit suite.
 const PLAN_EDIT_STEPS_NOTE = '这项分析的步骤由分析工序决定：可以去掉「核对与抽检」，不能改写、增加或调换顺序。';
-const PLAN_EDIT_ASK_FIRST_NOTE = '改成「先问你」要等澄清请求，暂不提供。';
+// Issue #422 (S76d): the move into 先问你 is offered, and the note says what it means for the Run.
+const PLAN_EDIT_ASK_FIRST_NOTE = '「先问你」：运行中遇到这种情况，AI7 先停下这一步来问你，其余阅读范围照常进行。';
 const ASSURANCE_SAMPLING_REMOVED = '按你修改的计划，这次运行不做核对与抽检；保证抽样未发起。';
 const LOCKED_BOUNDARY = ['固定要做的事、处理范围、参考范围与所用工序', '固定模型服务、发送内容类别、预算上限', '固定结果类型、受控动作'];
 

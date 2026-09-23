@@ -9,8 +9,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
-// J-10 (Issue #422, plan slices S76a, S76b and S76c): the operations on a Run under way, told apart by their
-// consequence (V2-UX-AUTH-010, AUTH-011, CTRL-001 to CTRL-009, CONT-013 to CONT-015). Books are made from the one
+// J-10 (Issue #422, plan slices S76a to S76d): the operations on a Run under way, told apart by their
+// consequence (V2-UX-AUTH-010, AUTH-011, CTRL-001 to CTRL-009, CONT-013 to CONT-015, CLAR-001 to CLAR-007). Books are made from the one
 // admitted input, exact `sample1`, through the product's own UI, and their analyses run on the J-04 model adapter.
 // J-10's unit hold keeps a reading range in flight once the Journey's number of ranges have settled, so the Journey
 // can watch and steer a Run under way.
@@ -32,6 +32,12 @@ import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabl
 // On the third Book, paused with two ranges kept: 改计划重做 opens one inline summary of what stops, what is kept and
 // what the new Task does, which records nothing, and 先不重做 closes it; confirming it by keyboard alone cancels the
 // Run into its partial revision, and the new Task, carrying those two ranges, opens in its editing without running.
+//
+// On the fourth Book, launched over the transient-retry fixture — unit 2 fails for good, unit 5's first attempt fails
+// retry-safe — the safe retry is moved into 先问你 before the Run starts. Unit 5 then asks instead of retrying: the
+// question card says only that step waits while the others are read, 暂不回答 sets it aside recording nothing, and once
+// the rest are read the Run waits, 任务等待你的说明, holding nothing. The question outlives AI7 closing; answered by
+// keyboard alone — 再试一次 with a note — the Run goes on, retrying unit 5 as its second attempt, to its end.
 // 重试, 回退运行方向 and 重放 are J-10's later operations, not these slices'.
 //
 // The runner writes J-10's unit-hold file, and reads the service's projections through `window.ai7` only to
@@ -46,6 +52,16 @@ const FIXTURE_IDENTITY = 'sample1-baseline-happy';
 const BOOK = Object.freeze({ title: '取消任务旅程' });
 const SECOND_BOOK = Object.freeze({ title: '续行旅程' });
 const THIRD_BOOK = Object.freeze({ title: '改计划重做旅程' });
+const FOURTH_BOOK = Object.freeze({ title: '澄清旅程' });
+/** The fourth Book's launch: unit 2 fails for good, and unit 5's first attempt fails retry-safe (Issue #422, S76d). */
+const TRANSIENT_FIXTURE_IDENTITY = 'sample1-baseline-transient-retry';
+/** Five ranges may settle before the fourth Book's Run is held: 1 to 4 do, 5 asks, 6 settles, and 7 is in flight. */
+const QUESTION_HOLD = 5;
+const ASK_FIRST_STATEMENT = '模型服务暂时出错时，先问你要不要把这个阅读范围安全地再试一次；只有等你回答的这一步会停下。';
+const QUESTION = '第 5 个阅读范围：模型服务暂时出错，这一次没有读成。要安全地再试一次吗？';
+const SCOPE_CONTINUING = '该步骤等待说明 · 其他步骤仍在继续';
+const SCOPE_WAITING = '任务等待你的说明';
+const QUESTION_NOTE = '服务刚才在维护';
 /** Exact `sample1`'s reading ranges. */
 const SAMPLE1_UNITS = 8;
 /** Two ranges settle before 暂停 with the third in flight; after 续行, five have settled before 取消任务 with the sixth. */
@@ -269,9 +285,9 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
   }
   try {
     database.exec('PRAGMA query_only = ON;');
-    // The terminal version the service stamps (`PLAN_EDIT_SCHEMA_VERSION`, as J-04 reads it): 更新计划's revision
-    // since Issue #419, and after it this pin moves with whatever revision a later slice takes.
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 34, 'credential-cleanup-metadata-version');
+    // The terminal version the service stamps (`CLARIFICATION_SCHEMA_VERSION`, as J-04 reads it): the Clarification
+    // Requests' revision since Issue #422 (S76d), and after it this pin moves with whatever revision a later slice takes.
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 35, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
               approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
@@ -410,6 +426,12 @@ async function pressTab(renderer) {
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...TAB });
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...TAB });
 }
+/** Space as a keyboard sends it, which chooses the focused radio. */
+async function pressSpace(renderer) {
+  const space = { key: ' ', code: 'Space', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 };
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...space, text: ' ', unmodifiedText: ' ' });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...space });
+}
 /** Enter as a keyboard sends it: only a key that carries its text activates the focused control. */
 async function pressEnter(renderer) {
   const enter = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 };
@@ -458,14 +480,36 @@ async function openAnalysisOf(renderer, bookId, name) {
  * does not); the bar's 开始任务 records the Run — and, with a route, hands it to the one slot.
  */
 async function startFirstBaseline(renderer, readiness, name) {
+  await prepareFirstBaseline(renderer, readiness, name);
+  await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', `${name}-start`);
+}
+/** The first baseline prepared and its plan open in the drawer, ready to start or to change first. */
+async function prepareFirstBaseline(renderer, readiness, name) {
   await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='available'`, `${name}-available`);
   await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="prepare"]', `${name}-prepare`);
   await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, `${name}-prepared`, 120_000);
   const showing = await renderer.evaluate(`(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer==='open' && drawer.dataset.taskPlanKind==='baseline-analysis' && drawer.dataset.taskPlanRef===document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId; })()`);
   if (!showing) await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', `${name}-open-plan`);
   await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanKind==='baseline-analysis' && document.querySelector('#task-drawer')?.dataset.taskPlanRef===document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId && document.querySelector('#task-drawer')?.dataset.taskPlanStart===${JSON.stringify(readiness)} && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, `${name}-bar-ready`);
-  await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', `${name}-start`);
 }
+
+/**
+ * The questions the drawer shows (Issue #422, S76d): each open card's question, scope, choices — chosen or not, 推荐 on
+ * which — and its two actions; a card set aside with 暂不回答 as its one quiet line.
+ */
+const READ_QUESTIONS = `Array.from(document.querySelectorAll('#task-drawer .task-drawer-questions [data-task-plan-clarification]')).map((card) => ({
+  state: card.dataset.clarificationState ?? null,
+  heading: card.querySelector('h4')?.textContent ?? null,
+  question: card.querySelector('legend')?.textContent ?? null,
+  scope: card.querySelector('[data-clarification-scope]')?.textContent ?? null,
+  options: Array.from(card.querySelectorAll('[data-clarification-option]')).map((option) => [
+    option.dataset.clarificationOption, option.querySelector('.task-plan-choice-label')?.textContent ?? null,
+    option.querySelector('.task-plan-choice-recommended')?.textContent ?? null, option.querySelector('input')?.checked === true,
+  ]),
+  submit: (() => { const button = card.querySelector('[data-task-drawer-control^="clarification-submit:"]'); return button === null ? null : [button.textContent, button.disabled]; })(),
+  defer: card.querySelector('[data-task-drawer-control^="clarification-defer:"]')?.textContent ?? null,
+  line: card.dataset.clarificationState === 'deferred' ? card.textContent : null,
+}))`;
 
 
 /**
@@ -758,13 +802,15 @@ async function main() {
     electronExecutableForCleanup = executable;
     // Every Journey launch names the picker's file, the J-04 model adapter and J-10's unit hold; a cleanup launch none.
     const holdPath = resolve(runRoot, 'j10-unit-hold.txt');
+    // The J-04 adapter's fixture: the happy one until the fourth Book's launch (Issue #422, S76d).
+    let adapterFixture = FIXTURE_IDENTITY;
     const launchArgs = ({ forCleanup }) => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
         '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
         resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
       ];
-      if (!forCleanup) args.push('--j10-picker-path', SAMPLE1_PATH, '--j04-model-adapter', FIXTURE_IDENTITY, '--j10-unit-hold-path', holdPath);
+      if (!forCleanup) args.push('--j10-picker-path', SAMPLE1_PATH, '--j04-model-adapter', adapterFixture, '--j10-unit-hold-path', holdPath);
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       return args;
     };
@@ -794,10 +840,10 @@ async function main() {
     await writeFile(holdPath, String(FIRST_HOLD), 'utf8');
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'product-ready');
-    // One member each for 取消任务, 暂停 and 续行, and nothing that redoes, retries, replays or rewinds a Run: 改计划重做
+    // One member each for 取消任务, 暂停, 续行 and 提交回答, and nothing that redoes, retries, replays or rewinds a Run: 改计划重做
     // prepares a new Task through `prepareBaselineAnalysis`, naming the Run it redoes (the manuscript's own
     // `redoManuscript` is the editor's undo and redo, not a Run's).
-    await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && ['cancelBaselineAnalysisRun', 'pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun'].every((key)=>typeof window.ai7[key] === 'function') && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress/i.test(key)) && !Object.keys(window.ai7).some((key)=>/(redo|retry|replay|rewind)[A-Za-z]*(Run|Analysis|Task)$/i.test(key))`, 'renderer-api-boundary');
+    await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && ['cancelBaselineAnalysisRun', 'pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun', 'answerBaselineAnalysisClarification'].every((key)=>typeof window.ai7[key] === 'function') && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress/i.test(key)) && !Object.keys(window.ai7).some((key)=>/(redo|retry|replay|rewind)[A-Za-z]*(Run|Analysis|Task)$/i.test(key))`, 'renderer-api-boundary');
     await renderer.send('Page.setBypassCSP', { enabled: true });
     try {
       const fetchRejected = await renderer.evaluate(`(async()=>{try{await fetch(${JSON.stringify(loopback.url)});return false}catch{return true}})()`);
@@ -1230,6 +1276,150 @@ async function main() {
     const stillPrepared = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(stillPrepared?.taskIntent?.taskIntentId === thirdRedo.taskIntent.taskIntentId && stillPrepared.state === 'prepared' && (stillPrepared.run ?? null) === null &&
       (await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanState`)) === 'ready', 'redo-waits-for-the-editor');
+
+    // ---- Clarification Requests (Issue #422, S76d; CLAR-001 to CLAR-007, PLAN-011, PLAN-012) ------------------------
+    at('relaunch-for-clarification');
+    // A launch over the transient-retry fixture: unit 2 fails for good, and unit 5's first attempt fails retry-safe.
+    await closeOwnedBrowser();
+    cancellation.throwIfRequested();
+    await writeFile(holdPath, 'release', 'utf8');
+    adapterFixture = TRANSIENT_FIXTURE_IDENTITY;
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'clarification-ready');
+
+    at('fourth-book-import');
+    const fourthBookId = await importSample1(renderer, FOURTH_BOOK.title, true, 'fourth-import');
+    requireJourney(![bookId, secondBookId, thirdBookId].includes(fourthBookId), 'four-books');
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'fourth-artifact-enable-ready');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'fourth-artifact-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'fourth-artifact-enabled');
+    await click(renderer, '返回图书列表', 'fourth-return-library');
+
+    at('ask-first-edit');
+    // In 完整 the safe retry offers × (不允许) and 先问你. 先问你 moves it into the right column with 恢复, and 更新计划 makes
+    // that version 2, whose plan says where the editor may be asked (PLAN-005).
+    await openAnalysisOf(renderer, fourthBookId, 'fourth-analysis');
+    await prepareFirstBaseline(renderer, 'ready', 'fourth-baseline');
+    const fourthIntentId = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanRef ?? ''`);
+    requireJourney(UUID_PATTERN.test(fourthIntentId), 'fourth-task');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="revise"]', 'fourth-revise');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerMode==='full' && document.querySelector('#task-drawer [data-task-plan-boundary="adaptable"] [data-task-plan-item="safe-retry"] [data-task-plan-edit="ask-first"]')?.disabled===false`, 'ask-first-offered', 10_000);
+    await assertRenderer(renderer, `document.querySelector('#task-drawer [data-task-plan-item="safe-retry"] [data-task-plan-edit="ask-first"]')?.getAttribute('aria-label')==='改成先问你：模型服务暂时出错时，同一个阅读范围安全地再试一次'`, 'ask-first-named');
+    await clickSelector(renderer, '#task-drawer [data-task-plan-item="safe-retry"] [data-task-plan-edit="ask-first"]', 'ask-first-move');
+    await waitFor(renderer, `(() => { const item=document.querySelector('#task-drawer [data-task-plan-boundary="ask-first"] [data-task-plan-item="safe-retry"]'); return item!==null && item.querySelector('.task-plan-edit-tag')?.textContent==='你改的 · 先问你' && document.activeElement===item.querySelector('[data-task-plan-edit="restore"]') && document.querySelector('#task-drawer .task-bar-note')?.textContent==='你改了 1 处'; })()`, 'ask-first-moved', 10_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="update-plan"]', 'ask-first-update');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanVersion==='2' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'ask-first-version-2', 60_000);
+    const askedPlan = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(askedPlan?.taskIntent?.taskIntentId === fourthIntentId && askedPlan.planVersion?.ordinal === 2 &&
+      JSON.stringify(askedPlan.planVersion.edits?.askFirstAdaptations) === JSON.stringify(['safe-retry']) &&
+      JSON.stringify(askedPlan.planEnvelope?.boundary?.askFirst?.map((entry) => entry.adaptationClass)) === JSON.stringify(['safe-retry']) &&
+      JSON.stringify(askedPlan.planEnvelope.boundary.adaptable) === '[]' && askedPlan.planEnvelope.boundary.participation?.expected === true,
+    'ask-first-version', { edits: askedPlan?.planVersion?.edits ?? null, boundary: askedPlan?.planEnvelope?.boundary ?? null });
+    await assertRenderer(renderer, `document.querySelector('#task-drawer .task-plan-participation li')?.textContent===${JSON.stringify(ASK_FIRST_STATEMENT)} && document.querySelector('#task-drawer [data-task-plan-boundary="ask-first"] [data-task-plan-item="safe-retry"] .task-plan-edit-tag')?.textContent==='你改的 · 先问你'`, 'ask-first-plan-words');
+
+    at('clarification-raised');
+    // 开始任务 with five ranges allowed to settle: unit 5 fails retry-safe and, asked first, asks instead of retrying; 6 is
+    // read and 7 held in flight. The card says only that step waits, its choices unchosen, 推荐 on 再试一次.
+    await writeFile(holdPath, String(QUESTION_HOLD), 'utf8');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'fourth-start');
+    await waitFor(renderer, `(() => { const activity=document.querySelector('#task-drawer .task-plan-activity'); return activity?.dataset.taskPlanActivityProgress==='5/8' && activity.dataset.taskPlanActivityUnit==='7' && document.querySelector('#task-drawer .task-drawer-questions [data-clarification-state="open"]')!==null; })()`, 'question-raised', 180_000);
+    const raised = await renderer.evaluate(READ_QUESTIONS);
+    requireJourney(JSON.stringify(raised) === JSON.stringify([{
+      state: 'open', heading: '需要你回答', question: QUESTION, scope: SCOPE_CONTINUING,
+      options: [['retry', '再试一次', '推荐', false], ['record-gap', '不重试，记为缺口', null, false]],
+      submit: ['提交回答', true], defer: '暂不回答', line: null,
+    }]), 'question-card', raised);
+    await waitForBar(renderer, { state: 'running', pill: '运行中', status: '运行中', note: '有 1 个问题等你回答', actions: RUNNING_ACTIONS }, 'question-running-bar', 30_000);
+    const asking = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(fourthIntentId)} })`);
+    requireJourney(asking?.clarifications?.length === 1 && asking.clarifications[0].unitOrdinal === 5 && asking.clarifications[0].state === 'open' &&
+      asking.clarifications[0].answer === null, 'question-record', asking?.clarifications ?? null);
+    const askingAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
+    requireJourney(askingAttention?.groups?.find((group) => group.key === 'decisions')?.items?.some((entry) =>
+      entry.book?.bookId === fourthBookId && entry.state === 'analysis-clarification' && entry.blocked === false) === true, 'question-in-attention', askingAttention?.groups ?? null);
+
+    at('clarification-deferred');
+    // 暂不回答 sets the card aside as one quiet line with 回答, focus on it, and records nothing (CLAR-007).
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control^="clarification-defer:"]', 'question-defer');
+    await waitFor(renderer, `document.activeElement?.dataset?.taskDrawerControl?.startsWith('clarification-reopen:') === true`, 'question-deferred', 10_000);
+    const deferred = await renderer.evaluate(READ_QUESTIONS);
+    requireJourney(deferred.length === 1 && deferred[0].state === 'deferred' && deferred[0].line === '有 1 个问题等你回答回答', 'question-deferred-line', deferred);
+    const unanswered = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(fourthIntentId)} })`);
+    requireJourney(unanswered?.clarifications?.[0]?.state === 'open' && unanswered.clarifications[0].answer === null, 'defer-records-nothing');
+
+    at('clarification-waiting');
+    // Released, ranges 7 and 8 are read and the Run stops at that boundary: 任务等待你的说明, holding nothing, 等你回答 in
+    // the bar with 取消任务 and 改计划重做 beside it, and 待我处理 holds the question as what the Task waits for.
+    await writeFile(holdPath, 'release', 'utf8');
+    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.state==='awaiting-clarification')`, 'run-waits', 60_000);
+    await waitForBar(renderer, {
+      state: 'awaiting-clarification', pill: SCOPE_WAITING, status: '等你回答', note: '已读完 7 / 8 个阅读范围；1 个问题等你回答，回答后接着做',
+      actions: [['cancel-run', '取消任务', 'enabled', null], ['redo', '改计划重做', 'enabled', null], ['run-link', '查看运行', 'enabled', null]],
+    }, 'waiting-bar', 30_000);
+    const waitingRun = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(waitingRun?.state === 'awaiting-clarification' && waitingRun.stateLabel === SCOPE_WAITING &&
+      JSON.stringify(waitingRun.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'awaiting-clarification']) &&
+      JSON.stringify(waitingRun.run.attempt?.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2, 3, 4, 5, 6, 7, 8]) &&
+      (waitingRun.resultSetRevision ?? null) === null,
+    'waiting-record', { state: waitingRun?.state, transitions: waitingRun?.run?.transitions?.map((transition) => transition.state), spans: waitingRun?.run?.attempt?.spans?.map((span) => span.unitOrdinal) });
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='awaiting-clarification'`, 'waiting-card', 30_000);
+    const waitingAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
+    requireJourney(waitingAttention?.groups?.find((group) => group.key === 'decisions')?.items?.some((entry) =>
+      entry.book?.bookId === fourthBookId && entry.state === 'analysis-clarification' && entry.blocked === true) === true, 'waiting-in-attention', waitingAttention?.groups ?? null);
+
+    at('clarification-survives-restart');
+    // AI7 closes and opens again: the question and the Run's wait are both still there, and nothing was sent since.
+    await closeOwnedBrowser();
+    cancellation.throwIfRequested();
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'restart-ready');
+    await openAnalysisOf(renderer, fourthBookId, 'restart-analysis');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='awaiting-clarification' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent===${JSON.stringify(SCOPE_WAITING)}`, 'restart-card', 30_000);
+    await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'restart-open-plan');
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-drawer-questions [data-clarification-state="open"] [data-clarification-scope]')?.textContent===${JSON.stringify(SCOPE_WAITING)}`, 'question-after-restart', 30_000);
+    const restarted = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(restarted?.run?.state === 'awaiting-clarification' && JSON.stringify(restarted.run.transitions) === JSON.stringify(waitingRun.run.transitions), 'nothing-since-restart');
+
+    at('j14-clarification-keyboard');
+    // Without a pointer: from the card's heading, Tab reaches 再试一次 and Space chooses it; Tab reaches 自行说明…, and
+    // Enter opens the note, which takes the words — Enter there is a new line and submits nothing — and Tab reaches
+    // 提交回答 with visible focus.
+    await assertRenderer(renderer, `(() => { const heading=document.querySelector('#task-drawer .task-drawer-questions [data-clarification-state="open"] h4'); if(!(heading instanceof HTMLElement))return false; heading.focus(); return document.activeElement===heading; })()`, 'keyboard-question-start');
+    await pressTab(renderer);
+    await waitFor(renderer, `document.activeElement?.dataset?.taskDrawerControl?.endsWith(':retry') === true && document.activeElement.matches(':focus-visible')`, 'keyboard-retry-focused', 10_000);
+    await pressSpace(renderer);
+    await waitFor(renderer, `document.activeElement instanceof HTMLInputElement && document.activeElement.checked && document.querySelector('#task-drawer [data-task-drawer-control^="clarification-submit:"]')?.disabled===false`, 'keyboard-retry-chosen', 10_000);
+    await pressTab(renderer);
+    await waitFor(renderer, `document.activeElement?.dataset?.taskDrawerControl?.startsWith('clarification-note-toggle:') === true`, 'keyboard-note-toggle', 10_000);
+    await pressEnter(renderer);
+    await waitFor(renderer, `document.activeElement instanceof HTMLTextAreaElement && document.activeElement.dataset.taskDrawerControl?.startsWith('clarification-note:') === true`, 'keyboard-note-open', 10_000);
+    await renderer.send('Input.insertText', { text: QUESTION_NOTE });
+    await pressEnter(renderer);
+    await new Promise((settle) => setTimeout(settle, 500));
+    const stillOpen = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(fourthIntentId)} })`);
+    requireJourney(stillOpen?.clarifications?.[0]?.answer === null &&
+      (await renderer.evaluate(`document.activeElement instanceof HTMLTextAreaElement && document.activeElement.value===${JSON.stringify(`${QUESTION_NOTE}
+`)}`)) === true,
+    'enter-writes-a-line');
+    await pressTab(renderer);
+    await waitFor(renderer, `document.activeElement?.dataset?.taskDrawerControl?.startsWith('clarification-submit:') === true && document.activeElement.matches(':focus-visible')`, 'keyboard-submit-reached', 10_000);
+
+    at('clarification-answered');
+    // Enter on 提交回答: the answer is recorded — 再试一次 and the note — and the Run goes on inside its unchanged envelope,
+    // retrying unit 5 as its second attempt, to its end; the drawer keeps what was asked and answered.
+    await pressEnter(renderer);
+    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>(analysis?.run?.transitions?.length ?? 0) > 4 && !['awaiting-clarification','admitted','executing'].includes(analysis.run.state))`, 'answered-run-ended', 180_000);
+    const answeredRun = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const answeredRevision = answeredRun?.resultSetRevision;
+    requireJourney(answeredRun?.state === 'settled' && answeredRun.run?.state === 'completed-with-gaps' &&
+      JSON.stringify(answeredRun.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'awaiting-clarification', 'admitted', 'executing', 'completed-with-gaps']) &&
+      JSON.stringify(answeredRun.run.attempt?.spans?.map((span) => [span.unitOrdinal, span.attemptIndex])) === JSON.stringify([[1, 1], [2, 1], [3, 1], [4, 1], [5, 1], [6, 1], [7, 1], [8, 1], [5, 2]]) &&
+      answeredRevision?.coverage?.unitsClosed === 7 && JSON.stringify(answeredRevision.gaps.map((gap) => gap.unitOrdinal)) === '[2]' &&
+      answeredRun.run.adaptations?.length === 1 && answeredRun.run.adaptations[0].unitOrdinal === 5 && typeof answeredRun.run.adaptations[0].clarificationAnswerId === 'string',
+    'answered-run', { state: answeredRun?.state, run: answeredRun?.run?.state, transitions: answeredRun?.run?.transitions?.map((transition) => transition.state), closed: answeredRevision?.coverage?.unitsClosed });
+    const answeredPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(fourthIntentId)} })`);
+    requireJourney(answeredPlan?.clarifications?.[0]?.state === 'answered' && answeredPlan.clarifications[0].answer?.optionId === 'retry' &&
+      answeredPlan.clarifications[0].answer.note === QUESTION_NOTE, 'answer-record', answeredPlan?.clarifications ?? null);
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-clarification-record li[data-clarification-state="answered"] .task-plan-clarification-answer')?.textContent?.startsWith(${JSON.stringify(`你已回答：再试一次 · 说明：${QUESTION_NOTE}（`)}) === true && document.querySelector('#task-drawer .task-drawer-questions [data-task-plan-clarification]')===null`, 'answer-shown', 30_000);
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
