@@ -59,6 +59,7 @@ import {
   ANALYSIS_LEDGER_REVISION_16_SQL,
   ANALYSIS_LEDGER_REVISION_19_SQL,
   ANALYSIS_LEDGER_REVISION_23_SQL,
+  ANALYSIS_LEDGER_REVISION_29_SQL,
   ANALYSIS_LEDGER_REVISION_17_TABLES,
   ANALYSIS_LEDGER_SCHEMA_SQL,
   ANALYSIS_LEDGER_TRIGGER_SQL,
@@ -74,6 +75,7 @@ import {
   IMPORT_RETENTION_SCHEMA_VERSION,
   IMPORTED_MARK_SCHEMA_VERSION,
   EXPORT_LEDGER_SCHEMA_VERSION,
+  CONNECTIVITY_WAIT_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -126,8 +128,9 @@ import {
  * The analysis ledger as revision 15 created it, as revision 16 rebuilt two of its relations, as
  * revision 19 left them, as revision 20 widened the three kind-coupled ones and revisions 21 to 23
  * carried them, and as revision 24 widened the same three again for the review-category kind family
- * (Issue #417). Every one of those shapes validates exactly, so a store at any of them passes this
- * layer before the forward copy that brings it to the current shape.
+ * (Issue #417); and the Run states as revisions 15 to 29 carried them before revision 30 widened them for
+ * Connectivity Wait (Issue #502). Every one of those shapes validates exactly, so a store at any of them
+ * passes this layer before the forward copy that brings it to the current shape.
  */
 const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | ReadonlyArray<string>>> = {
   ...ANALYSIS_LEDGER_SCHEMA_SQL,
@@ -148,6 +151,7 @@ const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | Read
     ANALYSIS_LEDGER_REVISION_23_SQL.analysis_result_set_revisions,
     ANALYSIS_LEDGER_REVISION_19_SQL.analysis_result_set_revisions,
   ],
+  analysis_run_states: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_states, ANALYSIS_LEDGER_REVISION_29_SQL.analysis_run_states],
 };
 
 /** The analysis ledger before revision 17 (Issue #48): the same relations without the plan-version, Plan Revision, and Plan Adaptation tables and their triggers. */
@@ -5177,7 +5181,7 @@ export function initializeBoundedSchema(
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION || version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION,
+      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5191,9 +5195,9 @@ export function initializeBoundedSchema(
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION) {
+      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== EXPORT_LEDGER_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== CONNECTIVITY_WAIT_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,

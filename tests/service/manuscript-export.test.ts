@@ -9,7 +9,7 @@ import { parseDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
 import { EDITOR_AUTHOR_LABEL } from '../../src/service/docx-export.js';
 import { EXPORT_LEDGER_SCHEMA_SQL, writeAtomically } from '../../src/service/manuscript-export.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { EXPORT_LEDGER_SCHEMA_VERSION, IMPORTED_MARK_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { CONNECTIVITY_WAIT_SCHEMA_VERSION, IMPORTED_MARK_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import {
   DEFAULT_MANUSCRIPT_EXPORT_OPTIONS,
@@ -445,7 +445,7 @@ describe('④ 导出: the Export Fidelity Review, the preparation, the approval 
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EXPORT_LEDGER_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(CONNECTIVITY_WAIT_SCHEMA_VERSION);
       const truthAfter = relationTruth(database);
       expect([...truthAfter.keys()]).toEqual([...truthBefore.keys(), ...EXPORT_LEDGER_RELATIONS_DROP_ORDER].sort());
       for (const relation of EXPORT_LEDGER_RELATIONS_DROP_ORDER) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);
