@@ -243,12 +243,20 @@ const SKIPPED_REVISION_ELEMENTS: ReadonlySet<string> = new Set([
   'tblPrExChange', 'numberingChange',
 ]);
 
-/** Revision markers that only say a revision is there: a table cell's, a move's range, custom XML's. */
+/**
+ * Revision markers that only say a revision is there and change no text of either reading: a table cell's merge,
+ * a move's range — the moved text itself is in `w:moveFrom`/`w:moveTo` — and custom XML's, which brackets the
+ * element's tags and not its content. A cell or a row inserted or deleted is not one of them: it is read as a
+ * revision of every paragraph it holds (`CELL_REVISIONS`, and `w:trPr`'s own `w:ins`/`w:del`).
+ */
 const REVISION_MARKER_ELEMENTS: ReadonlySet<string> = new Set([
-  'cellIns', 'cellDel', 'cellMerge', 'moveFromRangeStart', 'moveFromRangeEnd', 'moveToRangeStart', 'moveToRangeEnd',
+  'cellMerge', 'moveFromRangeStart', 'moveFromRangeEnd', 'moveToRangeStart', 'moveToRangeEnd',
   'customXmlInsRangeStart', 'customXmlInsRangeEnd', 'customXmlDelRangeStart', 'customXmlDelRangeEnd',
   'customXmlMoveFromRangeStart', 'customXmlMoveFromRangeEnd', 'customXmlMoveToRangeStart', 'customXmlMoveToRangeEnd',
 ]);
+
+/** A table cell inserted or deleted as a whole (`w:tcPr/w:cellIns`, `w:tcPr/w:cellDel`), as a run revision's kind. */
+const CELL_REVISIONS: Readonly<Record<string, 'ins' | 'del'>> = { cellIns: 'ins', cellDel: 'del' };
 
 /** The parents under which `w:ins` and its kin mark a property rather than hold runs. */
 const REVISION_PROPERTY_PARENTS: ReadonlySet<string> = new Set(['rPr', 'trPr', 'numPr']);
@@ -416,7 +424,9 @@ function createDocumentParser(
   let deletedTextDepth = 0;
   let instructionDepth = 0;
   // The revision containers open around the current position, innermost last.
-  const revisions: Array<{ kind: RevisionKind; identity: { author: string; date: string }; depth: number }> = [];
+  // A revision frame stands until the element it belongs to closes: the run container itself, or the table cell or
+  // row a cell or row revision covers.
+  const revisions: Array<{ kind: RevisionKind; identity: { author: string; date: string }; depth: number; closes: string }> = [];
   const marks = new ImportedMarkCollector();
   // A complex field's instruction follows its begin mark in `w:instrText`, possibly split across runs. It
   // is read only until its first word is known, and the field is counted then — or at its separate or end
@@ -639,13 +649,27 @@ function createDocumentParser(
       case 'moveTo': {
         marks.markPresent();
         const identity = { author: attributeValue(tag, 'author') ?? '', date: attributeValue(tag, 'date') ?? '' };
-        if (parent !== undefined && REVISION_PROPERTY_PARENTS.has(parent)) {
+        if (parent === 'trPr' && grandparent === 'tr' && (tag.local === 'ins' || tag.local === 'del')) {
+          // A table row inserted or deleted: every paragraph of the row reads as inserted or deleted text does — an
+          // inserted row's words leave the rejected reading, a deleted row's stay — until the row closes.
+          revisions.push({ kind: tag.local, identity, depth: ancestors.length - 2, closes: 'tr' });
+        } else if (parent !== undefined && REVISION_PROPERTY_PARENTS.has(parent)) {
           // The paragraph mark's own revision: a paragraph inserted, deleted, split or joined.
           if (parent === 'rPr' && grandparent === 'pPr' && textBox === undefined && paragraph !== undefined) {
             paragraph.revisions!.markRevision = { kind: tag.local, identity };
           }
         } else {
-          revisions.push({ kind: tag.local, identity, depth: ancestors.length });
+          revisions.push({ kind: tag.local, identity, depth: ancestors.length, closes: tag.local });
+        }
+        break;
+      }
+      case 'cellIns':
+      case 'cellDel': {
+        // A table cell inserted or deleted, the same way for the cell: its own author and date, until the cell closes.
+        marks.markPresent();
+        if (parent === 'tcPr' && grandparent === 'tc') {
+          const identity = { author: attributeValue(tag, 'author') ?? '', date: attributeValue(tag, 'date') ?? '' };
+          revisions.push({ kind: CELL_REVISIONS[tag.local]!, identity, depth: ancestors.length - 2, closes: 'tc' });
         }
         break;
       }
@@ -732,7 +756,7 @@ function createDocumentParser(
     if (tag.local === 't') textDepth -= 1;
     if (tag.local === 'delText') deletedTextDepth -= 1;
     if (tag.local === 'instrText') instructionDepth -= 1;
-    if (revisions.at(-1)?.depth === ancestors.length && revisions.at(-1)!.kind === tag.local) revisions.pop();
+    if (revisions.at(-1)?.depth === ancestors.length && revisions.at(-1)!.closes === tag.local) revisions.pop();
     if (tag.local === 'rPr') {
       requireDocx(runProperties?.depth === ancestors.length, 'run properties state mismatch');
       if (runProperties.styled) signals.inlineStyles += 1;
@@ -1017,11 +1041,13 @@ const TEXT_BOX_DETAILS: Readonly<Record<TextBoxDisposition, string>> = {
 
 /**
  * The 批注与修订 row of a revision-3 report whose file carries comments or revisions (Issue #411, D4): they
- * become marks on the manuscript whose source is the file's author, and what cannot — a formatting
- * revision, or a comment or revision inside a text box or a note — stays with the file. Not a degradation.
+ * become marks on the manuscript whose source is the file's author — a table row or cell inserted or deleted
+ * becomes the 批注 of the paragraphs it held — and what changes no text or cannot be converted — a formatting
+ * revision, a structural one such as a cell merge, or a comment or revision inside a text box or a note — stays
+ * with the file. Not a degradation.
  */
 export const COMMENTS_REVISIONS_DETAIL =
-  '转为稿件上的批注 / 修改建议（来源：文件作者）；格式修订，以及文本框与脚注中的批注和修订，随原文件保留。';
+  '转为稿件上的批注 / 修改建议（来源：文件作者），整行或整个单元格的插入与删除也一样；格式修订、不改动文字的结构修订（如合并单元格），以及文本框与脚注中的批注和修订，随原文件保留。';
 /**
  * The same row as a reimport states it: a reimport creates no mark (that is S63's, V2-UX-IMP-057), so the
  * class stays `不支持导入` there, with the marks it would have made as its count.

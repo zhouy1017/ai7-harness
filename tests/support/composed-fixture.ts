@@ -188,6 +188,21 @@ export interface ComposedRevisedParagraph {
   readonly textBox?: ReadonlyArray<ComposedRevisedParagraph>;
 }
 
+/**
+ * A table among the paragraphs: rows of cells of paragraphs. A row may be inserted or deleted as a whole
+ * (`w:trPr/w:ins`, `w:trPr/w:del`), a cell inserted, deleted or its vertical merge changed (`w:tcPr/w:cellIns`,
+ * `w:cellDel`, `w:cellMerge`), each with its own author and date.
+ */
+export interface ComposedRevisedTable {
+  readonly table: ReadonlyArray<{
+    readonly revision?: { readonly kind: 'ins' | 'del'; readonly author: string; readonly date: string };
+    readonly cells: ReadonlyArray<{
+      readonly revision?: { readonly kind: 'cellIns' | 'cellDel' | 'cellMerge'; readonly author: string; readonly date: string };
+      readonly paragraphs: ReadonlyArray<ComposedRevisedParagraph>;
+    }>;
+  }>;
+}
+
 /** One comment of `word/comments.xml`: its paragraphs are source spans; a reply names the comment it answers. */
 export interface ComposedComment {
   readonly id: number;
@@ -200,7 +215,7 @@ export interface ComposedComment {
 export interface ComposedRevisedRequest {
   readonly source: string;
   readonly title: string;
-  readonly paragraphs: ReadonlyArray<ComposedRevisedParagraph>;
+  readonly paragraphs: ReadonlyArray<ComposedRevisedParagraph | ComposedRevisedTable>;
   readonly comments?: ReadonlyArray<ComposedComment>;
   /** A section-property revision in the terminal `w:sectPr`. */
   readonly sectionRevision?: { readonly author: string; readonly date: string };
@@ -285,7 +300,25 @@ export async function composeRevisedDocx(path: string, request: ComposedRevisedR
     const pPr = properties.length === 0 ? '' : `<w:pPr>${properties.join('')}</w:pPr>`;
     return `<w:p>${pPr}${runs.join('')}</w:p>`;
   };
-  const body = (await Promise.all(request.paragraphs.map(paragraphXml))).join('');
+  const tableXml = async (table: ComposedRevisedTable): Promise<string> => {
+    const columns = Math.max(1, ...table.table.map((row) => row.cells.length));
+    const rows: string[] = [];
+    for (const row of table.table) {
+      const rowRevision = row.revision === undefined ? '' : `<w:trPr><w:${row.revision.kind}${attributes(row.revision.author, row.revision.date)}/></w:trPr>`;
+      const cells: string[] = [];
+      for (const cell of row.cells) {
+        const revision = cell.revision === undefined
+          ? ''
+          : `<w:${cell.revision.kind}${attributes(cell.revision.author, cell.revision.date)}${cell.revision.kind === 'cellMerge' ? ' w:vMerge="cont"' : ''}/>`;
+        const paragraphs = (await Promise.all(cell.paragraphs.map(paragraphXml))).join('') || '<w:p/>';
+        cells.push(`<w:tc><w:tcPr><w:tcW w:w="4000" w:type="dxa"/>${revision}</w:tcPr>${paragraphs}</w:tc>`);
+      }
+      rows.push(`<w:tr>${rowRevision}${cells.join('')}</w:tr>`);
+    }
+    const grid = '<w:gridCol w:w="4000"/>'.repeat(columns);
+    return `<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr><w:tblGrid>${grid}</w:tblGrid>${rows.join('')}</w:tbl>`;
+  };
+  const body = (await Promise.all(request.paragraphs.map((item) => 'table' in item ? tableXml(item) : paragraphXml(item)))).join('');
   const section = request.sectionRevision === undefined
     ? '<w:sectPr/>'
     : `<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:sectPrChange${attributes(request.sectionRevision.author, request.sectionRevision.date)}><w:sectPr/></w:sectPrChange></w:sectPr>`;
