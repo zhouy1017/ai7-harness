@@ -23,6 +23,7 @@ import {
   RUN_CONTROL_PAUSE_REASON,
   RUN_CONTROL_REDO_REASON,
   redoGoalSentence,
+  RESUME_BLOCKED_BINDING,
   RESUME_BLOCKED_CONNECTION,
   RESUME_BLOCKED_OFFLINE,
   RESUME_BLOCKED_SLOT,
@@ -279,6 +280,14 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
       '这项任务还没有读完任何阅读范围；取消后不会发送任何内容，也不会形成结果集修订版。',
       CANCELLATION_NO_EFFECTS,
     ]);
+    // Under a launch that can no longer carry the Run's binding, what it read cannot become its revision (S76c).
+    expect(baselineCancellationImpact(run('paused', null), { unitsSettled: 3, unitsTotal: 8, bindingHolds: false })).toEqual([
+      '这项任务已经停下；其余 5 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。',
+      '执行绑定已经变化，已读完的 3 个阅读范围不能整理成结果集修订版；这次取消不会形成修订版。',
+      CANCELLATION_NO_EFFECTS,
+    ]);
+    // CONT-016: a Run that cannot go on as it was authorized is redone, never continued past its authorization.
+    expect(RESUME_BLOCKED_BINDING).toBe('这次运行授权时的执行绑定已经变化（模型服务、路由、策略或 AI7 版本不同），不能照原样续行；请改计划重做。');
   });
 
   it('tells the truth about a Run no execution holds: nothing runs, and nothing of it was kept', () => {

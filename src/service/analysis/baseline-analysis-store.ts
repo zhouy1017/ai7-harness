@@ -2726,7 +2726,8 @@ export class BaselineAnalysisStore {
    */
   continuationBlockers(runRecordId: string): ReadonlyArray<string> {
     const drift = this.preflightDrift(runRecordId);
-    const reasons = drift.length === 0 ? [] : [`计划的关键内容已经变化：${drift.join('、')}。这次运行不能照原计划续行；请取消它，再按新的计划准备。`];
+    // CONT-016: material drift routes to a newly authorized Redo Run — 改计划重做 — never past the old authorization.
+    const reasons = drift.length === 0 ? [] : [`计划的关键内容已经变化：${drift.join('、')}。这次运行不能照原计划续行；请改计划重做。`];
     try {
       this.unitCheckpoints(runRecordId);
     } catch {

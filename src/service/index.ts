@@ -1120,7 +1120,7 @@ async function run(): Promise<void> {
       routeKind === DEVELOPER_LIVE_POLICY_BINDING.route || (connectivityPath !== undefined && routeKind === LOCAL_DETERMINISTIC_ROUTE);
     let preflightInFlight: Promise<ReconnectPreflightProjection> | null = null;
     const connectivity: ConnectivityContext = {
-      planConnectivity: { reading, reachesNetwork, slotBusy: () => owner.busy },
+      planConnectivity: { reading, reachesNetwork, slotBusy: () => owner.busy, carriesStoppedRun: (runRecordId) => owner.carriesStoppedRun(runRecordId, openStore.baselineAnalysisLedger) },
       // One at a time: a look already under way answers a second request for one.
       preflight: () => {
         preflightInFlight ??= reconnectPreflight({

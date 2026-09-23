@@ -430,6 +430,8 @@ describe('暂停 and 续行 over the real store', () => {
       });
       const moved = await store.inspectTaskPlanWithConnection(input, async () => null, ONLINE, () => null);
       expect(moved.runControl?.resume?.reason).toContain('计划的关键内容已经变化');
+      // CONT-016: the way on is a newly authorized Redo Run (Issue #422, S76c).
+      expect(moved.runControl?.resume?.reason).toContain('这次运行不能照原计划续行；请改计划重做。');
       expect(() => execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true })).toThrow();
       store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null });
       expect(states(store.inspectBaselineAnalysis(bookId, () => null)).at(-1)).toBe('paused');
