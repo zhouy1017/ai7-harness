@@ -15,6 +15,7 @@ import {
   type DocxExportMark,
   type DocxExportSourceRow,
 } from '../../src/service/docx-export.js';
+import { renderMarkdownExport, renderPdfHtmlExport } from '../../src/service/text-export.js';
 import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ExportFidelityRowProjection } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, sourceSpanText, type SourceSpan } from '../support/composed-fixture.js';
 
@@ -615,5 +616,240 @@ describe('DOCX export of text boxes and fresh builds', () => {
     rows[1] = { ...rows[1]!, sourceParagraphIndex: rows[0]!.sourceParagraphIndex };
     expect(() => renderDocxExport({ ...input, source: { ...(input.source as Extract<DocxExportInput['source'], { kind: 'mapped' }>), rows } }, { emit: true }))
       .toThrow(DocxExportError);
+  });
+});
+
+// ---- PDF and the Markdown 备用格式 (Issue #500, plan slice S64b) ----------------------------------------------
+
+/** Markdown's own escaping, restated: every character Markdown or CriticMarkup reads as syntax. */
+function md(value: string): string {
+  return value.replace(/[\\`*_[\]<>{}|~&#]/gu, (character) => `\\${character}`);
+}
+
+function html(value: string): string {
+  return value.replace(/[&<>"']/gu, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
+}
+
+/**
+ * The rich source laid out with a title, a heading and a heading deeper than Markdown's six levels, and the marks of
+ * the DOCX test above plus a 批注 whose last words fall inside a 修改建议 and a 备注 the default leaves out.
+ */
+async function laidOutInput(): Promise<{ input: DocxExportInput; proposal: string; insertion: string; tenth: string[] }> {
+  const { input } = await richInput();
+  const blocks = input.blocks.map((block, index): DocxExportBlock => index === 0
+    ? { ...block, kind: 'title', level: 1 }
+    : index === 1 ? { ...block, kind: 'heading', level: 1 } : index === 2 ? { ...block, kind: 'heading', level: 6 } : block);
+  const block = (position: number): DocxExportBlock => blocks[position - 1]!;
+  const tenth = graphemes(block(10).text);
+  const proposal = await sourceSpanText(SOURCE, { block: 31, from: 0, to: 4 });
+  const insertion = await sourceSpanText(SOURCE, { block: 32, from: 0, to: 3 });
+  const marks: DocxExportMark[] = [
+    mark({
+      markId: 'annotation', blockId: block(1).blockId, kind: 'annotation', standing: { state: 'exact', fromGrapheme: 2, toGrapheme: 6 },
+      authorLabel: AUTHOR, body: '请核对这一句。', replies: [{ body: '已核对。', createdAt: '2026-09-22T09:00:00.000Z' }], resolved: true,
+    }),
+    mark({
+      markId: 'reviewer', blockId: block(9).blockId, kind: 'annotation', standing: { state: 'exact', fromGrapheme: 0, toGrapheme: 3 },
+      authorLabel: REVIEWER, body: '用字前后不一。', createdAt: '2026-09-22T08:10:00.000Z',
+    }),
+    mark({
+      markId: 'replace', blockId: block(10).blockId, kind: 'change-suggestion', standing: { state: 'exact', fromGrapheme: 0, toGrapheme: 2 },
+      authorLabel: REVIEWER, suggestion: { currentText: tenth.slice(0, 2).join(''), proposedText: proposal }, createdAt: '2026-09-22T08:20:00.000Z',
+    }),
+    mark({
+      markId: 'insert', blockId: block(10).blockId, kind: 'change-suggestion', standing: { state: 'exact', fromGrapheme: 6, toGrapheme: 6 },
+      authorLabel: AUTHOR, suggestion: { currentText: '', proposedText: insertion }, createdAt: '2026-09-22T08:30:00.000Z',
+    }),
+    mark({
+      markId: 'delete', blockId: block(10).blockId, kind: 'change-suggestion', standing: { state: 'exact', fromGrapheme: 9, toGrapheme: 11 },
+      suggestion: { currentText: tenth.slice(9, 11).join(''), proposedText: '' }, createdAt: '2026-09-22T08:40:00.000Z',
+    }),
+    mark({
+      markId: 'overlap', blockId: block(10).blockId, kind: 'change-suggestion', standing: { state: 'exact', fromGrapheme: 1, toGrapheme: 3 },
+      suggestion: { currentText: tenth.slice(1, 3).join(''), proposedText: proposal }, createdAt: '2026-09-22T08:50:00.000Z',
+    }),
+    mark({
+      markId: 'inside', blockId: block(10).blockId, kind: 'annotation', standing: { state: 'exact', fromGrapheme: 7, toGrapheme: 10 },
+      body: '这几个字要再看。', createdAt: '2026-09-22T09:10:00.000Z',
+    }),
+    mark({ markId: 'moved', blockId: block(8).blockId, kind: 'annotation', standing: { state: 'moved' }, body: '这条原文已改。' }),
+    mark({
+      markId: 'note', blockId: block(8).blockId, kind: 'editor-note', standing: { state: 'exact', fromGrapheme: 0, toGrapheme: 2 },
+      authorLabel: EDITOR_NOTE_AUTHOR_LABEL, body: '二校时再看。',
+    }),
+  ];
+  return { input: { ...input, blocks, marks }, proposal, insertion, tenth };
+}
+
+/** Every class of the rich source, left behind by a format that writes only the manuscript's words. */
+const RICH_TEXT_FIDELITY: Array<[string, string, number, number[]]> = [
+  ['inline-styles', 'unavailable', 2, []],
+  ['annotations', 'unavailable', 4, [8]],
+  ['change-suggestions', 'unavailable', 4, [10]],
+  ['editor-notes', 'excluded', 1, []],
+  ['notes', 'unavailable', 1, []],
+  ['tables', 'unavailable', 1, []],
+  ['images-captions', 'unavailable', 1, []],
+  ['sections', 'unavailable', 1, []],
+  ['headers-footers', 'unavailable', 1, []],
+  ['text-boxes', 'unavailable', 1, []],
+  ['fields', 'unavailable', 1, []],
+];
+
+describe('PDF and the Markdown 备用格式 lay the version out from its words', () => {
+  it('writes Markdown with headings by level, 批注 as footnotes in reading order and 修改建议 as CriticMarkup, 备注 left out', async () => {
+    const { input, proposal, insertion, tenth } = await laidOutInput();
+    const result = renderMarkdownExport(input, { emit: true });
+    expect(result.written).toEqual({ annotations: 3, suggestions: 3, editorNotes: 0, replies: 1 });
+    expect(fidelityOf(result.fidelity)).toEqual(RICH_TEXT_FIDELITY);
+    expect(result.degraded).toBe(true);
+
+    const text = new TextDecoder().decode(result.bytes!);
+    expect(text.endsWith('\n') && !text.endsWith('\n\n')).toBe(true);
+    const parts = text.slice(0, -1).split('\n\n');
+    const [body, notes] = [parts.slice(0, input.blocks.length), parts.slice(input.blocks.length)];
+    expect(body.map((part) => /^#+ /u.exec(part)?.[0] ?? '')).toEqual(['# ', '## ', '###### ', '', '', '', '', '', '', '']);
+    // The title's 批注 follows its words; its block is the manuscript's words, escaped, and nothing more.
+    const first = graphemes(input.blocks[0]!.text);
+    expect(digest(body[0]!)).toBe(digest(`# ${md(first.slice(0, 6).join(''))}[^1]${md(first.slice(6).join(''))}`));
+    // The changed words stand in the text; the reference of a 批注 ending inside a change follows the change.
+    expect(digest(body[9]!)).toBe(digest(
+      `{~~${md(tenth.slice(0, 2).join(''))}~>${md(proposal)}~~}[^3]${md(tenth.slice(2, 6).join(''))}{++${md(insertion)}++}[^4]` +
+      `${md(tenth.slice(6, 9).join(''))}{--${md(tenth.slice(9, 11).join(''))}--}[^5][^6]${md(tenth.slice(11).join(''))}`,
+    ));
+    // The overlapping 修改建议 and the 批注 whose words changed are left out and counted; the 备注 is not written.
+    expect(notes.map((note) => note.replace(/^(\[\^\d+\]: \S+).*$/su, '$1'))).toEqual([
+      '[^1]: 批注', '[^2]: 批注', '[^3]: 修改建议', '[^4]: 修改建议', '[^5]: 修改建议', '[^6]: 批注',
+    ]);
+    expect(notes[0]).toBe(`[^1]: 批注 · ${AUTHOR} · 2026-09-22 · 已处理：请核对这一句。\n    回复 · 2026-09-22：已核对。`);
+    expect(notes[1]).toBe(`[^2]: 批注 · ${REVIEWER} · 2026-09-22：用字前后不一。`);
+    expect(digest(notes[2]!)).toBe(digest(`[^3]: 修改建议 · ${REVIEWER} · 2026-09-22：「${md(tenth.slice(0, 2).join(''))}」改为「${md(proposal)}」`));
+    expect(digest(notes[3]!)).toBe(digest(`[^4]: 修改建议 · ${AUTHOR} · 2026-09-22：「」改为「${md(insertion)}」`));
+    expect(digest(notes[4]!)).toBe(digest(`[^5]: 修改建议 · ${EDITOR_AUTHOR_LABEL} · 2026-09-22：「${md(tenth.slice(9, 11).join(''))}」改为「」`));
+    expect(notes[5]).toBe(`[^6]: 批注 · ${EDITOR_AUTHOR_LABEL} · 2026-09-22：这几个字要再看。`);
+    expect(text.includes('二校时再看。') || text.includes('这条原文已改。')).toBe(false);
+  });
+
+  it('lays out the PDF\'s page: a title, headings, deleted and inserted words with numbered notes at the end, and nothing to load', async () => {
+    const { input, proposal, insertion, tenth } = await laidOutInput();
+    const result = renderPdfHtmlExport(input, { emit: true });
+    expect(result.written).toEqual({ annotations: 3, suggestions: 3, editorNotes: 0, replies: 1 });
+    const page = new TextDecoder().decode(result.bytes!);
+    expect(page.startsWith('<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">')).toBe(true);
+    expect(page).toContain(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">`);
+    expect(page).toContain('@page{size:A4;');
+    expect(page).not.toMatch(/<script|<img|<link|<iframe|url\(|https?:/iu);
+    expect([page.match(/<h1 class="book-title">/gu)?.length, page.match(/<h2>/gu)?.length, page.match(/<h6>/gu)?.length, page.match(/<p>/gu)?.length])
+      .toEqual([1, 2, 1, 7]);
+    const paragraphs = [...page.matchAll(/<p>(.*?)<\/p>/gu)].map((match) => match[1]!);
+    expect(digest(paragraphs.at(-1)!)).toBe(digest(
+      `<del>${html(tenth.slice(0, 2).join(''))}</del><ins>${html(proposal)}</ins><sup class="note-ref">3</sup>${html(tenth.slice(2, 6).join(''))}` +
+      `<ins>${html(insertion)}</ins><sup class="note-ref">4</sup>${html(tenth.slice(6, 9).join(''))}<del>${html(tenth.slice(9, 11).join(''))}</del>` +
+      `<sup class="note-ref">5</sup><sup class="note-ref">6</sup>${html(tenth.slice(11).join(''))}`,
+    ));
+    const notes = page.slice(page.indexOf('<section class="notes">'));
+    expect(notes.startsWith('<section class="notes"><h2>批注与修改建议</h2><ol>')).toBe(true);
+    expect([...notes.matchAll(/<li value="(\d+)"><span class="note-kind">([^<]+)<\/span>/gu)].map((match) => `${match[1]} ${match[2]}`))
+      .toEqual(['1 批注', '2 批注', '3 修改建议', '4 修改建议', '5 修改建议', '6 批注']);
+    expect(notes).toContain(`<li value="1"><span class="note-kind">批注</span> · ${AUTHOR} · 2026-09-22 · 已处理：请核对这一句。` +
+      '<p class="note-reply">回复 · 2026-09-22：已核对。</p></li>');
+    expect(page.includes('二校时再看。') || page.includes('这条原文已改。')).toBe(false);
+
+    // A manuscript without marks has no notes section.
+    const bare = new TextDecoder().decode(renderPdfHtmlExport({ ...input, marks: [] }, { emit: true }).bytes!);
+    expect(bare.includes('<section class="notes">')).toBe(false);
+  });
+
+  it('writes the same bytes for the same input, and reviews without writing exactly as it writes', async () => {
+    const { input } = await laidOutInput();
+    for (const render of [renderMarkdownExport, renderPdfHtmlExport]) {
+      const first = render(input, { emit: true });
+      const second = render(input, { emit: true });
+      const review = render(input, { emit: false });
+      expect(digest(first.bytes!)).toBe(digest(second.bytes!));
+      expect(review.bytes).toBeNull();
+      expect([review.fidelity, review.degraded, review.written]).toEqual([first.fidelity, first.degraded, first.written]);
+    }
+  });
+
+  it('keeps words that Markdown or HTML would read as syntax as words, and a line break as one', async () => {
+    const probe = (position: number, text: string, kind: DocxExportBlock['kind'] = 'paragraph', level: number | null = null): DocxExportBlock =>
+      ({ blockId: `blk_${String(position).padStart(24, '0')}`, position, kind, level, text, digest: blockDigest(kind, level, text) });
+    // Authored probes, not manuscript words: each opens a construct if written as it stands.
+    const blocks = [
+      probe(1, '<组稿> & 标题 #', 'title', 1),
+      probe(2, '上\n下', 'heading', 2),
+      probe(3, '1. 条目'),
+      probe(4, '> 引文'),
+      probe(5, '- 列表'),
+      probe(6, '+ 加号'),
+      probe(7, '= 等号'),
+      probe(8, '*强调* _下划_ `代码` [链接](地址) <b> {++加++} ~~删~~ a|b \\ & #'),
+      probe(9, '第一行\n# 第二行\n\n  缩进'),
+    ];
+    const note = mark({
+      markId: 'a', blockId: blocks[2]!.blockId, kind: 'annotation', standing: { state: 'exact', fromGrapheme: 0, toGrapheme: 2 },
+      body: '第一句*\n- 第二句\n\n1. 第三句',
+    });
+    const input: DocxExportInput = {
+      title: '<组稿>', blocks, marks: [note], options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS },
+      source: { kind: 'fresh', reason: 'converted', scan: null, converter: 'ai7-text-to-docx/1' },
+    };
+    const markdown = new TextDecoder().decode(renderMarkdownExport(input, { emit: true }).bytes!).split('\n\n');
+    expect(markdown.slice(0, 9)).toEqual([
+      '# \\<组稿\\> \\& 标题 \\#',
+      '### 上 下',
+      '1\\.[^1] 条目',
+      '\\> 引文',
+      '\\- 列表',
+      '\\+ 加号',
+      '\\= 等号',
+      '\\*强调\\* \\_下划\\_ \\`代码\\` \\[链接\\](地址) \\<b\\> \\{++加++\\} \\~\\~删\\~\\~ a\\|b \\\\ \\& \\#',
+      '第一行\\\n\\# 第二行\\\n\\\n&#32;&#32;缩进',
+    ]);
+    expect(markdown.slice(9).join('\n\n')).toBe(`[^1]: 批注 · ${EDITOR_AUTHOR_LABEL} · 2026-09-22：第一句\\*\n    \\- 第二句\n    \n    1\\. 第三句\n`);
+
+    const page = new TextDecoder().decode(renderPdfHtmlExport(input, { emit: true }).bytes!);
+    expect(page).toContain('<title>&lt;组稿&gt;</title>');
+    expect(page).toContain('<h1 class="book-title">&lt;组稿&gt; &amp; 标题 #</h1><h3>上<br>下</h3><p>1.<sup class="note-ref">1</sup> 条目</p>');
+    expect(page).toContain('<p>第一行<br># 第二行<br><br>  缩进</p>');
+    expect(page).toContain('第一句*<br>- 第二句<br><br>1. 第三句</li>');
+  });
+
+  it('names every class of the source the format leaves behind, and what the marks keep in each format', async () => {
+    const { input } = await laidOutInput();
+    const pdf = renderPdfHtmlExport(input, { emit: false });
+    expect(fidelityOf(pdf.fidelity)).toEqual(RICH_TEXT_FIDELITY);
+    const detail = (rows: ReadonlyArray<ExportFidelityRowProjection>, key: string): string => rows.find((row) => row.key === key)!.detail;
+    expect(detail(pdf.fidelity, 'sections')).toBe('原文件中的分节与页面设置不带入（1 处）；PDF 按 A4 纸张排版。');
+    expect(detail(pdf.fidelity, 'annotations'))
+      .toBe('3 条批注在正文中标出编号，连同作者、日期与回复列在文末；PDF 中不能再回复或标为已处理。1 条所在的文字已变化，无法导出。');
+    const markdown = renderMarkdownExport(input, { emit: false });
+    expect(detail(markdown.fidelity, 'change-suggestions'))
+      .toBe('3 条待处理的修改建议写成 CriticMarkup 标记，作者与日期写在脚注里；Markdown 中不能接受或拒绝。1 条原文已变化或与其他修改建议重叠，无法导出。');
+    expect(detail(markdown.fidelity, 'tables')).toBe('原文件中的表格不随 Markdown 导出（1 个）。');
+
+    // Written without a loss, a mark is 降级导出: its words are kept, not what the editor can do with it.
+    const writable = input.marks.filter((entry) => !['overlap', 'moved'].includes(entry.markId));
+    const withNotes = renderMarkdownExport({ ...input, marks: writable, options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, includeEditorNotes: true } }, { emit: true });
+    expect(fidelityOf(withNotes.fidelity).filter(([key]) => ['annotations', 'change-suggestions', 'editor-notes'].includes(key))).toEqual([
+      ['annotations', 'degraded', 3, []],
+      ['change-suggestions', 'degraded', 3, []],
+      ['editor-notes', 'degraded', 1, []],
+    ]);
+    expect(withNotes.written.editorNotes).toBe(1);
+    expect(new TextDecoder().decode(withNotes.bytes!)).toContain(`: ${EDITOR_NOTE_AUTHOR_LABEL} · 2026-09-22：二校时再看。`);
+
+    // Text boxes merged at import are body paragraphs, written as such.
+    const merged = renderMarkdownExport({ ...input, source: { ...(input.source as Extract<DocxExportInput['source'], { kind: 'mapped' }>), textBoxes: 'merge' } }, { emit: false });
+    expect(fidelityOf(merged.fidelity).find(([key]) => key === 'text-boxes')).toEqual(['text-boxes', 'preserved', 1, []]);
+
+    // A source with nothing beyond its words, and marks the editor left out: nothing is lost, nothing is degraded.
+    const plain = renderPdfHtmlExport({
+      ...input, options: { includeAnnotations: false, includeSuggestions: false, includeEditorNotes: false },
+      source: { kind: 'fresh', reason: 'converted', scan: null, converter: 'ai7-text-to-docx/1' },
+    }, { emit: false });
+    expect(fidelityOf(plain.fidelity)).toEqual([['annotations', 'excluded', 4, []], ['change-suggestions', 'excluded', 4, []], ['editor-notes', 'excluded', 1, []]]);
+    expect(plain.degraded).toBe(false);
   });
 });

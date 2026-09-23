@@ -853,6 +853,11 @@ async function dispatch(
       };
     case 'inspectManuscriptExportReceipt':
       return { id: request.id, ok: true, op: request.op, result: store.inspectManuscriptExportReceipt(request.input) };
+    case 'stageManuscriptExport':
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: await store.stageManuscriptExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
+      };
     case 'undoManuscript':
       return {
         id: request.id,

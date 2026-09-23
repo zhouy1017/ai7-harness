@@ -753,13 +753,13 @@ function withoutTextBoxes(paragraph: XmlElement, boxParagraphs: XmlElement[]): X
 
 // ---- marks ------------------------------------------------------------------------------------------
 
-interface PlannedComment {
+export interface PlannedComment {
   mark: DocxExportMark;
   fromGrapheme: number;
   toGrapheme: number;
 }
 
-interface PlannedSuggestion {
+export interface PlannedSuggestion {
   mark: DocxExportMark;
   fromGrapheme: number;
   toGrapheme: number;
@@ -777,7 +777,8 @@ interface WrittenComment {
   done: boolean;
 }
 
-interface MarkPlan {
+/** Which marks an export writes and where; shared by every format (Issue #500, S64b). */
+export interface MarkPlan {
   commentsByBlock: Map<string, PlannedComment[]>;
   suggestionsByBlock: Map<string, PlannedSuggestion[]>;
   /** Block positions of the marks of each kind that cannot be written. */
@@ -788,7 +789,7 @@ interface MarkPlan {
   live: Record<'annotation' | 'editor-note' | 'change-suggestion', number>;
 }
 
-function included(kind: DocxExportMark['kind'], options: ManuscriptExportOptions): boolean {
+export function included(kind: DocxExportMark['kind'], options: ManuscriptExportOptions): boolean {
   if (kind === 'annotation') return options.includeAnnotations;
   if (kind === 'editor-note') return options.includeEditorNotes;
   return options.includeSuggestions;
@@ -799,7 +800,7 @@ function included(kind: DocxExportMark['kind'], options: ManuscriptExportOptions
  * exactly where it stands, and two suggestions whose ranges overlap cannot both be tracked changes — the one
  * made first is written and the other counted.
  */
-function planMarks(input: DocxExportInput, blocks: ReadonlyMap<string, DocxExportBlock>): MarkPlan {
+export function planMarks(input: DocxExportInput, blocks: ReadonlyMap<string, DocxExportBlock>): MarkPlan {
   const plan: MarkPlan = {
     commentsByBlock: new Map(),
     suggestionsByBlock: new Map(),
@@ -1071,7 +1072,7 @@ function emptyTally(): ClassTally {
   return { total: 0, lost: 0, positions: [] };
 }
 
-function row(
+export function fidelityRow(
   key: ExportFidelityKey,
   label: string,
   count: number,
@@ -1102,10 +1103,10 @@ function contentRow(
   lost: (count: number) => string,
 ): ExportFidelityRowProjection {
   const tally = facts.tallies[key];
-  if (tally.total === 0) return row(key, label, 0, 'preserved', absent);
-  if (facts.restoration === 'regenerated') return row(key, label, tally.total, 'unavailable', `${facts.freshReason}；${label}无法恢复。`);
-  if (tally.lost === 0) return row(key, label, tally.total, 'preserved', restored);
-  return row(key, label, tally.total, 'degraded', lost(tally.lost), tally.positions);
+  if (tally.total === 0) return fidelityRow(key, label, 0, 'preserved', absent);
+  if (facts.restoration === 'regenerated') return fidelityRow(key, label, tally.total, 'unavailable', `${facts.freshReason}；${label}无法恢复。`);
+  if (tally.lost === 0) return fidelityRow(key, label, tally.total, 'preserved', restored);
+  return fidelityRow(key, label, tally.total, 'degraded', lost(tally.lost), tally.positions);
 }
 
 function structureRow(
@@ -1116,9 +1117,9 @@ function structureRow(
   restored: string,
 ): ExportFidelityRowProjection {
   const tally = facts.tallies[key];
-  if (tally.total === 0) return row(key, label, 0, 'preserved', absent);
-  if (facts.restoration === 'regenerated') return row(key, label, tally.total, 'unavailable', `${facts.freshReason}；${label}无法恢复。`);
-  return row(key, label, tally.total, 'preserved', restored);
+  if (tally.total === 0) return fidelityRow(key, label, 0, 'preserved', absent);
+  if (facts.restoration === 'regenerated') return fidelityRow(key, label, tally.total, 'unavailable', `${facts.freshReason}；${label}无法恢复。`);
+  return fidelityRow(key, label, tally.total, 'preserved', restored);
 }
 
 function markRow(
@@ -1129,13 +1130,13 @@ function markRow(
   words: { excluded: (live: number) => string; none: string; written: (count: number) => string; unwritable: (count: number) => string },
 ): ExportFidelityRowProjection {
   const live = facts.marks.live[kind];
-  if (!included(kind, facts.options)) return row(key, label, live, 'excluded', words.excluded(live));
+  if (!included(kind, facts.options)) return fidelityRow(key, label, live, 'excluded', words.excluded(live));
   const considered = facts.marks.considered[kind];
-  if (considered === 0) return row(key, label, 0, 'preserved', words.none);
+  if (considered === 0) return fidelityRow(key, label, 0, 'preserved', words.none);
   const unwritable = facts.marks.unwritable[kind];
   const written = considered - unwritable.length;
-  if (unwritable.length === 0) return row(key, label, considered, 'preserved', words.written(written));
-  return row(key, label, considered, 'unavailable', `${words.written(written)}${words.unwritable(unwritable.length)}`, unwritable);
+  if (unwritable.length === 0) return fidelityRow(key, label, considered, 'preserved', words.written(written));
+  return fidelityRow(key, label, considered, 'unavailable', `${words.written(written)}${words.unwritable(unwritable.length)}`, unwritable);
 }
 
 function fidelityRows(facts: ReviewFacts): ExportFidelityRowProjection[] {
@@ -1171,19 +1172,19 @@ function fidelityRows(facts: ReviewFacts): ExportFidelityRowProjection[] {
     structureRow(facts, 'sections', '分节（含页面设置）', '未检测到分节或页面设置。', '页面设置与分节从原文件恢复。'),
     structureRow(facts, 'headers-footers', '页眉与页脚', '未检测到页眉或页脚。', '页眉与页脚从原文件恢复。'),
     boxes.total === 0
-      ? row('text-boxes', '文本框', 0, 'preserved', '未检测到文本框。')
+      ? fidelityRow('text-boxes', '文本框', 0, 'preserved', '未检测到文本框。')
       : facts.restoration === 'regenerated'
-        ? row('text-boxes', '文本框', boxes.total, 'unavailable', `${facts.freshReason}；文本框无法恢复。`)
+        ? fidelityRow('text-boxes', '文本框', boxes.total, 'unavailable', `${facts.freshReason}；文本框无法恢复。`)
         : facts.textBoxes === 'merge'
-          ? row('text-boxes', '文本框', boxes.total, 'preserved', '文本框已在导入时并入正文，按正文段落写出，不再写出原文本框。')
+          ? fidelityRow('text-boxes', '文本框', boxes.total, 'preserved', '文本框已在导入时并入正文，按正文段落写出，不再写出原文本框。')
           : boxes.lost === 0
-            ? row('text-boxes', '文本框', boxes.total, 'preserved', '文本框从原文件恢复。')
-            : row('text-boxes', '文本框', boxes.total, 'degraded', `锚定在改过或带标记的段落中的文本框未能写出（${boxes.lost} 个）；其余从原文件恢复。`, boxes.positions),
+            ? fidelityRow('text-boxes', '文本框', boxes.total, 'preserved', '文本框从原文件恢复。')
+            : fidelityRow('text-boxes', '文本框', boxes.total, 'degraded', `锚定在改过或带标记的段落中的文本框未能写出（${boxes.lost} 个）；其余从原文件恢复。`, boxes.positions),
     contentRow(facts, 'fields', '域（目录等）', '未检测到域。', '目录、页码等域从原文件恢复，打开后可以更新。',
       (count) => `改过或带标记的段落中的域只写出当前显示的文字，不再更新（${count} 个）；其余从原文件恢复。`),
     revisions.total === 0
-      ? row('file-revisions', '原文件中的修订', 0, 'preserved', '原文件没有未转为稿件标记的修订。')
-      : row('file-revisions', '原文件中的修订', revisions.total, facts.restoration === 'regenerated' ? 'unavailable' : 'degraded',
+      ? fidelityRow('file-revisions', '原文件中的修订', 0, 'preserved', '原文件没有未转为稿件标记的修订。')
+      : fidelityRow('file-revisions', '原文件中的修订', revisions.total, facts.restoration === 'regenerated' ? 'unavailable' : 'degraded',
         `原文件中未转为稿件标记的修订（格式修订、文本框中的批注与修订等，${revisions.total} 处）不写出；导出的文字是拒绝这些修订后的文字。`),
   ];
 }
@@ -1576,6 +1577,33 @@ const FRESH_STYLES_XML =
     `<w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:outlineLvl w:val="${level - 1}"/></w:pPr>` +
     `<w:rPr><w:b/><w:sz w:val="${34 - level * 2}"/></w:rPr></w:style>`).join('') +
   '</w:styles>';
+
+/** The content classes of the source a format lays out from the manuscript's words alone (Issue #500, S64b). */
+export type ContentClassKey = keyof ReviewFacts['tallies'];
+
+/**
+ * How many of each content class the version's source holds, counted as the parser would — the original file of a
+ * mapped version, or the file a fresh one was scanned from; none when there is none. A format that writes only the
+ * manuscript's words (PDF, Markdown) names each class it leaves behind from these counts.
+ */
+export function contentTallies(source: DocxExportSource): Record<ContentClassKey, number> {
+  const facts: ReviewFacts = {
+    restoration: 'regenerated',
+    freshReason: null,
+    textBoxes: source.kind === 'mapped' ? source.textBoxes : 'retain',
+    tallies: {
+      'inline-styles': emptyTally(), notes: emptyTally(), tables: emptyTally(), 'images-captions': emptyTally(),
+      sections: emptyTally(), 'headers-footers': emptyTally(), 'text-boxes': emptyTally(), fields: emptyTally(),
+      'file-revisions': emptyTally(),
+    },
+    marks: { commentsByBlock: new Map(), suggestionsByBlock: new Map(), unwritable: { annotation: [], 'editor-note': [], 'change-suggestion': [] },
+      considered: { annotation: 0, 'editor-note': 0, 'change-suggestion': 0 }, live: { annotation: 0, 'editor-note': 0, 'change-suggestion': 0 } },
+    options: { includeAnnotations: false, includeSuggestions: false, includeEditorNotes: false },
+  };
+  const bytes = source.kind === 'mapped' ? source.original : source.scan;
+  if (bytes !== null) scanPackage(bytes, facts);
+  return Object.fromEntries(Object.entries(facts.tallies).map(([key, tally]) => [key, tally.total])) as Record<ContentClassKey, number>;
+}
 
 /** Count what a DOCX carries, as the parser would: the review of a fresh build says every present class is lost. */
 function scanPackage(bytes: Uint8Array, facts: ReviewFacts): void {
