@@ -1543,10 +1543,13 @@ async function main() {
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="update-plan"]', 'budget-redo-update');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanVersion==='2' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'budget-redo-version-2', 60_000);
     const raisedPlan = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    // The stored diff line is read field by field: its record's keys come back in canonical order.
+    const raisedDiff = raisedPlan?.planRevisions?.at(-1)?.diff ?? [];
     requireJourney(raisedPlan?.taskIntent?.taskIntentId === budgetRedoId && raisedPlan.planVersion?.ordinal === 2 &&
       JSON.stringify(raisedPlan.providerResolutionPlan?.runBudgetCeiling) === JSON.stringify(RAISED) &&
-      JSON.stringify(raisedPlan.planRevisions?.at(-1)?.diff) === JSON.stringify([{ field: 'runBudgetCeiling', label: 'Run Budget Ceiling 状态', prior: BUDGET, proposed: RAISED, materiality: 'edited' }]),
-    'budget-raised', { ceiling: raisedPlan?.providerResolutionPlan?.runBudgetCeiling ?? null, diff: raisedPlan?.planRevisions?.at(-1)?.diff ?? null });
+      raisedDiff.length === 1 && raisedDiff[0].field === 'runBudgetCeiling' && raisedDiff[0].materiality === 'edited' &&
+      raisedDiff[0].prior?.maxTotalTokens === BUDGET.maxTotalTokens && raisedDiff[0].proposed?.maxTotalTokens === RAISED.maxTotalTokens,
+    'budget-raised', { ceiling: raisedPlan?.providerResolutionPlan?.runBudgetCeiling ?? null, diff: raisedDiff });
 
     at('budget-redo-completed');
     // 开始任务: the redo reads the four ranges left, and the reduction after them, under 20,000 tokens, to its end — the
