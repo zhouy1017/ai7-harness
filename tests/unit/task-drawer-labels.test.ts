@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { TaskPlanProjection, TaskPlanStartProjection, TaskPlanStateKey } from '../../src/shared/protocol.js';
 import {
+  TASK_BAR_CANCEL_FAILED,
+  TASK_BAR_CANCEL_WAIT,
+  TASK_BAR_CANCELLED,
   TASK_BAR_CONNECT,
   TASK_BAR_NOTES,
   TASK_BAR_OUTCOMES,
@@ -11,9 +14,14 @@ import {
   TASK_BAR_RUN_LINKS,
   TASK_BAR_SAVE_DRAFT,
   TASK_BAR_SAVED,
+  TASK_BAR_REVIEW_OFFLINE,
+  TASK_BAR_SAVE_DRAFT_ONLY,
   TASK_BAR_SLOT_BUSY,
   TASK_BAR_START,
+  TASK_BAR_START_WHEN_ONLINE,
   TASK_BAR_STATEMENT,
+  TASK_BAR_WAITING_FOR_CONNECTION,
+  TASK_BAR_WAITING_NOTE,
   TASK_DRAWER_BACK,
   TASK_DRAWER_BACK_REASON,
   TASK_DRAWER_FOOTER,
@@ -119,12 +127,19 @@ describe('the drawer', () => {
   });
 
   it('gives every state a tone and a shape, so the pill never speaks by colour alone', () => {
-    const keys: TaskPlanStateKey[] = ['ready', 'changed', 'unconnected', 'recorded', 'blocked', 'running', 'settled', 'stopped'];
+    const keys: TaskPlanStateKey[] = [
+      'ready', 'changed', 'unconnected', 'offline', 'recorded', 'blocked', 'waiting', 'running', 'settled', 'stopped', 'cancelled',
+    ];
     expect(Object.keys(TASK_PLAN_STATE_PILLS).sort()).toEqual([...keys].sort());
     expect(new Set(keys.map((key) => TASK_PLAN_STATE_PILLS[key].shape)).size).toBeGreaterThan(4);
     // 模型未连接 is its own shape among the pre-start states: it never reads as 计划已变化 without colour.
     expect(TASK_PLAN_STATE_PILLS.unconnected.shape).not.toBe(TASK_PLAN_STATE_PILLS.changed.shape);
     expect(TASK_PLAN_STATE_PILLS.unconnected.shape).not.toBe(TASK_PLAN_STATE_PILLS.ready.shape);
+    // So is 离线 (Issue #502); a waiting Run never reads as a running one, nor a cancelled one as 已中断 (OFF-012).
+    const preStart = (['ready', 'changed', 'unconnected', 'offline'] as const).map((key) => TASK_PLAN_STATE_PILLS[key].shape);
+    expect(new Set(preStart).size).toBe(preStart.length);
+    expect(TASK_PLAN_STATE_PILLS.waiting.shape).not.toBe(TASK_PLAN_STATE_PILLS.running.shape);
+    expect(TASK_PLAN_STATE_PILLS.cancelled.shape).not.toBe(TASK_PLAN_STATE_PILLS.stopped.shape);
   });
 });
 
@@ -222,6 +237,7 @@ describe('the authorization bar (S74a)', () => {
       'record-only': '此任务只记录运行，不会派发',
       'no-route': '这份计划没有可执行的路由：开始任务只记录运行，派发前会被阻止',
       'needs-connection': '模型未连接：这份计划要发送到模型服务，所需的凭据还没有就绪；连接好之后才能开始',
+      offline: '离线：这份计划要连到模型服务，而这台设备现在没有网络。联网后开始任务会先记录这次授权，联网后自动开始；在此之前不会发送任何内容',
     });
     expect(TASK_BAR_OUTCOMES).toEqual({ 'fixed-task': '一条运行记录（不派发）', 'baseline-analysis': '一份基线分析', 'review-run': '审阅发现与审阅报告' });
     expect(TASK_BAR_RUN_LINKS).toEqual({ 'fixed-task': '查看运行记录', 'baseline-analysis': '查看运行', 'review-run': '查看审阅' });
@@ -274,6 +290,62 @@ describe('the authorization bar (S74a)', () => {
     expect(names(review)).toEqual(['revise', 'save-draft']);
     expect(review.note).toBe('审阅没有计划修订：请在「审阅」里点「返回修改」重新准备这次审阅。');
     for (const view of [reconfirmable, review]) expect(names(view)).not.toContain('start');
+  });
+
+  it('speaks §6\'s words for 离线 and the wait (Issue #502): 联网后开始任务 without 授权, 仅保存任务草稿, and 取消', () => {
+    expect(TASK_BAR_START_WHEN_ONLINE).toBe('联网后开始任务');
+    expect(TASK_BAR_START_WHEN_ONLINE).not.toContain('授权');
+    expect(TASK_BAR_SAVE_DRAFT_ONLY).toBe('仅保存任务草稿');
+    expect(TASK_BAR_CANCEL_WAIT).toBe('取消');
+    expect(TASK_BAR_CANCELLED).toBe('已取消 · 未发送任何内容');
+    expect(TASK_BAR_CANCEL_FAILED).toBe('无法取消这项任务。');
+    expect(TASK_BAR_WAITING_FOR_CONNECTION).toBe('需要处理模型连接');
+    expect(TASK_BAR_WAITING_NOTE).toBe('已记录这次授权。联网、并确认计划没有变化后会自动开始；在此之前不会发送任何内容');
+    expect(TASK_BAR_REVIEW_OFFLINE).toBe('离线：审阅要连到模型服务，而这台设备现在没有网络；联网后再开始审阅');
+  });
+
+  it('offers 联网后开始任务 beside 仅保存任务草稿 while offline, and no 开始任务 to confuse it with (AUTH-002, OFF-004)', () => {
+    const view = taskBarView(barOf({ readiness: 'offline' }, { state: { key: 'offline', label: '离线' } }));
+    expect(view).toMatchObject({ readiness: 'offline', statement: TASK_BAR_STATEMENT, note: TASK_BAR_NOTES.offline, status: null });
+    expect(names(view)).toEqual(['start-when-online', 'save-draft', 'revise']);
+    expect(action(view, 'start-when-online')).toEqual({ name: 'start-when-online', label: '联网后开始任务', tone: 'primary', disabledReason: null });
+    // The draft action in OFF-004's words; it still only closes the drawer, so it is the same control.
+    expect(action(view, 'save-draft')).toEqual({ name: 'save-draft', label: '仅保存任务草稿', tone: 'secondary', disabledReason: null });
+    expect(names(view)).not.toContain('start');
+    for (const entry of view.actions) expect(entry.label).not.toContain('授权');
+  });
+
+  it('keeps a Review Run from starting while offline, with the reason, because it cannot wait yet', () => {
+    const view = taskBarView(barOf(
+      { readiness: 'offline', planEnvelopeDigest: null, categoryDigests: [{ categoryId: 'consistency', planEnvelopeDigest: 'd'.repeat(64) }] },
+      { kind: 'review-run', planVersion: null, state: { key: 'offline', label: '离线' } },
+    ));
+    expect(names(view)).toEqual(['start', 'revise', 'save-draft']);
+    expect(action(view, 'start')?.disabledReason).toBe(TASK_BAR_REVIEW_OFFLINE);
+    expect(view.note).toBe(TASK_BAR_REVIEW_OFFLINE);
+    expect(names(view)).not.toContain('start-when-online');
+  });
+
+  it('shows what a waiting Run waits for, its direct 取消, and 去设置连接 only when the connection is what it waits for (AUTH-007, OFF-006, OFF-009, OFF-010)', () => {
+    const started = { readiness: 'started' as const, planEnvelopeDigest: null };
+    const network = taskBarView(barOf(started, { state: { key: 'waiting', label: '等待网络' } }));
+    expect(network).toMatchObject({ readiness: 'started', statement: null, note: TASK_BAR_WAITING_NOTE, status: '等待网络' });
+    expect(names(network)).toEqual(['cancel-wait', 'run-link']);
+    expect(action(network, 'cancel-wait')).toEqual({ name: 'cancel-wait', label: '取消', tone: 'secondary', disabledReason: null });
+    const connection = taskBarView(barOf(started, { state: { key: 'waiting', label: TASK_BAR_WAITING_FOR_CONNECTION } }));
+    expect(names(connection)).toEqual(['connect', 'cancel-wait', 'run-link']);
+    expect(action(connection, 'connect')?.label).toBe('去设置连接');
+    for (const label of ['等待运行名额', '正在排队']) {
+      const view = taskBarView(barOf(started, { state: { key: 'waiting', label } }));
+      expect(view.status).toBe(label);
+      expect(names(view)).toEqual(['cancel-wait', 'run-link']);
+    }
+  });
+
+  it('states a cancelled wait as cancelled with nothing sent — never as 已中断 — and only links to it (OFF-010, OFF-012)', () => {
+    const cancelled = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'cancelled', label: '已取消' } }));
+    expect(cancelled).toMatchObject({ statement: null, note: null, status: '已取消 · 未发送任何内容' });
+    expect(names(cancelled)).toEqual(['run-link']);
   });
 
   it('becomes the Run\'s state and the way to its surface once started, offering nothing that would start it again (AUTH-007)', () => {

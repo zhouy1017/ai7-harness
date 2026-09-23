@@ -160,7 +160,16 @@ import {
   readRecoveryAttention,
   recentWindowStart,
 } from './global-attention.js';
-import { baselineAnalysisPlan, fixedTaskPlan, reviewRunPlan, TaskPlanError, withConnectionReadiness } from './task-plan.js';
+import { ALWAYS_ONLINE, type TaskPlanConnectivity } from './connectivity.js';
+import {
+  baselineAnalysisPlan,
+  fixedTaskPlan,
+  reviewRunPlan,
+  TaskPlanError,
+  withConnectionReadiness,
+  withConnectivityReadiness,
+  withWaitingReason,
+} from './task-plan.js';
 import { initializeProposalConflictSchema, ProposalConflictError, ProposalConflictStore, readConflictAttention } from './proposal-conflicts.js';
 import {
   ImportRetentionError,
@@ -3613,6 +3622,14 @@ export class EditorialStore {
    * checks see the same ledger. The range the chips name is the current plan version's (#288).
    */
   inspectTaskPlan(input: InspectTaskPlanInput): TaskPlanProjection {
+    return this.#taskPlanWithRoute(input).plan;
+  }
+
+  /**
+   * The plan and the kind of route it names: the baseline Task's frozen execution route, a Review Run's live route
+   * when it sends to a model service, and none for J-03's fixed task, which never dispatches (ADR 0055).
+   */
+  #taskPlanWithRoute(input: InspectTaskPlanInput): { plan: TaskPlanProjection; routeKind: string | null } {
     this.#assertAvailable();
     requireStore(typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) && TASK_PLAN_KINDS.includes(input.kind) &&
       (input.ref === null || (typeof input.ref === 'string' && UUID_PATTERN.test(input.ref))), 'TASK_PLAN_INVALID', '任务计划请求无效。');
@@ -3627,7 +3644,7 @@ export class EditorialStore {
       requireStore(projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', '这项任务还没有准备计划。');
       current(projection.taskIntent.taskIntentId);
       const blocks = this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
-      return this.#taskPlanCall(() => fixedTaskPlan({ projection, bookTitle, blocks }));
+      return { plan: this.#taskPlanCall(() => fixedTaskPlan({ projection, bookTitle, blocks })), routeKind: null };
     }
     if (input.kind === 'baseline-analysis') {
       const projection = this.#analysisCall(() => this.#baselineAnalysis.inspect(input.bookId)) as BaselineAnalysisProjection;
@@ -3635,13 +3652,15 @@ export class EditorialStore {
       requireStore(projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', '这项分析还没有准备计划。');
       current(projection.taskIntent.taskIntentId);
       const blocks = this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
-      return this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks }));
+      const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks }));
+      return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     const reviewRunId = input.ref;
     requireStore(reviewRunId !== null, 'TASK_PLAN_INVALID', '审阅的计划要指明是哪一次审阅。');
     const facts = this.#reviewCall(() => this.#reviewRuns.planFacts(input.bookId, reviewRunId));
     const blocks = this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(facts.manuscript.manuscriptId, facts.inputRevision.revisionId));
-    return this.#taskPlanCall(() => reviewRunPlan({ bookId: input.bookId, facts, bookTitle, blocks }));
+    const plan = this.#taskPlanCall(() => reviewRunPlan({ bookId: input.bookId, facts, bookTitle, blocks }));
+    return { plan, routeKind: plan.start.needsModelConnection ? 'opencode-go' : null };
   }
 
   /**
@@ -3654,10 +3673,19 @@ export class EditorialStore {
   async inspectTaskPlanWithConnection(
     input: InspectTaskPlanInput,
     credentialReadiness: () => Promise<'present' | 'missing' | null>,
+    connectivity: TaskPlanConnectivity = ALWAYS_ONLINE,
   ): Promise<TaskPlanProjection> {
-    const plan = this.inspectTaskPlan(input);
-    if (!plan.start.needsModelConnection || plan.start.readiness !== 'ready') return plan;
-    return withConnectionReadiness(plan, await credentialReadiness());
+    const { plan: frozen, routeKind } = this.#taskPlanWithRoute(input);
+    let plan = frozen;
+    if (plan.start.needsModelConnection && plan.start.readiness === 'ready') plan = withConnectionReadiness(plan, await credentialReadiness());
+    // Connectivity (Issue #502): only a plan whose route reaches its model over the network can be offline,
+    // and only once its credential is known to be there — 模型未连接 is decided first.
+    const reaches = routeKind !== null && connectivity.reachesNetwork(routeKind);
+    plan = withConnectivityReadiness(plan, reaches, reaches ? connectivity.reading() : 'online');
+    if (plan.state.key !== 'waiting') return plan;
+    if (reaches && connectivity.reading() === 'offline') return withWaitingReason(plan, 'network');
+    if ((await credentialReadiness()) === 'missing') return withWaitingReason(plan, 'connection');
+    return withWaitingReason(plan, connectivity.slotBusy() ? 'slot' : 'admitting');
   }
 
   #taskPlanCall<T>(operation: () => T): T {
@@ -3707,6 +3735,43 @@ export class EditorialStore {
   ): { projection: BaselineAnalysisProjection; dispatchRunRecordId: string | null } {
     const authorized = this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, slotBusy));
     return { projection: authorized.projection as BaselineAnalysisProjection, dispatchRunRecordId: authorized.dispatchRunRecordId };
+  }
+
+  /**
+   * 联网后开始任务 (Issue #502; AUTH-004, OFF-005): the Book's baseline Task is authorized exactly as 开始任务 would
+   * authorize it, and its Run waits in Connectivity Wait — nothing sent, no usage, nothing begun.
+   */
+  startBaselineAnalysisWhenOnline(bookId: string, taskIntentId: string, planEnvelopeDigest: string): BaselineAnalysisProjection {
+    return this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, false, 'when-online')).projection as BaselineAnalysisProjection;
+  }
+
+  /** 取消 while the Book's baseline Run waits (OFF-010): terminal, before any dispatch, without provider work. */
+  cancelWaitingBaselineAnalysis(bookId: string, taskIntentId: string): BaselineAnalysisProjection {
+    return this.#analysisCall(() => this.#baselineAnalysis.cancelWaiting(bookId, taskIntentId)) as BaselineAnalysisProjection;
+  }
+
+  /** The baseline Runs waiting in Connectivity Wait — the route Book's, or every Book's — oldest first. */
+  waitingBaselineAnalysisRuns(bookId: string | null): Array<{ bookId: string; taskIntentId: string; runRecordId: string }> {
+    this.#assertAvailable();
+    return this.#analysisCall(() => this.#baselineAnalysis.waitingRuns()).filter((run) => bookId === null || run.bookId === bookId);
+  }
+
+  /** Reconnect Preflight's local half for one waiting Run: the labels of the material inputs that moved, or none. */
+  baselineAnalysisPreflightDrift(runRecordId: string): ReadonlyArray<string> {
+    this.#assertAvailable();
+    return this.#analysisCall(() => this.#baselineAnalysis.preflightDrift(runRecordId));
+  }
+
+  /** A waiting Run that can never dispatch as authorized is blocked with its reasons (OFF-008). */
+  blockWaitingBaselineAnalysisRun(runRecordId: string, reasons: ReadonlyArray<string>): void {
+    this.#assertAvailable();
+    this.#analysisCall(() => this.#baselineAnalysis.blockWaitingRun(runRecordId, reasons));
+  }
+
+  /** Whether this Run still waits in Connectivity Wait: Reconnect Preflight re-reads it before it acts. */
+  baselineAnalysisRunWaits(runRecordId: string): boolean {
+    this.#assertAvailable();
+    return this.#analysisCall(() => this.#baselineAnalysis.currentRunState(runRecordId)) === 'awaiting-connectivity';
   }
 
   /** The append-only analysis ledger the execution owner writes through; service-internal. */

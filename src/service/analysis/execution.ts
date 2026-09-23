@@ -296,7 +296,12 @@ export class BaselineAnalysisExecutionOwner {
    * and not a ledger's: a Run of any kind holds it, which is what keeps a Review Run's category Tasks
    * one after another rather than side by side (Issue #417).
    */
-  admitAndDispatch(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): void {
+  /**
+   * `afterReconnectPreflight` is the one way a Run waiting in Connectivity Wait is admitted (Issue #502): the
+   * service passes it only once Reconnect Preflight has found the model service reachable, the credential ready
+   * and the bound plan unchanged. Every other Run must be one that was just authorized.
+   */
+  admitAndDispatch(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger, options: { afterReconnectPreflight?: boolean } = {}): void {
     if (this.#disposed) throw new ExecutionAdmissionError('EXECUTION_STOPPING', '本地业务服务正在停止。');
     if (this.#active !== null) throw new ExecutionAdmissionError('EXECUTION_BUSY', '当前已有一个运行在执行；本实例一次只执行一个运行。');
     const live = this.#deps.developerLive ?? null;
@@ -311,8 +316,11 @@ export class BaselineAnalysisExecutionOwner {
     if (live !== null && !DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS.has(facts.sourceDigest)) {
       throw new ExecutionAdmissionError('EXECUTION_SOURCE_NOT_TRANSMITTABLE', '当前图书不在 developer-live 可传输的 Public SampleBook 集合内；未发起任何传输。');
     }
-    if (ledger.currentRunState(runRecordId) !== 'authorized') {
-      throw new ExecutionAdmissionError('EXECUTION_STATE_INVALID', '只有刚记录授权的运行可以进入调度。');
+    const state = ledger.currentRunState(runRecordId);
+    if (state === 'awaiting-connectivity' ? options.afterReconnectPreflight !== true : state !== 'authorized') {
+      throw new ExecutionAdmissionError('EXECUTION_STATE_INVALID', state === 'awaiting-connectivity'
+        ? '等待中的运行只有通过重新联网预检后才能进入调度。'
+        : '只有刚记录授权的运行可以进入调度。');
     }
     const submitted = facts.update === null ? facts.manifest.units.length : facts.update.reusePlan.counts.recomputed;
     // A scope plan also says how many units it leaves unreviewed; a baseline plan has no such count,

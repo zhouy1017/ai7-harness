@@ -74,6 +74,8 @@ interface LaunchArguments {
   foregroundExecutionControl: J03ForegroundExecutionControl | undefined;
   recoveryControl: J08RecoveryControl | undefined;
   modelAdapterControl: J04ModelAdapterControl | undefined;
+  /** J-04 only (Issue #502): the file whose word, `offline`, the service reads as this device's connectivity. */
+  connectivityPath: string | undefined;
   /** J-05 only: the first Apply commits and its acknowledgement is withheld from the renderer, once. */
   applyControl: 'lose-first-acknowledgement' | undefined;
   observeJ12Reveal: boolean;
@@ -181,6 +183,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j03-foreground-execution-control' ||
           key === '--j08-recovery-control' ||
           key === '--j04-model-adapter' ||
+          key === '--j04-connectivity-path' ||
           key === '--j05-apply-control' ||
           key === '--j12-observe-reveal' ||
           key === '--launcher-pid' ||
@@ -301,6 +304,10 @@ function parseArguments(argv: string[]): LaunchArguments {
       ((process.env.AI7_E2E_JOURNEY === 'J-04' || process.env.AI7_E2E_JOURNEY === 'J-09') && modelAdapterControl !== undefined),
   );
   requireDesktop([importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length <= 1);
+  // The connectivity control is guarded as the picker paths are — J-04's own, and absolute — and, since it only
+  // simulates whether the adapter's route has a network, it sits beside the adapter rather than excluding it.
+  const connectivityPath = values.get('--j04-connectivity-path');
+  requireDesktop(connectivityPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && isAbsolute(connectivityPath)));
   requireDesktop(
     observeJ12RevealValue === undefined ||
       (process.env.AI7_E2E_JOURNEY === 'J-12' && observeJ12RevealValue === 'true'),
@@ -311,7 +318,7 @@ function parseArguments(argv: string[]): LaunchArguments {
     launchForm.trustedOperationalScope === 'development-ci' ||
       (process.env.AI7_E2E_JOURNEY === undefined && injectedPickerPath === undefined && observeJ12RevealValue === undefined &&
         importControlValue === undefined && foregroundExecutionControlValue === undefined && recoveryControlValue === undefined && modelAdapterControlValue === undefined &&
-        applyControlValue === undefined && injectedSavePath === undefined),
+        applyControlValue === undefined && injectedSavePath === undefined && connectivityPath === undefined),
   );
   return {
     dataRoot,
@@ -322,6 +329,7 @@ function parseArguments(argv: string[]): LaunchArguments {
     foregroundExecutionControl,
     recoveryControl,
     modelAdapterControl,
+    connectivityPath,
     applyControl,
     observeJ12Reveal,
     launcherPid,
@@ -2227,6 +2235,61 @@ function registerRendererHandlers(
         });
       }),
   );
+  // 联网后开始任务 and 取消 while waiting (Issue #502) are the baseline Task's own, exactly as its immediate start is:
+  // the renderer never names a Book, the service is asked within the route's, and the answer must be that Book's.
+  ipcMain.handle(
+    IPC_CHANNELS.startBaselineAnalysisWhenOnline,
+    (event, input: Omit<ServiceOperationMap['startBaselineAnalysisWhenOnline']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('startBaselineAnalysisWhenOnline', {
+            taskIntentId: input.taskIntentId,
+            planEnvelopeDigest: input.planEnvelopeDigest,
+            bookId: route.bookId,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if (result.bookId !== route.bookId) {
+            throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '联网后开始任务的结果不属于当前图书工作台。');
+          }
+          return result;
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.cancelWaitingBaselineAnalysis,
+    (event, input: Omit<ServiceOperationMap['cancelWaitingBaselineAnalysis']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('cancelWaitingBaselineAnalysis', { taskIntentId: input.taskIntentId, bookId: route.bookId });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if (result.bookId !== route.bookId) {
+            throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '取消等待中任务的结果不属于当前图书工作台。');
+          }
+          return result;
+        });
+      }),
+  );
+  // Reconnect Preflight names no Book: it only ever admits Runs the editor already authorized to start when
+  // online. It is serialized with every other effect, because an admission dispatches.
+  ipcMain.handle(
+    IPC_CHANNELS.runReconnectPreflight,
+    (event) =>
+      envelope(async () => {
+        requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          return service.call('runReconnectPreflight', {});
+        });
+      }),
+  );
   // 审阅 (Issue #417, plan slice S69) is a Book destination: the renderer never names a Book, the service
   // is asked within the route's, and every answer must be that Book's — and, where the renderer named a
   // Review Run, open exactly that Run. Reads are held to the route's read epoch; writes are serialized
@@ -2975,6 +3038,7 @@ export async function runApplication(): Promise<void> {
       launch.foregroundExecutionControl,
       launch.recoveryControl,
       launch.modelAdapterControl,
+      launch.connectivityPath,
     );
     service.onUnexpectedExit(() => {
       serviceInterrupted = true;
