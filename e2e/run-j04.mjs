@@ -2752,9 +2752,10 @@ async function main() {
     await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState) && document.querySelector('.baseline-analysis-card')?.dataset.resultRevisionOrdinal==='8'`, 'quick-settled', 180_000);
     const quickSettled = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const quickStates = quickSettled?.run?.transitions?.map((transition) => transition.state) ?? [];
-    // One Task Intent, plan, envelope and authorization of its own, exactly as 开始任务 records them — its origin the rule,
-    // naming the version the editor started under (TASK-020, TASK-028).
-    requireJourney(quickSettled?.state === 'settled' && quickSettled.taskIntent?.taskIntentId !== fellBackIntent && quickSettled.taskIntent?.mode === 'sync-current' &&
+    // The Task the stop left prepared is prepared again — unchanged, so revised in place (#48) — and started exactly as
+    // 开始任务 records it: its own authorization, its origin the rule, naming the version the editor started under
+    // (TASK-020, TASK-028).
+    requireJourney(quickSettled?.state === 'settled' && quickSettled.taskIntent?.taskIntentId === fellBackIntent && quickSettled.taskIntent?.mode === 'sync-current' &&
       quickSettled.authorization?.origin === 'default-execution-rule' && quickSettled.authorization.ruleVersionId === rule.ruleVersionId &&
       quickSettled.authorization.authority === 'standard-direct-dispatch' && quickSettled.authorization.planEnvelopeDigest === quickSettled.planEnvelope?.digest &&
       JSON.stringify(quickStates.slice(0, 3)) === JSON.stringify(['authorized', 'admitted', 'executing']) &&
