@@ -508,6 +508,16 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-plan-default-rule-confirm { display: grid; gap: .45rem; width: 100%; padding: .75rem; border: 1px solid #c9c2ae; border-radius: 10px; background: #fffdf6; }
 .task-plan-default-rule-confirm h4, .task-plan-default-rule-confirm p { margin: 0; }
 .task-plan-quick-started { margin: 0; }
+/* 取消任务 (Issue #422): the activity card above the plan while a Run is under way (AUTH-011), and the inline
+   Cancellation Impact Summary the bar opens before anything is recorded (CTRL-004). */
+.task-plan-activity { display: grid; gap: .45rem; padding: .75rem; border: 1px solid #b7c8bf; border-radius: 10px; background: #f3f8f4; }
+.task-plan-activity[data-task-plan-activity="cancelling"] { border-color: #c9a36b; background: #fdf7ec; }
+.task-plan-activity-title { margin: 0; font-size: .95rem; }
+.task-plan-activity .attention-note { margin: 0; }
+.task-bar-cancel-impact { display: grid; gap: .45rem; padding: .75rem; border: 1px solid #c9a36b; border-radius: 10px; background: #fffdf6; }
+.task-bar-cancel-impact h4 { margin: 0; }
+.task-bar-cancel-impact h4:focus-visible { outline: 3px solid #416458; outline-offset: 2px; }
+.task-bar-cancel-lines { display: grid; gap: .3rem; margin: 0; padding-left: 1.1rem; font-size: .86rem; line-height: 1.5; }
 /* 知识库 › 工序与规则: one card per rule, its state in words and shape. */
 .default-rule-list { display: grid; gap: .8rem; }
 .default-rule-card { display: grid; gap: .45rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
@@ -917,7 +927,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal,
   .global-attention-group, .global-attention-item,
   .manuscript-export, .export-format-option, .export-option, .export-fidelity-row, .export-receipt, .export-records > li,
-  .task-plan-default-rule-confirm, .default-rule-card {
+  .task-plan-default-rule-confirm, .default-rule-card, .task-plan-activity, .task-bar-cancel-impact {
     color: CanvasText;
     background: Canvas;
     border-color: CanvasText;
@@ -939,6 +949,9 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .task-drawer-mode { color: ButtonText; background: ButtonFace; forced-color-adjust: auto; }
   .task-drawer-mode[aria-pressed="true"] { outline: 2px solid Highlight; outline-offset: -3px; box-shadow: none; }
   .task-drawer-title:focus-visible, .task-drawer-mode:focus-visible { outline-color: Highlight; }
+  /* A Run stopping at the editor's word keeps a heavier edge than one simply running, and the summary its outline. */
+  .task-plan-activity[data-task-plan-activity="cancelling"], .task-bar-cancel-impact { border-width: 2px; }
+  .task-bar-cancel-impact h4:focus-visible { outline-color: Highlight; }
   /* Without colour, the 发稿版本 mark keeps its outline and the item it marks a heavier border; a chosen card
      or milestone keeps a heavier border too. */
   .publication-version-mark, .publication-current-mark { color: CanvasText; background: Canvas; border: 2px solid CanvasText; forced-color-adjust: none; }

@@ -1,7 +1,17 @@
-import type { RendererApi, ServiceJobProjection, TaskPlanKind, TaskPlanProjection } from '../shared/protocol.js';
+import type { RendererApi, ServiceJobProjection, TaskPlanKind, TaskPlanProjection, TaskPlanRunControlProjection } from '../shared/protocol.js';
 import {
+  TASK_BAR_CANCEL_CONFIRM,
   TASK_BAR_CANCEL_FAILED,
+  TASK_BAR_CANCEL_IMPACT_HEADING,
+  TASK_BAR_CANCEL_KEEP,
+  TASK_BAR_CANCEL_RUN_FAILED,
   TASK_BAR_CANCELLED,
+  TASK_BAR_CANCELLING_NOTE,
+  TASK_PLAN_ACTIVITY_STALE,
+  TASK_PLAN_ACTIVITY_TITLE,
+  TASK_PLAN_ACTIVITY_UNREPORTED,
+  taskPlanActivityIsStale,
+  taskPlanActivityRows,
   TASK_BAR_SLOT_BUSY,
   TASK_BAR_START_FAILED,
   TASK_BAR_SAVED,
@@ -106,6 +116,7 @@ type DrawerApi = Pick<
   | 'prepareBaselineAnalysis'
   | 'startBaselineAnalysisWhenOnline'
   | 'cancelWaitingBaselineAnalysis'
+  | 'cancelBaselineAnalysisRun'
   | 'runReconnectPreflight'
   | 'setDefaultExecutionRule'
 >;
@@ -139,6 +150,8 @@ const RUNNING_POLL_MS = 1_000;
 const WAITING_POLL_MS = 2_000;
 /** The diff table the bar's 查看计划修订 shows and hides; one drawer, so one table. */
 const DRIFT_TABLE_ID = 'task-drawer-drift-table';
+/** The Cancellation Impact Summary 取消任务 opens inline (Issue #422, CTRL-004); one bar, so one summary. */
+const CANCEL_IMPACT_ID = 'task-drawer-cancel-impact';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -198,6 +211,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   let focusBar = false;
   /** Whether `设为快速开始默认…`'s confirmation is open; kept across the reads of the same plan version. */
   let ruleConfirmShown = false;
+  /** Whether 取消任务's Cancellation Impact Summary is open; kept across the reads while the Run can still be cancelled. */
+  let cancelConfirmShown = false;
   /** Said beside the bar's actions once the plan the drawer was opened on is painted (`open`'s `note`). */
   let pendingNote: string | null = null;
   let pollTimer: number | undefined;
@@ -279,7 +294,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   function schedulePoll(next: TaskPlanProjection): void {
     clearPoll();
     const waiting = next.state.key === 'waiting';
-    if ((next.state.key !== 'running' && !waiting) || interrupted || root.hidden) return;
+    // 正在取消 is followed like 运行中 until the Run has stopped and says 已取消 (Issue #422, CTRL-005).
+    if ((next.state.key !== 'running' && next.state.key !== 'cancelling' && !waiting) || interrupted || root.hidden) return;
     pollTimer = window.setTimeout(() => {
       pollTimer = undefined;
       if (!waiting) {
@@ -328,6 +344,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const key = JSON.stringify(next);
     const sameVersion = plan !== null && plan.ref === next.ref && plan.planVersion === next.planVersion;
     if (!force && key === painted && plan !== null) {
+      // Nothing moved, but the activity card's times did: it holds no control, so it is simply drawn again.
+      if (next.runControl !== null) body.querySelector('.task-plan-activity')?.replaceWith(activityBlock(next.runControl));
       schedulePoll(next);
       return;
     }
@@ -336,6 +354,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       refusal = null;
       ruleConfirmShown = false;
     }
+    // The summary stays open only while there is still a Run 取消任务 can name.
+    if (next.runControl === null || next.runControl.cancel.reason !== null) cancelConfirmShown = false;
     if (pendingNote !== null) {
       refusal = pendingNote;
       pendingNote = null;
@@ -358,6 +378,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const active = document.activeElement;
     const restore = active instanceof HTMLElement && (body.contains(active) || bar.contains(active)) ? active.dataset['taskDrawerControl'] ?? null : null;
     body.replaceChildren(
+      ...(next.runControl === null ? [] : [activityBlock(next.runControl)]),
       goalBlock(next),
       ...(next.defaultRule.startedBy === null ? [] : [quickStartedBlock(next.defaultRule.startedBy)]),
       ...(next.drift === null ? [] : [driftBlock(next.drift)]),
@@ -697,6 +718,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const actions = el('div', 'task-bar-actions');
     for (const action of view.actions) actions.append(barAction(action, noteId));
     parts.push(actions);
+    const run = next.runControl;
+    if (run !== null && run.cancel.reason === null && cancelConfirmShown) parts.push(cancelImpactBlock(run));
     bar.replaceChildren(...parts);
     if (working) for (const button of bar.querySelectorAll<HTMLButtonElement>('button')) button.disabled = true;
   }
@@ -722,6 +745,16 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         break;
       case 'cancel-wait':
         button.addEventListener('click', () => void cancelWait());
+        break;
+      // 取消任务 records nothing: it opens the Cancellation Impact Summary, whose confirmation does (CTRL-004).
+      case 'cancel-run':
+        button.setAttribute('aria-controls', CANCEL_IMPACT_ID);
+        button.setAttribute('aria-expanded', cancelConfirmShown ? 'true' : 'false');
+        button.addEventListener('click', () => {
+          cancelConfirmShown = !cancelConfirmShown;
+          if (plan !== null) paintBar(plan);
+          bar.querySelector<HTMLElement>(cancelConfirmShown ? `#${CANCEL_IMPACT_ID} h4` : '[data-task-drawer-control="cancel-run"]')?.focus();
+        });
         break;
       case 'reconfirm-plan':
         button.addEventListener('click', () => void reconfirm());
@@ -785,7 +818,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       paintBar(plan);
       bar.querySelector<HTMLElement>(
         '[data-task-drawer-control="start"]:not(:disabled), [data-task-drawer-control="start-when-online"]:not(:disabled), ' +
-          '[data-task-drawer-control="reconfirm-plan"]:not(:disabled), [data-task-drawer-control="cancel-wait"]:not(:disabled)',
+          '[data-task-drawer-control="reconfirm-plan"]:not(:disabled), [data-task-drawer-control="cancel-wait"]:not(:disabled), ' +
+          '[data-task-drawer-control="cancel-run"]:not(:disabled)',
       )?.focus();
     }
     // `working` is not part of the projection cache key. Even an unchanged plan must repaint
@@ -854,6 +888,89 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   }
 
   /** 取消 while the Run waits (OFF-010): cancelled before it ever dispatched, directly — nothing ran to weigh first. */
+  /**
+   * The Cancellation Impact Summary (CTRL-004): the work that stops, what is kept, the Effects there are none of and
+   * the turn not back yet, then the explicit confirmation, which is the one activation that records anything.
+   */
+  function cancelImpactBlock(run: TaskPlanRunControlProjection): HTMLElement {
+    const section = el('section', 'task-bar-cancel-impact');
+    section.id = CANCEL_IMPACT_ID;
+    section.setAttribute('role', 'group');
+    const heading = el('h4', undefined, TASK_BAR_CANCEL_IMPACT_HEADING);
+    heading.id = uid('cancel-impact');
+    heading.tabIndex = -1;
+    section.setAttribute('aria-labelledby', heading.id);
+    const lines = el('ul', 'task-bar-cancel-lines');
+    for (const line of run.cancel.impact) lines.append(el('li', undefined, line));
+    const confirm = control(TASK_BAR_CANCEL_CONFIRM, 'primary', 'confirm-cancel-run');
+    const keep = control(TASK_BAR_CANCEL_KEEP, 'secondary', 'keep-running');
+    confirm.addEventListener('click', () => void cancelRun());
+    keep.addEventListener('click', () => {
+      cancelConfirmShown = false;
+      if (plan !== null) paintBar(plan);
+      bar.querySelector<HTMLElement>('[data-task-drawer-control="cancel-run"]')?.focus();
+    });
+    const actions = el('div', 'button-row');
+    actions.append(confirm, keep);
+    section.append(heading, lines, actions);
+    if (working) for (const button of [confirm, keep]) button.disabled = true;
+    return section;
+  }
+
+  /**
+   * AUTH-011's activity card above the plan: the Run Liveness Signal in rows, measured and never estimated, with
+   * LIVE-003's own words when the step has run longer than this Run can account for.
+   */
+  function activityBlock(run: TaskPlanRunControlProjection): HTMLElement {
+    const section = el('section', 'task-plan-activity');
+    section.setAttribute('aria-label', TASK_PLAN_ACTIVITY_TITLE);
+    section.dataset['taskPlanActivity'] = run.cancelling ? 'cancelling' : run.activity === null ? 'unreported' : 'running';
+    section.append(el('h3', 'task-plan-activity-title', TASK_PLAN_ACTIVITY_TITLE));
+    const activity = run.activity;
+    if (activity === null) {
+      section.append(el('p', 'field-note', TASK_PLAN_ACTIVITY_UNREPORTED));
+      return section;
+    }
+    const now = Date.now();
+    section.dataset['taskPlanActivityProgress'] = `${activity.unitsSettled}/${activity.unitsTotal}`;
+    if (activity.currentUnitOrdinal !== null) section.dataset['taskPlanActivityUnit'] = String(activity.currentUnitOrdinal);
+    if (taskPlanActivityIsStale(activity, now)) {
+      section.dataset['runLiveness'] = 'stale';
+      section.append(el('p', 'attention-note', TASK_PLAN_ACTIVITY_STALE));
+    }
+    const facts = el('dl', 'task-plan-facts task-plan-activity-facts');
+    for (const [term, value] of taskPlanActivityRows(activity, run.executingSince, now)) {
+      const cell = el('dd', undefined, value);
+      cell.dataset['taskPlanActivityRow'] = term;
+      facts.append(el('dt', undefined, term), cell);
+    }
+    section.append(facts);
+    return section;
+  }
+
+  /**
+   * 确认取消任务 (Issue #422; CTRL-004, CTRL-005): the Run the summary named is cancelled. The service records
+   * 正在取消 at once and the Run stops at the next unit boundary; the drawer follows it to 已取消.
+   */
+  async function cancelRun(): Promise<void> {
+    const current = plan;
+    const asked = request;
+    if (current === null || current.kind !== 'baseline-analysis' || current.runControl === null || !beginWork()) return;
+    options.setStatus('正在取消任务…', 'busy');
+    try {
+      await api.cancelBaselineAnalysisRun({ taskIntentId: current.ref });
+      cancelConfirmShown = false;
+      options.setStatus(TASK_BAR_CANCELLING_NOTE, 'success');
+      focusBar = true;
+      options.onRecorded(current.kind, current.bookId);
+    } catch (error) {
+      refusal = options.errorMessage(error, TASK_BAR_CANCEL_RUN_FAILED);
+      options.setStatus(refusal, 'error');
+    } finally {
+      endWork(asked);
+    }
+  }
+
   async function cancelWait(): Promise<void> {
     const current = plan;
     const asked = request;
@@ -916,6 +1033,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       pendingNote = note ?? null;
       diffShown = false;
       ruleConfirmShown = false;
+      cancelConfirmShown = false;
       clearPoll();
       root.hidden = false;
       root.dataset['taskDrawer'] = 'open';
