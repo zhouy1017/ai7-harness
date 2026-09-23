@@ -64,10 +64,15 @@ export const NO_PARTICIPATION_STATEMENT = '预计无需中途参与' as const;
 export const PLAN_PREVIEW_FOOTER = '计划说明，不是运行授权' as const;
 export const PLAN_REVISION_REQUIRED_REASON = 'plan-revision-required' as const;
 
-/** The exact split every plan version of this Task kind carries inside its canonical envelope. */
-export function planBoundarySplit(): PlanBoundarySplitProjection {
+/**
+ * The exact split every plan version of this Task kind carries inside its canonical envelope. An adaptation the editor
+ * withdrew (Issue #419, `不允许`) is not in it, so the Run Authorization binds the plan without it.
+ */
+export function planBoundarySplit(withdrawn: ReadonlyArray<string> = []): PlanBoundarySplitProjection {
   return {
-    adaptable: PLAN_ADAPTATION_CLASSES.map((adaptationClass) => ({ adaptationClass, label: '安全重试', statement: SAFE_RETRY_STATEMENT })),
+    adaptable: PLAN_ADAPTATION_CLASSES
+      .filter((adaptationClass) => !withdrawn.includes(adaptationClass))
+      .map((adaptationClass) => ({ adaptationClass, label: '安全重试', statement: SAFE_RETRY_STATEMENT })),
     material: MATERIAL_PLAN_FIELDS.map((field) => ({ field, label: MATERIAL_PLAN_FIELD_LABELS[field] })),
     participation: { expected: false, statement: NO_PARTICIPATION_STATEMENT },
   };

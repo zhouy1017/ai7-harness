@@ -48,6 +48,17 @@ import {
   TASK_PLAN_DRIFT_HEADING,
   TASK_PLAN_EDIT,
   TASK_PLAN_EDIT_REASON,
+  TASK_PLAN_EDIT_ADAPTATION_WITHDRAWN,
+  TASK_PLAN_EDIT_ASK_FIRST_NOTE,
+  TASK_PLAN_EDIT_RESTORE,
+  TASK_PLAN_EDIT_STEP_REMOVED,
+  TASK_PLAN_EDIT_STEPS_NOTE,
+  TASK_PLAN_EDIT_TAG,
+  TASK_PLAN_FULL_LINK_EDITABLE,
+  TASK_BAR_UPDATE_FAILED,
+  taskPlanEditRemoveStep,
+  taskPlanEditWithdraw,
+  taskPlanLastEdit,
   TASK_PLAN_FULL_LINK,
   TASK_PLAN_GOAL_TERMS,
   TASK_PLAN_LOCKED,
@@ -124,6 +135,7 @@ type DrawerApi = Pick<
   | 'cancelBaselineAnalysisRun'
   | 'pauseBaselineAnalysisRun'
   | 'resumeBaselineAnalysisRun'
+  | 'editBaselineAnalysisPlan'
   | 'runReconnectPreflight'
   | 'setDefaultExecutionRule'
 >;
@@ -205,6 +217,12 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   let painted = '';
   let returnFocus: () => HTMLElement | null = () => null;
   let mode: TaskDrawerMode = storedMode();
+  /**
+   * The editor's edits of each plan not yet made the plan (Issue #419, V2-UX-PLAN-011): per Task, each item's intended
+   * state where it differs from the version shown. It lives outside every repaint — a read of the plan redraws the body
+   * — so closing the drawer keeps it; only 更新计划, 撤销修改 or a restart of AI7 lets it go.
+   */
+  const editBuffers = new Map<string, Map<string, boolean>>();
   let ticket = 0;
   let interrupted = false;
   let focusTitle = false;
@@ -392,6 +410,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       goalBlock(next),
       ...(next.defaultRule.startedBy === null ? [] : [quickStartedBlock(next.defaultRule.startedBy)]),
       ...(next.drift === null ? [] : [driftBlock(next.drift)]),
+      ...(next.edit.lastEdit === null ? [] : [el('p', 'field-note task-plan-edit-record', taskPlanLastEdit(next.edit.lastEdit))]),
       mode === 'compact' ? compactBlock(next) : fullBlock(next),
     );
     if (technicalOpen) {
@@ -494,7 +513,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       dd.dataset['taskPlanRow'] = term;
       rows.append(dt, dd);
     }
-    const full = control(TASK_PLAN_FULL_LINK, 'quiet task-plan-full-link', 'full-link');
+    const full = control(next.edit.editable ? TASK_PLAN_FULL_LINK_EDITABLE : TASK_PLAN_FULL_LINK, 'quiet task-plan-full-link', 'full-link');
     full.addEventListener('click', () => setMode('full', true));
     section.append(rows, full);
     return section;
@@ -532,9 +551,14 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const steps = el('ol', 'task-plan-steps');
     for (const step of next.steps) {
       const item = el('li');
+      item.dataset['taskPlanItem'] = step.id;
+      const removed = shownRemoved(next, step.id, step.removed);
+      if (removed) item.classList.add('task-plan-item-removed');
       item.append(el('span', 'task-plan-step', step.label), el('span', 'task-plan-step-result', `→ ${step.result}`));
+      if (step.removable) item.append(...editControls(next, step.id, step.label, step.removed, removed, 'step'));
       steps.append(item);
     }
+    const stepsNote = next.edit.editable && next.steps.some((step) => step.removable) ? [el('p', 'field-note task-plan-edit-note', TASK_PLAN_EDIT_STEPS_NOTE)] : [];
     const usage = el('span');
     usage.append(next.service.usage);
     if (next.service.usageIsCeiling) usage.append(el('small', 'field-note task-plan-ceiling-note', TASK_PLAN_CEILING_NOTE));
@@ -547,7 +571,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         [TASK_PLAN_SCOPE_TERMS[2], next.scope.send],
         [TASK_PLAN_SCOPE_TERMS[3], next.scope.notRead],
       ])),
-      planSection(2, steps),
+      planSection(2, steps, ...stepsNote),
       planSection(3, listOf(participation, 'task-plan-list task-plan-participation')),
       planSection(4, facts([
         [TASK_PLAN_SERVICE_TERMS[0], next.service.role],
@@ -575,8 +599,21 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const section = el('section', 'task-plan-boundary');
     const adaptable = el('div', 'task-plan-boundary-column');
     adaptable.dataset['taskPlanBoundary'] = 'adaptable';
-    adaptable.append(el('h4', undefined, TASK_PLAN_BOUNDARY_COLUMNS[0]),
-      listOf(next.boundary.adaptable.length === 0 ? [TASK_PLAN_NO_ADAPTATION] : next.boundary.adaptable, 'task-plan-list'));
+    const adaptations = el('ul', 'task-plan-list');
+    if (next.boundary.adaptable.length === 0) adaptations.append(el('li', undefined, TASK_PLAN_NO_ADAPTATION));
+    for (const entry of next.boundary.adaptable) {
+      const item = el('li');
+      item.dataset['taskPlanItem'] = entry.id;
+      const removed = shownRemoved(next, entry.id, entry.removed);
+      if (removed) item.classList.add('task-plan-item-removed');
+      item.append(el('span', 'task-plan-adaptation', entry.label));
+      if (entry.removable) item.append(...editControls(next, entry.id, entry.label, entry.removed, removed, 'adaptation'));
+      adaptations.append(item);
+    }
+    adaptable.append(el('h4', undefined, TASK_PLAN_BOUNDARY_COLUMNS[0]), adaptations);
+    if (next.edit.editable && next.boundary.adaptable.some((entry) => entry.removable)) {
+      adaptable.append(el('p', 'field-note task-plan-edit-note', TASK_PLAN_EDIT_ASK_FIRST_NOTE));
+    }
     const askFirst = el('div', 'task-plan-boundary-column');
     askFirst.dataset['taskPlanBoundary'] = 'ask-first';
     const locked = el('ul', 'task-plan-list task-plan-locked');
@@ -701,7 +738,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
    * same region states the Run and leads to its surface, and offers nothing that would start it again.
    */
   function paintBar(next: TaskPlanProjection): void {
-    const view = taskBarView(next);
+    const view = taskBarView(next, pendingEdits(next));
     bar.hidden = false;
     bar.dataset['taskBar'] = view.readiness;
     const parts: HTMLElement[] = [el('p', 'task-bar-summary', view.summary)];
@@ -801,10 +838,127 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
           if (plan !== null) options.openRunSurface(plan);
         });
         break;
+      // 返回修改 (Issue #419): the plan's editing — 完整, focused on the first thing that can change.
       case 'revise':
+        button.addEventListener('click', () => {
+          if (mode !== 'full') setMode('full', false);
+          body.querySelector<HTMLElement>('[data-task-plan-edit]:not(:disabled)')?.focus();
+        });
+        break;
+      case 'update-plan':
+        button.addEventListener('click', () => void updatePlan());
+        break;
+      case 'discard-edits':
+        button.addEventListener('click', () => {
+          if (plan === null || working) return;
+          editBuffers.delete(editKey(plan));
+          focusBar = true;
+          paint(plan, true);
+        });
         break;
     }
     return button;
+  }
+
+  // ---- the editable plan (Issue #419, plan slice S73; §6 可编辑, V2-UX-PLAN-011) -------------------------------
+
+  function editKey(next: TaskPlanProjection): string {
+    return `${next.kind}:${next.ref}`;
+  }
+
+  /** An item as the editor now sees it: their pending edit where they made one, else the version shown. */
+  function shownRemoved(next: TaskPlanProjection, id: string, committed: boolean): boolean {
+    return editBuffers.get(editKey(next))?.get(id) ?? committed;
+  }
+
+  /**
+   * How many changes the editor has made and not yet made the plan. An intention the version shown already holds is
+   * no pending edit — a version 更新计划 wrote clears it — and a started Task keeps none.
+   */
+  function pendingEdits(next: TaskPlanProjection): number {
+    const key = editKey(next);
+    const buffer = editBuffers.get(key);
+    if (buffer === undefined) return 0;
+    if (next.start.readiness === 'started') {
+      editBuffers.delete(key);
+      return 0;
+    }
+    const committed = new Map<string, boolean>([
+      ...next.steps.filter((step) => step.removable).map((step) => [step.id, step.removed] as const),
+      ...next.boundary.adaptable.filter((entry) => entry.removable).map((entry) => [entry.id, entry.removed] as const),
+    ]);
+    for (const [id, removed] of buffer) {
+      if (committed.get(id) === undefined || committed.get(id) === removed) buffer.delete(id);
+    }
+    if (buffer.size === 0) editBuffers.delete(key);
+    return buffer.size;
+  }
+
+  /** One item's edit, kept until 更新计划 or 撤销修改; focus stays on the item, now on its other control. */
+  function setItemRemoved(next: TaskPlanProjection, id: string, committed: boolean, removed: boolean): void {
+    // The plan on show, which a read may have replaced since this control was drawn; never another Task's.
+    if (plan === null || editKey(plan) !== editKey(next) || working || interrupted || !plan.edit.editable) return;
+    const key = editKey(plan);
+    const buffer = editBuffers.get(key) ?? new Map<string, boolean>();
+    if (removed === committed) buffer.delete(id);
+    else buffer.set(id, removed);
+    if (buffer.size === 0) editBuffers.delete(key);
+    else editBuffers.set(key, buffer);
+    paint(plan, true);
+    body.querySelector<HTMLElement>(`[data-task-plan-item="${id}"] [data-task-plan-edit]`)?.focus();
+  }
+
+  /**
+   * An editable item's mark and control (PLAN-011): left out, it says so beside 你改的 with 恢复; kept, it offers `×`,
+   * whose glyph is drawn by the style sheet so the item's words stay the only text it holds. A plan that takes no edit
+   * shows the mark and no control.
+   */
+  function editControls(next: TaskPlanProjection, id: string, label: string, committed: boolean, removed: boolean, kind: 'step' | 'adaptation'): HTMLElement[] {
+    const parts: HTMLElement[] = [];
+    if (removed) {
+      parts.push(el('span', 'task-plan-edit-tag', `${TASK_PLAN_EDIT_TAG} · ${kind === 'step' ? TASK_PLAN_EDIT_STEP_REMOVED : TASK_PLAN_EDIT_ADAPTATION_WITHDRAWN}`));
+    }
+    if (!next.edit.editable) return parts;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset['taskPlanEdit'] = removed ? 'restore' : 'remove';
+    if (removed) {
+      button.className = 'quiet task-plan-edit-restore';
+      button.textContent = TASK_PLAN_EDIT_RESTORE;
+    } else {
+      const name = kind === 'step' ? taskPlanEditRemoveStep(label) : taskPlanEditWithdraw(label);
+      button.className = 'quiet task-plan-edit-remove';
+      button.setAttribute('aria-label', name);
+      button.title = name;
+    }
+    button.addEventListener('click', () => setItemRemoved(next, id, committed, !removed));
+    parts.push(button);
+    return parts;
+  }
+
+  /** 更新计划 (PLAN-009, PLAN-011): the plan as the editor left it becomes the next version; a refusal is said beside the bar. */
+  async function updatePlan(): Promise<void> {
+    const current = plan;
+    const asked = request;
+    const planEnvelopeDigest = current?.start.planEnvelopeDigest ?? null;
+    if (current === null || current.kind !== 'baseline-analysis' || planEnvelopeDigest === null || !beginWork()) return;
+    const removedSteps = current.steps.filter((step) => step.removable && shownRemoved(current, step.id, step.removed)).map((step) => step.id);
+    const disallowedAdaptations = current.boundary.adaptable
+      .filter((entry) => entry.removable && shownRemoved(current, entry.id, entry.removed))
+      .map((entry) => entry.id);
+    options.setStatus('正在更新计划…', 'busy');
+    try {
+      const updated = await api.editBaselineAnalysisPlan({ taskIntentId: current.ref, planEnvelopeDigest, removedSteps, disallowedAdaptations });
+      editBuffers.delete(editKey(current));
+      options.setStatus(`计划已更新为第 ${updated.planVersion?.ordinal ?? '?'} 版。`, 'success');
+      focusBar = true;
+      options.onRecorded(current.kind, current.bookId);
+    } catch (error) {
+      refusal = options.errorMessage(error, TASK_BAR_UPDATE_FAILED);
+      options.setStatus(refusal, 'error');
+    } finally {
+      endWork(asked);
+    }
   }
 
   /** Every bar action waits while one is under way; the bar is painted again when it ends. */
