@@ -61,7 +61,7 @@ jobs:
           --pr "${{ inputs.pr }}" --repo "$GITHUB_REPOSITORY" --output "$GITHUB_OUTPUT"
 
   windows:
-    name: J-01 + J-02 + J-08 + J-12 + J-15 + J-03 + J-04 + J-05 + J-06 + J-07 (Windows Server 2025 x64 CI)
+    name: J-01 + J-02 + J-08 + J-12 + J-15 + J-03 + J-04 + J-05 + J-06 + J-07 + J-09 (Windows Server 2025 x64 CI)
     needs: prepare
     runs-on: windows-2025
     timeout-minutes: 60
@@ -137,7 +137,7 @@ jobs:
           retention-days: 7
 
   macos:
-    name: J-01 + J-02 + J-08 + J-12 + J-15 + J-03 + J-04 + J-05 + J-06 + J-07 (macOS 15 arm64)
+    name: J-01 + J-02 + J-08 + J-12 + J-15 + J-03 + J-04 + J-05 + J-06 + J-07 + J-09 (macOS 15 arm64)
     needs: prepare
     runs-on: macos-15
     timeout-minutes: 60

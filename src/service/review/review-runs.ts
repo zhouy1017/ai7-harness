@@ -60,6 +60,7 @@ import { deriveCoverageManifest } from '../analysis/coverage-manifest.js';
 import { EXECUTION_SLOT_BUSY, EXECUTION_SLOT_BUSY_REASON } from '../analysis/execution-error.js';
 import { graphemeCount, sliceGraphemes } from '../analysis/factual-review-contract.js';
 import type { EditorialMarkStore, ProducedEditorialMarkInput } from '../editorial-marks.js';
+import type { ReviewRunAttentionReading } from '../global-attention.js';
 import {
   BUILTIN_REVIEW_CATEGORY_CONFIGURATION,
   reviewCategoryBasisStatement,
@@ -2088,6 +2089,11 @@ export class ReviewRunStore {
 
   /** Everything a Run reads as: its categories' states, its findings with their derived status, its own state. */
   #runView(snapshot: RunSnapshot): RunView {
+    return { ...this.#runStateView(snapshot), findings: this.#findingViews(snapshot.reviewRunId, snapshot.manuscript.branchId, null) };
+  }
+
+  /** A Run's categories and its own state, from the records alone: everything `#runView` reads but the findings. */
+  #runStateView(snapshot: RunSnapshot): Omit<RunView, 'findings'> {
     const authorization = this.#authorizationOf(snapshot.reviewRunId);
     const driving = this.#driving.has(snapshot.reviewRunId);
     const categories = snapshot.categories.map((category): CategoryView => {
@@ -2127,10 +2133,73 @@ export class ReviewRunStore {
       authorization,
       driving,
       categories,
-      findings: this.#findingViews(snapshot.reviewRunId, snapshot.manuscript.branchId, null),
       state,
       canContinue,
     };
+  }
+
+  // ---- 待我处理 (Issue #424, plan slice S78) ------------------------------------------------------------
+
+  /**
+   * What 待我处理 reads of the Review Runs (V2-UX-ATTN-002 to 005): each Book's latest Run — a newer Run
+   * settles an older one's item — and the Runs that put a category on the manuscript since `since`, newest
+   * first, of which the reader keeps those that reached it in every category. Each is read as `#runView`
+   * reads it, without its findings: a Book's findings belong to its own 发现 (V2-UX-IA-013). A read: a
+   * category a stopped service left dispatched is reported as `#runView` derives it, never recorded.
+   * `progress` is the execution owner's reader, so a category executing now carries its progress.
+   */
+  attentionReadings(progress: ProgressReader, since: string, limit: number): {
+    latest: ReviewRunAttentionReading[];
+    completed: ReviewRunAttentionReading[];
+  } {
+    const read = (row: SqlRow): ReviewRunAttentionReading => {
+      const view = this.#runStateView(this.#snapshotOf(row));
+      const last = this.#db.prepare('SELECT max(recorded_at) last FROM review_run_category_events WHERE review_run_id = ?')
+        .get(view.snapshot.reviewRunId) as SqlRow;
+      return {
+        bookId: view.snapshot.bookId,
+        bookTitle: text(row.book_title),
+        reviewRunId: view.snapshot.reviewRunId,
+        ordinal: view.snapshot.ordinal,
+        createdAt: view.snapshot.createdAt,
+        authorizedAt: view.authorization?.authorizedAt ?? null,
+        state: view.state,
+        canContinue: view.canContinue,
+        categories: view.categories.map((category) => {
+          const dispatched = category.state === 'running' ? category.events.findLast((event) => event.runRecordId !== null)?.runRecordId ?? null : null;
+          return {
+            categoryId: category.category.categoryId,
+            label: category.category.entry.label,
+            state: category.state,
+            pending: category.pending,
+            detail: category.detail,
+            progress: dispatched === null ? null : progress(dispatched),
+          };
+        }),
+        lastEventAt: nullableText(last.last),
+      };
+    };
+    // A Run reached the manuscript in every category exactly when each of its categories has a
+    // `materialized` event; counted in SQL so neither list reads a Run it would drop.
+    const materialized = `(SELECT count(DISTINCT e.category_id) FROM review_run_category_events e
+                            WHERE e.review_run_id = r.review_run_id AND e.state = 'materialized')`;
+    const categories = `json_array_length(r.canonical_json, '$.categories')`;
+    const lastEvent = `(SELECT max(e.recorded_at) FROM review_run_category_events e WHERE e.review_run_id = r.review_run_id)`;
+    // Each Book's latest Run, approved and not yet on the manuscript in every category.
+    const latest = (this.#db.prepare(
+      `SELECT r.*, b.title book_title FROM review_runs r JOIN books b ON b.book_id = r.book_id
+       WHERE r.ordinal = (SELECT max(r2.ordinal) FROM review_runs r2 WHERE r2.book_id = r.book_id)
+         AND EXISTS (SELECT 1 FROM review_run_authorizations a WHERE a.review_run_id = r.review_run_id)
+         AND ${materialized} < ${categories}
+       ORDER BY r.created_at, r.review_run_id LIMIT ?`,
+    ).all(limit) as SqlRow[]).map(read);
+    // Every Run on the manuscript in every category whose last category finished within the window.
+    const completed = (this.#db.prepare(
+      `SELECT r.*, b.title book_title FROM review_runs r JOIN books b ON b.book_id = r.book_id
+       WHERE ${materialized} = ${categories} AND ${lastEvent} >= ?
+       ORDER BY ${lastEvent} DESC, r.review_run_id LIMIT ?`,
+    ).all(since, limit) as SqlRow[]).map(read).filter((reading) => reading.state === 'settled');
+    return { latest, completed };
   }
 
   /**

@@ -116,6 +116,11 @@ interface OwnedRendererWindow {
   importTargets: Map<string, ImportTargetBinding>;
   importDraftIds: Set<string>;
   recoveryAttentionIds: Set<string>;
+  /**
+   * The Recovery Attention States this window's last 待我处理 read showed it (Issue #424). Showing one claims
+   * nothing: opening it from there claims it for this window, and only while no other window holds it.
+   */
+  attentionOffers: Set<string>;
   importCommitIds: Set<string>;
   manuscriptCapabilities: Map<string, ManuscriptCapability>;
   editorResourceCapabilities: Map<string, EditorResourceCapability>;
@@ -167,6 +172,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j05-picker-path' ||
           key === '--j06-picker-path' ||
           key === '--j07-picker-path' ||
+          key === '--j09-picker-path' ||
           key === '--j01-import-control' ||
           key === '--j03-foreground-execution-control' ||
           key === '--j08-recovery-control' ||
@@ -199,8 +205,9 @@ function parseArguments(argv: string[]): LaunchArguments {
   const j05PickerPath = values.get('--j05-picker-path');
   const j06PickerPath = values.get('--j06-picker-path');
   const j07PickerPath = values.get('--j07-picker-path');
+  const j09PickerPath = values.get('--j09-picker-path');
   requireDesktop(
-    [j01PickerPath, j02PickerPath, j08PickerPath, j12PickerPath, j03PickerPath, j04PickerPath, j05PickerPath, j06PickerPath, j07PickerPath]
+    [j01PickerPath, j02PickerPath, j08PickerPath, j12PickerPath, j03PickerPath, j04PickerPath, j05PickerPath, j06PickerPath, j07PickerPath, j09PickerPath]
       .filter(Boolean).length <= 1,
   );
   // The picker-path launch controls carry whatever their Journey selects, in any recognised format
@@ -232,8 +239,12 @@ function parseArguments(argv: string[]): LaunchArguments {
   requireDesktop(
     j07PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-07' && isAbsolute(j07PickerPath)),
   );
+  requireDesktop(
+    j09PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-09' && isAbsolute(j09PickerPath)),
+  );
   const injectedPickerPath =
-    j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath ?? j04PickerPath ?? j05PickerPath ?? j06PickerPath ?? j07PickerPath;
+    j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath ?? j04PickerPath ?? j05PickerPath ?? j06PickerPath ??
+      j07PickerPath ?? j09PickerPath;
   const importControlValue = values.get('--j01-import-control');
   const importControl =
     importControlValue === 'before-commit' ||
@@ -275,8 +286,10 @@ function parseArguments(argv: string[]): LaunchArguments {
   requireDesktop(
     recoveryControlValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-08' && recoveryControl !== undefined),
   );
+  // The model adapter binds a Journey whose Runs execute: J-04's analysis, and J-09's 运行中 and 最近完成 (Issue #424).
   requireDesktop(
-    modelAdapterControlValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && modelAdapterControl !== undefined),
+    modelAdapterControlValue === undefined ||
+      ((process.env.AI7_E2E_JOURNEY === 'J-04' || process.env.AI7_E2E_JOURNEY === 'J-09') && modelAdapterControl !== undefined),
   );
   requireDesktop([importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length <= 1);
   requireDesktop(
@@ -1062,6 +1075,11 @@ function registerRendererHandlers(
       envelope(async () => {
         const owned = requireSender(event);
         requireAuthority();
+        // Opened from 待我处理 (Issue #424): the state it showed this window is claimed for it now, and only
+        // while no other window holds it — then the claim refuses, naming the window that does.
+        if (!owned.recoveryAttentionIds.has(input.attentionId) && owned.attentionOffers.has(input.attentionId)) {
+          claims.claimAttentions(owned, [input.attentionId]);
+        }
         claims.requireAttention(owned, input.attentionId);
         const routeGeneration = owned.routeGeneration;
         const routeRequestSequence = owned.routeRequestSequence;
@@ -2370,6 +2388,24 @@ function registerRendererHandlers(
         });
       }),
   );
+  // 待我处理 (Issue #424, plan slice S78): a read across every Book, in any window whatever it shows. It needs no
+  // Book route and takes none — unlike getStartup it claims nothing and leaves no workbench. It remembers only
+  // which Recovery Attention States it showed this window, so opening one from there can claim it while no
+  // other window holds it (getRecoveryComparison above).
+  ipcMain.handle(IPC_CHANNELS.inspectGlobalAttention, (event) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const result = await service.call('inspectGlobalAttention', {});
+      owned.attentionOffers.clear();
+      for (const group of result.groups) {
+        for (const item of group.items) {
+          if (item.target.kind === 'manuscript-recovery' && UUID_PATTERN.test(item.target.attentionId)) owned.attentionOffers.add(item.target.attentionId);
+        }
+      }
+      return result;
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.startSearch, (event, input: ServiceOperationMap['startSearch']['input']) =>
     envelope(async () => {
       const owned = requireSender(event);
@@ -2893,6 +2929,7 @@ export async function runApplication(): Promise<void> {
         importTargets: new Map(),
         importDraftIds: new Set(),
         recoveryAttentionIds: new Set(),
+        attentionOffers: new Set(),
         importCommitIds: new Set(),
         manuscriptCapabilities: new Map(),
         editorResourceCapabilities: new Map(),

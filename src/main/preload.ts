@@ -331,6 +331,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectDeliverables']['output']>(IPC_CHANNELS.inspectDeliverables),
   designatePublicationVersion: (input: Omit<ServiceOperationMap['designatePublicationVersion']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['designatePublicationVersion']['output']>(IPC_CHANNELS.designatePublicationVersion, input),
+  inspectGlobalAttention: () =>
+    invoke<ServiceOperationMap['inspectGlobalAttention']['output']>(IPC_CHANNELS.inspectGlobalAttention, {}),
   undoManuscript: (input: ServiceOperationMap['undoManuscript']['input']) =>
     invoke<ServiceOperationMap['undoManuscript']['output']>(IPC_CHANNELS.undoManuscript, input),
   redoManuscript: (input: ServiceOperationMap['redoManuscript']['input']) =>

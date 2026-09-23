@@ -75,7 +75,8 @@ function serviceEnvironment(
   if (importControl) selected.AI7_E2E_JOURNEY = 'J-01';
   if (foregroundExecutionControl) selected.AI7_E2E_JOURNEY = 'J-03';
   if (recoveryControl) selected.AI7_E2E_JOURNEY = 'J-08';
-  if (modelAdapterControl) selected.AI7_E2E_JOURNEY = 'J-04';
+  // The model adapter binds J-04's Runs and J-09's (Issue #424); main admitted it for exactly one of the two.
+  if (modelAdapterControl) selected.AI7_E2E_JOURNEY = process.env.AI7_E2E_JOURNEY === 'J-09' ? 'J-09' : 'J-04';
   const names =
     process.platform === 'win32'
       ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
@@ -96,7 +97,7 @@ function serviceEnvironment(
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 38 &&
+    value.protocolVersion === 39 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&

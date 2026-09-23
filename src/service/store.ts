@@ -7,6 +7,7 @@ import { J03_TASK_GOAL, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, TASK_PLAN_KINDS, 
 import type {
   InspectTaskPlanInput,
   TaskPlanProjection,
+  GlobalAttentionProjection,
   DeliverablesProjection,
   ProposalConflictDraftSaveProjection,
   ProposalConflictProjection,
@@ -141,8 +142,16 @@ import {
 import { initializeManuscriptEffectSchema, ManuscriptApplyStore } from './manuscript-apply.js';
 import { initializeReviewRunSchema, ReviewRunError, ReviewRunStore, type ReviewRunPreparationProgress } from './review/review-runs.js';
 import { initializePublicationVersionSchema, PublicationVersionError, PublicationVersionStore } from './publication-versions.js';
+import {
+  GLOBAL_ATTENTION_READ_LIMIT,
+  GlobalAttentionError,
+  composeGlobalAttention,
+  readImportAttention,
+  readRecoveryAttention,
+  recentWindowStart,
+} from './global-attention.js';
 import { baselineAnalysisPlan, fixedTaskPlan, reviewRunPlan, TaskPlanError, withConnectionReadiness } from './task-plan.js';
-import { initializeProposalConflictSchema, ProposalConflictError, ProposalConflictStore } from './proposal-conflicts.js';
+import { initializeProposalConflictSchema, ProposalConflictError, ProposalConflictStore, readConflictAttention } from './proposal-conflicts.js';
 import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
 import { reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './review/category-configuration.js';
 import { reviewCategoryKindDefinition } from './review/review-category-kind.js';
@@ -8401,6 +8410,46 @@ export class EditorialStore {
   /** 保留当前稿件, 暂不处理, or 保存为新提案版本 — none of which writes the manuscript. */
   resolveProposalConflict(input: ResolveProposalConflictInput): ProposalConflictResolutionProjection {
     return this.#conflictCall(() => this.#proposalConflicts.resolve(input));
+  }
+
+  // ---- 待我处理 · Global Attention (Issue #424, plan slice S78) -----------------------------------------
+
+  /**
+   * 待我处理 across every Book (editor-surfaces §8.1, V2-UX-ATTN-001 to 009): the uncertain imports, the
+   * pending abandonment cleanups and the Recovery Attention States read here, the unresolved Manuscript Conflicts
+   * from their owner, each Book's latest baseline
+   * analysis Task and its recent outcomes from the baseline ledger, and each Book's latest Review Run and
+   * the recent completed ones from the Review Run ledger, composed into the four groups by
+   * `global-attention.ts`. `progress` and `busy` are the one execution owner's, handed in by the service
+   * entry exactly as the analysis inspections take them. J-03's recorded Run, Effect Receipts, designations,
+   * imports that completed, the recovered-state review, ordinary unfinished drafts, credential state and a
+   * Book's own findings are not read at all.
+   *
+   * A read (V2-UX-ATTN-008): nothing is written, claimed or terminalized, and every list is bounded so the
+   * answer fits one frame.
+   */
+  inspectGlobalAttention(progress: ProgressReader, busy: boolean, now: Date = new Date()): GlobalAttentionProjection {
+    return this.#reviewCall(() => {
+      const since = recentWindowStart(now);
+      const limit = GLOBAL_ATTENTION_READ_LIMIT;
+      try {
+        const baseline = this.#baselineAnalysis.attentionReadings(progress, since, limit);
+        const review = this.#reviewRuns.attentionReadings(progress, since, limit);
+        return composeGlobalAttention({
+          imports: readImportAttention(this.#authority, limit),
+          recoveries: readRecoveryAttention(this.#authority, limit),
+          conflicts: readConflictAttention(this.#authority, limit),
+          analysisTasks: baseline.tasks,
+          analysisOutcomes: baseline.outcomes,
+          reviewRuns: review.latest,
+          reviewCompletions: review.completed,
+          busy,
+        }, now);
+      } catch (error) {
+        if (error instanceof GlobalAttentionError) throw new StoreError(error.code, error.message);
+        throw error;
+      }
+    });
   }
 
   undoManuscript(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection {

@@ -35,7 +35,11 @@ export async function importSample1Book(
 ): Promise<{ bookId: string; manuscriptId: string; branchId: string; revisionId: string }> {
   const staged = await store.stageSelectedManuscript(randomUUID(), sample1Path(codeRoot));
   expect(staged.source.sourceSha256).toBe(SAMPLE1_SHA256);
-  const target = { kind: 'new-book', choiceId: 'new-book', confirmedTitle: title } as const;
+  // A second import of the same file is offered as a new Book of a distinct intended work (the identity
+  // finding discloses the first); the first import is offered as a plain new Book.
+  const choice = staged.targetChoices.find((entry) => entry.kind === 'new-book');
+  expect(choice).toBeDefined();
+  const target = { kind: 'new-book', choiceId: choice!.id as 'new-book' | 'new-book-distinct-intended-work', confirmedTitle: title } as const;
   const pending = store.prepareNewBookReview(staged.draftId, staged.draftVersion, target, false);
   expect(pending.degradationDecision.state).toBe('required-unselected');
   const review = store.prepareNewBookReview(pending.draftId, pending.draftVersion, target, true);

@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 38 as const;
+export const SERVICE_PROTOCOL_VERSION = 39 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -29,9 +29,10 @@ export type J03ForegroundExecutionControl = 'interrupt-before-foreground-boundar
 export type J08RecoveryControl = 'interrupt-after-journal-ack';
 
 /**
- * The J-04-only launch control: the identity of a hand-written synthetic deterministic fixture under
- * `tests/fixtures/model/`. Admitted only with `AI7_E2E_JOURNEY=J-04`, mutually exclusive with every
- * other control, and the only way the `ai7-local-deterministic` route can be bound.
+ * The J-04 launch control: the identity of a hand-written synthetic deterministic fixture under
+ * `tests/fixtures/model/`. Admitted only with `AI7_E2E_JOURNEY=J-04`, or `J-09` whose 待我处理 needs Runs
+ * that execute (Issue #424), mutually exclusive with every other control, and the only way the
+ * `ai7-local-deterministic` route can be bound.
  */
 export type J04ModelAdapterControl = string;
 export const J04_MODEL_ADAPTER_CONTROL_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -113,6 +114,7 @@ export const IPC_CHANNELS = {
   saveMilestone: 'ai7:j02:save-milestone',
   inspectDeliverables: 'ai7:j07:inspect-deliverables',
   designatePublicationVersion: 'ai7:j07:designate-publication-version',
+  inspectGlobalAttention: 'ai7:j09:inspect-global-attention',
   undoManuscript: 'ai7:j02:undo-manuscript',
   redoManuscript: 'ai7:j02:redo-manuscript',
   openBookWorkbench: 'ai7:j12:open-book-workbench',
@@ -4540,6 +4542,151 @@ export interface PublicationDesignationProjection {
   deliverables: DeliverablesProjection;
 }
 
+// ---- 待我处理 · Global Attention (Issue #424, plan slice S78; editor-surfaces §8.1) ------------------------
+
+/**
+ * The four groups of 待我处理, in their one fixed order (V2-UX-ATTN-001): 异常与结果待确认 · 等待你的决定 ·
+ * 运行中与已暂停 · 最近完成. No fifth group exists (V2-UX-ATTN-009).
+ */
+export type GlobalAttentionGroupKey = 'exceptions' | 'decisions' | 'active' | 'recent';
+export const GLOBAL_ATTENTION_GROUP_KEYS: readonly GlobalAttentionGroupKey[] = ['exceptions', 'decisions', 'active', 'recent'];
+/** Only these two count toward the entry's number (V2-UX-ATTN-006); the other two stay visible without an alert. */
+export const GLOBAL_ATTENTION_COUNTED_GROUPS: readonly GlobalAttentionGroupKey[] = ['exceptions', 'decisions'];
+
+/** How far back 最近完成 reaches, and how many completions it lists at most. */
+export const GLOBAL_ATTENTION_RECENT_DAYS = 7;
+export const GLOBAL_ATTENTION_RECENT_LIMIT = 20;
+/** The most items any other group lists in one answer, so the whole view always fits one frame. */
+export const GLOBAL_ATTENTION_GROUP_LIMIT = 50;
+
+/**
+ * The exact state or named decision of one item (V2-UX-ATTN-007), each read from its own record:
+ * - an import commit whose outcome local evidence cannot prove, and an abandonment whose safe cleanup is
+ *   still pending;
+ * - a Recovery Attention State, pending or deferred (稍后处理);
+ * - a 修改建议 in conflict with the manuscript and not yet resolved — before 暂不处理 or after it (V2-UX-ATTN-002);
+ * - the Book's latest baseline analysis Task whose Run failed, was interrupted, was blocked before dispatch,
+ *   or was left admitted or executing with no Run in flight (`analysis-orphaned`);
+ * - the Book's latest Review Run that ended without reaching the manuscript in every category;
+ * - a prepared baseline Task whose plan has a pending Plan Revision that 重新确认计划 can settle;
+ * - the one Run in flight, and a Review Run a stopped service left to 继续审阅;
+ * - a completion of the last days: a baseline Task Outcome or a Review Run that reached the manuscript.
+ */
+export type GlobalAttentionStateKey =
+  | 'import-outcome-uncertain'
+  | 'import-cleanup-pending'
+  | 'recovery-pending'
+  | 'recovery-deferred'
+  | 'manuscript-conflict'
+  | 'manuscript-conflict-deferred'
+  | 'analysis-failed'
+  | 'analysis-interrupted'
+  | 'analysis-blocked'
+  | 'analysis-orphaned'
+  | 'review-failed'
+  | 'review-stopped'
+  | 'analysis-plan-revision'
+  | 'analysis-queued'
+  | 'analysis-running'
+  | 'review-running'
+  | 'review-continuable'
+  | 'analysis-completed'
+  | 'analysis-completed-with-gaps'
+  | 'review-completed';
+
+/**
+ * The closed map of safe next steps (V2-UX-ATTN-007): each is an action the item's own record offers, in
+ * words the product already uses there. An item whose record offers none of them is not listed at all.
+ */
+export type GlobalAttentionNextStep =
+  | 'view-run'
+  | 'view-review'
+  | 'reconfirm-plan'
+  | 'continue-review'
+  | 'return-to-recovery'
+  | 'retry-abandon-cleanup'
+  | 'await-local-check'
+  | 'resolve-conflict';
+export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
+  'view-run', 'view-review', 'reconfirm-plan', 'continue-review', 'return-to-recovery', 'retry-abandon-cleanup', 'await-local-check',
+  'resolve-conflict',
+];
+
+/**
+ * Where an item opens: its exact authoritative record, in the requesting window (V2-UX-ATTN-007, D-006).
+ * Opening grants nothing; every decision is still made at the record.
+ */
+export type GlobalAttentionTarget =
+  | { kind: 'import-recovery'; draftId: string }
+  | { kind: 'manuscript-recovery'; attentionId: string }
+  | { kind: 'manuscript-conflict'; bookId: string; manuscriptId: string; branchId: string; markId: string }
+  | { kind: 'analysis'; bookId: string; taskIntentId: string }
+  | { kind: 'analysis-plan'; bookId: string; taskIntentId: string }
+  | { kind: 'review'; bookId: string; reviewRunId: string };
+
+/** The Active Work Object of one item, in its record's own terms (V2-UX-ATTN-007). */
+export type GlobalAttentionObjectProjection =
+  | { kind: 'import'; sourceDisplayName: string; relationship: 'first-manuscript' | 'source-only' | 'reimport' | null }
+  | { kind: 'recovery'; branchName: string }
+  | { kind: 'manuscript-conflict'; conflictKind: ProposalConflictKind }
+  | { kind: 'analysis'; mode: BaselineAnalysisTaskMode }
+  | { kind: 'review'; ordinal: number };
+
+/** The record facts an item's reason is told from: identities, counts and states, never manuscript text. */
+export interface GlobalAttentionFactsProjection {
+  /** The Run in flight: its declared step and its Measured Run Progress (V2-UX-ATTN-004). */
+  progress: null | { stage: RunReportUsageStageId; unitsSettled: number; unitsTotal: number };
+  /**
+   * The Review Run's categories the reason names — the ones that did not reach the manuscript, the one under
+   * way, the first one left, or the ones completed — each with its state in 审阅's own words and, while the
+   * Run can be continued, the line 审阅 derives for it.
+   */
+  categories: ReadonlyArray<{ label: string; state: ReviewRunCategoryState; stateLabel: string; detail: string | null }>;
+  /** The ordinal of the Result Set Revision a completed analysis formed. */
+  revisionOrdinal: number | null;
+}
+
+/** One Attention Projection Item (V2-UX-ATTN-007): a pointer to its record, never an authority of its own. */
+export interface GlobalAttentionItemProjection {
+  /** Stable across reads: the record's kind and identity. */
+  itemId: string;
+  group: GlobalAttentionGroupKey;
+  state: GlobalAttentionStateKey;
+  /** The record stops other work until the editor acts on it; blocked items come first in their group. */
+  blocked: boolean;
+  /** When the state began — or, in 最近完成, when the work completed — as an exact instant. */
+  at: string;
+  /** The Book. An import names the new Book by its reviewed title with no identity yet, and `null` when none was reviewed. */
+  book: { bookId: string | null; title: string | null };
+  object: GlobalAttentionObjectProjection;
+  facts: GlobalAttentionFactsProjection;
+  nextStep: GlobalAttentionNextStep;
+  target: GlobalAttentionTarget;
+  /** Every exact identity (LAYER-001), one step below the item's words. */
+  technical: ReadonlyArray<{ key: string; label: string; value: string }>;
+}
+
+export interface GlobalAttentionGroupProjection {
+  key: GlobalAttentionGroupKey;
+  items: ReadonlyArray<GlobalAttentionItemProjection>;
+  /** How many items the group holds; more than `items` when the group is longer than one answer lists. */
+  total: number;
+}
+
+/**
+ * 待我处理 across every Book (editor-surfaces §8.1, V2-UX-ATTN-001 to 009, IA-007). A read: composing it
+ * terminalizes, claims and writes nothing (V2-UX-ATTN-008). An item resolves by itself when the record
+ * moves on — a newer Task of the same kind for its Book, a decision made, a completion aging out.
+ */
+export interface GlobalAttentionProjection {
+  /** Always the four groups, in the fixed order. */
+  groups: ReadonlyArray<GlobalAttentionGroupProjection>;
+  /** The Actionable Attention Count: the items of the first two groups, and no others (V2-UX-ATTN-006). */
+  actionableCount: number;
+  /** A Run is in flight now, or a Review Run is being driven: a reader follows it slowly until it ends. */
+  running: boolean;
+}
+
 export interface DurableHistoryProjection {
   action: 'undo' | 'redo';
   branchId: string;
@@ -5052,6 +5199,11 @@ export interface ServiceOperationMap {
    */
   inspectDeliverables: { input: InspectDeliverablesInput; output: DeliverablesProjection };
   designatePublicationVersion: { input: DesignatePublicationVersionInput; output: PublicationDesignationProjection };
+  /**
+   * 待我处理 (Issue #424, plan slice S78): every Book's items in the four groups. It takes no input and names
+   * no Book, because it reads across them; it is a read and records nothing.
+   */
+  inspectGlobalAttention: { input: Record<string, never>; output: GlobalAttentionProjection };
   undoManuscript: {
     input: { manuscriptId: string; branchId: string; expectedWorkingDigest: string };
     output: DurableHistoryProjection;
@@ -5242,6 +5394,8 @@ export interface RendererApi {
   inspectDeliverables(): Promise<DeliverablesProjection>;
   /** 设为发稿版本 over one exact milestone of that Book; an identical repeat of the current one is no change. */
   designatePublicationVersion(input: Omit<DesignatePublicationVersionInput, 'bookId'>): Promise<PublicationDesignationProjection>;
+  /** 待我处理 across every Book (Issue #424): a read in any window, whatever it shows; it holds and grants nothing. */
+  inspectGlobalAttention(): Promise<GlobalAttentionProjection>;
   undoManuscript(input: ServiceOperationMap['undoManuscript']['input']): Promise<DurableHistoryProjection>;
   redoManuscript(input: ServiceOperationMap['redoManuscript']['input']): Promise<DurableHistoryProjection>;
   openBookWorkbench(input: BookWorkbenchRoute): Promise<BookWorkbenchOpenProjection>;

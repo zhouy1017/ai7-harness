@@ -175,6 +175,11 @@ describe('decodeRequest accepts well-formed frames', () => {
     }
   });
 
+  it('accepts 待我处理, which reads across every Book and names none', () => {
+    const request = { id: randomUUID(), op: 'inspectGlobalAttention', input: {} };
+    expect(decodeRequest(frameOf(request))).toEqual(request);
+  });
+
   it('accepts the Task Drawer read for each of the three kinds, naming the Task or the current one', () => {
     const bookId = randomUUID();
     const inputs: ReadonlyArray<Record<string, unknown>> = [
@@ -582,6 +587,25 @@ describe('decodeRequest rejects malformed frames', () => {
     for (const { op, input } of refused) {
       expect(rejectionFor(frameOf({ id, op, input })).requestId).toBe(id);
     }
+  });
+
+  it('rejects a 待我处理 read that names a Book, a group, a filter or anything else', () => {
+    const id = randomUUID();
+    const refused: ReadonlyArray<unknown> = [
+      // It reads across every Book: a Book, a group or a filter would make it a different read.
+      { bookId: randomUUID() },
+      { group: 'exceptions' },
+      { since: '2026-09-01T00:00:00.000Z' },
+      { claim: true },
+      null,
+      [],
+      'all',
+    ];
+    for (const input of refused) {
+      expect(rejectionFor(frameOf({ id, op: 'inspectGlobalAttention', input })).requestId).toBe(id);
+    }
+    // The input is required, as for every operation.
+    expect(rejectionFor(frameOf({ id, op: 'inspectGlobalAttention' })).requestId).toBe(id);
   });
 
   it('rejects a foreground-boundary inspection whose Run identity or key set is wrong', () => {

@@ -750,6 +750,30 @@ async function main() {
     await returnToManuscript(renderer, secondId, 'deferred-look');
     cancellation.throwIfRequested();
 
+    at('attention-conflict-row');
+    // 待我处理 (Issue #424; V2-UX-ATTN-002): the conflict put aside is 异常与结果待确认's — blocking, from the moment 暂不处理
+    // was recorded — and its 解决冲突… opens 稿件冲突 of exactly that suggestion.
+    await assertRenderer(renderer, `(() => { const entry = document.querySelector('#global-attention-entry'); if (!(entry instanceof HTMLButtonElement) || entry.disabled) return false; entry.click(); return true; })()`, 'attention-entry');
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"] .global-attention-host')?.dataset.attentionCount !== undefined && document.querySelectorAll('[data-screen="global-attention"] section.global-attention-group').length === 4`, 'attention-painted');
+    const conflictRow = await renderer.evaluate(`(() => {
+      const item = document.querySelector('[data-screen="global-attention"] li.global-attention-item[data-attention-item=${JSON.stringify(`conflict:${secondId}`)}]');
+      if (!(item instanceof HTMLElement)) return null;
+      return {
+        group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null, state: item.dataset.attentionState, blocked: item.dataset.attentionBlocked,
+        target: item.dataset.attentionTarget, pill: item.querySelector('.global-attention-pill')?.textContent ?? null,
+        object: item.querySelector('button.global-attention-open')?.textContent ?? null, reason: item.querySelector('.global-attention-reason')?.textContent ?? null,
+        next: item.querySelector('.global-attention-next')?.textContent ?? null,
+      };
+    })()`);
+    requireJourney(conflictRow?.group === 'exceptions' && conflictRow.state === 'manuscript-conflict-deferred' && conflictRow.blocked === 'true' &&
+      conflictRow.target === 'manuscript-conflict' && conflictRow.pill === '需要解决冲突 · 暂不处理' && conflictRow.object === '修改建议 · 稿件冲突' &&
+      conflictRow.reason === '建议所依据的原文已经改过；在解决之前不能接受或应用这条建议。已记下暂不处理，这处冲突仍未解决。' &&
+      conflictRow.next === '安全的下一步：解决冲突…', 'attention-conflict-row', conflictRow);
+    await assertRenderer(renderer, `(() => { const open = document.querySelector('[data-screen="global-attention"] button.global-attention-open[data-attention-open=${JSON.stringify(`conflict:${secondId}`)}]'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'attention-conflict-open');
+    await waitFor(renderer, `window.__j06.conflict()?.dataset.conflictMarkId === ${JSON.stringify(secondId)} && window.__j06.conflict().dataset.conflictState === 'deferred' && window.__j06.units().length > 0`, 'attention-conflict-workspace');
+    await returnToManuscript(renderer, secondId, 'attention-conflict-return');
+    cancellation.throwIfRequested();
+
     at('reversal');
     // The words an Apply wrote are edited afterwards: reversing it is blocked, and 解决冲突… compares them with the
     // words the Apply replaced. A new version there is a Correction Proposal that 接受并应用 writes.
