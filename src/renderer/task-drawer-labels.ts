@@ -267,6 +267,16 @@ export const TASK_BAR_WAITING_NOTE = '已记录这次授权。联网、并确认
 export const TASK_BAR_PAUSE = '暂停';
 export const TASK_BAR_CANCEL_RUN = '取消任务';
 export const TASK_BAR_REDO = '改计划重做';
+/**
+ * 改计划重做 on a stopped Run (Issue #422, S76c; AUTH-010): its summary says, before anything is recorded, what stops,
+ * what is kept and what the new Task does; its confirmation cancels the Run, and the new Task is prepared once it has.
+ */
+export const TASK_BAR_REDO_HEADING = '改计划重做摘要';
+export const TASK_BAR_REDO_CONFIRM = '确认改计划重做';
+export const TASK_BAR_REDO_KEEP = '先不重做';
+/** While the Run stops for the redo, the bar says what comes next. */
+export const TASK_BAR_REDOING_NOTE = '已记下改计划重做：这次运行正在取消，取消完成后准备新任务';
+export const TASK_BAR_REDO_FAILED = '无法改计划重做。';
 /** CTRL-004: 取消任务 opens this summary inline, and only its confirmation records anything. */
 export const TASK_BAR_CANCEL_IMPACT_HEADING = '取消影响摘要';
 export const TASK_BAR_CANCEL_CONFIRM = '确认取消任务';
@@ -462,7 +472,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
           actions: [
             { name: 'resume', label: TASK_BAR_RESUME, tone: 'primary', disabledReason: control.resume.reason },
             { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
-            { name: 'redo', label: TASK_BAR_REDO, tone: 'quiet', disabledReason: control.redo.reason },
+            { name: 'redo', label: TASK_BAR_REDO, tone: control.redo.reason === null ? 'secondary' : 'quiet', disabledReason: control.redo.reason },
             runLink,
           ],
         };
@@ -487,7 +497,8 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
       statement: null,
       note: null,
       status: plan.state.key === 'recorded' ? TASK_BAR_RECORDED : plan.state.key === 'cancelled' ? TASK_BAR_CANCELLED : plan.state.label,
-      actions: [runLink],
+      // 改计划重做 (Issue #422, S76c): a Run the editor cancelled after it began can be redone as a new Task.
+      actions: plan.redo === null ? [runLink] : [{ name: 'redo', label: TASK_BAR_REDO, tone: 'secondary', disabledReason: null }, runLink],
     };
   }
   if (readiness === 'offline') {

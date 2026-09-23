@@ -3185,6 +3185,20 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
   renderAnalysisUpdateControls(records, projection, host, bookTitle);
   renderAnalysisHistory(records, projection, host, bookTitle);
 
+  // A first analysis whose Run ended before it kept anything leaves no revision to update: it is started again
+  // from here, below what that Run recorded (Issue #422, S76c).
+  if (projection.state !== 'available' && projection.actions.canPrepare && projection.history === null) {
+    const restart = element('section', 'form-row analysis-form analysis-restart');
+    const restartActions = element('div', 'button-row analysis-actions');
+    const restartCancel = analysisCancelButton();
+    const restartStart = button('开始基线稿件分析', 'primary', () =>
+      startAnalysisPreparation(host, bookTitle, { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false }, { start: restartStart, cancel: restartCancel, others: [] }));
+    restartStart.dataset['analysisAction'] = 'prepare';
+    restartActions.append(restartStart, restartCancel);
+    restart.append(element('p', 'field-note', '上一次分析没有读完任何阅读范围，没有形成结果集修订版；可以重新开始。开始后先为任务保存修订版并整理阅读范围，计划在右侧的任务计划里打开。'), restartActions);
+    records.append(restart);
+  }
+
   // §10: 明确不会发生 reads 不会做 in the editor's words, and the engineer's statements — every one of them,
   // unabridged — are one step away in 查看技术详情.
   const notDo = element('ul', 'analysis-list analysis-not-do');

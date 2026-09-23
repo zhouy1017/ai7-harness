@@ -12,10 +12,12 @@ import type {
   TaskPlanDefaultRuleProjection,
   TaskPlanDriftEntryProjection,
   TaskPlanProjection,
+  TaskPlanRedoProjection,
   TaskPlanRunControlProjection,
   TaskPlanStartProjection,
   TaskPlanStepProjection,
 } from '../shared/protocol.js';
+import { BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_TASK_GOAL } from '../shared/protocol.js';
 import { namedNonEffects } from './analysis/baseline-analysis-store.js';
 import type { ManifestBlockInput } from './analysis/coverage-manifest.js';
 import { PLAN_EDITABLE_ADAPTATIONS, PLAN_EDIT_ADAPTATION_LABELS, PLAN_EDIT_STEP_LABELS } from './analysis/plan-edits.js';
@@ -438,6 +440,7 @@ export function fixedTaskPlan(input: {
       : { readiness: 'record-only', needsModelConnection: false, planEnvelopeDigest: envelope.digest, categoryDigests: [], reconfirm: null },
     defaultRule: noDefaultRule(FIXED_TASK_NO_RULE),
     runControl: null,
+    redo: null,
   };
 }
 
@@ -560,7 +563,7 @@ export function baselineAnalysisPlan(input: {
     state: baselineState(projection),
     planVersion: version.ordinal,
     goal: {
-      sentence: BASELINE_GOAL_SENTENCES[intent.mode] ?? intent.modeLabel,
+      sentence: intent.redoOf === null ? BASELINE_GOAL_SENTENCES[intent.mode] ?? intent.modeLabel : redoGoalSentence(counts),
       chips: { book: bookTitle, position, selectedGraphemes: reading.graphemes, taskInputRevision: checkpoint.revisionLabel, procedure: '基线分析' },
       savedForEdits: checkpoint.createdForDirtyJournal,
     },
@@ -636,6 +639,8 @@ export function baselineAnalysisPlan(input: {
     technical: [
       { key: 'task-intent', label: '任务意图', value: intent.taskIntentId },
       { key: 'mode', label: '更新方式', value: `${intent.modeLabel} · ${intent.mode}` },
+      // CONT-013: a redo's link to the Run it redoes stays visible.
+      ...(intent.redoOf === null ? [] : [{ key: 'redo-of', label: '改计划重做自', value: `运行 ${intent.redoOf.runRecordId} · 任务意图 ${intent.redoOf.taskIntentId}` }]),
       { key: 'goal', label: '固定任务目标', value: intent.goal },
       { key: 'expected-outcome', label: '预期结果类别', value: intent.expectedOutcome },
       { key: 'task-input-revision', label: '任务输入修订版', value: `${checkpoint.revisionLabel} · ${checkpoint.revisionId} · ${checkpoint.revisionDigest}` },
@@ -680,6 +685,7 @@ export function baselineAnalysisPlan(input: {
     start: baselineStart(projection, envelope.digest),
     defaultRule: input.defaultRule ?? noDefaultRule(BASELINE_NO_RULE),
     runControl: baselineRunControl(projection, input.stopped),
+    redo: baselineRedo(projection, input.stopped),
   };
 }
 
@@ -687,8 +693,11 @@ export function baselineAnalysisPlan(input: {
 
 /** 暂停 is offered while a Run executes or waits its turn in the slot (CTRL-001, CTRL-008); otherwise it says why not. */
 export const RUN_CONTROL_PAUSE_REASON = '这项任务现在没有在运行，不能暂停；可以取消它';
-/** 改计划重做 redoes the work under a changed plan, which needs S73's plan editing; until then it says so. */
-export const RUN_CONTROL_REDO_REASON = '改计划重做随计划编辑提供';
+/**
+ * 改计划重做 is offered once the Run has stopped (editor-surfaces §6: 暂停后出现 续行 与 改计划重做; Issue #422, S76c); a
+ * Run still under way says to pause it first.
+ */
+export const RUN_CONTROL_REDO_REASON = '先暂停，再改计划重做';
 /** Once the editor confirmed 取消任务 nothing more is offered: the Run is stopping. */
 export const RUN_CONTROL_CANCELLING_REASON = '已在取消：正在进行的这一步完成后停止';
 /** While the Run pauses, 取消任务 waits for it to have stopped. */
@@ -809,11 +818,60 @@ function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: Ba
     // CTRL-001 and CTRL-008: a Run executing its units, or admitted and waiting its turn, pauses in one click.
     pause: { reason: (run.state === 'executing' || run.state === 'admitted') && held ? null : RUN_CONTROL_PAUSE_REASON },
     resume: continuation === null ? null : { reason: stopped!.blockers.length === 0 ? null : stopped!.blockers.join('') },
-    redo: { reason: RUN_CONTROL_REDO_REASON },
+    redo: { reason: continuation === null ? RUN_CONTROL_REDO_REASON : null },
     activity: run.progress,
     executingSince: run.transitions.find((transition) => transition.state === 'executing')?.recordedAt ?? null,
     continuation,
     update,
+  };
+}
+
+/**
+ * 改计划重做's own sentence for the Task it prepared (Issue #422, S76c): how many ranges already read it carries — what
+ * the redone Run read, and on an update what it carried itself — and how many it reads; or, carrying none, that it
+ * starts from the beginning.
+ */
+export function redoGoalSentence(counts: AnalysisReusePlanCounts | null): string {
+  return counts === null || counts.reused === 0
+    ? '改计划重做：上一次运行没有读完任何阅读范围，这次从头读'
+    : `改计划重做：沿用已读完的 ${counts.reused} 个阅读范围，接着读其余 ${counts.recomputed} 个`;
+}
+
+/**
+ * 改计划重做 (Issue #422, plan slice S76c; V2-UX-AUTH-010, CONT-013), while it can be made: on a stopped Run — which it
+ * cancels first, so its summary says what stops, what is kept and what comes next — and on a Run the editor cancelled
+ * after it began, which it redoes at once. What the Run kept, it forms — once cancelled — into the partial revision
+ * the new Task carries, read again wherever it is not closed (同步到当前稿件); a Run that kept nothing is redone as
+ * the Task it was, the same way over the same range, or the first baseline again.
+ */
+function baselineRedo(projection: BaselineAnalysisProjection, stopped?: BaselineStoppedRunFacts): TaskPlanRedoProjection | null {
+  const run = projection.run;
+  if (run === null) return null;
+  const cancelledAfterStart = run.state === 'cancelled' && run.transitions.some((transition) => transition.state === 'executing');
+  const stoppedRun = (run.state === 'paused' || run.state === 'resumable') && stopped !== undefined;
+  if (!cancelledAfterStart && !stoppedRun) return null;
+  const carries = stoppedRun ? (stopped!.unitsSettled ?? 0) > 0 : projection.resultSetRevision?.provenance.runRecordId === run.runRecordId;
+  const update = carries
+    ? { mode: 'sync-current' as const, selectedRange: null }
+    : projection.update === null ? null : { mode: projection.update.mode, selectedRange: projection.update.selectedRange };
+  const prepare = { goal: update === null ? BASELINE_ANALYSIS_TASK_GOAL : BASELINE_ANALYSIS_MODE_GOALS[update.mode], update, redoOf: run.runRecordId };
+  if (!stoppedRun) return { summary: [], prepare };
+  const kept = stopped!.unitsSettled ?? 0;
+  const rest = stopped!.unitsTotal - kept;
+  return {
+    summary: [
+      stopped!.unitsSettled === null
+        ? '这项任务会在这里停下并取消；它已保存的阅读进度无法核对，不会形成结果集修订版。'
+        : kept === 0
+          ? '这项任务会在这里停下并取消；它还没有读完任何阅读范围，不会形成结果集修订版。'
+          : `这项任务会在这里停下并取消；已读完的 ${kept} 个阅读范围保留在一份新的结果集修订版里，没读到的记为未尝试。`,
+      kept === 0
+        ? '然后准备一项新任务，从头读；开始之前可以先改计划。'
+        : `然后准备一项新任务：沿用这 ${kept} 个阅读范围的结果，接着读其余 ${rest} 个；开始之前可以先改计划。`,
+      CANCELLATION_NO_EFFECTS,
+      '新任务由你开始，不会自己运行。',
+    ],
+    prepare,
   };
 }
 
@@ -1031,5 +1089,6 @@ export function reviewRunPlan(input: {
     start,
     defaultRule: noDefaultRule(REVIEW_RUN_NO_RULE),
     runControl: null,
+    redo: null,
   };
 }
