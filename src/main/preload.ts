@@ -231,6 +231,14 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['cancelWaitingBaselineAnalysis']['output']>(IPC_CHANNELS.cancelWaitingBaselineAnalysis, input),
   runReconnectPreflight: () =>
     invoke<ServiceOperationMap['runReconnectPreflight']['output']>(IPC_CHANNELS.runReconnectPreflight),
+  quickStartBaselineAnalysis: (input: Omit<ServiceOperationMap['quickStartBaselineAnalysis']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['quickStartBaselineAnalysis']['output']>(IPC_CHANNELS.quickStartBaselineAnalysis, input),
+  setDefaultExecutionRule: (input: Omit<ServiceOperationMap['setDefaultExecutionRule']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['setDefaultExecutionRule']['output']>(IPC_CHANNELS.setDefaultExecutionRule, input),
+  inspectDefaultExecutionRules: () =>
+    invoke<ServiceOperationMap['inspectDefaultExecutionRules']['output']>(IPC_CHANNELS.inspectDefaultExecutionRules),
+  deactivateDefaultExecutionRule: (input: ServiceOperationMap['deactivateDefaultExecutionRule']['input']) =>
+    invoke<ServiceOperationMap['deactivateDefaultExecutionRule']['output']>(IPC_CHANNELS.deactivateDefaultExecutionRule, input),
   inspectReviewWorkspace: (input?: Omit<ServiceOperationMap['inspectReviewWorkspace']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['inspectReviewWorkspace']['output']>(IPC_CHANNELS.inspectReviewWorkspace, input ?? { reviewRunId: null }),
   prepareReviewRun: (input: Omit<ServiceOperationMap['prepareReviewRun']['input'], 'bookId'>) =>

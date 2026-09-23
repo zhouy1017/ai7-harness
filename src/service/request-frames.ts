@@ -199,6 +199,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     // 待我处理 (Issue #424) reads across every Book, so it names none.
     case 'inspectGlobalAttention':
     case 'runReconnectPreflight':
+    case 'inspectDefaultExecutionRules':
     case 'shutdown': {
       requireInput(value.input, [], tentativeId);
       break;
@@ -426,13 +427,29 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'authorizeTaskAuthorization':
     case 'authorizeBaselineAnalysis':
-    case 'startBaselineAnalysisWhenOnline': {
+    case 'startBaselineAnalysisWhenOnline':
+    case 'setDefaultExecutionRule': {
       const input = requireInput(value.input, ['bookId', 'taskIntentId', 'planEnvelopeDigest'], tentativeId);
       if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId) ||
           !isBoundedString(input.taskIntentId, 36) || !UUID_PATTERN.test(input.taskIntentId) ||
           !isBoundedString(input.planEnvelopeDigest, 64) || !HEX_DIGEST_PATTERN.test(input.planEnvelopeDigest)) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    // 快速开始 (Issue #421): the Task just prepared, its exact plan, and the rule version the editor started under.
+    case 'quickStartBaselineAnalysis': {
+      const input = requireInput(value.input, ['bookId', 'taskIntentId', 'planEnvelopeDigest', 'ruleVersionId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.taskIntentId) || !validUuid(input.ruleVersionId) ||
+          !isBoundedString(input.planEnvelopeDigest, 64) || !HEX_DIGEST_PATTERN.test(input.planEnvelopeDigest)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // 停用 (Issue #421): a rule names itself; which Book it belongs to is the store's to know.
+    case 'deactivateDefaultExecutionRule': {
+      const input = requireInput(value.input, ['ruleId'], tentativeId);
+      if (!validUuid(input.ruleId)) throw new ProtocolError(tentativeId);
       break;
     }
     // 取消 while a Run waits (Issue #502): the Task Intent names it, within the route's Book.

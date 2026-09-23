@@ -119,6 +119,7 @@ describe('route-aware readiness of the authorization bar (S74a A3; AUTH-005, MOD
       drift: null,
       technical: [{ key: 'plan-envelope', label: '计划权限边界', value: 'e'.repeat(64) }],
       start: { readiness: 'ready', needsModelConnection: true, planEnvelopeDigest: 'e'.repeat(64), categoryDigests: [], reconfirm: null, ...start },
+      defaultRule: { canSet: false, reason: '这份计划不能设为快速开始默认。', current: null, binds: [], startedBy: null },
     };
   }
 

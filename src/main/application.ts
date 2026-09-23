@@ -2290,6 +2290,73 @@ function registerRendererHandlers(
         });
       }),
   );
+  // 快速开始 and `设为快速开始默认…` (Issue #421) are the baseline Task's own, exactly as its immediate start is: the
+  // renderer never names a Book, the service is asked within the route's, and the answer must be that Book's.
+  ipcMain.handle(
+    IPC_CHANNELS.quickStartBaselineAnalysis,
+    (event, input: Omit<ServiceOperationMap['quickStartBaselineAnalysis']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('quickStartBaselineAnalysis', {
+            taskIntentId: input.taskIntentId,
+            planEnvelopeDigest: input.planEnvelopeDigest,
+            ruleVersionId: input.ruleVersionId,
+            bookId: route.bookId,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if (result.projection.bookId !== route.bookId) {
+            throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '快速开始的结果不属于当前图书工作台。');
+          }
+          return result;
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.setDefaultExecutionRule,
+    (event, input: Omit<ServiceOperationMap['setDefaultExecutionRule']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('setDefaultExecutionRule', {
+            taskIntentId: input.taskIntentId,
+            planEnvelopeDigest: input.planEnvelopeDigest,
+            bookId: route.bookId,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if (result.bookId !== route.bookId) {
+            throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '设定的默认执行规则不属于当前图书工作台。');
+          }
+          return result;
+        });
+      }),
+  );
+  // 知识库 › 工序与规则 names no Book: it lists every Book's rules, and 停用 names the rule itself. Turning one off is
+  // serialized with every other effect of this window's authority.
+  ipcMain.handle(IPC_CHANNELS.inspectDefaultExecutionRules, (event) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('inspectDefaultExecutionRules', {});
+    }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.deactivateDefaultExecutionRule,
+    (event, input: ServiceOperationMap['deactivateDefaultExecutionRule']['input']) =>
+      envelope(async () => {
+        requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          return service.call('deactivateDefaultExecutionRule', { ruleId: input.ruleId });
+        });
+      }),
+  );
   // 审阅 (Issue #417, plan slice S69) is a Book destination: the renderer never names a Book, the service
   // is asked within the route's, and every answer must be that Book's — and, where the renderer named a
   // Review Run, open exactly that Run. Reads are held to the route's read epoch; writes are serialized
