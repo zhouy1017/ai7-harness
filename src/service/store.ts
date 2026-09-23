@@ -179,6 +179,7 @@ import {
   withConnectionReadiness,
   withConnectivityReadiness,
   withResumeBlockers,
+  RESUME_BLOCKED_BINDING,
   withWaitingReason,
   type WaitingFor,
   RESUME_BLOCKED_CONNECTION,
@@ -3714,7 +3715,11 @@ export class EditorialStore {
    * The plan and the kind of route it names: the baseline Task's frozen execution route, a Review Run's live route
    * when it sends to a model service, and none for J-03's fixed task, which never dispatches (ADR 0055).
    */
-  #taskPlanWithRoute(input: InspectTaskPlanInput, progress?: ProgressReader): { plan: TaskPlanProjection; routeKind: string | null } {
+  #taskPlanWithRoute(
+    input: InspectTaskPlanInput,
+    progress?: ProgressReader,
+    carriesStoppedRun: (runRecordId: string) => boolean = () => true,
+  ): { plan: TaskPlanProjection; routeKind: string | null } {
     this.#assertAvailable();
     requireStore(typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) && TASK_PLAN_KINDS.includes(input.kind) &&
       (input.ref === null || (typeof input.ref === 'string' && UUID_PATTERN.test(input.ref))), 'TASK_PLAN_INVALID', '任务计划请求无效。');
@@ -3739,7 +3744,7 @@ export class EditorialStore {
       current(projection.taskIntent.taskIntentId);
       const blocks = this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
       const defaultRule = this.#baselineDefaultRule(projection);
-      const stopped = this.#baselineStoppedRun(projection);
+      const stopped = this.#baselineStoppedRun(projection, carriesStoppedRun);
       const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, defaultRule, ...(stopped === null ? {} : { stopped }) }));
       return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
@@ -3770,7 +3775,7 @@ export class EditorialStore {
     connectivity: TaskPlanConnectivity = ALWAYS_ONLINE,
     progress?: ProgressReader,
   ): Promise<TaskPlanProjection> {
-    const { plan: frozen, routeKind } = this.#taskPlanWithRoute(input, progress);
+    const { plan: frozen, routeKind } = this.#taskPlanWithRoute(input, progress, (runRecordId) => connectivity.carriesStoppedRun?.(runRecordId) ?? true);
     let plan = frozen;
     if (plan.start.needsModelConnection && plan.start.readiness === 'ready') plan = withConnectionReadiness(plan, await credentialReadiness());
     // Connectivity (Issue #502): only a plan whose route reaches its model over the network can be offline,
@@ -3906,15 +3911,17 @@ export class EditorialStore {
 
   /**
    * What the drawer reads of the Task's Run when nothing executes it — paused, left 可续行, or left under way when AI7
-   * closed: what it kept, and, for a stopped one, why 续行 cannot go on as authorized, if not.
+   * closed: what it kept; for a stopped one, why 续行 cannot go on as authorized, if not; and — read by the execution
+   * owner — whether this launch can still carry it under the binding it persisted.
    */
-  #baselineStoppedRun(projection: BaselineAnalysisProjection): BaselineStoppedRunFacts | null {
+  #baselineStoppedRun(projection: BaselineAnalysisProjection, carriesStoppedRun: (runRecordId: string) => boolean): BaselineStoppedRunFacts | null {
     const run = projection.run;
     if (run === null || run.progress !== null) return null;
     const stopped = run.state === 'paused' || run.state === 'resumable';
     const unheld = run.state === 'admitted' || run.state === 'executing' || run.state === 'cancelling' || run.state === 'pausing';
     if (!stopped && !unheld) return null;
     const unitsTotal = projection.update === null ? (projection.coverageManifest?.units.length ?? 0) : projection.update.reusePlan?.counts.recomputed ?? 0;
+    const bindingHolds = carriesStoppedRun(run.runRecordId);
     return this.#analysisCall(() => {
       let unitsSettled: number | null;
       try {
@@ -3923,7 +3930,8 @@ export class EditorialStore {
         // Its kept progress no longer reads back: 续行 names that, and a cancellation forms no revision from it.
         unitsSettled = null;
       }
-      return { unitsSettled, unitsTotal, blockers: stopped ? this.#baselineAnalysis.continuationBlockers(run.runRecordId) : [] };
+      const blockers = stopped ? [...this.#baselineAnalysis.continuationBlockers(run.runRecordId), ...(bindingHolds ? [] : [RESUME_BLOCKED_BINDING])] : [];
+      return { unitsSettled, unitsTotal, blockers, bindingHolds };
     });
   }
 
