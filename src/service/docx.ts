@@ -229,6 +229,16 @@ interface DocumentParseResult {
   importedMarks: ParsedImportedMark[];
 }
 
+/**
+ * The parts besides the body that can hold comments and tracked changes — the notes, the headers and the footers.
+ * Revision 3 converts none of them: what they hold stays with the file, and the parser only notices that it is there.
+ */
+const SIDE_PART = /^word\/(?:footnotes|endnotes|header\d*|footer\d*)\.xml$/;
+/** A comment's or a revision's opening tag, under whatever namespace prefix the part declares. */
+const SIDE_MARKUP = /<[A-Za-z_][\w.-]*:(?:ins|del|moveFrom|moveTo|cellIns|cellDel|commentRangeStart|commentReference)[\s/>]/;
+/** Enough of a chunk's end to hold the start of a tag another chunk finishes. */
+const SIDE_MARKUP_TAIL = 96;
+
 /** The parts that carry a file's comments, read whole beside `word/document.xml` (Issue #411). */
 const COMMENTS_PART = 'word/comments.xml';
 const COMMENTS_EXTENDED_PART = 'word/commentsExtended.xml';
@@ -893,6 +903,8 @@ async function readStreamingArchive(
   entryNames: string[];
   metadata: Map<string, Uint8Array>;
   document: DocumentParseResult;
+  /** Whether a note, header or footer holds a comment or a tracked change, which stays with the file. */
+  sideMarkup: boolean;
 }> {
   // The parts read whole, each under its own bound: the package metadata, and the comments (Issue #411).
   const keptLimits = new Map<string, number>([
@@ -909,6 +921,7 @@ async function readStreamingArchive(
   let archiveBytes = 0;
   let expandedBytes = 0;
   let documentSeen = false;
+  let sideMarkup = false;
   let callbackFailure: Error | undefined;
 
   const unzip = new Unzip((file) => {
@@ -945,11 +958,17 @@ async function readStreamingArchive(
       }
       const keptLimit = keptLimits.get(name);
       if (keptLimit === undefined) {
-        file.ondata = (error, chunk) => {
+        const side = SIDE_PART.test(name) ? { decoder: new TextDecoder('utf-8'), tail: '' } : undefined;
+        file.ondata = (error, chunk, final) => {
           try {
             if (error) throw error;
             expandedBytes += chunk.byteLength;
             requireDocx(expandedBytes <= MAX_EXPANDED_BYTES, 'expanded DOCX is too large');
+            if (side !== undefined && !sideMarkup) {
+              const window = side.tail + side.decoder.decode(chunk, { stream: !final });
+              if (SIDE_MARKUP.test(window)) sideMarkup = true;
+              side.tail = window.slice(-SIDE_MARKUP_TAIL);
+            }
           } catch (failure) {
             callbackFailure = failure instanceof Error ? failure : new Error(String(failure));
           }
@@ -1014,6 +1033,7 @@ async function readStreamingArchive(
       ...(commentsPart === undefined ? {} : { comments: decodeMetadataXml(commentsPart) }),
       ...(commentsExtendedPart === undefined ? {} : { commentsExtended: decodeMetadataXml(commentsExtendedPart) }),
     }),
+    sideMarkup,
   };
 }
 
@@ -1482,7 +1502,10 @@ export async function parseDocx(
     ? { value: metadataTitle, sourceLabel: 'DOCX 标题元数据' as const }
     : { value: fallbackTitle, sourceLabel: '文件名' as const };
   requireDocx(titleSuggestion.value.length > 0, 'no usable title suggestion');
-  const fidelity = fidelityReport(archive.document.signals, archive.entryNames);
+  // A note, header or footer holding a comment or a tracked change: nothing of it becomes a mark, and the row says it
+  // stays with the file rather than that none was found.
+  const signals = archive.sideMarkup ? { ...archive.document.signals, commentsRevisionsPresent: true } : archive.document.signals;
+  const fidelity = fidelityReport(signals, archive.entryNames);
   requireDocx(deriveImportFidelityPlan(fidelity, archive.sourceDigest, archive.archiveBytes) !== undefined, 'document fidelity report is malformed');
   return {
     parserIdentity: DOCX_PARSER_IDENTITY,
