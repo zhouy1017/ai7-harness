@@ -452,8 +452,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validUuid(input.ruleId)) throw new ProtocolError(tentativeId);
       break;
     }
-    // 取消 while a Run waits (Issue #502): the Task Intent names it, within the route's Book.
-    case 'cancelWaitingBaselineAnalysis': {
+    // 取消 while a Run waits (Issue #502), and 取消任务 once it started (Issue #422): the Task Intent names it, within
+    // the route's Book.
+    case 'cancelWaitingBaselineAnalysis':
+    case 'cancelBaselineAnalysisRun': {
       const input = requireInput(value.input, ['bookId', 'taskIntentId'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.taskIntentId)) throw new ProtocolError(tentativeId);
       break;
