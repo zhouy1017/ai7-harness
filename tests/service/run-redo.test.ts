@@ -4,10 +4,11 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { NO_PLAN_EDITS } from '../../src/service/analysis/plan-edits.js';
+import { ALWAYS_ONLINE } from '../../src/service/connectivity.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { RUN_CONTROL_REDO_REASON } from '../../src/service/task-plan.js';
+import { RESUME_BLOCKED_BINDING, RUN_CONTROL_REDO_REASON } from '../../src/service/task-plan.js';
 import { controlledUnitHold } from '../../src/service/unit-hold.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
@@ -223,6 +224,64 @@ describe('改计划重做 over the real store', () => {
       store.markCleanShutdown();
     } finally {
       await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('says a stopped Run a launch can no longer carry keeps nothing, and redoes it from the beginning (CONT-016)', async () => {
+    const store = await openWithRoute();
+    const first = owner(store);
+    let second: BaselineAnalysisExecutionOwner | null = null;
+    try {
+      const bookId = await importedBook(store, 'L2 sample1 重做换绑定');
+      const prepared = prepare(store, bookId);
+      const taskIntentId = prepared.taskIntent!.taskIntentId;
+      writeFileSync(holdPath, '2');
+      const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+      first.admitAndDispatch(runRecordId);
+      await until(() => first.progressFor(runRecordId)?.currentUnitOrdinal === 3, 'unit 3 in flight');
+      store.requestBaselineAnalysisPause(bookId, taskIntentId);
+      first.pauseRun(runRecordId, store.baselineAnalysisLedger);
+      writeFileSync(holdPath, 'release');
+      await first.whenIdle();
+      expect(first.carriesStoppedRun(runRecordId)).toBe(true);
+      await first.dispose();
+      // The next launch executes another fixture, so the binding the Run persisted no longer reads the same.
+      second = new BaselineAnalysisExecutionOwner({
+        ledger: store.baselineAnalysisLedger,
+        launchPolicy,
+        fixture: await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry'),
+        secretResolver: { resolve: async () => null },
+      });
+      const next = second;
+      expect(next.carriesStoppedRun(runRecordId)).toBe(false);
+      const input = { bookId, kind: 'baseline-analysis', ref: taskIntentId } as const;
+      const plan = await store.inspectTaskPlanWithConnection(input, async () => null, { ...ALWAYS_ONLINE, carriesStoppedRun: (id) => next.carriesStoppedRun(id) }, () => null);
+      expect(plan.state.key).toBe('paused');
+      // 续行 says why it cannot go on and where the way on is; 取消任务 and 改计划重做 say nothing is kept.
+      expect(plan.runControl?.resume).toEqual({ reason: RESUME_BLOCKED_BINDING });
+      expect(plan.runControl?.cancel.impact[1]).toBe('执行绑定已经变化，已读完的 3 个阅读范围不能整理成结果集修订版；这次取消不会形成修订版。');
+      expect(plan.redo).toEqual({
+        summary: [
+          '这项任务会在这里停下并取消；执行绑定已经变化，已读完的 3 个阅读范围不能沿用，不会形成结果集修订版。',
+          '然后准备一项新任务，从头读；开始之前可以先改计划。',
+          '这项分析不改稿，没有需要撤回的受控动作。',
+          '新任务由你开始，不会自己运行。',
+        ],
+        prepare: { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, redoOf: runRecordId },
+      });
+      // The cancellation settles as the summary said, without a revision, and the redo is the first baseline again.
+      store.requestBaselineAnalysisCancel(bookId, taskIntentId);
+      expect(next.cancelRun(runRecordId, store.baselineAnalysisLedger)).toBe('settled');
+      const cancelled = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(cancelled.run?.state).toBe('cancelled');
+      expect(cancelled.resultSetRevision).toBeNull();
+      expect(store.inspectTaskPlan(input).redo).toEqual({ summary: [], prepare: { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, redoOf: runRecordId } });
+      expect(prepare(store, bookId, null, runRecordId).taskIntent).toMatchObject({ mode: 'first-baseline', redoOf: { runRecordId, taskIntentId } });
+      store.markCleanShutdown();
+    } finally {
+      await first.dispose();
+      await second?.dispose();
       store.close();
     }
   }, 300_000);

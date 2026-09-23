@@ -1124,7 +1124,7 @@ async function run(): Promise<void> {
       routeKind === DEVELOPER_LIVE_POLICY_BINDING.route || (connectivityPath !== undefined && routeKind === LOCAL_DETERMINISTIC_ROUTE);
     let preflightInFlight: Promise<ReconnectPreflightProjection> | null = null;
     const connectivity: ConnectivityContext = {
-      planConnectivity: { reading, reachesNetwork, slotBusy: () => owner.busy },
+      planConnectivity: { reading, reachesNetwork, slotBusy: () => owner.busy, carriesStoppedRun: (runRecordId) => owner.carriesStoppedRun(runRecordId, openStore.baselineAnalysisLedger) },
       // A waiting Run's route reaches its model over the network, or it would not wait: offline first, then a missing
       // credential, then the slot — the order the drawer reads them in.
       waitingFor: async () => reading() === 'offline'
