@@ -3902,6 +3902,7 @@ export class EditorialStore {
     return {
       canSet: reason === null,
       reason,
+      planEnvelopeDigest: reason === null ? envelope.digest : null,
       current,
       binds: defaultRuleBindingRows(defaultExecutionRuleBindingOf(version.materialInputs)),
       startedBy,

@@ -479,10 +479,53 @@ async function startUpdate(renderer, mode, label, name) {
     const quick=choice?.querySelector('[data-analysis-action=${JSON.stringify(`quick-${mode}`)}]');
     const plan=choice?.querySelector('[data-analysis-action=${JSON.stringify(mode)}]');
     if(!(chooser instanceof HTMLButtonElement)||!(choice instanceof HTMLElement)||!(quick instanceof HTMLButtonElement)||!(plan instanceof HTMLButtonElement)) return false;
-    if(choice.hidden||chooser.getAttribute('aria-expanded')!=='true'||!quick.disabled||plan.disabled||plan.textContent!=='先看计划'||!choice.textContent.includes('快速开始默认')) return false;
+    // No rule is in force for the mode here (Issue #421): the quick start is shown, disabled, with its reason beside it.
+    const note=document.getElementById(quick.getAttribute('aria-describedby')??'');
+    if(choice.hidden||chooser.getAttribute('aria-expanded')!=='true'||!quick.disabled||plan.disabled||plan.textContent!=='先看计划'||note?.dataset.quickStart!=='unavailable'||!note.textContent) return false;
     plan.click();
     return true;
   })()`, name);
+}
+
+/**
+ * 快速开始 from ②A (Issue #421, plan slice S75): the mode's own button opens its two ways to begin, and the quick start
+ * — offered because the Book has a 默认执行规则 for the mode in force — prepares the Task exactly as 先看计划 does and
+ * starts it under the rule, or stops at its plan with the reason.
+ */
+async function quickStart(renderer, mode, label, ruleName, name) {
+  await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const tab=card?.querySelector('[role="tab"][data-analysis-tab="history"]'); if(!(tab instanceof HTMLButtonElement))return false; tab.click(); return tab.getAttribute('aria-selected')==='true' && !card.querySelector('[data-analysis-panel="history"]').hidden; })()`, `${name}-history-tab`);
+  await click(renderer, label, `${name}-choose`);
+  await assertRenderer(renderer, `(() => {
+    const block=document.querySelector('.baseline-analysis-card [data-update-action=${JSON.stringify(mode)}]');
+    const choice=block?.querySelector('.analysis-update-choice');
+    const quick=choice?.querySelector('[data-analysis-action=${JSON.stringify(`quick-${mode}`)}]');
+    if(!(choice instanceof HTMLElement)||!(quick instanceof HTMLButtonElement)||choice.hidden||quick.disabled) return false;
+    const note=document.getElementById(quick.getAttribute('aria-describedby')??'');
+    if(note?.dataset.quickStart!=='available'||note.textContent!==${JSON.stringify(`按默认执行规则「${ruleName}」：先准备计划，与规则一致时直接开始；有任何不同都会停在计划上。`)}) return false;
+    quick.click();
+    return true;
+  })()`, name);
+}
+
+/** 设为快速开始默认…'s section of 完整, as an editor reads it: the rule named beside it, the action, and the confirmation. */
+async function readDefaultRule(renderer) {
+  return renderer.evaluate(`(() => {
+    const section=document.querySelector('#task-drawer [data-task-plan-default-rule]');
+    if(!(section instanceof HTMLElement))return null;
+    const action=section.querySelector('[data-task-drawer-control="default-rule"]');
+    const described=action?.getAttribute('aria-describedby')??null;
+    const confirm=section.querySelector('.task-plan-default-rule-confirm');
+    return {
+      offered:section.dataset.taskPlanDefaultRule, current:section.querySelector('.task-plan-default-rule-current')?.textContent??null,
+      currentState:section.querySelector('.task-plan-default-rule-current')?.dataset.defaultRuleState??null,
+      action:action===null?null:{ text:action.textContent, disabled:action.disabled, expanded:action.getAttribute('aria-expanded'), reason:described===null?null:(document.getElementById(described)?.textContent??null) },
+      confirm:confirm===null?null:{
+        hidden:confirm.hidden, heading:confirm.querySelector('h4')?.textContent, lead:confirm.querySelector(':scope > p')?.textContent,
+        binds:Object.fromEntries(Array.from(confirm.querySelectorAll('[data-default-rule-bind]')).map((node)=>[node.dataset.defaultRuleBind,node.textContent])),
+        buttons:Array.from(confirm.querySelectorAll('button')).map((node)=>node.dataset.taskDrawerControl+':'+node.textContent),
+      },
+    };
+  })()`);
 }
 
 /**
@@ -2639,6 +2682,116 @@ async function main() {
     'online-settled-run', { state: onlineSettled?.state, transitions: onlineStates });
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started' && document.querySelector('#task-drawer .task-bar-status')?.textContent==='已完成' && document.querySelector('#task-drawer [data-task-drawer-control="run-link"]')?.textContent==='查看运行' && !document.querySelector('#task-drawer [data-task-drawer-control="cancel-wait"]')`, 'online-bar-settled');
 
+    // ---- 快速开始 under a 默认执行规则 (Issue #421, plan slice S75; editor-surfaces §3, §6; V2-UX-TASK-017, TASK-019,
+    // TASK-020, TASK-026, TASK-028, AUTH-009). The plan the editor just saw run is set as the quick-start default;
+    // the next 同步 starts under it — once stopping at its plan while offline, then starting — and the rule is
+    // read and turned off in 知识库 › 工序与规则.
+    at('quick-start-set-rule');
+    cancellation.throwIfRequested();
+    const ruleInputs = onlineSettled.planVersion.materialInputs;
+    const ruleBinds = {
+      模型服务: `DeepSeek 开放平台 · ${ruleInputs.providerBinding.modelId}（凭据引用 ${ruleInputs.providerBinding.credentialReference}）`,
+      工序: `基线分析 · ${ruleInputs.artifactPin.identity} ${ruleInputs.artifactPin.version}（方案修订 ${ruleInputs.artifactPin.sidecarRevision}）`,
+      预算上限: '未设置任务预算上限',
+      发送内容类别: '公开或合成材料',
+      会得到: ruleInputs.expectedOutcome,
+    };
+    await assertRenderer(renderer, `(() => { const full=document.querySelector('#task-drawer [data-task-drawer-control="mode-full"]'); if(!(full instanceof HTMLButtonElement))return false; if(full.getAttribute('aria-pressed')!=='true')full.click(); return true; })()`, 'rule-drawer-full');
+    await waitFor(renderer, `document.querySelector('#task-drawer [data-task-plan-default-rule="offered"] [data-task-drawer-control="default-rule"]')?.disabled===false`, 'rule-offered');
+    const offeredRule = await readDefaultRule(renderer);
+    // Offered on the settled plan, closed until asked for, and nothing set yet: the standard start set no rule (AUTH-009).
+    requireJourney(offeredRule?.current === null && offeredRule.action?.text === '设为快速开始默认…' && offeredRule.action.expanded === 'false' && offeredRule.confirm?.hidden === true &&
+      JSON.stringify((await renderer.evaluate(`window.ai7.inspectDefaultExecutionRules()`))?.rules) === '[]', 'rule-offered-closed', offeredRule);
+    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="default-rule"]', 'rule-open-confirm');
+    const confirmRule = await readDefaultRule(renderer);
+    requireJourney(confirmRule?.action?.expanded === 'true' && confirmRule.confirm?.hidden === false && confirmRule.confirm.heading === '设为快速开始默认' &&
+      confirmRule.confirm.lead === '以后用快速开始更新这本书的分析时，AI7 会先准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。规则不会自己开始任何任务。' &&
+      JSON.stringify(confirmRule.confirm.binds) === JSON.stringify(ruleBinds) &&
+      JSON.stringify(confirmRule.confirm.buttons) === JSON.stringify(['default-rule-confirm:设为默认', 'default-rule-cancel:取消']) &&
+      (await renderer.evaluate(`document.activeElement?.dataset.taskDrawerControl`)) === 'default-rule-confirm', 'rule-confirm', confirmRule);
+    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="default-rule-confirm"]', 'rule-set');
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-default-rule-current')?.dataset.defaultRuleState==='active'`, 'rule-set-shown');
+    const setRule = await readDefaultRule(renderer);
+    requireJourney(setRule?.current === '这本书的默认执行规则：开始同步 · 第 1 版（使用中，由这份计划设定）' && setRule.offered === 'unavailable' &&
+      setRule.action?.disabled === true && setRule.action.reason === '默认执行规则「开始同步 · 第 1 版」就是由这份计划设定的，正在使用。', 'rule-set-drawer', setRule);
+    const rulesAfterSet = await renderer.evaluate(`window.ai7.inspectDefaultExecutionRules()`);
+    const rule = rulesAfterSet?.rules?.[0];
+    requireJourney(rulesAfterSet?.rules?.length === 1 && rule?.name === '开始同步 · 第 1 版' && rule.pattern === 'sync-current' && rule.state === 'active' &&
+      rule.sourceTaskIntentId === againIntent && rule.sourcePlanEnvelopeDigest === onlineSettled.planEnvelope.digest &&
+      JSON.stringify(Object.fromEntries(rule.binds.map((row) => [row.label, row.value]))) === JSON.stringify(ruleBinds) &&
+      rulesAfterSet.statement === '默认执行规则只在你点快速开始时使用：它不会自己开始任何任务；每次开始都会留下那一次的计划和运行授权，并写明按哪一版规则开始。',
+    'rule-set-record', rulesAfterSet);
+    const ruleSettled = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    // The manuscript has not moved since the sync, so 同步 has nothing to read: its quick start names the rule and waits.
+    requireJourney(JSON.stringify(ruleSettled?.updateControls?.actions?.['sync-current']?.quickStart) === JSON.stringify({
+      available: false, reason: '结果集修订版仍绑定当前稿件；只有在已确认编辑使精确修订版新鲜度为“已过期”后才可同步到当前稿件。',
+      rule: { name: '开始同步 · 第 1 版', ordinal: 1, ruleId: rule.ruleId, ruleVersionId: rule.ruleVersionId },
+    }), 'rule-sync-waits-for-an-edit', ruleSettled?.updateControls?.actions?.['sync-current']?.quickStart);
+
+    at('quick-start-fallback');
+    cancellation.throwIfRequested();
+    await saveEditorSuffix(renderer, '，J-04 快速开始前的确认编辑', ruleSettled.updateControls.working.journalSequence + 1, cancellation);
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.freshnessState==='stale'`, 'quick-stale');
+    await writeFile(connectivityPath, 'offline');
+    await quickStart(renderer, 'sync-current', '同步到当前稿件', '开始同步 · 第 1 版', 'quick-offline');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared' && document.querySelector('#task-drawer .task-bar-refusal')`, 'quick-offline-prepared', 120_000);
+    const fellBack = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    // It stopped at the plan and recorded nothing: no authorization, no Run (TASK-026).
+    requireJourney(fellBack?.state === 'prepared' && fellBack.taskIntent?.mode === 'sync-current' && fellBack.authorization === null && fellBack.run === null,
+      'quick-offline-nothing-recorded', { state: fellBack?.state, authorization: fellBack?.authorization, run: fellBack?.run });
+    const fellBackIntent = fellBack.taskIntent.taskIntentId;
+    const fellBackDrawer = await drawerShowing(renderer, fellBackIntent, 'offline', 'quick-offline-drawer');
+    requireJourney(fellBackDrawer?.bar?.refusal === '快速开始没有开始这项任务：离线：这份计划要连到模型服务，而这台设备现在没有网络；可以在计划里选择联网后开始任务。' &&
+      barActions(fellBackDrawer) === 'start-when-online:联网后开始任务:enabled|save-draft:仅保存任务草稿:enabled|revise:返回修改:disabled',
+    'quick-offline-bar', fellBackDrawer?.bar);
+
+    at('quick-start-started');
+    cancellation.throwIfRequested();
+    await writeFile(connectivityPath, 'online');
+    await quickStart(renderer, 'sync-current', '同步到当前稿件', '开始同步 · 第 1 版', 'quick-online');
+    await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState) && document.querySelector('.baseline-analysis-card')?.dataset.resultRevisionOrdinal==='8'`, 'quick-settled', 180_000);
+    const quickSettled = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const quickStates = quickSettled?.run?.transitions?.map((transition) => transition.state) ?? [];
+    // One Task Intent, plan, envelope and authorization of its own, exactly as 开始任务 records them — its origin the rule,
+    // naming the version the editor started under (TASK-020, TASK-028).
+    requireJourney(quickSettled?.state === 'settled' && quickSettled.taskIntent?.taskIntentId !== fellBackIntent && quickSettled.taskIntent?.mode === 'sync-current' &&
+      quickSettled.authorization?.origin === 'default-execution-rule' && quickSettled.authorization.ruleVersionId === rule.ruleVersionId &&
+      quickSettled.authorization.authority === 'standard-direct-dispatch' && quickSettled.authorization.planEnvelopeDigest === quickSettled.planEnvelope?.digest &&
+      JSON.stringify(quickStates.slice(0, 3)) === JSON.stringify(['authorized', 'admitted', 'executing']) &&
+      quickSettled.run?.transitions?.[0]?.detail === '快速开始按默认执行规则记录了运行授权。' &&
+      quickSettled.resultSetRevision?.ordinal === 8 && quickSettled.resultSetRevision?.update?.mode === 'sync-current',
+    'quick-started-run', { state: quickSettled?.state, authorization: quickSettled?.authorization, transitions: quickStates });
+    const quickDrawer = await drawerShowing(renderer, quickSettled.taskIntent.taskIntentId, 'settled', 'quick-started-drawer');
+    await assertRenderer(renderer, `(() => { const notice=document.querySelector('#task-drawer .task-plan-quick-started'); return notice?.dataset.taskPlanQuickStarted===${JSON.stringify(rule.ruleVersionId)} && notice.textContent==='已按默认执行规则「开始同步 · 第 1 版」快速开始 · 查看规则'; })()`, 'quick-started-notice');
+    requireJourney(quickDrawer?.bar?.status === '已完成' && quickDrawer.bar.refusal === null, 'quick-started-bar', quickDrawer?.bar);
+
+    at('quick-start-rules-page');
+    cancellation.throwIfRequested();
+    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="view-rules"]', 'rules-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"] .knowledge-base')?.dataset.ruleCount==='1'`, 'rules-page');
+    const readRuleCard = () => renderer.evaluate(`(() => {
+      const card=document.querySelector('.knowledge-base .default-rule-card');
+      if(!(card instanceof HTMLElement))return null;
+      return {
+        id:card.dataset.ruleId, state:card.dataset.ruleState, pattern:card.dataset.rulePattern, ordinal:card.dataset.ruleOrdinal,
+        heading:card.querySelector('h3')?.textContent, pill:card.querySelector('.status-pill')?.textContent, does:card.querySelector(':scope > p')?.textContent,
+        binds:Object.fromEntries(Array.from(card.querySelectorAll('[data-rule-bind]')).map((node)=>[node.dataset.ruleBind,node.textContent])),
+        view:card.querySelector('[data-rule-action="view"]')?.textContent, deactivate:card.querySelector('[data-rule-action="deactivate"]')?.textContent??null,
+      };
+    })()`);
+    const ruleCard = await readRuleCard();
+    requireJourney(ruleCard?.id === rule.ruleId && ruleCard.state === 'active' && ruleCard.pattern === 'sync-current' && ruleCard.ordinal === '1' &&
+      ruleCard.heading === `《J-04 sample1 基线稿件分析》 · 开始同步 · 第 1 版` && ruleCard.pill === '使用中' &&
+      ruleCard.does === '点「开始同步」后，AI7 先准备计划：计划与这条规则一致时直接开始，只重新分析改动过的部分，其余沿用；有任何不同都停在计划上，等你看过再开始。' &&
+      JSON.stringify(ruleCard.binds) === JSON.stringify(ruleBinds) && ruleCard.view === '查看' && ruleCard.deactivate === '停用', 'rules-card', ruleCard);
+    await reviewAction(renderer, '.knowledge-base .default-rule-card [data-rule-action="deactivate"]', 'rules-deactivate');
+    await waitFor(renderer, `document.querySelector('.knowledge-base .default-rule-card')?.dataset.ruleState==='deactivated'`, 'rules-deactivated');
+    const offCard = await readRuleCard();
+    const rulesAfterOff = await renderer.evaluate(`window.ai7.inspectDefaultExecutionRules()`);
+    // 停用 keeps the rule and its version on record; quick start no longer uses it.
+    requireJourney(offCard?.pill === '已停用' && offCard.deactivate === null && rulesAfterOff?.rules?.length === 1 &&
+      rulesAfterOff.rules[0].state === 'deactivated' && rulesAfterOff.rules[0].ruleVersionId === rule.ruleVersionId, 'rules-off', { offCard, rules: rulesAfterOff?.rules });
+
     // ---- 审阅 (Issue #417, plan slice S69; editor-surfaces §4; V2-UX-REV-001 to REV-013, MARK-010) ----
     at('review-relaunch');
     await closeOwnedBrowser();
@@ -2778,7 +2931,7 @@ async function main() {
     // the surfaces that raise a Task — the plan authorizes nothing (PLAN-007). Synchronized delta with Issue
     // #420: its only start is its own bar's, and no card anywhere carries one. Since #502 the Run that waited for
     // the network settled a seventh Result Set Revision before 审阅, so the card ends there.
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.analysisState==='settled' && card.dataset.resultRevisionOrdinal==='7' && ${ONLY_ANALYSIS_ACTIONS} && !document.querySelector('[data-analysis-action="prepare"], [data-analysis-action="authorize"]') && !document.querySelector('#task-drawer [data-analysis-action], #task-drawer [data-review-action], #task-drawer [data-task-authorization-action]') && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress|effect|enrol|apply|export/i.test(key) && ![...${JSON.stringify(CHANGE_SUGGESTION_APPLY_MEMBERS)}, ...${JSON.stringify(EXPORT_MEMBERS)}].includes(key)); })()`, 'no-execution-surface');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.analysisState==='settled' && card.dataset.resultRevisionOrdinal==='8' && ${ONLY_ANALYSIS_ACTIONS} && !document.querySelector('[data-analysis-action="prepare"], [data-analysis-action="authorize"]') && !document.querySelector('#task-drawer [data-analysis-action], #task-drawer [data-review-action], #task-drawer [data-task-authorization-action]') && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress|effect|enrol|apply|export/i.test(key) && ![...${JSON.stringify(CHANGE_SUGGESTION_APPLY_MEMBERS)}, ...${JSON.stringify(EXPORT_MEMBERS)}].includes(key)); })()`, 'no-execution-surface');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-network-provider-session');
   } finally {
     finalCleanupRequested = true;
