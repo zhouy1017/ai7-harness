@@ -61,6 +61,7 @@ import {
   ANALYSIS_LEDGER_REVISION_23_SQL,
   ANALYSIS_LEDGER_REVISION_29_SQL,
   ANALYSIS_LEDGER_REVISION_31_SQL,
+  ANALYSIS_LEDGER_REVISION_32_SQL,
   ANALYSIS_LEDGER_REVISION_30_SQL,
   ANALYSIS_LEDGER_REVISION_17_TABLES,
   ANALYSIS_LEDGER_SCHEMA_SQL,
@@ -80,6 +81,7 @@ import {
   CONNECTIVITY_WAIT_SCHEMA_VERSION,
   DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
   RUN_CANCELLATION_SCHEMA_VERSION,
+  RUN_CONTINUATION_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -105,6 +107,7 @@ import {
   DEFAULT_EXECUTION_RULE_SCHEMA_SQL,
   DEFAULT_EXECUTION_RULE_TRIGGER_SQL,
 } from './default-execution-rules.js';
+import { RUN_CHECKPOINT_FOREIGN_KEYS, RUN_CHECKPOINT_SCHEMA_SQL, RUN_CHECKPOINT_TRIGGER_SQL } from './analysis/run-checkpoints.js';
 import {
   MANUSCRIPT_EFFECT_FOREIGN_KEYS,
   MANUSCRIPT_EFFECT_SCHEMA_SQL,
@@ -139,8 +142,9 @@ import {
  * carried them, and as revision 24 widened the same three again for the review-category kind family
  * (Issue #417); the Run states as revisions 15 to 29 carried them before revision 30 widened them for
  * Connectivity Wait (Issue #502), and as revisions 30 and 31 carried them before revision 32 widened them again,
- * with the Task Outcomes, for 取消任务 (Issue #422). Every one of those shapes validates exactly, so a store at any
- * of them passes this layer before the forward copy that brings it to the current shape.
+ * with the Task Outcomes, for 取消任务 (Issue #422), and as revision 32 left them before revision 33 widened them for
+ * 暂停 and 续行. Every one of those shapes validates exactly, so a store at any of them passes this layer before the
+ * forward copy that brings it to the current shape.
  */
 const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | ReadonlyArray<string>>> = {
   ...ANALYSIS_LEDGER_SCHEMA_SQL,
@@ -163,6 +167,7 @@ const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | Read
   ],
   analysis_run_states: [
     ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_states,
+    ANALYSIS_LEDGER_REVISION_32_SQL.analysis_run_states,
     ANALYSIS_LEDGER_REVISION_31_SQL.analysis_run_states,
     ANALYSIS_LEDGER_REVISION_29_SQL.analysis_run_states,
   ],
@@ -1790,6 +1795,8 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...EXPORT_LEDGER_FOREIGN_KEYS,
   // Revision 31 (Issue #421): the default-execution-rule ledger, owned and spelled by `default-execution-rules.ts`.
   ...DEFAULT_EXECUTION_RULE_FOREIGN_KEYS,
+  // Revision 33 (Issue #422): the Run's unit checkpoints, owned and spelled by `analysis/run-checkpoints.ts`.
+  ...RUN_CHECKPOINT_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2394,6 +2401,7 @@ function requireManuscriptReimportTargetSchema(
   includeImportedMarkTables = false,
   includeExportLedgerTables = false,
   includeDefaultExecutionRuleTables = false,
+  includeRunCheckpointTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2448,10 +2456,11 @@ function requireManuscriptReimportTargetSchema(
         ? { proposal_change_items: [PROPOSAL_CHANGE_ITEMS_REVISION_27_SQL, EDITORIAL_MARK_SCHEMA_SQL.proposal_change_items] }
         : {}),
       ...(includeImportedMarkTables ? IMPORTED_MARK_SCHEMA_SQL : {}),
-      // Revision 29 (Issue #413) adds the export ledger the same way, behind a flag of its own, and
-      // revision 31 (Issue #421) the default-execution-rule ledger.
+      // Revision 29 (Issue #413) adds the export ledger the same way, behind a flag of its own, revision 31
+      // (Issue #421) the default-execution-rule ledger, and revision 33 (Issue #422) the Run's unit checkpoints.
       ...(includeExportLedgerTables ? EXPORT_LEDGER_SCHEMA_SQL : {}),
       ...(includeDefaultExecutionRuleTables ? DEFAULT_EXECUTION_RULE_SCHEMA_SQL : {}),
+      ...(includeRunCheckpointTables ? RUN_CHECKPOINT_SCHEMA_SQL : {}),
     },
     MANUSCRIPT_REIMPORT_INDEX_SQL,
     true,
@@ -2468,6 +2477,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeImportRetentionTables ? IMPORT_RETENTION_TRIGGER_SQL : {}),
       ...(includeExportLedgerTables ? EXPORT_LEDGER_TRIGGER_SQL : {}),
       ...(includeDefaultExecutionRuleTables ? DEFAULT_EXECUTION_RULE_TRIGGER_SQL : {}),
+      ...(includeRunCheckpointTables ? RUN_CHECKPOINT_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5126,6 +5136,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeImportedMarkTables = false,
   includeExportLedgerTables = false,
   includeDefaultExecutionRuleTables = false,
+  includeRunCheckpointTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5145,6 +5156,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeImportedMarkTables,
     includeExportLedgerTables,
     includeDefaultExecutionRuleTables,
+    includeRunCheckpointTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5209,7 +5221,8 @@ export function initializeBoundedSchema(
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
-      version === RUN_CANCELLATION_SCHEMA_VERSION,
+      version === RUN_CANCELLATION_SCHEMA_VERSION ||
+      version === RUN_CONTINUATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5224,9 +5237,10 @@ export function initializeBoundedSchema(
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
-      version === RUN_CANCELLATION_SCHEMA_VERSION) {
+      version === RUN_CANCELLATION_SCHEMA_VERSION ||
+      version === RUN_CONTINUATION_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== RUN_CANCELLATION_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== RUN_CONTINUATION_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5246,6 +5260,7 @@ export function initializeBoundedSchema(
           version >= IMPORTED_MARK_SCHEMA_VERSION,
           version >= EXPORT_LEDGER_SCHEMA_VERSION,
           version >= DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
+          version >= RUN_CONTINUATION_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);
