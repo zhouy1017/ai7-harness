@@ -153,6 +153,7 @@ export class ServiceClient {
     foregroundExecutionControl?: J03ForegroundExecutionControl,
     recoveryControl?: J08RecoveryControl,
     modelAdapterControl?: J04ModelAdapterControl,
+    connectivityPath?: string,
   ): Promise<ServiceClient> {
     if (!isAbsolute(executable) || !isAbsolute(serviceEntry) || !isAbsolute(dataRoot)) {
       throw new ServiceCallError('SERVICE_LAUNCH_INVALID', '本地业务服务启动参数无效。');
@@ -168,6 +169,8 @@ export class ServiceClient {
     }
     if (recoveryControl) args.push('--j08-recovery-control', recoveryControl);
     if (modelAdapterControl) args.push('--j04-model-adapter', modelAdapterControl);
+    // J-04's connectivity control (Issue #502) rides beside the adapter: the file the Journey writes to go offline.
+    if (connectivityPath !== undefined) args.push('--j04-connectivity-path', connectivityPath);
     const child = spawn(
       executable,
       args,

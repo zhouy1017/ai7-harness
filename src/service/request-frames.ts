@@ -198,6 +198,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'getModelServiceStoredState':
     // 待我处理 (Issue #424) reads across every Book, so it names none.
     case 'inspectGlobalAttention':
+    case 'runReconnectPreflight':
     case 'shutdown': {
       requireInput(value.input, [], tentativeId);
       break;
@@ -424,13 +425,20 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'authorizeTaskAuthorization':
-    case 'authorizeBaselineAnalysis': {
+    case 'authorizeBaselineAnalysis':
+    case 'startBaselineAnalysisWhenOnline': {
       const input = requireInput(value.input, ['bookId', 'taskIntentId', 'planEnvelopeDigest'], tentativeId);
       if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId) ||
           !isBoundedString(input.taskIntentId, 36) || !UUID_PATTERN.test(input.taskIntentId) ||
           !isBoundedString(input.planEnvelopeDigest, 64) || !HEX_DIGEST_PATTERN.test(input.planEnvelopeDigest)) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    // 取消 while a Run waits (Issue #502): the Task Intent names it, within the route's Book.
+    case 'cancelWaitingBaselineAnalysis': {
+      const input = requireInput(value.input, ['bookId', 'taskIntentId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.taskIntentId)) throw new ProtocolError(tentativeId);
       break;
     }
     // 审阅 (Issue #417). A Review Run is named by its identity within the route's Book; which categories

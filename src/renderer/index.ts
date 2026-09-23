@@ -3031,7 +3031,7 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
     projection.providerResolutionPlan?.remoteBinding.providerProcessing ?? projection.resultSetRevision?.policyPin ?? null,
   )));
 
-  const refreshLater = (): void => {
+  const refreshLater = (delayMs = 250): void => {
     window.setTimeout(async () => {
       if (!host.isConnected || host.dataset['analysisBookId'] !== projection.bookId) return;
       try {
@@ -3040,7 +3040,7 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
       } catch (error) {
         if (host.isConnected) setStatus(rendererErrorMessage(error, '无法刷新基线稿件分析状态。'), 'error');
       }
-    }, 250);
+    }, delayMs);
   };
 
   // The first-baseline form exists only while the Book holds no Result Set Revision; afterwards every
@@ -3075,7 +3075,7 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
     // A Task in flight is what the editor came for, so the card opens where its plan and its Run are;
     // a choice the editor made themselves always wins over either default.
     const taskInFlight = projection.state === 'prepared' || projection.state === 'authorized-blocked' ||
-      projection.state === 'admitted' || projection.state === 'executing';
+      projection.state === 'waiting' || projection.state === 'admitted' || projection.state === 'executing';
     const { panels, select } = analysisTabs(card, projection.bookId, taskInFlight ? 'history' : 'synopsis');
     renderBaselineAnalysisOverview(card, panels, select, projection, revision, bookTitle, projection.inspectedRevision !== null
       ? { historical: true, current: projection.inspectedRevision.current }
@@ -3114,6 +3114,9 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
   host.dataset['analysisRenderedState'] = projection.state;
   if (previousState !== undefined && previousState !== projection.state) taskDrawer.refresh('baseline-analysis');
   if (projection.state === 'admitted' || projection.state === 'executing') refreshLater();
+  // A Run in Connectivity Wait is followed too, more slowly — it may wait a long time (Issue #502) — so the card
+  // moves on by itself once Reconnect Preflight admits it.
+  if (projection.state === 'waiting') refreshLater(2_000);
 }
 
 /**

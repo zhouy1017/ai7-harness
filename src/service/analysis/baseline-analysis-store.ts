@@ -102,6 +102,8 @@ const NATIVE_CARRIER_DIGEST = 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86
 const SIDECAR_DIGEST = '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff' as const;
 const SUCCESSOR_BEHAVIOR ='每次更新都是新的用户发起任务，经准备 → 计划预览 → 标准直接授权 → 执行后，在同一结果集上追加下一序号的不可变后继修订版；前一修订版不被改写，且始终可在修订历史中按其原始稿件 pin 查看。' as const;
 const ACTIVE_RUN_REASON = '当前已有分析任务在调度或执行中；在其结束前不能准备新的更新任务。' as const;
+/** The waiting state's own words (Issue #502, OFF-005): recorded, and nothing has been sent or begun. */
+const CONNECTIVITY_WAIT_DETAIL = '已记录授权；联网并通过重新联网预检后开始。此前不调用模型、不产生用量。' as const;
 
 /**
  * Why a mode that reads only what changed is not on offer: nothing has changed. The mode's own label
@@ -121,6 +123,8 @@ const RUN_STATE_LABELS: Record<BaselineAnalysisRunState, string> = {
   'completed-with-gaps': '已完成 · 保留缺口',
   failed: '运行失败',
   interrupted: '运行已中断',
+  'awaiting-connectivity': '等待网络 · 未启动',
+  cancelled: '已取消 · 未启动',
 };
 
 const OUTCOME_LABELS = {
@@ -447,9 +451,13 @@ function firstBaselineCounts(unitCount: number): AnalysisReusePlanCounts {
   return { reused: 0, recomputed: unitCount, invalidated: 0, bypassed: 0 };
 }
 
-/** A Task whose Run is authorized for dispatch, admitted, or executing blocks any new update Task. */
+/**
+ * A Task whose Run is authorized for dispatch, waiting in Connectivity Wait, admitted, or executing blocks any
+ * new update Task. A waiting Run holds no execution slot, but it will run: the editor cancels it to prepare
+ * another (Issue #502, OFF-010).
+ */
 function runIsActive(state: BaselineAnalysisRunState | null): boolean {
-  return state === 'authorized' || state === 'admitted' || state === 'executing';
+  return state === 'authorized' || state === 'awaiting-connectivity' || state === 'admitted' || state === 'executing';
 }
 
 /**
@@ -683,6 +691,10 @@ export class BaselineAnalysisStore {
       ? 'prepared'
       : run.state === 'authorized' || run.state === 'blocked-before-dispatch'
         ? 'authorized-blocked'
+        // A cancelled Run never ran, so it reads as cancelled — never as 已中断, which OFF-012 keeps for a Run
+        // that can resume (Issue #502).
+        : run.state === 'awaiting-connectivity' ? 'waiting'
+          : run.state === 'cancelled' ? 'cancelled'
         : run.state === 'admitted' ? 'admitted'
           : run.state === 'executing' ? 'executing'
             : run.state === 'completed' || run.state === 'completed-with-gaps' ? 'settled'
@@ -2295,8 +2307,19 @@ export class BaselineAnalysisStore {
    * `slotBusy` is the execution owner's word that another Run holds its one slot (Issue #420, S74a A2). A
    * Run that would dispatch is then refused before anything is recorded — no queue — while a repeat of an
    * authorization already recorded answers as it always has, and a Run that never dispatches is unaffected.
+   *
+   * `start` is `when-online` for 联网后开始任务 (Issue #502; AUTH-004, OFF-005): the same exact Run Authorization
+   * and Run Record, and the Run then waits in Connectivity Wait instead of being handed to the slot — nothing
+   * sent, no usage, nothing implying it began. Only a plan that could dispatch can wait, and a waiting Run takes
+   * no slot, so a busy slot refuses only a start that would dispatch now.
    */
-  authorize(bookId: string, taskIntentId: string, planEnvelopeDigest: string, slotBusy = false): { projection: AnalysisProjection; dispatchRunRecordId: string | null } {
+  authorize(
+    bookId: string,
+    taskIntentId: string,
+    planEnvelopeDigest: string,
+    slotBusy = false,
+    start: 'now' | 'when-online' = 'now',
+  ): { projection: AnalysisProjection; dispatchRunRecordId: string | null } {
     requireAnalysis(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest),
       'ANALYSIS_AUTHORIZATION_INVALID', '任务运行授权参数无效。');
     const prepared = this.inspect(bookId);
@@ -2317,7 +2340,8 @@ export class BaselineAnalysisStore {
     requireAnalysis(prepared.update === null || prepared.update.predecessorCurrent,
       'ANALYSIS_PREDECESSOR_DRIFT', '该任务的前一修订版已不再是结果集的最新修订版；无法授权。请基于最新修订版重新准备更新。');
     const dispatchAllowed = prepared.planEnvelope.dispatchAllowed;
-    requireAnalysis(!(slotBusy && dispatchAllowed), EXECUTION_SLOT_BUSY, EXECUTION_SLOT_BUSY_REASON);
+    requireAnalysis(start === 'now' || dispatchAllowed, 'ANALYSIS_START_WHEN_ONLINE_INVALID', '这份计划没有可执行的路由，不能联网后开始。');
+    requireAnalysis(!(slotBusy && dispatchAllowed && start === 'now'), EXECUTION_SLOT_BUSY, EXECUTION_SLOT_BUSY_REASON);
     const authorizationId = randomUUID();
     const runRecordId = randomUUID();
     const instant = new Date().toISOString();
@@ -2344,9 +2368,81 @@ export class BaselineAnalysisStore {
       if (!dispatchAllowed) {
         const reasons = blockedReasons(this.#launch.live);
         this.#insertRunState(runRecordId, 2, 'blocked-before-dispatch', { detail: reasons.join(' '), reasons }, instant);
+      } else if (start === 'when-online') {
+        this.#insertRunState(runRecordId, 2, 'awaiting-connectivity', { detail: CONNECTIVITY_WAIT_DETAIL }, instant);
       }
     });
-    return { projection: this.inspect(bookId), dispatchRunRecordId: dispatchAllowed ? runRecordId : null };
+    return { projection: this.inspect(bookId), dispatchRunRecordId: dispatchAllowed && start === 'now' ? runRecordId : null };
+  }
+
+  // ---- Connectivity Wait (Issue #502, plan slice S74b) -------------------------------------------------
+
+  /**
+   * 取消 while the Book's Run waits (OFF-010): the terminal cancellation, before any dispatch and without
+   * provider work. Only a waiting Run can be cancelled here — one already admitted has begun, and pausing or
+   * cancelling it is S76's — and cancelling twice answers as the first did.
+   */
+  cancelWaiting(bookId: string, taskIntentId: string): AnalysisProjection {
+    requireAnalysis(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId), 'ANALYSIS_CANCEL_INVALID', '取消任务的参数无效。');
+    const current = this.inspect(bookId);
+    const run = current.run;
+    requireAnalysis(current.taskIntent?.taskIntentId === taskIntentId && run !== null, 'ANALYSIS_CANCEL_STALE', '这项任务已经变化；无法取消。');
+    if (run.state === 'cancelled') return current;
+    requireAnalysis(run.state === 'awaiting-connectivity', 'ANALYSIS_CANCEL_NOT_WAITING', '只有等待中的任务可以在这里取消；它已经开始或已经结束。');
+    this.recordRunState(run.runRecordId, 'cancelled', { detail: '编辑在派发前取消了这项等待中的任务；没有发送任何内容，也没有产生用量。' });
+    return this.inspect(bookId);
+  }
+
+  /** Every Run of this kind waiting in Connectivity Wait, oldest first, with its Book. */
+  waitingRuns(): Array<{ bookId: string; taskIntentId: string; runRecordId: string }> {
+    const rows = this.#db.prepare(
+      `SELECT r.run_record_id, r.task_intent_id, i.book_id
+       FROM analysis_run_records r
+       JOIN analysis_task_intents i ON i.task_intent_id = r.task_intent_id
+       WHERE i.kind = ?
+         AND (SELECT s.state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1)
+           = 'awaiting-connectivity'
+       ORDER BY r.recorded_at, r.rowid`,
+    ).all(this.#definition.kind) as SqlRow[];
+    return rows.map((row) => ({ bookId: asString(row.book_id), taskIntentId: asString(row.task_intent_id), runRecordId: asString(row.run_record_id) }));
+  }
+
+  /**
+   * Reconnect Preflight's local half (OFF-007, OFF-008, UI ADR 0008): whether the plan a waiting Run's
+   * authorization bound still stands. The material inputs are re-derived from durable state exactly as an
+   * unauthorized plan's are and compared with the bound version's; the answer is the labels of the fields that
+   * moved, or none. A credential is not a material input — its absence is a blocker the service reads
+   * separately, and never drift (OFF-009).
+   */
+  preflightDrift(runRecordId: string): ReadonlyArray<string> {
+    requireAnalysis(UUID_PATTERN.test(runRecordId), 'ANALYSIS_RUN_INVALID', '运行记录标识无效。');
+    const run = this.#db.prepare(
+      `SELECT r.task_intent_id, a.plan_envelope_sha256 FROM analysis_run_records r
+       JOIN analysis_run_authorizations a ON a.authorization_id = r.authorization_id WHERE r.run_record_id = ?`,
+    ).get(runRecordId) as SqlRow | undefined;
+    requireAnalysis(run !== undefined, 'ANALYSIS_RUN_INVALID', '运行记录不存在。');
+    const intentRow = this.#db.prepare('SELECT * FROM analysis_task_intents WHERE task_intent_id = ?').get(asString(run.task_intent_id)) as SqlRow | undefined;
+    requireAnalysis(intentRow !== undefined, 'ANALYSIS_RECORD_INVALID', '任务意图缺失。');
+    const intent = this.#intentFacts(intentRow);
+    const version = this.#planVersionByEnvelopeDigest(asString(run.plan_envelope_sha256));
+    requireAnalysis(version !== undefined && version.taskIntentId === intent.taskIntentId, 'ANALYSIS_RECORD_INVALID', '运行授权绑定的计划版本缺失。');
+    const plan = this.#planRecords(intent.taskIntentId, intent.mode, version.ordinal);
+    const frozen = materialPlanInputsOfComponents(plan, intent.record);
+    const manifest = plan['coverage-manifest'] as CoverageManifestProjection;
+    const live = this.#currentMaterialInputs(intent.bookId, intent.mode, frozen.selectedRange, manifest.units.length);
+    return diffMaterialPlanInputs(frozen, live).map((entry) => entry.label);
+  }
+
+  /**
+   * A waiting Run that can never dispatch as it was authorized is blocked with its reasons (OFF-008): its bound
+   * plan no longer stands, or this launch cannot carry it. The editor prepares the Task again — a Task Intent
+   * holds one Run, so the way on is a new plan, never this one revised.
+   */
+  blockWaitingRun(runRecordId: string, reasons: ReadonlyArray<string>): void {
+    requireAnalysis(reasons.length > 0 && reasons.every((reason) => typeof reason === 'string' && reason.length > 0),
+      'ANALYSIS_RUN_INVALID', '阻止运行需要写明原因。');
+    requireAnalysis(this.currentRunState(runRecordId) === 'awaiting-connectivity', 'ANALYSIS_RUN_INVALID', '该运行已不在等待中。');
+    this.recordRunState(runRecordId, 'blocked-before-dispatch', { detail: reasons.join(' '), reasons: [...reasons] });
   }
 
   #insertRunState(runRecordId: string, sequence: number, state: BaselineAnalysisRunState, detail: Record<string, unknown>, recordedAt: string): void {
