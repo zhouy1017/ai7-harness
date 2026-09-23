@@ -2723,10 +2723,10 @@ async function main() {
     'rule-set-record', rulesAfterSet);
     const ruleSettled = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     // The manuscript has not moved since the sync, so 同步 has nothing to read: its quick start names the rule and waits.
-    requireJourney(JSON.stringify(ruleSettled?.updateControls?.actions?.['sync-current']?.quickStart) === JSON.stringify({
-      available: false, reason: '结果集修订版仍绑定当前稿件；只有在已确认编辑使精确修订版新鲜度为“已过期”后才可同步到当前稿件。',
-      rule: { name: '开始同步 · 第 1 版', ordinal: 1, ruleId: rule.ruleId, ruleVersionId: rule.ruleVersionId },
-    }), 'rule-sync-waits-for-an-edit', ruleSettled?.updateControls?.actions?.['sync-current']?.quickStart);
+    const syncQuick = ruleSettled?.updateControls?.actions?.['sync-current']?.quickStart;
+    requireJourney(syncQuick?.available === false && syncQuick.reason === '结果集修订版仍绑定当前稿件；只有在已确认编辑使精确修订版新鲜度为“已过期”后才可同步到当前稿件。' &&
+      sameRecord(syncQuick.rule, { ruleId: rule.ruleId, ruleVersionId: rule.ruleVersionId, ordinal: 1, name: '开始同步 · 第 1 版' }),
+    'rule-sync-waits-for-an-edit', syncQuick);
 
     at('quick-start-fallback');
     cancellation.throwIfRequested();
