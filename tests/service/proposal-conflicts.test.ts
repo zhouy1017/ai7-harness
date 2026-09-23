@@ -4,7 +4,7 @@ import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { KEEP_CURRENT_REASON, PROPOSAL_CONFLICT_SCHEMA_SQL } from '../../src/service/proposal-conflicts.js';
-import { DEFAULT_EXECUTION_RULE_SCHEMA_VERSION, PUBLICATION_VERSION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { RUN_CANCELLATION_SCHEMA_VERSION, PUBLICATION_VERSION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { conflictUnits, initialResolutions, type ConflictUnitResolution } from '../../src/shared/conflict-units.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type { ManuscriptWindowProjection, ProposalConflictProjection } from '../../src/shared/protocol.js';
@@ -650,7 +650,7 @@ describe('稿件冲突 of a single 修改建议 (ADR 0085)', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DEFAULT_EXECUTION_RULE_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(RUN_CANCELLATION_SCHEMA_VERSION);
       const truthAfter = relationTruth(database);
       expect([...truthAfter.keys()]).toEqual([...truthBefore.keys(), ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER].sort());
       for (const relation of [...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER]) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);
