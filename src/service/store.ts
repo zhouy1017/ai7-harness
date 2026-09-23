@@ -3951,6 +3951,7 @@ export class EditorialStore {
       unitsTotal,
       blockers: [...this.#baselineAnalysis.continuationBlockers(run.runRecordId), ...(bindingHolds ? [] : [RESUME_BLOCKED_BINDING])],
       bindingHolds,
+      accountLimit: run.state === 'resumable' ? this.#baselineAnalysis.accountLimitOf(run.runRecordId) : null,
     }));
   }
 

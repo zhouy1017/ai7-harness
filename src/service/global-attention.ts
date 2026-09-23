@@ -118,6 +118,8 @@ export interface AnalysisTaskAttentionReading {
     readonly openClarification?: null | { readonly requestId: string; readonly unitOrdinal: number; readonly raisedAt: string };
     /** An interrupted Run the Run Budget Ceiling stopped (Issue #51, S16a): 已停止 · 预算已达上限. */
     readonly budgetReached?: boolean;
+    /** A resumable Run the provider's account limit stopped (Issue #51, S16b): 模型服务账户限额. */
+    readonly accountLimited?: boolean;
   };
   /** A prepared Task's pending Plan Revision that 重新确认计划 settles; `null` otherwise. */
   readonly planRevision: null | {
@@ -372,6 +374,13 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading): GlobalAttentio
     case 'paused':
       return item('active', 'analysis-paused', { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
     case 'resumable':
+      // 模型服务账户限额 (Issue #51, S16b; MODEL-018): an exception the editor resolves with the model service, then 续行.
+      if (run.accountLimited === true) {
+        return item('exceptions', 'analysis-account-limit', {
+          itemId, blocked: true, at: run.stateAt, book, object, nextStep: 'resolve-model-service',
+          target: { kind: 'analysis-plan', bookId: reading.bookId, taskIntentId: reading.taskIntentId }, technical,
+        });
+      }
       return item('active', 'analysis-resumable', { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
     // Answered, and waiting its turn in the slot to go on (Issue #422, S76d).
     case 'awaiting-clarification':

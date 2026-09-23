@@ -879,7 +879,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
     await store.close();
   });
 
-  it('ends the Run on a Provider Account Limit with no retry, fallback, or second model', async () => {
+  it('stops the Run on a Provider Account Limit with no retry, fallback, or second model, for 续行 once it clears', async () => {
     const calls: StubCall[] = [];
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
     const { units: responses } = await unitAnswers(prepared);
@@ -892,13 +892,15 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
     const settled = await runLive(store, bookId, prepared, execution);
 
     // Exactly one transmission: a Provider Account Limit is not retry-safe, so no unit is repeated
-    // and no later unit is dispatched.
+    // and no later unit is dispatched. The Run stops — 模型服务账户限额, holding nothing — for 续行 once the provider-side
+    // condition clears (Issue #51, S16b; MODEL-018), rather than ending: no outcome, no revision.
     expect(calls).toHaveLength(1);
-    expect(settled.run!.state).toBe('interrupted');
-    expect(settled.taskOutcome!.classification).toBe('interrupted');
-    expect(settled.taskOutcome!.safeNextAction).toContain('账户限额');
-    expect(settled.taskOutcome!.safeNextAction).toContain('不会自动重试');
-    expect(settled.taskOutcome!.safeNextAction).not.toContain('--run-budget-ceiling');
+    expect(settled.run!.state).toBe('resumable');
+    expect(settled.run!.stateLabel).toBe('模型服务账户限额');
+    expect(settled.run!.transitions.at(-1)!.detail).toContain('模型服务账户限额');
+    expect(settled.taskOutcome).toBeNull();
+    expect(settled.resultSetRevision).toBeNull();
+    expect(store.baselineAnalysisLedger.accountLimitOf(settled.run!.runRecordId)).toMatchObject({ unitOrdinal: 1 });
 
     const lines = await ledgerLines(cacheRoot);
     expect(lines).toHaveLength(1);

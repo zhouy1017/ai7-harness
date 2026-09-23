@@ -390,7 +390,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const waiting = next.state.key === 'waiting';
     // 正在取消 and 正在暂停 are followed like 运行中 until the Run has stopped (Issue #422, CTRL-005); a stopped Run is
     // read again slowly, so 续行 is offered once what it waits for — the slot, the network — is back.
-    const stopped = next.state.key === 'paused' || next.state.key === 'resumable';
+    const stopped = next.state.key === 'paused' || next.state.key === 'resumable' || next.state.key === 'account-limit';
     const followed = next.state.key === 'running' || next.state.key === 'cancelling' || next.state.key === 'pausing';
     if ((!followed && !waiting && !stopped) || interrupted || root.hidden) return;
     pollTimer = window.setTimeout(() => {

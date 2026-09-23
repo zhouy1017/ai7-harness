@@ -124,6 +124,8 @@ import {
   TASK_PLAN_BUDGET_SET,
   taskBarBudgetStopNote,
   taskPlanBudgetEdited,
+  TASK_BAR_RESOLVE_MODEL_SERVICE,
+  taskBarAccountLimitNote,
 } from '../../src/renderer/task-drawer-labels.js';
 import { localInstantLabel } from '../../src/renderer/plan-preview-labels.js';
 
@@ -207,12 +209,14 @@ describe('the drawer', () => {
   it('gives every state a tone and a shape, so the pill never speaks by colour alone', () => {
     const keys: TaskPlanStateKey[] = [
       'ready', 'changed', 'unconnected', 'offline', 'recorded', 'blocked', 'waiting', 'running', 'settled', 'stopped', 'cancelled',
-      'cancelling', 'cancelled-after-start', 'pausing', 'paused', 'resumable', 'awaiting-clarification', 'budget-reached',
+      'cancelling', 'cancelled-after-start', 'pausing', 'paused', 'resumable', 'awaiting-clarification', 'budget-reached', 'account-limit',
     ];
     expect(Object.keys(TASK_PLAN_STATE_PILLS).sort()).toEqual([...keys].sort());
     // 已停止 · 预算已达上限 (Issue #51, S16a) asks for the editor: never the blocked square of 已中断.
     expect(TASK_PLAN_STATE_PILLS['budget-reached']).toEqual({ tone: 'attention', shape: 'square' });
     expect(TASK_PLAN_STATE_PILLS['budget-reached']).not.toEqual(TASK_PLAN_STATE_PILLS.stopped);
+    // 模型服务账户限额 (Issue #51, S16b) never reads as 任务已中断 · 可续行 without colour (RUN-012).
+    expect(TASK_PLAN_STATE_PILLS['account-limit'].shape).not.toBe(TASK_PLAN_STATE_PILLS.resumable.shape);
     expect(new Set(keys.map((key) => TASK_PLAN_STATE_PILLS[key].shape)).size).toBeGreaterThan(4);
     // 模型未连接 is its own shape among the pre-start states: it never reads as 计划已变化 without colour.
     expect(TASK_PLAN_STATE_PILLS.unconnected.shape).not.toBe(TASK_PLAN_STATE_PILLS.changed.shape);
@@ -458,6 +462,7 @@ describe('the authorization bar (S74a)', () => {
       activity: null,
       executingSince: null,
       continuation: null,
+      accountLimit: null,
     };
     const running = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'running', label: '运行中' }, runControl }));
     expect(running).toMatchObject({ readiness: 'started', statement: null, note: null, status: '运行中' });
@@ -506,6 +511,7 @@ describe('the authorization bar (S74a)', () => {
       redo: { reason: null },
       activity: null, executingSince: null,
       continuation: { unitsSettled: 3, unitsTotal: 8 },
+      accountLimit: null,
     };
     expect(TASK_BAR_RESUME).toBe('续行');
     const paused = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'paused', label: '已暂停' }, runControl: stoppedControl }));
@@ -718,6 +724,41 @@ describe('the Run Budget Ceiling in the drawer (S16a)', () => {
   });
 });
 
+// Issue #51 (plan slice S16b; V2-UX-MODEL-018, RUN-012; interaction-spec §702, §1566): the bar of a Run the provider's account
+// limit stopped — 处理模型服务 and 续行 once the condition clears, never 任务已中断 · 可续行's words.
+describe('模型服务账户限额 in the drawer (S16b)', () => {
+  it('offers the way to the model service and 续行, with the provider\'s words and what was kept', () => {
+    expect(TASK_BAR_RESOLVE_MODEL_SERVICE).toBe('处理模型服务');
+    const condition = 'Provider Account Limit：模型服务账户限额阻止了本次请求。（QUOTA）';
+    expect(taskBarAccountLimitNote(4, 3, 8)).toBe('模型服务按账户限额拒绝了第 4 个阅读范围。已读完 3 / 8 个阅读范围，结果都已保存；处理好模型服务、限额解除后点「续行」从第 4 个接着读');
+    expect(taskBarAccountLimitNote(null, 8, 8)).toBe('模型服务按账户限额拒绝了之后的归纳或抽样。全部 8 个阅读范围都已读完，结果都已保存；处理好模型服务、限额解除后点「续行」接着做');
+    const control = {
+      runRecordId: 'run', cancelling: false, pausing: false,
+      cancel: { reason: null, impact: ['这项任务已经停下。'] },
+      pause: { reason: '这项任务现在没有在运行，不能暂停；可以取消它' },
+      resume: { reason: null },
+      redo: { reason: null },
+      activity: null, executingSince: null,
+      continuation: { unitsSettled: 3, unitsTotal: 8 },
+      accountLimit: { unitOrdinal: 4, condition },
+    };
+    const limited = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'account-limit', label: '模型服务账户限额' }, runControl: control }));
+    expect(limited).toMatchObject({ status: '模型服务账户限额', note: taskBarAccountLimitNote(4, 3, 8) });
+    expect(limited.actions.map((entry) => [entry.name, entry.label, entry.tone, entry.disabledReason])).toEqual([
+      ['connect', '处理模型服务', 'secondary', null],
+      ['resume', '续行', 'primary', null],
+      ['cancel-run', '取消任务', 'secondary', null],
+      ['redo', '改计划重做', 'secondary', null],
+      ['run-link', '查看运行', 'secondary', null],
+    ]);
+    // 续行 still waits for what the service reads — the slot, the connection — and says so.
+    const busy = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
+      state: { key: 'account-limit', label: '模型服务账户限额' }, runControl: { ...control, resume: { reason: '另一项任务正在运行；它结束后再续行。' } },
+    }));
+    expect(busy.actions.find((entry) => entry.name === 'resume')?.disabledReason).toBe('另一项任务正在运行；它结束后再续行。');
+  });
+});
+
 // Issue #422 (plan slice S76d; CLAR-002, CLAR-004, CLAR-007, INPUT-002 to INPUT-004): the question card's controls, the
 // move into 先问你, and what the bar says while questions wait.
 describe('Clarification Requests in the drawer (S76d)', () => {
@@ -741,7 +782,7 @@ describe('Clarification Requests in the drawer (S76d)', () => {
     const control = {
       runRecordId: 'run', cancelling: false, pausing: false,
       cancel: { reason: null, impact: [] }, pause: { reason: '这项任务现在没有在运行，不能暂停；可以取消它' }, resume: null, redo: { reason: null },
-      activity: null, executingSince: null, continuation: { unitsSettled: 7, unitsTotal: 8 },
+      activity: null, executingSince: null, continuation: { unitsSettled: 7, unitsTotal: 8 }, accountLimit: null,
     };
     const waiting = taskBarView(plan({
       state: { key: 'awaiting-clarification', label: '任务等待你的说明' },

@@ -193,6 +193,8 @@ const OUTCOME_LABELS = {
 const BUDGET_REACHED_OUTCOME_LABEL = '任务结果：任务运行预算已达上限 · 已保留部分结果' as const;
 /** …and the Run's, where ②A and its card read the Run (RUN-012): a terminal partial outcome, never 已中断. */
 export const BUDGET_REACHED_RUN_LABEL = '任务运行预算已达上限 · 已保留部分结果' as const;
+/** A Run the provider's account limit stopped (Issue #51, S16b; RUN-012): a remediable blocker, never 任务已中断 · 可续行. */
+export const ACCOUNT_LIMIT_RUN_LABEL = '模型服务账户限额' as const;
 
 /** Why an interrupted Run stopped, when a limit stopped it (Issue #51, S16a): the ceiling, what it used, and what it read. */
 export interface RunStop {
@@ -907,7 +909,7 @@ export class BaselineAnalysisStore {
               : state === 'cancelling' ? RUN_STATE_LABELS.cancelling
                 : state === 'pausing' ? RUN_STATE_LABELS.pausing
                   : state === 'paused' ? RUN_STATE_LABELS.paused
-                    : state === 'resumable' ? RUN_STATE_LABELS.resumable
+                    : state === 'resumable' ? (run !== null && this.accountLimitOf(run.runRecordId) !== null ? ACCOUNT_LIMIT_RUN_LABEL : RUN_STATE_LABELS.resumable)
                       : state === 'awaiting-clarification' ? RUN_STATE_LABELS['awaiting-clarification']
               : state === 'admitted' ? '已进入调度'
                 : state === 'executing' ? '正在执行'
@@ -1090,6 +1092,8 @@ export class BaselineAnalysisStore {
             openClarification: this.#openClarificationOf(runRecordId, state),
             // 已停止 · 预算已达上限 (Issue #51, S16a): an interrupted Run whose outcome names the ceiling.
             budgetReached: state === 'interrupted' && this.#runStop(runRecordId) !== null,
+            // 模型服务账户限额 (Issue #51, S16b): a resumable Run the provider's account limit stopped.
+            accountLimited: state === 'resumable' && this.accountLimitOf(runRecordId) !== null,
           },
           planRevision: null,
         });
@@ -1863,7 +1867,8 @@ export class BaselineAnalysisStore {
       runRecordId,
       state: current.state,
       stateLabel: current.state === 'cancelled' && runBegan(transitions) ? RUN_CANCELLED_AFTER_START_LABEL
-        : current.state === 'interrupted' && this.#runStop(runRecordId) !== null ? BUDGET_REACHED_RUN_LABEL : RUN_STATE_LABELS[current.state],
+        : current.state === 'interrupted' && this.#runStop(runRecordId) !== null ? BUDGET_REACHED_RUN_LABEL
+          : current.state === 'resumable' && this.accountLimitOf(runRecordId) !== null ? ACCOUNT_LIMIT_RUN_LABEL : RUN_STATE_LABELS[current.state],
       recordedAt: asString(runRecord.recorded_at),
       transitions,
       adaptations,
@@ -3035,6 +3040,19 @@ export class BaselineAnalysisStore {
       'INSERT INTO analysis_clarification_answers(answer_id, request_id, option_id, answered_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)',
     ).run(answerId, input.requestId, input.optionId, answeredAt, record.json, record.digest);
     return { answerId, runRecordId: run.runRecordId, runState: run.state };
+  }
+
+  /**
+   * The provider-account-limit stop of a resumable Run (Issue #51, S16b): the provider's words and the unit it refused
+   * — `null` for the reduction or a sample — read from the Run's latest state; `null` for every other Run.
+   */
+  accountLimitOf(runRecordId: string): { condition: string; unitOrdinal: number | null } | null {
+    const row = this.#db.prepare('SELECT state, canonical_json FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1')
+      .get(runRecordId) as SqlRow | undefined;
+    if (row === undefined || row.state !== 'resumable') return null;
+    const record = parseCanonicalJson(asString(row.canonical_json));
+    if (!isRecord(record) || record.stopReason !== 'provider-account-limit' || typeof record.condition !== 'string') return null;
+    return { condition: record.condition, unitOrdinal: typeof record.unitOrdinal === 'number' ? record.unitOrdinal : null };
   }
 
   /** Why a Run's interrupted outcome says it stopped (Issue #51, S16a); `null` for any other Run, or one with no outcome. */
