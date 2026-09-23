@@ -33,6 +33,7 @@ import type { BaselineUnitResult } from './contract.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 import { ExecutionAdmissionError } from './execution-error.js';
 import { applyAssuranceSample, type AnalysisKindDefinition, type AnalysisReductionResult } from './kind-definition.js';
+import { ASSURANCE_SAMPLING_REMOVED, SAFE_RETRY_WITHHELD, assuranceSamplingKept, safeRetryAllowed } from './plan-edits.js';
 import {
   BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
   buildCrossUnitMessage,
@@ -1037,10 +1038,13 @@ export class BaselineAnalysisExecutionOwner {
           });
         };
         let firstFailure: ClassifiedModelFailure | null = null;
+        // A retry-safe failure the bound plan does not let AI7 retry (Issue #419: the editor said 不允许).
+        let retryWithheld = false;
         // A safe retry is a further transmission, so a Run the editor cancelled meanwhile makes none.
         if (attempt.turn.terminal === 'failed' && !active.interrupted && !active.cancelRequested) {
           const failed = attempt.turn.signals.find((signal) => signal.kind === 'failed');
-          if (failed?.kind === 'failed' && failed.failure.retrySafe) {
+          retryWithheld = failed?.kind === 'failed' && failed.failure.retrySafe && !safeRetryAllowed(facts.editorEdits);
+          if (failed?.kind === 'failed' && failed.failure.retrySafe && !retryWithheld) {
             // The `safe-retry` Plan Adaptation: recorded before the retry is dispatched, inside the unchanged
             // envelope and Execution Binding; the retry repeats the byte-identical unit message once.
             firstFailure = failed.failure;
@@ -1110,8 +1114,11 @@ export class BaselineAnalysisExecutionOwner {
         } else if (turn.terminal === 'failed') {
           const failure = turn.signals.find((signal) => signal.kind === 'failed');
           const reason = failure?.kind === 'failed' ? `${failure.failure.reason}（${failure.failure.code}）` : '适配器失败。';
-          // A second failure names both attempts; the unit is never retried again.
-          gap('adapter-failure', firstFailure === null ? reason : `第 1 次尝试：${firstFailure.reason}（${firstFailure.code}）；安全重试后第 2 次尝试：${reason}`);
+          // A second failure names both attempts; the unit is never retried again. One the plan did not let AI7
+          // retry says so, so the gap reads as the editor's choice and not as a retry that failed.
+          gap('adapter-failure', firstFailure !== null
+            ? `第 1 次尝试：${firstFailure.reason}（${firstFailure.code}）；安全重试后第 2 次尝试：${reason}`
+            : retryWithheld ? `${reason}；${SAFE_RETRY_WITHHELD}` : reason);
           // A Provider Account Limit ends the Run outright: no retry, no fallback, no second model.
           if (failure?.kind === 'failed' && failure.failure.failureClass === 'provider-account-limit') {
             liveInterruption = 'provider-account-limit';
@@ -1284,6 +1291,7 @@ export class BaselineAnalysisExecutionOwner {
         active, definition, harness, reduction: reduced, manifest, blocksById, admittedUserMessages,
         acceptedOutputDigests, liveAdapter, countTurn, clock, ceilingState, live, policy,
         stopped: terminalClassification === 'interrupted' || terminalClassification === 'cancelled',
+        removedByEditor: !assuranceSamplingKept(facts.editorEdits),
       });
       if (stopWithoutEnding()) return;
       // The second reducer pass: the sample joins the revision and re-labels the assurance axis, and
@@ -1399,6 +1407,7 @@ export class BaselineAnalysisExecutionOwner {
     if (definition.assurance === null) return assuranceSampleNotRun(definition.assuranceAbsentReason);
     if (active.cancelRequested) return assuranceSampleNotRun(ASSURANCE_SAMPLING_CANCELLED);
     if (context.stopped || active.interrupted) return assuranceSampleNotRun('运行在单元阶段结束前停止，保证抽样未发起。');
+    if (context.removedByEditor) return assuranceSampleNotRun(ASSURANCE_SAMPLING_REMOVED);
     const candidates = definition.assurance.candidates(reduction);
     if (candidates.length === 0) return assuranceSampleNotRun('本次运行没有可抽样的发现，保证抽样未发起。');
     const draw = drawAssuranceSample(manifest, candidates);
@@ -1719,6 +1728,8 @@ interface AssuranceSamplingContext {
   readonly policy: LaunchPolicyProjection;
   /** Whether the Run had already stopped when the unit loop ended; a stopped Run samples nothing. */
   readonly stopped: boolean;
+  /** Whether the bound plan leaves 核对与抽检 out (Issue #419); such a Run draws no sample at all. */
+  readonly removedByEditor: boolean;
 }
 
 /** What two attempts of one unit cost together; `null` only when neither reported any usage at all. */

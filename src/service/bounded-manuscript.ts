@@ -62,6 +62,7 @@ import {
   ANALYSIS_LEDGER_REVISION_29_SQL,
   ANALYSIS_LEDGER_REVISION_31_SQL,
   ANALYSIS_LEDGER_REVISION_32_SQL,
+  ANALYSIS_LEDGER_REVISION_33_SQL,
   ANALYSIS_LEDGER_REVISION_30_SQL,
   ANALYSIS_LEDGER_REVISION_17_TABLES,
   ANALYSIS_LEDGER_SCHEMA_SQL,
@@ -82,6 +83,7 @@ import {
   DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
   RUN_CANCELLATION_SCHEMA_VERSION,
   RUN_CONTINUATION_SCHEMA_VERSION,
+  PLAN_EDIT_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -172,6 +174,7 @@ const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | Read
     ANALYSIS_LEDGER_REVISION_29_SQL.analysis_run_states,
   ],
   analysis_task_outcomes: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_outcomes, ANALYSIS_LEDGER_REVISION_31_SQL.analysis_task_outcomes],
+  analysis_plan_revisions: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_plan_revisions, ANALYSIS_LEDGER_REVISION_33_SQL.analysis_plan_revisions],
   analysis_run_authorizations: [
     ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_authorizations,
     ANALYSIS_LEDGER_REVISION_30_SQL.analysis_run_authorizations,
@@ -5222,7 +5225,8 @@ export function initializeBoundedSchema(
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
-      version === RUN_CONTINUATION_SCHEMA_VERSION,
+      version === RUN_CONTINUATION_SCHEMA_VERSION ||
+      version === PLAN_EDIT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5238,9 +5242,10 @@ export function initializeBoundedSchema(
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
-      version === RUN_CONTINUATION_SCHEMA_VERSION) {
+      version === RUN_CONTINUATION_SCHEMA_VERSION ||
+      version === PLAN_EDIT_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== RUN_CONTINUATION_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== PLAN_EDIT_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,

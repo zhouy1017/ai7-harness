@@ -81,9 +81,12 @@ export const TASK_PLAN_STATE_PILLS: Readonly<Record<TaskPlanStateKey, ReviewPill
 
 // ---- the goal block (S72 D5) ------------------------------------------------------------------------------
 
-/** 修改 returns to the composer with the plan editing of S73; until then it is shown with this reason. */
+/**
+ * 修改 returns to the composer (撰写框), which arrives with the 任务 panel; until then it is shown with this reason. The
+ * plan itself is edited in 完整 (Issue #419), which 返回修改 opens.
+ */
 export const TASK_PLAN_EDIT = '修改';
-export const TASK_PLAN_EDIT_REASON = '随计划编辑提供';
+export const TASK_PLAN_EDIT_REASON = '回到撰写随任务面板提供';
 
 /** The context chips in their order: 书 · 位置 · 已选字数 · 任务输入修订版 · 工序. */
 export function taskPlanChips(chips: TaskPlanProjection['goal']['chips']): ReadonlyArray<{ key: string; text: string }> {
@@ -110,6 +113,8 @@ export function groupedCount(value: number): string {
 
 export const TASK_PLAN_COMPACT_TERMS = ['处理', '发送', '会得到', '不会', '中途'] as const;
 export const TASK_PLAN_FULL_LINK = '完整计划（6 段）';
+/** §6: the same link on a plan the editor can edit says so. */
+export const TASK_PLAN_FULL_LINK_EDITABLE = '完整计划（6 段）· 可以改步骤与限制';
 /** The usage figure is a ceiling the Run cannot pass, never a forecast of what it will use. */
 export const TASK_PLAN_CEILING_NOTE = '上限，不是预测';
 
@@ -177,16 +182,58 @@ export const TASK_PLAN_TECHNICAL_NOT_DO = '技术性的不会做';
 export const TASK_PLAN_DRIFT_HEADING = '计划的关键内容已变化';
 export const TASK_PLAN_DRIFT_VIEW = '查看计划修订';
 export const TASK_PLAN_DRIFT_COLUMNS = ['内容', '原计划', '重新确认后', '性质'] as const;
-/** §10: 物质字段 / 派生后果 read 关键内容 / 随之变化. */
-export const TASK_PLAN_MATERIALITY_LABELS = { material: '关键内容', derived: '随之变化' } as const satisfies Record<'material' | 'derived', string>;
+/** §10: 物质字段 / 派生后果 read 关键内容 / 随之变化; the editor's own edit reads 你改的 (Issue #419). */
+export const TASK_PLAN_MATERIALITY_LABELS = { material: '关键内容', derived: '随之变化', edited: '你改的' } as const satisfies Record<'material' | 'derived' | 'edited', string>;
+
+// ---- the editable plan (Issue #419, plan slice S73; §6 可编辑, V2-UX-PLAN-011) -------------------------------------
+
+/** The editor's own mark on each item they changed, and on the plan's changes. */
+export const TASK_PLAN_EDIT_TAG = '你改的';
+/** What a step left out, and an adaptation withdrawn, read as — beside the tag. */
+export const TASK_PLAN_EDIT_STEP_REMOVED = '不做';
+export const TASK_PLAN_EDIT_ADAPTATION_WITHDRAWN = '不允许';
+/** `×` is the control's glyph; what it does is its name, for a reader who does not see it. */
+export function taskPlanEditRemoveStep(label: string): string {
+  return `去掉这一步：${label}`;
+}
+export function taskPlanEditWithdraw(label: string): string {
+  return `不允许：${label}`;
+}
+export const TASK_PLAN_EDIT_RESTORE = '恢复';
+/** Why the rest of the steps take no edit: the analysis's steps are its procedure. */
+export const TASK_PLAN_EDIT_STEPS_NOTE = '这项分析的步骤由分析工序决定：可以去掉「核对与抽检」，不能改写、增加或调换顺序。';
+/** Moving an adaptation into the right column needs a Run that can stop and ask, which Clarification Requests bring. */
+export const TASK_PLAN_EDIT_ASK_FIRST_NOTE = '改成「先问你」要等澄清请求，暂不提供。';
+/** PLAN-011's count of what the editor changed and has not yet made the plan. */
+export function taskPlanEditCount(count: number): string {
+  return `你改了 ${count} 处`;
+}
+/** With a key-content change pending, the edits wait for the version 重新确认计划 writes. */
+export function taskPlanEditCountAfterDrift(count: number): string {
+  return `你改了 ${count} 处；重新确认计划后再更新计划`;
+}
+/** The edit that made the version shown, with its time (PLAN-011: recorded with actor and time). */
+export function taskPlanLastEdit(edit: NonNullable<TaskPlanProjection['edit']['lastEdit']>): string {
+  const changes = edit.entries.map((entry) => `${entry.label}：${entry.prior} → ${entry.proposed}`).join('；');
+  return `第 ${edit.ordinal} 版由你修改（${localInstantLabel(edit.recordedAt)}）：${changes}`;
+}
 
 // ---- the authorization bar (Issue #420, S74a; §6 常驻授权条, V2-UX-AUTH-001 to 007, §10) --------------------
 
 /** AUTH-002 as ADR 0077 revised it: the one start action; the word 授权 is never on the button. */
 export const TASK_BAR_START = '开始任务';
-/** 返回修改 returns to the plan's editing, which arrives with S73; until then it is shown with its reason. */
+/**
+ * 返回修改 opens the plan's editing — 完整, focused on the first thing that can change (Issue #419). A plan that takes no
+ * edit says why; a kind that keeps no plan versions says this.
+ */
 export const TASK_BAR_REVISE = '返回修改';
-export const TASK_BAR_REVISE_REASON = '随计划编辑提供';
+export const TASK_BAR_REVISE_REASON = '这类任务的计划不能在这里修改';
+/** PLAN-011: with edits pending, 更新计划 takes the start's place; 撤销修改 lets them go. */
+export const TASK_BAR_UPDATE_PLAN = '更新计划';
+export const TASK_BAR_DISCARD_EDITS = '撤销修改';
+/** 保存草稿 would leave the edits unsaved while saying the plan is saved. */
+export const TASK_BAR_SAVE_DRAFT_EDITING_REASON = '先更新计划或撤销修改';
+export const TASK_BAR_UPDATE_FAILED = '无法更新计划。';
 /** 保存草稿 closes the drawer and writes nothing: the prepared plan is already a durable record. */
 export const TASK_BAR_SAVE_DRAFT = '保存草稿';
 export const TASK_BAR_SAVED = '计划已保存，可稍后开始';
@@ -284,6 +331,8 @@ export type TaskBarActionName =
   | 'connect'
   | 'revise'
   | 'save-draft'
+  | 'update-plan'
+  | 'discard-edits'
   | 'cancel-wait'
   | 'pause'
   | 'resume'
@@ -326,7 +375,6 @@ export function taskBarSummary(plan: TaskPlanProjection): string {
   ].join(' · ');
 }
 
-const REVISE: TaskBarAction = { name: 'revise', label: TASK_BAR_REVISE, tone: 'quiet', disabledReason: TASK_BAR_REVISE_REASON };
 const SAVE_DRAFT: TaskBarAction = { name: 'save-draft', label: TASK_BAR_SAVE_DRAFT, tone: 'secondary', disabledReason: null };
 
 /**
@@ -335,10 +383,43 @@ const SAVE_DRAFT: TaskBarAction = { name: 'save-draft', label: TASK_BAR_SAVE_DRA
  * key content changed, when `重新确认计划` and `查看计划修订` take its place; and once started, the Run's state
  * and the way to its surface instead of any action that starts it again.
  */
-export function taskBarView(plan: TaskPlanProjection): TaskBarView {
+export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBarView {
   const readiness = plan.start.readiness;
   const summary = taskBarSummary(plan);
   const runLink: TaskBarAction = { name: 'run-link', label: TASK_BAR_RUN_LINKS[plan.kind], tone: 'secondary', disabledReason: null };
+  // 返回修改 (Issue #419): into the plan's editing when it takes edits, else why it does not.
+  const revise: TaskBarAction = {
+    name: 'revise',
+    label: TASK_BAR_REVISE,
+    tone: 'quiet',
+    disabledReason: plan.edit.editable ? null : plan.edit.reason ?? TASK_BAR_REVISE_REASON,
+  };
+  // PLAN-011: edits the editor has not yet made the plan put 更新计划 where the start was, beside 撤销修改, and hold
+  // the draft back. With a key-content change pending, 重新确认计划 comes first and the edits wait for its version.
+  if (readiness !== 'started' && pendingEdits > 0) {
+    const drifted = readiness === 'changed';
+    return {
+      readiness,
+      summary,
+      statement: null,
+      note: drifted ? taskPlanEditCountAfterDrift(pendingEdits) : taskPlanEditCount(pendingEdits),
+      status: null,
+      actions: [
+        ...(drifted && plan.start.reconfirm !== null ? [{ name: 'reconfirm-plan', label: TASK_BAR_RECONFIRM, tone: 'primary', disabledReason: null } as const] : []),
+        ...(drifted && plan.drift !== null && plan.drift.entries.length > 0
+          ? [{ name: 'view-plan-revision', label: TASK_PLAN_DRIFT_VIEW, tone: 'secondary', disabledReason: null } as const]
+          : []),
+        {
+          name: 'update-plan',
+          label: TASK_BAR_UPDATE_PLAN,
+          tone: drifted ? 'secondary' : 'primary',
+          disabledReason: plan.edit.editable ? null : plan.edit.reason ?? TASK_BAR_REVISE_REASON,
+        },
+        { name: 'discard-edits', label: TASK_BAR_DISCARD_EDITS, tone: 'secondary', disabledReason: null },
+        { name: 'save-draft', label: TASK_BAR_SAVE_DRAFT, tone: 'secondary', disabledReason: TASK_BAR_SAVE_DRAFT_EDITING_REASON },
+      ],
+    };
+  }
   if (readiness === 'started') {
     // A Run in Connectivity Wait (Issue #502; AUTH-007, OFF-006): what it waits for, cancelled directly, and the
     // connection setting beside it when the connection is what it waits for (OFF-009).
@@ -419,7 +500,7 @@ export function taskBarView(plan: TaskPlanProjection): TaskBarView {
         statement: TASK_BAR_STATEMENT,
         note: TASK_BAR_REVIEW_OFFLINE,
         status: null,
-        actions: [{ name: 'start', label: TASK_BAR_START, tone: 'primary', disabledReason: TASK_BAR_REVIEW_OFFLINE }, REVISE, SAVE_DRAFT],
+        actions: [{ name: 'start', label: TASK_BAR_START, tone: 'primary', disabledReason: TASK_BAR_REVIEW_OFFLINE }, revise, SAVE_DRAFT],
       };
     }
     return {
@@ -431,7 +512,7 @@ export function taskBarView(plan: TaskPlanProjection): TaskBarView {
       actions: [
         { name: 'start-when-online', label: TASK_BAR_START_WHEN_ONLINE, tone: 'primary', disabledReason: null },
         { name: 'save-draft', label: TASK_BAR_SAVE_DRAFT_ONLY, tone: 'secondary', disabledReason: null },
-        REVISE,
+        revise,
       ],
     };
   }
@@ -445,7 +526,7 @@ export function taskBarView(plan: TaskPlanProjection): TaskBarView {
       actions: [
         ...(plan.start.reconfirm === null ? [] : [{ name: 'reconfirm-plan', label: TASK_BAR_RECONFIRM, tone: 'primary', disabledReason: null } as const]),
         ...(plan.drift === null || plan.drift.entries.length === 0 ? [] : [{ name: 'view-plan-revision', label: TASK_PLAN_DRIFT_VIEW, tone: 'secondary', disabledReason: null } as const]),
-        REVISE,
+        revise,
         SAVE_DRAFT,
       ],
     };
@@ -461,7 +542,7 @@ export function taskBarView(plan: TaskPlanProjection): TaskBarView {
       actions: [
         { name: 'start', label: TASK_BAR_START, tone: 'primary', disabledReason: note },
         { name: 'connect', label: TASK_BAR_CONNECT, tone: 'secondary', disabledReason: null },
-        REVISE,
+        revise,
         SAVE_DRAFT,
       ],
     };
@@ -472,7 +553,7 @@ export function taskBarView(plan: TaskPlanProjection): TaskBarView {
     statement: TASK_BAR_STATEMENT,
     note: readiness === 'ready' ? null : TASK_BAR_NOTES[readiness],
     status: null,
-    actions: [{ name: 'start', label: TASK_BAR_START, tone: 'primary', disabledReason: null }, REVISE, SAVE_DRAFT],
+    actions: [{ name: 'start', label: TASK_BAR_START, tone: 'primary', disabledReason: null }, revise, SAVE_DRAFT],
   };
 }
 
