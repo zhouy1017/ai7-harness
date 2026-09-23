@@ -1116,6 +1116,14 @@ async function run(): Promise<void> {
         // The Run stays 正在取消 and is offered 取消任务 again, which settles it.
       }
     }
+    // A Run the editor had answered before AI7 closed goes on now, one after another through the slot (Issue #422, S76d).
+    for (const runRecordId of reconciled.answered) {
+      try {
+        analysisExecution.continueAnswered(runRecordId, store.baselineAnalysisLedger);
+      } catch {
+        // It stays 任务等待你的说明 with its answer; the next launch takes it on again.
+      }
+    }
     // A Review Run's categories take the one owner's single slot one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);
     // Connectivity Wait (Issue #502). The reading is the device's own unless J-04's control names a file; the
