@@ -212,9 +212,10 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     // proposal-conflict relations, revision 27 the import-retention relations, revision 28 the staged
     // imported marks, revision 29 the export ledger, revision 30 widens the Run states for Connectivity Wait,
     // revision 31 adds the default-execution-rule ledger, revision 32 widens the Run states and the Task Outcomes
-    // for 取消任务 and revision 33 widens the Run states again and adds the unit checkpoints for 暂停 and 续行, so this
-    // pin moves with the terminal version the service stamps (`RUN_CONTINUATION_SCHEMA_VERSION`).
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 33, 'credential-cleanup-metadata-version');
+    // for 取消任务, revision 33 widens the Run states again and adds the unit checkpoints for 暂停 and 续行, and revision
+    // 34 widens the Plan Revisions for 更新计划, so this pin moves with the terminal version the service stamps
+    // (`PLAN_EDIT_SCHEMA_VERSION`).
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 34, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
               approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
@@ -914,7 +915,7 @@ async function main() {
     at('drawer-bar-record-only');
     // Issue #420 (S74a): the footer is the authorization bar. It sums the plan up in one line, states what
     // starting decides (AUTH-003), and offers 开始任务 — which here only records, and says so (ADR 0055) —
-    // beside 返回修改, shown with its reason until plan editing arrives, and 保存草稿. The Book's credential is
+    // beside 返回修改, shown with its reason — a fixed task keeps no plan versions to edit (Issue #419) — and 保存草稿. The Book's credential is
     // `missing`, and this Task's route sends nothing, so the start needs none: it is offered all the same.
     requireJourney(missingConnection?.credentialOperationState === 'missing' && compact.bar !== null &&
       compact.bar.state === 'record-only' && compact.bar.start === 'record-only' &&
@@ -923,7 +924,7 @@ async function main() {
       compact.bar.note === '此任务只记录运行，不会派发' && compact.bar.status === null && compact.bar.refusal === null &&
       JSON.stringify(compact.bar.actions) === JSON.stringify([
         { name: 'start', text: '开始任务', disabled: false, reason: null },
-        { name: 'revise', text: '返回修改', disabled: true, reason: '随计划编辑提供' },
+        { name: 'revise', text: '返回修改', disabled: true, reason: '这类任务的计划不能在这里修改' },
         { name: 'save-draft', text: '保存草稿', disabled: false, reason: null },
       ]), 'drawer-bar-record-only', compact.bar);
     // LAYER-005: the start is on screen without scrolling, wherever the plan above it is scrolled to.
