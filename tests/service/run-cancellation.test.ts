@@ -413,6 +413,34 @@ describe('取消任务 over the real store', () => {
     }
   }, 300_000);
 
+  it('offers 取消任务 again for a Run AI7 left 正在取消 when it closed, and settles it', async () => {
+    const store = await openWithRoute();
+    const execution = owner(store, null);
+    try {
+      const { bookId, prepared } = await preparedBook(store, 'L2 sample1 遗留的正在取消');
+      const taskIntentId = prepared.taskIntent!.taskIntentId;
+      const authorized = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest);
+      const runRecordId = authorized.dispatchRunRecordId!;
+      store.baselineAnalysisLedger.recordRunState(runRecordId, 'admitted', { detail: '已进入 AI7 调度器（单槽位）。' });
+      store.baselineAnalysisLedger.recordRunState(runRecordId, 'executing', { detail: '执行绑定已持久化并核对；开始逐单元执行。' });
+      store.baselineAnalysisLedger.recordRunState(runRecordId, 'cancelling', { detail: '编辑取消了这项任务。' });
+      // Nothing holds it, so it is not stopping by itself: the bar offers 取消任务, whose summary says why.
+      const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, (id) => execution.progressFor(id));
+      expect(plan.state).toEqual({ key: 'cancelling', label: '正在取消' });
+      expect(plan.runControl).toMatchObject({ cancelling: false, activity: null, cancel: { reason: null } });
+      expect(plan.runControl!.cancel.impact[0]).toBe('AI7 上次关闭时这项任务没有结束，现在也没有在运行；取消只结束这条运行记录，不会再发送任何内容。');
+      expect(store.requestBaselineAnalysisCancel(bookId, taskIntentId)).toBe(runRecordId);
+      expect(execution.cancelRun(runRecordId, store.baselineAnalysisLedger)).toBe('settled');
+      const cancelled = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(cancelled.run?.transitions.map((transition) => transition.state)).toEqual(['authorized', 'admitted', 'executing', 'cancelling', 'cancelled']);
+      expect(cancelled.taskOutcome).toMatchObject({ classification: 'cancelled', resultSetRevisionId: null });
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
   it('cancels only a Run under way, and answers a cancelled one as it did', async () => {
     const store = await openWithRoute();
     const execution = owner(store, null);
