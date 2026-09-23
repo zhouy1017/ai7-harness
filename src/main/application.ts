@@ -249,7 +249,6 @@ function parseArguments(argv: string[]): LaunchArguments {
   const injectedPickerPath =
     j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath ?? j04PickerPath ?? j05PickerPath ?? j06PickerPath ??
       j07PickerPath ?? j09PickerPath;
-    j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath ?? j04PickerPath ?? j05PickerPath ?? j06PickerPath ?? j07PickerPath;
   // The Save dialog's launch control is guarded exactly as the picker controls are: J-07's own, and absolute.
   const injectedSavePath = values.get('--j07-save-path');
   requireDesktop(
