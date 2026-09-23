@@ -9,9 +9,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
-// J-10 (Issue #422, plan slices S76a to S76d; Issue #51, S16a): the operations on a Run under way, told apart by their
-// consequence (V2-UX-AUTH-010, AUTH-011, CTRL-001 to CTRL-009, CONT-013 to CONT-015, CLAR-001 to CLAR-007, MODEL-013 to
-// MODEL-017). Books are made from the one
+// J-10 (Issue #422, plan slices S76a to S76d; Issue #51, S16a and S16b): the operations on a Run under way, told apart by
+// their consequence (V2-UX-AUTH-010, AUTH-011, CTRL-001 to CTRL-009, CONT-013 to CONT-015, CLAR-001 to CLAR-007, MODEL-013
+// to MODEL-018). Books are made from the one
 // admitted input, exact `sample1`, through the product's own UI, and their analyses run on the J-04 model adapter.
 // J-10's unit hold keeps a reading range in flight once the Journey's number of ranges have settled, so the Journey
 // can watch and steer a Run under way.
@@ -45,6 +45,11 @@ import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabl
 // fifth: 已停止 · 预算已达上限, with what it read and used, 调整预算并重做 and 查看部分结果 — never 续行 or 重试 — and 待我处理
 // holds it as an exception. 查看部分结果 shows ②A's partial revision; 调整预算并重做 opens a new Task carrying the four
 // ranges, focused on 设置上限…, where the keyboard alone raises the ceiling to 20,000, and the Task runs to its end.
+//
+// On the sixth Book, launched over the account-limit fixture, the model service refuses unit 4 on the account's limit. The
+// Run stops there — 模型服务账户限额, never 任务已中断 · 可续行 — keeping three ranges and holding nothing, with 处理模型服务
+// and 续行, and 待我处理 holds it as an exception. 处理模型服务 opens 设置 › 模型服务 and moves nothing; 续行 then goes on
+// in the same Run and attempt from unit 4, whose second turn the fixture serves, to its end.
 // 重试, 回退运行方向 and 重放 are J-10's later operations, not these slices'.
 //
 // The runner writes J-10's unit-hold file, and reads the service's projections through `window.ai7` only to
@@ -69,6 +74,10 @@ const BUDGET_INVALID = '请填一个大于 0 的整数，单位是 tokens。';
 const BUDGET_STOP_NOTE = '已读完 4 / 8 个阅读范围，结果都已保留；这次运行用了 6,620 tokens，达到了预算上限 5,000 tokens';
 const BUDGET_RUN_LABEL = '任务运行预算已达上限 · 已保留部分结果';
 const BUDGET_REDO_GOAL = '改计划重做：沿用已读完的 4 个阅读范围，接着读其余 4 个';
+const SIXTH_BOOK = Object.freeze({ title: '账户限额旅程' });
+/** The sixth Book's launch (Issue #51, S16b): unit 4's first turn is refused on the account's limit, its second is served. */
+const ACCOUNT_LIMIT_FIXTURE_IDENTITY = 'sample1-baseline-account-limit';
+const ACCOUNT_LIMIT_NOTE = '模型服务按账户限额拒绝了第 4 个阅读范围。已读完 3 / 8 个阅读范围，结果都已保存；处理好模型服务、限额解除后点「续行」从第 4 个接着读';
 /** The fourth Book's launch: unit 2 fails for good, and unit 5's first attempt fails retry-safe (Issue #422, S76d). */
 const TRANSIENT_FIXTURE_IDENTITY = 'sample1-baseline-transient-retry';
 /** Five ranges may settle before the fourth Book's Run is held: 1 to 4 do, 5 asks, 6 settles, and 7 is in flight. */
@@ -1565,6 +1574,78 @@ async function main() {
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='settled'`, 'budget-redo-shown-settled', 30_000);
     const settledAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
     requireJourney(settledAttention?.groups?.every((group) => group.items.every((entry) => entry.state !== 'analysis-budget-reached')) === true, 'budget-left-attention', settledAttention?.groups ?? null);
+
+    // ---- 模型服务账户限额 (Issue #51, S16b; MODEL-018, RUN-012) -------------------------------------------------------
+    at('relaunch-for-account-limit');
+    // A launch over the account-limit fixture: unit 4's first turn is refused on the account's limit, and its next is the
+    // happy fixture's result — the provider-side condition clearing.
+    await closeOwnedBrowser();
+    cancellation.throwIfRequested();
+    adapterFixture = ACCOUNT_LIMIT_FIXTURE_IDENTITY;
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'account-limit-ready');
+
+    at('sixth-book-import');
+    const sixthBookId = await importSample1(renderer, SIXTH_BOOK.title, true, 'sixth-import');
+    requireJourney(![bookId, secondBookId, thirdBookId, fourthBookId, fifthBookId].includes(sixthBookId), 'six-books');
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'sixth-artifact-enable-ready');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'sixth-artifact-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'sixth-artifact-enabled');
+    await click(renderer, '返回图书列表', 'sixth-return-library');
+
+    at('account-limit-stop');
+    // 开始任务: ranges 1 to 3 are read, and the model service refuses the fourth on the account's limit. The Run stops at that
+    // boundary — 模型服务账户限额 in its own words, never 任务已中断 · 可续行's — keeping three ranges and holding nothing:
+    // 处理模型服务 and 续行, beside 取消任务, 改计划重做 and 查看运行; ②A's card says the same, and 待我处理 holds it as an
+    // exception whose next step is 处理模型服务.
+    await openAnalysisOf(renderer, sixthBookId, 'sixth-analysis');
+    await startFirstBaseline(renderer, 'ready', 'sixth-baseline');
+    const sixthIntentId = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanRef ?? ''`);
+    requireJourney(UUID_PATTERN.test(sixthIntentId), 'sixth-task');
+    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.taskIntent?.taskIntentId===${JSON.stringify(sixthIntentId)} && analysis.run?.state==='resumable')`, 'account-limit-stopped', 180_000);
+    await waitForBar(renderer, {
+      state: 'account-limit', pill: '模型服务账户限额', status: '模型服务账户限额', note: ACCOUNT_LIMIT_NOTE,
+      actions: [['connect', '处理模型服务', 'enabled', null], ['resume', '续行', 'enabled', null], ['cancel-run', '取消任务', 'enabled', null], ['redo', '改计划重做', 'enabled', null], ['run-link', '查看运行', 'enabled', null]],
+    }, 'account-limit-bar', 30_000);
+    const limited = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(limited?.state === 'resumable' && limited.stateLabel === '模型服务账户限额' && limited.run?.stateLabel === '模型服务账户限额' &&
+      JSON.stringify(limited.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'resumable']) &&
+      JSON.stringify(limited.run.attempt?.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2, 3, 4]) &&
+      (limited.taskOutcome ?? null) === null && (limited.resultSetRevision ?? null) === null,
+    'account-limit-record', { state: limited?.state, label: limited?.stateLabel, transitions: limited?.run?.transitions?.map((transition) => transition.state), spans: limited?.run?.attempt?.spans?.map((span) => span.unitOrdinal) });
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='resumable' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='模型服务账户限额'`, 'account-limit-card', 30_000);
+    const limitAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
+    requireJourney(limitAttention?.groups?.find((group) => group.key === 'exceptions')?.items?.some((entry) =>
+      entry.book?.bookId === sixthBookId && entry.state === 'analysis-account-limit' && entry.nextStep === 'resolve-model-service' && entry.blocked === true) === true,
+    'account-limit-in-attention', limitAttention?.groups ?? null);
+
+    at('account-limit-resolve');
+    // 处理模型服务 opens 设置 › 模型服务, where the connection is; nothing about the Run moves. Back in ②A, the plan still reads
+    // 模型服务账户限额 with 续行.
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="connect"]', 'account-limit-resolve');
+    await waitFor(renderer, `document.querySelector('.model-service-settings')!==null`, 'account-limit-settings', 30_000);
+    const whileAway = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(whileAway?.run?.state === 'resumable' && JSON.stringify(whileAway.run.transitions) === JSON.stringify(limited.run.transitions), 'account-limit-unmoved');
+    await click(renderer, '返回', 'account-limit-settings-back');
+    await openAnalysisOf(renderer, sixthBookId, 'account-limit-return');
+    await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'account-limit-open-plan');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='account-limit' && document.querySelector('#task-drawer [data-task-drawer-control="resume"]')?.disabled===false`, 'account-limit-plan-again', 30_000);
+
+    at('account-limit-resumed');
+    // 续行 once the limit cleared: the same Run and attempt go on from the fourth range — its second turn — to the end; the
+    // three kept ranges are not read again, and 待我处理 no longer holds the Book.
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="resume"]', 'account-limit-resume');
+    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.taskIntent?.taskIntentId===${JSON.stringify(sixthIntentId)} && analysis.run !== null && !['resumable','admitted','executing'].includes(analysis.run.state))`, 'account-limit-run-ended', 180_000);
+    const resumedRun = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(resumedRun?.state === 'settled' && resumedRun.run?.state === 'completed' && resumedRun.run.runRecordId === limited.run.runRecordId &&
+      JSON.stringify(resumedRun.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'resumable', 'admitted', 'executing', 'completed']) &&
+      JSON.stringify(resumedRun.run.attempt?.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2, 3, 4, 4, 5, 6, 7, 8]) &&
+      resumedRun.run.attempt?.attemptId === limited.run.attempt?.attemptId &&
+      resumedRun.resultSetRevision?.coverage?.unitsClosed === SAMPLE1_UNITS && resumedRun.taskOutcome?.classification === 'completed',
+    'account-limit-resumed-run', { state: resumedRun?.state, run: resumedRun?.run?.state, transitions: resumedRun?.run?.transitions?.map((transition) => transition.state), spans: resumedRun?.run?.attempt?.spans?.map((span) => span.unitOrdinal) });
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='settled'`, 'account-limit-shown-settled', 30_000);
+    const clearedAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
+    requireJourney(clearedAttention?.groups?.every((group) => group.items.every((entry) => entry.state !== 'analysis-account-limit')) === true, 'account-limit-left-attention', clearedAttention?.groups ?? null);
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
