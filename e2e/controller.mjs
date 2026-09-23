@@ -92,7 +92,7 @@ if (isJourneyRunner) {
   }
 }
 
-export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15', 'J-03', 'J-04', 'J-05', 'J-06', 'J-07', 'J-09']);
+export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15', 'J-03', 'J-04', 'J-05', 'J-06', 'J-07', 'J-09', 'J-10']);
 
 // The bounded pull-request subset of ADMITTED_JOURNEYS under ADR 0075. Every member launches the
 // same production-shaped subject, so a broken build, launch, IPC, data root, or service still fails
@@ -185,6 +185,7 @@ const JOURNEY_MODULES = Object.freeze({
   'J-06': new URL('./run-j06.mjs', import.meta.url),
   'J-07': new URL('./run-j07.mjs', import.meta.url),
   'J-09': new URL('./run-j09.mjs', import.meta.url),
+  'J-10': new URL('./run-j10.mjs', import.meta.url),
 });
 
 const J01_LAUNCH_SCENARIOS = Object.freeze([
@@ -848,6 +849,34 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-attention-keyboard',
     'j14-attention-zoom-200-reflow',
     'j14-attention-forced-colors',
+    'zero-loopback-requests',
+    'completion-browser-close',
+    'completion-cleanup',
+  ]),
+  // J-10 (Issue #422, plan slice S76a): 取消任务 on a Run under way — its activity card, its controls, the inline
+  // Cancellation Impact Summary, 正在取消 while the range in flight finishes, and 已取消 with what it read kept.
+  'J-10': Object.freeze([
+    'entry',
+    'controller-loopback-sentinel',
+    'controller-imports',
+    'exact-sample1',
+    'renderer-api-boundary',
+    'book-import',
+    'book-prerequisites',
+    'model-credential-saved',
+    'model-credential-removed',
+    'run-under-way',
+    'activity-card',
+    'run-controls',
+    'cancel-impact-summary',
+    'cancel-keep-running',
+    'j14-cancel-keyboard',
+    'cancel-confirmed',
+    'cancelling-holds',
+    'j14-cancelling-forced-colors',
+    'cancel-settled',
+    'partial-revision-kept',
+    'nothing-sent-after',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',
