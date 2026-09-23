@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 47 as const;
+export const SERVICE_PROTOCOL_VERSION = 48 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -2853,6 +2853,8 @@ export interface BaselineAnalysisProjection {
     createdAt: string;
     mode: BaselineAnalysisTaskMode;
     modeLabel: string;
+    /** 改计划重做 (Issue #422, S76c; CONT-013): the cancelled Run this Task redoes, and its Task; `null` for any other Task. */
+    redoOf: null | { runRecordId: string; taskIntentId: string };
   };
   checkpoint: null | TaskAuthorizationProjection['checkpoint'];
   manuscriptPin: null | {
@@ -4035,7 +4037,8 @@ export type TaskPlanStateKey =
  * A started Run's controls in the drawer's bar and its activity above the plan (Issue #422, plan slice S76a;
  * V2-UX-AUTH-010, AUTH-011, CTRL-001 to CTRL-009, CONT-014, CONT-015). `取消任务` opens one inline Cancellation Impact
  * Summary, and only its confirmation records anything; `暂停` is one click (CTRL-001); a paused Run, or one AI7 stopped
- * under, offers `续行` once its revalidation holds. `改计划重做` is shown with the reason it is not offered yet (S76c).
+ * under, offers `续行` once its revalidation holds. `改计划重做` is offered on a stopped Run (S76c) and waits, with its
+ * reason, on one under way.
  */
 export interface TaskPlanRunControlProjection {
   /** The one Run every control names (CTRL-009). */
@@ -4053,7 +4056,8 @@ export interface TaskPlanRunControlProjection {
    * as it was authorized (CONT-016). `null` for a Run that is not stopped.
    */
   resume: { reason: string | null } | null;
-  redo: { reason: string };
+  /** `reason` is `null` while 改计划重做 is offered — the plan's `redo` then says what it does. */
+  redo: { reason: string | null };
   /**
    * The activity card's facts (AUTH-011; RUN-001 to 004, LIVE-001 to 003): the Run Liveness Signal the execution
    * owner reports, as ②A reads it. `null` when this service holds no execution of the Run.
@@ -4253,6 +4257,19 @@ export interface TaskPlanProjection {
   defaultRule: TaskPlanDefaultRuleProjection;
   /** A started Run's controls and activity (Issue #422); `null` while no Run of this Task is under way. */
   runControl: TaskPlanRunControlProjection | null;
+  /** 改计划重做 while it can be made (Issue #422, S76c): on a stopped Run, or one cancelled after it began; else `null`. */
+  redo: TaskPlanRedoProjection | null;
+}
+
+/**
+ * 改计划重做 (Issue #422, plan slice S76c; V2-UX-AUTH-010, CONT-013): a new Task under a plan the editor may change first,
+ * carrying what the Run read. A Run still stopped is cancelled first — `summary` says, before anything is recorded, what
+ * stops, what is kept and what the new Task does — and a Run already cancelled is redone at once (`summary` empty).
+ * `prepare` is the exact preparation the new Task takes once the Run reads 已取消.
+ */
+export interface TaskPlanRedoProjection {
+  summary: ReadonlyArray<string>;
+  prepare: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; redoOf: string };
 }
 
 /**
@@ -5541,8 +5558,12 @@ export interface ServiceOperationMap {
     output: BaselineAnalysisProjection;
   };
   prepareBaselineAnalysis: {
-    /** `reconfirm` is `重新确认计划`: resolve the pending Plan Revision of the prepared Task into its next plan version instead of preparing anew. */
-    input: { bookId: string; goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean };
+    /**
+     * `reconfirm` is `重新确认计划`: resolve the pending Plan Revision of the prepared Task into its next plan version instead
+     * of preparing anew. `redoOf` is `改计划重做` (Issue #422, S76c; AUTH-010, CONT-013): the cancelled Run of the Book's
+     * latest Task this new Task redoes, carrying what it read; absent or `null` otherwise.
+     */
+    input: { bookId: string; goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean; redoOf?: string | null };
     output: ServiceJobProjection;
   };
   authorizeBaselineAnalysis: {
@@ -5940,7 +5961,7 @@ export interface RendererApi {
     planEnvelopeDigest: string;
   }): Promise<TaskAuthorizationProjection>;
   inspectBaselineAnalysis(input?: { revisionId: string | null }): Promise<BaselineAnalysisProjection>;
-  prepareBaselineAnalysis(input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean }): Promise<ServiceJobProjection>;
+  prepareBaselineAnalysis(input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean; redoOf?: string | null }): Promise<ServiceJobProjection>;
   /**
    * The Task Drawer bar's 开始任务 for the analysis (Issue #420, S74a): records the Run Authorization and the
    * Run Record and admits the Run to the one slot; refused with `EXECUTION_BUSY`, before anything is

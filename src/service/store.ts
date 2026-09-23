@@ -3808,8 +3808,9 @@ export class EditorialStore {
     update: BaselineAnalysisUpdateRequest | null,
     launchPolicy: LaunchPolicyProjection,
     reconfirm = false,
+    redoOf: string | null = null,
   ): AnalysisPreparationResult<BaselineAnalysisProjection> {
-    return this.#baselineProgress(() => this.#baselineAnalysis.prepare({ phase: 'start', bookId, goal, update, reconfirm, launchPolicy }));
+    return this.#baselineProgress(() => this.#baselineAnalysis.prepare({ phase: 'start', bookId, goal, update, reconfirm, launchPolicy, redoOf }));
   }
 
   advanceBaselineAnalysisPreparationWork(workId: string): AnalysisPreparationResult<BaselineAnalysisProjection> {
