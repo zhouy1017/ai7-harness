@@ -7,9 +7,13 @@ import {
   TASK_BAR_CANCEL_RUN_FAILED,
   TASK_BAR_CANCELLED,
   TASK_BAR_CANCELLING_NOTE,
+  TASK_BAR_PAUSE_FAILED,
+  TASK_BAR_PAUSING_NOTE,
+  TASK_BAR_RESUME_FAILED,
   TASK_PLAN_ACTIVITY_STALE,
   TASK_PLAN_ACTIVITY_TITLE,
   TASK_PLAN_ACTIVITY_UNREPORTED,
+  taskBarContinuationNote,
   taskPlanActivityIsStale,
   taskPlanActivityRows,
   TASK_BAR_SLOT_BUSY,
@@ -117,6 +121,8 @@ type DrawerApi = Pick<
   | 'startBaselineAnalysisWhenOnline'
   | 'cancelWaitingBaselineAnalysis'
   | 'cancelBaselineAnalysisRun'
+  | 'pauseBaselineAnalysisRun'
+  | 'resumeBaselineAnalysisRun'
   | 'runReconnectPreflight'
   | 'setDefaultExecutionRule'
 >;
@@ -294,8 +300,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   function schedulePoll(next: TaskPlanProjection): void {
     clearPoll();
     const waiting = next.state.key === 'waiting';
-    // 正在取消 is followed like 运行中 until the Run has stopped and says 已取消 (Issue #422, CTRL-005).
-    if ((next.state.key !== 'running' && next.state.key !== 'cancelling' && !waiting) || interrupted || root.hidden) return;
+    // 正在取消 and 正在暂停 are followed like 运行中 until the Run has stopped (Issue #422, CTRL-005); a stopped Run is
+    // read again slowly, so 续行 is offered once what it waits for — the slot, the network — is back.
+    const stopped = next.state.key === 'paused' || next.state.key === 'resumable';
+    const followed = next.state.key === 'running' || next.state.key === 'cancelling' || next.state.key === 'pausing';
+    if ((!followed && !waiting && !stopped) || interrupted || root.hidden) return;
     pollTimer = window.setTimeout(() => {
       pollTimer = undefined;
       if (!waiting) {
@@ -303,7 +312,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         return;
       }
       void api.runReconnectPreflight().catch(() => undefined).finally(() => read());
-    }, waiting ? WAITING_POLL_MS : RUNNING_POLL_MS);
+    }, waiting || stopped ? WAITING_POLL_MS : RUNNING_POLL_MS);
   }
 
   // ---- reading --------------------------------------------------------------------------------------
@@ -746,6 +755,13 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       case 'cancel-wait':
         button.addEventListener('click', () => void cancelWait());
         break;
+      // 暂停 is one click and needs no confirmation (CTRL-001, CTRL-004); 续行 goes on after the service revalidates.
+      case 'pause':
+        button.addEventListener('click', () => void pauseRun());
+        break;
+      case 'resume':
+        button.addEventListener('click', () => void resumeRun());
+        break;
       // 取消任务 records nothing: it opens the Cancellation Impact Summary, whose confirmation does (CTRL-004).
       case 'cancel-run':
         button.setAttribute('aria-controls', CANCEL_IMPACT_ID);
@@ -819,7 +835,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       bar.querySelector<HTMLElement>(
         '[data-task-drawer-control="start"]:not(:disabled), [data-task-drawer-control="start-when-online"]:not(:disabled), ' +
           '[data-task-drawer-control="reconfirm-plan"]:not(:disabled), [data-task-drawer-control="cancel-wait"]:not(:disabled), ' +
-          '[data-task-drawer-control="cancel-run"]:not(:disabled)',
+          '[data-task-drawer-control="cancel-run"]:not(:disabled), [data-task-drawer-control="pause"]:not(:disabled), ' +
+          '[data-task-drawer-control="resume"]:not(:disabled)',
       )?.focus();
     }
     // `working` is not part of the projection cache key. Even an unchanged plan must repaint
@@ -926,9 +943,16 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   function activityBlock(run: TaskPlanRunControlProjection): HTMLElement {
     const section = el('section', 'task-plan-activity');
     section.setAttribute('aria-label', TASK_PLAN_ACTIVITY_TITLE);
-    section.dataset['taskPlanActivity'] = run.cancelling ? 'cancelling' : run.activity === null ? 'unreported' : 'running';
+    section.dataset['taskPlanActivity'] = run.cancelling ? 'cancelling' : run.pausing ? 'pausing'
+      : run.continuation !== null ? 'stopped' : run.activity === null ? 'unreported' : 'running';
     section.append(el('h3', 'task-plan-activity-title', TASK_PLAN_ACTIVITY_TITLE));
     const activity = run.activity;
+    // A stopped Run: nothing is in flight, and what it kept is its continuation point (CONT-015).
+    if (run.continuation !== null) {
+      section.dataset['taskPlanActivityProgress'] = `${run.continuation.unitsSettled}/${run.continuation.unitsTotal}`;
+      section.append(el('p', 'field-note', taskBarContinuationNote(run.continuation.unitsSettled, run.continuation.unitsTotal)));
+      return section;
+    }
     if (activity === null) {
       section.append(el('p', 'field-note', TASK_PLAN_ACTIVITY_UNREPORTED));
       return section;
@@ -967,6 +991,44 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       options.onRecorded(current.kind, current.bookId);
     } catch (error) {
       refusal = options.errorMessage(error, TASK_BAR_CANCEL_RUN_FAILED);
+      options.setStatus(refusal, 'error');
+    } finally {
+      endWork(asked);
+    }
+  }
+
+  /** 暂停 (Issue #422, S76b; CTRL-001): the pause is recorded at once, and the drawer follows the Run to 已暂停. */
+  async function pauseRun(): Promise<void> {
+    const current = plan;
+    const asked = request;
+    if (current === null || current.kind !== 'baseline-analysis' || current.runControl === null || !beginWork()) return;
+    options.setStatus('正在暂停任务…', 'busy');
+    try {
+      await api.pauseBaselineAnalysisRun({ taskIntentId: current.ref });
+      options.setStatus(TASK_BAR_PAUSING_NOTE, 'success');
+      focusBar = true;
+      options.onRecorded(current.kind, current.bookId);
+    } catch (error) {
+      refusal = options.errorMessage(error, TASK_BAR_PAUSE_FAILED);
+      options.setStatus(refusal, 'error');
+    } finally {
+      endWork(asked);
+    }
+  }
+
+  /** 续行 (CONT-015): the same Run goes on from where it stopped; a refusal says what it waits for, beside the bar. */
+  async function resumeRun(): Promise<void> {
+    const current = plan;
+    const asked = request;
+    if (current === null || current.kind !== 'baseline-analysis' || current.runControl === null || !beginWork()) return;
+    options.setStatus('正在续行…', 'busy');
+    try {
+      await api.resumeBaselineAnalysisRun({ taskIntentId: current.ref });
+      options.setStatus('已续行，从已保存的进度接着读。', 'success');
+      focusBar = true;
+      options.onRecorded(current.kind, current.bookId);
+    } catch (error) {
+      refusal = options.errorMessage(error, TASK_BAR_RESUME_FAILED);
       options.setStatus(refusal, 'error');
     } finally {
       endWork(asked);

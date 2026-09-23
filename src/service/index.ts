@@ -387,6 +387,43 @@ async function dispatch(
         op: request.op,
         result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress),
       };
+    // 暂停 (Issue #422, S76b; CTRL-001): `pausing` is recorded, and the owner stops the Run at the next unit boundary —
+    // or, holding no execution of it, settles it `paused` at once.
+    case 'pauseBaselineAnalysisRun': {
+      const runRecordId = store.requestBaselineAnalysisPause(request.input.bookId, request.input.taskIntentId);
+      if (runRecordId !== null) analysisExecution.pauseRun(runRecordId, store.baselineAnalysisLedger);
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress),
+      };
+    }
+    // 续行 (CONT-015, CONT-016): the drawer's own revalidation decides — the plan, the kept progress, the slot, the
+    // credential and the network — and only then does the same Run go on, under its own authorization.
+    case 'resumeBaselineAnalysisRun': {
+      const runRecordId = store.continuableBaselineAnalysisRun(request.input.bookId, request.input.taskIntentId);
+      const plan = await store.inspectTaskPlanWithConnection(
+        { bookId: request.input.bookId, kind: 'baseline-analysis', ref: request.input.taskIntentId },
+        () => analysisExecution.liveCredentialReadiness(),
+        connectivity.planConnectivity,
+        analysisProgress,
+      );
+      const reason = plan.runControl?.resume?.reason ?? '这项任务现在不能续行。';
+      if (plan.runControl?.resume?.reason !== null) throw new StoreErrorClass('ANALYSIS_RESUME_BLOCKED', reason);
+      try {
+        analysisExecution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true });
+      } catch (error) {
+        const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
+        throw new StoreErrorClass(code, error instanceof Error ? error.message : '续行未能进入调度。');
+      }
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress),
+      };
+    }
     // 取消任务 (Issue #422; CTRL-004 to CTRL-008): `cancelling` is recorded, and the owner stops the Run at the next unit
     // boundary — or, holding no execution of it, settles it at once.
     case 'cancelBaselineAnalysisRun': {
@@ -1058,6 +1095,17 @@ async function run(): Promise<void> {
       developerLive,
       unitHold: unitHoldPath === undefined ? null : controlledUnitHold(unitHoldPath),
     });
+    // Startup reconciliation (Issue #422, S76b; CONT-014): a baseline Run this service's predecessor left under way has
+    // nothing running it now. It settles 已暂停 or 任务已中断 · 可续行 before any request is read; one left cancelling is
+    // finished by the owner, sending nothing.
+    const reconciled = store.reconcileStoppedBaselineAnalysisRuns();
+    for (const runRecordId of reconciled.cancelling) {
+      try {
+        analysisExecution.cancelRun(runRecordId, store.baselineAnalysisLedger);
+      } catch {
+        // The Run stays 正在取消 and is offered 取消任务 again, which settles it.
+      }
+    }
     // A Review Run's categories take the one owner's single slot one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);
     // Connectivity Wait (Issue #502). The reading is the device's own unless J-04's control names a file; the

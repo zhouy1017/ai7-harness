@@ -57,12 +57,15 @@ import {
   TASK_BAR_CANCEL_RUN,
   TASK_BAR_CANCELLING_NOTE,
   TASK_BAR_PAUSE,
+  TASK_BAR_PAUSING_NOTE,
+  TASK_BAR_RESUME,
   TASK_BAR_REDO,
   TASK_PLAN_ACTIVITY_STALE,
   TASK_PLAN_ACTIVITY_TITLE,
   TASK_PLAN_ACTIVITY_UNREPORTED,
   groupedCount,
   taskBarSummary,
+  taskBarContinuationNote,
   taskPlanActivityIsStale,
   taskPlanActivityRows,
   taskBarView,
@@ -153,7 +156,7 @@ describe('the drawer', () => {
   it('gives every state a tone and a shape, so the pill never speaks by colour alone', () => {
     const keys: TaskPlanStateKey[] = [
       'ready', 'changed', 'unconnected', 'offline', 'recorded', 'blocked', 'waiting', 'running', 'settled', 'stopped', 'cancelled',
-      'cancelling', 'cancelled-after-start',
+      'cancelling', 'cancelled-after-start', 'pausing', 'paused', 'resumable',
     ];
     expect(Object.keys(TASK_PLAN_STATE_PILLS).sort()).toEqual([...keys].sort());
     expect(new Set(keys.map((key) => TASK_PLAN_STATE_PILLS[key].shape)).size).toBeGreaterThan(4);
@@ -385,22 +388,25 @@ describe('the authorization bar (S74a)', () => {
     }
   });
 
-  it('offers a Run under way 暂停 and 改计划重做 with why they wait, and 取消任务, which only opens its summary (Issue #422; AUTH-010, CTRL-004)', () => {
+  it('offers a Run under way 暂停, 取消任务 — which only opens its summary — and 改计划重做 with why it waits (Issue #422; AUTH-010, CTRL-001, CTRL-004)', () => {
     expect([TASK_BAR_PAUSE, TASK_BAR_CANCEL_RUN, TASK_BAR_REDO]).toEqual(['暂停', '取消任务', '改计划重做']);
     expect([TASK_BAR_CANCEL_IMPACT_HEADING, TASK_BAR_CANCEL_CONFIRM, TASK_BAR_CANCEL_KEEP]).toEqual(['取消影响摘要', '确认取消任务', '继续运行']);
     const runControl = {
       runRecordId: 'run',
       cancelling: false,
+      pausing: false,
       cancel: { reason: null, impact: ['正在读的第 3 个阅读范围读完后停止。'] },
-      pause: { reason: '暂停与续行随后提供' },
+      pause: { reason: null },
+      resume: null,
       redo: { reason: '改计划重做随计划编辑提供' },
       activity: null,
       executingSince: null,
+      continuation: null,
     };
     const running = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'running', label: '运行中' }, runControl }));
     expect(running).toMatchObject({ readiness: 'started', statement: null, note: null, status: '运行中' });
     expect(running.actions).toEqual([
-      { name: 'pause', label: '暂停', tone: 'secondary', disabledReason: '暂停与续行随后提供' },
+      { name: 'pause', label: '暂停', tone: 'secondary', disabledReason: null },
       { name: 'cancel-run', label: '取消任务', tone: 'secondary', disabledReason: null },
       { name: 'redo', label: '改计划重做', tone: 'quiet', disabledReason: '改计划重做随计划编辑提供' },
       { name: 'run-link', label: '查看运行', tone: 'secondary', disabledReason: null },
@@ -417,6 +423,42 @@ describe('the authorization bar (S74a)', () => {
     const stopped = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'cancelled-after-start', label: '已取消' } }));
     expect(stopped).toMatchObject({ statement: null, note: null, status: '已取消' });
     expect(names(stopped)).toEqual(['run-link']);
+    // 正在暂停 (CTRL-001): its sentence until the Run reaches its boundary, and nothing more to press.
+    const pausing = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
+      state: { key: 'pausing', label: '正在暂停' },
+      runControl: { ...runControl, pausing: true, cancel: { reason: '正在暂停：正在进行的这一步完成后停下', impact: [] }, pause: { reason: '这项任务现在没有在运行，不能暂停；可以取消它' } },
+    }));
+    expect(pausing).toMatchObject({ status: '正在暂停', note: TASK_BAR_PAUSING_NOTE });
+    expect(TASK_BAR_PAUSING_NOTE).toBe('已记下你的暂停；正在进行的这一步完成后停下，已完成的部分都会保存');
+    expect(names(pausing)).toEqual(['run-link']);
+  });
+
+  it('offers a stopped Run 续行 when it can go on, and says why when it cannot (Issue #422, S76b; CONT-014, CONT-015)', () => {
+    const stoppedControl = {
+      runRecordId: 'run', cancelling: false, pausing: false,
+      cancel: { reason: null, impact: ['这项任务已经停下。'] },
+      pause: { reason: '这项任务现在没有在运行，不能暂停；可以取消它' },
+      resume: { reason: null },
+      redo: { reason: '改计划重做随计划编辑提供' },
+      activity: null, executingSince: null,
+      continuation: { unitsSettled: 3, unitsTotal: 8 },
+    };
+    expect(TASK_BAR_RESUME).toBe('续行');
+    const paused = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'paused', label: '已暂停' }, runControl: stoppedControl }));
+    expect(paused).toMatchObject({ status: '已暂停', note: '已读完 3 / 8 个阅读范围，结果都已保存；续行时从第 4 个接着读，不重复已读完的部分' });
+    expect(paused.actions).toEqual([
+      { name: 'resume', label: '续行', tone: 'primary', disabledReason: null },
+      { name: 'cancel-run', label: '取消任务', tone: 'secondary', disabledReason: null },
+      { name: 'redo', label: '改计划重做', tone: 'quiet', disabledReason: '改计划重做随计划编辑提供' },
+      { name: 'run-link', label: '查看运行', tone: 'secondary', disabledReason: null },
+    ]);
+    const blocked = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
+      state: { key: 'resumable', label: '任务已中断 · 可续行' },
+      runControl: { ...stoppedControl, resume: { reason: '另一项任务正在运行；它结束后再续行。' } },
+    }));
+    expect(blocked.status).toBe('任务已中断 · 可续行');
+    expect(blocked.actions[0]).toEqual({ name: 'resume', label: '续行', tone: 'primary', disabledReason: '另一项任务正在运行；它结束后再续行。' });
+    expect(taskBarContinuationNote(8, 8)).toBe('已读完全部 8 个阅读范围，结果都已保存；续行时接着做之后的归纳与抽样');
   });
 
   it('states a cancelled wait as cancelled with nothing sent — never as 已中断 — and only links to it (OFF-010, OFF-012)', () => {

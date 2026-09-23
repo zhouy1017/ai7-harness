@@ -185,7 +185,7 @@ export function recentWindowStart(now: Date): string {
 
 // ---- composition ---------------------------------------------------------------------------------------
 
-const ACTIVE_RUN_STATES: ReadonlySet<BaselineAnalysisRunState> = new Set(['authorized', 'admitted', 'executing', 'cancelling']);
+const ACTIVE_RUN_STATES: ReadonlySet<BaselineAnalysisRunState> = new Set(['authorized', 'admitted', 'executing', 'cancelling', 'pausing']);
 
 function item(
   group: GlobalAttentionGroupKey,
@@ -323,7 +323,9 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading): GlobalAttentio
   if (ACTIVE_RUN_STATES.has(run.state)) {
     if (run.progress !== null) {
       // 正在取消 stays visible wherever the editor looks until the Run has stopped (Issue #422, CTRL-005).
-      const state = run.state === 'executing' ? 'analysis-running' : run.state === 'cancelling' ? 'analysis-cancelling' : 'analysis-queued';
+      const state = run.state === 'executing' ? 'analysis-running'
+        : run.state === 'cancelling' ? 'analysis-cancelling'
+          : run.state === 'pausing' ? 'analysis-pausing' : 'analysis-queued';
       return item('active', state, {
         itemId, blocked: false, at: run.recordedAt, book, object, facts: { progress: progressFact(run.progress) }, nextStep: 'view-run', target, technical,
       });
@@ -339,6 +341,11 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading): GlobalAttentio
       return item('exceptions', 'analysis-interrupted', { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
     case 'blocked-before-dispatch':
       return item('exceptions', 'analysis-blocked', { itemId, blocked: true, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
+    // 运行中与已暂停 (Issue #422, S76b): a paused Run, and one AI7 stopped under, wait for the editor's 续行 or 取消任务.
+    case 'paused':
+      return item('active', 'analysis-paused', { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
+    case 'resumable':
+      return item('active', 'analysis-resumable', { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
     default:
       return null;
   }

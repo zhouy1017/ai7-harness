@@ -126,6 +126,9 @@ const RUN_STATE_LABELS: Record<BaselineAnalysisRunState, string> = {
   'awaiting-connectivity': '等待网络 · 未启动',
   cancelled: '已取消 · 未启动',
   cancelling: '正在取消',
+  pausing: '正在暂停',
+  paused: '已暂停',
+  resumable: '任务已中断 · 可续行',
 };
 
 /**
@@ -137,6 +140,25 @@ export const RUN_CANCELLED_AFTER_START_LABEL = '已取消' as const;
 
 /** What `cancelling` records (CTRL-005): the editor's word, and where the Run stops. */
 export const RUN_CANCELLING_DETAIL = '编辑取消了这项任务；正在进行的阅读范围读完后停止，此后不再发送任何内容。' as const;
+
+/** What `pausing` records (CTRL-001): the editor's word, and where the Run stops to wait. */
+export const RUN_PAUSING_DETAIL = '编辑暂停了这项任务；正在进行的阅读范围读完后停下，已完成的部分都会保存。' as const;
+
+/** What reconciliation records for a Run AI7 stopped under (CONT-014): nothing of it runs, and nothing is sent until 续行. */
+export const RECONCILED_RESUMABLE_DETAIL = 'AI7 上次关闭时这项任务正在运行；已读完的阅读范围都已保存。点「续行」从下一个阅读范围接着读；在此之前不会发送任何内容。' as const;
+export const RECONCILED_PAUSED_DETAIL = 'AI7 上次关闭时这项任务正在暂停；已读完的阅读范围都已保存，任务已暂停。' as const;
+
+/** The schema of one unit's continuation checkpoint (Issue #422, S76b). */
+const UNIT_CHECKPOINT_SCHEMA = 'ai7.analysis.unit-checkpoint/1' as const;
+
+/** One unit a Run settled, as its continuation checkpoint keeps it: the revision's unit record, and what was observed. */
+export interface UnitCheckpoint {
+  readonly attemptId: string;
+  readonly unit: UnitResultRecord;
+  readonly observation: { unitOrdinal: number; attempts: number; wallMs: number; usage: { inputTokens: number; outputTokens: number } | null } | null;
+  /** The kind's typed unit result, read back the way a predecessor's is; `null` for a gap. */
+  readonly result: unknown;
+}
 
 const OUTCOME_LABELS = {
   completed: '任务结果：已完成',
@@ -489,14 +511,15 @@ function firstBaselineCounts(unitCount: number): AnalysisReusePlanCounts {
 }
 
 /**
- * A Task whose Run is authorized for dispatch, waiting in Connectivity Wait, admitted, executing, or stopping at the
- * editor's cancellation blocks any new update Task. A waiting Run holds no execution slot, but it will run: the
+ * A Task whose Run is authorized for dispatch, waiting in Connectivity Wait, admitted, executing, stopping at the
+ * editor's cancellation, pausing, paused, or left 可续行 blocks any new update Task: a paused Run holds no slot, but it
+ * is not done (Issue #422, S76b). A waiting Run holds no execution slot, but it will run: the
  * editor cancels it to prepare another (Issue #502, OFF-010); a cancelling one still holds the slot until it has
  * stopped (Issue #422).
  */
 function runIsActive(state: BaselineAnalysisRunState | null): boolean {
   return state === 'authorized' || state === 'awaiting-connectivity' || state === 'admitted' || state === 'executing' ||
-    state === 'cancelling';
+    state === 'cancelling' || state === 'pausing' || state === 'paused' || state === 'resumable';
 }
 
 /**
@@ -735,6 +758,9 @@ export class BaselineAnalysisStore {
         : run.state === 'awaiting-connectivity' ? 'waiting'
           : run.state === 'cancelled' ? 'cancelled'
             : run.state === 'cancelling' ? 'cancelling'
+              : run.state === 'pausing' ? 'pausing'
+                : run.state === 'paused' ? 'paused'
+                  : run.state === 'resumable' ? 'resumable'
         : run.state === 'admitted' ? 'admitted'
           : run.state === 'executing' ? 'executing'
             : run.state === 'completed' || run.state === 'completed-with-gaps' ? 'settled'
@@ -800,6 +826,9 @@ export class BaselineAnalysisStore {
           : state === 'waiting' ? RUN_STATE_LABELS['awaiting-connectivity']
             : state === 'cancelled' ? (run !== null && runBegan(run.transitions) ? RUN_CANCELLED_AFTER_START_LABEL : RUN_STATE_LABELS.cancelled)
               : state === 'cancelling' ? RUN_STATE_LABELS.cancelling
+                : state === 'pausing' ? RUN_STATE_LABELS.pausing
+                  : state === 'paused' ? RUN_STATE_LABELS.paused
+                    : state === 'resumable' ? RUN_STATE_LABELS.resumable
               : state === 'admitted' ? '已进入调度'
                 : state === 'executing' ? '正在执行'
                   : state === 'settled' ? '已形成结果集修订版'
@@ -972,7 +1001,7 @@ export class BaselineAnalysisStore {
             state,
             stateAt: asString(row.last_state_at),
             recordedAt: asString(row.run_recorded_at),
-            progress: state === 'admitted' || state === 'executing' || state === 'cancelling' ? progress(runRecordId) : null,
+            progress: state === 'admitted' || state === 'executing' || state === 'cancelling' || state === 'pausing' ? progress(runRecordId) : null,
           },
           planRevision: null,
         });
@@ -1585,7 +1614,9 @@ export class BaselineAnalysisStore {
     // hold it — it is the ledger's transition, read here already — so the projection composes it onto
     // the four facts the owner does hold. A Run with no owner in flight keeps today's `null`.
     // A Run stopping at the editor's cancellation is still in flight: its signal is read until it has stopped.
-    const live = current.state === 'admitted' || current.state === 'executing' || current.state === 'cancelling' ? progress(runRecordId) : null;
+    const live = current.state === 'admitted' || current.state === 'executing' || current.state === 'cancelling' || current.state === 'pausing'
+      ? progress(runRecordId)
+      : null;
     return {
       runRecordId,
       state: current.state,
@@ -2478,7 +2509,9 @@ export class BaselineAnalysisStore {
     if (run.state === 'cancelled') return { projection: current, runRecordId: null };
     if (run.state === 'cancelling') return { projection: current, runRecordId: run.runRecordId };
     requireAnalysis(run.state !== 'awaiting-connectivity', 'ANALYSIS_CANCEL_WAITING', '这项任务还在等待开始；请用等待中的「取消」。');
-    requireAnalysis(run.state === 'admitted' || run.state === 'executing', 'ANALYSIS_CANCEL_NOT_RUNNING', '只有正在运行的任务可以取消；它尚未开始或已经结束。');
+    // A paused Run, one pausing, and one left 可续行 are cancelled as a running one is (Issue #422, S76b).
+    requireAnalysis(run.state === 'admitted' || run.state === 'executing' || run.state === 'pausing' || run.state === 'paused' || run.state === 'resumable',
+      'ANALYSIS_CANCEL_NOT_RUNNING', '只有正在运行或暂停中的任务可以取消；它尚未开始或已经结束。');
     this.recordRunState(run.runRecordId, 'cancelling', { detail: RUN_CANCELLING_DETAIL });
     return { projection: this.inspect(bookId), runRecordId: run.runRecordId };
   }
@@ -2490,6 +2523,142 @@ export class BaselineAnalysisStore {
     requireAnalysis(run !== undefined, 'ANALYSIS_RUN_INVALID', '运行记录不存在。');
     const attempt = this.#db.prepare('SELECT attempt_id FROM analysis_execution_attempts WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
     return { taskIntentId: asString(run.task_intent_id), attemptId: attempt === undefined ? null : asString(attempt.attempt_id) };
+  }
+
+  // ---- 暂停 and 续行 (Issue #422, plan slice S76b) -----------------------------------------------------------
+
+  /**
+   * 暂停 (CTRL-001): `pausing` is recorded at once and the Run is named for the execution owner, which stops it at the
+   * next unit boundary and records `paused` once what it read is kept. Pausing twice names the same Run and records
+   * nothing more; a Run already paused, or left 可续行, answers as it is.
+   */
+  requestPause(bookId: string, taskIntentId: string): { projection: AnalysisProjection; runRecordId: string | null } {
+    requireAnalysis(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId), 'ANALYSIS_PAUSE_INVALID', '暂停任务的参数无效。');
+    const current = this.inspect(bookId);
+    const run = current.run;
+    requireAnalysis(current.taskIntent?.taskIntentId === taskIntentId && run !== null, 'ANALYSIS_PAUSE_STALE', '这项任务已经变化；无法暂停。');
+    if (run.state === 'paused' || run.state === 'resumable') return { projection: current, runRecordId: null };
+    if (run.state === 'pausing') return { projection: current, runRecordId: run.runRecordId };
+    requireAnalysis(run.state === 'admitted' || run.state === 'executing', 'ANALYSIS_PAUSE_NOT_RUNNING', '只有正在运行的任务可以暂停；它尚未开始、正在取消或已经结束。');
+    this.recordRunState(run.runRecordId, 'pausing', { detail: RUN_PAUSING_DETAIL });
+    return { projection: this.inspect(bookId), runRecordId: run.runRecordId };
+  }
+
+  /** The paused or 可续行 Run of the Book's current Task, which 续行 would continue; `null` when there is none. */
+  continuableRun(bookId: string, taskIntentId: string): string {
+    requireAnalysis(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId), 'ANALYSIS_RESUME_INVALID', '续行的参数无效。');
+    const current = this.inspect(bookId);
+    const run = current.run;
+    requireAnalysis(current.taskIntent?.taskIntentId === taskIntentId && run !== null, 'ANALYSIS_RESUME_STALE', '这项任务已经变化；无法续行。');
+    requireAnalysis(run.state === 'paused' || run.state === 'resumable', 'ANALYSIS_RESUME_NOT_PAUSED', '只有已暂停或中断后可续行的任务可以续行。');
+    return run.runRecordId;
+  }
+
+  /**
+   * 续行's lightweight revalidation (CONT-015, CONT-016), local half: the reasons a paused Run cannot go on as it was
+   * authorized — its bound plan's material inputs moved (the same comparison Reconnect Preflight makes), or its
+   * continuation checkpoints no longer read back — or none. The route's credential is the service's to read.
+   */
+  continuationBlockers(runRecordId: string): ReadonlyArray<string> {
+    const drift = this.preflightDrift(runRecordId);
+    const reasons = drift.length === 0 ? [] : [`计划的关键内容已经变化：${drift.join('、')}。这次运行不能照原计划续行；请取消它，再按新的计划准备。`];
+    try {
+      this.unitCheckpoints(runRecordId);
+    } catch {
+      reasons.push('已保存的阅读进度无法核对，这次运行不能续行；请取消它，再重新开始。');
+    }
+    return reasons;
+  }
+
+  /** One settled unit of a Run, kept the moment it settles: the continuation point 续行 goes on from (CONT-015). */
+  recordUnitCheckpoint(input: {
+    runRecordId: string;
+    attemptId: string;
+    unit: UnitResultRecord;
+    observation: UnitCheckpoint['observation'];
+  }): void {
+    const recordedAt = new Date().toISOString();
+    const record = canonicalRecord({
+      schema: UNIT_CHECKPOINT_SCHEMA,
+      runRecordId: input.runRecordId,
+      attemptId: input.attemptId,
+      unit: input.unit,
+      observation: input.observation,
+      recordedAt,
+    });
+    this.#db.prepare(
+      'INSERT INTO analysis_unit_checkpoints(run_record_id, unit_ordinal, state, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)',
+    ).run(input.runRecordId, input.unit.unitOrdinal, input.unit.closed.state, recordedAt, record.json, record.digest);
+  }
+
+  /** A Run's continuation checkpoints in unit order, each read back against its own digest. */
+  unitCheckpoints(runRecordId: string): UnitCheckpoint[] {
+    requireAnalysis(UUID_PATTERN.test(runRecordId), 'ANALYSIS_RUN_INVALID', '运行记录标识无效。');
+    const rows = this.#db.prepare('SELECT * FROM analysis_unit_checkpoints WHERE run_record_id = ? ORDER BY unit_ordinal').all(runRecordId) as SqlRow[];
+    return rows.map((row) => {
+      const json = asString(row.canonical_json);
+      const record = parseCanonicalJson(json) as {
+        schema: string; runRecordId: string; attemptId: string; unit: UnitResultRecord; observation: UnitCheckpoint['observation'];
+      };
+      const unitOrdinal = asNumber(row.unit_ordinal);
+      requireAnalysis(canonicalRecord(record).digest === asString(row.sha256) && record.schema === UNIT_CHECKPOINT_SCHEMA &&
+        record.runRecordId === runRecordId && record.unit.unitOrdinal === unitOrdinal && record.unit.closed.state === asString(row.state),
+      'ANALYSIS_RECORD_INVALID', '运行的阅读进度记录与其摘要不一致。');
+      return {
+        attemptId: record.attemptId,
+        unit: record.unit,
+        observation: record.observation,
+        result: record.unit.closed.state === 'closed'
+          ? this.#definition.unitResultOfRecord(record.unit.closed.result as Record<string, unknown>, unitOrdinal)
+          : null,
+      };
+    });
+  }
+
+  /** The attempt and Execution Binding a Run persisted, for 续行 to go on under; `null` before it persisted them. */
+  executionBindingOf(runRecordId: string): { attemptId: string; binding: ExecutionBindingRecord; bindingDigest: string; spanCount: number } | null {
+    const attempt = this.#db.prepare('SELECT attempt_id FROM analysis_execution_attempts WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
+    if (attempt === undefined) return null;
+    const attemptId = asString(attempt.attempt_id);
+    const row = this.#db.prepare('SELECT * FROM analysis_execution_bindings WHERE attempt_id = ?').get(attemptId) as SqlRow | undefined;
+    requireAnalysis(row !== undefined, 'ANALYSIS_RECORD_INVALID', '执行尝试缺少执行绑定。');
+    const binding = parseCanonicalJson(asString(row.canonical_json)) as ExecutionBindingRecord;
+    requireAnalysis(canonicalRecord(binding).digest === asString(row.sha256) && binding.attemptId === attemptId, 'ANALYSIS_RECORD_INVALID', '执行绑定与其摘要不一致。');
+    const spans = this.#db.prepare('SELECT count(*) total, max(ordinal) last FROM analysis_harness_spans WHERE attempt_id = ?').get(attemptId) as SqlRow;
+    return { attemptId, binding, bindingDigest: asString(row.sha256), spanCount: spans.last === null ? 0 : asNumber(spans.last) };
+  }
+
+  /**
+   * Startup reconciliation (CONT-014): every Run of this kind a stopped service left admitted, executing or pausing has
+   * nothing running it. One pausing settles `paused` — the boundary it waited for is reached — and one admitted or
+   * executing `resumable`, 任务已中断 · 可续行, its Run Authorization kept and nothing dispatched until 续行. A Run left
+   * cancelling is named for the execution owner, which finishes the cancellation.
+   */
+  reconcileStoppedRuns(): { settled: number; cancelling: ReadonlyArray<string> } {
+    const rows = this.#db.prepare(
+      `SELECT r.run_record_id,
+              (SELECT s.state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1) last_state
+       FROM analysis_run_records r
+       JOIN analysis_task_intents i ON i.task_intent_id = r.task_intent_id
+       WHERE i.kind = ?
+       ORDER BY r.recorded_at, r.rowid`,
+    ).all(this.#definition.kind) as SqlRow[];
+    let settled = 0;
+    const cancelling: string[] = [];
+    for (const row of rows) {
+      const runRecordId = asString(row.run_record_id);
+      const state = row.last_state === null ? null : asString(row.last_state);
+      if (state === 'pausing') {
+        this.recordRunState(runRecordId, 'paused', { detail: RECONCILED_PAUSED_DETAIL, reconciled: true });
+        settled += 1;
+      } else if (state === 'admitted' || state === 'executing') {
+        this.recordRunState(runRecordId, 'resumable', { detail: RECONCILED_RESUMABLE_DETAIL, reconciled: true });
+        settled += 1;
+      } else if (state === 'cancelling') {
+        cancelling.push(runRecordId);
+      }
+    }
+    return { settled, cancelling };
   }
 
   /** Every Run of this kind waiting in Connectivity Wait, oldest first, with its Book. */

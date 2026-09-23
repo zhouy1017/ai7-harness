@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { BASELINE_ANALYSIS_KIND } from '../../shared/protocol.js';
 import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisReusePlanUnitProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, ReviewScopePlanUnitProjection, RunAttemptState, RunReportStageId } from '../../shared/protocol.js';
 import { prepareExecution, type HarnessExecutionSpan, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
@@ -27,7 +28,7 @@ import {
   type AssuranceSamplingParseFailureCode,
 } from './assurance-sampling-contract.js';
 import { canonicalRecord } from './canonical.js';
-import { SAMPLE1_SOURCE_DIGEST, type BaselineAnalysisStore, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitResultRecord } from './baseline-analysis-store.js';
+import { SAMPLE1_SOURCE_DIGEST, type BaselineAnalysisStore, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitCheckpoint, type UnitResultRecord } from './baseline-analysis-store.js';
 import type { BaselineUnitResult } from './contract.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 import { ExecutionAdmissionError } from './execution-error.js';
@@ -146,8 +147,18 @@ interface ActiveRun {
    * so the unit in flight finishes — a sent turn is never aborted — and nothing after it is sent.
    */
   cancelRequested: boolean;
+  /** 暂停 (Issue #422, S76b): read between units like a cancellation; the Run then waits, keeping what it read. */
+  pauseRequested: boolean;
+  /**
+   * Whether AI7 stopping under this Run leaves it 可续行 rather than ending it (CONT-014): a baseline analysis Run, whose
+   * settled units are kept as they settle. A review category's Run keeps ending 已中断, which its drive loop reads.
+   */
+  readonly resumableOnInterrupt: boolean;
   done: Promise<void>;
 }
+
+/** What 续行 goes on from: the attempt and Execution Binding the Run persisted, when it had persisted them. */
+type Continuation = { readonly stored: ReturnType<BaselineAnalysisStore['executionBindingOf']> };
 
 /**
  * What the attempt in flight is doing, at the instant a reader asks. `retrying` and `null` are
@@ -179,7 +190,23 @@ export const CANCELLED_BEFORE_UNITS = '运行在开始阅读任何阅读范围�
  * running, so it is settled at once; the results of its finished units lived only in the Run it lost, and the
  * record says so rather than claiming a revision it never formed.
  */
-export const CANCELLED_WITHOUT_EXECUTION = '运行已按你的要求取消。AI7 上次关闭时这项任务没有结束，它已完成单元的结果没有保存下来，因此没有形成结果集修订版；此后没有再发送任何内容。' as const;
+export const CANCELLED_WITHOUT_EXECUTION = '运行已按你的要求取消。它还没有读完任何阅读范围，因此没有形成结果集修订版；此后没有再发送任何内容。' as const;
+
+/** A stopped Run whose kept progress could not be gathered into its revision is still cancelled, and says so. */
+export const CANCELLED_WITHOUT_REVISION = '运行已按你的要求取消；已保存的阅读进度这一次没能整理成结果集修订版，因此没有形成修订版。此后没有再发送任何内容。' as const;
+
+/** 暂停's own words (Issue #422, S76b; CTRL-001): where the Run stopped, what it kept, and what 续行 does. */
+export function pausedDetail(settled: number, total: number): string {
+  return `已在阅读范围之间暂停：已读完 ${settled} / ${total} 个阅读范围，结果都已保存。点「续行」从下一个阅读范围接着读。`;
+}
+
+/** AI7 stopping under a Run it can continue (CONT-014): nothing more runs, and nothing is sent until 续行. */
+export function resumableDetail(settled: number, total: number): string {
+  return `AI7 关闭时这项任务正在运行：已读完 ${settled} / ${total} 个阅读范围，结果都已保存。点「续行」从下一个阅读范围接着读；在此之前不会发送任何内容。`;
+}
+
+/** A pause recorded for a Run nothing executes: its boundary is reached already. */
+export const PAUSED_WITHOUT_EXECUTION = 'AI7 没有在运行这项任务；已读完的阅读范围都已保存，任务已暂停。' as const;
 
 /** The disclosure of a cross-unit reduction, a sample, and a reflection the editor's cancellation stopped. */
 export const CROSS_UNIT_CANCELLED = '运行已按你的要求取消，跨单元归纳未发起。' as const;
@@ -282,6 +309,8 @@ export class BaselineAnalysisExecutionOwner {
   readonly #broker: CredentialBroker;
   #active: ActiveRun | null = null;
   #disposed = false;
+  /** Stopped Runs whose cancellation waits for the one slot to finish them (Issue #422, S76b). */
+  readonly #pendingCancels: Array<{ runRecordId: string; ledger: BaselineAnalysisStore }> = [];
 
   constructor(deps: ExecutionOwnerDependencies) {
     // The developer-live runtime and the bound scope are one fact: a v5 launch that reached this owner
@@ -333,7 +362,17 @@ export class BaselineAnalysisExecutionOwner {
    * service passes it only once Reconnect Preflight has found the model service reachable, the credential ready
    * and the bound plan unchanged. Every other Run must be one that was just authorized.
    */
-  admitAndDispatch(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger, options: { afterReconnectPreflight?: boolean } = {}): void {
+  /**
+   * `resume` is 续行 (Issue #422, S76b; CONT-015): a paused Run, or one left 可续行, goes on in a new span of the same
+   * attempt from its continuation checkpoints, once its Execution Binding reads exactly as it was persisted. With
+   * `cancel`, a stopped Run the editor cancelled is finished the same way, sending nothing: its kept units become its
+   * partial revision.
+   */
+  admitAndDispatch(
+    runRecordId: string,
+    ledger: BaselineAnalysisStore = this.#deps.ledger,
+    options: { afterReconnectPreflight?: boolean; resume?: boolean; cancel?: boolean } = {},
+  ): void {
     if (this.#disposed) throw new ExecutionAdmissionError('EXECUTION_STOPPING', '本地业务服务正在停止。');
     if (this.#active !== null) throw new ExecutionAdmissionError('EXECUTION_BUSY', '当前已有一个运行在执行；本实例一次只执行一个运行。');
     const live = this.#deps.developerLive ?? null;
@@ -349,17 +388,41 @@ export class BaselineAnalysisExecutionOwner {
       throw new ExecutionAdmissionError('EXECUTION_SOURCE_NOT_TRANSMITTABLE', '当前图书不在 developer-live 可传输的 Public SampleBook 集合内；未发起任何传输。');
     }
     const state = ledger.currentRunState(runRecordId);
-    if (state === 'awaiting-connectivity' ? options.afterReconnectPreflight !== true : state !== 'authorized') {
-      throw new ExecutionAdmissionError('EXECUTION_STATE_INVALID', state === 'awaiting-connectivity'
-        ? '等待中的运行只有通过重新联网预检后才能进入调度。'
-        : '只有刚记录授权的运行可以进入调度。');
+    const resuming = options.resume === true;
+    const admissible = resuming
+      ? state === 'paused' || state === 'resumable' || (options.cancel === true && state === 'cancelling')
+      : state === 'awaiting-connectivity' ? options.afterReconnectPreflight === true : state === 'authorized';
+    if (!admissible) {
+      throw new ExecutionAdmissionError('EXECUTION_STATE_INVALID', resuming
+        ? '只有已暂停或中断后可续行的运行可以续行。'
+        : state === 'awaiting-connectivity'
+          ? '等待中的运行只有通过重新联网预检后才能进入调度。'
+          : '只有刚记录授权的运行可以进入调度。');
+    }
+    // 续行 goes on only under the Execution Binding the Run persisted (CONT-015): the same route, model, fixture,
+    // policy, credential slot, ceiling and plan digests. Anything else refuses before a state is recorded.
+    const continuation: Continuation | null = resuming ? { stored: ledger.executionBindingOf(runRecordId) } : null;
+    if (continuation?.stored != null) {
+      const stored = continuation.stored;
+      const rebuilt = executionBindingRecordOf({
+        facts, definition: ledger.definition, live, fixture: this.#deps.fixture, attemptId: stored.attemptId,
+        harnessSessionId: stored.binding.harnessSessionId, boundAt: stored.binding.boundAt, compositionDigest: facts.behaviorCompositionDigest,
+      });
+      if (canonicalRecord(rebuilt).digest !== stored.bindingDigest) {
+        throw new ExecutionAdmissionError('EXECUTION_RESUME_BINDING_DRIFT', '这次运行授权时的执行绑定已经变化（模型服务、路由或策略不同）；不能续行。请取消它，再按新的计划准备。');
+      }
     }
     const submitted = facts.update === null ? facts.manifest.units.length : facts.update.reusePlan.counts.recomputed;
     // A scope plan also says how many units it leaves unreviewed; a baseline plan has no such count,
     // so its admitted state reads exactly as it always has.
     const unreviewed = facts.update !== null && 'unreviewed' in facts.update.reusePlan.counts ? facts.update.reusePlan.counts.unreviewed : null;
     ledger.recordRunState(runRecordId, 'admitted', {
-      detail: '已进入 AI7 调度器（单槽位）。',
+      detail: !resuming
+        ? '已进入 AI7 调度器（单槽位）。'
+        : options.cancel === true
+          ? '取消：已进入 AI7 调度器，把已读完的部分整理成结果集修订版，不再发送任何内容。'
+          : '续行：已进入 AI7 调度器（单槽位），从已保存的进度接着读。',
+      ...(resuming ? { resumed: true } : {}),
       unitsTotal: facts.manifest.units.length,
       ...(facts.update === null ? {} : { updateMode: facts.update.mode, unitsRecomputed: submitted, unitsReused: facts.update.reusePlan.counts.reused }),
       ...(unreviewed === null ? {} : { unitsUnreviewed: unreviewed }),
@@ -381,15 +444,31 @@ export class BaselineAnalysisExecutionOwner {
       transmissionsAtDispatch: 0,
       harness: null,
       interrupted: false,
-      cancelRequested: false,
+      cancelRequested: options.cancel === true,
+      pauseRequested: false,
+      resumableOnInterrupt: ledger.definition.kind === BASELINE_ANALYSIS_KIND,
       done: Promise.resolve(),
     };
     this.#active = active;
-    active.done = this.#execute(active, facts).catch((error: unknown) => {
+    active.done = this.#execute(active, facts, continuation).catch((error: unknown) => {
       this.#recordFailure(ledger, facts, error);
     }).finally(() => {
       if (this.#active === active) this.#active = null;
+      this.#finishPendingCancel();
     });
+  }
+
+  /** The next stopped Run whose cancellation waited for the slot, finished now that the slot is free. */
+  #finishPendingCancel(): void {
+    while (this.#active === null && !this.#disposed && this.#pendingCancels.length > 0) {
+      const next = this.#pendingCancels.shift()!;
+      try {
+        if (next.ledger.currentRunState(next.runRecordId) !== 'cancelling') continue;
+        this.admitAndDispatch(next.runRecordId, next.ledger, { resume: true, cancel: true });
+      } catch {
+        settleCancelWithoutRevision(next.ledger, next.runRecordId, CANCELLED_WITHOUT_REVISION);
+      }
+    }
   }
 
   /** Resolve once no Run is executing; used by the service suites to observe settlement. */
@@ -413,11 +492,43 @@ export class BaselineAnalysisExecutionOwner {
       active.cancelRequested = true;
       return 'stopping';
     }
-    const facts = ledger.cancellationFacts(runRecordId);
     if (ledger.currentRunState(runRecordId) !== 'cancelling') {
       throw new ExecutionAdmissionError('EXECUTION_STATE_INVALID', '只有已记录“正在取消”的运行可以结束取消。');
     }
-    recordCancelledWithoutRevision(ledger, runRecordId, facts.taskIntentId, facts.attemptId, CANCELLED_WITHOUT_EXECUTION);
+    // A stopped Run that kept units ends the way a running one does — its partial revision, then 已取消 — through the
+    // one slot, sending nothing; while another Run holds the slot, it waits for it. One that kept none ends here.
+    if (ledger.unitCheckpoints(runRecordId).length > 0 && !this.#disposed) {
+      if (this.#active === null) {
+        try {
+          this.admitAndDispatch(runRecordId, ledger, { resume: true, cancel: true });
+        } catch {
+          settleCancelWithoutRevision(ledger, runRecordId, CANCELLED_WITHOUT_REVISION);
+          return 'settled';
+        }
+      } else if (!this.#pendingCancels.some((entry) => entry.runRecordId === runRecordId)) {
+        this.#pendingCancels.push({ runRecordId, ledger });
+      }
+      return 'stopping';
+    }
+    settleCancelWithoutRevision(ledger, runRecordId, CANCELLED_WITHOUT_EXECUTION);
+    return 'settled';
+  }
+
+  /**
+   * 暂停 (Issue #422, S76b; CTRL-001), once `pausing` is recorded. The Run this owner executes stops at the next unit
+   * boundary — the unit in flight finishes — and records `paused` with what it read kept. A pause recorded for a Run
+   * nothing executes has reached its boundary already, and settles here.
+   */
+  pauseRun(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): 'pausing' | 'settled' {
+    const active = this.#active;
+    if (active !== null && active.runRecordId === runRecordId) {
+      active.pauseRequested = true;
+      return 'pausing';
+    }
+    if (ledger.currentRunState(runRecordId) !== 'pausing') {
+      throw new ExecutionAdmissionError('EXECUTION_STATE_INVALID', '只有已记录“正在暂停”的运行可以结束暂停。');
+    }
+    ledger.recordRunState(runRecordId, 'paused', { detail: PAUSED_WITHOUT_EXECUTION });
     return 'settled';
   }
 
@@ -541,7 +652,7 @@ export class BaselineAnalysisExecutionOwner {
     return gap(failure?.kind === 'interrupted' ? failure.failure.reason : '运行反思被中断。');
   }
 
-  async #execute(active: ActiveRun, facts: ExecutionPlanFacts): Promise<void> {
+  async #execute(active: ActiveRun, facts: ExecutionPlanFacts, continuation: Continuation | null): Promise<void> {
     const ledger = active.ledger;
     // Everything kind-specific this Run needs: the frozen system section, the unit message builder and
     // its header, the unit result parser, the reducer, and whether the kind declares a cross-unit
@@ -559,14 +670,10 @@ export class BaselineAnalysisExecutionOwner {
       throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', '当前可信策略不是 developer-live · Provider Processing v5。');
     }
     const fixture = this.#deps.fixture;
-    // The route the plan froze, resolved once: the deterministic fixture, or the live route profile.
-    const route: ExecutionRouteId = live === null ? LOCAL_DETERMINISTIC_ROUTE : OPENCODE_GO_ROUTE;
-    const model = live === null ? LOCAL_DETERMINISTIC_MODEL : OPENCODE_GO_V4_FLASH_PROFILE.model;
-    const credentialSlot = live === null ? 'deepseek-api-key' as const : OPENCODE_GO_ROUTE_PROFILE.credentialSlot;
-    const credentialReference = live === null ? facts.credentialReference : DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE;
-    // The ceiling the frozen plan carries, already resolved: an explicit launch total, or the policy's
-    // per-frozen-unit default against this Run's own frozen unit count. Never re-derived at dispatch.
-    const runBudgetCeiling: RunBudgetCeiling = facts.runBudgetCeiling === 'unset' ? { kind: 'unset' } : facts.runBudgetCeiling;
+    // The route the plan froze, resolved once — the deterministic fixture, or the live route profile — and the
+    // ceiling it carries, already resolved: an explicit launch total, or the policy's per-frozen-unit default
+    // against this Run's own frozen unit count. Never re-derived at dispatch.
+    const { route, model, credentialSlot, credentialReference, runBudgetCeiling } = routeFactsOf(facts, live);
     // The test item purpose is the Task mode, so a first baseline and each update mode number their
     // live calls separately and a repeated purpose can never collide with an unrelated test. A Task
     // without a plan is the kind's own whole first mode — `first-baseline` for the baseline kind.
@@ -597,9 +704,15 @@ export class BaselineAnalysisExecutionOwner {
       : ledger.loadPredecessorUnitResults(predecessorFacts.revisionId);
     const acceptedOutputDigests = new Set<string>();
     let currentBindingDigest: string | null = null;
-    const harnessSessionId = randomUUID();
-    const attemptId = randomUUID();
-    const boundAt = new Date().toISOString();
+    // 续行 goes on under the attempt, Harness session and binding instant the Run persisted (CONT-015): a new span of
+    // the same attempt, never a Retry attempt created merely because AI7 stopped.
+    const stored = continuation?.stored ?? null;
+    const harnessSessionId = stored?.binding.harnessSessionId ?? randomUUID();
+    const attemptId = stored?.attemptId ?? randomUUID();
+    const boundAt = stored?.binding.boundAt ?? new Date().toISOString();
+    // What the Run kept before it stopped, read back against their digests; nothing on a first execution.
+    const checkpoints: UnitCheckpoint[] = continuation === null ? [] : ledger.unitCheckpoints(facts.runRecordId);
+    const checkpointed = new Set(checkpoints.map((checkpoint) => checkpoint.unit.unitOrdinal));
     let bindingFacts: EgressBindingFacts | null = null;
     // The payload digest the gate admitted for the turn in flight; recorded by reference, never the payload.
     let admittedPayloadDigest: string | null = null;
@@ -672,41 +785,9 @@ export class BaselineAnalysisExecutionOwner {
     let liveInterruption: LiveInterruption | null = null;
     try {
       requireCompositionMatch(harness.composition.digest, facts.behaviorCompositionDigest);
-      const bindingRecord: ExecutionBindingRecord = {
-        attemptId,
-        taskIntentId: facts.taskIntentId,
-        runRecordId: facts.runRecordId,
-        bookId: facts.bookId,
-        planEnvelopeDigest: facts.planEnvelopeDigest,
-        planVersion: facts.planVersionOrdinal,
-        runSourceScopeDigest: facts.runSourceScopeDigest,
-        providerResolutionPlanDigest: facts.providerResolutionPlanDigest,
-        coverageManifestDigest: facts.manifestDigest,
-        manuscriptPin: { revisionId: facts.checkpoint.revisionId, revisionDigest: facts.checkpoint.revisionDigest },
-        nativeArtifact: {
-          identity: '@ai7/editorial-workspace-profile',
-          version: '1.0.0',
-          nativeCarrierSha256: facts.artifactPin.nativeCarrierSha256,
-          sidecarRevision: 2,
-          sidecarSha256: facts.artifactPin.sidecarSha256,
-        },
-        behaviorCompositionDigest: harness.composition.digest,
-        promptContractDigest,
-        contractVersion: definition.contractVersion,
-        harnessSessionId,
-        route,
-        model,
-        adapterPin: live === null ? { fixtureIdentity: fixture!.identity, fixtureSha256: fixture!.sha256 } : null,
-        credentialSlot: { modelRole: 'Main Editorial Role', slot: credentialSlot, credentialReference },
-        outboundDataCategory: 'public-or-synthetic',
-        policyPin: live === null
-          ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v5', liveTransmissions: 0 }
-          : { operationalScope: 'developer-live', providerProcessingVersion: 'v5', activePolicySetVersion: 'v5', liveTransmissions: 'bounded-by-run' },
-        runBudgetCeiling: runBudgetCeiling.kind === 'unset' ? 'unset' : runBudgetCeiling,
-        dispatchAttribution: 'Dispatch',
-        boundAt,
-        ...(update === null ? {} : { update: { mode: update.mode, predecessorRevisionId: predecessorFacts?.revisionId ?? null, reusePlanDigest: update.reusePlanDigest } }),
-      };
+      const bindingRecord: ExecutionBindingRecord = executionBindingRecordOf({
+        facts, definition, live, fixture, attemptId, harnessSessionId, boundAt, compositionDigest: harness.composition.digest,
+      });
       const bindingDigest = canonicalRecord(bindingRecord).digest;
       // Readiness only: the product path reaches the Protected Secret Store and releases no value.
       const credentialReadiness = await this.#broker.checkReadiness({
@@ -715,8 +796,12 @@ export class BaselineAnalysisExecutionOwner {
         slot: credentialSlot,
         credentialReference,
       });
-      const persisted = ledger.persistAttemptAndBinding({ runRecordId: facts.runRecordId, binding: bindingRecord, credentialReadiness });
-      if (persisted.bindingDigest !== bindingDigest) throw new ExecutionAdmissionError('EXECUTION_BINDING_DIGEST_DRIFT', '执行绑定摘要在持久化时发生变化。');
+      if (stored === null) {
+        const persisted = ledger.persistAttemptAndBinding({ runRecordId: facts.runRecordId, binding: bindingRecord, credentialReadiness });
+        if (persisted.bindingDigest !== bindingDigest) throw new ExecutionAdmissionError('EXECUTION_BINDING_DIGEST_DRIFT', '执行绑定摘要在持久化时发生变化。');
+      } else if (stored.bindingDigest !== bindingDigest) {
+        throw new ExecutionAdmissionError('EXECUTION_BINDING_DIGEST_DRIFT', '续行时的执行绑定与这次运行持久化的不一致。');
+      }
       // A live Run cannot start without its credential: the broker would refuse the release anyway,
       // and refusing here keeps the Run from spending Sessions to reach the same conclusion.
       if (live !== null && credentialReadiness !== 'present') {
@@ -736,18 +821,29 @@ export class BaselineAnalysisExecutionOwner {
         admittedUserMessages,
       };
       harness.bindExecution({ harnessSessionId, behaviorCompositionDigest: harness.composition.digest, promptContractDigest });
-      // 取消任务 before the first unit (CTRL-008): nothing has been sent, so the Run ends here without provider work.
-      if (active.cancelRequested) {
+      // 取消任务 before the Run kept any unit (CTRL-008): nothing of it is left to gather, so it ends here without
+      // provider work and without a revision. A stopped Run that kept units is finished below, sending nothing.
+      if (active.cancelRequested && checkpoints.length === 0) {
         recordCancelledWithoutRevision(ledger, facts.runRecordId, facts.taskIntentId, attemptId, CANCELLED_BEFORE_UNITS);
         return;
       }
-      ledger.recordRunState(facts.runRecordId, 'executing', {
-        detail: update === null ? '执行绑定已持久化并核对；开始逐单元执行。' : '执行绑定已持久化并核对；按血缘复用兼容单元，仅对重算单元逐单元执行。',
-        attemptId,
-        bindingDigest,
-        unitsTotal: manifest.units.length,
-        ...(update === null ? {} : { unitsRecomputed: submittedUnits.length, unitsReused: update.reusePlan.counts.reused }),
-      });
+      // 暂停 before the next unit began: the Run waits here, keeping what it had kept (Issue #422, S76b).
+      if (active.pauseRequested && !active.cancelRequested) {
+        ledger.recordRunState(facts.runRecordId, 'paused', { detail: pausedDetail(checkpoints.length, submittedUnits.length), unitsSettled: checkpoints.length, unitsTotal: submittedUnits.length });
+        return;
+      }
+      if (!active.cancelRequested) {
+        ledger.recordRunState(facts.runRecordId, 'executing', {
+          detail: continuation !== null
+            ? `续行：新的执行区段；已读完的 ${checkpoints.length} 个阅读范围沿用，接着读其余 ${submittedUnits.length - checkpoints.length} 个。`
+            : update === null ? '执行绑定已持久化并核对；开始逐单元执行。' : '执行绑定已持久化并核对；按血缘复用兼容单元，仅对重算单元逐单元执行。',
+          attemptId,
+          bindingDigest,
+          unitsTotal: manifest.units.length,
+          ...(update === null ? {} : { unitsRecomputed: submittedUnits.length, unitsReused: update.reusePlan.counts.reused }),
+          ...(continuation === null ? {} : { resumed: true, unitsSettled: checkpoints.length }),
+        });
+      }
 
       const outcomes: Array<ClosedUnitOutcome<unknown> | GapUnitOutcome> = [];
       const unitRecords: UnitResultRecord[] = [];
@@ -813,9 +909,38 @@ export class BaselineAnalysisExecutionOwner {
           closed: { state: 'closed', responseDigest: source.responseDigest, usage: source.usage, result: definition.unitRecord(result) },
         });
       }
-      let spanOrdinal = 0;
-      let adaptationOrdinal = 0;
-      const adaptedUnitOrdinals: number[] = [];
+      // 续行 continues the attempt's own numbering: its spans after the last recorded, its adaptations after theirs.
+      const priorAdaptations = continuation === null ? [] : ledger.adaptationsOf(facts.runRecordId);
+      let spanOrdinal = stored?.spanCount ?? 0;
+      let adaptationOrdinal = priorAdaptations.length;
+      const adaptedUnitOrdinals: number[] = priorAdaptations.map((entry) => entry.unitOrdinal);
+      // The units the Run kept before it stopped count as settled here exactly as they did then: their results, their
+      // observations, their usage — toward the revision, the report and the ceiling alike — and their accepted answers.
+      for (const checkpoint of checkpoints) {
+        const kept = checkpoint.unit;
+        unitRecords.push(kept);
+        if (kept.closed.state === 'closed') {
+          outcomes.push({ unitOrdinal: kept.unitOrdinal, state: 'closed', result: checkpoint.result });
+          acceptedOutputDigests.add(kept.closed.responseDigest);
+        } else {
+          outcomes.push({ unitOrdinal: kept.unitOrdinal, state: 'gap', code: kept.closed.gap.code, reason: kept.closed.gap.reason });
+        }
+        const observation = checkpoint.observation;
+        if (observation === null) continue;
+        unitObservations.set(kept.unitOrdinal, observation);
+        usage.requests += observation.attempts;
+        stageUsage.units.requests += observation.attempts;
+        active.progress.completedAttempts += observation.attempts;
+        if (observation.usage !== null) {
+          usage.inputTokens += observation.usage.inputTokens;
+          usage.outputTokens += observation.usage.outputTokens;
+          stageUsage.units.inputTokens += observation.usage.inputTokens;
+          stageUsage.units.outputTokens += observation.usage.outputTokens;
+          accumulated.push(observation.usage);
+        }
+      }
+      active.progress.unitsSettled = checkpoints.length;
+      const remainingUnits = submittedUnits.filter((unit) => !checkpointed.has(unit.ordinal));
       // One technical turn for one unit attempt: the span is recorded by reference with the attempt index
       // and the admitted payload digest, and every attempt's usage counts toward the Run.
       const submitAttempt = async (unit: CoverageManifestUnitProjection, attemptIndex: number, attemptState: RunAttemptState) => {
@@ -844,11 +969,13 @@ export class BaselineAnalysisExecutionOwner {
       };
       // The `units` stage of the Run Report: first dispatch to last settled unit. A Run whose every
       // unit was reused by lineage submits nothing and opens no segment at all.
-      if (submittedUnits.length > 0) clock.open('units');
-      for (const unit of submittedUnits) {
+      if (remainingUnits.length > 0) clock.open('units');
+      for (const unit of remainingUnits) {
         if (active.interrupted) break;
         // 取消任务 (CTRL-005): the Run stops at this unit boundary, and the unit before it has finished.
         if (active.cancelRequested) break;
+        // 暂停 (CTRL-001): the Run waits at this boundary, keeping every unit it settled.
+        if (active.pauseRequested) break;
         // The ceiling is evaluated before every dispatch, not only inside the gate: reaching it ends
         // the Run here, before the next unit forms a request at all.
         if (ceilingState() === 'reached') {
@@ -862,6 +989,9 @@ export class BaselineAnalysisExecutionOwner {
         const unitStartedAtMs = Date.now();
         const requestDigest = definition.requestDigest(unit.ordinal, unit.digest);
         let attempt = await submitAttempt(unit, 1, 'dispatched');
+        // AI7 stopping under a Run it can continue cut this turn off: the unit is not settled, and 续行 reads it again
+        // (CONT-014). A turn that came back whole settles, and is kept, as any other.
+        if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) break;
         let attempts = 1;
         let unitUsageTotal = attempt.unitUsage;
         // What the Run Report records about this unit, taken at the instant it settles however it
@@ -901,6 +1031,7 @@ export class BaselineAnalysisExecutionOwner {
             adaptedUnitOrdinals.push(unit.ordinal);
             if (currentBindingDigest !== bindingDigest) throw new ExecutionAdmissionError('EXECUTION_BINDING_DIGEST_DRIFT', '计划内调整期间执行绑定发生变化。');
             attempt = await submitAttempt(unit, 2, 'retrying');
+            if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) break;
             attempts = 2;
             // Both attempts cost the Run, so the unit's row carries what the unit cost, not what its
             // last attempt cost.
@@ -968,6 +1099,11 @@ export class BaselineAnalysisExecutionOwner {
           terminalClassification = 'interrupted';
           break;
         }
+        // The continuation point (CONT-015): the unit is kept the moment it settles, as its revision will hold it.
+        const settledRecord = unitRecords.find((record) => record.unitOrdinal === unit.ordinal);
+        if (active.resumableOnInterrupt && settledRecord !== undefined) {
+          ledger.recordUnitCheckpoint({ runRecordId: facts.runRecordId, attemptId, unit: settledRecord, observation: unitObservations.get(unit.ordinal) ?? null });
+        }
         active.progress.unitsSettled += 1;
         // The bar the stale case is measured against is this Run's own longest settled step, so a model
         // that answers in ninety seconds and one that answers in ten are each judged by their own pace.
@@ -980,6 +1116,21 @@ export class BaselineAnalysisExecutionOwner {
         active.progress.attemptState = null;
       }
       clock.close();
+      // 暂停, or AI7 stopping under a Run it can continue (Issue #422, S76b): the Run stops here keeping what it read —
+      // no reduction, no revision, no outcome — and 续行 goes on from the next unit. A cancellation outranks both, and a
+      // spent ceiling or an account limit still ends the Run as the interruption it is.
+      const stopWithoutEnding = (): boolean => {
+        if (active.cancelRequested || liveInterruption !== null) return false;
+        if (!active.pauseRequested && !(active.interrupted && active.resumableOnInterrupt)) return false;
+        const settled = active.progress.unitsSettled;
+        ledger.recordRunState(facts.runRecordId, active.pauseRequested ? 'paused' : 'resumable', {
+          detail: active.pauseRequested ? pausedDetail(settled, submittedUnits.length) : resumableDetail(settled, submittedUnits.length),
+          unitsSettled: settled,
+          unitsTotal: submittedUnits.length,
+        });
+        return true;
+      };
+      if (stopWithoutEnding()) return;
       if (active.interrupted && terminalClassification === 'completed') terminalClassification = 'interrupted';
       // A Run the editor cancelled ends `cancelled`, whatever else stopped it (CTRL-005), and nothing after this point
       // is sent. A failure that ends the Run is still recorded as the failure it is, by `#recordFailure`.
@@ -1069,6 +1220,10 @@ export class BaselineAnalysisExecutionOwner {
         }
       }
 
+      // A pause, or AI7 stopping, while the reduction's turn was out: the Run waits with every unit kept, and 续行 forms
+      // the reduction again.
+      if (stopWithoutEnding()) return;
+
       // The kind's reducers run over the complete new unit set: reused plus recomputed. This is the
       // first of the `reduction` stage's two segments; the second is the persist below. The sampling
       // await between them belongs to the sampling stage, so the two segments are measured apart and
@@ -1096,6 +1251,7 @@ export class BaselineAnalysisExecutionOwner {
         acceptedOutputDigests, liveAdapter, countTurn, clock, ceilingState, live, policy,
         stopped: terminalClassification === 'interrupted' || terminalClassification === 'cancelled',
       });
+      if (stopWithoutEnding()) return;
       // The second reducer pass: the sample joins the revision and re-labels the assurance axis, and
       // every finding component comes through byte for byte. The `reduction` stage resumes here.
       clock.open('reduction');
@@ -1313,6 +1469,84 @@ export class BaselineAnalysisExecutionOwner {
     const usage = sampled.turnsWithUsage === 0 ? null : { inputTokens: sampled.inputTokens, outputTokens: sampled.outputTokens };
     return assuranceSampleOutcome(draw, dispositions, usage, gapReasons);
   }
+}
+
+/** The route facts a Run's Execution Binding names, from its frozen plan and the launch the owner runs under. */
+function routeFactsOf(facts: ExecutionPlanFacts, live: DeveloperLiveRuntime | null): {
+  route: ExecutionRouteId;
+  model: string;
+  credentialSlot: CredentialSlotBinding['slot'];
+  credentialReference: string;
+  runBudgetCeiling: RunBudgetCeiling;
+} {
+  return {
+    route: live === null ? LOCAL_DETERMINISTIC_ROUTE : OPENCODE_GO_ROUTE,
+    model: live === null ? LOCAL_DETERMINISTIC_MODEL : OPENCODE_GO_V4_FLASH_PROFILE.model,
+    credentialSlot: live === null ? 'deepseek-api-key' : OPENCODE_GO_ROUTE_PROFILE.credentialSlot,
+    credentialReference: live === null ? facts.credentialReference : DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
+    runBudgetCeiling: facts.runBudgetCeiling === 'unset' ? { kind: 'unset' } : facts.runBudgetCeiling,
+  };
+}
+
+/**
+ * One attempt's Execution Binding, exactly as it is persisted before the first model call. 续行 builds it again from
+ * the same frozen plan and launch with the attempt's own identities, and goes on only if it reads byte for byte as
+ * the persisted one (CONT-015).
+ */
+function executionBindingRecordOf(input: {
+  facts: ExecutionPlanFacts;
+  definition: AnalysisKindDefinition;
+  live: DeveloperLiveRuntime | null;
+  fixture: ResolvedModelFixture | null;
+  attemptId: string;
+  harnessSessionId: string;
+  boundAt: string;
+  compositionDigest: string;
+}): ExecutionBindingRecord {
+  const { facts, definition, live, fixture } = input;
+  const { route, model, credentialSlot, credentialReference, runBudgetCeiling } = routeFactsOf(facts, live);
+  const update = facts.update;
+  return {
+    attemptId: input.attemptId,
+    taskIntentId: facts.taskIntentId,
+    runRecordId: facts.runRecordId,
+    bookId: facts.bookId,
+    planEnvelopeDigest: facts.planEnvelopeDigest,
+    planVersion: facts.planVersionOrdinal,
+    runSourceScopeDigest: facts.runSourceScopeDigest,
+    providerResolutionPlanDigest: facts.providerResolutionPlanDigest,
+    coverageManifestDigest: facts.manifestDigest,
+    manuscriptPin: { revisionId: facts.checkpoint.revisionId, revisionDigest: facts.checkpoint.revisionDigest },
+    nativeArtifact: {
+      identity: '@ai7/editorial-workspace-profile',
+      version: '1.0.0',
+      nativeCarrierSha256: facts.artifactPin.nativeCarrierSha256,
+      sidecarRevision: 2,
+      sidecarSha256: facts.artifactPin.sidecarSha256,
+    },
+    behaviorCompositionDigest: input.compositionDigest,
+    promptContractDigest: definition.promptContractDigest,
+    contractVersion: definition.contractVersion,
+    harnessSessionId: input.harnessSessionId,
+    route,
+    model,
+    adapterPin: live === null ? { fixtureIdentity: fixture!.identity, fixtureSha256: fixture!.sha256 } : null,
+    credentialSlot: { modelRole: 'Main Editorial Role', slot: credentialSlot, credentialReference },
+    outboundDataCategory: 'public-or-synthetic',
+    policyPin: live === null
+      ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v5', liveTransmissions: 0 }
+      : { operationalScope: 'developer-live', providerProcessingVersion: 'v5', activePolicySetVersion: 'v5', liveTransmissions: 'bounded-by-run' },
+    runBudgetCeiling: runBudgetCeiling.kind === 'unset' ? 'unset' : runBudgetCeiling,
+    dispatchAttribution: 'Dispatch',
+    boundAt: input.boundAt,
+    ...(update === null ? {} : { update: { mode: update.mode, predecessorRevisionId: update.predecessor?.revisionId ?? null, reusePlanDigest: update.reusePlanDigest } }),
+  };
+}
+
+/** A cancelled Run no execution can finish ends here, with no revision, its reason in its own words. */
+function settleCancelWithoutRevision(ledger: BaselineAnalysisStore, runRecordId: string, reason: string): void {
+  const facts = ledger.cancellationFacts(runRecordId);
+  recordCancelledWithoutRevision(ledger, runRecordId, facts.taskIntentId, facts.attemptId, reason);
 }
 
 /**

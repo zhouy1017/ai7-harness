@@ -2311,6 +2311,29 @@ function registerRendererHandlers(
         });
       }),
   );
+  // 暂停 and 续行 (Issue #422, S76b) are the baseline Task's own the same way: named by the Task Intent, answered by the
+  // route Book, and serialized with every other effect — 续行 dispatches.
+  for (const [channel, operation, words] of [
+    [IPC_CHANNELS.pauseBaselineAnalysisRun, 'pauseBaselineAnalysisRun', '暂停任务的结果不属于当前图书工作台。'],
+    [IPC_CHANNELS.resumeBaselineAnalysisRun, 'resumeBaselineAnalysisRun', '续行的结果不属于当前图书工作台。'],
+  ] as const) {
+    ipcMain.handle(
+      channel,
+      (event, input: Omit<ServiceOperationMap[typeof operation]['input'], 'bookId'>) =>
+        envelope(async () => {
+          const owned = requireSender(event);
+          return serializeEffect(async () => {
+            requireAuthority();
+            const route = requireCurrentBookRoute(owned);
+            const routeGeneration = owned.routeGeneration;
+            const result = await service.call(operation, { taskIntentId: input.taskIntentId, bookId: route.bookId });
+            requireCurrentRouteGeneration(owned, routeGeneration);
+            if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', words);
+            return result;
+          });
+        }),
+    );
+  }
   // Reconnect Preflight names no Book: it only ever admits Runs the editor already authorized to start when
   // online. It is serialized with every other effect, because an admission dispatches.
   ipcMain.handle(

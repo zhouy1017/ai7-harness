@@ -178,7 +178,12 @@ import {
   TaskPlanError,
   withConnectionReadiness,
   withConnectivityReadiness,
+  withResumeBlockers,
   withWaitingReason,
+  RESUME_BLOCKED_CONNECTION,
+  RESUME_BLOCKED_OFFLINE,
+  RESUME_BLOCKED_SLOT,
+  type BaselineStoppedRunFacts,
 } from './task-plan.js';
 import { initializeProposalConflictSchema, ProposalConflictError, ProposalConflictStore, readConflictAttention } from './proposal-conflicts.js';
 import {
@@ -3723,7 +3728,8 @@ export class EditorialStore {
       current(projection.taskIntent.taskIntentId);
       const blocks = this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
       const defaultRule = this.#baselineDefaultRule(projection);
-      const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, defaultRule }));
+      const stopped = this.#baselineStoppedRun(projection);
+      const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, defaultRule, ...(stopped === null ? {} : { stopped }) }));
       return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     const reviewRunId = input.ref;
@@ -3754,6 +3760,16 @@ export class EditorialStore {
     // and only once its credential is known to be there — 模型未连接 is decided first.
     const reaches = routeKind !== null && connectivity.reachesNetwork(routeKind);
     plan = withConnectivityReadiness(plan, reaches, reaches ? connectivity.reading() : 'online');
+    // 续行 (Issue #422, S76b; CONT-015): a stopped Run goes on only once the service could run it now — the slot free,
+    // the route's credential there when it sends to a model service — one that sends nothing asks for none here
+    // either — and the device online when the route reaches its model over the network.
+    if (plan.runControl?.resume != null) {
+      const blockers: string[] = [];
+      if (connectivity.slotBusy()) blockers.push(RESUME_BLOCKED_SLOT);
+      if (plan.start.needsModelConnection && (await credentialReadiness()) === 'missing') blockers.push(RESUME_BLOCKED_CONNECTION);
+      if (reaches && connectivity.reading() === 'offline') blockers.push(RESUME_BLOCKED_OFFLINE);
+      plan = withResumeBlockers(plan, blockers);
+    }
     if (plan.state.key !== 'waiting') return plan;
     if (reaches && connectivity.reading() === 'offline') return withWaitingReason(plan, 'network');
     if ((await credentialReadiness()) === 'missing') return withWaitingReason(plan, 'connection');
@@ -3830,6 +3846,42 @@ export class EditorialStore {
   requestBaselineAnalysisCancel(bookId: string, taskIntentId: string): string | null {
     this.#assertAvailable();
     return this.#analysisCall(() => this.#baselineAnalysis.requestCancel(bookId, taskIntentId)).runRecordId;
+  }
+
+  /**
+   * 暂停 on the Book's baseline Run (Issue #422, S76b; CTRL-001): `pausing` is recorded at once and the Run the execution
+   * owner must stop at the next unit boundary is named — `null` when it is already paused or left 可续行.
+   */
+  requestBaselineAnalysisPause(bookId: string, taskIntentId: string): string | null {
+    this.#assertAvailable();
+    return this.#analysisCall(() => this.#baselineAnalysis.requestPause(bookId, taskIntentId)).runRecordId;
+  }
+
+  /** The Book's paused or 可续行 baseline Run, which 续行 would continue (CONT-015). */
+  continuableBaselineAnalysisRun(bookId: string, taskIntentId: string): string {
+    this.#assertAvailable();
+    return this.#analysisCall(() => this.#baselineAnalysis.continuableRun(bookId, taskIntentId));
+  }
+
+  /**
+   * Startup reconciliation (CONT-014): the baseline Runs a stopped service left under way are settled `paused` or
+   * `resumable`; the ones left cancelling are named for the execution owner to finish.
+   */
+  reconcileStoppedBaselineAnalysisRuns(): { settled: number; cancelling: ReadonlyArray<string> } {
+    this.#assertAvailable();
+    return this.#analysisCall(() => this.#baselineAnalysis.reconcileStoppedRuns());
+  }
+
+  /** What the drawer reads of the Task's stopped Run: what it kept, and why 续行 cannot go on as authorized, if not. */
+  #baselineStoppedRun(projection: BaselineAnalysisProjection): BaselineStoppedRunFacts | null {
+    const run = projection.run;
+    if (run === null || !(run.state === 'paused' || run.state === 'resumable')) return null;
+    const unitsTotal = projection.update === null ? (projection.coverageManifest?.units.length ?? 0) : projection.update.reusePlan?.counts.recomputed ?? 0;
+    return this.#analysisCall(() => ({
+      unitsSettled: this.#baselineAnalysis.unitCheckpoints(run.runRecordId).length,
+      unitsTotal,
+      blockers: this.#baselineAnalysis.continuationBlockers(run.runRecordId),
+    }));
   }
 
   /** The baseline Runs waiting in Connectivity Wait — the route Book's, or every Book's — oldest first. */
