@@ -28,6 +28,8 @@ declare module 'electron' {
       copy(): void;
       paste(): void;
       pasteAndMatchStyle(): void;
+      /** The PDF export's print of a staged page (Issue #500, S64b). */
+      printToPDF(options: { pageSize: 'A4'; printBackground: boolean; preferCSSPageSize: boolean }): Promise<Uint8Array>;
     };
     destroy(): void;
     focus(): void;
@@ -75,6 +77,6 @@ declare module 'electron' {
     send(channel: string, input?: unknown): void;
   };
   export const Menu: { setApplicationMenu(menu: null): void };
-  export const session: { defaultSession: Session };
+  export const session: { defaultSession: Session; fromPartition(partition: string): Session };
   export const shell: { showItemInFolder(path: string): void };
 }

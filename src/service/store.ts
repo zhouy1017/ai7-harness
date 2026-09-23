@@ -10,6 +10,8 @@ import type {
   GlobalAttentionProjection,
   ApproveManuscriptExportInput,
   InspectManuscriptExportReceiptInput,
+  StageManuscriptExportInput,
+  ManuscriptExportStageProjection,
   ManuscriptExportPreparationProjection,
   ManuscriptExportReceiptProjection,
   ManuscriptExportReviewProjection,
@@ -9224,6 +9226,11 @@ export class EditorialStore {
   /** `按上述方式导出`: the approval, the atomic write and its receipt or classified outcome (V2-UX-EXP-012, EXP-017). */
   async approveManuscriptExport(input: ApproveManuscriptExportInput, available: boolean): Promise<ManuscriptExportReceiptProjection> {
     return this.#exportCall(() => this.#manuscriptExport.approve(input, available));
+  }
+
+  /** The main process's step before it approves a PDF: the page the preparation bound, staged to print (Issue #500, S64b). */
+  async stageManuscriptExport(input: StageManuscriptExportInput, available: boolean): Promise<ManuscriptExportStageProjection> {
+    return this.#exportCall(() => this.#manuscriptExport.stage(input, available));
   }
 
   /** What one approved export came to, read by the main process before it reveals the file. */

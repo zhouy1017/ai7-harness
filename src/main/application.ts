@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { release } from 'node:os';
-import { basename, extname, isAbsolute, resolve } from 'node:path';
+import { writeFile } from 'node:fs/promises';
+import { basename, dirname, extname, isAbsolute, resolve } from 'node:path';
 import {
   app,
   BrowserWindow,
@@ -369,6 +370,46 @@ function validateRuntime(): void {
   );
 }
 
+/** What the Save dialog offers for each export format (Issue #500, S64b). */
+const EXPORT_DIALOG_FORMATS = {
+  docx: { extension: 'docx', name: 'Word 文档' },
+  pdf: { extension: 'pdf', name: 'PDF 文档' },
+  markdown: { extension: 'md', name: 'Markdown 文本' },
+} as const;
+
+/**
+ * Print one staged export page to PDF (Issue #500, S64b): a hidden window on its own in-memory session with every
+ * network scheme cancelled, no script, no devtools and no navigation, loads the page from AI7's own staging folder —
+ * and only from there — and prints it as the fixed layout the page states. The printed file goes beside the page,
+ * never over an existing one; the service then writes it to the chosen place and records its receipt.
+ */
+async function printStagedPage(stagingRoot: string, printSession: Session, pagePath: string, pdfPath: string): Promise<void> {
+  requireDesktop(isAbsolute(pagePath) && isAbsolute(pdfPath) && dirname(pagePath) === stagingRoot && dirname(pdfPath) === stagingRoot &&
+    extname(pagePath) === '.html' && extname(pdfPath) === '.pdf');
+  const printer = new BrowserWindow({
+    show: false,
+    webPreferences: {
+      session: printSession,
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      javascript: false,
+      devTools: false,
+      spellcheck: false,
+      webgl: false,
+    },
+  });
+  printer.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  printer.webContents.on('will-navigate', (event) => event.preventDefault());
+  try {
+    await printer.loadFile(pagePath);
+    const pdf = await printer.webContents.printToPDF({ pageSize: 'A4', printBackground: true, preferCSSPageSize: true });
+    await writeFile(pdfPath, pdf, { flag: 'wx' });
+  } finally {
+    if (!printer.isDestroyed()) printer.destroy();
+  }
+}
+
 function installChromiumDenial(productSession: Session): void {
   productSession.webRequest.onBeforeRequest(
     { urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] },
@@ -423,6 +464,7 @@ function registerRendererHandlers(
   removeModelServiceCredential: () => Promise<ModelServiceSettingsProjection>,
   consumeLostApplyAcknowledgement: () => boolean,
   consumeInjectedSavePath: () => string | undefined,
+  printExportPage: (pagePath: string, pdfPath: string) => Promise<void>,
 ): () => void {
   const AMBIGUOUS_SERVICE_FAILURES = new Set([
     'COMMIT_PROOF_INCONCLUSIVE',
@@ -1074,7 +1116,10 @@ function registerRendererHandlers(
    * choice (V2-UX-EXP-019), offering the review's file name in the documents folder. J-07 alone may answer it
    * once with a launch control instead, exactly as it answers the picker; `undefined` is a cancelled dialog.
    */
-  const chooseExportDestination = async (owned: OwnedRendererWindow, suggestedFileName: unknown): Promise<string | undefined> => {
+  const chooseExportDestination = async (owned: OwnedRendererWindow, suggestedFileName: unknown, formatInput: unknown): Promise<string | undefined> => {
+    // The format the review was of (Issue #500, S64b): the dialog offers its extension, and the service checks it again.
+    requireDesktop(formatInput === undefined || formatInput === 'docx' || formatInput === 'pdf' || formatInput === 'markdown');
+    const format = EXPORT_DIALOG_FORMATS[(formatInput ?? 'docx') as keyof typeof EXPORT_DIALOG_FORMATS];
     const injected = consumeInjectedSavePath();
     if (injected !== undefined) {
       requireDesktop(isAbsolute(injected));
@@ -1083,12 +1128,12 @@ function registerRendererHandlers(
     const offered = typeof suggestedFileName === 'string' && suggestedFileName.isWellFormed()
       ? basename(suggestedFileName).replace(/[\\/:*?"<>|]/gu, '_').slice(0, 180)
       : '';
-    const fileName = extname(offered).toLowerCase() === '.docx' ? offered : '稿件.docx';
+    const fileName = extname(offered).toLowerCase() === `.${format.extension}` ? offered : `稿件.${format.extension}`;
     const chosen = await dialog.showSaveDialog(owned.window, {
       title: '选择导出位置',
       buttonLabel: '选择此位置',
       defaultPath: resolve(app.getPath('documents'), fileName),
-      filters: [{ name: 'Word 文档', extensions: ['docx'] }],
+      filters: [{ name: format.name, extensions: [format.extension] }],
       properties: ['createDirectory', 'showOverwriteConfirmation'],
     });
     if (chosen.canceled || chosen.filePath === undefined || chosen.filePath.length === 0) return undefined;
@@ -2703,7 +2748,12 @@ function registerRendererHandlers(
         requireAuthority();
         const route = requireCurrentBookRoute(owned);
         const routeGeneration = owned.routeGeneration;
-        const result = await service.call('reviewManuscriptExport', { bookId: route.bookId, target: input.target, options: input.options });
+        const result = await service.call('reviewManuscriptExport', {
+          bookId: route.bookId,
+          target: input.target,
+          options: input.options,
+          ...(input.format === undefined ? {} : { format: input.format }),
+        });
         requireCurrentRouteGeneration(owned, routeGeneration);
         return requireExportOfRoute(route, result);
       });
@@ -2718,7 +2768,7 @@ function registerRendererHandlers(
           requireAuthority();
           const route = requireCurrentBookRoute(owned);
           const routeGeneration = owned.routeGeneration;
-          const destination = await chooseExportDestination(owned, input.suggestedFileName);
+          const destination = await chooseExportDestination(owned, input.suggestedFileName, input.format);
           // A cancelled dialog records nothing at all (V2-UX-EXP-020).
           if (destination === undefined) return { outcome: 'cancelled' };
           requireCurrentRouteGeneration(owned, routeGeneration);
@@ -2729,6 +2779,7 @@ function registerRendererHandlers(
             options: input.options,
             reviewDigest: input.reviewDigest,
             destination,
+            ...(input.format === undefined ? {} : { format: input.format }),
           });
           requireCurrentRouteGeneration(owned, routeGeneration);
           return { outcome: 'prepared', preparation: requireExportOfRoute(route, preparation) };
@@ -2742,6 +2793,11 @@ function registerRendererHandlers(
         requireAuthority();
         const route = requireCurrentBookRoute(owned);
         const routeGeneration = owned.routeGeneration;
+        // A PDF is printed here, from the page the service staged for this exact preparation, before it is approved
+        // (Issue #500, S64b): the service has no Chromium to print with. Nothing is written to the destination yet.
+        const staged = await service.call('stageManuscriptExport', { bookId: route.bookId, preparationId: input.preparationId });
+        if (staged.print !== null) await printExportPage(staged.print.pagePath, staged.print.pdfPath);
+        requireCurrentRouteGeneration(owned, routeGeneration);
         const result = await service.call('approveManuscriptExport', { bookId: route.bookId, preparationId: input.preparationId });
         requireCurrentRouteGeneration(owned, routeGeneration);
         return requireExportOfRoute(route, result);
@@ -3204,6 +3260,10 @@ export async function runApplication(): Promise<void> {
 
     const productSession = session.defaultSession;
     installChromiumDenial(productSession);
+    // The PDF export's print session (Issue #500, S64b): in memory, denied every network scheme like the product's own.
+    const exportPrintSession = session.fromPartition('ai7-export-print');
+    installChromiumDenial(exportPrintSession);
+    const exportStagingRoot = await ensureCanonicalDataDirectory(dataRoot, 'export-staging');
     startupLocation = 'service-ready';
     const serviceEntry = resolve(__dirname, '..', 'service', 'index.mjs');
     service = await ServiceClient.start(
@@ -3609,6 +3669,7 @@ export async function runApplication(): Promise<void> {
           return path;
         };
       })(),
+      (pagePath, pdfPath) => printStagedPage(exportStagingRoot, exportPrintSession, pagePath, pdfPath),
     );
     startupLocation = 'renderer-first-paint';
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);

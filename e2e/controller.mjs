@@ -821,6 +821,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-export-keyboard',
     'j14-export-zoom-200-reflow',
     'j14-export-forced-colors',
+    'export-pdf',
+    'export-markdown',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',
