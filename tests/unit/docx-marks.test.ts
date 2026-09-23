@@ -230,6 +230,66 @@ describe('parser identity /3 reads a revised file as it reads with every revisio
     ]);
   });
 
+  // The Owner's review of 2026-09-23: a table row or cell inserted or deleted as a whole is read as the paragraphs it
+  // holds — an inserted one's words leave the rejected reading and are described where they would stand, a deleted
+  // one's stay and are described on themselves — and a revision that changes no text, a merge, stays with the file.
+  it('reads a table row or cell inserted or deleted as the paragraphs it holds, and keeps a merge with the file', async () => {
+    const { parsed, blocks } = await parseRevised({
+      paragraphs: [
+        { runs: [text(span(7))] },
+        {
+          table: [
+            { cells: [{ paragraphs: [{ runs: [text(span(8))] }] }, { revision: { kind: 'cellIns', author: AUTHOR, date: '2026-09-01T14:00:00Z' }, paragraphs: [{ runs: [text(span(9))] }] }] },
+            { revision: { kind: 'ins', author: OTHER, date: '2026-09-01T14:01:00Z' }, cells: [{ paragraphs: [{ runs: [text(span(6))] }] }] },
+            { revision: { kind: 'del', author: AUTHOR, date: '2026-09-01T14:02:00Z' }, cells: [{ paragraphs: [{ runs: [text(span(11))] }] }] },
+            {
+              cells: [
+                { revision: { kind: 'cellDel', author: OTHER, date: '2026-09-01T14:03:00Z' }, paragraphs: [{ runs: [text(span(12))] }] },
+                { revision: { kind: 'cellMerge', author: AUTHOR, date: '2026-09-01T14:04:00Z' }, paragraphs: [] },
+              ],
+            },
+          ],
+        },
+        { runs: [text(span(13))] },
+      ],
+    });
+    // The rejected reading: the inserted cell and row are not there; the deleted row and cell are; a merged cell holds no text.
+    expect(blocks.map((block) => digest(block.text))).toEqual(await blockDigestsOf(7, 8, 11, 12, 13));
+    const [length8, length11, length12] = (await Promise.all([8, 11, 12].map((block) => sourceSpanText(SOURCE, span(block)))))
+      .map((value) => Array.from(segmenter.segment(value)).length);
+    const note = async (body: string, author: string) => ({
+      blockPosition: 2, fromGrapheme: length8! - 1, toGrapheme: length8!, pinned: await spanDigest(span(8, length8! - 1, length8!)), kind: 'annotation',
+      origin: 'paragraph-insertion', authorLabel: author, body: digest(body), proposed: null, status: 'open',
+    });
+    const deletion = async (blockPosition: number, sourceBlock: number, length: number, author: string) => ({
+      blockPosition, fromGrapheme: 0, toGrapheme: length, pinned: await spanDigest(span(sourceBlock)), kind: 'annotation',
+      origin: 'paragraph-deletion', authorLabel: author, body: digest(PARAGRAPH_DELETION_BODY), proposed: null, status: 'open',
+    });
+    expect(parsed.importedMarks.map(shape)).toEqual([
+      await note(paragraphInsertionBody(await sourceSpanText(SOURCE, span(9)), false), AUTHOR),
+      await note(paragraphInsertionBody(await sourceSpanText(SOURCE, span(6)), false), OTHER),
+      await deletion(3, 11, length11!, AUTHOR),
+      await deletion(4, 12, length12!, OTHER),
+    ]);
+    // The row counts exactly the marks the import creates, so a persisted review rebuilds from it byte for byte.
+    expect(parsed.fidelity[1]).toMatchObject({ count: 4, detail: COMMENTS_REVISIONS_DETAIL });
+    expect(deriveImportFidelityPlan(parsed.fidelity, parsed.sourceDigest, parsed.archiveBytes)).toMatchObject({ importedMarks: 4 });
+    expect(parsed.fidelity.find((category) => category.key === 'tables')?.count).toBe(1);
+  });
+
+  it('keeps a file whose only revision is a merge, which changes no text, and says so', async () => {
+    const { parsed, blocks } = await parseRevised({
+      paragraphs: [
+        { runs: [text(span(7))] },
+        { table: [{ cells: [{ paragraphs: [{ runs: [text(span(8))] }] }, { revision: { kind: 'cellMerge', author: AUTHOR, date: '2026-09-01T15:00:00Z' }, paragraphs: [] }] }] },
+      ],
+    });
+    expect(blocks.map((block) => digest(block.text))).toEqual(await blockDigestsOf(7, 8));
+    expect(parsed.importedMarks).toEqual([]);
+    // Present, converted into nothing: the row names what stays with the file rather than saying none was found.
+    expect(parsed.fidelity[1]).toMatchObject({ count: 0, detail: COMMENTS_REVISIONS_DETAIL });
+  });
+
   it('keeps a formatting revision with the file instead of refusing it', async () => {
     const formatting = { author: AUTHOR, date: '2026-09-01T13:00:00Z' };
     const { parsed, blocks } = await parseRevised({
