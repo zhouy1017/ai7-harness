@@ -206,6 +206,8 @@ describe('联网后开始任务 and Connectivity Wait over the real store', () =
       const taskIntentId = prepared.taskIntent!.taskIntentId;
       const waiting = store.startBaselineAnalysisWhenOnline(bookId, taskIntentId, prepared.planEnvelope!.digest);
       expect(waiting.state).toBe('waiting');
+      // The analysis reads as its Run does, never as 已中断 (OFF-012).
+      expect(waiting.stateLabel).toBe('等待网络 · 未启动');
       // The same Run Authorization 开始任务 records: this is still the editor's direct start (AUTH-004).
       expect(waiting.authorization).toMatchObject({ origin: 'standard-direct', authority: 'standard-direct-dispatch' });
       expect(waiting.run).toMatchObject({ state: 'awaiting-connectivity', stateLabel: '等待网络 · 未启动', attempt: null, progress: null });
@@ -243,6 +245,7 @@ describe('联网后开始任务 and Connectivity Wait over the real store', () =
       const cancelled = store.cancelWaitingBaselineAnalysis(bookId, taskIntentId);
       // Its own state, never 已中断, which OFF-012 keeps for a Run that can resume.
       expect(cancelled.state).toBe('cancelled');
+      expect(cancelled.stateLabel).toBe('已取消 · 未启动');
       expect(cancelled.run).toMatchObject({ state: 'cancelled', stateLabel: '已取消 · 未启动', attempt: null });
       expect(cancelled.run?.transitions.map((transition) => transition.state)).toEqual(['authorized', 'awaiting-connectivity', 'cancelled']);
       expect(cancelled.taskOutcome).toBeNull();

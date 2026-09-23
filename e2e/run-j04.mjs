@@ -2595,6 +2595,8 @@ async function main() {
       JSON.stringify(waitingAnalysis.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'awaiting-connectivity']),
     'waiting-run', { state: waitingAnalysis?.state, run: waitingAnalysis?.run });
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='waiting'`, 'waiting-card');
+    // ②A's state reads as the Run does — never 运行已中断, which OFF-012 keeps for a Run that can resume.
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='等待网络 · 未启动'`, 'waiting-card-label');
 
     at('connectivity-cancel');
     cancellation.throwIfRequested();
@@ -2608,6 +2610,7 @@ async function main() {
       cancelledAnalysis.run.attempt === null && cancelledAnalysis.taskOutcome === null &&
       JSON.stringify(cancelledAnalysis.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'awaiting-connectivity', 'cancelled']),
     'cancelled-run', { state: cancelledAnalysis?.state, run: cancelledAnalysis?.run });
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='已取消 · 未启动'`, 'cancelled-card-label');
 
     at('connectivity-wait-again');
     cancellation.throwIfRequested();
