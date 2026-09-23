@@ -742,6 +742,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'new-version-applied',
     'keep-current',
     'defer',
+    // Issue #424 (S78): 待我处理 lists the conflict put aside, and its 解决冲突… opens 稿件冲突 of that suggestion.
+    'attention-conflict-row',
     'reversal',
     'reversal-correction-applied',
     'j14-conflict-keyboard',
