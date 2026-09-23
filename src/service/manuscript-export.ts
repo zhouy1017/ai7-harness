@@ -203,6 +203,7 @@ const FAILURE_DETAILS: Readonly<Record<string, string>> = {
   EXPORT_STAGE_VERIFY_FAILED: '写入的临时文件校验不一致，已经删除，所选位置没有变化。',
   EXPORT_TARGET_CHANGED: '所选位置在批准后发生了变化，没有写入；请重新选择保存位置。',
   EXPORT_COMMIT_FAILED: '无法把导出文件放到所选位置，所选位置没有变化。',
+  EXPORT_CREATE_UNSUPPORTED: '所选位置所在的磁盘不能安全地新建文件，没有写入，所选位置没有变化。请换一个位置保存，或选择替换一个已有的文件。',
   EXPORT_COMMIT_UNCERTAIN: '系统没有确认文件是否已放到所选位置。请到所选位置核对；AI7 不会自动重试。',
   EXPORT_VERIFY_UNCERTAIN: '文件已放到所选位置，但读回校验没有通过。请到所选位置核对；AI7 不会自动重试。',
   EXPORT_INTERRUPTED: '导出在写入所选位置时中断，AI7 无法确认文件是否已写好。请到所选位置核对；如需重新导出，请重新选择保存位置。',
@@ -379,34 +380,21 @@ const NO_HARD_LINKS = new Set(['EPERM', 'EACCES', 'EINVAL', 'EMLINK', 'ENOSYS', 
 /**
  * Take `destination` for the staged file without replacing anything, for an export approved as `create`
  * (V2-UX-EXP-012). The filesystem decides whether the name is free at the instant it is taken, not a check
- * before it: a hard link fails with `EEXIST` when a file appeared since the destination was resolved, and a
- * volume with no hard links takes the name with an exclusive create that the staged file is then renamed over —
- * this write's own empty file, never another writer's. The staged file stays the caller's to discard.
+ * before it: a hard link fails with `EEXIST` when a file appeared since the destination was resolved. A volume
+ * with no hard links has no such primitive, and none can be built from what it does have: an exclusive create
+ * holds a file only while its handle is open, not the pathname once the handle closes, so another program could
+ * replace that file before the staged one arrives — and renaming over it, or removing it after a failure, would
+ * then write over or delete a file this export never made. There the export is refused instead. The staged file
+ * stays the caller's to discard.
  */
-async function takeFreeName(staged: string, destination: string): Promise<'taken' | 'exists' | 'failed' | 'uncertain'> {
+async function takeFreeName(staged: string, destination: string): Promise<'taken' | 'exists' | 'unsupported' | 'failed'> {
   try {
     await link(staged, destination);
     return 'taken';
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code ?? '';
     if (code === 'EEXIST') return 'exists';
-    if (!NO_HARD_LINKS.has(code)) return 'failed';
-  }
-  let placeholder;
-  try {
-    placeholder = await open(destination, 'wx');
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EEXIST' ? 'exists' : 'failed';
-  }
-  await placeholder.close().catch(() => undefined);
-  try {
-    await rename(staged, destination);
-    return 'taken';
-  } catch {
-    // The exclusive create above is what made the name this write's own, so removing it leaves the chosen
-    // name as free as this write found it — and an empty file nobody can read as the export never stays.
-    await rm(destination, { force: true }).catch(() => undefined);
-    return (await targetState(destination)) === 'absent' ? 'failed' : 'uncertain';
+    return NO_HARD_LINKS.has(code) ? 'unsupported' : 'failed';
   }
 }
 
@@ -460,11 +448,11 @@ export async function writeAtomically(
   }
   if (disposition === 'create') {
     const taken = await takeFreeName(staged, destination);
-    // After a link both names hold the payload; after the rename the stage is gone. Either way it is not left behind.
+    // After a link both names hold the payload, and the stage — this write's own — is not left behind.
     await discard();
     if (taken === 'exists') return { outcome: 'failed', code: 'EXPORT_TARGET_CHANGED' };
+    if (taken === 'unsupported') return { outcome: 'failed', code: 'EXPORT_CREATE_UNSUPPORTED' };
     if (taken === 'failed') return { outcome: 'failed', code: 'EXPORT_COMMIT_FAILED' };
-    if (taken === 'uncertain') return { outcome: 'ambiguous', code: 'EXPORT_COMMIT_UNCERTAIN' };
   } else {
     try {
       await rename(staged, destination);
