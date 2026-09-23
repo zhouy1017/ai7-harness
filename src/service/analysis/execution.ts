@@ -195,14 +195,21 @@ export const CANCELLED_WITHOUT_EXECUTION = '运行已按你的要求取消。它
 /** A stopped Run whose kept progress could not be gathered into its revision is still cancelled, and says so. */
 export const CANCELLED_WITHOUT_REVISION = '运行已按你的要求取消；已保存的阅读进度这一次没能整理成结果集修订版，因此没有形成修订版。此后没有再发送任何内容。' as const;
 
-/** 暂停's own words (Issue #422, S76b; CTRL-001): where the Run stopped, what it kept, and what 续行 does. */
+/**
+ * 暂停's own words (Issue #422, S76b; CTRL-001): where the Run stopped, what it kept, and what 续行 does — from the
+ * next range, or, once every range is read, the reduction and the sample after them.
+ */
 export function pausedDetail(settled: number, total: number): string {
-  return `已在阅读范围之间暂停：已读完 ${settled} / ${total} 个阅读范围，结果都已保存。点「续行」从下一个阅读范围接着读。`;
+  return settled >= total
+    ? `已暂停：全部 ${total} 个阅读范围都已读完，结果都已保存。点「续行」接着做之后的归纳与抽样。`
+    : `已在阅读范围之间暂停：已读完 ${settled} / ${total} 个阅读范围，结果都已保存。点「续行」从下一个阅读范围接着读。`;
 }
 
 /** AI7 stopping under a Run it can continue (CONT-014): nothing more runs, and nothing is sent until 续行. */
 export function resumableDetail(settled: number, total: number): string {
-  return `AI7 关闭时这项任务正在运行：已读完 ${settled} / ${total} 个阅读范围，结果都已保存。点「续行」从下一个阅读范围接着读；在此之前不会发送任何内容。`;
+  return settled >= total
+    ? `AI7 关闭时这项任务正在运行：全部 ${total} 个阅读范围都已读完，结果都已保存。点「续行」接着做之后的归纳与抽样；在此之前不会发送任何内容。`
+    : `AI7 关闭时这项任务正在运行：已读完 ${settled} / ${total} 个阅读范围，结果都已保存。点「续行」从下一个阅读范围接着读；在此之前不会发送任何内容。`;
 }
 
 /** A pause recorded for a Run nothing executes: its boundary is reached already. */
