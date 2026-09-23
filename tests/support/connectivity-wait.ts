@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { ANALYSIS_LEDGER_REVISION_29_SQL } from '../../src/service/task-authorization.js';
+import { ANALYSIS_LEDGER_REVISION_29_SQL, ANALYSIS_LEDGER_REVISION_31_SQL, ANALYSIS_LEDGER_SCHEMA_SQL } from '../../src/service/task-authorization.js';
 
 /**
  * Plant `analysis_run_states` as schema revisions 15 to 29 carried it, so that a store the current code built
@@ -34,11 +34,15 @@ export function downgradeAnalysisRunStatesToRevision29(database: DatabaseSync): 
   }
 }
 
-/** Which of its two shapes the Run-state relation holds: revision 29's, or the current widened one. */
-export function analysisRunStatesShape(database: DatabaseSync): 'revision-29' | 'current' | 'other' {
+/**
+ * Which of its shapes the Run-state relation holds: revision 29's, revision 31's — as revision 30 widened it and
+ * before revision 32 widened it again (Issue #422) — or the current one.
+ */
+export function analysisRunStatesShape(database: DatabaseSync): 'revision-29' | 'revision-31' | 'current' | 'other' {
   const row = database.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'analysis_run_states'").get() as { sql: string } | undefined;
   const normalized = (value: string): string => value.trim().replace(/\s+/gu, ' ');
   if (row === undefined) return 'other';
   if (normalized(row.sql) === normalized(ANALYSIS_LEDGER_REVISION_29_SQL.analysis_run_states)) return 'revision-29';
-  return /'awaiting-connectivity', 'cancelled'/u.test(row.sql) ? 'current' : 'other';
+  if (normalized(row.sql) === normalized(ANALYSIS_LEDGER_REVISION_31_SQL.analysis_run_states)) return 'revision-31';
+  return normalized(row.sql) === normalized(ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_states) ? 'current' : 'other';
 }

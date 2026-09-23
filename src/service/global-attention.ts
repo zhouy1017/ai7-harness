@@ -191,7 +191,7 @@ export function recentWindowStart(now: Date): string {
 
 // ---- composition ---------------------------------------------------------------------------------------
 
-const ACTIVE_RUN_STATES: ReadonlySet<BaselineAnalysisRunState> = new Set(['authorized', 'admitted', 'executing']);
+const ACTIVE_RUN_STATES: ReadonlySet<BaselineAnalysisRunState> = new Set(['authorized', 'admitted', 'executing', 'cancelling']);
 
 /** A Run in Connectivity Wait, by what it waits for now (ATTN-004): one the next preflight admits is simply queued. */
 const WAITING_STATES: Readonly<Record<WaitingFor, GlobalAttentionStateKey>> = {
@@ -336,7 +336,9 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading, waitingFor: Wai
   const itemId = `analysis:${reading.taskIntentId}`;
   if (ACTIVE_RUN_STATES.has(run.state)) {
     if (run.progress !== null) {
-      return item('active', run.state === 'executing' ? 'analysis-running' : 'analysis-queued', {
+      // 正在取消 stays visible wherever the editor looks until the Run has stopped (Issue #422, CTRL-005).
+      const state = run.state === 'executing' ? 'analysis-running' : run.state === 'cancelling' ? 'analysis-cancelling' : 'analysis-queued';
+      return item('active', state, {
         itemId, blocked: false, at: run.recordedAt, book, object, facts: { progress: progressFact(run.progress) }, nextStep: 'view-run', target, technical,
       });
     }
