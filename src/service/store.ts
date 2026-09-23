@@ -297,6 +297,7 @@ import {
   DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
   RUN_CANCELLATION_SCHEMA_VERSION,
   RUN_CONTINUATION_SCHEMA_VERSION,
+  PLAN_EDIT_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1503,7 +1504,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === IMPORT_RETENTION_SCHEMA_VERSION || currentVersion === IMPORTED_MARK_SCHEMA_VERSION ||
       currentVersion === EXPORT_LEDGER_SCHEMA_VERSION || currentVersion === CONNECTIVITY_WAIT_SCHEMA_VERSION || currentVersion === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       currentVersion === RUN_CANCELLATION_SCHEMA_VERSION ||
-      currentVersion === RUN_CONTINUATION_SCHEMA_VERSION,
+      currentVersion === RUN_CONTINUATION_SCHEMA_VERSION ||
+      currentVersion === PLAN_EDIT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1532,7 +1534,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === IMPORT_RETENTION_SCHEMA_VERSION || currentVersion === IMPORTED_MARK_SCHEMA_VERSION ||
       currentVersion === EXPORT_LEDGER_SCHEMA_VERSION || currentVersion === CONNECTIVITY_WAIT_SCHEMA_VERSION || currentVersion === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       currentVersion === RUN_CANCELLATION_SCHEMA_VERSION ||
-      currentVersion === RUN_CONTINUATION_SCHEMA_VERSION
+      currentVersion === RUN_CONTINUATION_SCHEMA_VERSION ||
+      currentVersion === PLAN_EDIT_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1875,7 +1878,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
-      version === RUN_CONTINUATION_SCHEMA_VERSION,
+      version === RUN_CONTINUATION_SCHEMA_VERSION ||
+      version === PLAN_EDIT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1893,7 +1897,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
-      version === RUN_CONTINUATION_SCHEMA_VERSION) return;
+      version === RUN_CONTINUATION_SCHEMA_VERSION ||
+      version === PLAN_EDIT_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2003,7 +2008,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
-      version === RUN_CONTINUATION_SCHEMA_VERSION,
+      version === RUN_CONTINUATION_SCHEMA_VERSION ||
+      version === PLAN_EDIT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2020,7 +2026,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
-      version === RUN_CONTINUATION_SCHEMA_VERSION) return;
+      version === RUN_CONTINUATION_SCHEMA_VERSION ||
+      version === PLAN_EDIT_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2313,7 +2320,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== RUN_CONTINUATION_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== PLAN_EDIT_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2378,7 +2385,8 @@ function initializeModelServiceSchema(
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
-      version === RUN_CONTINUATION_SCHEMA_VERSION,
+      version === RUN_CONTINUATION_SCHEMA_VERSION ||
+      version === PLAN_EDIT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2395,7 +2403,8 @@ function initializeModelServiceSchema(
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
-      version === RUN_CONTINUATION_SCHEMA_VERSION) {
+      version === RUN_CONTINUATION_SCHEMA_VERSION ||
+      version === PLAN_EDIT_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3846,6 +3855,19 @@ export class EditorialStore {
   requestBaselineAnalysisCancel(bookId: string, taskIntentId: string): string | null {
     this.#assertAvailable();
     return this.#analysisCall(() => this.#baselineAnalysis.requestCancel(bookId, taskIntentId)).runRecordId;
+  }
+
+  /**
+   * 更新计划 (Issue #419, plan slice S73; V2-UX-PLAN-009, PLAN-011): the next plan version of the Book's baseline analysis
+   * Task, as the editor left it, and the Book's analysis as it then reads.
+   */
+  editBaselineAnalysisPlan(
+    input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string; removedSteps: ReadonlyArray<string>; disallowedAdaptations: ReadonlyArray<string> },
+    progress?: ProgressReader,
+  ): BaselineAnalysisProjection {
+    this.#assertAvailable();
+    this.#analysisCall(() => this.#baselineAnalysis.editPlan(input.bookId, input));
+    return this.inspectBaselineAnalysis(input.bookId, progress);
   }
 
   /**

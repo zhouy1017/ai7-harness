@@ -2696,12 +2696,15 @@ function renderPlanVersions(card: HTMLElement, projection: BaselineAnalysisProje
   if (projection.planRevisions.length > 0) {
     const revisions = element('ol', 'analysis-list analysis-plan-revision-list');
     for (const revision of projection.planRevisions) {
-      const item = element('li', undefined, `${revision.label} · ${revision.resolved ? '已重新确认' : '待重新确认'}${revision.detectedAt === null ? '' : ` · ${localInstantLabel(revision.detectedAt)}`}`);
+      // The editor's own 更新计划 is theirs, not a reconfirmed change (Issue #419).
+      const settled = revision.trigger === 'plan-edit' ? '你改的 · 已更新计划' : revision.resolved ? '已重新确认' : '待重新确认';
+      const item = element('li', undefined, `${revision.label} · ${settled}${revision.detectedAt === null ? '' : ` · ${localInstantLabel(revision.detectedAt)}`}`);
       if (revision.detectedAt !== null) item.append(element('span', 'technical-identity', revision.detectedAt));
       item.dataset['planRevisionId'] = revision.planRevisionId ?? '';
       item.dataset['planRevisionPrior'] = String(revision.priorOrdinal);
       item.dataset['planRevisionNext'] = revision.nextOrdinal === null ? '' : String(revision.nextOrdinal);
       item.dataset['planRevisionResolved'] = revision.resolved ? 'true' : 'false';
+      item.dataset['planRevisionTrigger'] = revision.trigger;
       item.dataset['planRevisionFields'] = revision.changedFields.join(',');
       revisions.append(item);
     }

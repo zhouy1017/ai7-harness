@@ -2311,6 +2311,30 @@ function registerRendererHandlers(
         });
       }),
   );
+  // 更新计划 (Issue #419, plan slice S73) is the baseline Task's own too: the Task Intent, the version the editor read
+  // and what the plan leaves out, answered by the route Book and serialized with every other effect.
+  ipcMain.handle(
+    IPC_CHANNELS.editBaselineAnalysisPlan,
+    (event, input: Omit<ServiceOperationMap['editBaselineAnalysisPlan']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('editBaselineAnalysisPlan', {
+            bookId: route.bookId,
+            taskIntentId: input.taskIntentId,
+            planEnvelopeDigest: input.planEnvelopeDigest,
+            removedSteps: input.removedSteps,
+            disallowedAdaptations: input.disallowedAdaptations,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '更新计划的结果不属于当前图书工作台。');
+          return result;
+        });
+      }),
+  );
   // 暂停 and 续行 (Issue #422, S76b) are the baseline Task's own the same way: named by the Task Intent, answered by the
   // route Book, and serialized with every other effect — 续行 dispatches.
   for (const [channel, operation, words] of [

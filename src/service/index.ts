@@ -387,6 +387,9 @@ async function dispatch(
         op: request.op,
         result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress),
       };
+    // 更新计划 (Issue #419, plan slice S73; PLAN-009, PLAN-011): the next plan version, as the editor left the plan.
+    case 'editBaselineAnalysisPlan':
+      return { id: request.id, ok: true, op: request.op, result: store.editBaselineAnalysisPlan(request.input, analysisProgress) };
     // 暂停 (Issue #422, S76b; CTRL-001): `pausing` is recorded, and the owner stops the Run at the next unit boundary —
     // or, holding no execution of it, settles it `paused` at once.
     case 'pauseBaselineAnalysisRun': {

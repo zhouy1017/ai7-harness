@@ -64,6 +64,7 @@ import {
   reusePlanCountsDiffEntry,
   sameMaterialPlanInputs,
 } from './plan-boundary.js';
+import { NO_PLAN_EDITS, canonicalPlanEdits, planEditDiff, planEditsAreEmpty, planEditsOf, type PlanEdits } from './plan-edits.js';
 import {
   AnalysisError,
   DIGEST_PATTERN,
@@ -388,6 +389,8 @@ export interface ExecutionPlanFacts {
   readonly runBudgetCeiling: RunBudgetCeilingState;
   /** `null` for the first baseline; the verified reuse plan for an update Task. */
   readonly update: ExecutionUpdateFacts | null;
+  /** What the bound plan leaves out at the editor's word (Issue #419): the Run honours each. */
+  readonly editorEdits: PlanEdits;
 }
 
 export interface ExecutionBindingRecord {
@@ -807,6 +810,7 @@ export class BaselineAnalysisStore {
       planEnvelopeDigest: entry.planEnvelopeDigest,
       planRevisionId: entry.planRevisionId,
       createdAt: entry.createdAt,
+      edits: this.#planEditsOf(intent.taskIntentId, entry.ordinal),
       state: boundVersion !== null && entry.planVersionId === boundVersion.planVersionId
         ? 'bound'
         : entry.ordinal < currentVersion.ordinal || planRevision !== null ? 'superseded' : 'current',
@@ -1209,7 +1213,7 @@ export class BaselineAnalysisStore {
         priorPlanVersionId: asString(row.prior_plan_version_id),
         priorOrdinal,
         nextOrdinal,
-        trigger: asString(row.trigger_kind) as 'prepare' | 'inspect' | 'reconfirm',
+        trigger: asString(row.trigger_kind) as 'prepare' | 'inspect' | 'reconfirm' | 'plan-edit',
         detectedAt: asString(row.detected_at),
         changedFields,
         diff,
@@ -1325,10 +1329,12 @@ export class BaselineAnalysisStore {
     priorInputs: MaterialPlanInputsProjection;
     proposed: MaterialPlanInputsProjection;
     diff: ReadonlyArray<PlanRevisionDiffEntryProjection>;
-    trigger: 'prepare' | 'inspect' | 'reconfirm';
+    trigger: 'prepare' | 'inspect' | 'reconfirm' | 'plan-edit';
     instant: string;
     supersedes?: ReadonlyArray<string>;
     revert?: true;
+    /** Who made an edit (Issue #419, PLAN-011): the editor, recorded with the time. */
+    actor?: 'editor';
   }): string {
     const planRevisionId = randomUUID();
     const supersedes = input.supersedes === undefined || input.supersedes.length === 0 ? undefined : [...input.supersedes];
@@ -1344,6 +1350,7 @@ export class BaselineAnalysisStore {
       diff: input.diff,
       supersedes,
       revert: input.revert,
+      actor: input.actor,
     });
     this.#db.prepare(
       `INSERT INTO analysis_plan_revisions(plan_revision_id, task_intent_id, prior_plan_version_id, prior_ordinal, trigger_kind, detected_at, canonical_json, sha256)
@@ -1454,7 +1461,91 @@ export class BaselineAnalysisStore {
         selectedRange: proposed.selectedRange,
         planRevisionId,
         instant,
+        // What the editor left out stays out: the new version answers the key-content change, not the edit.
+        edits: this.#planEditsOf(intent.taskIntentId, current.ordinal),
       });
+    });
+    return this.inspect(bookId);
+  }
+
+  /** What one plan version leaves out at the editor's word (Issue #419), read from its frozen execution plan. */
+  #planEditsOf(taskIntentId: string, ordinal: number): PlanEdits {
+    const row = this.#db.prepare(
+      "SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = ? AND component = 'execution-plan'",
+    ).get(taskIntentId, ordinal) as SqlRow | undefined;
+    if (row === undefined) return NO_PLAN_EDITS;
+    try {
+      return planEditsOf(parseCanonicalJson(asString(row.canonical_json)));
+    } catch {
+      throw new AnalysisError('ANALYSIS_RECORD_INVALID', '计划记录的修改无效。');
+    }
+  }
+
+  /**
+   * 更新计划 (Issue #419, plan slice S73; V2-UX-PLAN-009, PLAN-011): the plan the editor sees, as they left it, becomes
+   * the next plan version of the same Task Intent. `edits` is the full set of what the plan leaves out — only what its
+   * Run honours — against the version whose envelope digest the editor was reading. One transaction records the Plan
+   * Revision, whose trigger is `plan-edit`, whose diff names each changed item as `edited`, and which carries the
+   * editor as its actor with the time, and writes the version it yields. The material inputs are the prior version's.
+   *
+   * Nothing is recorded when the Task has been authorized, a key-content change is pending (重新确认计划 settles it
+   * first; the editor's pending edits are theirs to apply after), the editor was reading another version, the edit
+   * names what the plan cannot leave out, or nothing changed. An edit changes the execution plan and the envelope
+   * only: a version whose other components would differ — the route or the fixture this launch binds has moved since
+   * the plan froze — is refused rather than written.
+   */
+  editPlan(bookId: string, input: { taskIntentId: string; planEnvelopeDigest: string; removedSteps: unknown; disallowedAdaptations: unknown }): AnalysisProjection {
+    requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND, 'ANALYSIS_PLAN_EDIT_UNSUPPORTED', '这类任务的计划不能在这里修改。');
+    const existing = this.inspect(bookId);
+    const intentRow = this.#latestIntentRow(bookId);
+    requireAnalysis(intentRow !== undefined && existing.taskIntent !== null && existing.taskIntent.taskIntentId === input.taskIntentId,
+      'ANALYSIS_PLAN_EDIT_STALE', '这项任务已不是这本书当前的任务；请重新打开它的计划。');
+    const intent = this.#intentFacts(intentRow);
+    requireAnalysis(existing.authorization === null && existing.state === 'prepared',
+      'ANALYSIS_PLAN_EDIT_STARTED', '任务已经开始，计划不能再改。');
+    requireAnalysis(existing.planRevision === null, 'ANALYSIS_PLAN_REVISION_PENDING', '计划的关键内容已变化：先重新确认计划，你的改动会保留。');
+    requireAnalysis(existing.planEnvelope !== null && existing.planEnvelope.digest === input.planEnvelopeDigest && existing.planVersion !== null,
+      'ANALYSIS_PLAN_EDIT_STALE', '计划已经变了；请重新查看计划后再修改。');
+    const next = canonicalPlanEdits(input);
+    requireAnalysis(next !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '这项修改不在这份计划可以改的范围内。');
+    const current = this.#planVersionFacts(intent.taskIntentId).at(-1);
+    requireAnalysis(current !== undefined && current.ordinal === existing.planVersion.ordinal, 'ANALYSIS_RECORD_INVALID', '任务计划缺少计划版本。');
+    const prior = this.#planEditsOf(intent.taskIntentId, current.ordinal);
+    const diff = planEditDiff(prior, next);
+    requireAnalysis(diff.length > 0, 'ANALYSIS_PLAN_EDIT_UNCHANGED', '计划没有改动。');
+    const checkpointRow = this.#db.prepare('SELECT * FROM analysis_task_input_checkpoints WHERE task_intent_id = ?').get(intent.taskIntentId) as SqlRow | undefined;
+    requireAnalysis(checkpointRow !== undefined, 'ANALYSIS_RECORD_INVALID', '任务输入固定点缺失。');
+    const checkpoint: ManuscriptCheckpointBinding = {
+      bookId,
+      manuscriptId: asString(checkpointRow.manuscript_id),
+      branchId: asString(checkpointRow.branch_id),
+      revisionId: asString(checkpointRow.revision_id),
+      revisionLabel: asString(checkpointRow.revision_label),
+      revisionDigest: asString(checkpointRow.revision_digest),
+      journalSequence: asNumber(checkpointRow.journal_sequence),
+      createdForDirtyJournal: asNumber(checkpointRow.created_for_dirty_journal) === 1,
+    };
+    const stored = existing.planVersion.materialInputs;
+    const instant = new Date().toISOString();
+    transact(this.#db, () => {
+      const planRevisionId = this.#insertPlanRevision({
+        taskIntentId: intent.taskIntentId, prior: current, priorInputs: stored, proposed: stored, diff, trigger: 'plan-edit', instant, actor: 'editor',
+      });
+      this.#writePlanVersion({
+        intent,
+        checkpoint,
+        checkpointDigest: asString(checkpointRow.sha256),
+        ordinal: current.ordinal + 1,
+        selectedRange: stored.selectedRange,
+        planRevisionId,
+        instant,
+        edits: next,
+      });
+      const before = this.#planDigests(intent.taskIntentId, current.ordinal);
+      const after = this.#planDigests(intent.taskIntentId, current.ordinal + 1);
+      const moved = Object.keys({ ...before, ...after }).filter((component) =>
+        component !== 'execution-plan' && component !== 'plan-envelope' && before[component] !== after[component]);
+      requireAnalysis(moved.length === 0, 'ANALYSIS_PLAN_EDIT_STALE', '这份计划准备之后，执行它的路由或所用工序已经变了；请重新准备这项任务再修改。');
     });
     return this.inspect(bookId);
   }
@@ -2177,7 +2268,7 @@ export class BaselineAnalysisStore {
     ).run(taskIntentId, checkpoint.manuscriptId, checkpoint.branchId, checkpoint.revisionId, checkpoint.revisionLabel,
       checkpoint.revisionDigest, checkpoint.journalSequence, purpose, checkpoint.createdForDirtyJournal ? 1 : 0,
       checkpointRecord.json, checkpointRecord.digest, instant);
-    this.#writePlanVersion({ intent, checkpoint, checkpointDigest: checkpointRecord.digest, ordinal: 1, selectedRange: intent.selectedRange, planRevisionId: null, instant });
+    this.#writePlanVersion({ intent, checkpoint, checkpointDigest: checkpointRecord.digest, ordinal: 1, selectedRange: intent.selectedRange, planRevisionId: null, instant, edits: NO_PLAN_EDITS });
   }
 
   /**
@@ -2195,6 +2286,8 @@ export class BaselineAnalysisStore {
     selectedRange: BaselineAnalysisSelectedRange | null;
     planRevisionId: string | null;
     instant: string;
+    /** What the version leaves out at the editor's word (Issue #419); nothing for a plan AI7 proposed. */
+    edits: PlanEdits;
   }): { planVersionId: string; planEnvelopeDigest: string } {
     const { intent, checkpoint, ordinal, instant } = input;
     const taskIntentId = intent.taskIntentId;
@@ -2324,8 +2417,10 @@ export class BaselineAnalysisStore {
       : dispatchAllowed
         ? 'Provider Processing v1 denies the remote route; execution binds only ai7-local-deterministic'
         : 'Provider Processing v1 denies the remote route and no local deterministic route is bound';
+    // An edited plan names what it leaves out; a plan AI7 proposed names nothing, so its record reads as before.
+    const editorEdits = planEditsAreEmpty(input.edits) ? {} : { editorEdits: input.edits };
     const executionPlan = reusePlan === null
-      ? { steps: this.#definition.executionSteps, effects: [], unitCount: manifest.units.length, reducerStages: this.#definition.reducerStages, stopCondition }
+      ? { steps: this.#definition.executionSteps, effects: [], unitCount: manifest.units.length, reducerStages: this.#definition.reducerStages, stopCondition, ...editorEdits }
       : {
           steps: this.#definition.updateExecutionSteps,
           effects: [],
@@ -2335,6 +2430,7 @@ export class BaselineAnalysisStore {
           ...(unreviewedCount === null ? {} : { unreviewedUnitCount: unreviewedCount }),
           reducerStages: this.#definition.reducerStages,
           stopCondition,
+          ...editorEdits,
         };
     const records: Record<string, { json: string; digest: string }> = {
       'manuscript-pin': canonicalRecord(manuscriptPin),
@@ -2367,7 +2463,7 @@ export class BaselineAnalysisStore {
       behaviorCompositionDigest: composition.digest,
       // The plan version and the Plan Boundary Split are part of the canonical envelope (Issue #48).
       planVersion: ordinal,
-      boundary: planBoundarySplit(),
+      boundary: planBoundarySplit(input.edits.disallowedAdaptations),
     };
     const envelope = canonicalRecord(reusePlan === null ? envelopeBase : {
       ...envelopeBase,
@@ -2779,6 +2875,17 @@ export class BaselineAnalysisStore {
     }
     const envelope = plan['plan-envelope'] as Record<string, unknown>;
     const artifactPin = plan['artifact-pin'] as { nativeCarrierSha256: string; sidecarSha256: string };
+    // What the editor left out (Issue #419), read from the execution plan and matched by the envelope's split, which
+    // the Run Authorization bound: the two are written together and never disagree.
+    let editorEdits: PlanEdits;
+    try {
+      editorEdits = planEditsOf(plan['execution-plan']);
+    } catch {
+      throw new AnalysisError('ANALYSIS_RECORD_INVALID', '计划记录的修改无效。');
+    }
+    const split = envelope.boundary as PlanBoundarySplitProjection | undefined;
+    requireAnalysis(split === undefined || canonicalJson(split) === canonicalJson(planBoundarySplit(editorEdits.disallowedAdaptations)),
+      'ANALYSIS_RECORD_INVALID', '计划信封与计划修改不一致。');
     let update: ExecutionUpdateFacts | null = null;
     if (this.#carriesPlan(intent.mode)) {
       const latestRow = this.#revisionRows(intent.bookId).at(-1);
@@ -2843,6 +2950,7 @@ export class BaselineAnalysisStore {
       behaviorCompositionDigest: asString(envelope.behaviorCompositionDigest),
       runBudgetCeiling,
       update,
+      editorEdits,
     };
   }
 
