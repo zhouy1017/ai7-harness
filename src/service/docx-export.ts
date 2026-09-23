@@ -101,6 +101,16 @@ const REVISION_MARKERS: ReadonlySet<string> = new Set([
   'customXmlMoveFromRangeStart', 'customXmlMoveFromRangeEnd', 'customXmlMoveToRangeStart', 'customXmlMoveToRangeEnd',
 ]);
 const COMMENT_MARKERS: ReadonlySet<string> = new Set(['commentRangeStart', 'commentRangeEnd', 'commentReference']);
+/**
+ * The revisions that change no text of either reading and become no mark on import (Issue #411): a cell's merge,
+ * and custom XML's markup — each counted once, by the marker that opens it. The export drops them, so they are
+ * counted under 原文件中的修订.
+ */
+const TEXT_NEUTRAL_REVISIONS: ReadonlySet<string> = new Set([
+  'cellMerge', 'customXmlInsRangeStart', 'customXmlDelRangeStart', 'customXmlMoveFromRangeStart', 'customXmlMoveToRangeStart',
+]);
+/** What a table cell must hold at least one of (ISO/IEC 29500-1 §17.4.66): a cell without one is corrupt. */
+const CELL_CONTENT: ReadonlySet<string> = new Set(['p', 'tbl', 'sdt', 'customXml', 'altChunk']);
 /** The parents under which `w:ins` and its kin mark a property rather than hold runs. */
 const PROPERTY_PARENTS: ReadonlySet<string> = new Set(['rPr', 'trPr', 'numPr', 'pPr']);
 /** What makes a paragraph more than an empty mark: text, a drawing, a field, a note or a section carrier. */
@@ -573,7 +583,7 @@ function countClasses(nodes: ReadonlyArray<XmlNode>): ClassCounts {
         if (parent?.local === 'pPr') counts.sections += 1;
         break;
       default:
-        if (FORMATTING_REVISIONS.has(element.local)) counts.fileRevisions += 1;
+        if (FORMATTING_REVISIONS.has(element.local) || TEXT_NEUTRAL_REVISIONS.has(element.local)) counts.fileRevisions += 1;
         else if (inTextBox && (COMMENT_MARKERS.has(element.local) || element.local === 'ins' || element.local === 'del' ||
           element.local === 'moveFrom' || element.local === 'moveTo')) counts.fileRevisions += 1;
         break;
@@ -584,6 +594,24 @@ function countClasses(nodes: ReadonlyArray<XmlNode>): ClassCounts {
 }
 
 // ---- restoring: the view the parser read ------------------------------------------------------------
+
+/**
+ * Whether a table row or cell was inserted as a whole (`w:trPr/w:ins`, `w:tcPr/w:cellIns`): the rejected reading the
+ * manuscript stands for does not hold it, and the import made the paragraphs it held 批注 (Issue #411).
+ */
+function insertedWhole(element: XmlElement): boolean {
+  const properties = element.local === 'tr' ? 'trPr' : element.local === 'tc' ? 'tcPr' : null;
+  if (properties === null) return false;
+  const marker = element.local === 'tr' ? 'ins' : 'cellIns';
+  return element.children.some((child) => isElement(child) && child.local === properties &&
+    child.children.some((grandchild) => isElement(grandchild) && grandchild.local === marker));
+}
+
+/** Whether a restored node is a block-level element a table cell may hold; a regenerated paragraph is one. */
+function holdsCellContent(node: XmlNode): boolean {
+  if (typeof node === 'string') return false;
+  return !isElement(node) || CELL_CONTENT.has(node.local);
+}
 
 interface StripContext {
   /** Inside a `w:del` or `w:moveFrom` that is being unwrapped: its deleted text is the paragraph's. */
@@ -1350,16 +1378,26 @@ function rewriteDocument(
       return [...(flushed.length > 0 ? [{ raw: flushed }] : []), stripped(element)];
     }
     if (COMMENT_MARKERS.has(element.local) || FORMATTING_REVISIONS.has(element.local) || REVISION_MARKERS.has(element.local)) {
-      if (FORMATTING_REVISIONS.has(element.local)) note('file-revisions', 1, 0, null);
+      if (FORMATTING_REVISIONS.has(element.local) || TEXT_NEUTRAL_REVISIONS.has(element.local)) note('file-revisions', 1, 0, null);
       return [];
     }
     if (element.local === 'ins' || element.local === 'moveTo') return [];
-    if (element.local === 'tbl') note('tables', 1, 0, null);
+    // A row or cell inserted as a whole is rejected with the rest: it is left out, as the manuscript leaves it out.
+    // One deleted as a whole stays, its marker dropped.
+    if (insertedWhole(element)) return [];
     const unwrap = element.local === 'del' || element.local === 'moveFrom';
     const children: XmlNode[] = [];
     for (const child of element.children) {
       if (isElement(child)) children.push(...transform(child, element));
       else children.push(child);
+    }
+    // A row left without a cell, or a table without a row, held only what was inserted, and is left out with it.
+    if (element.local === 'tr' && !children.some((child) => isElement(child) && child.local === 'tc')) return [];
+    if (element.local === 'tbl' && !children.some((child) => isElement(child) && child.local === 'tr')) return [];
+    if (element.local === 'tbl') note('tables', 1, 0, null);
+    // A cell whose every paragraph was left out keeps one empty paragraph: a cell without one is corrupt.
+    if (element.local === 'tc' && !children.some(holdsCellContent)) {
+      children.push({ raw: `<${element.name.slice(0, element.name.length - element.local.length)}p/>` });
     }
     return unwrap ? children : [{ ...element, children }];
   };

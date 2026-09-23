@@ -346,6 +346,64 @@ describe('DOCX export restores the original', () => {
   });
 });
 
+describe('DOCX export of a table\'s own revisions (Issue #411)', () => {
+  // The import reads a row or cell inserted as a whole as the paragraphs it held — left out of the manuscript, their
+  // words described in 批注 — and one deleted as a whole as paragraphs kept. The export writes the same reading.
+  it('leaves out a row, a cell or a table inserted whole, keeps one deleted, and never leaves a cell without a paragraph', async () => {
+    const path = join(sandbox, 'table-revised.docx');
+    const at = (minute: number) => ({ author: AUTHOR, date: `2026-09-01T14:${String(minute).padStart(2, '0')}:00Z` });
+    await composeRevisedDocx(path, {
+      source: SOURCE,
+      title: '表格修订组稿',
+      paragraphs: [
+        { runs: [{ text: { block: 7 } }] },
+        {
+          table: [
+            { cells: [{ paragraphs: [{ runs: [{ text: { block: 8 } }] }] }, { revision: { kind: 'cellIns', ...at(0) }, paragraphs: [{ runs: [{ text: { block: 9 } }] }] }] },
+            { revision: { kind: 'ins', ...at(1) }, cells: [{ paragraphs: [{ runs: [{ text: { block: 6 } }] }] }] },
+            { revision: { kind: 'del', ...at(2) }, cells: [{ paragraphs: [{ runs: [{ text: { block: 11 } }] }] }] },
+            { cells: [{ revision: { kind: 'cellDel', ...at(3) }, paragraphs: [{ runs: [{ text: { block: 12 } }] }] }, { revision: { kind: 'cellMerge', ...at(4) }, paragraphs: [] }] },
+            // A cell whose one paragraph is an inserted, empty paragraph mark: the export drops the paragraph, not the cell.
+            { cells: [{ paragraphs: [{ runs: [], markRevision: { kind: 'ins', ...at(5) } }] }] },
+          ],
+        },
+        { table: [{ revision: { kind: 'ins', ...at(6) }, cells: [{ paragraphs: [{ runs: [{ text: { block: 14 } }] }] }] }] },
+        { runs: [{ text: { block: 13 } }] },
+      ],
+    });
+    const { parsed, blocks } = await parse(path);
+    // The manuscript: the inserted cell, row and table are not in it; the deleted row and cell are.
+    expect(blocks).toHaveLength(5);
+    expect(parsed.importedMarks.map((entry) => entry.origin))
+      .toEqual(['paragraph-insertion', 'paragraph-insertion', 'paragraph-deletion', 'paragraph-deletion', 'paragraph-insertion']);
+    const original = new Uint8Array(await import('node:fs/promises').then((fs) => fs.readFile(path)));
+    const result = renderDocxExport({
+      title: '表格修订组稿',
+      blocks: exportBlocks(blocks),
+      marks: [],
+      options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS },
+      source: { kind: 'mapped', original, rows: bodyRows(blocks), textBoxes: 'retain' },
+    }, { emit: true });
+    expect(result.restoredBlocks).toBe(blocks.length);
+    // The written file reads back as the manuscript: the same blocks, and no revision or mark left in it.
+    const reread = await parseBytes(result.bytes!);
+    expect(reread.blocks.map((block) => block.digest)).toEqual(blocks.map((block) => block.digest));
+    expect(reread.parsed.importedMarks).toEqual([]);
+    const documentXml = partOf(result.bytes!, 'word/document.xml')!;
+    for (const markup of ['cellIns', 'cellDel', 'cellMerge', '<w:ins ', '<w:del ']) expect(documentXml.includes(markup)).toBe(false);
+    // One table is left, of four rows: the first without its inserted cell, the deleted row, the row of the deleted and
+    // merged cells, and the row whose cell kept an empty paragraph. The table inserted whole is gone.
+    expect(documentXml.match(/<w:tbl>/gu)).toHaveLength(1);
+    expect(documentXml.match(/<w:tr>/gu)).toHaveLength(4);
+    const cells = documentXml.match(/<w:tc>[\s\S]*?<\/w:tc>/gu) ?? [];
+    expect(cells).toHaveLength(5);
+    expect(cells.every((cell) => /<w:p[\s>/]/u.test(cell))).toBe(true);
+    // The merge changed no text and became no mark: it is the one revision of the file the export does not carry.
+    expect(fidelityOf(result.fidelity).find(([key]) => key === 'file-revisions')).toEqual(['file-revisions', 'degraded', 1, []]);
+    expect(result.fidelity.find((entry) => entry.key === 'tables')).toMatchObject({ count: 1, status: 'preserved' });
+  });
+});
+
 describe('DOCX export writes AI7\'s marks', () => {
   it('writes 批注 as comments with replies and 已处理, and 修改建议 as tracked changes, read back as the marks they were', async () => {
     const { input, blocks } = await richInput();
