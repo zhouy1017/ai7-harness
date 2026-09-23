@@ -36,7 +36,7 @@ This is the single Commander-owned status and routing file under [ADR 0064](docs
 
 `dev@10af99e` (PR #513) is the integrated head at this checkpoint. Under the Owner's standing merge word of 2026-09-22 — 「auto merge PRs you believe good to merge. This applies in this session for all PRs」 — the Commander integrated the pull requests the previous checkpoint lists, then #505 and #508 (two repairs of the nightly merge queue: a call site that withheld a scope its candidates ask for, and a listing read before GitHub had computed `mergeable`), #511 (J-01's readiness wait aligned with its siblings), #491 (S22, once the Owner merged ADR 0085, #489) and #513 (S78). Each had the complete ladder green on a background test guest at its exact tree and the full Gate green on both platforms.
 
-**A seven-slice stack waits only for ADR 0086 (#490).** Each slice is built and attested at its head — the ladder on a guest, the full Gate on Windows and macOS — and stays a draft until the one below it lands:
+**A nine-slice stack waits only for ADR 0086 (#490).** Each slice is built and attested at its head — the ladder on a guest, the full Gate on Windows and macOS — and stays a draft until the one below it lands:
 
 | Order | Pull request | Slice | What the editor can newly do | Schema | Protocol |
 | --- | --- | --- | --- | --- | --- |
@@ -47,6 +47,8 @@ This is the single Commander-owned status and routing file under [ADR 0064](docs
 | 5 | #514 | S75 (#421) | 快速开始 under a 默认执行规则, falling back to the plan with the reason when anything differs | 31 | 44 |
 | 6 | #515 | S76a (#422) | 取消任务 on a Run under way, with the Cancellation Impact Summary and what it read kept; the activity card; J-10 admitted | 32 | 45 |
 | 7 | #516 | S76b (#422) | 暂停 and 续行, and a Run AI7 closed under read 任务已中断 · 可续行 on the next launch | 33 | 46 |
+| 8 | #519 | S73 (#419) | change a baseline analysis's plan before it starts — leave out 核对与抽检 or forbid the automatic retry — as its next plan version, which the Run honours | 34 | 47 |
+| 9 | #520 | S76c (#422) | 改计划重做: stop a Run and redo it as a new Task that carries every finished reading range, its plan editable before it starts | — | 48 |
 
 Every slice after S64 was built on top of the stack rather than on `dev`, so no attested pull request renumbers its schema; the stack's protocols renumber once, mechanically, in its landing rebase if anything else lands on `dev` first. The provider line's next unit is still #473.
 
@@ -64,7 +66,7 @@ In order, from the [development plan](docs/development/development-plan.md), whi
 
 1. **Gate health is restored; read the next scheduled nightly.** PR #479 closed #474 and #475. If a scheduled nightly over `dev` fails again, J-02 now names the step and the precondition, J-01's `review` remains a sticky location worth splitting when it next matters, and the way to see a hosted-only failure is a `workflow_dispatch` of `e2e-nightly.yml` against a temporary ref (Process rules).
 2. **Phase 2 — the manuscript surface, review, files and delivery.** S88 (#438), 2.1 S57, 2.2 S71, 2.3 S58, 2.4 S59, 2.5 S60, 2.6 S69, 2.12 S65 and S22 (#57) are integrated. S61, S62 and S64 are the bottom of the stack under In flight and land the moment ADR 0086 (#490) is merged. Then S63 (#412, which stacks on S62), S64b (#500), S66 (#415) and S67 (#416).
-3. **Phase 3 — one Task Drawer and run governance**: 3.1 S72 (#418), 3.3 S74a (#420) and 3.9 S78 (#424) are integrated; S74b (#502), S75 (#421), S76a and S76b (#422) are built in the stack. Next: S73 (#419, the editable plan the drawer's 返回修改 waits for), built on top of the stack; then S76c (改计划重做, which needs S73) and S76d (Clarification Requests); then #51, S77 (#423), #49, #95, S70 (#425) (after S87-f3 #473, which lands the platform tools and the active-set v6 that selects the reviewed v7 bytes), S68 (#426).
+3. **Phase 3 — one Task Drawer and run governance**: 3.1 S72 (#418), 3.3 S74a (#420) and 3.9 S78 (#424) are integrated; S74b (#502), S75 (#421), S73 (#419), and S76a, S76b and S76c (#422) are built in the stack. Next: S76d (Clarification Requests, which also brings S73's deferred move of an adaptation into 先问你), built on top of the stack; then #51, S77 (#423), #49, #95, S70 (#425) (after S87-f3 #473, which lands the platform tools and the active-set v6 that selects the reviewed v7 bytes), S68 (#426).
 4. **Phase 4 — the knowledge base, evaluation and learning**: S79 (#427) to S83 (#431), then #94, #61, #62, #63, #64.
 5. **Phase 5 — ecosystem, dialogue and writing**: #52, #90, #65, #66, #89, S84 (#432).
 6. **The provider line** stays behind the value chain: S87-f3 (#473) is its next unit (dispatchable now; the Owner's byte review of active-set v6 at Ready); S55a (#435) (1c.10) follows with the ADR 0080 §6 document set; 1c.11 deferred; #452's literals retire with those two and a schema T3 of their own.
