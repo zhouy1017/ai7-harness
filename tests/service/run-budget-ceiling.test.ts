@@ -2,7 +2,7 @@ import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { BUDGET_REACHED_NEXT_ACTION, BaselineAnalysisExecutionOwner, CROSS_UNIT_BUDGET_REACHED } from '../../src/service/analysis/execution.js';
+import { BUDGET_REACHED_NEXT_ACTION, BaselineAnalysisExecutionOwner, CROSS_UNIT_BUDGET_REACHED, SAFE_RETRY_BUDGET_REACHED } from '../../src/service/analysis/execution.js';
 import { SET_RULE_BUDGET } from '../../src/service/default-execution-rules.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -48,22 +48,22 @@ afterEach(async () => {
   await roots.dispose();
 });
 
-function openWithRoute(): Promise<EditorialStore> {
+function openWithRoute(route: ResolvedModelFixture = fixture): Promise<EditorialStore> {
   return EditorialStore.open(roots.dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
     induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false,
     interruptAfterAbandonObjectRemoval: false,
-    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
+    baselineAnalysisRoute: { fixtureIdentity: route.identity, fixtureSha256: route.sha256, fixtureLineage: route.lineage },
   });
 }
 
-function owner(store: EditorialStore): BaselineAnalysisExecutionOwner {
+function owner(store: EditorialStore, route: ResolvedModelFixture = fixture): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
     ledger: store.baselineAnalysisLedger,
     launchPolicy,
-    fixture,
+    fixture: route,
     secretResolver: { resolve: async () => null },
     unitHold: controlledUnitHold(holdPath, { pollMs: 5 }),
   });
@@ -231,6 +231,49 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
       expect(stopped.resultSetRevision?.coverage).toMatchObject({ unitsTotal: SAMPLE1_UNITS, unitsClosed: SAMPLE1_UNITS });
       expect(stopped.resultSetRevision?.crossUnitReduction).toMatchObject({ state: 'gap', reason: CROSS_UNIT_BUDGET_REACHED, usage: null });
       expect(stopped.resultSetRevision?.assuranceSample).toMatchObject({ state: 'not-run', reason: '任务运行预算上限已达到，保证抽样未发起。' });
+      expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }).state.key).toBe('budget-reached');
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('keeps a retry the editor answered for from being sent once the ceiling is spent, and ends the Run at the ceiling', async () => {
+    // The transient-retry fixture: unit 2 fails for good, and unit 5's first attempt fails retry-safe. Neither failed
+    // turn reports tokens; the six ranges read spend 1,760 + 1,840 + 1,700 + 1,600 + 1,660 + 920 = 9,480.
+    const transient = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry');
+    const store = await openWithRoute(transient);
+    const execution = owner(store, transient);
+    try {
+      const bookId = await importedBook(store, 'L2 sample1 预算与澄清');
+      const prepared = prepare(store, bookId);
+      const taskIntentId = prepared.taskIntent!.taskIntentId;
+      // Asked first, under 9,000 tokens: the eighth range is sent at 8,560, and the ceiling is spent once it is read.
+      const edited = store.editBaselineAnalysisPlan({
+        bookId, taskIntentId, planEnvelopeDigest: prepared.planEnvelope!.digest, removedSteps: [], disallowedAdaptations: [],
+        askFirstAdaptations: ['safe-retry'], runBudgetCeiling: tokens(9000),
+      });
+      expect(edited.planVersion?.edits).toEqual({ removedSteps: [], disallowedAdaptations: [], askFirstAdaptations: ['safe-retry'], runBudgetCeiling: tokens(9000) });
+      const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, edited.planEnvelope!.digest).dispatchRunRecordId!;
+      execution.admitAndDispatch(runRecordId);
+      await execution.whenIdle();
+      expect(store.inspectBaselineAnalysis(bookId, () => null).run?.state).toBe('awaiting-clarification');
+      // 再试一次 is recorded, but the retry would be a further dispatch past the ceiling, so it is not sent: unit 5 is the
+      // gap its first attempt left, in words that say why, and the Run ends at the ceiling.
+      const card = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }).clarifications[0]!;
+      store.answerBaselineAnalysisClarification({ bookId, taskIntentId, requestId: card.requestId, optionId: 'retry', note: null });
+      expect(execution.continueAnswered(runRecordId, store.baselineAnalysisLedger)).toBe('continuing');
+      await execution.whenIdle();
+      const stopped = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(stopped.run?.transitions.map((transition) => transition.state)).toEqual(['authorized', 'admitted', 'executing', 'awaiting-clarification', 'admitted', 'executing', 'interrupted']);
+      expect(stopped.run?.attempt?.spans.map((span) => [span.unitOrdinal, span.attemptIndex])).toEqual([[1, 1], [2, 1], [3, 1], [4, 1], [5, 1], [6, 1], [7, 1], [8, 1]]);
+      expect(stopped.run?.adaptations).toEqual([]);
+      expect(stopped.taskOutcome?.stop).toEqual({ reason: 'run-budget-ceiling-reached', maxTotalTokens: 9000, usedTokens: 9480, unitsSettled: SAMPLE1_UNITS, unitsTotal: SAMPLE1_UNITS });
+      const gap = stopped.resultSetRevision?.gaps.find((entry) => entry.unitOrdinal === 5);
+      expect(gap?.code).toBe('adapter-failure');
+      expect(gap?.reason).toContain(SAFE_RETRY_BUDGET_REACHED);
+      expect(stopped.resultSetRevision?.gaps.map((entry) => entry.unitOrdinal)).toEqual([2, 5]);
       expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }).state.key).toBe('budget-reached');
       store.markCleanShutdown();
     } finally {
