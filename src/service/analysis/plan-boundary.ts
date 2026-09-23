@@ -61,20 +61,29 @@ export const MATERIAL_PLAN_FIELD_LABELS: Readonly<Record<MaterialPlanField, stri
 
 export const SAFE_RETRY_STATEMENT = '单个分析单元的模型请求因瞬时模型服务错误（速率限制、服务端错误、传输失败）失败时，在冻结计划内以完全相同的单元消息安全重试一次；不改变执行绑定、运行来源范围、Provider 绑定、预算状态或覆盖清单。第二次失败即记录为缺口。' as const;
 export const NO_PARTICIPATION_STATEMENT = '预计无需中途参与' as const;
+/** Where the editor may be asked mid-Run, once a safe retry is moved into 先问你 (Issue #422, S76d; PLAN-005). */
+export const ASK_FIRST_SAFE_RETRY_STATEMENT = '模型服务暂时出错时，先问你要不要把这个阅读范围安全地再试一次；只有等你回答的这一步会停下。' as const;
 export const PLAN_PREVIEW_FOOTER = '计划说明，不是运行授权' as const;
 export const PLAN_REVISION_REQUIRED_REASON = 'plan-revision-required' as const;
 
 /**
  * The exact split every plan version of this Task kind carries inside its canonical envelope. An adaptation the editor
- * withdrew (Issue #419, `不允许`) is not in it, so the Run Authorization binds the plan without it.
+ * withdrew (Issue #419, `不允许`) is not in it, so the Run Authorization binds the plan without it. One the editor moved
+ * into 先问你 (Issue #422, S76d) leaves the adaptable list for its own, and the plan then says where the editor may be
+ * asked; both are named only when something is there, so every split made before S76d reads back byte for byte.
  */
-export function planBoundarySplit(withdrawn: ReadonlyArray<string> = []): PlanBoundarySplitProjection {
+export function planBoundarySplit(withdrawn: ReadonlyArray<string> = [], askFirst: ReadonlyArray<string> = []): PlanBoundarySplitProjection {
+  const entry = (adaptationClass: PlanAdaptationClass) => ({ adaptationClass, label: '安全重试', statement: SAFE_RETRY_STATEMENT });
+  const asked = PLAN_ADAPTATION_CLASSES.filter((adaptationClass) => askFirst.includes(adaptationClass) && !withdrawn.includes(adaptationClass));
   return {
     adaptable: PLAN_ADAPTATION_CLASSES
-      .filter((adaptationClass) => !withdrawn.includes(adaptationClass))
-      .map((adaptationClass) => ({ adaptationClass, label: '安全重试', statement: SAFE_RETRY_STATEMENT })),
+      .filter((adaptationClass) => !withdrawn.includes(adaptationClass) && !asked.includes(adaptationClass))
+      .map(entry),
+    ...(asked.length === 0 ? {} : { askFirst: asked.map(entry) }),
     material: MATERIAL_PLAN_FIELDS.map((field) => ({ field, label: MATERIAL_PLAN_FIELD_LABELS[field] })),
-    participation: { expected: false, statement: NO_PARTICIPATION_STATEMENT },
+    participation: asked.length === 0
+      ? { expected: false, statement: NO_PARTICIPATION_STATEMENT }
+      : { expected: true, statement: ASK_FIRST_SAFE_RETRY_STATEMENT },
   };
 }
 
@@ -213,6 +222,8 @@ export interface PlanAdaptationRecordInput {
   readonly planEnvelopeDigest: string;
   readonly bindingDigest: string;
   readonly recordedAt: string;
+  /** The editor's answer that let the Run make this retry, once it was moved into 先问你 (Issue #422, S76d). */
+  readonly clarificationAnswerId?: string;
 }
 
 /**
@@ -245,6 +256,8 @@ export function buildPlanAdaptationRecord(input: PlanAdaptationRecordInput): { r
     planEnvelopeDigest: input.planEnvelopeDigest,
     bindingDigest: input.bindingDigest,
     recordedAt: input.recordedAt,
+    // Named only on a retry the editor answered for, so every other adaptation reads back byte for byte.
+    ...(input.clarificationAnswerId === undefined ? {} : { clarificationAnswerId: input.clarificationAnswerId }),
   };
   const canonical = canonicalRecord(record);
   return { record, json: canonical.json, digest: canonical.digest };

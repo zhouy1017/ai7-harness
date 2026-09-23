@@ -2330,9 +2330,35 @@ function registerRendererHandlers(
             planEnvelopeDigest: input.planEnvelopeDigest,
             removedSteps: input.removedSteps,
             disallowedAdaptations: input.disallowedAdaptations,
+            // 先问你 (Issue #422, S76d) rides along only when the renderer names it.
+            ...(input.askFirstAdaptations === undefined ? {} : { askFirstAdaptations: input.askFirstAdaptations }),
           });
           requireCurrentRouteGeneration(owned, routeGeneration);
           if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '更新计划的结果不属于当前图书工作台。');
+          return result;
+        });
+      }),
+  );
+  // 提交回答 (Issue #422, plan slice S76d) is the baseline Task's own too: the question, the Task it belongs to, the option
+  // and the note, answered by the route Book and serialized with every other effect — a Run that waits for it goes on.
+  ipcMain.handle(
+    IPC_CHANNELS.answerBaselineAnalysisClarification,
+    (event, input: Omit<ServiceOperationMap['answerBaselineAnalysisClarification']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('answerBaselineAnalysisClarification', {
+            bookId: route.bookId,
+            taskIntentId: input.taskIntentId,
+            requestId: input.requestId,
+            optionId: input.optionId,
+            note: input.note,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '回答的结果不属于当前图书工作台。');
           return result;
         });
       }),

@@ -103,6 +103,7 @@ import type {
   TaskAuthorizationProjection,
   BaselineAnalysisGoal,
   BaselineAnalysisProjection,
+  BaselineAnalysisRunState,
   BaselineAnalysisQuickStartProjection,
   BaselineAnalysisUpdateActionProjection,
   BaselineAnalysisUpdateMode,
@@ -238,6 +239,7 @@ import {
   type DefaultExecutionRuleRecord,
 } from './default-execution-rules.js';
 import { initializeRunCheckpointSchema } from './analysis/run-checkpoints.js';
+import { initializeClarificationSchema } from './analysis/clarifications.js';
 import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
 import { reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './review/category-configuration.js';
 import { reviewCategoryKindDefinition } from './review/review-category-kind.js';
@@ -301,6 +303,7 @@ import {
   RUN_CANCELLATION_SCHEMA_VERSION,
   RUN_CONTINUATION_SCHEMA_VERSION,
   PLAN_EDIT_SCHEMA_VERSION,
+  CLARIFICATION_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1508,7 +1511,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === EXPORT_LEDGER_SCHEMA_VERSION || currentVersion === CONNECTIVITY_WAIT_SCHEMA_VERSION || currentVersion === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       currentVersion === RUN_CANCELLATION_SCHEMA_VERSION ||
       currentVersion === RUN_CONTINUATION_SCHEMA_VERSION ||
-      currentVersion === PLAN_EDIT_SCHEMA_VERSION,
+      currentVersion === PLAN_EDIT_SCHEMA_VERSION ||
+      currentVersion === CLARIFICATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1538,7 +1542,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === EXPORT_LEDGER_SCHEMA_VERSION || currentVersion === CONNECTIVITY_WAIT_SCHEMA_VERSION || currentVersion === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       currentVersion === RUN_CANCELLATION_SCHEMA_VERSION ||
       currentVersion === RUN_CONTINUATION_SCHEMA_VERSION ||
-      currentVersion === PLAN_EDIT_SCHEMA_VERSION
+      currentVersion === PLAN_EDIT_SCHEMA_VERSION ||
+      currentVersion === CLARIFICATION_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1882,7 +1887,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION,
+      version === PLAN_EDIT_SCHEMA_VERSION ||
+      version === CLARIFICATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1901,7 +1907,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION) return;
+      version === PLAN_EDIT_SCHEMA_VERSION ||
+      version === CLARIFICATION_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2012,7 +2019,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION,
+      version === PLAN_EDIT_SCHEMA_VERSION ||
+      version === CLARIFICATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2030,7 +2038,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION) return;
+      version === PLAN_EDIT_SCHEMA_VERSION ||
+      version === CLARIFICATION_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2323,7 +2332,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== PLAN_EDIT_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== CLARIFICATION_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2389,7 +2398,8 @@ function initializeModelServiceSchema(
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION,
+      version === PLAN_EDIT_SCHEMA_VERSION ||
+      version === CLARIFICATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2407,7 +2417,8 @@ function initializeModelServiceSchema(
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION) {
+      version === PLAN_EDIT_SCHEMA_VERSION ||
+      version === CLARIFICATION_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3315,6 +3326,7 @@ export class EditorialStore {
       initializeExportLedgerSchema(authority);
       initializeDefaultExecutionRuleSchema(authority);
       initializeRunCheckpointSchema(authority);
+      initializeClarificationSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -3745,7 +3757,9 @@ export class EditorialStore {
       const blocks = this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
       const defaultRule = this.#baselineDefaultRule(projection);
       const stopped = this.#baselineStoppedRun(projection, carriesStoppedRun);
-      const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, defaultRule, ...(stopped === null ? {} : { stopped }) }));
+      // What the Run asked the editor, and the answers (Issue #422, S76d).
+      const clarifications = projection.run === null ? [] : this.#analysisCall(() => this.#baselineAnalysis.clarificationsOf(projection.run!.runRecordId));
+      const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, defaultRule, clarifications, ...(stopped === null ? {} : { stopped }) }));
       return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     const reviewRunId = input.ref;
@@ -3877,12 +3891,33 @@ export class EditorialStore {
    * Task, as the editor left it, and the Book's analysis as it then reads.
    */
   editBaselineAnalysisPlan(
-    input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string; removedSteps: ReadonlyArray<string>; disallowedAdaptations: ReadonlyArray<string> },
+    input: {
+      bookId: string;
+      taskIntentId: string;
+      planEnvelopeDigest: string;
+      removedSteps: ReadonlyArray<string>;
+      disallowedAdaptations: ReadonlyArray<string>;
+      askFirstAdaptations?: ReadonlyArray<string>;
+    },
     progress?: ProgressReader,
   ): BaselineAnalysisProjection {
     this.#assertAvailable();
     this.#analysisCall(() => this.#baselineAnalysis.editPlan(input.bookId, input));
     return this.inspectBaselineAnalysis(input.bookId, progress);
+  }
+
+  /**
+   * 提交回答 (Issue #422, plan slice S76d; V2-UX-CLAR-005, CLAR-006): the editor's answer to a question the Book's current
+   * baseline Task's Run asked, recorded with who and when; and the Run it belongs to, with the state it was in, so the
+   * service can take a Run that waits for it on.
+   */
+  answerBaselineAnalysisClarification(input: { bookId: string; taskIntentId: string; requestId: string; optionId: string; note: string | null }): {
+    runRecordId: string;
+    runState: BaselineAnalysisRunState;
+  } {
+    this.#assertAvailable();
+    const answered = this.#analysisCall(() => this.#baselineAnalysis.recordClarificationAnswer(input.bookId, input));
+    return { runRecordId: answered.runRecordId, runState: answered.runState };
   }
 
   /**
@@ -3917,7 +3952,7 @@ export class EditorialStore {
   #baselineStoppedRun(projection: BaselineAnalysisProjection, carriesStoppedRun: (runRecordId: string) => boolean): BaselineStoppedRunFacts | null {
     const run = projection.run;
     if (run === null || run.progress !== null) return null;
-    const stopped = run.state === 'paused' || run.state === 'resumable';
+    const stopped = run.state === 'paused' || run.state === 'resumable' || run.state === 'awaiting-clarification';
     const unheld = run.state === 'admitted' || run.state === 'executing' || run.state === 'cancelling' || run.state === 'pausing';
     if (!stopped && !unheld) return null;
     const unitsTotal = projection.update === null ? (projection.coverageManifest?.units.length ?? 0) : projection.update.reusePlan?.counts.recomputed ?? 0;
@@ -4038,7 +4073,7 @@ export class EditorialStore {
       ? SET_RULE_DEVELOPER_LIVE
       : projection.planRevision !== null
         ? SET_RULE_CHANGED
-        : version.edits.removedSteps.length > 0 || version.edits.disallowedAdaptations.length > 0
+        : version.edits.removedSteps.length > 0 || version.edits.disallowedAdaptations.length > 0 || (version.edits.askFirstAdaptations ?? []).length > 0
           ? SET_RULE_EDITED
           : current !== null && current.state === 'active' && current.fromThisPlan ? setRuleAlreadyReason(current.name) : null;
     return {
