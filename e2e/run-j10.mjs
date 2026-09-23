@@ -9,9 +9,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
-// J-10 (Issue #422, plan slices S76a and S76b): the operations on a Run under way, told apart by their consequence
-// (V2-UX-AUTH-010, AUTH-011, CTRL-001 to CTRL-009, CONT-014, CONT-015). Books are made from the one admitted input,
-// exact `sample1`, through the product's own UI, and their first baseline analyses run on the J-04 model adapter.
+// J-10 (Issue #422, plan slices S76a, S76b and S76c): the operations on a Run under way, told apart by their
+// consequence (V2-UX-AUTH-010, AUTH-011, CTRL-001 to CTRL-009, CONT-013 to CONT-015). Books are made from the one
+// admitted input, exact `sample1`, through the product's own UI, and their analyses run on the J-04 model adapter.
 // J-10's unit hold keeps a reading range in flight once the Journey's number of ranges have settled, so the Journey
 // can watch and steer a Run under way.
 //
@@ -21,11 +21,18 @@ import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabl
 // the slot free. 续行 goes on in the same Run from the fourth range, and with the sixth in flight 取消任务 opens one
 // inline Cancellation Impact Summary that records nothing; 继续运行 closes it; confirming — by keyboard alone — records
 // 正在取消, which holds while that range finishes, and 已取消 follows with six ranges kept in a partial Result Set
-// Revision, two named not attempted, and nothing sent after them.
+// Revision, two named not attempted, and nothing sent after them. 改计划重做 then sits beside 查看运行: it prepares a
+// new Task that carries those six ranges and reads the other two, and opens it in its editing; the editor leaves
+// 核对与抽检 out, updates the plan and starts it, and it runs to its end.
 //
 // On the second Book: AI7 closes while a range is in flight, and on the next launch the Run reads
 // 任务已中断 · 可续行 with what it had read kept and nothing dispatched; 续行 goes on in the same Run and attempt to
-// its end. 重试, 回退运行方向, 重做 and 重放 are J-10's later operations, not these slices'.
+// its end.
+//
+// On the third Book, paused with two ranges kept: 改计划重做 opens one inline summary of what stops, what is kept and
+// what the new Task does, which records nothing, and 先不重做 closes it; confirming it by keyboard alone cancels the
+// Run into its partial revision, and the new Task, carrying those two ranges, opens in its editing without running.
+// 重试, 回退运行方向 and 重放 are J-10's later operations, not these slices'.
 //
 // The runner writes J-10's unit-hold file, and reads the service's projections through `window.ai7` only to
 // cross-check what the drawer and ②A show — never as the oracle of what they say.
@@ -38,18 +45,31 @@ const SAMPLE1_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f4
 const FIXTURE_IDENTITY = 'sample1-baseline-happy';
 const BOOK = Object.freeze({ title: '取消任务旅程' });
 const SECOND_BOOK = Object.freeze({ title: '续行旅程' });
+const THIRD_BOOK = Object.freeze({ title: '改计划重做旅程' });
 /** Exact `sample1`'s reading ranges. */
 const SAMPLE1_UNITS = 8;
 /** Two ranges settle before 暂停 with the third in flight; after 续行, five have settled before 取消任务 with the sixth. */
 const FIRST_HOLD = 2;
 const RESUMED_HOLD = 5;
+const THIRD_HOLD = 1;
 // The drawer's own words (`src/renderer/task-drawer-labels.ts` and `src/service/task-plan.ts`), pinned there by
 // their unit suites.
-const REDO_REASON = '改计划重做随计划编辑提供';
+const REDO_REASON = '先暂停，再改计划重做';
 const CANCELLING_NOTE = '已记下你的取消；正在进行的这一步完成后停止，此后不会再发送任何内容';
 const PAUSING_NOTE = '已记下你的暂停；正在进行的这一步完成后停下，已完成的部分都会保存';
 const PAUSED_NOTE = '已读完 3 / 8 个阅读范围，结果都已保存；续行时从第 4 个接着读，不重复已读完的部分';
 const RESUMABLE_NOTE = '已读完 2 / 8 个阅读范围，结果都已保存；续行时从第 3 个接着读，不重复已读完的部分';
+const THIRD_PAUSED_NOTE = '已读完 2 / 8 个阅读范围，结果都已保存；续行时从第 3 个接着读，不重复已读完的部分';
+/** 改计划重做's summary on the third Book, paused with two ranges kept (Issue #422, S76c). */
+const REDO_SUMMARY = Object.freeze([
+  '这项任务会在这里停下并取消；已读完的 2 个阅读范围保留在一份新的结果集修订版里，没读到的记为未尝试。',
+  '然后准备一项新任务：沿用这 2 个阅读范围的结果，接着读其余 6 个；开始之前可以先改计划。',
+  '这项分析不改稿，没有需要撤回的受控动作。',
+  '新任务由你开始，不会自己运行。',
+]);
+/** The redo Task's own sentence: what it carries from the Run it redoes, and what it reads. */
+const REDO_GOAL_FIRST = '改计划重做：沿用已读完的 6 个阅读范围，接着读其余 2 个';
+const REDO_GOAL_THIRD = '改计划重做：沿用已读完的 2 个阅读范围，接着读其余 6 个';
 const IMPACT = Object.freeze([
   `正在读的第 6 个阅读范围读完后停止；其余 ${SAMPLE1_UNITS - 6} 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。`,
   '已读完的 5 个阅读范围和正在读的这一个的结果与缺口会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。',
@@ -458,6 +478,7 @@ const READ_DRAWER = `(() => {
   const text = (node) => node?.textContent ?? null;
   const activity = drawer.querySelector('.task-plan-activity');
   const impact = drawer.querySelector('#task-drawer-cancel-impact');
+  const redo = drawer.querySelector('#task-drawer-redo-summary');
   return {
     kind: drawer.dataset.taskPlanKind ?? null,
     ref: drawer.dataset.taskPlanRef ?? null,
@@ -481,6 +502,12 @@ const READ_DRAWER = `(() => {
       confirm: text(impact.querySelector('[data-task-drawer-control="confirm-cancel-run"]')),
       keep: text(impact.querySelector('[data-task-drawer-control="keep-running"]')),
     },
+    redo: redo === null ? null : {
+      heading: text(redo.querySelector('h4')),
+      lines: Array.from(redo.querySelectorAll('li')).map((line) => line.textContent),
+      confirm: text(redo.querySelector('[data-task-drawer-control="confirm-redo"]')),
+      keep: text(redo.querySelector('[data-task-drawer-control="keep-plan"]')),
+    },
   };
 })()`;
 
@@ -488,7 +515,7 @@ const READ_DRAWER = `(() => {
 function runningWith(settled) {
   return `(() => { const drawer=document.querySelector('#task-drawer'); const activity=drawer?.querySelector('.task-plan-activity'); return drawer?.dataset.taskDrawer==='open' && drawer.dataset.taskPlanState==='running' && activity?.dataset.taskPlanActivity==='running' && activity.dataset.taskPlanActivityProgress===${JSON.stringify(`${settled}/${SAMPLE1_UNITS}`)} && activity.dataset.taskPlanActivityUnit===${JSON.stringify(String(settled + 1))}; })()`;
 }
-/** The bar of a Run under way (AUTH-010): 暂停 and 取消任务 act on it, 改计划重做 says why it waits. */
+/** The bar of a Run under way (AUTH-010): 暂停 and 取消任务 act on it, 改计划重做 says it waits for 暂停. */
 const RUNNING_ACTIONS = Object.freeze([
   ['pause', '暂停', 'enabled', null],
   ['cancel-run', '取消任务', 'enabled', null],
@@ -499,7 +526,7 @@ const RUNNING_ACTIONS = Object.freeze([
 const STOPPED_ACTIONS = Object.freeze([
   ['resume', '续行', 'enabled', null],
   ['cancel-run', '取消任务', 'enabled', null],
-  ['redo', '改计划重做', 'disabled', REDO_REASON],
+  ['redo', '改计划重做', 'enabled', null],
   ['run-link', '查看运行', 'enabled', null],
 ]);
 
@@ -518,6 +545,13 @@ async function waitForBar(renderer, expected, name, timeout = 60_000) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   requireJourney(false, name, last);
+}
+/**
+ * The redo Task open in the drawer (Issue #422, S76c): a Task other than the one it redoes, not yet started, in its
+ * editing — 完整, focused on 核对与抽检's ×, the first thing that can change.
+ */
+function redoOpenedFrom(redoneIntentId) {
+  return `(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer==='open' && drawer.dataset.taskPlanKind==='baseline-analysis' && typeof drawer.dataset.taskPlanRef==='string' && drawer.dataset.taskPlanRef!==${JSON.stringify(redoneIntentId)} && drawer.dataset.taskPlanState==='ready' && drawer.dataset.taskPlanVersion==='1' && drawer.dataset.taskDrawerMode==='full' && document.activeElement?.dataset?.taskPlanEdit==='remove' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='assurance-sampling'; })()`;
 }
 /** Whether 待我处理 names the Book's analysis among what is under way, in the given state. */
 async function attentionNames(renderer, bookId, state) {
@@ -760,8 +794,9 @@ async function main() {
     await writeFile(holdPath, String(FIRST_HOLD), 'utf8');
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'product-ready');
-    // One member each for 取消任务, 暂停 and 续行, and nothing that redoes, retries, replays or rewinds a Run yet (the
-    // manuscript's own `redoManuscript` is the editor's undo and redo, not a Run's).
+    // One member each for 取消任务, 暂停 and 续行, and nothing that redoes, retries, replays or rewinds a Run: 改计划重做
+    // prepares a new Task through `prepareBaselineAnalysis`, naming the Run it redoes (the manuscript's own
+    // `redoManuscript` is the editor's undo and redo, not a Run's).
     await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && ['cancelBaselineAnalysisRun', 'pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun'].every((key)=>typeof window.ai7[key] === 'function') && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress/i.test(key)) && !Object.keys(window.ai7).some((key)=>/(redo|retry|replay|rewind)[A-Za-z]*(Run|Analysis|Task)$/i.test(key))`, 'renderer-api-boundary');
     await renderer.send('Page.setBypassCSP', { enabled: true });
     try {
@@ -957,7 +992,8 @@ async function main() {
     await writeFile(holdPath, String(RESUMED_HOLD + 1), 'utf8');
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskPlanState==='cancelled-after-start' && drawer.querySelector('.task-drawer-pill')?.textContent==='已取消' && drawer.querySelector('.task-bar-status')?.textContent==='已取消' && drawer.querySelector('.task-plan-activity')===null; })()`, 'cancelled-shown', 60_000);
     const cancelledDrawer = await renderer.evaluate(READ_DRAWER);
-    requireJourney(JSON.stringify(cancelledDrawer?.actions) === JSON.stringify([['run-link', '查看运行', 'enabled', null]]) && cancelledDrawer.note === null, 'cancelled-bar', cancelledDrawer);
+    // 改计划重做 is offered beside the way to the Run, now that it has stopped (Issue #422, S76c).
+    requireJourney(JSON.stringify(cancelledDrawer?.actions) === JSON.stringify([['redo', '改计划重做', 'enabled', null], ['run-link', '查看运行', 'enabled', null]]) && cancelledDrawer.note === null, 'cancelled-bar', cancelledDrawer);
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='cancelled' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='已取消'`, 'cancelled-card-label', 30_000);
 
     at('partial-revision-kept');
@@ -984,6 +1020,56 @@ async function main() {
     const after = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(after?.run?.state === 'cancelled' && after.run.attempt?.spans?.length === RESUMED_HOLD + 1 &&
       JSON.stringify(after.run.transitions) === JSON.stringify(cancelled.run.transitions), 'nothing-sent-after');
+
+    // ---- 改计划重做 (Issue #422, S76c; V2-UX-AUTH-010, CONT-013) ----------------------------------------------
+    at('redo-from-cancelled');
+    // A Run cancelled after it began offers 改计划重做 beside 查看运行 and asks nothing more: the redo is a new Task —
+    // its own intent, plan and envelope — that carries the six ranges the Run read and reads the two it did not. The
+    // drawer opens it in its editing, and nothing runs until the editor starts it. Nothing is held from here on.
+    await writeFile(holdPath, 'release', 'utf8');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="redo"]', 'redo');
+    await waitFor(renderer, redoOpenedFrom(taskIntentId), 'redo-opened', 120_000);
+    const redone = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const redoIntentId = redone?.taskIntent?.taskIntentId ?? '';
+    const redoCounts = redone?.update?.reusePlan?.counts;
+    requireJourney(UUID_PATTERN.test(redoIntentId) && redoIntentId !== taskIntentId && redone.bookId === bookId && redone.state === 'prepared' && (redone.run ?? null) === null &&
+      redone.taskIntent.mode === 'sync-current' && redone.taskIntent.redoOf?.runRecordId === executing.run.runRecordId && redone.taskIntent.redoOf.taskIntentId === taskIntentId &&
+      redoCounts?.reused === RESUMED_HOLD + 1 && redoCounts.recomputed === SAMPLE1_UNITS - RESUMED_HOLD - 1 &&
+      redone.update.predecessor?.revisionId === revision.revisionId && redone.resultSetRevision?.revisionId === revision.revisionId && redone.planVersion?.ordinal === 1 &&
+      (await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanRef`)) === redoIntentId,
+    'redo-task', { state: redone?.state, run: redone?.run?.state ?? null, intent: redone?.taskIntent, counts: redoCounts, predecessor: redone?.update?.predecessor?.revisionId ?? null });
+    // The drawer says what the new Task does and names the Run it redoes; ②A's card holds it, prepared.
+    const redoOfWords = `运行 ${executing.run.runRecordId} · 任务意图 ${taskIntentId}`;
+    await assertRenderer(renderer, `document.querySelector('#task-drawer .task-plan-sentence-text')?.textContent===${JSON.stringify(REDO_GOAL_FIRST)} && document.querySelector('#task-drawer [data-task-plan-technical="redo-of"]')?.textContent===${JSON.stringify(redoOfWords)}`, 'redo-task-words');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared' && document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId===${JSON.stringify(redoIntentId)}`, 'redo-task-card', 30_000);
+
+    at('redo-plan-edit');
+    // The redo is the editor's to change before it starts: × leaves 核对与抽检 out, and 更新计划 makes that version 2.
+    await clickSelector(renderer, '#task-drawer [data-task-plan-item="assurance-sampling"] [data-task-plan-edit="remove"]', 'redo-remove-sampling');
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-bar-note')?.textContent==='你改了 1 处' && document.querySelector('#task-drawer [data-task-drawer-control="update-plan"]')?.disabled===false`, 'redo-edit-pending', 10_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="update-plan"]', 'redo-update-plan');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanVersion==='2' && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'redo-plan-version-2', 60_000);
+    const redoEdited = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(redoEdited?.taskIntent?.taskIntentId === redoIntentId && redoEdited.state === 'prepared' && redoEdited.planVersion?.ordinal === 2 &&
+      JSON.stringify(redoEdited.planVersion.edits?.removedSteps) === JSON.stringify(['assurance-sampling']) && JSON.stringify(redoEdited.planVersion.edits.disallowedAdaptations) === '[]' &&
+      redoEdited.planRevisions?.at(-1)?.trigger === 'plan-edit' && (redoEdited.run ?? null) === null,
+    'redo-plan-edited', { planVersion: redoEdited?.planVersion ?? null, trigger: redoEdited?.planRevisions?.at(-1)?.trigger ?? null });
+
+    at('redo-run-completed');
+    // 开始任务: the redo runs as any Task does — only the two ranges the cancelled Run never reached — to its end,
+    // without 核对与抽检, as the editor asked; ②A and the drawer follow it there.
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'redo-start');
+    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.taskIntent?.taskIntentId===${JSON.stringify(redoIntentId)} && analysis.run !== null && !['authorized','admitted','executing'].includes(analysis.run.state))`, 'redo-run-ended', 180_000);
+    const redoFinished = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const redoRevision = redoFinished?.resultSetRevision;
+    requireJourney(redoFinished?.state === 'settled' && redoFinished.run?.state === 'completed' && redoFinished.run.runRecordId !== executing.run.runRecordId &&
+      JSON.stringify(redoFinished.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'completed']) &&
+      JSON.stringify(redoFinished.run.attempt?.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([7, 8]) &&
+      redoRevision?.coverage?.unitsTotal === SAMPLE1_UNITS && redoRevision.coverage.unitsClosed === SAMPLE1_UNITS && redoRevision.revisionId !== revision.revisionId &&
+      redoRevision.assuranceSample?.state === 'not-run' &&
+      redoFinished.taskOutcome?.classification === 'completed' && redoFinished.taskOutcome.resultSetRevisionId === redoRevision.revisionId,
+    'redo-run-completed', { state: redoFinished?.state, run: redoFinished?.run?.state, transitions: redoFinished?.run?.transitions?.map((transition) => transition.state), spans: redoFinished?.run?.attempt?.spans?.map((span) => span.unitOrdinal), closed: redoRevision?.coverage?.unitsClosed, sample: redoRevision?.assuranceSample?.state, outcome: redoFinished?.taskOutcome?.classification });
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled' && document.querySelector('#task-drawer')?.dataset.taskPlanState==='settled'`, 'redo-run-shown-settled', 30_000);
 
     // ---- 任务已中断 · 可续行: AI7 closes under a Run, and the Run goes on after it (CONT-014, CONT-015) ---------
     at('relaunch-for-second-book');
@@ -1058,6 +1144,92 @@ async function main() {
     'resumed-run-completed', { state: finished?.state, run: finished?.run?.state, transitions: finished?.run?.transitions?.map((transition) => transition.state), spans: finished?.run?.attempt?.spans?.map((span) => span.unitOrdinal), closed: finishedRevision?.coverage?.unitsClosed, outcome: finished?.taskOutcome?.classification });
     // ②A's card and the drawer follow it there.
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled' && document.querySelector('#task-drawer')?.dataset.taskPlanState==='settled'`, 'resumed-run-shown-settled', 30_000);
+
+    // ---- 改计划重做 from a stopped Run (Issue #422, S76c; V2-UX-AUTH-010, CONT-013) ------------------------------
+    at('third-book-import');
+    // A third Book, reached from the library by way of 工作概览.
+    await assertRenderer(renderer, `(() => { const open=Array.from(document.querySelectorAll('[data-screen="book-analysis"] .workbench-actions button')).find((button)=>button.textContent==='工作概览'); if(!(open instanceof HTMLButtonElement)||open.disabled)return false; open.click(); return true; })()`, 'third-overview');
+    await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='返回图书列表'&&!button.disabled)`, 'third-overview-ready');
+    await click(renderer, '返回图书列表', 'third-library');
+    const thirdBookId = await importSample1(renderer, THIRD_BOOK.title, true, 'third-import');
+    requireJourney(thirdBookId !== bookId && thirdBookId !== secondBookId, 'three-books');
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'third-artifact-enable-ready');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'third-artifact-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'third-artifact-enabled');
+    await click(renderer, '返回图书列表', 'third-return-library');
+
+    at('third-run-paused');
+    // One range may settle and the second is in flight when the editor pauses; it finishes and is kept, and the Run
+    // waits at the boundary after it, holding nothing. Nothing is held from here on.
+    await writeFile(holdPath, String(THIRD_HOLD), 'utf8');
+    await openAnalysisOf(renderer, thirdBookId, 'third-analysis');
+    await startFirstBaseline(renderer, 'ready', 'third-baseline');
+    await waitFor(renderer, runningWith(THIRD_HOLD), 'third-second-range-in-flight', 180_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="pause"]', 'third-pause');
+    await waitForBar(renderer, { state: 'pausing', pill: '正在暂停', status: '正在暂停', note: PAUSING_NOTE, actions: [['run-link', '查看运行', 'enabled', null]] }, 'third-pausing-bar', 30_000);
+    await writeFile(holdPath, 'release', 'utf8');
+    await waitForBar(renderer, { state: 'paused', pill: '已暂停', status: '已暂停', note: THIRD_PAUSED_NOTE, actions: STOPPED_ACTIONS }, 'third-paused-bar');
+    const thirdPaused = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const thirdIntentId = thirdPaused?.taskIntent?.taskIntentId ?? '';
+    requireJourney(thirdPaused?.bookId === thirdBookId && UUID_PATTERN.test(thirdIntentId) && thirdPaused.state === 'paused' && thirdPaused.run?.state === 'paused' &&
+      JSON.stringify(thirdPaused.run.attempt?.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2]) && (thirdPaused.resultSetRevision ?? null) === null,
+    'third-paused-record', { state: thirdPaused?.state, run: thirdPaused?.run?.state, spans: thirdPaused?.run?.attempt?.spans?.map((span) => span.unitOrdinal) });
+
+    at('redo-summary');
+    // AUTH-010: on a stopped Run 改计划重做 opens one inline summary, focus on it, of what stops, what is kept and what
+    // the new Task does — the same four lines `inspectTaskPlan()` answers — and records nothing.
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="redo"]', 'open-redo-summary');
+    await waitFor(renderer, `document.activeElement !== null && document.activeElement === document.querySelector('#task-drawer-redo-summary h4')`, 'redo-summary-focused', 10_000);
+    const redoSummary = await renderer.evaluate(READ_DRAWER);
+    const thirdPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(thirdIntentId)} })`);
+    requireJourney(redoSummary?.redo?.heading === '改计划重做摘要' && JSON.stringify(redoSummary.redo.lines) === JSON.stringify(REDO_SUMMARY) &&
+      JSON.stringify(thirdPlan?.redo?.summary) === JSON.stringify(REDO_SUMMARY) && redoSummary.redo.confirm === '确认改计划重做' && redoSummary.redo.keep === '先不重做' &&
+      redoSummary.impact === null,
+    'redo-summary', redoSummary?.redo ?? null);
+    const unrecordedRedo = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(unrecordedRedo?.taskIntent?.taskIntentId === thirdIntentId && unrecordedRedo.run?.state === 'paused' &&
+      unrecordedRedo.run.transitions.length === thirdPaused.run.transitions.length, 'redo-summary-records-nothing');
+
+    at('redo-keep-plan');
+    // 先不重做 closes it and returns focus to 改计划重做; the Run stays 已暂停.
+    await clickSelector(renderer, '#task-drawer-redo-summary [data-task-drawer-control="keep-plan"]', 'keep-plan');
+    await waitFor(renderer, `document.querySelector('#task-drawer-redo-summary') === null && document.activeElement === document.querySelector('#task-drawer [data-task-drawer-control="redo"]')`, 'redo-summary-closed', 10_000);
+    const keptPlan = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(keptPlan?.taskIntent?.taskIntentId === thirdIntentId && keptPlan.run?.state === 'paused' &&
+      keptPlan.run.transitions.length === thirdPaused.run.transitions.length, 'keep-plan-records-nothing');
+
+    at('j14-redo-keyboard');
+    // Without a pointer: Enter on 改计划重做 opens the summary with its heading focused, and Tab reaches 确认改计划重做
+    // with visible focus.
+    await pressEnter(renderer);
+    await waitFor(renderer, `document.activeElement !== null && document.activeElement === document.querySelector('#task-drawer-redo-summary h4')`, 'keyboard-redo-summary-focused', 10_000);
+    await pressTab(renderer);
+    await waitFor(renderer, `document.activeElement?.dataset?.taskDrawerControl === 'confirm-redo' && document.activeElement.matches(':focus-visible')`, 'keyboard-confirm-redo-reached', 10_000);
+
+    at('redo-confirmed');
+    // Enter confirms: the Run is cancelled from where it stopped — its two ranges kept in a partial revision, the rest
+    // named not attempted — and, once it reads 已取消, the new Task is prepared, carrying those two and reading the
+    // other six, and opens in its editing. Nothing runs.
+    await pressEnter(renderer);
+    await waitFor(renderer, redoOpenedFrom(thirdIntentId), 'redo-confirmed-opened', 120_000);
+    const thirdRedo = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const thirdRedoCounts = thirdRedo?.update?.reusePlan?.counts;
+    const thirdPartial = thirdRedo?.resultSetRevision;
+    requireJourney(thirdRedo?.bookId === thirdBookId && thirdRedo.state === 'prepared' && (thirdRedo.run ?? null) === null &&
+      UUID_PATTERN.test(thirdRedo.taskIntent?.taskIntentId ?? '') && thirdRedo.taskIntent.taskIntentId !== thirdIntentId && thirdRedo.taskIntent.mode === 'sync-current' &&
+      thirdRedo.taskIntent.redoOf?.runRecordId === thirdPaused.run.runRecordId && thirdRedo.taskIntent.redoOf.taskIntentId === thirdIntentId &&
+      thirdRedoCounts?.reused === THIRD_HOLD + 1 && thirdRedoCounts.recomputed === SAMPLE1_UNITS - THIRD_HOLD - 1 &&
+      thirdPartial?.coverage?.unitsTotal === SAMPLE1_UNITS && thirdPartial.coverage.unitsClosed === THIRD_HOLD + 1 && thirdRedo.update.predecessor?.revisionId === thirdPartial.revisionId &&
+      thirdPartial.provenance?.runRecordId === thirdPaused.run.runRecordId && thirdPartial.provenance.taskIntentId === thirdIntentId &&
+      thirdPartial.provenance.attemptId === thirdPaused.run.attempt.attemptId &&
+      JSON.stringify(thirdPartial.gaps.map((gap) => [gap.unitOrdinal, gap.code])) === JSON.stringify([3, 4, 5, 6, 7, 8].map((ordinal) => [ordinal, 'not-attempted'])),
+    'redo-confirmed-task', { state: thirdRedo?.state, run: thirdRedo?.run?.state ?? null, intent: thirdRedo?.taskIntent, counts: thirdRedoCounts, closed: thirdPartial?.coverage?.unitsClosed, provenance: thirdPartial?.provenance ?? null });
+    await assertRenderer(renderer, `document.querySelector('#task-drawer .task-plan-sentence-text')?.textContent===${JSON.stringify(REDO_GOAL_THIRD)}`, 'redo-confirmed-words');
+    // 新任务由你开始，不会自己运行: a moment later it is still waiting for the editor.
+    await new Promise((settle) => setTimeout(settle, 1_000));
+    const stillPrepared = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(stillPrepared?.taskIntent?.taskIntentId === thirdRedo.taskIntent.taskIntentId && stillPrepared.state === 'prepared' && (stillPrepared.run ?? null) === null &&
+      (await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanState`)) === 'ready', 'redo-waits-for-the-editor');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
