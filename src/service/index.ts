@@ -388,6 +388,42 @@ async function dispatch(
       };
     case 'runReconnectPreflight':
       return { id: request.id, ok: true, op: request.op, result: await connectivity.preflight() };
+    // 快速开始 (Issue #421; TASK-017, TASK-020, TASK-026): after 先看计划's own preparation, the Task starts exactly as
+    // 开始任务 would start it, under the rule version the editor clicked — or stays at its plan with the reason.
+    case 'quickStartBaselineAnalysis': {
+      const started = await store.quickStartBaselineAnalysis(
+        request.input.bookId,
+        request.input.taskIntentId,
+        request.input.planEnvelopeDigest,
+        request.input.ruleVersionId,
+        { credentialReadiness: () => analysisExecution.liveCredentialReadiness(), connectivity: connectivity.planConnectivity },
+      );
+      if (started.dispatchRunRecordId !== null) {
+        try {
+          analysisExecution.admitAndDispatch(started.dispatchRunRecordId);
+        } catch (error) {
+          const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
+          throw new StoreErrorClass(code, error instanceof Error ? error.message : '运行未能进入调度。');
+        }
+      }
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: { outcome: started.outcome, reasons: started.reasons, projection: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress) },
+      };
+    }
+    case 'setDefaultExecutionRule':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.setDefaultExecutionRule(request.input.bookId, request.input.taskIntentId, request.input.planEnvelopeDigest),
+      };
+    case 'inspectDefaultExecutionRules':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectDefaultExecutionRules() };
+    case 'deactivateDefaultExecutionRule':
+      return { id: request.id, ok: true, op: request.op, result: store.deactivateDefaultExecutionRule(request.input.ruleId) };
     // 审阅 (Issue #417, plan slice S69). Every answer that shows a Run reads the one owner's progress, so
     // a category executing now carries its Measured Run Progress.
     case 'inspectReviewWorkspace':

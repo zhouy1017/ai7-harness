@@ -93,6 +93,7 @@ function plan(overrides: Partial<TaskPlanProjection> = {}): TaskPlanProjection {
     drift: null,
     technical: [],
     start: { readiness: 'ready', needsModelConnection: false, planEnvelopeDigest: 'a'.repeat(64), categoryDigests: [], reconfirm: null },
+    defaultRule: { canSet: false, reason: '这份计划不能设为快速开始默认。', current: null, binds: [], startedBy: null },
     ...overrides,
   };
 }
