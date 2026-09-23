@@ -432,10 +432,14 @@ async function openGlobalAttentionItem(item: GlobalAttentionItemProjection): Pro
     case 'manuscript-recovery':
       await returnToRecoveryComparison(target.attentionId);
       return;
-    // 解决冲突… (Issue #57): 稿件冲突 of that suggestion, whose 返回稿件 opens the manuscript at its paragraph.
+    // 解决冲突… (Issue #57): 稿件冲突 of that suggestion, whose 返回稿件 opens the manuscript at its paragraph. The
+    // workspace reads and writes through this window's hold on the manuscript, which reading it grants — as opening
+    // the manuscript first does on the way there from its card.
     case 'manuscript-conflict':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>
-        renderProposalConflict({ bookId: target.bookId, manuscriptId: target.manuscriptId, branchId: target.branchId, markId: target.markId }, route.bookTitle));
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
+        await window.ai7.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null });
+        renderProposalConflict({ bookId: target.bookId, manuscriptId: target.manuscriptId, branchId: target.branchId, markId: target.markId }, route.bookTitle);
+      });
       return;
     case 'import-recovery':
       await renderStartupProjection(await window.ai7.getImportStartup());
