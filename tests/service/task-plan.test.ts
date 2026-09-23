@@ -220,7 +220,7 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
         { id: 'record-run', label: '记录运行（不派发）', result: '运行记录', removable: false, removed: false },
       ]);
       // A Task that keeps no plan versions takes no edit (Issue #419).
-      expect(drawer.edit).toEqual({ editable: false, reason: null, lastEdit: null, planEnvelopeDigest: null });
+      expect(drawer.edit).toEqual({ editable: false, reason: null, lastEdit: null, planEnvelopeDigest: null, budget: null });
       expect(drawer.scope.reference).toEqual([]);
       expect(drawer.scope.send).toBe('不发送任何内容');
       expect(drawer.scope.notRead).toContain('仅作血缘证据，不属于可读范围');
@@ -298,7 +298,7 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
       expect(firstPlan.boundary.adaptable).toEqual([{ id: 'safe-retry', label: '模型服务暂时出错时，同一个阅读范围安全地再试一次', removable: true, removed: false, movable: true, askFirst: false }]);
       // Issue #419: of the three steps only 核对与抽检 can be left out, and the prepared plan takes edits.
       expect(firstPlan.steps.map((step) => [step.id, step.removable, step.removed])).toEqual([['units', false, false], ['reduction', false, false], ['assurance-sampling', true, false]]);
-      expect(firstPlan.edit).toEqual({ editable: true, reason: null, lastEdit: null, planEnvelopeDigest: first.planEnvelope!.digest });
+      expect(firstPlan.edit).toEqual({ editable: true, reason: null, lastEdit: null, planEnvelopeDigest: first.planEnvelope!.digest, budget: { ceiling: 'unset', settable: true, reason: null } });
       expect(technical(firstPlan, 'coverage-manifest')).toContain(first.coverageManifest!.digest);
       expect(technical(firstPlan, 'execution-route')).toContain(fixture.identity);
       expect(technical(firstPlan, 'material-fields')?.split('、')).toHaveLength(15);
@@ -452,7 +452,7 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
         { id: 'report', label: '汇总', result: '审阅报告', removable: false, removed: false },
       ]);
       // A Review Run keeps no plan versions: its plan takes no edit here (Issue #419).
-      expect(drawer.edit).toEqual({ editable: false, reason: null, lastEdit: null, planEnvelopeDigest: null });
+      expect(drawer.edit).toEqual({ editable: false, reason: null, lastEdit: null, planEnvelopeDigest: null, budget: null });
       expect(drawer.participation.after).toContain('每一类完成后');
       expect(technical(drawer, `category:${TYPOS_AND_USAGE.categoryId}`)).toMatch(/计划权限边界 [0-9a-f]{64}/u);
       expect(technical(drawer, 'category:plot-consistency')).toContain('没有任务');

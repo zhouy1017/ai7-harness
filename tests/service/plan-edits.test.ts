@@ -190,7 +190,8 @@ describe('更新计划 over the real store', () => {
         ['assurance-sampling', '核对与抽检', true, false],
       ]);
       expect(proposed.boundary.adaptable).toEqual([{ id: 'safe-retry', label: '模型服务暂时出错时，同一个阅读范围安全地再试一次', removable: true, removed: false, movable: true, askFirst: false }]);
-      expect(proposed.edit).toEqual({ editable: true, reason: null, lastEdit: null, planEnvelopeDigest: v1 });
+      // 设置上限… is offered with the other edits (Issue #51, S16a): no ceiling yet, and the editor's to set.
+      expect(proposed.edit).toEqual({ editable: true, reason: null, lastEdit: null, planEnvelopeDigest: v1, budget: { ceiling: 'unset', settable: true, reason: null } });
       expect(prepared.planVersion?.edits).toEqual(NO_PLAN_EDITS);
       expect(prepared.executionPlan).not.toHaveProperty('editorEdits');
 
@@ -302,7 +303,7 @@ describe('更新计划 over the real store', () => {
       const drifted = prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: rangeB });
       expect(drifted.planRevision).toMatchObject({ trigger: 'prepare', state: 'pending' });
       expect(await refusal(() => edit(store, bookId, taskIntentId, edited.planEnvelope!.digest, NO_PLAN_EDITS))).toBe('ANALYSIS_PLAN_REVISION_PENDING');
-      expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }).edit).toEqual({ editable: false, reason: PLAN_EDIT_DRIFT_REASON, lastEdit: { ordinal: 2, recordedAt: edited.planRevisions.at(-1)!.detectedAt, entries: [{ field: 'steps.assurance-sampling', label: '步骤 · 核对与抽检', prior: '要做', proposed: '不做', materiality: 'edited' }] }, planEnvelopeDigest: null });
+      expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }).edit).toEqual({ editable: false, reason: PLAN_EDIT_DRIFT_REASON, lastEdit: { ordinal: 2, recordedAt: edited.planRevisions.at(-1)!.detectedAt, entries: [{ field: 'steps.assurance-sampling', label: '步骤 · 核对与抽检', prior: '要做', proposed: '不做', materiality: 'edited' }] }, planEnvelopeDigest: null, budget: { ceiling: 'unset', settable: false, reason: PLAN_EDIT_DRIFT_REASON } });
       // The version 重新确认计划 writes answers the change and keeps the edit.
       const reconfirmed = prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: rangeB }, true);
       expect(reconfirmed.planVersion).toMatchObject({ ordinal: 3, edits: { removedSteps: ['assurance-sampling'], disallowedAdaptations: [] } });
@@ -311,7 +312,7 @@ describe('更新计划 over the real store', () => {
       expect(reconfirmed.planEnvelope?.boundary?.adaptable.map((entry) => entry.adaptationClass)).toEqual(['safe-retry']);
       // Version 3 was made by the reconfirmation, so it names no edit of its own; its items still read as left out.
       const shown = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
-      expect(shown.edit).toEqual({ editable: true, reason: null, lastEdit: null, planEnvelopeDigest: reconfirmed.planEnvelope!.digest });
+      expect(shown.edit).toEqual({ editable: true, reason: null, lastEdit: null, planEnvelopeDigest: reconfirmed.planEnvelope!.digest, budget: { ceiling: 'unset', settable: true, reason: null } });
       expect(shown.steps.find((step) => step.id === 'assurance-sampling')?.removed).toBe(true);
       store.markCleanShutdown();
     } finally {

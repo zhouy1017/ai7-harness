@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 49 as const;
+export const SERVICE_PROTOCOL_VERSION = 50 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -2564,6 +2564,11 @@ export interface PlanEditsProjection {
    * Request — and makes it only once the editor answered 再试一次. Named only when it holds something.
    */
   askFirstAdaptations?: ReadonlyArray<'safe-retry'>;
+  /**
+   * 设置上限… (Issue #51, S16a; V2-UX-MODEL-015): the editor's Run Budget Ceiling, in total tokens, which the plan version
+   * freezes into its Provider Resolution Plan. Named only when set; a plan without it states `未设置任务预算上限`.
+   */
+  runBudgetCeiling?: Extract<RunBudgetCeilingState, { kind: 'tokens' }>;
 }
 
 /** The field a Plan Revision diff names for one edited item. */
@@ -2996,6 +3001,12 @@ export interface BaselineAnalysisProjection {
     recordedAt: string;
     resultSetRevisionId: string | null;
     safeNextAction: string;
+    /**
+     * Why the Run stopped before it finished, when a limit stopped it (Issue #51, S16a; V2-UX-MODEL-016): the explicit
+     * Run Budget Ceiling — the ceiling, what the Run had used, and how many of the ranges it submits it read. The
+     * outcome stays `interrupted`, with its partial revision; `null` for every other outcome.
+     */
+    stop: null | { reason: 'run-budget-ceiling-reached'; maxTotalTokens: number; usedTokens: number; unitsSettled: number; unitsTotal: number };
     /**
      * The Run Report of the Run this outcome settled (ADR 0066 §Run Report): an immutable record
      * inside the outcome, read back with the digest of its own canonical JSON. `null` for a Task
@@ -4044,7 +4055,7 @@ export interface InspectTaskPlanInput {
  */
 export type TaskPlanStateKey =
   | 'ready' | 'changed' | 'unconnected' | 'offline' | 'recorded' | 'blocked' | 'waiting' | 'running' | 'settled' | 'stopped'
-  | 'cancelled' | 'cancelling' | 'cancelled-after-start' | 'pausing' | 'paused' | 'resumable' | 'awaiting-clarification';
+  | 'cancelled' | 'cancelling' | 'cancelled-after-start' | 'pausing' | 'paused' | 'resumable' | 'awaiting-clarification' | 'budget-reached';
 
 /**
  * A started Run's controls in the drawer's bar and its activity above the plan (Issue #422, plan slice S76a;
@@ -4184,6 +4195,12 @@ export interface TaskPlanEditProjection {
    * edit's own: 模型未连接 or 离线 withholds 开始任务's digest, never this one.
    */
   planEnvelopeDigest: string | null;
+  /**
+   * 设置上限… (Issue #51, S16a; §6 ⑤, V2-UX-MODEL-013, MODEL-015): the Run Budget Ceiling this version freezes, and whether
+   * the editor can set it here — `reason` says why not, on a plan that is not editable or whose launch sets the ceiling.
+   * `null` for a kind whose plan takes no ceiling.
+   */
+  budget: null | { ceiling: RunBudgetCeilingState; settable: boolean; reason: string | null };
 }
 
 /**
@@ -4278,6 +4295,11 @@ export interface TaskPlanProjection {
   redo: TaskPlanRedoProjection | null;
   /** What the Task's Run asked the editor (Issue #422, S76d; CLAR-001 to CLAR-007): open questions first; empty when none. */
   clarifications: ReadonlyArray<TaskPlanClarificationProjection>;
+  /**
+   * 已停止 · 预算已达上限 (Issue #51, S16a; V2-UX-MODEL-016, MODEL-017): the ceiling, what the Run used, and what it read
+   * before the ceiling stopped it; `redo` is then 调整预算并重做. `null` for every other plan.
+   */
+  budgetStop: null | { maxTotalTokens: number; usedTokens: number; unitsSettled: number; unitsTotal: number };
 }
 
 /** The answers a question about a safe retry can have (Issue #422, S76d; CLAR-006, INPUT-002). */
@@ -4952,6 +4974,7 @@ export type GlobalAttentionStateKey =
   | 'manuscript-conflict-deferred'
   | 'analysis-failed'
   | 'analysis-interrupted'
+  | 'analysis-budget-reached'
   | 'analysis-blocked'
   | 'analysis-orphaned'
   | 'review-failed'
@@ -4988,10 +5011,11 @@ export type GlobalAttentionNextStep =
   | 'retry-abandon-cleanup'
   | 'await-local-check'
   | 'resolve-conflict'
-  | 'answer-clarification';
+  | 'answer-clarification'
+  | 'adjust-budget-redo';
 export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'view-run', 'view-review', 'reconfirm-plan', 'continue-review', 'return-to-recovery', 'retry-abandon-cleanup', 'await-local-check',
-  'resolve-conflict', 'answer-clarification',
+  'resolve-conflict', 'answer-clarification', 'adjust-budget-redo',
 ];
 
 /**
@@ -5675,6 +5699,8 @@ export interface ServiceOperationMap {
       disallowedAdaptations: ReadonlyArray<string>;
       /** 先问你 (Issue #422, S76d): absent reads as none, so an S73 request still means what it meant. */
       askFirstAdaptations?: ReadonlyArray<string>;
+      /** 设置上限… (Issue #51, S16a): the editor's ceiling in total tokens; absent or `null` sets none. */
+      runBudgetCeiling?: { kind: 'tokens'; maxTotalTokens: number } | null;
     };
     output: BaselineAnalysisProjection;
   };
@@ -6042,6 +6068,7 @@ export interface RendererApi {
     removedSteps: ReadonlyArray<string>;
     disallowedAdaptations: ReadonlyArray<string>;
     askFirstAdaptations?: ReadonlyArray<string>;
+    runBudgetCeiling?: { kind: 'tokens'; maxTotalTokens: number } | null;
   }): Promise<BaselineAnalysisProjection>;
   /** 提交回答 (Issue #422, S76d): the editor's answer to a question the Book's baseline analysis Run asked. */
   answerBaselineAnalysisClarification(input: {

@@ -27,7 +27,7 @@ import {
 } from '../../src/renderer/global-attention-labels.js';
 import { localInstantLabel } from '../../src/renderer/plan-preview-labels.js';
 import { REVIEW_ACTION_LABELS } from '../../src/renderer/review-labels.js';
-import { TASK_BAR_RECONFIRM, TASK_BAR_RUN_LINKS } from '../../src/renderer/task-drawer-labels.js';
+import { TASK_BAR_ADJUST_BUDGET_REDO, TASK_BAR_RECONFIRM, TASK_BAR_RUN_LINKS } from '../../src/renderer/task-drawer-labels.js';
 import { RESOLVE_CONFLICT_LABEL } from '../../src/renderer/editorial-mark-labels.js';
 import { PROPOSAL_CONFLICT_CLASSIFICATION } from '../../src/renderer/proposal-conflict-labels.js';
 import { REVIEW_RUN_CATEGORY_STATE_LABELS } from '../../src/service/review/review-run-state.js';
@@ -52,7 +52,7 @@ const AT = '2026-09-23T04:05:06.000Z';
 const STATES: ReadonlyArray<GlobalAttentionStateKey> = [
   'import-outcome-uncertain', 'import-cleanup-pending', 'recovery-pending', 'recovery-deferred',
   'manuscript-conflict', 'manuscript-conflict-deferred', 'analysis-failed',
-  'analysis-interrupted', 'analysis-blocked', 'analysis-orphaned', 'review-failed', 'review-stopped',
+  'analysis-interrupted', 'analysis-budget-reached', 'analysis-blocked', 'analysis-orphaned', 'review-failed', 'review-stopped',
   'analysis-plan-revision', 'analysis-clarification', 'analysis-queued', 'analysis-running', 'analysis-waiting-network', 'analysis-waiting-connection',
   'analysis-waiting-slot', 'analysis-cancelling', 'analysis-pausing', 'analysis-paused', 'analysis-resumable',
   'review-running', 'review-continuable',
@@ -147,6 +147,7 @@ describe('each item', () => {
       'manuscript-conflict-deferred': '需要解决冲突 · 暂不处理',
       'analysis-failed': '运行失败',
       'analysis-interrupted': '已中断',
+      'analysis-budget-reached': '已停止 · 预算已达上限',
       'analysis-blocked': '派发前已阻止',
       'analysis-orphaned': '已中断',
       'review-failed': '运行失败',
@@ -196,7 +197,11 @@ describe('each item', () => {
       'await-local-check': '等待本地核对',
       'resolve-conflict': '解决冲突…',
       'answer-clarification': '回答问题',
+      'adjust-budget-redo': '调整预算并重做',
     });
+    // The drawer's own words for the way on from a Run the ceiling stopped (Issue #51, S16a).
+    expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['adjust-budget-redo']).toBe(TASK_BAR_ADJUST_BUDGET_REDO);
+    expect(GLOBAL_ATTENTION_STATE_PILLS['analysis-budget-reached'].shape).not.toBe(GLOBAL_ATTENTION_STATE_PILLS['analysis-running'].shape);
     // Pinned to the words the record's own surface uses there.
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['resolve-conflict']).toBe(RESOLVE_CONFLICT_LABEL);
     expect(GLOBAL_ATTENTION_STATE_LABELS['manuscript-conflict']).toBe(PROPOSAL_CONFLICT_CLASSIFICATION);
@@ -239,6 +244,7 @@ describe('each item', () => {
       'manuscript-conflict-deferred': globalAttentionReason(item('manuscript-conflict-deferred', { object: { kind: 'manuscript-conflict', conflictKind: 'reversal' } })),
       'analysis-failed': globalAttentionReason(item('analysis-failed')),
       'analysis-interrupted': globalAttentionReason(item('analysis-interrupted')),
+      'analysis-budget-reached': globalAttentionReason(item('analysis-budget-reached')),
       'analysis-blocked': globalAttentionReason(item('analysis-blocked')),
       'analysis-orphaned': globalAttentionReason(item('analysis-orphaned')),
       'review-failed': globalAttentionReason(item('review-failed', { facts: { progress: null, revisionOrdinal: null, categories: categories([['错别字与规范用语', 'failed', null], ['体例与格式', 'refused', null]]) } })),
@@ -269,6 +275,7 @@ describe('each item', () => {
       'manuscript-conflict-deferred': '撤销这次应用时遇到冲突：应用后的文字又改过；在解决之前不能撤销这次应用。已记下暂不处理，这处冲突仍未解决。',
       'analysis-failed': '运行失败，没有形成新的结果集修订版。',
       'analysis-interrupted': '运行已在派发后中断；已完成单元的结果与缺口均已保留。',
+      'analysis-budget-reached': '运行用到了你设的预算上限，已停止；读完的部分已保留。要接着读，请调整预算并重做。',
       'analysis-blocked': '授权已记录，派发前阻止：当前启动没有可执行的路由。',
       'analysis-orphaned': '服务在这次运行期间停止，运行已中断；已完成单元的结果与缺口保留在分析账本中。',
       'review-failed': '「错别字与规范用语」运行失败；「体例与格式」未能开始',
