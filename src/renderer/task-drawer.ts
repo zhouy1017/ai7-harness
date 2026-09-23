@@ -1014,10 +1014,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       if (buffer.size === 0) editBuffers.delete(key);
       count += buffer.size;
     }
-    // The ceiling is one change (Issue #51, S16a), gone once the version shown holds it.
+    // The ceiling is one change (Issue #51, S16a), gone once the version shown holds it. Like the other edits it waits
+    // through a key-content change for the version 重新确认计划 writes.
     const ceiling = budgetBuffers.get(key);
     if (ceiling !== undefined) {
-      if (next.edit.budget === null || !next.edit.budget.settable || sameCeiling(ceiling, next.edit.budget.ceiling)) budgetBuffers.delete(key);
+      if (next.edit.budget === null || sameCeiling(ceiling, next.edit.budget.ceiling)) budgetBuffers.delete(key);
       else count += 1;
     }
     return count;
@@ -1117,10 +1118,13 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     return left === 'unset' || right === 'unset' ? left === right : left.maxTotalTokens === right.maxTotalTokens;
   }
 
-  /** The ceiling as the editor now sees it: theirs not yet made the plan, else the version's; none where it is not theirs to set. */
+  /**
+   * The ceiling as the editor now sees it: theirs not yet made the plan, else the version's. None where the launch sets it
+   * (developer-live), since the plan's edit never names that one.
+   */
   function shownCeiling(next: TaskPlanProjection): RunBudgetCeilingState {
     const budget = next.edit.budget;
-    if (budget === null || !budget.settable) return 'unset';
+    if (budget === null || (!budget.settable && next.edit.editable)) return 'unset';
     return budgetBuffers.get(editKey(next)) ?? budget.ceiling;
   }
 
