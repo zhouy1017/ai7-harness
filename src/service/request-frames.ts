@@ -455,7 +455,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     // 取消 while a Run waits (Issue #502), and 取消任务 once it started (Issue #422): the Task Intent names it, within
     // the route's Book.
     case 'cancelWaitingBaselineAnalysis':
-    case 'cancelBaselineAnalysisRun': {
+    case 'cancelBaselineAnalysisRun':
+    // 暂停 and 续行 (Issue #422, S76b) name the Task Intent as 取消任务 does.
+    case 'pauseBaselineAnalysisRun':
+    case 'resumeBaselineAnalysisRun': {
       const input = requireInput(value.input, ['bookId', 'taskIntentId'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.taskIntentId)) throw new ProtocolError(tentativeId);
       break;

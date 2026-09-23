@@ -14,6 +14,7 @@ import {
   readRange,
   withConnectionReadiness,
   withConnectivityReadiness,
+  withResumeBlockers,
   withWaitingReason,
   OFFLINE_STATE,
   WAITING_LABELS,
@@ -21,6 +22,9 @@ import {
   RUN_CONTROL_CANCELLING_REASON,
   RUN_CONTROL_PAUSE_REASON,
   RUN_CONTROL_REDO_REASON,
+  RESUME_BLOCKED_CONNECTION,
+  RESUME_BLOCKED_OFFLINE,
+  RESUME_BLOCKED_SLOT,
   baselineCancellationImpact,
 } from '../../src/service/task-plan.js';
 
@@ -202,8 +206,8 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
     blockedReasons: null, progress: live, attempt: null,
   });
 
-  it('says the controls this slice does not bring wait for theirs, and that the analysis leaves nothing committed', () => {
-    expect(RUN_CONTROL_PAUSE_REASON).toBe('暂停与续行随后提供');
+  it('says why 暂停 and 改计划重做 are not offered, and that the analysis leaves nothing committed', () => {
+    expect(RUN_CONTROL_PAUSE_REASON).toBe('这项任务现在没有在运行，不能暂停；可以取消它');
     expect(RUN_CONTROL_REDO_REASON).toBe('改计划重做随计划编辑提供');
     expect(RUN_CONTROL_CANCELLING_REASON).toBe('已在取消：正在进行的这一步完成后停止');
     expect(CANCELLATION_NO_EFFECTS).toBe('这项分析不改稿，没有需要撤回的受控动作。');
@@ -240,6 +244,33 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
       .toBe('正在进行的保证抽样完成后停止，之后的步骤都不再进行，不再发送任何内容。');
     expect(baselineCancellationImpact(run('admitted', null))).toEqual([
       '这项任务还没有开始阅读；取消后不会发送任何内容，也不会形成结果集修订版。',
+      CANCELLATION_NO_EFFECTS,
+    ]);
+  });
+
+  it('adds what 续行 waits for to a stopped Run\'s own reasons, sentence after sentence (S76b; CONT-015)', () => {
+    expect(RESUME_BLOCKED_SLOT).toBe('另一项任务正在运行；它结束后再续行。');
+    expect(RESUME_BLOCKED_CONNECTION).toBe('模型未连接：续行要发送到模型服务，所需的凭据还没有就绪；连接好之后才能续行。');
+    expect(RESUME_BLOCKED_OFFLINE).toBe('离线：续行要连到模型服务，而这台设备现在没有网络；联网后再续行。');
+    const stopped = { runControl: { resume: { reason: null } } } as unknown as TaskPlanProjection;
+    expect(withResumeBlockers(stopped, [])).toBe(stopped);
+    expect(withResumeBlockers(stopped, [RESUME_BLOCKED_SLOT, RESUME_BLOCKED_OFFLINE]).runControl?.resume?.reason)
+      .toBe('另一项任务正在运行；它结束后再续行。离线：续行要连到模型服务，而这台设备现在没有网络；联网后再续行。');
+    const moved = { runControl: { resume: { reason: '计划的关键内容已经变化：模型。' } } } as unknown as TaskPlanProjection;
+    expect(withResumeBlockers(moved, [RESUME_BLOCKED_CONNECTION]).runControl?.resume?.reason).toBe(`计划的关键内容已经变化：模型。${RESUME_BLOCKED_CONNECTION}`);
+    // A Run under way offers no 续行 to hold back.
+    const running = { runControl: { resume: null } } as unknown as TaskPlanProjection;
+    expect(withResumeBlockers(running, [RESUME_BLOCKED_SLOT])).toBe(running);
+  });
+
+  it('says what a stopped Run kept, and that nothing is in flight (S76b)', () => {
+    expect(baselineCancellationImpact(run('paused', null), null, { unitsSettled: 3, unitsTotal: 8 })).toEqual([
+      '这项任务已经停下；其余 5 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。',
+      '已读完的 3 个阅读范围的结果与缺口会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。',
+      CANCELLATION_NO_EFFECTS,
+    ]);
+    expect(baselineCancellationImpact(run('resumable', null), null, { unitsSettled: 0, unitsTotal: 8 })).toEqual([
+      '这项任务还没有读完任何阅读范围；取消后不会发送任何内容，也不会形成结果集修订版。',
       CANCELLATION_NO_EFFECTS,
     ]);
   });
