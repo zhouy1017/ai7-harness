@@ -29,6 +29,7 @@ import {
 } from '../shared/protocol.js';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
 import type { EditorialMarkStore } from './editorial-marks.js';
+import type { ConflictAttentionReading } from './global-attention.js';
 
 /**
  * 稿件冲突 of a single 修改建议 (Issue #57, plan slice S22; ADR 0085; V2-UX-CONFLICT-001 to 013,
@@ -310,6 +311,35 @@ export function markConflictOf(
     newMarkId: null,
     resolvedAt: null,
   };
+}
+
+/**
+ * 待我处理's reading of the Manuscript Conflicts (Issue #424; V2-UX-ATTN-002): every 修改建议 in conflict with the
+ * manuscript across every Book and not yet resolved — the same test `ANCHOR_CONFLICT_STATE_SQL` makes — with its Book
+ * and whether 暂不处理 was recorded, oldest first and at most `limit`. A read: nothing is claimed or written.
+ */
+export function readConflictAttention(db: DatabaseSync, limit: number): ConflictAttentionReading[] {
+  if (!proposalConflictRelationsExist(db)) return [];
+  const rows = db.prepare(
+    `SELECT em.mark_id, em.status, em.updated_at, em.book_id, em.manuscript_id, em.branch_id, b.title,
+            (SELECT max(x.created_at) FROM proposal_conflict_deferrals x WHERE x.mark_id = em.mark_id) AS deferred_at
+     FROM editorial_marks em
+     JOIN books b ON b.book_id = em.book_id
+     WHERE em.kind = 'change-suggestion' AND em.anchor_state = 'drifted' AND em.status IN ('open', 'applied')
+       AND NOT EXISTS (SELECT 1 FROM proposal_conflict_outcomes o WHERE o.mark_id = em.mark_id)
+     ORDER BY em.updated_at, em.rowid
+     LIMIT ?`,
+  ).all(limit) as SqlRow[];
+  return rows.map((row) => ({
+    markId: text(row.mark_id),
+    conflictKind: text(row.status) === 'applied' ? 'reversal' : 'suggestion',
+    deferredAt: nullableText(row.deferred_at),
+    updatedAt: text(row.updated_at),
+    bookId: text(row.book_id),
+    bookTitle: text(row.title),
+    manuscriptId: text(row.manuscript_id),
+    branchId: text(row.branch_id),
+  }));
 }
 
 /** The conflict a 修改建议 was saved from as a new Proposal version, if it was. */

@@ -15,6 +15,7 @@ import {
   type GlobalAttentionProjection,
   type GlobalAttentionStateKey,
   type GlobalAttentionTarget,
+  type ProposalConflictKind,
   type ReviewRunCategoryState,
   type ReviewRunState,
 } from '../shared/protocol.js';
@@ -27,6 +28,8 @@ import { REVIEW_RUN_CATEGORY_STATE_LABELS } from './review/review-run-state.js';
  * and recovery relations here, the baseline ledger and the Review Run ledger in their own modules — and
  * nothing in this file or in those readings writes, claims or terminalizes anything (V2-UX-ATTN-008): a Run
  * a stopped service left executing is *read* as stopped, never recorded so.
+ *
+ * The Manuscript Conflicts are read by `proposal-conflicts.ts`, their owner.
  *
  * Composition is pure, so the grouping, the ordering, the bounds and the count are pinned by the unit suite
  * without a store. An item resolves by itself when its record moves on: only the Book's latest Task of a
@@ -76,6 +79,23 @@ export interface RecoveryAttentionReading {
   readonly manuscriptId: string;
   readonly branchId: string;
   readonly branchName: string;
+}
+
+/**
+ * A 修改建议 in conflict with the manuscript and not yet resolved (V2-UX-ATTN-002), read by `proposal-conflicts.ts`:
+ * its own words changed while it was open (`suggestion`), or after its Apply (`reversal`).
+ */
+export interface ConflictAttentionReading {
+  readonly markId: string;
+  readonly conflictKind: ProposalConflictKind;
+  /** When 暂不处理 was last recorded for it; `null` before any. */
+  readonly deferredAt: string | null;
+  /** When the suggestion last moved: its words drifting is what made it a conflict. */
+  readonly updatedAt: string;
+  readonly bookId: string;
+  readonly bookTitle: string;
+  readonly manuscriptId: string;
+  readonly branchId: string;
 }
 
 /** The Book's latest baseline analysis Task, read by the baseline ledger. */
@@ -147,6 +167,7 @@ export interface ReviewRunAttentionReading {
 export interface GlobalAttentionReadings {
   readonly imports: ReadonlyArray<ImportAttentionReading>;
   readonly recoveries: ReadonlyArray<RecoveryAttentionReading>;
+  readonly conflicts: ReadonlyArray<ConflictAttentionReading>;
   readonly analysisTasks: ReadonlyArray<AnalysisTaskAttentionReading>;
   readonly analysisOutcomes: ReadonlyArray<AnalysisOutcomeAttentionReading>;
   /** Each Book's latest Review Run. */
@@ -239,6 +260,31 @@ function recoveryItem(reading: RecoveryAttentionReading): GlobalAttentionItemPro
       { key: 'manuscript', label: '稿件', value: reading.manuscriptId },
       { key: 'branch', label: '分支', value: reading.branchId },
       { key: 'state-at', label: '状态开始时间', value: reading.createdAt },
+    ],
+  });
+}
+
+/**
+ * A Manuscript Conflict (V2-UX-ATTN-002, ADR 0085): the suggestion cannot be accepted or applied — nor its Apply
+ * reversed — until the conflict is resolved, so it blocks; 暂不处理 records the conflict and leaves it standing.
+ */
+function conflictItem(reading: ConflictAttentionReading): GlobalAttentionItemProjection {
+  const deferred = reading.deferredAt !== null;
+  const at = reading.deferredAt ?? reading.updatedAt;
+  return item('exceptions', deferred ? 'manuscript-conflict-deferred' : 'manuscript-conflict', {
+    itemId: `conflict:${reading.markId}`,
+    blocked: true,
+    at,
+    book: { bookId: reading.bookId, title: reading.bookTitle },
+    object: { kind: 'manuscript-conflict', conflictKind: reading.conflictKind },
+    nextStep: 'resolve-conflict',
+    target: { kind: 'manuscript-conflict', bookId: reading.bookId, manuscriptId: reading.manuscriptId, branchId: reading.branchId, markId: reading.markId },
+    technical: [
+      { key: 'mark', label: '修改建议', value: reading.markId },
+      { key: 'conflict-kind', label: '冲突类型', value: reading.conflictKind },
+      { key: 'manuscript', label: '稿件', value: reading.manuscriptId },
+      { key: 'branch', label: '分支', value: reading.branchId },
+      { key: 'state-at', label: '状态开始时间', value: at },
     ],
   });
 }
@@ -432,6 +478,7 @@ export function composeGlobalAttention(readings: GlobalAttentionReadings, now: D
   const all: GlobalAttentionItemProjection[] = [
     ...readings.imports.map(importItem),
     ...readings.recoveries.map(recoveryItem),
+    ...readings.conflicts.map(conflictItem),
     ...readings.analysisTasks.flatMap((reading) => analysisTaskItem(reading) ?? []),
     ...readings.analysisOutcomes.filter((reading) => reading.recordedAt >= since).map(analysisOutcomeItem),
     ...readings.reviewRuns.flatMap((reading) => reviewRunItem(reading) ?? []),

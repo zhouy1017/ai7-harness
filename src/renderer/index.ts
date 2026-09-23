@@ -422,7 +422,7 @@ function renderGlobalAttention(): void {
 
 /**
  * An item opens its own record in this window (V2-UX-ATTN-007, D-006): the import or manuscript recovery the
- * startup would show, ②A with its Run, ②A with the plan in the Task Drawer where 重新确认计划 is, or ②B with
+ * startup would show, 稿件冲突 of the conflicted suggestion, ②A with its Run, ②A with the plan in the Task Drawer where 重新确认计划 is, or ②B with
  * the Review Run open. A Book another window already shows is shown there, as 书库 does. Opening decides
  * nothing; a Recovery Attention State is claimed for this window only while no other window holds it.
  */
@@ -431,6 +431,11 @@ async function openGlobalAttentionItem(item: GlobalAttentionItemProjection): Pro
   switch (target.kind) {
     case 'manuscript-recovery':
       await returnToRecoveryComparison(target.attentionId);
+      return;
+    // 解决冲突… (Issue #57): 稿件冲突 of that suggestion, whose 返回稿件 opens the manuscript at its paragraph.
+    case 'manuscript-conflict':
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>
+        renderProposalConflict({ bookId: target.bookId, manuscriptId: target.manuscriptId, branchId: target.branchId, markId: target.markId }, route.bookTitle));
       return;
     case 'import-recovery':
       await renderStartupProjection(await window.ai7.getImportStartup());

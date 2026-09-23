@@ -6,6 +6,7 @@ import {
   recentWindowStart,
   type AnalysisOutcomeAttentionReading,
   type AnalysisTaskAttentionReading,
+  type ConflictAttentionReading,
   type GlobalAttentionReadings,
   type ImportAttentionReading,
   type RecoveryAttentionReading,
@@ -35,6 +36,7 @@ const daysAgo = (days: number): string => new Date(NOW.getTime() - days * 24 * 6
 const NONE: GlobalAttentionReadings = {
   imports: [],
   recoveries: [],
+  conflicts: [],
   analysisTasks: [],
   analysisOutcomes: [],
   reviewRuns: [],
@@ -143,6 +145,10 @@ function recovery(title: string, status: RecoveryAttentionReading['status'], cre
   };
 }
 
+function conflict(title: string, conflictKind: ConflictAttentionReading['conflictKind'], deferredAt: string | null, updatedAt: string): ConflictAttentionReading {
+  return { markId: randomUUID(), conflictKind, deferredAt, updatedAt, bookId: randomUUID(), bookTitle: title, manuscriptId: randomUUID(), branchId: randomUUID() };
+}
+
 describe('the four groups of 待我处理', () => {
   it('are always the four, in their one fixed order, empty or not, and count nothing when nothing needs the editor', () => {
     const projection = composeGlobalAttention(NONE, NOW);
@@ -153,6 +159,28 @@ describe('the four groups of 待我处理', () => {
     expect(projection.running).toBe(false);
     // The owner's slot, and nothing else, says a Run is in flight.
     expect(composeGlobalAttention(readings({ busy: true }), NOW).running).toBe(true);
+  });
+
+  // V2-UX-ATTN-002: a Manuscript Conflict is 异常与结果待确认's, and blocks its suggestion until it is resolved.
+  it('lists a Manuscript Conflict, before or after 暂不处理, as blocking, opening its 稿件冲突', () => {
+    const open = conflict('冲突之书', 'suggestion', null, minutesAgo(30));
+    const deferred = conflict('暂缓之书', 'reversal', minutesAgo(10), minutesAgo(35));
+    const projection = composeGlobalAttention(readings({ conflicts: [deferred, open] }), NOW);
+    const exceptions = group(projection, 'exceptions');
+    // 暂不处理 is when the deferred state began, so the conflict first left open is the older item.
+    expect(exceptions.map((entry) => [entry.itemId, entry.state, entry.blocked, entry.at])).toEqual([
+      [`conflict:${open.markId}`, 'manuscript-conflict', true, open.updatedAt],
+      [`conflict:${deferred.markId}`, 'manuscript-conflict-deferred', true, deferred.deferredAt],
+    ]);
+    expect(exceptions[1]).toMatchObject({
+      group: 'exceptions',
+      book: { bookId: deferred.bookId, title: '暂缓之书' },
+      object: { kind: 'manuscript-conflict', conflictKind: 'reversal' },
+      nextStep: 'resolve-conflict',
+      target: { kind: 'manuscript-conflict', bookId: deferred.bookId, manuscriptId: deferred.manuscriptId, branchId: deferred.branchId, markId: deferred.markId },
+    });
+    expect(exceptions[0]!.technical.map((row) => row.key)).toEqual(['mark', 'conflict-kind', 'manuscript', 'branch', 'state-at']);
+    expect(projection.actionableCount).toBe(2);
   });
 
   it('places each record by its own state, with the next step and the record it opens', () => {

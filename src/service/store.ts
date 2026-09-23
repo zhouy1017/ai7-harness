@@ -151,7 +151,7 @@ import {
   recentWindowStart,
 } from './global-attention.js';
 import { baselineAnalysisPlan, fixedTaskPlan, reviewRunPlan, TaskPlanError, withConnectionReadiness } from './task-plan.js';
-import { initializeProposalConflictSchema, ProposalConflictError, ProposalConflictStore } from './proposal-conflicts.js';
+import { initializeProposalConflictSchema, ProposalConflictError, ProposalConflictStore, readConflictAttention } from './proposal-conflicts.js';
 import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
 import { reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './review/category-configuration.js';
 import { reviewCategoryKindDefinition } from './review/review-category-kind.js';
@@ -8416,7 +8416,8 @@ export class EditorialStore {
 
   /**
    * 待我处理 across every Book (editor-surfaces §8.1, V2-UX-ATTN-001 to 009): the uncertain imports, the
-   * pending abandonment cleanups and the Recovery Attention States read here, each Book's latest baseline
+   * pending abandonment cleanups and the Recovery Attention States read here, the unresolved Manuscript Conflicts
+   * from their owner, each Book's latest baseline
    * analysis Task and its recent outcomes from the baseline ledger, and each Book's latest Review Run and
    * the recent completed ones from the Review Run ledger, composed into the four groups by
    * `global-attention.ts`. `progress` and `busy` are the one execution owner's, handed in by the service
@@ -8437,6 +8438,7 @@ export class EditorialStore {
         return composeGlobalAttention({
           imports: readImportAttention(this.#authority, limit),
           recoveries: readRecoveryAttention(this.#authority, limit),
+          conflicts: readConflictAttention(this.#authority, limit),
           analysisTasks: baseline.tasks,
           analysisOutcomes: baseline.outcomes,
           reviewRuns: review.latest,

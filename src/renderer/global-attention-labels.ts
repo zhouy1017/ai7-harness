@@ -13,6 +13,8 @@ import { RUN_LIVENESS_STAGE_LABELS, localInstantLabel } from './plan-preview-lab
 import type { ReviewPill } from './review-labels.js';
 import { REVIEW_ACTION_LABELS } from './review-labels.js';
 import { TASK_BAR_RECONFIRM, TASK_BAR_RUN_LINKS } from './task-drawer-labels.js';
+import { RESOLVE_CONFLICT_LABEL } from './editorial-mark-labels.js';
+import { PROPOSAL_CONFLICT_CLASSIFICATION, REVERSAL_CONFLICT_LINE } from './proposal-conflict-labels.js';
 
 /**
  * Every word of 待我处理 (Issue #424, plan slice S78; editor-surfaces §8.1, V2-UX-ATTN-001 to 009, IA-007,
@@ -102,6 +104,9 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   'import-cleanup-pending': '放弃清理尚未完成',
   'recovery-pending': '恢复待确认状态',
   'recovery-deferred': '恢复待确认状态 · 已稍后处理',
+  // 稿件冲突's own classification (Issue #57); 暂不处理 records the conflict and leaves it standing (ADR 0085 §3).
+  'manuscript-conflict': PROPOSAL_CONFLICT_CLASSIFICATION,
+  'manuscript-conflict-deferred': `${PROPOSAL_CONFLICT_CLASSIFICATION} · 暂不处理`,
   'analysis-failed': '运行失败',
   'analysis-interrupted': '已中断',
   'analysis-blocked': '派发前已阻止',
@@ -126,6 +131,8 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
   'import-cleanup-pending': { tone: 'blocked', shape: 'square' },
   'recovery-pending': { tone: 'attention', shape: 'triangle' },
   'recovery-deferred': { tone: 'attention', shape: 'triangle' },
+  'manuscript-conflict': { tone: 'attention', shape: 'triangle' },
+  'manuscript-conflict-deferred': { tone: 'attention', shape: 'triangle' },
   'analysis-failed': { tone: 'blocked', shape: 'square' },
   'analysis-interrupted': { tone: 'blocked', shape: 'square' },
   'analysis-blocked': { tone: 'blocked', shape: 'diamond' },
@@ -145,7 +152,8 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
 /**
  * The closed map of safe next steps (V2-UX-ATTN-007): what the item's own record offers, in the words the
  * product already uses there — the drawer's 查看运行 / 查看审阅 / 重新确认计划, 审阅's 继续审阅, the
- * manuscript's 返回恢复待确认, the import cleanup's 重试放弃清理 and the uncertain import's 等待本地核对.
+ * manuscript's 返回恢复待确认, the import cleanup's 重试放弃清理, the uncertain import's 等待本地核对 and the conflicted
+ * suggestion card's 解决冲突….
  */
 export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionNextStep, string>> = {
   'view-run': TASK_BAR_RUN_LINKS['baseline-analysis'],
@@ -155,6 +163,7 @@ export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionN
   'return-to-recovery': '返回恢复待确认',
   'retry-abandon-cleanup': '重试放弃清理',
   'await-local-check': '等待本地核对',
+  'resolve-conflict': RESOLVE_CONFLICT_LABEL,
 };
 /** The prefix the product already puts before a record's safe next action. */
 export const GLOBAL_ATTENTION_NEXT_STEP_PREFIX = '安全的下一步：';
@@ -185,6 +194,8 @@ export function globalAttentionObjectLabel(object: GlobalAttentionObjectProjecti
         : `导入 · ${object.sourceDisplayName} · ${IMPORT_RELATIONSHIP_LABELS[object.relationship]}`;
     case 'recovery':
       return `稿件 · ${object.branchName}`;
+    case 'manuscript-conflict':
+      return object.conflictKind === 'reversal' ? '已应用的修改建议 · 稿件冲突' : '修改建议 · 稿件冲突';
     case 'analysis':
       return `基线分析 · ${BASELINE_ANALYSIS_MODE_LABELS[object.mode]}`;
     case 'review':
@@ -212,6 +223,13 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
       return '中断后的稿件状态需要你确认；系统不会替你选择恢复来源。';
     case 'recovery-deferred':
       return '该分支已稍后处理，普通编辑保持只读；请返回恢复比较作出决定。';
+    case 'manuscript-conflict':
+    case 'manuscript-conflict-deferred': {
+      const why = item.object.kind === 'manuscript-conflict' && item.object.conflictKind === 'reversal'
+        ? `${REVERSAL_CONFLICT_LINE}；在解决之前不能撤销这次应用。`
+        : '建议所依据的原文已经改过；在解决之前不能接受或应用这条建议。';
+      return item.state === 'manuscript-conflict-deferred' ? `${why}已记下暂不处理，这处冲突仍未解决。` : why;
+    }
     case 'analysis-failed':
       return '运行失败，没有形成新的结果集修订版。';
     case 'analysis-interrupted':

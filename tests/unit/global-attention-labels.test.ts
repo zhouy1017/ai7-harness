@@ -28,6 +28,8 @@ import {
 import { localInstantLabel } from '../../src/renderer/plan-preview-labels.js';
 import { REVIEW_ACTION_LABELS } from '../../src/renderer/review-labels.js';
 import { TASK_BAR_RECONFIRM, TASK_BAR_RUN_LINKS } from '../../src/renderer/task-drawer-labels.js';
+import { RESOLVE_CONFLICT_LABEL } from '../../src/renderer/editorial-mark-labels.js';
+import { PROPOSAL_CONFLICT_CLASSIFICATION } from '../../src/renderer/proposal-conflict-labels.js';
 import { REVIEW_RUN_CATEGORY_STATE_LABELS } from '../../src/service/review/review-run-state.js';
 import {
   GLOBAL_ATTENTION_GROUP_KEYS,
@@ -47,7 +49,8 @@ const RENDERER = readFileSync(fileURLToPath(new URL('../../src/renderer/index.ts
 const AT = '2026-09-23T04:05:06.000Z';
 
 const STATES: ReadonlyArray<GlobalAttentionStateKey> = [
-  'import-outcome-uncertain', 'import-cleanup-pending', 'recovery-pending', 'recovery-deferred', 'analysis-failed',
+  'import-outcome-uncertain', 'import-cleanup-pending', 'recovery-pending', 'recovery-deferred',
+  'manuscript-conflict', 'manuscript-conflict-deferred', 'analysis-failed',
   'analysis-interrupted', 'analysis-blocked', 'analysis-orphaned', 'review-failed', 'review-stopped',
   'analysis-plan-revision', 'analysis-queued', 'analysis-running', 'review-running', 'review-continuable',
   'analysis-completed', 'analysis-completed-with-gaps', 'review-completed',
@@ -137,6 +140,8 @@ describe('each item', () => {
       'import-cleanup-pending': '放弃清理尚未完成',
       'recovery-pending': '恢复待确认状态',
       'recovery-deferred': '恢复待确认状态 · 已稍后处理',
+      'manuscript-conflict': '需要解决冲突',
+      'manuscript-conflict-deferred': '需要解决冲突 · 暂不处理',
       'analysis-failed': '运行失败',
       'analysis-interrupted': '已中断',
       'analysis-blocked': '派发前已阻止',
@@ -170,8 +175,11 @@ describe('each item', () => {
       'return-to-recovery': '返回恢复待确认',
       'retry-abandon-cleanup': '重试放弃清理',
       'await-local-check': '等待本地核对',
+      'resolve-conflict': '解决冲突…',
     });
     // Pinned to the words the record's own surface uses there.
+    expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['resolve-conflict']).toBe(RESOLVE_CONFLICT_LABEL);
+    expect(GLOBAL_ATTENTION_STATE_LABELS['manuscript-conflict']).toBe(PROPOSAL_CONFLICT_CLASSIFICATION);
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['view-run']).toBe(TASK_BAR_RUN_LINKS['baseline-analysis']);
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['view-review']).toBe(TASK_BAR_RUN_LINKS['review-run']);
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['reconfirm-plan']).toBe(TASK_BAR_RECONFIRM);
@@ -193,6 +201,8 @@ describe('each item', () => {
     expect(globalAttentionObjectLabel({ kind: 'analysis', mode: 'reanalyze-range' })).toBe('基线分析 · 重新分析所选范围');
     expect(globalAttentionObjectLabel({ kind: 'review', ordinal: 3 })).toBe('审阅 · 第 3 次');
     expect(globalAttentionObjectLabel({ kind: 'recovery', branchName: '主分支' })).toBe('稿件 · 主分支');
+    expect(globalAttentionObjectLabel({ kind: 'manuscript-conflict', conflictKind: 'suggestion' })).toBe('修改建议 · 稿件冲突');
+    expect(globalAttentionObjectLabel({ kind: 'manuscript-conflict', conflictKind: 'reversal' })).toBe('已应用的修改建议 · 稿件冲突');
     expect(globalAttentionObjectLabel({ kind: 'import', sourceDisplayName: 'sample1.docx', relationship: 'first-manuscript' })).toBe('导入 · sample1.docx · 作为首份稿件导入');
     expect(globalAttentionObjectLabel({ kind: 'import', sourceDisplayName: 'sample1.docx', relationship: null })).toBe('导入 · sample1.docx');
   });
@@ -205,6 +215,8 @@ describe('each item', () => {
       'import-cleanup-pending': globalAttentionReason(item('import-cleanup-pending')),
       'recovery-pending': globalAttentionReason(item('recovery-pending')),
       'recovery-deferred': globalAttentionReason(item('recovery-deferred')),
+      'manuscript-conflict': globalAttentionReason(item('manuscript-conflict', { object: { kind: 'manuscript-conflict', conflictKind: 'suggestion' } })),
+      'manuscript-conflict-deferred': globalAttentionReason(item('manuscript-conflict-deferred', { object: { kind: 'manuscript-conflict', conflictKind: 'reversal' } })),
       'analysis-failed': globalAttentionReason(item('analysis-failed')),
       'analysis-interrupted': globalAttentionReason(item('analysis-interrupted')),
       'analysis-blocked': globalAttentionReason(item('analysis-blocked')),
@@ -225,6 +237,8 @@ describe('each item', () => {
       'import-cleanup-pending': '放弃意图已经持久化，安全清理尚未完成；已阻止继续导入和新权威引用。',
       'recovery-pending': '中断后的稿件状态需要你确认；系统不会替你选择恢复来源。',
       'recovery-deferred': '该分支已稍后处理，普通编辑保持只读；请返回恢复比较作出决定。',
+      'manuscript-conflict': '建议所依据的原文已经改过；在解决之前不能接受或应用这条建议。',
+      'manuscript-conflict-deferred': '撤销这次应用时遇到冲突：应用后的文字又改过；在解决之前不能撤销这次应用。已记下暂不处理，这处冲突仍未解决。',
       'analysis-failed': '运行失败，没有形成新的结果集修订版。',
       'analysis-interrupted': '运行已在派发后中断；已完成单元的结果与缺口均已保留。',
       'analysis-blocked': '授权已记录，派发前阻止：当前启动没有可执行的路由。',

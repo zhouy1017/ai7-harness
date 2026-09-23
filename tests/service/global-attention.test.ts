@@ -23,6 +23,7 @@ import {
   type ReviewRunScopeRequest,
 } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx } from '../support/composed-fixture.js';
+import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import { STYLE_AND_FORMAT, TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import {
@@ -399,6 +400,71 @@ describe('待我处理 over Review Runs', () => {
       await idle.dispose();
       second.markCleanShutdown();
       second.close();
+    }
+  }, 300_000);
+});
+
+/** A 修改建议 over graphemes [20, 26) of the first long paragraph whose own words the editor then edits (Issue #57's test). */
+function conflictedSuggestion(store: EditorialStore, book: { manuscriptId: string; branchId: string }): string {
+  const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+  const block = window.blocks.find((candidate) => candidate.kind === 'paragraph' && graphemesOf(candidate.text).length >= 60)!;
+  const markId = store.createEditorialMark({
+    ...book,
+    windowStartBlockId: window.blocks[0]!.blockId,
+    clientMarkId: randomUUID(),
+    baseRevisionId: window.revisionId,
+    expectedJournalSequence: window.journalSequence,
+    blockId: block.blockId,
+    baseBlockDigest: block.digest,
+    fromGrapheme: 20,
+    toGrapheme: 26,
+    selectedText: graphemesOf(block.text).slice(20, 26).join(''),
+    kind: 'change-suggestion',
+    highlightColor: null,
+    body: '',
+    proposedText: '〔建议〕',
+    rationale: null,
+  }).markId;
+  const now = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+  store.flushJournalEdit({
+    clientEditId: randomUUID(), ...book, baseRevisionId: now.revisionId, blockId: block.blockId, windowStartBlockId: now.blocks[0]!.blockId,
+    baseBlockDigest: now.blocks.find((candidate) => candidate.blockId === block.blockId)!.digest, expectedJournalSequence: now.journalSequence,
+    fromGrapheme: 23, toGrapheme: 23, insertText: '〔改〕',
+  });
+  return markId;
+}
+
+describe('待我处理 over Manuscript Conflicts (V2-UX-ATTN-002)', () => {
+  it('lists a conflicted 修改建议 as blocking, says so again after 暂不处理, drops it once resolved, and writes nothing', async () => {
+    const store = await open(null);
+    try {
+      const book = await importBook(store, '冲突之书', true);
+      const markId = conflictedSuggestion(store, book);
+      const target = { kind: 'manuscript-conflict', bookId: book.bookId, manuscriptId: book.manuscriptId, branchId: book.branchId, markId };
+      const listed = readWritingNothing(() => store.inspectGlobalAttention(() => null, false));
+      expect(items(listed, 'exceptions')).toHaveLength(1);
+      expect(items(listed, 'exceptions')[0]).toMatchObject({
+        itemId: `conflict:${markId}`, state: 'manuscript-conflict', blocked: true, nextStep: 'resolve-conflict', target,
+        book: { bookId: book.bookId, title: '冲突之书' }, object: { kind: 'manuscript-conflict', conflictKind: 'suggestion' },
+      });
+      expect(listed.actionableCount).toBe(1);
+
+      // 暂不处理 records the conflict and leaves it standing: still listed, from the moment it was put aside.
+      const conflict = store.inspectProposalConflict({ ...book, markId });
+      const deferred = store.resolveProposalConflict({ ...book, markId, basisDigest: conflict.basisDigest, outcome: 'defer', draftOrdinal: null });
+      const aside = readWritingNothing(() => store.inspectGlobalAttention(() => null, false));
+      expect(summary(aside, 'exceptions')).toEqual([['冲突之书', 'manuscript-conflict-deferred', 'resolve-conflict']]);
+      expect(items(aside, 'exceptions')[0]!.at).toBe(deferred.recordedAt);
+
+      // 保留当前稿件 resolves it: the item resolves by itself.
+      const again = store.inspectProposalConflict({ ...book, markId });
+      store.resolveProposalConflict({ ...book, markId, basisDigest: again.basisDigest, outcome: 'keep-current', draftOrdinal: null });
+      const resolved = readWritingNothing(() => store.inspectGlobalAttention(() => null, false));
+      expect(items(resolved, 'exceptions')).toEqual([]);
+      expect(resolved.actionableCount).toBe(0);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
     }
   }, 300_000);
 });

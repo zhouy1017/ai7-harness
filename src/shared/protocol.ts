@@ -4564,6 +4564,7 @@ export const GLOBAL_ATTENTION_GROUP_LIMIT = 50;
  * - an import commit whose outcome local evidence cannot prove, and an abandonment whose safe cleanup is
  *   still pending;
  * - a Recovery Attention State, pending or deferred (稍后处理);
+ * - a 修改建议 in conflict with the manuscript and not yet resolved — before 暂不处理 or after it (V2-UX-ATTN-002);
  * - the Book's latest baseline analysis Task whose Run failed, was interrupted, was blocked before dispatch,
  *   or was left admitted or executing with no Run in flight (`analysis-orphaned`);
  * - the Book's latest Review Run that ended without reaching the manuscript in every category;
@@ -4576,6 +4577,8 @@ export type GlobalAttentionStateKey =
   | 'import-cleanup-pending'
   | 'recovery-pending'
   | 'recovery-deferred'
+  | 'manuscript-conflict'
+  | 'manuscript-conflict-deferred'
   | 'analysis-failed'
   | 'analysis-interrupted'
   | 'analysis-blocked'
@@ -4602,9 +4605,11 @@ export type GlobalAttentionNextStep =
   | 'continue-review'
   | 'return-to-recovery'
   | 'retry-abandon-cleanup'
-  | 'await-local-check';
+  | 'await-local-check'
+  | 'resolve-conflict';
 export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'view-run', 'view-review', 'reconfirm-plan', 'continue-review', 'return-to-recovery', 'retry-abandon-cleanup', 'await-local-check',
+  'resolve-conflict',
 ];
 
 /**
@@ -4614,6 +4619,7 @@ export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
 export type GlobalAttentionTarget =
   | { kind: 'import-recovery'; draftId: string }
   | { kind: 'manuscript-recovery'; attentionId: string }
+  | { kind: 'manuscript-conflict'; bookId: string; manuscriptId: string; branchId: string; markId: string }
   | { kind: 'analysis'; bookId: string; taskIntentId: string }
   | { kind: 'analysis-plan'; bookId: string; taskIntentId: string }
   | { kind: 'review'; bookId: string; reviewRunId: string };
@@ -4622,6 +4628,7 @@ export type GlobalAttentionTarget =
 export type GlobalAttentionObjectProjection =
   | { kind: 'import'; sourceDisplayName: string; relationship: 'first-manuscript' | 'source-only' | 'reimport' | null }
   | { kind: 'recovery'; branchName: string }
+  | { kind: 'manuscript-conflict'; conflictKind: ProposalConflictKind }
   | { kind: 'analysis'; mode: BaselineAnalysisTaskMode }
   | { kind: 'review'; ordinal: number };
 
