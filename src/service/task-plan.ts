@@ -687,7 +687,9 @@ export function baselineCancellationImpact(run: NonNullable<BaselineAnalysisProj
 function baselineRunControl(projection: BaselineAnalysisProjection): TaskPlanRunControlProjection | null {
   const run = projection.run;
   if (run === null || !(run.state === 'admitted' || run.state === 'executing' || run.state === 'cancelling')) return null;
-  const cancelling = run.state === 'cancelling';
+  // Stopping at the editor's word while an execution holds it. One AI7 left 正在取消 when it closed has none, and is
+  // offered 取消任务 again, which settles it at once.
+  const cancelling = run.state === 'cancelling' && run.progress !== null;
   return {
     runRecordId: run.runRecordId,
     cancelling,
