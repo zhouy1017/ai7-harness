@@ -4198,6 +4198,8 @@ export interface TaskPlanDefaultRuleProjection {
   canSet: boolean;
   /** Why the plan cannot be set as the quick-start default, in the editor's words; `null` when it can. */
   reason: string | null;
+  /** The exact Plan Envelope a set binds — the plan on show; `null` when it cannot be set. */
+  planEnvelopeDigest: string | null;
   /** The Book's rule for this plan's pattern — in force or turned off — and whether this plan set it; `null` when none was set. */
   current: null | (DefaultExecutionRuleReference & { state: 'active' | 'deactivated'; fromThisPlan: boolean });
   /** What a rule set from this plan binds, in the editor's words: the confirmation lists exactly these. */

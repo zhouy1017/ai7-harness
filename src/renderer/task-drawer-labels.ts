@@ -130,9 +130,35 @@ export const TASK_PLAN_BOUNDARY_COLUMNS = ['运行中 AI7 可以自己调整', '
 export const TASK_PLAN_NO_ADAPTATION = '无';
 export const TASK_PLAN_LOCKED = '固定';
 export const TASK_PLAN_LOCKED_NOTE = '标「固定」的由授权规则固定，不能改成运行中自己调整。';
-/** `设为快速开始默认…` is its own action (AUTH-009, TASK-019); the rule it sets arrives with S75. */
+/**
+ * `设为快速开始默认…` is its own action (AUTH-009, TASK-019; Issue #421): it sets the Book's 默认执行规则 from the plan
+ * on show, after a confirmation that lists what the rule binds. Starting a Task never sets one.
+ */
 export const TASK_PLAN_DEFAULT_RULE = '设为快速开始默认…';
-export const TASK_PLAN_DEFAULT_RULE_REASON = '快速开始默认规则随「知识库 › 工序与规则」提供。';
+export const TASK_PLAN_DEFAULT_RULE_HEADING = '设为快速开始默认';
+/** What setting the rule means, above the rows it binds: a rule never starts anything by itself (TASK-028). */
+export const TASK_PLAN_DEFAULT_RULE_LEAD =
+  '以后用快速开始更新这本书的分析时，AI7 会先准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。规则不会自己开始任何任务。';
+export const TASK_PLAN_DEFAULT_RULE_CONFIRM = '设为默认';
+export const TASK_PLAN_DEFAULT_RULE_CANCEL = '取消';
+export const TASK_PLAN_DEFAULT_RULE_FAILED = '无法设为快速开始默认。';
+export function taskPlanDefaultRuleSet(name: string): string {
+  return `已设为快速开始默认：${name}`;
+}
+/** The Book's rule for this plan's pattern, beside the action. */
+export function taskPlanDefaultRuleCurrent(current: NonNullable<TaskPlanProjection['defaultRule']['current']>): string {
+  if (current.state === 'deactivated') return `这本书的默认执行规则：${current.name}（已停用）`;
+  return `这本书的默认执行规则：${current.name}（使用中${current.fromThisPlan ? '，由这份计划设定' : ''}）`;
+}
+/** 快速开始后 (S75 D5): the quiet notice on a Task quick start started, and the way to the rule. */
+export function taskPlanQuickStarted(name: string): string {
+  return `已按默认执行规则「${name}」快速开始`;
+}
+export const TASK_PLAN_VIEW_RULES = '查看规则';
+/** A quick start that stopped at the plan (TASK-026): the reason, beside the bar's actions. */
+export function taskPlanQuickStartFellBack(reasons: ReadonlyArray<string>): string {
+  return `快速开始没有开始这项任务：${reasons.join('')}`;
+}
 /** The heading of the engineer's 不会做 inside 查看技术详情 (editor-surfaces §10). */
 export const TASK_PLAN_TECHNICAL_NOT_DO = '技术性的不会做';
 

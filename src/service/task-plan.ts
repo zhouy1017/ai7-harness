@@ -108,7 +108,7 @@ export function budgetCeilingLabel(ceiling: RunBudgetCeilingState): string {
 
 /** `设为快速开始默认…` where the plan's kind takes no rule: shown, disabled, with the reason (S75 D3). */
 export function noDefaultRule(reason: string): TaskPlanDefaultRuleProjection {
-  return { canSet: false, reason, current: null, binds: [], startedBy: null };
+  return { canSet: false, reason, planEnvelopeDigest: null, current: null, binds: [], startedBy: null };
 }
 /** J-03's fixed Task is only ever recorded (ADR 0055): there is nothing a rule could start. */
 export const FIXED_TASK_NO_RULE = '这项固定任务只记录运行，不能设为快速开始默认。';
