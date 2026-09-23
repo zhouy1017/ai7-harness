@@ -3011,7 +3011,7 @@ export class BaselineAnalysisStore {
    * executing `resumable`, 任务已中断 · 可续行, its Run Authorization kept and nothing dispatched until 续行. A Run left
    * cancelling is named for the execution owner, which finishes the cancellation.
    */
-  reconcileStoppedRuns(): { settled: number; cancelling: ReadonlyArray<string> } {
+  reconcileStoppedRuns(): { settled: number; cancelling: ReadonlyArray<string>; answered: ReadonlyArray<string> } {
     const rows = this.#db.prepare(
       `SELECT r.run_record_id,
               (SELECT s.state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1) last_state
@@ -3022,6 +3022,9 @@ export class BaselineAnalysisStore {
     ).all(this.#definition.kind) as SqlRow[];
     let settled = 0;
     const cancelling: string[] = [];
+    // A Run that waits for an answer the editor has already given (Issue #422, S76d) — answered while another Run held
+    // the slot, before AI7 closed — is named for the owner to take on, as CLAR-006 goes on without being asked again.
+    const answered: string[] = [];
     for (const row of rows) {
       const runRecordId = asString(row.run_record_id);
       const state = row.last_state === null ? null : asString(row.last_state);
@@ -3033,9 +3036,11 @@ export class BaselineAnalysisStore {
         settled += 1;
       } else if (state === 'cancelling') {
         cancelling.push(runRecordId);
+      } else if (state === 'awaiting-clarification' && this.clarificationsOf(runRecordId).every((entry) => entry.answer !== null)) {
+        answered.push(runRecordId);
       }
     }
-    return { settled, cancelling };
+    return { settled, cancelling, answered };
   }
 
   /** Every Run of this kind waiting in Connectivity Wait, oldest first, with its Book. */

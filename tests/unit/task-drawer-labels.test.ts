@@ -683,6 +683,8 @@ describe('Clarification Requests in the drawer (S76d)', () => {
     expect(TASK_BAR_AWAITING_ANSWER).toBe('等你回答');
     expect(taskBarQuestionsNote(1)).toBe('有 1 个问题等你回答');
     expect(taskBarAwaitingAnswerNote(7, 8, 1)).toBe('已读完 7 / 8 个阅读范围；1 个问题等你回答，回答后接着做');
+    // Answered, and waiting only for the slot another Task holds.
+    expect(taskBarAwaitingAnswerNote(7, 8, 0)).toBe('已读完 7 / 8 个阅读范围；你已回答，另一项任务结束后就接着做');
     expect(TASK_PLAN_STATE_PILLS['awaiting-clarification']).toEqual({ tone: 'attention', shape: 'ring' });
   });
 
