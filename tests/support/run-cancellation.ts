@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { ANALYSIS_LEDGER_REVISION_31_SQL, ANALYSIS_LEDGER_SCHEMA_SQL } from '../../src/service/task-authorization.js';
+import { dropRunCheckpointRelations } from './run-continuation.js';
 
 /**
  * Rebuild one analysis relation from an earlier revision's exact text with every row copied, rowid included, and
@@ -35,10 +36,11 @@ function downgradeRelation(database: DatabaseSync, table: keyof typeof ANALYSIS_
 
 /**
  * Take a store the current code built back to exactly what schema revision 31 left (Issue #422): the Run states
- * without `cancelling` and the Task Outcomes without `cancelled`. No Run of the store may be cancelling, and no
+ * without `cancelling` and the Task Outcomes without `cancelled`, and without revision 33's checkpoints. No Run of the store may be cancelling, and no
  * outcome cancelled. The caller sets the version.
  */
 export function plantRevision31Relations(database: DatabaseSync): void {
+  dropRunCheckpointRelations(database);
   downgradeRelation(database, 'analysis_run_states');
   downgradeRelation(database, 'analysis_task_outcomes');
 }

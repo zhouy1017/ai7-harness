@@ -20,7 +20,7 @@ import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-poli
 import { LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CONNECTIVITY_WAIT_SCHEMA_VERSION, RUN_CANCELLATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { CONNECTIVITY_WAIT_SCHEMA_VERSION, RUN_CONTINUATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
   BASELINE_ANALYSIS_TASK_GOAL,
@@ -35,6 +35,7 @@ import {
 } from '../support/default-execution-rules.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
 
 // Service-integration suite (L2) for 快速开始 under a 默认执行规则 (Issue #421, plan slice S75): the real store on a
 // temporary Agent Data Root, exact `sample1` imported through the supported path, and no Provider, socket or
@@ -174,12 +175,12 @@ describe('schema revision 31 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(RUN_CANCELLATION_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(RUN_CONTINUATION_SCHEMA_VERSION);
       expect(analysisRunAuthorizationsShape(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all()).toEqual(before.authorizations);
       const after = relationTruth(database);
-      expect([...after.keys()]).toEqual([...before.truth.keys(), ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER].sort());
-      for (const relation of DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER) expect(after.get(relation)?.content).toMatch(/^0:/);
+      expect([...after.keys()]).toEqual([...before.truth.keys(), ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER].sort());
+      for (const relation of [...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER]) expect(after.get(relation)?.content).toMatch(/^0:/);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name)).toEqual(['analysis_run_authorizations']);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['service_lifetimes']);
       expect(database.prepare("SELECT name FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = 'analysis_run_authorizations' ORDER BY name").all())
