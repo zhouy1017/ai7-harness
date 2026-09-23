@@ -111,6 +111,8 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   'analysis-interrupted': '已中断',
   // Run Budget Ceiling Reached (Issue #51, S16a): the drawer's own status for it (editor-surfaces §6).
   'analysis-budget-reached': '已停止 · 预算已达上限',
+  // A Provider Account Limit (Issue #51, S16b): the drawer's own status, a blocker the editor resolves with the model service.
+  'analysis-account-limit': '模型服务账户限额',
   'analysis-blocked': '派发前已阻止',
   'analysis-orphaned': '已中断',
   'review-failed': '运行失败',
@@ -148,6 +150,7 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
   'analysis-failed': { tone: 'blocked', shape: 'square' },
   'analysis-interrupted': { tone: 'blocked', shape: 'square' },
   'analysis-budget-reached': { tone: 'attention', shape: 'square' },
+  'analysis-account-limit': { tone: 'blocked', shape: 'diamond' },
   'analysis-blocked': { tone: 'blocked', shape: 'diamond' },
   'analysis-orphaned': { tone: 'blocked', shape: 'square' },
   'review-failed': { tone: 'blocked', shape: 'square' },
@@ -188,6 +191,8 @@ export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionN
   'answer-clarification': '回答问题',
   // The drawer's own action for a Run the ceiling stopped (Issue #51, S16a; MODEL-017).
   'adjust-budget-redo': '调整预算并重做',
+  // The remediation route of a Provider Account Limit (Issue #51, S16b; interaction-spec §1566).
+  'resolve-model-service': '处理模型服务',
 };
 /** The two scopes a question can have (CLAR-004), in the card's own words. */
 export const GLOBAL_ATTENTION_CLARIFICATION_WAITING = '任务等待你的说明';
@@ -263,6 +268,8 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
       return '运行已在派发后中断；已完成单元的结果与缺口均已保留。';
     case 'analysis-budget-reached':
       return '运行用到了你设的预算上限，已停止；读完的部分已保留。要接着读，请调整预算并重做。';
+    case 'analysis-account-limit':
+      return '模型服务按账户限额拒绝了请求，这项任务已停下，读完的部分都已保存；处理好模型服务、限额解除后续行。';
     case 'analysis-blocked':
       return '授权已记录，派发前阻止：当前启动没有可执行的路由。';
     case 'analysis-orphaned':
