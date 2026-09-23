@@ -231,6 +231,10 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['cancelWaitingBaselineAnalysis']['output']>(IPC_CHANNELS.cancelWaitingBaselineAnalysis, input),
   cancelBaselineAnalysisRun: (input: Omit<ServiceOperationMap['cancelBaselineAnalysisRun']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['cancelBaselineAnalysisRun']['output']>(IPC_CHANNELS.cancelBaselineAnalysisRun, input),
+  pauseBaselineAnalysisRun: (input: Omit<ServiceOperationMap['pauseBaselineAnalysisRun']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['pauseBaselineAnalysisRun']['output']>(IPC_CHANNELS.pauseBaselineAnalysisRun, input),
+  resumeBaselineAnalysisRun: (input: Omit<ServiceOperationMap['resumeBaselineAnalysisRun']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['resumeBaselineAnalysisRun']['output']>(IPC_CHANNELS.resumeBaselineAnalysisRun, input),
   runReconnectPreflight: () =>
     invoke<ServiceOperationMap['runReconnectPreflight']['output']>(IPC_CHANNELS.runReconnectPreflight),
   quickStartBaselineAnalysis: (input: Omit<ServiceOperationMap['quickStartBaselineAnalysis']['input'], 'bookId'>) =>

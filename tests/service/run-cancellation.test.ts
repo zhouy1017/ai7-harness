@@ -16,7 +16,7 @@ import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-poli
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { EXPORT_LEDGER_SCHEMA_VERSION, RUN_CONTINUATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
-import { RUN_CONTROL_CANCELLING_REASON, RUN_CONTROL_PAUSE_REASON, RUN_CONTROL_REDO_REASON } from '../../src/service/task-plan.js';
+import { RUN_CONTROL_CANCELLING_REASON, RUN_CONTROL_REDO_REASON } from '../../src/service/task-plan.js';
 import { controlledUnitHold } from '../../src/service/unit-hold.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
@@ -261,14 +261,15 @@ describe('取消任务 over the real store', () => {
       await until(() => execution.progressFor(runRecordId)?.currentUnitOrdinal === 3, 'the third unit in flight');
       expect(execution.progressFor(runRecordId)).toMatchObject({ unitsSettled: 2, unitsTotal: SAMPLE1_UNITS, stage: 'units' });
 
-      // The drawer offers 取消任务 with its summary, and 暂停 and 改计划重做 with why they wait.
+      // The drawer offers 取消任务 with its summary, 暂停 (S76b), and 改计划重做 with why it waits.
       const running = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, progress);
       expect(running.state).toEqual({ key: 'running', label: '运行中' });
       expect(running.runControl).toMatchObject({
         runRecordId,
         cancelling: false,
         cancel: { reason: null },
-        pause: { reason: RUN_CONTROL_PAUSE_REASON },
+        pause: { reason: null },
+        resume: null,
         redo: { reason: RUN_CONTROL_REDO_REASON },
         activity: { unitsSettled: 2, unitsTotal: SAMPLE1_UNITS, currentUnitOrdinal: 3 },
       });
@@ -527,7 +528,7 @@ describe('取消任务 over the real store', () => {
     }
   }, 300_000);
 
-  it('never lets the hold keep a Run from being interrupted, and a Run interrupted while held is 已中断', async () => {
+  it('never lets the hold keep a Run from AI7 closing, and leaves it 可续行 with what it read kept (S76b, CONT-014)', async () => {
     const holdPath = join(roots.dataRoot, '..', 'j10-unit-hold.txt');
     writeFileSync(holdPath, '1');
     const store = await openWithRoute();
@@ -539,10 +540,13 @@ describe('取消任务 over the real store', () => {
       execution.admitAndDispatch(runRecordId);
       await until(() => execution.progressFor(runRecordId)?.currentUnitOrdinal === 2, 'the second unit in flight');
       await execution.dispose();
-      const interrupted = store.inspectBaselineAnalysis(bookId, () => null);
-      expect(interrupted.run?.state).toBe('interrupted');
-      expect(interrupted.taskOutcome?.classification).toBe('interrupted');
-      expect(interrupted.resultSetRevision?.coverage.unitsClosed).toBe(2);
+      // The held unit's turn had come back whole, so it settled and was kept; the Run then stopped without ending.
+      const stopped = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(stopped.run?.state).toBe('resumable');
+      expect(stopped.stateLabel).toBe('任务已中断 · 可续行');
+      expect(stopped.taskOutcome).toBeNull();
+      expect(stopped.resultSetRevision).toBeNull();
+      expect(store.baselineAnalysisLedger.unitCheckpoints(runRecordId).map((checkpoint) => checkpoint.unit.unitOrdinal)).toEqual([1, 2]);
       store.markCleanShutdown();
     } finally {
       await execution.dispose();
