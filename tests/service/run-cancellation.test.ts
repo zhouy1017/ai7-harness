@@ -15,7 +15,7 @@ import {
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { EXPORT_LEDGER_SCHEMA_VERSION, RUN_CANCELLATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { EXPORT_LEDGER_SCHEMA_VERSION, RUN_CONTINUATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { RUN_CONTROL_CANCELLING_REASON, RUN_CONTROL_PAUSE_REASON, RUN_CONTROL_REDO_REASON } from '../../src/service/task-plan.js';
 import { controlledUnitHold } from '../../src/service/unit-hold.js';
 import {
@@ -26,6 +26,7 @@ import {
 } from '../../src/shared/protocol.js';
 import { plantRevision30Relations } from '../support/default-execution-rules.js';
 import { plantRevision31Relations, runCancellationShape } from '../support/run-cancellation.js';
+import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
@@ -172,13 +173,15 @@ describe('schema revision 32 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(RUN_CANCELLATION_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(RUN_CONTINUATION_SCHEMA_VERSION);
       expect(runCancellationShape(database, 'analysis_run_states')).toBe('current');
       expect(runCancellationShape(database, 'analysis_task_outcomes')).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_run_states ORDER BY rowid').all()).toEqual(before.states);
       expect(database.prepare('SELECT rowid, * FROM analysis_task_outcomes ORDER BY rowid').all()).toEqual(before.outcomes);
       const after = relationTruth(database);
-      expect([...after.keys()]).toEqual([...before.truth.keys()]);
+      // Revision 33 (S76b) then adds its checkpoint relation, empty.
+      expect([...after.keys()]).toEqual([...before.truth.keys(), ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER].sort());
+      for (const relation of RUN_CHECKPOINT_RELATIONS_DROP_ORDER) expect(after.get(relation)?.content).toMatch(/^0:/);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name))
         .toEqual(['analysis_run_states', 'analysis_task_outcomes']);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['service_lifetimes']);
@@ -211,7 +214,7 @@ describe('schema revision 32 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(RUN_CANCELLATION_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(RUN_CONTINUATION_SCHEMA_VERSION);
       expect(runCancellationShape(database, 'analysis_run_states')).toBe('current');
       expect(runCancellationShape(database, 'analysis_task_outcomes')).toBe('current');
     });

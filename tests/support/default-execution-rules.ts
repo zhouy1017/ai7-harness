@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { DEFAULT_EXECUTION_RULE_SCHEMA_SQL } from '../../src/service/default-execution-rules.js';
 import { ANALYSIS_LEDGER_REVISION_30_SQL } from '../../src/service/task-authorization.js';
+import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from './run-continuation.js';
 
 /**
  * The three default-execution-rule relations schema revision 31 adds (Issue #421), in an order that drops every
@@ -43,14 +44,15 @@ export function downgradeAnalysisRunAuthorizationsToRevision30(database: Databas
 }
 
 /**
- * Take a store the current code built back to exactly what revision 30 left: the rule ledger dropped and the Run
- * Authorizations' origin narrowed again. The caller sets the version, so a suite can go further back first.
+ * Take a store the current code built back to exactly what revision 30 left: the rule ledger and revision 33's
+ * checkpoints dropped and the Run Authorizations' origin narrowed again. The caller sets the version, so a suite can go further back first.
  */
 export function plantRevision30Relations(database: DatabaseSync): void {
   database.exec('PRAGMA foreign_keys = OFF');
   try {
     database.exec('BEGIN IMMEDIATE');
     try {
+      for (const relation of RUN_CHECKPOINT_RELATIONS_DROP_ORDER) database.exec(`DROP TABLE IF EXISTS ${relation}`);
       for (const relation of DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER) database.exec(`DROP TABLE ${relation}`);
       database.exec('COMMIT');
     } catch (error) {
