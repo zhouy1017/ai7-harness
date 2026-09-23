@@ -171,11 +171,23 @@ describe('decodeRequest accepts well-formed frames', () => {
       // 先问你 (Issue #422, S76d) is a list of identities too, when it is named.
       { ...edit.input, askFirstAdaptations: 'safe-retry' },
       { ...edit.input, askFirstAdaptations: ['safe-retry', 'safe-retry'] },
+      // 设置上限… (Issue #51, S16a): a whole count of tokens from one up, or `null`; nothing else.
+      { ...edit.input, runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 0 } },
+      { ...edit.input, runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 1.5 } },
+      { ...edit.input, runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 1_000_000_000_000 } },
+      { ...edit.input, runBudgetCeiling: { kind: 'usd', maxTotalTokens: 5000 } },
+      { ...edit.input, runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 5000, currency: 'CNY' } },
+      { ...edit.input, runBudgetCeiling: 'unset' },
+      { ...edit.input, runBudgetCeiling: 5000 },
     ]) {
       expect(rejectionFor(frameOf({ ...edit, input }))).toBeInstanceOf(ProtocolError);
     }
     const asked = { ...edit, input: { ...edit.input, askFirstAdaptations: ['safe-retry'] } };
     expect(decodeRequest(frameOf(asked))).toEqual(asked);
+    const bounded = { ...edit, input: { ...edit.input, runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 5000 } } };
+    expect(decodeRequest(frameOf(bounded))).toEqual(bounded);
+    const unbounded = { ...edit, input: { ...edit.input, runBudgetCeiling: null } };
+    expect(decodeRequest(frameOf(unbounded))).toEqual(unbounded);
   });
 
   it('accepts 提交回答 with the question, one option and a note or none, and refuses anything else (Issue #422, S76d)', () => {

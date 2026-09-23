@@ -453,6 +453,8 @@ export const SET_RULE_CHANGED = '计划的关键内容已变化；重新确认�
  * as the procedure proposes it: a plan the editor edited cannot be the rule, which would start without those edits.
  */
 export const SET_RULE_EDITED = '这份计划改过步骤或限制；快速开始按工序原样准备计划，不会带上这些修改，所以不能设为快速开始默认。';
+/** A rule binds no ceiling of the editor's yet (Issue #51, S16a): quick start prepares its Task with none. */
+export const SET_RULE_BUDGET = '设了预算上限的计划还不能设为快速开始默认：快速开始的任务不设预算上限。';
 export function setRuleAlreadyReason(ruleName: string): string {
   return `默认执行规则「${ruleName}」就是由这份计划设定的，正在使用。`;
 }

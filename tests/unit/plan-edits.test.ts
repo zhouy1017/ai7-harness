@@ -3,17 +3,21 @@ import {
   ADAPTATION_MODE_WORDS,
   ASSURANCE_SAMPLING_REMOVED,
   NO_PLAN_EDITS,
+  PLAN_CEILING_LAUNCH_REASON,
   PLAN_EDIT_ADAPTATION_LABELS,
+  PLAN_EDIT_CEILING_MAX,
   PLAN_EDIT_STEP_LABELS,
   SAFE_RETRY_WITHHELD,
   adaptationMode,
   assuranceSamplingKept,
   canonicalPlanEdits,
+  planEditCeiling,
   planEditDiff,
   planEditsAreEmpty,
   planEditsOf,
   safeRetryAllowed,
   samePlanEdits,
+  withoutCeiling,
 } from '../../src/service/analysis/plan-edits.js';
 import { ASK_FIRST_SAFE_RETRY_STATEMENT, planBoundarySplit } from '../../src/service/analysis/plan-boundary.js';
 
@@ -111,5 +115,57 @@ describe('先问你 (S76d)', () => {
     // A split with nothing asked first is the one every earlier plan froze.
     expect(planBoundarySplit()).not.toHaveProperty('askFirst');
     expect(planBoundarySplit().participation).toEqual({ expected: false, statement: '预计无需中途参与' });
+  });
+});
+
+// 设置上限… (Issue #51, plan slice S16a; V2-UX-MODEL-015): the editor's own Run Budget Ceiling, in total tokens, as one more
+// edit of the plan — named only when set, so every earlier edit reads back byte for byte.
+describe('the editor\'s Run Budget Ceiling (S16a)', () => {
+  const ceiling = (maxTotalTokens: number) => ({ kind: 'tokens' as const, maxTotalTokens });
+
+  it('takes a whole count of tokens from one up, named only when set', () => {
+    expect(canonicalPlanEdits({ removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: ceiling(5000) }))
+      .toEqual({ removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: ceiling(5000) });
+    // No ceiling, or `null`, sets none, and the record never names the key.
+    expect(canonicalPlanEdits({ removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: null })).toEqual(NO_PLAN_EDITS);
+    expect(canonicalPlanEdits({ removedSteps: [], disallowedAdaptations: [] })).not.toHaveProperty('runBudgetCeiling');
+    expect(canonicalPlanEdits({ removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: ceiling(PLAN_EDIT_CEILING_MAX) })?.runBudgetCeiling)
+      .toEqual(ceiling(999_999_999_999));
+    for (const refused of [ceiling(0), ceiling(-1), ceiling(1.5), ceiling(PLAN_EDIT_CEILING_MAX + 1), { kind: 'usd', maxTotalTokens: 5 },
+      { kind: 'tokens', maxTotalTokens: '5000' }, { kind: 'tokens', maxTotalTokens: 5000, extra: true }, 'unset', 5000, []]) {
+      expect(canonicalPlanEdits({ removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: refused })).toBeNull();
+    }
+  });
+
+  it('reads a stored ceiling back, and states none as unset', () => {
+    const edits = planEditsOf({ editorEdits: { removedSteps: ['assurance-sampling'], disallowedAdaptations: [], runBudgetCeiling: ceiling(20000) } });
+    expect(planEditCeiling(edits)).toEqual(ceiling(20000));
+    expect(planEditCeiling(NO_PLAN_EDITS)).toBe('unset');
+    // A ceiling alone is an edit; a stored record that names only an empty one is refused, as any empty edit is.
+    expect(planEditsAreEmpty({ removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: ceiling(1) })).toBe(false);
+    expect(() => planEditsOf({ editorEdits: { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: null } })).toThrow('PLAN_EDITS_INVALID');
+  });
+
+  it('compares and diffs the ceiling as the editor\'s own change to a material field', () => {
+    const set = { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: ceiling(5000) };
+    expect(samePlanEdits(set, { ...set, runBudgetCeiling: ceiling(5000) })).toBe(true);
+    expect(samePlanEdits(set, { ...set, runBudgetCeiling: ceiling(20000) })).toBe(false);
+    expect(samePlanEdits(set, NO_PLAN_EDITS)).toBe(false);
+    expect(planEditDiff(NO_PLAN_EDITS, set)).toEqual([
+      { field: 'runBudgetCeiling', label: 'Run Budget Ceiling 状态', prior: 'unset', proposed: ceiling(5000), materiality: 'edited' },
+    ]);
+    expect(planEditDiff(set, { ...set, runBudgetCeiling: ceiling(20000) })).toEqual([
+      { field: 'runBudgetCeiling', label: 'Run Budget Ceiling 状态', prior: ceiling(5000), proposed: ceiling(20000), materiality: 'edited' },
+    ]);
+    // Removing it is a change too; the steps and adaptations come first, in their declared order.
+    expect(planEditDiff({ ...set, removedSteps: ['assurance-sampling'] }, NO_PLAN_EDITS).map((entry) => entry.field))
+      .toEqual(['steps.assurance-sampling', 'runBudgetCeiling']);
+  });
+
+  it('leaves the ceiling to the launch where the launch sets it, keeping the rest of the edit', () => {
+    const edits = { removedSteps: ['assurance-sampling' as const], disallowedAdaptations: [], askFirstAdaptations: ['safe-retry' as const], runBudgetCeiling: ceiling(5000) };
+    expect(withoutCeiling(edits)).toEqual({ removedSteps: ['assurance-sampling'], disallowedAdaptations: [], askFirstAdaptations: ['safe-retry'] });
+    expect(withoutCeiling(NO_PLAN_EDITS)).toBe(NO_PLAN_EDITS);
+    expect(PLAN_CEILING_LAUNCH_REASON).toBe('这次启动的预算上限由开发者实时启动参数决定，不能在计划里设置。');
   });
 });
