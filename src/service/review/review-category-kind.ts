@@ -79,6 +79,7 @@ const REVIEW_SAFE_NEXT_ACTIONS = {
   'completed-with-gaps': '逐项查看缺口单元；缺口单元在下一次覆盖它的审阅中会重审，结果集修订版本身不会改写。已定位的发现仍可逐条处置。',
   failed: '核对运行失败原因；修复后可在「审阅」中重新准备并授权新的运行。',
   interrupted: '运行已在派发后中断；已完成单元的发现与缺口均已保留，续行需要在「审阅」中发起新的授权运行。',
+  cancelled: '运行已按你的要求取消；已完成单元的发现与缺口均已保留，没有读到的单元记为未尝试。需要时可在「审阅」中发起新的授权运行。',
 } as const;
 
 /** The schema digest of one category: the contract version, the unit result schema, and the category's own frozen contract. */

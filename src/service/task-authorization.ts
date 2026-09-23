@@ -159,9 +159,18 @@ export const CONNECTIVITY_WAIT_SCHEMA_VERSION = 30;
  * `default-execution-rules.ts` owns those and creates them before this version is stamped. A rule is never a
  * standing authorization: each Run it starts still has its own Task Intent, plan, envelope and authorization,
  * which names the rule version (UI ADR 0001). No existing row changes (ADR 0079: an additive revision keeps the
- * same Data Version). This is the terminal version.
+ * same Data Version).
  */
 export const DEFAULT_EXECUTION_RULE_SCHEMA_VERSION = 31;
+/**
+ * The run-cancellation revision (Issue #422, plan slice S76a; V2-UX-CTRL-004, CTRL-006, CTRL-008):
+ * `analysis_run_states` widens to `cancelling` — 正在取消, a started Run the editor cancelled, which stops at the
+ * next unit boundary — and `analysis_task_outcomes.classification` to `cancelled`, the outcome of that Run once it
+ * has stopped, its completed units kept in a partial Result Set Revision. Both relations are rebuilt once, each
+ * while it still holds its frozen prior text, with every row copied byte for byte; nothing else moves and no row
+ * changes (ADR 0079: an additive revision keeps the same Data Version). This is the terminal version.
+ */
+export const RUN_CANCELLATION_SCHEMA_VERSION = 32;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
@@ -466,6 +475,38 @@ export const ANALYSIS_LEDGER_REVISION_30_SQL = {
   ) STRICT`,
 } as const;
 
+/**
+ * The two relations revision 32 widens, exactly as revision 31 carried them: the Run states as revision 30 widened
+ * them for Connectivity Wait (Issue #502), and the Task Outcomes as revision 15 created them — no started Run could
+ * be cancelled before 取消任务 (Issue #422). Kept to recognise a store that still holds them, which the widening
+ * rebuilds once, and to let every earlier revision's shape validate before that.
+ */
+export const ANALYSIS_LEDGER_REVISION_31_SQL = {
+  analysis_run_states: `CREATE TABLE analysis_run_states (
+    run_record_id TEXT NOT NULL REFERENCES analysis_run_records(run_record_id),
+    sequence INTEGER NOT NULL CHECK(sequence >= 1),
+    state TEXT NOT NULL CHECK(state IN (
+      'authorized', 'blocked-before-dispatch', 'admitted', 'executing',
+      'completed', 'completed-with-gaps', 'failed', 'interrupted',
+      'awaiting-connectivity', 'cancelled'
+    )),
+    recorded_at TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+    PRIMARY KEY(run_record_id, sequence)
+  ) STRICT`,
+  analysis_task_outcomes: `CREATE TABLE analysis_task_outcomes (
+    outcome_id TEXT PRIMARY KEY,
+    task_intent_id TEXT NOT NULL UNIQUE REFERENCES analysis_task_intents(task_intent_id),
+    run_record_id TEXT NOT NULL UNIQUE REFERENCES analysis_run_records(run_record_id),
+    classification TEXT NOT NULL CHECK(classification IN ('completed', 'completed-with-gaps', 'failed', 'interrupted')),
+    result_set_revision_id TEXT REFERENCES analysis_result_set_revisions(revision_id),
+    recorded_at TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
+  ) STRICT`,
+} as const;
+
 /** The revision-16 shape of the one relation revision 17 rebuilds; kept to validate a revision-16 store exactly before its rows are copied forward. */
 export const ANALYSIS_LEDGER_REVISION_16_SQL = {
   analysis_plan_records: `CREATE TABLE analysis_plan_records (
@@ -621,7 +662,7 @@ export const ANALYSIS_LEDGER_SCHEMA_SQL = {
     state TEXT NOT NULL CHECK(state IN (
       'authorized', 'blocked-before-dispatch', 'admitted', 'executing',
       'completed', 'completed-with-gaps', 'failed', 'interrupted',
-      'awaiting-connectivity', 'cancelled'
+      'awaiting-connectivity', 'cancelled', 'cancelling'
     )),
     recorded_at TEXT NOT NULL,
     canonical_json TEXT NOT NULL,
@@ -673,7 +714,7 @@ export const ANALYSIS_LEDGER_SCHEMA_SQL = {
     outcome_id TEXT PRIMARY KEY,
     task_intent_id TEXT NOT NULL UNIQUE REFERENCES analysis_task_intents(task_intent_id),
     run_record_id TEXT NOT NULL UNIQUE REFERENCES analysis_run_records(run_record_id),
-    classification TEXT NOT NULL CHECK(classification IN ('completed', 'completed-with-gaps', 'failed', 'interrupted')),
+    classification TEXT NOT NULL CHECK(classification IN ('completed', 'completed-with-gaps', 'failed', 'interrupted', 'cancelled')),
     result_set_revision_id TEXT REFERENCES analysis_result_set_revisions(revision_id),
     recorded_at TEXT NOT NULL,
     canonical_json TEXT NOT NULL,
@@ -1126,7 +1167,7 @@ function validateRevision16AnalysisLedgerSchema(db: DatabaseSync): void {
 
 export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
-  requireTask(version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
+  requireTask(version === RUN_CANCELLATION_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
   validateJ03TaskAuthorizationSchema(db);
   validateAnalysisLedgerSchema(db);
 }
@@ -1207,25 +1248,27 @@ function rebuildResultSetRelations(db: DatabaseSync): void {
 
 /**
  * One widening of one analysis relation, once per store and in its own transaction (revision 30, Issue #502;
- * revision 31, Issue #421): the relation is rebuilt while it still holds its frozen prior text, every row
- * copied byte for byte in its original order, with foreign keys off around the transaction exactly as
- * revisions 17, 20 and 24 rebuilt theirs. Both relations these revisions widen never moved before, so a store
- * at any revision from 15 up carries the prior text; one that already holds the current text, or has no
- * analysis ledger yet, is left alone. Shape-detected like `initializeImportedMarkSchema`, so a store that widened
- * never widens twice, and one whose relation matches neither shape is refused rather than rebuilt.
+ * revision 31, Issue #421; revision 32, Issue #422): the relation is rebuilt while it still holds one of its
+ * frozen prior texts, every row copied byte for byte in its original order, with foreign keys off around the
+ * transaction exactly as revisions 17, 20 and 24 rebuilt theirs. The relations these revisions widen moved only
+ * by these widenings, so a store at any revision from 15 up carries one of the prior texts — the Run states either
+ * revision 29's or revision 31's, since revision 32 widens them a second time; one that already holds the current
+ * text, or has no analysis ledger yet, is left alone. Shape-detected like `initializeImportedMarkSchema`, so a
+ * store that widened never widens twice, and one whose relation matches no known shape is refused rather than
+ * rebuilt.
  */
 function widenAnalysisRelation(
   db: DatabaseSync,
-  table: 'analysis_run_states' | 'analysis_run_authorizations',
-  priorSql: string,
+  table: 'analysis_run_states' | 'analysis_run_authorizations' | 'analysis_task_outcomes',
+  priorSqls: readonly string[],
   columns: string,
-  revision: 30 | 31,
+  revision: 30 | 31 | 32,
 ): void {
   const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as SqlRow | undefined;
   if (row === undefined) return;
   const shape = normalizeSql(asString(row.sql));
   if (shape === normalizeSql(ANALYSIS_LEDGER_SCHEMA_SQL[table])) return;
-  requireTask(shape === normalizeSql(priorSql), 'SCHEMA_INVALID', `分析任务账本表 ${table} 结构不兼容。`);
+  requireTask(priorSqls.some((priorSql) => shape === normalizeSql(priorSql)), 'SCHEMA_INVALID', `分析任务账本表 ${table} 结构不兼容。`);
   validateCanonicalRowDigests(db, [table]);
   const foreignKeysState = (): number => asNumber((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys);
   const restoreForeignKeys = foreignKeysState() === 1;
@@ -1322,7 +1365,7 @@ function migrateAnalysisLedgerToRevision17(db: DatabaseSync, from: typeof J04_BA
         db.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_delete`]!);
       }
       seedInitialPlanVersions(db);
-      db.exec(`PRAGMA user_version = ${DEFAULT_EXECUTION_RULE_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${RUN_CANCELLATION_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -1387,7 +1430,7 @@ function migrateAnalysisLedgerToRevision24(db: DatabaseSync): void {
  * terminal shape first.
  */
 function advanceToTerminalRevision(db: DatabaseSync): void {
-  migrateInTransaction(db, `PRAGMA user_version = ${DEFAULT_EXECUTION_RULE_SCHEMA_VERSION};`, 'Terminal version');
+  migrateInTransaction(db, `PRAGMA user_version = ${RUN_CANCELLATION_SCHEMA_VERSION};`, 'Terminal version');
 }
 
 /**
@@ -1412,7 +1455,7 @@ function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24
                   mode, predecessor_revision_id, selected_start_position, selected_end_position
            FROM temp.migrate_analysis_task_intents ORDER BY migrate_rowid`);
       rebuildResultSetRelations(db);
-      db.exec(`PRAGMA user_version = ${DEFAULT_EXECUTION_RULE_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${RUN_CANCELLATION_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -1438,9 +1481,10 @@ function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24
  * revision-17 or revision-18 store has the three kind-coupled relations rebuilt; a revision-19 store
  * is validated whole as revision 19 left it and has them rebuilt; a revision-20, revision-21,
  * revision-22 or revision-23 store is validated whole as revision 20 left it and has them rebuilt
- * again, for the review-category kind family; a revision-24 to revision-29 store is validated whole and
- * only moves its version. Before any of that, every store with an analysis ledger has its Run states
- * widened for revision 30. Every path lands on the terminal version.
+ * again, for the review-category kind family; a revision-24 to revision-31 store is validated whole and
+ * only moves its version. Before any of that, every store with an analysis ledger has its Run states, its
+ * Run Authorizations' origin and its Task Outcomes widened for revisions 30 to 32. Every path lands on the
+ * terminal version.
  */
 export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
@@ -1454,23 +1498,27 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION ||
-      version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
+      version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION || version === RUN_CANCELLATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
-  // Revisions 30 and 31 widen the Run states and the Run Authorizations' origin first, for every store that has
-  // an analysis ledger: each revision from 15 up carries them as revision 15 created them, so once widened,
-  // every older revision's own validation below reads the current shape and its forward copy needs nothing new.
-  widenAnalysisRelation(db, 'analysis_run_states', ANALYSIS_LEDGER_REVISION_29_SQL.analysis_run_states,
-    'run_record_id, sequence, state, recorded_at, canonical_json, sha256', 30);
-  widenAnalysisRelation(db, 'analysis_run_authorizations', ANALYSIS_LEDGER_REVISION_30_SQL.analysis_run_authorizations,
+  if (version === RUN_CANCELLATION_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  // Revisions 30 to 32 widen the Run states, the Run Authorizations' origin and the Task Outcomes first, for every
+  // store that has an analysis ledger: each revision from 15 up carries them as revision 15 created them or as an
+  // earlier one of these widenings left them, so once widened, every older revision's own validation below reads
+  // the current shape and its forward copy needs nothing new. The Run states widen once from either prior text.
+  widenAnalysisRelation(db, 'analysis_run_states',
+    [ANALYSIS_LEDGER_REVISION_31_SQL.analysis_run_states, ANALYSIS_LEDGER_REVISION_29_SQL.analysis_run_states],
+    'run_record_id, sequence, state, recorded_at, canonical_json, sha256', 32);
+  widenAnalysisRelation(db, 'analysis_run_authorizations', [ANALYSIS_LEDGER_REVISION_30_SQL.analysis_run_authorizations],
     'authorization_id, task_intent_id, plan_envelope_sha256, origin, authority, authorized_at, canonical_json, sha256', 31);
+  widenAnalysisRelation(db, 'analysis_task_outcomes', [ANALYSIS_LEDGER_REVISION_31_SQL.analysis_task_outcomes],
+    'outcome_id, task_intent_id, run_record_id, classification, result_set_revision_id, recorded_at, canonical_json, sha256', 32);
   if (version === EDITORIAL_REVIEW_SCHEMA_VERSION || version === PUBLICATION_VERSION_SCHEMA_VERSION ||
       version === PROPOSAL_CONFLICT_SCHEMA_VERSION || version === IMPORT_RETENTION_SCHEMA_VERSION ||
       version === IMPORTED_MARK_SCHEMA_VERSION || version === EXPORT_LEDGER_SCHEMA_VERSION ||
-      version === CONNECTIVITY_WAIT_SCHEMA_VERSION) {
-    // Revisions 25 to 29 add no task-authorization or analysis relation and revisions 30 and 31 have just
-    // widened the two they move, so the ledger a revision-24 to revision-30 store carries is already the
+      version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION) {
+    // Revisions 25 to 29 add no task-authorization or analysis relation and revisions 30 to 32 have just
+    // widened the three they move, so the ledger a revision-24 to revision-31 store carries is already the
     // terminal one: it is validated as the terminal shape, and nothing but the version moves.
     validateJ03TaskAuthorizationSchema(db);
     validateAnalysisLedgerSchema(db);
@@ -1506,7 +1554,7 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   }
   const analysisStatements = `${Object.values(ANALYSIS_LEDGER_SCHEMA_SQL).join(';\n')};
       ${Object.values(ANALYSIS_LEDGER_TRIGGER_SQL).join(';\n')};
-      PRAGMA user_version = ${DEFAULT_EXECUTION_RULE_SCHEMA_VERSION};`;
+      PRAGMA user_version = ${RUN_CANCELLATION_SCHEMA_VERSION};`;
   if (version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION) {
     validateJ03TaskAuthorizationSchema(db);
     return migrateInTransaction(db, analysisStatements, 'Analysis ledger');

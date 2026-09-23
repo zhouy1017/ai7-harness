@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 44 as const;
+export const SERVICE_PROTOCOL_VERSION = 45 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -64,6 +64,7 @@ export const IPC_CHANNELS = {
   authorizeBaselineAnalysis: 'ai7:j04:authorize-baseline-analysis',
   startBaselineAnalysisWhenOnline: 'ai7:j04:start-baseline-analysis-when-online',
   cancelWaitingBaselineAnalysis: 'ai7:j04:cancel-waiting-baseline-analysis',
+  cancelBaselineAnalysisRun: 'ai7:j04:cancel-baseline-analysis-run',
   runReconnectPreflight: 'ai7:j04:run-reconnect-preflight',
   quickStartBaselineAnalysis: 'ai7:j04:quick-start-baseline-analysis',
   setDefaultExecutionRule: 'ai7:j04:set-default-execution-rule',
@@ -2049,7 +2050,7 @@ export interface RunReportRecordProjection {
   /** The Run's one execution attempt; `null` for a Run that failed before its attempt was persisted. */
   attemptId: string | null;
   resultSetRevisionId: string | null;
-  classification: 'completed' | 'completed-with-gaps' | 'failed' | 'interrupted';
+  classification: 'completed' | 'completed-with-gaps' | 'failed' | 'interrupted' | 'cancelled';
   recordedAt: string;
   stages: ReadonlyArray<RunReportStageProjection>;
   units: RunReportUnitAccountingProjection;
@@ -2444,7 +2445,10 @@ export type BaselineAnalysisRunState =
   // Connectivity Wait (Issue #502): authorized by 联网后开始任务 and waiting for Reconnect Preflight to admit it,
   // or cancelled by the editor while it waited — before it ever dispatched (OFF-005, OFF-010).
   | 'awaiting-connectivity'
-  | 'cancelled';
+  // `cancelled` is also where 取消任务 ends a Run that started (Issue #422, CTRL-005): after `cancelling`, 正在取消,
+  // while the Run stops at the next unit boundary, and once what it did is classified and recorded.
+  | 'cancelled'
+  | 'cancelling';
 
 export type BaselineAnalysisUnitProjection =
   | {
@@ -2770,7 +2774,7 @@ export interface BaselineAnalysisHistoryEntryProjection {
   counts: AnalysisReusePlanCounts;
   predecessor: null | { revisionId: string; ordinal: number; digest: string };
   reusePlanDigest: string | null;
-  producingRun: { taskIntentId: string; runRecordId: string; attemptId: string; classification: 'completed' | 'completed-with-gaps' | 'failed' | 'interrupted' | null };
+  producingRun: { taskIntentId: string; runRecordId: string; attemptId: string; classification: 'completed' | 'completed-with-gaps' | 'failed' | 'interrupted' | 'cancelled' | null };
   /**
    * The Run Report of the Run that produced this revision (ADR 0066 §Run Report), read from that Run's
    * own Task Outcome, so 历史与更新 opens the report of every Run and not only the latest Task's. `null`
@@ -2811,7 +2815,7 @@ export interface BaselineAnalysisProjection {
   bookId: string;
   kind: typeof BASELINE_ANALYSIS_KIND;
   contractVersion: typeof BASELINE_ANALYSIS_CONTRACT_VERSION;
-  state: 'available' | 'prepared' | 'authorized-blocked' | 'waiting' | 'admitted' | 'executing' | 'settled' | 'failed' | 'interrupted' | 'cancelled';
+  state: 'available' | 'prepared' | 'authorized-blocked' | 'waiting' | 'admitted' | 'executing' | 'settled' | 'failed' | 'interrupted' | 'cancelled' | 'cancelling';
   stateLabel: string;
   taskIntent: null | {
     taskIntentId: string;
@@ -2942,7 +2946,7 @@ export interface BaselineAnalysisProjection {
   resultSetRevision: null | BaselineAnalysisResultSetRevisionProjection;
   taskOutcome: null | {
     outcomeId: string;
-    classification: 'completed' | 'completed-with-gaps' | 'failed' | 'interrupted';
+    classification: 'completed' | 'completed-with-gaps' | 'failed' | 'interrupted' | 'cancelled';
     label: string;
     recordedAt: string;
     resultSetRevisionId: string | null;
@@ -3987,9 +3991,37 @@ export interface InspectTaskPlanInput {
  * the plan's route sends to a model service whose credential is not ready (Issue #420, S74a). `offline` is 离线,
  * before authorization: the route reaches its model service over a network this device does not have now.
  * `waiting` is a Run in Connectivity Wait, whose label says what it waits for — 等待网络, 需要处理模型连接 or
- * 等待运行名额 (OFF-006) — and `cancelled` one the editor cancelled while it waited (Issue #502).
+ * 等待运行名额 (OFF-006) — and `cancelled` one the editor cancelled before it read anything (Issue #502).
+ * `cancelling` is 正在取消: the editor cancelled a Run under way, which stops at the next unit boundary, and
+ * `cancelled-after-start` the 已取消 of a Run cancelled after it began reading (Issue #422, CTRL-005).
  */
-export type TaskPlanStateKey = 'ready' | 'changed' | 'unconnected' | 'offline' | 'recorded' | 'blocked' | 'waiting' | 'running' | 'settled' | 'stopped' | 'cancelled';
+export type TaskPlanStateKey =
+  | 'ready' | 'changed' | 'unconnected' | 'offline' | 'recorded' | 'blocked' | 'waiting' | 'running' | 'settled' | 'stopped'
+  | 'cancelled' | 'cancelling' | 'cancelled-after-start';
+
+/**
+ * A started Run's controls in the drawer's bar and its activity above the plan (Issue #422, plan slice S76a;
+ * V2-UX-AUTH-010, AUTH-011, CTRL-004 to CTRL-009). `取消任务` is the control this slice brings: one inline
+ * Cancellation Impact Summary, then the editor's confirmation, and only that records anything. `暂停` and `改计划重做`
+ * are shown with the reason they are not offered yet (S76b, S76c).
+ */
+export interface TaskPlanRunControlProjection {
+  /** The one Run every control names (CTRL-009). */
+  runRecordId: string;
+  /** 正在取消: the editor's cancellation is recorded and the Run is stopping; nothing more is offered. */
+  cancelling: boolean;
+  /** `reason` is `null` while 取消任务 is offered; `impact` is the Cancellation Impact Summary, one line each. */
+  cancel: { reason: string | null; impact: ReadonlyArray<string> };
+  pause: { reason: string };
+  redo: { reason: string };
+  /**
+   * The activity card's facts (AUTH-011; RUN-001 to 004, LIVE-001 to 003): the Run Liveness Signal the execution
+   * owner reports, as ②A reads it. `null` when this service holds no execution of the Run.
+   */
+  activity: NonNullable<NonNullable<BaselineAnalysisProjection['run']>['progress']> | null;
+  /** When the Run began executing its units; `null` before it did. */
+  executingSince: string | null;
+}
 
 /**
  * What the Task Drawer's authorization bar offers for one plan now (Issue #420, plan slice S74a;
@@ -4131,6 +4163,8 @@ export interface TaskPlanProjection {
   start: TaskPlanStartProjection;
   /** `设为快速开始默认…` and the rule that started the Task, when one did (Issue #421). */
   defaultRule: TaskPlanDefaultRuleProjection;
+  /** A started Run's controls and activity (Issue #422); `null` while no Run of this Task is under way. */
+  runControl: TaskPlanRunControlProjection | null;
 }
 
 /**
@@ -4752,7 +4786,8 @@ export const GLOBAL_ATTENTION_GROUP_LIMIT = 50;
  *   or was left admitted or executing with no Run in flight (`analysis-orphaned`);
  * - the Book's latest Review Run that ended without reaching the manuscript in every category;
  * - a prepared baseline Task whose plan has a pending Plan Revision that 重新确认计划 can settle;
- * - the one Run in flight, and a Review Run a stopped service left to 继续审阅;
+ * - the one Run in flight — 正在取消 while it stops at the editor's cancellation (Issue #422) — and a Review Run a
+ *   stopped service left to 继续审阅;
  * - a completion of the last days: a baseline Task Outcome or a Review Run that reached the manuscript.
  */
 export type GlobalAttentionStateKey =
@@ -4771,6 +4806,7 @@ export type GlobalAttentionStateKey =
   | 'analysis-plan-revision'
   | 'analysis-queued'
   | 'analysis-running'
+  | 'analysis-cancelling'
   | 'review-running'
   | 'review-continuable'
   | 'analysis-completed'
@@ -5432,6 +5468,16 @@ export interface ServiceOperationMap {
     output: BaselineAnalysisProjection;
   };
   /**
+   * 取消任务 on a Run that started (Issue #422; CTRL-004 to CTRL-008), once the editor confirmed the Cancellation
+   * Impact Summary: `cancelling` is recorded at once, the Run stops at the next unit boundary — the unit in flight
+   * finishes and nothing after it is sent — and ends `cancelled` with what it completed kept. Cancelling twice
+   * answers as the first did.
+   */
+  cancelBaselineAnalysisRun: {
+    input: { bookId: string; taskIntentId: string };
+    output: BaselineAnalysisProjection;
+  };
+  /**
    * Reconnect Preflight now, over every waiting Run (OFF-007, OFF-008): what it admitted, blocked, or left waiting.
    * It names no Book because it only ever admits Runs the editor already authorized to start when online.
    */
@@ -5775,6 +5821,7 @@ export interface RendererApi {
   authorizeBaselineAnalysis(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisProjection>;
   startBaselineAnalysisWhenOnline(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisProjection>;
   cancelWaitingBaselineAnalysis(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
+  cancelBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
   runReconnectPreflight(): Promise<ReconnectPreflightProjection>;
   /** 快速开始 of the Book the window is showing, after 先看计划's preparation (Issue #421). */
   quickStartBaselineAnalysis(input: { taskIntentId: string; planEnvelopeDigest: string; ruleVersionId: string }): Promise<QuickStartBaselineAnalysisResult>;

@@ -76,6 +76,8 @@ interface LaunchArguments {
   modelAdapterControl: J04ModelAdapterControl | undefined;
   /** J-04 only (Issue #502): the file whose word, `offline`, the service reads as this device's connectivity. */
   connectivityPath: string | undefined;
+  /** J-10 only (Issue #422): the file whose number says how many units may settle; a unit waits, in flight, for it. */
+  unitHoldPath: string | undefined;
   /** J-05 only: the first Apply commits and its acknowledgement is withheld from the renderer, once. */
   applyControl: 'lose-first-acknowledgement' | undefined;
   observeJ12Reveal: boolean;
@@ -178,12 +180,14 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j06-picker-path' ||
           key === '--j07-picker-path' ||
           key === '--j09-picker-path' ||
+          key === '--j10-picker-path' ||
           key === '--j07-save-path' ||
           key === '--j01-import-control' ||
           key === '--j03-foreground-execution-control' ||
           key === '--j08-recovery-control' ||
           key === '--j04-model-adapter' ||
           key === '--j04-connectivity-path' ||
+          key === '--j10-unit-hold-path' ||
           key === '--j05-apply-control' ||
           key === '--j12-observe-reveal' ||
           key === '--launcher-pid' ||
@@ -213,9 +217,10 @@ function parseArguments(argv: string[]): LaunchArguments {
   const j06PickerPath = values.get('--j06-picker-path');
   const j07PickerPath = values.get('--j07-picker-path');
   const j09PickerPath = values.get('--j09-picker-path');
+  const j10PickerPath = values.get('--j10-picker-path');
   requireDesktop(
-    [j01PickerPath, j02PickerPath, j08PickerPath, j12PickerPath, j03PickerPath, j04PickerPath, j05PickerPath, j06PickerPath, j07PickerPath, j09PickerPath]
-      .filter(Boolean).length <= 1,
+    [j01PickerPath, j02PickerPath, j08PickerPath, j12PickerPath, j03PickerPath, j04PickerPath, j05PickerPath, j06PickerPath, j07PickerPath, j09PickerPath,
+      j10PickerPath].filter(Boolean).length <= 1,
   );
   // The picker-path launch controls carry whatever their Journey selects, in any recognised format
   // or none, so each one asks only that it is its own Journey's absolute path.
@@ -249,9 +254,12 @@ function parseArguments(argv: string[]): LaunchArguments {
   requireDesktop(
     j09PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-09' && isAbsolute(j09PickerPath)),
   );
+  requireDesktop(
+    j10PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-10' && isAbsolute(j10PickerPath)),
+  );
   const injectedPickerPath =
     j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath ?? j04PickerPath ?? j05PickerPath ?? j06PickerPath ??
-      j07PickerPath ?? j09PickerPath;
+      j07PickerPath ?? j09PickerPath ?? j10PickerPath;
   // The Save dialog's launch control is guarded exactly as the picker controls are: J-07's own, and absolute.
   const injectedSavePath = values.get('--j07-save-path');
   requireDesktop(
@@ -298,16 +306,21 @@ function parseArguments(argv: string[]): LaunchArguments {
   requireDesktop(
     recoveryControlValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-08' && recoveryControl !== undefined),
   );
-  // The model adapter binds a Journey whose Runs execute: J-04's analysis, and J-09's 运行中 and 最近完成 (Issue #424).
+  // The model adapter binds a Journey whose Runs execute: J-04's analysis, J-09's 运行中 and 最近完成 (Issue #424), and
+  // J-10's cancelled Run (Issue #422).
   requireDesktop(
     modelAdapterControlValue === undefined ||
-      ((process.env.AI7_E2E_JOURNEY === 'J-04' || process.env.AI7_E2E_JOURNEY === 'J-09') && modelAdapterControl !== undefined),
+      ((process.env.AI7_E2E_JOURNEY === 'J-04' || process.env.AI7_E2E_JOURNEY === 'J-09' || process.env.AI7_E2E_JOURNEY === 'J-10') &&
+        modelAdapterControl !== undefined),
   );
   requireDesktop([importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length <= 1);
   // The connectivity control is guarded as the picker paths are — J-04's own, and absolute — and, since it only
   // simulates whether the adapter's route has a network, it sits beside the adapter rather than excluding it.
   const connectivityPath = values.get('--j04-connectivity-path');
   requireDesktop(connectivityPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && isAbsolute(connectivityPath)));
+  // J-10's unit hold (Issue #422) is guarded the same way — J-10's own, and absolute — and sits beside the adapter.
+  const unitHoldPath = values.get('--j10-unit-hold-path');
+  requireDesktop(unitHoldPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-10' && isAbsolute(unitHoldPath)));
   requireDesktop(
     observeJ12RevealValue === undefined ||
       (process.env.AI7_E2E_JOURNEY === 'J-12' && observeJ12RevealValue === 'true'),
@@ -318,7 +331,7 @@ function parseArguments(argv: string[]): LaunchArguments {
     launchForm.trustedOperationalScope === 'development-ci' ||
       (process.env.AI7_E2E_JOURNEY === undefined && injectedPickerPath === undefined && observeJ12RevealValue === undefined &&
         importControlValue === undefined && foregroundExecutionControlValue === undefined && recoveryControlValue === undefined && modelAdapterControlValue === undefined &&
-        applyControlValue === undefined && injectedSavePath === undefined && connectivityPath === undefined),
+        applyControlValue === undefined && injectedSavePath === undefined && connectivityPath === undefined && unitHoldPath === undefined),
   );
   return {
     dataRoot,
@@ -330,6 +343,7 @@ function parseArguments(argv: string[]): LaunchArguments {
     recoveryControl,
     modelAdapterControl,
     connectivityPath,
+    unitHoldPath,
     applyControl,
     observeJ12Reveal,
     launcherPid,
@@ -2277,6 +2291,26 @@ function registerRendererHandlers(
         });
       }),
   );
+  // 取消任务 (Issue #422) is the baseline Task's own as well: the renderer names the Task Intent and never a Book, and
+  // the answer must be the route Book's. It is serialized with every other effect, since it records a Run state.
+  ipcMain.handle(
+    IPC_CHANNELS.cancelBaselineAnalysisRun,
+    (event, input: Omit<ServiceOperationMap['cancelBaselineAnalysisRun']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('cancelBaselineAnalysisRun', { taskIntentId: input.taskIntentId, bookId: route.bookId });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if (result.bookId !== route.bookId) {
+            throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '取消任务的结果不属于当前图书工作台。');
+          }
+          return result;
+        });
+      }),
+  );
   // Reconnect Preflight names no Book: it only ever admits Runs the editor already authorized to start when
   // online. It is serialized with every other effect, because an admission dispatches.
   ipcMain.handle(
@@ -3106,6 +3140,7 @@ export async function runApplication(): Promise<void> {
       launch.recoveryControl,
       launch.modelAdapterControl,
       launch.connectivityPath,
+      launch.unitHoldPath,
     );
     service.onUnexpectedExit(() => {
       serviceInterrupted = true;

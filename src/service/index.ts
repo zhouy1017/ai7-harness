@@ -24,6 +24,7 @@ import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../shared/protecte
 import { DEVELOPER_LIVE_POLICY_BINDING, resolveDeveloperLiveLaunch, type DeveloperLiveRuntime } from './launch-policy.js';
 import { decodeRequest, isSafeInteger, ProtocolError } from './request-frames.js';
 import { controlledConnectivity, hostConnectivity, type TaskPlanConnectivity } from './connectivity.js';
+import { controlledUnitHold } from './unit-hold.js';
 import { reconnectPreflight } from './reconnect-preflight.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from './provider/egress-gate.js';
 import type { DormantHarnessRuntime } from './runtime.js';
@@ -293,7 +294,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: await store.inspectTaskPlanWithConnection(request.input, () => analysisExecution.liveCredentialReadiness(), connectivity.planConnectivity),
+        result: await store.inspectTaskPlanWithConnection(request.input, () => analysisExecution.liveCredentialReadiness(), connectivity.planConnectivity, analysisProgress),
       };
     case 'inspectForegroundExecutionBoundary':
       return {
@@ -386,6 +387,18 @@ async function dispatch(
         op: request.op,
         result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress),
       };
+    // 取消任务 (Issue #422; CTRL-004 to CTRL-008): `cancelling` is recorded, and the owner stops the Run at the next unit
+    // boundary — or, holding no execution of it, settles it at once.
+    case 'cancelBaselineAnalysisRun': {
+      const runRecordId = store.requestBaselineAnalysisCancel(request.input.bookId, request.input.taskIntentId);
+      if (runRecordId !== null) analysisExecution.cancelRun(runRecordId, store.baselineAnalysisLedger);
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress),
+      };
+    }
     case 'runReconnectPreflight':
       return { id: request.id, ok: true, op: request.op, result: await connectivity.preflight() };
     // 快速开始 (Issue #421; TASK-017, TASK-020, TASK-026): after 先看计划's own preparation, the Task starts exactly as
@@ -830,6 +843,7 @@ function parseArguments(argv: string[]): {
   recoveryControl: J08RecoveryControl | undefined;
   modelAdapterControl: J04ModelAdapterControl | undefined;
   connectivityPath: string | undefined;
+  unitHoldPath: string | undefined;
 } {
   const values = new Map<string, string>();
   for (let index = 0; index < argv.length; index += 2) {
@@ -841,7 +855,8 @@ function parseArguments(argv: string[]): {
       values.has(key) ||
       (key !== '--data-root' && key !== '--parent-pid' && key !== '--j01-import-control' &&
         key !== '--j03-foreground-execution-control' && key !== '--j08-recovery-control' &&
-        key !== '--j04-model-adapter' && key !== '--j04-connectivity-path' && key !== TRUSTED_SCOPE_ARGUMENT && key !== RUN_BUDGET_CEILING_ARGUMENT &&
+        key !== '--j04-model-adapter' && key !== '--j04-connectivity-path' && key !== '--j10-unit-hold-path' &&
+        key !== TRUSTED_SCOPE_ARGUMENT && key !== RUN_BUDGET_CEILING_ARGUMENT &&
         key !== PROVIDER_CACHE_ROOT_ARGUMENT)
     ) {
       throw new ProtocolError();
@@ -886,6 +901,8 @@ function parseArguments(argv: string[]): {
   // J-04's connectivity control (Issue #502): a file the Journey writes, read at each reading. It rides beside the
   // model adapter — it simulates only whether that route's network is there — so it is exclusive of nothing.
   const connectivityPath = values.get('--j04-connectivity-path');
+  // J-10's unit hold (Issue #422): a file the Journey writes, read before a unit settles; beside the adapter too.
+  const unitHoldPath = values.get('--j10-unit-hold-path');
   if (
     !dataRoot ||
     !isAbsolute(dataRoot) ||
@@ -898,19 +915,23 @@ function parseArguments(argv: string[]): {
       (foregroundExecutionControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-03')) ||
     (recoveryControlValue !== undefined &&
       (recoveryControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-08')) ||
-    // The model adapter binds a Journey whose Runs execute: J-04's analysis, and J-09's 运行中 and 最近完成.
+    // The model adapter binds a Journey whose Runs execute: J-04's analysis, J-09's 运行中 and 最近完成, and J-10's
+    // cancelled Run (Issue #422).
     (modelAdapterControlValue !== undefined &&
-      (modelAdapterControl === undefined || (process.env.AI7_E2E_JOURNEY !== 'J-04' && process.env.AI7_E2E_JOURNEY !== 'J-09'))) ||
+      (modelAdapterControl === undefined ||
+        (process.env.AI7_E2E_JOURNEY !== 'J-04' && process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10'))) ||
     (connectivityPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-04' || !isAbsolute(connectivityPath))) ||
+    (unitHoldPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-10' || !isAbsolute(unitHoldPath))) ||
     [importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length > 1 ||
     // developer-live is a human-attended developer-host launch: never a Journey launch, never with a Journey control.
     (launchForm.trustedOperationalScope !== 'development-ci' &&
       (process.env.AI7_E2E_JOURNEY !== undefined || importControlValue !== undefined || foregroundExecutionControlValue !== undefined ||
-        recoveryControlValue !== undefined || modelAdapterControlValue !== undefined || connectivityPath !== undefined))
+        recoveryControlValue !== undefined || modelAdapterControlValue !== undefined || connectivityPath !== undefined ||
+        unitHoldPath !== undefined))
   ) {
     throw new ProtocolError();
   }
-  return { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath };
+  return { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath, unitHoldPath };
 }
 
 function parentIsAlive(parentPid: number): boolean {
@@ -932,7 +953,7 @@ async function run(): Promise<void> {
   // The native `fetch` is captured before the denial replaces the global; only the developer-live
   // `opencode-go` transport ever receives it, and only through the adapter's transmit step.
   const nativeFetch: typeof fetch = globalThis.fetch;
-  const { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath } =
+  const { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath, unitHoldPath } =
     parseArguments(process.argv.slice(2));
   if (launchForm.trustedOperationalScope === 'developer-live') {
     // The single-host allowance (settlement l): armed before the denial so its gates admit exactly the
@@ -1035,6 +1056,7 @@ async function run(): Promise<void> {
       fixture,
       secretResolver: createKeyringSecretResolver(),
       developerLive,
+      unitHold: unitHoldPath === undefined ? null : controlledUnitHold(unitHoldPath),
     });
     // A Review Run's categories take the one owner's single slot one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);
