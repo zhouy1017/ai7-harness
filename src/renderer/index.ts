@@ -24,6 +24,7 @@ import type {
   ImportCommitProjection,
   ManuscriptReimportCommitProjection,
   ReimportGroupProjection,
+  ReimportUnfollowedMarkProjection,
   ImportDraftRecoveryProjection,
   ImportStartupProjection,
   HistoricalRevisionProjection,
@@ -1496,6 +1497,19 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
     }
     detail.append(element('h4', undefined, `章节对应 · ${record.groups.count} 处`), rows);
     detail.append(element('p', 'field-note', `标记：${record.markOutcomes.followed} 条已跟随，${record.markOutcomes.unfollowed} 条未能跟随。`));
+    // Each mark that could not follow, as the landing notice listed it: set aside for good, so the record is where it is read later.
+    if (record.markOutcomes.items.length > 0) {
+      const unfollowed = element('ul', 'degradation-list reimport-record-unfollowed');
+      for (const item of record.markOutcomes.items) {
+        const entry = element('li', undefined, reimportUnfollowedLine(item));
+        entry.dataset['reimportRecordUnfollowedMarkId'] = item.markId;
+        unfollowed.append(entry);
+      }
+      detail.append(unfollowed);
+    }
+    if (record.markOutcomes.unfollowed > record.markOutcomes.items.length) {
+      detail.append(element('p', 'field-note', `另有 ${record.markOutcomes.unfollowed - record.markOutcomes.items.length} 条未列出。`));
+    }
   }
   if (record.kind === 'import-record' || record.kind === 'manuscript-reimport-record') {
     const fidelity = element('details', 'degradation-disclosure');
@@ -5557,6 +5571,13 @@ function renderImported(result: ImportCommitProjection, recoveryReturn?: Recover
 /** How many graphemes of a mark's words the reimport notice quotes. */
 const REIMPORT_NOTICE_WORDS = 40;
 
+/** One mark a reimport could not follow: its kind, the paragraph it stood in, and its words, cut at a bound. */
+function reimportUnfollowedLine(item: ReimportUnfollowedMarkProjection): string {
+  const words = Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(item.words), ({ segment }) => segment);
+  const quoted = words.length > REIMPORT_NOTICE_WORDS ? `${words.slice(0, REIMPORT_NOTICE_WORDS).join('')}…` : item.words;
+  return `${MARK_KIND_LABELS[item.kind]} · 原第 ${item.fromPosition} 段 · 「${quoted}」`;
+}
+
 /**
  * What a reimport came to, where the editor lands after it (Issue #412, S63; V2-UX-IMP-056, IMP-057): the result, how
  * many rows were resolved and marks followed, and — kept until the editor dismisses it — every mark that could not
@@ -5581,15 +5602,14 @@ function reimportLandingSection(result: ManuscriptReimportCommitProjection): HTM
       `${record.markOutcomes.unfollowed} 条标记未能跟随新文件：它们的文字已删去、改写或不止一处，已从正文移开并保留。`));
     const list = element('ul', 'reimport-unfollowed');
     for (const item of record.markOutcomes.items) {
-      const words = Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(item.words), ({ segment }) => segment);
-      const quoted = words.length > REIMPORT_NOTICE_WORDS ? `${words.slice(0, REIMPORT_NOTICE_WORDS).join('')}…` : item.words;
-      const entry = element('li', undefined, `${MARK_KIND_LABELS[item.kind]} · 原第 ${item.fromPosition} 段 · 「${quoted}」`);
+      const entry = element('li', undefined, reimportUnfollowedLine(item));
       entry.dataset['reimportUnfollowedMarkId'] = item.markId;
       list.append(entry);
     }
     section.append(list);
+    // The record lists the same marks, bounded alike: what neither lists is counted, never pointed elsewhere.
     if (record.markOutcomes.unfollowed > record.markOutcomes.items.length) {
-      section.append(element('p', 'field-note', `另有 ${record.markOutcomes.unfollowed - record.markOutcomes.items.length} 条，见稿件重新导入记录。`));
+      section.append(element('p', 'field-note', `另有 ${record.markOutcomes.unfollowed - record.markOutcomes.items.length} 条未列出。`));
     }
   }
   const detail = element('div', 'reimport-landing-record');

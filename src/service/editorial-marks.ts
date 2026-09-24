@@ -525,15 +525,6 @@ export function followBlockTextChangeForMarks(
   for (const mark of followed) update.run(mark.fromGrapheme, mark.toGrapheme, mark.state, journalSequence, mark.markId);
 }
 
-/**
- * After the whole working state was replaced — a recovery restoration, a reimport — no spans exist
- * to follow. Every live mark is resolved against what its block holds now: `exact` where its pinned
- * text stands at its range or stands alone in the block, `drifted` otherwise, and `detached` when
- * the block is no longer part of the working state. A detached mark that finds its block again is
- * resolved like any other. A point pinned on no text has nothing to be found by, so it resolves
- * `drifted`: rewritten text never proves where an applied suggestion deleted its words, nor where a
- * pending insertion (Issue #411) would write its own.
- */
 /** One row of a reimport's chapter-level comparison as its marks see it (Issue #412, S63). */
 export interface ReimportMarkRow {
   ordinal: number;
@@ -632,10 +623,11 @@ export function followReimportedMarks(db: DatabaseSync, branchId: string, rows: 
 }
 
 /**
- * A mark a reimport set aside (Issue #412, S63): detached, with `unfollowed` as its latest reimport outcome. It stays set aside
- * until the editor re-pins it — the record listed it, and the notice said it was taken off the text and kept — so a later
- * rewrite of the branch, by another reimport or a recovery, never reads it against the text its block holds, and a later
- * reimport never lists it again.
+ * A mark a reimport set aside (Issue #412, S63): detached, with `unfollowed` as its latest reimport outcome. It is set aside
+ * for good — the notice and the reimport's record list it as taken off the text and kept — since nothing takes a mark out of
+ * `detached`: Apply, its reversal and a conversion need the mark exact, an edit follows only exact and drifted marks, and
+ * the manuscript draws no detached one. So a later rewrite of the branch, by another reimport or a recovery, never reads
+ * it against the text its block holds, and a later reimport never lists it again.
  */
 function setAsideByReimport(db: DatabaseSync): string {
   const kept = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'manuscript_reimport_mark_outcomes'").get() !== undefined;
@@ -645,6 +637,16 @@ function setAsideByReimport(db: DatabaseSync): string {
     : '0';
 }
 
+/**
+ * After the whole working state was replaced — a recovery restoration, a reimport — no spans exist
+ * to follow. Every live mark is resolved against what its block holds now: `exact` where its pinned
+ * text stands at its range or stands alone in the block, `drifted` otherwise, and `detached` when
+ * the block is no longer part of the working state. A detached mark that finds its block again is
+ * resolved like any other, except one a reimport set aside (`setAsideByReimport`), which stays aside.
+ * A point pinned on no text has nothing to be found by, so it resolves
+ * `drifted`: rewritten text never proves where an applied suggestion deleted its words, nor where a
+ * pending insertion (Issue #411) would write its own.
+ */
 export function resolveBranchMarksAfterRewrite(db: DatabaseSync, branchId: string): void {
   if (!marksRelationExists(db)) return;
   const state = db.prepare('SELECT journal_sequence FROM branch_working_state WHERE branch_id = ?').get(branchId) as SqlRow | undefined;
