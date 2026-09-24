@@ -1173,6 +1173,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // 交付 · 生产文档 (Issue #415). A house type by its identity, a material and a document by theirs, all within
     // the route's Book; whether they are that Book's is the store's to decide.
+    case 'inspectBookTasks':
     case 'inspectProductionDocuments': {
       const input = requireInput(value.input, ['bookId'], tentativeId);
       if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);

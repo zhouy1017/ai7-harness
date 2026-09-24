@@ -357,6 +357,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['designatePublicationVersion']['output']>(IPC_CHANNELS.designatePublicationVersion, input),
   inspectProductionDocuments: () =>
     invoke<ServiceOperationMap['inspectProductionDocuments']['output']>(IPC_CHANNELS.inspectProductionDocuments),
+  inspectBookTasks: () =>
+    invoke<ServiceOperationMap['inspectBookTasks']['output']>(IPC_CHANNELS.inspectBookTasks),
   inspectBookDeliveryPackage: () =>
     invoke<ServiceOperationMap['inspectBookDeliveryPackage']['output']>(IPC_CHANNELS.inspectBookDeliveryPackage),
   prepareBookDeliveryPackage: (input: Omit<ServiceOperationMap['prepareBookDeliveryPackage']['input'], 'bookId'>) =>

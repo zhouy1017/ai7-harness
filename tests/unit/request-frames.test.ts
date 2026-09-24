@@ -299,6 +299,8 @@ describe('decodeRequest accepts well-formed frames', () => {
     const delivery = { bookId, documentId: randomUUID(), version: { kind: 'saved', revisionId: randomUUID() } };
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
       { op: 'inspectProductionDocuments', input: { bookId } },
+      // The Book's 任务 panel (Issue #423, S77a).
+      { op: 'inspectBookTasks', input: { bookId } },
       { op: 'createProductionDocument', input: { bookId, typeId: 'news-release', sourceVersionId: randomUUID() } },
       { op: 'decideProductionDocumentType', input: { bookId, typeId: 'marketing-points', notForThisBook: true } },
       { op: 'decideProductionDocumentType', input: { bookId, typeId: 'promotion-article', notForThisBook: false } },
@@ -342,6 +344,9 @@ describe('decodeRequest accepts well-formed frames', () => {
       { op: 'inspectProductionDocuments', input: {} },
       { op: 'inspectProductionDocuments', input: { bookId: 'current' } },
       { op: 'inspectProductionDocuments', input: { bookId, typeId: 'news-release' } },
+      { op: 'inspectBookTasks', input: {} },
+      { op: 'inspectBookTasks', input: { bookId: 'current' } },
+      { op: 'inspectBookTasks', input: { bookId, group: 'waiting' } },
       // A delivery names one recipient kind; only 自行输入 carries words, within their bound, and a note stays in its own.
       { op: 'recordProductionDocumentDelivery', input: { ...delivery, recipient: { kind: 'press', custom: null }, note: null } },
       { op: 'recordProductionDocumentDelivery', input: { ...delivery, recipient: { kind: 'publicity', custom: '宣传部' }, note: null } },

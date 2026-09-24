@@ -1056,7 +1056,13 @@ export class BaselineAnalysisStore {
    * A read: nothing is written. A Run left admitted or executing is reported with the owner's `progress`
    * reading of it, which is `null` when nothing executes it; what that means is the reader's to say.
    */
-  attentionReadings(progress: ProgressReader, since: string, limit: number): {
+  attentionReadings(
+    progress: ProgressReader,
+    since: string,
+    limit: number,
+    // A Book's 任务 panel (Issue #423, S77a): that Book alone, and its cancelled Tasks among the outcomes.
+    scope: { bookId: string; cancelled: boolean } | null = null,
+  ): {
     tasks: AnalysisTaskAttentionReading[];
     outcomes: AnalysisOutcomeAttentionReading[];
   } {
@@ -1081,8 +1087,9 @@ export class BaselineAnalysisStore {
            ORDER BY t2.created_at DESC, t2.rowid DESC LIMIT 1)
          AND EXISTS (SELECT 1 FROM analysis_task_input_checkpoints c WHERE c.task_intent_id = t.task_intent_id)
          AND (r.run_record_id IS NULL OR ${lastState} NOT IN ('completed', 'completed-with-gaps'))
+         AND (? IS NULL OR t.book_id = ?)
        ORDER BY t.created_at, t.task_intent_id LIMIT ?`,
-    ).all(kind, limit) as SqlRow[];
+    ).all(kind, scope?.bookId ?? null, scope?.bookId ?? null, limit) as SqlRow[];
     const tasks: AnalysisTaskAttentionReading[] = [];
     for (const row of rows) {
       const base = {
@@ -1128,16 +1135,17 @@ export class BaselineAnalysisStore {
        JOIN analysis_task_intents t ON t.task_intent_id = o.task_intent_id
        JOIN books b ON b.book_id = t.book_id
        LEFT JOIN analysis_result_set_revisions r ON r.revision_id = o.result_set_revision_id
-       WHERE t.kind = ? AND o.classification IN ('completed', 'completed-with-gaps') AND o.recorded_at >= ?
+       WHERE t.kind = ? AND o.classification IN ('completed', 'completed-with-gaps'${scope?.cancelled === true ? ", 'cancelled'" : ''}) AND o.recorded_at >= ?
+         AND (? IS NULL OR t.book_id = ?)
        ORDER BY o.recorded_at DESC, o.outcome_id LIMIT ?`,
-    ).all(kind, since, limit) as SqlRow[]).map((row): AnalysisOutcomeAttentionReading => ({
+    ).all(kind, since, scope?.bookId ?? null, scope?.bookId ?? null, limit) as SqlRow[]).map((row): AnalysisOutcomeAttentionReading => ({
       bookId: asString(row.book_id),
       bookTitle: asString(row.book_title),
       taskIntentId: asString(row.task_intent_id),
       mode: asString(row.mode) as BaselineAnalysisTaskMode,
       outcomeId: asString(row.outcome_id),
       runRecordId: asString(row.run_record_id),
-      classification: asString(row.classification) as 'completed' | 'completed-with-gaps',
+      classification: asString(row.classification) as 'completed' | 'completed-with-gaps' | 'cancelled',
       recordedAt: asString(row.recorded_at),
       revisionId: row.result_set_revision_id === null ? null : asString(row.result_set_revision_id),
       revisionOrdinal: row.revision_ordinal === null ? null : asNumber(row.revision_ordinal),

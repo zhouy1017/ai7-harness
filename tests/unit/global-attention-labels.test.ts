@@ -57,6 +57,7 @@ const STATES: ReadonlyArray<GlobalAttentionStateKey> = [
   'analysis-waiting-slot', 'analysis-waiting-admission', 'analysis-cancelling', 'analysis-pausing', 'analysis-paused', 'analysis-resumable',
   'review-running', 'review-continuable',
   'analysis-completed', 'analysis-completed-with-gaps', 'review-completed',
+  'analysis-prepared', 'review-prepared', 'analysis-cancelled',
   'maintenance-pending', 'maintenance-waiting',
 ];
 
@@ -172,6 +173,10 @@ describe('each item', () => {
       'analysis-completed': '已完成',
       'analysis-completed-with-gaps': '已完成 · 保留缺口',
       'review-completed': '已完成',
+      // The 任务 panel's own three (Issue #423, S77a).
+      'analysis-prepared': '计划已准备 · 等你开始',
+      'review-prepared': '计划已准备 · 等你开始',
+      'analysis-cancelled': '已取消',
       'maintenance-pending': '维护事项待处理',
       'maintenance-waiting': '维护事项待处理 · 等待另设发稿版本',
     });
@@ -207,6 +212,8 @@ describe('each item', () => {
       'resolve-model-service': '处理模型服务',
       reprepare: '重新准备',
       redo: '改计划重做',
+      // A prepared plan nobody started (Issue #423, S77a): the drawer's own entry to it.
+      'view-plan': '查看计划并开始',
       'maintenance-link-proposal': '关联修改建议',
       'maintenance-link-publication': '关联发稿版本',
       'maintenance-write-errata': '编写勘误',
@@ -295,6 +302,9 @@ describe('each item', () => {
       'analysis-completed': globalAttentionReason(item('analysis-completed', { facts: { progress: null, categories: [], revisionOrdinal: 1 } })),
       'analysis-completed-with-gaps': globalAttentionReason(item('analysis-completed-with-gaps', { facts: { progress: null, categories: [], revisionOrdinal: 4 } })),
       'review-completed': globalAttentionReason(item('review-completed', { facts: { progress: null, categories: categories([['错别字与规范用语', 'settled', null], ['体例与格式', 'settled', null]]), revisionOrdinal: null } })),
+      'analysis-prepared': globalAttentionReason(item('analysis-prepared')),
+      'review-prepared': globalAttentionReason(item('review-prepared', { facts: { progress: null, revisionOrdinal: null, categories: categories([['错别字与规范用语', 'waiting', null], ['体例与格式', 'waiting', null]]) } })),
+      'analysis-cancelled': globalAttentionReason(item('analysis-cancelled', { facts: { progress: null, categories: [], revisionOrdinal: 2 } })),
       'maintenance-pending': globalAttentionReason(item('maintenance-pending', {
         object: { kind: 'maintenance', classification: 'errata', ordinal: 1, publicationOrdinal: 1 }, nextStep: 'maintenance-write-errata',
       })),
@@ -338,6 +348,10 @@ describe('each item', () => {
       'analysis-completed': '已形成第 1 份基线分析。',
       'analysis-completed-with-gaps': '已形成第 4 份基线分析，保留缺口单元。',
       'review-completed': '已审：「错别字与规范用语」「体例与格式」；发现已标到稿件上。',
+      // Issue #423 (S77a; TASK-044): the 任务 panel's own three; nothing starts by itself, and a cancellation keeps what was read.
+      'analysis-prepared': '计划已准备好，还没有开始；查看计划后开始任务。它不会自己开始。',
+      'review-prepared': '审阅计划已准备好，还没有开始：「错别字与规范用语」「体例与格式」；查看计划后开始审阅。它不会自己开始。',
+      'analysis-cancelled': '你取消了这项任务；读完的阅读范围已形成第 2 份基线分析。',
       // Issue #426 (S68b; MAINT-012): what the case waits on; nothing outside AI7 is claimed.
       'maintenance-pending': '勘误还没有写下内容：在这个维护事项中编写勘误。',
       'maintenance-waiting': '替代等待另设的发稿版本：另行设为发稿版本后，在这个维护事项中关联它。',
