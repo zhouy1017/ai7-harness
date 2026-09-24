@@ -39,6 +39,7 @@ import {
   type GlobalAttentionProjection,
   type GlobalAttentionStateKey,
 } from '../../src/shared/protocol.js';
+import { TASK_PLAN_STATE_PILLS } from '../../src/renderer/task-drawer-labels.js';
 
 // Unit suite for 待我处理's words (Issue #424, plan slice S78; editor-surfaces §8.1, V2-UX-ATTN-001 to 009):
 // every group heading, state, reason and safe next step byte for byte; the next steps pinned to the words the
@@ -168,6 +169,10 @@ describe('each item', () => {
     });
     for (const state of STATES) {
       expect(GLOBAL_ATTENTION_STATE_PILLS[state].shape).toMatch(/^(circle|ring|half|triangle|square|diamond|check|dash)$/u);
+    }
+    // A Run under way or stopped reads with the same pill here as in the Task Drawer (S76b reading 6).
+    for (const [state, drawer] of [['analysis-cancelling', 'cancelling'], ['analysis-pausing', 'pausing'], ['analysis-paused', 'paused'], ['analysis-resumable', 'resumable']] as const) {
+      expect(GLOBAL_ATTENTION_STATE_PILLS[state]).toEqual(TASK_PLAN_STATE_PILLS[drawer]);
     }
     // 已暂停 names a Run the editor paused and nothing else — a Review Run a stopped service left mid-way is never called
     // so (Issue #422, S76b) — and no generic decision word stands in for a named one.

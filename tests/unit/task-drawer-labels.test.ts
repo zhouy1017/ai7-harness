@@ -461,6 +461,8 @@ describe('the authorization bar (S74a)', () => {
     expect(blocked.status).toBe('任务已中断 · 可续行');
     expect(blocked.actions[0]).toEqual({ name: 'resume', label: '续行', tone: 'primary', disabledReason: '另一项任务正在运行；它结束后再续行。' });
     expect(taskBarContinuationNote(8, 8)).toBe('已读完全部 8 个阅读范围，结果都已保存；续行时接着做之后的归纳与抽样');
+    // Kept progress that no longer reads back is never stated as a count.
+    expect(taskBarContinuationNote(null, 8)).toBe('已保存的阅读进度无法核对，这次运行不能续行；可以取消它，再重新开始');
   });
 
   it('states a cancelled wait as cancelled with nothing sent — never as 已中断 — and only links to it (OFF-010, OFF-012)', () => {
