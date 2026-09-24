@@ -849,6 +849,10 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.designatePublicationVersion(request.input) };
     case 'inspectProductionDocuments':
       return { id: request.id, ok: true, op: request.op, result: store.inspectProductionDocuments(request.input.bookId) };
+    case 'inspectBookDeliveryPackage':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectBookDeliveryPackage(request.input.bookId) };
+    case 'prepareBookDeliveryPackage':
+      return { id: request.id, ok: true, op: request.op, result: store.prepareBookDeliveryPackage(request.input) };
     case 'createProductionDocument':
       return { id: request.id, ok: true, op: request.op, result: await store.createProductionDocument(request.input) };
     case 'decideProductionDocumentType':

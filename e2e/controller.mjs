@@ -843,6 +843,11 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'document-delivery-export',
     'document-changed-since-delivery',
     'document-redeliver',
+    // Issue #416 (S67a): 图书交付包 — its conditions and routes, what it holds, v1, an unchanged repeat and v2.
+    'package-conditions',
+    'package-not-for-this-book',
+    'package-prepare',
+    'package-v2',
     'documents-restart',
     'zero-loopback-requests',
     'completion-browser-close',

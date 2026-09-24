@@ -2718,6 +2718,46 @@ function registerRendererHandlers(
       return result;
     }),
   );
+  // 图书交付包 (Issue #416, S67a): a read bound to the route's Book and its read epoch, and 准备图书交付包 serialized
+  // like every other command. The service decides whether the content is still what the editor saw; nothing here
+  // chooses a destination or writes a file.
+  const requireBookDeliveryPackageOfRoute = (route: { bookId: string }, bookId: string): void => {
+    if (bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '图书交付包不属于当前图书工作台。');
+  };
+  ipcMain.handle(IPC_CHANNELS.inspectBookDeliveryPackage, (event) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectBookDeliveryPackage', { bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      requireBookDeliveryPackageOfRoute(route, result.bookId);
+      return result;
+    }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.prepareBookDeliveryPackage,
+    (event, input: Omit<ServiceOperationMap['prepareBookDeliveryPackage']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('prepareBookDeliveryPackage', {
+            bookId: route.bookId,
+            purpose: input.purpose,
+            expectedContentDigest: input.expectedContentDigest,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          requireBookDeliveryPackageOfRoute(route, result.bookId);
+          requireBookDeliveryPackageOfRoute(route, result.package.bookId);
+          return result;
+        });
+      }),
+  );
   ipcMain.handle(
     IPC_CHANNELS.createProductionDocument,
     (event, input: Omit<ServiceOperationMap['createProductionDocument']['input'], 'bookId'>) =>

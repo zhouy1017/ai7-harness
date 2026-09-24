@@ -7,7 +7,7 @@ import { parseDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
 import { productionDocumentMarksNotCarried } from '../../src/service/production-documents.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
-  PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION,
+  BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION,
   PRODUCTION_DOCUMENT_SCHEMA_VERSION,
   REIMPORT_GROUP_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
@@ -353,7 +353,7 @@ describe('Production Documents', () => {
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION);
       expect(after.prepare('SELECT rowid, * FROM manuscripts ORDER BY rowid').all()).toEqual(rows!);
       expect((after.prepare("SELECT sql FROM sqlite_schema WHERE name = 'manuscripts'").get() as { sql: string }).sql).toContain("'production-document'");
       expect(after.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'index' AND name = 'manuscripts_one_primary_per_book'").get()).toBeDefined();
@@ -551,9 +551,10 @@ describe('交付 of a Production Document (S66b)', () => {
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const planted = new DatabaseSync(path);
     try {
-      // Revision 37: everything as it is, but no Delivery Records.
+      // Revision 37: everything as it is, but no Delivery Records and no package versions (revision 39).
       planted.exec('PRAGMA foreign_keys = OFF');
       planted.exec(`BEGIN IMMEDIATE;
+        DROP TABLE book_delivery_package_versions;
         DROP TABLE production_document_deliveries;
         PRAGMA user_version = ${PRODUCTION_DOCUMENT_SCHEMA_VERSION};
         COMMIT;`);
@@ -570,7 +571,7 @@ describe('交付 of a Production Document (S66b)', () => {
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION);
       expect((after.prepare('SELECT count(*) count FROM production_document_deliveries').get() as { count: number }).count).toBe(0);
     } finally {
       after.close();
