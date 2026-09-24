@@ -303,6 +303,18 @@ export class PublicationVersionStore {
   }
 
   /**
+   * The Book's current 发稿版本 — its newest designation, read and verified exactly as 交付物 reads it — and whether
+   * the manuscript moved past it (Issue #416: 图书交付包's first condition). `null` when the Book has none.
+   */
+  current(bookId: string): { projection: PublicationVersionProjection; changedSince: boolean } | null {
+    requirePublication(typeof bookId === 'string' && UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+    const head = this.#head(bookId);
+    const current = this.#designations(bookId, head, 1)[0];
+    if (current === undefined) return null;
+    return { projection: current.projection, changedSince: head!.workingDigest !== current.projection.technical.revisionDigest };
+  }
+
+  /**
    * 设为发稿版本 (V2-UX-PUB-002 to PUB-009): deterministic and local. One transaction appends the
    * Publication Version, its separate internal Public Release Permission and the two events it leaves —
    * or, when the request repeats the current designation exactly, appends nothing and says so. A newer
