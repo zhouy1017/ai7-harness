@@ -35,6 +35,7 @@ import type {
   PriorWorkItemProjection,
   ReplacementPreviewProjection,
   RecoveryComparisonProjection,
+  RecoveryRestorationProjection,
   RecoverySelection,
   RecoveryWindowProjection,
   ResolvedBookWorkbenchRoute,
@@ -71,6 +72,7 @@ import {
   documentVersionSavedLine,
 } from './production-document-labels.js';
 import { documentStanding, renderDocumentLens, type ProductionDocumentContext } from './production-document-lens.js';
+import { conflictCompletionOn } from './proposal-conflict-labels.js';
 import { renderFidelityReview } from './import-fidelity.js';
 import {
   commitNote,
@@ -937,19 +939,35 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
     restore.disabled = true;
     defer.disabled = true;
     setStatus('正在原子创建恢复后代修订版…', 'busy');
+    let restored: RecoveryRestorationProjection;
     try {
-      const restored = await window.ai7.restoreRecovery({
+      restored = await window.ai7.restoreRecovery({
         attentionId: recovery.attentionId,
         expectedAttentionVersion: recovery.attentionVersion,
         selection,
       });
-      await openEditorWindow(restored.window, recovery.bookTitle);
-      setStatus(`已恢复为新版本 ${restored.descendantRevisionLabel}`, 'success');
     } catch (error) {
+      // Only a restore that did not happen can be tried again.
       setStatus(rendererErrorMessage(error, '恢复未完成。'), 'error');
       view.disabled = false;
       restore.disabled = false;
       defer.disabled = false;
+      return;
+    }
+    // The restore is committed and its claim released: it is said as done however its window draws, and a document's
+    // text, which no version holds yet, in the document's words (Issue #543 follow-up).
+    const onDocument = restored.window.deliverable === 'production-document';
+    try {
+      await openEditorWindow(restored.window, recovery.bookTitle);
+      setStatus(onDocument ? DOCUMENT_STATUS_LINES.recovered : `已恢复为新版本 ${restored.descendantRevisionLabel}`, 'success');
+    } catch (error) {
+      if (onDocument) {
+        renderBookDeliverables(recovery.bookId, recovery.bookTitle);
+        setStatus(DOCUMENT_STATUS_LINES.recoveredNotOpened, 'error');
+      } else {
+        await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId: recovery.bookId, bookTitle: recovery.bookTitle });
+        setStatus(`已恢复为新版本 ${restored.descendantRevisionLabel}，但稿件没能打开：${rendererErrorMessage(error, '请从图书再打开它。')}`, 'error');
+      }
     }
   });
   const selected = (
@@ -1798,22 +1816,23 @@ function renderProposalConflict(target: { bookId: string; manuscriptId: string; 
     errorMessage: rendererErrorMessage,
     errorCode: (error) => rendererErrorData(error)?.code ?? null,
     returnToManuscript: async (at, completion) => {
+      let opened: ManuscriptWindowProjection;
       if (at === null) {
         // With no place to return to, a conflict on a Production Document returns to that document, and one on the
         // Manuscript to where the Book opens.
-        const opened = await window.ai7.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null });
+        opened = await window.ai7.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null });
         if (opened.deliverable === 'production-document') await openEditorWindow(opened, bookTitle);
         else await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId: target.bookId, bookTitle });
       } else {
-        const opened = await window.ai7.getManuscriptWindowAt({
+        opened = await window.ai7.getManuscriptWindowAt({
           manuscriptId: target.manuscriptId,
           branchId: target.branchId,
           target: { kind: 'block', blockId: at.blockId },
         });
         await openEditorWindow(opened, bookTitle, undefined, undefined, at.markId);
       }
-      // Said once the window is drawn, so nothing drawn after it takes its place.
-      if (completion !== null) setStatus(completion, 'success');
+      // Said once the window is drawn, so nothing drawn after it takes its place — on a document, in its own words.
+      if (completion !== null) setStatus(conflictCompletionOn(opened.deliverable === 'production-document', completion), 'success');
     },
     openConflict: (markId) => renderProposalConflict({ ...target, markId }, bookTitle),
   });
