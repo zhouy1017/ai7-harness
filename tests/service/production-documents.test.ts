@@ -149,6 +149,18 @@ describe('Production Documents', () => {
       const again = await store.saveProductionDocumentVersion({ bookId: book.bookId, documentId, branchId: documentWindow.branchId });
       expect(again.document!.versions.map((version) => version.label)).toEqual(['版本 2', '版本 1']);
 
+      // The same marks: a 批注 on the document stands in the document's window and nowhere in the Manuscript's.
+      const marked = store.getManuscriptWindow(documentId, documentWindow.branchId, null);
+      const markId = store.createEditorialMark({
+        manuscriptId: documentId, branchId: marked.branchId, windowStartBlockId: marked.blocks[0]!.blockId, clientMarkId: randomUUID(),
+        baseRevisionId: marked.revisionId, expectedJournalSequence: marked.journalSequence, blockId: marked.blocks[1]!.blockId,
+        baseBlockDigest: marked.blocks[1]!.digest, fromGrapheme: 0, toGrapheme: 2,
+        selectedText: Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(marked.blocks[1]!.text), ({ segment }) => segment).slice(0, 2).join(''),
+        kind: 'annotation', highlightColor: null, body: '新闻稿里再核对。', proposedText: null, rationale: null,
+      }).markId;
+      expect(store.getManuscriptWindow(documentId, marked.branchId, null).marks.map((entry) => entry.markId)).toEqual([markId]);
+      expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).marks).toEqual([]);
+
       // A document has no milestones (MILE-014), and its caret never moves where the Manuscript opens.
       expect(await asyncCode(() => store.saveMilestone(documentId, documentWindow.branchId, '一审稿', 'stage-archive', null, '')))
         .toBe('MILESTONE_INVALID');
