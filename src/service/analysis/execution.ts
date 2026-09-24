@@ -1348,7 +1348,9 @@ export class BaselineAnalysisExecutionOwner {
             spent = true;
             continue;
           }
-          if (active.interrupted || active.pauseRequested) return spent ? 'end' : 'stopped';
+          // A pause lapses at a spent ceiling, as at every boundary: nothing more is sent, so the answers after this one are
+          // applied too — a 再试一次 later in unit order is kept back in the ceiling's words, never left to read 未接着做.
+          if (active.interrupted || (active.pauseRequested && ceilingState() !== 'reached')) return spent ? 'end' : 'stopped';
           waiting.delete(entry.unitOrdinal);
           active.progress.currentUnitOrdinal = w.unit.ordinal;
           active.progress.currentUnitStartedAt = new Date().toISOString();
