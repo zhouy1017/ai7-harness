@@ -8257,6 +8257,7 @@ export class EditorialStore {
        LEFT JOIN manuscript_reimport_mapping_resolutions claimed
          ON claimed.comparison_id = m.comparison_id
         AND claimed.resolved_current_block_id = m.current_block_id
+        AND claimed.mapping_id <> m.mapping_id
        LEFT JOIN staged_import_blocks sib
          ON sib.draft_id = c.draft_id AND sib.staged_block_id = m.staged_block_id
        LEFT JOIN import_ingest_blocks iib
