@@ -589,6 +589,10 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .export-format-option input, .export-option input { flex: none; width: 18px; height: 18px; margin-top: .2rem; }
 .export-format-text, .export-option-text { display: grid; gap: .15rem; min-width: 0; }
 .export-format-text .field-note, .export-option-text .field-note, .export-format-line { margin-top: 0; }
+/* The 备用格式 disclosure (V2-UX-EXP-005): secondary, quiet until opened, its one format laid out as the others are. */
+.export-fallback-formats { display: grid; gap: .45rem; min-width: 0; }
+.export-fallback-formats > summary { width: fit-content; cursor: pointer; color: #43504a; font-size: .9rem; }
+.export-fallback-formats > summary:focus-visible { outline: 2px solid #416458; outline-offset: 2px; border-radius: 4px; }
 .export-fidelity, .export-destination { margin-top: 1rem; padding-top: .9rem; border-top: 1px solid #d5dcd9; }
 .export-restoration-line { margin: .4rem 0 0; }
 .export-fidelity-list { display: grid; gap: .5rem; margin: .6rem 0 0; padding: 0; list-style: none; }

@@ -16,6 +16,7 @@ import {
   EXPORT_DESTINATION_HEADING,
   EXPORT_DESTINATION_UNCHOSEN,
   EXPORT_FIDELITY_HEADING,
+  EXPORT_FALLBACK_FORMATS,
   EXPORT_FORMAT_LEGEND,
   EXPORT_LOCAL_LINE,
   EXPORT_OPTION_LABELS,
@@ -315,13 +316,17 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
   }
 
   /**
-   * DOCX first and chosen, PDF optional, Markdown as the 备用格式 (EXP-001, EXP-005, EXP-006; Issue #500, S64b). Choosing
-   * another reviews again — each format has its own review (EXP-007) — and a review in flight never locks the choice.
+   * DOCX first and chosen, PDF optional, Markdown as the 备用格式 (EXP-001, EXP-005, EXP-006; Issue #500, S64b) — under a
+   * secondary disclosure of its own, open only once the editor opens it or chose it. Choosing another reviews again —
+   * each format has its own review (EXP-007) — and a review in flight never locks the choice.
    */
   function renderFormats(current: CardState, busy: boolean): HTMLElement {
     const formats = el('fieldset', 'export-formats');
     formats.append(el('legend', undefined, EXPORT_FORMAT_LEGEND));
     const offered = current.review?.formats ?? [];
+    const fallback = el('details', 'export-fallback-formats');
+    fallback.append(el('summary', undefined, EXPORT_FALLBACK_FORMATS));
+    fallback.open = offered.some((format) => format.fallback && format.format === current.format);
     for (const format of offered) {
       const option = el('label', 'export-format-option');
       option.dataset['exportFormat'] = format.format;
@@ -339,8 +344,9 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
       const words = el('span', 'export-format-text');
       words.append(el('strong', undefined, format.label), el('small', 'field-note', format.note));
       option.append(radio, words);
-      formats.append(option);
+      (format.fallback ? fallback : formats).append(option);
     }
+    if (fallback.children.length > 1) formats.append(fallback);
     if (current.review !== null) formats.append(el('p', 'field-note export-format-line', current.review.formatLine));
     return formats;
   }

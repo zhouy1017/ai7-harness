@@ -75,6 +75,8 @@ describe('the words of 导出', () => {
     ]);
     expect(EXPORT_FORMATS[1]!.note).toBe('可选 · 固定版式，适合阅读与打印；不能继续编辑，也不能导回 AI7。');
     expect(EXPORT_FORMATS[2]!.note).toBe('备用格式 · 只写出文字与标题层级，用于迁移或留底。');
+    // Markdown is offered only under the 备用格式 disclosure, never as a peer of DOCX and PDF (EXP-005).
+    expect(EXPORT_FORMATS.map((format) => [format.format, format.fallback])).toEqual([['docx', false], ['pdf', false], ['markdown', true]]);
     // What each option writes follows the format the card reviews.
     expect(exportOptionNote('includeAnnotations', 'docx')).toBe('作为 Word 批注写出，保留作者名与回复。');
     expect(exportOptionNote('includeAnnotations', 'pdf')).toBe('在正文中标出编号，连同作者名与回复列在文末。');
