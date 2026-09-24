@@ -132,7 +132,7 @@ describe('route-aware readiness of the authorization bar (S74a A3; AUTH-005, MOD
       outcomes: ['一份基线分析'],
       notDo: { editorial: [], technical: [] },
       boundary: { adaptable: [], askFirst: [...LOCKED_BOUNDARY] },
-      edit: { editable: true, reason: null, lastEdit: null },
+      edit: { editable: true, reason: null, lastEdit: null, planEnvelopeDigest: 'e'.repeat(64) },
       drift: null,
       technical: [{ key: 'plan-envelope', label: '计划权限边界', value: 'e'.repeat(64) }],
       start: { readiness: 'ready', needsModelConnection: true, planEnvelopeDigest: 'e'.repeat(64), categoryDigests: [], reconfirm: null, ...start },
@@ -151,6 +151,8 @@ describe('route-aware readiness of the authorization bar (S74a A3; AUTH-005, MOD
       expect(blocked.start).toEqual({ readiness: 'needs-connection', needsModelConnection: true, planEnvelopeDigest: null, categoryDigests: [], reconfirm: null });
       // The blocker is the Run's, never the plan's: no drift is invented and every frozen fact stays (OFF-009).
       expect(blocked.drift).toBeNull();
+      // 更新计划 keeps the version it edits: only 开始任务's digest is withheld (Issue #419).
+      expect(blocked.edit.planEnvelopeDigest).toBe('e'.repeat(64));
       expect({ ...blocked, state: live.state, start: live.start }).toEqual(live);
     }
   });
