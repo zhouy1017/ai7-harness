@@ -1840,13 +1840,13 @@ function renderBookDeliverables(bookId: string, bookTitle: string): void {
 
 function renderBookOverview(
   overview: BookWorkOverviewProjection,
-  completion?: ImportCommitProjection,
+  // A reimport lands in the manuscript instead (renderImported; Issue #412).
+  completion?: Exclude<ImportCommitProjection, ManuscriptReimportCommitProjection>,
   recoveryReturn?: RecoveryReturnContext,
   emptyBookCreated = false,
 ): void {
   const sourceCompletion: SourceImportCommitProjection | undefined =
     completion && 'sourceImportRecordId' in completion ? completion : undefined;
-  const reimportCompletion = completion && 'reimportRecordId' in completion ? completion : undefined;
   const content = panel();
   content.classList.add('book-overview');
   content.dataset['bookId'] = overview.book.bookId;
@@ -1865,10 +1865,6 @@ function renderBookOverview(
   );
   if (sourceCompletion) {
     content.append(element('p', 'success-note', '来源材料已导入；以下可精确查看图书拥有的来源版本与本次文件专属来源导入记录。'));
-  } else if (reimportCompletion) {
-    content.append(element('p', 'success-note', reimportCompletion.resultKind === 'changed'
-      ? '稿件已重新导入；已形成一份后代修订版和可直接查看的重新导入记录。'
-      : '未发现稿件变化；已保留精确证据并且没有创建空修订版。'));
   } else if (completion) {
     content.append(element('p', 'success-note', '稿件已导入；以下为这本图书的精确结果记录。'));
   }
@@ -2072,20 +2068,6 @@ function renderBookOverview(
     viewImportRecord.disabled = true;
     completionActionButtons.push(viewSource, viewImportRecord);
     actions.append(viewSource, viewImportRecord);
-  } else if (reimportCompletion) {
-    const reimportRecord = reimportCompletion.receipt;
-    if (reimportRecord.reimportRecordId !== reimportCompletion.reimportRecordId) {
-      throw new Error('AI7_REIMPORT_RESULT_INVALID');
-    }
-    const viewRecord = button('查看稿件重新导入记录', 'primary', () =>
-      detailHost.replaceChildren(recordPresentation(reimportRecord)));
-    viewRecord.dataset['viewReimportRecordId'] = reimportCompletion.reimportRecordId;
-    const openManuscript = button('打开稿件', 'secondary', () =>
-      renderEditorWindow(reimportCompletion.window, overview.book.title, recoveryReturn?.attentionId));
-    viewRecord.disabled = true;
-    openManuscript.disabled = true;
-    completionActionButtons.push(viewRecord, openManuscript);
-    actions.append(viewRecord, openManuscript);
   } else if (overview.primaryAction.kind === 'import-first-manuscript') {
     const importFirst = button('导入首份稿件', 'primary', async () => {
       importFirst.disabled = true;
