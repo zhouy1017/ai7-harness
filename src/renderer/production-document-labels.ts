@@ -63,7 +63,7 @@ export function documentActionName(action: DocumentAction, typeLabel: string): s
 
 /** A document with no Delivery Record yet. */
 export const DOCUMENT_NOT_DELIVERED = '尚未交付';
-/** `交付后有修改` (DELIV-004): the text moved past the version last delivered. */
+/** `交付后有修改` (DELIV-004): an edit after a delivery, so the text is no version the document was delivered at. */
 export const DOCUMENT_CHANGED_SINCE_DELIVERY = '交付后有修改';
 export const DOCUMENT_DELIVERIES_HEADING = '交付记录';
 export const DELIVERY_FORM_HEADING = '交付';

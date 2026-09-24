@@ -33,7 +33,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
  * The right-hand 工作流程 column of a Production Document's surface (DELIV-002), as far as S66a reaches: `版本与交付`
  * lists the document's versions newest first — the one its working text stands on marked `当前` — and
  * `这份文档的材料` states that none is attached yet. Since S66b the Delivery Records follow the versions, newest first,
- * each with what its export came to, and `交付后有修改` once the text moved past the version last delivered. The seven
+ * each with what its export came to, and `交付后有修改` once an edit left every version delivered. The seven
  * phases, `下一项需要处理` and the gates join it with the Deliverable Workflow Lens (S66c, S66d).
  */
 export function renderDocumentLens(context: ProductionDocumentContext): { element: HTMLElement } {
