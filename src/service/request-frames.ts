@@ -143,6 +143,11 @@ function validReviewFindingReason(value: unknown): boolean {
  * store counts them. The raw text may carry the whitespace the store trims and characters outside the
  * Basic Multilingual Plane, so its own ceiling leaves room for both.
  */
+/** A house type's identity: lower-case words joined by hyphens, as the type configuration spells them. */
+function validProductionDocumentTypeId(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(value) && value.length <= 64;
+}
+
 function validPublicationText(value: unknown, maximum: number): boolean {
   return isBoundedString(value, maximum * 4) && publicationText(value, maximum) !== null;
 }
@@ -1114,6 +1119,27 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           !validPublicationText(input.basis, MAX_PUBLICATION_BASIS_CHARACTERS)) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    // 交付 · 生产文档 (Issue #415). A house type by its identity, a material and a document by theirs, all within
+    // the route's Book; whether they are that Book's is the store's to decide.
+    case 'createProductionDocument': {
+      const input = requireInput(value.input, ['bookId', 'typeId', 'sourceVersionId'], tentativeId);
+      if (!validUuid(input.bookId) || !validProductionDocumentTypeId(input.typeId) || !validUuid(input.sourceVersionId)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'decideProductionDocumentType': {
+      const input = requireInput(value.input, ['bookId', 'typeId', 'notForThisBook'], tentativeId);
+      if (!validUuid(input.bookId) || !validProductionDocumentTypeId(input.typeId) || typeof input.notForThisBook !== 'boolean') {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'saveProductionDocumentVersion': {
+      const input = requireInput(value.input, ['bookId', 'documentId', 'branchId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.documentId) || !validUuid(input.branchId)) throw new ProtocolError(tentativeId);
       break;
     }
     // ④ 导出 (Issue #413). The version is the current revision or one milestone of the route's Book, the options

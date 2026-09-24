@@ -290,6 +290,41 @@ describe('decodeRequest accepts well-formed frames', () => {
     }
   });
 
+  it('accepts the three 生产文档 commands with a house type, a material and a document by their identities', () => {
+    const bookId = randomUUID();
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'createProductionDocument', input: { bookId, typeId: 'news-release', sourceVersionId: randomUUID() } },
+      { op: 'decideProductionDocumentType', input: { bookId, typeId: 'marketing-points', notForThisBook: true } },
+      { op: 'decideProductionDocumentType', input: { bookId, typeId: 'promotion-article', notForThisBook: false } },
+      { op: 'saveProductionDocumentVersion', input: { bookId, documentId: randomUUID(), branchId: randomUUID() } },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+  });
+
+  it('rejects a 生产文档 command whose type, identities, decision or key set is wrong', () => {
+    const id = randomUUID();
+    const bookId = randomUUID();
+    const create = { bookId, typeId: 'news-release', sourceVersionId: randomUUID() };
+    const refused: ReadonlyArray<{ op: string; input: unknown }> = [
+      { op: 'createProductionDocument', input: { ...create, typeId: '' } },
+      { op: 'createProductionDocument', input: { ...create, typeId: 'News Release' } },
+      { op: 'createProductionDocument', input: { ...create, typeId: 'x'.repeat(65) } },
+      { op: 'createProductionDocument', input: { ...create, sourceVersionId: 'latest' } },
+      { op: 'createProductionDocument', input: { typeId: 'news-release', sourceVersionId: create.sourceVersionId } },
+      { op: 'createProductionDocument', input: { ...create, text: '一段文字' } },
+      { op: 'decideProductionDocumentType', input: { bookId, typeId: 'news-release', notForThisBook: 'true' } },
+      { op: 'decideProductionDocumentType', input: { bookId, typeId: 'news-release' } },
+      { op: 'saveProductionDocumentVersion', input: { bookId, documentId: 'not-a-uuid', branchId: randomUUID() } },
+      { op: 'saveProductionDocumentVersion', input: { bookId, documentId: randomUUID() } },
+    ];
+    for (const { op, input } of refused) {
+      expect(rejectionFor(frameOf({ id, op, input })).requestId).toBe(id);
+    }
+  });
+
   it('accepts 待我处理, which reads across every Book and names none', () => {
     const request = { id: randomUUID(), op: 'inspectGlobalAttention', input: {} };
     expect(decodeRequest(frameOf(request))).toEqual(request);

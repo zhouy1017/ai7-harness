@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { CLARIFICATION_SCHEMA_SQL } from '../../src/service/analysis/clarifications.js';
 import { dropReimportGroupRelations } from './reimport-groups.js';
+import { dropProductionDocumentRelations } from './production-documents.js';
 import { ANALYSIS_LEDGER_REVISION_34_SQL, ANALYSIS_LEDGER_SCHEMA_SQL } from '../../src/service/task-authorization.js';
 
 /**
@@ -34,6 +35,7 @@ export function dropClarificationRelations(database: DatabaseSync): void {
  * store may be awaiting clarification. The caller sets the version.
  */
 export function plantRevision34Relations(database: DatabaseSync): void {
+  dropProductionDocumentRelations(database);
   dropReimportGroupRelations(database);
   dropClarificationRelations(database);
   const columns = (database.prepare("SELECT name FROM pragma_table_info('analysis_run_states') ORDER BY cid").all() as { name: string }[])

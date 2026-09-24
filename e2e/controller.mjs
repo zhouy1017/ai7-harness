@@ -289,6 +289,12 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'landing-action-ready',
     'landing-target-transition',
     'reimport-pre-review',
+    // Issue #412 (S63): a reimport's rows resolved, its commit, where it lands, and the Book's records after it — so a
+    // hosted failure names the step rather than the launch before it.
+    'reimport-resolve',
+    'reimport-commit',
+    'reimport-landed',
+    'reimport-history',
     // The source-only intake of a PDF: identified from its bytes, refused as editable, retained.
     'synthetic-pdf-identity',
     'source-only-pdf-landing',
@@ -824,6 +830,15 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-export-forced-colors',
     'export-pdf',
     'export-markdown',
+    // Issue #415 (S66a): 交付 · 生产文档 — a document made from the Book's source material, edited and versioned on the
+    // manuscript's own surface, and 本书不做.
+    'documents-source-import',
+    'documents-cards',
+    'document-create',
+    'document-edit-and-version',
+    'document-card-after-version',
+    'document-not-for-this-book',
+    'documents-restart',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',

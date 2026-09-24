@@ -938,6 +938,7 @@ async function assertCommittedManuscriptReimport(renderer, expectation) {
     scenario,
   } = expectation;
   // A reimport returns to the manuscript with its result (V2-UX-IMP-056; Issue #412), not to the Book Work Overview.
+  at('reimport-landed');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"] section.reimport-landing[data-import-commit-id]')`, `${scenario}-landed`);
   await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`, `${scenario}-acknowledged`);
   await assertRenderer(
@@ -964,6 +965,7 @@ async function assertCommittedManuscriptReimport(renderer, expectation) {
   const recordIdentity = await renderer.evaluate(`(() => { const values = Object.fromEntries(Array.from(document.querySelectorAll('.record-detail[data-record-kind="manuscript-reimport-record"] dt'), (label) => [label.textContent, label.nextElementSibling?.textContent])); return { sourceVersionId: values['来源版本 ID'], resultingRevisionId: values['结果修订版 ID'] }; })()`);
   requireJourney(/^[0-9a-f-]{36}$/i.test(recordIdentity?.sourceVersionId ?? ''), `${scenario}-source-version`);
   // The Book's records are one step away, through the manuscript's 资料与记录 group.
+  at('reimport-history');
   await clickExactButton(renderer, '返回图书工作概览', `${scenario}-to-overview`);
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-book-id=${JSON.stringify(identities.bookId)}]')`, `${scenario}-overview`);
   await assertBoundedHistoryGraph(renderer, expectedRevisionCount, expectedRecordCount, scenario);
@@ -972,6 +974,7 @@ async function assertCommittedManuscriptReimport(renderer, expectation) {
 
 async function resolveAndCommitManuscriptReimport(renderer, expectation) {
   const { changed, scenario, expectInterruption = false, cancelCommitOnce = false, verbs = {} } = expectation;
+  at('reimport-resolve');
   while (true) {
     await waitFor(
       renderer,
@@ -1022,6 +1025,7 @@ async function resolveAndCommitManuscriptReimport(renderer, expectation) {
     `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportCommitReady === 'true'`,
     `${scenario}-commit-ready`,
   );
+  at('reimport-commit');
   const commitProof = await manuscriptReimportReviewProof(renderer, `${scenario}-commit-input`);
   const beforeCommitCancellationProof = cancelCommitOnce
     ? await manuscriptReimportReviewProof(renderer, `${scenario}-commit-cancel-before`)
@@ -1318,7 +1322,7 @@ async function runJourney(
   );
   await assertRenderer(
     renderer,
-    `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'abandonImportDraft,acceptReimportDegradation,acknowledgeImportCompletion,answerBaselineAnalysisClarification,applyChangeSuggestion,applyChangeSuggestionBatch,approveManuscriptExport,authorizeBaselineAnalysis,authorizeReviewRun,authorizeTaskAuthorization,cancelBaselineAnalysisRun,cancelServiceJob,cancelWaitingBaselineAnalysis,chooseManuscriptExportDestination,commitBookCreation,commitManuscriptReimport,commitNewBookImport,commitReplacement,commitSourceImport,continueImportDraft,continueReviewRun,createEditorialMark,deactivateDefaultExecutionRule,deferRecovery,designatePublicationVersion,dismissReplacementPreview,editBaselineAnalysisPlan,enableEditorialWorkspaceProfile,flushJournalEdit,freezeReplacement,generateReviewReport,getBookOverview,getBookWorkbenchRoute,getEditorialMarkCard,getHistoricalRevision,getImportStartup,getManuscriptApplyOutcome,getManuscriptRail,getManuscriptWindow,getManuscriptWindowAt,getModelServiceSettings,getOutline,getProductDataLocation,getRecoveryComparison,getReimportLineageSourceVersionPage,getReimportMappingPage,getSearchResults,getStartup,inspectBaselineAnalysis,inspectDefaultExecutionRules,inspectDeliverables,inspectEditorialWorkspaceProfile,inspectForegroundExecutionBoundary,inspectGlobalAttention,inspectProposalConflict,inspectReviewFindingOfMark,inspectReviewWorkspace,inspectTaskAuthorization,inspectTaskPlan,installEditorialWorkspaceProfile,leaveBookWorkbench,listBooks,listPriorWork,openBookWorkbench,pauseBaselineAnalysisRun,platform,pollServiceJob,prepareBaselineAnalysis,prepareBookCreation,prepareManuscriptReimport,prepareNewBookReview,prepareReplacement,prepareReviewRun,prepareSourceImportReview,prepareTaskAuthorization,quickStartBaselineAnalysis,recordChangeSuggestionDecision,recordManuscriptEntryPosition,recordProposalDecisionReason,recordReviewFindingDisposition,redoManuscript,removeModelServiceCredential,reselectImportDraft,resolveProposalConflict,resolveReimportMapping,restoreRecovery,resumeBaselineAnalysisRun,revealManuscriptExport,revealProductDataLocation,reverseAppliedChangeSuggestion,reviewManuscriptExport,runEditorClipboardCommand,runReconnectPreflight,saveMilestone,saveModelServiceCredential,saveProposalConflictDraft,selectAndStageManuscript,setDefaultExecutionRule,startBaselineAnalysisWhenOnline,startReplacementCommit,startSearch,undoManuscript,updateEditorialMark,viewRecoveryCandidate'`,
+    `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'abandonImportDraft,acceptReimportDegradation,acknowledgeImportCompletion,answerBaselineAnalysisClarification,applyChangeSuggestion,applyChangeSuggestionBatch,approveManuscriptExport,authorizeBaselineAnalysis,authorizeReviewRun,authorizeTaskAuthorization,cancelBaselineAnalysisRun,cancelServiceJob,cancelWaitingBaselineAnalysis,chooseManuscriptExportDestination,commitBookCreation,commitManuscriptReimport,commitNewBookImport,commitReplacement,commitSourceImport,continueImportDraft,continueReviewRun,createEditorialMark,createProductionDocument,deactivateDefaultExecutionRule,decideProductionDocumentType,deferRecovery,designatePublicationVersion,dismissReplacementPreview,editBaselineAnalysisPlan,enableEditorialWorkspaceProfile,flushJournalEdit,freezeReplacement,generateReviewReport,getBookOverview,getBookWorkbenchRoute,getEditorialMarkCard,getHistoricalRevision,getImportStartup,getManuscriptApplyOutcome,getManuscriptRail,getManuscriptWindow,getManuscriptWindowAt,getModelServiceSettings,getOutline,getProductDataLocation,getRecoveryComparison,getReimportLineageSourceVersionPage,getReimportMappingPage,getSearchResults,getStartup,inspectBaselineAnalysis,inspectDefaultExecutionRules,inspectDeliverables,inspectEditorialWorkspaceProfile,inspectForegroundExecutionBoundary,inspectGlobalAttention,inspectProposalConflict,inspectReviewFindingOfMark,inspectReviewWorkspace,inspectTaskAuthorization,inspectTaskPlan,installEditorialWorkspaceProfile,leaveBookWorkbench,listBooks,listPriorWork,openBookWorkbench,pauseBaselineAnalysisRun,platform,pollServiceJob,prepareBaselineAnalysis,prepareBookCreation,prepareManuscriptReimport,prepareNewBookReview,prepareReplacement,prepareReviewRun,prepareSourceImportReview,prepareTaskAuthorization,quickStartBaselineAnalysis,recordChangeSuggestionDecision,recordManuscriptEntryPosition,recordProposalDecisionReason,recordReviewFindingDisposition,redoManuscript,removeModelServiceCredential,reselectImportDraft,resolveProposalConflict,resolveReimportMapping,restoreRecovery,resumeBaselineAnalysisRun,revealManuscriptExport,revealProductDataLocation,reverseAppliedChangeSuggestion,reviewManuscriptExport,runEditorClipboardCommand,runReconnectPreflight,saveMilestone,saveModelServiceCredential,saveProductionDocumentVersion,saveProposalConflictDraft,selectAndStageManuscript,setDefaultExecutionRule,startBaselineAnalysisWhenOnline,startReplacementCommit,startSearch,undoManuscript,updateEditorialMark,viewRecoveryCandidate'`,
     'renderer-isolation',
   );
   await assertRenderer(

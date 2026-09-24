@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 54 as const;
+export const SERVICE_PROTOCOL_VERSION = 55 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -125,6 +125,9 @@ export const IPC_CHANNELS = {
   saveMilestone: 'ai7:j02:save-milestone',
   inspectDeliverables: 'ai7:j07:inspect-deliverables',
   designatePublicationVersion: 'ai7:j07:designate-publication-version',
+  createProductionDocument: 'ai7:j07:create-production-document',
+  decideProductionDocumentType: 'ai7:j07:decide-production-document-type',
+  saveProductionDocumentVersion: 'ai7:j07:save-production-document-version',
   inspectGlobalAttention: 'ai7:j09:inspect-global-attention',
   reviewManuscriptExport: 'ai7:j07:review-manuscript-export',
   chooseManuscriptExportDestination: 'ai7:j07:choose-manuscript-export-destination',
@@ -1013,6 +1016,12 @@ export interface ManuscriptWindowProjection {
    */
   marks: ReadonlyArray<EditorialMarkAnchorProjection>;
   marksTruncated: boolean;
+  /**
+   * `production-document` when the window holds a Production Document (Issue #415, S66), however it was reached — 交付物's
+   * 打开, 解决冲突 → 返回, recovery, 待我处理 or 最近稿件 — so it is always drawn as the document it is. Absent for the Book's
+   * Manuscript.
+   */
+  deliverable?: 'production-document';
 }
 
 /** The most chapters and marks the Whole-manuscript Position Rail draws; beyond them it says it is sparse. */
@@ -4975,6 +4984,101 @@ export interface DeliverablesProjection {
    * came to — a receipt, a failure that changed nothing, or `结果待确认`.
    */
   exports: ReadonlyArray<ManuscriptExportReceiptProjection>;
+  /** 交付 · 生产文档 (Issue #415, S66): one card per house type, and the materials a document can start from. */
+  documents: ProductionDocumentsProjection;
+}
+
+// ---- ⑥ 交付物 · 生产文档 (Issue #415, plan slice S66; V2-UX-DELIV-001, DELIV-002, WORK-013) ----------------
+
+/** The most versions one document's card lists, newest first; an older version stays in the document's history. */
+export const MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED = 20;
+/** The most source materials 从来源材料创建 offers, newest first. */
+export const MAX_PRODUCTION_DOCUMENT_SOURCES_LISTED = 20;
+/** The most paragraphs a document may start with; a longer material is not offered as one. */
+export const MAX_PRODUCTION_DOCUMENT_BLOCKS = 2_000;
+
+/** One saved version of a Production Document: `版本 N`, never a milestone (V2-UX-MILE-014). */
+export interface ProductionDocumentVersionProjection {
+  revisionId: string;
+  /** `版本 N`. */
+  label: string;
+  ordinal: number;
+  createdAt: string;
+  revisionDigest: string;
+}
+
+/** A Production Document as it stands: its versions and whether its working text moved past the latest one. */
+export interface ProductionDocumentProjection {
+  documentId: string;
+  branchId: string;
+  createdAt: string;
+  /** The Book's source material it was made from. */
+  origin: { sourceVersionId: string; displayName: string };
+  /** Newest first, at most `MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED`. */
+  versions: ReadonlyArray<ProductionDocumentVersionProjection>;
+  versionsTruncated: boolean;
+  /** The working text differs from the latest version: `保存为版本` would make a new one. */
+  changedSinceVersion: boolean;
+  journalSequence: number;
+  workingDigest: string;
+}
+
+/** One house type's card in 交付物. */
+export interface ProductionDocumentTypeProjection {
+  typeId: string;
+  label: string;
+  /** `本书不做` for this Book, as its latest decision records it. */
+  notForThisBook: boolean;
+  document: ProductionDocumentProjection | null;
+}
+
+/** A source-only material of the Book a document can be made from. */
+export interface ProductionDocumentSourceProjection {
+  sourceVersionId: string;
+  displayName: string;
+  format: SourceFormat;
+  createdAt: string;
+}
+
+export interface ProductionDocumentsProjection {
+  /** The house type configuration in force: its schema, version and digest. */
+  configuration: { schema: string; version: string; digest: string };
+  /** Why no document can be made yet, or `null`. */
+  unavailableReason: string | null;
+  types: ReadonlyArray<ProductionDocumentTypeProjection>;
+  sources: ReadonlyArray<ProductionDocumentSourceProjection>;
+  sourcesTruncated: boolean;
+}
+
+/** 从来源材料创建: a document of one type, made from one source-only material of the route's Book. */
+export interface CreateProductionDocumentInput {
+  bookId: string;
+  typeId: string;
+  sourceVersionId: string;
+}
+
+/** `本书不做` or `恢复` for one type of the route's Book. */
+export interface DecideProductionDocumentTypeInput {
+  bookId: string;
+  typeId: string;
+  notForThisBook: boolean;
+}
+
+/** `保存为版本`: the document's working text becomes its next version. */
+export interface SaveProductionDocumentVersionInput {
+  bookId: string;
+  documentId: string;
+  branchId: string;
+}
+
+/** What a document operation came to: the 交付物 as they stand after it, and the document it was about. */
+export interface ProductionDocumentResultProjection {
+  bookId: string;
+  deliverables: DeliverablesProjection;
+  document: ProductionDocumentProjection | null;
+  typeId: string;
+  /** What 从来源材料创建 did not carry into the document, said where the document opens; `null` when it carried everything. */
+  notice: string | null;
 }
 
 /**
@@ -6041,6 +6145,14 @@ export interface ServiceOperationMap {
   inspectDeliverables: { input: InspectDeliverablesInput; output: DeliverablesProjection };
   designatePublicationVersion: { input: DesignatePublicationVersionInput; output: PublicationDesignationProjection };
   /**
+   * 交付 · 生产文档 (Issue #415, plan slice S66), Book-scoped. 从来源材料创建 makes a document of one house type
+   * from one source-only material; 本书不做 / 恢复 records a decision about a type; 保存为版本 makes the
+   * document's working text its next version. Each answers with the 交付物 as they stand.
+   */
+  createProductionDocument: { input: CreateProductionDocumentInput; output: ProductionDocumentResultProjection };
+  decideProductionDocumentType: { input: DecideProductionDocumentTypeInput; output: ProductionDocumentResultProjection };
+  saveProductionDocumentVersion: { input: SaveProductionDocumentVersionInput; output: ProductionDocumentResultProjection };
+  /**
    * 待我处理 (Issue #424, plan slice S78): every Book's items in the four groups. It takes no input and names
    * no Book, because it reads across them; it is a read and records nothing.
    */
@@ -6267,6 +6379,12 @@ export interface RendererApi {
   inspectDeliverables(): Promise<DeliverablesProjection>;
   /** 设为发稿版本 over one exact milestone of that Book; an identical repeat of the current one is no change. */
   designatePublicationVersion(input: Omit<DesignatePublicationVersionInput, 'bookId'>): Promise<PublicationDesignationProjection>;
+  /** 从来源材料创建 (Issue #415): a document of one house type of that Book, from one of its source-only materials. */
+  createProductionDocument(input: Omit<CreateProductionDocumentInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
+  /** 本书不做 or 恢复 for one house type of that Book. */
+  decideProductionDocumentType(input: Omit<DecideProductionDocumentTypeInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
+  /** 保存为版本: one document of that Book gets its working text as its next version. */
+  saveProductionDocumentVersion(input: Omit<SaveProductionDocumentVersionInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 待我处理 across every Book (Issue #424): a read in any window, whatever it shows; it holds and grants nothing. */
   inspectGlobalAttention(): Promise<GlobalAttentionProjection>;
   /**
