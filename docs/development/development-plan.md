@@ -84,15 +84,15 @@ Exit criterion: an editor opens a Book into the manuscript at the last position,
 | 2.4 | S59 | #408 | T3 | J-05 | ① / ②B One-click 接受并应用 with the three records kept apart (B3) | S58 | integrated (PR #483, `dev@07cdc7f`) |
 | 2.5 | S60 | #409 | T2 | J-02 | ① Position rail lanes in the unified 导航 column (B5) | S58 | integrated (PR #484, `dev@65d15b3`) |
 | 2.6 | S69 | #417 | T3 | J-04 | ②B 审阅: multi-category Review Runs, coverage matrix, Reports, findings synced to marks, 书系一致性 (B6) | S58, S18a | integrated (PR #487, `dev@1c600a8`) |
-| 2.7 | S22 | #57 | T3 | J-06 | Same-block and structural conflicts resolved all-or-none, returning through 接受并应用 | S59 | attested (PR #491, admits J-06); waits for ADR 0085 (#489) |
-| 2.8 | S61 | #410 | T3 | J-01 | ④ DOCX content retained with the Source Version by default; 保留 / 并入 per class (B14) | — | attested (PR #492); waits for ADR 0086 (#490) |
-| 2.9 | S62 | #411 | T2 | J-01 | ④ Imported comments and tracked changes enter as marks (B15) | S58, S61 | attested (PR #498, stacked on S61); waits for ADR 0086 (#490) |
-| 2.10 | S63 | #412 | T3 | J-01 | ④ Chapter-level reimport with four verbs; marks migrate; return to the manuscript (B16) | S58 | planned |
-| 2.11 | S64 | #413 | T3 | J-07 | ④ Export to DOCX with 含批注 / 含修改建议, fidelity table, system picker, receipt (B17) | S58, S61, S62 (the External Export Policy v2 bytes are integrated, PR #440, and need no further confirmation) | attested (PR #501, stacked on S62); waits for ADR 0086 (#490) |
-| 2.11b | S64b | #500 | T3 | J-07 | ④ The same export to PDF and Markdown, and the 审阅报告 export (B17) | S64 | planned |
+| 2.7 | S22 | #57 | T3 | J-06 | Same-block and structural conflicts resolved all-or-none, returning through 接受并应用 | S59 | integrated (PR #491, `dev@12d668d`); admits J-06 |
+| 2.8 | S61 | #410 | T3 | J-01 | ④ DOCX content retained with the Source Version by default; 保留 / 并入 per class (B14) | — | integrated (PR #492, `dev@b1db4a1`) |
+| 2.9 | S62 | #411 | T2 | J-01 | ④ Imported comments and tracked changes enter as marks (B15) | S58, S61 | integrated (PR #498, `dev@3a139c0`) |
+| 2.10 | S63 | #412 | T3 | J-01 | ④ Chapter-level reimport with four verbs; marks migrate; return to the manuscript (B16) | S58 | built (PR #528, in the stack) |
+| 2.11 | S64 | #413 | T3 | J-07 | ④ Export to DOCX with 含批注 / 含修改建议, fidelity table, system picker, receipt (B17) | S58, S61, S62 (the External Export Policy v2 bytes are integrated, PR #440, and need no further confirmation) | integrated (PR #501, `dev@fdda1b3`) |
+| 2.11b | S64b | #500 | T3 | J-07 | ④ The same export to PDF and Markdown, and the 审阅报告 export (B17) | S64 | built (PRs #526 and #527, in the stack) |
 | 2.12 | S65 | #414 | T3 | J-07 | ⑥ 发稿: Manuscript-only milestones and 设为发稿版本 (B26) | — | integrated (PR #488, `dev@f169695`), taken ahead of S64; admits J-07 |
-| 2.13 | S66 | #415 | T3 | J-07 | ⑥ Production Documents: types, versions, workflow and gates, Delivery Records, 交付后有修改, 本书不做 (B27) | S64, S58 | planned |
-| 2.14 | S67 | #416 | T3 | J-07 | ⑥ 图书交付包: conditions, frozen manifest, versions, export history (B28) | S64, S65, S66 | planned |
+| 2.13 | S66 | #415 | T3 | J-07 | ⑥ Production Documents: types, versions, workflow and gates, Delivery Records, 交付后有修改, 本书不做 (B27) | S64, S58 | S66a and S66b built (PRs #529 and #530, in the stack); S66c and S66d follow |
+| 2.14 | S67 | #416 | T3 | J-07 | ⑥ 图书交付包: conditions, frozen manifest, versions, export history (B28) | S64, S65, S66 | S67a built (PR #531, in the stack); S67b follows |
 
 Each slice's detail is in its Issue and in the specification's screen section; this table carries only the order and the dependencies. J-05 and J-07 are admitted by S58 and S65, and J-06 by S22's pull request (#491). Under [CI and test boundaries](../agents/ci-test-boundaries.md) admitting one is an explicit Owner routing decision, and on 2026-09-20 the Owner gave it for these and for J-09, J-10, J-11, J-13 and J-16 ("admit as you need"): the first slice of each supplies the real runner in its own pull request and cuts it over atomically into `ADMITTED_JOURNEYS`, `JOURNEY_MODULES`, `JOURNEY_LOCATIONS`, `e2e/run-all.mjs` and the nightly's full set, `GATE_JOURNEYS` unchanged.
 
@@ -103,15 +103,15 @@ Exit criterion: any Task shows its plan in the Task Drawer in 精简 or 完整 m
 | Order | Slice | Issue | Class | Journey | Outcome | Depends on | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 3.1 | S72 | #418 | T3 | J-03 | ③ One Task Drawer for every Task; 精简 and 完整 modes (B8) | Phase 2 (2.1 to 2.6) | integrated (PR #499, `dev@3557a4f`) |
-| 3.2 | S73 | #419 | T3 | J-03 | ③ Editable plan → 更新计划 → next plan version (B9) | S72 | planned, after S74a — the drawer’s 返回修改 waits for it |
+| 3.2 | S73 | #419 | T3 | J-03 | ③ Editable plan → 更新计划 → next plan version (B9) | S72 | built (PR #519, in the stack) |
 | 3.3 | S74a | #420 | T2 | J-03 | ③ The Task Drawer’s authorization bar: 开始任务 in one click for every kind (B10) | S72 | integrated (PR #503, `dev@80554ad`) |
-| 3.3b | S74b | #502 | T2 | J-03 | ③ 联网后开始任务, the Reconnect Preflight and the Connectivity Wait (B10) | S74a | planned |
-| 3.4 | S75 | #421 | T3 | J-03 | ③ / ⑤ 快速开始 under a Default Execution Rule; 设为快速开始默认 (B11) | S72, S74a | planned |
-| 3.5 | S76 | #422 | T3 | J-10 | ③ Running-Run controls, Clarification Requests, the activity card, 续行 (B12) | S72, S74a | planned |
+| 3.3b | S74b | #502 | T2 | J-03 | ③ 联网后开始任务, the Reconnect Preflight and the Connectivity Wait (B10) | S74a | integrated (PR #512, `dev@0865589`); 需要重新确认计划 at reconnect is #536 |
+| 3.4 | S75 | #421 | T3 | J-03 | ③ / ⑤ 快速开始 under a Default Execution Rule; 设为快速开始默认 (B11) | S72, S74a | integrated (PR #514, `dev@da94971`) |
+| 3.5 | S76 | #422 | T3 | J-10 | ③ Running-Run controls, Clarification Requests, the activity card, 续行 (B12) | S72, S74a | S76a to S76d built (PRs #515, #516, #520 and #522, in the stack); admits J-10 |
 | 3.6 | S13-f1 | #281 | T2 | J-04 | Every material plan field from durable state; the revert path; the dead `inspect` trigger kind | S13 | integrated (PR #445, `dev@6ecffb9`) |
-| 3.7 | S16 | #51 | T2 | J-10 | Run Budget Ceiling termination, Provider Account Limit recovery, ambiguous outcomes | S76 | planned |
+| 3.7 | S16 | #51 | T2 | J-10 | Run Budget Ceiling termination, Provider Account Limit recovery, ambiguous outcomes | S76 | S16a and S16b built (PRs #523 and #524, in the stack); S16c waits for a route that can produce an ambiguous turn |
 | 3.8 | S77 | #423 | T3 | J-16 | ① The 任务 panel: task list, dialogue tasks, result floating windows, the 回到 chip (B4) | S72, S74a | planned |
-| 3.9 | S78 | #424 | T2 | J-09 | ⑤ 待我处理: four cross-Book groups (B18) | S72 | planned |
+| 3.9 | S78 | #424 | T2 | J-09 | ⑤ 待我处理: four cross-Book groups (B18) | S72 | integrated (PR #513, `dev@10af99e`); admits J-09 |
 | 3.10 | S14 | #49 | T3 | J-09 | Concurrent Book work without focus or scope leakage | S78, S16 | planned |
 | 3.11 | S39 | #95 | T3 | J-09 | Background Analysis Enrollment and revocation | S14 | planned |
 | 3.12 | S70 | #425 | T3 | J-04 | ②B / ⑤ External Evidence Retention Procedure; the live research path of 事实核查 (B13) | S69; ADR 0074 (accepted 2026-09-10, PR #391); S87-f3 (#473) | after S87-f3; the Factual Verification Policy v1 bytes and the egress document it writes are the Owner's byte review at Ready |
