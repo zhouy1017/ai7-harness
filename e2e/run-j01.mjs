@@ -71,15 +71,16 @@ function launchTraceNow() {
 }
 
 /**
- * A launch that became ready shows AI7_READY in its trace (Issue #518). Main prints it before it tells the renderer, so
- * once the renderer says the product is ready only the log's own write is outstanding. A trace that cannot see the
- * product fails here, on a launch that worked, rather than saying nothing reached main on the failure it is for.
+ * A launch that became ready shows it in its trace (Issue #518): launched, `readiness-signal`, AI7_READY and its target.
+ * Main prints AI7_READY before it tells the renderer, so once the renderer says the product is ready only the log's own
+ * write is outstanding. A trace that cannot see the product fails here, on a launch that worked, rather than saying
+ * nothing reached main on the failure it is for.
  */
 async function requireTracedReadiness() {
   const deadline = Date.now() + 10_000;
   for (;;) {
     const trace = launchTraceNow();
-    if (trace !== null && trace.launched !== null && trace.last === 'readiness-signal' && trace.ready !== null) return;
+    if (trace !== null && trace.launched !== null && trace.last === 'readiness-signal' && trace.ready !== null && trace.target) return;
     requireJourney(Date.now() < deadline, 'readiness-trace');
     await new Promise((settle) => setTimeout(settle, 50));
   }
@@ -262,7 +263,11 @@ function productEnvironment(executable) {
   return selected;
 }
 
-async function attachRendererTarget(browser) {
+/**
+ * Attach to the product's page and wait until its renderer is ready. `onTarget` runs once the page target is found and
+ * attached, before that wait (Issue #518): a stall at `renderer-ready` then says the target existed.
+ */
+async function attachRendererTarget(browser, onTarget = () => undefined) {
   const deadline = Date.now() + PRODUCT_READY_TIMEOUT_MS;
   const withBrowserConnection = (operation) =>
     settleOnBrowserDisconnect(browser, operation, {
@@ -300,6 +305,7 @@ async function attachRendererTarget(browser) {
     },
     deadline,
   );
+  onTarget();
   let nextId = 1;
   const pending = new Map();
   rootSession.on('Target.receivedMessageFromTarget', ({ sessionId: incomingSessionId, message }) => {
@@ -2212,9 +2218,10 @@ async function main() {
       }
       cancellation.throwIfRequested();
       at(`launch-${launchScenario}-renderer-target`);
-      const attached = await attachRendererTarget(browser);
-      inFlight.target = true;
-      return attached;
+      // The trace says the target existed as soon as it is attached, before the renderer is ready (Issue #518).
+      return attachRendererTarget(browser, () => {
+        inFlight.target = true;
+      });
     };
     const closeProduct = async () => {
       at('window-close');
