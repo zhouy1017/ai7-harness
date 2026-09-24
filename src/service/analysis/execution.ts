@@ -106,6 +106,11 @@ export interface ExecutionOwnerDependencies {
   readonly developerLive?: DeveloperLiveRuntime | null;
   /** J-10's unit hold (Issue #422); absent in every other launch, where a unit settles as soon as its turn returns. */
   readonly unitHold?: UnitHold | null;
+  /**
+   * The service suite's hold around the cross-unit reduction (Issue #422): awaited once the reduction's turn has come
+   * back and before its result is read, so a cancellation can arrive while that turn is out. Absent in every launch.
+   */
+  readonly stageHold?: ((stage: 'cross-unit-reduction') => Promise<void>) | null;
 }
 
 /**
@@ -417,7 +422,10 @@ export class BaselineAnalysisExecutionOwner {
     if (ledger.currentRunState(runRecordId) !== 'cancelling') {
       throw new ExecutionAdmissionError('EXECUTION_STATE_INVALID', '只有已记录“正在取消”的运行可以结束取消。');
     }
-    recordCancelledWithoutRevision(ledger, runRecordId, facts.taskIntentId, facts.attemptId, CANCELLED_WITHOUT_EXECUTION);
+    // Its turns before AI7 closed were sent: the units the ledger recorded a turn for are the ones it submitted. Their
+    // usage was never recorded, so the report can count none of it.
+    const submitted = facts.attemptId === null ? 0 : ledger.submittedUnitCount(facts.attemptId);
+    recordCancelledWithoutRevision(ledger, runRecordId, facts.taskIntentId, facts.attemptId, CANCELLED_WITHOUT_EXECUTION, submitted);
     return 'settled';
   }
 
@@ -1031,6 +1039,7 @@ export class BaselineAnalysisExecutionOwner {
           active.progress.attemptState = 'dispatched';
           active.transmissionsAtDispatch = active.transmissions?.() ?? 0;
           const turn = await harness.submitUnit(message);
+          if (this.#deps.stageHold) await this.#deps.stageHold('cross-unit-reduction');
           const canonical = liveAdapter.instance?.lastCanonicalResult ?? null;
           // The reduction's turn is a model turn like any other: it counts as a request, its usage
           // counts toward the Run and the ceiling, and it records no execution-span row, because the
@@ -1326,6 +1335,7 @@ function recordCancelledWithoutRevision(
   taskIntentId: string,
   attemptId: string | null,
   reason: string,
+  submitted = 0,
 ): void {
   ledger.recordRunState(runRecordId, 'cancelled', { detail: reason });
   const none = { requests: 0, inputTokens: 0, outputTokens: 0 };
@@ -1346,7 +1356,7 @@ function recordCancelledWithoutRevision(
       spans: new Map(),
       usage: { units: none, 'cross-unit-reduction': { ...none }, 'assurance-sampling': { ...none } },
       unitRows: [],
-      submitted: 0,
+      submitted,
       adaptations: [],
       gaps: [],
       crossUnit: { state: 'not-run', reason: CROSS_UNIT_CANCELLED },

@@ -223,6 +223,8 @@ export const TASK_BAR_CANCEL_KEEP = '继续运行';
 export const TASK_BAR_CANCEL_RUN_FAILED = '无法取消这项任务。';
 /** CTRL-005: what 正在取消 says beside itself until the Run has stopped — never a spinner, never 已取消 early. */
 export const TASK_BAR_CANCELLING_NOTE = '已记下你的取消；正在进行的这一步完成后停止，此后不会再发送任何内容';
+/** 取消任务 of a Run nothing was running — one waiting in the queue, or one AI7 left behind when it closed — settles at once. */
+export const TASK_BAR_CANCELLED_NOTE = '已取消这项任务；此后不会再发送任何内容';
 
 /** A Review Run cannot wait yet (Issue #502): offline, its start is shown disabled with this reason. */
 export const TASK_BAR_REVIEW_OFFLINE = '离线：审阅要连到模型服务，而这台设备现在没有网络；联网后再开始审阅';
@@ -449,13 +451,17 @@ export function taskPlanActivityRows(
   activity: NonNullable<TaskPlanRunControlProjection['activity']>,
   executingSince: string | null,
   nowMs: number,
+  update: TaskPlanRunControlProjection['update'] = null,
 ): ReadonlyArray<readonly [string, string]> {
   const stepMs = activity.currentUnitStartedAt === null ? null : nowMs - Date.parse(activity.currentUnitStartedAt);
+  // An update Run names its range among the whole manuscript, and counts only the ranges it reads again, as ②A does.
   const current = activity.stage !== 'units'
     ? RUN_LIVENESS_STAGE_LABELS[activity.stage]
     : activity.currentUnitOrdinal === null
       ? '两个阅读范围之间'
-      : `第 ${activity.currentUnitOrdinal} 个阅读范围（共 ${activity.unitsTotal} 个）`;
+      : update === null
+        ? `第 ${activity.currentUnitOrdinal} 个阅读范围（共 ${activity.unitsTotal} 个）`
+        : `第 ${activity.currentUnitOrdinal} 个阅读范围（全书共 ${update.manuscriptUnits} 个，这次重新分析 ${activity.unitsTotal} 个）`;
   return [
     ['阶段', RUN_LIVENESS_STAGE_LABELS[activity.stage]],
     ['当前', current],
@@ -465,7 +471,7 @@ export function taskPlanActivityRows(
     ].join(' · ') || '—'],
     ['尝试', activity.attemptState === null ? '—' : attemptStateLabel(activity.attemptState)],
     ['上次更新', localInstantLabel(activity.lastTransitionAt)],
-    ['进展', `已读完 ${activity.unitsSettled} / ${activity.unitsTotal} 个阅读范围 · 已完成模型回合 ${activity.completedAttempts} 次`],
+    ['进展', `已读完 ${activity.unitsSettled} / ${activity.unitsTotal} 个阅读范围${update === null ? '' : '（只算要重新分析的）'} · 已完成模型回合 ${activity.completedAttempts} 次`],
   ];
 }
 
