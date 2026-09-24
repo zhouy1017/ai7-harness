@@ -664,27 +664,49 @@ const STAGE_WORDS: Readonly<Record<'cross-unit-reduction' | 'assurance-sampling'
 export function baselineCancellationImpact(
   run: NonNullable<BaselineAnalysisProjection['run']>,
   update: TaskPlanRunControlProjection['update'] = null,
-  continuation: { unitsSettled: number; unitsTotal: number } | null = null,
+  kept: { unitsSettled: number | null; unitsTotal: number } | null = null,
 ): ReadonlyArray<string> {
   // An update Run reads only the ranges it recomputes: the rest it names as such, and the ranges it reuses are kept.
   const reusedKept = update === null || update.reusedUnits === 0 ? '' : `，连同沿用上一份分析的 ${update.reusedUnits} 个阅读范围，`;
   const restOf = (count: number): string => update === null ? `其余 ${count} 个阅读范围` : `其余 ${count} 个要重新分析的阅读范围`;
-  // A Run that stopped — paused, or left 可续行 — has nothing in flight: what it kept becomes its partial revision.
-  if (continuation !== null) {
-    const { unitsSettled, unitsTotal } = continuation;
-    if (unitsSettled === 0) {
-      return ['这项任务还没有读完任何阅读范围；取消后不会发送任何内容，也不会形成结果集修订版。', CANCELLATION_NO_EFFECTS];
+  const partial = (unitsSettled: number): string =>
+    `已读完的 ${unitsSettled} 个阅读范围的结果与缺口${reusedKept}会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。`;
+  const progress = run.progress;
+  // A Run nothing executes — paused, left 可续行, or left under way when AI7 closed — has nothing in flight: what its
+  // checkpoints kept becomes its partial revision, and one that kept nothing, or whose kept progress no longer reads
+  // back, ends with its record alone (Issue #422, S76b).
+  if (progress === null && kept !== null) {
+    const { unitsSettled, unitsTotal } = kept;
+    if (run.state === 'paused' || run.state === 'resumable') {
+      if (unitsSettled === null) {
+        return ['这项任务已经停下，它已保存的阅读进度无法核对；取消后不会发送任何内容，也不会形成结果集修订版。', CANCELLATION_NO_EFFECTS];
+      }
+      if (unitsSettled === 0) {
+        return ['这项任务还没有读完任何阅读范围；取消后不会发送任何内容，也不会形成结果集修订版。', CANCELLATION_NO_EFFECTS];
+      }
+      return [
+        `这项任务已经停下；${restOf(Math.max(0, unitsTotal - unitsSettled))}和之后的归纳、抽样都不再进行，不再发送任何内容。`,
+        partial(unitsSettled),
+        CANCELLATION_NO_EFFECTS,
+      ];
+    }
+    if (unitsSettled === null || unitsSettled === 0) {
+      return [
+        'AI7 上次关闭时这项任务没有结束，现在也没有在运行；取消只结束这条运行记录，不会再发送任何内容。',
+        unitsSettled === null ? '它已保存的阅读进度无法核对，不会形成结果集修订版。' : '它还没有读完任何阅读范围，不会形成结果集修订版。',
+        CANCELLATION_NO_EFFECTS,
+      ];
     }
     return [
-      `这项任务已经停下；${restOf(Math.max(0, unitsTotal - unitsSettled))}和之后的归纳、抽样都不再进行，不再发送任何内容。`,
-      `已读完的 ${unitsSettled} 个阅读范围的结果与缺口${reusedKept}会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。`,
+      `AI7 上次关闭时这项任务没有结束，现在也没有在运行；${restOf(Math.max(0, unitsTotal - unitsSettled))}和之后的归纳、抽样都不再进行，不再发送任何内容。`,
+      partial(unitsSettled),
       CANCELLATION_NO_EFFECTS,
     ];
   }
-  if (run.state === 'admitted') {
+  // Admitted and waiting its turn: nothing read yet — unless it is a Run going on from what it kept.
+  if (run.state === 'admitted' && (progress === null || progress.unitsSettled === 0)) {
     return ['这项任务还没有开始阅读；取消后不会发送任何内容，也不会形成结果集修订版。', CANCELLATION_NO_EFFECTS];
   }
-  const progress = run.progress;
   if (progress === null) {
     // No execution of this service holds the Run: AI7 closed while it ran, and its unit results were never kept.
     return [
@@ -700,10 +722,10 @@ export function baselineCancellationImpact(
     : inFlight
       ? `正在读的第 ${progress.currentUnitOrdinal} 个阅读范围读完后停止；${restOf(remaining)}和之后的归纳、抽样都不再进行，不再发送任何内容。`
       : `在这两个阅读范围之间停止；${restOf(remaining)}和之后的归纳、抽样都不再进行，不再发送任何内容。`;
-  const kept = `已读完的 ${progress.unitsSettled} 个阅读范围${inFlight ? '和正在读的这一个' : ''}的结果与缺口${reusedKept}会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。`;
+  const settled = `已读完的 ${progress.unitsSettled} 个阅读范围${inFlight ? '和正在读的这一个' : ''}的结果与缺口${reusedKept}会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。`;
   return [
     stops,
-    kept,
+    settled,
     CANCELLATION_NO_EFFECTS,
     ...(inFlight ? ['正在等待的那一轮模型回答不会被中途切断，它的结果照常计入。'] : []),
   ];
@@ -725,9 +747,9 @@ function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: Ba
   // offered 取消任务 again, which settles it at once.
   const cancelling = run.state === 'cancelling' && held;
   const pausing = run.state === 'pausing' && held;
-  const continuation = (run.state === 'paused' || run.state === 'resumable') && stopped !== undefined
-    ? { unitsSettled: stopped.unitsSettled, unitsTotal: stopped.unitsTotal }
-    : null;
+  // What its checkpoints kept, read by the store for a Run nothing executes; a stopped one continues from it.
+  const kept = held || stopped === undefined ? null : { unitsSettled: stopped.unitsSettled, unitsTotal: stopped.unitsTotal };
+  const continuation = run.state === 'paused' || run.state === 'resumable' ? kept : null;
   const counts = projection.update?.reusePlan?.counts ?? null;
   const update = counts === null ? null : { manuscriptUnits: projection.coverageManifest?.units.length ?? counts.recomputed + counts.reused, reusedUnits: counts.reused };
   return {
@@ -736,7 +758,7 @@ function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: Ba
     pausing,
     cancel: {
       reason: cancelling ? RUN_CONTROL_CANCELLING_REASON : pausing ? RUN_CONTROL_PAUSING_REASON : null,
-      impact: cancelling || pausing ? [] : baselineCancellationImpact(run, update, continuation),
+      impact: cancelling || pausing ? [] : baselineCancellationImpact(run, update, kept),
     },
     // CTRL-001 and CTRL-008: a Run executing its units, or admitted and waiting its turn, pauses in one click.
     pause: { reason: (run.state === 'executing' || run.state === 'admitted') && held ? null : RUN_CONTROL_PAUSE_REASON },
@@ -750,12 +772,13 @@ function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: Ba
 }
 
 /**
- * What the store reads of a stopped Run for the drawer (Issue #422, S76b): how many of the units it submits it kept,
- * and why 续行 cannot go on now, if it cannot — the plan moved, its progress no longer reads back, or, read by the
- * service, the model service, the network or the slot.
+ * What the store reads of a Run nothing executes for the drawer (Issue #422, S76b): how many of the units it submits it
+ * kept — `null` when that progress no longer reads back — and, for a stopped Run, why 续行 cannot go on now, if it
+ * cannot: the plan moved, its progress no longer reads back, or, read by the service, the model service, the network
+ * or the slot.
  */
 export interface BaselineStoppedRunFacts {
-  readonly unitsSettled: number;
+  readonly unitsSettled: number | null;
   readonly unitsTotal: number;
   readonly blockers: ReadonlyArray<string>;
 }

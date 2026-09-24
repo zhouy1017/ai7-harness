@@ -3880,16 +3880,27 @@ export class EditorialStore {
     return this.#analysisCall(() => this.#baselineAnalysis.reconcileStoppedRuns());
   }
 
-  /** What the drawer reads of the Task's stopped Run: what it kept, and why 续行 cannot go on as authorized, if not. */
+  /**
+   * What the drawer reads of the Task's Run when nothing executes it — paused, left 可续行, or left under way when AI7
+   * closed: what it kept, and, for a stopped one, why 续行 cannot go on as authorized, if not.
+   */
   #baselineStoppedRun(projection: BaselineAnalysisProjection): BaselineStoppedRunFacts | null {
     const run = projection.run;
-    if (run === null || !(run.state === 'paused' || run.state === 'resumable')) return null;
+    if (run === null || run.progress !== null) return null;
+    const stopped = run.state === 'paused' || run.state === 'resumable';
+    const unheld = run.state === 'admitted' || run.state === 'executing' || run.state === 'cancelling' || run.state === 'pausing';
+    if (!stopped && !unheld) return null;
     const unitsTotal = projection.update === null ? (projection.coverageManifest?.units.length ?? 0) : projection.update.reusePlan?.counts.recomputed ?? 0;
-    return this.#analysisCall(() => ({
-      unitsSettled: this.#baselineAnalysis.unitCheckpoints(run.runRecordId).length,
-      unitsTotal,
-      blockers: this.#baselineAnalysis.continuationBlockers(run.runRecordId),
-    }));
+    return this.#analysisCall(() => {
+      let unitsSettled: number | null;
+      try {
+        unitsSettled = this.#baselineAnalysis.unitCheckpoints(run.runRecordId).length;
+      } catch {
+        // Its kept progress no longer reads back: 续行 names that, and a cancellation forms no revision from it.
+        unitsSettled = null;
+      }
+      return { unitsSettled, unitsTotal, blockers: stopped ? this.#baselineAnalysis.continuationBlockers(run.runRecordId) : [] };
+    });
   }
 
   /** The baseline Runs waiting in Connectivity Wait — the route Book's, or every Book's — oldest first. */

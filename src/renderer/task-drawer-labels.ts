@@ -238,8 +238,9 @@ export const TASK_BAR_RESUME = '续行';
 export const TASK_BAR_PAUSE_FAILED = '无法暂停这项任务。';
 export const TASK_BAR_RESUME_FAILED = '无法续行这项任务。';
 
-/** A stopped Run's continuation point, as the bar states it beside 续行. */
-export function taskBarContinuationNote(unitsSettled: number, unitsTotal: number): string {
+/** A stopped Run's continuation point, as the bar states it beside 续行; `null` when its kept progress no longer reads back. */
+export function taskBarContinuationNote(unitsSettled: number | null, unitsTotal: number): string {
+  if (unitsSettled === null) return '已保存的阅读进度无法核对，这次运行不能续行；可以取消它，再重新开始';
   return unitsSettled >= unitsTotal
     ? `已读完全部 ${unitsTotal} 个阅读范围，结果都已保存；续行时接着做之后的归纳与抽样`
     : `已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存；续行时从第 ${unitsSettled + 1} 个接着读，不重复已读完的部分`;
