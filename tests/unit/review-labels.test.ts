@@ -157,7 +157,8 @@ describe('the words of the 审阅 destination', () => {
     expect(REVIEW_CONSEQUENCE_TERMS).toEqual(['会读取', '会发送', '不会做', '费用']);
     expect(REVIEW_COST_BEFORE_PLAN).toBe('先看计划后显示');
     expect(REVIEW_NOT_DO).toBe('不会直接修改稿件；不读范围外正文；不导出或发布；不存里程碑。');
-    expect(REVIEW_QUICK_START_REASON).toBe('快速开始要先有「快速开始默认」，目前还没有设定；请先看计划，再开始任务。');
+    // A Review Run never takes a 默认执行规则: there is nothing to set first, so nothing says it is not set yet.
+    expect(REVIEW_QUICK_START_REASON).toBe('审阅没有快速开始：每次都先看计划，再开始任务。');
     const none = { from: null, to: null };
     expect(reviewReadConsequence(null, manuscript, none)).toBe('选好范围后显示');
     expect(reviewReadConsequence('whole', manuscript, none)).toBe('当前稿件（修订版 r2）的全部 97 个内容块');

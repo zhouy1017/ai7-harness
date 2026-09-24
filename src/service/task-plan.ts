@@ -178,7 +178,7 @@ export function positionLabel(reading: RangeReading): string {
 // ---- the plan's key content, relabelled by field key (D8) -------------------------------------------------
 
 /** The editor's name for each field a stored Plan Revision diff names; the stored label stays in the record. */
-const DRIFT_FIELD_LABELS: Readonly<Record<string, string>> = {
+export const DRIFT_FIELD_LABELS: Readonly<Record<string, string>> = {
   'providerBinding.providerId': '模型服务 · 提供方',
   'providerBinding.modelId': '模型服务 · 模型',
   'providerBinding.adapterRevision': '模型服务 · 接入修订',
