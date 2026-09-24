@@ -5,6 +5,8 @@ import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import type { Connectivity, TaskPlanConnectivity } from '../../src/service/connectivity.js';
+import { readGlobalAttention } from '../../src/service/global-attention.js';
+import type { WaitingFor } from '../../src/service/task-plan.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -425,6 +427,36 @@ describe('联网后开始任务 and Connectivity Wait over the real store', () =
       store.markCleanShutdown();
     } finally {
       await owner.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('checks what a waiting Run waits for only while one waits, and reads a failed check as waiting for the connection (Issue #539)', async () => {
+    const store = await openWithRoute();
+    try {
+      const { bookId, prepared } = await preparedBook(store, 'L2 sample1 待我处理读取');
+      const taskIntentId = prepared.taskIntent!.taskIntentId;
+      let checks = 0;
+      const checking = (answer: () => Promise<WaitingFor>) => () => {
+        checks += 1;
+        return answer();
+      };
+      const itemOf = async (answer: () => Promise<WaitingFor>) => (await readGlobalAttention(store, () => null, false, checking(answer))).groups
+        .flatMap((group) => group.items).find((entry) => entry.itemId === `analysis:${taskIntentId}`);
+      // Nothing waits: 待我处理 is read without the keyring check.
+      expect(await itemOf(async () => 'network')).toBeUndefined();
+      expect(checks).toBe(0);
+      store.startBaselineAnalysisWhenOnline(bookId, taskIntentId, prepared.planEnvelope!.digest);
+      // A Run waits: the check is made once per read, and names what the Run waits for.
+      expect((await itemOf(async () => 'network'))?.state).toBe('analysis-waiting-network');
+      expect((await itemOf(async () => 'admitting'))?.state).toBe('analysis-waiting-admission');
+      expect(checks).toBe(2);
+      // A check that fails does not fail the read. Reconnect Preflight admits nothing while it fails, so the Run reads as
+      // waiting for the connection, never as about to start.
+      expect((await itemOf(async () => { throw new Error('keyring unavailable'); }))?.state).toBe('analysis-waiting-connection');
+      expect(checks).toBe(3);
+      store.markCleanShutdown();
+    } finally {
       store.close();
     }
   }, 300_000);

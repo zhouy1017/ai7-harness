@@ -72,6 +72,7 @@ import {
   documentVersionSavedLine,
 } from './production-document-labels.js';
 import { documentStanding, renderDocumentLens, type ProductionDocumentContext } from './production-document-lens.js';
+import { AnalysisFollower } from './analysis-follow.js';
 import { conflictCompletionOn } from './proposal-conflict-labels.js';
 import { renderFidelityReview } from './import-fidelity.js';
 import {
@@ -3124,13 +3125,10 @@ function renderAnalysisHistory(card: HTMLElement, projection: BaselineAnalysisPr
 }
 
 function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisProjection, bookTitle: string): void {
-  // A draw replaces what the card follows (Issue #539): a follow-up armed for an earlier draw — of a revision the editor
-  // has since left — never draws over this one, and this draw arms its own if it needs one.
-  const pending = analysisRefreshTimers.get(host);
-  if (pending !== undefined) {
-    window.clearTimeout(pending);
-    analysisRefreshTimers.delete(host);
-  }
+  // A draw replaces what the card follows (Issue #539): a follow-up an earlier draw armed — of a revision the editor has
+  // since left — never draws over this one, whether its read was still to be sent or already out, and this draw arms its
+  // own if it needs one.
+  const generation = analysisFollower.drawn(host);
   const card = element('section', 'baseline-analysis-card');
   card.dataset['analysisState'] = projection.state;
   card.dataset['analysisBookId'] = projection.bookId;
@@ -3164,27 +3162,17 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
   // One follow-up read per card at a time, of the revision the editor is looking at: a newer draw replaces the
   // pending one rather than adding another loop, and an answer that changed nothing draws nothing, so the editor's
   // place and focus stay while a Run waits (Issue #502).
-  const refreshLater = (delayMs = 250): void => {
-    const pending = analysisRefreshTimers.get(host);
-    if (pending !== undefined) window.clearTimeout(pending);
-    analysisRefreshTimers.set(host, window.setTimeout(async () => {
-      analysisRefreshTimers.delete(host);
-      if (!host.isConnected || host.dataset['analysisBookId'] !== projection.bookId) return;
-      try {
-        const inspected = projection.inspectedRevision?.revision.revisionId ?? null;
-        const next = await window.ai7.inspectBaselineAnalysis(inspected === null ? undefined : { revisionId: inspected });
-        if (!host.isConnected || next.bookId !== host.dataset['analysisBookId']) return;
-        if (JSON.stringify(next) === JSON.stringify(projection)) {
-          const again = analysisFollowDelayMs(projection.state);
-          if (again !== null) refreshLater(again);
-          return;
-        }
-        renderBaselineAnalysis(host, next, bookTitle);
-      } catch (error) {
-        if (host.isConnected) setStatus(rendererErrorMessage(error, '无法刷新基线稿件分析状态。'), 'error');
-      }
-    }, delayMs));
-  };
+  const refreshLater = (delayMs = 250): void => analysisFollower.later(host, generation, delayMs, {
+    belongs: (next) => host.isConnected && host.dataset['analysisBookId'] === (next?.bookId ?? projection.bookId),
+    read: () => {
+      const inspected = projection.inspectedRevision?.revision.revisionId ?? null;
+      return window.ai7.inspectBaselineAnalysis(inspected === null ? undefined : { revisionId: inspected });
+    },
+    unchanged: (next) => JSON.stringify(next) === JSON.stringify(projection),
+    again: () => analysisFollowDelayMs(projection.state),
+    draw: (next) => renderBaselineAnalysis(host, next, bookTitle),
+    failed: (error) => setStatus(rendererErrorMessage(error, '无法刷新基线稿件分析状态。'), 'error'),
+  });
 
   // The first-baseline form exists only while the Book holds no Result Set Revision; afterwards every
   // new Task is one of the three Analysis Update Controls below the Overview. A first baseline cancelled while
@@ -3300,8 +3288,11 @@ function analysisFollowDelayMs(state: BaselineAnalysisProjection['state']): numb
   }
 }
 
-/** ②A's one pending follow-up read per card host (Issue #502): a later draw replaces it, never adds another loop. */
-const analysisRefreshTimers = new WeakMap<HTMLElement, number>();
+/** ②A's one follow-up per card host (Issue #502; Issue #539): a later draw replaces it, never adds another loop. */
+const analysisFollower = new AnalysisFollower<HTMLElement>({
+  setTimeout: (callback, delayMs) => window.setTimeout(callback, delayMs),
+  clearTimeout: (handle) => window.clearTimeout(handle),
+});
 
 /**
  * The latest Task's plan on ②A (S72 D4): one line naming it and 查看计划, which opens the whole plan in the

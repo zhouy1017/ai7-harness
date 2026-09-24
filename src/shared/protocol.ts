@@ -5358,7 +5358,7 @@ export type GlobalAttentionStateKey =
   | 'analysis-queued'
   | 'analysis-running'
   // A Run in Connectivity Wait (Issue #502; ATTN-004), in the words of what it waits for now; one the next Reconnect
-  // Preflight will admit reads 正在排队 (`analysis-queued`).
+  // Preflight will admit is `analysis-waiting-admission` (below), never `analysis-queued`.
   | 'analysis-waiting-network'
   | 'analysis-waiting-connection'
   | 'analysis-waiting-slot'
