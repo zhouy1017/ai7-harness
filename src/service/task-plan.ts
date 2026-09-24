@@ -65,6 +65,10 @@ export const NOTHING_SENT = '本环境不连接模型服务，不会发送任何
 export const BUDGET_NOT_SET = '未设置任务预算上限';
 /** V2-UX-MODEL-014: an unknown Provider Account Limit is said to be unknown, never given a value. */
 export const ACCOUNT_LIMIT_UNKNOWN = '未知 · 提供方未返回';
+/** ⑤'s 账户限额 once the provider's limit stopped the Run (Issue #51, S16b; MODEL-018): what the provider said. */
+export function accountLimitReached(condition: string): string {
+  return `已达到 · ${condition}`;
+}
 /** No Run has measured a duration this estimate could stand on. */
 export const DURATION_UNKNOWN = '暂无可靠估计';
 const NO_USAGE = '不发送，没有模型用量';
@@ -632,7 +636,7 @@ export function baselineAnalysisPlan(input: {
       usageIsCeiling: ceiling !== 'unset',
       duration: DURATION_UNKNOWN,
       budgetCeiling: budgetCeilingLabel(ceiling),
-      accountLimit: ACCOUNT_LIMIT_UNKNOWN,
+      accountLimit: input.stopped?.accountLimit != null ? accountLimitReached(input.stopped.accountLimit.condition) : ACCOUNT_LIMIT_UNKNOWN,
     },
     outcomes: [
       update === null || update.predecessor === null
