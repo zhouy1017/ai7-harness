@@ -230,9 +230,9 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
   }
   try {
     database.exec('PRAGMA query_only = ON;');
-    // The terminal version the service stamps (`PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION`, as J-04 reads it): 待我处理
+    // The terminal version the service stamps (`BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION`, as J-04 reads it): 待我处理
     // adds no relation, so this pin moves only with a revision some other slice takes.
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 38, 'credential-cleanup-metadata-version');
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 39, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
               approved_fallback_chain, credential_slot, credential_reference, credential_operation_state

@@ -99,6 +99,7 @@ import {
   documentSourceLine,
   type DocumentAction,
 } from './production-document-labels.js';
+import { mountBookDeliveryPackage } from './book-delivery-package.js';
 
 /**
  * ⑥ 交付物 as far as plan slice S65 reaches (Issue #414; editor-surfaces §9, V2-UX-MILE-008, PUB-002 to
@@ -120,7 +121,8 @@ export interface DeliverablesSurface {
   destroy(): void;
 }
 
-type DeliverablesApi = Pick<RendererApi, 'inspectDeliverables' | 'inspectProductionDocuments' | 'designatePublicationVersion' | 'reviewManuscriptExport' |
+type DeliverablesApi = Pick<RendererApi, 'inspectDeliverables' | 'inspectProductionDocuments' | 'inspectBookDeliveryPackage' |
+  'prepareBookDeliveryPackage' | 'designatePublicationVersion' | 'reviewManuscriptExport' |
   'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
   'createProductionDocument' | 'decideProductionDocumentType' | 'recordProductionDocumentDelivery'>;
 
@@ -136,6 +138,8 @@ export interface MountDeliverablesOptions {
   /** 打开 a Production Document (Issue #415): the destination is left for the document's surface. */
   /** `notice`: what 从来源材料创建 did not carry into the document, said where it opens. */
   openDocument(document: ProductionDocumentProjection, type: { typeId: string; label: string }, notice?: string | null): Promise<void>;
+  /** 前往审阅 from 图书交付包's work records (Issue #416): the destination is left for 审阅. */
+  openReview(): void;
 }
 
 /** 从来源材料创建…'s inline form while it is open: the type it creates and the material chosen, if any. */
@@ -228,7 +232,9 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   const exportSlot = el('div', 'deliverables-export-slot');
   // 交付 · 生产文档 (Issue #415) has a slot of its own after them: the three things of 交付物 stay apart (DELIV-001).
   const documentsSlot = el('div', 'deliverables-documents-slot');
-  host.append(blockSlot, exportSlot, documentsSlot);
+  // 图书交付包 (Issue #416) comes last, the Book-level total of the other two, in a slot of its own.
+  const packageSlot = el('div', 'deliverables-package-slot');
+  host.append(blockSlot, exportSlot, documentsSlot, packageSlot);
   options.root.append(
     el('p', 'section-label', DELIVERABLES_SECTION_LABEL),
     el('h2', undefined, options.bookTitle),
@@ -245,6 +251,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     onChanged: () => {
       refresh();
       refreshDocuments();
+      bundle.refresh();
     },
     // 交付物 opens the card for a manuscript version, and for a document's delivered version from its Delivery Record
     // (Issue #415, S66b); a 审阅报告 is exported from 审阅.
@@ -253,6 +260,30 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       : block?.querySelector<HTMLElement>(target.kind === 'current'
         ? '[data-export-action="open"][data-export-target="current"]'
         : `ol.milestone-list > li[data-milestone-id="${CSS.escape(target.milestoneId)}"] [data-export-action="open"]`) ?? null,
+  });
+
+  const bundle = mountBookDeliveryPackage({
+    root: packageSlot,
+    bookId,
+    api,
+    technicalDetails: options.technicalDetails,
+    setStatus: options.setStatus,
+    errorMessage: options.errorMessage,
+    route: (route) => {
+      if (route.kind === 'review') {
+        options.openReview();
+        return;
+      }
+      // The 发稿 block's 设为发稿版本…, or the type card's own next action: the editor acts there, on this page.
+      const target = route.kind === 'publication'
+        ? block?.querySelector<HTMLElement>('[data-publication-action="designate"]') ?? null
+        : (['deliver', 'redeliver', 'create', 'notForThisBook'] as const)
+          .map((action) => documentsBlock?.querySelector<HTMLButtonElement>(
+            `li.production-document-card[data-document-type-id="${CSS.escape(route.typeId)}"] [data-document-action="${action}"]`) ?? null)
+          .find((button) => button !== null && !button.disabled) ?? null;
+      target?.scrollIntoView({ block: 'center' });
+      target?.focus();
+    },
   });
 
   // ---- reading --------------------------------------------------------------------------------------
@@ -696,6 +727,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       form = null;
       projection = result.deliverables;
       render('designate');
+      bundle.refresh();
       options.setStatus(result.completionLabel, 'success');
     } catch (error) {
       working = false;
@@ -1053,6 +1085,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       deliveryForm = null;
       documentsGeneration += 1;
       documentsProjection = result.documents;
+      bundle.refresh();
       drawDocuments(result.documents, 'keep');
       options.setStatus(documentDeliveredLine(delivered.ordinal, delivered.recipient.label), 'success');
       const opener = documentsBlock?.querySelector<HTMLElement>(`ol.production-document-deliveries > li[data-delivery-id="${CSS.escape(delivered.deliveryId)}"] [data-export-action="open"]`);
@@ -1134,6 +1167,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       documentForm = null;
       documentsGeneration += 1;
       documentsProjection = result.documents;
+      bundle.refresh();
       drawDocuments(result.documents, 'keep');
       options.setStatus(documentCreatedLine(type.label), 'success');
       await openDocument(result.document, type, result.notice);
@@ -1161,6 +1195,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       if (deliveryForm?.typeId === type.typeId) deliveryForm = null;
       documentsGeneration += 1;
       documentsProjection = result.documents;
+      bundle.refresh();
       drawDocuments(result.documents, { typeId: type.typeId, action: notForThisBook ? 'restore' : 'notForThisBook' });
       options.setStatus(notForThisBook ? DOCUMENT_STATUS_LINES.notForThisBook : DOCUMENT_STATUS_LINES.restored, 'success');
     } catch (error) {
@@ -1232,12 +1267,14 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     start: () => {
       refresh();
       refreshDocuments();
+      bundle.refresh();
     },
     destroy: () => {
       destroyed = true;
       generation += 1;
       documentsGeneration += 1;
       exporter.destroy();
+      bundle.destroy();
     },
   };
 }

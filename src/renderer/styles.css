@@ -600,6 +600,28 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .production-document-deliveries, .document-lens-deliveries { display: grid; gap: .4rem; margin: .45rem 0 0; padding-left: 1.2rem; }
 .production-document-deliveries > li, .document-lens-deliveries > li { min-width: 0; }
 .document-lens-deliveries > li > span { display: block; }
+/* 图书交付包 (Issue #416, S67a): the condition table, the Manifest Preview, 准备 and the frozen versions, last on 交付物. */
+.deliverables-package { margin-top: 1.3rem; padding: 1.15rem 1.25rem; border: 1px solid #d3cfc0; border-radius: 12px; background: #faf8f1; overflow-wrap: anywhere; }
+.deliverables-package h3, .deliverables-package h4 { margin: 0; }
+.deliverables-package h4 { margin-top: .9rem; font-size: 1rem; }
+.deliverables-package h5 { margin: .6rem 0 0; font-size: .95rem; }
+.deliverables-package > p { margin: .45rem 0 0; }
+.package-condition-list, .package-version-list { display: grid; gap: .45rem; margin: .5rem 0 0; padding-left: 1.2rem; }
+.package-condition-list > li, .package-version-list > li { min-width: 0; }
+.package-condition-line { display: flex; flex-wrap: wrap; gap: .3rem .6rem; align-items: baseline; margin: 0; }
+.package-condition-state.is-unmet { font-weight: 800; }
+.package-condition-notice { margin: .3rem 0 0; }
+.package-conditions button { margin-top: .3rem; }
+.package-included, .package-excluded, .package-limitations { display: grid; gap: .3rem; margin: .35rem 0 0; padding-left: 1.2rem; }
+.package-included > li > span, .package-excluded > li > span { display: block; }
+.package-prepare { margin-top: .9rem; }
+.package-purpose { display: block; }
+.package-purpose input { display: block; width: 100%; box-sizing: border-box; margin-top: .35rem; }
+.package-prepare .button-row { margin-top: .55rem; }
+.package-prepare-reason[hidden] { display: none; }
+.package-version-list p { margin: .3rem 0 0; }
+.package-version-line { font-weight: 800; }
+.package-current-mark { margin-left: .5rem; padding: 0 .4rem; border: 1px solid currentColor; border-radius: 999px; font-size: .85rem; }
 /* A Production Document's surface (DELIV-002): the 工作流程 column stands beside the text on a wide window and after it
    on a narrow one, so a 200% zoom never scrolls sideways. */
 .editor-workspace.document-workspace { grid-template-columns: minmax(0, 1fr) minmax(14rem, 18rem) 4.75rem; }
@@ -1008,6 +1030,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .book-deliverables-summary, .milestone-section .milestone-purpose-option,
   .deliverables-documents, .production-document-card, .document-create fieldset, .document-lens, .document-version-current,
   .document-delivery fieldset, .delivery-statement,
+  .deliverables-package, .package-current-mark,
   .task-drawer, .task-drawer-head, .task-drawer-footer, .task-drawer-modes, .task-plan-goal, .task-plan-compact,
   .task-plan-chip, .task-plan-boundary, .task-plan-lock, .task-plan-section-number, .task-plan-edit-remove, .task-plan-edit-tag,
   .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal,

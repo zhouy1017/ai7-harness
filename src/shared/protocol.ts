@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 56 as const;
+export const SERVICE_PROTOCOL_VERSION = 57 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -126,6 +126,8 @@ export const IPC_CHANNELS = {
   inspectDeliverables: 'ai7:j07:inspect-deliverables',
   designatePublicationVersion: 'ai7:j07:designate-publication-version',
   inspectProductionDocuments: 'ai7:j07:inspect-production-documents',
+  inspectBookDeliveryPackage: 'ai7:j07:inspect-book-delivery-package',
+  prepareBookDeliveryPackage: 'ai7:j07:prepare-book-delivery-package',
   createProductionDocument: 'ai7:j07:create-production-document',
   decideProductionDocumentType: 'ai7:j07:decide-production-document-type',
   saveProductionDocumentVersion: 'ai7:j07:save-production-document-version',
@@ -5147,6 +5149,113 @@ export interface ProductionDocumentResultProjection {
   notice: string | null;
 }
 
+// ---- 图书交付包 (Issue #416, plan slice S67a; V2-UX-BUNDLE-001 to 005, DPKG-001 to 015) -------------------------------
+
+/** 交付包用途, in characters (code points) once NFC-normalized and trimmed. */
+export const MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS = 80;
+/**
+ * The most package versions, review reports and review limitation lines one answer lists, newest first; the rest stay
+ * in the records and in the content a package freezes.
+ */
+export const MAX_BOOK_DELIVERY_PACKAGE_VERSIONS_LISTED = 20;
+export const MAX_BOOK_DELIVERY_PACKAGE_REPORTS_LISTED = 20;
+
+/**
+ * One row of the condition table (BUNDLE-002): the Publication Version, one per house type, and the work records —
+ * whether it holds, in words, and where to go when it does not. A notice is a change the editor may act on without
+ * the condition failing: the manuscript changed after 发稿, or a document after its delivery.
+ */
+export interface BookDeliveryPackageConditionProjection {
+  key: 'publication' | 'document' | 'work-records';
+  /** The house type a `document` row is about; `null` for the other two. */
+  typeId: string | null;
+  label: string;
+  met: boolean;
+  stateLabel: string;
+  notice: string | null;
+  /** Where the row's route leads, when it is unmet or carries a notice; `null` when there is nothing to do. */
+  route: 'publication' | 'document' | 'review' | null;
+  routeLabel: string | null;
+}
+
+/** One line of the Manifest Preview (DPKG-004, DPKG-006): what it is, and a detail in words. */
+export interface BookDeliveryPackageItemProjection {
+  kind: 'publication' | 'document' | 'review-report' | 'not-for-this-book' | 'exclusion';
+  label: string;
+  detail: string | null;
+}
+
+/**
+ * What a package prepared now would hold (the Manifest Preview), without its purpose. `digest` names exactly this
+ * content: `准备图书交付包` freezes it or refuses, so the editor never prepares a package they did not see.
+ */
+export interface BookDeliveryPackageContentProjection {
+  digest: string;
+  included: ReadonlyArray<BookDeliveryPackageItemProjection>;
+  /** More review reports are included than the answer lists. */
+  includedTruncated: boolean;
+  excluded: ReadonlyArray<BookDeliveryPackageItemProjection>;
+  limitations: ReadonlyArray<string>;
+  /** More review Runs carry a limitation than the answer lists. */
+  limitationsTruncated: boolean;
+}
+
+/** One frozen version of the Book's package (DPKG-007, DPKG-011): immutable, and never itself an export or a delivery. */
+export interface BookDeliveryPackageVersionProjection {
+  packageVersionId: string;
+  /** The package's stable identity, the same for every version of a Book's package. */
+  packageId: string;
+  version: number;
+  /** `v1`, `v2` … */
+  label: string;
+  purpose: string;
+  preparedAt: string;
+  /** The newest version is the current one. */
+  current: boolean;
+  /** What the version holds, in one line. */
+  summary: string;
+  /** The derived Package Export History (DPKG-011): `暂无导出记录` until a file is exported. */
+  exportHistoryLabel: string;
+  /** 查看技术详情 only. */
+  technical: { contentDigest: string; digest: string; priorVersionId: string | null };
+}
+
+/** 图书交付包 of one Book, read on its own beside 发稿 and 交付 · 生产文档. */
+export interface BookDeliveryPackageProjection {
+  bookId: string;
+  /** BUNDLE-005's sentence: the package is neither 发稿 nor 交付, and preparing it changes no record. */
+  statement: string;
+  conditions: ReadonlyArray<BookDeliveryPackageConditionProjection>;
+  ready: boolean;
+  /** The unmet conditions' labels in the table's order, named beside `准备图书交付包` while it is unavailable. */
+  unmet: ReadonlyArray<string>;
+  content: BookDeliveryPackageContentProjection;
+  versions: ReadonlyArray<BookDeliveryPackageVersionProjection>;
+  versionsTruncated: boolean;
+  /** The content differs from the newest version's, so preparing again makes the next version (BUNDLE-004). */
+  changedSinceLatest: boolean;
+}
+
+/** The read of 图书交付包: the route's Book, supplied by the main process. */
+export interface InspectBookDeliveryPackageInput {
+  bookId: string;
+}
+
+/** `准备图书交付包`: the content the editor saw, by its digest, and the purpose they wrote. */
+export interface PrepareBookDeliveryPackageInput {
+  bookId: string;
+  purpose: string;
+  expectedContentDigest: string;
+}
+
+/** What `准备图书交付包` came to: a new version, or the newest one unchanged, and the package as it stands. */
+export interface BookDeliveryPackageResultProjection {
+  bookId: string;
+  outcome: 'prepared' | 'unchanged';
+  version: number;
+  package: BookDeliveryPackageProjection;
+}
+
 /**
  * The inputs of the 交付物 operations. The Book is always the route's, never the renderer's: every
  * renderer member takes the input without `bookId`, and the main process supplies the Book its window
@@ -6220,6 +6329,10 @@ export interface ServiceOperationMap {
    * document's working text its next version. Each answers with the 交付物 as they stand.
    */
   inspectProductionDocuments: { input: InspectProductionDocumentsInput; output: ProductionDocumentsProjection };
+  /** 图书交付包 (Issue #416, S67a): the condition table, the Manifest Preview and the frozen versions. A read. */
+  inspectBookDeliveryPackage: { input: InspectBookDeliveryPackageInput; output: BookDeliveryPackageProjection };
+  /** `准备图书交付包`: freeze the content the editor saw as the package's next version, or say it is unchanged. */
+  prepareBookDeliveryPackage: { input: PrepareBookDeliveryPackageInput; output: BookDeliveryPackageResultProjection };
   createProductionDocument: { input: CreateProductionDocumentInput; output: ProductionDocumentResultProjection };
   decideProductionDocumentType: { input: DecideProductionDocumentTypeInput; output: ProductionDocumentResultProjection };
   saveProductionDocumentVersion: { input: SaveProductionDocumentVersionInput; output: ProductionDocumentResultProjection };
@@ -6457,6 +6570,10 @@ export interface RendererApi {
   designatePublicationVersion(input: Omit<DesignatePublicationVersionInput, 'bookId'>): Promise<PublicationDesignationProjection>;
   /** 交付 · 生产文档 of that Book (Issue #415): one card per house type and the materials a document can start from. */
   inspectProductionDocuments(): Promise<ProductionDocumentsProjection>;
+  /** 图书交付包 of that Book (Issue #416): its conditions, what a package would hold, and its versions. */
+  inspectBookDeliveryPackage(): Promise<BookDeliveryPackageProjection>;
+  /** `准备图书交付包`: freeze exactly the content read, with its purpose; it creates no file and sends nothing. */
+  prepareBookDeliveryPackage(input: Omit<PrepareBookDeliveryPackageInput, 'bookId'>): Promise<BookDeliveryPackageResultProjection>;
   /** 从来源材料创建 (Issue #415): a document of one house type of that Book, from one of its source-only materials. */
   createProductionDocument(input: Omit<CreateProductionDocumentInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 本书不做 or 恢复 for one house type of that Book. */
