@@ -102,6 +102,8 @@ const NATIVE_CARRIER_DIGEST = 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86
 const SIDECAR_DIGEST = '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff' as const;
 const SUCCESSOR_BEHAVIOR ='每次更新都是新的用户发起任务，经准备 → 计划预览 → 标准直接授权 → 执行后，在同一结果集上追加下一序号的不可变后继修订版；前一修订版不被改写，且始终可在修订历史中按其原始稿件 pin 查看。' as const;
 const ACTIVE_RUN_REASON = '当前已有分析任务在调度或执行中；在其结束前不能准备新的更新任务。' as const;
+/** A Run in Connectivity Wait blocks a new Task too, but it is not running: it waits to start once online (OFF-005, OFF-006). */
+const WAITING_RUN_REASON = '有一项分析任务在等待联网后开始；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的更新任务。' as const;
 /** The waiting state's own words (Issue #502, OFF-005): recorded, and nothing has been sent or begun. */
 const CONNECTIVITY_WAIT_DETAIL = '已记录授权；联网并通过重新联网预检后开始。此前不调用模型、不产生用量。' as const;
 
@@ -460,6 +462,11 @@ function runIsActive(state: BaselineAnalysisRunState | null): boolean {
   return state === 'authorized' || state === 'awaiting-connectivity' || state === 'admitted' || state === 'executing';
 }
 
+/** Why an active Run blocks a new Task, in the words of its state: a waiting Run is never said to be under way. */
+function activeRunReason(state: BaselineAnalysisRunState | null): string {
+  return state === 'awaiting-connectivity' ? WAITING_RUN_REASON : ACTIVE_RUN_REASON;
+}
+
 /**
  * The launch facts a Run's plan must freeze, handed to the ledger once by the service entry. Under
  * `development-ci` the plan stays exactly what it was: the denied production binding, the local
@@ -668,7 +675,7 @@ export class BaselineAnalysisStore {
         taskIntent,
         resultSetRevision: revision,
         update,
-        updateControls: this.#updateControlsFor(bookId, revision, false),
+        updateControls: this.#updateControlsFor(bookId, revision, null),
         history,
         inspectedRevision,
         actions: { canPrepare: revision === null, canAuthorize: false, canReconfirmPlan: false },
@@ -805,11 +812,13 @@ export class BaselineAnalysisStore {
       resultSetRevision: revision,
       taskOutcome: outcome === undefined ? null : this.#outcomeProjection(outcome),
       update,
-      updateControls: this.#updateControlsFor(bookId, revision, runIsActive(run?.state ?? null)),
+      updateControls: this.#updateControlsFor(bookId, revision, runIsActive(run?.state ?? null) ? run!.state : null),
       history,
       inspectedRevision,
       actions: {
-        canPrepare: false,
+        // A first baseline whose Run was cancelled before it ever ran leaves the Book with no revision: it may be
+        // prepared again, as the Book with no Task could (Issue #502, OFF-010).
+        canPrepare: revision === null && run?.state === 'cancelled',
         canAuthorize: authorization === undefined && (update === null || update.predecessorCurrent) && planRevision === null,
         canReconfirmPlan,
       },
@@ -1853,10 +1862,10 @@ export class BaselineAnalysisStore {
   #updateControlsFor(
     bookId: string,
     revision: BaselineAnalysisResultSetRevisionProjection | null,
-    blockedByActiveRun: boolean,
+    activeRun: BaselineAnalysisRunState | null,
   ): BaselineAnalysisUpdateControlsProjection | ReviewCategoryUpdateControlsProjection | null {
     if (revision === null || this.#definition.updateModes.length === 0) return null;
-    return this.#updateControls(bookId, revision, blockedByActiveRun);
+    return this.#updateControls(bookId, revision, activeRun);
   }
 
   /**
@@ -1872,8 +1881,10 @@ export class BaselineAnalysisStore {
   #updateControls(
     bookId: string,
     latest: BaselineAnalysisResultSetRevisionProjection,
-    blockedByActiveRun: boolean,
+    activeRun: BaselineAnalysisRunState | null,
   ): BaselineAnalysisUpdateControlsProjection | ReviewCategoryUpdateControlsProjection {
+    const blockedByActiveRun = activeRun !== null;
+    const blockedReason = blockedByActiveRun ? activeRunReason(activeRun) : null;
     const head = this.#workingHead(latest.manuscriptPin.manuscriptId, bookId);
     const blocks = this.readWorkingBlocks(head.branchId);
     const preview = deriveCoverageManifest({
@@ -1895,7 +1906,7 @@ export class BaselineAnalysisStore {
       goal: this.#definition.mode(mode).goal,
       meaning: this.#definition.mode(mode).meaning,
       available: available && !blockedByActiveRun,
-      unavailableReason: blockedByActiveRun ? ACTIVE_RUN_REASON : unavailableReason,
+      unavailableReason: blockedReason ?? unavailableReason,
       expected: counts,
     });
     const options = (mode: AnalysisTaskMode): BaselineAnalysisRangeOptionProjection[] => preview.units.map((unit) => ({
@@ -1937,6 +1948,7 @@ export class BaselineAnalysisStore {
         sectionCount: preview.sectionCount,
       },
       blockedByActiveRun,
+      blockedReason,
       actions,
       providerConsequence: providerConsequence(this.#launch.live, preview.units.length, this.#definition.mode(this.#definition.initialMode).label),
       successorBehavior: SUCCESSOR_BEHAVIOR,
@@ -1970,7 +1982,7 @@ export class BaselineAnalysisStore {
     requireAnalysis(input.goal === this.#definition.mode(mode).goal, 'ANALYSIS_GOAL_INVALID', '任务目标与所选更新方式的固定目标不一致。');
     this.#requireDeniedPolicy(input.launchPolicy);
     const existing = this.inspect(input.bookId);
-    requireAnalysis(!runIsActive(existing.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', ACTIVE_RUN_REASON);
+    requireAnalysis(!runIsActive(existing.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', activeRunReason(existing.run?.state ?? null));
     const latest = existing.resultSetRevision;
     let selectedRange: BaselineAnalysisSelectedRange | null = null;
     if (update === null) {

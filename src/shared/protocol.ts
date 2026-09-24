@@ -2723,8 +2723,10 @@ export interface BaselineAnalysisUpdateControlsProjection {
   };
   /** The current working manuscript the next Task Input checkpoint would pin, as the manifest would derive it. */
   working: { branchId: string; revisionLabel: string; journalSequence: number; workingDigest: string; totalBlocks: number; unitCount: number; sectionCount: number };
-  /** True while a Task is authorized for dispatch, admitted, or executing: no new update Task may be prepared. */
+  /** True while a Task is authorized for dispatch, waiting in Connectivity Wait, admitted, or executing: no new update Task may be prepared. */
   blockedByActiveRun: boolean;
+  /** Why, in the words of that Task's state — a Run waiting to start once online reads so (OFF-005, OFF-006); `null` when nothing blocks. */
+  blockedReason: string | null;
   actions: {
     'sync-current': BaselineAnalysisUpdateActionProjection;
     'reanalyze-range': BaselineAnalysisUpdateActionProjection & { options: ReadonlyArray<BaselineAnalysisRangeOptionProjection> };
@@ -4662,6 +4664,11 @@ export type GlobalAttentionStateKey =
   | 'analysis-plan-revision'
   | 'analysis-queued'
   | 'analysis-running'
+  // A Run in Connectivity Wait (Issue #502; ATTN-004), in the words of what it waits for now; one the next Reconnect
+  // Preflight will admit reads 正在排队 (`analysis-queued`).
+  | 'analysis-waiting-network'
+  | 'analysis-waiting-connection'
+  | 'analysis-waiting-slot'
   | 'review-running'
   | 'review-continuable'
   | 'analysis-completed'

@@ -169,6 +169,7 @@ import {
   withConnectionReadiness,
   withConnectivityReadiness,
   withWaitingReason,
+  type WaitingFor,
 } from './task-plan.js';
 import { initializeProposalConflictSchema, ProposalConflictError, ProposalConflictStore, readConflictAttention } from './proposal-conflicts.js';
 import {
@@ -3660,7 +3661,13 @@ export class EditorialStore {
     const facts = this.#reviewCall(() => this.#reviewRuns.planFacts(input.bookId, reviewRunId));
     const blocks = this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(facts.manuscript.manuscriptId, facts.inputRevision.revisionId));
     const plan = this.#taskPlanCall(() => reviewRunPlan({ bookId: input.bookId, facts, bookTitle, blocks }));
-    return { plan, routeKind: plan.start.needsModelConnection ? 'opencode-go' : null };
+    // The route the categories' frozen plans resolve, read from the first Task's Provider Resolution Plan as the
+    // baseline reads its own: a review's Tasks share one launch, and a Run of the leads alone reaches no model.
+    const frozenRoute = facts.categories
+      .map((category) => category.task?.components['provider-resolution-plan'])
+      .map((provider) => (provider !== null && typeof provider === 'object' ? (provider as { executionRoute?: { kind?: unknown } }).executionRoute?.kind : undefined))
+      .find((kind): kind is string => typeof kind === 'string');
+    return { plan, routeKind: plan.start.needsModelConnection ? frozenRoute ?? null : null };
   }
 
   /**
@@ -8801,7 +8808,7 @@ export class EditorialStore {
    * A read (V2-UX-ATTN-008): nothing is written, claimed or terminalized, and every list is bounded so the
    * answer fits one frame.
    */
-  inspectGlobalAttention(progress: ProgressReader, busy: boolean, now: Date = new Date()): GlobalAttentionProjection {
+  inspectGlobalAttention(progress: ProgressReader, busy: boolean, waitingFor: WaitingFor = 'admitting', now: Date = new Date()): GlobalAttentionProjection {
     return this.#reviewCall(() => {
       const since = recentWindowStart(now);
       const limit = GLOBAL_ATTENTION_READ_LIMIT;
@@ -8817,6 +8824,7 @@ export class EditorialStore {
           reviewRuns: review.latest,
           reviewCompletions: review.completed,
           busy,
+          waitingFor,
         }, now);
       } catch (error) {
         if (error instanceof GlobalAttentionError) throw new StoreError(error.code, error.message);
