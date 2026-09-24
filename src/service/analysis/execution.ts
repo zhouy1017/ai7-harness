@@ -118,10 +118,11 @@ export interface ExecutionOwnerDependencies {
   /** J-10's unit hold (Issue #422); absent in every other launch, where a unit settles as soon as its turn returns. */
   readonly unitHold?: UnitHold | null;
   /**
-   * The service suite's hold around the cross-unit reduction (Issue #422): awaited once the reduction's turn has come
-   * back and before its result is read, so a cancellation can arrive while that turn is out. Absent in every launch.
+   * The service suite's hold around the cross-unit reduction and each sampling turn (Issue #422, Issue #51): awaited once
+   * the turn has come back and before its result is read, so a cancellation or a pause can arrive while that turn is out.
+   * Absent in every launch.
    */
-  readonly stageHold?: ((stage: 'cross-unit-reduction') => Promise<void>) | null;
+  readonly stageHold?: ((stage: 'cross-unit-reduction' | 'assurance-sampling') => Promise<void>) | null;
 }
 
 /**
@@ -1417,10 +1418,16 @@ export class BaselineAnalysisExecutionOwner {
         const asking = waiting.size > 0 && !unitsEnded && !active.interrupted;
         if (!stopping && !asking) return false;
         // A spent ceiling outranks a pause, AI7 stopping and an open question (Issue #51, S16a; MODEL-016): nothing more may
-        // be sent under it — no continuation, no answer's retry — so the Run ends as the ceiling reached, and asks nothing.
+        // be sent under it, so no Run waits to be continued past it. An open question's answer would be one more request, and
+        // AI7 stopping leaves nothing to send the rest: either ends the Run here as the ceiling reached, and asks nothing.
+        // The editor's pause alone lapses. The Run goes on without it; the next request's own check — the reduction's, a
+        // sampling turn's — ends the Run as the ceiling reached if one is still to be sent, and a Run that needs none
+        // completes, since the ceiling counts only where it stops a request.
         if (ceilingState() === 'reached') {
-          liveInterruption = 'run-budget-ceiling-reached';
-          terminalClassification = 'interrupted';
+          if (asking || active.interrupted) {
+            liveInterruption = 'run-budget-ceiling-reached';
+            terminalClassification = 'interrupted';
+          }
           return false;
         }
         // What this stop leaves spent beyond its units — a reduction or a sample 续行 forms again — is kept with it, so
@@ -1494,7 +1501,10 @@ export class BaselineAnalysisExecutionOwner {
         crossUnit = { state: 'not-run', reason: definition.crossUnitAbsentReason };
       } else if (terminalClassification === 'cancelled') {
         crossUnit = { state: 'not-run', reason: CROSS_UNIT_CANCELLED };
-      } else if (terminalClassification === 'interrupted' || active.interrupted) {
+      } else if ((terminalClassification === 'interrupted' || active.interrupted)
+        // Every range settled and the ceiling spent — by the last range, or with a question, AI7 stopping or a retry the
+        // ceiling kept back — is the ceiling stopping the reduction, and is said so below (Issue #51, S16a).
+        && !(liveInterruption === 'run-budget-ceiling-reached' && active.progress.unitsSettled === submittedUnits.length)) {
         crossUnit = { state: 'not-run', reason: '运行在单元阶段结束前停止，跨单元归纳未发起。' };
       } else if (closedOutcomes.length >= 2) {
         const requestDigest = crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, unitSetDigest(closedOutcomes));
@@ -1753,15 +1763,16 @@ export class BaselineAnalysisExecutionOwner {
         gapReasons.push(assuranceSamplingTurnGapReason(turn.unitOrdinal, '运行已按你的要求取消，本轮未派发。'));
         break;
       }
-      // 暂停 between two sampling turns (S76b): no further one is sent; the Run waits, and 续行 draws the sample again.
-      if (active.pauseRequested) break;
       // The ceiling is evaluated before every dispatch exactly as before a unit's, so a Run that has
-      // spent its bound ends here rather than spending one more turn to discover it.
+      // spent its bound ends here rather than spending one more turn to discover it — and before a pause, as the unit
+      // loop's is (Issue #51, S16a): a drawn turn the ceiling keeps back is a gap of the sample, never a pause's to hide.
       if (context.ceilingState() === 'reached') {
         gapReasons.push(assuranceSamplingTurnGapReason(turn.unitOrdinal, '任务运行预算上限已达到，本轮未派发。'));
         context.onCeilingReached();
         break;
       }
+      // 暂停 between two sampling turns (S76b): no further one is sent; the Run waits, and 续行 draws the sample again.
+      if (active.pauseRequested) break;
       const unit = manifest.units[turn.unitOrdinal - 1]!;
       const message = buildAssuranceSamplingMessage(unit, manifest.units.length, context.blocksById, turn.findings);
       // The same set the gate reads: exactly one further user message becomes admissible per turn, and
@@ -1779,6 +1790,7 @@ export class BaselineAnalysisExecutionOwner {
       active.progress.attemptState = 'dispatched';
       active.transmissionsAtDispatch = active.transmissions?.() ?? 0;
       const result = await harness.submitUnit(message);
+      if (this.#deps.stageHold) await this.#deps.stageHold('assurance-sampling');
       const canonical = context.liveAdapter.instance?.lastCanonicalResult ?? null;
       // A sampling turn is a model turn like any other: it counts as a request, its usage counts
       // toward the Run and the ceiling, and it records no execution-span row, because the span table

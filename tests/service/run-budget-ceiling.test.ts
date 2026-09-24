@@ -2,7 +2,14 @@ import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { BUDGET_REACHED_NEXT_ACTION, BaselineAnalysisExecutionOwner, CROSS_UNIT_BUDGET_REACHED, SAFE_RETRY_BUDGET_REACHED } from '../../src/service/analysis/execution.js';
+import {
+  ASSURANCE_SAMPLING_BUDGET_REACHED,
+  BUDGET_REACHED_NEXT_ACTION,
+  BaselineAnalysisExecutionOwner,
+  CROSS_UNIT_BUDGET_REACHED,
+  SAFE_RETRY_BUDGET_REACHED,
+} from '../../src/service/analysis/execution.js';
+import { ASSURANCE_SAMPLING_REMOVED } from '../../src/service/analysis/plan-edits.js';
 import { SET_RULE_BUDGET } from '../../src/service/default-execution-rules.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -278,6 +285,8 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
       expect(gap?.code).toBe('adapter-failure');
       expect(gap?.reason).toContain(SAFE_RETRY_BUDGET_REACHED);
       expect(stopped.resultSetRevision?.gaps.map((entry) => entry.unitOrdinal)).toEqual([2, 5]);
+      // Every range settled before the ceiling ended the Run, so the reduction is the request it stopped, in its own words.
+      expect(stopped.resultSetRevision?.crossUnitReduction).toMatchObject({ state: 'gap', reason: CROSS_UNIT_BUDGET_REACHED });
       const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
       expect(plan.state.key).toBe('budget-reached');
       // The question stays on record, unanswered, and 待我处理 asks nothing of the editor for it.
@@ -382,6 +391,148 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
       store.close();
     }
   }, 300_000);
+
+  describe('a pause at a spent ceiling lapses, and the ceiling counts only where it stops a request', () => {
+    // An owner whose reduction and sampling turns, once back, give the test the moment to ask for a pause — as the
+    // editor's 暂停 arrives while a turn is out.
+    function pausingOwner(store: EditorialStore, at: (stage: 'cross-unit-reduction' | 'assurance-sampling', turn: number) => boolean) {
+      let pause: () => void = () => undefined;
+      let samplingTurns = 0;
+      const execution = new BaselineAnalysisExecutionOwner({
+        ledger: store.baselineAnalysisLedger,
+        launchPolicy,
+        fixture,
+        secretResolver: { resolve: async () => null },
+        stageHold: async (stage) => {
+          if (at(stage, stage === 'assurance-sampling' ? ++samplingTurns : 1)) pause();
+        },
+      });
+      const start = (bookId: string, taskIntentId: string, digest: string): string => {
+        const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, digest).dispatchRunRecordId!;
+        pause = () => {
+          store.requestBaselineAnalysisPause(bookId, taskIntentId);
+          execution.pauseRun(runRecordId, store.baselineAnalysisLedger);
+        };
+        execution.admitAndDispatch(runRecordId);
+        return runRecordId;
+      };
+      return { execution, start };
+    }
+
+    function edit(store: EditorialStore, bookId: string, prepared: BaselineAnalysisProjection, ceiling: number, removedSteps: ReadonlyArray<'assurance-sampling'> = []) {
+      return store.editBaselineAnalysisPlan({
+        bookId, taskIntentId: prepared.taskIntent!.taskIntentId, planEnvelopeDigest: prepared.planEnvelope!.digest,
+        removedSteps: [...removedSteps], disallowedAdaptations: [], runBudgetCeiling: tokens(ceiling),
+      });
+    }
+
+    it('completes a Run paused while its reduction spends the ceiling, with nothing left to send', async () => {
+      const store = await openWithRoute();
+      const { execution, start } = pausingOwner(store, (stage) => stage === 'cross-unit-reduction');
+      try {
+        const bookId = await importedBook(store, 'L2 sample1 预算与暂停于归纳');
+        const prepared = prepare(store, bookId);
+        const taskIntentId = prepared.taskIntent!.taskIntentId;
+        // 核对与抽检 removed, under 13,000 tokens: the eight ranges spend 12,380, and the reduction, out when 暂停 comes,
+        // passes 13,000. Nothing is left to send, so the Run completes as it would without the pause: the ceiling stopped
+        // no request, and a Run left paused could only be continued past what it may spend.
+        const edited = edit(store, bookId, prepared, 13000, ['assurance-sampling']);
+        start(bookId, taskIntentId, edited.planEnvelope!.digest);
+        await execution.whenIdle();
+        const completed = store.inspectBaselineAnalysis(bookId, () => null);
+        expect(completed.run?.transitions.map((transition) => transition.state)).toEqual(['authorized', 'admitted', 'executing', 'pausing', 'completed']);
+        expect(completed.taskOutcome?.stop).toBeNull();
+        expect(completed.resultSetRevision?.crossUnitReduction?.state).toBe('closed');
+        expect(completed.resultSetRevision?.assuranceSample).toMatchObject({ state: 'not-run', reason: ASSURANCE_SAMPLING_REMOVED });
+        expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }).state.key).not.toBe('budget-reached');
+        store.markCleanShutdown();
+      } finally {
+        await execution.dispose();
+        store.close();
+      }
+    }, 300_000);
+
+    it('completes a Run paused while its one sampling turn spends the ceiling', async () => {
+      const store = await openWithRoute();
+      const { execution, start } = pausingOwner(store, (stage, turn) => stage === 'assurance-sampling' && turn === 1);
+      try {
+        const bookId = await importedBook(store, 'L2 sample1 预算与暂停于抽检');
+        const prepared = prepare(store, bookId);
+        const taskIntentId = prepared.taskIntent!.taskIntentId;
+        // Under 16,000 tokens: the ranges and the reduction spend 14,680, and the sample's one turn, out when 暂停 comes,
+        // brings the Run to 16,500. Every request was sent — the reflection is the Run Report's, and the ceiling keeps it
+        // back without counting — so the Run completes.
+        const edited = edit(store, bookId, prepared, 16000);
+        start(bookId, taskIntentId, edited.planEnvelope!.digest);
+        await execution.whenIdle();
+        const completed = store.inspectBaselineAnalysis(bookId, () => null);
+        expect(completed.run?.state).toBe('completed');
+        expect(completed.taskOutcome?.stop).toBeNull();
+        expect(completed.resultSetRevision?.assuranceSample?.state).toBe('closed');
+        expect(completed.taskOutcome?.report?.usagePerStage['assurance-sampling'].requests).toBe(1);
+        store.markCleanShutdown();
+      } finally {
+        await execution.dispose();
+        store.close();
+      }
+    }, 300_000);
+
+    it('ends a Run at the ceiling, its drawn turn a gap, when a pause comes while the reduction spends it', async () => {
+      const store = await openWithRoute();
+      const { execution, start } = pausingOwner(store, (stage) => stage === 'cross-unit-reduction');
+      try {
+        const bookId = await importedBook(store, 'L2 sample1 预算与抽检前的暂停');
+        const prepared = prepare(store, bookId);
+        const taskIntentId = prepared.taskIntent!.taskIntentId;
+        // Under 14,000 tokens: the reduction, out when 暂停 comes, brings the Run to 14,680. The pause lapses, the sample is
+        // drawn, and the ceiling keeps its turn back before the pause could hide it: the Run ends at the ceiling, and the
+        // sample says why it holds no disposition rather than reading as closed.
+        const edited = edit(store, bookId, prepared, 14000);
+        start(bookId, taskIntentId, edited.planEnvelope!.digest);
+        await execution.whenIdle();
+        const stopped = store.inspectBaselineAnalysis(bookId, () => null);
+        expect(stopped.run?.state).toBe('interrupted');
+        expect(stopped.taskOutcome?.stop).toMatchObject({ reason: 'run-budget-ceiling-reached', maxTotalTokens: 14000, usedTokens: 14680 });
+        expect(stopped.resultSetRevision?.crossUnitReduction?.state).toBe('closed');
+        expect(stopped.resultSetRevision?.assuranceSample).toMatchObject({ state: 'gap', reason: expect.stringContaining('任务运行预算上限已达到，本轮未派发') });
+        expect(stopped.taskOutcome?.report?.usagePerStage['assurance-sampling'].requests).toBe(0);
+        store.markCleanShutdown();
+      } finally {
+        await execution.dispose();
+        store.close();
+      }
+    }, 300_000);
+
+    it('ends a Run paused while its last range spends the ceiling exactly as without the pause: at the reduction', async () => {
+      const store = await openWithRoute();
+      const execution = owner(store);
+      try {
+        const bookId = await importedBook(store, 'L2 sample1 预算与暂停于末段');
+        const prepared = prepare(store, bookId);
+        const taskIntentId = prepared.taskIntent!.taskIntentId;
+        // Under 12,000 tokens, 暂停 while the eighth range is out: it brings the Run to 12,380. The pause lapses, and the
+        // reduction's own check stops it, in the reduction's words.
+        const edited = edit(store, bookId, prepared, 12000);
+        const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, edited.planEnvelope!.digest).dispatchRunRecordId!;
+        writeFileSync(holdPath, String(SAMPLE1_UNITS - 1));
+        execution.admitAndDispatch(runRecordId);
+        await until(() => execution.progressFor(runRecordId)?.currentUnitOrdinal === SAMPLE1_UNITS, 'the last range in flight');
+        store.requestBaselineAnalysisPause(bookId, taskIntentId);
+        execution.pauseRun(runRecordId, store.baselineAnalysisLedger);
+        writeFileSync(holdPath, 'release');
+        await execution.whenIdle();
+        const stopped = store.inspectBaselineAnalysis(bookId, () => null);
+        expect(stopped.run?.state).toBe('interrupted');
+        expect(stopped.taskOutcome?.stop).toEqual({ reason: 'run-budget-ceiling-reached', maxTotalTokens: 12000, usedTokens: 12380, unitsSettled: SAMPLE1_UNITS, unitsTotal: SAMPLE1_UNITS });
+        expect(stopped.resultSetRevision?.crossUnitReduction).toMatchObject({ state: 'gap', reason: CROSS_UNIT_BUDGET_REACHED });
+        expect(stopped.resultSetRevision?.assuranceSample).toMatchObject({ state: 'not-run', reason: ASSURANCE_SAMPLING_BUDGET_REACHED });
+        store.markCleanShutdown();
+      } finally {
+        await execution.dispose();
+        store.close();
+      }
+    }, 300_000);
+  });
 
   it('takes the ceiling off a plan the editor set it on, and keeps a plan that is running from taking one', async () => {
     const store = await openWithRoute();
