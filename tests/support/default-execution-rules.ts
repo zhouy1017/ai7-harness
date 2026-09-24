@@ -3,6 +3,7 @@ import { DEFAULT_EXECUTION_RULE_SCHEMA_SQL } from '../../src/service/default-exe
 import { ANALYSIS_LEDGER_REVISION_30_SQL } from '../../src/service/task-authorization.js';
 import { CLARIFICATION_RELATIONS_DROP_ORDER } from './clarifications.js';
 import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from './reimport-groups.js';
+import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from './production-documents.js';
 import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from './run-continuation.js';
 
 /**
@@ -54,7 +55,7 @@ export function plantRevision30Relations(database: DatabaseSync): void {
   try {
     database.exec('BEGIN IMMEDIATE');
     try {
-      for (const relation of [...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER]) database.exec(`DROP TABLE IF EXISTS ${relation}`);
+      for (const relation of [...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER]) database.exec(`DROP TABLE IF EXISTS ${relation}`);
       for (const relation of DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER) database.exec(`DROP TABLE ${relation}`);
       database.exec('COMMIT');
     } catch (error) {

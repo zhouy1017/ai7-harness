@@ -61,6 +61,15 @@ import {
 } from '../shared/protocol.js';
 import { MARK_KIND_LABELS } from './editorial-mark-labels.js';
 import { mountDeliverables, type DeliverablesSurface } from './deliverables.js';
+import {
+  DOCUMENT_ACTION_LABELS,
+  DOCUMENT_CHANGED_SINCE_VERSION,
+  DOCUMENT_CURRENT_VERSION,
+  DOCUMENT_STATUS_LINES,
+  DOCUMENT_SURFACE_LABEL,
+  documentVersionSavedLine,
+} from './production-document-labels.js';
+import { renderDocumentLens, type ProductionDocumentContext } from './production-document-lens.js';
 import { renderFidelityReview } from './import-fidelity.js';
 import {
   commitNote,
@@ -1808,6 +1817,11 @@ function renderBookDeliverables(bookId: string, bookTitle: string): void {
     technicalDetails,
     setStatus,
     errorMessage: rendererErrorMessage,
+    // 打开 a Production Document (Issue #415): its own surface, read like the manuscript's window.
+    openDocument: async (documentNow, type) => {
+      const opened = await window.ai7.getManuscriptWindow({ manuscriptId: documentNow.documentId, branchId: documentNow.branchId, cursor: null });
+      renderEditorWindow(opened, bookTitle, undefined, undefined, undefined, undefined, { typeId: type.typeId, typeLabel: type.label, document: documentNow });
+    },
   });
   const actions = element('div', 'button-row workbench-actions');
   const openManuscript = button(DELIVERABLES_DESTINATION_ACTIONS[0], 'primary', async () => {
@@ -5649,18 +5663,40 @@ function renderEditorWindow(
   openMarkId?: string,
   /** A reimport that just ended here (Issue #412, S63): its notice stands above the manuscript until dismissed. */
   reimport?: ManuscriptReimportCommitProjection,
+  /**
+   * A Production Document (Issue #415, S66): the same surface and marks as the manuscript (DELIV-002), named by its
+   * type and `版本 N`, with the 工作流程 column beside it and nothing of the manuscript's own — no milestone, no
+   * 发稿, no 分析, no remembered entry position (MILE-014).
+   */
+  productionDocument?: ProductionDocumentContext,
 ): void {
   const content = panel();
   content.classList.add('editor-shell');
   // The manuscript is now a Book's entry surface, so it says which Book it belongs to exactly as the
   // overview does — a window is identified by the Book it holds, not by the surface it happens to show.
   content.dataset['bookId'] = initialWindow.bookId;
+  const isDocument = productionDocument !== undefined;
+  if (productionDocument !== undefined) {
+    content.dataset['deliverable'] = 'production-document';
+    content.dataset['documentId'] = productionDocument.document.documentId;
+    content.dataset['documentTypeId'] = productionDocument.typeId;
+  }
   const toolbar = element('header', 'editor-toolbar');
   const title = element('div');
-  title.append(element('p', 'section-label', `${bookTitle} · 主分支`), element('h2', undefined, `稿件修订版 ${initialWindow.revisionLabel}`));
+  // A document names its version as its own ledger numbers it (`版本 N`), never the block store's revision label.
+  const versionOf = (windowNow: ManuscriptWindowProjection): string | undefined =>
+    productionDocument?.document.versions.find((version) => version.revisionId === windowNow.revisionId)?.label;
+  const revisionWords = (windowNow: ManuscriptWindowProjection): string =>
+    isDocument ? `${DOCUMENT_CURRENT_VERSION} ${versionOf(windowNow) ?? DOCUMENT_CHANGED_SINCE_VERSION}` : `当前修订版 ${windowNow.revisionLabel}`;
+  title.append(
+    element('p', 'section-label', isDocument ? `${bookTitle} · ${DOCUMENT_SURFACE_LABEL}` : `${bookTitle} · 主分支`),
+    element('h2', undefined, productionDocument !== undefined
+      ? `${productionDocument.typeLabel} · ${versionOf(initialWindow) ?? productionDocument.document.versions[0]?.label ?? ''}`
+      : `稿件修订版 ${initialWindow.revisionLabel}`),
+  );
   const meta = element('div', 'editor-meta');
   const position = element('span', undefined, initialWindow.position.label);
-  const revision = element('span', undefined, `当前修订版 ${initialWindow.revisionLabel}`);
+  const revision = element('span', undefined, revisionWords(initialWindow));
   const journal = element('span', undefined, `修订日志序号 ${initialWindow.journalSequence}`);
   const recoveredState = element('strong', 'recovered-state-marker', '当前为恢复的工作状态');
   recoveredState.hidden = initialWindow.recoveredStateReview === null;
@@ -5756,6 +5792,7 @@ function renderEditorWindow(
     }
   });
   openDeliverables.dataset['workDestination'] = 'deliverables';
+  if (isDocument) openDeliverables.textContent = DOCUMENT_ACTION_LABELS.back;
   const toolbarActions = element('div', 'button-row');
   if (recoveryAttentionId) {
     toolbarActions.append(button('返回恢复待确认', 'secondary', async () => {
@@ -5772,14 +5809,17 @@ function renderEditorWindow(
   // the group names where it leads without renaming what it does.
   const recordsGroup = element('nav', 'book-records-group');
   recordsGroup.setAttribute('aria-label', '资料与记录');
-  recordsGroup.append(element('span', 'section-label', '资料与记录'), openAnalysis, backToOverview);
+  recordsGroup.append(element('span', 'section-label', '资料与记录'), ...(isDocument ? [] : [openAnalysis]), backToOverview);
   // IA-006's `工作` group (稿件 / 审阅 / 评估 / 交付物), as much of it as exists: 审阅 (editor-surfaces §4) and
   // 交付物 (§9). They are destinations of the Book beside 资料与记录, never entries on the right edge, whose
   // three entries are 导航 / 分析 / 任务.
   const workGroup = element('nav', 'book-work-group');
   workGroup.setAttribute('aria-label', REVIEW_WORK_GROUP_LABEL);
-  workGroup.append(element('span', 'section-label', REVIEW_WORK_GROUP_LABEL), openReview, openDeliverables);
-  toolbarActions.append(workGroup, recordsGroup, undo, redo, save, retryAuthoritativeRefreshButton);
+  workGroup.append(element('span', 'section-label', REVIEW_WORK_GROUP_LABEL), ...(isDocument ? [] : [openReview]), openDeliverables);
+  // 保存为版本 (Issue #415): a document's working text becomes its next version; the manuscript's milestones stay its own.
+  const saveVersion = button(DOCUMENT_ACTION_LABELS.saveVersion, 'secondary', () => void saveDocumentVersion());
+  saveVersion.dataset['documentAction'] = 'saveVersion';
+  toolbarActions.append(workGroup, recordsGroup, undo, redo, save, ...(isDocument ? [saveVersion] : []), retryAuthoritativeRefreshButton);
   toolbar.append(title, toolbarActions);
 
   const workspace = element('div', 'editor-workspace');
@@ -5927,7 +5967,7 @@ function renderEditorWindow(
     milestoneButton,
     milestoneReason,
   );
-  navigator.append(outlineSection, searchSection, milestoneSection);
+  navigator.append(outlineSection, searchSection, ...(isDocument ? [] : [milestoneSection]));
   // The outline and the search are one 导航 panel, opened on demand over the manuscript's right side and
   // closed by default, so the manuscript stays the central object (V2-UX-ED-015).
   navigator.id = 'manuscript-navigation-panel';
@@ -5971,13 +6011,15 @@ function renderEditorWindow(
   tasksEntry.disabled = true;
   tasksEntry.title = '任务面接通后可用';
   const edgeEntries = element('div', 'edge-entries');
-  edgeEntries.append(navigationEntry, analysisEntry, tasksEntry);
+  edgeEntries.append(navigationEntry, ...(isDocument ? [] : [analysisEntry, tasksEntry]));
   const railTrack = element('div', 'rail-track');
   railTrack.append(positionRail);
   const railColumn = element('div', 'rail-column');
   railColumn.append(positionRailLabel, railTrack);
   edge.append(edgeEntries, railColumn);
-  workspace.append(manuscript, navigator, edge);
+  const documentLens = productionDocument === undefined ? undefined : renderDocumentLens(productionDocument);
+  if (documentLens !== undefined) workspace.classList.add('document-workspace');
+  workspace.append(manuscript, ...(documentLens === undefined ? [] : [documentLens.element]), navigator, edge);
 
   const setNavigationOpen = (open: boolean): void => {
     // One supporting side surface at a time (IA): 导航 opening closes the Task Drawer beside the manuscript.
@@ -6078,7 +6120,7 @@ function renderEditorWindow(
 
   const updateWindowChrome = (): void => {
     position.textContent = currentWindow.position.label;
-    revision.textContent = `当前修订版 ${currentWindow.revisionLabel}`;
+    revision.textContent = revisionWords(currentWindow);
     journal.textContent = `修订日志序号 ${currentWindow.journalSequence}`;
     recoveredState.hidden = currentWindow.recoveredStateReview === null;
     positionRail.value = String(Math.round(currentWindow.position.proportion * 1_000_000));
@@ -6159,8 +6201,47 @@ function renderEditorWindow(
    * the editor has already moved off. Arriving does not await, because a window just fetched is the
    * position a caller already reached and nothing downstream reads it back.
    */
+  /**
+   * 保存为版本 (Issue #415): local edits are settled first, then the document's working text becomes its next version;
+   * the surface opens again at the same place with the version it now stands on and the column's list refreshed.
+   */
+  async function saveDocumentVersion(): Promise<void> {
+    if (productionDocument === undefined || authoritativeMutationBusy()) return;
+    saveVersion.disabled = true;
+    setStatus(DOCUMENT_STATUS_LINES.savingVersion, 'busy');
+    try {
+      if (!(await settleLocalEdit())) {
+        saveVersion.disabled = false;
+        return;
+      }
+      const before = productionDocument.document.versions[0]?.revisionId;
+      const result = await window.ai7.saveProductionDocumentVersion({
+        documentId: productionDocument.document.documentId,
+        branchId: productionDocument.document.branchId,
+      });
+      if (result.document === null || result.document.documentId !== productionDocument.document.documentId) {
+        throw new Error(DOCUMENT_STATUS_LINES.saveVersionFailed);
+      }
+      const anchorBlock = currentWindow.blocks[0]?.blockId;
+      const reopened = await window.ai7.getManuscriptWindowAt({
+        manuscriptId: currentWindow.manuscriptId,
+        branchId: currentWindow.branchId,
+        target: anchorBlock === undefined ? { kind: 'start' } : { kind: 'block', blockId: anchorBlock },
+      });
+      renderEditorWindow(reopened, bookTitle, undefined, undefined, undefined, undefined, { ...productionDocument, document: result.document });
+      const latest = result.document.versions[0];
+      setStatus(latest === undefined || latest.revisionId === before
+        ? DOCUMENT_STATUS_LINES.versionUnchanged
+        : documentVersionSavedLine(latest.label), 'success');
+    } catch (error) {
+      saveVersion.disabled = false;
+      setStatus(rendererErrorMessage(error, DOCUMENT_STATUS_LINES.saveVersionFailed), 'error');
+    }
+  }
+
   async function rememberEntryPosition(): Promise<void> {
-    if (!editor || authorityInterrupted) return;
+    // Where the editor was belongs to the manuscript the Book opens into, never to a Production Document.
+    if (!editor || authorityInterrupted || isDocument) return;
     const point = editor.captureContinuity().anchor;
     // Paging with 向前浏览 / 向后浏览 deliberately leaves the caret where it was, off the window now on
     // screen, so the window's own first block answers for the position rather than a caret the editor

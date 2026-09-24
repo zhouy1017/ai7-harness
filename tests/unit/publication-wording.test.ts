@@ -3,6 +3,8 @@ import {
   MAX_DELIVERABLE_MILESTONES,
   MAX_EXPORT_DESTINATION_CODE_UNITS,
   MAX_EXPORT_RECORDS_LISTED,
+  MAX_PRODUCTION_DOCUMENT_SOURCES_LISTED,
+  MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED,
   MAX_FRAME_BYTES,
   MAX_MILESTONE_PURPOSE_CODE_UNITS,
   MAX_PUBLICATION_BASIS_CHARACTERS,
@@ -127,6 +129,34 @@ describe('the words of 发稿', () => {
         revealAvailable: false,
         technical: { approvalId: identity, receiptId: identity, receiptDigest: digest, fileSha256: null, failureCode: 'EXPORT_COMMIT_UNCERTAIN' },
       })),
+      // Issue #415: every house type with a document at its widest — its versions listed to their bound and a source
+      // name at the length a file name may take — and the materials listed to theirs.
+      documents: {
+        configuration: { schema: 'ai7.production-document-types/1', version: '1', digest },
+        unavailableReason: null,
+        types: ['news-release', 'promotion-article', 'review-article', 'launch-materials', 'marketing-points'].map((typeId) => ({
+          typeId,
+          label: '类'.repeat(16),
+          notForThisBook: true,
+          document: {
+            documentId: identity,
+            branchId: identity,
+            createdAt: time,
+            origin: { sourceVersionId: identity, displayName: '文'.repeat(250) + '.docx' },
+            versions: Array.from({ length: MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED }, (_, index) => ({
+              revisionId: identity, label: `版本 ${9_999_999 - index}`, ordinal: 9_999_999 - index, createdAt: time, revisionDigest: digest,
+            })),
+            versionsTruncated: true,
+            changedSinceVersion: true,
+            journalSequence: 9_999_999,
+            workingDigest: digest,
+          },
+        })),
+        sources: Array.from({ length: MAX_PRODUCTION_DOCUMENT_SOURCES_LISTED }, () => ({
+          sourceVersionId: identity, displayName: '文'.repeat(250) + '.docx', format: 'DOCX' as const, createdAt: time,
+        })),
+        sourcesTruncated: true,
+      },
     };
     const answer: PublicationDesignationProjection = {
       bookId: identity,
