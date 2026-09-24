@@ -83,6 +83,32 @@ afterEach(async () => {
 });
 
 describe('the 审阅报告 as a file', () => {
+  it('names a refused category by its decision-layer state, never the technical line it carries (reading 4)', async () => {
+    const refusedLine = '派发前已阻止：Provider Processing v1 允许 0 次实时传输；远程 DeepSeek 绑定被拒绝，未构造 Provider payload（EXECUTION_STOPPING）';
+    const base = record();
+    const refused = input({
+      overview: { ...base.overview, rows: [base.overview.rows[0]!, { ...base.overview.rows[1]!, state: 'blocked', stateLabel: '派发前已阻止' }] },
+      categorySummaries: { ...base.categorySummaries, entries: [base.categorySummaries.entries[0]!, { ...base.categorySummaries.entries[1]!, stateLine: refusedLine }] },
+      appendix: {
+        ...base.appendix,
+        categories: base.appendix.categories.map((category) => ({ ...category, adapterPin: { route: 'ai7-local-deterministic', model: 'ai7-local-deterministic-model', fixtureIdentity: 'fixture', fixtureSha256: 'f'.repeat(64) } })),
+      },
+    } as Partial<ReviewReportRecord>);
+    const markdown = decode(renderReportExport(refused, 'markdown', { emit: true }).bytes);
+    const page = decode(renderReportExport(refused, 'pdf', { emit: true }).bytes);
+    const docxPath = join(sandbox, 'refused.docx');
+    await writeFile(docxPath, renderReportExport(refused, 'docx', { emit: true }).bytes!);
+    const blocks: ParsedDocxBlock[] = [];
+    await parseDocx(docxPath, 'refused.docx', (block) => blocks.push(block));
+    const words = blocks.map((block) => block.text).join(' ');
+    for (const text of [markdown, page, words]) {
+      expect(text).toContain('体例与格式 · 派发前已阻止');
+      for (const technical of ['Provider Processing', 'DeepSeek', 'EXECUTION_STOPPING', 'payload', 'ai7-local-deterministic', 'f'.repeat(64)]) {
+        expect(text).not.toContain(technical);
+      }
+    }
+  });
+
   it('writes the Markdown 备用格式: the title, what it reports on, a table, the items numbered, each summary, and the appendix', () => {
     const generated = localInstantLabel('2026-09-23T10:00:00.000Z');
     const result = renderReportExport(input(), 'markdown', { emit: true });
