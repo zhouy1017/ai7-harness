@@ -32,11 +32,16 @@ export const EXPORT_ACTION_LABELS = {
 export type ExportAction = keyof typeof EXPORT_ACTION_LABELS;
 
 /** What the card names before its first review: the version kind, and a milestone's or a report's own label. */
-export type ExportPendingLabel = { kind: 'current' } | { kind: 'milestone'; label: string } | { kind: 'report'; label: string };
+export type ExportPendingLabel =
+  | { kind: 'current' }
+  | { kind: 'milestone'; label: string }
+  | { kind: 'report'; label: string }
+  // Issue #415 (S66b): a Production Document's version, named `新闻稿 · 版本 2`.
+  | { kind: 'document'; label: string };
 
 /** 导出… names the version it exports for a screen reader, since several stand side by side. */
 export function exportOpenAccessibleName(target: ExportPendingLabel): string {
-  if (target.kind === 'report') return `导出「${target.label}」…`;
+  if (target.kind === 'report' || target.kind === 'document') return `导出「${target.label}」…`;
   return target.kind === 'current' ? '导出当前修订版…' : `导出里程碑版本「${target.label}」…`;
 }
 
@@ -44,10 +49,11 @@ export function exportOpenAccessibleName(target: ExportPendingLabel): string {
 
 export function exportCardHeading(target: ManuscriptExportTargetProjection | null, pending: ExportPendingLabel): string {
   if (target === null) {
-    if (pending.kind === 'report') return `导出 · ${pending.label}`;
+    if (pending.kind === 'report' || pending.kind === 'document') return `导出 · ${pending.label}`;
     return pending.kind === 'current' ? '导出 · 当前修订版' : `导出 · 里程碑版本「${pending.label}」`;
   }
   if (target.report !== null) return `导出 · ${reportExportLabel(target.report.runLabel, target.report.version)}`;
+  if (target.document !== null) return `导出 · ${target.document.typeLabel} · ${target.document.versionLabel}`;
   return target.kind === 'current'
     ? `导出 · 当前修订版 ${target.revisionLabel}`
     : `导出 · 里程碑版本「${target.milestoneLabel ?? ''}」 · ${target.revisionLabel}`;
@@ -168,6 +174,8 @@ export function exportReceiptMeta(receipt: Pick<ManuscriptExportReceiptProjectio
 
 export function exportVersionText(target: ManuscriptExportTargetProjection): string {
   if (target.report !== null) return reportExportLabel(target.report.runLabel, target.report.version);
+  // A Production Document's version by its type and 版本 N (Issue #415, S66b), never by the revision behind it.
+  if (target.document !== null) return `${target.document.typeLabel} · ${target.document.versionLabel}`;
   return target.kind === 'current' ? `修订版 ${target.revisionLabel}` : `里程碑版本「${target.milestoneLabel ?? ''}」 · ${target.revisionLabel}`;
 }
 
