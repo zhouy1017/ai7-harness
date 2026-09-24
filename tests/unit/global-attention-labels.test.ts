@@ -54,7 +54,7 @@ const STATES: ReadonlyArray<GlobalAttentionStateKey> = [
   'manuscript-conflict', 'manuscript-conflict-deferred', 'analysis-failed',
   'analysis-interrupted', 'analysis-budget-reached', 'analysis-account-limit', 'analysis-blocked', 'analysis-orphaned', 'review-failed', 'review-stopped',
   'analysis-plan-revision', 'analysis-plan-moved', 'analysis-clarification', 'analysis-queued', 'analysis-running', 'analysis-waiting-network', 'analysis-waiting-connection',
-  'analysis-waiting-slot', 'analysis-cancelling', 'analysis-pausing', 'analysis-paused', 'analysis-resumable',
+  'analysis-waiting-slot', 'analysis-waiting-admission', 'analysis-cancelling', 'analysis-pausing', 'analysis-paused', 'analysis-resumable',
   'review-running', 'review-continuable',
   'analysis-completed', 'analysis-completed-with-gaps', 'review-completed',
 ];
@@ -161,6 +161,7 @@ describe('each item', () => {
       'analysis-waiting-network': '等待网络',
       'analysis-waiting-connection': '需要处理模型连接',
       'analysis-waiting-slot': '等待运行名额',
+      'analysis-waiting-admission': '正在排队',
       'analysis-cancelling': '正在取消',
       'analysis-pausing': '正在暂停',
       'analysis-paused': '已暂停',
@@ -275,6 +276,7 @@ describe('each item', () => {
       'analysis-waiting-network': globalAttentionReason(item('analysis-waiting-network')),
       'analysis-waiting-connection': globalAttentionReason(item('analysis-waiting-connection')),
       'analysis-waiting-slot': globalAttentionReason(item('analysis-waiting-slot')),
+      'analysis-waiting-admission': globalAttentionReason(item('analysis-waiting-admission')),
       'analysis-cancelling': globalAttentionReason(item('analysis-cancelling', { facts: { progress: { stage: 'units', unitsSettled: 2, unitsTotal: 8 }, categories: [], revisionOrdinal: null } })),
       'analysis-pausing': globalAttentionReason(item('analysis-pausing', { facts: { progress: { stage: 'units', unitsSettled: 2, unitsTotal: 8 }, categories: [], revisionOrdinal: null } })),
       'analysis-paused': globalAttentionReason(item('analysis-paused')),
@@ -310,6 +312,8 @@ describe('each item', () => {
       'analysis-waiting-network': '联网后开始任务：恢复联网后，AI7 先核对计划再开始；现在什么都没有运行。',
       'analysis-waiting-connection': '模型连接缺少凭据：到设置连接模型服务后，任务会在联网时开始。',
       'analysis-waiting-slot': '另一项任务正在运行；它结束后，这项任务在联网时开始。',
+      // Issue #539: online with nothing in its way, it is not in the scheduler yet.
+      'analysis-waiting-admission': '已经联网：AI7 先核对计划，没有变化就开始；现在什么都没有运行。',
       'analysis-cancelling': '你取消了这项任务；正在进行的这一步完成后停止，之后不再发送任何内容 · 正在逐个阅读范围分析 · 已完成 2/8 个阅读范围',
       'analysis-pausing': '你暂停了这项任务；正在进行的这一步完成后停下，已完成的部分都会保存 · 正在逐个阅读范围分析 · 已完成 2/8 个阅读范围',
       'analysis-paused': '已暂停：已读完的阅读范围都已保存；续行时从下一个接着读，也可以取消它。',

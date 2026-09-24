@@ -400,6 +400,8 @@ describe('联网后开始任务 and Connectivity Wait over the real store', () =
       const taskIntentId = prepared.taskIntent!.taskIntentId;
       expect([blocked.run?.blockedBy, blocked.state, blocked.stateLabel, blocked.run?.stateLabel])
         .toEqual(['plan-moved', 'authorized-blocked', '需要重新确认计划', '需要重新确认计划']);
+      // A first baseline blocked here left the Book no revision: ②A offers it again (Issue #539).
+      expect([blocked.resultSetRevision, blocked.actions.canPrepare]).toEqual([null, true]);
       const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
       expect(plan.state).toEqual({ key: 'plan-moved', label: '需要重新确认计划' });
       // 重新准备 is the Task it was — the first baseline — prepared anew; nothing is started by reading it.
