@@ -1399,18 +1399,16 @@ async function main() {
         edge: JSON.stringify(edge) === '["navigation"]',
         noMilestone: shell?.querySelector('details.milestone-section') === null,
         saveVersion: shell?.querySelector('[data-document-action="saveVersion"]')?.textContent === '保存为版本',
-        // The surface's own words, not the document's: the text in the editor is the draft's.
+        // The surface's own words, not the document's or the Book's: the text in the editor is the draft's, and this
+        // Book's title happens to hold 发稿.
         noManuscriptWords: (() => {
           const clone = shell?.cloneNode(true);
           for (const text of clone?.querySelectorAll('[data-testid="manuscript-editor"]') ?? []) text.remove();
-          return !/里程碑|签发|发稿/.test(clone?.textContent ?? '');
+          return !/里程碑|签发|发稿/.test((clone?.textContent ?? '').replaceAll(${JSON.stringify(EXCERPT.title)}, ''));
         })(),
-        where: Array.from(shell?.querySelectorAll('*') ?? []).filter((node) => node.closest('[data-testid="manuscript-editor"]') === null &&
-          Array.from(node.childNodes).some((child) => child.nodeType === 3 && /里程碑|签发|发稿/.test(child.textContent ?? '')))
-          .slice(0, 5).map((node) => node.tagName + '.' + node.className + ':' + (/里程碑|签发|发稿/.exec(node.textContent ?? '')?.[0] ?? '')),
       };
     })()`);
-    requireJourney(surface !== null && typeof surface === 'object' && Object.entries(surface).every(([key, value]) => key === 'where' || value === true), 'document-surface-is-the-documents', surface);
+    requireJourney(surface !== null && typeof surface === 'object' && Object.values(surface).every((value) => value === true), 'document-surface-is-the-documents', surface);
     const documentTexts = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]'), (block) => block.textContent ?? '')`);
     const draftParagraphs = await admittedParagraphs(DRAFT);
     requireJourney(Array.isArray(documentTexts) && JSON.stringify(documentTexts.map(digestOf)) === JSON.stringify(draftParagraphs.map(digestOf)), 'document-reads-as-the-draft', { blocks: documentTexts?.length });
