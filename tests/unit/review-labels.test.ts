@@ -9,7 +9,7 @@ import {
   REVIEW_COST_BEFORE_PLAN,
   REVIEW_COVERAGE_PILLS,
   REVIEW_DESTINATION_ACTIONS,
-  REVIEW_EXPORT_REASON,
+  REVIEW_EXPORT_NEEDS_REPORT,
   REVIEW_FILTER_ALL,
   REVIEW_FILTER_LABELS,
   REVIEW_IGNORE_LABEL,
@@ -251,7 +251,7 @@ describe('the words of the 审阅 destination', () => {
   });
 
   it('versions the 审阅报告 and says why export waits', () => {
-    expect(REVIEW_EXPORT_REASON).toBe('导出随交付物功能提供。');
+    expect(REVIEW_EXPORT_NEEDS_REPORT).toBe('先生成报告，再导出。');
     expect(reviewReportVersionLine(2, '2026/09/21 18:00:00')).toBe('第 2 版 · 生成于 2026/09/21 18:00:00');
     expect(reviewReportMustItemLine({ categoryLabel: '错别字与规范用语', locationLabel: '内容块 3', quote: '的的', note: '重复。', statusLabel: '待处理' }))
       .toBe('错别字与规范用语 · 内容块 3 · 「的的」 · 重复。 · 待处理');
