@@ -54,7 +54,6 @@ import {
   type RunBudgetCeilingState,
 } from '../../shared/protocol.js';
 import {
-  PLAN_ADAPTATION_CLASSES,
   PLAN_REVISION_REQUIRED_REASON,
   buildPlanAdaptationRecord,
   diffMaterialPlanInputs,
@@ -1536,6 +1535,10 @@ export class BaselineAnalysisStore {
       createdForDirtyJournal: asNumber(checkpointRow.created_for_dirty_journal) === 1,
     };
     const stored = existing.planVersion.materialInputs;
+    // The connection's credential readiness is not key content: it may change after the plan froze, and the version an
+    // edit writes keeps the one the edited version froze, so only the execution plan and the envelope differ.
+    const priorProvider = this.#planRecords(intent.taskIntentId, intent.mode, current.ordinal)['provider-resolution-plan'] as
+      { remoteBinding: { credentialReadiness: ModelCredentialOperationState } };
     const instant = new Date().toISOString();
     transact(this.#db, () => {
       const planRevisionId = this.#insertPlanRevision({
@@ -1550,6 +1553,7 @@ export class BaselineAnalysisStore {
         planRevisionId,
         instant,
         edits: next,
+        credentialReadiness: priorProvider.remoteBinding.credentialReadiness,
       });
       const before = this.#planDigests(intent.taskIntentId, current.ordinal);
       const after = this.#planDigests(intent.taskIntentId, current.ordinal + 1);
@@ -2312,6 +2316,11 @@ export class BaselineAnalysisStore {
     instant: string;
     /** What the version leaves out at the editor's word (Issue #419); nothing for a plan AI7 proposed. */
     edits: PlanEdits;
+    /**
+     * The credential readiness an edit carries forward from the version it edits (Issue #419): readiness is not a
+     * material input, so an edit leaves the provider component as it froze. Absent, the connection is read now.
+     */
+    credentialReadiness?: ModelCredentialOperationState;
   }): { planVersionId: string; planEnvelopeDigest: string } {
     const { intent, checkpoint, ordinal, instant } = input;
     const taskIntentId = intent.taskIntentId;
@@ -2407,7 +2416,7 @@ export class BaselineAnalysisStore {
             approvedFallbackChain: [],
             credentialSlot: 'deepseek-api-key',
             credentialReference: facts.credentialReference,
-            credentialReadiness: facts.credentialOperationState,
+            credentialReadiness: input.credentialReadiness ?? facts.credentialOperationState,
             providerProcessing: { operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 },
           }
         : {
@@ -2418,7 +2427,7 @@ export class BaselineAnalysisStore {
             approvedFallbackChain: [],
             credentialSlot: live.credentialSlot,
             credentialReference: live.credentialReference,
-            credentialReadiness: facts.credentialOperationState,
+            credentialReadiness: input.credentialReadiness ?? facts.credentialOperationState,
             providerProcessing: { operationalScope: 'developer-live', version: 'v5', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
           },
       executionRoute: live !== null
@@ -2900,8 +2909,8 @@ export class BaselineAnalysisStore {
     const envelope = plan['plan-envelope'] as Record<string, unknown>;
     const artifactPin = plan['artifact-pin'] as { nativeCarrierSha256: string; sidecarSha256: string };
     // What the editor left out (Issue #419), read from the execution plan and matched by the adaptations the envelope's
-    // split names, which the Run Authorization bound: the two are written together and never disagree. The split's
-    // words are not compared — a later release may reword them under a plan frozen before it.
+    // split names, which the Run Authorization bound: the two are written together and never disagree. Only a class the
+    // editor withdrew is looked for — the split's words, and a class a later release adds, are not a plan's to answer.
     let editorEdits: PlanEdits;
     try {
       editorEdits = planEditsOf(plan['execution-plan']);
@@ -2909,8 +2918,8 @@ export class BaselineAnalysisStore {
       throw new AnalysisError('ANALYSIS_RECORD_INVALID', '计划记录的修改无效。');
     }
     const split = envelope.boundary as PlanBoundarySplitProjection | undefined;
-    const allowed = PLAN_ADAPTATION_CLASSES.filter((adaptationClass) => !editorEdits.disallowedAdaptations.includes(adaptationClass));
-    requireAnalysis(split === undefined || JSON.stringify(split.adaptable.map((entry) => entry.adaptationClass)) === JSON.stringify(allowed),
+    const withdrawn: ReadonlyArray<string> = editorEdits.disallowedAdaptations;
+    requireAnalysis(split === undefined || !split.adaptable.some((entry) => withdrawn.includes(entry.adaptationClass)),
       'ANALYSIS_RECORD_INVALID', '计划信封与计划修改不一致。');
     let update: ExecutionUpdateFacts | null = null;
     if (this.#carriesPlan(intent.mode)) {

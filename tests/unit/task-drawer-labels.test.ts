@@ -132,7 +132,7 @@ function plan(overrides: Partial<TaskPlanProjection> = {}): TaskPlanProjection {
     outcomes: ['一份基线分析', '这次运行的运行报告'],
     notDo: { editorial: ['不会直接修改稿件', '不导出或发布'], technical: ['不创建或执行 Effect'] },
     boundary: { adaptable: [], askFirst: [] },
-    edit: { editable: true, reason: null, lastEdit: null },
+    edit: { editable: true, reason: null, lastEdit: null, planEnvelopeDigest: 'a'.repeat(64) },
     drift: null,
     technical: [],
     start: { readiness: 'ready', needsModelConnection: false, planEnvelopeDigest: 'a'.repeat(64), categoryDigests: [], reconfirm: null },
@@ -325,7 +325,7 @@ describe('the authorization bar (S74a)', () => {
   });
 
   it('says J-03\'s Task is only recorded, and a plan without a route is blocked before dispatch, beside the same start (ADR 0055)', () => {
-    const recordOnly = taskBarView(barOf({ readiness: 'record-only' }, { kind: 'fixed-task', planVersion: null, edit: { editable: false, reason: null, lastEdit: null } }));
+    const recordOnly = taskBarView(barOf({ readiness: 'record-only' }, { kind: 'fixed-task', planVersion: null, edit: { editable: false, reason: null, lastEdit: null, planEnvelopeDigest: null } }));
     expect(recordOnly.note).toBe('此任务只记录运行，不会派发');
     expect(names(recordOnly)).toEqual(['start', 'revise', 'save-draft']);
     // A kind that keeps no plan versions has no editing for 返回修改 to open, and says so.
@@ -559,7 +559,7 @@ describe('the activity card (Issue #422, AUTH-011)', () => {
 // Issue #419 (plan slice S73; editor-surfaces §6 可编辑, V2-UX-PLAN-009, PLAN-011): the editable plan's words, and the
 // bar while the editor has edits the plan does not hold yet.
 describe('the editable plan (S73)', () => {
-  const edit = (overrides: Partial<TaskPlanProjection['edit']> = {}): TaskPlanProjection['edit'] => ({ editable: true, reason: null, lastEdit: null, ...overrides });
+  const edit = (overrides: Partial<TaskPlanProjection['edit']> = {}): TaskPlanProjection['edit'] => ({ editable: true, reason: null, lastEdit: null, planEnvelopeDigest: 'a'.repeat(64), ...overrides });
   const rows = (view: ReturnType<typeof taskBarView>) => view.actions.map((entry) => [entry.name, entry.tone, entry.disabledReason]);
 
   it('speaks §6 可编辑\'s words, each control named for a reader who does not see its glyph', () => {
@@ -590,7 +590,7 @@ describe('the editable plan (S73)', () => {
     ]);
     // The edit sends nothing, so it is the editor's to make offline and without a connection as well.
     expect(rows(taskBarView(barOf({ readiness: 'offline' }), 1))).toEqual(rows(taskBarView(plan(), 1)));
-    expect(rows(taskBarView(barOf({ readiness: 'needs-connection', needsModelConnection: true }), 1))).toEqual(rows(taskBarView(plan(), 1)));
+    expect(rows(taskBarView(barOf({ readiness: 'needs-connection', needsModelConnection: true, planEnvelopeDigest: null }), 1))).toEqual(rows(taskBarView(plan(), 1)));
     // Nothing pending: the start's bar again.
     expect(taskBarView(plan(), 0).actions.map((entry) => entry.name)).toEqual(['start', 'revise', 'save-draft']);
     // Once the Task has started, no edit is pending and the Run's state is the bar.

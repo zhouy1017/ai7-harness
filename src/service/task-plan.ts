@@ -80,7 +80,7 @@ const SAFE_RETRY_ADAPTATION = PLAN_EDIT_ADAPTATION_LABELS['safe-retry'];
 export const PLAN_EDIT_DRIFT_REASON = '计划的关键内容已变化：先重新确认计划，你的改动会保留';
 export const PLAN_EDIT_STARTED_REASON = '任务已经开始，计划不能再改';
 /** A plan the editor cannot edit because its kind keeps no plan versions. */
-const NOT_EDITABLE: TaskPlanProjection['edit'] = { editable: false, reason: null, lastEdit: null };
+const NOT_EDITABLE: TaskPlanProjection['edit'] = { editable: false, reason: null, lastEdit: null, planEnvelopeDigest: null };
 /** §10's editorial 不会做: the technical half reads in 查看技术详情. */
 const EDITORIAL_NOT_DO = ['不会直接修改稿件', '不导出或发布', '不存里程碑版本'] as const;
 
@@ -510,6 +510,7 @@ function baselinePlanEdit(projection: BaselineAnalysisProjection, ordinal: numbe
     lastEdit: madeBy === undefined || madeBy.detectedAt === null
       ? null
       : { ordinal, recordedAt: madeBy.detectedAt, entries: madeBy.diff.map((entry) => driftEntry(entry, blocks)) },
+    planEnvelopeDigest: started || drifted ? null : projection.planEnvelope?.digest ?? null,
   };
 }
 
