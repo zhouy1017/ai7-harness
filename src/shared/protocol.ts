@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 59 as const;
+export const SERVICE_PROTOCOL_VERSION = 60 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -5358,10 +5358,12 @@ export type GlobalAttentionStateKey =
   | 'analysis-queued'
   | 'analysis-running'
   // A Run in Connectivity Wait (Issue #502; ATTN-004), in the words of what it waits for now; one the next Reconnect
-  // Preflight will admit reads 正在排队 (`analysis-queued`).
+  // Preflight will admit is `analysis-waiting-admission` (below), never `analysis-queued`.
   | 'analysis-waiting-network'
   | 'analysis-waiting-connection'
   | 'analysis-waiting-slot'
+  // Online with nothing in its way, the next Reconnect Preflight admits it; it is not in the scheduler yet (Issue #539).
+  | 'analysis-waiting-admission'
   | 'analysis-cancelling'
   | 'analysis-pausing'
   | 'analysis-paused'

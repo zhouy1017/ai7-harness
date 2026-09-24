@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
+  attentionWaitingFor,
   composeGlobalAttention,
   orderGlobalAttentionItems,
   recentWindowStart,
@@ -197,8 +198,25 @@ describe('the four groups of 待我处理', () => {
       ['analysis-waiting-network', false, 'view-run', 0, true],
       ['analysis-waiting-connection', true, 'view-run', 0, true],
       ['analysis-waiting-slot', false, 'view-run', 0, true],
-      ['analysis-queued', false, 'view-run', 0, true],
+      // Nothing in its way, the next look admits it: not yet in the scheduler, so never 正在排队's 已进入调度器 (Issue #539).
+      ['analysis-waiting-admission', false, 'view-run', 0, true],
     ]);
+  });
+
+  it('reads what a Run waits for only while one waits, and a failed read as the plain case (Issue #539)', async () => {
+    let reads = 0;
+    const read = async () => {
+      reads += 1;
+      return 'connection' as const;
+    };
+    // No Run waits: the credential is never checked for 待我处理.
+    expect(await attentionWaitingFor(false, read)).toBe('admitting');
+    expect(reads).toBe(0);
+    expect(await attentionWaitingFor(true, read)).toBe('connection');
+    expect(reads).toBe(1);
+    // A keyring read that fails does not fail the whole read of 待我处理, and reads as waiting for the connection: Reconnect
+    // Preflight makes the same check and admits nothing while it fails, so the Run is not about to start.
+    expect(await attentionWaitingFor(true, async () => { throw new Error('keyring unavailable'); })).toBe('connection');
   });
 
   it('places each record by its own state, with the next step and the record it opens', () => {

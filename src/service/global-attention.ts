@@ -19,7 +19,7 @@ import {
   type ReviewRunCategoryState,
   type ReviewRunState,
 } from '../shared/protocol.js';
-import type { RunProgress } from './analysis/baseline-analysis-store.js';
+import type { ProgressReader, RunProgress } from './analysis/baseline-analysis-store.js';
 import type { WaitingFor } from './task-plan.js';
 import { REVIEW_RUN_CATEGORY_STATE_LABELS } from './review/review-run-state.js';
 
@@ -203,13 +203,46 @@ export function recentWindowStart(now: Date): string {
 
 const ACTIVE_RUN_STATES: ReadonlySet<BaselineAnalysisRunState> = new Set(['authorized', 'admitted', 'executing', 'cancelling', 'pausing']);
 
-/** A Run in Connectivity Wait, by what it waits for now (ATTN-004): one the next preflight admits is simply queued. */
+/**
+ * A Run in Connectivity Wait, by what it waits for now (ATTN-004). One the next preflight admits is about to start, not in
+ * the scheduler yet (Issue #539).
+ */
 const WAITING_STATES: Readonly<Record<WaitingFor, GlobalAttentionStateKey>> = {
   network: 'analysis-waiting-network',
   connection: 'analysis-waiting-connection',
   slot: 'analysis-waiting-slot',
-  admitting: 'analysis-queued',
+  // Online, credential there, slot free: the next Reconnect Preflight admits it — until then it is not in the scheduler
+  // (Issue #539), so it never reads as 已进入 AI7 调度器.
+  admitting: 'analysis-waiting-admission',
 };
+
+/**
+ * What a waiting Run waits for, as 待我处理 reads it (Issue #539): read only while a Run waits — the credential check it
+ * makes is the keyring's, and a read of 待我处理 every few seconds must not make it for nothing. A check that fails does
+ * not fail the whole read: it reads as waiting for the connection, since Reconnect Preflight makes the same check and
+ * admits nothing while it fails — never as a Run about to start.
+ */
+export async function attentionWaitingFor(anyWaiting: boolean, read: () => Promise<WaitingFor>): Promise<WaitingFor> {
+  if (!anyWaiting) return 'admitting';
+  try {
+    return await read();
+  } catch {
+    return 'connection';
+  }
+}
+
+/** 待我处理 as the service answers it (Issue #539): what a waiting Run waits for is checked only while one waits. */
+export async function readGlobalAttention(
+  store: {
+    waitingBaselineAnalysisRuns(bookId: null): ReadonlyArray<unknown>;
+    inspectGlobalAttention(progress: ProgressReader, busy: boolean, waitingFor: WaitingFor): GlobalAttentionProjection;
+  },
+  progress: ProgressReader,
+  busy: boolean,
+  read: () => Promise<WaitingFor>,
+): Promise<GlobalAttentionProjection> {
+  return store.inspectGlobalAttention(progress, busy, await attentionWaitingFor(store.waitingBaselineAnalysisRuns(null).length > 0, read));
+}
 
 function item(
   group: GlobalAttentionGroupKey,
