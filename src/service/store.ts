@@ -3924,14 +3924,18 @@ export class EditorialStore {
     const bindingHolds = carriesStoppedRun(run.runRecordId);
     return this.#analysisCall(() => {
       let unitsSettled: number | null;
+      let unitsClosed: number | null;
       try {
-        unitsSettled = this.#baselineAnalysis.unitCheckpoints(run.runRecordId).length;
+        const checkpoints = this.#baselineAnalysis.unitCheckpoints(run.runRecordId);
+        unitsSettled = checkpoints.length;
+        unitsClosed = checkpoints.filter((checkpoint) => checkpoint.unit.closed.state === 'closed').length;
       } catch {
         // Its kept progress no longer reads back: 续行 names that, and a cancellation forms no revision from it.
         unitsSettled = null;
+        unitsClosed = null;
       }
       const blockers = stopped ? [...this.#baselineAnalysis.continuationBlockers(run.runRecordId), ...(bindingHolds ? [] : [RESUME_BLOCKED_BINDING])] : [];
-      return { unitsSettled, unitsTotal, blockers, bindingHolds };
+      return { unitsSettled, unitsClosed, unitsTotal, blockers, bindingHolds };
     });
   }
 
