@@ -2789,6 +2789,13 @@ export class BaselineAnalysisStore {
     return { bindingDigest: binding.digest };
   }
 
+  /** The units an attempt recorded a turn for: what it submitted, as far as the ledger knows. */
+  submittedUnitCount(attemptId: string): number {
+    const row = this.#db.prepare('SELECT count(DISTINCT unit_ordinal) submitted FROM analysis_harness_spans WHERE attempt_id = ? AND unit_ordinal IS NOT NULL')
+      .get(attemptId) as SqlRow;
+    return asNumber(row.submitted);
+  }
+
   /** One technical turn by reference; from Issue #48 also which attempt of its unit it was and the payload digest the gate admitted. */
   recordSpan(
     attemptId: string,

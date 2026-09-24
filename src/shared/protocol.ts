@@ -4023,6 +4023,12 @@ export interface TaskPlanRunControlProjection {
   activity: NonNullable<NonNullable<BaselineAnalysisProjection['run']>['progress']> | null;
   /** When the Run began executing its units; `null` before it did. */
   executingSince: string | null;
+  /**
+   * An update Run's counts (CTRL-004): the manuscript's reading ranges and how many of them the Run reuses from its
+   * predecessor, so the activity card names a range among the whole manuscript and the Cancellation Impact Summary
+   * keeps the reused ranges in view. `null` for a first baseline, which reads every range.
+   */
+  update: null | { manuscriptUnits: number; reusedUnits: number };
 }
 
 /**
