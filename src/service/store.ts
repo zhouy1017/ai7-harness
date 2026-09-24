@@ -8702,13 +8702,15 @@ export class EditorialStore {
       }
       // Issue #412 (S63; MARK-009): the new file's comments and tracked changes become 批注 and 修改建议 by their author
       // on the manuscript in this same transaction — all of them, or no reimport — after the editor's own marks have
-      // followed. One that already stands there as it is, the file's comment still in the file, is not made twice.
+      // followed. One that already stands there as it is, exactly on its words — the file's comment still in the file — is
+      // not made twice; one that drifted or was set aside no longer shows the file's comment, so the new file's makes it.
       if (fidelityPlan.importedMarks > 0) {
         const placedAt = this.#authority.prepare('SELECT block_id FROM temp.reimport_commit_rows WHERE work_id = ? AND position = ?');
         const standing = this.#authority.prepare(
           `SELECT 1 FROM editorial_marks
            WHERE branch_id = ? AND block_id = ? AND source_kind = 'imported-author' AND source_label = ? AND kind = ?
-             AND pinned_text = ? AND body = ? AND from_grapheme = ? AND to_grapheme = ? AND status IN ('open', 'resolved', 'applied')`,
+             AND pinned_text = ? AND body = ? AND from_grapheme = ? AND to_grapheme = ? AND status IN ('open', 'resolved', 'applied')
+             AND anchor_state = 'exact'`,
         );
         let alreadyStanding = 0;
         const created = this.#importedMarkCall(() => createImportedMarks(this.#authority, this.#editorialMarks, input.draftId, {
@@ -10200,7 +10202,9 @@ export class EditorialStore {
        JOIN manuscript_reimport_comparisons c ON c.draft_id = d.draft_id
        LEFT JOIN manuscript_reimport_group_sets gs ON gs.comparison_id = c.comparison_id
        LEFT JOIN manuscript_reimport_records r ON r.comparison_id = c.comparison_id
-       WHERE d.state = 'reviewed' AND d.reviewed_relationship = 'reimport' AND gs.comparison_id IS NULL AND r.comparison_id IS NULL`,
+       WHERE d.state = 'reviewed' AND d.reviewed_relationship = 'reimport' AND gs.comparison_id IS NULL AND r.comparison_id IS NULL
+         -- A commit left uncertain is its recovery's to settle first: invalidating its review would strand it.
+         AND NOT EXISTS (SELECT 1 FROM import_commit_attempts a WHERE a.draft_id = d.draft_id AND a.state = 'uncertain')`,
     ).all() as SqlRow[];
     for (const draft of drafts) this.#invalidateReview(this.#loadDraftSnapshot(asString(draft.draft_id)));
   }
