@@ -3,6 +3,9 @@ import {
   MAX_DELIVERABLE_MILESTONES,
   MAX_EXPORT_DESTINATION_CODE_UNITS,
   MAX_EXPORT_RECORDS_LISTED,
+  MAX_PRODUCTION_DOCUMENT_DELIVERIES_LISTED,
+  MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS,
+  MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS,
   MAX_PRODUCTION_DOCUMENT_SOURCES_LISTED,
   MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED,
   MAX_FRAME_BYTES,
@@ -26,6 +29,7 @@ import {
   type DeliverablesProjection,
   type MilestoneListItemProjection,
   type PublicationDesignationProjection,
+  type ProductionDocumentsProjection,
   type PublicationVersionProjection,
 } from '../../src/shared/protocol.js';
 
@@ -116,7 +120,7 @@ describe('the words of 发稿', () => {
         bookId: identity,
         preparationId: identity,
         // A milestone's target, with its label at its bound, is wider than a 审阅报告's (Issue #500, S64b part 2).
-        target: { kind: 'milestone' as const, milestoneId: identity, milestoneLabel: label, revisionId: identity, revisionLabel: 'r9999999', report: null },
+        target: { kind: 'milestone' as const, milestoneId: identity, milestoneLabel: label, revisionId: identity, revisionLabel: 'r9999999', report: null, document: null },
         // Issue #500: the longest format name the receipt binds.
         format: 'markdown' as const,
         outcome: 'ambiguous' as const,
@@ -129,9 +133,26 @@ describe('the words of 发稿', () => {
         revealAvailable: false,
         technical: { approvalId: identity, receiptId: identity, receiptDigest: digest, fileSha256: null, failureCode: 'EXPORT_COMMIT_UNCERTAIN' },
       })),
-      // Issue #415: every house type with a document at its widest — its versions listed to their bound and a source
+    };
+    const answer: PublicationDesignationProjection = {
+      bookId: identity,
+      outcome: 'designated',
+      completionLabel: publicationDesignatedLabel(label, 'r9999999', designation.scope),
+      publicationVersionId: identity,
+      deliverables,
+    };
+    const response = { id: identity, ok: true, op: 'designatePublicationVersion', result: answer };
+    expect(Buffer.byteLength(JSON.stringify(response), 'utf8')).toBeLessThan(MAX_FRAME_BYTES);
+  });
+
+  it('keep the widest 交付 · 生产文档 answer within one service frame, apart from the 发稿 block (Issue #415)', () => {
+    const identity = '00000000-0000-4000-8000-000000000000';
+    const digest = 'f'.repeat(64);
+    const time = '2026-09-22T00:00:00.000Z';
+    // Issue #415: every house type with a document at its widest — its versions listed to their bound and a source
       // name at the length a file name may take — and the materials listed to theirs.
-      documents: {
+    const documents: ProductionDocumentsProjection = {
+      bookId: identity,
         configuration: { schema: 'ai7.production-document-types/1', version: '1', digest },
         unavailableReason: null,
         types: ['news-release', 'promotion-article', 'review-article', 'launch-materials', 'marketing-points'].map((typeId) => ({
@@ -150,22 +171,23 @@ describe('the words of 发稿', () => {
             changedSinceVersion: true,
             journalSequence: 9_999_999,
             workingDigest: digest,
+            // Issue #415 (S66b): its Delivery Records listed to their bound, each at its widest.
+            deliveries: Array.from({ length: MAX_PRODUCTION_DOCUMENT_DELIVERIES_LISTED }, (_, index) => ({
+              deliveryId: identity, ordinal: 9_999_999 - index, revisionId: identity, versionLabel: '版本 9999999',
+              recipient: { kind: 'custom' as const, label: '交'.repeat(MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS) },
+              note: '𠀀'.repeat(MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS), recordedAt: time,
+              export: { preparationId: identity, outcome: 'ambiguous' as const, outcomeLabel: '结果待确认', fileName: '文'.repeat(250) + '.docx' },
+            })),
+            deliveriesTruncated: true,
+            changedSinceDelivery: true,
           },
         })),
         sources: Array.from({ length: MAX_PRODUCTION_DOCUMENT_SOURCES_LISTED }, () => ({
           sourceVersionId: identity, displayName: '文'.repeat(250) + '.docx', format: 'DOCX' as const, createdAt: time,
         })),
         sourcesTruncated: true,
-      },
-    };
-    const answer: PublicationDesignationProjection = {
-      bookId: identity,
-      outcome: 'designated',
-      completionLabel: publicationDesignatedLabel(label, 'r9999999', designation.scope),
-      publicationVersionId: identity,
-      deliverables,
-    };
-    const response = { id: identity, ok: true, op: 'designatePublicationVersion', result: answer };
+      };
+    const response = { id: identity, ok: true, op: 'recordProductionDocumentDelivery', result: { bookId: identity, documents, document: documents.types[0]!.document, typeId: 'news-release' } };
     expect(Buffer.byteLength(JSON.stringify(response), 'utf8')).toBeLessThan(MAX_FRAME_BYTES);
   });
 });

@@ -9,6 +9,10 @@ import {
   MAX_MILESTONE_PURPOSE_CODE_UNITS,
   MAX_PROPOSAL_CONFLICT_UNITS,
   MAX_PUBLICATION_BASIS_CHARACTERS,
+  MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS,
+  MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS,
+  PRODUCTION_DOCUMENT_RECIPIENT_KINDS,
+  type ProductionDocumentRecipientKind,
   MAX_PUBLICATION_SCOPE_CHARACTERS,
   MAX_REPLACEMENT_EXCLUSIONS,
   MAX_REVIEW_FINDING_REASON_CHARACTERS,
@@ -163,6 +167,8 @@ function validExportTarget(value: unknown): boolean {
   if (value.kind === 'current') return hasExactKeys(value, ['kind']);
   // One recorded version of a 审阅报告 (Issue #500, S64b part 2).
   if (value.kind === 'report') return hasExactKeys(value, ['kind', 'reportId']) && validUuid(value.reportId);
+  // One saved version of a Production Document (Issue #415, S66b).
+  if (value.kind === 'document') return hasExactKeys(value, ['kind', 'documentId', 'revisionId']) && validUuid(value.documentId) && validUuid(value.revisionId);
   return value.kind === 'milestone' && hasExactKeys(value, ['kind', 'milestoneId']) && validUuid(value.milestoneId);
 }
 
@@ -1123,6 +1129,11 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // 交付 · 生产文档 (Issue #415). A house type by its identity, a material and a document by theirs, all within
     // the route's Book; whether they are that Book's is the store's to decide.
+    case 'inspectProductionDocuments': {
+      const input = requireInput(value.input, ['bookId'], tentativeId);
+      if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'createProductionDocument': {
       const input = requireInput(value.input, ['bookId', 'typeId', 'sourceVersionId'], tentativeId);
       if (!validUuid(input.bookId) || !validProductionDocumentTypeId(input.typeId) || !validUuid(input.sourceVersionId)) {
@@ -1140,6 +1151,22 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'saveProductionDocumentVersion': {
       const input = requireInput(value.input, ['bookId', 'documentId', 'branchId'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.documentId) || !validUuid(input.branchId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 交付 (Issue #415, S66b): a document's saved version, a recipient from the house's list or in the editor's own
+    // words, and an optional note, bounded here exactly as the store bounds them.
+    case 'recordProductionDocumentDelivery': {
+      const input = requireInput(value.input, ['bookId', 'documentId', 'revisionId', 'recipient', 'note'], tentativeId);
+      const recipient = input.recipient;
+      if (!validUuid(input.bookId) || !validUuid(input.documentId) || !validUuid(input.revisionId) ||
+          !isRecord(recipient) || !hasExactKeys(recipient, ['kind', 'custom']) ||
+          !PRODUCTION_DOCUMENT_RECIPIENT_KINDS.includes(recipient.kind as ProductionDocumentRecipientKind) ||
+          (recipient.kind === 'custom'
+            ? !validPublicationText(recipient.custom, MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS)
+            : recipient.custom !== null) ||
+          (input.note !== null && !validPublicationText(input.note, MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS))) {
+        throw new ProtocolError(tentativeId);
+      }
       break;
     }
     // ④ 导出 (Issue #413). The version is the current revision or one milestone of the route's Book, the options

@@ -3,7 +3,14 @@ import {
   MAX_PUBLICATION_SCOPE_CHARACTERS,
   type DeliverablesProjection,
   type MilestoneListItemProjection,
+  MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS,
+  MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS,
+  PRODUCTION_DOCUMENT_RECIPIENT_LABELS,
+  publicationText,
+  type ProductionDocumentDeliveryProjection,
   type ProductionDocumentProjection,
+  type ProductionDocumentRecipientKind,
+  type ProductionDocumentsProjection,
   type ProductionDocumentTypeProjection,
   type PublicationVersionProjection,
   type RendererApi,
@@ -58,8 +65,20 @@ import { localInstantLabel } from './plan-preview-labels.js';
 import { EXPORT_ACTION_LABELS, EXPORT_RECORDS_HEADING, EXPORT_TECHNICAL_TERMS, exportOpenAccessibleName, exportRecordLine } from './manuscript-export-labels.js';
 import { mountManuscriptExport } from './manuscript-export.js';
 import {
+  DELIVERY_BLOCKERS,
+  DELIVERY_CUSTOM_LABEL,
+  DELIVERY_CUSTOM_RECIPIENT,
+  DELIVERY_FORM_HEADING,
+  DELIVERY_NOTE_LABEL,
+  DELIVERY_RECIPIENT_LEGEND,
+  DELIVERY_STATEMENT,
+  DELIVERY_UNSAVED_NOTE,
+  DELIVERY_VERSION_LEGEND,
   DOCUMENT_ACTION_LABELS,
+  DOCUMENT_CHANGED_SINCE_DELIVERY,
   DOCUMENT_CHANGED_SINCE_VERSION,
+  DOCUMENT_DELIVERIES_HEADING,
+  DOCUMENT_NOT_DELIVERED,
   DOCUMENT_KEPT_NOTE,
   DOCUMENT_NO_SOURCES,
   DOCUMENT_SOURCE_HINT,
@@ -72,6 +91,10 @@ import {
   documentActionName,
   documentCardLine,
   documentCreatedLine,
+  documentDeliveredLine,
+  documentDeliveryExportLine,
+  documentDeliveryLine,
+  documentExportLabel,
   documentSourceLine,
   type DocumentAction,
 } from './production-document-labels.js';
@@ -96,9 +119,9 @@ export interface DeliverablesSurface {
   destroy(): void;
 }
 
-type DeliverablesApi = Pick<RendererApi, 'inspectDeliverables' | 'designatePublicationVersion' | 'reviewManuscriptExport' |
+type DeliverablesApi = Pick<RendererApi, 'inspectDeliverables' | 'inspectProductionDocuments' | 'designatePublicationVersion' | 'reviewManuscriptExport' |
   'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
-  'createProductionDocument' | 'decideProductionDocumentType'>;
+  'createProductionDocument' | 'decideProductionDocumentType' | 'recordProductionDocumentDelivery'>;
 
 export interface MountDeliverablesOptions {
   /** The destination's panel: the surface appends its heading and its host, and the caller its persistent actions after them. */
@@ -121,8 +144,18 @@ interface DocumentForm {
   problem: string | null;
 }
 
+/** 交付…'s inline form while it is open (DELIV-003): the version, who it goes to and the note, none preselected. */
+interface DeliveryForm {
+  typeId: string;
+  revisionId: string | null;
+  recipient: ProductionDocumentRecipientKind | null;
+  custom: string;
+  note: string;
+  problem: string | null;
+}
+
 /** Where focus goes once the documents block is drawn again. */
-type DocumentFocus = 'keep' | { typeId: string; action: DocumentAction | 'source' };
+type DocumentFocus = 'keep' | { typeId: string; action: DocumentAction | 'source' | 'delivery-version' };
 
 /** 设为发稿版本's inline form while it is open: what the editor has chosen and written so far. */
 interface DesignateForm {
@@ -172,10 +205,14 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   let destroyed = false;
   let generation = 0;
   let projection: DeliverablesProjection | null = null;
+  // 交付 · 生产文档 is a read of its own (Issue #415), with its own ticket.
+  let documentsProjection: ProductionDocumentsProjection | null = null;
+  let documentsGeneration = 0;
   let working = false;
   let form: DesignateForm | null = null;
   let block: HTMLElement | undefined;
   let documentForm: DocumentForm | null = null;
+  let deliveryForm: DeliveryForm | null = null;
   let documentsBlock: HTMLElement | undefined;
 
   const host = el('div', 'deliverables-host');
@@ -200,11 +237,17 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     technicalDetails: options.technicalDetails,
     setStatus: options.setStatus,
     errorMessage: options.errorMessage,
-    onChanged: () => refresh(),
-    // 交付物 opens the card for a manuscript version only; a 审阅报告 is exported from 审阅.
-    openerOf: (target) => target.kind === 'report' ? null : block?.querySelector<HTMLElement>(target.kind === 'current'
-      ? '[data-export-action="open"][data-export-target="current"]'
-      : `ol.milestone-list > li[data-milestone-id="${CSS.escape(target.milestoneId)}"] [data-export-action="open"]`) ?? null,
+    onChanged: () => {
+      refresh();
+      refreshDocuments();
+    },
+    // 交付物 opens the card for a manuscript version, and for a document's delivered version from its Delivery Record
+    // (Issue #415, S66b); a 审阅报告 is exported from 审阅.
+    openerOf: (target) => target.kind === 'report' ? null : target.kind === 'document'
+      ? documentsBlock?.querySelector<HTMLElement>(`ol.production-document-deliveries > li[data-revision-id="${CSS.escape(target.revisionId)}"] [data-export-action="open"]`) ?? null
+      : block?.querySelector<HTMLElement>(target.kind === 'current'
+        ? '[data-export-action="open"][data-export-target="current"]'
+        : `ol.milestone-list > li[data-milestone-id="${CSS.escape(target.milestoneId)}"] [data-export-action="open"]`) ?? null,
   });
 
   // ---- reading --------------------------------------------------------------------------------------
@@ -226,6 +269,23 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
         if (destroyed || ticket !== generation || !host.isConnected) return;
         if (projection === null) renderUnavailable(error);
         else options.setStatus(options.errorMessage(error, DELIVERABLES_STATUS_LINES.refreshFailed), 'error');
+      },
+    );
+  }
+
+  /** Read 交付 · 生产文档 again and draw it; an answer overtaken by a newer read or a command never paints. */
+  function refreshDocuments(): void {
+    if (destroyed) return;
+    const ticket = ++documentsGeneration;
+    void api.inspectProductionDocuments().then(
+      (next) => {
+        if (destroyed || ticket !== documentsGeneration || !host.isConnected || next.bookId !== bookId) return;
+        documentsProjection = next;
+        drawDocuments(next, 'keep');
+      },
+      (error) => {
+        if (destroyed || ticket !== documentsGeneration || !host.isConnected) return;
+        options.setStatus(options.errorMessage(error, DELIVERABLES_STATUS_LINES.refreshFailed), 'error');
       },
     );
   }
@@ -307,7 +367,6 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       ));
     }
     swap(section);
-    drawDocuments(next, 'keep');
 
     // The form's first stop is the milestone already chosen, or the first choice when none is.
     const firstChoice = (): HTMLElement | null =>
@@ -650,8 +709,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
    * materials are the Book's own, none preselected; 本书不做 and 恢复 are one deterministic record each. No card
    * carries a percentage (WORK-007).
    */
-  function drawDocuments(next: DeliverablesProjection, focus: DocumentFocus): void {
-    const documents = next.documents;
+  function drawDocuments(next: ProductionDocumentsProjection, focus: DocumentFocus): void {
+    const documents = next;
     if (documentForm !== null && (documents.unavailableReason !== null ||
       !documents.types.some((type) => type.typeId === documentForm!.typeId && type.document === null && !type.notForThisBook))) {
       documentForm = null;
@@ -659,6 +718,12 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     if (documentForm !== null && documentForm.sourceVersionId !== null &&
       !documents.sources.some((source) => source.sourceVersionId === documentForm!.sourceVersionId)) {
       documentForm.sourceVersionId = null;
+    }
+    const deliverable = deliveryForm === null ? undefined : documents.types.find((type) => type.typeId === deliveryForm!.typeId);
+    if (deliveryForm !== null && (deliverable?.document == null || deliverable.notForThisBook)) deliveryForm = null;
+    if (deliveryForm !== null && deliveryForm.revisionId !== null &&
+      !deliverable!.document!.versions.some((version) => version.revisionId === deliveryForm!.revisionId)) {
+      deliveryForm.revisionId = null;
     }
     const active = document.activeElement;
     const restore = focus === 'keep' && active instanceof HTMLElement && documentsBlock?.contains(active) === true
@@ -685,10 +750,12 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       const card = section.querySelector<HTMLElement>(`li[data-document-type-id="${CSS.escape(focus.typeId)}"]`);
       const target = focus.action === 'source'
         ? card?.querySelector<HTMLElement>('input[name="document-source"]:checked') ?? card?.querySelector<HTMLElement>('input[name="document-source"]')
-        : card?.querySelector<HTMLElement>(`[data-document-action="${focus.action}"]`);
+        : focus.action === 'delivery-version'
+          ? card?.querySelector<HTMLElement>('input[name="delivery-version"]:checked') ?? card?.querySelector<HTMLElement>('input[name="delivery-version"]')
+          : card?.querySelector<HTMLElement>(`[data-document-action="${focus.action}"]`);
       target?.focus();
     } else if (restore !== null) {
-      const match = Array.from(section.querySelectorAll<HTMLElement>('button, input')).find((candidate) => documentFocusKeyOf(candidate) === restore);
+      const match = Array.from(section.querySelectorAll<HTMLElement>('button, input, textarea')).find((candidate) => documentFocusKeyOf(candidate) === restore);
       if (match !== undefined && !(match instanceof HTMLButtonElement && match.disabled)) match.focus({ preventScroll: true });
     }
   }
@@ -697,7 +764,10 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     return [
       node.tagName,
       node.dataset['documentAction'] ?? '',
-      node instanceof HTMLInputElement && node.type === 'radio' ? node.value : '',
+      node instanceof HTMLInputElement && node.type === 'radio' ? node.name + ':' + node.value : '',
+      node.dataset['deliveryField'] ?? '',
+      node.dataset['exportAction'] ?? '',
+      node.closest<HTMLElement>('li[data-delivery-id]')?.dataset['deliveryId'] ?? '',
       node.closest<HTMLElement>('li[data-document-type-id]')?.dataset['documentTypeId'] ?? '',
     ].join('|');
   }
@@ -711,8 +781,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     return control;
   }
 
-  function renderDocumentCard(next: DeliverablesProjection, type: ProductionDocumentTypeProjection): HTMLElement {
-    const documents = next.documents;
+  function renderDocumentCard(next: ProductionDocumentsProjection, type: ProductionDocumentTypeProjection): HTMLElement {
+    const documents = next;
     const item = el('li', 'production-document-card');
     item.dataset['documentTypeId'] = type.typeId;
     item.dataset['documentState'] = type.notForThisBook ? 'not-for-this-book' : type.document === null ? 'none' : 'document';
@@ -744,6 +814,21 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       open.disabled = working || documents.unavailableReason !== null;
       open.addEventListener('click', () => void openDocument(documentNow, type));
       actions.append(open);
+      // 交付 (Issue #415, S66b): the latest Delivery Record, or none yet, and 交付后有修改 once the text moved past it.
+      const latest = documentNow.deliveries[0];
+      item.dataset['documentDeliveries'] = String(documentNow.deliveries.length);
+      item.dataset['documentChangedSinceDelivery'] = String(documentNow.changedSinceDelivery);
+      item.append(el('p', 'document-delivery-line', latest === undefined ? DOCUMENT_NOT_DELIVERED : documentDeliveryLine(latest, localInstantLabel(latest.recordedAt))));
+      if (documentNow.changedSinceDelivery) item.append(el('p', 'attention-note document-changed-since-delivery', DOCUMENT_CHANGED_SINCE_DELIVERY));
+      const deliver = documentButton(latest === undefined ? 'deliver' : 'redeliver', type, 'secondary');
+      const deliveryOpen = deliveryForm?.typeId === type.typeId;
+      deliver.setAttribute('aria-expanded', String(deliveryOpen));
+      deliver.disabled = working || exporter.busy();
+      deliver.addEventListener('click', () => {
+        deliveryForm = deliveryOpen ? null : { typeId: type.typeId, revisionId: null, recipient: null, custom: '', note: '', problem: null };
+        drawDocuments(next, { typeId: type.typeId, action: deliveryOpen ? (latest === undefined ? 'deliver' : 'redeliver') : 'delivery-version' });
+      });
+      actions.append(deliver);
     } else {
       item.append(el('p', 'document-state-none', DOCUMENT_STATE_NONE));
       const create = documentButton('create', type, 'secondary');
@@ -773,11 +858,207 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     actions.append(notForThisBook);
     item.append(actions);
     if (documentForm?.typeId === type.typeId && type.document === null) item.append(renderDocumentForm(next, type, documentForm));
+    if (type.document !== null && deliveryForm?.typeId === type.typeId) item.append(renderDeliveryForm(type, type.document, deliveryForm));
+    if (type.document !== null && type.document.deliveries.length > 0) item.append(renderDeliveries(type, type.document));
     return item;
   }
 
+  /** Why 交付 cannot be confirmed yet, in the order the form asks. */
+  function deliveryBlockers(state: DeliveryForm): string[] {
+    const blockers: string[] = [];
+    if (state.revisionId === null) blockers.push(DELIVERY_BLOCKERS.version);
+    if (state.recipient === null) blockers.push(DELIVERY_BLOCKERS.recipient);
+    else if (state.recipient === 'custom' && publicationText(state.custom, MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS) === null) blockers.push(DELIVERY_BLOCKERS.custom);
+    return blockers;
+  }
+
+  /**
+   * 交付… (DELIV-003): the document's saved versions and the house's recipients as choices with none preselected, an
+   * optional note, and the sentence that a delivery records and never sends. 交付 waits for a version and a recipient.
+   */
+  function renderDeliveryForm(type: ProductionDocumentTypeProjection, documentNow: ProductionDocumentProjection, state: DeliveryForm): HTMLElement {
+    const form = el('form', 'document-delivery');
+    form.noValidate = true;
+    form.addEventListener('submit', (event) => event.preventDefault());
+    form.append(el('h5', undefined, DELIVERY_FORM_HEADING));
+    const versions = el('fieldset');
+    versions.append(el('legend', undefined, DELIVERY_VERSION_LEGEND));
+    if (documentNow.changedSinceVersion) versions.append(el('p', 'field-note delivery-unsaved', DELIVERY_UNSAVED_NOTE));
+    const confirm = documentButton('confirmDeliver', type, 'primary');
+    const reason = el('p', 'field-note delivery-reason');
+    reason.id = uid('delivery-reason');
+    confirm.setAttribute('aria-describedby', reason.id);
+    const sync = (): void => {
+      const blockers = deliveryBlockers(state);
+      reason.textContent = blockers[0] ?? '';
+      reason.hidden = blockers.length === 0;
+      confirm.disabled = working || blockers.length > 0;
+    };
+    for (const version of documentNow.versions) {
+      const label = el('label', 'choice-row');
+      const input = el('input');
+      input.type = 'radio';
+      input.name = 'delivery-version';
+      input.value = version.revisionId;
+      input.checked = state.revisionId === version.revisionId;
+      input.disabled = working;
+      input.addEventListener('change', () => {
+        state.revisionId = version.revisionId;
+        state.problem = null;
+        sync();
+      });
+      label.append(input, el('span', undefined, `${version.label} · ${localInstantLabel(version.createdAt)}`));
+      versions.append(label);
+    }
+    form.append(versions);
+    const recipients = el('fieldset');
+    recipients.append(el('legend', undefined, DELIVERY_RECIPIENT_LEGEND));
+    const custom = el('input');
+    custom.type = 'text';
+    custom.dataset['deliveryField'] = 'custom';
+    custom.value = state.custom;
+    custom.disabled = working || state.recipient !== 'custom';
+    custom.setAttribute('aria-label', DELIVERY_CUSTOM_LABEL);
+    custom.addEventListener('input', () => {
+      state.custom = custom.value;
+      state.problem = null;
+      sync();
+    });
+    const kinds: ReadonlyArray<[ProductionDocumentRecipientKind, string]> = [
+      ...(Object.entries(PRODUCTION_DOCUMENT_RECIPIENT_LABELS) as Array<[ProductionDocumentRecipientKind, string]>),
+      ['custom', DELIVERY_CUSTOM_RECIPIENT],
+    ];
+    for (const [kind, words] of kinds) {
+      const label = el('label', 'choice-row');
+      const input = el('input');
+      input.type = 'radio';
+      input.name = 'delivery-recipient';
+      input.value = kind;
+      input.checked = state.recipient === kind;
+      input.disabled = working;
+      input.addEventListener('change', () => {
+        state.recipient = kind;
+        state.problem = null;
+        custom.disabled = working || kind !== 'custom';
+        if (kind === 'custom') custom.focus();
+        sync();
+      });
+      label.append(input, el('span', undefined, words));
+      recipients.append(label);
+    }
+    recipients.append(custom);
+    form.append(recipients);
+    const noteLabel = el('label', 'delivery-note');
+    const note = el('textarea');
+    note.dataset['deliveryField'] = 'note';
+    note.rows = 2;
+    note.value = state.note;
+    note.disabled = working;
+    note.addEventListener('input', () => {
+      state.note = note.value;
+      state.problem = null;
+    });
+    noteLabel.append(el('span', undefined, DELIVERY_NOTE_LABEL), note);
+    form.append(noteLabel, el('p', 'delivery-statement', DELIVERY_STATEMENT));
+    if (state.problem !== null) form.append(el('p', 'attention-note', state.problem));
+    const row = el('div', 'button-row compact-actions');
+    confirm.addEventListener('click', () => void recordDelivery(type, documentNow, state));
+    const cancel = documentButton('cancel', type, 'quiet');
+    cancel.addEventListener('click', () => {
+      deliveryForm = null;
+      if (documentsProjection !== null) drawDocuments(documentsProjection, { typeId: type.typeId, action: documentNow.deliveries.length === 0 ? 'deliver' : 'redeliver' });
+    });
+    row.append(confirm, cancel);
+    form.append(row, reason);
+    sync();
+    return form;
+  }
+
+  /** Every Delivery Record newest first, each with what its export came to and 导出… of its version. */
+  function renderDeliveries(type: ProductionDocumentTypeProjection, documentNow: ProductionDocumentProjection): HTMLElement {
+    const section = el('section', 'document-deliveries-section');
+    section.append(el('h5', undefined, DOCUMENT_DELIVERIES_HEADING));
+    const list = el('ol', 'production-document-deliveries');
+    for (const delivery of documentNow.deliveries) list.append(renderDelivery(type, documentNow, delivery));
+    section.append(list);
+    return section;
+  }
+
+  function renderDelivery(type: ProductionDocumentTypeProjection, documentNow: ProductionDocumentProjection, delivery: ProductionDocumentDeliveryProjection): HTMLElement {
+    const item = el('li');
+    item.dataset['deliveryId'] = delivery.deliveryId;
+    item.dataset['revisionId'] = delivery.revisionId;
+    item.dataset['deliveryOrdinal'] = String(delivery.ordinal);
+    item.dataset['deliveryExport'] = delivery.export === null ? 'none' : delivery.export.outcome;
+    item.append(el('p', 'document-delivery-record', documentDeliveryLine(delivery, localInstantLabel(delivery.recordedAt))));
+    if (delivery.note !== null) item.append(el('p', 'field-note document-delivery-note', delivery.note));
+    item.append(el('p', 'document-delivery-export', documentDeliveryExportLine(delivery)));
+    const label = documentExportLabel(type.label, delivery.versionLabel);
+    const open = el('button', 'secondary', EXPORT_ACTION_LABELS.open);
+    open.type = 'button';
+    open.dataset['exportAction'] = 'open';
+    open.dataset['exportTarget'] = 'document';
+    open.setAttribute('aria-label', exportOpenAccessibleName({ kind: 'document', label }));
+    open.disabled = working || exporter.busy();
+    open.addEventListener('click', () => {
+      if (working || exporter.busy()) return;
+      exporter.open({ kind: 'document', documentId: documentNow.documentId, revisionId: delivery.revisionId }, label, open);
+    });
+    const row = el('div', 'button-row export-open-row');
+    row.append(open);
+    item.append(row);
+    return item;
+  }
+
+  /**
+   * 交付 (DELIV-003): one Delivery Record, then the export card of the delivered version opens beside the block, its
+   * opener the new record's 导出…; a cancelled export leaves the record standing with 暂无导出记录.
+   */
+  async function recordDelivery(type: ProductionDocumentTypeProjection, documentNow: ProductionDocumentProjection, state: DeliveryForm): Promise<void> {
+    if (destroyed || working || deliveryForm !== state || deliveryBlockers(state).length > 0) return;
+    const revisionId = state.revisionId!;
+    const recipient = state.recipient!;
+    const note = state.note.trim() === '' ? null : state.note;
+    if (note !== null && publicationText(note, MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS) === null) {
+      state.problem = `备注最多 ${MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS} 个字。`;
+      if (documentsProjection !== null) drawDocuments(documentsProjection, { typeId: type.typeId, action: 'confirmDeliver' });
+      return;
+    }
+    working = true;
+    generation += 1;
+    lockDocuments();
+    options.setStatus(DOCUMENT_STATUS_LINES.delivering, 'busy');
+    try {
+      const result = await api.recordProductionDocumentDelivery({
+        documentId: documentNow.documentId,
+        revisionId,
+        recipient: { kind: recipient, custom: recipient === 'custom' ? state.custom : null },
+        note,
+      });
+      if (destroyed) return;
+      const delivered = result.document?.deliveries[0];
+      if (result.bookId !== bookId || result.documents.bookId !== bookId || delivered === undefined) throw new Error(DOCUMENT_STATUS_LINES.deliverFailed);
+      working = false;
+      deliveryForm = null;
+      documentsGeneration += 1;
+      documentsProjection = result.documents;
+      drawDocuments(result.documents, 'keep');
+      options.setStatus(documentDeliveredLine(delivered.ordinal, delivered.recipient.label), 'success');
+      const opener = documentsBlock?.querySelector<HTMLElement>(`ol.production-document-deliveries > li[data-delivery-id="${CSS.escape(delivered.deliveryId)}"] [data-export-action="open"]`);
+      if (opener instanceof HTMLButtonElement) {
+        exporter.open({ kind: 'document', documentId: documentNow.documentId, revisionId }, documentExportLabel(type.label, delivered.versionLabel), opener);
+      }
+    } catch (error) {
+      working = false;
+      if (destroyed || documentsProjection === null) return;
+      state.problem = options.errorMessage(error, DOCUMENT_STATUS_LINES.deliverFailed);
+      drawDocuments(documentsProjection, { typeId: type.typeId, action: 'confirmDeliver' });
+      options.setStatus(state.problem, 'error');
+    }
+  }
+
   /** The Book's source-only materials as choices, none preselected; 创建文档 waits for one. */
-  function renderDocumentForm(next: DeliverablesProjection, type: ProductionDocumentTypeProjection, state: DocumentForm): HTMLElement {
+  function renderDocumentForm(next: ProductionDocumentsProjection, type: ProductionDocumentTypeProjection, state: DocumentForm): HTMLElement {
     const form = el('form', 'document-create');
     form.noValidate = true;
     form.addEventListener('submit', (event) => event.preventDefault());
@@ -786,7 +1067,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     const hint = el('p', 'field-note', DOCUMENT_SOURCE_HINT);
     hint.id = uid('document-source-hint');
     fieldset.append(hint);
-    for (const source of next.documents.sources) {
+    for (const source of next.sources) {
       const label = el('label', 'choice-row');
       const input = el('input');
       input.type = 'radio';
@@ -834,18 +1115,19 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     try {
       const result = await api.createProductionDocument({ typeId: type.typeId, sourceVersionId: state.sourceVersionId });
       if (destroyed) return;
-      if (result.bookId !== bookId || result.deliverables.bookId !== bookId || result.document === null) throw new Error(DOCUMENT_STATUS_LINES.createFailed);
+      if (result.bookId !== bookId || result.documents.bookId !== bookId || result.document === null) throw new Error(DOCUMENT_STATUS_LINES.createFailed);
       working = false;
       documentForm = null;
-      projection = result.deliverables;
-      render('keep');
+      documentsGeneration += 1;
+      documentsProjection = result.documents;
+      drawDocuments(result.documents, 'keep');
       options.setStatus(documentCreatedLine(type.label), 'success');
       await openDocument(result.document, type, result.notice);
     } catch (error) {
       working = false;
-      if (destroyed || projection === null) return;
+      if (destroyed || documentsProjection === null) return;
       state.problem = options.errorMessage(error, DOCUMENT_STATUS_LINES.createFailed);
-      drawDocuments(projection, { typeId: type.typeId, action: 'confirmCreate' });
+      drawDocuments(documentsProjection, { typeId: type.typeId, action: 'confirmCreate' });
       options.setStatus(state.problem, 'error');
     }
   }
@@ -859,17 +1141,18 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     try {
       const result = await api.decideProductionDocumentType({ typeId: type.typeId, notForThisBook });
       if (destroyed) return;
-      if (result.bookId !== bookId || result.deliverables.bookId !== bookId) throw new Error(DOCUMENT_STATUS_LINES.decideFailed);
+      if (result.bookId !== bookId || result.documents.bookId !== bookId) throw new Error(DOCUMENT_STATUS_LINES.decideFailed);
       working = false;
       if (documentForm?.typeId === type.typeId) documentForm = null;
-      projection = result.deliverables;
-      render('keep');
-      drawDocuments(result.deliverables, { typeId: type.typeId, action: notForThisBook ? 'restore' : 'notForThisBook' });
+      if (deliveryForm?.typeId === type.typeId) deliveryForm = null;
+      documentsGeneration += 1;
+      documentsProjection = result.documents;
+      drawDocuments(result.documents, { typeId: type.typeId, action: notForThisBook ? 'restore' : 'notForThisBook' });
       options.setStatus(notForThisBook ? DOCUMENT_STATUS_LINES.notForThisBook : DOCUMENT_STATUS_LINES.restored, 'success');
     } catch (error) {
       working = false;
-      if (destroyed || projection === null) return;
-      drawDocuments(projection, 'keep');
+      if (destroyed || documentsProjection === null) return;
+      drawDocuments(documentsProjection, 'keep');
       options.setStatus(options.errorMessage(error, DOCUMENT_STATUS_LINES.decideFailed), 'error');
     }
   }
@@ -932,10 +1215,14 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   }
 
   return {
-    start: () => refresh(),
+    start: () => {
+      refresh();
+      refreshDocuments();
+    },
     destroy: () => {
       destroyed = true;
       generation += 1;
+      documentsGeneration += 1;
       exporter.destroy();
     },
   };
