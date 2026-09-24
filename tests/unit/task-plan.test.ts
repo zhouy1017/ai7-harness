@@ -225,8 +225,9 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
     // The redo Task's own sentence (Issue #422, S76c): what it carries, and what it reads again.
     expect(redoGoalSentence({ reused: 6, recomputed: 2, invalidated: 2, bypassed: 0 })).toBe('改计划重做：沿用已读完的 6 个阅读范围，接着读其余 2 个');
     // Carrying none — the first baseline again, or an update the Run kept nothing of — it starts from the beginning.
-    expect(redoGoalSentence(null)).toBe('改计划重做：上一次运行没有读完任何阅读范围，这次从头读');
-    expect(redoGoalSentence({ reused: 0, recomputed: 8, invalidated: 8, bypassed: 0 })).toBe('改计划重做：上一次运行没有读完任何阅读范围，这次从头读');
+    // Carrying nothing, it never says the Run read nothing: what it read may be what this launch could not carry.
+    expect(redoGoalSentence(null)).toBe('改计划重做：不沿用上一次运行的结果，这次从头读');
+    expect(redoGoalSentence({ reused: 0, recomputed: 8, invalidated: 8, bypassed: 0 })).toBe('改计划重做：不沿用上一次运行的结果，这次从头读');
     expect(RUN_CONTROL_CANCELLING_REASON).toBe('已在取消：正在进行的这一步完成后停止');
     expect(CANCELLATION_NO_EFFECTS).toBe('这项分析不改稿，没有需要撤回的受控动作。');
   });
