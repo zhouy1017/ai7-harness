@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 45 as const;
+export const SERVICE_PROTOCOL_VERSION = 46 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -65,6 +65,8 @@ export const IPC_CHANNELS = {
   startBaselineAnalysisWhenOnline: 'ai7:j04:start-baseline-analysis-when-online',
   cancelWaitingBaselineAnalysis: 'ai7:j04:cancel-waiting-baseline-analysis',
   cancelBaselineAnalysisRun: 'ai7:j04:cancel-baseline-analysis-run',
+  pauseBaselineAnalysisRun: 'ai7:j04:pause-baseline-analysis-run',
+  resumeBaselineAnalysisRun: 'ai7:j04:resume-baseline-analysis-run',
   runReconnectPreflight: 'ai7:j04:run-reconnect-preflight',
   quickStartBaselineAnalysis: 'ai7:j04:quick-start-baseline-analysis',
   setDefaultExecutionRule: 'ai7:j04:set-default-execution-rule',
@@ -2448,7 +2450,12 @@ export type BaselineAnalysisRunState =
   // `cancelled` is also where 取消任务 ends a Run that started (Issue #422, CTRL-005): after `cancelling`, 正在取消,
   // while the Run stops at the next unit boundary, and once what it did is classified and recorded.
   | 'cancelled'
-  | 'cancelling';
+  | 'cancelling'
+  // 暂停 and 续行 (Issue #422, S76b; CTRL-001, CONT-014): 正在暂停 until the Run reaches a unit boundary, 已暂停 once what
+  // it read is kept, and 任务已中断 · 可续行 for a Run AI7 stopped under, its authorization kept for 续行.
+  | 'pausing'
+  | 'paused'
+  | 'resumable';
 
 export type BaselineAnalysisUnitProjection =
   | {
@@ -2817,7 +2824,8 @@ export interface BaselineAnalysisProjection {
   bookId: string;
   kind: typeof BASELINE_ANALYSIS_KIND;
   contractVersion: typeof BASELINE_ANALYSIS_CONTRACT_VERSION;
-  state: 'available' | 'prepared' | 'authorized-blocked' | 'waiting' | 'admitted' | 'executing' | 'settled' | 'failed' | 'interrupted' | 'cancelled' | 'cancelling';
+  state: 'available' | 'prepared' | 'authorized-blocked' | 'waiting' | 'admitted' | 'executing' | 'settled' | 'failed' | 'interrupted' | 'cancelled' | 'cancelling'
+    | 'pausing' | 'paused' | 'resumable';
   stateLabel: string;
   taskIntent: null | {
     taskIntentId: string;
@@ -3995,26 +4003,35 @@ export interface InspectTaskPlanInput {
  * `waiting` is a Run in Connectivity Wait, whose label says what it waits for — 等待网络, 需要处理模型连接 or
  * 等待运行名额 (OFF-006) — and `cancelled` one the editor cancelled before it read anything (Issue #502).
  * `cancelling` is 正在取消: the editor cancelled a Run under way, which stops at the next unit boundary, and
- * `cancelled-after-start` the 已取消 of a Run cancelled after it began reading (Issue #422, CTRL-005).
+ * `cancelled-after-start` the 已取消 of a Run cancelled after it began reading (Issue #422, CTRL-005). `pausing`,
+ * `paused` and `resumable` are 正在暂停, 已暂停 and 任务已中断 · 可续行 (S76b; CTRL-001, CONT-014).
  */
 export type TaskPlanStateKey =
   | 'ready' | 'changed' | 'unconnected' | 'offline' | 'recorded' | 'blocked' | 'waiting' | 'running' | 'settled' | 'stopped'
-  | 'cancelled' | 'cancelling' | 'cancelled-after-start';
+  | 'cancelled' | 'cancelling' | 'cancelled-after-start' | 'pausing' | 'paused' | 'resumable';
 
 /**
  * A started Run's controls in the drawer's bar and its activity above the plan (Issue #422, plan slice S76a;
- * V2-UX-AUTH-010, AUTH-011, CTRL-004 to CTRL-009). `取消任务` is the control this slice brings: one inline
- * Cancellation Impact Summary, then the editor's confirmation, and only that records anything. `暂停` and `改计划重做`
- * are shown with the reason they are not offered yet (S76b, S76c).
+ * V2-UX-AUTH-010, AUTH-011, CTRL-001 to CTRL-009, CONT-014, CONT-015). `取消任务` opens one inline Cancellation Impact
+ * Summary, and only its confirmation records anything; `暂停` is one click (CTRL-001); a paused Run, or one AI7 stopped
+ * under, offers `续行` once its revalidation holds. `改计划重做` is shown with the reason it is not offered yet (S76c).
  */
 export interface TaskPlanRunControlProjection {
   /** The one Run every control names (CTRL-009). */
   runRecordId: string;
   /** 正在取消: the editor's cancellation is recorded and the Run is stopping; nothing more is offered. */
   cancelling: boolean;
+  /** 正在暂停: the editor's pause is recorded and the Run stops at the next unit boundary; nothing more is offered. */
+  pausing: boolean;
   /** `reason` is `null` while 取消任务 is offered; `impact` is the Cancellation Impact Summary, one line each. */
   cancel: { reason: string | null; impact: ReadonlyArray<string> };
-  pause: { reason: string };
+  /** `reason` is `null` while 暂停 is offered: a Run executing its units. */
+  pause: { reason: string | null };
+  /**
+   * 续行 for a paused Run or one left 可续行: `reason` is `null` while its revalidation holds, else why it cannot go on
+   * as it was authorized (CONT-016). `null` for a Run that is not stopped.
+   */
+  resume: { reason: string | null } | null;
   redo: { reason: string };
   /**
    * The activity card's facts (AUTH-011; RUN-001 to 004, LIVE-001 to 003): the Run Liveness Signal the execution
@@ -4029,6 +4046,11 @@ export interface TaskPlanRunControlProjection {
    * keeps the reused ranges in view. `null` for a first baseline, which reads every range.
    */
   update: null | { manuscriptUnits: number; reusedUnits: number };
+  /**
+   * A stopped Run's continuation point (S76b): how many of the units it submits it has kept — `unitsSettled` is `null`
+   * when that progress no longer reads back — and `null` while it runs.
+   */
+  continuation: { unitsSettled: number | null; unitsTotal: number } | null;
 }
 
 /**
@@ -4820,6 +4842,9 @@ export type GlobalAttentionStateKey =
   | 'analysis-waiting-connection'
   | 'analysis-waiting-slot'
   | 'analysis-cancelling'
+  | 'analysis-pausing'
+  | 'analysis-paused'
+  | 'analysis-resumable'
   | 'review-running'
   | 'review-continuable'
   | 'analysis-completed'
@@ -5491,6 +5516,22 @@ export interface ServiceOperationMap {
     output: BaselineAnalysisProjection;
   };
   /**
+   * 暂停 (Issue #422, S76b; CTRL-001, CTRL-002): `pausing` is recorded at once, the Run stops at the next unit boundary —
+   * the unit in flight finishes — and reads `paused` once what it read is kept; the slot is free while it waits.
+   */
+  pauseBaselineAnalysisRun: {
+    input: { bookId: string; taskIntentId: string };
+    output: BaselineAnalysisProjection;
+  };
+  /**
+   * 续行 (CONT-015, CONT-016): after lightweight revalidation, the same Run goes on in a new Harness Execution Span from
+   * its continuation point, under its own authorization; material drift refuses it, and nothing is recorded.
+   */
+  resumeBaselineAnalysisRun: {
+    input: { bookId: string; taskIntentId: string };
+    output: BaselineAnalysisProjection;
+  };
+  /**
    * Reconnect Preflight now, over every waiting Run (OFF-007, OFF-008): what it admitted, blocked, or left waiting.
    * It names no Book because it only ever admits Runs the editor already authorized to start when online.
    */
@@ -5835,6 +5876,8 @@ export interface RendererApi {
   startBaselineAnalysisWhenOnline(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisProjection>;
   cancelWaitingBaselineAnalysis(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
   cancelBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
+  pauseBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
+  resumeBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
   runReconnectPreflight(): Promise<ReconnectPreflightProjection>;
   /** 快速开始 of the Book the window is showing, after 先看计划's preparation (Issue #421). */
   quickStartBaselineAnalysis(input: { taskIntentId: string; planEnvelopeDigest: string; ruleVersionId: string }): Promise<QuickStartBaselineAnalysisResult>;

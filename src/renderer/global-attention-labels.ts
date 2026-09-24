@@ -122,6 +122,9 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   'analysis-waiting-connection': '需要处理模型连接',
   'analysis-waiting-slot': '等待运行名额',
   'analysis-cancelling': '正在取消',
+  'analysis-pausing': '正在暂停',
+  'analysis-paused': '已暂停',
+  'analysis-resumable': '任务已中断 · 可续行',
   'review-running': '运行中',
   // A Review Run a stopped service left mid-way; there is no pause yet, so it is never called 已暂停.
   'review-continuable': '中途停止 · 可继续审阅',
@@ -151,6 +154,9 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
   'analysis-waiting-connection': { tone: 'attention', shape: 'triangle' },
   'analysis-waiting-slot': { tone: 'neutral', shape: 'ring' },
   'analysis-cancelling': { tone: 'attention', shape: 'half' },
+  'analysis-pausing': { tone: 'attention', shape: 'half' },
+  'analysis-paused': { tone: 'neutral', shape: 'half' },
+  'analysis-resumable': { tone: 'attention', shape: 'ring' },
   'review-running': { tone: 'progress', shape: 'half' },
   'review-continuable': { tone: 'attention', shape: 'ring' },
   'analysis-completed': { tone: 'good', shape: 'check' },
@@ -266,6 +272,12 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
       return runningReason(facts.progress);
     case 'analysis-cancelling':
       return `你取消了这项任务；正在进行的这一步完成后停止，之后不再发送任何内容 · ${runningReason(facts.progress)}`;
+    case 'analysis-pausing':
+      return `你暂停了这项任务；正在进行的这一步完成后停下，已完成的部分都会保存 · ${runningReason(facts.progress)}`;
+    case 'analysis-paused':
+      return '已暂停：已读完的阅读范围都已保存；续行时从下一个接着读，也可以取消它。';
+    case 'analysis-resumable':
+      return 'AI7 关闭时这项任务正在运行；已读完的阅读范围都已保存。续行时从下一个接着读，在此之前不会发送任何内容。';
     case 'review-running': {
       const current = facts.categories[0];
       if (current === undefined) return '正在审阅';

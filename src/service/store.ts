@@ -178,8 +178,13 @@ import {
   TaskPlanError,
   withConnectionReadiness,
   withConnectivityReadiness,
+  withResumeBlockers,
   withWaitingReason,
   type WaitingFor,
+  RESUME_BLOCKED_CONNECTION,
+  RESUME_BLOCKED_OFFLINE,
+  RESUME_BLOCKED_SLOT,
+  type BaselineStoppedRunFacts,
 } from './task-plan.js';
 import { initializeProposalConflictSchema, ProposalConflictError, ProposalConflictStore, readConflictAttention } from './proposal-conflicts.js';
 import {
@@ -230,6 +235,7 @@ import {
   setRuleAlreadyReason,
   type DefaultExecutionRuleRecord,
 } from './default-execution-rules.js';
+import { initializeRunCheckpointSchema } from './analysis/run-checkpoints.js';
 import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
 import { reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './review/category-configuration.js';
 import { reviewCategoryKindDefinition } from './review/review-category-kind.js';
@@ -291,6 +297,7 @@ import {
   CONNECTIVITY_WAIT_SCHEMA_VERSION,
   DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
   RUN_CANCELLATION_SCHEMA_VERSION,
+  RUN_CONTINUATION_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1496,7 +1503,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === PUBLICATION_VERSION_SCHEMA_VERSION || currentVersion === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       currentVersion === IMPORT_RETENTION_SCHEMA_VERSION || currentVersion === IMPORTED_MARK_SCHEMA_VERSION ||
       currentVersion === EXPORT_LEDGER_SCHEMA_VERSION || currentVersion === CONNECTIVITY_WAIT_SCHEMA_VERSION || currentVersion === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
-      currentVersion === RUN_CANCELLATION_SCHEMA_VERSION,
+      currentVersion === RUN_CANCELLATION_SCHEMA_VERSION ||
+      currentVersion === RUN_CONTINUATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1524,7 +1532,8 @@ function initializeSchema(db: DatabaseSync): void {
     currentVersion === PUBLICATION_VERSION_SCHEMA_VERSION || currentVersion === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       currentVersion === IMPORT_RETENTION_SCHEMA_VERSION || currentVersion === IMPORTED_MARK_SCHEMA_VERSION ||
       currentVersion === EXPORT_LEDGER_SCHEMA_VERSION || currentVersion === CONNECTIVITY_WAIT_SCHEMA_VERSION || currentVersion === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
-      currentVersion === RUN_CANCELLATION_SCHEMA_VERSION
+      currentVersion === RUN_CANCELLATION_SCHEMA_VERSION ||
+      currentVersion === RUN_CONTINUATION_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1866,7 +1875,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
-      version === RUN_CANCELLATION_SCHEMA_VERSION,
+      version === RUN_CANCELLATION_SCHEMA_VERSION ||
+      version === RUN_CONTINUATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1883,7 +1893,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
-      version === RUN_CANCELLATION_SCHEMA_VERSION) return;
+      version === RUN_CANCELLATION_SCHEMA_VERSION ||
+      version === RUN_CONTINUATION_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -1992,7 +2003,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
-      version === RUN_CANCELLATION_SCHEMA_VERSION,
+      version === RUN_CANCELLATION_SCHEMA_VERSION ||
+      version === RUN_CONTINUATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2008,7 +2020,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
-      version === RUN_CANCELLATION_SCHEMA_VERSION) return;
+      version === RUN_CANCELLATION_SCHEMA_VERSION ||
+      version === RUN_CONTINUATION_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2301,7 +2314,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== RUN_CANCELLATION_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== RUN_CONTINUATION_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2321,6 +2334,7 @@ function validateModelServiceSchema(
       version >= IMPORTED_MARK_SCHEMA_VERSION,
       version >= EXPORT_LEDGER_SCHEMA_VERSION,
       version >= DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
+      version >= RUN_CONTINUATION_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2364,7 +2378,8 @@ function initializeModelServiceSchema(
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
-      version === RUN_CANCELLATION_SCHEMA_VERSION,
+      version === RUN_CANCELLATION_SCHEMA_VERSION ||
+      version === RUN_CONTINUATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2380,7 +2395,8 @@ function initializeModelServiceSchema(
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
-      version === RUN_CANCELLATION_SCHEMA_VERSION) {
+      version === RUN_CANCELLATION_SCHEMA_VERSION ||
+      version === RUN_CONTINUATION_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3287,6 +3303,7 @@ export class EditorialStore {
       initializeImportedMarkSchema(authority);
       initializeExportLedgerSchema(authority);
       initializeDefaultExecutionRuleSchema(authority);
+      initializeRunCheckpointSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -3712,7 +3729,8 @@ export class EditorialStore {
       current(projection.taskIntent.taskIntentId);
       const blocks = this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
       const defaultRule = this.#baselineDefaultRule(projection);
-      const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, defaultRule }));
+      const stopped = this.#baselineStoppedRun(projection);
+      const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, defaultRule, ...(stopped === null ? {} : { stopped }) }));
       return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     const reviewRunId = input.ref;
@@ -3749,6 +3767,16 @@ export class EditorialStore {
     // and only once its credential is known to be there — 模型未连接 is decided first.
     const reaches = routeKind !== null && connectivity.reachesNetwork(routeKind);
     plan = withConnectivityReadiness(plan, reaches, reaches ? connectivity.reading() : 'online');
+    // 续行 (Issue #422, S76b; CONT-015): a stopped Run goes on only once the service could run it now — the slot free,
+    // the route's credential there when it sends to a model service — one that sends nothing asks for none here
+    // either — and the device online when the route reaches its model over the network.
+    if (plan.runControl?.resume != null) {
+      const blockers: string[] = [];
+      if (connectivity.slotBusy()) blockers.push(RESUME_BLOCKED_SLOT);
+      if (plan.start.needsModelConnection && (await credentialReadiness()) === 'missing') blockers.push(RESUME_BLOCKED_CONNECTION);
+      if (reaches && connectivity.reading() === 'offline') blockers.push(RESUME_BLOCKED_OFFLINE);
+      plan = withResumeBlockers(plan, blockers);
+    }
     if (plan.state.key !== 'waiting') return plan;
     if (reaches && connectivity.reading() === 'offline') return withWaitingReason(plan, 'network');
     if ((await credentialReadiness()) === 'missing') return withWaitingReason(plan, 'connection');
@@ -3826,6 +3854,53 @@ export class EditorialStore {
   requestBaselineAnalysisCancel(bookId: string, taskIntentId: string): string | null {
     this.#assertAvailable();
     return this.#analysisCall(() => this.#baselineAnalysis.requestCancel(bookId, taskIntentId)).runRecordId;
+  }
+
+  /**
+   * 暂停 on the Book's baseline Run (Issue #422, S76b; CTRL-001): `pausing` is recorded at once and the Run the execution
+   * owner must stop at the next unit boundary is named — `null` when it is already paused or left 可续行.
+   */
+  requestBaselineAnalysisPause(bookId: string, taskIntentId: string): string | null {
+    this.#assertAvailable();
+    return this.#analysisCall(() => this.#baselineAnalysis.requestPause(bookId, taskIntentId)).runRecordId;
+  }
+
+  /** The Book's paused or 可续行 baseline Run, which 续行 would continue (CONT-015). */
+  continuableBaselineAnalysisRun(bookId: string, taskIntentId: string): string {
+    this.#assertAvailable();
+    return this.#analysisCall(() => this.#baselineAnalysis.continuableRun(bookId, taskIntentId));
+  }
+
+  /**
+   * Startup reconciliation (CONT-014): the baseline Runs a stopped service left under way are settled `paused` or
+   * `resumable`; the ones left cancelling are named for the execution owner to finish.
+   */
+  reconcileStoppedBaselineAnalysisRuns(): { settled: number; cancelling: ReadonlyArray<string> } {
+    this.#assertAvailable();
+    return this.#analysisCall(() => this.#baselineAnalysis.reconcileStoppedRuns());
+  }
+
+  /**
+   * What the drawer reads of the Task's Run when nothing executes it — paused, left 可续行, or left under way when AI7
+   * closed: what it kept, and, for a stopped one, why 续行 cannot go on as authorized, if not.
+   */
+  #baselineStoppedRun(projection: BaselineAnalysisProjection): BaselineStoppedRunFacts | null {
+    const run = projection.run;
+    if (run === null || run.progress !== null) return null;
+    const stopped = run.state === 'paused' || run.state === 'resumable';
+    const unheld = run.state === 'admitted' || run.state === 'executing' || run.state === 'cancelling' || run.state === 'pausing';
+    if (!stopped && !unheld) return null;
+    const unitsTotal = projection.update === null ? (projection.coverageManifest?.units.length ?? 0) : projection.update.reusePlan?.counts.recomputed ?? 0;
+    return this.#analysisCall(() => {
+      let unitsSettled: number | null;
+      try {
+        unitsSettled = this.#baselineAnalysis.unitCheckpoints(run.runRecordId).length;
+      } catch {
+        // Its kept progress no longer reads back: 续行 names that, and a cancellation forms no revision from it.
+        unitsSettled = null;
+      }
+      return { unitsSettled, unitsTotal, blockers: stopped ? this.#baselineAnalysis.continuationBlockers(run.runRecordId) : [] };
+    });
   }
 
   /** The baseline Runs waiting in Connectivity Wait — the route Book's, or every Book's — oldest first. */

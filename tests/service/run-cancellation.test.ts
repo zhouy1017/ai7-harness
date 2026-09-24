@@ -15,8 +15,8 @@ import {
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { EXPORT_LEDGER_SCHEMA_VERSION, RUN_CANCELLATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
-import { RUN_CONTROL_CANCELLING_REASON, RUN_CONTROL_PAUSE_REASON, RUN_CONTROL_REDO_REASON } from '../../src/service/task-plan.js';
+import { EXPORT_LEDGER_SCHEMA_VERSION, RUN_CONTINUATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { RUN_CONTROL_CANCELLING_REASON, RUN_CONTROL_REDO_REASON } from '../../src/service/task-plan.js';
 import { controlledUnitHold } from '../../src/service/unit-hold.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
@@ -26,6 +26,7 @@ import {
 } from '../../src/shared/protocol.js';
 import { plantRevision30Relations } from '../support/default-execution-rules.js';
 import { plantRevision31Relations, runCancellationShape } from '../support/run-cancellation.js';
+import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
@@ -172,13 +173,15 @@ describe('schema revision 32 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(RUN_CANCELLATION_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(RUN_CONTINUATION_SCHEMA_VERSION);
       expect(runCancellationShape(database, 'analysis_run_states')).toBe('current');
       expect(runCancellationShape(database, 'analysis_task_outcomes')).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_run_states ORDER BY rowid').all()).toEqual(before.states);
       expect(database.prepare('SELECT rowid, * FROM analysis_task_outcomes ORDER BY rowid').all()).toEqual(before.outcomes);
       const after = relationTruth(database);
-      expect([...after.keys()]).toEqual([...before.truth.keys()]);
+      // Revision 33 (S76b) then adds its checkpoint relation, empty.
+      expect([...after.keys()]).toEqual([...before.truth.keys(), ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER].sort());
+      for (const relation of RUN_CHECKPOINT_RELATIONS_DROP_ORDER) expect(after.get(relation)?.content).toMatch(/^0:/);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name))
         .toEqual(['analysis_run_states', 'analysis_task_outcomes']);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['service_lifetimes']);
@@ -211,7 +214,7 @@ describe('schema revision 32 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(RUN_CANCELLATION_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(RUN_CONTINUATION_SCHEMA_VERSION);
       expect(runCancellationShape(database, 'analysis_run_states')).toBe('current');
       expect(runCancellationShape(database, 'analysis_task_outcomes')).toBe('current');
     });
@@ -258,14 +261,15 @@ describe('取消任务 over the real store', () => {
       await until(() => execution.progressFor(runRecordId)?.currentUnitOrdinal === 3, 'the third unit in flight');
       expect(execution.progressFor(runRecordId)).toMatchObject({ unitsSettled: 2, unitsTotal: SAMPLE1_UNITS, stage: 'units' });
 
-      // The drawer offers 取消任务 with its summary, and 暂停 and 改计划重做 with why they wait.
+      // The drawer offers 取消任务 with its summary, 暂停 (S76b), and 改计划重做 with why it waits.
       const running = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, progress);
       expect(running.state).toEqual({ key: 'running', label: '运行中' });
       expect(running.runControl).toMatchObject({
         runRecordId,
         cancelling: false,
         cancel: { reason: null },
-        pause: { reason: RUN_CONTROL_PAUSE_REASON },
+        pause: { reason: null },
+        resume: null,
         redo: { reason: RUN_CONTROL_REDO_REASON },
         activity: { unitsSettled: 2, unitsTotal: SAMPLE1_UNITS, currentUnitOrdinal: 3 },
       });
@@ -524,7 +528,7 @@ describe('取消任务 over the real store', () => {
     }
   }, 300_000);
 
-  it('never lets the hold keep a Run from being interrupted, and a Run interrupted while held is 已中断', async () => {
+  it('never lets the hold keep a Run from AI7 closing, and leaves it 可续行 with what it read kept (S76b, CONT-014)', async () => {
     const holdPath = join(roots.dataRoot, '..', 'j10-unit-hold.txt');
     writeFileSync(holdPath, '1');
     const store = await openWithRoute();
@@ -536,10 +540,13 @@ describe('取消任务 over the real store', () => {
       execution.admitAndDispatch(runRecordId);
       await until(() => execution.progressFor(runRecordId)?.currentUnitOrdinal === 2, 'the second unit in flight');
       await execution.dispose();
-      const interrupted = store.inspectBaselineAnalysis(bookId, () => null);
-      expect(interrupted.run?.state).toBe('interrupted');
-      expect(interrupted.taskOutcome?.classification).toBe('interrupted');
-      expect(interrupted.resultSetRevision?.coverage.unitsClosed).toBe(2);
+      // The held unit's turn had come back whole, so it settled and was kept; the Run then stopped without ending.
+      const stopped = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(stopped.run?.state).toBe('resumable');
+      expect(stopped.stateLabel).toBe('任务已中断 · 可续行');
+      expect(stopped.taskOutcome).toBeNull();
+      expect(stopped.resultSetRevision).toBeNull();
+      expect(store.baselineAnalysisLedger.unitCheckpoints(runRecordId).map((checkpoint) => checkpoint.unit.unitOrdinal)).toEqual([1, 2]);
       store.markCleanShutdown();
     } finally {
       await execution.dispose();

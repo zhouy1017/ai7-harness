@@ -205,16 +205,16 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
   }
   try {
     database.exec('PRAGMA query_only = ON;');
-    // Synchronized delta with Issues #467, #407, #408, #417, #414, #57, #410, #411, #413, #502, #421 and #422: schema revision 21
+    // Synchronized delta with Issues #467, #407, #408, #417, #414, #57, #410, #411, #413, #502, #421 and #422 (twice): schema revision 21
     // added the manuscript entry-position relation, revision 22 the editorial-mark relations, revision 23 the
     // manuscript-effect relations, revision 24 rebuilt the three kind-coupled analysis relations for the
     // review-category kind family, revision 25 added the Publication Version relations, revision 26 the
     // proposal-conflict relations, revision 27 the import-retention relations, revision 28 the staged
     // imported marks, revision 29 the export ledger, revision 30 widens the Run states for Connectivity Wait,
-    // revision 31 adds the default-execution-rule ledger and revision 32 widens the Run states and the Task
-    // Outcomes for 取消任务, so this pin moves with the terminal version the service stamps
-    // (`RUN_CANCELLATION_SCHEMA_VERSION`).
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 32, 'credential-cleanup-metadata-version');
+    // revision 31 adds the default-execution-rule ledger, revision 32 widens the Run states and the Task Outcomes
+    // for 取消任务 and revision 33 widens the Run states again and adds the unit checkpoints for 暂停 and 续行, so this
+    // pin moves with the terminal version the service stamps (`RUN_CONTINUATION_SCHEMA_VERSION`).
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 33, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
               approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
