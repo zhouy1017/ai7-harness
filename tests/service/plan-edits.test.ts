@@ -9,6 +9,7 @@ import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-poli
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { PLAN_EDIT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { SET_RULE_EDITED } from '../../src/service/default-execution-rules.js';
 import { PLAN_EDIT_DRIFT_REASON, PLAN_EDIT_STARTED_REASON } from '../../src/service/task-plan.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
@@ -334,6 +335,30 @@ describe('更新计划 over the real store', () => {
       expect(edited.providerResolutionPlan?.remoteBinding.credentialReadiness).toBe('missing');
       store.markCleanShutdown();
     } finally {
+      store.close();
+    }
+  }, 300_000);
+
+  it('keeps an edited plan from becoming the quick-start default, which would start without its edits (TASK-022)', async () => {
+    const store = await openWithRoute(happy);
+    const execution = owner(store, happy);
+    try {
+      const bookId = await importedBook(store, 'L2 sample1 改过的计划不设默认');
+      const first = prepare(store, bookId);
+      await runToSettled(store, execution, bookId, first.planEnvelope!.digest, first.taskIntent!.taskIntentId);
+      const whole = prepare(store, bookId, { mode: 'reanalyze-book', selectedRange: null });
+      const taskIntentId = whole.taskIntent!.taskIntentId;
+      const input = { bookId, kind: 'baseline-analysis' as const, ref: taskIntentId };
+      // As the procedure proposed it, the plan can set the rule.
+      expect(store.inspectTaskPlan(input).defaultRule).toMatchObject({ canSet: true, reason: null });
+      // Edited, it cannot, and says why; nothing is set.
+      const edited = edit(store, bookId, taskIntentId, whole.planEnvelope!.digest, BOTH);
+      expect(store.inspectTaskPlan(input).defaultRule).toMatchObject({ canSet: false, reason: SET_RULE_EDITED, planEnvelopeDigest: null });
+      expect(await refusal(() => store.setDefaultExecutionRule(bookId, taskIntentId, edited.planEnvelope!.digest))).toBe('DEFAULT_EXECUTION_RULE_UNAVAILABLE');
+      expect(store.inspectDefaultExecutionRules().rules).toEqual([]);
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
       store.close();
     }
   }, 300_000);
