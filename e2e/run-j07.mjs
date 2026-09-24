@@ -2035,6 +2035,33 @@ async function main() {
     await assertRenderer(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] aside.document-lens .document-materials .document-origin-marks')?.textContent === ${JSON.stringify(DRAFT_MARKS_LINE)}`, 'documents-restart-origin-marks');
     await assertNoForbiddenWords(renderer, 'documents-without-forbidden-words');
 
+    at('knowledge-exemplars');
+    // 知识库 › 范例 (Issue #427, S79b): the Book set as a 发稿版本 brings in the 新闻稿 it delivered — the version its latest
+    // delivery named, the earlier one beneath it — attributed to the Book and eligible 仅本社, exactly as
+    // `inspectExemplars()` answers.
+    await clickSelector(renderer, '#global-attention-entry', 'exemplars-attention');
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]')`, 'exemplars-attention-screen');
+    await click(renderer, '返回图书列表', 'exemplars-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'exemplars-landing');
+    await click(renderer, '知识库', 'exemplars-knowledge');
+    await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"] .knowledge-base')`, 'exemplars-knowledge-page');
+    await click(renderer, '范例', 'exemplars-tab');
+    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab === 'exemplars' && document.querySelector('.knowledge-panel')?.dataset.exemplarBooks === '1'`, 'exemplars-painted');
+    const exemplars = await renderer.evaluate(`window.ai7.inspectExemplars()`);
+    const exemplarPage = await renderer.evaluate(`Array.from(document.querySelectorAll('.exemplar-book'), (card) => ({
+      bookId: card.dataset.bookId, title: card.querySelector('h3')?.textContent ?? null, attribution: card.querySelector('.exemplar-attribution')?.textContent ?? null,
+      items: Array.from(card.querySelectorAll('.exemplar-items li'), (item) => [item.dataset.exemplarType, item.dataset.exemplarVersion, item.textContent]),
+    }))`);
+    const exemplarBook = exemplars?.books?.[0];
+    const exemplarNews = exemplarBook?.exemplars?.find((exemplar) => exemplar.typeId === 'news-release');
+    requireJourney(exemplars?.books?.length === 1 && exemplarBook.bookId === bookId && exemplarNews?.typeLabel === '新闻稿' && exemplarNews.eligibility === 'house-only' &&
+      exemplarNews.earlierVersions.length === 1 && exemplarPage.length === 1 && exemplarPage[0].bookId === bookId && exemplarPage[0].title === `《${EXCERPT.title}》` &&
+      exemplarPage[0].attribution === '作者：未填写 · 责编：未填写' && exemplarPage[0].items.length === exemplarBook.exemplars.length &&
+      exemplarPage[0].items[0][0] === 'news-release' && exemplarPage[0].items[0][1] === String(exemplarNews.version) &&
+      exemplarPage[0].items[0][2].startsWith(`新闻稿 · 版本 ${exemplarNews.version} · 交付给`) &&
+      exemplarPage[0].items[0][2].includes(` · 学习准入：仅本社 · 此前还交付过版本 ${exemplarNews.earlierVersions[0]}`),
+    'exemplars-news-release', { service: exemplars?.books?.map((entry) => entry.exemplars.map((exemplar) => [exemplar.typeId, exemplar.version, exemplar.earlierVersions])), page: exemplarPage });
+
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
 

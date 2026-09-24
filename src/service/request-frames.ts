@@ -244,6 +244,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectDefaultExecutionRules':
     // 知识库 › 审阅规范文件 (Issue #427, S79a) reads across every Book, so it names none.
     case 'inspectReviewGuidelines':
+    // 知识库 › 范例 (Issue #427, S79b) reads every published Book, so it names none.
+    case 'inspectExemplars':
     case 'shutdown': {
       requireInput(value.input, [], tentativeId);
       break;

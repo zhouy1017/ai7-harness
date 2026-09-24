@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  EXEMPLARS_LATER,
+  exemplarAttribution,
+  exemplarDesignation,
+  exemplarLine,
   GUIDELINE_CANCEL,
   GUIDELINE_CONFIRM,
   GUIDELINE_IMPORT,
@@ -22,7 +26,7 @@ import type { ReviewGuidelineVersionProjection } from '../../src/shared/protocol
 describe('知识库', () => {
   it('names its seven classes in the specification\'s order, and says which arrive later', () => {
     expect(KNOWLEDGE_BASE_TAB_VIEWS.map((view) => view.label)).toEqual(['审阅规范文件', '评估方案', '工序与规则', '社级编辑记忆', '范例', '资料库', '外部来源留存']);
-    expect(KNOWLEDGE_BASE_TAB_VIEWS.filter((view) => view.pending === null).map((view) => view.tab)).toEqual(['guidelines', 'rules']);
+    expect(KNOWLEDGE_BASE_TAB_VIEWS.filter((view) => view.pending === null).map((view) => view.tab)).toEqual(['guidelines', 'rules', 'exemplars']);
     for (const view of KNOWLEDGE_BASE_TAB_VIEWS) {
       expect(view.holds.length).toBeGreaterThan(0);
       if (view.pending !== null) expect(view.pending.startsWith('尚未提供')).toBe(true);
@@ -55,6 +59,20 @@ describe('知识库', () => {
       changes: { changed: 2, added: 1, removed: 0 }, clauses: [{ clauseId: 'a/1', number: 1, text: '一' }],
     })).toBe('规范.txt · 1 条 · 与第 1 版相比：改动 2 条，新增 1 条，删去 0 条');
     expect(guidelineImported('文字规范条款', 2)).toBe('已导入《文字规范条款》第 2 版；之后的审阅按第 2 版。');
+  });
+});
+
+describe('范例 (Issue #427, S79b)', () => {
+  it('names a published Book\'s attribution and each exemplar with its version, delivery, arrival and eligibility', () => {
+    expect(exemplarAttribution({ authors: ['作者甲', '作者丙'], editors: [] })).toBe('作者：作者甲、作者丙 · 责编：未填写');
+    expect(exemplarDesignation({ designatedAt: 'x' }, () => '9月25日')).toBe('设为发稿版本于 9月25日');
+    const exemplar = {
+      documentId: 'd', typeId: 'news-release', typeLabel: '新闻稿', version: 3, revisionId: 'r', revisionDigest: 'a'.repeat(64),
+      deliveredTo: '编辑部', deliveredAt: 't1', archivedAt: 't2', earlierVersions: [1, 2], eligibility: 'house-only' as const,
+    };
+    expect(exemplarLine(exemplar, (iso) => iso)).toBe('新闻稿 · 版本 3 · 交付给编辑部于 t1 · 归入于 t2 · 学习准入：仅本社 · 此前还交付过版本 1、2');
+    expect(exemplarLine({ ...exemplar, earlierVersions: [] }, (iso) => iso)).toBe('新闻稿 · 版本 3 · 交付给编辑部于 t1 · 归入于 t2 · 学习准入：仅本社');
+    expect(EXEMPLARS_LATER).toHaveLength(2);
   });
 });
 

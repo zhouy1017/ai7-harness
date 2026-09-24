@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 68 as const;
+export const SERVICE_PROTOCOL_VERSION = 69 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -77,6 +77,7 @@ export const IPC_CHANNELS = {
   inspectReviewGuidelines: 'ai7:j15:inspect-review-guidelines',
   previewReviewGuidelineVersion: 'ai7:j15:preview-review-guideline-version',
   importReviewGuidelineVersion: 'ai7:j15:import-review-guideline-version',
+  inspectExemplars: 'ai7:j07:inspect-exemplars',
   inspectReviewWorkspace: 'ai7:j04:inspect-review-workspace',
   prepareReviewRun: 'ai7:j04:prepare-review-run',
   authorizeReviewRun: 'ai7:j04:authorize-review-run',
@@ -4643,6 +4644,42 @@ export interface ReviewGuidelinePreviewProjection {
   readonly changes: { readonly changed: number; readonly added: number; readonly removed: number };
 }
 
+// ---- 知识库 › 范例 (Issue #427, plan slice S79b; V2-UX-KB-004, KB-006) --------------------------------------------------
+
+/** One exemplar: the version of one delivered document of a published Book that stands in 范例. */
+export interface ExemplarProjection {
+  readonly documentId: string;
+  readonly typeId: string;
+  readonly typeLabel: string;
+  /** The document version its latest Delivery Record named. */
+  readonly version: number;
+  readonly revisionId: string;
+  readonly revisionDigest: string;
+  readonly deliveredTo: string;
+  readonly deliveredAt: string;
+  /** When it came into 范例: the designation for a document delivered before it, else its delivery. */
+  readonly archivedAt: string;
+  /** Other versions of the document delivered before, oldest first. */
+  readonly earlierVersions: ReadonlyArray<number>;
+  /** The Learning Eligibility it came in with: `仅本社`, the default, asked of no one. */
+  readonly eligibility: 'house-only';
+}
+
+/** A published Book in 范例: who it is attributed to, its latest 发稿版本, and its exemplars by document type. */
+export interface ExemplarBookProjection {
+  readonly bookId: string;
+  readonly bookTitle: string;
+  readonly authors: ReadonlyArray<string>;
+  readonly editors: ReadonlyArray<string>;
+  readonly publicationOrdinal: number;
+  readonly designatedAt: string;
+  readonly exemplars: ReadonlyArray<ExemplarProjection>;
+}
+
+export interface ExemplarsProjection {
+  readonly books: ReadonlyArray<ExemplarBookProjection>;
+}
+
 /** The drawer's `设为快速开始默认…` for one plan, and the rule that started its Task, when one did. */
 export interface TaskPlanDefaultRuleProjection {
   canSet: boolean;
@@ -6777,6 +6814,11 @@ export interface ServiceOperationMap {
     input: { previewId: string };
     output: ReviewGuidelinesProjection;
   };
+  /** 知识库 › 范例 (Issue #427, S79b): every published Book's delivered documents, by Book and type. */
+  inspectExemplars: {
+    input: Record<string, never>;
+    output: ExemplarsProjection;
+  };
   /**
    * 审阅 (Issue #417, plan slice S69). The workspace is one read; preparing a Review Run is a
    * cooperative job; the one approval records the Run's authorization and starts its drive loop at once,
@@ -7150,6 +7192,8 @@ export interface RendererApi {
   /** 导入新版本: the native picker, then the file's clauses as the next version would read them; `null` when the picker was cancelled. */
   previewReviewGuidelineVersion(input: { documentId: string }): Promise<ReviewGuidelinePreviewProjection | null>;
   importReviewGuidelineVersion(input: { previewId: string }): Promise<ReviewGuidelinesProjection>;
+  /** 知识库 › 范例 (Issue #427, S79b): names no Book; it reads every published Book's delivered documents. */
+  inspectExemplars(): Promise<ExemplarsProjection>;
   /**
    * 审阅 of the Book the window is showing (Issue #417). Inspecting without a Run opens the latest; a
    * running Run is followed by inspecting it again, and its executing category carries its progress.

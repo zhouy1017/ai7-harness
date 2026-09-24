@@ -525,6 +525,9 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: await store.previewReviewGuidelineVersion(request.input.documentId, request.input.path) };
     case 'importReviewGuidelineVersion':
       return { id: request.id, ok: true, op: request.op, result: store.importReviewGuidelineVersion(request.input.previewId) };
+    // 知识库 › 范例 (Issue #427, S79b).
+    case 'inspectExemplars':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectExemplars() };
     case 'deactivateDefaultExecutionRule':
       return { id: request.id, ok: true, op: request.op, result: store.deactivateDefaultExecutionRule(request.input.ruleId) };
     // 审阅 (Issue #417, plan slice S69). Every answer that shows a Run reads the one owner's progress, so

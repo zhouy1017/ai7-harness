@@ -41,6 +41,7 @@ import type {
   UpdateBookPeopleInput,
   ReviewGuidelinePreviewProjection,
   ReviewGuidelinesProjection,
+  ExemplarsProjection,
   AppendMaintenanceCaseRevisionInput,
   InspectMaintenanceCaseInput,
   MaintenanceCaseProjection,
@@ -282,6 +283,7 @@ import { BookDeliveryPackageError, BookDeliveryPackages, initializeBookDeliveryP
 import { MaintenanceCaseError, MaintenanceCases, initializeMaintenanceCaseSchema } from './maintenance-cases.js';
 import { BookPeople, BookPeopleError, initializeBookPeopleSchema } from './book-people.js';
 import { ReviewGuidelineError, ReviewGuidelineLedger, initializeReviewGuidelineSchema, readGuidelineFile } from './review-guidelines.js';
+import { readExemplars } from './exemplars.js';
 import {
   ProductionDocumentOriginError,
   initializeProductionDocumentOriginSchema,
@@ -5427,6 +5429,12 @@ export class EditorialStore {
   /** 知识库 › 审阅规范文件 (Issue #427, S79a; KB-001 to KB-003): every guideline document with its versions and their use. */
   inspectReviewGuidelines(): ReviewGuidelinesProjection {
     return this.#guidelineCall(() => this.#reviewGuidelines.projection());
+  }
+
+  /** 知识库 › 范例 (Issue #427, S79b; KB-004, KB-006): every published Book's delivered documents, read from their records. */
+  inspectExemplars(): ExemplarsProjection {
+    this.#assertAvailable();
+    return readExemplars(this.#authority, { current: (bookId) => this.#peopleCall(() => this.#bookPeople.current(bookId)) });
   }
 
   /** 导入新版本's first step: the picked file's clauses as the next version of one document would read them; nothing is recorded. */

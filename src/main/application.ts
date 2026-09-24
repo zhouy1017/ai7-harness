@@ -2570,6 +2570,14 @@ function registerRendererHandlers(
       return service.call('inspectReviewGuidelines', {});
     }),
   );
+  // 知识库 › 范例 (Issue #427, S79b) names no Book either: it reads every published Book's delivered documents.
+  ipcMain.handle(IPC_CHANNELS.inspectExemplars, (event) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('inspectExemplars', {});
+    }),
+  );
   ipcMain.handle(
     IPC_CHANNELS.previewReviewGuidelineVersion,
     (event, input: { documentId: string }) =>
