@@ -191,11 +191,14 @@ export interface ComposedRevisedParagraph {
 /**
  * A table among the paragraphs: rows of cells of paragraphs. A row may be inserted or deleted as a whole
  * (`w:trPr/w:ins`, `w:trPr/w:del`), a cell inserted, deleted or its vertical merge changed (`w:tcPr/w:cellIns`,
- * `w:cellDel`, `w:cellMerge`), each with its own author and date.
+ * `w:cellDel`, `w:cellMerge`), each with its own author and date. A row may carry both, in that order: one author
+ * inserted it and another deleted it.
  */
 export interface ComposedRevisedTable {
   readonly table: ReadonlyArray<{
-    readonly revision?: { readonly kind: 'ins' | 'del'; readonly author: string; readonly date: string };
+    readonly revision?:
+      | { readonly kind: 'ins' | 'del'; readonly author: string; readonly date: string }
+      | ReadonlyArray<{ readonly kind: 'ins' | 'del'; readonly author: string; readonly date: string }>;
     readonly cells: ReadonlyArray<{
       readonly revision?: { readonly kind: 'cellIns' | 'cellDel' | 'cellMerge'; readonly author: string; readonly date: string };
       readonly paragraphs: ReadonlyArray<ComposedRevisedParagraph>;
@@ -306,7 +309,10 @@ export async function composeRevisedDocx(path: string, request: ComposedRevisedR
     const columns = Math.max(1, ...table.table.map((row) => row.cells.length));
     const rows: string[] = [];
     for (const row of table.table) {
-      const rowRevision = row.revision === undefined ? '' : `<w:trPr><w:${row.revision.kind}${attributes(row.revision.author, row.revision.date)}/></w:trPr>`;
+      const rowRevisions = row.revision === undefined ? [] : 'kind' in row.revision ? [row.revision] : row.revision;
+      const rowRevision = rowRevisions.length === 0
+        ? ''
+        : `<w:trPr>${rowRevisions.map((revision) => `<w:${revision.kind}${attributes(revision.author, revision.date)}/>`).join('')}</w:trPr>`;
       const cells: string[] = [];
       for (const cell of row.cells) {
         const revision = cell.revision === undefined

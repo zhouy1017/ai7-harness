@@ -30,6 +30,8 @@ The Source Version records the **original file's** exact identity, digest, byte 
 
 The Import Fidelity Review keeps its eight content classes and its three labels — `完整保留`, `降级导入`, `不支持导入` — with exact counts and representative examples (V2-UX-IMP-002 to 004). For a converted file the review names conversion as the cause where it is, so a `.doc` read through a text converter shows its inline styles and tables as `降级导入` or `不支持导入` with the converter named, and the editor decides with `按上述降级方式导入` before anything commits (V2-UX-IMP-005). A converted file is never presented as if it had been read natively.
 
+> Amended by [ADR 0086](./0086-classify-ten-import-content-classes-and-retain-them-with-the-source-version.md): the Import Fidelity Review now records ten content classes — these eight plus text boxes and fields such as a table of contents — and shows the round-trip class as its closing 预计往返 card. A converted file is retained as its working DOCX holds it; what the converter lost stays `降级导入` or `不支持导入` with the converter named.
+
 ### 4 · The bounded DOCX import becomes a classified one
 
 The two `sample1`-shaped conditions stop refusing and start classifying:
