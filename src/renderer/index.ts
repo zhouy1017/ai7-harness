@@ -3111,7 +3111,8 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
         const next = await window.ai7.inspectBaselineAnalysis(inspected === null ? undefined : { revisionId: inspected });
         if (!host.isConnected || next.bookId !== host.dataset['analysisBookId']) return;
         if (JSON.stringify(next) === JSON.stringify(projection)) {
-          if (projection.state === 'waiting' || projection.state === 'admitted' || projection.state === 'executing') refreshLater(delayMs);
+          const again = analysisFollowDelayMs(projection.state);
+          if (again !== null) refreshLater(again);
           return;
         }
         renderBaselineAnalysis(host, next, bookTitle);
@@ -3154,7 +3155,7 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
     // A Task in flight is what the editor came for, so the card opens where its plan and its Run are;
     // a choice the editor made themselves always wins over either default.
     const taskInFlight = projection.state === 'prepared' || projection.state === 'authorized-blocked' ||
-      projection.state === 'waiting' || projection.state === 'admitted' || projection.state === 'executing';
+      projection.state === 'waiting' || projection.state === 'admitted' || projection.state === 'executing' || projection.state === 'cancelling';
     const { panels, select } = analysisTabs(card, projection.bookId, taskInFlight ? 'history' : 'synopsis');
     renderBaselineAnalysisOverview(card, panels, select, projection, revision, bookTitle, projection.inspectedRevision !== null
       ? { historical: true, current: projection.inspectedRevision.current }
@@ -3192,10 +3193,28 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
   const previousState = host.dataset['analysisRenderedState'];
   host.dataset['analysisRenderedState'] = projection.state;
   if (previousState !== undefined && previousState !== projection.state) taskDrawer.refresh('baseline-analysis');
-  if (projection.state === 'admitted' || projection.state === 'executing') refreshLater();
-  // A Run in Connectivity Wait is followed too, more slowly — it may wait a long time (Issue #502) — so the card
-  // moves on by itself once Reconnect Preflight admits it.
-  if (projection.state === 'waiting') refreshLater(2_000);
+  const followDelay = analysisFollowDelayMs(projection.state);
+  if (followDelay !== null) refreshLater(followDelay);
+}
+
+/**
+ * How often ②A reads the analysis again while its Run moves by itself, or `null` when nothing will move it: a Run under
+ * way, and one stopping at the editor's cancellation until it reads 已取消 (Issue #422), every 250 ms; a Run in
+ * Connectivity Wait every 2 s, since it may wait a long time (Issue #502), so the card moves on once Reconnect Preflight
+ * admits it. The same answer serves the first read and every read after an unchanged answer, so the card follows a Run
+ * exactly as long as the drawer does.
+ */
+function analysisFollowDelayMs(state: BaselineAnalysisProjection['state']): number | null {
+  switch (state) {
+    case 'admitted':
+    case 'executing':
+    case 'cancelling':
+      return 250;
+    case 'waiting':
+      return 2_000;
+    default:
+      return null;
+  }
 }
 
 /** ②A's one pending follow-up read per card host (Issue #502): a later draw replaces it, never adds another loop. */

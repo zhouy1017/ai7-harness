@@ -6,7 +6,7 @@ import { COMMENTS_REVISIONS_DETAIL, REIMPORT_COMMENTS_REVISIONS_DETAIL } from '.
 import { EditorialMarkStore, proposalChangeItemsShape } from '../../src/service/editorial-marks.js';
 import { ImportedMarkError, createImportedMarks, stageImportedMarks } from '../../src/service/imported-marks.js';
 import { EditorialStore, StoreError, importedMarksRecord } from '../../src/service/store.js';
-import { DEFAULT_EXECUTION_RULE_SCHEMA_VERSION, IMPORT_RETENTION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { RUN_CANCELLATION_SCHEMA_VERSION, IMPORT_RETENTION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import type { EditorialMarkAnchorProjection, ManuscriptBlockProjection } from '../../src/shared/protocol.js';
 import {
   ADMITTED_BASELINE_DOCX,
@@ -415,7 +415,7 @@ describe('schema revision 28 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DEFAULT_EXECUTION_RULE_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(RUN_CANCELLATION_SCHEMA_VERSION);
       expect(proposalChangeItemsShape(database)).toBe('current');
       const items = database.prepare('SELECT rowid, * FROM proposal_change_items ORDER BY rowid').all() as Row[];
       expect(items.slice(0, 2)).toEqual(before.items);

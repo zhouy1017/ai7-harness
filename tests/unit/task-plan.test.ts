@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ManifestBlockInput } from '../../src/service/analysis/coverage-manifest.js';
-import type { TaskPlanProjection, TaskPlanStartProjection } from '../../src/shared/protocol.js';
+import type { BaselineAnalysisProjection, TaskPlanProjection, TaskPlanStartProjection } from '../../src/shared/protocol.js';
 import {
   ACCOUNT_LIMIT_UNKNOWN,
   BUDGET_NOT_SET,
@@ -17,6 +17,11 @@ import {
   withWaitingReason,
   OFFLINE_STATE,
   WAITING_LABELS,
+  CANCELLATION_NO_EFFECTS,
+  RUN_CONTROL_CANCELLING_REASON,
+  RUN_CONTROL_PAUSE_REASON,
+  RUN_CONTROL_REDO_REASON,
+  baselineCancellationImpact,
 } from '../../src/service/task-plan.js';
 
 // The pure half of the Task Drawer's plan projection (Issue #418, plan slice S72): the range a plan reads
@@ -120,6 +125,7 @@ describe('route-aware readiness of the authorization bar (S74a A3; AUTH-005, MOD
       technical: [{ key: 'plan-envelope', label: '计划权限边界', value: 'e'.repeat(64) }],
       start: { readiness: 'ready', needsModelConnection: true, planEnvelopeDigest: 'e'.repeat(64), categoryDigests: [], reconfirm: null, ...start },
       defaultRule: { canSet: false, reason: '这份计划不能设为快速开始默认。', planEnvelopeDigest: null, current: null, binds: [], startedBy: null },
+      runControl: null,
     };
   }
 
@@ -179,5 +185,70 @@ describe('route-aware readiness of the authorization bar (S74a A3; AUTH-005, MOD
     }
     const running: TaskPlanProjection = { ...waiting, state: { key: 'running', label: '运行中' } };
     expect(withWaitingReason(running, 'slot')).toBe(running);
+  });
+});
+
+// 取消任务 (Issue #422, plan slice S76a): the Cancellation Impact Summary names exactly where the Run stands, from the
+// Run Liveness Signal alone, and the two controls this slice does not bring say why.
+describe('the Cancellation Impact Summary (CTRL-004)', () => {
+  type Run = NonNullable<BaselineAnalysisProjection['run']>;
+  const progress = (overrides: Partial<NonNullable<Run['progress']>> = {}): NonNullable<Run['progress']> => ({
+    unitsTotal: 8, unitsSettled: 2, currentUnitOrdinal: 3, currentUnitStartedAt: '2026-09-24T01:00:30.000Z',
+    attemptState: 'dispatched', completedAttempts: 2, longestSettledUnitMs: 10, stage: 'units',
+    lastTransitionAt: '2026-09-24T01:00:00.000Z', ...overrides,
+  });
+  const run = (state: Run['state'], live: Run['progress']): Run => ({
+    runRecordId: 'run', state, stateLabel: '', recordedAt: '2026-09-24T01:00:00.000Z', transitions: [], adaptations: [],
+    blockedReasons: null, progress: live, attempt: null,
+  });
+
+  it('says the controls this slice does not bring wait for theirs, and that the analysis leaves nothing committed', () => {
+    expect(RUN_CONTROL_PAUSE_REASON).toBe('暂停与续行随后提供');
+    expect(RUN_CONTROL_REDO_REASON).toBe('改计划重做随计划编辑提供');
+    expect(RUN_CONTROL_CANCELLING_REASON).toBe('已在取消：正在进行的这一步完成后停止');
+    expect(CANCELLATION_NO_EFFECTS).toBe('这项分析不改稿，没有需要撤回的受控动作。');
+  });
+
+  it('names the unit in flight, the ones left, what is kept, and the one answer not back yet', () => {
+    expect(baselineCancellationImpact(run('executing', progress()))).toEqual([
+      '正在读的第 3 个阅读范围读完后停止；其余 5 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。',
+      '已读完的 2 个阅读范围和正在读的这一个的结果与缺口会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。',
+      CANCELLATION_NO_EFFECTS,
+      '正在等待的那一轮模型回答不会被中途切断，它的结果照常计入。',
+    ]);
+  });
+
+  it('names the rest of an update Run as ranges to analyse again, and keeps the ranges it reuses in view (CTRL-004)', () => {
+    // Units 3 and 7 edited, then 同步到当前稿件: two ranges read again, six reused.
+    const impact = baselineCancellationImpact(run('executing', progress({ unitsTotal: 2, unitsSettled: 1, currentUnitOrdinal: 7 })), { manuscriptUnits: 8, reusedUnits: 6 });
+    expect(impact.slice(0, 2)).toEqual([
+      '正在读的第 7 个阅读范围读完后停止；其余 0 个要重新分析的阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。',
+      '已读完的 1 个阅读范围和正在读的这一个的结果与缺口，连同沿用上一份分析的 6 个阅读范围，会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。',
+    ]);
+  });
+
+  it('stops a Run between two units there, with no answer outstanding', () => {
+    expect(baselineCancellationImpact(run('executing', progress({ currentUnitOrdinal: null, currentUnitStartedAt: null, attemptState: null })))).toEqual([
+      '在这两个阅读范围之间停止；其余 6 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。',
+      '已读完的 2 个阅读范围的结果与缺口会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。',
+      CANCELLATION_NO_EFFECTS,
+    ]);
+  });
+
+  it('stops a later step once it completes, and a Run not yet reading before anything is sent', () => {
+    expect(baselineCancellationImpact(run('executing', progress({ stage: 'assurance-sampling', unitsSettled: 8, currentUnitOrdinal: null })))[0])
+      .toBe('正在进行的保证抽样完成后停止，之后的步骤都不再进行，不再发送任何内容。');
+    expect(baselineCancellationImpact(run('admitted', null))).toEqual([
+      '这项任务还没有开始阅读；取消后不会发送任何内容，也不会形成结果集修订版。',
+      CANCELLATION_NO_EFFECTS,
+    ]);
+  });
+
+  it('tells the truth about a Run no execution holds: nothing runs, and nothing of it was kept', () => {
+    expect(baselineCancellationImpact(run('executing', null))).toEqual([
+      'AI7 上次关闭时这项任务没有结束，现在也没有在运行；取消只结束这条运行记录，不会再发送任何内容。',
+      '它已读完的阅读范围的结果没有保存下来，不会形成结果集修订版。',
+      CANCELLATION_NO_EFFECTS,
+    ]);
   });
 });

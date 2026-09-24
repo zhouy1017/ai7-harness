@@ -51,8 +51,21 @@ import {
   TASK_PLAN_SECTIONS,
   TASK_PLAN_SERVICE_TERMS,
   TASK_PLAN_STATE_PILLS,
+  TASK_BAR_CANCEL_CONFIRM,
+  TASK_BAR_CANCEL_IMPACT_HEADING,
+  TASK_BAR_CANCEL_KEEP,
+  TASK_BAR_CANCEL_RUN,
+  TASK_BAR_CANCELLING_NOTE,
+  TASK_BAR_CANCELLED_NOTE,
+  TASK_BAR_PAUSE,
+  TASK_BAR_REDO,
+  TASK_PLAN_ACTIVITY_STALE,
+  TASK_PLAN_ACTIVITY_TITLE,
+  TASK_PLAN_ACTIVITY_UNREPORTED,
   groupedCount,
   taskBarSummary,
+  taskPlanActivityIsStale,
+  taskPlanActivityRows,
   taskBarView,
   taskDrawerModeOf,
   taskPlanChips,
@@ -104,6 +117,7 @@ function plan(overrides: Partial<TaskPlanProjection> = {}): TaskPlanProjection {
     technical: [],
     start: { readiness: 'ready', needsModelConnection: false, planEnvelopeDigest: 'a'.repeat(64), categoryDigests: [], reconfirm: null },
     defaultRule: { canSet: false, reason: '这份计划不能设为快速开始默认。', planEnvelopeDigest: null, current: null, binds: [], startedBy: null },
+    runControl: null,
     ...overrides,
   };
 }
@@ -140,6 +154,7 @@ describe('the drawer', () => {
   it('gives every state a tone and a shape, so the pill never speaks by colour alone', () => {
     const keys: TaskPlanStateKey[] = [
       'ready', 'changed', 'unconnected', 'offline', 'recorded', 'blocked', 'waiting', 'running', 'settled', 'stopped', 'cancelled',
+      'cancelling', 'cancelled-after-start',
     ];
     expect(Object.keys(TASK_PLAN_STATE_PILLS).sort()).toEqual([...keys].sort());
     expect(new Set(keys.map((key) => TASK_PLAN_STATE_PILLS[key].shape)).size).toBeGreaterThan(4);
@@ -151,6 +166,9 @@ describe('the drawer', () => {
     expect(new Set(preStart).size).toBe(preStart.length);
     expect(TASK_PLAN_STATE_PILLS.waiting.shape).not.toBe(TASK_PLAN_STATE_PILLS.running.shape);
     expect(TASK_PLAN_STATE_PILLS.cancelled.shape).not.toBe(TASK_PLAN_STATE_PILLS.stopped.shape);
+    // A Run cancelled after it began is 已取消 as well, never 已中断 (Issue #422, CTRL-005); 正在取消 is still under way.
+    expect(TASK_PLAN_STATE_PILLS['cancelled-after-start']).toEqual(TASK_PLAN_STATE_PILLS.cancelled);
+    expect(TASK_PLAN_STATE_PILLS.cancelling).toEqual({ tone: 'attention', shape: 'half' });
   });
 });
 
@@ -368,6 +386,41 @@ describe('the authorization bar (S74a)', () => {
     }
   });
 
+  it('offers a Run under way 暂停 and 改计划重做 with why they wait, and 取消任务, which only opens its summary (Issue #422; AUTH-010, CTRL-004)', () => {
+    expect([TASK_BAR_PAUSE, TASK_BAR_CANCEL_RUN, TASK_BAR_REDO]).toEqual(['暂停', '取消任务', '改计划重做']);
+    expect([TASK_BAR_CANCEL_IMPACT_HEADING, TASK_BAR_CANCEL_CONFIRM, TASK_BAR_CANCEL_KEEP]).toEqual(['取消影响摘要', '确认取消任务', '继续运行']);
+    const runControl = {
+      runRecordId: 'run',
+      cancelling: false,
+      cancel: { reason: null, impact: ['正在读的第 3 个阅读范围读完后停止。'] },
+      pause: { reason: '暂停与续行随后提供' },
+      redo: { reason: '改计划重做随计划编辑提供' },
+      activity: null,
+      executingSince: null,
+      update: null,
+    };
+    const running = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'running', label: '运行中' }, runControl }));
+    expect(running).toMatchObject({ readiness: 'started', statement: null, note: null, status: '运行中' });
+    expect(running.actions).toEqual([
+      { name: 'pause', label: '暂停', tone: 'secondary', disabledReason: '暂停与续行随后提供' },
+      { name: 'cancel-run', label: '取消任务', tone: 'secondary', disabledReason: null },
+      { name: 'redo', label: '改计划重做', tone: 'quiet', disabledReason: '改计划重做随计划编辑提供' },
+      { name: 'run-link', label: '查看运行', tone: 'secondary', disabledReason: null },
+    ]);
+    // Confirmed: 正在取消 and its sentence until the Run has stopped, and nothing more to press (CTRL-005).
+    const cancelling = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
+      state: { key: 'cancelling', label: '正在取消' },
+      runControl: { ...runControl, cancelling: true, cancel: { reason: '已在取消：正在进行的这一步完成后停止', impact: [] } },
+    }));
+    expect(cancelling).toMatchObject({ status: '正在取消', note: TASK_BAR_CANCELLING_NOTE });
+    expect(TASK_BAR_CANCELLING_NOTE).toBe('已记下你的取消；正在进行的这一步完成后停止，此后不会再发送任何内容');
+    expect(names(cancelling)).toEqual(['run-link']);
+    // Stopped: 已取消, never 已中断, and only the way to the Run.
+    const stopped = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'cancelled-after-start', label: '已取消' } }));
+    expect(stopped).toMatchObject({ statement: null, note: null, status: '已取消' });
+    expect(names(stopped)).toEqual(['run-link']);
+  });
+
   it('states a cancelled wait as cancelled with nothing sent — never as 已中断 — and only links to it (OFF-010, OFF-012)', () => {
     const cancelled = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'cancelled', label: '已取消' } }));
     expect(cancelled).toMatchObject({ statement: null, note: null, status: '已取消 · 未发送任何内容' });
@@ -385,5 +438,57 @@ describe('the authorization bar (S74a)', () => {
     const review = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { kind: 'review-run', state: { key: 'settled', label: '已完成' } }));
     expect(review.status).toBe('已完成');
     expect(action(review, 'run-link')?.label).toBe('查看审阅');
+  });
+});
+
+describe('the activity card (Issue #422, AUTH-011)', () => {
+  const at = (iso: string): number => Date.parse(iso);
+  const activity = {
+    unitsTotal: 8,
+    unitsSettled: 2,
+    currentUnitOrdinal: 3,
+    currentUnitStartedAt: '2026-09-24T01:00:30.000Z',
+    attemptState: 'awaiting-response' as const,
+    completedAttempts: 2,
+    longestSettledUnitMs: 20_000,
+    stage: 'units' as const,
+    lastTransitionAt: '2026-09-24T01:00:00.000Z',
+  };
+
+  it('names the phase, the reading range in flight, the time on it and since the Run began, the attempt, the last update and the milestones', () => {
+    expect(TASK_PLAN_ACTIVITY_TITLE).toBe('运行动态');
+    const rows = taskPlanActivityRows(activity, '2026-09-24T00:59:00.000Z', at('2026-09-24T01:01:05.000Z'));
+    expect(rows.map(([term]) => term)).toEqual(['阶段', '当前', '用时', '尝试', '上次更新', '进展']);
+    expect(Object.fromEntries(rows)).toMatchObject({
+      阶段: '正在逐个阅读范围分析',
+      当前: '第 3 个阅读范围（共 8 个）',
+      用时: '本步 00:35 · 运行 02:05',
+      尝试: '等待模型响应',
+      进展: '已读完 2 / 8 个阅读范围 · 已完成模型回合 2 次',
+    });
+  });
+
+  it('names the range an update Run reads among the whole manuscript, and counts only the ranges it reads again', () => {
+    const rows = Object.fromEntries(taskPlanActivityRows({ ...activity, currentUnitOrdinal: 7, unitsTotal: 2, unitsSettled: 1 }, null, at('2026-09-24T01:01:05.000Z'), { manuscriptUnits: 8, reusedUnits: 6 }));
+    expect(rows).toMatchObject({
+      当前: '第 7 个阅读范围（全书共 8 个，这次重新分析 2 个）',
+      进展: '已读完 1 / 2 个阅读范围（只算要重新分析的） · 已完成模型回合 2 次',
+    });
+    expect(TASK_BAR_CANCELLED_NOTE).toBe('已取消这项任务；此后不会再发送任何内容');
+  });
+
+  it('says a Run between two units is between them, and a later step by its own name', () => {
+    const between = Object.fromEntries(taskPlanActivityRows({ ...activity, currentUnitOrdinal: null, currentUnitStartedAt: null, attemptState: null }, null, at('2026-09-24T01:01:05.000Z')));
+    expect(between).toMatchObject({ 当前: '两个阅读范围之间', 用时: '—', 尝试: '—' });
+    const reducing = Object.fromEntries(taskPlanActivityRows({ ...activity, stage: 'cross-unit-reduction', currentUnitOrdinal: null }, null, at('2026-09-24T01:01:05.000Z')));
+    expect(reducing['当前']).toBe(reducing['阶段']);
+  });
+
+  it('keeps LIVE-003\'s words and judges the step by this Run\'s own longest one', () => {
+    expect(TASK_PLAN_ACTIVITY_STALE).toBe('本步骤用时已超过通常水平');
+    expect(taskPlanActivityIsStale(activity, at('2026-09-24T01:01:05.000Z'))).toBe(false);
+    expect(taskPlanActivityIsStale(activity, at('2026-09-24T01:01:11.000Z'))).toBe(true);
+    expect(taskPlanActivityIsStale({ ...activity, currentUnitStartedAt: null }, at('2026-09-24T02:00:00.000Z'))).toBe(false);
+    expect(TASK_PLAN_ACTIVITY_UNREPORTED).toBe('这项任务现在没有在运行：AI7 上次关闭时它没有结束。可以取消它，再准备新的任务。');
   });
 });

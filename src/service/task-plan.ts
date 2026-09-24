@@ -12,6 +12,7 @@ import type {
   TaskPlanDefaultRuleProjection,
   TaskPlanDriftEntryProjection,
   TaskPlanProjection,
+  TaskPlanRunControlProjection,
   TaskPlanStartProjection,
   TaskPlanStepProjection,
 } from '../shared/protocol.js';
@@ -423,6 +424,7 @@ export function fixedTaskPlan(input: {
       ? startedBar(false)
       : { readiness: 'record-only', needsModelConnection: false, planEnvelopeDigest: envelope.digest, categoryDigests: [], reconfirm: null },
     defaultRule: noDefaultRule(FIXED_TASK_NO_RULE),
+    runControl: null,
   };
 }
 
@@ -451,8 +453,14 @@ function baselineState(projection: BaselineAnalysisProjection): TaskPlanProjecti
     // (`withWaitingReason`); on its own the record says only that it waits for the network.
     case 'waiting':
       return { key: 'waiting', label: WAITING_LABELS.network };
+    // A Run the editor cancelled before it ran anything keeps the dash of a cancelled wait (Issue #502); one it
+    // cancelled after it began reading reads 已取消 in its own shape, and 正在取消 while it stops (Issue #422).
     case 'cancelled':
-      return { key: 'cancelled', label: '已取消' };
+      return projection.run !== null && projection.run.transitions.some((transition) => transition.state === 'executing')
+        ? { key: 'cancelled-after-start', label: '已取消' }
+        : { key: 'cancelled', label: '已取消' };
+    case 'cancelling':
+      return { key: 'cancelling', label: '正在取消' };
     case 'admitted':
       return { key: 'running', label: '正在排队' };
     case 'executing':
@@ -616,6 +624,89 @@ export function baselineAnalysisPlan(input: {
     ],
     start: baselineStart(projection, envelope.digest),
     defaultRule: input.defaultRule ?? noDefaultRule(BASELINE_NO_RULE),
+    runControl: baselineRunControl(projection),
+  };
+}
+
+// ---- 取消任务 and the activity card (Issue #422, plan slice S76a) -----------------------------------------------
+
+/** 暂停 and 续行 need a durable per-unit continuation point, which S76b brings; until then 暂停 says so. */
+export const RUN_CONTROL_PAUSE_REASON = '暂停与续行随后提供';
+/** 改计划重做 redoes the work under a changed plan, which needs S73's plan editing; until then it says so. */
+export const RUN_CONTROL_REDO_REASON = '改计划重做随计划编辑提供';
+/** Once the editor confirmed 取消任务 nothing more is offered: the Run is stopping. */
+export const RUN_CONTROL_CANCELLING_REASON = '已在取消：正在进行的这一步完成后停止';
+/** What the analysis never does, so there is nothing a cancellation could leave committed (CTRL-007). */
+export const CANCELLATION_NO_EFFECTS = '这项分析不改稿，没有需要撤回的受控动作。';
+
+const STAGE_WORDS: Readonly<Record<'cross-unit-reduction' | 'assurance-sampling' | 'run-report-reflection', string>> = {
+  'cross-unit-reduction': '跨单元归纳',
+  'assurance-sampling': '保证抽样',
+  'run-report-reflection': '运行反思',
+};
+
+/**
+ * The Cancellation Impact Summary of the Book's baseline Run (CTRL-004; interaction-spec § Control invariants): the
+ * future work that stops, what is kept, the committed Effects there are none of, and the one turn whose answer is
+ * not back yet — read from the Run Liveness Signal, so it names exactly where the Run stands.
+ */
+export function baselineCancellationImpact(
+  run: NonNullable<BaselineAnalysisProjection['run']>,
+  update: TaskPlanRunControlProjection['update'] = null,
+): ReadonlyArray<string> {
+  if (run.state === 'admitted') {
+    return ['这项任务还没有开始阅读；取消后不会发送任何内容，也不会形成结果集修订版。', CANCELLATION_NO_EFFECTS];
+  }
+  const progress = run.progress;
+  if (progress === null) {
+    // No execution of this service holds the Run: AI7 closed while it ran, and its unit results were never kept.
+    return [
+      'AI7 上次关闭时这项任务没有结束，现在也没有在运行；取消只结束这条运行记录，不会再发送任何内容。',
+      '它已读完的阅读范围的结果没有保存下来，不会形成结果集修订版。',
+      CANCELLATION_NO_EFFECTS,
+    ];
+  }
+  const inFlight = progress.stage === 'units' && progress.currentUnitOrdinal !== null;
+  const remaining = Math.max(0, progress.unitsTotal - progress.unitsSettled - (inFlight ? 1 : 0));
+  // An update Run reads only the ranges it recomputes: the rest it names as such, and the ranges it reuses are kept.
+  const rest = update === null ? `其余 ${remaining} 个阅读范围` : `其余 ${remaining} 个要重新分析的阅读范围`;
+  const stops = progress.stage !== 'units'
+    ? `正在进行的${STAGE_WORDS[progress.stage]}完成后停止，之后的步骤都不再进行，不再发送任何内容。`
+    : inFlight
+      ? `正在读的第 ${progress.currentUnitOrdinal} 个阅读范围读完后停止；${rest}和之后的归纳、抽样都不再进行，不再发送任何内容。`
+      : `在这两个阅读范围之间停止；${rest}和之后的归纳、抽样都不再进行，不再发送任何内容。`;
+  const reused = update === null || update.reusedUnits === 0 ? '' : `，连同沿用上一份分析的 ${update.reusedUnits} 个阅读范围，`;
+  const kept = `已读完的 ${progress.unitsSettled} 个阅读范围${inFlight ? '和正在读的这一个' : ''}的结果与缺口${reused}会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。`;
+  return [
+    stops,
+    kept,
+    CANCELLATION_NO_EFFECTS,
+    ...(inFlight ? ['正在等待的那一轮模型回答不会被中途切断，它的结果照常计入。'] : []),
+  ];
+}
+
+/**
+ * The controls and activity of the Book's baseline Run while it is under way (AUTH-010, AUTH-011): 取消任务 with its
+ * summary, and 暂停 and 改计划重做 with the reasons they are not offered yet. `null` once the Run has ended, and
+ * before it was admitted — a Run waiting for the network has its own 取消 (Issue #502).
+ */
+function baselineRunControl(projection: BaselineAnalysisProjection): TaskPlanRunControlProjection | null {
+  const run = projection.run;
+  if (run === null || !(run.state === 'admitted' || run.state === 'executing' || run.state === 'cancelling')) return null;
+  // Stopping at the editor's word while an execution holds it. One AI7 left 正在取消 when it closed has none, and is
+  // offered 取消任务 again, which settles it at once.
+  const cancelling = run.state === 'cancelling' && run.progress !== null;
+  const counts = projection.update?.reusePlan?.counts ?? null;
+  const update = counts === null ? null : { manuscriptUnits: projection.coverageManifest?.units.length ?? counts.recomputed + counts.reused, reusedUnits: counts.reused };
+  return {
+    runRecordId: run.runRecordId,
+    cancelling,
+    cancel: { reason: cancelling ? RUN_CONTROL_CANCELLING_REASON : null, impact: cancelling ? [] : baselineCancellationImpact(run, update) },
+    pause: { reason: RUN_CONTROL_PAUSE_REASON },
+    redo: { reason: RUN_CONTROL_REDO_REASON },
+    activity: run.progress,
+    executingSince: run.transitions.find((transition) => transition.state === 'executing')?.recordedAt ?? null,
+    update,
   };
 }
 
@@ -799,5 +890,6 @@ export function reviewRunPlan(input: {
     ],
     start,
     defaultRule: noDefaultRule(REVIEW_RUN_NO_RULE),
+    runControl: null,
   };
 }

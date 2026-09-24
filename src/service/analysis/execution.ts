@@ -104,7 +104,23 @@ export interface ExecutionOwnerDependencies {
   readonly secretResolver: SecretResolver;
   /** The developer-live launch facts and captured transport; present exactly when the policy bound v5. */
   readonly developerLive?: DeveloperLiveRuntime | null;
+  /** J-10's unit hold (Issue #422); absent in every other launch, where a unit settles as soon as its turn returns. */
+  readonly unitHold?: UnitHold | null;
+  /**
+   * The service suite's hold around the cross-unit reduction (Issue #422): awaited once the reduction's turn has come
+   * back and before its result is read, so a cancellation can arrive while that turn is out. Absent in every launch.
+   */
+  readonly stageHold?: ((stage: 'cross-unit-reduction') => Promise<void>) | null;
 }
+
+/**
+ * J-10's unit hold (Issue #422, plan slice S76a): once a unit's turn has come back, the owner asks whether the unit
+ * may settle, given how many units already have, and waits until it may. The unit is in flight all that time, which
+ * is what lets the Journey cancel a Run with a unit under way and watch 正在取消 until that unit finishes. A
+ * cancellation does not end the hold, exactly as it never cuts off a sent turn; an interruption does, so a held Run
+ * never keeps AI7 from closing.
+ */
+export type UnitHold = (unitsSettled: number, interrupted: () => boolean) => Promise<void>;
 
 interface ActiveRun {
   readonly runRecordId: string;
@@ -130,6 +146,11 @@ interface ActiveRun {
   transmissionsAtDispatch: number;
   harness: PrimaryAgentHarnessHandle | null;
   interrupted: boolean;
+  /**
+   * 取消任务 (Issue #422): the editor cancelled the Run and `cancelling` is recorded. It is read between units only,
+   * so the unit in flight finishes — a sent turn is never aborted — and nothing after it is sent.
+   */
+  cancelRequested: boolean;
   done: Promise<void>;
 }
 
@@ -152,7 +173,23 @@ const SAFE_NEXT_ACTIONS = {
   'completed-with-gaps': '逐项查看缺口单元与冲突清单；缺口单元在任一更新方式的新授权运行中都会重算，结果集修订版本身不会改写。',
   failed: '核对运行失败原因；修复后可通过分析更新操作重新准备并授权新的运行。',
   interrupted: '运行已在派发后中断；已完成单元的结果与缺口均已保留，续行需要通过分析更新操作发起新的授权运行。',
+  cancelled: '运行已按你的要求取消；已完成单元的结果与缺口均已保留，没有读到的单元记为未尝试。需要时可用分析更新操作发起新的授权运行。',
 } as const;
+
+/** 取消任务 before the Run began its units (CTRL-008): nothing was sent, so there is nothing to keep but the record. */
+export const CANCELLED_BEFORE_UNITS = '运行在开始阅读任何阅读范围之前已按你的要求取消；没有发送任何内容，也没有形成结果集修订版。' as const;
+
+/**
+ * 取消任务 on a Run no execution of this service holds: one AI7 left behind when it last closed. Nothing of it is
+ * running, so it is settled at once; the results of its finished units lived only in the Run it lost, and the
+ * record says so rather than claiming a revision it never formed.
+ */
+export const CANCELLED_WITHOUT_EXECUTION = '运行已按你的要求取消。AI7 上次关闭时这项任务没有结束，它已完成单元的结果没有保存下来，因此没有形成结果集修订版；此后没有再发送任何内容。' as const;
+
+/** The disclosure of a cross-unit reduction, a sample, and a reflection the editor's cancellation stopped. */
+export const CROSS_UNIT_CANCELLED = '运行已按你的要求取消，跨单元归纳未发起。' as const;
+export const ASSURANCE_SAMPLING_CANCELLED = '运行已按你的要求取消，保证抽样未发起。' as const;
+export const RUN_REPORT_REFLECTION_CANCELLED = '运行已按你的要求取消，运行反思未发起。' as const;
 
 /**
  * The two developer-live interruptions the closed CHECK sets admit only as `interrupted`, with the
@@ -349,6 +386,7 @@ export class BaselineAnalysisExecutionOwner {
       transmissionsAtDispatch: 0,
       harness: null,
       interrupted: false,
+      cancelRequested: false,
       done: Promise.resolve(),
     };
     this.#active = active;
@@ -366,6 +404,29 @@ export class BaselineAnalysisExecutionOwner {
       await current.done;
       if (this.#active === current) return;
     }
+  }
+
+  /**
+   * 取消任务 (Issue #422, plan slice S76a; CTRL-005, CTRL-008), once `cancelling` is recorded. The Run this owner
+   * executes stops at the next unit boundary: the unit in flight finishes, nothing after it is sent, and the Run ends
+   * `cancelled` with what it completed kept. A Run it does not hold — one AI7 left behind when it last closed — is
+   * settled here at once, since nothing of it is running.
+   */
+  cancelRun(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): 'stopping' | 'settled' {
+    const active = this.#active;
+    if (active !== null && active.runRecordId === runRecordId) {
+      active.cancelRequested = true;
+      return 'stopping';
+    }
+    const facts = ledger.cancellationFacts(runRecordId);
+    if (ledger.currentRunState(runRecordId) !== 'cancelling') {
+      throw new ExecutionAdmissionError('EXECUTION_STATE_INVALID', '只有已记录“正在取消”的运行可以结束取消。');
+    }
+    // Its turns before AI7 closed were sent: the units the ledger recorded a turn for are the ones it submitted. Their
+    // usage was never recorded, so the report can count none of it.
+    const submitted = facts.attemptId === null ? 0 : ledger.submittedUnitCount(facts.attemptId);
+    recordCancelledWithoutRevision(ledger, runRecordId, facts.taskIntentId, facts.attemptId, CANCELLED_WITHOUT_EXECUTION, submitted);
+    return 'settled';
   }
 
   async dispose(): Promise<void> {
@@ -434,6 +495,7 @@ export class BaselineAnalysisExecutionOwner {
    */
   async #reflect(context: RunReportReflectionContext): Promise<RunReportReflectionOutcome> {
     const { active, harness, live, policy } = context;
+    if (active.cancelRequested) return runReportReflectionNotRun(RUN_REPORT_REFLECTION_CANCELLED);
     if (context.stopped || active.interrupted) return runReportReflectionNotRun(RUN_REPORT_REFLECTION_NOT_REACHED);
     if (live !== null && policy.providerProcessing.runReportReflectionAllowed !== true) {
       // The reflection is a transmission the active Provider Processing policy does not name, so it
@@ -612,7 +674,7 @@ export class BaselineAnalysisExecutionOwner {
     });
     active.harness = harness;
     const spans: HarnessExecutionSpan[] = [];
-    let terminalClassification: 'completed' | 'completed-with-gaps' | 'failed' | 'interrupted' = 'completed';
+    let terminalClassification: 'completed' | 'completed-with-gaps' | 'failed' | 'interrupted' | 'cancelled' = 'completed';
     // Which of the two developer-live interruptions settled this Run, when one did; the closed CHECK
     // sets record both as `interrupted`, so the distinction lives in the detail, summary, and action.
     let liveInterruption: LiveInterruption | null = null;
@@ -682,6 +744,11 @@ export class BaselineAnalysisExecutionOwner {
         admittedUserMessages,
       };
       harness.bindExecution({ harnessSessionId, behaviorCompositionDigest: harness.composition.digest, promptContractDigest });
+      // 取消任务 before the first unit (CTRL-008): nothing has been sent, so the Run ends here without provider work.
+      if (active.cancelRequested) {
+        recordCancelledWithoutRevision(ledger, facts.runRecordId, facts.taskIntentId, attemptId, CANCELLED_BEFORE_UNITS);
+        return;
+      }
       ledger.recordRunState(facts.runRecordId, 'executing', {
         detail: update === null ? '执行绑定已持久化并核对；开始逐单元执行。' : '执行绑定已持久化并核对；按血缘复用兼容单元，仅对重算单元逐单元执行。',
         attemptId,
@@ -769,6 +836,8 @@ export class BaselineAnalysisExecutionOwner {
         // Read before anything else can start a turn: the adapter clears this at the start of every
         // stream, so it is this attempt's result or nothing.
         const canonical = liveAdapter.instance?.lastCanonicalResult ?? null;
+        // J-10's unit hold (Issue #422): the turn is back and the unit stays in flight until the Journey lets it settle.
+        if (this.#deps.unitHold) await this.#deps.unitHold(active.progress.unitsSettled, () => active.interrupted);
         const payloadDigest = admittedPayloadDigest;
         spanOrdinal += 1;
         spans.push(turn.span);
@@ -786,6 +855,8 @@ export class BaselineAnalysisExecutionOwner {
       if (submittedUnits.length > 0) clock.open('units');
       for (const unit of submittedUnits) {
         if (active.interrupted) break;
+        // 取消任务 (CTRL-005): the Run stops at this unit boundary, and the unit before it has finished.
+        if (active.cancelRequested) break;
         // The ceiling is evaluated before every dispatch, not only inside the gate: reaching it ends
         // the Run here, before the next unit forms a request at all.
         if (ceilingState() === 'reached') {
@@ -812,7 +883,8 @@ export class BaselineAnalysisExecutionOwner {
           });
         };
         let firstFailure: ClassifiedModelFailure | null = null;
-        if (attempt.turn.terminal === 'failed' && !active.interrupted) {
+        // A safe retry is a further transmission, so a Run the editor cancelled meanwhile makes none.
+        if (attempt.turn.terminal === 'failed' && !active.interrupted && !active.cancelRequested) {
           const failed = attempt.turn.signals.find((signal) => signal.kind === 'failed');
           if (failed?.kind === 'failed' && failed.failure.retrySafe) {
             // The `safe-retry` Plan Adaptation: recorded before the retry is dispatched, inside the unchanged
@@ -910,9 +982,19 @@ export class BaselineAnalysisExecutionOwner {
         // A unit that settled as a gap took real time too, and counts.
         const settledMs = Date.now() - unitStartedAtMs;
         active.progress.longestSettledUnitMs = Math.max(active.progress.longestSettledUnitMs ?? 0, settledMs);
+        // Between two units nothing is in flight, so the reader sees the count and not the unit that just settled.
+        active.progress.currentUnitOrdinal = null;
+        active.progress.currentUnitStartedAt = null;
+        active.progress.attemptState = null;
       }
       clock.close();
       if (active.interrupted && terminalClassification === 'completed') terminalClassification = 'interrupted';
+      // A Run the editor cancelled ends `cancelled`, whatever else stopped it (CTRL-005), and nothing after this point
+      // is sent. A failure that ends the Run is still recorded as the failure it is, by `#recordFailure`.
+      if (active.cancelRequested) {
+        terminalClassification = 'cancelled';
+        liveInterruption = null;
+      }
 
       // The one declared cross-unit suboperation (ADR 0066), inside this Run's unchanged envelope and
       // Execution Binding: one message admitted through the same gate, one turn, one attempt, no
@@ -926,6 +1008,8 @@ export class BaselineAnalysisExecutionOwner {
         // A kind that declares no cross-unit contract never forms the request, never counts a turn,
         // and says so exactly. The baseline path below is unchanged, request counts included.
         crossUnit = { state: 'not-run', reason: definition.crossUnitAbsentReason };
+      } else if (terminalClassification === 'cancelled') {
+        crossUnit = { state: 'not-run', reason: CROSS_UNIT_CANCELLED };
       } else if (terminalClassification === 'interrupted' || active.interrupted) {
         crossUnit = { state: 'not-run', reason: '运行在单元阶段结束前停止，跨单元归纳未发起。' };
       } else if (closedOutcomes.length >= 2) {
@@ -955,6 +1039,7 @@ export class BaselineAnalysisExecutionOwner {
           active.progress.attemptState = 'dispatched';
           active.transmissionsAtDispatch = active.transmissions?.() ?? 0;
           const turn = await harness.submitUnit(message);
+          if (this.#deps.stageHold) await this.#deps.stageHold('cross-unit-reduction');
           const canonical = liveAdapter.instance?.lastCanonicalResult ?? null;
           // The reduction's turn is a model turn like any other: it counts as a request, its usage
           // counts toward the Run and the ceiling, and it records no execution-span row, because the
@@ -1005,6 +1090,11 @@ export class BaselineAnalysisExecutionOwner {
         terminalClassification = 'completed-with-gaps';
       }
       clock.close();
+      // A cancellation that came while the reduction's turn was out stops the sample before it forms a message.
+      if (active.cancelRequested) {
+        terminalClassification = 'cancelled';
+        liveInterruption = null;
+      }
 
       // The one declared assurance sampling suboperation (ADR 0066), inside this Run's unchanged
       // envelope and Execution Binding: one admitted user message per anchor unit, one turn each, no
@@ -1013,7 +1103,7 @@ export class BaselineAnalysisExecutionOwner {
       const sample = await this.#drawAndJudge({
         active, definition, harness, reduction: reduced, manifest, blocksById, admittedUserMessages,
         acceptedOutputDigests, liveAdapter, countTurn, clock, ceilingState, live, policy,
-        stopped: terminalClassification === 'interrupted',
+        stopped: terminalClassification === 'interrupted' || terminalClassification === 'cancelled',
       });
       // The second reducer pass: the sample joins the revision and re-labels the assurance axis, and
       // every finding component comes through byte for byte. The `reduction` stage resumes here.
@@ -1042,11 +1132,18 @@ export class BaselineAnalysisExecutionOwner {
         adaptedUnitOrdinals,
       });
       clock.close();
+      // The last instant a cancellation can still name this Run: the terminal state below is the one it ends in.
+      if (active.cancelRequested) {
+        terminalClassification = 'cancelled';
+        liveInterruption = null;
+      }
       const interruption = liveInterruption === null ? null : LIVE_INTERRUPTIONS[liveInterruption];
       ledger.recordRunState(facts.runRecordId, terminalClassification, {
-        detail: interruption === null
-          ? `运行终态：${terminalClassification}；结果集修订版 ${revision.revisionId}（Revision ${revision.ordinal}）。`
-          : `运行终态：${terminalClassification} · ${liveInterruption}；${interruption.detail}结果集修订版 ${revision.revisionId}（Revision ${revision.ordinal}）。`,
+        detail: terminalClassification === 'cancelled'
+          ? `运行终态：cancelled；按你的取消在阅读范围之间停止，已完成的结果与缺口均已保留，没有读到的阅读范围记为未尝试；结果集修订版 ${revision.revisionId}（Revision ${revision.ordinal}）。`
+          : interruption === null
+            ? `运行终态：${terminalClassification}；结果集修订版 ${revision.revisionId}（Revision ${revision.ordinal}）。`
+            : `运行终态：${terminalClassification} · ${liveInterruption}；${interruption.detail}结果集修订版 ${revision.revisionId}（Revision ${revision.ordinal}）。`,
         resultSetRevisionId: revision.revisionId,
         resultSetRevisionOrdinal: revision.ordinal,
         unitsClosed: reduction.coverage.unitsClosed,
@@ -1086,14 +1183,16 @@ export class BaselineAnalysisExecutionOwner {
         runRecordId: facts.runRecordId,
         classification: terminalClassification,
         resultSetRevisionId: revision.revisionId,
-        summary: interruption === null
-          ? `${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`
-          : `${interruption.summary}${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`,
+        summary: terminalClassification === 'cancelled'
+          ? `已按你的要求取消：${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`
+          : interruption === null
+            ? `${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`
+            : `${interruption.summary}${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`,
         safeNextAction: interruption === null ? (definition.safeNextActions ?? SAFE_NEXT_ACTIONS)[terminalClassification] : interruption.safeNextAction,
         report: buildRunReport(reportFacts, await this.#reflect({
           active, harness, runRecordId: facts.runRecordId, accounting: runReportAccounting(reportFacts),
           admittedUserMessages, acceptedOutputDigests, liveAdapter, accumulated, ceilingState, live, policy,
-          stopped: terminalClassification === 'interrupted',
+          stopped: terminalClassification === 'interrupted' || terminalClassification === 'cancelled',
         })),
       });
     } finally {
@@ -1117,6 +1216,7 @@ export class BaselineAnalysisExecutionOwner {
   async #drawAndJudge(context: AssuranceSamplingContext): Promise<AssuranceSampleOutcome> {
     const { active, definition, harness, reduction, manifest, live, policy } = context;
     if (definition.assurance === null) return assuranceSampleNotRun(definition.assuranceAbsentReason);
+    if (active.cancelRequested) return assuranceSampleNotRun(ASSURANCE_SAMPLING_CANCELLED);
     if (context.stopped || active.interrupted) return assuranceSampleNotRun('运行在单元阶段结束前停止，保证抽样未发起。');
     const candidates = definition.assurance.candidates(reduction);
     if (candidates.length === 0) return assuranceSampleNotRun('本次运行没有可抽样的发现，保证抽样未发起。');
@@ -1133,6 +1233,11 @@ export class BaselineAnalysisExecutionOwner {
     for (const turn of assuranceSamplingTurns(draw.sampled)) {
       if (active.interrupted) {
         gapReasons.push(assuranceSamplingTurnGapReason(turn.unitOrdinal, '运行已中断，本轮未派发。'));
+        break;
+      }
+      // 取消任务 between two sampling turns: the one out finished, and no further one is sent.
+      if (active.cancelRequested) {
+        gapReasons.push(assuranceSamplingTurnGapReason(turn.unitOrdinal, '运行已按你的要求取消，本轮未派发。'));
         break;
       }
       // The ceiling is evaluated before every dispatch exactly as before a unit's, so a Run that has
@@ -1217,6 +1322,49 @@ export class BaselineAnalysisExecutionOwner {
     const usage = sampled.turnsWithUsage === 0 ? null : { inputTokens: sampled.inputTokens, outputTokens: sampled.outputTokens };
     return assuranceSampleOutcome(draw, dispositions, usage, gapReasons);
   }
+}
+
+/**
+ * The terminal cancellation of a Run that formed no revision (Issue #422; CTRL-006, CTRL-008): one cancelled before
+ * it began its units, which sent nothing, or one no execution holds any more. Its Task Outcome says exactly that, and
+ * its Run Report records stages that never ran, no units and no usage, as a Run that failed before its revision does.
+ */
+function recordCancelledWithoutRevision(
+  ledger: BaselineAnalysisStore,
+  runRecordId: string,
+  taskIntentId: string,
+  attemptId: string | null,
+  reason: string,
+  submitted = 0,
+): void {
+  ledger.recordRunState(runRecordId, 'cancelled', { detail: reason });
+  const none = { requests: 0, inputTokens: 0, outputTokens: 0 };
+  ledger.recordOutcome({
+    taskIntentId,
+    runRecordId,
+    classification: 'cancelled',
+    resultSetRevisionId: null,
+    summary: reason,
+    safeNextAction: (ledger.definition.safeNextActions ?? SAFE_NEXT_ACTIONS).cancelled,
+    report: buildRunReport({
+      runRecordId,
+      taskIntentId,
+      attemptId,
+      resultSetRevisionId: null,
+      classification: 'cancelled',
+      recordedAt: new Date().toISOString(),
+      spans: new Map(),
+      usage: { units: none, 'cross-unit-reduction': { ...none }, 'assurance-sampling': { ...none } },
+      unitRows: [],
+      submitted,
+      adaptations: [],
+      gaps: [],
+      crossUnit: { state: 'not-run', reason: CROSS_UNIT_CANCELLED },
+      sample: assuranceSampleNotRun(ASSURANCE_SAMPLING_CANCELLED),
+      findingCounts: [],
+      terminalFailure: null,
+    }, runReportReflectionNotRun(RUN_REPORT_REFLECTION_CANCELLED)),
+  });
 }
 
 /** The exact disclosure when the active Provider Processing policy does not name the suboperation. */

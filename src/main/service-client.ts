@@ -75,8 +75,10 @@ function serviceEnvironment(
   if (importControl) selected.AI7_E2E_JOURNEY = 'J-01';
   if (foregroundExecutionControl) selected.AI7_E2E_JOURNEY = 'J-03';
   if (recoveryControl) selected.AI7_E2E_JOURNEY = 'J-08';
-  // The model adapter binds J-04's Runs and J-09's (Issue #424); main admitted it for exactly one of the two.
-  if (modelAdapterControl) selected.AI7_E2E_JOURNEY = process.env.AI7_E2E_JOURNEY === 'J-09' ? 'J-09' : 'J-04';
+  // The model adapter binds J-04's Runs, J-09's (Issue #424) and J-10's (Issue #422); main admitted it for exactly one.
+  if (modelAdapterControl) {
+    selected.AI7_E2E_JOURNEY = process.env.AI7_E2E_JOURNEY === 'J-09' || process.env.AI7_E2E_JOURNEY === 'J-10' ? process.env.AI7_E2E_JOURNEY : 'J-04';
+  }
   const names =
     process.platform === 'win32'
       ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
@@ -97,7 +99,7 @@ function serviceEnvironment(
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 44 &&
+    value.protocolVersion === 45 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&
@@ -154,6 +156,7 @@ export class ServiceClient {
     recoveryControl?: J08RecoveryControl,
     modelAdapterControl?: J04ModelAdapterControl,
     connectivityPath?: string,
+    unitHoldPath?: string,
   ): Promise<ServiceClient> {
     if (!isAbsolute(executable) || !isAbsolute(serviceEntry) || !isAbsolute(dataRoot)) {
       throw new ServiceCallError('SERVICE_LAUNCH_INVALID', '本地业务服务启动参数无效。');
@@ -171,6 +174,8 @@ export class ServiceClient {
     if (modelAdapterControl) args.push('--j04-model-adapter', modelAdapterControl);
     // J-04's connectivity control (Issue #502) rides beside the adapter: the file the Journey writes to go offline.
     if (connectivityPath !== undefined) args.push('--j04-connectivity-path', connectivityPath);
+    // J-10's unit hold (Issue #422) rides beside the adapter as well: the file whose number lets units settle.
+    if (unitHoldPath !== undefined) args.push('--j10-unit-hold-path', unitHoldPath);
     const child = spawn(
       executable,
       args,

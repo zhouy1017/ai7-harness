@@ -127,14 +127,31 @@ const RUN_STATE_LABELS: Record<BaselineAnalysisRunState, string> = {
   interrupted: '运行已中断',
   'awaiting-connectivity': '等待网络 · 未启动',
   cancelled: '已取消 · 未启动',
+  cancelling: '正在取消',
 };
+
+/**
+ * A Run cancelled after it began executing its units (Issue #422, CTRL-005): `已取消`, and never `已取消 · 未启动`,
+ * which stays the word for a Run cancelled before it ran anything, nor 已中断, which OFF-012 keeps for a Run that
+ * can resume.
+ */
+export const RUN_CANCELLED_AFTER_START_LABEL = '已取消' as const;
+
+/** What `cancelling` records (CTRL-005): the editor's word, and where the Run stops. */
+export const RUN_CANCELLING_DETAIL = '编辑取消了这项任务；正在进行的阅读范围读完后停止，此后不再发送任何内容。' as const;
 
 const OUTCOME_LABELS = {
   completed: '任务结果：已完成',
   'completed-with-gaps': '任务结果：已完成（保留缺口）',
   failed: '任务结果：失败',
   interrupted: '任务结果：已中断',
+  cancelled: '任务结果：已取消',
 } as const;
+
+/** Whether a Run began executing its units: the one fact that tells a started cancellation from a wait cancelled. */
+function runBegan(transitions: ReadonlyArray<{ state: BaselineAnalysisRunState }>): boolean {
+  return transitions.some((transition) => transition.state === 'executing');
+}
 
 export interface BaselineAnalysisRouteFacts {
   readonly fixtureIdentity: string;
@@ -474,12 +491,14 @@ function firstBaselineCounts(unitCount: number): AnalysisReusePlanCounts {
 }
 
 /**
- * A Task whose Run is authorized for dispatch, waiting in Connectivity Wait, admitted, or executing blocks any
- * new update Task. A waiting Run holds no execution slot, but it will run: the editor cancels it to prepare
- * another (Issue #502, OFF-010).
+ * A Task whose Run is authorized for dispatch, waiting in Connectivity Wait, admitted, executing, or stopping at the
+ * editor's cancellation blocks any new update Task. A waiting Run holds no execution slot, but it will run: the
+ * editor cancels it to prepare another (Issue #502, OFF-010); a cancelling one still holds the slot until it has
+ * stopped (Issue #422).
  */
 function runIsActive(state: BaselineAnalysisRunState | null): boolean {
-  return state === 'authorized' || state === 'awaiting-connectivity' || state === 'admitted' || state === 'executing';
+  return state === 'authorized' || state === 'awaiting-connectivity' || state === 'admitted' || state === 'executing' ||
+    state === 'cancelling';
 }
 
 /** Why an active Run blocks a new Task, in the words of its state: a waiting Run is never said to be under way. */
@@ -722,6 +741,7 @@ export class BaselineAnalysisStore {
         // that can resume (Issue #502).
         : run.state === 'awaiting-connectivity' ? 'waiting'
           : run.state === 'cancelled' ? 'cancelled'
+            : run.state === 'cancelling' ? 'cancelling'
         : run.state === 'admitted' ? 'admitted'
           : run.state === 'executing' ? 'executing'
             : run.state === 'completed' || run.state === 'completed-with-gaps' ? 'settled'
@@ -780,11 +800,13 @@ export class BaselineAnalysisStore {
       contractVersion: this.#definition.contractVersion,
       state,
       // A Run in Connectivity Wait, or cancelled while it waited, never ran: it reads as its Run state does, never as
-      // 已中断, which OFF-012 keeps for a Run that can resume (Issue #502).
+      // 已中断, which OFF-012 keeps for a Run that can resume (Issue #502). One cancelled after it began reads 已取消,
+      // and one stopping at the editor's word 正在取消 (Issue #422).
       stateLabel: state === 'prepared' ? '计划已冻结 · 待授权'
         : state === 'authorized-blocked' ? '已授权 · 派发前阻止'
           : state === 'waiting' ? RUN_STATE_LABELS['awaiting-connectivity']
-            : state === 'cancelled' ? RUN_STATE_LABELS.cancelled
+            : state === 'cancelled' ? (run !== null && runBegan(run.transitions) ? RUN_CANCELLED_AFTER_START_LABEL : RUN_STATE_LABELS.cancelled)
+              : state === 'cancelling' ? RUN_STATE_LABELS.cancelling
               : state === 'admitted' ? '已进入调度'
                 : state === 'executing' ? '正在执行'
                   : state === 'settled' ? '已形成结果集修订版'
@@ -959,7 +981,7 @@ export class BaselineAnalysisStore {
             state,
             stateAt: asString(row.last_state_at),
             recordedAt: asString(row.run_recorded_at),
-            progress: state === 'admitted' || state === 'executing' ? progress(runRecordId) : null,
+            progress: state === 'admitted' || state === 'executing' || state === 'cancelling' ? progress(runRecordId) : null,
           },
           planRevision: null,
         });
@@ -1571,11 +1593,12 @@ export class BaselineAnalysisStore {
     // The liveness signal's fifth fact: when this Run last changed state. The execution owner cannot
     // hold it — it is the ledger's transition, read here already — so the projection composes it onto
     // the four facts the owner does hold. A Run with no owner in flight keeps today's `null`.
-    const live = current.state === 'admitted' || current.state === 'executing' ? progress(runRecordId) : null;
+    // A Run stopping at the editor's cancellation is still in flight: its signal is read until it has stopped.
+    const live = current.state === 'admitted' || current.state === 'executing' || current.state === 'cancelling' ? progress(runRecordId) : null;
     return {
       runRecordId,
       state: current.state,
-      stateLabel: RUN_STATE_LABELS[current.state],
+      stateLabel: current.state === 'cancelled' && runBegan(transitions) ? RUN_CANCELLED_AFTER_START_LABEL : RUN_STATE_LABELS[current.state],
       recordedAt: asString(runRecord.recorded_at),
       transitions,
       adaptations,
@@ -2461,6 +2484,37 @@ export class BaselineAnalysisStore {
     return this.inspect(bookId);
   }
 
+  // ---- 取消任务 (Issue #422, plan slice S76a) ------------------------------------------------------------
+
+  /**
+   * 取消任务 on the Book's started Run (CTRL-004 to CTRL-008), once the editor confirmed the Cancellation Impact
+   * Summary: `cancelling` is recorded at once and the Run is named for the execution owner, which stops it at the
+   * next unit boundary and records `cancelled`. A waiting Run is cancelled by `cancelWaiting` instead, since
+   * nothing of it ran. A Run already cancelling is named again — the owner that holds it stops it once, and one AI7
+   * left behind when it last closed is settled there — and one already cancelled answers as it did.
+   */
+  requestCancel(bookId: string, taskIntentId: string): { projection: AnalysisProjection; runRecordId: string | null } {
+    requireAnalysis(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId), 'ANALYSIS_CANCEL_INVALID', '取消任务的参数无效。');
+    const current = this.inspect(bookId);
+    const run = current.run;
+    requireAnalysis(current.taskIntent?.taskIntentId === taskIntentId && run !== null, 'ANALYSIS_CANCEL_STALE', '这项任务已经变化；无法取消。');
+    if (run.state === 'cancelled') return { projection: current, runRecordId: null };
+    if (run.state === 'cancelling') return { projection: current, runRecordId: run.runRecordId };
+    requireAnalysis(run.state !== 'awaiting-connectivity', 'ANALYSIS_CANCEL_WAITING', '这项任务还在等待开始；请用等待中的「取消」。');
+    requireAnalysis(run.state === 'admitted' || run.state === 'executing', 'ANALYSIS_CANCEL_NOT_RUNNING', '只有正在运行的任务可以取消；它尚未开始或已经结束。');
+    this.recordRunState(run.runRecordId, 'cancelling', { detail: RUN_CANCELLING_DETAIL });
+    return { projection: this.inspect(bookId), runRecordId: run.runRecordId };
+  }
+
+  /** What settling a cancellation needs of a Run it did not reach through its plan: its Task Intent and its attempt. */
+  cancellationFacts(runRecordId: string): { taskIntentId: string; attemptId: string | null } {
+    requireAnalysis(UUID_PATTERN.test(runRecordId), 'ANALYSIS_RUN_INVALID', '运行记录标识无效。');
+    const run = this.#db.prepare('SELECT task_intent_id FROM analysis_run_records WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
+    requireAnalysis(run !== undefined, 'ANALYSIS_RUN_INVALID', '运行记录不存在。');
+    const attempt = this.#db.prepare('SELECT attempt_id FROM analysis_execution_attempts WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
+    return { taskIntentId: asString(run.task_intent_id), attemptId: attempt === undefined ? null : asString(attempt.attempt_id) };
+  }
+
   /** Every Run of this kind waiting in Connectivity Wait, oldest first, with its Book. */
   waitingRuns(): Array<{ bookId: string; taskIntentId: string; runRecordId: string }> {
     const rows = this.#db.prepare(
@@ -2733,6 +2787,13 @@ export class BaselineAnalysisStore {
       ).run(input.binding.attemptId, input.binding.harnessSessionId, startedAt, binding.json, binding.digest);
     });
     return { bindingDigest: binding.digest };
+  }
+
+  /** The units an attempt recorded a turn for: what it submitted, as far as the ledger knows. */
+  submittedUnitCount(attemptId: string): number {
+    const row = this.#db.prepare('SELECT count(DISTINCT unit_ordinal) submitted FROM analysis_harness_spans WHERE attempt_id = ? AND unit_ordinal IS NOT NULL')
+      .get(attemptId) as SqlRow;
+    return asNumber(row.submitted);
   }
 
   /** One technical turn by reference; from Issue #48 also which attempt of its unit it was and the payload digest the gate admitted. */

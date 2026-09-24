@@ -251,7 +251,7 @@ export interface AnalysisKindDefinition {
    * What a settled Task tells its editor to do next, when the kind's own surfaces are not the
    * baseline's. Absent for the two kinds that read the execution owner's long-standing wording.
    */
-  readonly safeNextActions?: Readonly<Record<'completed' | 'completed-with-gaps' | 'failed' | 'interrupted', string>>;
+  readonly safeNextActions?: Readonly<Record<'completed' | 'completed-with-gaps' | 'failed' | 'interrupted' | 'cancelled', string>>;
   /** The kind-specific keys of a stored revision body, read back for the projection. */
   revisionComponents(body: Readonly<Record<string, unknown>>): Record<string, unknown>;
   /** The unresolved-conflict count a stored revision discloses; `0` for a kind with no conflict pass. */
