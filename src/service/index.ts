@@ -344,7 +344,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: jobs.startBaselineAnalysisPreparation(request.input.bookId, request.input.goal, request.input.update, launchPolicy, request.input.reconfirm),
+        result: jobs.startBaselineAnalysisPreparation(request.input.bookId, request.input.goal, request.input.update, launchPolicy, request.input.reconfirm, request.input.redoOf ?? null),
       };
     case 'authorizeBaselineAnalysis': {
       // One slot, no queue (Issue #420, S74a A2): while a Run holds the slot, a start that would dispatch is
@@ -1124,7 +1124,7 @@ async function run(): Promise<void> {
       routeKind === DEVELOPER_LIVE_POLICY_BINDING.route || (connectivityPath !== undefined && routeKind === LOCAL_DETERMINISTIC_ROUTE);
     let preflightInFlight: Promise<ReconnectPreflightProjection> | null = null;
     const connectivity: ConnectivityContext = {
-      planConnectivity: { reading, reachesNetwork, slotBusy: () => owner.busy },
+      planConnectivity: { reading, reachesNetwork, slotBusy: () => owner.busy, carriesStoppedRun: (runRecordId) => owner.carriesStoppedRun(runRecordId, openStore.baselineAnalysisLedger) },
       // A waiting Run's route reaches its model over the network, or it would not wait: offline first, then a missing
       // credential, then the slot — the order the drawer reads them in.
       waitingFor: async () => reading() === 'offline'

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { BASELINE_ANALYSIS_KIND } from '../../shared/protocol.js';
 import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisReusePlanUnitProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, ReviewScopePlanUnitProjection, RunAttemptState, RunReportStageId } from '../../shared/protocol.js';
-import { prepareExecution, type HarnessExecutionSpan, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
+import { describeComposition, prepareExecution, type HarnessExecutionSpan, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import type { DeveloperLiveRuntime } from '../launch-policy.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
@@ -420,15 +420,8 @@ export class BaselineAnalysisExecutionOwner {
     // 续行 goes on only under the Execution Binding the Run persisted (CONT-015): the same route, model, fixture,
     // policy, credential slot, ceiling and plan digests. Anything else refuses before a state is recorded.
     const continuation: Continuation | null = resuming ? { stored: ledger.executionBindingOf(runRecordId) } : null;
-    if (continuation?.stored != null) {
-      const stored = continuation.stored;
-      const rebuilt = executionBindingRecordOf({
-        facts, definition: ledger.definition, live, fixture: this.#deps.fixture, attemptId: stored.attemptId,
-        harnessSessionId: stored.binding.harnessSessionId, boundAt: stored.binding.boundAt, compositionDigest: facts.behaviorCompositionDigest,
-      });
-      if (canonicalRecord(rebuilt).digest !== stored.bindingDigest) {
-        throw new ExecutionAdmissionError('EXECUTION_RESUME_BINDING_DRIFT', '这次运行授权时的执行绑定已经变化（模型服务、路由或策略不同）；不能续行。请取消它，再按新的计划准备。');
-      }
+    if (continuation?.stored != null && this.#bindingMoved(continuation.stored, facts, live, ledger)) {
+      throw new ExecutionAdmissionError('EXECUTION_RESUME_BINDING_DRIFT', '这次运行授权时的执行绑定已经变化（模型服务、路由、策略或 AI7 版本不同）；不能续行。请改计划重做。');
     }
     const submitted = submittedUnitsOf(facts);
     // A continuing Run reads, from its admission on, the units it already kept.
@@ -477,6 +470,39 @@ export class BaselineAnalysisExecutionOwner {
       if (this.#active === active) this.#active = null;
       this.#finishPendingCancel();
     });
+  }
+
+  /** Whether the Execution Binding a Run persisted reads otherwise under this launch (CONT-015). */
+  #bindingMoved(stored: NonNullable<Continuation['stored']>, facts: ExecutionPlanFacts, live: DeveloperLiveRuntime | null, ledger: BaselineAnalysisStore): boolean {
+    // The composition this launch would execute under — its harness pins included — as `prepareExecution` will
+    // describe it, never the one the plan froze: a harness a later release pins differently is seen here, before a
+    // summary promises what the Run kept, and not first when the execution refuses it.
+    const { route, model } = routeFactsOf(facts, live);
+    const composition = describeComposition(route, model, ledger.definition.promptContractDigest);
+    const rebuilt = executionBindingRecordOf({
+      facts, definition: ledger.definition, live, fixture: this.#deps.fixture, attemptId: stored.attemptId,
+      harnessSessionId: stored.binding.harnessSessionId, boundAt: stored.binding.boundAt, compositionDigest: composition.digest,
+    });
+    return canonicalRecord(rebuilt).digest !== stored.bindingDigest;
+  }
+
+  /**
+   * Whether this launch can still carry a stopped Run under the Execution Binding it persisted (Issue #422, S76c;
+   * CONT-015, CONT-016): the check 续行 and a stopped Run's cancellation make when they re-admit it, made here
+   * without recording anything. A launch that cannot — another route, fixture, policy or AI7 version — neither
+   * continues the Run nor forms what it kept into a revision: its cancellation settles without one.
+   */
+  carriesStoppedRun(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): boolean {
+    const live = this.#deps.developerLive ?? null;
+    if (this.#disposed || (live === null && this.#deps.fixture === null) || (ledger.launch.live !== null) !== (live !== null)) return false;
+    try {
+      const facts = ledger.loadExecutionPlan(runRecordId);
+      if (live !== null && !DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS.has(facts.sourceDigest)) return false;
+      const stored = ledger.executionBindingOf(runRecordId);
+      return stored == null || !this.#bindingMoved(stored, facts, live, ledger);
+    } catch {
+      return false;
+    }
   }
 
   /** The next stopped Run whose cancellation waited for the slot, finished now that the slot is free. */

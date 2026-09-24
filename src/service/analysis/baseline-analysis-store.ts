@@ -228,6 +228,8 @@ interface IntentFacts {
   /** The immutable Task Intent record; the expected outcome class the Task froze is read from here, never from the kind's constant. */
   readonly record: Readonly<Record<string, unknown>>;
   readonly expectedOutcome: string;
+  /** 改计划重做 (Issue #422, S76c; CONT-013): the cancelled Run this Task redoes; `null` for any other Task. */
+  readonly redoOfRunRecordId: string | null;
 }
 
 /**
@@ -241,7 +243,16 @@ type AnalysisProjectionShape = Omit<
 > & {
   kind: AnalysisKindId;
   contractVersion: string;
-  taskIntent: null | { taskIntentId: string; goal: string; expectedOutcome: string; createdAt: string; mode: AnalysisTaskMode; modeLabel: string };
+  taskIntent: null | {
+    taskIntentId: string;
+    goal: string;
+    expectedOutcome: string;
+    createdAt: string;
+    mode: AnalysisTaskMode;
+    modeLabel: string;
+    /** The baseline kind's alone (Issue #422, S76c). */
+    redoOf?: null | { runRecordId: string; taskIntentId: string };
+  };
   executionPlan: null | {
     steps: ReadonlyArray<string>;
     effects: readonly [];
@@ -296,7 +307,16 @@ export type BaselineAnalysisPrepareInput =
    * update modes, or — for a kind that declares one — its range-bound first mode, which starts the
    * Result Set over one selected range (Issue #417).
    */
-  | { phase: 'start'; bookId: string; goal: AnalysisGoal; update: BaselineAnalysisUpdateRequest | AnalysisModeRequest | null; reconfirm: boolean; launchPolicy: LaunchPolicyProjection }
+  | {
+    phase: 'start';
+    bookId: string;
+    goal: AnalysisGoal;
+    update: BaselineAnalysisUpdateRequest | AnalysisModeRequest | null;
+    reconfirm: boolean;
+    launchPolicy: LaunchPolicyProjection;
+    /** 改计划重做 (Issue #422, S76c): the cancelled Run of the Book's latest Task this new Task redoes. */
+    redoOf?: string | null;
+  }
   | { phase: 'advance'; workId: string }
   | { phase: 'cancel'; workId: string }
   | { phase: 'cancel-all' };
@@ -724,6 +744,11 @@ export class BaselineAnalysisStore {
       createdAt: intent.createdAt,
       mode: intent.mode,
       modeLabel: this.#definition.mode(intent.mode).label,
+      ...(this.#definition.kind !== BASELINE_ANALYSIS_KIND ? {} : {
+        redoOf: intent.redoOfRunRecordId === null
+          ? null
+          : { runRecordId: intent.redoOfRunRecordId, taskIntentId: this.#redoneTaskIntentId(intent.redoOfRunRecordId) },
+      }),
     };
     const revisionRows = this.#revisionRows(bookId);
     const latestRow = revisionRows.at(-1);
@@ -891,9 +916,11 @@ export class BaselineAnalysisStore {
       history,
       inspectedRevision,
       actions: {
-        // A first baseline whose Run was cancelled before it ever ran leaves the Book with no revision: it may be
-        // prepared again, as the Book with no Task could (Issue #502, OFF-010).
-        canPrepare: revision === null && run?.state === 'cancelled',
+        // A baseline analysis whose Run ended before it kept anything — cancelled, a wait included (Issue #502, OFF-010),
+        // failed, interrupted or blocked — leaves the Book with no revision: it can be started again, as a Book never
+        // analysed can (Issue #422, S76c).
+        canPrepare: this.#definition.kind === BASELINE_ANALYSIS_KIND && revision === null && run !== null &&
+          (run.state === 'cancelled' || run.state === 'failed' || run.state === 'interrupted' || run.state === 'blocked-before-dispatch'),
         canAuthorize: authorization === undefined && (update === null || update.predecessorCurrent) && planRevision === null,
         canReconfirmPlan,
       },
@@ -1629,8 +1656,9 @@ export class BaselineAnalysisStore {
     const goal = asString(row.goal);
     requireAnalysis(goal === this.#definition.mode(mode).goal, 'ANALYSIS_RECORD_INVALID', '任务意图的目标与更新方式不一致。');
     const record = parseCanonicalJson(asString(row.canonical_json));
-    requireAnalysis(isRecord(record) && record.taskIntentId === row.task_intent_id && typeof record.expectedOutcome === 'string',
-      'ANALYSIS_RECORD_INVALID', '任务意图记录无效。');
+    requireAnalysis(isRecord(record) && record.taskIntentId === row.task_intent_id && typeof record.expectedOutcome === 'string' &&
+      (record.redoOfRunRecordId === undefined || (typeof record.redoOfRunRecordId === 'string' && UUID_PATTERN.test(record.redoOfRunRecordId))),
+    'ANALYSIS_RECORD_INVALID', '任务意图记录无效。');
     const start = row.selected_start_position;
     const end = row.selected_end_position;
     return {
@@ -1643,7 +1671,26 @@ export class BaselineAnalysisStore {
       selectedRange: start === null || end === null ? null : { startPosition: asNumber(start), endPosition: asNumber(end) },
       record,
       expectedOutcome: record.expectedOutcome,
+      redoOfRunRecordId: record.redoOfRunRecordId === undefined ? null : record.redoOfRunRecordId as string,
     };
+  }
+
+  /** The Task the Run a redo names belongs to (Issue #422, S76c); refused when the record is not there. */
+  #redoneTaskIntentId(runRecordId: string): string {
+    const row = this.#db.prepare('SELECT task_intent_id FROM analysis_run_records WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
+    requireAnalysis(row !== undefined, 'ANALYSIS_RECORD_INVALID', '改计划重做所接续的运行记录缺失。');
+    return asString(row.task_intent_id);
+  }
+
+  /**
+   * What a redo's first plan version leaves out (Issue #422, S76c; CONT-013: a redo begins from a copyable prior plan):
+   * the edits of the redone Task's last plan version; nothing for any other Task.
+   */
+  #redoPlanEdits(intent: IntentFacts): PlanEdits {
+    if (intent.redoOfRunRecordId === null) return NO_PLAN_EDITS;
+    const prior = this.#redoneTaskIntentId(intent.redoOfRunRecordId);
+    const last = this.#planVersionFacts(prior).at(-1);
+    return last === undefined ? NO_PLAN_EDITS : this.#planEditsOf(prior, last.ordinal);
   }
 
   /** The frozen plan components of one plan version of a Task; an update Task must also carry its `reuse-plan`. */
@@ -2172,6 +2219,24 @@ export class BaselineAnalysisStore {
     const existing = this.inspect(input.bookId);
     requireAnalysis(!runIsActive(existing.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', activeRunReason(existing.run?.state ?? null));
     const latest = existing.resultSetRevision;
+    // 改计划重做 (Issue #422, S76c; AUTH-010, CONT-013): a new Task after the latest Task's Run was cancelled once it
+    // began. What that Run kept it formed into the Book's latest revision, which the redo carries and reads again
+    // wherever it is not closed (同步到当前稿件 reuses every closed range and re-reads every gap); a Run that kept
+    // nothing is redone as the Task it was — the same way over the same range, or the first baseline again.
+    const redoOf = input.redoOf ?? null;
+    if (redoOf !== null) {
+      const run = existing.run;
+      requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND && run !== null && run.runRecordId === redoOf && run.state === 'cancelled' &&
+        run.transitions.some((transition) => transition.state === 'executing'), 'ANALYSIS_REDO_STALE', '只有这本书最近一项任务里开始后取消的运行可以改计划重做。');
+      const expected = latest !== null && latest.provenance.runRecordId === redoOf
+        ? { mode: 'sync-current', selectedRange: null }
+        : existing.update === null ? null : { mode: existing.update.mode, selectedRange: existing.update.selectedRange };
+      requireAnalysis(!input.reconfirm && (expected === null
+        ? update === null
+        : update !== null && update.mode === expected.mode && update.selectedRange?.startPosition === expected.selectedRange?.startPosition &&
+          update.selectedRange?.endPosition === expected.selectedRange?.endPosition),
+      'ANALYSIS_REDO_INVALID', '改计划重做沿用这次运行已读完的部分，接着读其余的；什么都没读完时，照原样从头再做。');
+    }
     let selectedRange: BaselineAnalysisSelectedRange | null = null;
     if (update === null) {
       requireAnalysis(latest === null, 'ANALYSIS_FIRST_BASELINE_EXISTS', '本图书已存在结果集修订版；请使用分析更新操作追加后继修订版。');
@@ -2184,7 +2249,8 @@ export class BaselineAnalysisStore {
       const initialLabel = this.#definition.mode(this.#definition.initialMode).label;
       requireAnalysis(latest !== null && existing.updateControls !== null, 'ANALYSIS_PREDECESSOR_ABSENT', `本图书尚无结果集修订版；请先完成${initialLabel}。`);
       const control = (existing.updateControls!.actions as Readonly<Record<string, { available: boolean; unavailableReason: string | null }>>)[mode];
-      requireAnalysis(control !== undefined && control.available, 'ANALYSIS_UPDATE_MODE_UNAVAILABLE',
+      // A redo's 同步 reads the gaps of a revision the manuscript has not moved past, which ②A's own 同步 waits for.
+      requireAnalysis(control !== undefined && (control.available || redoOf !== null), 'ANALYSIS_UPDATE_MODE_UNAVAILABLE',
         control?.unavailableReason ?? changedModeUnavailableReason(this.#definition.mode(mode).label));
       if (this.#definition.mode(mode).rangeBound) {
         selectedRange = requireSelectedRange(update.selectedRange, existing.updateControls!.working.totalBlocks);
@@ -2221,6 +2287,7 @@ export class BaselineAnalysisStore {
         goal: input.goal,
         kind: this.#definition.kind,
         taskIntentId,
+        ...(redoOf === null ? {} : { redoOfRunRecordId: redoOf }),
       };
       // A whole first Task's record is the base alone, as it has been since revision 15. Every Task that
       // carries a plan also states its mode, its predecessor and its range — and a range-bound first
@@ -2296,7 +2363,7 @@ export class BaselineAnalysisStore {
     ).run(taskIntentId, checkpoint.manuscriptId, checkpoint.branchId, checkpoint.revisionId, checkpoint.revisionLabel,
       checkpoint.revisionDigest, checkpoint.journalSequence, purpose, checkpoint.createdForDirtyJournal ? 1 : 0,
       checkpointRecord.json, checkpointRecord.digest, instant);
-    this.#writePlanVersion({ intent, checkpoint, checkpointDigest: checkpointRecord.digest, ordinal: 1, selectedRange: intent.selectedRange, planRevisionId: null, instant, edits: NO_PLAN_EDITS });
+    this.#writePlanVersion({ intent, checkpoint, checkpointDigest: checkpointRecord.digest, ordinal: 1, selectedRange: intent.selectedRange, planRevisionId: null, instant, edits: this.#redoPlanEdits(intent) });
   }
 
   /**
@@ -2690,7 +2757,8 @@ export class BaselineAnalysisStore {
    */
   continuationBlockers(runRecordId: string): ReadonlyArray<string> {
     const drift = this.preflightDrift(runRecordId);
-    const reasons = drift.length === 0 ? [] : [`计划的关键内容已经变化：${drift.join('、')}。这次运行不能照原计划续行；请取消它，再按新的计划准备。`];
+    // CONT-016: material drift routes to a newly authorized Redo Run — 改计划重做 — never past the old authorization.
+    const reasons = drift.length === 0 ? [] : [`计划的关键内容已经变化：${drift.join('、')}。这次运行不能照原计划续行；请改计划重做。`];
     try {
       this.unitCheckpoints(runRecordId);
     } catch {

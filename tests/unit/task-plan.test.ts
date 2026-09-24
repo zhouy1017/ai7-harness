@@ -22,6 +22,8 @@ import {
   RUN_CONTROL_CANCELLING_REASON,
   RUN_CONTROL_PAUSE_REASON,
   RUN_CONTROL_REDO_REASON,
+  redoGoalSentence,
+  RESUME_BLOCKED_BINDING,
   RESUME_BLOCKED_CONNECTION,
   RESUME_BLOCKED_OFFLINE,
   RESUME_BLOCKED_SLOT,
@@ -138,6 +140,7 @@ describe('route-aware readiness of the authorization bar (S74a A3; AUTH-005, MOD
       start: { readiness: 'ready', needsModelConnection: true, planEnvelopeDigest: 'e'.repeat(64), categoryDigests: [], reconfirm: null, ...start },
       defaultRule: { canSet: false, reason: '这份计划不能设为快速开始默认。', planEnvelopeDigest: null, current: null, binds: [], startedBy: null },
       runControl: null,
+      redo: null,
     };
   }
 
@@ -218,7 +221,13 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
 
   it('says why 暂停 and 改计划重做 are not offered, and that the analysis leaves nothing committed', () => {
     expect(RUN_CONTROL_PAUSE_REASON).toBe('这项任务现在没有在运行，不能暂停；可以取消它');
-    expect(RUN_CONTROL_REDO_REASON).toBe('改计划重做随计划编辑提供');
+    expect(RUN_CONTROL_REDO_REASON).toBe('先暂停，再改计划重做');
+    // The redo Task's own sentence (Issue #422, S76c): what it carries, and what it reads again.
+    expect(redoGoalSentence({ reused: 6, recomputed: 2, invalidated: 2, bypassed: 0 })).toBe('改计划重做：沿用已读完的 6 个阅读范围，接着读其余 2 个');
+    // Carrying none — the first baseline again, or an update the Run kept nothing of — it starts from the beginning.
+    // Carrying nothing, it never says the Run read nothing: what it read may be what this launch could not carry.
+    expect(redoGoalSentence(null)).toBe('改计划重做：不沿用上一次运行的结果，这次从头读');
+    expect(redoGoalSentence({ reused: 0, recomputed: 8, invalidated: 8, bypassed: 0 })).toBe('改计划重做：不沿用上一次运行的结果，这次从头读');
     expect(RUN_CONTROL_CANCELLING_REASON).toBe('已在取消：正在进行的这一步完成后停止');
     expect(CANCELLATION_NO_EFFECTS).toBe('这项分析不改稿，没有需要撤回的受控动作。');
   });
@@ -283,6 +292,14 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
       '这项任务还没有读完任何阅读范围；取消后不会发送任何内容，也不会形成结果集修订版。',
       CANCELLATION_NO_EFFECTS,
     ]);
+    // Under a launch that can no longer carry the Run's binding, what it read cannot become its revision (S76c).
+    expect(baselineCancellationImpact(run('paused', null), null, { unitsSettled: 3, unitsTotal: 8, bindingHolds: false })).toEqual([
+      '这项任务已经停下；其余 5 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。',
+      '执行绑定已经变化，已读完的 3 个阅读范围不能整理成结果集修订版；这次取消不会形成修订版。',
+      CANCELLATION_NO_EFFECTS,
+    ]);
+    // CONT-016: a Run that cannot go on as it was authorized is redone, never continued past its authorization.
+    expect(RESUME_BLOCKED_BINDING).toBe('这次运行授权时的执行绑定已经变化（模型服务、路由、策略或 AI7 版本不同），不能照原样续行；请改计划重做。');
   });
 
   it('tells the truth about a Run no execution holds: nothing runs, and nothing of it was kept', () => {
