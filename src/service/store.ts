@@ -9607,16 +9607,53 @@ export class EditorialStore {
   }
 
   /**
-   * 交付 (Issue #415, S66b; DELIV-003): one Delivery Record of one exact saved version of a document of this Book. The
-   * export of that version follows on the export card, as the manuscript's does; nothing is sent.
+   * 交付 (Issue #415, S66b; DELIV-003): one Delivery Record of one exact version of a document of this Book — a version
+   * it saved, or its current text, saved as the next version first (origin `delivery`) in the transaction that records
+   * the delivery. The export of that version follows on the export card, as the manuscript's does; nothing is sent.
    */
-  recordProductionDocumentDelivery(input: RecordProductionDocumentDeliveryInput): ProductionDocumentResultProjection {
+  async recordProductionDocumentDelivery(input: RecordProductionDocumentDeliveryInput): Promise<ProductionDocumentResultProjection> {
     this.#assertAvailable();
-    requireStore(UUID_PATTERN.test(input.bookId) && UUID_PATTERN.test(input.documentId) && UUID_PATTERN.test(input.revisionId),
-      'PRODUCTION_DOCUMENT_INVALID', '生产文档参数无效。');
+    const version = input.version;
+    requireStore(UUID_PATTERN.test(input.bookId) && UUID_PATTERN.test(input.documentId) &&
+      (version.kind === 'saved' ? UUID_PATTERN.test(version.revisionId) : version.kind === 'current' && DIGEST_PATTERN.test(version.workingDigest)),
+    'PRODUCTION_DOCUMENT_INVALID', '生产文档参数无效。');
     const row = this.#documentCall(() => this.#productionDocuments.documentById(input.bookId, input.documentId));
     requireStore(row !== undefined, 'PRODUCTION_DOCUMENT_NOT_FOUND', '这本书没有这份生产文档。');
-    this.#documentCall(() => this.#transaction(this.#authority, () => this.#productionDocuments.recordDelivery(input)));
+    // Who and the note are checked first: a refused delivery saves no version either.
+    const party = this.#documentCall(() => this.#productionDocuments.deliveryParty(input.recipient, input.note));
+    if (version.kind === 'saved') {
+      this.#documentCall(() => this.#transaction(this.#authority, () => this.#productionDocuments.recordDelivery(row, version.revisionId, party)));
+      return this.#productionDocumentResult(input.bookId, row.typeId);
+    }
+    requireStore(this.#documentCall(() => this.#productionDocuments.workingDigest(row)) === version.workingDigest,
+      'PRODUCTION_DOCUMENT_DELIVERY_CHANGED', '文档在打开交付后又有修改；请重新选择要交付的版本。');
+    // The current text as the next version — or the latest version already, when nothing moved since — and its delivery.
+    const deliver = (revisionId: string, revisionDigest: string): void => {
+      this.#productionDocuments.recordVersion(row.documentId, revisionId, revisionDigest, 'delivery');
+      this.#productionDocuments.recordDelivery(row, revisionId, party);
+    };
+    const owner = this.#boundedAuthority;
+    const work = this.#boundedCall(() => owner.createManuscriptCheckpointWork(row.documentId, row.branchId, 'Document Version / 文档版本'));
+    if (work.workId === null) {
+      const checkpoint = work.checkpoint!;
+      this.#documentCall(() => this.#transaction(this.#authority, () => deliver(checkpoint.revisionId, checkpoint.revisionDigest)));
+      return this.#productionDocumentResult(input.bookId, row.typeId);
+    }
+    const workId = work.workId;
+    try {
+      for (;;) {
+        const progress = this.#boundedCall(() => owner.advanceManuscriptCheckpointWork(workId));
+        if (progress.done) break;
+        await new Promise<void>((resolveYield) => setImmediate(resolveYield));
+      }
+      this.#boundedCall(() => owner.finalizeManuscriptCheckpointWork(workId, (checkpoint, purpose) => {
+        requireStore(purpose === 'Document Version / 文档版本', 'PRODUCTION_DOCUMENT_INVALID', '文档版本的用途无效。');
+        this.#documentCall(() => deliver(checkpoint.revisionId, checkpoint.revisionDigest));
+      }));
+    } catch (error) {
+      this.#boundedCall(() => owner.cancelManuscriptCheckpointWork(workId));
+      throw error;
+    }
     return this.#productionDocumentResult(input.bookId, row.typeId);
   }
 

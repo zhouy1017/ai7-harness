@@ -294,7 +294,7 @@ describe('decodeRequest accepts well-formed frames', () => {
 
   it('accepts the 生产文档 read and commands with a house type, a material, a document and a delivery by their identities', () => {
     const bookId = randomUUID();
-    const delivery = { bookId, documentId: randomUUID(), revisionId: randomUUID() };
+    const delivery = { bookId, documentId: randomUUID(), version: { kind: 'saved', revisionId: randomUUID() } };
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
       { op: 'inspectProductionDocuments', input: { bookId } },
       { op: 'createProductionDocument', input: { bookId, typeId: 'news-release', sourceVersionId: randomUUID() } },
@@ -304,6 +304,11 @@ describe('decodeRequest accepts well-formed frames', () => {
       // Issue #415 (S66b): 交付 to a recipient from the house's list or in the editor's own words, with a note or none.
       { op: 'recordProductionDocumentDelivery', input: { ...delivery, recipient: { kind: 'publicity', custom: null }, note: null } },
       { op: 'recordProductionDocumentDelivery', input: { ...delivery, recipient: { kind: 'external-media', custom: null }, note: '发布会前一周。' } },
+      // The current text, bound to the working digest the form read (DELIV-003).
+      {
+        op: 'recordProductionDocumentDelivery',
+        input: { ...delivery, version: { kind: 'current', workingDigest: 'a'.repeat(64) }, recipient: { kind: 'other', custom: null }, note: null },
+      },
       {
         op: 'recordProductionDocumentDelivery',
         input: { ...delivery, recipient: { kind: 'custom', custom: '𠀀'.repeat(MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS) },
@@ -320,7 +325,7 @@ describe('decodeRequest accepts well-formed frames', () => {
     const id = randomUUID();
     const bookId = randomUUID();
     const create = { bookId, typeId: 'news-release', sourceVersionId: randomUUID() };
-    const delivery = { bookId, documentId: randomUUID(), revisionId: randomUUID() };
+    const delivery = { bookId, documentId: randomUUID(), version: { kind: 'saved', revisionId: randomUUID() } };
     const refused: ReadonlyArray<{ op: string; input: unknown }> = [
       { op: 'createProductionDocument', input: { ...create, typeId: '' } },
       { op: 'createProductionDocument', input: { ...create, typeId: 'News Release' } },
@@ -351,7 +356,20 @@ describe('decodeRequest accepts well-formed frames', () => {
         input: { ...delivery, recipient: { kind: 'publicity', custom: null }, note: '字'.repeat(MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS + 1) },
       },
       { op: 'recordProductionDocumentDelivery', input: { ...delivery, recipient: { kind: 'publicity', custom: null } } },
-      { op: 'recordProductionDocumentDelivery', input: { ...delivery, revisionId: 'latest', recipient: { kind: 'publicity', custom: null }, note: null } },
+      // A version is a saved one by its revision or the current text by its digest, and nothing else.
+      { op: 'recordProductionDocumentDelivery', input: { ...delivery, version: { kind: 'saved', revisionId: 'latest' }, recipient: { kind: 'publicity', custom: null }, note: null } },
+      { op: 'recordProductionDocumentDelivery', input: { ...delivery, version: { kind: 'current' }, recipient: { kind: 'publicity', custom: null }, note: null } },
+      {
+        op: 'recordProductionDocumentDelivery',
+        input: { ...delivery, version: { kind: 'current', workingDigest: 'A'.repeat(64) }, recipient: { kind: 'publicity', custom: null }, note: null },
+      },
+      {
+        op: 'recordProductionDocumentDelivery',
+        input: { ...delivery, version: { kind: 'current', workingDigest: 'a'.repeat(64), revisionId: randomUUID() }, recipient: { kind: 'publicity', custom: null }, note: null },
+      },
+      { op: 'recordProductionDocumentDelivery', input: { ...delivery, version: { kind: 'latest' }, recipient: { kind: 'publicity', custom: null }, note: null } },
+      { op: 'recordProductionDocumentDelivery', input: { ...delivery, version: randomUUID(), recipient: { kind: 'publicity', custom: null }, note: null } },
+      { op: 'recordProductionDocumentDelivery', input: { bookId, documentId: randomUUID(), revisionId: randomUUID(), recipient: { kind: 'publicity', custom: null }, note: null } },
       { op: 'recordProductionDocumentDelivery', input: { ...delivery, recipient: { kind: 'publicity', custom: null }, note: null, sent: true } },
     ];
     for (const { op, input } of refused) {
