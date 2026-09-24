@@ -5197,6 +5197,8 @@ export interface ManuscriptExportFormatProjection {
   label: string;
   available: boolean;
   note: string;
+  /** Offered only under the secondary `备用格式` disclosure, never beside the recommended format (V2-UX-EXP-005). */
+  fallback: boolean;
 }
 
 /**

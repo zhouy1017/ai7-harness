@@ -52,6 +52,8 @@ export function exportSavedRevisionLine(revisionLabel: string): string {
 /** V2-UX-EXP-015, EXP-017: the export ends at the chosen local file. */
 export const EXPORT_LOCAL_LINE = '导出只写到本机你选择的位置；AI7 不会发送、上传或发布这个文件。';
 export const EXPORT_FORMAT_LEGEND = '格式';
+/** The secondary disclosure a fallback format sits under (V2-UX-EXP-005; IA §导出, visual direction). */
+export const EXPORT_FALLBACK_FORMATS = '备用格式';
 export const EXPORT_OPTIONS_LEGEND = '随文件导出';
 export const EXPORT_OPTION_LABELS: Readonly<Record<keyof ManuscriptExportOptions, string>> = {
   includeAnnotations: '含批注',
