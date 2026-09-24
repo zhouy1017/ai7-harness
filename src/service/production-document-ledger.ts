@@ -161,3 +161,71 @@ export function initializeProductionDocumentSchema(db: DatabaseSync): void {
     throw new ProductionDocumentSchemaError('SCHEMA_MIGRATION_FAILED', '生产文档的关系与已有记录不一致。');
   }
 }
+
+/**
+ * Revision 38 (Issue #415, S66b; V2-UX-DELIV-003, DELIV-004): `production_document_deliveries`, a document's Delivery
+ * Records — 第 N 次交付, the exact version and its digest, the recipient from the house's list or in the editor's own
+ * words, the note, the actor and the time, with the record's canonical JSON and digest. A ledger like the others: a
+ * record is appended once and never rewritten, so a later edit and a new delivery leave every earlier one as it was.
+ */
+export const PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_SQL = {
+  production_document_deliveries: `CREATE TABLE production_document_deliveries (
+  delivery_id TEXT PRIMARY KEY,
+  document_id TEXT NOT NULL REFERENCES production_documents(document_id),
+  book_id TEXT NOT NULL REFERENCES books(book_id),
+  ordinal INTEGER NOT NULL CHECK(ordinal >= 1),
+  version INTEGER NOT NULL CHECK(version >= 1),
+  revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+  revision_digest TEXT NOT NULL CHECK(length(revision_digest) = 64),
+  recipient_kind TEXT NOT NULL CHECK(recipient_kind IN ('publicity', 'editorial', 'external-media', 'other', 'custom')),
+  recipient_label TEXT NOT NULL CHECK(length(recipient_label) BETWEEN 1 AND 160),
+  note TEXT CHECK(note IS NULL OR length(note) BETWEEN 1 AND 2000),
+  actor TEXT NOT NULL CHECK(actor = '本机编辑'),
+  recorded_at TEXT NOT NULL,
+  canonical_json TEXT NOT NULL,
+  sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
+  UNIQUE(document_id, ordinal)
+) STRICT`,
+} as const;
+
+export const PRODUCTION_DOCUMENT_DELIVERY_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.keys(PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_SQL).flatMap((table) => [
+    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
+    BEFORE UPDATE ON ${table}
+    BEGIN
+      SELECT RAISE(ABORT, 'PRODUCTION_DOCUMENT_LEDGER_IMMUTABLE');
+    END`],
+    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
+    BEFORE DELETE ON ${table}
+    BEGIN
+      SELECT RAISE(ABORT, 'PRODUCTION_DOCUMENT_LEDGER_IMMUTABLE');
+    END`],
+  ]),
+);
+
+export const PRODUCTION_DOCUMENT_DELIVERY_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
+  production_document_deliveries: [
+    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
+    'document_id>production_documents.document_id:NO ACTION/NO ACTION/NONE',
+    'revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+  ],
+};
+
+/** Revision 38's relation, created once: a store that predates it gains one empty relation and nothing existing moves. */
+export function initializeProductionDocumentDeliverySchema(db: DatabaseSync): void {
+  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'production_document_deliveries'").get() !== undefined) return;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const sql of Object.values(PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_SQL)) db.exec(sql);
+    for (const sql of Object.values(PRODUCTION_DOCUMENT_DELIVERY_TRIGGER_SQL)) db.exec(sql);
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (rollbackError) {
+      throw new AggregateError([error, rollbackError], 'Production document delivery schema rollback failed.');
+    }
+    throw error;
+  }
+  if (db.prepare('PRAGMA foreign_key_check').all().length !== 0) {
+    throw new ProductionDocumentSchemaError('SCHEMA_INVALID', '交付记录的关系与已有记录不一致。');
+  }
+}
