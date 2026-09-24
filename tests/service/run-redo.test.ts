@@ -8,7 +8,7 @@ import { ALWAYS_ONLINE } from '../../src/service/connectivity.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { RESUME_BLOCKED_BINDING, RUN_CONTROL_REDO_REASON } from '../../src/service/task-plan.js';
+import { RESUME_BLOCKED_BINDING, RUN_CONTROL_REDO_NOT_BEGUN_REASON, RUN_CONTROL_REDO_REASON } from '../../src/service/task-plan.js';
 import { controlledUnitHold } from '../../src/service/unit-hold.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
@@ -218,7 +218,7 @@ describe('改计划重做 over the real store', () => {
       const redo = prepare(store, bookId, null, runRecordId);
       expect(redo.taskIntent).toMatchObject({ mode: 'first-baseline', redoOf: { runRecordId, taskIntentId } });
       expect(redo.planVersion?.edits).toEqual(NO_PLAN_EDITS);
-      expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: redo.taskIntent!.taskIntentId }).goal.sentence).toBe('改计划重做：上一次运行没有读完任何阅读范围，这次从头读');
+      expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: redo.taskIntent!.taskIntentId }).goal.sentence).toBe('改计划重做：不沿用上一次运行的结果，这次从头读');
       // A prepared Task is never offered a start of its own.
       expect(redo.actions.canPrepare).toBe(false);
       store.markCleanShutdown();
@@ -286,6 +286,55 @@ describe('改计划重做 over the real store', () => {
     }
   }, 300_000);
 
+  it('carries only the ranges a stopped Run read to a result, and reads a range it left a gap in again', async () => {
+    fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-one-unit-failure');
+    const store = await openWithRoute();
+    const execution = owner(store);
+    try {
+      const bookId = await importedBook(store, 'L2 sample1 重做缺口');
+      const prepared = prepare(store, bookId);
+      const taskIntentId = prepared.taskIntent!.taskIntentId;
+      writeFileSync(holdPath, '2');
+      const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+      execution.admitAndDispatch(runRecordId);
+      await until(() => execution.progressFor(runRecordId)?.currentUnitOrdinal === 3, 'unit 3 in flight');
+      store.requestBaselineAnalysisPause(bookId, taskIntentId);
+      execution.pauseRun(runRecordId, store.baselineAnalysisLedger);
+      writeFileSync(holdPath, '3');
+      await execution.whenIdle();
+      // Three ranges kept, unit 2 a gap: the redo carries the two with a result and reads the other six again.
+      const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, (id) => execution.progressFor(id));
+      expect(plan.redo?.summary.slice(0, 2)).toEqual([
+        '这项任务会在这里停下并取消；已读完的 3 个阅读范围保留在一份新的结果集修订版里，没读到的记为未尝试。',
+        '然后准备一项新任务：沿用其中有结果的 2 个阅读范围，其余 6 个（含留下缺口的 1 个）重新读；开始之前可以先改计划。',
+      ]);
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('offers no redo on a stopped Run that never began reading, and says why', async () => {
+    const store = await openWithRoute();
+    try {
+      const bookId = await importedBook(store, 'L2 sample1 未开始的重做');
+      const prepared = prepare(store, bookId);
+      const taskIntentId = prepared.taskIntent!.taskIntentId;
+      const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+      // Admitted when the service stopped, it is reconciled 可续行 without having read a range.
+      store.baselineAnalysisLedger.recordRunState(runRecordId, 'admitted', { detail: '已进入 AI7 调度器（单槽位）。' });
+      expect(store.reconcileStoppedBaselineAnalysisRuns()).toEqual({ settled: 1, cancelling: [] });
+      const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
+      expect(plan.state.key).toBe('resumable');
+      expect(plan.runControl?.redo).toEqual({ reason: RUN_CONTROL_REDO_NOT_BEGUN_REASON });
+      expect(plan.redo).toBeNull();
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 300_000);
+
   it('redoes an update that kept nothing as the Task it was, never as a 同步 of the revision before it', async () => {
     const store = await openWithRoute();
     const execution = owner(store);
@@ -314,7 +363,7 @@ describe('改计划重做 over the real store', () => {
       const redo = prepare(store, bookId, whole, runRecordId);
       expect(redo.taskIntent).toMatchObject({ mode: 'reanalyze-book', redoOf: { runRecordId, taskIntentId } });
       expect(redo.update?.reusePlan?.counts).toMatchObject({ reused: 0, recomputed: SAMPLE1_UNITS });
-      expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: redo.taskIntent!.taskIntentId }).goal.sentence).toBe('改计划重做：上一次运行没有读完任何阅读范围，这次从头读');
+      expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: redo.taskIntent!.taskIntentId }).goal.sentence).toBe('改计划重做：不沿用上一次运行的结果，这次从头读');
       store.markCleanShutdown();
     } finally {
       await execution.dispose();

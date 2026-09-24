@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { BASELINE_ANALYSIS_KIND } from '../../shared/protocol.js';
 import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisReusePlanUnitProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, ReviewScopePlanUnitProjection, RunAttemptState, RunReportStageId } from '../../shared/protocol.js';
-import { prepareExecution, type HarnessExecutionSpan, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
+import { describeComposition, prepareExecution, type HarnessExecutionSpan, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import type { DeveloperLiveRuntime } from '../launch-policy.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
@@ -474,9 +474,14 @@ export class BaselineAnalysisExecutionOwner {
 
   /** Whether the Execution Binding a Run persisted reads otherwise under this launch (CONT-015). */
   #bindingMoved(stored: NonNullable<Continuation['stored']>, facts: ExecutionPlanFacts, live: DeveloperLiveRuntime | null, ledger: BaselineAnalysisStore): boolean {
+    // The composition this launch would execute under — its harness pins included — as `prepareExecution` will
+    // describe it, never the one the plan froze: a harness a later release pins differently is seen here, before a
+    // summary promises what the Run kept, and not first when the execution refuses it.
+    const { route, model } = routeFactsOf(facts, live);
+    const composition = describeComposition(route, model, ledger.definition.promptContractDigest);
     const rebuilt = executionBindingRecordOf({
       facts, definition: ledger.definition, live, fixture: this.#deps.fixture, attemptId: stored.attemptId,
-      harnessSessionId: stored.binding.harnessSessionId, boundAt: stored.binding.boundAt, compositionDigest: facts.behaviorCompositionDigest,
+      harnessSessionId: stored.binding.harnessSessionId, boundAt: stored.binding.boundAt, compositionDigest: composition.digest,
     });
     return canonicalRecord(rebuilt).digest !== stored.bindingDigest;
   }
