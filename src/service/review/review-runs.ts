@@ -59,6 +59,7 @@ import {
 import { deriveCoverageManifest } from '../analysis/coverage-manifest.js';
 import { EXECUTION_SLOT_BUSY, EXECUTION_SLOT_BUSY_REASON } from '../analysis/execution-error.js';
 import { graphemeCount, sliceGraphemes } from '../analysis/factual-review-contract.js';
+import type { PackageReviewRunReading } from '../book-delivery-packages.js';
 import type { EditorialMarkStore, ProducedEditorialMarkInput } from '../editorial-marks.js';
 import type { ReviewRunAttentionReading } from '../global-attention.js';
 import {
@@ -2136,6 +2137,36 @@ export class ReviewRunStore {
       state,
       canContinue,
     };
+  }
+
+  // ---- 图书交付包 (Issue #416, plan slice S67a) -----------------------------------------------------------
+
+  /**
+   * What 图书交付包 reads of a Book's Review Runs (BUNDLE-001, BUNDLE-002): each Run oldest first, with its state as
+   * `#runView` derives it — a category a stopped service left dispatched is read, never recorded — and its newest
+   * report version, if the Run has not moved since. A read.
+   */
+  packageReadings(bookId: string): PackageReviewRunReading[] {
+    const rows = this.#db.prepare('SELECT * FROM review_runs WHERE book_id = ? ORDER BY ordinal').all(bookId) as SqlRow[];
+    const latestReport = this.#db.prepare('SELECT report_id, version, generated_at, sha256 FROM review_reports WHERE review_run_id = ? ORDER BY version DESC LIMIT 1');
+    const latestEvent = this.#db.prepare('SELECT max(recorded_at) last FROM review_run_category_events WHERE review_run_id = ?');
+    return rows.map((row) => {
+      const view = this.#runStateView(this.#snapshotOf(row));
+      const report = latestReport.get(view.snapshot.reviewRunId) as SqlRow | undefined;
+      const moved = (latestEvent.get(view.snapshot.reviewRunId) as SqlRow).last;
+      // A report the Run moved past — a category dispatched, settled or stopped after it was generated, as 继续审阅 does
+      // after a report of a partial Run — writes a Run that no longer is: the package reads it as none until a newer one.
+      const current = report !== undefined && (moved === null || text(report.generated_at) >= text(moved));
+      return {
+        reviewRunId: view.snapshot.reviewRunId,
+        ordinal: view.snapshot.ordinal,
+        label: `第 ${view.snapshot.ordinal} 次`,
+        state: view.state,
+        report: !current
+          ? null
+          : { reportId: text(report.report_id), version: integer(report.version), digest: text(report.sha256), generatedAt: text(report.generated_at) },
+      };
+    });
   }
 
   // ---- 待我处理 (Issue #424, plan slice S78) ------------------------------------------------------------

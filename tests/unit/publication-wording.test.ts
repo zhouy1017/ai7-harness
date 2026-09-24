@@ -9,6 +9,9 @@ import {
   MAX_PRODUCTION_DOCUMENT_SOURCES_LISTED,
   MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED,
   MAX_FRAME_BYTES,
+  MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS,
+  MAX_BOOK_DELIVERY_PACKAGE_REPORTS_LISTED,
+  MAX_BOOK_DELIVERY_PACKAGE_VERSIONS_LISTED,
   MAX_MILESTONE_PURPOSE_CODE_UNITS,
   MAX_PUBLICATION_BASIS_CHARACTERS,
   MAX_PUBLICATION_SCOPE_CHARACTERS,
@@ -30,6 +33,9 @@ import {
   type MilestoneListItemProjection,
   type PublicationDesignationProjection,
   type ProductionDocumentsProjection,
+  type BookDeliveryPackageItemProjection,
+  type BookDeliveryPackageProjection,
+  type BookDeliveryPackageVersionProjection,
   type PublicationVersionProjection,
 } from '../../src/shared/protocol.js';
 
@@ -150,7 +156,7 @@ describe('the words of 发稿', () => {
     const digest = 'f'.repeat(64);
     const time = '2026-09-22T00:00:00.000Z';
     // Issue #415: every house type with a document at its widest — its versions listed to their bound and a source
-      // name at the length a file name may take — and the materials listed to theirs.
+    // name at the length a file name may take — and the materials listed to theirs.
     const documents: ProductionDocumentsProjection = {
       bookId: identity,
         configuration: { schema: 'ai7.production-document-types/1', version: '1', digest },
@@ -188,6 +194,46 @@ describe('the words of 发稿', () => {
         sourcesTruncated: true,
       };
     const response = { id: identity, ok: true, op: 'recordProductionDocumentDelivery', result: { bookId: identity, documents, document: documents.types[0]!.document, typeId: 'news-release' } };
+    expect(Buffer.byteLength(JSON.stringify(response), 'utf8')).toBeLessThan(MAX_FRAME_BYTES);
+  });
+
+  it('keep the widest 图书交付包 answer within one service frame (Issue #416)', () => {
+    const identity = '00000000-0000-4000-8000-000000000000';
+    const digest = 'f'.repeat(64);
+    const wide = (length: number) => '𠀀'.repeat(length);
+    // Every condition at its widest words, every list at its bound, and every version with the widest purpose.
+    const conditions = [
+      { key: 'publication' as const, typeId: null, label: '发稿版本', met: true, stateLabel: `发稿版本「${wide(80)}」 · r9999`, notice: wide(120), route: 'publication' as const, routeLabel: '设为发稿版本…' },
+      ...Array.from({ length: 5 }, (_, index) => ({
+        key: 'document' as const, typeId: `type-${index}`, label: wide(40), met: true, stateLabel: '第 9999 次交付 · 版本 9999', notice: wide(120),
+        route: 'document' as const, routeLabel: '再交付…',
+      })),
+      { key: 'work-records' as const, typeId: null, label: '工作记录', met: false, stateLabel: '第 9999 次审阅尚未生成报告', notice: null, route: 'review' as const, routeLabel: '前往审阅' },
+    ];
+    const item = (kind: BookDeliveryPackageItemProjection['kind']): BookDeliveryPackageItemProjection => ({ kind, label: wide(120), detail: wide(200) });
+    const answer: BookDeliveryPackageProjection = {
+      bookId: identity,
+      statement: wide(80),
+      conditions,
+      ready: false,
+      unmet: conditions.map((condition) => condition.label),
+      content: {
+        digest,
+        included: [item('publication'), ...Array.from({ length: 5 }, () => item('document')), ...Array.from({ length: MAX_BOOK_DELIVERY_PACKAGE_REPORTS_LISTED }, () => item('review-report'))],
+        includedTruncated: true,
+        excluded: [...Array.from({ length: 5 }, () => item('not-for-this-book')), ...Array.from({ length: 3 }, () => item('exclusion'))],
+        limitations: Array.from({ length: 6 + MAX_BOOK_DELIVERY_PACKAGE_REPORTS_LISTED + 1 }, () => wide(160)),
+        limitationsTruncated: true,
+      },
+      versions: Array.from({ length: MAX_BOOK_DELIVERY_PACKAGE_VERSIONS_LISTED }, (_, index): BookDeliveryPackageVersionProjection => ({
+        packageVersionId: identity, packageId: identity, version: index + 1, label: `v${index + 1}`, purpose: wide(MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS),
+        preparedAt: '2026-09-24T00:00:00.000Z', current: index === 0, summary: wide(200), exportHistoryLabel: '暂无导出记录',
+        technical: { contentDigest: digest, digest, priorVersionId: identity },
+      })),
+      versionsTruncated: true,
+      changedSinceLatest: true,
+    };
+    const response = { id: identity, ok: true, op: 'prepareBookDeliveryPackage', result: { bookId: identity, outcome: 'prepared', version: 21, package: answer } };
     expect(Buffer.byteLength(JSON.stringify(response), 'utf8')).toBeLessThan(MAX_FRAME_BYTES);
   });
 });

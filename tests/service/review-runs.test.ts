@@ -667,10 +667,21 @@ describe('a Review Run over the real store on exact sample1', () => {
       const partial = workspace(second, book, reviewRunId).run!;
       expect(partial).toMatchObject({ state: 'partial', stateLabel: '部分完成 · 可继续审阅', canContinue: true });
       expect(partial.categories[1]).toMatchObject({ state: 'waiting', detail: '尚未开始；继续审阅时从这一类接着审。' });
+      // 图书交付包's work records (Issue #416, S67a): a report of the partial Run is a record of the Run as it stands.
+      const workRecords = () => second.store.inspectBookDeliveryPackage(book.bookId).conditions.find((condition) => condition.key === 'work-records')!;
+      second.store.generateReviewReport(book.bookId, reviewRunId);
+      expect(workRecords()).toMatchObject({ met: true, stateLabel: '审阅报告 1 份', route: null });
       await second.driver.continue(reviewRunId);
       const finished = workspace(second, book, reviewRunId).run!;
       expect(finished).toMatchObject({ state: 'settled', canContinue: false });
       expect(finished.categories.map((category) => category.state)).toEqual(['settled', 'settled']);
+      // 继续审阅 moved the Run past that report: it writes a Run that no longer is, so the package waits for a newer one
+      // rather than freezing it, and takes the newer one once it is generated.
+      expect(workRecords()).toMatchObject({ met: false, stateLabel: '第 1 次审阅尚未生成报告', route: 'review' });
+      second.store.generateReviewReport(book.bookId, reviewRunId);
+      expect(workRecords()).toMatchObject({ met: true, stateLabel: '审阅报告 1 份', route: null });
+      expect(second.store.inspectBookDeliveryPackage(book.bookId).content.included.filter((item) => item.kind === 'review-report').map((item) => item.label))
+        .toEqual(['审阅报告 · 第 1 次审阅 · 第 2 版']);
       expect(eventTrail(reviewRunId)).toEqual([
         [TYPOS, 'dispatched'], [TYPOS, 'settled'], [TYPOS, 'materialized'],
         [STYLE, 'dispatched'], [STYLE, 'settled'], [STYLE, 'materialized'],

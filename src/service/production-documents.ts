@@ -19,6 +19,7 @@ import {
   type SourceFormat,
 } from '../shared/protocol.js';
 import { UUID_PATTERN, canonicalJson, canonicalRecord, sha256Hex } from './analysis/canonical.js';
+import type { PackageDeliveryReading, PackageDocumentReading } from './book-delivery-packages.js';
 import {
   BUILTIN_PRODUCTION_DOCUMENT_TYPES,
   BUILTIN_PRODUCTION_DOCUMENT_TYPES_DIGEST,
@@ -279,6 +280,45 @@ export class ProductionDocuments {
         export: exported === null
           ? null
           : { preparationId: exported.preparationId, outcome: exported.outcome, outcomeLabel: exported.outcomeLabel, fileName: exported.fileName },
+      };
+    });
+  }
+
+  /**
+   * What 图书交付包 reads of the Book's Production Documents (Issue #416, S67a): every house type in the house's order,
+   * whether it is 本书不做, and its document's every Delivery Record newest first, each with the exact version it
+   * named, and whether the text moved past the version last delivered. A read.
+   */
+  packageReadings(bookId: string): PackageDocumentReading[] {
+    const decisions = this.#latestDecisions(bookId);
+    const rows = this.#documentRows(bookId);
+    return BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.map((type): PackageDocumentReading => {
+      const row = rows.find((candidate) => candidate.typeId === type.typeId);
+      const notForThisBook = decisions.get(type.typeId) === 'not-for-this-book';
+      if (row === undefined) return { typeId: type.typeId, typeLabel: type.label, notForThisBook, document: null };
+      const deliveries = (this.#db.prepare(
+        `SELECT d.delivery_id, d.ordinal, d.version, d.revision_id, d.revision_digest, d.recipient_label, d.recorded_at, d.canonical_json, d.sha256
+         FROM production_document_deliveries d WHERE d.document_id = ? ORDER BY d.ordinal DESC`,
+      ).all(row.documentId) as SqlRow[]).map((delivery): PackageDeliveryReading => {
+        requireDocument(sha256Hex(text(delivery.canonical_json)) === text(delivery.sha256), 'PRODUCTION_DOCUMENT_RECORD_INVALID', '交付记录与其摘要不一致。');
+        return {
+          deliveryId: text(delivery.delivery_id),
+          ordinal: integer(delivery.ordinal),
+          version: integer(delivery.version),
+          versionLabel: productionDocumentVersionLabel(integer(delivery.version)),
+          revisionId: text(delivery.revision_id),
+          revisionDigest: text(delivery.revision_digest),
+          recipientLabel: text(delivery.recipient_label),
+          recordedAt: text(delivery.recorded_at),
+        };
+      });
+      const working = this.workingDigest(row);
+      return {
+        typeId: type.typeId,
+        typeLabel: type.label,
+        notForThisBook,
+        // 交付后有修改 read as the document's own card reads it (DELIV-004): one check, in one place.
+        document: { documentId: row.documentId, changedSinceDelivery: this.changedSinceDelivery(row.documentId, working), deliveries },
       };
     });
   }
