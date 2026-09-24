@@ -56,6 +56,7 @@ import {
   TASK_BAR_CANCEL_KEEP,
   TASK_BAR_CANCEL_RUN,
   TASK_BAR_CANCELLING_NOTE,
+  TASK_BAR_CANCELLED_NOTE,
   TASK_BAR_PAUSE,
   TASK_BAR_REDO,
   TASK_PLAN_ACTIVITY_STALE,
@@ -396,6 +397,7 @@ describe('the authorization bar (S74a)', () => {
       redo: { reason: '改计划重做随计划编辑提供' },
       activity: null,
       executingSince: null,
+      update: null,
     };
     const running = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'running', label: '运行中' }, runControl }));
     expect(running).toMatchObject({ readiness: 'started', statement: null, note: null, status: '运行中' });
@@ -464,6 +466,15 @@ describe('the activity card (Issue #422, AUTH-011)', () => {
       尝试: '等待模型响应',
       进展: '已读完 2 / 8 个阅读范围 · 已完成模型回合 2 次',
     });
+  });
+
+  it('names the range an update Run reads among the whole manuscript, and counts only the ranges it reads again', () => {
+    const rows = Object.fromEntries(taskPlanActivityRows({ ...activity, currentUnitOrdinal: 7, unitsTotal: 2, unitsSettled: 1 }, null, at('2026-09-24T01:01:05.000Z'), { manuscriptUnits: 8, reusedUnits: 6 }));
+    expect(rows).toMatchObject({
+      当前: '第 7 个阅读范围（全书共 8 个，这次重新分析 2 个）',
+      进展: '已读完 1 / 2 个阅读范围（只算要重新分析的） · 已完成模型回合 2 次',
+    });
+    expect(TASK_BAR_CANCELLED_NOTE).toBe('已取消这项任务；此后不会再发送任何内容');
   });
 
   it('says a Run between two units is between them, and a later step by its own name', () => {
