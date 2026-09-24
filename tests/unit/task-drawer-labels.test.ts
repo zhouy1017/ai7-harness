@@ -114,6 +114,7 @@ import {
   taskPlanSummaryLine,
   parseBudgetCeiling,
   TASK_BAR_ADJUST_BUDGET_REDO,
+  TASK_BAR_BUDGET_LAUNCH_NOTE,
   TASK_BAR_VIEW_PARTIAL,
   TASK_PLAN_BUDGET_APPLY,
   TASK_PLAN_BUDGET_CANCEL,
@@ -714,7 +715,7 @@ describe('the Run Budget Ceiling in the drawer (S16a)', () => {
   });
 
   it('shows a Run the ceiling stopped with what it read and used, 调整预算并重做 and 查看部分结果 — no 续行, no 重试', () => {
-    const budgetStop = { maxTotalTokens: 5000, usedTokens: 6620, unitsSettled: 4, unitsTotal: 8 };
+    const budgetStop = { maxTotalTokens: 5000, usedTokens: 6620, unitsSettled: 4, unitsTotal: 8, launchSetsCeiling: false };
     expect(taskBarBudgetStopNote(budgetStop)).toBe('已读完 4 / 8 个阅读范围，结果都已保留；这次运行用了 6,620 tokens，达到了预算上限 5,000 tokens');
     const redo = { summary: [], prepare: { goal: 'g', update: { mode: 'sync-current', selectedRange: null }, redoOf: 'r' } } as unknown as TaskPlanProjection['redo'];
     const view = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
@@ -728,6 +729,14 @@ describe('the Run Budget Ceiling in the drawer (S16a)', () => {
     ]);
     expect(TASK_BAR_ADJUST_BUDGET_REDO).toBe('调整预算并重做');
     expect(TASK_BAR_VIEW_PARTIAL).toBe('查看部分结果');
+    // Under developer-live the launch sets the ceiling: the plan cannot raise it, so the redo is 改计划重做's, and the note
+    // says where a higher ceiling comes from.
+    const live = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
+      state: { key: 'budget-reached', label: '已停止 · 预算已达上限' }, budgetStop: { ...budgetStop, launchSetsCeiling: true }, redo,
+    }));
+    expect(live.note).toBe(`${taskBarBudgetStopNote(budgetStop)}。${TASK_BAR_BUDGET_LAUNCH_NOTE}`);
+    expect(TASK_BAR_BUDGET_LAUNCH_NOTE).toBe('预算上限由开发者实时启动参数决定：以更高的 --run-budget-ceiling 重新启动后再重做，新任务才会用新的上限');
+    expect(live.actions.map((entry) => [entry.name, entry.label])).toEqual([['redo', TASK_BAR_REDO], ['run-link', TASK_BAR_VIEW_PARTIAL]]);
   });
 });
 

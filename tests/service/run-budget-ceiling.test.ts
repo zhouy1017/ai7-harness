@@ -17,6 +17,7 @@ import {
 } from '../../src/shared/protocol.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { CLARIFICATION_UNANSWERABLE_ENDED } from '../../src/service/task-plan.js';
 
 // Service-integration suite (L2) for the editor's Run Budget Ceiling (Issue #51, plan slice S16a; V2-UX-MODEL-013 to
 // MODEL-017): the real store on a temporary Agent Data Root, exact `sample1` imported through the supported path, J-04's
@@ -83,6 +84,14 @@ async function importedBook(store: EditorialStore, title: string): Promise<strin
   return imported.bookId;
 }
 
+async function until(condition: () => boolean, label: string): Promise<void> {
+  const deadline = Date.now() + 60_000;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${label}`);
+    await new Promise((settle) => setTimeout(settle, 5));
+  }
+}
+
 async function refusal(operation: () => unknown): Promise<string> {
   try {
     await operation();
@@ -132,7 +141,7 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
       const withCeiling = plan();
       expect(withCeiling.state.key).toBe('ready');
       expect(withCeiling.service).toMatchObject({
-        budgetCeiling: '任务运行预算上限：5,000 tokens', usage: `至多 5,000 tokens（${SAMPLE1_UNITS} 个阅读范围）`, usageIsCeiling: true,
+        budgetCeiling: '任务运行预算上限：5,000 tokens', usage: `达到 5,000 tokens 后不再发送新的请求（${SAMPLE1_UNITS} 个阅读范围）`, usageIsCeiling: true,
       });
       expect(withCeiling.edit.budget).toEqual({ ceiling: tokens(5000), settable: true, reason: null });
       expect(withCeiling.edit.lastEdit?.entries).toEqual([
@@ -170,7 +179,7 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
       // The drawer: 已停止 · 预算已达上限, what it read and used, and 调整预算并重做 at once — no 续行, no 重试.
       const reached = plan();
       expect(reached.state).toEqual({ key: 'budget-reached', label: '已停止 · 预算已达上限' });
-      expect(reached.budgetStop).toEqual({ maxTotalTokens: 5000, usedTokens: used, unitsSettled: 4, unitsTotal: SAMPLE1_UNITS });
+      expect(reached.budgetStop).toEqual({ maxTotalTokens: 5000, usedTokens: used, unitsSettled: 4, unitsTotal: SAMPLE1_UNITS, launchSetsCeiling: false });
       expect(reached.runControl).toBeNull();
       expect(reached.redo).toEqual({ summary: [], prepare: { goal: BASELINE_ANALYSIS_MODE_GOALS['sync-current'], update: SYNC, redoOf: runRecordId } });
       // 待我处理: an exception whose next step is the drawer's own.
@@ -239,7 +248,7 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
     }
   }, 300_000);
 
-  it('keeps a retry the editor answered for from being sent once the ceiling is spent, and ends the Run at the ceiling', async () => {
+  it('asks nothing once the ceiling is spent: the Run ends at the ceiling, and its question stays on record unanswered', async () => {
     // The transient-retry fixture: unit 2 fails for good, and unit 5's first attempt fails retry-safe. Neither failed
     // turn reports tokens; the six ranges read spend 1,760 + 1,840 + 1,700 + 1,600 + 1,660 + 920 = 9,480.
     const transient = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry');
@@ -258,15 +267,10 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
       const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, edited.planEnvelope!.digest).dispatchRunRecordId!;
       execution.admitAndDispatch(runRecordId);
       await execution.whenIdle();
-      expect(store.inspectBaselineAnalysis(bookId, () => null).run?.state).toBe('awaiting-clarification');
-      // 再试一次 is recorded, but the retry would be a further dispatch past the ceiling, so it is not sent: unit 5 is the
-      // gap its first attempt left, in words that say why, and the Run ends at the ceiling.
-      const card = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }).clarifications[0]!;
-      store.answerBaselineAnalysisClarification({ bookId, taskIntentId, requestId: card.requestId, optionId: 'retry', note: null });
-      expect(execution.continueAnswered(runRecordId, store.baselineAnalysisLedger)).toBe('continuing');
-      await execution.whenIdle();
+      // No answer could be honoured once the ceiling is spent — its 再试一次 would be a further dispatch — so the Run does not
+      // wait for one: it ends at the ceiling, and unit 5 is the gap its first attempt left, in words that say why.
       const stopped = store.inspectBaselineAnalysis(bookId, () => null);
-      expect(stopped.run?.transitions.map((transition) => transition.state)).toEqual(['authorized', 'admitted', 'executing', 'awaiting-clarification', 'admitted', 'executing', 'interrupted']);
+      expect(stopped.run?.transitions.map((transition) => transition.state)).toEqual(['authorized', 'admitted', 'executing', 'interrupted']);
       expect(stopped.run?.attempt?.spans.map((span) => [span.unitOrdinal, span.attemptIndex])).toEqual([[1, 1], [2, 1], [3, 1], [4, 1], [5, 1], [6, 1], [7, 1], [8, 1]]);
       expect(stopped.run?.adaptations).toEqual([]);
       expect(stopped.taskOutcome?.stop).toEqual({ reason: 'run-budget-ceiling-reached', maxTotalTokens: 9000, usedTokens: 9480, unitsSettled: SAMPLE1_UNITS, unitsTotal: SAMPLE1_UNITS });
@@ -274,7 +278,104 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
       expect(gap?.code).toBe('adapter-failure');
       expect(gap?.reason).toContain(SAFE_RETRY_BUDGET_REACHED);
       expect(stopped.resultSetRevision?.gaps.map((entry) => entry.unitOrdinal)).toEqual([2, 5]);
-      expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }).state.key).toBe('budget-reached');
+      const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
+      expect(plan.state.key).toBe('budget-reached');
+      // The question stays on record, unanswered, and 待我处理 asks nothing of the editor for it.
+      expect(plan.clarifications.map((card) => [card.unitOrdinal, card.state, card.answerable.reason])).toEqual([[5, 'unanswered', CLARIFICATION_UNANSWERABLE_ENDED]]);
+      const attention = store.inspectGlobalAttention(() => null, false);
+      expect(attention.groups.flatMap((group) => group.items).filter((entry) => entry.state === 'analysis-clarification')).toEqual([]);
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('keeps a retry the editor answered while the Run read on from being sent once the ceiling is spent', async () => {
+    // The transient-retry fixture: unit 5 asks after units 1 to 4 (unit 2 a gap) spent 5,300; 6 and 7 bring it to 8,560.
+    const transient = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry');
+    const store = await openWithRoute(transient);
+    const execution = owner(store, transient);
+    try {
+      const bookId = await importedBook(store, 'L2 sample1 预算与答复');
+      const prepared = prepare(store, bookId);
+      const taskIntentId = prepared.taskIntent!.taskIntentId;
+      const edited = store.editBaselineAnalysisPlan({
+        bookId, taskIntentId, planEnvelopeDigest: prepared.planEnvelope!.digest, removedSteps: [], disallowedAdaptations: [],
+        askFirstAdaptations: ['safe-retry'], runBudgetCeiling: tokens(8000),
+      });
+      const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, edited.planEnvelope!.digest).dispatchRunRecordId!;
+      // Five units settle — 1 to 4, then 6 — while unit 5 waits for its answer; unit 7 is held in flight.
+      writeFileSync(holdPath, '5');
+      execution.admitAndDispatch(runRecordId);
+      await until(() => execution.progressFor(runRecordId)?.currentUnitOrdinal === 7, 'unit 7 in flight');
+      const card = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, (id) => execution.progressFor(id)).clarifications[0]!;
+      store.answerBaselineAnalysisClarification({ bookId, taskIntentId, requestId: card.requestId, optionId: 'retry', note: null });
+      writeFileSync(holdPath, 'release');
+      await execution.whenIdle();
+      // At the next boundary the answer is found, but the ceiling is spent: the retry is not sent, and the Run ends there.
+      const stopped = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(stopped.run?.state).toBe('interrupted');
+      expect(stopped.run?.attempt?.spans.map((span) => [span.unitOrdinal, span.attemptIndex])).toEqual([[1, 1], [2, 1], [3, 1], [4, 1], [5, 1], [6, 1], [7, 1]]);
+      expect(stopped.taskOutcome?.stop).toMatchObject({ reason: 'run-budget-ceiling-reached', maxTotalTokens: 8000, usedTokens: 8560 });
+      expect(stopped.resultSetRevision?.gaps.find((entry) => entry.unitOrdinal === 5)?.reason).toContain(SAFE_RETRY_BUDGET_REACHED);
+      expect(stopped.resultSetRevision?.gaps.find((entry) => entry.unitOrdinal === 8)?.code).toBe('not-attempted');
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('counts what a paused Run spent on its reduction toward the ceiling after 续行', async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let heldAt: string | null = null;
+    const store = await openWithRoute();
+    const execution = new BaselineAnalysisExecutionOwner({
+      ledger: store.baselineAnalysisLedger,
+      launchPolicy,
+      fixture,
+      secretResolver: { resolve: async () => null },
+      stageHold: async (stage) => {
+        heldAt = stage;
+        await held;
+      },
+    });
+    try {
+      const bookId = await importedBook(store, 'L2 sample1 预算与续行');
+      const prepared = prepare(store, bookId);
+      const taskIntentId = prepared.taskIntent!.taskIntentId;
+      // The eight ranges spend 12,380 and the reduction a little over 2,000 more, under a 15,000 ceiling; forming the
+      // reduction a second time passes it.
+      const units = UNIT_TOKENS.reduce((total, count) => total + count, 0);
+      const edited = store.editBaselineAnalysisPlan({
+        bookId, taskIntentId, planEnvelopeDigest: prepared.planEnvelope!.digest, removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: tokens(15000),
+      });
+      const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, edited.planEnvelope!.digest).dispatchRunRecordId!;
+      execution.admitAndDispatch(runRecordId);
+      await until(() => heldAt === 'cross-unit-reduction', 'the reduction turn back');
+      // 暂停 while the reduction's turn is back: the Run waits, and 续行 forms the reduction again.
+      store.requestBaselineAnalysisPause(bookId, taskIntentId);
+      execution.pauseRun(runRecordId, store.baselineAnalysisLedger);
+      release();
+      await execution.whenIdle();
+      expect(store.inspectBaselineAnalysis(bookId, () => null).run?.state).toBe('paused');
+      const carried = store.baselineAnalysisLedger.carriedUsageOf(runRecordId);
+      expect(carried).not.toBeNull();
+      expect(carried!.inputTokens + carried!.outputTokens).toBeGreaterThan(1);
+      // After 续行 the first reduction's spend still counts: with the reduction formed again the ceiling is spent, and the
+      // sample is never sent. Without it, the Run would have read on as if it had spent less than it had.
+      const reduction = carried!.inputTokens + carried!.outputTokens;
+      expect(units + reduction).toBeLessThan(15000);
+      execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true });
+      await execution.whenIdle();
+      const stopped = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(stopped.run?.state).toBe('interrupted');
+      expect(stopped.taskOutcome?.stop).toMatchObject({ reason: 'run-budget-ceiling-reached', usedTokens: units + 2 * reduction });
+      expect(stopped.resultSetRevision?.crossUnitReduction?.state).toBe('closed');
+      // The sample is drawn, and its one turn is not sent: the ceiling is spent before it.
+      expect(stopped.resultSetRevision?.assuranceSample).toMatchObject({ state: 'gap', reason: expect.stringContaining('任务运行预算上限已达到，本轮未派发') });
       store.markCleanShutdown();
     } finally {
       await execution.dispose();

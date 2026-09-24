@@ -623,7 +623,9 @@ export function baselineAnalysisPlan(input: {
       send: live ? `所读范围内的稿件正文发往 ${route.kind} · ${route.model}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
       // The ceiling the Run is held to, the launch's or the editor's (Issue #51, S16a), is a ceiling and never a prediction.
-      usage: ceiling !== 'unset' ? `至多 ${groupedCount(ceiling.maxTotalTokens)} tokens（${units} 个阅读范围）` : NO_USAGE,
+      // It is evaluated before each request (MODEL-016), so the turn under way when it is reached still counts: nothing
+      // promises the Run stays under it, only that nothing more is sent once it is reached.
+      usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : NO_USAGE,
       usageIsCeiling: ceiling !== 'unset',
       duration: DURATION_UNKNOWN,
       budgetCeiling: budgetCeilingLabel(ceiling),
@@ -723,7 +725,10 @@ export function baselineAnalysisPlan(input: {
 /** What the Run read before the Run Budget Ceiling stopped it (Issue #51, S16a; MODEL-016); `null` for any other Run. */
 function baselineBudgetStop(projection: BaselineAnalysisProjection): TaskPlanProjection['budgetStop'] {
   const stop = projection.run?.state === 'interrupted' ? projection.taskOutcome?.stop ?? null : null;
-  return stop === null ? null : { maxTotalTokens: stop.maxTotalTokens, usedTokens: stop.usedTokens, unitsSettled: stop.unitsSettled, unitsTotal: stop.unitsTotal };
+  if (stop === null) return null;
+  // Under developer-live the launch sets the ceiling (ADR 0070): the plan cannot raise it.
+  const launchSetsCeiling = projection.planEnvelope?.providerStatus === 'remote-eligible-developer-live';
+  return { maxTotalTokens: stop.maxTotalTokens, usedTokens: stop.usedTokens, unitsSettled: stop.unitsSettled, unitsTotal: stop.unitsTotal, launchSetsCeiling };
 }
 
 // ---- Clarification Requests (Issue #422, plan slice S76d) --------------------------------------------------------

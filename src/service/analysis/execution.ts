@@ -1059,6 +1059,10 @@ export class BaselineAnalysisExecutionOwner {
         }
       }
       active.progress.unitsSettled = checkpoints.length;
+      // What an earlier stop left spent beyond its units — a reduction or a sample it will form again — still counts
+      // toward the ceiling (Issue #51, S16a): the Run spent it, whatever it keeps.
+      const carried = continuation === null ? { inputTokens: 0, outputTokens: 0 } : ledger.carriedUsageOf(facts.runRecordId) ?? { inputTokens: 0, outputTokens: 0 };
+      if (carried.inputTokens + carried.outputTokens > 0) accumulated.push(carried);
       // Units whose safe retry waits for the editor's answer (Issue #422, S76d; CLAR-004). A question the Run asked before
       // it stopped is still its own, answered or not: its unit is not read again until the answer says so, and what its
       // first attempt cost counts toward the Run as it did then.
@@ -1263,8 +1267,9 @@ export class BaselineAnalysisExecutionOwner {
         if (waiting.size === 0) return 'none';
         const answered = ledger.clarificationsOf(facts.runRecordId).filter((entry) => entry.answer !== null && waiting.has(entry.unitOrdinal));
         if (answered.length === 0) return 'none';
+        let spent = false;
         for (const entry of answered) {
-          if (active.interrupted || active.cancelRequested || active.pauseRequested) return 'stopped';
+          if (active.interrupted || active.cancelRequested || active.pauseRequested) return spent ? 'end' : 'stopped';
           const w = waiting.get(entry.unitOrdinal)!;
           waiting.delete(entry.unitOrdinal);
           active.progress.currentUnitOrdinal = w.unit.ordinal;
@@ -1275,14 +1280,16 @@ export class BaselineAnalysisExecutionOwner {
             keepSettled(w.unit, w.wallMs);
             continue;
           }
-          // 再试一次 once the ceiling is spent (Issue #51, S16a): the retry is not sent, and the Run stops as the ceiling reached.
+          // 再试一次 once the ceiling is spent (Issue #51, S16a): the retry is not sent, and the Run stops as the ceiling reached
+          // — once every other answer given is applied too, each as the editor chose.
           if (ceilingState() === 'reached') {
             settleGap(w.unit, w.requestDigest, { unitOrdinal: w.unit.ordinal, attempts: w.attempts, wallMs: w.wallMs, usage: w.usage },
               'adapter-failure', `${w.failure.reason}（${w.failure.code}）；${SAFE_RETRY_BUDGET_REACHED}`);
             keepSettled(w.unit, w.wallMs);
             liveInterruption = 'run-budget-ceiling-reached';
             terminalClassification = 'interrupted';
-            return 'end';
+            spent = true;
+            continue;
           }
           const startedAtMs = Date.now();
           const attempt = await safeRetry(w.unit, w.requestDigest, w.failure, w.firstPayloadDigest, entry.answer!.answerId);
@@ -1294,7 +1301,7 @@ export class BaselineAnalysisExecutionOwner {
           });
           if (settled === 'end') return 'end';
         }
-        return 'applied';
+        return spent ? 'end' : 'applied';
       };
       // The `units` stage of the Run Report: first dispatch to last settled unit. A Run whose every
       // unit was reused by lineage submits nothing and opens no segment at all.
@@ -1307,19 +1314,20 @@ export class BaselineAnalysisExecutionOwner {
           unitsEnded = true;
           break;
         }
-        if (active.interrupted) break;
         // 取消任务 (CTRL-005): the Run stops at this unit boundary, and the unit before it has finished.
         if (active.cancelRequested) break;
-        // 暂停 (CTRL-001): the Run waits at this boundary, keeping every unit it settled.
-        if (active.pauseRequested) break;
         // The ceiling is evaluated before every dispatch, not only inside the gate: reaching it ends
-        // the Run here, before the next unit forms a request at all.
+        // the Run here, before the next unit forms a request at all — and before a pause or AI7 stopping is honoured,
+        // which would leave a Run to be continued past what it may spend (Issue #51, S16a).
         if (ceilingState() === 'reached') {
           liveInterruption = 'run-budget-ceiling-reached';
           terminalClassification = 'interrupted';
           unitsEnded = true;
           break;
         }
+        if (active.interrupted) break;
+        // 暂停 (CTRL-001): the Run waits at this boundary, keeping every unit it settled.
+        if (active.pauseRequested) break;
         active.progress.currentUnitOrdinal = unit.ordinal;
         // The instant the reader computes elapsed time from; the product itself estimates nothing.
         active.progress.currentUnitStartedAt = new Date().toISOString();
@@ -1405,41 +1413,63 @@ export class BaselineAnalysisExecutionOwner {
       // it as the interruption it is, with that unit's gap kept.
       const stopWithoutEnding = (): boolean => {
         if (active.cancelRequested || liveInterruption !== null || terminalClassification === 'interrupted') return false;
-        if (active.pauseRequested || (active.interrupted && active.resumableOnInterrupt)) {
-          const settled = active.progress.unitsSettled;
+        const stopping = active.pauseRequested || (active.interrupted && active.resumableOnInterrupt);
+        const asking = waiting.size > 0 && !unitsEnded && !active.interrupted;
+        if (!stopping && !asking) return false;
+        // A spent ceiling outranks a pause, AI7 stopping and an open question (Issue #51, S16a; MODEL-016): nothing more may
+        // be sent under it — no continuation, no answer's retry — so the Run ends as the ceiling reached, and asks nothing.
+        if (ceilingState() === 'reached') {
+          liveInterruption = 'run-budget-ceiling-reached';
+          terminalClassification = 'interrupted';
+          return false;
+        }
+        // What this stop leaves spent beyond its units — a reduction or a sample 续行 forms again — is kept with it, so
+        // the ceiling counts it after 续行 as it did before.
+        const carriedUsage = {
+          inputTokens: carried.inputTokens + stageUsage['cross-unit-reduction'].inputTokens + stageUsage['assurance-sampling'].inputTokens,
+          outputTokens: carried.outputTokens + stageUsage['cross-unit-reduction'].outputTokens + stageUsage['assurance-sampling'].outputTokens,
+        };
+        const settled = active.progress.unitsSettled;
+        if (stopping) {
           ledger.recordRunState(facts.runRecordId, active.pauseRequested ? 'paused' : 'resumable', {
             detail: active.pauseRequested ? pausedDetail(settled, submittedUnits.length) : resumableDetail(settled, submittedUnits.length),
             unitsSettled: settled,
             unitsTotal: submittedUnits.length,
+            carriedUsage,
           });
           return true;
         }
         // 任务等待你的说明 (Issue #422, S76d; CLAR-004): every unit the Run could read is read, and a question is still open.
         // It stops at this boundary — no reduction, no revision, no outcome — holding nothing and keeping what it read, and
         // the answer takes it on. The ledger was read for answers just now, with nothing awaited since.
-        if (waiting.size > 0 && !unitsEnded && !active.interrupted) {
-          const settled = active.progress.unitsSettled;
-          ledger.recordRunState(facts.runRecordId, 'awaiting-clarification', {
-            detail: awaitingClarificationDetail([...waiting.keys()], settled, submittedUnits.length),
-            unitsSettled: settled,
-            unitsTotal: submittedUnits.length,
-            waitingUnits: [...waiting.keys()],
-          });
-          return true;
-        }
-        return false;
+        ledger.recordRunState(facts.runRecordId, 'awaiting-clarification', {
+          detail: awaitingClarificationDetail([...waiting.keys()], settled, submittedUnits.length),
+          unitsSettled: settled,
+          unitsTotal: submittedUnits.length,
+          waitingUnits: [...waiting.keys()],
+          carriedUsage,
+        });
+        return true;
       };
       if (stopWithoutEnding()) return;
       // A question the Run's end leaves open stays on record (CLAR-005), and its unit settles as the gap it is, unretried —
       // in words that say whether the editor had answered it, read now, since an answer may have come while it ran.
-      const answeredUnits = new Set(waiting.size === 0 ? [] : ledger.clarificationsOf(facts.runRecordId).filter((entry) => entry.answer !== null).map((entry) => entry.unitOrdinal));
+      const answers = new Map(waiting.size === 0 ? [] : ledger.clarificationsOf(facts.runRecordId)
+        .filter((entry) => entry.answer !== null).map((entry) => [entry.unitOrdinal, entry.answer!.optionId] as const));
       for (const w of waiting.values()) {
-        const answered = answeredUnits.has(w.unit.ordinal);
+        const answer = answers.get(w.unit.ordinal) ?? null;
+        // A Run the ceiling ended sent no retry for its question (Issue #51, S16a), and a 不重试 answer is the editor's own gap.
         const words = active.cancelRequested
-          ? answered ? CLARIFICATION_CANCELLED_ANSWERED : CLARIFICATION_CANCELLED_UNANSWERED
-          : answered ? CLARIFICATION_ENDED_ANSWERED : CLARIFICATION_ENDED_UNANSWERED;
+          ? answer !== null ? CLARIFICATION_CANCELLED_ANSWERED : CLARIFICATION_CANCELLED_UNANSWERED
+          : answer === 'record-gap'
+            ? CLARIFICATION_RECORD_GAP
+            : liveInterruption === 'run-budget-ceiling-reached'
+              ? SAFE_RETRY_BUDGET_REACHED
+              : answer !== null ? CLARIFICATION_ENDED_ANSWERED : CLARIFICATION_ENDED_UNANSWERED;
         settleGap(w.unit, w.requestDigest, { unitOrdinal: w.unit.ordinal, attempts: w.attempts, wallMs: w.wallMs, usage: w.usage },
           'adapter-failure', `${w.failure.reason}（${w.failure.code}）；${words}`);
+        // Settled as the gap it is, it counts among the ranges the Run went through, as an answered one does.
+        keepSettled(w.unit, w.wallMs);
       }
       waiting.clear();
       if (active.interrupted && terminalClassification === 'completed') terminalClassification = 'interrupted';
