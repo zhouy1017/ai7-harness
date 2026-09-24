@@ -56,6 +56,13 @@ const integer = (value: SQLOutputValue | undefined): number => {
 
 /** Why no document can be made or opened: the Book has no Manuscript yet. */
 export const PRODUCTION_DOCUMENTS_NEED_MANUSCRIPT = '先导入稿件，再创建生产文档' as const;
+/**
+ * 从来源材料创建 reads a material's text as its tracked changes rejected, and carries none of its comments or tracked
+ * changes into the document (Issue #415, S66): the document says so where it opens, never leaving them to vanish.
+ */
+export function productionDocumentMarksNotCarried(count: number): string {
+  return `来源材料里的 ${count} 处批注与修订没有带入这份文档：文字按全部修订被拒绝时的样子读出，批注不带入。需要时请在文档里重新标出。`;
+}
 
 /** `版本 N`: a document's version names its place in the document's own history, never a milestone (MILE-014). */
 export function productionDocumentVersionLabel(ordinal: number): string {

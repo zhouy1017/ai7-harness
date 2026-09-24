@@ -110,7 +110,8 @@ export interface MountDeliverablesOptions {
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
   /** 打开 a Production Document (Issue #415): the destination is left for the document's surface. */
-  openDocument(document: ProductionDocumentProjection, type: { typeId: string; label: string }): Promise<void>;
+  /** `notice`: what 从来源材料创建 did not carry into the document, said where it opens. */
+  openDocument(document: ProductionDocumentProjection, type: { typeId: string; label: string }, notice?: string | null): Promise<void>;
 }
 
 /** 从来源材料创建…'s inline form while it is open: the type it creates and the material chosen, if any. */
@@ -839,7 +840,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       projection = result.deliverables;
       render('keep');
       options.setStatus(documentCreatedLine(type.label), 'success');
-      await openDocument(result.document, type);
+      await openDocument(result.document, type, result.notice);
     } catch (error) {
       working = false;
       if (destroyed || projection === null) return;
@@ -873,11 +874,11 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     }
   }
 
-  async function openDocument(documentNow: ProductionDocumentProjection, type: { typeId: string; label: string }): Promise<void> {
+  async function openDocument(documentNow: ProductionDocumentProjection, type: { typeId: string; label: string }, notice: string | null = null): Promise<void> {
     if (destroyed) return;
     options.setStatus(DOCUMENT_STATUS_LINES.opening, 'busy');
     try {
-      await options.openDocument(documentNow, { typeId: type.typeId, label: type.label });
+      await options.openDocument(documentNow, { typeId: type.typeId, label: type.label }, notice);
     } catch (error) {
       if (destroyed) return;
       options.setStatus(options.errorMessage(error, DOCUMENT_STATUS_LINES.openFailed), 'error');
