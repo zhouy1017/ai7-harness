@@ -21,7 +21,7 @@ export type ConvertibleSourceFormat = 'TXT' | 'MD';
 
 /**
  * What the converter kept as literal text, counted into the fidelity classes the Import Fidelity
- * Review already has. The shape mirrors the review's seven counted classes so that merging a
+ * Review already has. The shape mirrors the review's nine counted classes (ADR 0086) so that merging a
  * conversion into a parser's report is one addition per class and never a re-classification.
  */
 export interface ConversionLoss {
@@ -32,6 +32,8 @@ export interface ConversionLoss {
   imagesCaptions: number;
   sections: number;
   headersFooters: number;
+  textBoxes: number;
+  fields: number;
 }
 
 export interface ConvertedTextManuscript {
@@ -109,7 +111,7 @@ function escapeXml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** The zero of the seven counted classes, which every converter starts its own counting from. */
+/** The zero of the nine counted classes, which every converter starts its own counting from. */
 export function emptyLoss(): ConversionLoss {
   return {
     inlineStyles: 0,
@@ -119,6 +121,8 @@ export function emptyLoss(): ConversionLoss {
     imagesCaptions: 0,
     sections: 0,
     headersFooters: 0,
+    textBoxes: 0,
+    fields: 0,
   };
 }
 

@@ -71,6 +71,23 @@ describe('decodeRequest accepts well-formed frames', () => {
     expect(decodeRequest(frameOf(revisionRoute))).toEqual(revisionRoute);
   });
 
+  it('accepts an import review with each text-box choice (ADR 0086)', () => {
+    for (const textBoxDisposition of ['retain', 'merge'] as const) {
+      const request = {
+        id: randomUUID(),
+        op: 'prepareNewBookReview',
+        input: {
+          draftId: randomUUID(),
+          expectedDraftVersion: 2,
+          target: { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '书名' },
+          acceptDegradation: false,
+          textBoxDisposition,
+        },
+      };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+  });
+
   it('accepts a nullable cursor', () => {
     const request = {
       id: randomUUID(),
@@ -356,6 +373,24 @@ describe('decodeRequest rejects malformed frames', () => {
       rejectionFor(frameOf({ id, op: 'getHistoricalRevision', input: { revisionId: randomUUID(), cursor: 7 } }))
         .requestId,
     ).toBe(id);
+  });
+
+  it('rejects an import review without a text-box choice, or with one that is not retain or merge', () => {
+    const id = randomUUID();
+    const input = {
+      draftId: randomUUID(),
+      expectedDraftVersion: 2,
+      target: { kind: 'existing-book', bookId: randomUUID(), relationship: 'first-manuscript' },
+      acceptDegradation: true,
+    };
+    // The protocol-38 key set, with no choice at all, is refused rather than read as a default.
+    expect(rejectionFor(frameOf({ id, op: 'prepareNewBookReview', input })).requestId).toBe(id);
+    for (const textBoxDisposition of [null, '', 'keep', 'Retain', true]) {
+      expect(rejectionFor(frameOf({ id, op: 'prepareNewBookReview', input: { ...input, textBoxDisposition } })).requestId).toBe(id);
+    }
+    expect(rejectionFor(frameOf({
+      id, op: 'prepareNewBookReview', input: { ...input, textBoxDisposition: 'retain', extra: 1 },
+    })).requestId).toBe(id);
   });
 
   it('rejects a baseline-analysis preparation whose goal, mode, or range is inconsistent, or whose digest is malformed', () => {

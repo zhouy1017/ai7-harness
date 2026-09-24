@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 39 as const;
+export const SERVICE_PROTOCOL_VERSION = 40 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -140,6 +140,11 @@ export type RendererCallResult<T> =
   | { ok: true; result: T }
   | { ok: false; error: { code: string; message: string } };
 
+/**
+ * The Import Fidelity Review's content classes (ADR 0086 §1). A review parsed under
+ * `ai7-docx-fflate-saxes/2` carries all ten, in this order; one recorded under `/1` carries the eight
+ * it had, without `text-boxes` and `fields`. `round-trip-export` is the closing 预计往返 card.
+ */
 export type FidelityCategoryKey =
   | 'inline-styles'
   | 'comments-revisions'
@@ -148,17 +153,31 @@ export type FidelityCategoryKey =
   | 'images-captions'
   | 'sections'
   | 'headers-footers'
+  | 'text-boxes'
+  | 'fields'
   | 'round-trip-export';
 
-export type FidelityStatus = 'preserved' | 'degraded' | 'unsupported';
+/** `retained`: present in the file and kept with the Source Version, restored on export (ADR 0086 §2). */
+export type FidelityStatus = 'preserved' | 'retained' | 'degraded' | 'unsupported';
 
 export interface FidelityCategoryProjection {
   key: FidelityCategoryKey;
   label: string;
   count: number;
   status: FidelityStatus;
-  statusLabel: '完整保留' | '降级导入' | '不支持导入';
+  statusLabel: '完整保留' | '完整保留（随文件保留）' | '降级导入' | '不支持导入';
   detail: string;
+}
+
+/** How a text box enters the Manuscript: kept as a text box with the file (the default), or merged. */
+export type TextBoxDisposition = 'retain' | 'merge';
+
+/** The label every status reads as, the one mapping a persisted row's status is read back through. */
+export function fidelityStatusLabel(status: FidelityStatus): FidelityCategoryProjection['statusLabel'] {
+  if (status === 'preserved') return '完整保留';
+  if (status === 'retained') return '完整保留（随文件保留）';
+  if (status === 'degraded') return '降级导入';
+  return '不支持导入';
 }
 
 export interface ImportDegradationItemProjection {
@@ -677,6 +696,11 @@ export interface ReviewBeforeImportProjection {
   source: StagedImportProjection['source'];
   identityFindings: ReadonlyArray<ImportIdentityFindingProjection>;
   fidelity: ReadonlyArray<FidelityCategoryProjection>;
+  /**
+   * The review's choice for the file's text boxes (ADR 0086 §2), which its `text-boxes` row states:
+   * `retain` (保留为文本框, the default) or `merge` (并入正文); null when the file has none it can choose for.
+   */
+  textBoxDisposition: TextBoxDisposition | null;
   recordsToCreate: ReadonlyArray<string>;
   nonEffects: ReadonlyArray<string>;
   workflowProfile: {
@@ -5043,6 +5067,11 @@ export interface ServiceOperationMap {
       expectedDraftVersion: number;
       target: ImportTargetSelection;
       acceptDegradation: boolean;
+      /**
+       * The review's choice for the file's text boxes (ADR 0086 §2): `retain` — the default the review
+       * preselects — or `merge`. A file without a text box can only be reviewed with `retain`.
+       */
+      textBoxDisposition: TextBoxDisposition;
     };
     output: ReviewBeforeImportProjection;
   };

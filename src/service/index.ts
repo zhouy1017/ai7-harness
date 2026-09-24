@@ -438,6 +438,7 @@ async function dispatch(
           request.input.expectedDraftVersion,
           request.input.target,
           request.input.acceptDegradation,
+          request.input.textBoxDisposition,
         ),
       };
     case 'commitNewBookImport':

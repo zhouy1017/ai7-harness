@@ -5,7 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strToU8, zipSync } from 'fflate';
-import { admittedParagraphs, ADMITTED_BASELINE_DOCX } from './composed-docx.mjs';
+import { admittedParagraphs, composeAdmittedDocx, ADMITTED_BASELINE_DOCX } from './composed-docx.mjs';
 import { attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, discloseJourneySkip, installJourneyCancellationCleanup, LOCAL_ONLY_DOC, localDebugEnabled, localManuscriptAvailable, localManuscriptPath, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -55,6 +55,22 @@ async function duringCompletionPhase(scenario, phase, operation) {
   const result = await operation();
   at(previousLocation);
   return result;
+}
+
+/**
+ * ADR 0086: a review's nine rows as [class, count, status class] (the tenth class closes them as the
+ * 预计往返 card). A file that carries none of them reads 完整保留 on every row.
+ */
+const CLEAN_FIDELITY_ROWS = Object.freeze([
+  ['inline-styles', 0, 'status-preserved'], ['comments-revisions', 0, 'status-preserved'],
+  ['notes', 0, 'status-preserved'], ['tables', 0, 'status-preserved'], ['images-captions', 0, 'status-preserved'],
+  ['sections', 0, 'status-preserved'], ['headers-footers', 0, 'status-preserved'],
+  ['text-boxes', 0, 'status-preserved'], ['fields', 0, 'status-preserved'],
+]);
+
+/** The review's rows exactly as `expected` names them, followed by the 预计往返 card. */
+function fidelityRowsExpression(expected) {
+  return `(() => { const rows = Array.from(document.querySelectorAll('.fidelity-row[data-fidelity-category]')); const expected = ${JSON.stringify(expected)}; return rows.length === expected.length && rows.every((row, index) => row.dataset.fidelityCategory === expected[index][0] && row.querySelector('.count')?.textContent.includes('· ' + expected[index][1] + ' 项') && row.querySelector('.status-pill')?.classList.contains(expected[index][2])) && Boolean(document.querySelector('.roundtrip-card[data-fidelity-category="round-trip-export"]')); })()`;
 }
 
 function requireJourney(condition, location, detail) {
@@ -907,7 +923,7 @@ async function assertCommittedManuscriptReimport(renderer, expectation) {
   );
   await assertRenderer(
     renderer,
-    `(() => { const direct = document.querySelector('[data-view-reimport-record-id]'); if (!direct || direct.disabled) return false; direct.click(); const detail = document.querySelector('.record-detail[data-record-kind="manuscript-reimport-record"]'); const values = Object.fromEntries(Array.from(detail?.querySelectorAll('dt') ?? [], (label) => [label.textContent, label.nextElementSibling?.textContent])); const revisionIdentityValid = ${changed ? "/^[0-9a-f-]{36}$/i.test(values['结果修订版 ID'] ?? '')" : "values['结果修订版 ID'] === '—'"}; const fidelityItems = detail?.querySelectorAll('details.degradation-disclosure:first-of-type li').length ?? 0; const degradationValid = ${degraded ? "/^[0-9a-f-]{36}$/i.test(values['导入降级决定 ID'] ?? '') && values['保真结果']?.includes('含已接受的降级')" : "values['导入降级决定 ID'] === '—' && values['保真结果']?.includes('完整保留')"}; return values['稿件重新导入记录 ID'] === ${JSON.stringify(identities.reimportRecordId)} && values['原子提交 ID'] === ${JSON.stringify(identities.commitId)} && values['来源关系'] === ${JSON.stringify(lineageStatus === 'verified' ? '来源关系已确认' : '来源关系未确认')} && values['比较方式'] === ${JSON.stringify(lineageStatus === 'verified' ? '三方比较' : '两方比较')} && values['结果'] === ${JSON.stringify(changed ? '稿件已重新导入' : '未发现稿件变化')} && revisionIdentityValid && fidelityItems === 8 && degradationValid && /^[0-9a-f]{64}$/.test(values['比较摘要'] ?? '') && /^[0-9a-f]{64}$/.test(values['解决摘要'] ?? '') && /^[0-9a-f]{64}$/.test(values['记录摘要'] ?? ''); })()`,
+    `(() => { const direct = document.querySelector('[data-view-reimport-record-id]'); if (!direct || direct.disabled) return false; direct.click(); const detail = document.querySelector('.record-detail[data-record-kind="manuscript-reimport-record"]'); const values = Object.fromEntries(Array.from(detail?.querySelectorAll('dt') ?? [], (label) => [label.textContent, label.nextElementSibling?.textContent])); const revisionIdentityValid = ${changed ? "/^[0-9a-f-]{36}$/i.test(values['结果修订版 ID'] ?? '')" : "values['结果修订版 ID'] === '—'"}; const fidelityItems = detail?.querySelectorAll('details.degradation-disclosure:first-of-type li').length ?? 0; const degradationValid = ${degraded ? "/^[0-9a-f-]{36}$/i.test(values['导入降级决定 ID'] ?? '') && values['保真结果']?.includes('含已接受的降级')" : "values['导入降级决定 ID'] === '—' && values['保真结果']?.includes('完整保留')"}; return values['稿件重新导入记录 ID'] === ${JSON.stringify(identities.reimportRecordId)} && values['原子提交 ID'] === ${JSON.stringify(identities.commitId)} && values['来源关系'] === ${JSON.stringify(lineageStatus === 'verified' ? '来源关系已确认' : '来源关系未确认')} && values['比较方式'] === ${JSON.stringify(lineageStatus === 'verified' ? '三方比较' : '两方比较')} && values['结果'] === ${JSON.stringify(changed ? '稿件已重新导入' : '未发现稿件变化')} && revisionIdentityValid && fidelityItems === 10 && degradationValid && /^[0-9a-f]{64}$/.test(values['比较摘要'] ?? '') && /^[0-9a-f]{64}$/.test(values['解决摘要'] ?? '') && /^[0-9a-f]{64}$/.test(values['记录摘要'] ?? ''); })()`,
     `${scenario}-direct-record-inspection`,
   );
   const recordIdentity = await renderer.evaluate(`(() => { const values = Object.fromEntries(Array.from(document.querySelectorAll('.record-detail[data-record-kind="manuscript-reimport-record"] dt'), (label) => [label.textContent, label.nextElementSibling?.textContent])); return { sourceVersionId: values['来源版本 ID'], resultingRevisionId: values['结果修订版 ID'] }; })()`);
@@ -1216,6 +1232,9 @@ async function runJourney(
     identityFindingCount = 0,
     degraded,
     exerciseEditor = false,
+    fidelityRows = CLEAN_FIDELITY_ROWS,
+    degradationItems = [],
+    textBoxDisposition = null,
   } = expectation;
   const {
     start = 'landing',
@@ -1241,7 +1260,7 @@ async function runJourney(
         '不创建发稿版本',
         '不创建公开发布许可或公开发布事实',
         '不导出、不发送、不交付、不发布',
-        '不承诺 DOCX 往返或版式复原',
+        '不修改所选原文件',
       ]
     : [
         '不创建书系或书系成员关系',
@@ -1250,7 +1269,7 @@ async function runJourney(
         '不创建发稿版本',
         '不创建公开发布许可或公开发布事实',
         '不导出、不发送、不交付、不发布',
-        '不承诺 DOCX 往返或版式复原',
+        '不修改所选原文件',
         '符合当前范围的导入不创建导入降级决定',
       ];
   const initialScreen = start === 'accepted-review' ? 'review' : start;
@@ -1317,7 +1336,7 @@ async function runJourney(
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, 'target-title');
   await assertRenderer(
     renderer,
-    `document.querySelector('#book-title')?.value.length > 0 && Array.from(document.querySelectorAll('.field-note')).some((note) => note.textContent.includes('建议来源：')) && document.querySelector('[data-source-sha256]')?.textContent === ${JSON.stringify(sourceSha256)} && document.querySelector('[data-source-bytes]')?.textContent === ${JSON.stringify(String(sourceBytes))} && document.querySelectorAll('[data-fidelity-category]').length === 8`,
+    `document.querySelector('#book-title')?.value.length > 0 && Array.from(document.querySelectorAll('.field-note')).some((note) => note.textContent.includes('建议来源：')) && document.querySelector('[data-source-sha256]')?.textContent === ${JSON.stringify(sourceSha256)} && document.querySelector('[data-source-bytes]')?.textContent === ${JSON.stringify(String(sourceBytes))} && document.querySelectorAll('[data-fidelity-category]').length === 10`,
     'title-contract',
   );
   if (hasIdentityFinding) {
@@ -1325,6 +1344,14 @@ async function runJourney(
       renderer,
       `(() => { const title = document.querySelector('#book-title'); if (!title) return false; title.value = title.value + '（不同作品）'; title.dispatchEvent(new Event('input', { bubbles: true })); return title.value.endsWith('（不同作品）') && Array.from(document.querySelectorAll('.field-note')).some((note) => note.textContent.includes('建议来源：') && note.textContent.includes('可编辑建议')); })()`,
       'distinct-work-title-edited',
+    );
+  }
+  if (textBoxDisposition !== null) {
+    // ADR 0086 §2: the text-box row offers 保留为文本框 preselected and 并入正文; the choice goes with the review.
+    await assertRenderer(
+      renderer,
+      `(() => { const retain = document.querySelector('#text-box-disposition-retain'); const merge = document.querySelector('#text-box-disposition-merge'); if (!(retain instanceof HTMLInputElement) || !(merge instanceof HTMLInputElement) || !retain.checked || merge.checked || retain.disabled || merge.disabled) return false; if (${JSON.stringify(textBoxDisposition)} === 'merge') merge.click(); return ${JSON.stringify(textBoxDisposition)} === 'merge' ? merge.checked && !retain.checked : retain.checked; })()`,
+      'text-box-choice-offered',
     );
   }
   await clickExactButton(renderer, '确认书名并复核', 'review-click');
@@ -1343,12 +1370,15 @@ async function runJourney(
     `document.querySelector('[data-screen="review"] [data-source-sha256]')?.textContent === ${JSON.stringify(sourceSha256)} && document.querySelector('[data-screen="review"] [data-source-bytes]')?.textContent === ${JSON.stringify(String(sourceBytes))} && Array.from(document.querySelectorAll('[data-screen="review"] dd')).some((item) => item.textContent === ${JSON.stringify(degraded ? '按上述降级方式新建图书并导入稿件' : '新建图书并导入稿件')})`,
     'review-source-and-action',
   );
-  if (degraded) {
+  if (textBoxDisposition !== null) {
     await assertRenderer(
       renderer,
-      `(() => { const rows = Array.from(document.querySelectorAll('[data-fidelity-category]')); const expected = [['inline-styles',266,'status-degraded'],['comments-revisions',0,'status-preserved'],['notes',0,'status-preserved'],['tables',0,'status-preserved'],['images-captions',0,'status-preserved'],['sections',1,'status-degraded'],['headers-footers',0,'status-preserved'],['round-trip-export',0,'status-unsupported']]; return rows.length === expected.length && rows.every((row, index) => row.dataset.fidelityCategory === expected[index][0] && row.querySelector('.count')?.textContent.includes('· ' + expected[index][1] + ' 项') && row.querySelector('.status-pill')?.classList.contains(expected[index][2])); })()`,
-      'review-fidelity-degraded',
+      `(() => { const stated = document.querySelector('[data-screen="review"] [data-text-box-choice="stated"]'); const checked = stated?.querySelector('input:checked'); const row = document.querySelector('[data-screen="review"] .fidelity-row[data-fidelity-category="text-boxes"]'); return checked?.value === ${JSON.stringify(textBoxDisposition)} && Array.from(stated.querySelectorAll('input')).every((input) => input.disabled) && row?.querySelector('.fidelity-detail')?.textContent.startsWith(${JSON.stringify(textBoxDisposition === 'merge' ? '并入正文：' : '保留为文本框：')}); })()`,
+      'review-text-box-choice-stated',
     );
+  }
+  if (degraded) {
+    await assertRenderer(renderer, fidelityRowsExpression(fidelityRows), 'review-fidelity-degraded');
     await assertRenderer(
       renderer,
       `(() => { const acceptance = document.querySelector('#accept-import-degradation'); const commit = Array.from(document.querySelectorAll('button')).find((button) => button.textContent.includes('新建图书并导入稿件')); return acceptance && !acceptance.checked && (!commit || commit.disabled); })()`,
@@ -1356,7 +1386,7 @@ async function runJourney(
     );
     await assertRenderer(
       renderer,
-      `(() => { const items = Array.from(document.querySelectorAll('[data-degradation-category]')); const expected = [['inline-styles','266'],['sections','1']]; return items.length === expected.length && items.every((item, index) => item.dataset.degradationCategory === expected[index][0] && item.dataset.degradationCount === expected[index][1]); })()`,
+      `(() => { const items = Array.from(document.querySelectorAll('[data-degradation-category]')); const expected = ${JSON.stringify(degradationItems)}; return expected.length > 0 && items.length === expected.length && items.every((item, index) => item.dataset.degradationCategory === expected[index][0] && item.dataset.degradationCount === expected[index][1]); })()`,
       'degradation-complete-server-set',
     );
     atPrimaryReviewStage('review-acceptance');
@@ -1371,20 +1401,21 @@ async function runJourney(
       'degradation-accepted-review',
     );
   } else {
+    // A review that asks for no decision reads as one concise line whose rows expand (ADR 0086).
     await assertRenderer(
       renderer,
-      `(() => { const rows = Array.from(document.querySelectorAll('[data-fidelity-category]')); return rows.length === 8 && rows.every((row) => row.dataset.fidelityCategory === 'round-trip-export' ? row.querySelector('.status-pill')?.classList.contains('status-unsupported') : row.querySelector('.count')?.textContent.includes('· 0 项') && row.querySelector('.status-pill')?.classList.contains('status-preserved')) && !document.querySelector('#accept-import-degradation'); })()`,
+      `${fidelityRowsExpression(fidelityRows)} && Boolean(document.querySelector('[data-screen="review"] [data-fidelity-summary="no-decision"]')) && !document.querySelector('#accept-import-degradation')`,
       'review-fidelity-clean',
     );
   }
   await assertRenderer(
     renderer,
-    `document.querySelector('[data-fidelity-category="round-trip-export"]')?.textContent.includes('不提供往返保证') && document.querySelector('[data-fidelity-category="round-trip-export"]')?.textContent.includes('不阻止本次符合范围的文本导入')`,
+    `(() => { const card = document.querySelector('.roundtrip-card[data-fidelity-category="round-trip-export"]'); return card?.textContent.includes('DOCX 导出将在后续提供') && card.textContent.includes('样式表随文件保留') && !document.body.textContent.includes('不提供往返保证') && !document.body.textContent.includes('不承诺 DOCX 往返'); })()`,
     'review-roundtrip-non-effect',
   );
   await assertRenderer(
     renderer,
-    `(() => { const sections = Array.from(document.querySelectorAll('.review-section')); const exact = (heading, expected) => { const section = sections.find((item) => item.querySelector('h3')?.textContent === heading); const actual = Array.from(section?.querySelectorAll('li') ?? [], (item) => item.textContent); return actual.length === expected.length && actual.every((item, index) => item === expected[index]); }; return exact('将创建的记录', ${JSON.stringify(degraded ? ['图书与稳定标识','图书编辑维度集（8 项）','源材料版本与来源记录','导入保真审阅','导入降级决定','主稿件','稿件分支','稿件修订版 r1 与有序稳定内容块','工作流程实例与精确方案版本绑定','稿件导入记录'] : ['图书与稳定标识','图书编辑维度集（8 项）','源材料版本与来源记录','导入保真审阅','主稿件','稿件分支','稿件修订版 r1 与有序稳定内容块','工作流程实例与精确方案版本绑定','稿件导入记录'])}) && exact('明确不会发生', ${JSON.stringify(expectedNonEffects)}); })()`,
+    `(() => { const sections = Array.from(document.querySelectorAll('.review-section')); const exact = (heading, expected) => { const section = sections.find((item) => item.querySelector('h3')?.textContent === heading); const actual = Array.from(section?.querySelectorAll('li') ?? [], (item) => item.textContent); return actual.length === expected.length && actual.every((item, index) => item === expected[index]); }; return exact('将创建的记录', ${JSON.stringify(degraded ? ['图书与稳定标识','图书编辑维度集（8 项）','源材料版本与来源记录','导入保真审阅','导入降级决定','主稿件','稿件分支','稿件修订版 r1 与有序稳定内容块','来源段落对应','工作流程实例与精确方案版本绑定','稿件导入记录'] : ['图书与稳定标识','图书编辑维度集（8 项）','源材料版本与来源记录','导入保真审阅','主稿件','稿件分支','稿件修订版 r1 与有序稳定内容块','来源段落对应','工作流程实例与精确方案版本绑定','稿件导入记录'])}) && exact('明确不会发生', ${JSON.stringify(expectedNonEffects)}); })()`,
     'review-exact-effects',
   );
   await assertRenderer(
@@ -1486,7 +1517,7 @@ async function runJourney(
   await clickExactButton(renderer, '稿件导入记录', 'record-open');
   await assertRenderer(
     renderer,
-    `(() => { const record = document.querySelector('.record-detail[data-record-kind="import-record"]'); const buttons = Array.from(document.querySelectorAll('.record-navigation button'), (button) => button.textContent); const exact = ['图书','主稿件','修订版 r1','来源版本与来源记录','工作流实例与精确 Profile 绑定','稿件导入记录']; const items = Array.from(record?.querySelectorAll('[data-degradation-category]') ?? []); return record?.textContent.includes('稿件导入记录 ID') && record.textContent.includes('导入保真审阅 ID') && record.textContent.includes('导入降级决定 ID') && record.textContent.includes('查看受影响类别、示例与导出后果') && record.textContent.includes('rFonts') && record.textContent.includes('文档网格') && record.textContent.includes('后续导出无法恢复') && items.length === 2 && items[0].dataset.degradationCategory === 'inline-styles' && items[0].dataset.degradationCount === '266' && items[1].dataset.degradationCategory === 'sections' && items[1].dataset.degradationCount === '1' && buttons.length === exact.length && buttons.every((label, index) => label === exact[index]); })()`,
+    `(() => { const record = document.querySelector('.record-detail[data-record-kind="import-record"]'); const buttons = Array.from(document.querySelectorAll('.record-navigation button'), (button) => button.textContent); const exact = ['图书','主稿件','修订版 r1','来源版本与来源记录','工作流实例与精确 Profile 绑定','稿件导入记录']; const items = Array.from(record?.querySelectorAll('[data-degradation-category]') ?? []); const values = Object.fromEntries(Array.from(record?.querySelectorAll('dt') ?? [], (label) => [label.textContent, label.nextElementSibling?.textContent])); return record?.textContent.includes('稿件导入记录 ID') && record.textContent.includes('导入保真审阅 ID') && values['导入降级决定 ID'] === '—' && values['保真结果'] === '完整保留 · 原文件随来源版本保留' && record.textContent.includes('查看导入保真审阅 · 9 类与预计往返') && record.textContent.includes('完整保留（随文件保留）') && !record.textContent.includes('查看受影响类别、示例与导出后果') && items.length === 0 && buttons.length === exact.length && buttons.every((label, index) => label === exact[index]); })()`,
     'exact-record-navigation',
   );
   await clickExactButton(renderer, '打开稿件', 'editor-open');
@@ -1695,18 +1726,14 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
     `document.querySelector('[data-screen="review"] [data-source-sha256]')?.textContent === ${JSON.stringify(expectation.sourceSha256)} && document.querySelector('[data-screen="review"] [data-source-bytes]')?.textContent === ${JSON.stringify(String(expectation.sourceBytes))}`,
     'existing-book-sample1-identity',
   );
-  await assertRenderer(
-    renderer,
-    `(() => { const acceptance = document.querySelector('#accept-import-degradation'); if (!acceptance) return false; acceptance.click(); return true; })()`,
-    'existing-book-degradation-accept',
-  );
+  // ADR 0086: sample1 retains its inline styles and its section with the file, so no decision is asked for.
   await waitFor(
     renderer,
-    `Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '按上述降级方式导入为首份稿件')`,
-    'existing-book-accepted-review',
+    `!document.querySelector('#accept-import-degradation') && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '导入为首份稿件' && !button.disabled)`,
+    'existing-book-clean-review',
   );
   if (restartReviewedImport) renderer = await restartReviewedImport({ bookId, title });
-  await clickExactButton(renderer, '按上述降级方式导入为首份稿件', 'existing-book-commit');
+  await clickExactButton(renderer, '导入为首份稿件', 'existing-book-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"] .book-overview[data-manuscript-state="populated"]')`, 'existing-book-imported');
   await waitFor(
     renderer,
@@ -1748,11 +1775,11 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
     `(() => { const record = document.querySelector('.record-detail[data-record-kind="workflow"]'); return record?.textContent.includes('ai7.manuscript.editorial.zh-CN@2.0.0') && record.textContent.includes('d9c36f1a80f8461001e028bca9b8fc44723e44d1558dfc6f8863af4e47a5b03f') && record.textContent.includes('manuscript-editorial@1.0.0') && record.textContent.includes('fc337a46d41a88a6f4d7bad7fc7b6846fe4b973e84776722ec126906a7b1d3ff'); })()`,
     'existing-book-exact-profile-pins',
   );
-  await clickExactButton(renderer, '稿件导入记录', 'existing-book-import-record-degradation');
+  await clickExactButton(renderer, '稿件导入记录', 'existing-book-import-record-retention');
   await assertRenderer(
     renderer,
-    `(() => { const record = document.querySelector('.record-detail[data-record-kind="import-record"]'); const items = Array.from(record?.querySelectorAll('[data-degradation-category]') ?? []); return record?.textContent.includes('查看受影响类别、示例与导出后果') && record.textContent.includes('rFonts') && record.textContent.includes('文档网格') && record.textContent.includes('后续导出无法恢复') && items.length === 2 && items[0].dataset.degradationCategory === 'inline-styles' && items[0].dataset.degradationCount === '266' && items[1].dataset.degradationCategory === 'sections' && items[1].dataset.degradationCount === '1'; })()`,
-    'existing-book-import-degradation-disclosure',
+    `(() => { const record = document.querySelector('.record-detail[data-record-kind="import-record"]'); const items = Array.from(record?.querySelectorAll('[data-degradation-category]') ?? []); return record?.textContent.includes('完整保留 · 原文件随来源版本保留') && record.textContent.includes('完整保留（随文件保留）') && !record.textContent.includes('查看受影响类别、示例与导出后果') && items.length === 0; })()`,
+    'existing-book-import-retention-disclosure',
   );
   return bookId;
 }
@@ -1978,6 +2005,31 @@ async function main() {
         syntheticAmbiguousBaseSha256 !== syntheticAmbiguousReimportSha256,
       'synthetic-input-identities',
     );
+    // ADR 0086's classes need content sample1 does not carry: a field and a footnote for the one path
+    // that still asks for the Import Degradation Decision, and a text box for 保留为文本框 and 并入正文.
+    // Each is composed at run time from the one admitted source (ADR 0043 as narrowed by ADR 0079 §5),
+    // every word of it sample1's own, and spoken of here by digest and count alone.
+    const composedDegradedPath = resolve(syntheticRoot, 'retention-degraded.docx');
+    const composedTextBoxPath = resolve(syntheticRoot, 'retention-text-box.docx');
+    await composeAdmittedDocx(composedDegradedPath, {
+      source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 8, title: '降级导入组稿',
+      retention: { field: { block: 1 }, footnote: { block: 3, noteSourceBlock: 9 } },
+    });
+    await composeAdmittedDocx(composedTextBoxPath, {
+      source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 6, title: '文本框组稿',
+      retention: { textBox: { anchorBlock: 2, sourceStartBlock: 7, blocks: 2 } },
+    });
+    const composedDegradedInfo = await lstat(composedDegradedPath);
+    const composedTextBoxInfo = await lstat(composedTextBoxPath);
+    const composedDegradedSha256 = await digestFile(composedDegradedPath);
+    const composedTextBoxSha256 = await digestFile(composedTextBoxPath);
+    requireJourney(
+      composedDegradedInfo.isFile() && composedTextBoxInfo.isFile() &&
+        !composedDegradedInfo.isSymbolicLink() && !composedTextBoxInfo.isSymbolicLink() &&
+        composedDegradedSha256 !== SAMPLE1_SHA256 && composedTextBoxSha256 !== SAMPLE1_SHA256 &&
+        composedDegradedSha256 !== composedTextBoxSha256,
+      'composed-retention-identities',
+    );
     const executable = electronExecutable();
     const entry = resolve(ROOT, 'dist', 'main', 'index.cjs');
     const launchProduct = async ({ dataRoot, pickerPath, importControl, launchScenario }) => {
@@ -2060,10 +2112,29 @@ async function main() {
         throw error;
       }
     };
+    // ADR 0086: sample1's 266 inline styles and its one section are retained with the file and nothing
+    // else is found, so its import asks for no Import Degradation Decision.
     const sample1Expectation = {
       sourceSha256: SAMPLE1_SHA256,
       sourceBytes: SAMPLE1_BYTES,
+      degraded: false,
+      fidelityRows: CLEAN_FIDELITY_ROWS.map(([key]) =>
+        key === 'inline-styles' ? [key, 266, 'status-retained'] : key === 'sections' ? [key, 1, 'status-retained'] : [key, 0, 'status-preserved']),
+    };
+    // A field and a footnote are the two classes that cannot be retained: 降级导入, decided explicitly.
+    const composedDegradedExpectation = {
+      sourceSha256: composedDegradedSha256,
+      sourceBytes: composedDegradedInfo.size,
       degraded: true,
+      fidelityRows: CLEAN_FIDELITY_ROWS.map(([key]) =>
+        key === 'notes' || key === 'fields' ? [key, 1, 'status-degraded'] : [key, 0, 'status-preserved']),
+      degradationItems: [['notes', '1'], ['fields', '1']],
+    };
+    const composedTextBoxExpectation = {
+      sourceSha256: composedTextBoxSha256,
+      sourceBytes: composedTextBoxInfo.size,
+      degraded: false,
+      fidelityRows: CLEAN_FIDELITY_ROWS.map(([key]) => key === 'text-boxes' ? [key, 1, 'status-retained'] : [key, 0, 'status-preserved']),
     };
     const exactSample1Expectation = {
       ...sample1Expectation,
@@ -2254,7 +2325,7 @@ async function main() {
       await waitFor(relaunched, `document.querySelector('[data-screen="review"]')`, 'existing-book-revalidated-review');
       await assertRenderer(
         relaunched,
-        `(() => { const screen = document.querySelector('[data-screen="review"]'); const reviewed = screen?.querySelector('[data-reviewed-book-id]'); return screen?.textContent.includes(${JSON.stringify(title)}) && screen.textContent.includes('作为首份稿件导入') && screen.textContent.includes('manuscript-editorial@1.0.0') && reviewed?.dataset.reviewedBookId === ${JSON.stringify(bookId)} && Array.from(screen.querySelectorAll('button')).some((button) => button.textContent === '按上述降级方式导入为首份稿件'); })()`,
+        `(() => { const screen = document.querySelector('[data-screen="review"]'); const reviewed = screen?.querySelector('[data-reviewed-book-id]'); return screen?.textContent.includes(${JSON.stringify(title)}) && screen.textContent.includes('作为首份稿件导入') && screen.textContent.includes('manuscript-editorial@1.0.0') && reviewed?.dataset.reviewedBookId === ${JSON.stringify(bookId)} && Array.from(screen.querySelectorAll('button')).some((button) => button.textContent === '导入为首份稿件'); })()`,
         'existing-book-revalidation-preserves-review',
       );
       return relaunched;
@@ -2333,6 +2404,48 @@ async function main() {
       'source-bound-zero-manuscript-book',
     );
     await closeProduct();
+
+    // ADR 0086: the one path that still asks for the Import Degradation Decision, and a text box kept
+    // as a text box and merged into the body right after the paragraph that anchors it.
+    const retentionDegradedRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'retention-degraded-data'), checkoutRoot);
+    renderer = await launchProduct({ dataRoot: retentionDegradedRoot, pickerPath: composedDegradedPath, launchScenario: 'retention-degraded' });
+    await runJourney(renderer, composedDegradedExpectation, {
+      diagnosticReviewLocation: 'retention-review',
+      diagnosticScenario: 'retention-degraded',
+    });
+    await clickExactButton(renderer, '稿件导入记录', 'retention-degraded-record-open');
+    await assertRenderer(
+      renderer,
+      `(() => { const record = document.querySelector('.record-detail[data-record-kind="import-record"]'); const items = Array.from(record?.querySelectorAll('[data-degradation-category]') ?? []); return record?.textContent.includes('含已接受的降级 · 原文件随来源版本保留') && record.textContent.includes('查看受影响类别、示例与导出后果') && items.length === 2 && items[0].dataset.degradationCategory === 'notes' && items[0].dataset.degradationCount === '1' && items[1].dataset.degradationCategory === 'fields' && items[1].dataset.degradationCount === '1'; })()`,
+      'retention-degraded-record',
+    );
+    await closeProduct();
+    for (const [disposition, blocks] of [['retain', 6], ['merge', 8]]) {
+      const retentionTextBoxRoot = await createCanonicalExternalDataRoot(resolve(runRoot, `retention-text-box-${disposition}-data`), checkoutRoot);
+      renderer = await launchProduct({
+        dataRoot: retentionTextBoxRoot,
+        pickerPath: composedTextBoxPath,
+        launchScenario: disposition === 'merge' ? 'retention-text-box-merge' : 'retention-text-box-retain',
+      });
+      await runJourney(renderer, { ...composedTextBoxExpectation, textBoxDisposition: disposition }, {
+        diagnosticReviewLocation: 'retention-review',
+        diagnosticScenario: disposition === 'merge' ? 'retention-text-box-merge' : 'retention-text-box-retain',
+      });
+      await clickExactButton(renderer, '稿件导入记录', `retention-text-box-${disposition}-record`);
+      await assertRenderer(
+        renderer,
+        `document.querySelector('.record-detail[data-record-kind="import-record"]')?.textContent.includes(${JSON.stringify(disposition === 'merge' ? '并入正文：' : '保留为文本框：')})`,
+        `retention-text-box-${disposition}-record-choice`,
+      );
+      // Merged, the box's two paragraphs are blocks of r1 beside the six of the body; kept, they are not.
+      await clickExactButton(renderer, '打开稿件', `retention-text-box-${disposition}-editor-open`);
+      await waitFor(
+        renderer,
+        `document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length === ${blocks}`,
+        `retention-text-box-${disposition}-blocks`,
+      );
+      await closeProduct();
+    }
 
     // A PDF has no honest editable round trip, so intake identifies it from its bytes, refuses it as
     // an editable Manuscript with the reason stated, and offers only source-only retention
@@ -2476,7 +2589,7 @@ async function main() {
     // pinned to a literal.
     await assertRenderer(
       renderer,
-      `(() => { const rows = Array.from(document.querySelectorAll('[data-fidelity-category]')); return rows.length === 8 && rows.every((row) => row.dataset.fidelityCategory === 'round-trip-export' ? row.querySelector('.status-pill')?.classList.contains('status-unsupported') : row.querySelector('.count')?.textContent.includes('· 0 项') && row.querySelector('.status-pill')?.classList.contains('status-preserved')) && document.body.textContent.includes(${JSON.stringify(`${textManuscriptParagraphs.length} 个可编辑内容块`)}); })()`,
+      `${fidelityRowsExpression(CLEAN_FIDELITY_ROWS)} && document.body.textContent.includes(${JSON.stringify(`${textManuscriptParagraphs.length} 个可编辑内容块`)})`,
       'text-manuscript-fidelity-clean',
     );
     await clickExactButton(renderer, '确认书名并复核', 'text-manuscript-review-action');
@@ -2505,7 +2618,7 @@ async function main() {
     requireJourney(
       textManuscriptRecord?.['格式'] === 'TXT' &&
         textManuscriptRecord?.['原文件 SHA-256'] === syntheticTxtSha256 &&
-        textManuscriptRecord?.['解析器'] === 'ai7-docx-fflate-saxes/1' &&
+        textManuscriptRecord?.['解析器'] === 'ai7-docx-fflate-saxes/2' &&
         textManuscriptRecord?.['转换器'] === 'ai7-text-to-docx/1' &&
         /^[0-9a-f]{64}$/.test(textManuscriptRecord?.['工作表示 SHA-256'] ?? '') &&
         textManuscriptRecord?.['工作表示 SHA-256'] !== syntheticTxtSha256,
@@ -2567,7 +2680,7 @@ async function main() {
       // detail says the conversion could not keep it rather than that it kept the characters.
       await assertRenderer(
         renderer,
-        `(() => { const rows = Array.from(document.querySelectorAll('[data-fidelity-category]')); if (rows.length !== 8) return false; const degraded = rows.filter((row) => !row.querySelector('.count')?.textContent.includes('· 0 项')); if (degraded.length !== 1 || degraded[0].dataset.fidelityCategory !== 'headers-footers') return false; return degraded[0].querySelector('.count')?.textContent.includes('· 1 项') && degraded[0].querySelector('.status-pill')?.classList.contains('status-degraded') && degraded[0].textContent.includes('由 ai7-doc-to-docx/1 从 DOC 转换时未能保留：') && !degraded[0].textContent.includes('转换保留为原文字符'); })()`,
+        `(() => { const rows = Array.from(document.querySelectorAll('.fidelity-row[data-fidelity-category]')); if (rows.length !== 9 || !document.querySelector('.roundtrip-card[data-fidelity-category="round-trip-export"]')) return false; const degraded = rows.filter((row) => !row.querySelector('.count')?.textContent.includes('· 0 项')); if (degraded.length !== 1 || degraded[0].dataset.fidelityCategory !== 'headers-footers') return false; return degraded[0].querySelector('.count')?.textContent.includes('· 1 项') && degraded[0].querySelector('.status-pill')?.classList.contains('status-degraded') && degraded[0].textContent.includes('由 ai7-doc-to-docx/1 从 DOC 转换时未能保留：') && !degraded[0].textContent.includes('转换保留为原文字符'); })()`,
         'doc-manuscript-fidelity-degraded',
       );
       await assertRenderer(
@@ -2613,7 +2726,7 @@ async function main() {
       requireJourney(
         docManuscriptRecord?.['格式'] === 'DOC' &&
           docManuscriptRecord?.['原文件 SHA-256'] === LOCAL_DOC_SHA256 &&
-          docManuscriptRecord?.['解析器'] === 'ai7-docx-fflate-saxes/1' &&
+          docManuscriptRecord?.['解析器'] === 'ai7-docx-fflate-saxes/2' &&
           docManuscriptRecord?.['转换器'] === 'ai7-doc-to-docx/1' &&
           /^[0-9a-f]{64}$/.test(docManuscriptRecord?.['工作表示 SHA-256'] ?? '') &&
           docManuscriptRecord?.['工作表示 SHA-256'] !== LOCAL_DOC_SHA256,
@@ -2960,7 +3073,8 @@ async function main() {
       'reimport-degraded',
     );
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: reimportDegradedRoot, pickerPath: docx, launchScenario: 'reimport-degraded-review' });
+    // ADR 0086: sample1 is clean now, so the degraded reimport stages the composed field-and-footnote input.
+    renderer = await launchProduct({ dataRoot: reimportDegradedRoot, pickerPath: composedDegradedPath, launchScenario: 'reimport-degraded-review' });
     await prepareManuscriptReimportReview(renderer, {
       targetBookId: reimportDegradedInitial.bookId,
       lineageStatus: 'unconfirmed',
@@ -2974,7 +3088,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'reimport-degraded-restart-required');
     await clickExactButton(renderer, '继续导入', 'reimport-degraded-restart-required-continue');
     await waitFor(renderer, `document.querySelector('[data-accept-reimport-degradation]')`, 'reimport-degraded-required-restored');
-    await assertRenderer(renderer, `(() => { const review = document.querySelector('[data-import-review-kind="reimport"]'); const values = Object.fromEntries(Array.from(review?.querySelectorAll('dt') ?? [], (label) => [label.textContent, label.nextElementSibling?.textContent])); return /^[0-9a-f-]{36}$/i.test(values['当前固定点修订版 ID'] ?? '') && /^[0-9a-f]{64}$/.test(values['当前固定点修订版摘要'] ?? '') && review?.querySelector('[data-reimport-source-sha256]')?.dataset.reimportSourceSha256 === ${JSON.stringify(SAMPLE1_SHA256)} && review.querySelector('[data-reimport-source-sha256]').dataset.reimportSourceBytes === ${JSON.stringify(String(SAMPLE1_BYTES))}; })()`, 'reimport-degraded-restart-exact-authorities');
+    await assertRenderer(renderer, `(() => { const review = document.querySelector('[data-import-review-kind="reimport"]'); const values = Object.fromEntries(Array.from(review?.querySelectorAll('dt') ?? [], (label) => [label.textContent, label.nextElementSibling?.textContent])); return /^[0-9a-f-]{36}$/i.test(values['当前固定点修订版 ID'] ?? '') && /^[0-9a-f]{64}$/.test(values['当前固定点修订版摘要'] ?? '') && review?.querySelector('[data-reimport-source-sha256]')?.dataset.reimportSourceSha256 === ${JSON.stringify(composedDegradedSha256)} && review.querySelector('[data-reimport-source-sha256]').dataset.reimportSourceBytes === ${JSON.stringify(String(composedDegradedInfo.size))}; })()`, 'reimport-degraded-restart-exact-authorities');
     const degradationVersion = await renderer.evaluate(`document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion`);
     await clickExactButton(renderer, '明确接受完整降级集合', 'reimport-degraded-accept');
     await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(degradationVersion)} && document.querySelector('[data-import-review-kind="reimport"]')?.textContent.includes('已明确接受完整降级集合')`, 'reimport-degraded-accept-persisted');

@@ -230,9 +230,9 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
   }
   try {
     database.exec('PRAGMA query_only = ON;');
-    // The terminal version the service stamps (`PROPOSAL_CONFLICT_SCHEMA_VERSION`, as J-04 reads it): 待我处理
+    // The terminal version the service stamps (`IMPORT_RETENTION_SCHEMA_VERSION`, as J-04 reads it): 待我处理
     // adds no relation, so this pin moves only with a revision some other slice takes.
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 26, 'credential-cleanup-metadata-version');
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 27, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
               approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
@@ -416,9 +416,10 @@ async function importSample1(renderer, title, distinct, name) {
   await fill(renderer, '#book-title', title, `${name}-title`);
   await click(renderer, '确认书名并复核', `${name}-review`);
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, `${name}-review-ready`);
-  await assertRenderer(renderer, `(() => { const acceptance=document.querySelector('#accept-import-degradation'); if(!(acceptance instanceof HTMLInputElement)||acceptance.checked)return false; acceptance.click(); return acceptance.checked; })()`, `${name}-degradation-explicit`);
-  await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='按上述降级方式新建图书并导入稿件'&&!button.disabled)`, `${name}-degradation-accepted`);
-  await click(renderer, '按上述降级方式新建图书并导入稿件', `${name}-commit`);
+  // Synchronized delta with Issue #410 (ADR 0086): sample1's inline styles and its one section are retained with
+  // the file, so its review asks for no Import Degradation Decision.
+  await waitFor(renderer, `!document.querySelector('#accept-import-degradation')&&Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='新建图书并导入稿件'&&!button.disabled)`, `${name}-review-clean`);
+  await click(renderer, '新建图书并导入稿件', `${name}-commit`);
   await waitFor(renderer, `document.querySelector('[data-screen="imported"] .book-overview[data-manuscript-state="populated"]')`, `${name}-completed`, 180_000);
   await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged==='true'`, `${name}-acknowledged`, 180_000);
   const bookId = await renderer.evaluate(`document.querySelector('.book-overview')?.dataset.bookId ?? null`);

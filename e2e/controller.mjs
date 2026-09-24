@@ -139,6 +139,11 @@ const J01_COMPLETION_PHASES_BY_SCENARIO = Object.freeze({
   'continuity-identity-review-resumed': J01_COMMON_COMPLETION_PHASES,
   'continuity-synthetic-b': J01_COMMON_COMPLETION_PHASES,
   'legacy-review-rereview': J01_COMMON_COMPLETION_PHASES,
+  // ADR 0086 (Issue #410): the decision path on a composed field and footnote, and a composed text box
+  // kept as a text box and merged into the body.
+  'retention-degraded': J01_COMMON_COMPLETION_PHASES,
+  'retention-text-box-retain': J01_COMMON_COMPLETION_PHASES,
+  'retention-text-box-merge': J01_COMMON_COMPLETION_PHASES,
   'before-paint': Object.freeze([
     'imported-transition',
     'content-contract',
@@ -186,6 +191,9 @@ const J01_LAUNCH_SCENARIOS = Object.freeze([
   'empty-book-review-recovery',
   'populated-book-open-before-source',
   'source-bound-new',
+  'retention-degraded',
+  'retention-text-box-retain',
+  'retention-text-box-merge',
   'source-only-pdf',
   'text-manuscript',
   'doc-manuscript',
@@ -358,6 +366,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'completion-visibility-transition',
     'continuity-review',
     'legacy-review',
+    'retention-review',
     'before-paint-review',
     'before-commit-review',
     'after-commit-review',

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
   FACTUAL_REVIEW_SCHEMA_VERSION,
-  PROPOSAL_CONFLICT_SCHEMA_VERSION,
+  IMPORT_RETENTION_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import { MAX_WINDOW_BLOCKS } from '../../src/shared/protocol.js';
 import {
@@ -18,6 +18,7 @@ import { KIND_COUPLED_ANALYSIS_RELATIONS, downgradeKindCoupledRelationsToRevisio
 import { REVIEW_RUN_RELATIONS_DROP_ORDER } from '../support/review-categories.js';
 import { PUBLICATION_VERSION_RELATIONS_DROP_ORDER } from '../support/publication-versions.js';
 import { PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER } from '../support/proposal-conflicts.js';
+import { IMPORT_RETENTION_RELATIONS_DROP_ORDER } from '../support/import-retention.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2). It drives the real `EditorialStore` on a temporary Agent Data Root
@@ -161,6 +162,7 @@ function downgradeToRevision20(databasePath: string): void {
   try {
     downgradeKindCoupledRelationsToRevision23(database);
     database.exec(`BEGIN IMMEDIATE;
+      ${IMPORT_RETENTION_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join('\n      ')}
       ${PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join('\n      ')}
       ${PUBLICATION_VERSION_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join('\n      ')}
       ${REVIEW_RUN_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join('\n      ')}
@@ -633,7 +635,7 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
       expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
-        .toBe(PROPOSAL_CONFLICT_SCHEMA_VERSION);
+        .toBe(IMPORT_RETENTION_SCHEMA_VERSION);
       const truthAfter = relationTruth(after);
       // Exactly the relations revisions 21 to 26 add appear, and each appears empty.
       const added = [
@@ -643,6 +645,7 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
         ...REVIEW_RUN_RELATIONS_DROP_ORDER,
         ...PUBLICATION_VERSION_RELATIONS_DROP_ORDER,
         ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER,
+        ...IMPORT_RETENTION_RELATIONS_DROP_ORDER,
       ];
       expect([...truthAfter.keys()]).toEqual([...truthBefore.keys(), ...added].sort());
       for (const relation of added) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);

@@ -21,9 +21,8 @@ import {
  * a tab, a line, page, and paragraph break all become a newline, a picture anchor is dropped, and a
  * field keeps only its result. The counting below reads the marks that reach it and will observe
  * none of them from this reader — which is the honest outcome rather than a silent one: what the
- * review cannot count, it does not claim. Inline styles beyond a field and sections beyond a page
- * break cannot be observed by this reader at all, so those counts stay at zero even for a document
- * that carries them.
+ * review cannot count, it does not claim. Inline styles and sections beyond a page break cannot be
+ * observed by this reader at all, so those counts stay at zero even for a document that carries them.
  */
 export const DOC_CONVERTER_IDENTITY = 'ai7-doc-to-docx/1';
 
@@ -125,15 +124,19 @@ function countPartLoss(document: WordDocument, loss: ConversionLoss): void {
     countedSegments(document.getFootnotes(READER_OPTIONS)) +
     countedSegments(document.getEndnotes(READER_OPTIONS));
   loss.commentsRevisions += countedSegments(document.getAnnotations(READER_OPTIONS));
-  // A textbox is floating content with no place in a single ordered manuscript, so it is dropped.
-  loss.imagesCaptions += countedSegments(document.getTextboxes(READER_OPTIONS));
+  // A textbox is floating content the working representation does not carry, so it is dropped and
+  // counted in its own class (ADR 0086 §1).
+  loss.textBoxes += countedSegments(document.getTextboxes(READER_OPTIONS));
 }
 
-/** A field's result text is kept, its code is dropped, and the field itself is counted once. */
+/**
+ * A field's result text is kept, its code is dropped, and the field itself is counted once, in the
+ * class of fields (ADR 0086 §1).
+ */
 function resolveFields(text: string, loss: ConversionLoss): string {
   let resolved = text;
   for (let field = FIELD.exec(resolved); field !== null; field = FIELD.exec(resolved)) {
-    loss.inlineStyles += 1;
+    loss.fields += 1;
     resolved = resolved.slice(0, field.index) + (field[1] ?? '') + resolved.slice(field.index + field[0].length);
   }
   return resolved;

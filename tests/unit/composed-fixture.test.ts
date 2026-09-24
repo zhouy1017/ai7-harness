@@ -98,7 +98,7 @@ describe('composeManuscriptDocx', () => {
     // Composed packaging keeps the generated helper's clean fidelity, which is why the service call
     // sites that switch to it keep the import-review sequence they already had.
     expect(deriveImportFidelityPlan(composed.parsed.fidelity, composed.parsed.sourceDigest, composed.parsed.archiveBytes))
-      .toEqual({ outcome: 'clean-import-no-round-trip', degradations: [] });
+      .toEqual({ outcome: 'clean-import-no-round-trip', degradations: [], textBoxDisposition: null });
   });
 
   it('refuses an excerpt that runs past the end of its source', async () => {
