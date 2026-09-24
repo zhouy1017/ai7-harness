@@ -3220,7 +3220,8 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
  * How often ②A reads the analysis again while its Run moves by itself, or `null` when nothing will move it: a Run under
  * way, and one stopping at the editor's cancellation or pause until it reads 已取消 or 已暂停 (Issue #422), every 250 ms; a Run in
  * Connectivity Wait every 2 s, since it may wait a long time (Issue #502), so the card moves on once Reconnect Preflight
- * admits it. The same answer serves the first read and every read after an unchanged answer, so the card follows a Run
+ * admits it — and so is one waiting for the editor's answer, which the service takes on once the slot another Run holds
+ * is free (Issue #422, S76d). The same answer serves the first read and every read after an unchanged answer, so the card follows a Run
  * exactly as long as the drawer does.
  */
 function analysisFollowDelayMs(state: BaselineAnalysisProjection['state']): number | null {
@@ -3231,6 +3232,7 @@ function analysisFollowDelayMs(state: BaselineAnalysisProjection['state']): numb
     case 'pausing':
       return 250;
     case 'waiting':
+    case 'awaiting-clarification':
       return 2_000;
     default:
       return null;

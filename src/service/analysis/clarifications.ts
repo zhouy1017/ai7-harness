@@ -117,6 +117,9 @@ export const CLARIFICATION_RECORD_GAP = '按你的回答，这个阅读范围不
 /** …and when the Run was cancelled, or ended otherwise, while its question was still open (CLAR-007 keeps the question). */
 export const CLARIFICATION_CANCELLED_UNANSWERED = '任务取消时它还在等你的回答，没有重试' as const;
 export const CLARIFICATION_ENDED_UNANSWERED = '任务结束时它还在等你的回答，没有重试' as const;
+/** …and when the editor had answered, but the Run was cancelled, or ended otherwise, before it went on by that answer. */
+export const CLARIFICATION_CANCELLED_ANSWERED = '任务取消时还没有按你的回答接着做，没有重试' as const;
+export const CLARIFICATION_ENDED_ANSWERED = '任务结束时还没有按你的回答接着做，没有重试' as const;
 
 /** The Run's own detail when it stops for its questions (CLAR-004): what it read, and which units wait for the answer. */
 export function awaitingClarificationDetail(waitingOrdinals: ReadonlyArray<number>, settled: number, total: number): string {
