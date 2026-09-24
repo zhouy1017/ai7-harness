@@ -27,7 +27,7 @@ import {
 } from '../../src/renderer/global-attention-labels.js';
 import { localInstantLabel } from '../../src/renderer/plan-preview-labels.js';
 import { REVIEW_ACTION_LABELS } from '../../src/renderer/review-labels.js';
-import { TASK_BAR_ADJUST_BUDGET_REDO, TASK_BAR_RECONFIRM, TASK_BAR_REPREPARE, TASK_BAR_RESOLVE_MODEL_SERVICE, TASK_BAR_RUN_LINKS } from '../../src/renderer/task-drawer-labels.js';
+import { TASK_BAR_ADJUST_BUDGET_REDO, TASK_BAR_RECONFIRM, TASK_BAR_REDO, TASK_BAR_REPREPARE, TASK_BAR_RESOLVE_MODEL_SERVICE, TASK_BAR_RUN_LINKS } from '../../src/renderer/task-drawer-labels.js';
 import { RESOLVE_CONFLICT_LABEL } from '../../src/renderer/editorial-mark-labels.js';
 import { PROPOSAL_CONFLICT_CLASSIFICATION } from '../../src/renderer/proposal-conflict-labels.js';
 import { REVIEW_RUN_CATEGORY_STATE_LABELS } from '../../src/service/review/review-run-state.js';
@@ -202,6 +202,7 @@ describe('each item', () => {
       'adjust-budget-redo': '调整预算并重做',
       'resolve-model-service': '处理模型服务',
       reprepare: '重新准备',
+      redo: '改计划重做',
     });
     // The drawer's own words for the way on from a Run the ceiling stopped (Issue #51, S16a).
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['adjust-budget-redo']).toBe(TASK_BAR_ADJUST_BUDGET_REDO);
@@ -211,6 +212,11 @@ describe('each item', () => {
     expect(GLOBAL_ATTENTION_STATE_PILLS['analysis-account-limit'].shape).not.toBe(GLOBAL_ATTENTION_STATE_PILLS['analysis-resumable'].shape);
     // A waiting Run whose plan moved (Issue #536; OFF-008): the drawer's own words and pill, never 派发前已阻止's.
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS.reprepare).toBe(TASK_BAR_REPREPARE);
+    // A Run the launch's ceiling stopped under developer-live (Issue #541): the drawer's 改计划重做, and words that say the
+    // ceiling was the launch's and a relaunch raises it.
+    expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS.redo).toBe(TASK_BAR_REDO);
+    expect(globalAttentionReason(item('analysis-budget-reached', { nextStep: 'redo' })))
+      .toBe('运行用到了这次启动的预算上限，已停止；读完的部分已保留。要接着读，请以更高的预算上限重新启动，再改计划重做。');
     expect(GLOBAL_ATTENTION_STATE_PILLS['analysis-plan-moved']).toEqual(TASK_PLAN_STATE_PILLS['plan-moved']);
     expect(GLOBAL_ATTENTION_STATE_PILLS['analysis-plan-moved']).not.toEqual(GLOBAL_ATTENTION_STATE_PILLS['analysis-blocked']);
     // Pinned to the words the record's own surface uses there.

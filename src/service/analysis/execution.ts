@@ -28,7 +28,7 @@ import {
   type AssuranceSamplingParseFailureCode,
 } from './assurance-sampling-contract.js';
 import { canonicalRecord } from './canonical.js';
-import { SAMPLE1_SOURCE_DIGEST, type BaselineAnalysisStore, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitCheckpoint, type UnitResultRecord } from './baseline-analysis-store.js';
+import { CARRIED_STAGES, SAMPLE1_SOURCE_DIGEST, type BaselineAnalysisStore, type CarriedStages, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitCheckpoint, type UnitResultRecord } from './baseline-analysis-store.js';
 import type { BaselineUnitResult } from './contract.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 import { ExecutionAdmissionError } from './execution-error.js';
@@ -1084,9 +1084,23 @@ export class BaselineAnalysisExecutionOwner {
       }
       active.progress.unitsSettled = checkpoints.length;
       // What an earlier stop left spent beyond its units — a reduction or a sample it will form again — still counts
-      // toward the ceiling (Issue #51, S16a): the Run spent it, whatever it keeps.
-      const carried = continuation === null ? { inputTokens: 0, outputTokens: 0 } : ledger.carriedUsageOf(facts.runRecordId) ?? { inputTokens: 0, outputTokens: 0 };
-      if (carried.inputTokens + carried.outputTokens > 0) accumulated.push(carried);
+      // toward the ceiling (Issue #51, S16a), and in the Run's usage and its report by the stage it was spent in (Issue #541):
+      // the Run spent it, whatever it keeps. A stop recorded before the stages were kept counts toward the ceiling only.
+      const carriedStop = continuation === null ? null : ledger.carriedUsageOf(facts.runRecordId);
+      const unattributed = { inputTokens: carriedStop?.inputTokens ?? 0, outputTokens: carriedStop?.outputTokens ?? 0 };
+      if (unattributed.inputTokens + unattributed.outputTokens > 0) accumulated.push({ ...unattributed });
+      for (const stage of CARRIED_STAGES) {
+        const kept = carriedStop?.stages?.[stage];
+        if (kept === undefined) continue;
+        stageUsage[stage].requests += kept.requests;
+        stageUsage[stage].inputTokens += kept.inputTokens;
+        stageUsage[stage].outputTokens += kept.outputTokens;
+        usage.requests += kept.requests;
+        usage.inputTokens += kept.inputTokens;
+        usage.outputTokens += kept.outputTokens;
+        unattributed.inputTokens -= kept.inputTokens;
+        unattributed.outputTokens -= kept.outputTokens;
+      }
       // The attempt a provider's account limit refused before 续行 (Issue #51, S16b) was sent: it counts toward the Run and
       // the ceiling, and its range's row carries it once the range is read again — or ends it as the gap it is.
       const lastStop = continuation === null ? null : ledger.accountLimitStopOf(facts.runRecordId);
@@ -1317,26 +1331,31 @@ export class BaselineAnalysisExecutionOwner {
         if (answered.length === 0) return 'none';
         let spent = false;
         for (const entry of answered) {
-          if (active.interrupted || active.cancelRequested || active.pauseRequested) return spent ? 'end' : 'stopped';
+          // A cancellation outranks every answer (CTRL-005).
+          if (active.cancelRequested) return spent ? 'end' : 'stopped';
           const w = waiting.get(entry.unitOrdinal)!;
-          waiting.delete(entry.unitOrdinal);
-          active.progress.currentUnitOrdinal = w.unit.ordinal;
-          active.progress.currentUnitStartedAt = new Date().toISOString();
-          if (entry.answer!.optionId === 'record-gap') {
-            settleGap(w.unit, w.requestDigest, { unitOrdinal: w.unit.ordinal, attempts: w.attempts, wallMs: w.wallMs, usage: w.usage },
-              'adapter-failure', `${w.failure.reason}（${w.failure.code}）；${CLARIFICATION_RECORD_GAP}`);
-            keepSettled(w.unit, w.wallMs);
-            continue;
-          }
+          const retry = entry.answer!.optionId !== 'record-gap';
           // 再试一次 once the ceiling is spent (Issue #51, S16a): the retry is not sent, and the Run stops as the ceiling reached
-          // — once every other answer given is applied too, each as the editor chose.
-          if (ceilingState() === 'reached') {
+          // — once every other answer given is applied too, each as the editor chose. The ceiling is read before a pause or
+          // AI7 stopping, as at every boundary (Issue #541): a retry it keeps back is never left for a pause to hide.
+          if (retry && ceilingState() === 'reached') {
+            waiting.delete(entry.unitOrdinal);
             settleGap(w.unit, w.requestDigest, { unitOrdinal: w.unit.ordinal, attempts: w.attempts, wallMs: w.wallMs, usage: w.usage },
               'adapter-failure', `${w.failure.reason}（${w.failure.code}）；${SAFE_RETRY_BUDGET_REACHED}`);
             keepSettled(w.unit, w.wallMs);
             liveInterruption = 'run-budget-ceiling-reached';
             terminalClassification = 'interrupted';
             spent = true;
+            continue;
+          }
+          if (active.interrupted || active.pauseRequested) return spent ? 'end' : 'stopped';
+          waiting.delete(entry.unitOrdinal);
+          active.progress.currentUnitOrdinal = w.unit.ordinal;
+          active.progress.currentUnitStartedAt = new Date().toISOString();
+          if (!retry) {
+            settleGap(w.unit, w.requestDigest, { unitOrdinal: w.unit.ordinal, attempts: w.attempts, wallMs: w.wallMs, usage: w.usage },
+              'adapter-failure', `${w.failure.reason}（${w.failure.code}）；${CLARIFICATION_RECORD_GAP}`);
+            keepSettled(w.unit, w.wallMs);
             continue;
           }
           const startedAtMs = Date.now();
@@ -1484,11 +1503,14 @@ export class BaselineAnalysisExecutionOwner {
           }
           return false;
         }
-        // What this stop leaves spent beyond its units — a reduction or a sample 续行 forms again — is kept with it, so
-        // the ceiling counts it after 续行 as it did before.
+        // What this stop leaves spent beyond its units — a reduction or a sample 续行 forms again — is kept with it by stage,
+        // so the ceiling counts it after 续行 as it did before, and the Run's report states it where it was spent (Issue #541).
+        // The stages hold what earlier stops kept too, since 续行 counted it into them.
+        const carriedStages = Object.fromEntries(CARRIED_STAGES.map((stage) => [stage, { ...stageUsage[stage] }])) as CarriedStages;
         const carriedUsage = {
-          inputTokens: carried.inputTokens + stageUsage['cross-unit-reduction'].inputTokens + stageUsage['assurance-sampling'].inputTokens,
-          outputTokens: carried.outputTokens + stageUsage['cross-unit-reduction'].outputTokens + stageUsage['assurance-sampling'].outputTokens,
+          inputTokens: unattributed.inputTokens + CARRIED_STAGES.reduce((total, stage) => total + carriedStages[stage].inputTokens, 0),
+          outputTokens: unattributed.outputTokens + CARRIED_STAGES.reduce((total, stage) => total + carriedStages[stage].outputTokens, 0),
+          stages: carriedStages,
         };
         const settled = active.progress.unitsSettled;
         // 模型服务账户限额 (Issue #51, S16b; MODEL-018): outside developer-live the Run stops resumable in its own words, with
