@@ -3105,6 +3105,39 @@ export class BaselineAnalysisStore {
     return { condition: record.condition, unitOrdinal: typeof record.unitOrdinal === 'number' ? record.unitOrdinal : null };
   }
 
+  /**
+   * The account-limit stop a Run goes on from (Issue #51, S16b): its latest stop, when that was the provider's limit, with
+   * the attempt the provider refused — which was sent — when it refused a unit. `null` when the Run's latest stop was
+   * anything else, or it never stopped.
+   */
+  accountLimitStopOf(runRecordId: string): {
+    condition: string;
+    unitOrdinal: number | null;
+    refusedAttempt: { attempts: number; wallMs: number; usage: { inputTokens: number; outputTokens: number } | null } | null;
+  } | null {
+    const row = this.#db.prepare(
+      "SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? AND state IN ('paused', 'resumable', 'awaiting-clarification') ORDER BY sequence DESC LIMIT 1",
+    ).get(runRecordId) as SqlRow | undefined;
+    if (row === undefined) return null;
+    const record = parseCanonicalJson(asString(row.canonical_json));
+    if (!isRecord(record) || record.stopReason !== 'provider-account-limit' || typeof record.condition !== 'string') return null;
+    const refused = record.refusedAttempt;
+    let refusedAttempt: { attempts: number; wallMs: number; usage: { inputTokens: number; outputTokens: number } | null } | null = null;
+    if (refused !== undefined) {
+      const usage = isRecord(refused) ? refused.usage : undefined;
+      requireAnalysis(isRecord(refused) && Number.isSafeInteger(refused.attempts) && (refused.attempts as number) >= 1 &&
+        typeof refused.wallMs === 'number' && refused.wallMs >= 0 &&
+        (usage === null || (isRecord(usage) && Number.isSafeInteger(usage.inputTokens) && Number.isSafeInteger(usage.outputTokens))),
+      'ANALYSIS_RECORD_INVALID', '运行记录的被拒绝尝试无效。');
+      refusedAttempt = {
+        attempts: refused.attempts as number,
+        wallMs: refused.wallMs as number,
+        usage: usage === null ? null : { inputTokens: (usage as Record<string, number>).inputTokens!, outputTokens: (usage as Record<string, number>).outputTokens! },
+      };
+    }
+    return { condition: record.condition, unitOrdinal: typeof record.unitOrdinal === 'number' ? record.unitOrdinal : null, refusedAttempt };
+  }
+
   /** Why a Run's interrupted outcome says it stopped (Issue #51, S16a); `null` for any other Run, or one with no outcome. */
   #runStop(runRecordId: string): RunStop | null {
     const row = this.#db.prepare("SELECT canonical_json FROM analysis_task_outcomes WHERE run_record_id = ? AND classification = 'interrupted'")

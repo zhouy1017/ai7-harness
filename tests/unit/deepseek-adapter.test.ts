@@ -619,6 +619,9 @@ describe('parseProviderResponse', () => {
     expect(parse(400, { error: { message: "This model's maximum context length is 128000 tokens" } })).toMatchObject({ kind: 'failure', code: CONTEXT_WINDOW_EXCEEDED_CODE });
     expect(parse(429, { error: { message: 'Rate limit reached' } })).toMatchObject({ kind: 'failure', code: AI7_FAILURE_CODES.RATE_LIMIT });
     expect(parse(500, { error: { message: 'server' } })).toMatchObject({ kind: 'failure', code: AI7_FAILURE_CODES.PROVIDER_ERROR });
+    // A server error that mentions a quota or a credit is the server's failure, never the account's limit.
+    expect(parse(500, { error: { message: 'credit check service unavailable' } })).toMatchObject({ kind: 'failure', code: AI7_FAILURE_CODES.PROVIDER_ERROR });
+    expect(parse(503, { error: { message: 'quota service down' } })).not.toMatchObject({ code: QUOTA_EXCEEDED_CODE });
     expect(parse(200, { choices: [] })).toMatchObject({ kind: 'malformed', reason: 'choice-absent' });
     expect(parse(200, null)).toMatchObject({ kind: 'malformed', reason: 'response-not-a-record' });
   });

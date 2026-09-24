@@ -2,13 +2,14 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { BaselineAnalysisExecutionOwner, accountLimitDetail } from '../../src/service/analysis/execution.js';
+import { ACCOUNT_LIMIT_CANCELLED_UNREAD, BaselineAnalysisExecutionOwner, accountLimitDetail } from '../../src/service/analysis/execution.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, type BaselineAnalysisProjection, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { accountLimitReached } from '../../src/service/task-plan.js';
 
 // Service-integration suite (L2) for 模型服务账户限额 (Issue #51, plan slice S16b; V2-UX-MODEL-018, RUN-012): the real store on
 // a temporary Agent Data Root, exact `sample1` imported through the supported path, and J-04's deterministic route over
@@ -106,6 +107,8 @@ describe('模型服务账户限额 over the real store', () => {
       });
       expect(limit!.condition).toBe('Provider Account Limit：模型服务账户限额阻止了本次请求。（QUOTA）');
       expect(plan.technical.find((row) => row.key === 'account-limit')?.value).toBe(limit!.condition);
+      // ⑤'s 账户限额 says the limit was reached, in the provider's words, rather than 「未知」.
+      expect(plan.service.accountLimit).toBe(accountLimitReached(limit!.condition));
       // 待我处理: an exception, blocking, whose next step is 处理模型服务.
       const item = store.inspectGlobalAttention(() => null, false).groups.flatMap((group) => group.items.map((entry) => [group.key, entry] as const))
         .find(([, entry]) => entry.book.bookId === bookId);
@@ -122,6 +125,10 @@ describe('模型服务账户限额 over the real store', () => {
       expect(settled.run?.attempt?.spans.map((span) => span.unitOrdinal)).toEqual([1, 2, 3, 4, 4, 5, 6, 7, 8]);
       expect(settled.taskOutcome?.classification).toBe('completed');
       expect(settled.taskOutcome?.stop).toBeNull();
+      // The refused attempt was sent: it counts toward the Run, and unit 4's row carries both its turns.
+      const report = settled.taskOutcome!.report!;
+      expect(report.usagePerStage.units.requests).toBe(SAMPLE1_UNITS + 1);
+      expect(report.unitRows.find((row) => row.unitOrdinal === 4)?.attempts).toBe(2);
       expect(settled.resultSetRevision?.coverage).toMatchObject({ unitsTotal: SAMPLE1_UNITS, unitsClosed: SAMPLE1_UNITS });
       expect(store.baselineAnalysisLedger.accountLimitOf(runRecordId)).toBeNull();
       expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }).state.key).toBe('settled');
@@ -132,7 +139,7 @@ describe('模型服务账户限额 over the real store', () => {
     }
   }, 300_000);
 
-  it('cancels a Run the account limit stopped into its partial revision, the refused range not attempted', async () => {
+  it('cancels a Run the account limit stopped into its partial revision, the refused range the gap its sent attempt left', async () => {
     const store = await openWithRoute();
     const execution = owner(store);
     try {
@@ -152,7 +159,11 @@ describe('模型服务账户限额 over the real store', () => {
       const cancelled = store.inspectBaselineAnalysis(bookId, () => null);
       expect(cancelled.run?.state).toBe('cancelled');
       expect(cancelled.resultSetRevision?.coverage.unitsClosed).toBe(3);
-      expect(cancelled.resultSetRevision?.gaps.map((gap) => [gap.unitOrdinal, gap.code])).toEqual([4, 5, 6, 7, 8].map((ordinal) => [ordinal, 'not-attempted']));
+      // Unit 4's attempt was sent and refused: it is that gap, in the provider's words, never a range not attempted.
+      expect(cancelled.resultSetRevision?.gaps.map((gap) => [gap.unitOrdinal, gap.code])).toEqual([[4, 'adapter-failure'], ...[5, 6, 7, 8].map((ordinal) => [ordinal, 'not-attempted'])]);
+      const refused = cancelled.resultSetRevision!.gaps.find((gap) => gap.unitOrdinal === 4)!;
+      expect(refused.reason).toBe(`Provider Account Limit：模型服务账户限额阻止了本次请求。（QUOTA）；${ACCOUNT_LIMIT_CANCELLED_UNREAD}`);
+      expect(cancelled.taskOutcome!.report!.usagePerStage.units.requests).toBe(4);
       store.markCleanShutdown();
     } finally {
       await execution.dispose();

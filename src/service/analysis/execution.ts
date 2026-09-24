@@ -236,6 +236,10 @@ export const PAUSED_WITHOUT_EXECUTION = 'AI7 没有在运行这项任务；已�
  * stops at this boundary — nothing more is sent, what it read is kept — and the same Run goes on with 续行 once the
  * provider-side condition clears. Never a retry, a fallback, or a second model; never 任务已中断 · 可续行's words.
  */
+/** A range the account limit refused that the Run's end left unread again (Issue #51, S16b): its attempt was sent. */
+export const ACCOUNT_LIMIT_CANCELLED_UNREAD = '任务取消时它还没有再读' as const;
+export const ACCOUNT_LIMIT_ENDED_UNREAD = '任务结束时它还没有再读' as const;
+
 export function accountLimitDetail(settled: number, total: number): string {
   return settled >= total
     ? `模型服务账户限额：模型服务按账户限额拒绝了请求，这项任务已停下。全部 ${total} 个阅读范围都已读完，结果都已保存。处理好模型服务、限额解除后点「续行」接着做之后的归纳与抽样；在此之前不会发送任何内容。`
@@ -913,8 +917,13 @@ export class BaselineAnalysisExecutionOwner {
     // sets record both as `interrupted`, so the distinction lives in the detail, summary, and action.
     let liveInterruption: LiveInterruption | null = null;
     // 模型服务账户限额 met under a Run that keeps its progress (Issue #51, S16b): the provider's words, and the unit it
-    // refused — `null` for the reduction or a sampling turn. The Run stops resumable at the next boundary.
-    let accountLimit: { readonly unitOrdinal: number | null; readonly condition: string } | null = null;
+    // refused — `null` for the reduction or a sampling turn — with what that refused attempt cost. The Run stops resumable
+    // at the next boundary. Under developer-live ADR 0067 §Quota ends the Run instead, as it always has.
+    let accountLimit: {
+      readonly unitOrdinal: number | null;
+      readonly condition: string;
+      readonly refused?: { readonly attempts: number; readonly wallMs: number; readonly usage: { inputTokens: number; outputTokens: number } | null };
+    } | null = null;
     try {
       requireCompositionMatch(harness.composition.digest, facts.behaviorCompositionDigest);
       const bindingRecord: ExecutionBindingRecord = executionBindingRecordOf({
@@ -1078,6 +1087,24 @@ export class BaselineAnalysisExecutionOwner {
       // toward the ceiling (Issue #51, S16a): the Run spent it, whatever it keeps.
       const carried = continuation === null ? { inputTokens: 0, outputTokens: 0 } : ledger.carriedUsageOf(facts.runRecordId) ?? { inputTokens: 0, outputTokens: 0 };
       if (carried.inputTokens + carried.outputTokens > 0) accumulated.push(carried);
+      // The attempt a provider's account limit refused before 续行 (Issue #51, S16b) was sent: it counts toward the Run and
+      // the ceiling, and its range's row carries it once the range is read again — or ends it as the gap it is.
+      const lastStop = continuation === null ? null : ledger.accountLimitStopOf(facts.runRecordId);
+      const refused = lastStop !== null && lastStop.unitOrdinal !== null && lastStop.refusedAttempt !== null && !checkpointed.has(lastStop.unitOrdinal)
+        ? { unitOrdinal: lastStop.unitOrdinal, condition: lastStop.condition, ...lastStop.refusedAttempt }
+        : null;
+      if (refused !== null) {
+        usage.requests += refused.attempts;
+        stageUsage.units.requests += refused.attempts;
+        active.progress.completedAttempts += refused.attempts;
+        if (refused.usage !== null) {
+          usage.inputTokens += refused.usage.inputTokens;
+          usage.outputTokens += refused.usage.outputTokens;
+          stageUsage.units.inputTokens += refused.usage.inputTokens;
+          stageUsage.units.outputTokens += refused.usage.outputTokens;
+          accumulated.push(refused.usage);
+        }
+      }
       // Units whose safe retry waits for the editor's answer (Issue #422, S76d; CLAR-004). A question the Run asked before
       // it stopped is still its own, answered or not: its unit is not read again until the answer says so, and what its
       // first attempt cost counts toward the Run as it did then.
@@ -1214,8 +1241,8 @@ export class BaselineAnalysisExecutionOwner {
           const reason = failure?.kind === 'failed' ? `${failure.failure.reason}（${failure.failure.code}）` : '适配器失败。';
           // 模型服务账户限额 (Issue #51, S16b; MODEL-018): a Run that keeps its progress stops here with the unit unsettled —
           // no gap, no retry, no fallback, no second model — and 续行 reads it again once the limit clears.
-          if (failure?.kind === 'failed' && failure.failure.failureClass === 'provider-account-limit' && active.resumableOnInterrupt) {
-            accountLimit = { unitOrdinal: unit.ordinal, condition: reason };
+          if (failure?.kind === 'failed' && failure.failure.failureClass === 'provider-account-limit' && active.resumableOnInterrupt && live === null) {
+            accountLimit = { unitOrdinal: unit.ordinal, condition: reason, refused: { attempts: s.attempts, wallMs: s.wallMs, usage: s.usage } };
             return 'stop';
           }
           // A second failure names both attempts; the unit is never retried again. One the plan did not let AI7
@@ -1413,8 +1440,13 @@ export class BaselineAnalysisExecutionOwner {
             }
           }
         }
+        // A range the account limit refused before 续行 carries that attempt in its row as well.
+        const prior = refused !== null && refused.unitOrdinal === unit.ordinal ? refused : null;
         const settled = settleFromTurn({
-          unit, requestDigest, attempt, attempts, usage: unitUsageTotal, wallMs: Date.now() - unitStartedAtMs,
+          unit, requestDigest, attempt,
+          attempts: attempts + (prior?.attempts ?? 0),
+          usage: prior === null ? unitUsageTotal : addUsage(unitUsageTotal, prior.usage),
+          wallMs: Date.now() - unitStartedAtMs + (prior?.wallMs ?? 0),
           firstFailure: firstFailure === null ? null : { reason: firstFailure.reason, code: firstFailure.code }, withheld,
         });
         if (settled === 'end' || settled === 'stop') {
@@ -1440,7 +1472,7 @@ export class BaselineAnalysisExecutionOwner {
         if (accountLimit === null && !stopping && !asking) return false;
         // A spent ceiling outranks a pause, AI7 stopping, an open question and an account limit (Issue #51, S16a; MODEL-016):
         // nothing more may be sent under it, so no Run waits to be continued past it. An open question's answer and the
-        // range an account limit refused would each be one more request, and AI7 stopping leaves nothing to send the rest:
+        // request an account limit refused would each be one more request, and AI7 stopping leaves nothing to send the rest:
         // any of them ends the Run here as the ceiling reached, and asks nothing. The editor's pause alone lapses. The Run
         // goes on without it; the next request's own check — the reduction's, a sampling turn's — ends the Run as the
         // ceiling reached if one is still to be sent, and a Run that needs none completes, since the ceiling counts only
@@ -1469,6 +1501,8 @@ export class BaselineAnalysisExecutionOwner {
             stopReason: 'provider-account-limit',
             condition: accountLimit.condition,
             ...(accountLimit.unitOrdinal === null ? {} : { unitOrdinal: accountLimit.unitOrdinal }),
+            // The refused attempt was sent: 续行 counts it, and a cancellation ends its range as the gap it is.
+            ...(accountLimit.refused === undefined ? {} : { refusedAttempt: accountLimit.refused }),
             carriedUsage,
           });
           return true;
@@ -1515,6 +1549,16 @@ export class BaselineAnalysisExecutionOwner {
         keepSettled(w.unit, w.wallMs);
       }
       waiting.clear();
+      // The range an account limit refused, never read again before the Run ended (Issue #51, S16b): its attempt was sent,
+      // so it is the gap it is — in the provider's words — and never a range the Run did not attempt.
+      if (refused !== null && !unitRecords.some((record) => record.unitOrdinal === refused.unitOrdinal)) {
+        const unit = submittedUnits.find((entry) => entry.ordinal === refused.unitOrdinal);
+        if (unit !== undefined) {
+          settleGap(unit, definition.requestDigest(unit.ordinal, unit.digest), { unitOrdinal: unit.ordinal, attempts: refused.attempts, wallMs: refused.wallMs, usage: refused.usage },
+            'adapter-failure', `${refused.condition}；${active.cancelRequested ? ACCOUNT_LIMIT_CANCELLED_UNREAD : ACCOUNT_LIMIT_ENDED_UNREAD}`);
+          keepSettled(unit, refused.wallMs);
+        }
+      }
       if (active.interrupted && terminalClassification === 'completed') terminalClassification = 'interrupted';
       // A Run the editor cancelled ends `cancelled`, whatever else stopped it (CTRL-005), and nothing after this point
       // is sent. A failure that ends the Run is still recorded as the failure it is, by `#recordFailure`.
@@ -1604,7 +1648,7 @@ export class BaselineAnalysisExecutionOwner {
             // No safe retry here: one attempt, and a retry-safe failure is a gap like any other.
             crossUnit = gap('adapter-failure', failure?.kind === 'failed' ? `${failure.failure.reason}（${failure.failure.code}）` : '适配器失败。');
             // 模型服务账户限额 (Issue #51, S16b): the Run stops before the reduction settles, and 续行 forms it again.
-            if (failure?.kind === 'failed' && failure.failure.failureClass === 'provider-account-limit' && active.resumableOnInterrupt) {
+            if (failure?.kind === 'failed' && failure.failure.failureClass === 'provider-account-limit' && active.resumableOnInterrupt && live === null) {
               accountLimit = { unitOrdinal: null, condition: `${failure.failure.reason}（${failure.failure.code}）` };
             }
           } else {
@@ -1652,7 +1696,7 @@ export class BaselineAnalysisExecutionOwner {
           terminalClassification = 'interrupted';
         },
         onAccountLimit: (condition) => {
-          if (active.resumableOnInterrupt) accountLimit = { unitOrdinal: null, condition };
+          if (active.resumableOnInterrupt && live === null) accountLimit = { unitOrdinal: null, condition };
         },
       });
       if (stopWithoutEnding()) return;
