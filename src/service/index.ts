@@ -12,6 +12,7 @@ import {
   type J04ModelAdapterControl,
   type J08RecoveryControl,
   type LaunchPolicyProjection,
+  type ReconnectPreflightProjection,
   type ServiceFailureResponse,
   type ServiceRequest,
   type ServiceResponse,
@@ -22,6 +23,10 @@ import { armSingleHostAllowance, installNodeNetworkDenial } from '../shared/netw
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../shared/protected-secret-identity.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, resolveDeveloperLiveLaunch, type DeveloperLiveRuntime } from './launch-policy.js';
 import { decodeRequest, isSafeInteger, ProtocolError } from './request-frames.js';
+import { controlledConnectivity, hostConnectivity, type TaskPlanConnectivity } from './connectivity.js';
+import type { WaitingFor } from './task-plan.js';
+import { reconnectPreflight } from './reconnect-preflight.js';
+import { LOCAL_DETERMINISTIC_ROUTE } from './provider/egress-gate.js';
 import type { DormantHarnessRuntime } from './runtime.js';
 import type { EditorialStore } from './store.js';
 import type { CooperativeJobOwner } from './cooperative-jobs.js';
@@ -113,6 +118,17 @@ function driveReviewRun(reviewRuns: ReviewRunDriver, reviewRunId: string): void 
   }
 }
 
+/**
+ * Connectivity Wait's two service-side facts (Issue #502): how the drawer's plan reads the device and the slot,
+ * and Reconnect Preflight — one at a time, over every waiting Run.
+ */
+interface ConnectivityContext {
+  planConnectivity: TaskPlanConnectivity;
+  preflight(): Promise<ReconnectPreflightProjection>;
+  /** What a Run in Connectivity Wait waits for now, as the drawer reads it: the network, a model connection, or the slot. */
+  waitingFor(): Promise<WaitingFor>;
+}
+
 async function dispatch(
   store: EditorialStore,
   harness: DormantHarnessRuntime,
@@ -122,6 +138,7 @@ async function dispatch(
   request: ServiceRequest,
   importControl: J01ImportControl | undefined,
   launchPolicy: LaunchPolicyProjection,
+  connectivity: ConnectivityContext,
 ): Promise<ServiceSuccessResponse> {
   const analysisProgress = (runRecordId: string) => analysisExecution.progressFor(runRecordId);
   switch (request.op) {
@@ -162,6 +179,8 @@ async function dispatch(
         ),
       };
     case 'setModelServiceCredentialState':
+      // A credential that became ready may be all a waiting Run waited for (OFF-009): look again, afterwards.
+      queueMicrotask(() => void connectivity.preflight().catch(() => undefined));
       return {
         id: request.id,
         ok: true,
@@ -277,7 +296,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: await store.inspectTaskPlanWithConnection(request.input, () => analysisExecution.liveCredentialReadiness()),
+        result: await store.inspectTaskPlanWithConnection(request.input, () => analysisExecution.liveCredentialReadiness(), connectivity.planConnectivity),
       };
     case 'inspectForegroundExecutionBoundary':
       return {
@@ -350,6 +369,29 @@ async function dispatch(
         result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress),
       };
     }
+    // 联网后开始任务 (Issue #502; AUTH-004, OFF-005): the Run is recorded waiting, and Reconnect Preflight looks at
+    // once — so a start made just as the network came back is admitted now rather than at the next look.
+    case 'startBaselineAnalysisWhenOnline': {
+      store.startBaselineAnalysisWhenOnline(request.input.bookId, request.input.taskIntentId, request.input.planEnvelopeDigest);
+      // A look that fails leaves the Run waiting as recorded; the next look admits it.
+      await connectivity.preflight().catch(() => undefined);
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress),
+      };
+    }
+    case 'cancelWaitingBaselineAnalysis':
+      store.cancelWaitingBaselineAnalysis(request.input.bookId, request.input.taskIntentId);
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress),
+      };
+    case 'runReconnectPreflight':
+      return { id: request.id, ok: true, op: request.op, result: await connectivity.preflight() };
     // 审阅 (Issue #417, plan slice S69). Every answer that shows a Run reads the one owner's progress, so
     // a category executing now carries its Measured Run Progress.
     case 'inspectReviewWorkspace':
@@ -700,7 +742,7 @@ async function dispatch(
     // 待我处理 (Issue #424, plan slice S78): a read across every Book. The one owner's progress reader and its
     // slot say which Run is in flight, exactly as the analysis inspections read them; nothing is written.
     case 'inspectGlobalAttention':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAttention(analysisProgress, analysisExecution.busy) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAttention(analysisProgress, analysisExecution.busy, await connectivity.waitingFor()) };
     // ④ 导出 (Issue #413, plan slice S64): local only, and only under this launch's verified External Export Policy.
     case 'reviewManuscriptExport':
       return {
@@ -755,6 +797,7 @@ function parseArguments(argv: string[]): {
   foregroundExecutionControl: J03ForegroundExecutionControl | undefined;
   recoveryControl: J08RecoveryControl | undefined;
   modelAdapterControl: J04ModelAdapterControl | undefined;
+  connectivityPath: string | undefined;
 } {
   const values = new Map<string, string>();
   for (let index = 0; index < argv.length; index += 2) {
@@ -766,7 +809,7 @@ function parseArguments(argv: string[]): {
       values.has(key) ||
       (key !== '--data-root' && key !== '--parent-pid' && key !== '--j01-import-control' &&
         key !== '--j03-foreground-execution-control' && key !== '--j08-recovery-control' &&
-        key !== '--j04-model-adapter' && key !== TRUSTED_SCOPE_ARGUMENT && key !== RUN_BUDGET_CEILING_ARGUMENT &&
+        key !== '--j04-model-adapter' && key !== '--j04-connectivity-path' && key !== TRUSTED_SCOPE_ARGUMENT && key !== RUN_BUDGET_CEILING_ARGUMENT &&
         key !== PROVIDER_CACHE_ROOT_ARGUMENT)
     ) {
       throw new ProtocolError();
@@ -808,6 +851,9 @@ function parseArguments(argv: string[]): {
   const modelAdapterControl = modelAdapterControlValue !== undefined && J04_MODEL_ADAPTER_CONTROL_PATTERN.test(modelAdapterControlValue)
     ? modelAdapterControlValue
     : undefined;
+  // J-04's connectivity control (Issue #502): a file the Journey writes, read at each reading. It rides beside the
+  // model adapter — it simulates only whether that route's network is there — so it is exclusive of nothing.
+  const connectivityPath = values.get('--j04-connectivity-path');
   if (
     !dataRoot ||
     !isAbsolute(dataRoot) ||
@@ -823,15 +869,16 @@ function parseArguments(argv: string[]): {
     // The model adapter binds a Journey whose Runs execute: J-04's analysis, and J-09's 运行中 and 最近完成.
     (modelAdapterControlValue !== undefined &&
       (modelAdapterControl === undefined || (process.env.AI7_E2E_JOURNEY !== 'J-04' && process.env.AI7_E2E_JOURNEY !== 'J-09'))) ||
+    (connectivityPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-04' || !isAbsolute(connectivityPath))) ||
     [importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length > 1 ||
     // developer-live is a human-attended developer-host launch: never a Journey launch, never with a Journey control.
     (launchForm.trustedOperationalScope !== 'development-ci' &&
       (process.env.AI7_E2E_JOURNEY !== undefined || importControlValue !== undefined || foregroundExecutionControlValue !== undefined ||
-        recoveryControlValue !== undefined || modelAdapterControlValue !== undefined))
+        recoveryControlValue !== undefined || modelAdapterControlValue !== undefined || connectivityPath !== undefined))
   ) {
     throw new ProtocolError();
   }
-  return { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl };
+  return { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath };
 }
 
 function parentIsAlive(parentPid: number): boolean {
@@ -846,11 +893,14 @@ function parentIsAlive(parentPid: number): boolean {
 
 let StoreErrorClass: typeof import('./store.js').StoreError;
 
+/** How often Reconnect Preflight looks again while the service runs (Issue #502): a local read, then nothing, when no Run waits. */
+const RECONNECT_PREFLIGHT_INTERVAL_MS = 15_000;
+
 async function run(): Promise<void> {
   // The native `fetch` is captured before the denial replaces the global; only the developer-live
   // `opencode-go` transport ever receives it, and only through the adapter's transmit step.
   const nativeFetch: typeof fetch = globalThis.fetch;
-  const { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl } =
+  const { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath } =
     parseArguments(process.argv.slice(2));
   if (launchForm.trustedOperationalScope === 'developer-live') {
     // The single-host allowance (settlement l): armed before the denial so its gates admit exactly the
@@ -898,6 +948,7 @@ async function run(): Promise<void> {
   let jobs: CooperativeJobOwner | undefined;
   let analysisExecution: BaselineAnalysisExecutionOwner | undefined;
   let reviewRuns: ReviewRunDriver | undefined;
+  let preflightTimer: NodeJS.Timeout | undefined;
   try {
     const codeRoot = fileURLToPath(new URL('../', import.meta.url));
     const launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot, launchForm.trustedOperationalScope);
@@ -955,6 +1006,44 @@ async function run(): Promise<void> {
     });
     // A Review Run's categories take the one owner's single slot one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);
+    // Connectivity Wait (Issue #502). The reading is the device's own unless J-04's control names a file; the
+    // live route reaches its model over the network, and so — under that control only — does J-04's route.
+    const owner = analysisExecution;
+    const openStore = store;
+    const reading = connectivityPath === undefined ? hostConnectivity : () => controlledConnectivity(connectivityPath);
+    const reachesNetwork = (routeKind: string): boolean =>
+      routeKind === DEVELOPER_LIVE_POLICY_BINDING.route || (connectivityPath !== undefined && routeKind === LOCAL_DETERMINISTIC_ROUTE);
+    let preflightInFlight: Promise<ReconnectPreflightProjection> | null = null;
+    const connectivity: ConnectivityContext = {
+      planConnectivity: { reading, reachesNetwork, slotBusy: () => owner.busy },
+      // A waiting Run's route reaches its model over the network, or it would not wait: offline first, then a missing
+      // credential, then the slot — the order the drawer reads them in.
+      waitingFor: async () => reading() === 'offline'
+        ? 'network'
+        : (await owner.liveCredentialReadiness()) === 'missing' ? 'connection' : owner.busy ? 'slot' : 'admitting',
+      // One at a time: a look already under way answers a second request for one.
+      preflight: () => {
+        preflightInFlight ??= reconnectPreflight({
+          waitingRuns: () => openStore.waitingBaselineAnalysisRuns(null),
+          stillWaiting: (runRecordId) => openStore.baselineAnalysisRunWaits(runRecordId),
+          drift: (runRecordId) => openStore.baselineAnalysisPreflightDrift(runRecordId),
+          block: (runRecordId, reasons) => openStore.blockWaitingBaselineAnalysisRun(runRecordId, reasons),
+          reachesNetwork: developerLive !== null || (connectivityPath !== undefined && fixture !== null),
+          connectivity: reading,
+          credentialReadiness: () => owner.liveCredentialReadiness(),
+          slotBusy: () => owner.busy,
+          admit: (runRecordId) => owner.admitAndDispatch(runRecordId, openStore.baselineAnalysisLedger, { afterReconnectPreflight: true }),
+        }).finally(() => {
+          preflightInFlight = null;
+        });
+        return preflightInFlight;
+      },
+    };
+    // OFF-013: a Run left waiting when AI7 last closed is looked at once the service is active again, and then
+    // periodically while it runs — never by a launch of its own, which connectivity returning cannot cause.
+    void connectivity.preflight().catch(() => undefined);
+    preflightTimer = setInterval(() => void connectivity.preflight().catch(() => undefined), RECONNECT_PREFLIGHT_INTERVAL_MS);
+    preflightTimer.unref();
     for await (const frame of readFrames()) {
       let request: ServiceRequest;
       try {
@@ -966,7 +1055,7 @@ async function run(): Promise<void> {
       }
       let response: ServiceResponse;
       try {
-        response = await dispatch(store, harness, jobs, analysisExecution, reviewRuns, request, importControl, launchPolicy);
+        response = await dispatch(store, harness, jobs, analysisExecution, reviewRuns, request, importControl, launchPolicy, connectivity);
       } catch (error) {
         if (error instanceof StoreFatalError) {
           stop();
@@ -999,6 +1088,7 @@ async function run(): Promise<void> {
     }
   } finally {
     clearInterval(parentLease);
+    if (preflightTimer !== undefined) clearInterval(preflightTimer);
     process.removeListener('SIGTERM', stop);
     process.removeListener('SIGINT', stop);
     try {

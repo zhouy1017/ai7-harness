@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
   FACTUAL_REVIEW_SCHEMA_VERSION,
-  EXPORT_LEDGER_SCHEMA_VERSION,
+  CONNECTIVITY_WAIT_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import { MAX_WINDOW_BLOCKS } from '../../src/shared/protocol.js';
 import {
@@ -637,7 +637,7 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
       expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
-        .toBe(EXPORT_LEDGER_SCHEMA_VERSION);
+        .toBe(CONNECTIVITY_WAIT_SCHEMA_VERSION);
       const truthAfter = relationTruth(after);
       // Exactly the relations revisions 21 to 28 add appear, and each appears empty.
       const added = [

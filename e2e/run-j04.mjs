@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { lstat, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createServer } from 'node:http';
@@ -333,9 +333,9 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     database.exec('PRAGMA query_only = ON;');
     // Synchronized delta with Issue #467: this reads the same Agent Data Root store J-03 and J-12
     // read, so the pin moves with the terminal version the service stamps
-    // (`EXPORT_LEDGER_SCHEMA_VERSION` since Issue #413). It read 19 until #467 — one revision
+    // (`CONNECTIVITY_WAIT_SCHEMA_VERSION` since Issue #502). It read 19 until #467 — one revision
     // behind, because only a failed product cleanup reaches this fallback, so revision 20 never met it.
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 29, 'credential-cleanup-metadata-version');
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 30, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
               approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
@@ -1023,11 +1023,15 @@ async function main() {
     electronExecutableForCleanup = executable;
     // The bound fixture identity is a launch control; the Issue #48 stages relaunch with the transient-retry variant.
     let modelAdapterIdentity = FIXTURE_IDENTITY;
+    // J-04's connectivity control (Issue #502): the service reads this file's word as the device's connectivity, and
+    // the deterministic route as one that reaches its model over the network. Absent, the reading is online, so
+    // every stage before Connectivity Wait's reads exactly as it always has.
+    const connectivityPath = resolve(runRoot, 'connectivity');
     const launchArgs = () => [
       '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
       '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
       resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
-      '--j04-picker-path', SAMPLE1_PATH, '--j04-model-adapter', modelAdapterIdentity,
+      '--j04-picker-path', SAMPLE1_PATH, '--j04-model-adapter', modelAdapterIdentity, '--j04-connectivity-path', connectivityPath,
     ];
     requireJourney(!launchArgs().some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
     launchForCleanup = async (forCleanup = false) => {
@@ -2553,6 +2557,88 @@ async function main() {
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planVersion==='2' && card.dataset.planVersionCount==='2' && card.dataset.planRevisionPending==='false' && card.dataset.planEnvelopeDigest===${JSON.stringify(v2Digest)} && card.dataset.freshnessState==='stale' && card.dataset.resultRevisionOrdinal==='6'; })()`, 'plan-revision-edit-surface');
     cancellation.throwIfRequested();
 
+    // ---- 联网后开始任务 (Issue #502, plan slice S74b; editor-surfaces §6 离线 / 等待网络; V2-UX-AUTH-002, AUTH-004,
+    // AUTH-007, OFF-004 to OFF-010). The device goes offline through J-04's control; the stale manuscript gives
+    // 同步到当前稿件 something to read.
+    at('connectivity-offline-bar');
+    await writeFile(connectivityPath, 'offline');
+    await startUpdate(renderer, 'sync-current', '同步到当前稿件', 'offline-sync-click');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'offline-sync-prepared', 120_000);
+    const preparedOffline = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(preparedOffline?.state === 'prepared' && preparedOffline.taskIntent?.mode === 'sync-current' && preparedOffline.actions?.canAuthorize === true &&
+      preparedOffline.authorization === null && preparedOffline.run === null, 'offline-sync-plan', { state: preparedOffline?.state, mode: preparedOffline?.taskIntent?.mode });
+    const offlineIntent = preparedOffline.taskIntent.taskIntentId;
+    const offlineDrawer = await drawerShowing(renderer, offlineIntent, 'offline', 'offline-drawer');
+    // Two start actions are never shown ambiguously: 离线 offers 联网后开始任务 beside 仅保存任务草稿, and neither is
+    // preselected — focus is not on either when the drawer opens (AUTH-002, OFF-004).
+    requireJourney(offlineDrawer?.pill === '离线' && offlineDrawer.bar?.state === 'offline' && offlineDrawer.bar.start === 'offline' &&
+      offlineDrawer.bar.statement === '只是让 AI7 按这份计划做这一次；接受修改建议、批准受控动作、保存里程碑版本、设为发稿版本都仍由你另行决定' &&
+      offlineDrawer.bar.note === '离线：这份计划要连到模型服务，而这台设备现在没有网络。联网后开始任务会先记录这次授权，联网后自动开始；在此之前不会发送任何内容' &&
+      barActions(offlineDrawer) === 'start-when-online:联网后开始任务:enabled|save-draft:仅保存任务草稿:enabled|revise:返回修改:disabled' &&
+      offlineDrawer.bar.status === null && offlineDrawer.bar.refusal === null,
+    'offline-bar', offlineDrawer?.bar);
+    await assertRenderer(renderer, `(() => { const bar=document.querySelector('#task-drawer .task-drawer-bar'); return bar instanceof HTMLElement && !bar.contains(document.activeElement) && bar.querySelector('[autofocus]')===null && [...bar.querySelectorAll('button')].every((button)=>!button.textContent.includes('授权')); })()`, 'offline-bar-nothing-preselected');
+
+    at('connectivity-start-when-online');
+    cancellation.throwIfRequested();
+    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start-when-online"]', 'offline-start-when-online');
+    const waitingDrawer = await drawerShowing(renderer, offlineIntent, 'waiting', 'waiting-drawer');
+    requireJourney(waitingDrawer?.pill === '等待网络' && waitingDrawer.bar?.state === 'started' && waitingDrawer.bar.status === '等待网络' &&
+      waitingDrawer.bar.note === '已记录这次授权。联网、并确认计划没有变化后会自动开始；在此之前不会发送任何内容' &&
+      barActions(waitingDrawer) === 'cancel-wait:取消:enabled|run-link:查看运行:enabled' && waitingDrawer.bar.statement === null,
+    'waiting-bar', waitingDrawer?.bar);
+    const waitingAnalysis = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    // The exact authorization 开始任务 records, and a Run that has sent nothing: no attempt, no binding, no usage.
+    requireJourney(waitingAnalysis?.state === 'waiting' && waitingAnalysis.authorization?.origin === 'standard-direct' &&
+      waitingAnalysis.authorization?.authority === 'standard-direct-dispatch' && waitingAnalysis.run?.state === 'awaiting-connectivity' &&
+      waitingAnalysis.run.stateLabel === '等待网络 · 未启动' && waitingAnalysis.run.attempt === null && waitingAnalysis.run.progress === null &&
+      JSON.stringify(waitingAnalysis.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'awaiting-connectivity']),
+    'waiting-run', { state: waitingAnalysis?.state, run: waitingAnalysis?.run });
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='waiting'`, 'waiting-card');
+    // ②A's state reads as the Run does — never 运行已中断, which OFF-012 keeps for a Run that can resume.
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='等待网络 · 未启动'`, 'waiting-card-label');
+
+    at('connectivity-cancel');
+    cancellation.throwIfRequested();
+    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="cancel-wait"]', 'waiting-cancel');
+    const cancelledDrawer = await drawerShowing(renderer, offlineIntent, 'cancelled', 'cancelled-drawer');
+    requireJourney(cancelledDrawer?.pill === '已取消' && cancelledDrawer.bar?.status === '已取消 · 未发送任何内容' &&
+      barActions(cancelledDrawer) === 'run-link:查看运行:enabled', 'cancelled-bar', cancelledDrawer?.bar);
+    const cancelledAnalysis = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    // Terminal, before any dispatch, without provider work — and never 已中断, which OFF-012 keeps for a Run that can resume.
+    requireJourney(cancelledAnalysis?.state === 'cancelled' && cancelledAnalysis.run?.state === 'cancelled' && cancelledAnalysis.run.stateLabel === '已取消 · 未启动' &&
+      cancelledAnalysis.run.attempt === null && cancelledAnalysis.taskOutcome === null &&
+      JSON.stringify(cancelledAnalysis.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'awaiting-connectivity', 'cancelled']),
+    'cancelled-run', { state: cancelledAnalysis?.state, run: cancelledAnalysis?.run });
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='已取消 · 未启动'`, 'cancelled-card-label');
+
+    at('connectivity-wait-again');
+    cancellation.throwIfRequested();
+    // Cancelling freed the Book: the same mode is prepared again, and started again to wait for the network.
+    await startUpdate(renderer, 'sync-current', '同步到当前稿件', 'again-sync-click');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'again-sync-prepared', 120_000);
+    const preparedAgain = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(preparedAgain?.state === 'prepared' && preparedAgain.taskIntent?.taskIntentId !== offlineIntent, 'again-sync-plan');
+    const againIntent = preparedAgain.taskIntent.taskIntentId;
+    await drawerShowing(renderer, againIntent, 'offline', 'again-offline-drawer');
+    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start-when-online"]', 'again-start-when-online');
+    await drawerShowing(renderer, againIntent, 'waiting', 'again-waiting-drawer');
+
+    at('connectivity-online-dispatch');
+    cancellation.throwIfRequested();
+    // The network returns. The drawer showing the waiting Run asks Reconnect Preflight on its own clock; the plan it
+    // bound still stands, so the Run enters the one slot and runs to its end (OFF-008).
+    await writeFile(connectivityPath, 'online');
+    await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, 'online-settled', 180_000);
+    const onlineSettled = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const onlineStates = onlineSettled?.run?.transitions?.map((transition) => transition.state) ?? [];
+    requireJourney(onlineSettled?.state === 'settled' && onlineSettled.taskIntent?.taskIntentId === againIntent &&
+      JSON.stringify(onlineStates.slice(0, 4)) === JSON.stringify(['authorized', 'awaiting-connectivity', 'admitted', 'executing']) &&
+      onlineSettled.run?.attempt !== null && onlineSettled.taskOutcome?.resultSetRevisionId === onlineSettled.resultSetRevision?.revisionId &&
+      onlineSettled.resultSetRevision?.ordinal === 7 && onlineSettled.resultSetRevision?.update?.mode === 'sync-current',
+    'online-settled-run', { state: onlineSettled?.state, transitions: onlineStates });
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started' && document.querySelector('#task-drawer .task-bar-status')?.textContent==='已完成' && document.querySelector('#task-drawer [data-task-drawer-control="run-link"]')?.textContent==='查看运行' && !document.querySelector('#task-drawer [data-task-drawer-control="cancel-wait"]')`, 'online-bar-settled');
+
     // ---- 审阅 (Issue #417, plan slice S69; editor-surfaces §4; V2-UX-REV-001 to REV-013, MARK-010) ----
     at('review-relaunch');
     await closeOwnedBrowser();
@@ -2690,8 +2776,9 @@ async function main() {
     at('zero-activity');
     // Synchronized delta with Issue #418: the Task Drawer, open beside ②A since 审阅, holds no action of
     // the surfaces that raise a Task — the plan authorizes nothing (PLAN-007). Synchronized delta with Issue
-    // #420: its only start is its own bar's, and no card anywhere carries one.
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.analysisState==='settled' && card.dataset.resultRevisionOrdinal==='6' && ${ONLY_ANALYSIS_ACTIONS} && !document.querySelector('[data-analysis-action="prepare"], [data-analysis-action="authorize"]') && !document.querySelector('#task-drawer [data-analysis-action], #task-drawer [data-review-action], #task-drawer [data-task-authorization-action]') && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress|effect|enrol|apply|export/i.test(key) && ![...${JSON.stringify(CHANGE_SUGGESTION_APPLY_MEMBERS)}, ...${JSON.stringify(EXPORT_MEMBERS)}].includes(key)); })()`, 'no-execution-surface');
+    // #420: its only start is its own bar's, and no card anywhere carries one. Since #502 the Run that waited for
+    // the network settled a seventh Result Set Revision before 审阅, so the card ends there.
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.analysisState==='settled' && card.dataset.resultRevisionOrdinal==='7' && ${ONLY_ANALYSIS_ACTIONS} && !document.querySelector('[data-analysis-action="prepare"], [data-analysis-action="authorize"]') && !document.querySelector('#task-drawer [data-analysis-action], #task-drawer [data-review-action], #task-drawer [data-task-authorization-action]') && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress|effect|enrol|apply|export/i.test(key) && ![...${JSON.stringify(CHANGE_SUGGESTION_APPLY_MEMBERS)}, ...${JSON.stringify(EXPORT_MEMBERS)}].includes(key)); })()`, 'no-execution-surface');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-network-provider-session');
   } finally {
     finalCleanupRequested = true;

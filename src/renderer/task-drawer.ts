@@ -1,5 +1,7 @@
 import type { RendererApi, ServiceJobProjection, TaskPlanKind, TaskPlanProjection } from '../shared/protocol.js';
 import {
+  TASK_BAR_CANCEL_FAILED,
+  TASK_BAR_CANCELLED,
   TASK_BAR_SLOT_BUSY,
   TASK_BAR_START_FAILED,
   TASK_BAR_SAVED,
@@ -84,7 +86,17 @@ export interface TaskDrawerSurface {
   interrupt(): void;
 }
 
-type DrawerApi = Pick<RendererApi, 'inspectTaskPlan' | 'authorizeTaskAuthorization' | 'authorizeBaselineAnalysis' | 'authorizeReviewRun' | 'prepareBaselineAnalysis'>;
+type DrawerApi = Pick<
+  RendererApi,
+  | 'inspectTaskPlan'
+  | 'authorizeTaskAuthorization'
+  | 'authorizeBaselineAnalysis'
+  | 'authorizeReviewRun'
+  | 'prepareBaselineAnalysis'
+  | 'startBaselineAnalysisWhenOnline'
+  | 'cancelWaitingBaselineAnalysis'
+  | 'runReconnectPreflight'
+>;
 
 export interface MountTaskDrawerOptions {
   /** The shell's own side panel, beside `#screen`. */
@@ -109,6 +121,8 @@ export interface MountTaskDrawerOptions {
 
 /** How often the drawer reads a running Task's plan again, so the bar follows the Run to its end. */
 const RUNNING_POLL_MS = 1_000;
+/** How often a Run in Connectivity Wait is looked at again while the drawer shows it (Issue #502). */
+const WAITING_POLL_MS = 2_000;
 /** The diff table the bar's 查看计划修订 shows and hides; one drawer, so one table. */
 const DRIFT_TABLE_ID = 'task-drawer-drift-table';
 
@@ -239,14 +253,23 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     pollTimer = undefined;
   }
 
-  /** While the Run runs, read the plan again on a timer, so the bar follows it to its end wherever the editor is. */
+  /**
+   * While the Run runs, read the plan again on a timer, so the bar follows it to its end wherever the editor is.
+   * While it waits in Connectivity Wait, Reconnect Preflight looks first (Issue #502), so the Run the editor is
+   * watching starts as soon as it can; the service also looks by itself, so nothing depends on the drawer.
+   */
   function schedulePoll(next: TaskPlanProjection): void {
     clearPoll();
-    if (next.state.key !== 'running' || interrupted || root.hidden) return;
+    const waiting = next.state.key === 'waiting';
+    if ((next.state.key !== 'running' && !waiting) || interrupted || root.hidden) return;
     pollTimer = window.setTimeout(() => {
       pollTimer = undefined;
-      read();
-    }, RUNNING_POLL_MS);
+      if (!waiting) {
+        read();
+        return;
+      }
+      void api.runReconnectPreflight().catch(() => undefined).finally(() => read());
+    }, waiting ? WAITING_POLL_MS : RUNNING_POLL_MS);
   }
 
   // ---- reading --------------------------------------------------------------------------------------
@@ -579,6 +602,12 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       case 'start':
         button.addEventListener('click', () => void start());
         break;
+      case 'start-when-online':
+        button.addEventListener('click', () => void startWhenOnline());
+        break;
+      case 'cancel-wait':
+        button.addEventListener('click', () => void cancelWait());
+        break;
       case 'reconfirm-plan':
         button.addEventListener('click', () => void reconfirm());
         break;
@@ -639,7 +668,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     if (refusal !== null && plan !== null) {
       paintBar(plan);
-      bar.querySelector<HTMLElement>('[data-task-drawer-control="start"]:not(:disabled), [data-task-drawer-control="reconfirm-plan"]:not(:disabled)')?.focus();
+      bar.querySelector<HTMLElement>(
+        '[data-task-drawer-control="start"]:not(:disabled), [data-task-drawer-control="start-when-online"]:not(:disabled), ' +
+          '[data-task-drawer-control="reconfirm-plan"]:not(:disabled), [data-task-drawer-control="cancel-wait"]:not(:disabled)',
+      )?.focus();
     }
     // `working` is not part of the projection cache key. Even an unchanged plan must repaint
     // after cancellation, an intervening read, or opening another Task while this action ran.
@@ -675,6 +707,50 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       options.onRecorded(current.kind, current.bookId);
     } catch (error) {
       refusal = options.errorCode(error) === 'EXECUTION_BUSY' ? TASK_BAR_SLOT_BUSY : options.errorMessage(error, TASK_BAR_START_FAILED);
+      options.setStatus(refusal, 'error');
+    } finally {
+      endWork(asked);
+    }
+  }
+
+  /**
+   * 联网后开始任务 (Issue #502; AUTH-002, AUTH-004, OFF-005): one activation records the exact Run Authorization and
+   * Run Record for the plan on show — the digest the bar read with it — and the Run waits in Connectivity Wait.
+   * Nothing is sent and nothing implies it began; the bar then says what it waits for, beside 取消.
+   */
+  async function startWhenOnline(): Promise<void> {
+    const current = plan;
+    const asked = request;
+    if (current === null || current.kind !== 'baseline-analysis' || !beginWork()) return;
+    options.setStatus('正在记录授权…', 'busy');
+    try {
+      const planEnvelopeDigest = current.start.planEnvelopeDigest;
+      if (planEnvelopeDigest === null) throw new Error(TASK_BAR_START_FAILED);
+      await api.startBaselineAnalysisWhenOnline({ taskIntentId: current.ref, planEnvelopeDigest });
+      options.setStatus('已记录授权 · 联网后开始', 'success');
+      focusBar = true;
+      options.onRecorded(current.kind, current.bookId);
+    } catch (error) {
+      refusal = options.errorMessage(error, TASK_BAR_START_FAILED);
+      options.setStatus(refusal, 'error');
+    } finally {
+      endWork(asked);
+    }
+  }
+
+  /** 取消 while the Run waits (OFF-010): cancelled before it ever dispatched, directly — nothing ran to weigh first. */
+  async function cancelWait(): Promise<void> {
+    const current = plan;
+    const asked = request;
+    if (current === null || current.kind !== 'baseline-analysis' || !beginWork()) return;
+    options.setStatus('正在取消…', 'busy');
+    try {
+      await api.cancelWaitingBaselineAnalysis({ taskIntentId: current.ref });
+      options.setStatus(TASK_BAR_CANCELLED, 'success');
+      focusBar = true;
+      options.onRecorded(current.kind, current.bookId);
+    } catch (error) {
+      refusal = options.errorMessage(error, TASK_BAR_CANCEL_FAILED);
       options.setStatus(refusal, 'error');
     } finally {
       endWork(asked);

@@ -667,6 +667,12 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'plan-revision-drawer-range',
     'plan-revision-dispatch',
     'plan-revision-edit-unchanged',
+    // Connectivity Wait (Issue #502): 离线, 联网后开始任务, 取消, and Reconnect Preflight admitting the Run.
+    'connectivity-offline-bar',
+    'connectivity-start-when-online',
+    'connectivity-cancel',
+    'connectivity-wait-again',
+    'connectivity-online-dispatch',
     'review-relaunch',
     'review-destination',
     'review-sheet',

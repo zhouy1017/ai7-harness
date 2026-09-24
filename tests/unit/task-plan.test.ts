@@ -13,6 +13,10 @@ import {
   positionLabel,
   readRange,
   withConnectionReadiness,
+  withConnectivityReadiness,
+  withWaitingReason,
+  OFFLINE_STATE,
+  WAITING_LABELS,
 } from '../../src/service/task-plan.js';
 
 // The pure half of the Task Drawer's plan projection (Issue #418, plan slice S72): the range a plan reads
@@ -141,5 +145,38 @@ describe('route-aware readiness of the authorization bar (S74a A3; AUTH-005, MOD
     expect(withConnectionReadiness(started, 'missing')).toBe(started);
     const changed = planWith({ readiness: 'changed', planEnvelopeDigest: null });
     expect(withConnectionReadiness(changed, 'missing')).toBe(changed);
+  });
+
+  it('reads 离线 for a plan whose route reaches its model over a network the device lacks, keeping what 开始任务 would bind (Issue #502; OFF-004)', () => {
+    const live = planWith({});
+    const offline = withConnectivityReadiness(live, true, 'offline');
+    expect(OFFLINE_STATE).toEqual({ key: 'offline', label: '离线' });
+    expect(offline.state).toEqual({ key: 'offline', label: '离线' });
+    // 联网后开始任务 binds exactly the digest 开始任务 would, and nothing frozen moves: the reading is the device's.
+    expect(offline.start).toEqual({ ...live.start, readiness: 'offline' });
+    expect(offline.drift).toBeNull();
+    expect({ ...offline, state: live.state, start: live.start }).toEqual(live);
+    expect(withConnectivityReadiness(live, true, 'online')).toBe(live);
+  });
+
+  it('asks the network nothing of a route that does not reach one or of a plan that is not ready — 模型未连接 is decided first', () => {
+    const live = planWith({});
+    expect(withConnectivityReadiness(live, false, 'offline')).toBe(live);
+    const unconnected = withConnectionReadiness(live, 'missing');
+    expect(withConnectivityReadiness(unconnected, true, 'offline')).toBe(unconnected);
+    for (const readiness of ['record-only', 'no-route', 'changed', 'started'] as const) {
+      const other = planWith({ readiness, planEnvelopeDigest: null });
+      expect(withConnectivityReadiness(other, true, 'offline')).toBe(other);
+    }
+  });
+
+  it('says what a waiting Run waits for in its own words, and leaves every other plan as it came (OFF-006, OFF-009)', () => {
+    expect(WAITING_LABELS).toEqual({ network: '等待网络', connection: '需要处理模型连接', slot: '等待运行名额', admitting: '正在排队' });
+    const waiting: TaskPlanProjection = { ...planWith({ readiness: 'started', planEnvelopeDigest: null }), state: { key: 'waiting', label: '等待网络' } };
+    for (const [reason, label] of Object.entries(WAITING_LABELS)) {
+      expect(withWaitingReason(waiting, reason as keyof typeof WAITING_LABELS).state).toEqual({ key: 'waiting', label });
+    }
+    const running: TaskPlanProjection = { ...waiting, state: { key: 'running', label: '运行中' } };
+    expect(withWaitingReason(running, 'slot')).toBe(running);
   });
 });

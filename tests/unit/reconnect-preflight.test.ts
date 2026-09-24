@@ -1,0 +1,124 @@
+import { describe, expect, it } from 'vitest';
+import type { Connectivity } from '../../src/service/connectivity.js';
+import { planDriftReason, reconnectPreflight, type ReconnectPreflightDependencies } from '../../src/service/reconnect-preflight.js';
+
+// Reconnect Preflight's rule (Issue #502; OFF-007 to OFF-009, UI ADR 0008), over fakes: which waiting Run is
+// left waiting, which is blocked and why, and the one that is admitted.
+
+class AdmissionError extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message);
+  }
+}
+
+interface World {
+  waiting: string[];
+  drift: Record<string, string[]>;
+  connectivity: Connectivity;
+  credential: 'present' | 'missing' | null;
+  busy: boolean;
+  admitThrows: Record<string, AdmissionError>;
+  admitted: string[];
+  blocked: Array<{ runRecordId: string; reasons: ReadonlyArray<string> }>;
+  settledElsewhere: Set<string>;
+  reachesNetwork: boolean;
+}
+
+function world(overrides: Partial<World> = {}): World {
+  return {
+    waiting: ['run-a'],
+    drift: {},
+    connectivity: 'online',
+    credential: null,
+    busy: false,
+    admitThrows: {},
+    admitted: [],
+    blocked: [],
+    settledElsewhere: new Set(),
+    reachesNetwork: true,
+    ...overrides,
+  };
+}
+
+function dependencies(state: World): ReconnectPreflightDependencies {
+  return {
+    waitingRuns: () => state.waiting.map((runRecordId) => ({ runRecordId })),
+    stillWaiting: (runRecordId) => !state.settledElsewhere.has(runRecordId) && !state.admitted.includes(runRecordId),
+    drift: (runRecordId) => state.drift[runRecordId] ?? [],
+    block: (runRecordId, reasons) => {
+      state.blocked.push({ runRecordId, reasons });
+    },
+    reachesNetwork: state.reachesNetwork,
+    connectivity: () => state.connectivity,
+    credentialReadiness: async () => state.credential,
+    slotBusy: () => state.busy,
+    admit: (runRecordId) => {
+      const error = state.admitThrows[runRecordId];
+      if (error !== undefined) throw error;
+      state.admitted.push(runRecordId);
+      state.busy = true;
+    },
+  };
+}
+
+describe('Reconnect Preflight', () => {
+  it('does nothing at all while no Run waits', async () => {
+    const state = world({ waiting: [] });
+    expect(await reconnectPreflight(dependencies(state))).toEqual({ admitted: 0, blocked: 0, waiting: 0 });
+  });
+
+  it('admits a waiting Run once the device is online, its credential ready and its plan unchanged (OFF-008)', async () => {
+    const state = world({ credential: 'present' });
+    expect(await reconnectPreflight(dependencies(state))).toEqual({ admitted: 1, blocked: 0, waiting: 0 });
+    expect(state.admitted).toEqual(['run-a']);
+  });
+
+  it('leaves every Run waiting while the device has no network its route needs, and reads nothing else', async () => {
+    const state = world({ connectivity: 'offline', waiting: ['run-a', 'run-b'], drift: { 'run-a': ['处理范围'] } });
+    expect(await reconnectPreflight(dependencies(state))).toEqual({ admitted: 0, blocked: 0, waiting: 2 });
+    expect(state.blocked).toEqual([]);
+  });
+
+  it('ignores the reading for a route that reaches no network', async () => {
+    const state = world({ connectivity: 'offline', reachesNetwork: false });
+    expect(await reconnectPreflight(dependencies(state))).toEqual({ admitted: 1, blocked: 0, waiting: 0 });
+  });
+
+  it('leaves a Run waiting while its credential is missing — a blocker, never drift (OFF-009)', async () => {
+    const state = world({ credential: 'missing', drift: { 'run-a': ['主编辑角色的模型服务'] } });
+    expect(await reconnectPreflight(dependencies(state))).toEqual({ admitted: 0, blocked: 0, waiting: 1 });
+    expect(state.blocked).toEqual([]);
+  });
+
+  it('blocks a Run whose bound plan no longer stands, naming what moved, and never dispatches it (OFF-008)', async () => {
+    const state = world({ drift: { 'run-a': ['处理范围', '前一修订版'] } });
+    expect(await reconnectPreflight(dependencies(state))).toEqual({ admitted: 0, blocked: 1, waiting: 0 });
+    expect(state.blocked).toEqual([{ runRecordId: 'run-a', reasons: ['需要重新确认计划：处理范围、前一修订版已经变化，这次授权不再对应当前的情况。'] }]);
+    expect(planDriftReason(['处理范围'])).toBe('需要重新确认计划：处理范围已经变化，这次授权不再对应当前的情况。');
+    expect(state.admitted).toEqual([]);
+  });
+
+  it('leaves a Run waiting for the slot, and admits at most one per look because the slot holds one', async () => {
+    const busy = world({ busy: true });
+    expect(await reconnectPreflight(dependencies(busy))).toEqual({ admitted: 0, blocked: 0, waiting: 1 });
+    const two = world({ waiting: ['run-a', 'run-b'] });
+    expect(await reconnectPreflight(dependencies(two))).toEqual({ admitted: 1, blocked: 0, waiting: 1 });
+    expect(two.admitted).toEqual(['run-a']);
+  });
+
+  it('leaves a Run waiting when the owner answers it is busy or stopping, and blocks it with the owner\'s reason otherwise', async () => {
+    for (const code of ['EXECUTION_BUSY', 'EXECUTION_STOPPING']) {
+      const state = world({ admitThrows: { 'run-a': new AdmissionError(code, '稍后再试。') } });
+      expect(await reconnectPreflight(dependencies(state))).toEqual({ admitted: 0, blocked: 0, waiting: 1 });
+    }
+    const never = world({ admitThrows: { 'run-a': new AdmissionError('EXECUTION_SOURCE_NOT_TRANSMITTABLE', '当前图书不在可传输的集合内；未发起任何传输。') } });
+    expect(await reconnectPreflight(dependencies(never))).toEqual({ admitted: 0, blocked: 1, waiting: 0 });
+    expect(never.blocked).toEqual([{ runRecordId: 'run-a', reasons: ['当前图书不在可传输的集合内；未发起任何传输。'] }]);
+  });
+
+  it('skips a Run the editor cancelled, or another look admitted, while it read the credential', async () => {
+    const state = world({ waiting: ['run-a', 'run-b'], settledElsewhere: new Set(['run-a']) });
+    expect(await reconnectPreflight(dependencies(state))).toEqual({ admitted: 1, blocked: 0, waiting: 0 });
+    expect(state.admitted).toEqual(['run-b']);
+  });
+});

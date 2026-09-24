@@ -160,7 +160,17 @@ import {
   readRecoveryAttention,
   recentWindowStart,
 } from './global-attention.js';
-import { baselineAnalysisPlan, fixedTaskPlan, reviewRunPlan, TaskPlanError, withConnectionReadiness } from './task-plan.js';
+import { ALWAYS_ONLINE, type TaskPlanConnectivity } from './connectivity.js';
+import {
+  baselineAnalysisPlan,
+  fixedTaskPlan,
+  reviewRunPlan,
+  TaskPlanError,
+  withConnectionReadiness,
+  withConnectivityReadiness,
+  withWaitingReason,
+  type WaitingFor,
+} from './task-plan.js';
 import { initializeProposalConflictSchema, ProposalConflictError, ProposalConflictStore, readConflictAttention } from './proposal-conflicts.js';
 import {
   ImportRetentionError,
@@ -239,6 +249,7 @@ import {
   IMPORT_RETENTION_SCHEMA_VERSION,
   IMPORTED_MARK_SCHEMA_VERSION,
   EXPORT_LEDGER_SCHEMA_VERSION,
+  CONNECTIVITY_WAIT_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1443,7 +1454,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       currentVersion === PUBLICATION_VERSION_SCHEMA_VERSION || currentVersion === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       currentVersion === IMPORT_RETENTION_SCHEMA_VERSION || currentVersion === IMPORTED_MARK_SCHEMA_VERSION ||
-      currentVersion === EXPORT_LEDGER_SCHEMA_VERSION,
+      currentVersion === EXPORT_LEDGER_SCHEMA_VERSION || currentVersion === CONNECTIVITY_WAIT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1470,7 +1481,7 @@ function initializeSchema(db: DatabaseSync): void {
     currentVersion === EDITORIAL_REVIEW_SCHEMA_VERSION ||
     currentVersion === PUBLICATION_VERSION_SCHEMA_VERSION || currentVersion === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       currentVersion === IMPORT_RETENTION_SCHEMA_VERSION || currentVersion === IMPORTED_MARK_SCHEMA_VERSION ||
-      currentVersion === EXPORT_LEDGER_SCHEMA_VERSION
+      currentVersion === EXPORT_LEDGER_SCHEMA_VERSION || currentVersion === CONNECTIVITY_WAIT_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1811,7 +1822,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION,
+      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1827,7 +1838,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION) return;
+      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -1935,7 +1946,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION,
+      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1950,7 +1961,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION) return;
+      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2243,7 +2254,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== EXPORT_LEDGER_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== CONNECTIVITY_WAIT_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2304,7 +2315,7 @@ function initializeModelServiceSchema(
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION,
+      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2319,7 +2330,7 @@ function initializeModelServiceSchema(
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION) {
+      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3612,6 +3623,14 @@ export class EditorialStore {
    * checks see the same ledger. The range the chips name is the current plan version's (#288).
    */
   inspectTaskPlan(input: InspectTaskPlanInput): TaskPlanProjection {
+    return this.#taskPlanWithRoute(input).plan;
+  }
+
+  /**
+   * The plan and the kind of route it names: the baseline Task's frozen execution route, a Review Run's live route
+   * when it sends to a model service, and none for J-03's fixed task, which never dispatches (ADR 0055).
+   */
+  #taskPlanWithRoute(input: InspectTaskPlanInput): { plan: TaskPlanProjection; routeKind: string | null } {
     this.#assertAvailable();
     requireStore(typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) && TASK_PLAN_KINDS.includes(input.kind) &&
       (input.ref === null || (typeof input.ref === 'string' && UUID_PATTERN.test(input.ref))), 'TASK_PLAN_INVALID', '任务计划请求无效。');
@@ -3626,7 +3645,7 @@ export class EditorialStore {
       requireStore(projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', '这项任务还没有准备计划。');
       current(projection.taskIntent.taskIntentId);
       const blocks = this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
-      return this.#taskPlanCall(() => fixedTaskPlan({ projection, bookTitle, blocks }));
+      return { plan: this.#taskPlanCall(() => fixedTaskPlan({ projection, bookTitle, blocks })), routeKind: null };
     }
     if (input.kind === 'baseline-analysis') {
       const projection = this.#analysisCall(() => this.#baselineAnalysis.inspect(input.bookId)) as BaselineAnalysisProjection;
@@ -3634,13 +3653,21 @@ export class EditorialStore {
       requireStore(projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', '这项分析还没有准备计划。');
       current(projection.taskIntent.taskIntentId);
       const blocks = this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
-      return this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks }));
+      const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks }));
+      return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     const reviewRunId = input.ref;
     requireStore(reviewRunId !== null, 'TASK_PLAN_INVALID', '审阅的计划要指明是哪一次审阅。');
     const facts = this.#reviewCall(() => this.#reviewRuns.planFacts(input.bookId, reviewRunId));
     const blocks = this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(facts.manuscript.manuscriptId, facts.inputRevision.revisionId));
-    return this.#taskPlanCall(() => reviewRunPlan({ bookId: input.bookId, facts, bookTitle, blocks }));
+    const plan = this.#taskPlanCall(() => reviewRunPlan({ bookId: input.bookId, facts, bookTitle, blocks }));
+    // The route the categories' frozen plans resolve, read from the first Task's Provider Resolution Plan as the
+    // baseline reads its own: a review's Tasks share one launch, and a Run of the leads alone reaches no model.
+    const frozenRoute = facts.categories
+      .map((category) => category.task?.components['provider-resolution-plan'])
+      .map((provider) => (provider !== null && typeof provider === 'object' ? (provider as { executionRoute?: { kind?: unknown } }).executionRoute?.kind : undefined))
+      .find((kind): kind is string => typeof kind === 'string');
+    return { plan, routeKind: plan.start.needsModelConnection ? frozenRoute ?? null : null };
   }
 
   /**
@@ -3653,10 +3680,19 @@ export class EditorialStore {
   async inspectTaskPlanWithConnection(
     input: InspectTaskPlanInput,
     credentialReadiness: () => Promise<'present' | 'missing' | null>,
+    connectivity: TaskPlanConnectivity = ALWAYS_ONLINE,
   ): Promise<TaskPlanProjection> {
-    const plan = this.inspectTaskPlan(input);
-    if (!plan.start.needsModelConnection || plan.start.readiness !== 'ready') return plan;
-    return withConnectionReadiness(plan, await credentialReadiness());
+    const { plan: frozen, routeKind } = this.#taskPlanWithRoute(input);
+    let plan = frozen;
+    if (plan.start.needsModelConnection && plan.start.readiness === 'ready') plan = withConnectionReadiness(plan, await credentialReadiness());
+    // Connectivity (Issue #502): only a plan whose route reaches its model over the network can be offline,
+    // and only once its credential is known to be there — 模型未连接 is decided first.
+    const reaches = routeKind !== null && connectivity.reachesNetwork(routeKind);
+    plan = withConnectivityReadiness(plan, reaches, reaches ? connectivity.reading() : 'online');
+    if (plan.state.key !== 'waiting') return plan;
+    if (reaches && connectivity.reading() === 'offline') return withWaitingReason(plan, 'network');
+    if ((await credentialReadiness()) === 'missing') return withWaitingReason(plan, 'connection');
+    return withWaitingReason(plan, connectivity.slotBusy() ? 'slot' : 'admitting');
   }
 
   #taskPlanCall<T>(operation: () => T): T {
@@ -3706,6 +3742,43 @@ export class EditorialStore {
   ): { projection: BaselineAnalysisProjection; dispatchRunRecordId: string | null } {
     const authorized = this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, slotBusy));
     return { projection: authorized.projection as BaselineAnalysisProjection, dispatchRunRecordId: authorized.dispatchRunRecordId };
+  }
+
+  /**
+   * 联网后开始任务 (Issue #502; AUTH-004, OFF-005): the Book's baseline Task is authorized exactly as 开始任务 would
+   * authorize it, and its Run waits in Connectivity Wait — nothing sent, no usage, nothing begun.
+   */
+  startBaselineAnalysisWhenOnline(bookId: string, taskIntentId: string, planEnvelopeDigest: string): BaselineAnalysisProjection {
+    return this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, false, 'when-online')).projection as BaselineAnalysisProjection;
+  }
+
+  /** 取消 while the Book's baseline Run waits (OFF-010): terminal, before any dispatch, without provider work. */
+  cancelWaitingBaselineAnalysis(bookId: string, taskIntentId: string): BaselineAnalysisProjection {
+    return this.#analysisCall(() => this.#baselineAnalysis.cancelWaiting(bookId, taskIntentId)) as BaselineAnalysisProjection;
+  }
+
+  /** The baseline Runs waiting in Connectivity Wait — the route Book's, or every Book's — oldest first. */
+  waitingBaselineAnalysisRuns(bookId: string | null): Array<{ bookId: string; taskIntentId: string; runRecordId: string }> {
+    this.#assertAvailable();
+    return this.#analysisCall(() => this.#baselineAnalysis.waitingRuns()).filter((run) => bookId === null || run.bookId === bookId);
+  }
+
+  /** Reconnect Preflight's local half for one waiting Run: the labels of the material inputs that moved, or none. */
+  baselineAnalysisPreflightDrift(runRecordId: string): ReadonlyArray<string> {
+    this.#assertAvailable();
+    return this.#analysisCall(() => this.#baselineAnalysis.preflightDrift(runRecordId));
+  }
+
+  /** A waiting Run that can never dispatch as authorized is blocked with its reasons (OFF-008). */
+  blockWaitingBaselineAnalysisRun(runRecordId: string, reasons: ReadonlyArray<string>): void {
+    this.#assertAvailable();
+    this.#analysisCall(() => this.#baselineAnalysis.blockWaitingRun(runRecordId, reasons));
+  }
+
+  /** Whether this Run still waits in Connectivity Wait: Reconnect Preflight re-reads it before it acts. */
+  baselineAnalysisRunWaits(runRecordId: string): boolean {
+    this.#assertAvailable();
+    return this.#analysisCall(() => this.#baselineAnalysis.currentRunState(runRecordId)) === 'awaiting-connectivity';
   }
 
   /** The append-only analysis ledger the execution owner writes through; service-internal. */
@@ -8735,7 +8808,7 @@ export class EditorialStore {
    * A read (V2-UX-ATTN-008): nothing is written, claimed or terminalized, and every list is bounded so the
    * answer fits one frame.
    */
-  inspectGlobalAttention(progress: ProgressReader, busy: boolean, now: Date = new Date()): GlobalAttentionProjection {
+  inspectGlobalAttention(progress: ProgressReader, busy: boolean, waitingFor: WaitingFor = 'admitting', now: Date = new Date()): GlobalAttentionProjection {
     return this.#reviewCall(() => {
       const since = recentWindowStart(now);
       const limit = GLOBAL_ATTENTION_READ_LIMIT;
@@ -8751,6 +8824,7 @@ export class EditorialStore {
           reviewRuns: review.latest,
           reviewCompletions: review.completed,
           busy,
+          waitingFor,
         }, now);
       } catch (error) {
         if (error instanceof GlobalAttentionError) throw new StoreError(error.code, error.message);

@@ -20,6 +20,7 @@ import {
   type ReviewRunState,
 } from '../shared/protocol.js';
 import type { RunProgress } from './analysis/baseline-analysis-store.js';
+import type { WaitingFor } from './task-plan.js';
 import { REVIEW_RUN_CATEGORY_STATE_LABELS } from './review/review-run-state.js';
 
 /**
@@ -176,6 +177,11 @@ export interface GlobalAttentionReadings {
   readonly reviewCompletions: ReadonlyArray<ReviewRunAttentionReading>;
   /** Whether a Run holds the execution owner's one slot now. */
   readonly busy: boolean;
+  /**
+   * What a Run in Connectivity Wait waits for now, as the drawer reads it (Issue #502): the device's reading, the
+   * live credential and the slot are the service's, the same for every waiting Run.
+   */
+  readonly waitingFor: WaitingFor;
 }
 
 /** The instant the recent window opens, for a reader that filters in SQL. */
@@ -186,6 +192,14 @@ export function recentWindowStart(now: Date): string {
 // ---- composition ---------------------------------------------------------------------------------------
 
 const ACTIVE_RUN_STATES: ReadonlySet<BaselineAnalysisRunState> = new Set(['authorized', 'admitted', 'executing']);
+
+/** A Run in Connectivity Wait, by what it waits for now (ATTN-004): one the next preflight admits is simply queued. */
+const WAITING_STATES: Readonly<Record<WaitingFor, GlobalAttentionStateKey>> = {
+  network: 'analysis-waiting-network',
+  connection: 'analysis-waiting-connection',
+  slot: 'analysis-waiting-slot',
+  admitting: 'analysis-queued',
+};
 
 function item(
   group: GlobalAttentionGroupKey,
@@ -290,7 +304,7 @@ function conflictItem(reading: ConflictAttentionReading): GlobalAttentionItemPro
 }
 
 /** The analysis Task's item, if its latest state asks for one; a settled Run is 最近完成's, read from its outcome. */
-function analysisTaskItem(reading: AnalysisTaskAttentionReading): GlobalAttentionItemProjection | null {
+function analysisTaskItem(reading: AnalysisTaskAttentionReading, waitingFor: WaitingFor): GlobalAttentionItemProjection | null {
   const book = { bookId: reading.bookId, title: reading.bookTitle };
   const object: GlobalAttentionObjectProjection = { kind: 'analysis', mode: reading.mode };
   const target: GlobalAttentionTarget = { kind: 'analysis', bookId: reading.bookId, taskIntentId: reading.taskIntentId };
@@ -331,6 +345,12 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading): GlobalAttentio
     return item('exceptions', 'analysis-orphaned', { itemId, blocked: true, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
   }
   switch (run.state) {
+    // A Run waiting to start once online is 运行中与已暂停's (ATTN-004), in the words of what it waits for; only a
+    // missing model connection asks the editor to act.
+    case 'awaiting-connectivity':
+      return item('active', WAITING_STATES[waitingFor], {
+        itemId, blocked: waitingFor === 'connection', at: run.stateAt, book, object, nextStep: 'view-run', target, technical,
+      });
     case 'failed':
       return item('exceptions', 'analysis-failed', { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
     case 'interrupted':
@@ -479,7 +499,7 @@ export function composeGlobalAttention(readings: GlobalAttentionReadings, now: D
     ...readings.imports.map(importItem),
     ...readings.recoveries.map(recoveryItem),
     ...readings.conflicts.map(conflictItem),
-    ...readings.analysisTasks.flatMap((reading) => analysisTaskItem(reading) ?? []),
+    ...readings.analysisTasks.flatMap((reading) => analysisTaskItem(reading, readings.waitingFor) ?? []),
     ...readings.analysisOutcomes.filter((reading) => reading.recordedAt >= since).map(analysisOutcomeItem),
     ...readings.reviewRuns.flatMap((reading) => reviewRunItem(reading) ?? []),
     ...readings.reviewCompletions
@@ -496,8 +516,10 @@ export function composeGlobalAttention(readings: GlobalAttentionReadings, now: D
   return {
     groups,
     actionableCount: groups.filter((group) => GLOBAL_ATTENTION_COUNTED_GROUPS.includes(group.key)).reduce((sum, group) => sum + group.total, 0),
-    // A Run holds the slot, or a Review Run is being driven — between two categories it holds none.
-    running: readings.busy || readings.reviewRuns.some((reading) => reading.state === 'running'),
+    // A Run holds the slot, or a Review Run is being driven — between two categories it holds none — or a Run waits to
+    // start once online, which a reader follows until it starts (Issue #502).
+    running: readings.busy || readings.reviewRuns.some((reading) => reading.state === 'running') ||
+      readings.analysisTasks.some((reading) => reading.run?.state === 'awaiting-connectivity'),
   };
 }
 

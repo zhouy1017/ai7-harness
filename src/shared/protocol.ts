@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 42 as const;
+export const SERVICE_PROTOCOL_VERSION = 43 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -62,6 +62,9 @@ export const IPC_CHANNELS = {
   inspectBaselineAnalysis: 'ai7:j04:inspect-baseline-analysis',
   prepareBaselineAnalysis: 'ai7:j04:prepare-baseline-analysis',
   authorizeBaselineAnalysis: 'ai7:j04:authorize-baseline-analysis',
+  startBaselineAnalysisWhenOnline: 'ai7:j04:start-baseline-analysis-when-online',
+  cancelWaitingBaselineAnalysis: 'ai7:j04:cancel-waiting-baseline-analysis',
+  runReconnectPreflight: 'ai7:j04:run-reconnect-preflight',
   inspectReviewWorkspace: 'ai7:j04:inspect-review-workspace',
   prepareReviewRun: 'ai7:j04:prepare-review-run',
   authorizeReviewRun: 'ai7:j04:authorize-review-run',
@@ -2433,7 +2436,11 @@ export type BaselineAnalysisRunState =
   | 'completed'
   | 'completed-with-gaps'
   | 'failed'
-  | 'interrupted';
+  | 'interrupted'
+  // Connectivity Wait (Issue #502): authorized by 联网后开始任务 and waiting for Reconnect Preflight to admit it,
+  // or cancelled by the editor while it waited — before it ever dispatched (OFF-005, OFF-010).
+  | 'awaiting-connectivity'
+  | 'cancelled';
 
 export type BaselineAnalysisUnitProjection =
   | {
@@ -2716,8 +2723,10 @@ export interface BaselineAnalysisUpdateControlsProjection {
   };
   /** The current working manuscript the next Task Input checkpoint would pin, as the manifest would derive it. */
   working: { branchId: string; revisionLabel: string; journalSequence: number; workingDigest: string; totalBlocks: number; unitCount: number; sectionCount: number };
-  /** True while a Task is authorized for dispatch, admitted, or executing: no new update Task may be prepared. */
+  /** True while a Task is authorized for dispatch, waiting in Connectivity Wait, admitted, or executing: no new update Task may be prepared. */
   blockedByActiveRun: boolean;
+  /** Why, in the words of that Task's state — a Run waiting to start once online reads so (OFF-005, OFF-006); `null` when nothing blocks. */
+  blockedReason: string | null;
   actions: {
     'sync-current': BaselineAnalysisUpdateActionProjection;
     'reanalyze-range': BaselineAnalysisUpdateActionProjection & { options: ReadonlyArray<BaselineAnalysisRangeOptionProjection> };
@@ -2781,7 +2790,7 @@ export interface BaselineAnalysisProjection {
   bookId: string;
   kind: typeof BASELINE_ANALYSIS_KIND;
   contractVersion: typeof BASELINE_ANALYSIS_CONTRACT_VERSION;
-  state: 'available' | 'prepared' | 'authorized-blocked' | 'admitted' | 'executing' | 'settled' | 'failed' | 'interrupted';
+  state: 'available' | 'prepared' | 'authorized-blocked' | 'waiting' | 'admitted' | 'executing' | 'settled' | 'failed' | 'interrupted' | 'cancelled';
   stateLabel: string;
   taskIntent: null | {
     taskIntentId: string;
@@ -3951,9 +3960,12 @@ export interface InspectTaskPlanInput {
 
 /**
  * Where a plan stands, as the drawer's state pill says it (editor-surfaces §6 状态). `unconnected` is 模型未连接:
- * the plan's route sends to a model service whose credential is not ready (Issue #420, S74a).
+ * the plan's route sends to a model service whose credential is not ready (Issue #420, S74a). `offline` is 离线,
+ * before authorization: the route reaches its model service over a network this device does not have now.
+ * `waiting` is a Run in Connectivity Wait, whose label says what it waits for — 等待网络, 需要处理模型连接 or
+ * 等待运行名额 (OFF-006) — and `cancelled` one the editor cancelled while it waited (Issue #502).
  */
-export type TaskPlanStateKey = 'ready' | 'changed' | 'unconnected' | 'recorded' | 'blocked' | 'running' | 'settled' | 'stopped';
+export type TaskPlanStateKey = 'ready' | 'changed' | 'unconnected' | 'offline' | 'recorded' | 'blocked' | 'waiting' | 'running' | 'settled' | 'stopped' | 'cancelled';
 
 /**
  * What the Task Drawer's authorization bar offers for one plan now (Issue #420, plan slice S74a;
@@ -3968,9 +3980,24 @@ export type TaskPlanStateKey = 'ready' | 'changed' | 'unconnected' | 'recorded' 
  *   ready — 开始任务 is disabled with that reason; this is never plan drift (OFF-009);
  * - `changed`: the plan's key content changed — 开始任务 is removed (AUTH-006); 重新确认计划 when `reconfirm`
  *   is set;
+ * - `offline`: the plan's route reaches its model service over the network and this device has none now —
+ *   联网后开始任务 records the exact Run Authorization and a Run that waits in Connectivity Wait until
+ *   Reconnect Preflight admits it (AUTH-002, AUTH-004, OFF-004, OFF-005, Issue #502); a Review Run cannot wait
+ *   yet, so its start is disabled with that reason;
  * - `started`: an authorization exists — the bar is the Run's state (AUTH-007).
  */
-export type TaskPlanStartReadiness = 'ready' | 'record-only' | 'no-route' | 'needs-connection' | 'changed' | 'started';
+export type TaskPlanStartReadiness = 'ready' | 'record-only' | 'no-route' | 'needs-connection' | 'changed' | 'offline' | 'started';
+
+/**
+ * What one Reconnect Preflight did (Issue #502; OFF-007, OFF-008, OFF-009): each waiting Run is admitted to the
+ * one execution slot when the model service can be reached and nothing material moved, blocked with its reason
+ * when something material did, or left waiting — for the network, for the model connection, or for the slot.
+ */
+export interface ReconnectPreflightProjection {
+  admitted: number;
+  blocked: number;
+  waiting: number;
+}
 
 /** The authorization bar's facts, derived from the records the plan already reads: nothing here is written. */
 export interface TaskPlanStartProjection {
@@ -4637,6 +4664,11 @@ export type GlobalAttentionStateKey =
   | 'analysis-plan-revision'
   | 'analysis-queued'
   | 'analysis-running'
+  // A Run in Connectivity Wait (Issue #502; ATTN-004), in the words of what it waits for now; one the next Reconnect
+  // Preflight will admit reads 正在排队 (`analysis-queued`).
+  | 'analysis-waiting-network'
+  | 'analysis-waiting-connection'
+  | 'analysis-waiting-slot'
   | 'review-running'
   | 'review-continuable'
   | 'analysis-completed'
@@ -5284,6 +5316,28 @@ export interface ServiceOperationMap {
     output: BaselineAnalysisProjection;
   };
   /**
+   * 联网后开始任务 (Issue #502; AUTH-004, OFF-005): records the exact Run Authorization and Run Record, and the Run
+   * waits in Connectivity Wait — nothing is sent, no usage arises, and nothing implies it began. Reconnect
+   * Preflight then admits it once the model service can be reached and nothing material moved.
+   */
+  startBaselineAnalysisWhenOnline: {
+    input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string };
+    output: BaselineAnalysisProjection;
+  };
+  /** 取消 while a Run waits (OFF-010): the terminal cancellation, before any dispatch and without provider work. */
+  cancelWaitingBaselineAnalysis: {
+    input: { bookId: string; taskIntentId: string };
+    output: BaselineAnalysisProjection;
+  };
+  /**
+   * Reconnect Preflight now, over every waiting Run (OFF-007, OFF-008): what it admitted, blocked, or left waiting.
+   * It names no Book because it only ever admits Runs the editor already authorized to start when online.
+   */
+  runReconnectPreflight: {
+    input: Record<string, never>;
+    output: ReconnectPreflightProjection;
+  };
+  /**
    * 审阅 (Issue #417, plan slice S69). The workspace is one read; preparing a Review Run is a
    * cooperative job; the one approval records the Run's authorization and starts its drive loop at once,
    * so the answer already reads the Run `running`; 继续审阅 drives a stopped Run again. A finding's
@@ -5593,6 +5647,9 @@ export interface RendererApi {
    * recorded, while another Run holds it.
    */
   authorizeBaselineAnalysis(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisProjection>;
+  startBaselineAnalysisWhenOnline(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisProjection>;
+  cancelWaitingBaselineAnalysis(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
+  runReconnectPreflight(): Promise<ReconnectPreflightProjection>;
   /**
    * 审阅 of the Book the window is showing (Issue #417). Inspecting without a Run opens the latest; a
    * running Run is followed by inspecting it again, and its executing category carries its progress.

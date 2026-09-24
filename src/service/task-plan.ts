@@ -15,6 +15,7 @@ import type {
 } from '../shared/protocol.js';
 import { namedNonEffects } from './analysis/baseline-analysis-store.js';
 import type { ManifestBlockInput } from './analysis/coverage-manifest.js';
+import type { Connectivity } from './connectivity.js';
 import { graphemeCount, sliceGraphemes } from './analysis/factual-review-contract.js';
 import type { ReviewRunPlanFacts } from './review/review-runs.js';
 
@@ -225,6 +226,36 @@ export function withConnectionReadiness(plan: TaskPlanProjection, credential: 'p
   };
 }
 
+/** 离线 (editor-surfaces §6 状态): the pill of a plan whose route reaches its model over a network this device lacks now. */
+export const OFFLINE_STATE = { key: 'offline', label: '离线' } as const;
+
+/**
+ * Connectivity readiness (Issue #502, plan slice S74b; V2-UX-AUTH-002, AUTH-005, OFF-004): a plan that could
+ * start now, and whose route reaches its model service over the network, reads 离线 while this device has no
+ * network. 联网后开始任务 then binds exactly the digests 开始任务 would, and the Run waits for Reconnect
+ * Preflight. A missing credential is decided first — 模型未连接 is fixed in 设置, never waited out — and
+ * nothing frozen moves: the reading is the device's, never the plan's, so it invents no revision (OFF-009).
+ */
+export function withConnectivityReadiness(plan: TaskPlanProjection, reachesNetwork: boolean, connectivity: Connectivity): TaskPlanProjection {
+  if (!reachesNetwork || connectivity === 'online' || plan.start.readiness !== 'ready') return plan;
+  return { ...plan, state: { ...OFFLINE_STATE }, start: { ...plan.start, readiness: 'offline' } };
+}
+
+/**
+ * What a Run in Connectivity Wait waits for (OFF-006, OFF-009): the network, a model connection the editor
+ * must fix in 设置, or the one execution slot — or nothing any more, when the next Reconnect Preflight will
+ * admit it (正在排队, AUTH-007). Each is its own words, so a wait never reads as a pause, as activity, or as
+ * the plan having changed.
+ */
+export const WAITING_LABELS = { network: '等待网络', connection: '需要处理模型连接', slot: '等待运行名额', admitting: '正在排队' } as const;
+export type WaitingFor = keyof typeof WAITING_LABELS;
+
+/** The waiting Run's pill, in the words of what it waits for now; any other plan reads exactly as it came. */
+export function withWaitingReason(plan: TaskPlanProjection, waitingFor: WaitingFor): TaskPlanProjection {
+  if (plan.state.key !== 'waiting') return plan;
+  return { ...plan, state: { key: 'waiting', label: WAITING_LABELS[waitingFor] } };
+}
+
 /**
  * 重新确认计划's request for a baseline Task whose key content changed: the same Task Intent's goal, its
  * mode, and — for 重新分析所选范围 — the range the pending revision proposes, exactly as ②A sent it before
@@ -383,6 +414,12 @@ function baselineState(projection: BaselineAnalysisProjection): TaskPlanProjecti
         : { key: 'ready', label: '尚未开始' };
     case 'authorized-blocked':
       return { key: 'blocked', label: '派发前已阻止' };
+    // Connectivity Wait (Issue #502): the label says what it waits for once the service has looked
+    // (`withWaitingReason`); on its own the record says only that it waits for the network.
+    case 'waiting':
+      return { key: 'waiting', label: WAITING_LABELS.network };
+    case 'cancelled':
+      return { key: 'cancelled', label: '已取消' };
     case 'admitted':
       return { key: 'running', label: '正在排队' };
     case 'executing':
