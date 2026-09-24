@@ -1,6 +1,7 @@
 import type {
   ClarificationOptionId,
   RendererApi,
+  RunBudgetCeilingState,
   ServiceJobProjection,
   TaskPlanClarificationProjection,
   TaskPlanKind,
@@ -9,6 +10,16 @@ import type {
 } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import {
+  parseBudgetCeiling,
+  TASK_PLAN_BUDGET_APPLY,
+  TASK_PLAN_BUDGET_CANCEL,
+  TASK_PLAN_BUDGET_HINT,
+  TASK_PLAN_BUDGET_INPUT,
+  TASK_PLAN_BUDGET_INVALID,
+  TASK_PLAN_BUDGET_NOTE,
+  TASK_PLAN_BUDGET_REMOVE,
+  TASK_PLAN_BUDGET_SET,
+  taskPlanBudgetEdited,
   TASK_BAR_CANCEL_CONFIRM,
   TASK_BAR_CANCEL_FAILED,
   TASK_BAR_CANCEL_IMPACT_HEADING,
@@ -254,6 +265,12 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
    */
   const editBuffers = new Map<string, Map<string, ItemEdit>>();
   /**
+   * 设置上限… (Issue #51, S16a; MODEL-015): the ceiling the editor set on each plan and has not yet made the plan, kept like
+   * the other edits; and the one ceiling form that is open, with what is typed in it, kept across repaints.
+   */
+  const budgetBuffers = new Map<string, RunBudgetCeilingState>();
+  let budgetForm: { key: string; draft: string; error: string | null } | null = null;
+  /**
    * 澄清卡 (Issue #422, S76d; INPUT-004): the choice and the note the editor has on each open question, kept outside every
    * repaint until they submit it; and the questions they set aside with 暂不回答, which records nothing (CLAR-007).
    */
@@ -282,8 +299,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
    * every repaint; if AI7 closes first, the cancelled Run still offers 改计划重做.
    */
   let redoPending: { ref: string; runRecordId: string } | null = null;
-  /** The next paint of the Task a redo prepared opens its editing: 完整, focused on the first thing that can change. */
-  let editOnOpen = false;
+  /**
+   * The next paint of the Task a redo prepared opens its editing: 完整, focused on the first thing that can change — or,
+   * for 调整预算并重做 (Issue #51, S16a), on 设置上限….
+   */
+  let editOnOpen: 'first' | 'budget' | null = null;
   /** Said beside the bar's actions once the plan the drawer was opened on is painted (`open`'s `note`). */
   let pendingNote: string | null = null;
   let pollTimer: number | undefined;
@@ -485,10 +505,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     focusBar = false;
     // The Task a redo prepared opens in its editing (Issue #422, S76c), as 返回修改 would open it.
-    if (editOnOpen && next.edit.editable) {
-      editOnOpen = false;
+    if (editOnOpen !== null && next.edit.editable) {
+      const target = editOnOpen === 'budget' ? '[data-task-plan-edit="budget"]:not(:disabled)' : '[data-task-plan-edit]:not(:disabled)';
+      editOnOpen = null;
       if (mode !== 'full') setMode('full', false);
-      body.querySelector<HTMLElement>('[data-task-plan-edit]:not(:disabled)')?.focus();
+      (body.querySelector<HTMLElement>(target) ?? body.querySelector<HTMLElement>('[data-task-plan-edit]:not(:disabled)'))?.focus();
     }
     // The Run the editor redoes has stopped and reads 已取消: the new Task is prepared now.
     if (redoPending !== null && redoPending.ref === next.ref && next.state.key === 'cancelled-after-start' && next.redo !== null &&
@@ -648,7 +669,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         [TASK_PLAN_SERVICE_TERMS[6], next.service.duration],
         [TASK_PLAN_SERVICE_TERMS[7], next.service.budgetCeiling],
         [TASK_PLAN_SERVICE_TERMS[8], next.service.accountLimit],
-      ])),
+      ]), ...budgetBlock(next)),
       planSection(5, facts([
         [TASK_PLAN_RESULT_TERMS[0], listOf(next.outcomes, 'task-plan-list')],
         [TASK_PLAN_RESULT_TERMS[1], listOf(next.notDo.editorial, 'task-plan-list task-plan-not-do')],
@@ -940,6 +961,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         button.addEventListener('click', () => {
           if (plan === null || working) return;
           editBuffers.delete(editKey(plan));
+          budgetBuffers.delete(editKey(plan));
+          budgetForm = null;
           focusBar = true;
           paint(plan, true);
         });
@@ -974,21 +997,33 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
    */
   function pendingEdits(next: TaskPlanProjection): number {
     const key = editKey(next);
-    const buffer = editBuffers.get(key);
-    if (buffer === undefined) return 0;
     if (next.start.readiness === 'started') {
       editBuffers.delete(key);
+      budgetBuffers.delete(key);
+      if (budgetForm?.key === key) budgetForm = null;
       return 0;
     }
-    const committed = new Map<string, ItemEdit>([
-      ...next.steps.filter((step) => step.removable).map((step) => [step.id, committedEdit(step)] as const),
-      ...next.boundary.adaptable.filter((entry) => entry.removable || entry.movable).map((entry) => [entry.id, committedEdit(entry)] as const),
-    ]);
-    for (const [id, state] of buffer) {
-      if (committed.get(id) === undefined || committed.get(id) === state) buffer.delete(id);
+    let count = 0;
+    const buffer = editBuffers.get(key);
+    if (buffer !== undefined) {
+      const committed = new Map<string, ItemEdit>([
+        ...next.steps.filter((step) => step.removable).map((step) => [step.id, committedEdit(step)] as const),
+        ...next.boundary.adaptable.filter((entry) => entry.removable || entry.movable).map((entry) => [entry.id, committedEdit(entry)] as const),
+      ]);
+      for (const [id, state] of buffer) {
+        if (committed.get(id) === undefined || committed.get(id) === state) buffer.delete(id);
+      }
+      if (buffer.size === 0) editBuffers.delete(key);
+      count += buffer.size;
     }
-    if (buffer.size === 0) editBuffers.delete(key);
-    return buffer.size;
+    // The ceiling is one change (Issue #51, S16a), gone once the version shown holds it. Like the other edits it waits
+    // through a key-content change for the version 重新确认计划 writes.
+    const ceiling = budgetBuffers.get(key);
+    if (ceiling !== undefined) {
+      if (next.edit.budget === null || sameCeiling(ceiling, next.edit.budget.ceiling)) budgetBuffers.delete(key);
+      else count += 1;
+    }
+    return count;
   }
 
   /** One item's edit, kept until 更新计划 or 撤销修改; focus stays on the item, now on its other control. */
@@ -1079,6 +1114,162 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     return parts;
   }
 
+  // ---- 设置上限… (Issue #51, plan slice S16a; §6 ⑤, V2-UX-MODEL-013, MODEL-015) ----------------------------------------
+
+  function sameCeiling(left: RunBudgetCeilingState, right: RunBudgetCeilingState): boolean {
+    return left === 'unset' || right === 'unset' ? left === right : left.maxTotalTokens === right.maxTotalTokens;
+  }
+
+  /**
+   * The ceiling as the editor now sees it: theirs not yet made the plan, else the version's. None where the launch sets it
+   * (developer-live), since the plan's edit never names that one.
+   */
+  function shownCeiling(next: TaskPlanProjection): RunBudgetCeilingState {
+    const budget = next.edit.budget;
+    if (budget === null || (!budget.settable && next.edit.editable)) return 'unset';
+    return budgetBuffers.get(editKey(next)) ?? budget.ceiling;
+  }
+
+  /**
+   * Section ⑤'s ceiling (MODEL-013, MODEL-015): what any ceiling leaves to the model service's own account; the editor's
+   * ceiling not yet made the plan, beside 你改的 with 恢复; and 设置上限… — with 去掉上限 once there is one — whose form takes a
+   * whole count of tokens. A plan that takes no edit shows the note alone, and one whose launch sets the ceiling says why.
+   */
+  function budgetBlock(next: TaskPlanProjection): HTMLElement[] {
+    const budget = next.edit.budget;
+    if (budget === null) return [];
+    const key = editKey(next);
+    const block = el('div', 'task-plan-budget');
+    block.dataset['taskPlanBudget'] = 'ceiling';
+    block.append(el('p', 'field-note task-plan-budget-note', TASK_PLAN_BUDGET_NOTE));
+    const pending = budgetBuffers.get(key);
+    if (pending !== undefined) {
+      const line = el('p', 'task-plan-budget-edited');
+      line.append(el('span', 'task-plan-edit-tag', `${TASK_PLAN_EDIT_TAG} · ${taskPlanBudgetEdited(pending)}`));
+      if (next.edit.editable) {
+        const restore = document.createElement('button');
+        restore.type = 'button';
+        restore.dataset['taskPlanEdit'] = 'budget-restore';
+        restore.className = 'quiet task-plan-edit-restore';
+        restore.textContent = TASK_PLAN_EDIT_RESTORE;
+        restore.addEventListener('click', () => setBudget(next, undefined));
+        line.append(restore);
+      }
+      block.append(line);
+    }
+    if (!next.edit.editable) return [block];
+    if (!budget.settable) {
+      block.append(unavailable(TASK_PLAN_BUDGET_SET, 'budget', budget.reason ?? ''));
+      return [block];
+    }
+    const open = budgetForm !== null && budgetForm.key === key;
+    const actions = el('div', 'task-plan-budget-actions');
+    const set = document.createElement('button');
+    set.type = 'button';
+    set.className = 'quiet task-plan-budget-set';
+    set.dataset['taskPlanEdit'] = 'budget';
+    set.textContent = TASK_PLAN_BUDGET_SET;
+    set.setAttribute('aria-expanded', open ? 'true' : 'false');
+    set.addEventListener('click', () => {
+      if (plan === null || editKey(plan) !== key || working || interrupted) return;
+      budgetForm = open ? null : { key, draft: '', error: null };
+      paint(plan, true);
+      body.querySelector<HTMLElement>(open ? '[data-task-plan-edit="budget"]' : '[data-task-drawer-control="budget-input"]')?.focus();
+    });
+    actions.append(set);
+    if (shownCeiling(next) !== 'unset') {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'quiet task-plan-budget-remove';
+      remove.dataset['taskPlanEdit'] = 'budget-remove';
+      remove.textContent = TASK_PLAN_BUDGET_REMOVE;
+      remove.addEventListener('click', () => setBudget(next, 'unset'));
+      actions.append(remove);
+    }
+    block.append(actions);
+    if (open && budgetForm !== null) block.append(budgetFormBlock(next, budgetForm));
+    return [block];
+  }
+
+  /**
+   * The ceiling's form: one labelled field for a whole count of tokens, what the ceiling does, and why a value was not
+   * taken. Enter sets it (never mid-composition), Escape closes the form and not the drawer; what is typed survives a repaint.
+   */
+  function budgetFormBlock(next: TaskPlanProjection, form: { key: string; draft: string; error: string | null }): HTMLElement {
+    const group = el('div', 'task-plan-budget-form');
+    group.setAttribute('role', 'group');
+    group.setAttribute('aria-label', TASK_PLAN_BUDGET_SET);
+    const input = el('input', 'task-plan-budget-input');
+    input.type = 'text';
+    input.inputMode = 'numeric';
+    input.autocomplete = 'off';
+    input.id = uid('budget-input');
+    input.dataset['taskDrawerControl'] = 'budget-input';
+    input.value = form.draft;
+    const label = el('label', undefined, TASK_PLAN_BUDGET_INPUT);
+    label.htmlFor = input.id;
+    const hint = el('small', 'field-note', TASK_PLAN_BUDGET_HINT);
+    hint.id = uid('budget-hint');
+    const described = [hint.id];
+    const error = form.error === null ? null : el('small', 'field-note task-plan-budget-error', form.error);
+    if (error !== null) {
+      error.id = uid('budget-error');
+      error.setAttribute('role', 'alert');
+      described.push(error.id);
+      input.setAttribute('aria-invalid', 'true');
+    }
+    input.setAttribute('aria-describedby', described.join(' '));
+    input.addEventListener('input', () => {
+      form.draft = input.value;
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.isComposing) return;
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        applyBudgetForm(next, form);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        closeBudgetForm();
+      }
+    });
+    const apply = control(TASK_PLAN_BUDGET_APPLY, 'primary', 'budget-apply');
+    apply.addEventListener('click', () => applyBudgetForm(next, form));
+    const cancel = control(TASK_PLAN_BUDGET_CANCEL, 'secondary', 'budget-cancel');
+    cancel.addEventListener('click', () => closeBudgetForm());
+    group.append(label, input, hint, ...(error === null ? [] : [error]), apply, cancel);
+    return group;
+  }
+
+  /** 设定: a whole count of tokens becomes the editor's ceiling; anything else keeps the form open with why. */
+  function applyBudgetForm(next: TaskPlanProjection, form: { key: string; draft: string; error: string | null }): void {
+    const tokens = parseBudgetCeiling(form.draft);
+    if (tokens === null) {
+      form.error = TASK_PLAN_BUDGET_INVALID;
+      if (plan !== null) paint(plan, true);
+      body.querySelector<HTMLElement>('[data-task-drawer-control="budget-input"]')?.focus();
+      return;
+    }
+    setBudget(next, { kind: 'tokens', maxTotalTokens: tokens });
+  }
+
+  function closeBudgetForm(): void {
+    if (plan === null) return;
+    budgetForm = null;
+    paint(plan, true);
+    body.querySelector<HTMLElement>('[data-task-plan-edit="budget"]')?.focus();
+  }
+
+  /** The editor's ceiling, kept until 更新计划 or 撤销修改 — `undefined` returns to the version's — with focus back on 设置上限…. */
+  function setBudget(next: TaskPlanProjection, value: RunBudgetCeilingState | undefined): void {
+    if (plan === null || editKey(plan) !== editKey(next) || working || interrupted || !plan.edit.editable || plan.edit.budget === null) return;
+    const key = editKey(plan);
+    if (value === undefined || sameCeiling(value, plan.edit.budget.ceiling)) budgetBuffers.delete(key);
+    else budgetBuffers.set(key, value);
+    budgetForm = null;
+    paint(plan, true);
+    body.querySelector<HTMLElement>('[data-task-plan-edit="budget"]')?.focus();
+  }
+
   /** 更新计划 (PLAN-009, PLAN-011): the plan as the editor left it becomes the next version; a refusal is said beside the bar. */
   async function updatePlan(): Promise<void> {
     const current = plan;
@@ -1094,6 +1285,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const askFirstAdaptations = current.boundary.adaptable
       .filter((entry) => entry.movable && shownEdit(current, entry.id, committedEdit(entry)) === 'ask-first')
       .map((entry) => entry.id);
+    // 设置上限… (Issue #51, S16a): the edit is the whole plan as the editor left it, so a ceiling set before is sent again.
+    const ceiling = shownCeiling(current);
     options.setStatus('正在更新计划…', 'busy');
     try {
       const updated = await api.editBaselineAnalysisPlan({
@@ -1102,8 +1295,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         removedSteps,
         disallowedAdaptations,
         ...(askFirstAdaptations.length === 0 ? {} : { askFirstAdaptations }),
+        ...(ceiling === 'unset' ? {} : { runBudgetCeiling: ceiling }),
       });
       editBuffers.delete(editKey(current));
+      budgetBuffers.delete(editKey(current));
+      if (budgetForm?.key === editKey(current)) budgetForm = null;
       options.setStatus(`计划已更新为第 ${updated.planVersion?.ordinal ?? '?'} 版。`, 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId);
@@ -1298,7 +1494,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       endWork(asked);
     }
     if (prepared !== null && !root.hidden) {
-      editOnOpen = true;
+      editOnOpen = current.state.key === 'budget-reached' ? 'budget' : 'first';
       surface.open({ bookId: current.bookId, kind: current.kind, ref: prepared }, returnFocus);
     }
   }

@@ -29,6 +29,7 @@ import {
 } from '../../src/service/provider/local-deterministic-adapter.js';
 import { BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, crossUnitRequestDigest, parseCrossUnitCitedBlocks, parseCrossUnitMessageHeader } from '../../src/service/analysis/cross-unit-contract.js';
 import { runReportUsageReconciles } from '../../src/service/analysis/run-report.js';
+import { PLAN_CEILING_LAUNCH_REASON } from '../../src/service/analysis/plan-edits.js';
 import {
   OPENCODE_GO_ENDPOINT,
   OPENCODE_GO_SESSION_HEADER,
@@ -818,6 +819,19 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
     expect(prepared.planVersion!.materialInputs.expectedOutcome).toBe(prepared.taskIntent!.expectedOutcome);
     expect(prepared.planVersion!.materialInputs.outboundDataCategory).toBe('public-or-synthetic');
     expect(prepared.actions).toEqual({ canPrepare: false, canAuthorize: true, canReconfirmPlan: false });
+    // The launch sets a developer-live ceiling (Issue #51, S16a): the plan offers no 设置上限…, and an edit naming one is refused.
+    const taskIntentId = prepared.taskIntent!.taskIntentId;
+    expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }).edit.budget)
+      .toEqual({ ceiling: CEILING, settable: false, reason: PLAN_CEILING_LAUNCH_REASON });
+    let refused: unknown = null;
+    try {
+      store.editBaselineAnalysisPlan({
+        bookId, taskIntentId, planEnvelopeDigest: prepared.planEnvelope!.digest, removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 1000 },
+      });
+    } catch (error) {
+      refused = error;
+    }
+    expect(refused).toMatchObject({ code: 'ANALYSIS_PLAN_EDIT_INVALID', message: PLAN_CEILING_LAUNCH_REASON });
 
     // Re-binding the launch at another ceiling is durable-state drift the next read detects on its own.
     ledger.bindLaunch(liveBinding(OTHER));

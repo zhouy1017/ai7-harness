@@ -2658,12 +2658,14 @@ async function main() {
 
     at('j14-plan-edit-keyboard');
     // Without a pointer: Enter on 返回修改 lands on 核对与抽检's ×; Enter leaves it out and focus stays on the item, now
-    // on its 恢复; Tab reaches the safe retry's ×, and Enter withdraws it.
+    // on its 恢复; Tab reaches ⑤'s 设置上限… (Issue #51, S16a) and then the safe retry's ×, and Enter withdraws it.
     await assertRenderer(renderer, `(() => { const revise=document.querySelector('#task-drawer [data-task-drawer-control="revise"]'); if(!(revise instanceof HTMLButtonElement)||revise.disabled)return false; revise.focus(); return document.activeElement===revise; })()`, 'plan-edit-keyboard-start');
     await pressEnter(renderer);
     await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='remove' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='assurance-sampling' && document.activeElement.matches(':focus-visible')`, 'plan-edit-keyboard-remove-focused', 10_000);
     await pressEnter(renderer);
     await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='restore' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='assurance-sampling' && document.activeElement.matches(':focus-visible')`, 'plan-edit-keyboard-restore-focused', 10_000);
+    await pressTab(renderer);
+    await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='budget' && document.activeElement.closest('[data-task-plan-section="5"]')!==null && document.activeElement.matches(':focus-visible')`, 'plan-edit-keyboard-budget', 10_000);
     await pressTab(renderer);
     await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='remove' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='safe-retry' && document.activeElement.matches(':focus-visible')`, 'plan-edit-keyboard-next', 10_000);
     await pressEnter(renderer);

@@ -9,8 +9,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
-// J-10 (Issue #422, plan slices S76a to S76d): the operations on a Run under way, told apart by their
-// consequence (V2-UX-AUTH-010, AUTH-011, CTRL-001 to CTRL-009, CONT-013 to CONT-015, CLAR-001 to CLAR-007). Books are made from the one
+// J-10 (Issue #422, plan slices S76a to S76d; Issue #51, S16a): the operations on a Run under way, told apart by their
+// consequence (V2-UX-AUTH-010, AUTH-011, CTRL-001 to CTRL-009, CONT-013 to CONT-015, CLAR-001 to CLAR-007, MODEL-013 to
+// MODEL-017). Books are made from the one
 // admitted input, exact `sample1`, through the product's own UI, and their analyses run on the J-04 model adapter.
 // J-10's unit hold keeps a reading range in flight once the Journey's number of ranges have settled, so the Journey
 // can watch and steer a Run under way.
@@ -38,6 +39,12 @@ import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabl
 // question card says only that step waits while the others are read, 暂不回答 sets it aside recording nothing, and once
 // the rest are read the Run waits, 任务等待你的说明, holding nothing. The question outlives AI7 closing; answered by
 // keyboard alone — 再试一次 with a note — the Run goes on, retrying unit 5 as its second attempt, to its end.
+//
+// On the fifth Book, launched over the happy fixture again, 设置上限… in the plan's ⑤ refuses what is not a count of tokens
+// and takes 5,000, which 更新计划 freezes into version 2. The Run spends 6,620 tokens on four ranges and stops before the
+// fifth: 已停止 · 预算已达上限, with what it read and used, 调整预算并重做 and 查看部分结果 — never 续行 or 重试 — and 待我处理
+// holds it as an exception. 查看部分结果 shows ②A's partial revision; 调整预算并重做 opens a new Task carrying the four
+// ranges, focused on 设置上限…, where the keyboard alone raises the ceiling to 20,000, and the Task runs to its end.
 // 重试, 回退运行方向 and 重放 are J-10's later operations, not these slices'.
 //
 // The runner writes J-10's unit-hold file, and reads the service's projections through `window.ai7` only to
@@ -53,6 +60,15 @@ const BOOK = Object.freeze({ title: '取消任务旅程' });
 const SECOND_BOOK = Object.freeze({ title: '续行旅程' });
 const THIRD_BOOK = Object.freeze({ title: '改计划重做旅程' });
 const FOURTH_BOOK = Object.freeze({ title: '澄清旅程' });
+const FIFTH_BOOK = Object.freeze({ title: '预算上限旅程' });
+/** The fifth Book's ceilings (Issue #51, S16a): four ranges spend 6,620 tokens under 5,000; the redo reads the rest under 20,000. */
+const BUDGET = Object.freeze({ kind: 'tokens', maxTotalTokens: 5000 });
+const RAISED = Object.freeze({ kind: 'tokens', maxTotalTokens: 20000 });
+const BUDGET_NOTE = '用量和费用仍受所选模型服务的账户控制与计费条款约束。';
+const BUDGET_INVALID = '请填一个大于 0 的整数，单位是 tokens。';
+const BUDGET_STOP_NOTE = '已读完 4 / 8 个阅读范围，结果都已保留；这次运行用了 6,620 tokens，达到了预算上限 5,000 tokens';
+const BUDGET_RUN_LABEL = '任务运行预算已达上限 · 已保留部分结果';
+const BUDGET_REDO_GOAL = '改计划重做：沿用已读完的 4 个阅读范围，接着读其余 4 个';
 /** The fourth Book's launch: unit 2 fails for good, and unit 5's first attempt fails retry-safe (Issue #422, S76d). */
 const TRANSIENT_FIXTURE_IDENTITY = 'sample1-baseline-transient-retry';
 /** Five ranges may settle before the fourth Book's Run is held: 1 to 4 do, 5 asks, 6 settles, and 7 is in flight. */
@@ -1420,6 +1436,135 @@ async function main() {
     requireJourney(answeredPlan?.clarifications?.[0]?.state === 'answered' && answeredPlan.clarifications[0].answer?.optionId === 'retry' &&
       answeredPlan.clarifications[0].answer.note === QUESTION_NOTE, 'answer-record', answeredPlan?.clarifications ?? null);
     await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-clarification-record li[data-clarification-state="answered"] .task-plan-clarification-answer')?.textContent?.startsWith(${JSON.stringify(`你已回答：再试一次 · 说明：${QUESTION_NOTE}（`)}) === true && document.querySelector('#task-drawer .task-drawer-questions [data-task-plan-clarification]')===null`, 'answer-shown', 30_000);
+
+    // ---- The Run Budget Ceiling (Issue #51, S16a; MODEL-013, MODEL-015 to MODEL-017) ----------------------------------
+    at('relaunch-for-budget');
+    // A launch over the happy fixture again, whose turns report the tokens a ceiling counts; nothing is held.
+    await closeOwnedBrowser();
+    cancellation.throwIfRequested();
+    await writeFile(holdPath, 'release', 'utf8');
+    adapterFixture = FIXTURE_IDENTITY;
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'budget-ready');
+
+    at('fifth-book-import');
+    const fifthBookId = await importSample1(renderer, FIFTH_BOOK.title, true, 'fifth-import');
+    requireJourney(![bookId, secondBookId, thirdBookId, fourthBookId].includes(fifthBookId), 'five-books');
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'fifth-artifact-enable-ready');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'fifth-artifact-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'fifth-artifact-enabled');
+    await click(renderer, '返回图书列表', 'fifth-return-library');
+
+    at('budget-set');
+    // ⑤ reads 未设置任务预算上限 and what any ceiling leaves to the model service's account (MODEL-013). 设置上限… opens one
+    // labelled field: what is not a count of tokens is refused in words, and 5,000 becomes the editor's change, which
+    // 更新计划 makes version 2 — the ceiling frozen into the plan, which can still start.
+    await openAnalysisOf(renderer, fifthBookId, 'fifth-analysis');
+    await prepareFirstBaseline(renderer, 'ready', 'fifth-baseline');
+    const fifthIntentId = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanRef ?? ''`);
+    requireJourney(UUID_PATTERN.test(fifthIntentId), 'fifth-task');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="revise"]', 'fifth-revise');
+    await waitFor(renderer, `(() => { const section=document.querySelector('#task-drawer [data-task-plan-section="5"]'); return document.querySelector('#task-drawer')?.dataset.taskDrawerMode==='full' && section?.querySelector('dd[data-task-plan-term="预算上限"]')?.textContent==='未设置任务预算上限' && section.querySelector('.task-plan-budget-note')?.textContent===${JSON.stringify(BUDGET_NOTE)} && section.querySelector('[data-task-plan-edit="budget"]')?.textContent==='设置上限…' && section.querySelector('[data-task-plan-edit="budget-remove"]')===null; })()`, 'budget-offered', 10_000);
+    await clickSelector(renderer, '#task-drawer [data-task-plan-edit="budget"]', 'budget-open');
+    await waitFor(renderer, `(() => { const input=document.activeElement; return input instanceof HTMLInputElement && input.dataset.taskDrawerControl==='budget-input' && document.querySelector('#task-drawer label[for="'+input.id+'"]')?.textContent==='预算上限（tokens）' && document.querySelector('#task-drawer [data-task-plan-edit="budget"]')?.getAttribute('aria-expanded')==='true'; })()`, 'budget-input-focused', 10_000);
+    await renderer.send('Input.insertText', { text: '五千' });
+    await pressEnter(renderer);
+    await waitFor(renderer, `(() => { const input=document.activeElement; return input instanceof HTMLInputElement && input.dataset.taskDrawerControl==='budget-input' && input.value==='五千' && input.getAttribute('aria-invalid')==='true' && document.querySelector('#task-drawer .task-plan-budget-error')?.textContent===${JSON.stringify(BUDGET_INVALID)} && document.querySelector('#task-drawer .task-plan-budget-edited')===null; })()`, 'budget-refused', 10_000);
+    await assertRenderer(renderer, `(() => { const input=document.activeElement; if(!(input instanceof HTMLInputElement))return false; input.select(); return true; })()`, 'budget-select');
+    await renderer.send('Input.insertText', { text: '5,000' });
+    await pressEnter(renderer);
+    await waitFor(renderer, `(() => { const block=document.querySelector('#task-drawer .task-plan-budget'); return block?.querySelector('.task-plan-budget-edited .task-plan-edit-tag')?.textContent==='你改的 · 预算上限 5,000 tokens' && block.querySelector('.task-plan-budget-form')===null && document.activeElement?.dataset?.taskPlanEdit==='budget' && document.querySelector('#task-drawer .task-bar-note')?.textContent==='你改了 1 处'; })()`, 'budget-pending', 10_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="update-plan"]', 'budget-update');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanVersion==='2' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'budget-version-2', 60_000);
+    const budgetPlan = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(budgetPlan?.taskIntent?.taskIntentId === fifthIntentId && budgetPlan.planVersion?.ordinal === 2 &&
+      JSON.stringify(budgetPlan.planVersion.edits?.runBudgetCeiling) === JSON.stringify(BUDGET) &&
+      JSON.stringify(budgetPlan.planVersion.materialInputs?.runBudgetCeiling) === JSON.stringify(BUDGET) &&
+      JSON.stringify(budgetPlan.providerResolutionPlan?.runBudgetCeiling) === JSON.stringify(BUDGET) &&
+      (budgetPlan.planRevision ?? null) === null && budgetPlan.planRevisions?.at(-1)?.trigger === 'plan-edit',
+    'budget-version', { edits: budgetPlan?.planVersion?.edits ?? null, ceiling: budgetPlan?.providerResolutionPlan?.runBudgetCeiling ?? null, revision: budgetPlan?.planRevision ?? null });
+    await assertRenderer(renderer, `(() => { const section=document.querySelector('#task-drawer [data-task-plan-section="5"]'); return section?.querySelector('dd[data-task-plan-term="预算上限"]')?.textContent==='任务运行预算上限：5,000 tokens' && section.querySelector('dd[data-task-plan-term="用量上限"]')?.textContent==='达到 5,000 tokens 后不再发送新的请求（8 个阅读范围）上限，不是预测' && section.querySelector('[data-task-plan-edit="budget-remove"]')?.textContent==='去掉上限' && document.querySelector('#task-drawer .task-plan-edit-record')?.textContent?.endsWith('：预算上限：未设置任务预算上限 → 任务运行预算上限：5,000 tokens')===true; })()`, 'budget-plan-words');
+
+    at('budget-reached');
+    // 开始任务: four ranges spend 6,620 tokens and the fifth would pass the ceiling, so it is never sent. The Run stops as
+    // 已停止 · 预算已达上限 with what it read and used — 调整预算并重做 and 查看部分结果, never 续行 or 重试 — its partial revision
+    // kept, and 待我处理 holds it as an exception whose next step is 调整预算并重做.
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'fifth-start');
+    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.taskIntent?.taskIntentId===${JSON.stringify(fifthIntentId)} && analysis.run?.state==='interrupted')`, 'budget-run-stopped', 180_000);
+    await waitForBar(renderer, {
+      state: 'budget-reached', pill: '已停止 · 预算已达上限', status: '已停止 · 预算已达上限', note: BUDGET_STOP_NOTE,
+      actions: [['redo', '调整预算并重做', 'enabled', null], ['run-link', '查看部分结果', 'enabled', null]],
+    }, 'budget-bar', 30_000);
+    const reached = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const reachedRevision = reached?.resultSetRevision;
+    requireJourney(reached?.state === 'interrupted' && reached.stateLabel === BUDGET_RUN_LABEL && reached.run?.stateLabel === BUDGET_RUN_LABEL &&
+      JSON.stringify(reached.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'interrupted']) &&
+      JSON.stringify(reached.run.attempt?.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2, 3, 4]) &&
+      reached.taskOutcome?.classification === 'interrupted' && reached.taskOutcome.label === '任务结果：任务运行预算已达上限 · 已保留部分结果' &&
+      JSON.stringify(reached.taskOutcome.stop) === JSON.stringify({ reason: 'run-budget-ceiling-reached', maxTotalTokens: 5000, usedTokens: 6620, unitsSettled: 4, unitsTotal: SAMPLE1_UNITS }) &&
+      reachedRevision?.coverage?.unitsClosed === 4 && reached.taskOutcome.resultSetRevisionId === reachedRevision.revisionId &&
+      JSON.stringify(reachedRevision.gaps.map((gap) => [gap.unitOrdinal, gap.code])) === JSON.stringify([5, 6, 7, 8].map((ordinal) => [ordinal, 'not-attempted'])),
+    'budget-reached-record', { state: reached?.state, run: reached?.run?.state, stop: reached?.taskOutcome?.stop ?? null, closed: reachedRevision?.coverage?.unitsClosed });
+    const budgetAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
+    requireJourney(budgetAttention?.groups?.find((group) => group.key === 'exceptions')?.items?.some((entry) =>
+      entry.book?.bookId === fifthBookId && entry.state === 'analysis-budget-reached' && entry.nextStep === 'adjust-budget-redo' && entry.blocked === false) === true,
+    'budget-in-attention', budgetAttention?.groups ?? null);
+
+    at('budget-partial-results');
+    // 查看部分结果 opens ②A on the partial revision; its card names the stop in its own words, never 已中断's.
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="run-link"]', 'budget-view-partial');
+    await waitFor(renderer, `(() => { const card=document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(fifthBookId)}] .baseline-analysis-card'); return card?.dataset.analysisState==='interrupted' && card.dataset.taskOutcomeClassification==='interrupted' && card.querySelector('.analysis-state')?.textContent===${JSON.stringify(BUDGET_RUN_LABEL)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='budget-reached'; })()`, 'budget-partial-shown', 30_000);
+
+    at('budget-redo');
+    // 调整预算并重做 prepares a new Task that carries the four ranges and begins from the plan's 5,000 tokens; it opens in its
+    // editing with focus on 设置上限….
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="redo"]', 'budget-redo');
+    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer==='open' && typeof drawer.dataset.taskPlanRef==='string' && drawer.dataset.taskPlanRef!==${JSON.stringify(fifthIntentId)} && drawer.dataset.taskPlanState==='ready' && drawer.dataset.taskPlanVersion==='1' && drawer.dataset.taskDrawerMode==='full' && document.activeElement?.dataset?.taskPlanEdit==='budget'; })()`, 'budget-redo-opened', 120_000);
+    const budgetRedo = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const budgetRedoId = budgetRedo?.taskIntent?.taskIntentId ?? '';
+    requireJourney(UUID_PATTERN.test(budgetRedoId) && budgetRedoId !== fifthIntentId && budgetRedo.state === 'prepared' && (budgetRedo.run ?? null) === null &&
+      budgetRedo.taskIntent.mode === 'sync-current' && budgetRedo.taskIntent.redoOf?.runRecordId === reached.run.runRecordId &&
+      budgetRedo.update?.reusePlan?.counts?.reused === 4 && budgetRedo.update.reusePlan.counts.recomputed === SAMPLE1_UNITS - 4 &&
+      budgetRedo.update.predecessor?.revisionId === reachedRevision.revisionId &&
+      JSON.stringify(budgetRedo.planVersion?.edits?.runBudgetCeiling) === JSON.stringify(BUDGET),
+    'budget-redo-task', { state: budgetRedo?.state, intent: budgetRedo?.taskIntent ?? null, counts: budgetRedo?.update?.reusePlan?.counts ?? null, edits: budgetRedo?.planVersion?.edits ?? null });
+    await assertRenderer(renderer, `document.querySelector('#task-drawer .task-plan-sentence-text')?.textContent===${JSON.stringify(BUDGET_REDO_GOAL)} && document.querySelector('#task-drawer dd[data-task-plan-term="预算上限"]')?.textContent==='任务运行预算上限：5,000 tokens'`, 'budget-redo-words');
+
+    at('j14-budget-keyboard');
+    // Without a pointer: Enter on 设置上限… opens the field with focus in it; the count is typed and Enter sets it, focus back
+    // on 设置上限… beside 你改的; Tab reaches 去掉上限.
+    await pressEnter(renderer);
+    await waitFor(renderer, `document.activeElement?.dataset?.taskDrawerControl==='budget-input'`, 'keyboard-budget-input', 10_000);
+    await renderer.send('Input.insertText', { text: '20000' });
+    await pressEnter(renderer);
+    await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='budget' && document.activeElement.matches(':focus-visible') && document.querySelector('#task-drawer .task-plan-budget-edited .task-plan-edit-tag')?.textContent==='你改的 · 预算上限 20,000 tokens' && document.querySelector('#task-drawer .task-bar-note')?.textContent==='你改了 1 处'`, 'keyboard-budget-set', 10_000);
+    await pressTab(renderer);
+    await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='budget-remove' && document.activeElement.matches(':focus-visible')`, 'keyboard-budget-remove-reached', 10_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="update-plan"]', 'budget-redo-update');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanVersion==='2' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'budget-redo-version-2', 60_000);
+    const raisedPlan = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    // The stored diff line is read field by field: its record's keys come back in canonical order.
+    const raisedDiff = raisedPlan?.planRevisions?.at(-1)?.diff ?? [];
+    requireJourney(raisedPlan?.taskIntent?.taskIntentId === budgetRedoId && raisedPlan.planVersion?.ordinal === 2 &&
+      JSON.stringify(raisedPlan.providerResolutionPlan?.runBudgetCeiling) === JSON.stringify(RAISED) &&
+      raisedDiff.length === 1 && raisedDiff[0].field === 'runBudgetCeiling' && raisedDiff[0].materiality === 'edited' &&
+      raisedDiff[0].prior?.maxTotalTokens === BUDGET.maxTotalTokens && raisedDiff[0].proposed?.maxTotalTokens === RAISED.maxTotalTokens,
+    'budget-raised', { ceiling: raisedPlan?.providerResolutionPlan?.runBudgetCeiling ?? null, diff: raisedDiff });
+
+    at('budget-redo-completed');
+    // 开始任务: the redo reads the four ranges left, and the reduction after them, under 20,000 tokens, to its end — the
+    // Book's analysis whole again, and 待我处理 no longer naming the stop.
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'budget-redo-start');
+    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.taskIntent?.taskIntentId===${JSON.stringify(budgetRedoId)} && analysis.run !== null && !['authorized','admitted','executing'].includes(analysis.run.state))`, 'budget-redo-ended', 180_000);
+    const budgetDone = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(budgetDone?.state === 'settled' && budgetDone.run?.state === 'completed' && budgetDone.run.runRecordId !== reached.run.runRecordId &&
+      JSON.stringify(budgetDone.run.attempt?.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([5, 6, 7, 8]) &&
+      budgetDone.resultSetRevision?.coverage?.unitsClosed === SAMPLE1_UNITS && (budgetDone.taskOutcome?.stop ?? null) === null &&
+      budgetDone.taskOutcome?.classification === 'completed',
+    'budget-redo-completed', { state: budgetDone?.state, run: budgetDone?.run?.state, spans: budgetDone?.run?.attempt?.spans?.map((span) => span.unitOrdinal), closed: budgetDone?.resultSetRevision?.coverage?.unitsClosed });
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='settled'`, 'budget-redo-shown-settled', 30_000);
+    const settledAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
+    requireJourney(settledAttention?.groups?.every((group) => group.items.every((entry) => entry.state !== 'analysis-budget-reached')) === true, 'budget-left-attention', settledAttention?.groups ?? null);
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
