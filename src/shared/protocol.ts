@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 57 as const;
+export const SERVICE_PROTOCOL_VERSION = 58 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -3028,6 +3028,12 @@ export interface BaselineAnalysisProjection {
     adaptations: ReadonlyArray<BaselineAnalysisPlanAdaptationProjection>;
     blockedReasons: ReadonlyArray<string> | null;
     /**
+     * Why a Run blocked before dispatch never ran (Issue #536; V2-UX-OFF-008): `plan-moved` when Reconnect Preflight found
+     * the plan its authorization bound had moved while it waited, `launch` when this launch cannot carry it. `null` for
+     * a Run not blocked.
+     */
+    blockedBy: null | 'plan-moved' | 'launch';
+    /**
      * The Run Liveness Signal's facts while the Run is `admitted` or `executing` (ADR 0071 §3): what
      * is in flight, since when, what the attempt is doing, and when the Run last changed state. Every
      * field is a count or an instant; elapsed time is the reader's to compute, never the product's to
@@ -4125,7 +4131,7 @@ export interface InspectTaskPlanInput {
 export type TaskPlanStateKey =
   | 'ready' | 'changed' | 'unconnected' | 'offline' | 'recorded' | 'blocked' | 'waiting' | 'running' | 'settled' | 'stopped'
   | 'cancelled' | 'cancelling' | 'cancelled-after-start' | 'pausing' | 'paused' | 'resumable' | 'awaiting-clarification' | 'budget-reached'
-  | 'account-limit';
+  | 'account-limit' | 'plan-moved';
 
 /**
  * A started Run's controls in the drawer's bar and its activity above the plan (Issue #422, plan slice S76a;
@@ -4369,6 +4375,8 @@ export interface TaskPlanProjection {
   runControl: TaskPlanRunControlProjection | null;
   /** 改计划重做 while it can be made (Issue #422, S76c): on a stopped Run, or one cancelled after it began; else `null`. */
   redo: TaskPlanRedoProjection | null;
+  /** 重新准备 for a waiting Run whose plan moved before it could start (Issue #536); else `null`. */
+  reprepare: TaskPlanReprepareProjection | null;
   /** What the Task's Run asked the editor (Issue #422, S76d; CLAR-001 to CLAR-007): open questions first; empty when none. */
   clarifications: ReadonlyArray<TaskPlanClarificationProjection>;
   /**
@@ -4420,6 +4428,17 @@ export interface TaskPlanClarificationProjection {
  * stops, what is kept and what the new Task does — and a Run already cancelled is redone at once (`summary` empty).
  * `prepare` is the exact preparation the new Task takes once the Run reads 已取消.
  */
+/**
+ * 需要重新确认计划 (Issue #536; V2-UX-OFF-008): a Run that waited in Connectivity Wait and was blocked because the plan its
+ * authorization bound moved meanwhile. A Task Intent holds one Run, so the Plan Revision and the renewed Run Authorization
+ * OFF-008 routes through are a new preparation of the same goal and range: `prepare` is that exact request, and nothing
+ * starts until the editor reads the new plan and starts it. `reason` names what moved.
+ */
+export interface TaskPlanReprepareProjection {
+  reason: string;
+  prepare: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null };
+}
+
 export interface TaskPlanRedoProjection {
   summary: ReadonlyArray<string>;
   prepare: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; redoOf: string };
@@ -5330,6 +5349,8 @@ export type GlobalAttentionStateKey =
   | 'review-failed'
   | 'review-stopped'
   | 'analysis-plan-revision'
+  // A waiting Run whose plan moved before it could start (Issue #536; OFF-008): a plan decision, never an exception.
+  | 'analysis-plan-moved'
   | 'analysis-clarification'
   | 'analysis-queued'
   | 'analysis-running'
@@ -5363,10 +5384,11 @@ export type GlobalAttentionNextStep =
   | 'resolve-conflict'
   | 'answer-clarification'
   | 'adjust-budget-redo'
-  | 'resolve-model-service';
+  | 'resolve-model-service'
+  | 'reprepare';
 export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'view-run', 'view-review', 'reconfirm-plan', 'continue-review', 'return-to-recovery', 'retry-abandon-cleanup', 'await-local-check',
-  'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service',
+  'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'reprepare',
 ];
 
 /**

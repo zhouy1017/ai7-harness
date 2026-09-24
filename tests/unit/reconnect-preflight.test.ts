@@ -19,7 +19,7 @@ interface World {
   busy: boolean;
   admitThrows: Record<string, AdmissionError>;
   admitted: string[];
-  blocked: Array<{ runRecordId: string; reasons: ReadonlyArray<string> }>;
+  blocked: Array<{ runRecordId: string; reasons: ReadonlyArray<string>; cause: 'plan-moved' | 'launch' }>;
   settledElsewhere: Set<string>;
   reachesNetwork: boolean;
 }
@@ -45,8 +45,8 @@ function dependencies(state: World): ReconnectPreflightDependencies {
     waitingRuns: () => state.waiting.map((runRecordId) => ({ runRecordId })),
     stillWaiting: (runRecordId) => !state.settledElsewhere.has(runRecordId) && !state.admitted.includes(runRecordId),
     drift: (runRecordId) => state.drift[runRecordId] ?? [],
-    block: (runRecordId, reasons) => {
-      state.blocked.push({ runRecordId, reasons });
+    block: (runRecordId, reasons, cause) => {
+      state.blocked.push({ runRecordId, reasons, cause });
     },
     reachesNetwork: state.reachesNetwork,
     connectivity: () => state.connectivity,
@@ -93,7 +93,7 @@ describe('Reconnect Preflight', () => {
   it('blocks a Run whose bound plan no longer stands, naming what moved, and never dispatches it (OFF-008)', async () => {
     const state = world({ drift: { 'run-a': ['处理范围', '前一修订版'] } });
     expect(await reconnectPreflight(dependencies(state))).toEqual({ admitted: 0, blocked: 1, waiting: 0 });
-    expect(state.blocked).toEqual([{ runRecordId: 'run-a', reasons: ['需要重新确认计划：处理范围、前一修订版已经变化，这次授权不再对应当前的情况。'] }]);
+    expect(state.blocked).toEqual([{ runRecordId: 'run-a', reasons: ['需要重新确认计划：处理范围、前一修订版已经变化，这次授权不再对应当前的情况。'], cause: 'plan-moved' }]);
     expect(planDriftReason(['处理范围'])).toBe('需要重新确认计划：处理范围已经变化，这次授权不再对应当前的情况。');
     expect(state.admitted).toEqual([]);
   });
@@ -113,7 +113,7 @@ describe('Reconnect Preflight', () => {
     }
     const never = world({ admitThrows: { 'run-a': new AdmissionError('EXECUTION_SOURCE_NOT_TRANSMITTABLE', '当前图书不在可传输的集合内；未发起任何传输。') } });
     expect(await reconnectPreflight(dependencies(never))).toEqual({ admitted: 0, blocked: 1, waiting: 0 });
-    expect(never.blocked).toEqual([{ runRecordId: 'run-a', reasons: ['当前图书不在可传输的集合内；未发起任何传输。'] }]);
+    expect(never.blocked).toEqual([{ runRecordId: 'run-a', reasons: ['当前图书不在可传输的集合内；未发起任何传输。'], cause: 'launch' }]);
   });
 
   it('skips a Run the editor cancelled, or another look admitted, while it read the credential', async () => {

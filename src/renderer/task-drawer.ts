@@ -90,6 +90,7 @@ import {
   TASK_BAR_UPDATE_FAILED,
   TASK_BAR_REDO_CONFIRM,
   TASK_BAR_REDO_FAILED,
+  TASK_BAR_REPREPARE_FAILED,
   TASK_BAR_REDO_HEADING,
   TASK_BAR_REDO_KEEP,
   TASK_BAR_REDOING_NOTE,
@@ -948,6 +949,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
           button.addEventListener('click', () => void redoNow());
         }
         break;
+      // 需要重新确认计划 (Issue #536; OFF-008): the new plan for the same goal and range, opened to be read and started.
+      case 'reprepare':
+        button.addEventListener('click', () => void reprepareNow());
+        break;
       // 返回修改 (Issue #419): the plan's editing — 完整, focused on the first thing that can change.
       case 'revise':
         button.addEventListener('click', () => {
@@ -1342,7 +1347,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         '[data-task-drawer-control="start"]:not(:disabled), [data-task-drawer-control="start-when-online"]:not(:disabled), ' +
           '[data-task-drawer-control="reconfirm-plan"]:not(:disabled), [data-task-drawer-control="cancel-wait"]:not(:disabled), ' +
           '[data-task-drawer-control="cancel-run"]:not(:disabled), [data-task-drawer-control="pause"]:not(:disabled), ' +
-          '[data-task-drawer-control="resume"]:not(:disabled)',
+          '[data-task-drawer-control="resume"]:not(:disabled), [data-task-drawer-control="reprepare"]:not(:disabled), ' +
+          '[data-task-drawer-control="redo"]:not(:disabled)',
       )?.focus();
     }
     // `working` is not part of the projection cache key. Even an unchanged plan must repaint
@@ -1498,6 +1504,40 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       editOnOpen = current.state.key === 'budget-reached' ? 'budget' : 'first';
       surface.open({ bookId: current.bookId, kind: current.kind, ref: prepared }, returnFocus);
     }
+  }
+
+  /**
+   * 重新准备 (Issue #536; OFF-008): a Run whose plan moved while it waited never ran, and its Task holds that one Run, so the
+   * same goal over the same range is prepared as a new Task; the drawer then opens its plan, which starts only once the
+   * editor starts it there.
+   */
+  async function reprepareNow(): Promise<void> {
+    const current = plan;
+    const asked = request;
+    const again = current?.reprepare ?? null;
+    if (current === null || again === null || !beginWork()) return;
+    options.setStatus('正在重新准备这项任务…', 'busy');
+    let prepared: string | null = null;
+    try {
+      const initial = await api.prepareBaselineAnalysis({ goal: again.prepare.goal, update: again.prepare.update, reconfirm: false, redoOf: null });
+      const completed = await options.awaitServiceJob(initial, (job) => options.setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy'));
+      if (completed.state === 'cancelled') {
+        options.setStatus('重新准备已取消；这项任务保持原样。', 'success');
+        return;
+      }
+      if (completed.kind !== 'baseline-analysis-preparation' || completed.result === null || !('coverageManifest' in completed.result)) {
+        throw new Error(TASK_BAR_REPREPARE_FAILED);
+      }
+      prepared = completed.result.taskIntent?.taskIntentId ?? null;
+      options.setStatus('新计划已准备：看过之后再开始任务。', 'success');
+      options.onRecorded(current.kind, current.bookId);
+    } catch (error) {
+      refusal = options.errorMessage(error, TASK_BAR_REPREPARE_FAILED);
+      options.setStatus(refusal, 'error');
+    } finally {
+      endWork(asked);
+    }
+    if (prepared !== null && !root.hidden) surface.open({ bookId: current.bookId, kind: current.kind, ref: prepared }, returnFocus);
   }
 
   function cancelImpactBlock(run: TaskPlanRunControlProjection): HTMLElement {

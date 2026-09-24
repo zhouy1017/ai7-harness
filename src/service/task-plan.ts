@@ -14,6 +14,7 @@ import type {
   TaskPlanProjection,
   TaskPlanClarificationProjection,
   TaskPlanRedoProjection,
+  TaskPlanReprepareProjection,
   TaskPlanRunControlProjection,
   TaskPlanStartProjection,
   TaskPlanStepProjection,
@@ -24,6 +25,7 @@ import { namedNonEffects } from './analysis/baseline-analysis-store.js';
 import type { ManifestBlockInput } from './analysis/coverage-manifest.js';
 import { PLAN_CEILING_LAUNCH_REASON, PLAN_EDITABLE_ADAPTATIONS, PLAN_EDIT_ADAPTATION_LABELS, PLAN_EDIT_STEP_LABELS } from './analysis/plan-edits.js';
 import type { Connectivity } from './connectivity.js';
+import { PLAN_MOVED_LABEL } from './reconnect-preflight.js';
 import { graphemeCount, sliceGraphemes } from './analysis/factual-review-contract.js';
 import type { ReviewRunPlanFacts } from './review/review-runs.js';
 
@@ -452,6 +454,7 @@ export function fixedTaskPlan(input: {
     defaultRule: noDefaultRule(FIXED_TASK_NO_RULE),
     runControl: null,
     redo: null,
+    reprepare: null,
     clarifications: [],
     budgetStop: null,
   };
@@ -476,8 +479,10 @@ function baselineState(projection: BaselineAnalysisProjection, stopped?: Baselin
       return projection.planRevision !== null || (projection.update !== null && !projection.update.predecessorCurrent)
         ? { key: 'changed', label: '计划已变化' }
         : { key: 'ready', label: '尚未开始' };
+    // 需要重新确认计划 (Issue #536; OFF-008): a waiting Run whose plan moved before it could start; any other block keeps
+    // 派发前已阻止.
     case 'authorized-blocked':
-      return { key: 'blocked', label: '派发前已阻止' };
+      return projection.run?.blockedBy === 'plan-moved' ? { key: 'plan-moved', label: PLAN_MOVED_LABEL } : { key: 'blocked', label: '派发前已阻止' };
     // Connectivity Wait (Issue #502): the label says what it waits for once the service has looked
     // (`withWaitingReason`); on its own the record says only that it waits for the network.
     case 'waiting':
@@ -726,8 +731,24 @@ export function baselineAnalysisPlan(input: {
     defaultRule: input.defaultRule ?? noDefaultRule(BASELINE_NO_RULE),
     runControl: baselineRunControl(projection, input.stopped),
     redo: baselineRedo(projection, input.stopped),
+    reprepare: baselineReprepare(projection),
     clarifications: baselineClarifications(projection, input.clarifications ?? [], input.stopped),
     budgetStop: baselineBudgetStop(projection),
+  };
+}
+
+/**
+ * 重新准备 (Issue #536; V2-UX-OFF-008): a waiting Run blocked because the plan its authorization bound moved never ran, and a
+ * Task Intent holds one Run, so the Plan Revision and renewed Run Authorization OFF-008 routes through are a new
+ * preparation of the Task it was — the same goal over the same range — whose plan the editor reads before starting it.
+ */
+function baselineReprepare(projection: BaselineAnalysisProjection): TaskPlanReprepareProjection | null {
+  const run = projection.run;
+  if (run === null || run.state !== 'blocked-before-dispatch' || run.blockedBy !== 'plan-moved') return null;
+  const update = projection.update === null ? null : { mode: projection.update.mode, selectedRange: projection.update.selectedRange };
+  return {
+    reason: run.blockedReasons === null || run.blockedReasons.length === 0 ? PLAN_MOVED_LABEL : run.blockedReasons.join(' '),
+    prepare: { goal: update === null ? BASELINE_ANALYSIS_TASK_GOAL : BASELINE_ANALYSIS_MODE_GOALS[update.mode], update },
   };
 }
 
@@ -1324,6 +1345,7 @@ export function reviewRunPlan(input: {
     defaultRule: noDefaultRule(REVIEW_RUN_NO_RULE),
     runControl: null,
     redo: null,
+    reprepare: null,
     clarifications: [],
     budgetStop: null,
   };

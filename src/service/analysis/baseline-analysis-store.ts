@@ -112,6 +112,7 @@ import { EXECUTION_SLOT_BUSY, EXECUTION_SLOT_BUSY_REASON } from './execution-err
 import { describeComposition } from '../harness/primary-agent-harness.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provider/egress-gate.js';
 import type { AnalysisOutcomeAttentionReading, AnalysisTaskAttentionReading } from '../global-attention.js';
+import { PLAN_MOVED_LABEL, type WaitingRunBlockCause } from '../reconnect-preflight.js';
 
 type SqlRow = Record<string, SQLOutputValue>;
 
@@ -909,7 +910,7 @@ export class BaselineAnalysisStore {
       // 已中断, which OFF-012 keeps for a Run that can resume (Issue #502). One cancelled after it began reads 已取消,
       // and one stopping at the editor's word 正在取消 (Issue #422).
       stateLabel: state === 'prepared' ? '计划已冻结 · 待授权'
-        : state === 'authorized-blocked' ? '已授权 · 派发前阻止'
+        : state === 'authorized-blocked' ? (run?.blockedBy === 'plan-moved' ? PLAN_MOVED_LABEL : '已授权 · 派发前阻止')
           : state === 'waiting' ? RUN_STATE_LABELS['awaiting-connectivity']
             : state === 'cancelled' ? (run !== null && runBegan(run.transitions) ? RUN_CANCELLED_AFTER_START_LABEL : RUN_STATE_LABELS.cancelled)
               : state === 'cancelling' ? RUN_STATE_LABELS.cancelling
@@ -1101,6 +1102,8 @@ export class BaselineAnalysisStore {
             budgetReached: state === 'interrupted' && this.#runStop(runRecordId) !== null,
             // 模型服务账户限额 (Issue #51, S16b): a resumable Run the provider's account limit stopped.
             accountLimited: state === 'resumable' && this.accountLimitOf(runRecordId) !== null,
+            // 需要重新确认计划 (Issue #536; OFF-008): a waiting Run blocked because its plan moved.
+            planMoved: state === 'blocked-before-dispatch' && this.blockedByOf(runRecordId) === 'plan-moved',
           },
           planRevision: null,
         });
@@ -1875,16 +1878,20 @@ export class BaselineAnalysisStore {
     const live = current.state === 'admitted' || current.state === 'executing' || current.state === 'cancelling' || current.state === 'pausing'
       ? progress(runRecordId)
       : null;
+    // Why a Run blocked before dispatch never ran (Issue #536): only Reconnect Preflight records `plan-moved`.
+    const blockedBy = current.state === 'blocked-before-dispatch' ? (currentRecord.cause === 'plan-moved' ? 'plan-moved' : 'launch') : null;
     return {
       runRecordId,
       state: current.state,
       stateLabel: current.state === 'cancelled' && runBegan(transitions) ? RUN_CANCELLED_AFTER_START_LABEL
         : current.state === 'interrupted' && this.#runStop(runRecordId) !== null ? BUDGET_REACHED_RUN_LABEL
-          : current.state === 'resumable' && this.accountLimitOf(runRecordId) !== null ? ACCOUNT_LIMIT_RUN_LABEL : RUN_STATE_LABELS[current.state],
+          : current.state === 'resumable' && this.accountLimitOf(runRecordId) !== null ? ACCOUNT_LIMIT_RUN_LABEL
+            : blockedBy === 'plan-moved' ? PLAN_MOVED_LABEL : RUN_STATE_LABELS[current.state],
       recordedAt: asString(runRecord.recorded_at),
       transitions,
       adaptations,
       blockedReasons: current.state === 'blocked-before-dispatch' ? recordedReasons ?? blockedReasons(this.#launch.live) : null,
+      blockedBy,
       progress: live === null ? null : { ...live, lastTransitionAt: current.recordedAt },
       attempt,
     };
@@ -2349,6 +2356,16 @@ export class BaselineAnalysisStore {
           update.selectedRange?.endPosition === expected.selectedRange?.endPosition),
       'ANALYSIS_REDO_INVALID', '改计划重做沿用这次运行已读完的部分，接着读其余的；什么都没读完时，照原样从头再做。');
     }
+    // 重新准备 (Issue #536; OFF-008) of a redo whose Run a moved plan blocked before it began: that redo prepared again as
+    // it was — the same way over the same range, its predecessor still the latest revision — so a redo's 同步 over the
+    // revision its stopped Run kept stays open to it, as it was to the redo.
+    const blocked = existing.run;
+    const reprepared = redoOf === null && update !== null && blocked !== null && blocked.state === 'blocked-before-dispatch' &&
+      blocked.blockedBy === 'plan-moved' && existing.taskIntent !== null && 'redoOf' in existing.taskIntent &&
+      existing.taskIntent.redoOf !== null && existing.update !== null &&
+      existing.update.predecessorCurrent && update.mode === existing.update.mode &&
+      update.selectedRange?.startPosition === existing.update.selectedRange?.startPosition &&
+      update.selectedRange?.endPosition === existing.update.selectedRange?.endPosition;
     let selectedRange: BaselineAnalysisSelectedRange | null = null;
     if (update === null) {
       requireAnalysis(latest === null, 'ANALYSIS_FIRST_BASELINE_EXISTS', '本图书已存在结果集修订版；请使用分析更新操作追加后继修订版。');
@@ -2361,8 +2378,9 @@ export class BaselineAnalysisStore {
       const initialLabel = this.#definition.mode(this.#definition.initialMode).label;
       requireAnalysis(latest !== null && existing.updateControls !== null, 'ANALYSIS_PREDECESSOR_ABSENT', `本图书尚无结果集修订版；请先完成${initialLabel}。`);
       const control = (existing.updateControls!.actions as Readonly<Record<string, { available: boolean; unavailableReason: string | null }>>)[mode];
-      // A redo's 同步 reads the gaps of a revision the manuscript has not moved past, which ②A's own 同步 waits for.
-      requireAnalysis(control !== undefined && (control.available || redoOf !== null), 'ANALYSIS_UPDATE_MODE_UNAVAILABLE',
+      // A redo's 同步 reads the gaps of a revision the manuscript has not moved past, which ②A's own 同步 waits for; so
+      // does that redo prepared again.
+      requireAnalysis(control !== undefined && (control.available || redoOf !== null || reprepared), 'ANALYSIS_UPDATE_MODE_UNAVAILABLE',
         control?.unavailableReason ?? changedModeUnavailableReason(this.#definition.mode(mode).label));
       if (this.#definition.mode(mode).rangeBound) {
         selectedRange = requireSelectedRange(update.selectedRange, existing.updateControls!.working.totalBlocks);
@@ -3263,11 +3281,26 @@ export class BaselineAnalysisStore {
    * plan no longer stands, or this launch cannot carry it. The editor prepares the Task again — a Task Intent
    * holds one Run, so the way on is a new plan, never this one revised.
    */
-  blockWaitingRun(runRecordId: string, reasons: ReadonlyArray<string>): void {
+  blockWaitingRun(runRecordId: string, reasons: ReadonlyArray<string>, cause: WaitingRunBlockCause): void {
     requireAnalysis(reasons.length > 0 && reasons.every((reason) => typeof reason === 'string' && reason.length > 0),
       'ANALYSIS_RUN_INVALID', '阻止运行需要写明原因。');
+    requireAnalysis(cause === 'plan-moved' || cause === 'launch', 'ANALYSIS_RUN_INVALID', '阻止运行需要写明缘由。');
     requireAnalysis(this.currentRunState(runRecordId) === 'awaiting-connectivity', 'ANALYSIS_RUN_INVALID', '该运行已不在等待中。');
-    this.recordRunState(runRecordId, 'blocked-before-dispatch', { detail: reasons.join(' '), reasons: [...reasons] });
+    // Why it was blocked travels in the state record's canonical detail (Issue #536): no schema change.
+    this.recordRunState(runRecordId, 'blocked-before-dispatch', { detail: reasons.join(' '), reasons: [...reasons], cause });
+  }
+
+  /**
+   * Why a Run blocked before dispatch never ran (Issue #536; OFF-008): `plan-moved` when Reconnect Preflight found the
+   * plan its authorization bound had moved, else `launch` — a block this launch made, or one recorded before the cause
+   * was kept. `null` for a Run not blocked.
+   */
+  blockedByOf(runRecordId: string): 'plan-moved' | 'launch' | null {
+    const row = this.#db.prepare('SELECT state, canonical_json FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1')
+      .get(runRecordId) as SqlRow | undefined;
+    if (row === undefined || row.state !== 'blocked-before-dispatch') return null;
+    const record = parseCanonicalJson(asString(row.canonical_json));
+    return isRecord(record) && record.cause === 'plan-moved' ? 'plan-moved' : 'launch';
   }
 
   #insertRunState(runRecordId: string, sequence: number, state: BaselineAnalysisRunState, detail: Record<string, unknown>, recordedAt: string): void {

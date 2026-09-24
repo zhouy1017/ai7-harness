@@ -262,6 +262,7 @@ import { BookDeliveryPackageError, BookDeliveryPackages, initializeBookDeliveryP
 import {
   PRODUCTION_DOCUMENTS_NEED_MANUSCRIPT, ProductionDocumentError, ProductionDocuments, productionDocumentMarksNotCarried,
 } from './production-documents.js';
+import type { WaitingRunBlockCause } from './reconnect-preflight.js';
 import { productionDocumentType } from './production-document-types.js';
 import { REIMPORT_GROUP_VERBS, groupReimportMappings, reimportGroupResolutions, reimportGroupVerbs } from './reimport-groups.js';
 import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
@@ -4126,9 +4127,9 @@ export class EditorialStore {
   }
 
   /** A waiting Run that can never dispatch as authorized is blocked with its reasons (OFF-008). */
-  blockWaitingBaselineAnalysisRun(runRecordId: string, reasons: ReadonlyArray<string>): void {
+  blockWaitingBaselineAnalysisRun(runRecordId: string, reasons: ReadonlyArray<string>, cause: WaitingRunBlockCause): void {
     this.#assertAvailable();
-    this.#analysisCall(() => this.#baselineAnalysis.blockWaitingRun(runRecordId, reasons));
+    this.#analysisCall(() => this.#baselineAnalysis.blockWaitingRun(runRecordId, reasons, cause));
   }
 
   /** Whether this Run still waits in Connectivity Wait: Reconnect Preflight re-reads it before it acts. */

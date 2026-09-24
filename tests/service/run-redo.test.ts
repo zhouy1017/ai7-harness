@@ -1,12 +1,14 @@
+import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { NO_PLAN_EDITS } from '../../src/service/analysis/plan-edits.js';
-import { ALWAYS_ONLINE } from '../../src/service/connectivity.js';
+import { ALWAYS_ONLINE, type Connectivity } from '../../src/service/connectivity.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { reconnectPreflight } from '../../src/service/reconnect-preflight.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { RESUME_BLOCKED_BINDING, RUN_CONTROL_REDO_NOT_BEGUN_REASON, RUN_CONTROL_REDO_REASON } from '../../src/service/task-plan.js';
 import { controlledUnitHold } from '../../src/service/unit-hold.js';
@@ -103,6 +105,21 @@ async function until(condition: () => boolean, label: string): Promise<void> {
 
 const states = (projection: BaselineAnalysisProjection): string[] => projection.run!.transitions.map((transition) => transition.state);
 
+/** Reconnect Preflight wired exactly as the service wires it, over this store and this owner. */
+function preflight(store: EditorialStore, execution: BaselineAnalysisExecutionOwner, connectivity: () => Connectivity) {
+  return reconnectPreflight({
+    waitingRuns: () => store.waitingBaselineAnalysisRuns(null),
+    stillWaiting: (runRecordId) => store.baselineAnalysisRunWaits(runRecordId),
+    drift: (runRecordId) => store.baselineAnalysisPreflightDrift(runRecordId),
+    block: (runRecordId, reasons, cause) => store.blockWaitingBaselineAnalysisRun(runRecordId, reasons, cause),
+    reachesNetwork: true,
+    connectivity,
+    credentialReadiness: () => execution.liveCredentialReadiness(),
+    slotBusy: () => execution.busy,
+    admit: (runRecordId) => execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { afterReconnectPreflight: true }),
+  });
+}
+
 describe('改计划重做 over the real store', () => {
   it('offers a stopped Run the redo with what it will do, and redoes it as a new Task that carries what the Run read', async () => {
     const store = await openWithRoute();
@@ -187,6 +204,67 @@ describe('改计划重做 over the real store', () => {
       expect(settled.run?.attempt?.spans.map((span) => span.unitOrdinal)).toEqual([4, 5, 6, 7, 8]);
       expect(settled.resultSetRevision?.coverage).toMatchObject({ unitsTotal: SAMPLE1_UNITS, unitsClosed: SAMPLE1_UNITS });
       expect(settled.resultSetRevision?.assuranceSample.state).toBe('not-run');
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('prepares a redo again as it was once a moved plan blocked its waiting Run: its 同步 over the kept revision stays open (Issue #536)', async () => {
+    const store = await openWithRoute();
+    const execution = owner(store);
+    try {
+      const bookId = await importedBook(store, 'L2 sample1 重做后重新准备');
+      const prepared = prepare(store, bookId);
+      const taskIntentId = prepared.taskIntent!.taskIntentId;
+      writeFileSync(holdPath, '2');
+      const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+      execution.admitAndDispatch(runRecordId);
+      await until(() => execution.progressFor(runRecordId)?.currentUnitOrdinal === 3, 'unit 3 in flight');
+      store.requestBaselineAnalysisPause(bookId, taskIntentId);
+      execution.pauseRun(runRecordId, store.baselineAnalysisLedger);
+      writeFileSync(holdPath, '3');
+      await execution.whenIdle();
+      // Cancelled once it began, the Run keeps the three ranges it read in a partial revision, which the redo reads on from.
+      expect(store.requestBaselineAnalysisCancel(bookId, taskIntentId)).toBe(runRecordId);
+      execution.cancelRun(runRecordId, store.baselineAnalysisLedger);
+      await execution.whenIdle();
+      const kept = store.inspectBaselineAnalysis(bookId, () => null).resultSetRevision!;
+      expect(kept.coverage.unitsClosed).toBe(3);
+      const redo = prepare(store, bookId, SYNC, runRecordId);
+      const redoIntentId = redo.taskIntent!.taskIntentId;
+      // ②A's own 同步 waits for the manuscript to move past that revision; the redo's is its own way on.
+      expect((redo.updateControls!.actions as Readonly<Record<string, { available: boolean }>>)['sync-current']!.available).toBe(false);
+
+      // 联网后开始任务: the redo's Run waits for the network, and the launch changes meanwhile, so Reconnect Preflight
+      // blocks it before it begins — its plan moved.
+      store.startBaselineAnalysisWhenOnline(bookId, redoIntentId, redo.planEnvelope!.digest);
+      store.baselineAnalysisLedger.bindLaunch({
+        operationalScope: 'developer-live',
+        live: {
+          route: 'opencode-go',
+          model: 'deepseek-v4-flash',
+          endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
+          credentialSlot: 'opencode-go',
+          credentialReference: randomUUID(),
+          runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 240_000 },
+        },
+      });
+      expect(await preflight(store, execution, () => 'online')).toEqual({ admitted: 0, blocked: 1, waiting: 0 });
+      const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: redoIntentId });
+      expect(plan.state.key).toBe('plan-moved');
+      expect(plan.reprepare?.prepare).toEqual({ goal: BASELINE_ANALYSIS_MODE_GOALS['sync-current'], update: SYNC });
+
+      // 重新准备 prepares that redo again — the same 同步 over the kept revision — rather than refusing it because ②A waits.
+      store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null });
+      const again = prepare(store, bookId, plan.reprepare!.prepare.update);
+      expect(again.state).toBe('prepared');
+      expect(again.taskIntent?.taskIntentId).not.toBe(redoIntentId);
+      expect(again.taskIntent?.mode).toBe('sync-current');
+      expect(again.update?.predecessor?.revisionId).toBe(kept.revisionId);
+      expect(again.update?.reusePlan?.counts).toEqual({ reused: 3, recomputed: SAMPLE1_UNITS - 3, invalidated: SAMPLE1_UNITS - 3, bypassed: 0 });
+      // Only that Task as it was: any other way over the kept revision is still ②A's to offer.
       store.markCleanShutdown();
     } finally {
       await execution.dispose();
