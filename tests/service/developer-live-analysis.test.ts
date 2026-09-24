@@ -555,6 +555,45 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
     await store.close();
   });
 
+  it('cancels a paused Run into the partial revision of what it kept though the credential is gone, sending nothing more (Issue #422, S76b)', async () => {
+    const calls: StubCall[] = [];
+    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
+    const { units: responses, named } = await unitAnswers(prepared);
+    const held = heldTransport({ calls, responses, named });
+    let credential: string | null = 'placeholder-development-key';
+    const execution = new BaselineAnalysisExecutionOwner({
+      ledger: store.baselineAnalysisLedger,
+      launchPolicy,
+      fixture: null,
+      secretResolver: { resolve: async () => credential },
+      developerLive: { launch: { runBudgetCeiling: CEILING, providerCacheRoot: cacheRoot }, nativeFetch: held.transport },
+    });
+    const taskIntentId = prepared.taskIntent!.taskIntentId;
+    const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+    execution.admitAndDispatch(runRecordId);
+    held.release(0);
+    held.release(1);
+    await held.arrived(2);
+    // 暂停 while unit 3 is out: it finishes and is kept, and the Run waits.
+    store.requestBaselineAnalysisPause(bookId, taskIntentId);
+    execution.pauseRun(runRecordId, store.baselineAnalysisLedger);
+    held.release(2);
+    await execution.whenIdle();
+    expect(store.inspectBaselineAnalysis(bookId, () => null).state).toBe('paused');
+    expect(calls).toHaveLength(3);
+    // The credential is gone. A cancellation sends nothing, so it needs none: the three kept ranges become the revision.
+    credential = null;
+    store.requestBaselineAnalysisCancel(bookId, taskIntentId);
+    expect(execution.cancelRun(runRecordId, store.baselineAnalysisLedger)).toBe('stopping');
+    await execution.whenIdle();
+    const cancelled = store.inspectBaselineAnalysis(bookId, () => null);
+    expect(cancelled.state).toBe('cancelled');
+    expect(cancelled.taskOutcome?.classification).toBe('cancelled');
+    expect(cancelled.resultSetRevision?.coverage.unitsClosed).toBe(3);
+    expect(calls).toHaveLength(3);
+    await store.close();
+  });
+
   it('replays an identical request from the cache without transmitting', async () => {
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
     const firstCalls: StubCall[] = [];

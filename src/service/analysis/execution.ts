@@ -321,8 +321,11 @@ export class BaselineAnalysisExecutionOwner {
   readonly #broker: CredentialBroker;
   #active: ActiveRun | null = null;
   #disposed = false;
-  /** Stopped Runs whose cancellation waits for the one slot to finish them (Issue #422, S76b). */
-  readonly #pendingCancels: Array<{ runRecordId: string; ledger: BaselineAnalysisStore }> = [];
+  /**
+   * Stopped Runs whose cancellation waits for the one slot to finish them (Issue #422, S76b), each with what it reads
+   * meanwhile: stopped between two ranges, with what it kept.
+   */
+  readonly #pendingCancels: Array<{ runRecordId: string; ledger: BaselineAnalysisStore; progress: RunProgress }> = [];
 
   constructor(deps: ExecutionOwnerDependencies) {
     // The developer-live runtime and the bound scope are one fact: a v5 launch that reached this owner
@@ -338,8 +341,10 @@ export class BaselineAnalysisExecutionOwner {
 
   progressFor(runRecordId: string): RunProgress | null {
     const active = this.#active;
-    if (active === null || active.runRecordId !== runRecordId) return null;
-    return { ...active.progress, attemptState: attemptStateOf(active) };
+    if (active !== null && active.runRecordId === runRecordId) return { ...active.progress, attemptState: attemptStateOf(active) };
+    // A stopped Run whose cancellation waits for the slot is held as well: every read has it 正在取消 with what it
+    // kept, never as a Run nothing holds (Issue #422, S76b; CTRL-005).
+    return this.#pendingCancels.find((entry) => entry.runRecordId === runRecordId)?.progress ?? null;
   }
 
   /**
@@ -424,27 +429,30 @@ export class BaselineAnalysisExecutionOwner {
         throw new ExecutionAdmissionError('EXECUTION_RESUME_BINDING_DRIFT', '这次运行授权时的执行绑定已经变化（模型服务、路由或策略不同）；不能续行。请取消它，再按新的计划准备。');
       }
     }
-    const submitted = facts.update === null ? facts.manifest.units.length : facts.update.reusePlan.counts.recomputed;
+    const submitted = submittedUnitsOf(facts);
+    // A continuing Run reads, from its admission on, the units it already kept.
+    const kept = resuming ? ledger.unitCheckpoints(runRecordId).length : 0;
     // A scope plan also says how many units it leaves unreviewed; a baseline plan has no such count,
     // so its admitted state reads exactly as it always has.
     const unreviewed = facts.update !== null && 'unreviewed' in facts.update.reusePlan.counts ? facts.update.reusePlan.counts.unreviewed : null;
-    ledger.recordRunState(runRecordId, 'admitted', {
-      detail: !resuming
-        ? '已进入 AI7 调度器（单槽位）。'
-        : options.cancel === true
-          ? '取消：已进入 AI7 调度器，把已读完的部分整理成结果集修订版，不再发送任何内容。'
-          : '续行：已进入 AI7 调度器（单槽位），从已保存的进度接着读。',
-      ...(resuming ? { resumed: true } : {}),
-      unitsTotal: facts.manifest.units.length,
-      ...(facts.update === null ? {} : { updateMode: facts.update.mode, unitsRecomputed: submitted, unitsReused: facts.update.reusePlan.counts.reused }),
-      ...(unreviewed === null ? {} : { unitsUnreviewed: unreviewed }),
-    });
+    // Finishing a stopped Run's cancellation records nothing here: `cancelling` stays its latest state until 已取消, so
+    // every read keeps it 正在取消 and a service that stops meanwhile finishes the cancellation at its next start
+    // rather than leaving the Run 可续行 (CTRL-005, CTRL-006).
+    if (!(resuming && options.cancel === true)) {
+      ledger.recordRunState(runRecordId, 'admitted', {
+        detail: !resuming ? '已进入 AI7 调度器（单槽位）。' : '续行：已进入 AI7 调度器（单槽位），从已保存的进度接着读。',
+        ...(resuming ? { resumed: true } : {}),
+        unitsTotal: facts.manifest.units.length,
+        ...(facts.update === null ? {} : { updateMode: facts.update.mode, unitsRecomputed: submitted, unitsReused: facts.update.reusePlan.counts.reused }),
+        ...(unreviewed === null ? {} : { unitsUnreviewed: unreviewed }),
+      });
+    }
     const active: ActiveRun = {
       runRecordId,
       ledger,
       progress: {
         unitsTotal: submitted,
-        unitsSettled: 0,
+        unitsSettled: kept,
         currentUnitOrdinal: null,
         currentUnitStartedAt: null,
         attemptState: null,
@@ -495,8 +503,9 @@ export class BaselineAnalysisExecutionOwner {
   /**
    * 取消任务 (Issue #422, plan slice S76a; CTRL-005, CTRL-008), once `cancelling` is recorded. The Run this owner
    * executes stops at the next unit boundary: the unit in flight finishes, nothing after it is sent, and the Run ends
-   * `cancelled` with what it completed kept. A Run it does not hold — one AI7 left behind when it last closed — is
-   * settled here at once, since nothing of it is running.
+   * `cancelled` with what it completed kept. A Run it does not hold — paused, left 可续行, or one AI7 left behind when
+   * it last closed — has nothing running: what it kept is gathered through the slot, and one that kept nothing is
+   * settled here at once.
    */
   cancelRun(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): 'stopping' | 'settled' {
     const active = this.#active;
@@ -508,22 +517,32 @@ export class BaselineAnalysisExecutionOwner {
       throw new ExecutionAdmissionError('EXECUTION_STATE_INVALID', '只有已记录“正在取消”的运行可以结束取消。');
     }
     // A stopped Run that kept units ends the way a running one does — its partial revision, then 已取消 — through the
-    // one slot, sending nothing; while another Run holds the slot, it waits for it. One that kept none ends here.
-    if (ledger.unitCheckpoints(runRecordId).length > 0 && !this.#disposed) {
-      if (this.#active === null) {
-        try {
-          this.admitAndDispatch(runRecordId, ledger, { resume: true, cancel: true });
-        } catch {
-          settleCancelWithoutRevision(ledger, runRecordId, CANCELLED_WITHOUT_REVISION);
-          return 'settled';
-        }
-      } else if (!this.#pendingCancels.some((entry) => entry.runRecordId === runRecordId)) {
-        this.#pendingCancels.push({ runRecordId, ledger });
-      }
-      return 'stopping';
+    // one slot, sending nothing; while another Run holds the slot it waits for it, held and read as 正在取消. One that
+    // kept none ends here, and so does one whose kept progress no longer reads back: nothing of it can be gathered.
+    let checkpoints: UnitCheckpoint[];
+    try {
+      checkpoints = ledger.unitCheckpoints(runRecordId);
+    } catch {
+      settleCancelWithoutRevision(ledger, runRecordId, CANCELLED_WITHOUT_REVISION);
+      return 'settled';
     }
-    settleCancelWithoutRevision(ledger, runRecordId, CANCELLED_WITHOUT_EXECUTION);
-    return 'settled';
+    if (checkpoints.length === 0) {
+      settleCancelWithoutRevision(ledger, runRecordId, CANCELLED_WITHOUT_EXECUTION);
+      return 'settled';
+    }
+    // AI7 is closing: the Run stays 正在取消, and the next start's reconciliation finishes it.
+    if (this.#disposed) return 'stopping';
+    try {
+      if (this.#active === null) {
+        this.admitAndDispatch(runRecordId, ledger, { resume: true, cancel: true });
+      } else if (!this.#pendingCancels.some((entry) => entry.runRecordId === runRecordId)) {
+        this.#pendingCancels.push({ runRecordId, ledger, progress: stoppedRunProgress(ledger.loadExecutionPlan(runRecordId), checkpoints) });
+      }
+    } catch {
+      settleCancelWithoutRevision(ledger, runRecordId, CANCELLED_WITHOUT_REVISION);
+      return 'settled';
+    }
+    return 'stopping';
   }
 
   /**
@@ -815,8 +834,9 @@ export class BaselineAnalysisExecutionOwner {
         throw new ExecutionAdmissionError('EXECUTION_BINDING_DIGEST_DRIFT', '续行时的执行绑定与这次运行持久化的不一致。');
       }
       // A live Run cannot start without its credential: the broker would refuse the release anyway,
-      // and refusing here keeps the Run from spending Sessions to reach the same conclusion.
-      if (live !== null && credentialReadiness !== 'present') {
+      // and refusing here keeps the Run from spending Sessions to reach the same conclusion. A cancellation sends
+      // nothing, so a stopped Run the editor cancelled still forms the partial revision of what it kept.
+      if (live !== null && credentialReadiness !== 'present' && !active.cancelRequested) {
         throw new ExecutionAdmissionError('EXECUTION_CREDENTIAL_ABSENT', '受保护凭据库中没有 opencode-go 开发凭据；未发起任何传输。');
       }
       currentBindingDigest = bindingDigest;
@@ -1130,9 +1150,10 @@ export class BaselineAnalysisExecutionOwner {
       clock.close();
       // 暂停, or AI7 stopping under a Run it can continue (Issue #422, S76b): the Run stops here keeping what it read —
       // no reduction, no revision, no outcome — and 续行 goes on from the next unit. A cancellation outranks both, and a
-      // spent ceiling or an account limit still ends the Run as the interruption it is.
+      // spent ceiling, an account limit, or a unit whose turn ended the Run — refused, cut off or ambiguous — still ends
+      // it as the interruption it is, with that unit's gap kept.
       const stopWithoutEnding = (): boolean => {
-        if (active.cancelRequested || liveInterruption !== null) return false;
+        if (active.cancelRequested || liveInterruption !== null || terminalClassification === 'interrupted') return false;
         if (!active.pauseRequested && !(active.interrupted && active.resumableOnInterrupt)) return false;
         const settled = active.progress.unitsSettled;
         ledger.recordRunState(facts.runRecordId, active.pauseRequested ? 'paused' : 'resumable', {
@@ -1400,6 +1421,8 @@ export class BaselineAnalysisExecutionOwner {
         gapReasons.push(assuranceSamplingTurnGapReason(turn.unitOrdinal, '运行已按你的要求取消，本轮未派发。'));
         break;
       }
+      // 暂停 between two sampling turns (S76b): no further one is sent; the Run waits, and 续行 draws the sample again.
+      if (active.pauseRequested) break;
       // The ceiling is evaluated before every dispatch exactly as before a unit's, so a Run that has
       // spent its bound ends here rather than spending one more turn to discover it.
       if (context.ceilingState() === 'reached') {
@@ -1557,6 +1580,28 @@ function executionBindingRecordOf(input: {
 }
 
 /** A cancelled Run no execution can finish ends here, with no revision, its reason in its own words. */
+/** The units a Run's plan submits: every unit of a first baseline, the recomputed ones of an update. */
+function submittedUnitsOf(facts: ExecutionPlanFacts): number {
+  return facts.update === null ? facts.manifest.units.length : facts.update.reusePlan.counts.recomputed;
+}
+
+/**
+ * What a stopped Run whose cancellation waits for the slot reads meanwhile (Issue #422, S76b): stopped between two
+ * ranges, with the units it kept and the model turns they took, and nothing in flight.
+ */
+function stoppedRunProgress(facts: ExecutionPlanFacts, checkpoints: ReadonlyArray<UnitCheckpoint>): RunProgress {
+  return {
+    unitsTotal: submittedUnitsOf(facts),
+    unitsSettled: checkpoints.length,
+    currentUnitOrdinal: null,
+    currentUnitStartedAt: null,
+    attemptState: null,
+    completedAttempts: checkpoints.reduce((total, checkpoint) => total + (checkpoint.observation?.attempts ?? 0), 0),
+    longestSettledUnitMs: null,
+    stage: 'units',
+  };
+}
+
 function settleCancelWithoutRevision(ledger: BaselineAnalysisStore, runRecordId: string, reason: string): void {
   const facts = ledger.cancellationFacts(runRecordId);
   // Its turns before it stopped were sent: the units the ledger recorded a turn for are the ones it submitted. Their
