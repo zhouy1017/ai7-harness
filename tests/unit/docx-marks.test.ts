@@ -290,6 +290,41 @@ describe('parser identity /3 reads a revised file as it reads with every revisio
     expect(parsed.fidelity[1]).toMatchObject({ count: 0, detail: COMMENTS_REVISIONS_DETAIL });
   });
 
+  // The review of PR #498: a row one author inserted and another deleted carries two revisions in its `w:trPr`, and
+  // both end with the row. Were one left open, the plain rows and paragraphs after it would read as that author's
+  // insertion — dropped from the manuscript and described as a 批注 — or the file would be refused as incomplete.
+  it('ends both revisions of a row inserted by one author and deleted by another with the row', async () => {
+    const both = [
+      { kind: 'ins' as const, author: OTHER, date: '2026-09-01T14:10:00Z' },
+      { kind: 'del' as const, author: AUTHOR, date: '2026-09-01T14:11:00Z' },
+    ];
+    const { parsed, blocks } = await parseRevised({
+      paragraphs: [
+        { runs: [text(span(7))] },
+        {
+          table: [
+            { cells: [{ paragraphs: [{ runs: [text(span(8))] }] }] },
+            { revision: both, cells: [{ paragraphs: [{ runs: [text(span(9))] }] }] },
+            { cells: [{ paragraphs: [{ runs: [text(span(11))] }] }] },
+          ],
+        },
+        { runs: [text(span(13))] },
+        // The same row as the table's last: the paragraph after the table is still the body's own.
+        {
+          table: [
+            { cells: [{ paragraphs: [{ runs: [text(span(12))] }] }] },
+            { revision: both, cells: [{ paragraphs: [{ runs: [text(span(14))] }] }] },
+          ],
+        },
+        { runs: [text(span(15))] },
+      ],
+    });
+    // Inserted and then deleted, the row is in neither reading; every row and paragraph around it stands as written.
+    expect(blocks.map((block) => digest(block.text))).toEqual(await blockDigestsOf(7, 8, 11, 13, 12, 15));
+    expect(parsed.importedMarks).toEqual([]);
+    expect(parsed.fidelity[1]).toMatchObject({ count: 0, status: 'preserved', detail: COMMENTS_REVISIONS_DETAIL });
+  });
+
   // A tracked change in a note, header or footer becomes no mark; the row says it stays with the file rather than
   // that the file carries none.
   it('says a tracked change in a footnote stays with the file, rather than that none was found', async () => {
