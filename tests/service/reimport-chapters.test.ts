@@ -124,12 +124,15 @@ describe('the chapter-level Reimport Comparison', () => {
     let noteId: string;
     let splitMark: string;
     let mergedMark: string;
+    let anchoredMark: string;
     let book: Book;
     try {
       book = await importBook(store, first);
       // A 批注 on the second paragraph's first words, one on the fifth's, and a 备注 on the seventh.
       splitMark = mark(store, book, 2, 0, 6, 'annotation', '请核对这一句。');
       mergedMark = mark(store, book, 5, 2, 8, 'annotation', '与前文一致吗？');
+      // …and a 批注 on the third, which the new file keeps exactly: an anchor, one place later.
+      anchoredMark = mark(store, book, 3, 0, 4, 'annotation', '这一段不动。');
       noteId = mark(store, book, 7, 0, 4, 'editor-note', '二校时再看。');
 
       let review = await prepareReimport(store, book, second);
@@ -193,6 +196,9 @@ describe('the chapter-level Reimport Comparison', () => {
       const blockPosition = (markId: string) => view.blocks.findIndex((block) => block.blockId === standing.get(markId)?.blockId) + 1;
       // The split paragraph's first words are the first new paragraph's; the merged fifth's words stand in the merged one.
       expect([blockPosition(splitMark!), blockPosition(mergedMark!)]).toEqual([2, 5]);
+      // A mark on a paragraph that matched exactly is untouched: it stands where its paragraph now stands.
+      expect(blockPosition(anchoredMark!)).toBe(4);
+      expect(standing.get(anchoredMark!)?.anchorState).toBe('exact');
       expect(standing.get(splitMark!)?.anchorState).toBe('exact');
       expect(standing.get(mergedMark!)?.anchorState).toBe('exact');
       // The 备注 on the dropped paragraph is set aside, kept, and not drawn on the text.
