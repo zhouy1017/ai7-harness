@@ -1832,9 +1832,9 @@ function renderBookDeliverables(bookId: string, bookTitle: string): void {
     setStatus,
     errorMessage: rendererErrorMessage,
     // 打开 a Production Document (Issue #415): its own surface, read like the manuscript's window.
-    openDocument: async (documentNow, type) => {
+    openDocument: async (documentNow, type, notice) => {
       const opened = await window.ai7.getManuscriptWindow({ manuscriptId: documentNow.documentId, branchId: documentNow.branchId, cursor: null });
-      renderEditorWindow(opened, bookTitle, undefined, undefined, undefined, undefined, { typeId: type.typeId, typeLabel: type.label, document: documentNow });
+      renderEditorWindow(opened, bookTitle, undefined, notice ?? undefined, undefined, undefined, { typeId: type.typeId, typeLabel: type.label, document: documentNow });
     },
   });
   const actions = element('div', 'button-row workbench-actions');
@@ -5674,6 +5674,14 @@ async function awaitServiceJob(
   return job;
 }
 
+/** A Production Document's type and versions, read for a window that holds it (Issue #415, S66). */
+async function documentContextOf(window_: ManuscriptWindowProjection): Promise<ProductionDocumentContext> {
+  const deliverables = await window.ai7.inspectDeliverables();
+  const type = deliverables.documents.types.find((entry) => entry.document?.documentId === window_.manuscriptId);
+  if (deliverables.bookId !== window_.bookId || type === undefined || type.document === null) throw new Error('这份生产文档已不在这本书的交付物中。');
+  return { typeId: type.typeId, typeLabel: type.label, document: type.document };
+}
+
 function renderEditorWindow(
   initialWindow: ManuscriptWindowProjection,
   bookTitle: string,
@@ -5690,6 +5698,17 @@ function renderEditorWindow(
    */
   productionDocument?: ProductionDocumentContext,
 ): void {
+  // A Production Document reached any other way than 交付物's 打开 — 解决冲突 → 返回, recovery, 待我处理, 最近稿件 — is still
+  // drawn as the document it is (Issue #415, S66): its type and versions are read once, then the window is drawn with them.
+  if (productionDocument === undefined && initialWindow.deliverable === 'production-document') {
+    const showing = screen.firstElementChild;
+    void documentContextOf(initialWindow).then((context) => {
+      // The editor moved on while the document was read: the screen they are on stays.
+      if (screen.firstElementChild !== showing) return;
+      renderEditorWindow(initialWindow, bookTitle, recoveryAttentionId, entryNotice, openMarkId, reimport, context);
+    }, (error: unknown) => setStatus(rendererErrorMessage(error, '无法打开这份生产文档。'), 'error'));
+    return;
+  }
   const content = panel();
   content.classList.add('editor-shell');
   // The manuscript is now a Book's entry surface, so it says which Book it belongs to exactly as the

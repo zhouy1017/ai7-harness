@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { productionDocumentMarksNotCarried } from '../../src/service/production-documents.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { PRODUCTION_DOCUMENT_SCHEMA_VERSION, REIMPORT_GROUP_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import type { ProductionDocumentResultProjection } from '../../src/shared/protocol.js';
@@ -114,6 +115,8 @@ describe('Production Documents', () => {
 
       const created: ProductionDocumentResultProjection = await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', sourceVersionId });
       expect(created.document).not.toBeNull();
+      // A material with no comment or tracked change leaves nothing behind, and the document opens without a word of it.
+      expect(created.notice).toBeNull();
       documentId = created.document!.documentId;
       expect(created.document!.versions.map((version) => [version.ordinal, version.label])).toEqual([[1, '版本 1']]);
       expect(created.document!.changedSinceVersion).toBe(false);
@@ -201,6 +204,80 @@ describe('Production Documents', () => {
       reopened.markCleanShutdown();
     } finally {
       reopened.close();
+    }
+  }, 180_000);
+
+  it('says what it did not carry from a material with comments and tracked changes, and every window of a document says it is one', async () => {
+    const manuscriptPath = await compose('标记组稿', [1, 2, 3]);
+    const draftPath = join(roots.inputRoot, '带批注的新闻稿.docx');
+    await composeRevisedDocx(draftPath, {
+      source: SOURCE,
+      title: '带批注的新闻稿',
+      paragraphs: [
+        { runs: [{ comment: 'start', id: 1 }, { text: { block: 21 } }, { comment: 'end', id: 1 }, { comment: 'reference', id: 1 }] },
+        { runs: [{ text: { block: 22 } }, { text: { block: 23, from: 0, to: 4 }, revision: { kind: 'ins', author: '编辑甲', date: '2026-09-20T00:00:00Z' } }] },
+      ],
+      comments: [{ id: 1, author: '编辑甲', text: [{ block: 24, from: 0, to: 6 }] }],
+    });
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store, manuscriptPath);
+      const sourceVersionId = await importSource(store, book.bookId, draftPath);
+      const created = await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', sourceVersionId });
+      // The comment and the insertion stay with the material, and the result says so for the window that opens.
+      expect(created.notice).toBe(productionDocumentMarksNotCarried(2));
+      const document = created.document!;
+      expect(store.getManuscriptWindow(document.documentId, document.branchId, null).deliverable).toBe('production-document');
+      expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null)).not.toHaveProperty('deliverable');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
+  it('saves the revision a journal recovery made as the next version, and the recovered window is still the document', async () => {
+    const manuscriptPath = await compose('恢复组稿', [1, 2, 3]);
+    const draftPath = await compose('恢复的新闻稿', [21, 22]);
+    let book: Book;
+    let documentId: string;
+    let branchId: string;
+    const interrupted = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      book = await importBook(interrupted, manuscriptPath);
+      const sourceVersionId = await importSource(interrupted, book.bookId, draftPath);
+      const created = await interrupted.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', sourceVersionId });
+      ({ documentId, branchId } = created.document!);
+      const documentWindow = interrupted.getManuscriptWindow(documentId, branchId, null);
+      const first = documentWindow.blocks[0]!;
+      interrupted.flushJournalEdit({
+        clientEditId: randomUUID(), manuscriptId: documentId, branchId, baseRevisionId: documentWindow.revisionId,
+        blockId: first.blockId, windowStartBlockId: first.blockId, baseBlockDigest: first.digest,
+        expectedJournalSequence: documentWindow.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText: '（修订）',
+      });
+    } finally {
+      // No `markCleanShutdown`: an interrupted process leaves the document's journal ahead of its revision.
+      interrupted.close();
+    }
+
+    const recovered = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const startup = await recovered.getStartup();
+      if (startup.state !== 'manuscript-recovery') throw new Error('the interrupted edit raised no recovery');
+      expect(startup.recovery.manuscriptId).toBe(documentId!);
+      const restoration = await recovered.restoreRecovery(randomUUID(), startup.recovery.attentionId, startup.recovery.attentionVersion, { kind: 'journal' });
+      // Recovery returns to the document's own window, which says what it holds.
+      expect(restoration.window.deliverable).toBe('production-document');
+      // The restored state is a revision with nothing left to check point: 保存为版本 saves that revision as 版本 2, once.
+      expect(recovered.inspectDeliverables(book!.bookId).documents.types[0]!.document!.changedSinceVersion).toBe(true);
+      const saved = await recovered.saveProductionDocumentVersion({ bookId: book!.bookId, documentId: documentId!, branchId: branchId! });
+      expect(saved.document!.versions.map((version) => version.label)).toEqual(['版本 2', '版本 1']);
+      expect(saved.document!.versions[0]!.revisionId).toBe(restoration.descendantRevisionId);
+      expect(saved.document!.changedSinceVersion).toBe(false);
+      const again = await recovered.saveProductionDocumentVersion({ bookId: book!.bookId, documentId: documentId!, branchId: branchId! });
+      expect(again.document!.versions.map((version) => version.label)).toEqual(['版本 2', '版本 1']);
+      recovered.markCleanShutdown();
+    } finally {
+      recovered.close();
     }
   }, 180_000);
 

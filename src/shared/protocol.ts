@@ -1016,6 +1016,12 @@ export interface ManuscriptWindowProjection {
    */
   marks: ReadonlyArray<EditorialMarkAnchorProjection>;
   marksTruncated: boolean;
+  /**
+   * `production-document` when the window holds a Production Document (Issue #415, S66), however it was reached — 交付物's
+   * 打开, 解决冲突 → 返回, recovery, 待我处理 or 最近稿件 — so it is always drawn as the document it is. Absent for the Book's
+   * Manuscript.
+   */
+  deliverable?: 'production-document';
 }
 
 /** The most chapters and marks the Whole-manuscript Position Rail draws; beyond them it says it is sparse. */
@@ -5071,6 +5077,8 @@ export interface ProductionDocumentResultProjection {
   deliverables: DeliverablesProjection;
   document: ProductionDocumentProjection | null;
   typeId: string;
+  /** What 从来源材料创建 did not carry into the document, said where the document opens; `null` when it carried everything. */
+  notice: string | null;
 }
 
 /**
