@@ -12,6 +12,11 @@ import {
   MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS,
   MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS,
   MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS,
+  MAX_BOOK_AUTHORS,
+  MAX_BOOK_EDITORS,
+  MAX_BOOK_PERSON_NAME_CHARACTERS,
+  MAX_BOOK_RELATED_PEOPLE,
+  MAX_BOOK_SUMMARY_FILTER_CHARACTERS,
   MAINTENANCE_CLASSIFICATIONS,
   MAX_MAINTENANCE_ERRATA_CHARACTERS,
   MAX_MAINTENANCE_EVIDENCE_CHARACTERS,
@@ -283,12 +288,32 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'listBooks': {
-      const input = requireInput(value.input, ['after'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['after'], ['filter'], tentativeId);
       const after = input.after;
       if (
         !(after === null || (isRecord(after) && hasExactKeys(after, ['title', 'bookId']) &&
           isBoundedString(after.title, 180) && isBoundedString(after.bookId, 36) && UUID_PATTERN.test(after.bookId)))
       ) throw new ProtocolError(tentativeId);
+      // 书库's search (Issue #431, S83): one field, or all three, and the words within their bound.
+      if (input.filter !== undefined && !(isRecord(input.filter) && hasExactKeys(input.filter, ['field', 'text']) &&
+          (input.filter.field === 'all' || input.filter.field === 'title' || input.filter.field === 'author' || input.filter.field === 'editor') &&
+          validPublicationText(input.filter.text, MAX_BOOK_SUMMARY_FILTER_CHARACTERS) && !/[\r\n]/u.test(String(input.filter.text)))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // 作者 · 责编 · 相关人 (Issue #431, S83): the whole set, each name within its bound, against the version read.
+    case 'updateBookPeople': {
+      const input = requireInput(value.input, ['bookId', 'expectedVersion', 'authors', 'editors', 'related'], tentativeId);
+      const name = (entry: unknown): boolean => validPublicationText(entry, MAX_BOOK_PERSON_NAME_CHARACTERS);
+      if (!validUuid(input.bookId) || !isSafeInteger(input.expectedVersion, 0) ||
+          !Array.isArray(input.authors) || input.authors.length > MAX_BOOK_AUTHORS || !input.authors.every(name) ||
+          !Array.isArray(input.editors) || input.editors.length > MAX_BOOK_EDITORS || !input.editors.every(name) ||
+          !Array.isArray(input.related) || input.related.length > MAX_BOOK_RELATED_PEOPLE ||
+          !input.related.every((entry) => isRecord(entry) && hasExactKeys(entry, ['roleId', 'name']) &&
+            typeof entry.roleId === 'string' && /^[a-z][a-z-]{0,31}$/.test(entry.roleId) && name(entry.name))) {
+        throw new ProtocolError(tentativeId);
+      }
       break;
     }
     case 'getRecoveryComparison': {

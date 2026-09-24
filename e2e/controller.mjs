@@ -93,7 +93,7 @@ if (isJourneyRunner) {
   }
 }
 
-export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15', 'J-03', 'J-04', 'J-05', 'J-06', 'J-07', 'J-09', 'J-10']);
+export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15', 'J-03', 'J-04', 'J-05', 'J-06', 'J-07', 'J-09', 'J-10', 'J-11']);
 
 // The bounded pull-request subset of ADMITTED_JOURNEYS under ADR 0075. Every member launches the
 // same production-shaped subject, so a broken build, launch, IPC, data root, or service still fails
@@ -187,6 +187,7 @@ const JOURNEY_MODULES = Object.freeze({
   'J-07': new URL('./run-j07.mjs', import.meta.url),
   'J-09': new URL('./run-j09.mjs', import.meta.url),
   'J-10': new URL('./run-j10.mjs', import.meta.url),
+  'J-11': new URL('./run-j11.mjs', import.meta.url),
 });
 
 const J01_LAUNCH_SCENARIOS = Object.freeze([
@@ -962,6 +963,29 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'account-limit-stop',
     'account-limit-resolve',
     'account-limit-resumed',
+    'zero-loopback-requests',
+    'completion-browser-close',
+    'completion-cleanup',
+  ]),
+  // J-11 (Issue #431, plan slice S83): a Book's 作者, 责编 and 相关人 on its 工作概览, on 书库's cards, found by 书名, 作者
+  // and 责编, and kept across a restart — two empty Books, no manuscript read.
+  'J-11': Object.freeze([
+    'entry',
+    'controller-loopback-sentinel',
+    'controller-imports',
+    'renderer-api-boundary',
+    'first-book-created',
+    'people-empty',
+    'j14-people-keyboard',
+    'people-form',
+    'j14-people-zoom-200-reflow',
+    'j14-people-forced-colors',
+    'people-saved',
+    'people-unchanged',
+    'second-book-created',
+    'library-cards',
+    'library-search',
+    'restart-keeps-people',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',

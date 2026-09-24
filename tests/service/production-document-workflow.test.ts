@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION, MAINTENANCE_CASE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION, BOOK_PEOPLE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
   MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS,
   PRODUCTION_DOCUMENT_PHASE_IDS,
@@ -235,6 +235,7 @@ describe('the Deliverable Workflow of a Production Document (Issue #415, S66c)',
     try {
       planted.exec('PRAGMA foreign_keys = OFF');
       planted.exec(`BEGIN IMMEDIATE;
+        DROP TABLE book_people_versions;
         DROP TABLE maintenance_case_revisions;
         DROP TABLE maintenance_errata_versions;
         DROP TABLE maintenance_cases;
@@ -261,7 +262,7 @@ describe('the Deliverable Workflow of a Production Document (Issue #415, S66c)',
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MAINTENANCE_CASE_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BOOK_PEOPLE_SCHEMA_VERSION);
       expect((after.prepare('SELECT count(*) count FROM production_document_workflow_instances').get() as { count: number }).count).toBe(1);
       expect((after.prepare('SELECT count(*) count FROM production_document_phase_transitions').get() as { count: number }).count).toBe(0);
     } finally {

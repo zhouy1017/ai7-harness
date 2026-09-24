@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BOOK_DELIVERY_PACKAGE_EXPORT_STATEMENT } from '../../src/service/book-delivery-package-exports.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { MAINTENANCE_CASE_SCHEMA_VERSION, PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { BOOK_PEOPLE_SCHEMA_VERSION, PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { PUBLICATION_FORBIDDEN_WORDS, type BookDeliveryPackageExportProjection } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, type SourceSpan } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -310,6 +310,7 @@ describe('图书交付包 · 导出 (S67b)', () => {
     try {
       planted.exec('PRAGMA foreign_keys = OFF');
       planted.exec(`BEGIN IMMEDIATE;
+        DROP TABLE book_people_versions;
         DROP TABLE maintenance_case_revisions;
         DROP TABLE maintenance_errata_versions;
         DROP TABLE maintenance_cases;
@@ -330,7 +331,7 @@ describe('图书交付包 · 导出 (S67b)', () => {
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MAINTENANCE_CASE_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BOOK_PEOPLE_SCHEMA_VERSION);
       for (const table of ['book_delivery_package_exports', 'book_delivery_package_export_files']) {
         expect((after.prepare(`SELECT count(*) count FROM ${table}`).get() as { count: number }).count).toBe(0);
       }
