@@ -55,6 +55,9 @@ interface ReportLayout {
 
 function layoutOf(input: ReportExportInput): ReportLayout {
   const { record } = input;
+  // A category's state in the file is the decision layer's (reading 4): the overview's own label, never the technical
+  // line a refused or stopped category carries — its policy, its model binding, its failure code.
+  const stateLabels = new Map(record.overview.rows.map((row) => [row.categoryId, row.stateLabel] as const));
   return {
     title: `${input.bookTitle} · ${REVIEW_REPORT_HEADING}`,
     meta: `${record.run.label}审阅 · ${record.run.scopeLabel} · 稿件修订版 ${record.run.manuscript.revisionLabel} · 报告${reviewReportVersionLine(input.version, localInstantLabel(input.generatedAt))}`,
@@ -67,7 +70,7 @@ function layoutOf(input: ReportExportInput): ReportLayout {
     summaries: {
       title: record.categorySummaries.title,
       entries: record.categorySummaries.entries.map((entry) => ({
-        heading: `${entry.label} · ${entry.stateLine}`,
+        heading: stateLabels.has(entry.categoryId) ? `${entry.label} · ${stateLabels.get(entry.categoryId)!}` : entry.label,
         lines: [reviewCountsLine(entry.counts), entry.basisStatement, reviewReportExcludedLine(entry.excludedCount)],
       })),
     },
