@@ -2578,6 +2578,13 @@ function registerRendererHandlers(
       return service.call('inspectExemplars', {});
     }),
   );
+  ipcMain.handle(IPC_CHANNELS.inspectKnowledgeProcedures, (event) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('inspectKnowledgeProcedures', {});
+    }),
+  );
   ipcMain.handle(
     IPC_CHANNELS.previewReviewGuidelineVersion,
     (event, input: { documentId: string }) =>

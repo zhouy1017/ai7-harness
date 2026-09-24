@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 69 as const;
+export const SERVICE_PROTOCOL_VERSION = 70 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -78,6 +78,7 @@ export const IPC_CHANNELS = {
   previewReviewGuidelineVersion: 'ai7:j15:preview-review-guideline-version',
   importReviewGuidelineVersion: 'ai7:j15:import-review-guideline-version',
   inspectExemplars: 'ai7:j07:inspect-exemplars',
+  inspectKnowledgeProcedures: 'ai7:j15:inspect-knowledge-procedures',
   inspectReviewWorkspace: 'ai7:j04:inspect-review-workspace',
   prepareReviewRun: 'ai7:j04:prepare-review-run',
   authorizeReviewRun: 'ai7:j04:authorize-review-run',
@@ -4680,6 +4681,36 @@ export interface ExemplarsProjection {
   readonly books: ReadonlyArray<ExemplarBookProjection>;
 }
 
+// ---- 知识库 › 工序与规则's expert 工序 (Issue #427, plan slice S79d; V2-UX-KB-010, REUSE-029, REUSE-030) ---------------
+
+/** One 工序 a review category runs, named by what it does. */
+export interface KnowledgeProcedureProjection {
+  readonly procedureId: string;
+  readonly title: string;
+  readonly version: string;
+  readonly categoryId: string;
+  readonly categoryLabel: string;
+  /** `enabled` when its category can run; `unavailable` when the category's basis does not exist yet. */
+  readonly state: 'enabled' | 'unavailable';
+  readonly unavailableReason: string | null;
+  /** How many Review Runs applied it. */
+  readonly reviewRuns: number;
+}
+
+/** A native artifact AI7 carries, in its own lifecycle words (REUSE-030). */
+export interface KnowledgeArtifactProjection {
+  readonly artifactId: string;
+  readonly title: string;
+  readonly version: string | null;
+  readonly state: 'not-installed' | 'installed';
+  readonly enabledBooks: number;
+}
+
+export interface KnowledgeProceduresProjection {
+  readonly procedures: ReadonlyArray<KnowledgeProcedureProjection>;
+  readonly artifacts: ReadonlyArray<KnowledgeArtifactProjection>;
+}
+
 /** The drawer's `设为快速开始默认…` for one plan, and the rule that started its Task, when one did. */
 export interface TaskPlanDefaultRuleProjection {
   canSet: boolean;
@@ -6819,6 +6850,11 @@ export interface ServiceOperationMap {
     input: Record<string, never>;
     output: ExemplarsProjection;
   };
+  /** 知识库 › 工序与规则 (Issue #427, S79d): the review categories' 工序 and the native artifact, with their use. */
+  inspectKnowledgeProcedures: {
+    input: Record<string, never>;
+    output: KnowledgeProceduresProjection;
+  };
   /**
    * 审阅 (Issue #417, plan slice S69). The workspace is one read; preparing a Review Run is a
    * cooperative job; the one approval records the Run's authorization and starts its drive loop at once,
@@ -7194,6 +7230,8 @@ export interface RendererApi {
   importReviewGuidelineVersion(input: { previewId: string }): Promise<ReviewGuidelinesProjection>;
   /** 知识库 › 范例 (Issue #427, S79b): names no Book; it reads every published Book's delivered documents. */
   inspectExemplars(): Promise<ExemplarsProjection>;
+  /** 知识库 › 工序与规则's expert 工序 (Issue #427, S79d): names no Book. */
+  inspectKnowledgeProcedures(): Promise<KnowledgeProceduresProjection>;
   /**
    * 审阅 of the Book the window is showing (Issue #417). Inspecting without a Run opens the latest; a
    * running Run is followed by inspecting it again, and its executing category carries its progress.

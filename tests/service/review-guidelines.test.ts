@@ -134,6 +134,15 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
         ['typos-and-usage/1', 0], ['typos-and-usage/2', 0], ['typos-and-usage/3', 0], ['typos-and-usage/4', 0],
       ]);
       expect(typosDocument(fresh).versions).toEqual([expect.objectContaining({ ordinal: 1, versionId: null, source: null, usedBy: [] })]);
+      // 工序与规则's expert 工序 (S79d): the nine categories' 工序, none used yet, and the native artifact not installed.
+      const freshProcedures = store.inspectKnowledgeProcedures();
+      expect(freshProcedures.procedures.map((procedure) => [procedure.title, procedure.state, procedure.reviewRuns])).toEqual([
+        ['错别字与规范用语审阅工序', 'enabled', 0], ['体例与格式审阅工序', 'enabled', 0], ['线索转批注', 'enabled', 0], ['断言列举与引文定位', 'enabled', 0],
+        ['引用风险点标注', 'enabled', 0], ['出版风险点标注', 'enabled', 0], ['文学性与表达改进工序', 'enabled', 0],
+        ['书系一致性检查', 'unavailable', 0], ['跨交付物一致性检查', 'unavailable', 0],
+      ]);
+      expect(freshProcedures.procedures.filter((procedure) => procedure.state === 'unavailable').every((procedure) => (procedure.unavailableReason ?? '').length > 0)).toBe(true);
+      expect(freshProcedures.artifacts).toEqual([{ artifactId: '@ai7/editorial-workspace-profile', title: '编辑工作区方案', version: null, state: 'not-installed', enabledBooks: 0 }]);
 
       // One review of 错别字与规范用语 under version 1: its findings cite the clauses, and the version names the Run.
       const imported = await importSample1Book(store, roots.codeRoot, 'L2 审阅规范');
@@ -157,6 +166,10 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       }
       expect(reviewed.versions[0]!.usedBy).toEqual([expect.objectContaining({ bookId: imported.bookId, bookTitle: 'L2 审阅规范', reviewRunId: first.reviewRunId, reviewOrdinal: 1 })]);
       expect(reviewed.olderVersionBooks).toEqual([]);
+      const afterReview = store.inspectKnowledgeProcedures();
+      expect(afterReview.procedures.find((procedure) => procedure.categoryId === TYPOS)!.reviewRuns).toBe(1);
+      expect(afterReview.procedures.filter((procedure) => procedure.categoryId !== TYPOS).every((procedure) => procedure.reviewRuns === 0)).toBe(true);
+      expect(afterReview.artifacts[0]).toMatchObject({ state: 'installed', version: '1.0.0', enabledBooks: 1 });
 
       // 导入新版本 from plain text: the preview reads the house's five clauses and records nothing.
       const before = store.inspectReviewGuidelines();
@@ -189,6 +202,7 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       const now = typosDocument(store.inspectReviewGuidelines());
       expect(now.olderVersionBooks).toEqual([]);
       expect(now.versions.map((version) => version.usedBy.map((run) => run.reviewOrdinal))).toEqual([[2], [1]]);
+      expect(store.inspectKnowledgeProcedures().procedures.find((procedure) => procedure.categoryId === TYPOS)!.reviewRuns).toBe(2);
     } finally {
       await close(session);
     }

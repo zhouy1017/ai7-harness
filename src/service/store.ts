@@ -42,6 +42,7 @@ import type {
   ReviewGuidelinePreviewProjection,
   ReviewGuidelinesProjection,
   ExemplarsProjection,
+  KnowledgeProceduresProjection,
   AppendMaintenanceCaseRevisionInput,
   InspectMaintenanceCaseInput,
   MaintenanceCaseProjection,
@@ -284,6 +285,7 @@ import { MaintenanceCaseError, MaintenanceCases, initializeMaintenanceCaseSchema
 import { BookPeople, BookPeopleError, initializeBookPeopleSchema } from './book-people.js';
 import { ReviewGuidelineError, ReviewGuidelineLedger, initializeReviewGuidelineSchema, readGuidelineFile } from './review-guidelines.js';
 import { readExemplars } from './exemplars.js';
+import { readKnowledgeProcedures } from './knowledge-procedures.js';
 import {
   ProductionDocumentOriginError,
   initializeProductionDocumentOriginSchema,
@@ -5435,6 +5437,12 @@ export class EditorialStore {
   inspectExemplars(): ExemplarsProjection {
     this.#assertAvailable();
     return readExemplars(this.#authority, { current: (bookId) => this.#peopleCall(() => this.#bookPeople.current(bookId)) });
+  }
+
+  /** 知识库 › 工序与规则 (Issue #427, S79d; KB-010): the review categories' 工序 as they apply now, and the native artifact. */
+  inspectKnowledgeProcedures(): KnowledgeProceduresProjection {
+    this.#assertAvailable();
+    return readKnowledgeProcedures(this.#authority, this.#reviewGuidelines.configuration());
   }
 
   /** 导入新版本's first step: the picked file's clauses as the next version of one document would read them; nothing is recorded. */

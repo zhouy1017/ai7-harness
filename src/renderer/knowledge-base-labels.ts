@@ -1,4 +1,6 @@
 import type {
+  KnowledgeArtifactProjection,
+  KnowledgeProcedureProjection,
   ExemplarBookProjection,
   ExemplarProjection,
   ReviewGuidelineDocumentProjection,
@@ -166,4 +168,23 @@ export function exemplarLine(exemplar: ExemplarProjection, instant: (iso: string
   const earlier = exemplar.earlierVersions.length === 0 ? '' : ` · 此前还交付过版本 ${exemplar.earlierVersions.join('、')}`;
   return `${exemplar.typeLabel} · 版本 ${exemplar.version} · 交付给${exemplar.deliveredTo}于 ${instant(exemplar.deliveredAt)} · 归入于 ${instant(exemplar.archivedAt)}` +
     ` · 学习准入：${EXEMPLAR_ELIGIBILITY_LABELS[exemplar.eligibility]}${earlier}`;
+}
+
+// ---- 工序与规则's expert 工序 (Issue #427, plan slice S79d; KB-010, REUSE-029, REUSE-030) --------------------------------
+
+export const PROCEDURES_HEADING = '专家经验工序';
+export const RULES_HEADING = '快速开始 · 默认执行规则';
+export const PROCEDURE_STATE_LABELS: Readonly<Record<KnowledgeProcedureProjection['state'], string>> = { enabled: '已启用', unavailable: '尚未接通' };
+
+/** One 工序: what it does, its version and origin, the category it serves, and how often a review applied it. */
+export function procedureLine(procedure: KnowledgeProcedureProjection): string {
+  const used = procedure.reviewRuns === 0 ? '还没有审阅用过' : `已用于 ${procedure.reviewRuns} 次审阅`;
+  return `${procedure.title} · 第 ${procedure.version} 版 · 内置 · 用于「${procedure.categoryLabel}」 · ${used}`;
+}
+
+/** The native artifact in its own lifecycle words: installed or not, and how many Books enabled it. */
+export function artifactLine(artifact: KnowledgeArtifactProjection): string {
+  if (artifact.state === 'not-installed') return `${artifact.title} · 尚未安装`;
+  const enabled = artifact.enabledBooks === 0 ? '还没有图书启用' : `已为 ${artifact.enabledBooks} 本书启用`;
+  return `${artifact.title} · ${artifact.version} · 已安装 · ${enabled}`;
 }

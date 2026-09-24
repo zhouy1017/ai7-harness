@@ -8,6 +8,7 @@ import type {
   DefaultExecutionRuleReference,
   DefaultExecutionRulesProjection,
   ExemplarsProjection,
+  KnowledgeProceduresProjection,
   QuickStartBaselineAnalysisResult,
   BaselineAnalysisResultSetRevisionProjection,
   BaselineAnalysisSelectedRange,
@@ -71,6 +72,11 @@ import { mountDeliverables, type DeliverablesSurface } from './deliverables.js';
 import { mountBookPeople } from './book-people.js';
 import { mountReviewGuidelines } from './review-guidelines.js';
 import {
+  PROCEDURES_HEADING,
+  PROCEDURE_STATE_LABELS,
+  RULES_HEADING,
+  artifactLine,
+  procedureLine,
   EXEMPLARS_EMPTY,
   EXEMPLARS_LATER,
   EXEMPLARS_NONE_DELIVERED,
@@ -4218,7 +4224,8 @@ async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocu
   if (tab === 'rules') {
     setStatus('正在读取工序与规则…', 'busy');
     try {
-      renderKnowledgeBaseProjection(await window.ai7.inspectDefaultExecutionRules(), tabFocused);
+      const [rules, procedures] = await Promise.all([window.ai7.inspectDefaultExecutionRules(), window.ai7.inspectKnowledgeProcedures()]);
+      renderKnowledgeBaseProjection(rules, tabFocused, procedures);
       setStatus('工序与规则已打开');
     } catch (error) {
       setStatus(rendererErrorMessage(error, '无法读取工序与规则。'), 'error');
@@ -4343,9 +4350,34 @@ function knowledgeBasePage(tab: KnowledgeBaseTab, tabFocused: boolean): { conten
  * it binds, who set it and when — with 查看 and 停用. A rule is changed by setting it again from a newly viewed plan
  * in the drawer (D7), never edited here, and turning it off keeps it on record.
  */
-function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjection, tabFocused = false): void {
+function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjection, tabFocused = false, procedures: KnowledgeProceduresProjection | null = null): void {
   const { content, panelNode } = knowledgeBasePage('rules', tabFocused);
   content.dataset['ruleCount'] = String(projection.rules.length);
+  // The expert 工序 (Issue #427, S79d; KB-010): what each does, its version, state and use, then the native artifact.
+  if (procedures !== null) {
+    const section = element('section', 'knowledge-procedures');
+    section.dataset['procedureCount'] = String(procedures.procedures.length);
+    const list = element('ul', 'knowledge-procedure-list');
+    for (const procedure of procedures.procedures) {
+      const item = element('li', undefined);
+      item.dataset['procedureId'] = procedure.procedureId;
+      item.dataset['procedureState'] = procedure.state;
+      item.dataset['procedureRuns'] = String(procedure.reviewRuns);
+      item.append(element('span', `status-pill procedure-state-${procedure.state}`, PROCEDURE_STATE_LABELS[procedure.state]), element('span', undefined, ` ${procedureLine(procedure)}`));
+      if (procedure.unavailableReason !== null) item.append(element('span', 'field-note procedure-reason', ` · ${procedure.unavailableReason}`));
+      list.append(item);
+    }
+    const artifacts = element('ul', 'knowledge-artifact-list');
+    for (const artifact of procedures.artifacts) {
+      const item = element('li', undefined, artifactLine(artifact));
+      item.dataset['artifactId'] = artifact.artifactId;
+      item.dataset['artifactState'] = artifact.state;
+      item.dataset['artifactEnabledBooks'] = String(artifact.enabledBooks);
+      artifacts.append(item);
+    }
+    section.append(element('h3', undefined, PROCEDURES_HEADING), list, artifacts);
+    panelNode.append(section, element('h3', undefined, RULES_HEADING));
+  }
   panelNode.append(element('p', 'field-note', projection.statement));
   if (projection.rules.length === 0) {
     panelNode.append(element('p', 'field-note default-rule-empty', '还没有默认执行规则。在分析的完整计划里点「设为快速开始默认…」就能设定。'));
