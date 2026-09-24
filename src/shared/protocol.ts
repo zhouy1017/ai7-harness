@@ -5045,7 +5045,7 @@ export interface ProductionDocumentProjection {
   /** Every Delivery Record newest first, at most `MAX_PRODUCTION_DOCUMENT_DELIVERIES_LISTED` (Issue #415, S66b). */
   deliveries: ReadonlyArray<ProductionDocumentDeliveryProjection>;
   deliveriesTruncated: boolean;
-  /** `交付后有修改` (DELIV-004): the document has a delivery, and its text moved past the version last delivered. */
+  /** `交付后有修改` (DELIV-004): an edit after a delivery — the document was delivered, and its text is no version it was delivered at. */
   changedSinceDelivery: boolean;
 }
 
@@ -5077,7 +5077,10 @@ export interface ProductionDocumentDeliveryProjection {
   recipient: { kind: ProductionDocumentRecipientKind; label: string };
   note: string | null;
   recordedAt: string;
-  /** The newest export of the delivered version recorded after this delivery and before the next; `null` when none. */
+  /**
+   * The delivered version's export recorded after this delivery and before the next: the newest that wrote its file, else the
+   * newest attempt; `null` when none.
+   */
   export: null | { preparationId: string; outcome: 'created' | 'replaced' | 'ambiguous' | 'failed'; outcomeLabel: string; fileName: string };
 }
 

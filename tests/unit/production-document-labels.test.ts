@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PUBLICATION_FORBIDDEN_WORDS, type ProductionDocumentProjection } from '../../src/shared/protocol.js';
 import * as labels from '../../src/renderer/production-document-labels.js';
+import { documentStanding } from '../../src/renderer/production-document-lens.js';
 
 // The words of 交付 · 生产文档 (Issue #415, plan slices S66a and S66b; V2-UX-DELIV-001 to DELIV-004, WORK-013, MILE-014),
 // byte for byte.
@@ -104,5 +105,31 @@ describe('the words of 交付 · 生产文档', () => {
       export: { preparationId: identity, outcome: 'created', outcomeLabel: '已导出到所选位置', fileName: '新闻稿 · 版本 2.docx' },
     })).toBe('已导出到所选位置 · 新闻稿 · 版本 2.docx');
     expect(labels.documentExportLabel('新闻稿', '版本 2')).toBe('新闻稿 · 版本 2');
+  });
+});
+
+// Issue #543: where a document's text stands, read against the working digest the window holds now.
+describe('where a document\'s text stands', () => {
+  const delivered = { ...document, deliveries: [{
+    deliveryId: identity, ordinal: 1, revisionId: 'r1', versionLabel: '版本 1', recipient: { kind: 'publicity' as const, label: '宣传部' },
+    note: null, recordedAt: '2026-09-24T02:30:00.000Z', export: null,
+  }] };
+  const versions = [
+    { revisionId: 'r2', label: '版本 2', ordinal: 2, createdAt: '2026-09-24T03:00:00.000Z', revisionDigest: 'a'.repeat(64) },
+    { revisionId: 'r1', label: '版本 1', ordinal: 1, createdAt: '2026-09-24T02:00:00.000Z', revisionDigest: 'b'.repeat(64) },
+  ];
+  const read = { ...delivered, versions, workingDigest: 'a'.repeat(64), changedSinceVersion: false, changedSinceDelivery: true };
+
+  it('answers as 交付物 read it while the text is what it read', () => {
+    expect(documentStanding(read, 'a'.repeat(64))).toEqual({ current: versions[0], changedSinceVersion: false, changedSinceDelivery: true });
+  });
+
+  it('moves 当前 off a version as soon as an edit is written, and back when the text is a version again', () => {
+    // An edit: no version holds the text, which moved past the latest and away from the delivered one.
+    expect(documentStanding(read, 'c'.repeat(64))).toEqual({ current: null, changedSinceVersion: true, changedSinceDelivery: true });
+    // Edited back to 版本 1, the version delivered: it stands on it, past the latest, and no edit after the delivery shows.
+    expect(documentStanding(read, 'b'.repeat(64))).toEqual({ current: versions[1], changedSinceVersion: true, changedSinceDelivery: false });
+    // With no delivery there is nothing to have moved away from.
+    expect(documentStanding({ ...read, deliveries: [] }, 'c'.repeat(64)).changedSinceDelivery).toBe(false);
   });
 });

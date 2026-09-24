@@ -97,8 +97,8 @@ export interface ProductionDocumentRow {
 }
 
 /**
- * The newest approved export of one document version between two instants — a Delivery Record's file — as the export
- * ledger reads it, or `null` (Issue #415, S66b).
+ * A Delivery Record's file (Issue #415, S66b): the approved export of one document version between two instants that wrote
+ * its file, else the newest attempt, as the export ledger reads it, or `null`.
  */
 export type ProductionDocumentExportOf = (bookId: string, revisionId: string, from: string, until: string | null) => ManuscriptExportReceiptProjection | null;
 
