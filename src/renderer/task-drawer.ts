@@ -1347,7 +1347,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         '[data-task-drawer-control="start"]:not(:disabled), [data-task-drawer-control="start-when-online"]:not(:disabled), ' +
           '[data-task-drawer-control="reconfirm-plan"]:not(:disabled), [data-task-drawer-control="cancel-wait"]:not(:disabled), ' +
           '[data-task-drawer-control="cancel-run"]:not(:disabled), [data-task-drawer-control="pause"]:not(:disabled), ' +
-          '[data-task-drawer-control="resume"]:not(:disabled)',
+          '[data-task-drawer-control="resume"]:not(:disabled), [data-task-drawer-control="reprepare"]:not(:disabled), ' +
+          '[data-task-drawer-control="redo"]:not(:disabled)',
       )?.focus();
     }
     // `working` is not part of the projection cache key. Even an unchanged plan must repaint
