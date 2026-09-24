@@ -133,7 +133,7 @@ export function renderFidelityReview(
   if (needsDegradationDecision(fidelity)) {
     elements.push(...body);
   } else {
-    const summary = el('p', 'fidelity-summary', fidelitySummaryLine(fidelity));
+    const summary = el('p', 'fidelity-summary', fidelitySummaryLine(fidelity, stated ? chosen : null));
     summary.dataset['fidelitySummary'] = 'no-decision';
     const details = el('details', 'fidelity-details');
     // The rows stay folded unless the editor has a choice to make in them.

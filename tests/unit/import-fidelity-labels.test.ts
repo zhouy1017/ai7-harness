@@ -85,6 +85,18 @@ describe('the import fidelity review words', () => {
     expect(fidelitySummaryLine(formattingOnly)).toBe('9 类内容都完整保留，不需要导入降级决定：批注与修订随文件保留，其余 8 类未检测到。');
   });
 
+  it('says text boxes the review was formed to merge go into the text, never that they stay with the file (Issue #532)', () => {
+    const kept = '9 类内容都完整保留，不需要导入降级决定：文本框 · 1 项随文件保留，其余 8 类未检测到。';
+    expect(fidelitySummaryLine(WITH_BOX)).toBe(kept);
+    expect(fidelitySummaryLine(WITH_BOX, 'retain')).toBe(kept);
+    expect(fidelitySummaryLine(WITH_BOX, 'merge')).toBe('9 类内容都完整保留，不需要导入降级决定：文本框 · 1 项并入正文，其余 8 类未检测到。');
+    // Only a box the file has is merged; the other kept classes stay with the file.
+    const boxAndStyles = buildFidelityReport({ ...NO_SIGNALS, inlineStyles: 266, textBoxes: 2 }, 0);
+    expect(fidelitySummaryLine(boxAndStyles, 'merge'))
+      .toBe('9 类内容都完整保留，不需要导入降级决定：行内样式 · 266 项随文件保留；文本框 · 2 项并入正文，其余 7 类未检测到。');
+    expect(fidelitySummaryLine(SAMPLE1_V2, 'merge')).toBe(fidelitySummaryLine(SAMPLE1_V2));
+  });
+
   it('offers the text-box choice, 保留为文本框 first and preselected, only for a natively read file with a box', () => {
     expect(TEXT_BOX_CHOICE_LEGEND).toBe('文本框怎样进来');
     expect(TEXT_BOX_CHOICE_OPTIONS.map((option) => [option.disposition, option.label])).toEqual([
