@@ -1,5 +1,5 @@
 ---
-status: proposed — the Owner chose this reading on 2026-09-22; the Owner merging this pull request is its acceptance
+status: accepted — the Owner chose this reading on 2026-09-22, and PR #489 was merged on the Owner's word on 2026-09-23, which this record names as its acceptance
 date: 2026-09-22
 deciders: Owner
 amends: ADR 0006 — "different changes within one block … require explicit editor resolution" no longer binds a Proposal that targets an exact range inside a block (§1); V2-UX-CONFLICT-003 and -005; kick-in/18 item 7; the stale-base line of the interaction specification; journeys J-06; project constraints, Proposal Branches

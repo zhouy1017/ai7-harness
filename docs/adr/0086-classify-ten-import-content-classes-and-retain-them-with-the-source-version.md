@@ -1,5 +1,5 @@
 ---
-status: proposed — the Owner chose this reading on 2026-09-22; the Owner merging this pull request is its acceptance
+status: accepted — the Owner chose this reading on 2026-09-22, and PR #490 was merged on the Owner's word on 2026-09-24, which this record names as its acceptance
 date: 2026-09-22
 deciders: Owner
 amends: V2-UX-IMP-002 — eight classes become ten, and the round-trip class is shown as the closing card (§1); V2-UX-IMP-055 — which classes are `完整保留（随文件保留）` and what that promises after an edit (§2–§3); ADR 0072 — its eight content classes; editor-surfaces §7 (④) 保真审阅 — 「八类一张表」 and 「导出时原样恢复」
