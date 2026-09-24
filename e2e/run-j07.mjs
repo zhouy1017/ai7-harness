@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx } from './composed-docx.mjs';
+import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeAdmittedDocx, composeExportAdmittedDocx, readExportedDocx } from './composed-docx.mjs';
 import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 // J-07 (Issue #414, plan slice S65): ⑥ 发稿. An editor saves Milestone Versions of the manuscript — each
@@ -100,6 +100,14 @@ const ACTUALS_PROMPT = '录入定价与首印 · 随评估功能提供';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 // 导出's four members (Issue #413): the only renderer members named like an export, and none publishes or sends.
 const EXPORT_MEMBERS = Object.freeze(['approveManuscriptExport', 'chooseManuscriptExportDestination', 'revealManuscriptExport', 'reviewManuscriptExport']);
+// Issue #415 (S66a): a 新闻稿's draft, composed at run time from exact sample1's paragraphs after the manuscript's own,
+// imported as source material and made the Book's 新闻稿; the house's five types in its order; and the document's edit.
+const DRAFT = Object.freeze({ source: ADMITTED_BASELINE_DOCX, startBlock: 31, blocks: 3, title: '新闻稿初稿' });
+const DRAFT_FILE = '新闻稿初稿.docx';
+const DOCUMENT_TYPES = Object.freeze([
+  ['news-release', '新闻稿'], ['promotion-article', '宣传文章'], ['review-article', '评论文章'], ['launch-materials', '发布会材料'], ['marketing-points', '营销要点'],
+]);
+const DOCUMENT_EDIT = '〔文档修订〕';
 const EXPORT_MEMBERS_ONLY = `JSON.stringify(Object.keys(window.ai7).filter((key) => /export|publish|send/i.test(key)).sort()) === ${JSON.stringify(JSON.stringify(EXPORT_MEMBERS))}`;
 
 let location = 'entry';
@@ -317,6 +325,10 @@ const PAGE_HELPERS = `(() => {
     exportFact: (term) => Array.from(window.__j07.exportCard()?.querySelectorAll('details.technical-details dt') ?? [])
       .find((node) => node.textContent === term)?.nextElementSibling?.textContent ?? null,
     exportRecords: () => Array.from(block()?.querySelectorAll('section.export-records-section ol.export-records > li') ?? []),
+    // 交付 · 生产文档 (Issue #415): the block in its own slot, a type's card and a card's action.
+    documents: () => document.querySelector('[data-screen="book-deliverables"] .deliverables-documents-slot > section.deliverables-documents'),
+    card: (typeId) => window.__j07.documents()?.querySelector('li.production-document-card[data-document-type-id="' + typeId + '"]') ?? null,
+    cardAction: (typeId, action) => window.__j07.card(typeId)?.querySelector('[data-document-action="' + action + '"]') ?? null,
   };
   return true;
 })()`;
@@ -528,6 +540,26 @@ async function importAndOpen(renderer, title) {
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'import-editor');
 }
 
+/**
+ * 导入稿件 → 作为来源材料导入 into the Book (Issue #415): the one file this launch's picker answers with becomes the Book's
+ * source material, reviewed and committed like any source import, and the completion lands in 工作概览.
+ */
+async function importDraftAsSource(renderer, bookId) {
+  await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'draft-landing');
+  await assertRenderer(renderer, PAGE_HELPERS, 'draft-page-helpers');
+  await click(renderer, '导入稿件', 'draft-import');
+  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'draft-target');
+  await assertRenderer(renderer, `(() => { const target = document.querySelector('[data-import-target-choice="existing-book"][data-book-id=${JSON.stringify(bookId)}]'); if (!(target instanceof HTMLInputElement)) return false; target.click(); return target.checked; })()`, 'draft-target-book');
+  await waitFor(renderer, `document.querySelector('[data-screen="relationship"] [data-import-relationship="source-only"]')`, 'draft-relationship');
+  await assertRenderer(renderer, `(() => { const source = document.querySelector('[data-import-relationship="source-only"]'); if (!(source instanceof HTMLInputElement) || source.checked) return false; source.click(); return source.checked; })()`, 'draft-source-only');
+  await waitFor(renderer, `document.querySelector('[data-prepare-source-import-review=${JSON.stringify(bookId)}]')`, 'draft-review-action');
+  await click(renderer, '复核来源材料导入', 'draft-review');
+  await waitFor(renderer, `document.querySelector('[data-screen="review"] [data-import-review-kind="source-only"] [data-commit-source-import]')`, 'draft-reviewed', 120_000);
+  await clickSelector(renderer, '[data-commit-source-import]', 'draft-commit');
+  await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'draft-committed', 120_000);
+  await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true' && document.querySelector('[data-screen="imported"] .book-deliverables-summary [data-deliverables-action="open"]:not(:disabled)')`, 'draft-acknowledged', 120_000);
+}
+
 /** 交付物 from the manuscript: the 工作 group holds 审阅 and then 交付物, and leaving settles the manuscript first. */
 async function openDeliverables(renderer, name) {
   await assertRenderer(renderer, `(() => { const group = document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const entries = Array.from(group?.querySelectorAll('button[data-work-destination]') ?? []).map((item) => item.dataset.workDestination + ':' + item.textContent); const open = group?.querySelector('button[data-work-destination="deliverables"]'); if (entries.join('|') !== 'review:审阅|deliverables:交付物' || !(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, `${name}-entry`);
@@ -663,6 +695,8 @@ async function main() {
     await mkdir(inputs);
     const manuscript = resolve(inputs, 'publication.docx');
     await composeExportAdmittedDocx(manuscript, { ...EXCERPT, ...EXPORT_INPUT });
+    const draftPath = resolve(inputs, DRAFT_FILE);
+    await composeAdmittedDocx(draftPath, DRAFT);
     // Issue #413: the folder the Save dialog's launch control names, beside the data and outside it.
     const exportsRoot = resolve(runRoot, 'exports');
     await mkdir(exportsRoot);
@@ -727,7 +761,14 @@ async function main() {
         block.dataset.publicationState === 'no-milestone' && window.__j07.items().length === 0 && block.querySelector('.milestone-list-empty') !== null &&
         designate instanceof HTMLButtonElement && designate.disabled && designate.textContent === '设为发稿版本…' && reason?.textContent === '先保存里程碑版本' &&
         window.__j07.form() === null && window.__j07.versions().length === 0 && block.querySelector('.publication-actuals-prompt') === null &&
-        block.querySelector('.publication-change-notice') === null && !/生产文档|图书交付包/.test(page.textContent ?? '');
+        block.querySelector('.publication-change-notice') === null && !/图书交付包/.test(page.textContent ?? '') &&
+        window.__j07.documents()?.querySelector(':scope > h3')?.textContent === '交付 · 生产文档' &&
+        Array.from(window.__j07.documents().querySelectorAll('li.production-document-card')).every((card) => {
+          const create = card.querySelector('[data-document-action="create"]');
+          const reason = document.getElementById(create?.getAttribute('aria-describedby') ?? '');
+          return card.dataset.documentState === 'none' && create instanceof HTMLButtonElement && create.disabled &&
+            reason?.textContent === '先把文档的初稿作为来源材料导入：导入稿件时选「作为来源材料导入」。';
+        });
     })()`, 'designate-unavailable-before-a-milestone');
     const nothing = await renderer.evaluate(READ_PUBLICATION);
     requireJourney(nothing?.bookId === bookId && nothing.milestones.length === 0 && nothing.designations.length === 0 &&
@@ -1303,6 +1344,100 @@ async function main() {
     requireJourney(!markdownText.includes(NOTE.body) && !markdownText.includes('备注 · '), 'markdown-writes-no-note');
     requireJourney(JSON.stringify((await readdir(exportsRoot)).sort()) === JSON.stringify([EXPORT_FILE, MARKDOWN_FILE, PDF_FILE].sort()), 'markdown-folder-holds-the-three-files');
     await waitFor(renderer, `window.__j07.block()?.querySelector('section.export-records-section')?.dataset.exportRecords === '3'`, 'markdown-three-records-listed', 30_000);
+
+    at('documents-source-import');
+    // Issue #415 (S66a): a 新闻稿's draft enters the Book as its source material — 导入稿件 → 作为来源材料导入 — which is
+    // what a Production Document starts from until the writing task drafts one.
+    await close();
+    renderer = await launch({ picker: draftPath });
+    await importDraftAsSource(renderer, bookId);
+
+    at('documents-cards');
+    // 交付物 shows 交付 · 生产文档 apart from 发稿: one card per house type in the house's order, none made yet, each
+    // offering 从来源材料创建… and 本书不做, and nothing that reads as progress.
+    await clickSelector(renderer, '[data-screen="imported"] .book-deliverables-summary [data-deliverables-action="open"]', 'documents-open-deliverables');
+    await waitForDeliverables(renderer, 'documents');
+    await waitFor(renderer, `window.__j07.documents()?.querySelectorAll('li.production-document-card').length === ${DOCUMENT_TYPES.length}`, 'documents-block');
+    await assertRenderer(renderer, `(() => {
+      const block = window.__j07.documents();
+      const cards = Array.from(block.querySelectorAll('li.production-document-card'));
+      return block.querySelector(':scope > h3')?.textContent === '交付 · 生产文档' && block.dataset.documentSources === '1' &&
+        JSON.stringify(cards.map((card) => card.dataset.documentTypeId + ':' + card.querySelector('h4')?.textContent + ':' + card.dataset.documentState)) === ${JSON.stringify(JSON.stringify(DOCUMENT_TYPES.map(([typeId, label]) => `${typeId}:${label}:none`)))} &&
+        cards.every((card) => card.querySelector('.document-state-none')?.textContent === '尚未创建' &&
+          window.__j07.cardAction(card.dataset.documentTypeId, 'create')?.disabled === false &&
+          window.__j07.cardAction(card.dataset.documentTypeId, 'notForThisBook')?.disabled === false) &&
+        !/%|百分/.test(block.textContent ?? '') && !/图书交付包/.test(document.body.textContent ?? '');
+    })()`, 'documents-five-cards-none-made');
+
+    at('document-create');
+    // 从来源材料创建… offers the Book's source material, none preselected; 创建文档 waits for a choice, then the 新闻稿 opens
+    // on the manuscript's own surface — named by its type and 版本 1, with the 工作流程 column beside it and nothing of the
+    // manuscript's own: no 审阅, no 分析, no milestone, no 发稿.
+    await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="create"]', 'document-create-open');
+    await waitFor(renderer, `window.__j07.card('news-release')?.querySelector('form.document-create') !== null && document.activeElement === window.__j07.card('news-release').querySelector('input[name="document-source"]')`, 'document-create-form');
+    await assertRenderer(renderer, `(() => { const form = window.__j07.card('news-release').querySelector('form.document-create'); const radios = Array.from(form.querySelectorAll('input[name="document-source"]')); return radios.length === 1 && !radios[0].checked && form.querySelector('legend')?.textContent === '选择来源材料' && (form.querySelector('label.choice-row span')?.textContent ?? '').startsWith(${JSON.stringify(`${DRAFT_FILE} · DOCX · 导入于 `)}) && window.__j07.cardAction('news-release', 'confirmCreate')?.disabled === true; })()`, 'document-create-nothing-preselected');
+    await assertRenderer(renderer, `(() => { const radio = window.__j07.card('news-release').querySelector('input[name="document-source"]'); radio.click(); return radio.checked && window.__j07.cardAction('news-release', 'confirmCreate')?.disabled === false; })()`, 'document-create-choose');
+    await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="confirmCreate"]', 'document-create-confirm');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"][data-document-type-id="news-release"] [data-testid="manuscript-editor"] > [data-block-id]') !== null`, 'document-opened', 120_000);
+    await assertRenderer(renderer, `(() => {
+      const shell = document.querySelector('.editor-shell[data-deliverable="production-document"][data-document-type-id="news-release"]');
+      const lens = shell?.querySelector('aside.document-lens');
+      const work = Array.from(shell?.querySelectorAll('nav.book-work-group button[data-work-destination]') ?? []).map((item) => item.dataset.workDestination + ':' + item.textContent);
+      const edge = Array.from(shell?.querySelectorAll('.edge-entries button') ?? []).map((item) => item.dataset.edgeEntry);
+      const versions = Array.from(lens?.querySelectorAll('ol.document-version-list > li') ?? []).map((item) => item.dataset.versionOrdinal + ':' + (item.dataset.versionCurrent ?? ''));
+      const surface = (shell?.textContent ?? '');
+      return shell?.dataset.bookId === ${JSON.stringify(bookId)} && shell.querySelector('.editor-toolbar .section-label')?.textContent === ${JSON.stringify(`${EXCERPT.title} · 生产文档`)} &&
+        shell.querySelector('.editor-toolbar h2')?.textContent === '新闻稿 · 版本 1' && Array.from(shell.querySelectorAll('.editor-meta > span')).some((item) => item.textContent === '当前版本 版本 1') &&
+        lens?.querySelector(':scope > .section-label')?.textContent === '工作流程' &&
+        JSON.stringify(Array.from(lens.querySelectorAll('h3')).map((item) => item.textContent)) === '["版本与交付","这份文档的材料"]' &&
+        JSON.stringify(versions) === '["1:true"]' && lens.querySelector('.document-materials .field-note')?.textContent === '暂无材料。任务简报、引语台账、事实核查记录与参考的范例会列在这里。' &&
+        JSON.stringify(work) === '["deliverables:返回交付物"]' && shell.querySelector('[data-records-destination="analysis"]') === null &&
+        JSON.stringify(edge) === '["navigation"]' && shell.querySelector('details.milestone-section') === null &&
+        shell.querySelector('[data-document-action="saveVersion"]')?.textContent === '保存为版本' && !/里程碑|签发|发稿/.test(surface);
+    })()`, 'document-surface-is-the-documents');
+    const documentTexts = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]'), (block) => block.textContent ?? '')`);
+    const draftParagraphs = await admittedParagraphs(DRAFT);
+    requireJourney(Array.isArray(documentTexts) && JSON.stringify(documentTexts.map(digestOf)) === JSON.stringify(draftParagraphs.map(digestOf)), 'document-reads-as-the-draft', { blocks: documentTexts?.length });
+
+    at('document-edit-and-version');
+    // An edit is written to the document's own journal; 保存为版本 makes it 版本 2, and the column lists both.
+    await assertRenderer(renderer, `(() => { const block = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]'); if (!(block instanceof HTMLElement)) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText', false, ${JSON.stringify(DOCUMENT_EDIT)}); return block.textContent?.endsWith(${JSON.stringify(DOCUMENT_EDIT)}); })()`, 'document-edit');
+    await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '保存当前编辑' && !button.disabled)`, 'document-edit-save-ready');
+    await click(renderer, '保存当前编辑', 'document-edit-save');
+    await waitFor(renderer, `window.__j07.status().includes('已写入修订日志')`, 'document-edit-durable');
+    await clickSelector(renderer, '.editor-shell[data-deliverable="production-document"] [data-document-action="saveVersion"]', 'document-save-version');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] .editor-toolbar h2')?.textContent === '新闻稿 · 版本 2' && window.__j07.status() === '已保存为版本 2'`, 'document-version-saved', 120_000);
+    await assertRenderer(renderer, `(() => { const versions = Array.from(document.querySelectorAll('aside.document-lens ol.document-version-list > li')).map((item) => item.dataset.versionOrdinal + ':' + (item.dataset.versionCurrent ?? '')); return JSON.stringify(versions) === '["2:true","1:"]' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.textContent?.endsWith(${JSON.stringify(DOCUMENT_EDIT)}); })()`, 'document-two-versions');
+
+    at('document-card-after-version');
+    // 返回交付物: the 新闻稿's card names its latest version and the material it came from, and offers 打开.
+    await clickSelector(renderer, '.editor-shell[data-deliverable="production-document"] nav.book-work-group [data-work-destination="deliverables"]', 'document-back');
+    await waitForDeliverables(renderer, 'document-back');
+    await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentState === 'document'`, 'document-card-ready');
+    await assertRenderer(renderer, `(() => { const card = window.__j07.card('news-release'); return card.dataset.documentVersion === '2' && card.dataset.documentChanged === 'false' && card.querySelector('.document-card-line')?.textContent === ${JSON.stringify(`版本 2 · 由「${DRAFT_FILE}」创建`)} && window.__j07.cardAction('news-release', 'open')?.textContent === '打开' && window.__j07.cardAction('news-release', 'create') === null; })()`, 'document-card-names-the-version');
+
+    at('document-not-for-this-book');
+    // 本书不做 is one record, and 恢复 another; focus stays with the card's own next action.
+    await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="promotion-article"] [data-document-action="notForThisBook"]', 'document-not-for-this-book');
+    await waitFor(renderer, `window.__j07.card('promotion-article')?.dataset.documentState === 'not-for-this-book' && document.activeElement === window.__j07.cardAction('promotion-article', 'restore') && window.__j07.status() === '已标为本书不做'`, 'document-not-for-this-book-recorded');
+    await assertRenderer(renderer, `window.__j07.card('promotion-article').querySelector('.document-not-for-this-book')?.textContent === '本书不做' && window.__j07.cardAction('promotion-article', 'create') === null`, 'document-not-for-this-book-card');
+    await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="promotion-article"] [data-document-action="restore"]', 'document-restore');
+    await waitFor(renderer, `window.__j07.card('promotion-article')?.dataset.documentState === 'none' && document.activeElement === window.__j07.cardAction('promotion-article', 'notForThisBook') && window.__j07.status() === '已恢复'`, 'document-restored');
+    const documentsRead = await renderer.evaluate(`window.ai7.inspectDeliverables().then((deliverables) => deliverables.documents.types.map((type) => [type.typeId, type.notForThisBook, type.document === null ? null : type.document.versions.map((version) => version.label)]))`);
+    requireJourney(JSON.stringify(documentsRead) === JSON.stringify(DOCUMENT_TYPES.map(([typeId]) => [typeId, false, typeId === 'news-release' ? ['版本 2', '版本 1'] : null])), 'documents-service-agrees', documentsRead);
+
+    at('documents-restart');
+    // A restart moves nothing: 交付物 answers byte for byte as before, and the 新闻稿 opens at 版本 2 with its edit.
+    const documentsBefore = await renderer.evaluate(`window.ai7.inspectDeliverables().then((deliverables) => JSON.stringify(deliverables))`);
+    await close();
+    renderer = await launch();
+    await reopenDeliverables(renderer, 'documents-restart');
+    const documentsAfter = await renderer.evaluate(`window.ai7.inspectDeliverables().then((deliverables) => JSON.stringify(deliverables))`);
+    requireJourney(typeof documentsBefore === 'string' && documentsAfter === documentsBefore, 'documents-restart-moved-nothing');
+    await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentState === 'document'`, 'documents-restart-card');
+    await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="open"]', 'documents-restart-open');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] .editor-toolbar h2')?.textContent === '新闻稿 · 版本 2' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.textContent?.endsWith(${JSON.stringify(DOCUMENT_EDIT)})`, 'documents-restart-document');
+    await assertNoForbiddenWords(renderer, 'documents-without-forbidden-words');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

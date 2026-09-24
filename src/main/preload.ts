@@ -353,6 +353,12 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectDeliverables']['output']>(IPC_CHANNELS.inspectDeliverables),
   designatePublicationVersion: (input: Omit<ServiceOperationMap['designatePublicationVersion']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['designatePublicationVersion']['output']>(IPC_CHANNELS.designatePublicationVersion, input),
+  createProductionDocument: (input: Omit<ServiceOperationMap['createProductionDocument']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['createProductionDocument']['output']>(IPC_CHANNELS.createProductionDocument, input),
+  decideProductionDocumentType: (input: Omit<ServiceOperationMap['decideProductionDocumentType']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['decideProductionDocumentType']['output']>(IPC_CHANNELS.decideProductionDocumentType, input),
+  saveProductionDocumentVersion: (input: Omit<ServiceOperationMap['saveProductionDocumentVersion']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['saveProductionDocumentVersion']['output']>(IPC_CHANNELS.saveProductionDocumentVersion, input),
   inspectGlobalAttention: () =>
     invoke<ServiceOperationMap['inspectGlobalAttention']['output']>(IPC_CHANNELS.inspectGlobalAttention, {}),
   reviewManuscriptExport: (input: Parameters<RendererApi['reviewManuscriptExport']>[0]) =>

@@ -11,7 +11,7 @@ import { PLAN_EDIT_ADAPTATION_LABELS } from '../../src/service/analysis/plan-edi
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CLARIFICATION_SCHEMA_VERSION, REIMPORT_GROUP_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { CLARIFICATION_SCHEMA_VERSION, PRODUCTION_DOCUMENT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
   CLARIFICATION_SCOPE_CONTINUING,
   CLARIFICATION_SCOPE_WAITING,
@@ -26,6 +26,7 @@ import {
 } from '../../src/shared/protocol.js';
 import { CLARIFICATION_RELATIONS_DROP_ORDER, plantRevision34Relations, runStatesShapeAt34 } from '../support/clarifications.js';
 import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
+import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
@@ -179,11 +180,11 @@ describe('schema revision 35 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(REIMPORT_GROUP_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(PRODUCTION_DOCUMENT_SCHEMA_VERSION);
       expect(runStatesShapeAt34(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_run_states ORDER BY rowid').all()).toEqual(before.states);
       const after = relationTruth(database);
-      expect([...after.keys()]).toEqual([...before.truth.keys(), ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER].sort());
+      expect([...after.keys()]).toEqual([...before.truth.keys(), ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER].sort());
       for (const relation of CLARIFICATION_RELATIONS_DROP_ORDER) expect(after.get(relation)?.content).toMatch(/^0:/);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name)).toEqual(['analysis_run_states']);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['service_lifetimes']);

@@ -144,6 +144,13 @@ function deliverables(publication: Partial<DeliverablesProjection['publication']
       ...publication,
     },
     exports: [],
+    documents: {
+      configuration: { schema: 'ai7.production-document-types/1', version: '1', digest: 'd'.repeat(64) },
+      unavailableReason: null,
+      types: [],
+      sources: [],
+      sourcesTruncated: false,
+    },
   };
 }
 

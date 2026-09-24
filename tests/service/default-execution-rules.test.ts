@@ -20,7 +20,7 @@ import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-poli
 import { LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CONNECTIVITY_WAIT_SCHEMA_VERSION, CLARIFICATION_SCHEMA_VERSION, REIMPORT_GROUP_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { CONNECTIVITY_WAIT_SCHEMA_VERSION, CLARIFICATION_SCHEMA_VERSION, PRODUCTION_DOCUMENT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
   BASELINE_ANALYSIS_TASK_GOAL,
@@ -37,6 +37,7 @@ import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissing
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js';
 import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
+import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
 import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
 
 // Service-integration suite (L2) for 快速开始 under a 默认执行规则 (Issue #421, plan slice S75): the real store on a
@@ -177,12 +178,12 @@ describe('schema revision 31 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(REIMPORT_GROUP_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(PRODUCTION_DOCUMENT_SCHEMA_VERSION);
       expect(analysisRunAuthorizationsShape(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all()).toEqual(before.authorizations);
       const after = relationTruth(database);
-      expect([...after.keys()]).toEqual([...before.truth.keys(), ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER].sort());
-      for (const relation of [...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER]) expect(after.get(relation)?.content).toMatch(/^0:/);
+      expect([...after.keys()]).toEqual([...before.truth.keys(), ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER].sort());
+      for (const relation of [...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER]) expect(after.get(relation)?.content).toMatch(/^0:/);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name)).toEqual(['analysis_run_authorizations']);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['service_lifetimes']);
       expect(database.prepare("SELECT name FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = 'analysis_run_authorizations' ORDER BY name").all())
