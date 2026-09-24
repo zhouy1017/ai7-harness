@@ -855,6 +855,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'package-export',
     // Issue #426 (S68a): 维护事项 — a 勘误 recorded, written and concluded, and 撤回 of the current designation.
     'maintenance-cases',
+    // Issue #426 (S68b): 维护事项待处理 — a waiting 替代 in 待我处理, opened back at its case, and cleared by an 归档.
+    'maintenance-attention',
     'documents-restart',
     'zero-loopback-requests',
     'completion-browser-close',

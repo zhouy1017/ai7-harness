@@ -15,6 +15,8 @@ import {
   type GlobalAttentionProjection,
   type GlobalAttentionStateKey,
   type GlobalAttentionTarget,
+  type MaintenanceClassification,
+  type MaintenanceNextStep,
   type ProposalConflictKind,
   type ReviewRunCategoryState,
   type ReviewRunState,
@@ -175,6 +177,24 @@ export interface ReviewRunAttentionReading {
   readonly lastEventAt: string | null;
 }
 
+/**
+ * A 维护事项 whose next step is the editor's (Issue #426, S68b; MAINT-012), read by `maintenance-cases.ts`: not complete,
+ * and its designation's maintenance not closed by an 归档.
+ */
+export interface MaintenanceAttentionReading {
+  readonly caseId: string;
+  readonly ordinal: number;
+  readonly classification: MaintenanceClassification;
+  readonly status: 'unresolved' | 'waiting';
+  readonly nextStep: MaintenanceNextStep;
+  /** When its newest revision was recorded. */
+  readonly at: string;
+  readonly bookId: string;
+  readonly bookTitle: string;
+  readonly publicationVersionId: string;
+  readonly publicationOrdinal: number;
+}
+
 export interface GlobalAttentionReadings {
   readonly imports: ReadonlyArray<ImportAttentionReading>;
   readonly recoveries: ReadonlyArray<RecoveryAttentionReading>;
@@ -185,6 +205,8 @@ export interface GlobalAttentionReadings {
   readonly reviewRuns: ReadonlyArray<ReviewRunAttentionReading>;
   /** The Review Runs that reached the manuscript in every category within the recent window. */
   readonly reviewCompletions: ReadonlyArray<ReviewRunAttentionReading>;
+  /** Every 维护事项 still waiting on the editor (Issue #426, S68b). */
+  readonly maintenance: ReadonlyArray<MaintenanceAttentionReading>;
   /** Whether a Run holds the execution owner's one slot now. */
   readonly busy: boolean;
   /**
@@ -546,6 +568,34 @@ function reviewCompletionItem(reading: ReviewRunAttentionReading): GlobalAttenti
 // ---- ordering ------------------------------------------------------------------------------------------
 
 /** Code-point order, the same on every host; a missing title sorts first. */
+const MAINTENANCE_NEXT_STEPS: Readonly<Record<MaintenanceNextStep, GlobalAttentionNextStep>> = {
+  'link-proposal': 'maintenance-link-proposal',
+  'link-publication': 'maintenance-link-publication',
+  'write-errata': 'maintenance-write-errata',
+  conclude: 'maintenance-conclude',
+};
+
+/**
+ * 维护事项待处理 (MAINT-012): a named decision of the editor's, returning to the case on its 发稿版本. It stops no other
+ * work, so it never blocks; 撤回, 归档 and a complete case never come here.
+ */
+function maintenanceItem(reading: MaintenanceAttentionReading): GlobalAttentionItemProjection {
+  return item('decisions', reading.status === 'waiting' ? 'maintenance-waiting' : 'maintenance-pending', {
+    itemId: `maintenance:${reading.caseId}`,
+    blocked: false,
+    at: reading.at,
+    book: { bookId: reading.bookId, title: reading.bookTitle },
+    object: { kind: 'maintenance', classification: reading.classification, ordinal: reading.ordinal, publicationOrdinal: reading.publicationOrdinal },
+    nextStep: MAINTENANCE_NEXT_STEPS[reading.nextStep],
+    target: { kind: 'maintenance', bookId: reading.bookId, publicationVersionId: reading.publicationVersionId, caseId: reading.caseId },
+    technical: [
+      { key: 'maintenance-case', label: '维护事项', value: reading.caseId },
+      { key: 'publication-version', label: '发稿版本', value: reading.publicationVersionId },
+      { key: 'state-at', label: '状态开始时间', value: reading.at },
+    ],
+  });
+}
+
 function compareText(left: string | null, right: string | null): number {
   const a = left ?? '';
   const b = right ?? '';
@@ -599,6 +649,7 @@ export function composeGlobalAttention(readings: GlobalAttentionReadings, now: D
     ...readings.reviewCompletions
       .filter((reading) => reading.state === 'settled' && (reading.lastEventAt ?? '') >= since)
       .map(reviewCompletionItem),
+    ...readings.maintenance.map(maintenanceItem),
   ];
   // One record is one item: a Review Run read both as a Book's latest and as a completion is listed once.
   const unique = Array.from(new Map(all.map((entry) => [`${entry.group}\n${entry.itemId}`, entry] as const)).values());

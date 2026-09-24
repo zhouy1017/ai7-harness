@@ -243,6 +243,44 @@ describe('⑥ 维护事项 (S68a)', () => {
     }
   }, 180_000);
 
+  it('lists each case still waiting on the editor in 待我处理, and none once concluded, 撤回, 归档 or closed by an 归档 (S68b)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const bookId = book.bookId;
+      const milestone = await store.saveMilestone(book.manuscriptId, book.branchId, '一审稿', 'stage-archive', null, '');
+      const a = store.designatePublicationVersion({ bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '三审通过' }).publicationVersionId;
+      const b = store.designatePublicationVersion({ bookId, milestoneId: milestone.milestoneId, scope: '电子版首发', basis: '同一修订版' }).publicationVersionId;
+      const record = (classification: 'errata' | 'supersession' | 'withdrawal' | 'archive', target: string) =>
+        store.recordMaintenanceCase({ bookId, publicationVersionId: target, classification, reason: '读者来信', evidence: null }).maintenanceCase;
+      const maintenanceItems = () => store.inspectGlobalAttention(() => null, false).groups
+        .flatMap((group) => group.items.filter((entry) => entry.target.kind === 'maintenance').map((entry) => [group.key, entry.itemId, entry.state, entry.nextStep, entry.blocked] as const));
+      const errata = record('errata', a);
+      const supersession = record('supersession', a);
+      record('withdrawal', b);
+      expect(maintenanceItems()).toEqual([
+        ['decisions', `maintenance:${errata.caseId}`, 'maintenance-pending', 'maintenance-write-errata', false],
+        ['decisions', `maintenance:${supersession.caseId}`, 'maintenance-waiting', 'maintenance-link-publication', false],
+      ]);
+      const counted = store.inspectGlobalAttention(() => null, false).actionableCount;
+      expect(counted).toBe(2);
+      const item = store.inspectGlobalAttention(() => null, false).groups.find((group) => group.key === 'decisions')!.items[0]!;
+      expect(item).toMatchObject({
+        book: { bookId },
+        object: { kind: 'maintenance', classification: 'errata', ordinal: errata.ordinal, publicationOrdinal: 1 },
+        target: { kind: 'maintenance', bookId, publicationVersionId: a, caseId: errata.caseId },
+      });
+      // Concluded, it leaves; an 归档 of its 发稿版本 closes the rest of that version's maintenance.
+      store.appendMaintenanceCaseRevision({ bookId, caseId: errata.caseId, expectedRevision: 1, step: { kind: 'conclude', status: 'complete', outcome: '已处理' } });
+      expect(maintenanceItems().map(([, itemId]) => itemId)).toEqual([`maintenance:${supersession.caseId}`]);
+      record('archive', a);
+      expect(maintenanceItems()).toEqual([]);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
   it('adds the 维护事项 relations to a revision-42 store empty', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {

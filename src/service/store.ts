@@ -10045,11 +10045,12 @@ export class EditorialStore {
           analysisOutcomes: baseline.outcomes,
           reviewRuns: review.latest,
           reviewCompletions: review.completed,
+          maintenance: this.#maintenanceCases.attentionReadings(limit),
           busy,
           waitingFor,
         }, now);
       } catch (error) {
-        if (error instanceof GlobalAttentionError) throw new StoreError(error.code, error.message);
+        if (error instanceof GlobalAttentionError || error instanceof MaintenanceCaseError) throw new StoreError(error.code, error.message);
         throw error;
       }
     });

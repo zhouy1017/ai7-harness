@@ -42,6 +42,7 @@ const NONE: GlobalAttentionReadings = {
   analysisOutcomes: [],
   reviewRuns: [],
   reviewCompletions: [],
+  maintenance: [],
   busy: false,
   waitingFor: 'admitting',
 };
@@ -182,6 +183,28 @@ describe('the four groups of 待我处理', () => {
       target: { kind: 'manuscript-conflict', bookId: deferred.bookId, manuscriptId: deferred.manuscriptId, branchId: deferred.branchId, markId: deferred.markId },
     });
     expect(exceptions[0]!.technical.map((row) => row.key)).toEqual(['mark', 'conflict-kind', 'manuscript', 'branch', 'state-at']);
+    expect(projection.actionableCount).toBe(2);
+  });
+
+  it('lists a 维护事项 still waiting on the editor under 等待你的决定, never blocking, opening the case on its 发稿版本 (Issue #426, S68b)', () => {
+    const reading = (classification: 'errata' | 'supersession', status: 'unresolved' | 'waiting', nextStep: 'write-errata' | 'link-publication', at: string) => ({
+      caseId: randomUUID(), ordinal: classification === 'errata' ? 1 : 3, classification, status, nextStep, at,
+      bookId: randomUUID(), bookTitle: '维护之书', publicationVersionId: randomUUID(), publicationOrdinal: 1,
+    });
+    const errata = reading('errata', 'unresolved', 'write-errata', minutesAgo(40));
+    const supersession = reading('supersession', 'waiting', 'link-publication', minutesAgo(20));
+    const projection = composeGlobalAttention(readings({ maintenance: [supersession, errata] }), NOW);
+    const decisions = group(projection, 'decisions');
+    expect(decisions.map((entry) => [entry.itemId, entry.state, entry.blocked, entry.nextStep, entry.at])).toEqual([
+      [`maintenance:${errata.caseId}`, 'maintenance-pending', false, 'maintenance-write-errata', errata.at],
+      [`maintenance:${supersession.caseId}`, 'maintenance-waiting', false, 'maintenance-link-publication', supersession.at],
+    ]);
+    expect(decisions[1]).toMatchObject({
+      book: { bookId: supersession.bookId, title: '维护之书' },
+      object: { kind: 'maintenance', classification: 'supersession', ordinal: 3, publicationOrdinal: 1 },
+      target: { kind: 'maintenance', bookId: supersession.bookId, publicationVersionId: supersession.publicationVersionId, caseId: supersession.caseId },
+    });
+    expect(decisions[0]!.technical.map((row) => row.key)).toEqual(['maintenance-case', 'publication-version', 'state-at']);
     expect(projection.actionableCount).toBe(2);
   });
 

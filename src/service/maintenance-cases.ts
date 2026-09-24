@@ -34,6 +34,7 @@ import {
   MAINTENANCE_STEP_LABELS,
 } from '../shared/maintenance-wording.js';
 import { UUID_PATTERN, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
+import type { MaintenanceAttentionReading } from './global-attention.js';
 
 /**
  * 维护事项 (Issue #426, plan slice S68a; V2-UX-MAINT-001 to 011, ADR 0040). After 设为发稿版本 a matter about that exact
@@ -280,6 +281,44 @@ export class MaintenanceCases {
       });
     }
     return { cases, total: rows.length, withdrawn, archived };
+  }
+
+  /**
+   * Every case still waiting on the editor, across Books (Issue #426, S68b; MAINT-012): not complete, with a named next
+   * step, and on a designation whose maintenance no 归档 has closed. At most `limit`, oldest first.
+   */
+  attentionReadings(limit: number): MaintenanceAttentionReading[] {
+    if (!this.#present()) return [];
+    const rows = this.#db.prepare(
+      `SELECT c.case_id, c.book_id, b.title
+       FROM maintenance_cases c
+       JOIN books b ON b.book_id = c.book_id
+       WHERE NOT EXISTS (
+         SELECT 1 FROM maintenance_cases a WHERE a.publication_version_id = c.publication_version_id AND a.classification = 'archive'
+       )
+       AND (SELECT r.status FROM maintenance_case_revisions r WHERE r.case_id = c.case_id ORDER BY r.revision DESC LIMIT 1) <> 'complete'
+       ORDER BY c.created_at, c.rowid LIMIT ?`,
+    ).all(limit) as SqlRow[];
+    return rows.flatMap((row): MaintenanceAttentionReading[] => {
+      const record = this.#case(text(row.book_id), text(row.case_id));
+      const revisions = this.#revisions(record);
+      const latest = revisions.at(-1)!;
+      const nextStep = nextStepOf(record.classification, revisions);
+      if (latest.status === 'complete' || nextStep === null) return [];
+      const target = this.#designation(record.bookId, record.publicationVersionId)!;
+      return [{
+        caseId: record.caseId,
+        ordinal: record.ordinal,
+        classification: record.classification,
+        status: latest.status,
+        nextStep,
+        at: latest.recordedAt,
+        bookId: record.bookId,
+        bookTitle: text(row.title),
+        publicationVersionId: record.publicationVersionId,
+        publicationOrdinal: target.ordinal,
+      }];
+    });
   }
 
   /** Whether a 撤回 case holds the designation: in AI7 it is no longer used for 发稿 (ADR 0040). */

@@ -83,6 +83,10 @@ export interface MountMaintenanceOptions {
   refresh(): void;
   /** Draw 交付物 again from its last read: only the surface's own state moved. */
   redraw(): void;
+  /** A case to open as the surface mounts (Issue #426, S68b): 待我处理's item, back at its record. */
+  initialCase?: { caseId: string; publicationVersionId: string };
+  /** A step moved what 待我处理 lists (Issue #426, S68b): its number is read again at once. */
+  attentionChanged?(): void;
 }
 
 type Panel = 'link-proposal' | 'link-publication' | 'errata' | 'conclude';
@@ -616,6 +620,15 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     };
     options.setStatus(result.completion, 'success');
     options.refresh();
+    options.attentionChanged?.();
+  }
+
+  // 待我处理 opened this case (MAINT-012): it is read and drawn open, with focus on its heading, once 交付物 shows it.
+  if (options.initialCase !== undefined) {
+    const { caseId, publicationVersionId } = options.initialCase;
+    const current: OpenCase = { caseId, publicationVersionId, projection: null, panel: null, choice: null, text: '', conclusion: null, problem: null };
+    open = current;
+    void read(current, caseSelector(caseId, '.maintenance-case-heading'));
   }
 
   return {
