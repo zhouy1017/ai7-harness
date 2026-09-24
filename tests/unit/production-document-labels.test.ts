@@ -124,10 +124,12 @@ describe('where a document\'s text stands', () => {
     expect(documentStanding(read, 'a'.repeat(64))).toEqual({ current: versions[0], changedSinceVersion: false, changedSinceDelivery: true });
   });
 
-  it('moves 当前 off a version as soon as an edit is written, and back when the text is a version again', () => {
+  it('moves 当前 off a version as soon as an edit is written, and reads a version only by its own digest', () => {
     // An edit: no version holds the text, which moved past the latest and away from the delivered one.
     expect(documentStanding(read, 'c'.repeat(64))).toEqual({ current: null, changedSinceVersion: true, changedSinceDelivery: true });
-    // Edited back to 版本 1, the version delivered: it stands on it, past the latest, and no edit after the delivery shows.
+    // A working digest is chained, an undo's too, so no edit brings the text back to an earlier version's digest: only a
+    // digest a version holds stands on it. Given 版本 1's, the version delivered, it reads that version as the reading
+    // would, past the latest and with no edit after the delivery.
     expect(documentStanding(read, 'b'.repeat(64))).toEqual({ current: versions[1], changedSinceVersion: true, changedSinceDelivery: false });
     // With no delivery there is nothing to have moved away from.
     expect(documentStanding({ ...read, deliveries: [] }, 'c'.repeat(64)).changedSinceDelivery).toBe(false);

@@ -164,6 +164,14 @@ export const CONFLICT_COMPLETION = {
   defer: '已记下暂不处理；这处冲突仍未解决。',
 } as const;
 
+/** 保留当前稿件's completion on a Production Document (Issue #543 follow-up), where the text kept is the document's. */
+export const CONFLICT_KEEP_CURRENT_ON_DOCUMENT = '已保留文档现在的文字；文档没有改动。';
+
+/** A completion in the words of what the conflict was on: a document's own words for its text, the manuscript's otherwise. */
+export function conflictCompletionOn(onDocument: boolean, completion: string): string {
+  return onDocument && completion === CONFLICT_COMPLETION.keepCurrent ? CONFLICT_KEEP_CURRENT_ON_DOCUMENT : completion;
+}
+
 export const CONFLICT_STATUS_LINES = {
   opening: '正在打开稿件冲突…',
   opened: '稿件冲突已打开；三处文字只读，稿件不会改动。',
