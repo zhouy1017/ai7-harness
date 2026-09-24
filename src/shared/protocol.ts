@@ -5037,8 +5037,12 @@ export interface ProductionDocumentProjection {
   documentId: string;
   branchId: string;
   createdAt: string;
-  /** The Book's source material it was made from. */
-  origin: { sourceVersionId: string; displayName: string };
+  /**
+   * The Book's source material it was made from, and how many of its 批注与修订 the document did not carry (Issue #547):
+   * its text was read with every tracked change rejected and its comments left out. `null` for a document made before
+   * the count was recorded.
+   */
+  origin: { sourceVersionId: string; displayName: string; marksNotCarried: number | null };
   /** Newest first, at most `MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED`. */
   versions: ReadonlyArray<ProductionDocumentVersionProjection>;
   versionsTruncated: boolean;

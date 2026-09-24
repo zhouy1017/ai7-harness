@@ -267,6 +267,11 @@ import { initializeReimportGroupSchema } from './reimport-group-ledger.js';
 import { initializeProductionDocumentDeliverySchema, initializeProductionDocumentSchema } from './production-document-ledger.js';
 import { BookDeliveryPackageError, BookDeliveryPackages, initializeBookDeliveryPackageSchema } from './book-delivery-packages.js';
 import {
+  ProductionDocumentOriginError,
+  initializeProductionDocumentOriginSchema,
+  recordProductionDocumentOrigin,
+} from './production-document-origins.js';
+import {
   BookDeliveryPackageExportError,
   BookDeliveryPackageExports,
   initializeBookDeliveryPackageExportSchema,
@@ -354,6 +359,7 @@ import {
   BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION,
   PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION,
   BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
+  PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1571,7 +1577,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
       currentVersion === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
       currentVersion === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
-      currentVersion === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
+      currentVersion === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
+      currentVersion === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1608,7 +1615,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
       currentVersion === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
       currentVersion === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
-      currentVersion === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION
+      currentVersion === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
+      currentVersion === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1959,7 +1967,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
+      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1985,7 +1994,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION) return;
+      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2103,7 +2113,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
+      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2128,7 +2139,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION) return;
+      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2421,7 +2433,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2449,6 +2461,7 @@ function validateModelServiceSchema(
       version >= BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION,
       version >= PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION,
       version >= BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
+      version >= PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2501,7 +2514,8 @@ function initializeModelServiceSchema(
       version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
+      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2526,7 +2540,8 @@ function initializeModelServiceSchema(
       version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION) {
+      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3511,6 +3526,8 @@ export class EditorialStore {
       // S67b) each package export and the files it links.
       initializeProductionDocumentWorkflowSchema(authority, workflowProfilePin(workflowProfile));
       initializeBookDeliveryPackageExportSchema(authority);
+      // Revision 42 (Issue #547) adds how each document's origin material was read.
+      initializeProductionDocumentOriginSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -9656,6 +9673,11 @@ export class EditorialStore {
       });
       // The document begins following the Book's workflow profile now (Issue #415, S66c; WORK-002).
       this.#documentWorkflow.recordInstance(documentId, now);
+      // How its material was read, kept for as long as the document exists (Issue #547): every tracked change rejected,
+      // the comments left out, and how many 批注与修订 that left behind.
+      recordProductionDocumentOrigin(this.#authority, {
+        documentId, sourceVersionId: plan.sourceVersionId, marksNotCarried: parsed.importedMarks.length, recordedAt: now,
+      });
       this.#productionDocuments.recordVersion(documentId, revisionId, revisionDigest, 'created');
     }));
     // The material's comments and tracked changes stay with the material: the document says so where it opens.
@@ -9820,7 +9842,9 @@ export class EditorialStore {
     try {
       return operation();
     } catch (error) {
-      if (error instanceof ProductionDocumentError || error instanceof ProductionDocumentWorkflowError) throw new StoreError(error.code, error.message);
+      if (error instanceof ProductionDocumentError || error instanceof ProductionDocumentWorkflowError || error instanceof ProductionDocumentOriginError) {
+        throw new StoreError(error.code, error.message);
+      }
       if (error instanceof AggregateError) {
         this.#poisoned = true;
         throw new StoreFatalError(error);

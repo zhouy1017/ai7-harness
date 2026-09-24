@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION, BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION, PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
   MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS,
   PRODUCTION_DOCUMENT_PHASE_IDS,
@@ -235,6 +235,7 @@ describe('the Deliverable Workflow of a Production Document (Issue #415, S66c)',
     try {
       planted.exec('PRAGMA foreign_keys = OFF');
       planted.exec(`BEGIN IMMEDIATE;
+        DROP TABLE production_document_origin_readings;
         DROP TABLE book_delivery_package_export_files;
         DROP TABLE book_delivery_package_exports;
         DROP TABLE production_document_phase_transitions;
@@ -247,8 +248,9 @@ describe('the Deliverable Workflow of a Production Document (Issue #415, S66c)',
     }
     const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
-      // The document reads exactly as it did: the same profile, activated when it was made, no phase moved.
-      expect(JSON.stringify(migrated.inspectProductionDocuments(bookId!))).toBe(before!);
+      // The document reads exactly as it did: the same profile, activated when it was made, no phase moved. Only what its
+      // material held reads as unknown, since a store that old never counted it (Issue #547).
+      expect(JSON.stringify(migrated.inspectProductionDocuments(bookId!))).toBe(before!.replaceAll('"marksNotCarried":0', '"marksNotCarried":null'));
       expect(workflowOf(migrated, bookId!).profile.activatedAt).toBe(createdAt!);
       migrated.markCleanShutdown();
     } finally {
@@ -256,7 +258,7 @@ describe('the Deliverable Workflow of a Production Document (Issue #415, S66c)',
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION);
       expect((after.prepare('SELECT count(*) count FROM production_document_workflow_instances').get() as { count: number }).count).toBe(1);
       expect((after.prepare('SELECT count(*) count FROM production_document_phase_transitions').get() as { count: number }).count).toBe(0);
     } finally {

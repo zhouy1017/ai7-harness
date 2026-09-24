@@ -90,6 +90,7 @@ import {
   DOCUMENTS_LEDE,
   documentActionName,
   documentCardLine,
+  documentOriginMarksLine,
   documentCreatedLine,
   documentCurrentTextChoice,
   documentDeliveredLine,
@@ -837,6 +838,9 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       item.dataset['documentVersion'] = String(documentNow.versions[0]?.ordinal ?? 0);
       item.dataset['documentChanged'] = String(documentNow.changedSinceVersion);
       item.append(el('p', 'document-card-line', documentCardLine(documentNow)));
+      // What the material's reading left behind, said as long as the document exists (Issue #547).
+      const notCarried = documentNow.origin.marksNotCarried;
+      if (notCarried !== null && notCarried > 0) item.append(el('p', 'field-note document-origin-marks', documentOriginMarksLine(notCarried)));
       if (documentNow.changedSinceVersion) item.append(el('p', 'field-note document-changed', DOCUMENT_CHANGED_SINCE_VERSION));
     }
     if (type.notForThisBook) {

@@ -20,6 +20,7 @@ import {
 } from '../shared/protocol.js';
 import { UUID_PATTERN, canonicalJson, canonicalRecord, sha256Hex } from './analysis/canonical.js';
 import type { PackageDeliveryReading, PackageDocumentReading } from './book-delivery-packages.js';
+import { ProductionDocumentOriginError, productionDocumentOriginMarks } from './production-document-origins.js';
 import type { ProductionDocumentWorkflow } from './production-document-workflow.js';
 import {
   BUILTIN_PRODUCTION_DOCUMENT_TYPES,
@@ -177,7 +178,7 @@ export class ProductionDocuments {
       documentId: row.documentId,
       branchId: row.branchId,
       createdAt: row.createdAt,
-      origin: { sourceVersionId: row.originSourceVersionId, displayName: text(state.display_name) },
+      origin: { sourceVersionId: row.originSourceVersionId, displayName: text(state.display_name), marksNotCarried: this.#originMarks(row) },
       versions: versions.slice(0, MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED),
       versionsTruncated: versions.length > MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED,
       changedSinceVersion,
@@ -190,6 +191,16 @@ export class ProductionDocuments {
         changedSinceVersion, delivered: deliveries.length > 0, changedSinceDelivery, openSuggestions,
       }),
     };
+  }
+
+  /** How many of the origin material's 批注与修订 the document did not carry (Issue #547), from its own record. */
+  #originMarks(row: ProductionDocumentRow): number | null {
+    try {
+      return productionDocumentOriginMarks(this.#db, row.documentId, row.originSourceVersionId);
+    } catch (error) {
+      if (error instanceof ProductionDocumentOriginError) throw new ProductionDocumentError(error.code, error.message);
+      throw error;
+    }
   }
 
   /**

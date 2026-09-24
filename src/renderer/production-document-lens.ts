@@ -12,6 +12,7 @@ import {
   DOCUMENT_VERSIONS_TRUNCATED,
   documentDeliveryExportLine,
   documentDeliveryLine,
+  documentOriginMarksLine,
   documentVersionLine,
 } from './production-document-labels.js';
 import { renderDocumentWorkflow, type DocumentWorkflowActions } from './production-document-workflow.js';
@@ -58,9 +59,9 @@ export function documentStanding(document: ProductionDocumentProjection, working
  * The right-hand 工作流程 column of a Production Document's surface (DELIV-002). Since S66c the Deliverable Workflow opens
  * it (`renderDocumentWorkflow`): the profile the document follows, `下一项需要处理` and the seven phases with their moves.
  * `版本与交付` then lists the document's versions newest first — the one its working text stands on marked `当前` — and
- * `这份文档的材料` states that none is attached yet. Since S66b the Delivery Records follow the versions, newest first,
- * each with what its export came to, and `交付后有修改` once an edit left every version delivered. The gates join it with
- * S66d.
+ * `这份文档的材料` says how the material it was made from was read, when that left 批注与修订 behind (Issue #547), and
+ * states that none is attached yet. Since S66b the Delivery Records follow the versions, newest first, each with what its
+ * export came to, and `交付后有修改` once an edit left every version delivered. The gates join it with S66d.
  *
  * `update` paints it again for the working digest the window holds now, so an edit moves `当前` and the notes as it happens
  * rather than when the document is next opened.
@@ -75,7 +76,11 @@ export function renderDocumentLens(
   const workflow = renderDocumentWorkflow(context.document.workflow, workflowActions);
   const versions = el('section', 'document-lens-section document-versions');
   const materials = el('section', 'document-lens-section document-materials');
-  materials.append(el('h3', undefined, DOCUMENT_MATERIALS_HEADING), el('p', 'field-note', DOCUMENT_MATERIALS_EMPTY));
+  materials.append(el('h3', undefined, DOCUMENT_MATERIALS_HEADING));
+  // How the material it was made from was read, for as long as the document exists (Issue #547).
+  const notCarried = context.document.origin.marksNotCarried;
+  if (notCarried !== null && notCarried > 0) materials.append(el('p', 'field-note document-origin-marks', documentOriginMarksLine(notCarried)));
+  materials.append(el('p', 'field-note document-materials-empty', DOCUMENT_MATERIALS_EMPTY));
   aside.append(el('p', 'section-label', DOCUMENT_LENS_LABEL), workflow.element, versions, materials);
   let painted: string | null = null;
   const paint = (workingDigest: string): void => {

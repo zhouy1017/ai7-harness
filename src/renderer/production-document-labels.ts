@@ -60,6 +60,14 @@ export function documentCardLine(document: ProductionDocumentProjection): string
   return `${latest === undefined ? '' : `${latest.label} · `}由「${document.origin.displayName}」创建`;
 }
 
+/**
+ * How the document's material was read, said for as long as the document exists (Issue #547): its text with every tracked
+ * change rejected and its comments left out, and how many 批注与修订 stayed with the material.
+ */
+export function documentOriginMarksLine(count: number): string {
+  return `创建时，来源材料里的 ${count} 处批注与修订没有带入：文字按全部修订被拒绝时的样子读出，批注不带入。`;
+}
+
 /** An accessible name for a card action: what it does to which type. */
 export function documentActionName(action: DocumentAction, typeLabel: string): string {
   return `${DOCUMENT_ACTION_LABELS[action]}：${typeLabel}`;

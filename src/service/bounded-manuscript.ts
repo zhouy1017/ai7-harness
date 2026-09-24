@@ -92,6 +92,7 @@ import {
   BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION,
   PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION,
   BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
+  PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -146,6 +147,11 @@ import {
   BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_SQL,
   BOOK_DELIVERY_PACKAGE_EXPORT_TRIGGER_SQL,
 } from './book-delivery-package-exports.js';
+import {
+  PRODUCTION_DOCUMENT_ORIGIN_FOREIGN_KEYS,
+  PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_SQL,
+  PRODUCTION_DOCUMENT_ORIGIN_TRIGGER_SQL,
+} from './production-document-origins.js';
 import {
   MANUSCRIPT_EFFECT_FOREIGN_KEYS,
   MANUSCRIPT_EFFECT_SCHEMA_SQL,
@@ -1849,6 +1855,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...BOOK_DELIVERY_PACKAGE_FOREIGN_KEYS,
   ...PRODUCTION_DOCUMENT_WORKFLOW_FOREIGN_KEYS,
   ...BOOK_DELIVERY_PACKAGE_EXPORT_FOREIGN_KEYS,
+  ...PRODUCTION_DOCUMENT_ORIGIN_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2461,6 +2468,7 @@ function requireManuscriptReimportTargetSchema(
   includeBookDeliveryPackageTables = false,
   includeProductionDocumentWorkflowTables = false,
   includeBookDeliveryPackageExportTables = false,
+  includeProductionDocumentOriginTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2533,6 +2541,8 @@ function requireManuscriptReimportTargetSchema(
       ...(includeProductionDocumentWorkflowTables ? PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_SQL : {}),
       // Revision 41 (Issue #416, S67b) adds each package export and the files it links.
       ...(includeBookDeliveryPackageExportTables ? BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_SQL : {}),
+      // Revision 42 (Issue #547) adds how each Production Document's origin material was read.
+      ...(includeProductionDocumentOriginTables ? PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_SQL : {}),
     },
     // The partial index that keeps one primary Manuscript per Book stands with the rebuilt relation, whatever the version.
     {
@@ -2562,6 +2572,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeBookDeliveryPackageTables ? BOOK_DELIVERY_PACKAGE_TRIGGER_SQL : {}),
       ...(includeProductionDocumentWorkflowTables ? PRODUCTION_DOCUMENT_WORKFLOW_TRIGGER_SQL : {}),
       ...(includeBookDeliveryPackageExportTables ? BOOK_DELIVERY_PACKAGE_EXPORT_TRIGGER_SQL : {}),
+      ...(includeProductionDocumentOriginTables ? PRODUCTION_DOCUMENT_ORIGIN_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5244,6 +5255,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeBookDeliveryPackageTables = false,
   includeProductionDocumentWorkflowTables = false,
   includeBookDeliveryPackageExportTables = false,
+  includeProductionDocumentOriginTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5271,6 +5283,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeBookDeliveryPackageTables,
     includeProductionDocumentWorkflowTables,
     includeBookDeliveryPackageExportTables,
+    includeProductionDocumentOriginTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5344,7 +5357,8 @@ export function initializeBoundedSchema(
       version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
+      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5368,9 +5382,10 @@ export function initializeBoundedSchema(
       version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION) {
+      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5398,6 +5413,7 @@ export function initializeBoundedSchema(
           version >= BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION,
           version >= PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION,
           version >= BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
+          version >= PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);

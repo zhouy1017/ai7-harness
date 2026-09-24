@@ -1,15 +1,16 @@
 import type { DatabaseSync } from 'node:sqlite';
 
 /**
- * The relations schema revisions 37 to 41 add (Issue #415, S66a to S66c; Issue #416, S67a and S67b), in drop order: a
- * package's exports and their files (revision 41), a document's phase moves and workflow instance (revision 40), the
- * Book's 图书交付包 versions, which name documents' deliveries, then a document's Delivery Records, decisions and versions
- * before the document. A suite that plants a store at an earlier revision drops them with whatever else later revisions
- * added: a store that old never held them. Revision 37 also rebuilt `manuscripts`; a planted store
- * keeps the rebuilt relation and its partial index, which every earlier revision's validation accepts, exactly as a store
- * an earlier build planted after this one would hold them.
+ * The relations schema revisions 37 to 42 add (Issue #415, S66a to S66c; Issue #416, S67a and S67b; Issue #547), in drop
+ * order: how a document's origin material was read (revision 42), a package's exports and their files (revision 41), a
+ * document's phase moves and workflow instance (revision 40), the Book's 图书交付包 versions, which name documents'
+ * deliveries, then a document's Delivery Records, decisions and versions before the document. A suite that plants a store
+ * at an earlier revision drops them with whatever else later revisions added: a store that old never held them. Revision
+ * 37 also rebuilt `manuscripts`; a planted store keeps the rebuilt relation and its partial index, which every earlier
+ * revision's validation accepts, exactly as a store an earlier build planted after this one would hold them.
  */
 export const PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER: ReadonlyArray<string> = [
+  'production_document_origin_readings',
   'book_delivery_package_export_files',
   'book_delivery_package_exports',
   'production_document_phase_transitions',
@@ -21,7 +22,7 @@ export const PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER: ReadonlyArray<string> = [
   'production_documents',
 ];
 
-/** Drop the relations revisions 37 to 41 added, foreign keys off around it. The caller sets the version. */
+/** Drop the relations revisions 37 to 42 added, foreign keys off around it. The caller sets the version. */
 export function dropProductionDocumentRelations(database: DatabaseSync): void {
   database.exec('PRAGMA foreign_keys = OFF');
   try {

@@ -172,7 +172,7 @@ describe('the words of 发稿', () => {
             documentId: identity,
             branchId: identity,
             createdAt: time,
-            origin: { sourceVersionId: identity, displayName: '文'.repeat(250) + '.docx' },
+            origin: { sourceVersionId: identity, displayName: '文'.repeat(250) + '.docx', marksNotCarried: Number.MAX_SAFE_INTEGER },
             versions: Array.from({ length: MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED }, (_, index) => ({
               revisionId: identity, label: `版本 ${9_999_999 - index}`, ordinal: 9_999_999 - index, createdAt: time, revisionDigest: digest,
             })),
