@@ -534,6 +534,100 @@ export function followBlockTextChangeForMarks(
  * `drifted`: rewritten text never proves where an applied suggestion deleted its words, nor where a
  * pending insertion (Issue #411) would write its own.
  */
+/** One row of a reimport's chapter-level comparison as its marks see it (Issue #412, S63). */
+export interface ReimportMarkRow {
+  ordinal: number;
+  verb: 'split' | 'rewrite' | 'delete' | 'merge';
+  /** The row's blocks in the revision the reimport replaced, with their positions there. */
+  current: ReadonlyArray<{ blockId: string; position: number }>;
+  /** The blocks the new file put in the row's place, in the new revision. */
+  newBlockIds: ReadonlyArray<string>;
+}
+
+export interface ReimportMarkOutcome {
+  markId: string;
+  ordinal: number;
+  outcome: 'followed' | 'unfollowed';
+  kind: EditorialMarkKind;
+  words: string;
+  fromPosition: number;
+  toBlockId: string | null;
+}
+
+/** Every place a run of graphemes stands in another, by its first grapheme. */
+function occurrencesOf(parts: ReadonlyArray<string>, pinned: ReadonlyArray<string>): number[] {
+  const found: number[] = [];
+  if (pinned.length === 0 || pinned.length > parts.length) return found;
+  for (let index = 0; index + pinned.length <= parts.length; index += 1) {
+    let same = true;
+    for (let offset = 0; offset < pinned.length; offset += 1) {
+      if (parts[index + offset] !== pinned[offset]) {
+        same = false;
+        break;
+      }
+    }
+    if (same) found.push(index);
+  }
+  return found;
+}
+
+/**
+ * The marks of a reimport's changed rows (Issue #412, plan slice S63; V2-UX-IMP-057), after the working state was
+ * replaced and `resolveBranchMarksAfterRewrite` read every mark against the block it names. A mark whose block the
+ * row carried, and which still stands exactly on its words there, stays. Any other mark of a row goes to its words
+ * when they stand exactly once among the row's new paragraphs. Otherwise — under 删除, or where its words are gone or
+ * repeated — it is set aside from the text, kept, and listed for the editor. Marks outside the changed rows are not
+ * touched, and nothing is guessed: a mark never lands on words it was not on.
+ */
+export function followReimportedMarks(db: DatabaseSync, branchId: string, rows: ReadonlyArray<ReimportMarkRow>): ReimportMarkOutcome[] {
+  if (!marksRelationExists(db)) return [];
+  const state = db.prepare('SELECT journal_sequence FROM branch_working_state WHERE branch_id = ?').get(branchId) as SqlRow | undefined;
+  requireMark(state !== undefined, 'MANUSCRIPT_NOT_FOUND', '稿件工作状态不存在。');
+  const journalSequence = integer(state.journal_sequence);
+  const marksOn = db.prepare(
+    `SELECT mark_id, kind, pinned_text, from_grapheme, to_grapheme, anchor_state
+     FROM editorial_marks WHERE branch_id = ? AND block_id = ? AND status IN ${LIVE_STATUSES} ORDER BY created_at, mark_id`,
+  );
+  const blockText = db.prepare('SELECT text FROM working_blocks WHERE branch_id = ? AND block_id = ?');
+  const update = db.prepare(
+    `UPDATE editorial_marks SET block_id = ?, from_grapheme = ?, to_grapheme = ?, anchor_state = ?, followed_journal_sequence = ?
+     WHERE mark_id = ?`,
+  );
+  const outcomes: ReimportMarkOutcome[] = [];
+  for (const row of rows) {
+    const newBlocks = row.newBlockIds.map((blockId) => {
+      const found = blockText.get(branchId, blockId) as SqlRow | undefined;
+      requireMark(found !== undefined, 'MARK_ANCHOR_INVALID', '重新导入的新段落不在稿件中。');
+      return { blockId, parts: graphemesOf(text(found.text)) };
+    });
+    const carried = new Set(row.newBlockIds);
+    for (const current of row.current) {
+      for (const mark of marksOn.all(branchId, current.blockId) as SqlRow[]) {
+        const markId = text(mark.mark_id);
+        const words = text(mark.pinned_text);
+        const base = { markId, ordinal: row.ordinal, kind: text(mark.kind) as EditorialMarkKind, words, fromPosition: current.position };
+        if (row.verb !== 'delete' && carried.has(current.blockId) && text(mark.anchor_state) === 'exact') {
+          outcomes.push({ ...base, outcome: 'followed', toBlockId: current.blockId });
+          continue;
+        }
+        if (row.verb !== 'delete' && words !== '') {
+          const pinned = graphemesOf(words);
+          const places = newBlocks.flatMap((block) => occurrencesOf(block.parts, pinned).map((from) => ({ blockId: block.blockId, from })));
+          if (places.length === 1) {
+            const place = places[0]!;
+            update.run(place.blockId, place.from, place.from + pinned.length, 'exact', journalSequence, markId);
+            outcomes.push({ ...base, outcome: 'followed', toBlockId: place.blockId });
+            continue;
+          }
+        }
+        update.run(current.blockId, integer(mark.from_grapheme), integer(mark.to_grapheme), 'detached', journalSequence, markId);
+        outcomes.push({ ...base, outcome: 'unfollowed', toBlockId: null });
+      }
+    }
+  }
+  return outcomes;
+}
+
 export function resolveBranchMarksAfterRewrite(db: DatabaseSync, branchId: string): void {
   if (!marksRelationExists(db)) return;
   const state = db.prepare('SELECT journal_sequence FROM branch_working_state WHERE branch_id = ?').get(branchId) as SqlRow | undefined;

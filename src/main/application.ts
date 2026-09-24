@@ -1561,27 +1561,6 @@ function registerRendererHandlers(
       }),
   );
   ipcMain.handle(
-    IPC_CHANNELS.getReimportIdentityCandidatePage,
-    (event, input: ServiceOperationMap['getReimportIdentityCandidatePage']['input']) =>
-      envelope(async () => {
-        const owned = requireSender(event);
-        requireAuthority();
-        requireReimportDraftBook(owned, input.draftId);
-        const routeGeneration = owned.routeGeneration;
-        const routeRequestSequence = owned.routeRequestSequence;
-        const result = await service.call('getReimportIdentityCandidatePage', input);
-        requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
-        if (
-          result.draftId !== input.draftId ||
-          result.draftVersion !== input.expectedDraftVersion ||
-          result.mappingId !== input.mappingId
-        ) {
-          throw new ServiceCallError('AI7_IMPORT_DRAFT_CAPABILITY_INVALID', '稿件重新导入身份候选页标识不一致。');
-        }
-        return result;
-      }),
-  );
-  ipcMain.handle(
     IPC_CHANNELS.getReimportLineageSourceVersionPage,
     (event, input: ServiceOperationMap['getReimportLineageSourceVersionPage']['input']) =>
       envelope(async () => {
