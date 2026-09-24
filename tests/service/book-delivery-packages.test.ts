@@ -168,6 +168,17 @@ describe('图书交付包 (S67a)', () => {
       });
       expect([bundle.ready, bundle.changedSinceLatest]).toEqual([true, true]);
       expect(bundle.content.limitations).toContain('新闻稿：交付后有修改，本包按交付时的版本 1。');
+      // Saved and delivered as 版本 2, then 版本 1 delivered once more with no edit: delivering an earlier version is no
+      // edit (DELIV-004), so the row reads as the document's card does — no 交付后有修改 — and takes the version last delivered.
+      const version2 = (await store.saveProductionDocumentVersion({ bookId: book.bookId, documentId: news.documentId, branchId: news.branchId })).document!.versions[0]!;
+      const deliver = (revisionId: string, kind: 'publicity' | 'editorial') => store.recordProductionDocumentDelivery({
+        bookId: book.bookId, documentId: news.documentId, version: { kind: 'saved', revisionId }, recipient: { kind, custom: null }, note: null,
+      });
+      await deliver(version2.revisionId, 'publicity');
+      await deliver(news.versions[0]!.revisionId, 'editorial');
+      bundle = store.inspectBookDeliveryPackage(book.bookId);
+      expect(bundle.conditions[1]).toMatchObject({ met: true, stateLabel: '第 3 次交付 · 版本 1', notice: null, route: null });
+      expect(bundle.content.limitations.filter((line) => line.includes('交付后有修改'))).toEqual([]);
       // 恢复 of a type takes its row back to unmet.
       store.decideProductionDocumentType({ bookId: book.bookId, typeId: 'marketing-points', notForThisBook: false });
       bundle = store.inspectBookDeliveryPackage(book.bookId);
