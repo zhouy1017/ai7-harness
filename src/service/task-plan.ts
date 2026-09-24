@@ -650,7 +650,10 @@ const STAGE_WORDS: Readonly<Record<'cross-unit-reduction' | 'assurance-sampling'
  * future work that stops, what is kept, the committed Effects there are none of, and the one turn whose answer is
  * not back yet — read from the Run Liveness Signal, so it names exactly where the Run stands.
  */
-export function baselineCancellationImpact(run: NonNullable<BaselineAnalysisProjection['run']>): ReadonlyArray<string> {
+export function baselineCancellationImpact(
+  run: NonNullable<BaselineAnalysisProjection['run']>,
+  update: TaskPlanRunControlProjection['update'] = null,
+): ReadonlyArray<string> {
   if (run.state === 'admitted') {
     return ['这项任务还没有开始阅读；取消后不会发送任何内容，也不会形成结果集修订版。', CANCELLATION_NO_EFFECTS];
   }
@@ -665,12 +668,15 @@ export function baselineCancellationImpact(run: NonNullable<BaselineAnalysisProj
   }
   const inFlight = progress.stage === 'units' && progress.currentUnitOrdinal !== null;
   const remaining = Math.max(0, progress.unitsTotal - progress.unitsSettled - (inFlight ? 1 : 0));
+  // An update Run reads only the ranges it recomputes: the rest it names as such, and the ranges it reuses are kept.
+  const rest = update === null ? `其余 ${remaining} 个阅读范围` : `其余 ${remaining} 个要重新分析的阅读范围`;
   const stops = progress.stage !== 'units'
     ? `正在进行的${STAGE_WORDS[progress.stage]}完成后停止，之后的步骤都不再进行，不再发送任何内容。`
     : inFlight
-      ? `正在读的第 ${progress.currentUnitOrdinal} 个阅读范围读完后停止；其余 ${remaining} 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。`
-      : `在这两个阅读范围之间停止；其余 ${remaining} 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。`;
-  const kept = `已读完的 ${progress.unitsSettled} 个阅读范围${inFlight ? '和正在读的这一个' : ''}的结果与缺口会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。`;
+      ? `正在读的第 ${progress.currentUnitOrdinal} 个阅读范围读完后停止；${rest}和之后的归纳、抽样都不再进行，不再发送任何内容。`
+      : `在这两个阅读范围之间停止；${rest}和之后的归纳、抽样都不再进行，不再发送任何内容。`;
+  const reused = update === null || update.reusedUnits === 0 ? '' : `，连同沿用上一份分析的 ${update.reusedUnits} 个阅读范围，`;
+  const kept = `已读完的 ${progress.unitsSettled} 个阅读范围${inFlight ? '和正在读的这一个' : ''}的结果与缺口${reused}会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。`;
   return [
     stops,
     kept,
@@ -690,14 +696,17 @@ function baselineRunControl(projection: BaselineAnalysisProjection): TaskPlanRun
   // Stopping at the editor's word while an execution holds it. One AI7 left 正在取消 when it closed has none, and is
   // offered 取消任务 again, which settles it at once.
   const cancelling = run.state === 'cancelling' && run.progress !== null;
+  const counts = projection.update?.reusePlan?.counts ?? null;
+  const update = counts === null ? null : { manuscriptUnits: projection.coverageManifest?.units.length ?? counts.recomputed + counts.reused, reusedUnits: counts.reused };
   return {
     runRecordId: run.runRecordId,
     cancelling,
-    cancel: { reason: cancelling ? RUN_CONTROL_CANCELLING_REASON : null, impact: cancelling ? [] : baselineCancellationImpact(run) },
+    cancel: { reason: cancelling ? RUN_CONTROL_CANCELLING_REASON : null, impact: cancelling ? [] : baselineCancellationImpact(run, update) },
     pause: { reason: RUN_CONTROL_PAUSE_REASON },
     redo: { reason: RUN_CONTROL_REDO_REASON },
     activity: run.progress,
     executingSince: run.transitions.find((transition) => transition.state === 'executing')?.recordedAt ?? null,
+    update,
   };
 }
 

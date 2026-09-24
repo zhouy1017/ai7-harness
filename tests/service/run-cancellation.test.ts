@@ -345,6 +345,60 @@ describe('取消任务 over the real store', () => {
     }
   }, 300_000);
 
+  it('lets a reduction turn already out come back and count, then stops before the sample', async () => {
+    // A cancellation that arrives while the cross-unit reduction's turn is out: the owner is held just after that turn
+    // comes back, the way J-10's hold keeps a unit in flight.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let heldAt: string | null = null;
+    const store = await openWithRoute();
+    const execution = new BaselineAnalysisExecutionOwner({
+      ledger: store.baselineAnalysisLedger,
+      launchPolicy,
+      fixture,
+      secretResolver: { resolve: async () => null },
+      stageHold: async (stage) => {
+        heldAt = stage;
+        await held;
+      },
+    });
+    const progress = (runRecordId: string) => execution.progressFor(runRecordId);
+    try {
+      const { bookId, prepared } = await preparedBook(store, 'L2 sample1 归纳时取消');
+      const taskIntentId = prepared.taskIntent!.taskIntentId;
+      const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+      execution.admitAndDispatch(runRecordId);
+      await until(() => heldAt === 'cross-unit-reduction', 'the reduction turn out');
+      expect(execution.progressFor(runRecordId)).toMatchObject({ stage: 'cross-unit-reduction', unitsSettled: SAMPLE1_UNITS });
+      expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, progress).runControl!.cancel.impact[0])
+        .toBe('正在进行的跨单元归纳完成后停止，之后的步骤都不再进行，不再发送任何内容。');
+
+      expect(store.requestBaselineAnalysisCancel(bookId, taskIntentId)).toBe(runRecordId);
+      expect(execution.cancelRun(runRecordId, store.baselineAnalysisLedger)).toBe('stopping');
+      release();
+      await execution.whenIdle();
+
+      const cancelled = store.inspectBaselineAnalysis(bookId, progress);
+      expect(cancelled.state).toBe('cancelled');
+      // Every unit and the reduction were kept; the sample and the reflection never started.
+      const revision = cancelled.resultSetRevision!;
+      expect(revision.coverage.unitsClosed).toBe(SAMPLE1_UNITS);
+      const report = cancelled.taskOutcome!.report!;
+      expect(report.classification).toBe('cancelled');
+      expect(report.usagePerStage['cross-unit-reduction'].requests).toBe(1);
+      expect(report.usagePerStage['assurance-sampling'].requests).toBe(0);
+      expect(report.stages.find((stage) => stage.stage === 'assurance-sampling')?.state).toBe('not-run');
+      expect(report.assurance).toMatchObject({ state: 'not-run', size: 0 });
+      expect(revision.assuranceSample).toMatchObject({ state: 'not-run', reason: ASSURANCE_SAMPLING_CANCELLED });
+      expect(report.ifRedone).toEqual({ state: 'not-run', items: [], reason: RUN_REPORT_REFLECTION_CANCELLED });
+      store.markCleanShutdown();
+    } finally {
+      release();
+      await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
   it('cancels a Run admitted but not yet reading without provider work and without a revision', async () => {
     const store = await openWithRoute();
     const execution = owner(store, null);

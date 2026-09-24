@@ -7,6 +7,7 @@ import {
   TASK_BAR_CANCEL_RUN_FAILED,
   TASK_BAR_CANCELLED,
   TASK_BAR_CANCELLING_NOTE,
+  TASK_BAR_CANCELLED_NOTE,
   TASK_PLAN_ACTIVITY_STALE,
   TASK_PLAN_ACTIVITY_TITLE,
   TASK_PLAN_ACTIVITY_UNREPORTED,
@@ -941,7 +942,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       section.append(el('p', 'attention-note', TASK_PLAN_ACTIVITY_STALE));
     }
     const facts = el('dl', 'task-plan-facts task-plan-activity-facts');
-    for (const [term, value] of taskPlanActivityRows(activity, run.executingSince, now)) {
+    for (const [term, value] of taskPlanActivityRows(activity, run.executingSince, now, run.update)) {
       const cell = el('dd', undefined, value);
       cell.dataset['taskPlanActivityRow'] = term;
       facts.append(el('dt', undefined, term), cell);
@@ -960,9 +961,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     if (current === null || current.kind !== 'baseline-analysis' || current.runControl === null || !beginWork()) return;
     options.setStatus('正在取消任务…', 'busy');
     try {
-      await api.cancelBaselineAnalysisRun({ taskIntentId: current.ref });
+      const answered = await api.cancelBaselineAnalysisRun({ taskIntentId: current.ref });
       cancelConfirmShown = false;
-      options.setStatus(TASK_BAR_CANCELLING_NOTE, 'success');
+      // A Run under way stops at its next boundary; one nothing was running settled at once.
+      options.setStatus(answered.run?.state === 'cancelling' ? TASK_BAR_CANCELLING_NOTE : TASK_BAR_CANCELLED_NOTE, 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId);
     } catch (error) {

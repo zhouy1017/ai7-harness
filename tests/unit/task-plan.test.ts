@@ -218,6 +218,15 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
     ]);
   });
 
+  it('names the rest of an update Run as ranges to analyse again, and keeps the ranges it reuses in view (CTRL-004)', () => {
+    // Units 3 and 7 edited, then 同步到当前稿件: two ranges read again, six reused.
+    const impact = baselineCancellationImpact(run('executing', progress({ unitsTotal: 2, unitsSettled: 1, currentUnitOrdinal: 7 })), { manuscriptUnits: 8, reusedUnits: 6 });
+    expect(impact.slice(0, 2)).toEqual([
+      '正在读的第 7 个阅读范围读完后停止；其余 0 个要重新分析的阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。',
+      '已读完的 1 个阅读范围和正在读的这一个的结果与缺口，连同沿用上一份分析的 6 个阅读范围，会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。',
+    ]);
+  });
+
   it('stops a Run between two units there, with no answer outstanding', () => {
     expect(baselineCancellationImpact(run('executing', progress({ currentUnitOrdinal: null, currentUnitStartedAt: null, attemptState: null })))).toEqual([
       '在这两个阅读范围之间停止；其余 6 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。',
