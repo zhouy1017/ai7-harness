@@ -820,7 +820,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       open.disabled = working || documents.unavailableReason !== null;
       open.addEventListener('click', () => void openDocument(documentNow, type));
       actions.append(open);
-      // 交付 (Issue #415, S66b): the latest Delivery Record, or none yet, and 交付后有修改 once the text moved past it.
+      // 交付 (Issue #415, S66b): the latest Delivery Record, or none yet, and 交付后有修改 once an edit left every delivered version.
       const latest = documentNow.deliveries[0];
       item.dataset['documentDeliveries'] = String(documentNow.deliveries.length);
       item.dataset['documentChangedSinceDelivery'] = String(documentNow.changedSinceDelivery);
