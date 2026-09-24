@@ -148,6 +148,11 @@ function validPublicationText(value: unknown, maximum: number): boolean {
 }
 
 /** The version an export names: the current revision, or one milestone by its identity (Issue #413). */
+/** One of the three export formats (Issue #500, S64b). */
+function validExportFormat(value: unknown): boolean {
+  return value === 'docx' || value === 'pdf' || value === 'markdown';
+}
+
 function validExportTarget(value: unknown): boolean {
   if (!isRecord(value)) return false;
   if (value.kind === 'current') return hasExactKeys(value, ['kind']);
@@ -1125,21 +1130,25 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     // ④ 导出 (Issue #413). The version is the current revision or one milestone of the route's Book, the options
     // are exactly the three switches, and the destination — only ever the main process's, from the system
     // dialog — is an absolute path within the bound; whether it may be written is the store's to decide.
+    // The format (Issue #500, S64b) is optional: a request without it still means DOCX.
     case 'reviewManuscriptExport': {
-      const input = requireInput(value.input, ['bookId', 'target', 'options'], tentativeId);
-      if (!validUuid(input.bookId) || !validExportTarget(input.target) || !validExportOptions(input.options)) throw new ProtocolError(tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'target', 'options'], ['format'], tentativeId);
+      if (!validUuid(input.bookId) || !validExportTarget(input.target) || !validExportOptions(input.options) ||
+          (Object.hasOwn(input, 'format') && !validExportFormat(input.format))) throw new ProtocolError(tentativeId);
       break;
     }
     case 'prepareManuscriptExport': {
-      const input = requireInput(value.input, ['bookId', 'revisionId', 'target', 'options', 'reviewDigest', 'destination'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'revisionId', 'target', 'options', 'reviewDigest', 'destination'], ['format'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.revisionId) || !validExportTarget(input.target) ||
           !validExportOptions(input.options) || !isBoundedString(input.reviewDigest, 64) || !HEX_DIGEST_PATTERN.test(input.reviewDigest) ||
-          !isBoundedString(input.destination, MAX_EXPORT_DESTINATION_CODE_UNITS) || !isAbsolute(input.destination)) {
+          !isBoundedString(input.destination, MAX_EXPORT_DESTINATION_CODE_UNITS) || !isAbsolute(input.destination) ||
+          (Object.hasOwn(input, 'format') && !validExportFormat(input.format))) {
         throw new ProtocolError(tentativeId);
       }
       break;
     }
     case 'approveManuscriptExport':
+    case 'stageManuscriptExport':
     case 'inspectManuscriptExportReceipt': {
       const input = requireInput(value.input, ['bookId', 'preparationId'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.preparationId)) throw new ProtocolError(tentativeId);

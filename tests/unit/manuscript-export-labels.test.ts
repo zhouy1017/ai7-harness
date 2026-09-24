@@ -7,6 +7,7 @@ import {
   EXPORT_LOCAL_LINE,
   EXPORT_OPTION_LABELS,
   EXPORT_OPTION_NOTES,
+  exportOptionNote,
   EXPORT_OPTION_ORDER,
   EXPORT_OPTIONS_NOTE,
   EXPORT_RECORDS_HEADING,
@@ -68,11 +69,19 @@ describe('the words of 导出', () => {
     expect(EXPORT_LOCAL_LINE).toBe('导出只写到本机你选择的位置；AI7 不会发送、上传或发布这个文件。');
   });
 
-  it('offer DOCX and name PDF and Markdown as later, with what each promises', () => {
+  it('offer DOCX first, PDF as optional and Markdown only as the 备用格式, with what each promises (Issue #500)', () => {
     expect(EXPORT_FORMATS.map((format) => [format.format, format.label, format.available])).toEqual([
-      ['docx', 'DOCX', true], ['pdf', 'PDF', false], ['markdown', 'Markdown（备用格式）', false],
+      ['docx', 'DOCX', true], ['pdf', 'PDF', true], ['markdown', 'Markdown（备用格式）', true],
     ]);
-    expect(EXPORT_FORMATS[1]!.note).toBe('随后提供 · 固定版式，不支持可编辑往返。');
+    expect(EXPORT_FORMATS[1]!.note).toBe('可选 · 固定版式，适合阅读与打印；不能继续编辑，也不能导回 AI7。');
+    expect(EXPORT_FORMATS[2]!.note).toBe('备用格式 · 只写出文字与标题层级，用于迁移或留底。');
+    // Markdown is offered only under the 备用格式 disclosure, never as a peer of DOCX and PDF (EXP-005).
+    expect(EXPORT_FORMATS.map((format) => [format.format, format.fallback])).toEqual([['docx', false], ['pdf', false], ['markdown', true]]);
+    // What each option writes follows the format the card reviews.
+    expect(exportOptionNote('includeAnnotations', 'docx')).toBe('作为 Word 批注写出，保留作者名与回复。');
+    expect(exportOptionNote('includeAnnotations', 'pdf')).toBe('在正文中标出编号，连同作者名与回复列在文末。');
+    expect(exportOptionNote('includeSuggestions', 'markdown')).toBe('待处理的修改建议写成 CriticMarkup 标记，作者写在脚注里。');
+    expect(exportOptionNote('includeEditorNotes', 'markdown')).toBe('备注默认不随导出；勾选后写成脚注，作者为「备注」。');
   });
 
   it('read each review row by its shape as well as its words, and summarize what is nowhere', () => {

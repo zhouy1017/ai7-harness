@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx } from './composed-docx.mjs';
+import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx } from './composed-docx.mjs';
 import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 // J-07 (Issue #414, plan slice S65): ⑥ 发稿. An editor saves Milestone Versions of the manuscript — each
@@ -23,6 +23,14 @@ import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabl
 // their author, the header byte for byte, the untouched paragraph's bold run, and no 备注. Cancelling after the
 // destination was chosen writes nothing, and the card is reached by keyboard, reflows at 200% and keeps its
 // shapes without colour.
+//
+// Issue #500 (plan slice S64b) adds the two formats laid out from the manuscript's words. Two more launches, each
+// with its own Save-dialog answer, export the same revision as PDF and as the Markdown 备用格式: choosing the format
+// reviews again, and the review is the format's own — every class of the file beyond the words named 无法导出, the
+// marks kept only as words 降级导出. The PDF is printed by AI7 itself from the page the preparation bound; the runner
+// finds a PDF on disk, byte for byte the receipt's, and nothing of the print left in AI7's staging folder. The
+// Markdown it reads itself: every paragraph the manuscript's words at its heading level, the author's 批注 a
+// footnote under their name, the tracked replacement CriticMarkup, and no 备注.
 //
 // The input is composed at run time from the one admitted Public SampleBook under the content rule in
 // docs/agents/ci-test-boundaries.md; every string this runner types is authored here, and the only
@@ -66,6 +74,25 @@ const EXPORT_ABSENT_LINE = '未检测到：脚注与尾注、表格、图片与�
 const EXPORT_NOTE_EXCLUDED = '备注默认不随导出（稿件上 1 条）；勾选「含备注」后作为批注写出，作者为「备注」。';
 const EXPORT_DESTINATION_UNCHOSEN = '还没有选择保存位置。所选位置已有同名文件时，由系统的保存对话框询问是否替换。';
 const EXPORTED_LABEL = '已导出到所选位置';
+// Issue #500 (S64b): the same revision as a PDF and as the Markdown 备用格式, each under a launch of its own.
+const PDF_FILE = '发稿旅程甲.pdf';
+const MARKDOWN_FILE = '发稿旅程甲.md';
+// The review of either: every class the file holds beyond the words left behind, the marks kept only as words.
+const TEXT_EXPORT_ROWS = Object.freeze(['inline-styles:unavailable:1', 'annotations:degraded:1', 'change-suggestions:degraded:1', 'editor-notes:excluded:1', 'sections:unavailable:1', 'headers-footers:unavailable:1']);
+// The service's and the card's words for each (`src/service/manuscript-export.ts`, `src/renderer/manuscript-export-labels.ts`),
+// pinned there by the service and unit suites.
+const TEXT_EXPORT_WORDS = Object.freeze({
+  pdf: {
+    line: 'PDF 是固定版式：按稿件文字排成 A4 页面，适合阅读与打印，不能在 PDF 里继续修改，也不能导回 AI7；稿件本身和稿件上的标记不会因为导出而改变。',
+    restoration: '这份 PDF 按稿件文字排版生成：书名、章节标题与段落按稿件写出，不从原文件恢复任何内容。',
+    annotations: '在正文中标出编号，连同作者名与回复列在文末。',
+  },
+  markdown: {
+    line: 'Markdown 是备用格式：只写出文字与标题层级，批注写成脚注，修改建议写成 CriticMarkup 标记，其余内容不随导出；稿件本身和稿件上的标记不会因为导出而改变。',
+    restoration: '这份 Markdown 按稿件文字生成：标题层级写成 #，段落之间空一行，不从原文件恢复任何内容。',
+    annotations: '写成脚注，保留作者名与回复。',
+  },
+});
 const EXPORT_CLOSED = '已关闭导出，没有写入任何文件。';
 // The written package: the original's parts, the comments the export writes, and the package relationships it adds.
 const EXPORTED_PARTS = Object.freeze(['[Content_Types].xml', '_rels/.rels', 'docProps/core.xml', 'word/_rels/document.xml.rels', 'word/comments.xml', 'word/commentsExtended.xml', 'word/document.xml', 'word/header1.xml']);
@@ -392,6 +419,94 @@ async function exportAct(renderer, action, name) {
   await clickSelector(renderer, `[data-screen="book-deliverables"] .deliverables-export-slot > section.manuscript-export [data-export-action="${action}"]`, name);
 }
 
+/** After a relaunch: the Book from 最近的工作, then 交付物 from its manuscript. */
+async function reopenDeliverables(renderer, name) {
+  await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]') && document.querySelector('.recent-work-item button')`, `${name}-prior-work`);
+  await assertRenderer(renderer, PAGE_HELPERS, `${name}-page-helpers`);
+  await assertRenderer(renderer, `(() => { document.querySelector('.recent-work-item button').click(); return true; })()`, `${name}-open-book`);
+  await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] > [data-block-id]')`, `${name}-editor`);
+  await openDeliverables(renderer, name);
+}
+
+/**
+ * Issue #500 (S64b): 导出… of the current revision as a PDF or in the Markdown 备用格式, under this launch's Save-dialog
+ * answer. The card opens on DOCX with all three formats offered; choosing another reviews again, and the review is
+ * the format's own, its option notes in the format's words. The destination, the approval and the receipt follow as
+ * for DOCX. Returns the service's receipt of the export.
+ */
+async function exportAs(renderer, format, destination, fileName, name) {
+  const words = TEXT_EXPORT_WORDS[format];
+  const radio = `window.__j07.exportCard()?.querySelector('input[name="export-format"][value="${format}"]')`;
+  await clickSelector(renderer, '[data-screen="book-deliverables"] section.deliverables-publication [data-export-action="open"][data-export-target="current"]', `${name}-open`);
+  await waitFor(renderer, `(() => { const card = window.__j07.exportCard(); return card?.dataset.exportPhase === 'ready' && card.querySelector('input[name="export-format"]:checked')?.value === 'docx'; })()`, `${name}-opens-on-docx`, 120_000);
+  await assertRenderer(renderer, `(() => {
+    const formats = Array.from(window.__j07.exportCard().querySelectorAll('input[name="export-format"]'));
+    const radio = ${radio};
+    if (JSON.stringify(formats.map((item) => item.value + ':' + item.checked + ':' + item.disabled)) !== '["docx:true:false","pdf:false:false","markdown:false:false"]' || !(radio instanceof HTMLInputElement)) return false;
+    // Markdown sits under the 备用格式 disclosure only, closed until the editor opens it (EXP-005).
+    const fallback = window.__j07.exportCard().querySelector('details.export-fallback-formats');
+    if (fallback?.querySelector('summary')?.textContent !== '备用格式' || fallback.open ||
+      JSON.stringify(Array.from(fallback.querySelectorAll('input[name="export-format"]')).map((item) => item.value)) !== '["markdown"]') return false;
+    if (radio.closest('details.export-fallback-formats') !== null) fallback.open = true;
+    radio.click();
+    return true;
+  })()`, `${name}-choose-format`);
+  await waitFor(renderer, `(() => { const card = window.__j07.exportCard(); return card?.dataset.exportPhase === 'ready' && ${radio}?.checked === true && card.querySelector('.export-format-line')?.textContent === ${JSON.stringify(words.line)} && card.querySelector('section.export-fidelity')?.dataset.exportRestoration === 'regenerated'; })()`, `${name}-reviewed`, 120_000);
+  await assertRenderer(renderer, `(() => {
+    const card = window.__j07.exportCard();
+    const fidelity = card.querySelector('section.export-fidelity');
+    const pills = Array.from(fidelity.querySelectorAll('li.export-fidelity-row .status-pill')).map((pill) => pill.textContent);
+    const note = window.__j07.exportOption('includeAnnotations')?.closest('label')?.querySelector('small.field-note')?.textContent ?? null;
+    return JSON.stringify(window.__j07.exportRows()) === ${JSON.stringify(JSON.stringify(TEXT_EXPORT_ROWS))} &&
+      JSON.stringify(pills) === ${JSON.stringify(JSON.stringify(TEXT_EXPORT_ROWS.map((row) => row.includes(':unavailable:') ? '⊘ 无法导出' : row.includes(':degraded:') ? '△ 降级导出' : '○ 本次不含')))} &&
+      fidelity.dataset.exportDegraded === 'true' && fidelity.querySelector('.export-restoration-line')?.textContent === ${JSON.stringify(words.restoration)} &&
+      fidelity.querySelector('.export-absent-line')?.textContent === ${JSON.stringify(EXPORT_ABSENT_LINE)} && fidelity.querySelector('.export-degraded-note') !== null &&
+      note === ${JSON.stringify(words.annotations)} && card.querySelector('section.export-destination')?.dataset.exportDestination === 'unchosen';
+  })()`, `${name}-review-is-the-formats-own`);
+  await exportAct(renderer, 'choose', `${name}-choose`);
+  await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'prepared' && window.__j07.status() === '已准备好导出文件，等待你确认。'`, `${name}-prepared`, 120_000);
+  await assertRenderer(renderer, `(() => {
+    const card = window.__j07.exportCard();
+    return card.querySelector('.export-destination-line')?.textContent === ${JSON.stringify(`${destination}（新建文件）`)} && window.__j07.exportAction('approve')?.disabled === false &&
+      card.querySelector('.export-actions')?.dataset.exportAcceptsDegradation === 'true' && ${radio}?.checked === true;
+  })()`, `${name}-destination-bound`);
+  requireJourney(!existsSync(destination), `${name}-nothing-written-before-approval`);
+  await exportAct(renderer, 'approve', `${name}-approve`);
+  await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'done' && window.__j07.status() === ${JSON.stringify(EXPORTED_LABEL)} && window.__j07.tone() === 'success'`, `${name}-written`, 120_000);
+  await assertRenderer(renderer, `(() => {
+    const receipt = window.__j07.exportCard().querySelector('.export-receipt');
+    return receipt?.dataset.exportOutcome === 'created' && receipt.querySelector('.export-outcome-detail')?.textContent === ${JSON.stringify(`已新建「${fileName}」。`)} &&
+      Array.from(window.__j07.exportCard().querySelectorAll('input[name="export-format"]')).every((item) => item.disabled);
+  })()`, `${name}-receipt-shown`);
+  const records = await renderer.evaluate(`window.ai7.inspectDeliverables().then((deliverables) => deliverables.exports.map((record) => ({ outcome: record.outcome, format: record.format, fileName: record.fileName, destination: record.destination, revisionLabel: record.target.revisionLabel, byteLength: record.byteLength, fileSha256: record.technical.fileSha256 })))`);
+  const record = Array.isArray(records) ? records.find((entry) => entry.destination === destination) : undefined;
+  requireJourney(record?.outcome === 'created' && record.format === format && record.fileName === fileName && record.revisionLabel === 'r3', `${name}-service-receipt`,
+    Array.isArray(records) ? records.map((entry) => `${entry.format}:${entry.outcome}`) : records);
+  await exportAct(renderer, 'close', `${name}-close`);
+  await waitFor(renderer, `window.__j07.exportCard() === null && document.activeElement === window.__j07.exportOpener('current')`, `${name}-closed`, 10_000);
+  return record;
+}
+
+// The Markdown 备用格式's escaping (`src/service/text-export.ts`), restated: a character Markdown or CriticMarkup
+// reads as syntax is escaped wherever it stands, a line that would open a construct at its start, a leading space
+// or tab becomes its character reference, and a paragraph's line break is a hard break.
+function markdownWords(text) {
+  return text.replace(/[\\`*_[\]<>{}|~&#]/gu, (character) => `\\${character}`);
+}
+function markdownLine(line) {
+  const indent = /^[ \t]+/u.exec(line);
+  if (indent !== null) return `${indent[0].replace(/[ \t]/gu, (space) => (space === ' ' ? '&#32;' : '&#9;'))}${line.slice(indent[0].length)}`;
+  const list = /^(\d+)([.)])/u.exec(line);
+  if (list !== null) return `${list[1]}\\${list[2]}${line.slice(list[0].length)}`;
+  return /^[>+=-]/u.test(line) ? `\\${line}` : line;
+}
+function markdownBlock(shape, markdown) {
+  const lines = markdown.split('\n').map(markdownLine);
+  if (shape.kind === 'title') return `# ${lines.join(' ')}`;
+  if (shape.kind === 'heading') return `${'#'.repeat(Math.min(Math.max(shape.level + 1, 2), 6))} ${lines.join(' ')}`;
+  return lines.join('\\\n');
+}
+
 /** 交付物 as the service answers it, reduced to what the page is checked against: identities, words and states. */
 const READ_PUBLICATION = `window.ai7.inspectDeliverables().then((deliverables) => ({
   bookId: deliverables.bookId,
@@ -558,6 +673,8 @@ async function main() {
     await mkdir(exportsRoot);
     const exportPath = resolve(exportsRoot, EXPORT_FILE);
     const cancelledPath = resolve(exportsRoot, CANCELLED_FILE);
+    const pdfPath = resolve(exportsRoot, PDF_FILE);
+    const markdownPath = resolve(exportsRoot, MARKDOWN_FILE);
     const metadata = await lstat(manuscript);
     requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size > 1_000, 'fixture-composed');
     const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
@@ -838,7 +955,8 @@ async function main() {
 
     at('export-open-current');
     // 导出… of the current revision: the unsaved edit becomes revision r3 — not a milestone — and the card reviews
-    // it with 含批注 and 含修改建议（作为修订） on and 含备注 off, DOCX the one format offered, focus on it.
+    // it with 含批注 and 含修改建议（作为修订） on and 含备注 off, DOCX chosen of the three formats (PDF and the
+    // Markdown 备用格式 since Issue #500), focus on it.
     await openDeliverables(renderer, 'export');
     await assertRenderer(renderer, `(() => { const openers = Array.from(document.querySelectorAll('[data-screen="book-deliverables"] [data-export-action="open"]')); return window.__j07.exportCard() === null && openers.every((node) => node.textContent === '导出…' && !node.disabled) && JSON.stringify(openers.map((node) => node.getAttribute('aria-label'))) === ${JSON.stringify(JSON.stringify(['导出当前修订版…', `导出里程碑版本「${SECOND.label}」…`, `导出里程碑版本「${FIRST.label}」…`]))} && window.__j07.block().querySelector('section.export-records-section')?.dataset.exportRecords === '0'; })()`, 'export-openers-name-their-version');
     await clickSelector(renderer, '[data-screen="book-deliverables"] section.deliverables-publication [data-export-action="open"][data-export-target="current"]', 'export-open');
@@ -850,7 +968,7 @@ async function main() {
       return card.dataset.exportTarget === 'current' && card.querySelector('h4')?.textContent === '导出 · 当前修订版 r3' &&
         card.querySelector('.export-saved-line')?.textContent === '未保存的修改已为导出保存为修订版 r3；这不是里程碑版本。' &&
         card.querySelector('.export-local-line')?.textContent === ${JSON.stringify(EXPORT_LOCAL_LINE)} &&
-        JSON.stringify(formats.map((radio) => radio.value + ':' + radio.checked + ':' + radio.disabled)) === '["docx:true:false","pdf:false:true","markdown:false:true"]' &&
+        JSON.stringify(formats.map((radio) => radio.value + ':' + radio.checked + ':' + radio.disabled)) === '["docx:true:false","pdf:false:false","markdown:false:false"]' &&
         option('includeAnnotations')?.checked === true && option('includeSuggestions')?.checked === true && option('includeEditorNotes')?.checked === false &&
         document.activeElement === formats[0] && window.__j07.tone() === 'success';
     })()`, 'export-card-states-the-version');
@@ -1073,14 +1191,16 @@ async function main() {
     await waitFor(renderer, `window.__j07.form() === null`, 'forced-colors-form-closed', 10_000);
 
     at('j14-export-keyboard');
-    // The card without a pointer: Enter on 导出… opens it on its first choice; Tab reaches each option with visible
-    // focus, and Space on 含备注 reviews again — the 备注 now written under 「备注」 — with focus kept; Tab reaches
+    // The card without a pointer: Enter on 导出… opens it on its first choice; Tab reaches the closed 备用格式 disclosure,
+    // then each option with visible focus, and Space on 含备注 reviews again — the 备注 now written under 「备注」 — with focus kept; Tab reaches
     // 选择保存位置…, left alone because this launch's Save dialog has answered, and 取消, whose Enter closes the
     // card with focus back on the opener and nothing written.
     await assertRenderer(renderer, `(() => { const open = window.__j07.exportOpener('current'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.focus(); return document.activeElement === open; })()`, 'export-keyboard-opener-focused');
     await pressEnter(renderer);
     await waitFor(renderer, `(() => { const card = window.__j07.exportCard(); const docx = card?.querySelector('input[name="export-format"][value="docx"]'); return card?.dataset.exportPhase === 'ready' && docx instanceof HTMLInputElement && docx.checked && document.activeElement === docx; })()`, 'export-keyboard-opens-on-its-first-choice', 60_000);
     await assertRenderer(renderer, `window.__j07.exportCard().querySelector('h4')?.textContent === '导出 · 当前修订版 r3' && window.__j07.exportCard().querySelector('.export-saved-line') === null`, 'export-keyboard-nothing-to-save');
+    await press(renderer, 'Tab');
+    await waitFor(renderer, `(() => { const summary = window.__j07.exportCard()?.querySelector('details.export-fallback-formats > summary'); return document.activeElement === summary && summary.textContent === '备用格式' && summary.matches(':focus-visible') && summary.parentElement.open === false; })()`, 'export-keyboard-fallback-formats-reached', 10_000);
     for (const key of ['includeAnnotations', 'includeSuggestions', 'includeEditorNotes']) {
       await press(renderer, 'Tab');
       await waitFor(renderer, `document.activeElement === window.__j07.exportOption(${JSON.stringify(key)}) && document.activeElement.matches(':focus-visible')`, `export-keyboard-${key}-reached`, 10_000);
@@ -1133,6 +1253,63 @@ async function main() {
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
     await exportAct(renderer, 'cancel', 'export-forced-colors-cancel');
     await waitFor(renderer, `window.__j07.exportCard() === null`, 'export-forced-colors-closed', 10_000);
+
+    at('export-pdf');
+    // Issue #500 (S64b): a launch whose Save dialog answers with a PDF. The same revision, PDF chosen: AI7 prints the
+    // page the preparation bound and writes it; the file on disk is a PDF, byte for byte the receipt's, and AI7's
+    // staging folder keeps nothing of the print.
+    await close();
+    renderer = await launch({ save: pdfPath });
+    await reopenDeliverables(renderer, 'pdf');
+    const pdfRecord = await exportAs(renderer, 'pdf', pdfPath, PDF_FILE, 'pdf');
+    const printed = await readFile(pdfPath);
+    requireJourney(printed.subarray(0, 5).toString('latin1') === '%PDF-' && printed.subarray(Math.max(0, printed.length - 1_024)).toString('latin1').includes('%%EOF') &&
+      pdfRecord.byteLength === printed.length && pdfRecord.fileSha256 === createHash('sha256').update(printed).digest('hex'), 'pdf-written-as-printed', { bytes: printed.length, recorded: pdfRecord.byteLength });
+    requireJourney(JSON.stringify(await readdir(resolve(dataRoot, 'export-staging'))) === '[]', 'pdf-print-not-kept');
+    requireJourney(JSON.stringify((await readdir(exportsRoot)).sort()) === JSON.stringify([EXPORT_FILE, PDF_FILE].sort()), 'pdf-folder-holds-the-two-files');
+
+    at('export-markdown');
+    // A launch whose Save dialog answers with a Markdown file: the 备用格式 of the same revision, read back by the
+    // runner — every paragraph the manuscript's words at its heading level, the two edits in the first, the author's
+    // 批注 a footnote under their name after its words, the tracked replacement CriticMarkup where it stands, and no 备注.
+    await close();
+    renderer = await launch({ save: markdownPath });
+    await reopenDeliverables(renderer, 'markdown');
+    const markdownRecord = await exportAs(renderer, 'markdown', markdownPath, MARKDOWN_FILE, 'markdown');
+    const markdownBytes = await readFile(markdownPath);
+    requireJourney(markdownRecord.byteLength === markdownBytes.length && markdownRecord.fileSha256 === createHash('sha256').update(markdownBytes).digest('hex'), 'markdown-written-as-recorded');
+    const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
+    const graphemesOf = (text) => Array.from(segmenter.segment(text), ({ segment }) => segment);
+    const shapes = await admittedParagraphShapes(EXCERPT);
+    const commentWords = await admittedSpanText(EXCERPT.source, EXPORT_INPUT.comment.text);
+    const insertWords = await admittedSpanText(EXCERPT.source, EXPORT_INPUT.replacement.insert);
+    const { comment, replacement } = EXPORT_INPUT;
+    const expectedMarkdown = excerpt.map((text, index) => {
+      const words = graphemesOf(index === 0 ? `${text}${FIRST_EDIT}${SECOND_EDIT}` : text);
+      const span = (from, to) => markdownWords(words.slice(from, to).join(''));
+      const markdown = index + 1 === comment.block
+        ? `${span(0, comment.to)}[^1]${span(comment.to)}`
+        : index + 1 === replacement.block
+          ? `${span(0, replacement.from)}{~~${span(replacement.from, replacement.to)}~>${markdownWords(insertWords)}~~}[^2]${span(replacement.to)}`
+          : span(0);
+      return markdownBlock(shapes[index], markdown);
+    });
+    const markdownText = markdownBytes.toString('utf8');
+    requireJourney(markdownText.endsWith('\n') && !markdownText.endsWith('\n\n'), 'markdown-ends-with-one-line-break');
+    const markdownParts = markdownText.slice(0, -1).split('\n\n');
+    const markdownBody = markdownParts.slice(0, excerpt.length);
+    requireJourney(markdownParts.length === excerpt.length + 2 && JSON.stringify(markdownBody.map(digestOf)) === JSON.stringify(expectedMarkdown.map(digestOf)), 'markdown-paragraphs-as-the-manuscript',
+      { parts: markdownParts.length, differing: markdownBody.map((part, index) => digestOf(part) === digestOf(expectedMarkdown[index] ?? '') ? 0 : index + 1).filter(Boolean) });
+    const dated = (note) => note.replace(/^(\[\^\d\]: \S+ · .+?) · \d{4}-\d{2}-\d{2}：/u, '$1 · <date>：');
+    const expectedNotes = [
+      `[^1]: 批注 · ${IMPORTED_MARKS_AUTHOR} · <date>：${markdownWords(commentWords)}`,
+      `[^2]: 修改建议 · ${IMPORTED_MARKS_AUTHOR} · <date>：「${markdownWords(graphemesOf(excerpt[replacement.block - 1]).slice(replacement.from, replacement.to).join(''))}」改为「${markdownWords(insertWords)}」`,
+    ];
+    requireJourney(JSON.stringify(markdownParts.slice(excerpt.length).map(dated).map(digestOf)) === JSON.stringify(expectedNotes.map(digestOf)), 'markdown-notes-by-their-author',
+      markdownParts.slice(excerpt.length).map((note) => /^\[\^\d\]: (\S+) · (\S+) · \d{4}-\d{2}-\d{2}：/u.exec(note)?.slice(1).map((part) => part === IMPORTED_MARKS_AUTHOR ? 'file-author' : part) ?? 'unrecognized'));
+    requireJourney(!markdownText.includes(NOTE.body) && !markdownText.includes('备注 · '), 'markdown-writes-no-note');
+    requireJourney(JSON.stringify((await readdir(exportsRoot)).sort()) === JSON.stringify([EXPORT_FILE, MARKDOWN_FILE, PDF_FILE].sort()), 'markdown-folder-holds-the-three-files');
+    await waitFor(renderer, `window.__j07.block()?.querySelector('section.export-records-section')?.dataset.exportRecords === '3'`, 'markdown-three-records-listed', 30_000);
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

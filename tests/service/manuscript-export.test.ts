@@ -202,7 +202,7 @@ describe('④ 导出: the Export Fidelity Review, the preparation, the approval 
 
       const reviewed = await review(store, book);
       expect(reviewed).toMatchObject({ target: { kind: 'current', milestoneId: null, revisionLabel: 'r1' }, savedForExport: false, format: 'docx', restoration: 'from-original', degraded: false });
-      expect(reviewed.formats.map((format) => [format.format, format.available])).toEqual([['docx', true], ['pdf', false], ['markdown', false]]);
+      expect(reviewed.formats.map((format) => [format.format, format.available])).toEqual([['docx', true], ['pdf', true], ['markdown', true]]);
       expect(reviewed.fidelity.filter((row) => ['annotations', 'change-suggestions', 'editor-notes'].includes(row.key)).map((row) => [row.key, row.status, row.count]))
         .toEqual([['annotations', 'preserved', 1], ['change-suggestions', 'preserved', 1], ['editor-notes', 'excluded', 1]]);
       expect(reviewed.suggestedFileName).toBe('导出组稿 · r1.docx');

@@ -1,6 +1,7 @@
 import {
   DEFAULT_MANUSCRIPT_EXPORT_OPTIONS,
   type ExportFidelityRowProjection,
+  type ManuscriptExportFormat,
   type ManuscriptExportOptions,
   type ManuscriptExportPreparationProjection,
   type ManuscriptExportReceiptProjection,
@@ -15,10 +16,11 @@ import {
   EXPORT_DESTINATION_HEADING,
   EXPORT_DESTINATION_UNCHOSEN,
   EXPORT_FIDELITY_HEADING,
+  EXPORT_FALLBACK_FORMATS,
   EXPORT_FORMAT_LEGEND,
   EXPORT_LOCAL_LINE,
   EXPORT_OPTION_LABELS,
-  EXPORT_OPTION_NOTES,
+  exportOptionNote,
   EXPORT_OPTION_ORDER,
   EXPORT_OPTIONS_LEGEND,
   EXPORT_OPTIONS_NOTE,
@@ -77,6 +79,8 @@ type Phase = 'reviewing' | 'ready' | 'choosing' | 'prepared' | 'writing' | 'done
 interface CardState {
   target: ManuscriptExportTargetInput;
   pendingLabel: { kind: 'current' } | { kind: 'milestone'; label: string };
+  /** The format the card reviews (Issue #500, S64b): DOCX until the editor chooses another. */
+  format: ManuscriptExportFormat;
   options: ManuscriptExportOptions;
   review: ManuscriptExportReviewProjection | null;
   preparation: ManuscriptExportPreparationProjection | null;
@@ -146,7 +150,7 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
     current.problem = null;
     render(focus === 'first' ? 'keep' : focus);
     options.setStatus(EXPORT_STATUS_LINES.reviewing, 'busy');
-    void api.reviewManuscriptExport({ target: current.target, options: { ...current.options } }).then(
+    void api.reviewManuscriptExport({ target: current.target, options: { ...current.options }, format: current.format }).then(
       (next) => {
         if (destroyed || state !== current || request !== ticket) return;
         if (next.bookId !== options.bookId) {
@@ -189,6 +193,7 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
         options: { ...current.options },
         reviewDigest: reviewed.reviewDigest,
         suggestedFileName: reviewed.suggestedFileName,
+        format: reviewed.format,
       });
       if (destroyed || state !== current || request !== ticket) return;
       if (result.outcome === 'cancelled') {
@@ -310,11 +315,18 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
     }
   }
 
-  /** DOCX is the one format offered; PDF and the Markdown 备用格式 are named with why they are not (EXP-001). */
+  /**
+   * DOCX first and chosen, PDF optional, Markdown as the 备用格式 (EXP-001, EXP-005, EXP-006; Issue #500, S64b) — under a
+   * secondary disclosure of its own, open only once the editor opens it or chose it. Choosing another reviews again —
+   * each format has its own review (EXP-007) — and a review in flight never locks the choice.
+   */
   function renderFormats(current: CardState, busy: boolean): HTMLElement {
     const formats = el('fieldset', 'export-formats');
     formats.append(el('legend', undefined, EXPORT_FORMAT_LEGEND));
     const offered = current.review?.formats ?? [];
+    const fallback = el('details', 'export-fallback-formats');
+    fallback.append(el('summary', undefined, EXPORT_FALLBACK_FORMATS));
+    fallback.open = offered.some((format) => format.fallback && format.format === current.format);
     for (const format of offered) {
       const option = el('label', 'export-format-option');
       option.dataset['exportFormat'] = format.format;
@@ -322,13 +334,19 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
       radio.type = 'radio';
       radio.name = 'export-format';
       radio.value = format.format;
-      radio.checked = format.format === 'docx';
-      radio.disabled = !format.available || busy;
+      radio.checked = format.format === current.format;
+      radio.disabled = !format.available || (busy && current.phase !== 'reviewing') || current.receipt !== null;
+      radio.addEventListener('change', () => {
+        if (state !== current || working() || !radio.checked) return;
+        current.format = format.format;
+        review('keep');
+      });
       const words = el('span', 'export-format-text');
       words.append(el('strong', undefined, format.label), el('small', 'field-note', format.note));
       option.append(radio, words);
-      formats.append(option);
+      (format.fallback ? fallback : formats).append(option);
     }
+    if (fallback.children.length > 1) formats.append(fallback);
     if (current.review !== null) formats.append(el('p', 'field-note export-format-line', current.review.formatLine));
     return formats;
   }
@@ -345,7 +363,7 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
       // A review in flight never locks the switches: a newer choice supersedes it, and focus stays where it was.
       box.disabled = (busy && current.phase !== 'reviewing') || current.receipt !== null;
       box.dataset['exportOption'] = key;
-      const note = el('small', 'field-note', EXPORT_OPTION_NOTES[key]);
+      const note = el('small', 'field-note', exportOptionNote(key, current.format));
       note.id = uid(`${key}-note`);
       box.setAttribute('aria-describedby', note.id);
       box.addEventListener('change', () => {
@@ -480,6 +498,7 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
       state = {
         target,
         pendingLabel: target.kind === 'current' ? { kind: 'current' } : { kind: 'milestone', label: label ?? '' },
+        format: 'docx',
         options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS },
         review: null,
         preparation: null,

@@ -99,7 +99,7 @@ function serviceEnvironment(
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 51 &&
+    value.protocolVersion === 52 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&
@@ -232,9 +232,10 @@ export class ServiceClient {
             // A Review Run's drive loop starts inside these two answers, and it writes at once whatever
             // needs no model: the leads, or a category whose Run finished before a restart.
             operation === 'authorizeReviewRun' || operation === 'continueReviewRun' ||
-            // An export renders the whole file for its review, its preparation and its approval; a timeout would
-            // stop the service mid-write and leave its stage behind.
-            operation === 'reviewManuscriptExport' || operation === 'prepareManuscriptExport' || operation === 'approveManuscriptExport'
+            // An export renders the whole file for its review, its staging, its preparation and its approval; a timeout
+            // would stop the service mid-write and leave its stage behind.
+            operation === 'reviewManuscriptExport' || operation === 'stageManuscriptExport' ||
+            operation === 'prepareManuscriptExport' || operation === 'approveManuscriptExport'
           ? LONG_REQUEST_TIMEOUT_MS
           : REQUEST_TIMEOUT_MS);
       timeout.unref();
