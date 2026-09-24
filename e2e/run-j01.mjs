@@ -17,6 +17,7 @@ import {
   IMPORTED_MARKS_REJECTED_BLOCKS,
 } from './composed-docx.mjs';
 import { attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, discloseJourneySkip, installJourneyCancellationCleanup, LOCAL_ONLY_DOC, localDebugEnabled, localManuscriptAvailable, localManuscriptPath, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { createLaunchTrace, formatReadinessTrace, launchTraceLogger } from './readiness-trace.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PRODUCT_RENDERER_URL = pathToFileURL(resolve(ROOT, 'dist', 'renderer', 'index.html')).href;
@@ -51,6 +52,8 @@ const RENDERER_CDP_FAILURE = new Error('J-01/renderer-cdp-response');
 const RENDERER_CDP_TIMEOUT = new Error('J-01/renderer-cdp-timeout');
 const RENDERER_SESSION_CLOSED = new Error('J-01/renderer-session-closed');
 let diagnosticLocation = 'entry';
+// The launch in flight (Issue #518): what the product reported while J-01 waited for it, for the one line a failure prints.
+let launchTrace = null;
 let electronExecutable;
 let browserLifecycleIncomplete = false;
 
@@ -2137,6 +2140,8 @@ async function main() {
       );
       cancellation.throwIfRequested();
       at(`launch-${launchScenario}-browser-acquisition`);
+      const trace = createLaunchTrace(launchScenario);
+      launchTrace = trace;
       const launchPromise = chromium.launch({
         executablePath: executable,
         headless: false,
@@ -2144,6 +2149,7 @@ async function main() {
         args: productArgs,
         env: productEnvironment(executable),
         timeout: PRODUCT_READY_TIMEOUT_MS,
+        logger: launchTraceLogger(trace),
       });
       launchPromise.catch(() => undefined);
       let launchTimeout;
@@ -2168,7 +2174,9 @@ async function main() {
       }
       cancellation.throwIfRequested();
       at(`launch-${launchScenario}-renderer-target`);
-      return attachRendererTarget(browser);
+      const attached = await attachRendererTarget(browser);
+      trace.target = true;
+      return attached;
     };
     const closeProduct = async () => {
       at('window-close');
@@ -4223,5 +4231,6 @@ async function main() {
 
 main().catch((error) => {
   reportJourneyFailure('J-01', diagnosticLocation, error);
+  if (launchTrace !== null) console.error(formatReadinessTrace('J-01', launchTrace));
   if (browserLifecycleIncomplete) process.stderr.write('', () => process.exit(1));
 });

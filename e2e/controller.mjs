@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { appendFileSync, createWriteStream, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readReadinessTrace } from './readiness-trace.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const JOURNEY_RUNNER_ENTRY = resolve(ROOT, 'e2e', 'run.mjs');
@@ -1482,6 +1483,14 @@ async function writeDebugFailure(journey, location, error) {
 }
 
 /** Classify a finished journey process the same way the payload-safe diagnostic does. */
+/**
+ * The readiness trace a failed Journey printed (Issue #518), without its prefix: which startup step the product reached
+ * and when, validated as content-free, or `null`. A passing run's output is never read for it.
+ */
+export function collectReadinessTrace(result, journey) {
+  return readReadinessTrace(result.stderr, journey);
+}
+
 export function classifyJourneyResult(result, journey) {
   if (result.spawnError) return { location: 'controller', errorClass: 'controller-spawn' };
   if (result.controllerSignal !== null) return { location: 'controller', errorClass: 'controller-signal' };
