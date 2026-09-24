@@ -253,7 +253,9 @@ import { initializeRunCheckpointSchema } from './analysis/run-checkpoints.js';
 import { initializeClarificationSchema } from './analysis/clarifications.js';
 import { initializeReimportGroupSchema } from './reimport-group-ledger.js';
 import { initializeProductionDocumentSchema } from './production-document-ledger.js';
-import { PRODUCTION_DOCUMENTS_NEED_MANUSCRIPT, ProductionDocumentError, ProductionDocuments } from './production-documents.js';
+import {
+  PRODUCTION_DOCUMENTS_NEED_MANUSCRIPT, ProductionDocumentError, ProductionDocuments, productionDocumentMarksNotCarried,
+} from './production-documents.js';
 import { productionDocumentType } from './production-document-types.js';
 import { REIMPORT_GROUP_VERBS, groupReimportMappings, reimportGroupResolutions, reimportGroupVerbs } from './reimport-groups.js';
 import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
@@ -9525,7 +9527,9 @@ export class EditorialStore {
       });
       this.#productionDocuments.recordVersion(documentId, revisionId, revisionDigest, 'created');
     }));
-    return this.#productionDocumentResult(input.bookId, input.typeId);
+    // The material's comments and tracked changes stay with the material: the document says so where it opens.
+    const notCarried = parsed.importedMarks.length;
+    return this.#productionDocumentResult(input.bookId, input.typeId, notCarried === 0 ? null : productionDocumentMarksNotCarried(notCarried));
   }
 
   /** `本书不做` or `恢复` for one house type of a Book (WORK-013): an appended decision, or no change. */
@@ -9552,6 +9556,12 @@ export class EditorialStore {
     requireStore(row !== undefined && row.branchId === input.branchId, 'PRODUCTION_DOCUMENT_NOT_FOUND', '这本书没有这份生产文档。');
     const owner = this.#boundedAuthority;
     const work = this.#boundedCall(() => owner.createManuscriptCheckpointWork(input.documentId, input.branchId, 'Document Version / 文档版本'));
+    // Nothing to check point — the working state is its revision, as after a journal recovery made one — still saves
+    // that revision as a version when no version holds it yet; one already the latest records nothing more.
+    if (work.workId === null && work.checkpoint !== null) {
+      const checkpoint = work.checkpoint;
+      this.#documentCall(() => this.#productionDocuments.recordVersion(input.documentId, checkpoint.revisionId, checkpoint.revisionDigest, 'saved'));
+    }
     if (work.workId !== null) {
       const workId = work.workId;
       try {
@@ -9593,10 +9603,10 @@ export class EditorialStore {
     };
   }
 
-  #productionDocumentResult(bookId: string, typeId: string): ProductionDocumentResultProjection {
+  #productionDocumentResult(bookId: string, typeId: string, notice: string | null = null): ProductionDocumentResultProjection {
     const deliverables = this.inspectDeliverables(bookId);
     const card = deliverables.documents.types.find((type) => type.typeId === typeId);
-    return { bookId, deliverables, typeId, document: card?.document ?? null };
+    return { bookId, deliverables, typeId, document: card?.document ?? null, notice };
   }
 
   #documentCall<T>(operation: () => T): T {
