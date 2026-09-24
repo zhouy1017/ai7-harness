@@ -26,7 +26,7 @@ import { decodeRequest, isSafeInteger, ProtocolError } from './request-frames.js
 import { controlledConnectivity, hostConnectivity, type TaskPlanConnectivity } from './connectivity.js';
 import type { WaitingFor } from './task-plan.js';
 import { controlledUnitHold } from './unit-hold.js';
-import { attentionWaitingFor } from './global-attention.js';
+import { readGlobalAttention } from './global-attention.js';
 import { reconnectPreflight } from './reconnect-preflight.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from './provider/egress-gate.js';
 import type { DormantHarnessRuntime } from './runtime.js';
@@ -867,8 +867,7 @@ async function dispatch(
     case 'inspectGlobalAttention':
       return {
         id: request.id, ok: true, op: request.op,
-        result: store.inspectGlobalAttention(analysisProgress, analysisExecution.busy,
-          await attentionWaitingFor(store.waitingBaselineAnalysisRuns(null).length > 0, () => connectivity.waitingFor())),
+        result: await readGlobalAttention(store, analysisProgress, analysisExecution.busy, () => connectivity.waitingFor()),
       };
     // ④ 导出 (Issue #413, plan slice S64): local only, and only under this launch's verified External Export Policy.
     case 'reviewManuscriptExport':

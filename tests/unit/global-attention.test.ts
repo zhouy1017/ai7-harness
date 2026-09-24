@@ -214,8 +214,9 @@ describe('the four groups of 待我处理', () => {
     expect(reads).toBe(0);
     expect(await attentionWaitingFor(true, read)).toBe('connection');
     expect(reads).toBe(1);
-    // A keyring read that fails does not fail the whole read of 待我处理.
-    expect(await attentionWaitingFor(true, async () => { throw new Error('keyring unavailable'); })).toBe('admitting');
+    // A keyring read that fails does not fail the whole read of 待我处理, and reads as waiting for the connection: Reconnect
+    // Preflight makes the same check and admits nothing while it fails, so the Run is not about to start.
+    expect(await attentionWaitingFor(true, async () => { throw new Error('keyring unavailable'); })).toBe('connection');
   });
 
   it('places each record by its own state, with the next step and the record it opens', () => {
