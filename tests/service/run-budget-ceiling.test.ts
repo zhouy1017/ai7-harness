@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -9,6 +9,7 @@ import {
   CROSS_UNIT_BUDGET_REACHED,
   SAFE_RETRY_BUDGET_REACHED,
 } from '../../src/service/analysis/execution.js';
+import { CLARIFICATION_RECORD_GAP } from '../../src/service/analysis/clarifications.js';
 import { ASSURANCE_SAMPLING_REMOVED } from '../../src/service/analysis/plan-edits.js';
 import { RUN_REPORT_REVISION_USAGE_STAGES, runReportUsageReconciles } from '../../src/service/analysis/run-report.js';
 import { SET_RULE_BUDGET } from '../../src/service/default-execution-rules.js';
@@ -76,6 +77,34 @@ function owner(store: EditorialStore, route: ResolvedModelFixture = fixture): Ba
     secretResolver: { resolve: async () => null },
     unitHold: controlledUnitHold(holdPath, { pollMs: 5 }),
   });
+}
+
+/**
+ * The transient-retry fixture with a second question: Analysis Unit 3 answers its first attempt with the same transient
+ * error Analysis Unit 5 does, so a Run under 先问你 asks about both. It is written beside this case's Agent Data Root over
+ * copies of the committed chain it is based on, for this case alone; nothing is admitted or committed.
+ */
+async function twoQuestionsFixture(): Promise<ResolvedModelFixture> {
+  const root = join(roots.dataRoot, '..', 'model-fixtures');
+  mkdirSync(root, { recursive: true });
+  for (const identity of ['sample1-baseline-happy', 'sample1-baseline-one-unit-failure', 'sample1-baseline-transient-retry']) {
+    copyFileSync(join(FIXTURES_ROOT, `${identity}.json`), join(root, `${identity}.json`));
+  }
+  type Entry = { unitOrdinal: number; requestDigest: string; attempt?: number; response: unknown };
+  const read = (identity: string) => JSON.parse(readFileSync(join(FIXTURES_ROOT, `${identity}.json`), 'utf8')) as Record<string, unknown> & { entries: Entry[] };
+  const transient = read('sample1-baseline-transient-retry');
+  const failing = transient.entries.find((entry) => entry.unitOrdinal === 5 && entry.attempt === 1)!;
+  const unit3 = read('sample1-baseline-happy').entries.find((entry) => entry.unitOrdinal === 3)!;
+  writeFileSync(join(root, 'sample1-baseline-two-questions.json'), JSON.stringify({
+    schema: transient.schema,
+    identity: 'sample1-baseline-two-questions',
+    description: 'L2-only variant of sample1-baseline-transient-retry: Analysis Unit 3 fails its first attempt as unit 5 does.',
+    basedOn: 'sample1-baseline-transient-retry',
+    provider: transient.provider,
+    model: transient.model,
+    entries: [{ unitOrdinal: 3, requestDigest: unit3.requestDigest, attempt: 1, response: failing.response }],
+  }));
+  return loadModelFixture(root, 'sample1-baseline-two-questions');
 }
 
 function prepare(store: EditorialStore, bookId: string, update: BaselineAnalysisUpdateRequest | null = null, redoOf: string | null = null): BaselineAnalysisProjection {
@@ -367,6 +396,51 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
       expect(stopped.taskOutcome?.stop).toMatchObject({ reason: 'run-budget-ceiling-reached', maxTotalTokens: 8000, usedTokens: 8560 });
       expect(stopped.resultSetRevision?.gaps.find((entry) => entry.unitOrdinal === 5)?.reason).toContain(SAFE_RETRY_BUDGET_REACHED);
       expect(stopped.resultSetRevision?.gaps.find((entry) => entry.unitOrdinal === 8)?.code).toBe('not-attempted');
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('applies every answer at a spent ceiling though a pause came, a 不重试 first and a 再试一次 after it, each in its own words', async () => {
+    const twoQuestions = await twoQuestionsFixture();
+    const store = await openWithRoute(twoQuestions);
+    const execution = owner(store, twoQuestions);
+    try {
+      const bookId = await importedBook(store, 'L2 sample1 预算、两处答复与暂停');
+      const prepared = prepare(store, bookId);
+      const taskIntentId = prepared.taskIntent!.taskIntentId;
+      // Units 3 and 5 each fail once on a transient error and ask. Units 1, 2 (a gap), 4 and 6 spend 5,060; unit 7 brings
+      // it to 6,720, past a 6,000 ceiling.
+      const edited = store.editBaselineAnalysisPlan({
+        bookId, taskIntentId, planEnvelopeDigest: prepared.planEnvelope!.digest, removedSteps: [], disallowedAdaptations: [],
+        askFirstAdaptations: ['safe-retry'], runBudgetCeiling: tokens(6000),
+      });
+      const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, edited.planEnvelope!.digest).dispatchRunRecordId!;
+      // Four units settle — 1, 2, 4 and 6 — while units 3 and 5 wait for their answers; unit 7 is held in flight.
+      writeFileSync(holdPath, '4');
+      execution.admitAndDispatch(runRecordId);
+      await until(() => execution.progressFor(runRecordId)?.currentUnitOrdinal === 7, 'unit 7 in flight');
+      const cards = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, (id) => execution.progressFor(id)).clarifications;
+      const cardOf = (unitOrdinal: number) => cards.find((card) => card.unitOrdinal === unitOrdinal)!;
+      expect(cards.map((card) => card.unitOrdinal).sort()).toEqual([3, 5]);
+      // 不重试 for the first in unit order, 再试一次 for the second; then 暂停 while unit 7 is out.
+      store.answerBaselineAnalysisClarification({ bookId, taskIntentId, requestId: cardOf(3).requestId, optionId: 'record-gap', note: null });
+      store.answerBaselineAnalysisClarification({ bookId, taskIntentId, requestId: cardOf(5).requestId, optionId: 'retry', note: null });
+      store.requestBaselineAnalysisPause(bookId, taskIntentId);
+      execution.pauseRun(runRecordId, store.baselineAnalysisLedger);
+      writeFileSync(holdPath, 'release');
+      await execution.whenIdle();
+      // At the next boundary the ceiling is spent: the pause lapses and nothing is sent. Each answer is applied as the
+      // editor chose — the 不重试 as its gap, the 再试一次 kept back in the ceiling's words — and the Run ends there.
+      const stopped = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(stopped.run?.state).toBe('interrupted');
+      expect(stopped.taskOutcome?.stop).toMatchObject({ reason: 'run-budget-ceiling-reached', maxTotalTokens: 6000, usedTokens: 6720 });
+      const gaps = stopped.resultSetRevision!.gaps;
+      expect(gaps.find((entry) => entry.unitOrdinal === 3)?.reason).toContain(CLARIFICATION_RECORD_GAP);
+      expect(gaps.find((entry) => entry.unitOrdinal === 5)?.reason).toContain(SAFE_RETRY_BUDGET_REACHED);
+      expect(gaps.find((entry) => entry.unitOrdinal === 8)?.code).toBe('not-attempted');
       store.markCleanShutdown();
     } finally {
       await execution.dispose();

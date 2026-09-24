@@ -3182,7 +3182,6 @@ export class BaselineAnalysisStore {
     return { condition: record.condition, unitOrdinal: typeof record.unitOrdinal === 'number' ? record.unitOrdinal : null, refusedAttempt };
   }
 
-  /** Why a Run's interrupted outcome says it stopped (Issue #51, S16a); `null` for any other Run, or one with no outcome. */
   /** Whether the plan a Task holds was frozen under developer-live, where the launch sets the Run Budget Ceiling (Issue #541). */
   #launchSetsCeiling(taskIntentId: string): boolean {
     const row = this.#db.prepare(
@@ -3193,6 +3192,7 @@ export class BaselineAnalysisStore {
     return isRecord(envelope) && envelope.providerStatus === 'remote-eligible-developer-live';
   }
 
+  /** Why a Run's interrupted outcome says it stopped (Issue #51, S16a); `null` for any other Run, or one with no outcome. */
   #runStop(runRecordId: string): RunStop | null {
     const row = this.#db.prepare("SELECT canonical_json FROM analysis_task_outcomes WHERE run_record_id = ? AND classification = 'interrupted'")
       .get(runRecordId) as SqlRow | undefined;
