@@ -79,6 +79,13 @@ export function productionDocumentVersionLabel(ordinal: number): string {
 }
 
 /** A document's row as the ledger holds it. */
+/** Who a delivery goes to, in the words it is recorded with, and its note. */
+export interface ProductionDocumentDeliveryParty {
+  kind: ProductionDocumentRecipientKind;
+  label: string;
+  note: string | null;
+}
+
 export interface ProductionDocumentRow {
   documentId: string;
   bookId: string;
@@ -176,48 +183,56 @@ export class ProductionDocuments {
   }
 
   /**
-   * 交付 (DELIV-003): one Delivery Record of one exact version of the document — to a recipient from the house's list or
-   * in the editor's own words, with an optional note. It is appended once, never sends anything, and leaves every earlier
-   * record and the Manuscript's 发稿 as they were.
+   * Who a delivery goes to and its note, as they will be recorded (DELIV-003): a recipient from the house's list or in
+   * the editor's own words, and a note within its bound. Checked before anything is saved, so a refused delivery saves
+   * no version either.
    */
-  recordDelivery(input: {
-    bookId: string;
-    documentId: string;
-    revisionId: string;
-    recipient: { kind: ProductionDocumentRecipientKind; custom: string | null };
-    note: string | null;
-  }): string {
-    const row = this.documentById(input.bookId, input.documentId);
-    requireDocument(row !== undefined, 'PRODUCTION_DOCUMENT_NOT_FOUND', '这本书没有这份生产文档。');
+  deliveryParty(recipient: { kind: ProductionDocumentRecipientKind; custom: string | null }, note: string | null): ProductionDocumentDeliveryParty {
+    requireDocument(PRODUCTION_DOCUMENT_RECIPIENT_KINDS.includes(recipient.kind), 'PRODUCTION_DOCUMENT_DELIVERY_INVALID', '请选择交给谁。');
+    const custom = recipient.kind === 'custom' ? publicationText(recipient.custom, MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS) : null;
+    requireDocument((recipient.kind === 'custom') === (custom !== null) && (recipient.kind === 'custom' || recipient.custom === null),
+      'PRODUCTION_DOCUMENT_DELIVERY_INVALID', `请写明交给谁（1–${MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS} 个字）。`);
+    const recorded = note === null ? null : publicationText(note, MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS);
+    requireDocument(note === null || recorded !== null, 'PRODUCTION_DOCUMENT_DELIVERY_INVALID',
+      `备注最多 ${MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS} 个字。`);
+    return { kind: recipient.kind, label: recipient.kind === 'custom' ? custom! : PRODUCTION_DOCUMENT_RECIPIENT_LABELS[recipient.kind], note: recorded };
+  }
+
+  /** What the document's text is now, saved as a version or not. */
+  workingDigest(row: ProductionDocumentRow): string {
+    const state = this.#db.prepare('SELECT working_digest FROM branch_working_state WHERE branch_id = ? AND manuscript_id = ?')
+      .get(row.branchId, row.documentId) as SqlRow | undefined;
+    requireDocument(state !== undefined, 'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档的工作状态缺失。');
+    return text(state.working_digest);
+  }
+
+  /**
+   * 交付 (DELIV-003): one Delivery Record of one exact saved version of the document, to the party `deliveryParty`
+   * checked. It is appended once, never sends anything, and leaves every earlier record and the Manuscript's 发稿 as
+   * they were.
+   */
+  recordDelivery(row: ProductionDocumentRow, revisionId: string, party: ProductionDocumentDeliveryParty): string {
     const version = this.#db.prepare(
       `SELECT pv.version, pv.revision_digest FROM production_document_versions pv
        JOIN manuscript_revisions mr ON mr.revision_id = pv.revision_id AND mr.manuscript_id = pv.document_id AND mr.branch_id = ?
        WHERE pv.document_id = ? AND pv.revision_id = ?`,
-    ).get(row.branchId, input.documentId, input.revisionId) as SqlRow | undefined;
+    ).get(row.branchId, row.documentId, revisionId) as SqlRow | undefined;
     requireDocument(version !== undefined, 'PRODUCTION_DOCUMENT_DELIVERY_INVALID', '只能交付这份文档保存过的版本。');
-    requireDocument(PRODUCTION_DOCUMENT_RECIPIENT_KINDS.includes(input.recipient.kind), 'PRODUCTION_DOCUMENT_DELIVERY_INVALID', '请选择交给谁。');
-    const custom = input.recipient.kind === 'custom' ? publicationText(input.recipient.custom, MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS) : null;
-    requireDocument((input.recipient.kind === 'custom') === (custom !== null) && (input.recipient.kind === 'custom' || input.recipient.custom === null),
-      'PRODUCTION_DOCUMENT_DELIVERY_INVALID', `请写明交给谁（1–${MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS} 个字）。`);
-    const recipientLabel = input.recipient.kind === 'custom' ? custom! : PRODUCTION_DOCUMENT_RECIPIENT_LABELS[input.recipient.kind];
-    const note = input.note === null ? null : publicationText(input.note, MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS);
-    requireDocument(input.note === null || note !== null, 'PRODUCTION_DOCUMENT_DELIVERY_INVALID',
-      `备注最多 ${MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS} 个字。`);
-    const last = this.#db.prepare('SELECT max(ordinal) ordinal FROM production_document_deliveries WHERE document_id = ?').get(input.documentId) as SqlRow | undefined;
+    const last = this.#db.prepare('SELECT max(ordinal) ordinal FROM production_document_deliveries WHERE document_id = ?').get(row.documentId) as SqlRow | undefined;
     const ordinal = last?.ordinal === null || last?.ordinal === undefined ? 1 : integer(last.ordinal) + 1;
     const deliveryId = randomUUID();
     const recordedAt = new Date().toISOString();
     const record = canonicalRecord({
       schema: 'ai7.production-document-delivery/1',
       deliveryId,
-      documentId: input.documentId,
-      bookId: input.bookId,
+      documentId: row.documentId,
+      bookId: row.bookId,
       ordinal,
       version: integer(version.version),
-      revisionId: input.revisionId,
+      revisionId,
       revisionDigest: text(version.revision_digest),
-      recipient: { kind: input.recipient.kind, label: recipientLabel },
-      note,
+      recipient: { kind: party.kind, label: party.label },
+      note: party.note,
       actor: '本机编辑',
       recordedAt,
     });
@@ -226,8 +241,8 @@ export class ProductionDocuments {
          delivery_id, document_id, book_id, ordinal, version, revision_id, revision_digest, recipient_kind, recipient_label,
          note, actor, recorded_at, canonical_json, sha256
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '本机编辑', ?, ?, ?)`,
-    ).run(deliveryId, input.documentId, input.bookId, ordinal, integer(version.version), input.revisionId, text(version.revision_digest),
-      input.recipient.kind, recipientLabel, note, recordedAt, record.json, record.digest);
+    ).run(deliveryId, row.documentId, row.bookId, ordinal, integer(version.version), revisionId, text(version.revision_digest),
+      party.kind, party.label, party.note, recordedAt, record.json, record.digest);
     return deliveryId;
   }
 

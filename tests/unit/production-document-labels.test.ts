@@ -68,7 +68,7 @@ describe('the words of 交付 · 生产文档', () => {
       labels.DELIVERY_RECIPIENT_LEGEND, labels.DELIVERY_CUSTOM_RECIPIENT, labels.DELIVERY_CUSTOM_LABEL, labels.DELIVERY_NOTE_LABEL,
       labels.DELIVERY_STATEMENT, ...Object.values(labels.DELIVERY_BLOCKERS), labels.DELIVERY_NO_EXPORT,
       labels.documentDeliveryLine({ ordinal: 1, recipient: { kind: 'publicity', label: '宣传部' }, versionLabel: '版本 2' }, '9月24日 11:00'),
-      labels.documentDeliveredLine(1, '宣传部'),
+      labels.documentDeliveredLine(1, '宣传部'), labels.documentCurrentTextChoice(3),
     ];
     expect(labels.DOCUMENT_LENS_LABEL).toBe('工作流程');
     expect(labels.DOCUMENT_VERSIONS_HEADING).toBe('版本与交付');
@@ -86,7 +86,8 @@ describe('the words of 交付 · 生产文档', () => {
     expect(labels.DOCUMENT_DELIVERIES_HEADING).toBe('交付记录');
     expect(labels.DELIVERY_FORM_HEADING).toBe('交付');
     expect(labels.DELIVERY_VERSION_LEGEND).toBe('交付哪一版');
-    expect(labels.DELIVERY_UNSAVED_NOTE).toBe('有修改尚未保存为版本：要交付现在的文字，先打开文档「保存为版本」；也可以交付已保存的版本。');
+    expect(labels.DELIVERY_UNSAVED_NOTE).toBe('有修改尚未保存为版本：交付「现在的文字」会先把它保存为新的版本；也可以交付已保存的版本。');
+    expect(labels.documentCurrentTextChoice(3)).toBe('现在的文字（交付时先保存为版本 3）');
     expect(labels.DELIVERY_RECIPIENT_LEGEND).toBe('交给谁');
     expect(labels.DELIVERY_CUSTOM_RECIPIENT).toBe('自行输入');
     expect(labels.DELIVERY_CUSTOM_LABEL).toBe('交给谁（自行输入）');
