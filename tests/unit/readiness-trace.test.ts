@@ -1,11 +1,17 @@
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-// Issue #518: the readiness trace a Journey prints when it waits past its budget, read from Playwright's `browser` log
-// lines exactly as the debug layer records them, and relayed by the controller only in its content-free shape.
+// Issue #518: the readiness trace a Journey prints when it waits past its budget, read from Playwright's `browser` debug
+// log — each line with the time it was written, as a Journey sets that log up — and relayed by the controller only in its
+// content-free shape. One case reads a real launch through the installed Playwright, so a channel it never feeds fails.
 const trace = (await import(new URL('../../e2e/readiness-trace.mjs', import.meta.url).href)) as {
   STARTUP_LOCATIONS: ReadonlyArray<string>;
   createLaunchTrace(scenario: string, startedAt?: number): Record<string, unknown>;
-  observeBrowserLog(trace: Record<string, unknown>, message: string, now?: number): void;
+  readBrowserLog(trace: Record<string, unknown>, text: string): Record<string, unknown>;
   formatReadinessTrace(journey: string, trace: Record<string, unknown>, now?: number): string;
   readReadinessTrace(stderr: string, journey: string): string | null;
 };
@@ -13,16 +19,21 @@ const controller = (await import(new URL('../../e2e/controller.mjs', import.meta
   collectReadinessTrace(result: { stderr: string }, journey: string): string | null;
 };
 
-/** A launch at t = 1000 ms, fed the given `[offset, line]` pairs. */
-function launched(lines: ReadonlyArray<readonly [number, string]>) {
-  const launch = trace.createLaunchTrace('empty-book-first-import', 1_000);
-  for (const [offset, line] of lines) trace.observeBrowserLog(launch, line, 1_000 + offset);
-  return launch;
+const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
+
+/** Playwright's `browser` log with each message at `offset` ms past t = 1000 ms, where the launch begins. */
+function logOf(lines: ReadonlyArray<readonly [number, string]>): string {
+  return lines.map(([offset, message]) => `${new Date(1_000 + offset).toISOString()} pw:browser ${message}`).join('\n');
+}
+
+function launched(lines: ReadonlyArray<readonly [number, string]>): Record<string, unknown> {
+  return trace.readBrowserLog(trace.createLaunchTrace('empty-book-first-import', 1_000), logOf(lines));
 }
 
 describe('the readiness trace (Issue #518)', () => {
   it('reads a launch that became ready: when it launched, the last startup step, AI7_READY and the exit', () => {
     const launch = launched([
+      [2, '<launching> C:\\product\\ai7.exe --remote-debugging-pipe'],
       [9, '<launched> pid=2084'],
       [22, '[pid=2084][out] '],
       [30, '[pid=2084][err] AI7_STARTUP/runtime'],
@@ -30,6 +41,7 @@ describe('the readiness trace (Issue #518)', () => {
       [1_400, '[pid=2084][err] AI7_STARTUP/renderer-first-paint'],
       [1_590, '[pid=2084][err] AI7_STARTUP/readiness-signal'],
       [1_620, '[pid=2084][out] AI7_READY'],
+      [2_300, '[pid=2084] <gracefully close start>'],
       [2_310, '[pid=2084] <process did exit: exitCode=0, signal=null>'],
     ]);
     expect(trace.formatReadinessTrace('J-01', launch, 1_000 + 2_400)).toBe(
@@ -38,14 +50,15 @@ describe('the readiness trace (Issue #518)', () => {
   });
 
   it('says where a launch that never became ready stopped, and only counts the product\'s other words', () => {
-    const launch = launched([
+    const lines: Array<readonly [number, string]> = [
       [8, '<launched> pid=7'],
       [900, '[pid=7][err] AI7_STARTUP/service-ready'],
       [1_500, '[pid=7][err] AI7_STARTUP/renderer-first-paint'],
       [1_600, '[pid=7][err] [1234:ERROR:gpu_init.cc(1)] something the product said about C:\\Users\\someone'],
       [1_700, '[pid=7][out] 稿件里的一句话'],
       [1_800, '[pid=7][err] AI7_STARTUP/not-a-step'],
-    ]);
+    ];
+    const launch = launched(lines);
     launch.target = true;
     const line = trace.formatReadinessTrace('J-01', launch, 1_000 + 60_050);
     expect(line).toBe(
@@ -54,9 +67,36 @@ describe('the readiness trace (Issue #518)', () => {
     expect(line).not.toContain('C:');
     expect(line).not.toContain('稿件');
     // A startup failure main names is kept by its location.
-    trace.observeBrowserLog(launch, '[pid=7][err] AI7_STARTUP_FAILED/renderer-first-paint', 1_000 + 61_000);
-    trace.observeBrowserLog(launch, '[pid=7] <process did exit: exitCode=1, signal=null>', 1_000 + 61_100);
-    expect(trace.formatReadinessTrace('J-01', launch, 1_000 + 61_200)).toContain(';failed=renderer-first-paint;exit=1@61100;');
+    const failed = launched([...lines,
+      [61_000, '[pid=7][err] AI7_STARTUP_FAILED/renderer-first-paint'],
+      [61_100, '[pid=7] <process did exit: exitCode=1, signal=null>'],
+    ]);
+    expect(trace.formatReadinessTrace('J-01', failed, 1_000 + 61_200)).toContain(';failed=renderer-first-paint;exit=1@61100;');
+  });
+
+  it('reads only the launch in flight: nothing from before it began, from another process, or without its time', () => {
+    const launch = launched([
+      // The launch before, still closing: written before this one began, or by its own process after.
+      [-5, '[pid=11][err] AI7_STARTUP/readiness-signal'],
+      [3, '[pid=11] <process did exit: exitCode=0, signal=null>'],
+      [9, '<launched> pid=12'],
+      [40, '[pid=11][out] AI7_READY'],
+      [50, '[pid=12][err] AI7_STARTUP/runtime'],
+    ]) as Record<string, unknown>;
+    const undated = trace.readBrowserLog(launch, 'pw:browser [pid=12][out] AI7_READY\n[pid=12][err] AI7_STARTUP/readiness-signal');
+    expect(trace.formatReadinessTrace('J-01', undated, 1_000 + 60_000)).toBe(
+      'READINESS/J-01/launch=empty-book-first-import;launched=9;last=runtime@50;ready=none;failed=none;exit=none@none;target=no;other=0;age=60000',
+    );
+  });
+
+  it('keeps a Windows exit status whole, and relays it', () => {
+    const launch = launched([[9, '<launched> pid=3'], [700, '[pid=3] <process did exit: exitCode=3221225477, signal=null>']]);
+    const line = trace.formatReadinessTrace('J-01', launch, 1_000 + 800);
+    expect(line).toContain(';exit=3221225477@700;');
+    expect(trace.readReadinessTrace(line, 'J-01')).toBe(line.slice('READINESS/J-01/'.length));
+    // Longer than any exit status: not read as one.
+    const longer = launched([[9, '<launched> pid=3'], [700, '[pid=3] <process did exit: exitCode=32212254770, signal=null>']]);
+    expect(trace.formatReadinessTrace('J-01', longer, 1_000 + 800)).toContain(';exit=none@none;');
   });
 
   it('relays only a trace of exactly its content-free shape, and only one', () => {
@@ -75,4 +115,42 @@ describe('the readiness trace (Issue #518)', () => {
       expect(trace.readReadinessTrace(line.replace('last=none', `last=${location}`), 'J-01')).not.toBeNull();
     }
   });
+
+  it('reads a real launch through the installed Playwright\'s browser log, set up as J-01 sets it up', () => {
+    // Node stands in for the product: it says two startup steps and something else, prints AI7_READY and exits. Playwright
+    // launches it as J-01 launches the product, and the launch then fails, since nothing answers on the pipe.
+    const root = mkdtempSync(join(tmpdir(), 'ai7-readiness-trace-'));
+    try {
+      const product = join(root, 'product.mjs');
+      writeFileSync(product, [
+        "process.stderr.write('AI7_STARTUP/runtime\\n');",
+        "process.stderr.write('something the product said\\n');",
+        "process.stderr.write('AI7_STARTUP/readiness-signal\\n');",
+        "process.stdout.write('AI7_READY\\n', () => setTimeout(() => process.exit(0), 100));",
+      ].join('\n'));
+      const launcher = join(root, 'launcher.mjs');
+      writeFileSync(launcher, [
+        "import { join } from 'node:path';",
+        "import { pathToFileURL } from 'node:url';",
+        'const [product, checkout] = process.argv.slice(2);',
+        "const { chromium } = await import(pathToFileURL(join(checkout, 'node_modules', 'playwright-core', 'index.mjs')).href);",
+        'await chromium.launch({ executablePath: process.execPath, ignoreDefaultArgs: true, args: [product], timeout: 30_000 }).catch(() => undefined);',
+      ].join('\n'));
+      const log = join(root, 'playwright-browser.log');
+      const startedAt = Date.now();
+      const run = spawnSync(process.execPath, [launcher, product, ROOT], {
+        env: { ...process.env, DEBUG: 'pw:browser', DEBUG_FILE: log, DEBUG_COLORS: 'no' },
+        encoding: 'utf8',
+        timeout: 60_000,
+      });
+      expect(run.status).toBe(0);
+      const read = trace.readBrowserLog(trace.createLaunchTrace('real-launch', startedAt), readFileSync(log, 'utf8'));
+      expect(read).toMatchObject({ last: 'readiness-signal', failed: null, exitCode: '0' });
+      for (const field of ['launched', 'lastAt', 'ready', 'exited']) expect(read[field]).not.toBeNull();
+      expect(read.other).toBeGreaterThanOrEqual(1);
+      expect(trace.formatReadinessTrace('J-01', read)).not.toContain('said');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
 });

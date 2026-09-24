@@ -1,5 +1,5 @@
 import { copyFile, lstat, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
-import { createReadStream, existsSync } from 'node:fs';
+import { createReadStream, existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
@@ -17,7 +17,7 @@ import {
   IMPORTED_MARKS_REJECTED_BLOCKS,
 } from './composed-docx.mjs';
 import { attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, discloseJourneySkip, installJourneyCancellationCleanup, LOCAL_ONLY_DOC, localDebugEnabled, localManuscriptAvailable, localManuscriptPath, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
-import { createLaunchTrace, formatReadinessTrace, launchTraceLogger } from './readiness-trace.mjs';
+import { createLaunchTrace, formatReadinessTrace, readBrowserLog } from './readiness-trace.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PRODUCT_RENDERER_URL = pathToFileURL(resolve(ROOT, 'dist', 'renderer', 'index.html')).href;
@@ -52,10 +52,38 @@ const RENDERER_CDP_FAILURE = new Error('J-01/renderer-cdp-response');
 const RENDERER_CDP_TIMEOUT = new Error('J-01/renderer-cdp-timeout');
 const RENDERER_SESSION_CLOSED = new Error('J-01/renderer-session-closed');
 let diagnosticLocation = 'entry';
-// The launch in flight (Issue #518): what the product reported while J-01 waited for it, for the one line a failure prints.
-let launchTrace = null;
+// The launch in flight (Issue #518): its scenario, when it began and whether its renderer target attached. What the
+// product reported while J-01 waited is read from Playwright's `browser` log, whose file this run keeps in its run root.
+let launchInFlight = null;
+let browserLogPath = null;
+// The readiness line a failure prints, built when the failure happens, before the run closes the product and its root.
+let readinessLine = null;
 let electronExecutable;
 let browserLifecycleIncomplete = false;
+
+/** The launch in flight as Playwright's `browser` log shows it now, or `null` before the first launch. */
+function launchTraceNow() {
+  if (launchInFlight === null) return null;
+  const trace = createLaunchTrace(launchInFlight.scenario, launchInFlight.startedAt);
+  trace.target = launchInFlight.target;
+  if (browserLogPath !== null && existsSync(browserLogPath)) readBrowserLog(trace, readFileSync(browserLogPath, 'utf8'));
+  return trace;
+}
+
+/**
+ * A launch that became ready shows AI7_READY in its trace (Issue #518). Main prints it before it tells the renderer, so
+ * once the renderer says the product is ready only the log's own write is outstanding. A trace that cannot see the
+ * product fails here, on a launch that worked, rather than saying nothing reached main on the failure it is for.
+ */
+async function requireTracedReadiness() {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const trace = launchTraceNow();
+    if (trace !== null && trace.launched !== null && trace.last === 'readiness-signal' && trace.ready !== null) return;
+    requireJourney(Date.now() < deadline, 'readiness-trace');
+    await new Promise((settle) => setTimeout(settle, 50));
+  }
+}
 
 function at(location) {
   diagnosticLocation = location;
@@ -1664,6 +1692,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
     `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
     'empty-book-landing',
   );
+  await requireTracedReadiness();
   await clickExactButton(renderer, '新建图书', 'empty-book-create-open');
   await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, 'empty-book-form');
   await clickExactButton(renderer, '复核创建', 'empty-book-missing-title');
@@ -1852,12 +1881,11 @@ async function main() {
   const { createCanonicalExternalDataRoot, ensureCanonicalDataDirectory } = await import(
     pathToFileURL(dataRootEntry).href
   );
-  const {
-    chromium,
-    errors: { TimeoutError: PlaywrightTimeoutError },
-  } = await import('playwright-core');
+  // Playwright loads once the run root exists: its `browser` log goes to a file there (Issue #518).
+  let chromium;
+  let PlaywrightTimeoutError;
   const isBrowserLaunchTimeout = (error) =>
-    error === BROWSER_LAUNCH_TIMEOUT || error instanceof PlaywrightTimeoutError;
+    error === BROWSER_LAUNCH_TIMEOUT || (PlaywrightTimeoutError !== undefined && error instanceof PlaywrightTimeoutError);
   const tempParent = await realpath(tmpdir());
   const checkoutRoot = await realpath(ROOT);
   requireJourney(
@@ -1938,6 +1966,17 @@ async function main() {
     cancellation.throwIfRequested();
     requireJourney(dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j01-e2e-'), 'temp-root');
     requireJourney((await realpath(runRoot)) === runRoot, 'temp-root');
+    // Issue #518: Playwright writes a launch's lines only to its `browser` debug log, set up when it loads. Before it
+    // loads, that log goes to a file in this run root, removed with it — or stays e2e:debug's own — each line with its
+    // time, so a failure can say what the launch in flight reported. Only the product's fixed markers are read back.
+    if (!localDebugEnabled()) {
+      process.env.DEBUG = 'pw:browser';
+      process.env.DEBUG_FILE = resolve(runRoot, 'playwright-browser.log');
+    }
+    process.env.DEBUG_COLORS = 'no';
+    delete process.env.DEBUG_HIDE_DATE;
+    browserLogPath = process.env.DEBUG_FILE ?? null;
+    ({ chromium, errors: { TimeoutError: PlaywrightTimeoutError } } = await import('playwright-core'));
     const docx = SAMPLE1_PATH;
     const sampleInfo = await lstat(docx);
     requireJourney(
@@ -2140,8 +2179,8 @@ async function main() {
       );
       cancellation.throwIfRequested();
       at(`launch-${launchScenario}-browser-acquisition`);
-      const trace = createLaunchTrace(launchScenario);
-      launchTrace = trace;
+      const inFlight = { scenario: launchScenario, startedAt: Date.now(), target: false };
+      launchInFlight = inFlight;
       const launchPromise = chromium.launch({
         executablePath: executable,
         headless: false,
@@ -2149,7 +2188,6 @@ async function main() {
         args: productArgs,
         env: productEnvironment(executable),
         timeout: PRODUCT_READY_TIMEOUT_MS,
-        logger: launchTraceLogger(trace),
       });
       launchPromise.catch(() => undefined);
       let launchTimeout;
@@ -2175,7 +2213,7 @@ async function main() {
       cancellation.throwIfRequested();
       at(`launch-${launchScenario}-renderer-target`);
       const attached = await attachRendererTarget(browser);
-      trace.target = true;
+      inFlight.target = true;
       return attached;
     };
     const closeProduct = async () => {
@@ -4220,6 +4258,11 @@ async function main() {
     // Keep the observed-bug regression terminal so its deliberate multi-window lifecycle cannot
     // influence unrelated J-01 import/recovery scenarios on either supported desktop platform.
     await runIssue178WindowCloseRegression();
+  } catch (error) {
+    // Issue #518: what the launch in flight reported, read now, while its log and product are still there.
+    const trace = launchTraceNow();
+    if (trace !== null) readinessLine = formatReadinessTrace('J-01', trace);
+    throw error;
   } finally {
     try {
       await cancellation.cleanup();
@@ -4231,6 +4274,6 @@ async function main() {
 
 main().catch((error) => {
   reportJourneyFailure('J-01', diagnosticLocation, error);
-  if (launchTrace !== null) console.error(formatReadinessTrace('J-01', launchTrace));
+  if (readinessLine !== null) console.error(readinessLine);
   if (browserLifecycleIncomplete) process.stderr.write('', () => process.exit(1));
 });
