@@ -766,7 +766,8 @@ function createDocumentParser(
     if (tag.local === 't') textDepth -= 1;
     if (tag.local === 'delText') deletedTextDepth -= 1;
     if (tag.local === 'instrText') instructionDepth -= 1;
-    if (revisions.at(-1)?.depth === ancestors.length && revisions.at(-1)!.closes === tag.local) revisions.pop();
+    // Every frame this element closes ends here: a row inserted by one author and deleted by another carries two.
+    while (revisions.at(-1)?.depth === ancestors.length && revisions.at(-1)!.closes === tag.local) revisions.pop();
     if (tag.local === 'rPr') {
       requireDocx(runProperties?.depth === ancestors.length, 'run properties state mismatch');
       if (runProperties.styled) signals.inlineStyles += 1;
@@ -1063,11 +1064,11 @@ const TEXT_BOX_DETAILS: Readonly<Record<TextBoxDisposition, string>> = {
  * The 批注与修订 row of a revision-3 report whose file carries comments or revisions (Issue #411, D4): they
  * become marks on the manuscript whose source is the file's author — a table row or cell inserted or deleted
  * becomes the 批注 of the paragraphs it held — and what changes no text or cannot be converted — a formatting
- * revision, a structural one such as a cell merge, or a comment or revision inside a text box or a note — stays
- * with the file. Not a degradation.
+ * revision, a structural one such as a cell merge, or a comment or revision inside a text box, a note, a header or
+ * a footer — stays with the file. Not a degradation.
  */
 export const COMMENTS_REVISIONS_DETAIL =
-  '转为稿件上的批注 / 修改建议（来源：文件作者），整行或整个单元格的插入与删除也一样；格式修订、不改动文字的结构修订（如合并单元格），以及文本框与脚注中的批注和修订，随原文件保留。';
+  '转为稿件上的批注 / 修改建议（来源：文件作者），整行或整个单元格的插入与删除也一样；格式修订、不改动文字的结构修订（如合并单元格），以及文本框、脚注与尾注、页眉与页脚中的批注和修订，随原文件保留。';
 /**
  * The same row as a reimport states it: a reimport creates no mark (that is S63's, V2-UX-IMP-057), so the
  * class stays `不支持导入` there, with the marks it would have made as its count.
