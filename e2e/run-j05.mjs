@@ -763,10 +763,21 @@ async function main() {
     if (windowState === 'window-moved') at('marks-keyboard-menu-open-window-moved');
     else if (windowState === 'editor-read-only') at('marks-keyboard-menu-open-editor-read-only');
     requireJourney(windowState === 'ready', 'keyboard-window-ready');
-    await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(first)}, ${RANGES.note[0] + TYPED_BEFORE.length + 2}, ${RANGES.note[0] + TYPED_BEFORE.length + 2})`, 'keyboard-caret-in-note');
-    await new Promise((resolveWait) => setTimeout(resolveWait, 80));
-    await press(renderer, 'ContextMenu');
-    const opened = await settle(renderer, `(() => { const menu = window.__j05.menu(); if (menu === null) return 'no-menu'; if (menu.dataset.markMenu !== 'mark') return 'selection-menu'; if (!menu.getAttribute('aria-label').startsWith('备注')) return 'other-mark'; return document.activeElement === window.__j05.item('open-card') ? 'ready' : 'unfocused'; })()`);
+    // The editor reads the caret a tick after the page places it, and a slow runner makes that tick long enough
+    // for the key to find the selection the step before left: it then opens the selection menu, which never turns
+    // into the note's (Issue #534). As with a pointer, the key is pressed again until the menu is the note's.
+    const keyboardDeadline = Date.now() + 30_000;
+    let opened = 'no-menu';
+    while (Date.now() < keyboardDeadline) {
+      await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(first)}, ${RANGES.note[0] + TYPED_BEFORE.length + 2}, ${RANGES.note[0] + TYPED_BEFORE.length + 2})`, 'keyboard-caret-in-note');
+      await new Promise((resolveWait) => setTimeout(resolveWait, 80));
+      await press(renderer, 'ContextMenu');
+      opened = await settle(renderer, `(() => { const menu = window.__j05.menu(); if (menu === null) return 'no-menu'; if (menu.dataset.markMenu !== 'mark') return 'selection-menu'; if (!menu.getAttribute('aria-label').startsWith('备注')) return 'other-mark'; return document.activeElement === window.__j05.item('open-card') ? 'ready' : 'unfocused'; })()`, 3_000);
+      if (opened === 'ready') break;
+      if (await renderer.evaluate(`window.__j05.menu() !== null`)) await press(renderer, 'Escape');
+      await waitFor(renderer, `window.__j05.menu() === null`, 'keyboard-wrong-menu-closed', 15_000);
+      await new Promise((resolveWait) => setTimeout(resolveWait, 120));
+    }
     if (opened === 'no-menu') at('marks-keyboard-menu-open-no-menu');
     else if (opened === 'selection-menu') at('marks-keyboard-menu-open-selection-menu');
     else if (opened === 'other-mark') at('marks-keyboard-menu-open-other-mark');
