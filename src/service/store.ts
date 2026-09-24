@@ -8706,14 +8706,24 @@ export class EditorialStore {
       // not made twice; one that drifted or was set aside no longer shows the file's comment, so the new file's makes it.
       // A point — a pending insertion — is never found by its words, so the rewrite leaves it drifted where it stood: the
       // file's insertion at that same place is that one, set exact again rather than made twice.
+      // A 修改建议's words are only where it stands: what it proposes lives in its Proposal Change Item, so a tracked
+      // change stands as it is only while it proposes the same words — an insertion as an insertion. One the author
+      // rewrote is a new one, made beside the old, which stays the editor's to settle. Each standing mark is at most one
+      // file mark: two changes alike at one place are two marks, each set again as itself.
       if (fidelityPlan.importedMarks > 0) {
         const placedAt = this.#authority.prepare('SELECT block_id FROM temp.reimport_commit_rows WHERE work_id = ? AND position = ?');
         const standing = this.#authority.prepare(
-          `SELECT mark_id, anchor_state FROM editorial_marks
-           WHERE branch_id = ? AND block_id = ? AND source_kind = 'imported-author' AND source_label = ? AND kind = ?
-             AND pinned_text = ? AND body = ? AND from_grapheme = ? AND to_grapheme = ? AND status IN ('open', 'resolved', 'applied')
-             AND (anchor_state = 'exact' OR (anchor_state = 'drifted' AND pinned_text = ''))`,
+          `SELECT em.mark_id, em.anchor_state FROM editorial_marks em
+           WHERE em.branch_id = ? AND em.block_id = ? AND em.source_kind = 'imported-author' AND em.source_label = ? AND em.kind = ?
+             AND em.pinned_text = ? AND em.body = ? AND em.from_grapheme = ? AND em.to_grapheme = ?
+             AND em.status IN ('open', 'resolved', 'applied')
+             AND (em.anchor_state = 'exact' OR (em.anchor_state = 'drifted' AND em.pinned_text = ''))
+             AND (em.kind <> 'change-suggestion' OR EXISTS (
+               SELECT 1 FROM proposal_change_items i
+               WHERE i.mark_id = em.mark_id AND i.proposed_text = ? AND (em.pinned_text <> '' OR i.change_type = 'insert')))
+           ORDER BY em.rowid`,
         );
+        const answered = new Set<string>();
         const followedAt = asNumber(one(
           this.#authority.prepare('SELECT journal_sequence FROM branch_working_state WHERE branch_id = ?').all(target.branchId) as SqlRow[],
           'REIMPORT_TARGET_CHANGED', '重新导入提交时分支已变化。',
@@ -8728,10 +8738,13 @@ export class EditorialStore {
           blockIdOf: (position) => asString(one(placedAt.all(work.workId, position) as SqlRow[],
             'IMPORT_MARK_ANCHOR_FAILED', '文件中的批注或修订无法准确落在稿件文字上，本次重新导入没有提交。').block_id),
           alreadyStanding: (mark, blockId) => {
-            const found = standing.get(target.branchId, blockId, mark.authorLabel, mark.kind, mark.pinnedText, mark.body,
-              mark.fromGrapheme, mark.toGrapheme) as SqlRow | undefined;
+            const found = (standing.all(target.branchId, blockId, mark.authorLabel, mark.kind, mark.pinnedText, mark.body,
+              mark.fromGrapheme, mark.toGrapheme, mark.proposedText ?? '') as SqlRow[])
+              .find((row) => !answered.has(asString(row.mark_id)));
             if (found === undefined) return false;
-            if (asString(found.anchor_state) === 'drifted') repin.run(followedAt, asString(found.mark_id));
+            const markId = asString(found.mark_id);
+            answered.add(markId);
+            if (asString(found.anchor_state) === 'drifted') repin.run(followedAt, markId);
             alreadyStanding += 1;
             return true;
           },
