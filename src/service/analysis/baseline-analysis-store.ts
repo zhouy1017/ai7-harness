@@ -2900,6 +2900,25 @@ export class BaselineAnalysisStore {
     ).run(input.runRecordId, input.unit.unitOrdinal, input.unit.closed.state, recordedAt, record.json, record.digest);
   }
 
+  /**
+   * What a stopped Run spent beyond its units before it stopped — a reduction or a sample 续行 forms again — as its latest
+   * stop kept it (Issue #51, S16a): the ceiling counts it after 续行 as it did before. `null` when no stop kept any.
+   */
+  carriedUsageOf(runRecordId: string): { inputTokens: number; outputTokens: number } | null {
+    const rows = this.#db.prepare(
+      "SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? AND state IN ('paused', 'resumable', 'awaiting-clarification') ORDER BY sequence DESC",
+    ).all(runRecordId) as SqlRow[];
+    for (const row of rows) {
+      const carried = (parseCanonicalJson(asString(row.canonical_json)) as { carriedUsage?: unknown }).carriedUsage;
+      if (carried === undefined) continue;
+      const usage = carried as { inputTokens?: unknown; outputTokens?: unknown };
+      requireAnalysis(carried !== null && typeof carried === 'object' && Number.isSafeInteger(usage.inputTokens) && Number.isSafeInteger(usage.outputTokens) &&
+        (usage.inputTokens as number) >= 0 && (usage.outputTokens as number) >= 0, 'ANALYSIS_RECORD_INVALID', '运行记录的已用量无效。');
+      return { inputTokens: usage.inputTokens as number, outputTokens: usage.outputTokens as number };
+    }
+    return null;
+  }
+
   /** A Run's continuation checkpoints in unit order, each read back against its own digest. */
   unitCheckpoints(runRecordId: string): UnitCheckpoint[] {
     requireAnalysis(UUID_PATTERN.test(runRecordId), 'ANALYSIS_RUN_INVALID', '运行记录标识无效。');
