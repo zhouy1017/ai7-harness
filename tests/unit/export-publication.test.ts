@@ -78,10 +78,45 @@ describe('publishing on a volume with no hard links', () => {
   it('still replaces the file the editor chose to replace: that needs no hard link', async () => {
     const destination = join(folder, '覆盖.docx');
     await writeFile(destination, OTHER);
-    const written = await writeAtomically(destination, PAYLOAD, digest(PAYLOAD), 'replace', crypto.randomUUID());
+    const written = await writeAtomically(destination, PAYLOAD, digest(PAYLOAD), 'replace', crypto.randomUUID(), { bytes: OTHER.byteLength, sha256: digest(OTHER) });
     expect(written).toEqual({ outcome: 'replaced', bytes: PAYLOAD.byteLength, sha256: digest(PAYLOAD) });
     expect(new Uint8Array(await readFile(destination))).toEqual(PAYLOAD);
     expect(vi.mocked(link)).not.toHaveBeenCalled();
+    expect(await partials()).toEqual([]);
+  });
+
+  it('refuses a create where FAT32 or exFAT on Windows answer the link with EISDIR', async () => {
+    const destination = join(folder, 'exFAT.docx');
+    vi.mocked(link).mockImplementationOnce(async () => { throw Object.assign(new Error('illegal operation on a directory'), { code: 'EISDIR' }); });
+    const written = await writeAtomically(destination, PAYLOAD, digest(PAYLOAD), 'create', crypto.randomUUID());
+    expect(written).toEqual({ outcome: 'failed', code: 'EXPORT_CREATE_UNSUPPORTED' });
+    expect(await readdir(folder)).toEqual([]);
+  });
+
+  it('reports a replace whose rename failed as failed, even when the untouched file already holds the same bytes', async () => {
+    const destination = join(folder, '相同内容.docx');
+    await writeFile(destination, PAYLOAD);
+    vi.mocked(rename).mockImplementationOnce(async () => { throw Object.assign(new Error('access denied'), { code: 'EACCES' }); });
+    const written = await writeAtomically(destination, PAYLOAD, digest(PAYLOAD), 'replace', crypto.randomUUID(), { bytes: PAYLOAD.byteLength, sha256: digest(PAYLOAD) });
+    expect(written).toEqual({ outcome: 'failed', code: 'EXPORT_COMMIT_FAILED' });
+    expect(new Uint8Array(await readFile(destination))).toEqual(PAYLOAD);
+    expect(await partials()).toEqual([]);
+  });
+});
+
+describe('publishing where the name is taken at the last instant', () => {
+  it('refuses a create whose name another program took after the last check, and leaves that file untouched', async () => {
+    const destination = join(folder, '抢先.docx');
+    // The link itself finds the name taken (EEXIST): the check just before it had seen the name free.
+    const { link: realLink } = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    vi.mocked(link).mockImplementationOnce(async (existing, target) => {
+      await writeFile(target, OTHER);
+      await realLink(existing, target);
+    });
+    const written = await writeAtomically(destination, PAYLOAD, digest(PAYLOAD), 'create', crypto.randomUUID());
+    expect(vi.mocked(link)).toHaveBeenCalledOnce();
+    expect(written).toEqual({ outcome: 'failed', code: 'EXPORT_TARGET_CHANGED' });
+    expect(new Uint8Array(await readFile(destination))).toEqual(OTHER);
     expect(await partials()).toEqual([]);
   });
 });

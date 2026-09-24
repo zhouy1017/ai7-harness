@@ -26,9 +26,10 @@ import {
  *   revision rejected (`w:ins` and `w:moveTo` content dropped, `w:del` and `w:moveFrom` unwrapped with their
  *   deleted text written as text), and every comment anchor, formatting revision and revision marker dropped.
  * - An edited block, or one carrying an exported mark, is regenerated: the source paragraph's properties and
- *   its first run's properties over the block's text, with the marks written from AI7's own state. What the
- *   paragraph held beyond its text — a drawing, a text box's anchor, a note reference, a field, other runs'
- *   formatting — is not written, and the review names the block (降级导出).
+ *   its first run's properties over the block's text, with the marks written from AI7's own state, and its
+ *   bookmarks kept at its beginning and close so a table of contents still links to it. What the paragraph held
+ *   beyond its text — a drawing, a text box's anchor, a note reference, a field, other runs' formatting — is not
+ *   written, and the review names the block (降级导出).
  * - A source paragraph mapped to nothing (an empty one, a text box's own paragraph, a section carrier) is
  *   restored stripped. A text box merged into the body at import is not written as a box: its paragraphs are
  *   written as body paragraphs right after the paragraph that anchored it.
@@ -186,7 +187,8 @@ export type DocxExportSource =
     }
   | {
       kind: 'fresh';
-      reason: 'no-mapping' | 'converted';
+      /** Why the file is written fresh: no mapping, a converted file, or an original AI7 cannot restore in place. */
+      reason: 'no-mapping' | 'converted' | 'unprefixed';
       /** The DOCX whose classes the review counts: the original, or a converted file's working representation. */
       scan: Uint8Array | null;
       /** The converter a converted file names. */
@@ -666,6 +668,29 @@ function paragraphMarkInserted(paragraph: XmlElement): boolean {
   const properties = paragraph.children.find((child): child is XmlElement => isElement(child) && child.local === 'pPr');
   const markProperties = properties?.children.find((child): child is XmlElement => isElement(child) && child.local === 'rPr');
   return markProperties?.children.some((child) => isElement(child) && (child.local === 'ins' || child.local === 'moveTo')) === true;
+}
+
+/** The inline containers a paragraph's own bookmarks may stand in; a text box's paragraphs are other paragraphs. */
+const BOOKMARK_CONTAINERS = new Set(['hyperlink', 'smartTag', 'sdt', 'sdtContent', 'customXml', 'fldSimple', 'ins', 'del', 'moveTo', 'moveFrom']);
+
+/**
+ * The bookmarks a regenerated paragraph keeps — a table of contents' `_Toc` targets among them — each start at the
+ * paragraph's beginning and each end at its close, so a link to a heading still lands on it. A bookmark spanning
+ * paragraphs keeps its other half where that paragraph writes it; ids and names are the original's, unique there.
+ */
+function paragraphBookmarks(paragraph: XmlElement): { starts: string; ends: string } {
+  let starts = '';
+  let ends = '';
+  const walk = (nodes: ReadonlyArray<XmlNode>): void => {
+    for (const node of nodes) {
+      if (!isElement(node)) continue;
+      if (node.local === 'bookmarkStart') starts += openTag(node.name, node.attributes, true);
+      else if (node.local === 'bookmarkEnd') ends += openTag(node.name, node.attributes, true);
+      else if (BOOKMARK_CONTAINERS.has(node.local)) walk(node.children);
+    }
+  };
+  walk(paragraph.children);
+  return { starts, ends };
 }
 
 /**
@@ -1304,7 +1329,8 @@ function rewriteDocument(
     const name = paragraph === null ? w.w('p') : paragraph.name;
     emitted.add(block.blockId);
     regeneratedBlocks += 1;
-    return `${openTag(name, attributes, false)}${properties.paragraph}${w.blockRuns(block, properties.run, blockComments(plan, block), blockSuggestions(plan, block))}</${name}>`;
+    const bookmarks = paragraph === null ? { starts: '', ends: '' } : paragraphBookmarks(paragraph);
+    return `${openTag(name, attributes, false)}${properties.paragraph}${bookmarks.starts}${w.blockRuns(block, properties.run, blockComments(plan, block), blockSuggestions(plan, block))}${bookmarks.ends}</${name}>`;
   };
 
   /** The blocks no source paragraph holds, written fresh before the block that follows them. */
@@ -1607,7 +1633,9 @@ function freshPackage(input: DocxExportInput, source: Extract<DocxExportSource, 
     restoration: 'regenerated',
     freshReason: source.reason === 'converted'
       ? `这份稿件由 ${source.converter ?? '转换器'} 转换导入，导出按稿件文字重新生成 DOCX`
-      : '这份稿件导入时还没有建立来源段落对应，导出按稿件文字重新生成 DOCX',
+      : source.reason === 'unprefixed'
+        ? '原文件的 XML 写法 AI7 无法在原处恢复，导出按稿件文字重新生成 DOCX'
+        : '这份稿件导入时还没有建立来源段落对应，导出按稿件文字重新生成 DOCX',
     textBoxes: 'retain',
     tallies: {
       'inline-styles': emptyTally(), notes: emptyTally(), tables: emptyTally(), 'images-captions': emptyTally(),

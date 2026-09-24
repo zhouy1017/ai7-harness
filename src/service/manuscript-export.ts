@@ -55,7 +55,12 @@ import {
  *   reads `结果待确认` too. Nothing retries by itself (EXP-021).
  *
  * The file is written atomically in the destination's own folder: staged beside it under a name no one could
- * take for the result, synced and verified, then renamed over the chosen name and verified again. Cancelling
+ * take for the result, synced and verified, then published under the chosen name and verified again. A `create`
+ * takes the name with a hard link, which fails when a file appeared there meanwhile; a volume with no hard links
+ * has no way to take a name without possibly writing over another program's file, so a `create` there is refused
+ * with `EXPORT_CREATE_UNSUPPORTED` and nothing changes. A `replace` renames over exactly the file the dialog
+ * resolved: the preparation records that file's size and digest, and the approval and the moment before the
+ * rename both check it, so a file put there since is never overwritten (`EXPORT_TARGET_CHANGED`). Cancelling
  * before the approval creates nothing but the preparation (EXP-020). Nothing is sent anywhere (EXP-015).
  *
  * Nothing existing moves (ADR 0079 §1.1): the three relations are added once, shape-detected, by
@@ -183,6 +188,8 @@ export function initializeExportLedgerSchema(db: DatabaseSync): void {
 
 /** The low-ceremony state of a current revision whose unsaved edits are saved for the export (V2-UX-TASK-040). */
 export const EXPORT_CHECKPOINT_PURPOSE = 'Export Input / 导出输入' as const;
+/** Why a mapped document was written fresh: its original binds WordprocessingML to no prefix, which AI7 cannot restore in place. */
+export const EXPORT_UNPREFIXED_RESTORATION_LINE = '原文件的 XML 写法 AI7 无法在原处恢复，导出按稿件文字重新生成 DOCX。';
 export const EXPORT_OUTCOME_LABELS = {
   exported: '已导出到所选位置',
   ambiguous: '结果待确认',
@@ -374,8 +381,11 @@ type WriteOutcome =
   | { outcome: 'created' | 'replaced'; bytes: number; sha256: string }
   | { outcome: 'failed' | 'ambiguous'; code: string };
 
-/** A volume that has no hard links answers with one of these; the chosen name is then taken by an exclusive create. */
-const NO_HARD_LINKS = new Set(['EPERM', 'EACCES', 'EINVAL', 'EMLINK', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV']);
+/**
+ * A volume that has no hard links answers with one of these, and a `create` there is refused. FAT32 and exFAT on
+ * Windows answer `CreateHardLinkW` with ERROR_INVALID_FUNCTION, which libuv reports as `EISDIR`.
+ */
+const NO_HARD_LINKS = new Set(['EPERM', 'EACCES', 'EINVAL', 'EISDIR', 'EMLINK', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV']);
 
 /**
  * Take `destination` for the staged file without replacing anything, for an export approved as `create`
@@ -398,6 +408,34 @@ async function takeFreeName(staged: string, destination: string): Promise<'taken
   }
 }
 
+/** The longest a file name may be on the volumes an editor saves to, in UTF-8 bytes (APFS, ext4) as in UTF-16 units (NTFS). */
+const MAX_FILE_NAME_BYTES = 255;
+
+/**
+ * The name the write stages under, beside the destination: `.<stem>.<effect intent>.<random>.ai7-partial`, no one's
+ * result and this write's alone. The stem is the destination's name cut to whole characters so the whole name stays
+ * within 255 UTF-8 bytes — which also keeps it within 255 UTF-16 units — however long the chosen name is.
+ */
+export function stagedPathFor(destination: string, effectIntentId: string, random: string): string {
+  const suffix = `.${effectIntentId}.${random}.ai7-partial`;
+  const budget = MAX_FILE_NAME_BYTES - Buffer.byteLength(`.${suffix}`, 'utf8');
+  let stem = '';
+  let bytes = 0;
+  for (const character of basename(destination)) {
+    const size = Buffer.byteLength(character, 'utf8');
+    if (bytes + size > budget) break;
+    stem += character;
+    bytes += size;
+  }
+  return join(dirname(destination), `.${stem}${suffix}`);
+}
+
+/** The file a `replace` binds: exactly the one the dialog resolved, by its size and digest. */
+export interface ReplacedFileIdentity {
+  bytes: number;
+  sha256: string;
+}
+
 /**
  * Write `payload` at `destination` atomically (V2-UX-EXP-012): stage it beside the destination under a name no
  * one could take for the result and that only this write owns, sync and verify it, check the destination is
@@ -412,10 +450,10 @@ export async function writeAtomically(
   payloadSha256: string,
   disposition: ManuscriptExportDisposition,
   effectIntentId: string,
+  replaces: ReplacedFileIdentity | null = null,
 ): Promise<WriteOutcome> {
   const directory = dirname(destination);
-  const stem = Array.from(basename(destination)).slice(0, 80).join('');
-  const staged = join(directory, `.${stem}.${effectIntentId}.${randomUUID()}.ai7-partial`);
+  const staged = stagedPathFor(destination, effectIntentId, randomUUID());
   // Only a stage this write created may be removed: an exclusive open that found a file leaves it to its owner.
   let owned = false;
   const discard = async (): Promise<void> => {
@@ -446,6 +484,15 @@ export async function writeAtomically(
     await discard();
     return { outcome: 'failed', code: 'EXPORT_TARGET_CHANGED' };
   }
+  // A `replace` renames over the file the dialog resolved and no other: one a sync client or another program put
+  // there since is left as it is, and nothing is written.
+  if (disposition === 'replace') {
+    const standing = await fileDigest(destination);
+    if (replaces === null || standing?.bytes !== replaces.bytes || standing.sha256 !== replaces.sha256) {
+      await discard();
+      return { outcome: 'failed', code: 'EXPORT_TARGET_CHANGED' };
+    }
+  }
   if (disposition === 'create') {
     const taken = await takeFreeName(staged, destination);
     // After a link both names hold the payload, and the stage — this write's own — is not left behind.
@@ -458,14 +505,16 @@ export async function writeAtomically(
       await rename(staged, destination);
       owned = false;
     } catch {
-      const landed = await fileDigest(destination);
-      if (landed?.sha256 === payloadSha256) {
-        await discard();
-        return { outcome: 'replaced', bytes: landed.bytes, sha256: landed.sha256 };
-      }
+      // A stage still standing was never renamed: the destination is untouched, whatever it holds — even the same
+      // bytes as the payload — so nothing was replaced.
       if ((await targetState(staged)) === 'file') {
         await discard();
         return { outcome: 'failed', code: 'EXPORT_COMMIT_FAILED' };
+      }
+      owned = false;
+      const landed = await fileDigest(destination);
+      if (landed?.sha256 === payloadSha256 && landed.bytes === payload.byteLength) {
+        return { outcome: 'replaced', bytes: landed.bytes, sha256: landed.sha256 };
       }
       return { outcome: 'ambiguous', code: 'EXPORT_COMMIT_UNCERTAIN' };
     }
@@ -557,6 +606,8 @@ export class ManuscriptExportStore {
       fileName: destination.fileName,
       destination: destination.path,
       disposition: destination.disposition,
+      // The file a `replace` binds, by its size and digest: the approval and the moment before the rename check it.
+      replaces: destination.replaces,
       payloadSha256,
       payloadBytes: payload.byteLength,
       policyId: POLICY.id,
@@ -606,8 +657,11 @@ export class ManuscriptExportStore {
     requireExport(sha256Hex(payload) === preparation.technical.payloadDigest, 'EXPORT_PAYLOAD_CHANGED',
       '稿件或标记在准备导出后有了变化，请重新准备导出。');
     const state = await targetState(preparation.destination);
+    const replaces = this.#replacedFileOf(row);
+    const standing = preparation.disposition === 'replace' ? await fileDigest(preparation.destination) : null;
     requireExport(
-      (preparation.disposition === 'create' && state === 'absent') || (preparation.disposition === 'replace' && state === 'file'),
+      (preparation.disposition === 'create' && state === 'absent') ||
+        (preparation.disposition === 'replace' && state === 'file' && standing?.bytes === replaces?.bytes && standing?.sha256 === replaces?.sha256),
       'EXPORT_TARGET_CHANGED',
       '所选位置在准备后发生了变化，请重新选择保存位置。',
     );
@@ -633,7 +687,7 @@ export class ManuscriptExportStore {
         approvedAt, approval.json, approval.digest);
     });
     const written = await writeAtomically(preparation.destination, payload, preparation.technical.payloadDigest,
-      preparation.disposition, preparation.technical.effectIntentId);
+      preparation.disposition, preparation.technical.effectIntentId, replaces);
     const receiptId = randomUUID();
     const recordedAt = new Date().toISOString();
     const verified = written.outcome === 'created' || written.outcome === 'replaced' ? written : null;
@@ -696,7 +750,7 @@ export class ManuscriptExportStore {
     requireExport(available, 'EXPORT_POLICY_UNAVAILABLE', '对外导出策略未通过本次启动的校验，导出不可用。');
   }
 
-  async #requireDestination(value: unknown): Promise<{ path: string; fileName: string; disposition: ManuscriptExportDisposition }> {
+  async #requireDestination(value: unknown): Promise<{ path: string; fileName: string; disposition: ManuscriptExportDisposition; replaces: ReplacedFileIdentity | null }> {
     requireExport(
       typeof value === 'string' && value.isWellFormed() && value.length > 0 && value.length <= MAX_EXPORT_DESTINATION_CODE_UNITS &&
         !value.includes('\u0000') && isAbsolute(value),
@@ -718,7 +772,28 @@ export class ManuscriptExportStore {
       '不能导出到 AI7 保存数据的位置，请选择别的文件夹。');
     const state = await targetState(value);
     requireExport(state !== 'other', 'EXPORT_DESTINATION_INVALID', '所选位置不是可以写入的文件。');
-    return { path: value, fileName, disposition: state === 'file' ? 'replace' : 'create' };
+    if (state === 'absent') return { path: value, fileName, disposition: 'create', replaces: null };
+    // The file the editor chose to replace, as it stands now: the preparation binds exactly this one.
+    const standing = await fileDigest(value);
+    requireExport(standing !== null, 'EXPORT_DESTINATION_INVALID', '所选位置的文件无法读取。');
+    return { path: value, fileName, disposition: 'replace', replaces: standing };
+  }
+
+  /** The file a preparation's `replace` binds, as its record holds it; `null` for a `create`. */
+  #replacedFileOf(row: SqlRow): ReplacedFileIdentity | null {
+    const record = parseCanonicalJson(text(row.canonical_json));
+    const replaces = isRecord(record) ? record.replaces : undefined;
+    if (text(row.disposition) === 'create') {
+      requireExport(replaces === null, 'EXPORT_RECORD_INVALID', '导出准备记录无效。');
+      return null;
+    }
+    requireExport(
+      isRecord(replaces) && Object.keys(replaces).length === 2 && typeof replaces.bytes === 'number' && Number.isSafeInteger(replaces.bytes) &&
+        replaces.bytes >= 0 && typeof replaces.sha256 === 'string' && DIGEST_PATTERN.test(replaces.sha256),
+      'EXPORT_RECORD_INVALID',
+      '导出准备记录无效。',
+    );
+    return { bytes: replaces.bytes, sha256: replaces.sha256 };
   }
 
   /** The Book's primary Manuscript on its working branch, with how far its working state is ahead of its revision. */
@@ -997,8 +1072,8 @@ export class ManuscriptExportStore {
       return renderDocxExport(input, { emit });
     } catch (error) {
       if (error instanceof DocxExportError && error.code === 'DOCX_EXPORT_SOURCE_UNSUPPORTED' && input.source.kind === 'mapped') {
-        // A document that binds WordprocessingML to no prefix is written fresh from its blocks.
-        return renderDocxExport({ ...input, source: { kind: 'fresh', reason: 'no-mapping', scan: input.source.original, converter: null } }, { emit });
+        // A document that binds WordprocessingML to no prefix is written fresh from its blocks, and says why.
+        return renderDocxExport({ ...input, source: { kind: 'fresh', reason: 'unprefixed', scan: input.source.original, converter: null } }, { emit });
       }
       if (error instanceof DocxExportError) throw new ExportLedgerError(error.code, error.message);
       throw error;
@@ -1026,7 +1101,9 @@ export class ManuscriptExportStore {
     }).digest;
     const restorationLine = rendered.restoration === 'from-original'
       ? `未改过、也没有带出标记的 ${rendered.restoredBlocks} 段从原文件恢复；其余 ${rendered.regeneratedBlocks} 段按稿件文字重新写出。`
-      : '这份稿件没有可以对应的原文件段落，导出按稿件文字重新生成 DOCX。';
+      : plan.input.source.kind === 'mapped' || (plan.input.source.kind === 'fresh' && plan.input.source.reason === 'unprefixed')
+        ? EXPORT_UNPREFIXED_RESTORATION_LINE
+        : '这份稿件没有可以对应的原文件段落，导出按稿件文字重新生成 DOCX。';
     return {
       bookId,
       bookTitle: target.bookTitle,

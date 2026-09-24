@@ -1,13 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { parseDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
 import { EDITOR_AUTHOR_LABEL } from '../../src/service/docx-export.js';
-import { EXPORT_LEDGER_SCHEMA_SQL, writeAtomically } from '../../src/service/manuscript-export.js';
+import { EXPORT_LEDGER_SCHEMA_SQL, stagedPathFor, writeAtomically } from '../../src/service/manuscript-export.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { EXPORT_LEDGER_SCHEMA_VERSION, IMPORTED_MARK_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
@@ -305,6 +305,17 @@ describe('④ 导出: the Export Fidelity Review, the preparation, the approval 
       const receipt = await store.approveManuscriptExport({ bookId: book.bookId, preparationId: preparation.preparationId }, true);
       expect(receipt).toMatchObject({ outcome: 'replaced', outcomeLabel: '已导出到所选位置', revealAvailable: true });
       expect(digest(await readFile(destination))).toBe(preparation.technical.payloadDigest);
+
+      // Another file put in its place after the dialog resolved it — a sync client's, say — is never overwritten:
+      // the preparation bound the file it replaces by its size and digest.
+      const synced = join(outbox, '同步来的.docx');
+      await writeFile(synced, 'the dialog resolved this file');
+      const bound = await prepare(store, book, synced);
+      expect(bound.disposition).toBe('replace');
+      await writeFile(synced, 'a sync client put another file here');
+      expect(await refusal(() => store.approveManuscriptExport({ bookId: book.bookId, preparationId: bound.preparationId }, true)))
+        .toBe('EXPORT_TARGET_CHANGED');
+      expect(await readFile(synced, 'utf8')).toBe('a sync client put another file here');
       store.markCleanShutdown();
     } finally {
       store.close();
@@ -516,10 +527,32 @@ describe('taking the chosen name', () => {
   it('replaces exactly the file the editor chose to replace', async () => {
     const destination = join(outbox, '覆盖.docx');
     await writeFile(destination, OTHER);
-    const written = await writeAtomically(destination, PAYLOAD, digest(PAYLOAD), 'replace', randomUUID());
+    const written = await writeAtomically(destination, PAYLOAD, digest(PAYLOAD), 'replace', randomUUID(), { bytes: OTHER.byteLength, sha256: digest(OTHER) });
     expect(written).toEqual({ outcome: 'replaced', bytes: PAYLOAD.byteLength, sha256: digest(PAYLOAD) });
     expect(new Uint8Array(await readFile(destination))).toEqual(PAYLOAD);
     expect(await partials()).toEqual([]);
+  });
+
+  it('refuses a replace whose file changed since the dialog resolved it, and leaves the new one as it is', async () => {
+    const destination = join(outbox, '已被换掉.docx');
+    await writeFile(destination, OTHER);
+    const resolved = { bytes: PAYLOAD.byteLength, sha256: digest(PAYLOAD) };
+    const written = await writeAtomically(destination, PAYLOAD, digest(PAYLOAD), 'replace', randomUUID(), resolved);
+    expect(written).toEqual({ outcome: 'failed', code: 'EXPORT_TARGET_CHANGED' });
+    expect(new Uint8Array(await readFile(destination))).toEqual(OTHER);
+    expect(await partials()).toEqual([]);
+  });
+
+  it('stages a long name within the file-name bound, whole characters only', () => {
+    const effectIntentId = randomUUID();
+    const long = join(outbox, `${'长'.repeat(84)}.docx`);
+    const staged = stagedPathFor(long, effectIntentId, randomUUID());
+    const name = basename(staged);
+    expect(Buffer.byteLength(name, 'utf8')).toBeLessThanOrEqual(255);
+    expect(name.isWellFormed()).toBe(true);
+    expect(name.startsWith(`.${'长'.repeat(50)}`) && name.endsWith('.ai7-partial') && name.includes(effectIntentId)).toBe(true);
+    // A short name is staged whole.
+    expect(basename(stagedPathFor(join(outbox, '稿件.docx'), effectIntentId, 'r'))).toBe(`.稿件.docx.${effectIntentId}.r.ai7-partial`);
   });
 
   it('refuses a replace whose file is gone, and writes nothing in its place', async () => {

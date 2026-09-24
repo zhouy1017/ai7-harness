@@ -70,6 +70,8 @@ type ComposedBodyItem =
       drawing?: boolean;
       /** A hyperlink around the paragraph's last run. */
       link?: boolean;
+      /** A bookmark of this name around the paragraph's runs, the way a table of contents marks a heading. */
+      bookmark?: string;
     }
   | { table: ReadonlyArray<ReadonlyArray<SourceSpan>> };
 
@@ -95,6 +97,10 @@ async function paragraphXml(item: Extract<ComposedBodyItem, { runs: unknown }>):
   if (item.field && runs.length > 0) runs[0] = `<w:fldSimple w:instr=" TITLE ">${runs[0]}</w:fldSimple>`;
   if (item.link && runs.length > 0) runs[runs.length - 1] = `<w:hyperlink w:anchor="mark">${runs.at(-1)}</w:hyperlink>`;
   if (item.footnote) runs.push('<w:r><w:footnoteReference w:id="1"/></w:r>');
+  if (item.bookmark !== undefined) {
+    runs.unshift(`<w:bookmarkStart w:id="0" w:name="${item.bookmark}"/>`);
+    runs.push('<w:bookmarkEnd w:id="0"/>');
+  }
   if (item.drawing) {
     runs.push(`<w:r><w:drawing><wp:inline ${WP}><a:graphic ${A}><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
       `<pic:pic ${PIC}/></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`);
@@ -231,6 +237,30 @@ async function richInput(options: Partial<DocxExportInput> = {}): Promise<{ inpu
     },
   };
 }
+
+describe('a regenerated paragraph keeps its bookmarks', () => {
+  it('writes an edited paragraph’s bookmark around its text, so a link to it still lands', async () => {
+    const path = join(sandbox, 'bookmarks.docx');
+    const original = await composeSource(path, { body: [{ runs: [{ span: { block: 3 } }], bookmark: 'mark' }, { runs: [{ span: { block: 4 } }], link: true }] });
+    const { blocks } = await parse(path);
+    const input: DocxExportInput = {
+      title: '书签',
+      blocks: exportBlocks(blocks).map((block, index) => index === 0 ? edited(block, `${block.text}（改）`) : block),
+      marks: [],
+      options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS },
+      source: { kind: 'mapped', original, rows: bodyRows(blocks), textBoxes: 'retain' },
+    };
+    const result = renderDocxExport(input, { emit: true });
+    expect([result.restoredBlocks, result.regeneratedBlocks]).toEqual([1, 1]);
+    const document = partOf(result.bytes!, 'word/document.xml')!;
+    const start = document.indexOf('<w:bookmarkStart w:id="0" w:name="mark"/>');
+    const text = document.indexOf('（改）');
+    const end = document.indexOf('<w:bookmarkEnd w:id="0"/>');
+    expect(start >= 0 && start < text && text < end).toBe(true);
+    expect(document.split('w:name="mark"').length).toBe(2);
+    expect(document).toContain('w:anchor="mark"');
+  });
+});
 
 describe('DOCX export restores the original', () => {
   it('writes an unedited manuscript back as the file it came from, every retained class restored', async () => {
@@ -591,6 +621,15 @@ describe('DOCX export of text boxes and fresh builds', () => {
       '[Content_Types].xml', '_rels/.rels', 'docProps/core.xml', 'word/document.xml', 'word/_rels/document.xml.rels', 'word/styles.xml',
       'word/comments.xml', 'word/commentsExtended.xml',
     ]);
+  });
+
+  it('says why a mapped original is written fresh when AI7 cannot restore it in place, apart from having no mapping', async () => {
+    const { input, original } = await richInput();
+    const unprefixed = renderDocxExport({ ...input, source: { kind: 'fresh', reason: 'unprefixed', scan: original, converter: null } }, { emit: false });
+    const unmapped = renderDocxExport({ ...input, source: { kind: 'fresh', reason: 'no-mapping', scan: original, converter: null } }, { emit: false });
+    const detail = (result: typeof unprefixed) => result.fidelity.find((entry) => entry.key === 'tables')?.detail;
+    expect(detail(unprefixed)).toBe('原文件的 XML 写法 AI7 无法在原处恢复，导出按稿件文字重新生成 DOCX；表格无法恢复。');
+    expect(detail(unmapped)).toBe('这份稿件导入时还没有建立来源段落对应，导出按稿件文字重新生成 DOCX；表格无法恢复。');
   });
 
   it('writes a heading block fresh in a style the parser reads back as the same heading', async () => {
