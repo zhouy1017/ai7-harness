@@ -443,6 +443,11 @@ async function exportAs(renderer, format, destination, fileName, name) {
     const formats = Array.from(window.__j07.exportCard().querySelectorAll('input[name="export-format"]'));
     const radio = ${radio};
     if (JSON.stringify(formats.map((item) => item.value + ':' + item.checked + ':' + item.disabled)) !== '["docx:true:false","pdf:false:false","markdown:false:false"]' || !(radio instanceof HTMLInputElement)) return false;
+    // Markdown sits under the 备用格式 disclosure only, closed until the editor opens it (EXP-005).
+    const fallback = window.__j07.exportCard().querySelector('details.export-fallback-formats');
+    if (fallback?.querySelector('summary')?.textContent !== '备用格式' || fallback.open ||
+      JSON.stringify(Array.from(fallback.querySelectorAll('input[name="export-format"]')).map((item) => item.value)) !== '["markdown"]') return false;
+    if (radio.closest('details.export-fallback-formats') !== null) fallback.open = true;
     radio.click();
     return true;
   })()`, `${name}-choose-format`);
@@ -1186,14 +1191,16 @@ async function main() {
     await waitFor(renderer, `window.__j07.form() === null`, 'forced-colors-form-closed', 10_000);
 
     at('j14-export-keyboard');
-    // The card without a pointer: Enter on 导出… opens it on its first choice; Tab reaches each option with visible
-    // focus, and Space on 含备注 reviews again — the 备注 now written under 「备注」 — with focus kept; Tab reaches
+    // The card without a pointer: Enter on 导出… opens it on its first choice; Tab reaches the closed 备用格式 disclosure,
+    // then each option with visible focus, and Space on 含备注 reviews again — the 备注 now written under 「备注」 — with focus kept; Tab reaches
     // 选择保存位置…, left alone because this launch's Save dialog has answered, and 取消, whose Enter closes the
     // card with focus back on the opener and nothing written.
     await assertRenderer(renderer, `(() => { const open = window.__j07.exportOpener('current'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.focus(); return document.activeElement === open; })()`, 'export-keyboard-opener-focused');
     await pressEnter(renderer);
     await waitFor(renderer, `(() => { const card = window.__j07.exportCard(); const docx = card?.querySelector('input[name="export-format"][value="docx"]'); return card?.dataset.exportPhase === 'ready' && docx instanceof HTMLInputElement && docx.checked && document.activeElement === docx; })()`, 'export-keyboard-opens-on-its-first-choice', 60_000);
     await assertRenderer(renderer, `window.__j07.exportCard().querySelector('h4')?.textContent === '导出 · 当前修订版 r3' && window.__j07.exportCard().querySelector('.export-saved-line') === null`, 'export-keyboard-nothing-to-save');
+    await press(renderer, 'Tab');
+    await waitFor(renderer, `(() => { const summary = window.__j07.exportCard()?.querySelector('details.export-fallback-formats > summary'); return document.activeElement === summary && summary.textContent === '备用格式' && summary.matches(':focus-visible') && summary.parentElement.open === false; })()`, 'export-keyboard-fallback-formats-reached', 10_000);
     for (const key of ['includeAnnotations', 'includeSuggestions', 'includeEditorNotes']) {
       await press(renderer, 'Tab');
       await waitFor(renderer, `document.activeElement === window.__j07.exportOption(${JSON.stringify(key)}) && document.activeElement.matches(':focus-visible')`, `export-keyboard-${key}-reached`, 10_000);

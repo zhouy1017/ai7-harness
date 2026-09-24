@@ -205,10 +205,11 @@ export const EXPORT_DISPOSITION_LABELS: Readonly<Record<ManuscriptExportDisposit
   replace: '替换所选位置的同名文件',
 };
 export const EXPORT_FORMATS: ReadonlyArray<ManuscriptExportFormatProjection> = [
-  { format: 'docx', label: 'DOCX', available: true, note: '主要可编辑格式：可在 Word 中继续修改，批注与修订按下面的选项写出。' },
-  // Issue #500 (S64b; EXP-005, EXP-006): PDF, optional, and Markdown only as the 备用格式 — never in place of a DOCX.
-  { format: 'pdf', label: 'PDF', available: true, note: '可选 · 固定版式，适合阅读与打印；不能继续编辑，也不能导回 AI7。' },
-  { format: 'markdown', label: 'Markdown（备用格式）', available: true, note: '备用格式 · 只写出文字与标题层级，用于迁移或留底。' },
+  { format: 'docx', label: 'DOCX', available: true, note: '主要可编辑格式：可在 Word 中继续修改，批注与修订按下面的选项写出。', fallback: false },
+  // Issue #500 (S64b; EXP-005, EXP-006): PDF, optional, and Markdown only as the 备用格式 — never in place of a DOCX, and
+  // offered under its own secondary disclosure rather than as a peer of the other two.
+  { format: 'pdf', label: 'PDF', available: true, note: '可选 · 固定版式，适合阅读与打印；不能继续编辑，也不能导回 AI7。', fallback: false },
+  { format: 'markdown', label: 'Markdown（备用格式）', available: true, note: '备用格式 · 只写出文字与标题层级，用于迁移或留底。', fallback: true },
 ];
 export const EXPORT_DOCX_LINE = 'DOCX 可在 Word 中继续编辑；稿件本身和稿件上的标记不会因为导出而改变。';
 /** What PDF and Markdown promise (V2-UX-EXP-009), before any approval. */
