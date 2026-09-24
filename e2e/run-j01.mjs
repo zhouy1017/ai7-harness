@@ -132,8 +132,8 @@ async function createSyntheticDocx(path, variant) {
       // into one and one split in two — eighteen rows with the ones above, more than one page of ten.
       const labelled = (label) => paragraphs.findIndex((text) => text.startsWith(`有界内容块 ${label} `));
       for (const label of PAGED_REWRITTEN_LABELS) paragraphs[labelled(label)] = paragraphs[labelled(label)].replace(' 边界', ' 二校边界');
-      const merged = labelled('150');
-      paragraphs.splice(merged, 2, `${paragraphs[merged]}${paragraphs[merged + 1]}`);
+      // The merged paragraph keeps half of each, so it stays within one block's bound.
+      paragraphs.splice(labelled('150'), 2, `有界内容块 150 ${'边界'.repeat(500)}有界内容块 151 ${'边界'.repeat(500)}`);
       paragraphs.splice(labelled('200'), 1, `有界内容块 200 ${'边界'.repeat(500)}`, `拆分后半 ${'边界'.repeat(500)}`);
     }
   } else if (variant === 'repeated-base' || variant === 'repeated-reimport') {
