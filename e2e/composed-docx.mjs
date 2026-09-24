@@ -361,6 +361,184 @@ export const IMPORTED_MARKS_RECIPE = Object.freeze({
 export const IMPORTED_MARKS_REJECTED_BLOCKS = Object.freeze([8, 10, 13, 15, 16, 19, 20, 12]);
 export const IMPORTED_MARKS_COUNT = 7;
 
+// ---- the export input and the exported file (Issue #413) ---------------------------------------------
+
+const REL = 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+
+/**
+ * J-07's export input (Issue #413, E6), every word sample1's own: the contiguous excerpt with a header whose
+ * words are the source's `header.sourceBlock`; the excerpt's `styledRun.block`-th paragraph split after its
+ * fourth grapheme, the rest bold; one comment by `comment.author` over graphemes `[from, to)` of the excerpt's
+ * `comment.block`-th paragraph, its words the source span `comment.text`; and one tracked replacement by
+ * `replacement.author` of graphemes `[from, to)` of the excerpt's `replacement.block`-th paragraph by the source
+ * span `replacement.insert`. Read with every revision rejected it is the excerpt itself.
+ */
+export async function composeExportAdmittedDocx(path, { source, startBlock, blocks, title, header, styledRun, comment, replacement }) {
+  const { zipSync, strToU8 } = await carriers();
+  const available = await admittedBlocks(source);
+  const lastBlock = startBlock + blocks - 1;
+  if (!Number.isSafeInteger(startBlock) || !Number.isSafeInteger(blocks) || startBlock < 1 || blocks < 1 || lastBlock > available.length) {
+    throw new Error(`composed excerpt out of range: blocks ${startBlock}-${lastBlock} of ${available.length} in ${admittedSourcePath(source)}`);
+  }
+  const excerpt = available.slice(startBlock - 1, lastBlock);
+  const graphemes = (text) => Array.from(segmenter.segment(text), ({ segment }) => segment);
+  const plainRun = (text, bold = false) => text.length === 0 ? '' : `<w:r>${bold ? '<w:rPr><w:b/></w:rPr>' : ''}<w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r>`;
+  const within = (position) => {
+    if (!Number.isSafeInteger(position) || position < 1 || position > excerpt.length) throw new Error('composed export content outside the excerpt');
+    return graphemes(excerpt[position - 1].text);
+  };
+  const commentWords = await admittedSpanText(source, comment.text);
+  const insertWords = await admittedSpanText(source, replacement.insert);
+  const body = excerpt.map((block, index) => {
+    const position = index + 1;
+    const style = block.style === undefined ? '' : `<w:pPr><w:pStyle w:val="${escapeXml(block.style)}"/></w:pPr>`;
+    let runs = plainRun(block.text);
+    if (position === styledRun.block) {
+      const parts = within(position);
+      runs = `${plainRun(parts.slice(0, 4).join(''))}${plainRun(parts.slice(4).join(''), true)}`;
+    } else if (position === comment.block) {
+      const parts = within(position);
+      runs = `${plainRun(parts.slice(0, comment.from).join(''))}<w:commentRangeStart w:id="1"/>${plainRun(parts.slice(comment.from, comment.to).join(''))}` +
+        `<w:commentRangeEnd w:id="1"/><w:r><w:commentReference w:id="1"/></w:r>${plainRun(parts.slice(comment.to).join(''))}`;
+    } else if (position === replacement.block) {
+      const parts = within(position);
+      const identity = `w:author="${escapeXml(replacement.author)}" w:date="${escapeXml(replacement.date)}"`;
+      runs = `${plainRun(parts.slice(0, replacement.from).join(''))}` +
+        `<w:del w:id="101" ${identity}><w:r><w:delText xml:space="preserve">${escapeXml(parts.slice(replacement.from, replacement.to).join(''))}</w:delText></w:r></w:del>` +
+        `<w:ins w:id="102" ${identity}><w:r><w:t xml:space="preserve">${escapeXml(insertWords)}</w:t></w:r></w:ins>${plainRun(parts.slice(replacement.to).join(''))}`;
+    }
+    return `<w:p>${style}${runs}</w:p>`;
+  }).join('');
+  const [headerBlock] = available.slice(header.sourceBlock - 1, header.sourceBlock);
+  if (headerBlock === undefined) throw new Error('composed header outside the source');
+  const archive = zipSync({
+    '[Content_Types].xml': strToU8('<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/><Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>'),
+    'docProps/core.xml': strToU8(`<?xml version="1.0" encoding="UTF-8"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${escapeXml(title)}</dc:title></cp:coreProperties>`),
+    'word/document.xml': strToU8(
+      `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ${REL}>` +
+      `<w:body>${body}<w:sectPr><w:headerReference w:type="default" r:id="rIdHeader1"/></w:sectPr></w:body></w:document>`,
+    ),
+    'word/_rels/document.xml.rels': strToU8('<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdHeader1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/><Relationship Id="rIdComments1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="comments.xml"/></Relationships>'),
+    'word/header1.xml': strToU8(`<?xml version="1.0" encoding="UTF-8"?><w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p>${plainRun(headerBlock.text)}</w:p></w:hdr>`),
+    'word/comments.xml': strToU8(
+      `<?xml version="1.0" encoding="UTF-8"?><w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+      `<w:comment w:id="1" w:author="${escapeXml(comment.author)}" w:date="2026-09-01T00:00:00Z" w:initials="示"><w:p><w:r><w:t xml:space="preserve">${escapeXml(commentWords)}</w:t></w:r></w:p></w:comment></w:comments>`,
+    ),
+  }, { level: 6, mtime: new Date('2026-01-01T00:00:00.000Z') });
+  await writeFile(path, archive, { flag: 'wx' });
+  return archive;
+}
+
+/**
+ * What a written DOCX holds, as digests, counts and authors only — so a runner checks an exported file without
+ * ever holding its words in a message: each part's digest; each body paragraph's text as the parser reads it
+ * with every revision rejected, and whether a run of it is bold; each tracked insertion and deletion; each
+ * comment's author and words; and whether the section still names its header.
+ */
+export async function readExportedDocx(path) {
+  const { unzipSync, SaxesParser } = await carriers();
+  const { createHash } = await import('node:crypto');
+  const digest = (value) => createHash('sha256').update(value).digest('hex');
+  const files = unzipSync(await readFile(path));
+  const parts = Object.fromEntries(Object.entries(files).filter(([name]) => !name.endsWith('/')).map(([name, bytes]) => [name, digest(bytes)]));
+  const decode = (name) => (files[name] === undefined ? undefined : new TextDecoder('utf-8', { fatal: true }).decode(files[name]));
+  const attribute = (tag, local) => Object.values(tag.attributes).find((item) => item.local === local)?.value;
+  const paragraphs = [];
+  const insertions = [];
+  const deletions = [];
+  let headerReference = false;
+  let paragraph;
+  let run;
+  let textDepth = 0;
+  const revisions = [];
+  const documentParser = new SaxesParser({ xmlns: true });
+  documentParser.on('opentag', (tag) => {
+    switch (tag.local) {
+      case 'p':
+        paragraph = { text: '', bold: false };
+        break;
+      case 'r':
+        run = { bold: false };
+        break;
+      case 'b':
+        if (run !== undefined && revisions.length === 0) run.bold = true;
+        break;
+      case 'ins':
+      case 'del':
+        if (paragraph !== undefined) {
+          const record = { kind: tag.local, author: attribute(tag, 'author') ?? '', text: '' };
+          revisions.push(record);
+          (tag.local === 'ins' ? insertions : deletions).push(record);
+        }
+        break;
+      case 't':
+      case 'delText':
+        textDepth += 1;
+        break;
+      case 'br':
+      case 'cr':
+        if (paragraph !== undefined && revisions.every((record) => record.kind === 'del')) paragraph.text += '\n';
+        break;
+      case 'headerReference':
+        headerReference = true;
+        break;
+      default:
+        break;
+    }
+  });
+  documentParser.on('text', (text) => {
+    if (paragraph === undefined || textDepth === 0) return;
+    const innermost = revisions.at(-1);
+    if (innermost !== undefined) innermost.text += text;
+    if (revisions.every((record) => record.kind === 'del')) paragraph.text += text;
+  });
+  documentParser.on('closetag', (tag) => {
+    if (tag.local === 't' || tag.local === 'delText') textDepth -= 1;
+    if ((tag.local === 'ins' || tag.local === 'del') && paragraph !== undefined) revisions.pop();
+    if (tag.local === 'r') {
+      if (run?.bold === true && paragraph !== undefined) paragraph.bold = true;
+      run = undefined;
+    }
+    if (tag.local === 'p' && paragraph !== undefined) {
+      const text = paragraph.text.normalize('NFC').replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').trim();
+      if (text.length > 0) paragraphs.push({ digest: digest(text), bold: paragraph.bold });
+      paragraph = undefined;
+    }
+  });
+  documentParser.write(decode('word/document.xml') ?? '').close();
+  const comments = [];
+  const commentsXml = decode('word/comments.xml');
+  if (commentsXml !== undefined) {
+    let current;
+    let depth = 0;
+    const commentParser = new SaxesParser({ xmlns: true });
+    commentParser.on('opentag', (tag) => {
+      if (tag.local === 'comment') current = { author: attribute(tag, 'author') ?? '', lines: [] };
+      if (tag.local === 'p' && current !== undefined) current.lines.push('');
+      if (tag.local === 't') depth += 1;
+    });
+    commentParser.on('text', (text) => {
+      if (current !== undefined && depth > 0) current.lines[current.lines.length - 1] += text;
+    });
+    commentParser.on('closetag', (tag) => {
+      if (tag.local === 't') depth -= 1;
+      if (tag.local === 'comment' && current !== undefined) {
+        comments.push({ author: current.author, digest: digest(current.lines.join('\n').trim()) });
+        current = undefined;
+      }
+    });
+    commentParser.write(commentsXml).close();
+  }
+  return {
+    parts,
+    paragraphs,
+    insertions: insertions.map((record) => ({ author: record.author, digest: digest(record.text) })),
+    deletions: deletions.map((record) => ({ author: record.author, digest: digest(record.text) })),
+    comments,
+    headerReference,
+  };
+}
+
 /**
  * Compose one DOCX at `path` from the contiguous 1-based excerpt `[startBlock, startBlock + blocks)` of
  * `source` under exact root `SampleBooks/`, carrying the caller's `title` as the package's `dc:title` —

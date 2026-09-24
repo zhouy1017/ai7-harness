@@ -18,7 +18,7 @@ import {
   ANALYSIS_LEDGER_TRIGGER_SQL,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
-  IMPORTED_MARK_SCHEMA_VERSION,
+  EXPORT_LEDGER_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
 } from '../../src/service/task-authorization.js';
@@ -48,6 +48,7 @@ import { PUBLICATION_VERSION_RELATIONS_DROP_ORDER } from '../support/publication
 import { PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER } from '../support/proposal-conflicts.js';
 import { IMPORT_RETENTION_RELATIONS_DROP_ORDER } from '../support/import-retention.js';
 import { IMPORTED_MARK_RELATIONS_DROP_ORDER } from '../support/imported-marks.js';
+import { EXPORT_LEDGER_RELATIONS_DROP_ORDER } from '../support/manuscript-export.js';
 import {
   SAMPLE1_BLOCKS,
   SAMPLE1_UNITS,
@@ -188,6 +189,7 @@ function downgradePlanRecordsToRevision16(database: DatabaseSync): void {
  * revision 28's staged imported marks.
  */
 function dropEntryPositionRelation(database: DatabaseSync): void {
+  for (const relation of EXPORT_LEDGER_RELATIONS_DROP_ORDER) database.exec(`DROP TABLE ${relation}`);
   for (const relation of IMPORTED_MARK_RELATIONS_DROP_ORDER) database.exec(`DROP TABLE ${relation}`);
   for (const relation of IMPORT_RETENTION_RELATIONS_DROP_ORDER) database.exec(`DROP TABLE ${relation}`);
   for (const relation of PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER) database.exec(`DROP TABLE ${relation}`);
@@ -598,7 +600,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     // drift or a retry-safe failure leaves the Plan Revision and Plan Adaptation relations empty.
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(IMPORTED_MARK_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EXPORT_LEDGER_SCHEMA_VERSION);
       const expectedEmpty = new Set(['analysis_plan_revisions', 'analysis_plan_adaptations']);
       for (const table of Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL)) {
         const total = (database.prepare(`SELECT count(*) total FROM ${table}`).get() as { total: number }).total;
@@ -1321,7 +1323,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       try {
         const after = new DatabaseSync(databasePath, { readOnly: true });
         try {
-          expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(IMPORTED_MARK_SCHEMA_VERSION);
+          expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EXPORT_LEDGER_SCHEMA_VERSION);
           for (const table of j03Tables) expect(tableRows(after, table)).toEqual(j03Before[table]);
           for (const table of analysisTables) {
             expect(tableRows(after, table, table === 'analysis_task_intents' ? REVISION_15_INTENT_COLUMNS : '*')).toEqual(analysisBefore[table]);
@@ -1406,7 +1408,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     try {
       const after = new DatabaseSync(databasePath, { readOnly: true });
       try {
-        expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(IMPORTED_MARK_SCHEMA_VERSION);
+        expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EXPORT_LEDGER_SCHEMA_VERSION);
         for (const table of j03Tables) expect(tableRows(after, table)).toEqual(j03Before[table]);
         for (const table of analysisTables) expect(tableRows(after, table)).toEqual(analysisBefore[table]);
         // The widened CHECKs are in place: the second kind is admissible where it was not before.
@@ -1452,7 +1454,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     }
     const verify = new DatabaseSync(databasePath);
     try {
-      expect((verify.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(IMPORTED_MARK_SCHEMA_VERSION);
+      expect((verify.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EXPORT_LEDGER_SCHEMA_VERSION);
       for (const table of Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL)) {
         expect((verify.prepare(`SELECT count(*) total FROM ${table}`).get() as { total: number }).total).toBe(0);
       }

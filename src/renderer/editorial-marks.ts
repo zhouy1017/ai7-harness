@@ -377,7 +377,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       submitLabel: suggestion ? '提出修改建议' : kind === 'annotation' ? '添加批注' : '添加备注',
       note: suggestion
         ? '修改建议替换原文，待接受；提出后稿件本身不变。'
-        : kind === 'annotation' ? '批注随稿件导出（导出时可选不含批注）。' : '备注仅自己可见：不随稿件导出，也不会发送给模型。',
+        : kind === 'annotation' ? '批注随稿件导出（导出时可选不含批注）。' : '备注仅自己可见：默认不随稿件导出（导出时可选含备注），也不会发送给模型。',
       submit: async (values) => {
         const made = await createFromSelection(
           kind,
@@ -819,7 +819,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       if (form) yours.append(buildForm(form(reopen)));
       panel.append(yours, el('p', 'muted', card.kind === 'annotation'
         ? '批注随稿件导出（导出时可选不含批注）。'
-        : '不随稿件导出，也不会发送给模型。'));
+        : '默认不随稿件导出（导出时可选含备注），也不会发送给模型。'));
     }
 
     const technical = el('details', 'technical-details');

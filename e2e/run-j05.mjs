@@ -546,7 +546,7 @@ async function main() {
     await assertRenderer(renderer, `window.__j05.composer().textContent.includes('不会发送给模型') && window.__j05.write('body', ${JSON.stringify(NOTE_BODY)}) && window.__j05.act('submit')`, 'note-submit');
     await waitFor(renderer, `window.__j05.mark('editor-note', ${JSON.stringify(first)}).length > 0 && window.__j05.composer() === null`, 'note-drawn');
     await openMarkCard(renderer, 'editor-note', first, 'note-open');
-    await assertRenderer(renderer, `(() => { const card = window.__j05.card(); return card.querySelector('[data-mark-state]').textContent === '仅自己可见' && card.textContent.includes('不随稿件导出，也不会发送给模型') && card.querySelector('[data-mark-action="resolve"]') === null && card.querySelector('[data-mark-action="reply"]') === null; })()`, 'note-is-private');
+    await assertRenderer(renderer, `(() => { const card = window.__j05.card(); return card.querySelector('[data-mark-state]').textContent === '仅自己可见' && card.textContent.includes('默认不随稿件导出（导出时可选含备注），也不会发送给模型') && card.querySelector('[data-mark-action="resolve"]') === null && card.querySelector('[data-mark-action="reply"]') === null; })()`, 'note-is-private');
     await assertRenderer(renderer, `window.__j05.act('edit')`, 'note-edit-open');
     await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-form="edit"] [data-mark-field="body"]')?.value === ${JSON.stringify(NOTE_BODY)}`, 'note-edit-form');
     await assertRenderer(renderer, `window.__j05.write('body', ${JSON.stringify(NOTE_EDITED)}) && window.__j05.act('submit')`, 'note-edit-submit');

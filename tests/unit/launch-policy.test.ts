@@ -74,7 +74,12 @@ function expectZeroTransmission(projection: LaunchPolicyProjection): void {
   expect(projection.providerProcessing.liveTransmissionAllowed).toBe(false);
   expect(projection.providerProcessing.authorizedLiveTransmissionCount).toBe(0);
   expect(projection.externalExport.policyEligibilityIsEffectApproval).toBe(false);
-  expect(projection.externalExport.currentExportEffectAvailable).toBe(false);
+  // Issue #413: a local export Effect is offered exactly when External Export Policy v2 verified at this launch;
+  // eligibility is still never an approval, and every denial offers none.
+  expect(projection.externalExport.currentExportEffectAvailable).toBe(projection.integrityState === 'verified');
+  expect(projection.externalExport.label).toBe(projection.integrityState === 'verified'
+    ? '对外导出策略 v2 已校验：只导出到本机所选位置，每个文件单独批准'
+    : '对外导出策略独立；当前未提供导出受控动作');
   expect(projection.publicReleasePermission.present).toBe(false);
 }
 
@@ -174,7 +179,8 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
       label: '开发者实时：实时传输受运行边界约束',
     });
     expect(projection.externalExport.version).toBe('v2');
-    expect(projection.externalExport.currentExportEffectAvailable).toBe(false);
+    expect(projection.externalExport.currentExportEffectAvailable).toBe(true);
+    expect(projection.externalExport.policyEligibilityIsEffectApproval).toBe(false);
     expect(projection.publicReleasePermission.present).toBe(false);
   });
 

@@ -6,6 +6,7 @@ import {
   BASELINE_ANALYSIS_MODE_GOALS,
   BASELINE_ANALYSIS_TASK_GOAL,
   MAX_EDIT_CODE_UNITS,
+  MAX_EXPORT_DESTINATION_CODE_UNITS,
   MAX_MARK_BODY_CODE_UNITS,
   MAX_MILESTONE_PURPOSE_CODE_UNITS,
   MAX_PROPOSAL_CONFLICT_UNITS,
@@ -208,6 +209,29 @@ describe('decodeRequest accepts well-formed frames', () => {
     ];
     for (const input of inputs) {
       const request = { id: randomUUID(), op: 'inspectTaskPlan', input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+  });
+
+  it('accepts the four 导出 operations with their exact inputs (Issue #413)', () => {
+    const bookId = randomUUID();
+    const options = { includeAnnotations: true, includeSuggestions: true, includeEditorNotes: false };
+    const milestone = { kind: 'milestone', milestoneId: randomUUID() };
+    const destination = process.platform === 'win32' ? 'C:\\导出\\稿件.docx' : '/导出/稿件.docx';
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'current' }, options } },
+      { op: 'reviewManuscriptExport', input: { bookId, target: milestone, options: { ...options, includeEditorNotes: true } } },
+      { op: 'prepareManuscriptExport', input: { bookId, revisionId: randomUUID(), target: milestone, options, reviewDigest: 'd'.repeat(64), destination } },
+      {
+        op: 'prepareManuscriptExport',
+        input: { bookId, revisionId: randomUUID(), target: { kind: 'current' }, options, reviewDigest: 'e'.repeat(64),
+          destination: `${destination.slice(0, -'稿件.docx'.length)}${'径'.repeat(MAX_EXPORT_DESTINATION_CODE_UNITS - destination.length)}.docx`.slice(0, MAX_EXPORT_DESTINATION_CODE_UNITS) },
+      },
+      { op: 'approveManuscriptExport', input: { bookId, preparationId: randomUUID() } },
+      { op: 'inspectManuscriptExportReceipt', input: { bookId, preparationId: randomUUID() } },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
       expect(decodeRequest(frameOf(request))).toEqual(request);
     }
   });
@@ -583,6 +607,35 @@ describe('decodeRequest rejects malformed frames', () => {
     ];
     for (const input of refused) {
       expect(rejectionFor(frameOf({ id, op: 'inspectTaskPlan', input })).requestId).toBe(id);
+    }
+  });
+
+  it('rejects a 导出 operation whose version, options, digest or destination is not exactly one it can name (Issue #413)', () => {
+    const id = randomUUID();
+    const bookId = randomUUID();
+    const options = { includeAnnotations: true, includeSuggestions: true, includeEditorNotes: false };
+    const destination = process.platform === 'win32' ? 'C:\\导出\\稿件.docx' : '/导出/稿件.docx';
+    const preparation = { bookId, revisionId: randomUUID(), target: { kind: 'current' }, options, reviewDigest: 'a'.repeat(64), destination };
+    const refused: ReadonlyArray<{ op: string; input: unknown }> = [
+      { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'latest' }, options } },
+      { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'current', milestoneId: randomUUID() }, options } },
+      { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'milestone', milestoneId: 'first' }, options } },
+      { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'current' }, options: { ...options, includeHighlights: true } } },
+      { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'current' }, options: { ...options, includeEditorNotes: 'yes' } } },
+      { op: 'reviewManuscriptExport', input: { target: { kind: 'current' }, options } },
+      // The renderer never names a path: a relative one, an overlong one, or none is refused.
+      { op: 'prepareManuscriptExport', input: { ...preparation, destination: '稿件.docx' } },
+      { op: 'prepareManuscriptExport', input: { ...preparation, destination: `${destination}${'径'.repeat(MAX_EXPORT_DESTINATION_CODE_UNITS)}` } },
+      { op: 'prepareManuscriptExport', input: { ...preparation, destination: null } },
+      { op: 'prepareManuscriptExport', input: { ...preparation, reviewDigest: 'A'.repeat(64) } },
+      { op: 'prepareManuscriptExport', input: { ...preparation, revisionId: 'current' } },
+      { op: 'prepareManuscriptExport', input: { ...preparation, format: 'pdf' } },
+      { op: 'approveManuscriptExport', input: { bookId, preparationId: 'last' } },
+      { op: 'approveManuscriptExport', input: { bookId, preparationId: randomUUID(), destination } },
+      { op: 'inspectManuscriptExportReceipt', input: { preparationId: randomUUID() } },
+    ];
+    for (const { op, input } of refused) {
+      expect(rejectionFor(frameOf({ id, op, input })).requestId).toBe(id);
     }
   });
 

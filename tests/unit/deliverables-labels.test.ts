@@ -143,6 +143,7 @@ function deliverables(publication: Partial<DeliverablesProjection['publication']
       actualsPrompt: null,
       ...publication,
     },
+    exports: [],
   };
 }
 

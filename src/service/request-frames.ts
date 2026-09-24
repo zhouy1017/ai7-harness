@@ -4,6 +4,7 @@ import {
   BASELINE_ANALYSIS_UPDATE_MODES,
   MAX_BLOCK_CODE_UNITS,
   MAX_EDIT_CODE_UNITS,
+  MAX_EXPORT_DESTINATION_CODE_UNITS,
   MAX_MARK_BODY_CODE_UNITS,
   MAX_MILESTONE_PURPOSE_CODE_UNITS,
   MAX_PROPOSAL_CONFLICT_UNITS,
@@ -144,6 +145,20 @@ function validReviewFindingReason(value: unknown): boolean {
  */
 function validPublicationText(value: unknown, maximum: number): boolean {
   return isBoundedString(value, maximum * 4) && publicationText(value, maximum) !== null;
+}
+
+/** The version an export names: the current revision, or one milestone by its identity (Issue #413). */
+function validExportTarget(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (value.kind === 'current') return hasExactKeys(value, ['kind']);
+  return value.kind === 'milestone' && hasExactKeys(value, ['kind', 'milestoneId']) && validUuid(value.milestoneId);
+}
+
+/** 含批注, 含修改建议（作为修订） and 含备注, each a switch and nothing else (V2-UX-EXP-023). */
+function validExportOptions(value: unknown): boolean {
+  return isRecord(value) && hasExactKeys(value, ['includeAnnotations', 'includeSuggestions', 'includeEditorNotes']) &&
+    typeof value.includeAnnotations === 'boolean' && typeof value.includeSuggestions === 'boolean' &&
+    typeof value.includeEditorNotes === 'boolean';
 }
 
 function validRecoverySelection(value: unknown): boolean {
@@ -1041,6 +1056,29 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           !validPublicationText(input.basis, MAX_PUBLICATION_BASIS_CHARACTERS)) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    // ④ 导出 (Issue #413). The version is the current revision or one milestone of the route's Book, the options
+    // are exactly the three switches, and the destination — only ever the main process's, from the system
+    // dialog — is an absolute path within the bound; whether it may be written is the store's to decide.
+    case 'reviewManuscriptExport': {
+      const input = requireInput(value.input, ['bookId', 'target', 'options'], tentativeId);
+      if (!validUuid(input.bookId) || !validExportTarget(input.target) || !validExportOptions(input.options)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'prepareManuscriptExport': {
+      const input = requireInput(value.input, ['bookId', 'revisionId', 'target', 'options', 'reviewDigest', 'destination'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.revisionId) || !validExportTarget(input.target) ||
+          !validExportOptions(input.options) || !isBoundedString(input.reviewDigest, 64) || !HEX_DIGEST_PATTERN.test(input.reviewDigest) ||
+          !isBoundedString(input.destination, MAX_EXPORT_DESTINATION_CODE_UNITS) || !isAbsolute(input.destination)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'approveManuscriptExport':
+    case 'inspectManuscriptExportReceipt': {
+      const input = requireInput(value.input, ['bookId', 'preparationId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.preparationId)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'undoManuscript':
