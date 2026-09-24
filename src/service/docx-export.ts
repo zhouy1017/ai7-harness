@@ -674,11 +674,12 @@ function paragraphMarkInserted(paragraph: XmlElement): boolean {
 }
 
 /**
- * The inline containers a paragraph's own bookmarks may stand in; a text box's paragraphs are other paragraphs. A tracked
- * insertion or move-to is none of them (Issue #537): the reading the import took rejects it whole, bookmarks and all, as a
- * restored paragraph drops it, so a regenerated paragraph keeps exactly the bookmarks that reading keeps.
+ * The inline containers a paragraph's own bookmarks may stand in; a text box's paragraphs are other paragraphs. A
+ * bidirectional run (`w:dir`, `w:bdo`) is one: the reading takes its text as the paragraph's. A tracked insertion or
+ * move-to is none of them (Issue #537): the reading the import took rejects it whole, bookmarks and all, as a restored
+ * paragraph drops it, so a regenerated paragraph keeps the bookmarks that reading keeps.
  */
-const BOOKMARK_CONTAINERS = new Set(['hyperlink', 'smartTag', 'sdt', 'sdtContent', 'customXml', 'fldSimple', 'del', 'moveFrom']);
+const BOOKMARK_CONTAINERS = new Set(['hyperlink', 'smartTag', 'sdt', 'sdtContent', 'customXml', 'fldSimple', 'dir', 'bdo', 'del', 'moveFrom']);
 
 const BOOKMARK_HALF = /<(?:[A-Za-z_][\w.-]*:)?bookmark(Start|End)\b([^>]*?)(?:\/>|>\s*<\/(?:[A-Za-z_][\w.-]*:)?bookmark(?:Start|End)>)/g;
 const BOOKMARK_ID = /(?:^|\s)(?:[A-Za-z_][\w.-]*:)?id\s*=\s*"([^"]*)"/;

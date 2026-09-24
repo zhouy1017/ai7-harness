@@ -295,6 +295,29 @@ describe('a regenerated paragraph keeps its bookmarks', () => {
       expect([name, ...halves(partOf(result.bytes!, 'word/document.xml')!)]).toEqual([name, false, false]);
     }
   });
+
+  it('keeps a bookmark half that stands in a bidirectional run of a regenerated paragraph, as the reading does (Issue #537)', async () => {
+    const run = await runXml({ span: { block: 5, from: 0, to: 4 } });
+    for (const container of ['dir', 'bdo']) {
+      const path = join(sandbox, `bidi-${container}.docx`);
+      const original = await composeSource(path, { body: [
+        { runs: [{ span: { block: 3 } }], before: `<w:${container} w:val="rtl"><w:bookmarkStart w:id="9" w:name="bidi"/>${run}</w:${container}>` },
+        { runs: [{ span: { block: 4 } }], after: '<w:bookmarkEnd w:id="9"/>' },
+      ] });
+      const { blocks } = await parse(path);
+      const result = renderDocxExport({
+        title: '书签',
+        blocks: exportBlocks(blocks).map((block, index) => index === 0 ? edited(block, `${block.text}（改）`) : block),
+        marks: [],
+        options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS },
+        source: { kind: 'mapped', original, rows: bodyRows(blocks), textBoxes: 'retain' },
+      }, { emit: true });
+      expect([container, result.restoredBlocks, result.regeneratedBlocks]).toEqual([container, 1, 1]);
+      // The regenerated paragraph writes its start; the restored one keeps its end: the pair stays whole.
+      const document = partOf(result.bytes!, 'word/document.xml')!;
+      expect([container, document.includes('w:id="9" w:name="bidi"'), document.includes('<w:bookmarkEnd w:id="9"/>')]).toEqual([container, true, true]);
+    }
+  });
 });
 
 describe('DOCX export restores the original', () => {

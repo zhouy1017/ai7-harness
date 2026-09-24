@@ -8,7 +8,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { parseDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
 import { EDITOR_AUTHOR_LABEL } from '../../src/service/docx-export.js';
-import { EXPORT_LEDGER_SCHEMA_SQL, EXPORT_UNPREFIXED_RESTORATION_LINE, stagedPathFor, writeAtomically } from '../../src/service/manuscript-export.js';
+import {
+  EXPORT_LEDGER_SCHEMA_SQL,
+  EXPORT_TARGET_UNREADABLE_DETAIL,
+  EXPORT_UNPREFIXED_RESTORATION_LINE,
+  stagedPathFor,
+  writeAtomically,
+} from '../../src/service/manuscript-export.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { CLARIFICATION_SCHEMA_VERSION, BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION, IMPORTED_MARK_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
@@ -32,12 +38,14 @@ import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation
 // What a real disk does to a write, planted one call at a time (Issue #537): a file held open without read sharing, or a
 // cloud placeholder that cannot download offline, cannot be read; another program can take a stage's name first.
 // Otherwise every call is the real one.
-const faults = vi.hoisted(() => ({ unreadable: null as string | null, rivalAtStage: false }));
+const faults = vi.hoisted(() => ({ unreadable: null as string | null, readsBeforeUnreadable: 0, rivalAtStage: false }));
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
   const readFile = (async (path: Parameters<typeof actual.readFile>[0], ...rest: unknown[]) => {
     if (faults.unreadable !== null && String(path) === faults.unreadable) {
-      throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+      // The reads the case lets through first — the approval's, say — and every one after them fails.
+      if (faults.readsBeforeUnreadable > 0) faults.readsBeforeUnreadable -= 1;
+      else throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
     }
     return (actual.readFile as (...args: unknown[]) => Promise<unknown>)(path, ...rest);
   }) as typeof actual.readFile;
@@ -73,6 +81,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   faults.unreadable = null;
+  faults.readsBeforeUnreadable = 0;
   faults.rivalAtStage = false;
   await roots.dispose();
 });
@@ -393,11 +402,38 @@ describe('④ 导出: the Export Fidelity Review, the preparation, the approval 
       expect(bound.disposition).toBe('replace');
       // Held open elsewhere, or not downloaded: AI7 cannot tell whether it changed, and says so rather than that it did.
       faults.unreadable = destination;
-      expect(await refusal(() => store.approveManuscriptExport({ bookId: book.bookId, preparationId: bound.preparationId }, true)))
-        .toBe('EXPORT_TARGET_UNREADABLE');
+      const refused = await store.approveManuscriptExport({ bookId: book.bookId, preparationId: bound.preparationId }, true)
+        .then(() => null, (error: unknown) => error);
+      expect(refused).toBeInstanceOf(StoreError);
+      expect([(refused as StoreError).code, (refused as StoreError).message]).toEqual(['EXPORT_TARGET_UNREADABLE', EXPORT_TARGET_UNREADABLE_DETAIL]);
       faults.unreadable = null;
       expect(ledgerCounts()).toEqual({ export_preparations: 1, export_approvals: 0, export_receipts: 0 });
       expect(await readFile(destination, 'utf8')).toBe('the dialog resolved this file');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 300_000);
+
+  it('records a replace whose file became unreadable after the approval as 未能导出 in its own words, and writes nothing (Issue #537)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const destination = join(outbox, '写时被占用.docx');
+      await writeFile(destination, 'the dialog resolved this file');
+      const bound = await prepare(store, book, destination);
+      expect(bound.disposition).toBe('replace');
+      // The approval reads the bound file as it was; by the write, another program holds it without read sharing.
+      faults.unreadable = destination;
+      faults.readsBeforeUnreadable = 1;
+      const receipt = await store.approveManuscriptExport({ bookId: book.bookId, preparationId: bound.preparationId }, true);
+      faults.unreadable = null;
+      expect(receipt).toMatchObject({ outcome: 'failed', outcomeLabel: '未能导出', detail: EXPORT_TARGET_UNREADABLE_DETAIL, revealAvailable: false, byteLength: null });
+      expect(receipt.technical.failureCode).toBe('EXPORT_TARGET_UNREADABLE');
+      // The record says the same, and nothing was written in the file's place.
+      expect(store.inspectDeliverables(book.bookId).exports.map((entry) => [entry.outcome, entry.detail])).toEqual([['failed', EXPORT_TARGET_UNREADABLE_DETAIL]]);
+      expect(await readFile(destination, 'utf8')).toBe('the dialog resolved this file');
+      expect(ledgerCounts()).toEqual({ export_preparations: 1, export_approvals: 1, export_receipts: 1 });
       store.markCleanShutdown();
     } finally {
       store.close();
@@ -650,11 +686,12 @@ describe('taking the chosen name', () => {
     // A short name is staged whole.
     expect(basename(stagedPathFor(join(outbox, '稿件.docx'), effectIntentId, 'r'))).toBe(`.稿件.docx.${effectIntentId}.r.ai7-partial`);
     // A character outside the Basic Multilingual Plane, four bytes and two UTF-16 units, at the cut is kept or dropped
-    // whole (Issue #537): 54 three-byte characters leave room for one of them and not two.
-    const astral = basename(stagedPathFor(join(outbox, `${'长'.repeat(54)}${'𠀀'.repeat(10)}.docx`), effectIntentId, randomUUID()));
+    // whole (Issue #537). 55 three-byte characters leave three bytes: room for its first UTF-16 unit alone, which a cut
+    // by units would keep as a lone surrogate, and not for the character, which a cut by characters drops.
+    const astral = basename(stagedPathFor(join(outbox, `${'长'.repeat(55)}${'𠀀'.repeat(10)}.docx`), effectIntentId, randomUUID()));
     expect(astral.isWellFormed()).toBe(true);
     expect(Buffer.byteLength(astral, 'utf8')).toBeLessThanOrEqual(255);
-    expect(astral.startsWith(`.${'长'.repeat(54)}𠀀.`)).toBe(true);
+    expect(astral.startsWith(`.${'长'.repeat(55)}.`)).toBe(true);
   });
 
   it('refuses a replace whose file cannot be read now as unreadable, never as changed, and leaves it as it is (Issue #537)', async () => {
