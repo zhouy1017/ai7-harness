@@ -5,13 +5,13 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RECONCILED_PAUSED_DETAIL, RECONCILED_RESUMABLE_DETAIL } from '../../src/service/analysis/baseline-analysis-store.js';
-import { BaselineAnalysisExecutionOwner, pausedDetail, resumableDetail } from '../../src/service/analysis/execution.js';
+import { BaselineAnalysisExecutionOwner, CANCELLED_WITHOUT_REVISION, pausedDetail, resumableDetail } from '../../src/service/analysis/execution.js';
 import type { TaskPlanConnectivity } from '../../src/service/connectivity.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { RUN_CONTINUATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
-import { RESUME_BLOCKED_OFFLINE, RESUME_BLOCKED_SLOT } from '../../src/service/task-plan.js';
+import { RESUME_BLOCKED_OFFLINE, RESUME_BLOCKED_SLOT, RUN_CONTROL_CANCELLING_REASON } from '../../src/service/task-plan.js';
 import { controlledUnitHold } from '../../src/service/unit-hold.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, type BaselineAnalysisProjection, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER, plantRevision32Relations, runStatesShapeAt32 } from '../support/run-continuation.js';
@@ -354,7 +354,8 @@ describe('暂停 and 续行 over the real store', () => {
       expect(execution.cancelRun(runRecordId, store.baselineAnalysisLedger)).toBe('stopping');
       await execution.whenIdle();
       const cancelled = store.inspectBaselineAnalysis(bookId, () => null);
-      expect(states(cancelled)).toEqual(['authorized', 'admitted', 'executing', 'pausing', 'paused', 'cancelling', 'admitted', 'cancelled']);
+      // 正在取消 stays the Run's latest state until 已取消: its cancellation records no second admission.
+      expect(states(cancelled)).toEqual(['authorized', 'admitted', 'executing', 'pausing', 'paused', 'cancelling', 'cancelled']);
       expect(cancelled.stateLabel).toBe('已取消');
       expect(cancelled.taskOutcome?.classification).toBe('cancelled');
       expect(cancelled.resultSetRevision?.coverage.unitsClosed).toBe(3);
@@ -382,16 +383,72 @@ describe('暂停 and 续行 over the real store', () => {
       store.requestBaselineAnalysisCancel(a.bookId, a.taskIntentId);
       expect(execution.cancelRun(a.runRecordId, store.baselineAnalysisLedger)).toBe('stopping');
       expect(store.inspectBaselineAnalysis(a.bookId, () => null).state).toBe('cancelling');
+      // Held while it waits: stopped between two ranges with the three it kept, never read as a Run nothing holds, and
+      // 取消任务 is not offered again.
+      const progress = (runRecordId: string) => execution.progressFor(runRecordId);
+      expect(progress(a.runRecordId)).toMatchObject({ unitsSettled: 3, unitsTotal: SAMPLE1_UNITS, currentUnitOrdinal: null, attemptState: null, stage: 'units' });
+      expect(store.inspectGlobalAttention(progress, execution.busy).groups.flatMap((group) => group.items).find((item) => item.book.bookId === a.bookId)?.state)
+        .toBe('analysis-cancelling');
+      expect(store.inspectTaskPlan({ bookId: a.bookId, kind: 'baseline-analysis', ref: a.taskIntentId }, progress).runControl)
+        .toMatchObject({ cancelling: true, cancel: { reason: RUN_CONTROL_CANCELLING_REASON, impact: [] } });
       writeFileSync(holdPath, 'release');
       await execution.whenIdle();
       expect(store.inspectBaselineAnalysis(b.bookId, () => null).taskOutcome?.classification).toBe('completed');
       const cancelled = store.inspectBaselineAnalysis(a.bookId, () => null);
       expect(cancelled.taskOutcome?.classification).toBe('cancelled');
       expect(cancelled.resultSetRevision?.coverage.unitsClosed).toBe(3);
+      expect(states(cancelled).slice(-2)).toEqual(['cancelling', 'cancelled']);
+      expect(progress(a.runRecordId)).toBeNull();
       store.markCleanShutdown();
     } finally {
       await execution.dispose();
       store.close();
+    }
+  }, 300_000);
+
+  it('cancels a stopped Run whose kept progress no longer reads back, saying so, and forms no revision', async () => {
+    const first = await openWithRoute();
+    const firstOwner = owner(first);
+    let bookId = '';
+    let taskIntentId = '';
+    let runRecordId = '';
+    try {
+      ({ bookId, taskIntentId, runRecordId } = await heldRun(first, firstOwner, 'L2 sample1 进度无法核对', 2));
+      first.requestBaselineAnalysisPause(bookId, taskIntentId);
+      firstOwner.pauseRun(runRecordId, first.baselineAnalysisLedger);
+      writeFileSync(holdPath, '3');
+      await firstOwner.whenIdle();
+      first.markCleanShutdown();
+    } finally {
+      await firstOwner.dispose();
+      first.close();
+    }
+    // One kept unit's record no longer matches its digest; the ledger's own trigger is put back exactly as it was.
+    withDatabase(false, (database) => {
+      const trigger = database.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND name = 'analysis_unit_checkpoints_no_update'").get() as { sql: string };
+      database.exec('DROP TRIGGER analysis_unit_checkpoints_no_update');
+      database.prepare('UPDATE analysis_unit_checkpoints SET sha256 = ? WHERE run_record_id = ? AND unit_ordinal = 2').run('0'.repeat(64), runRecordId);
+      database.exec(trigger.sql);
+    });
+    const second = await openWithRoute();
+    const secondOwner = owner(second);
+    try {
+      const plan = await second.inspectTaskPlanWithConnection({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, async () => null, ONLINE, () => null);
+      expect(plan.runControl?.continuation).toEqual({ unitsSettled: null, unitsTotal: SAMPLE1_UNITS });
+      expect(plan.runControl?.resume?.reason).toContain('已保存的阅读进度无法核对');
+      expect(plan.runControl?.cancel.impact[0]).toBe('这项任务已经停下，它已保存的阅读进度无法核对；取消后不会发送任何内容，也不会形成结果集修订版。');
+      // 取消任务 still ends it: nothing of it can be gathered, so it is cancelled with no revision, and says why.
+      expect(second.requestBaselineAnalysisCancel(bookId, taskIntentId)).toBe(runRecordId);
+      expect(secondOwner.cancelRun(runRecordId, second.baselineAnalysisLedger)).toBe('settled');
+      const cancelled = second.inspectBaselineAnalysis(bookId, () => null);
+      expect(cancelled.state).toBe('cancelled');
+      expect(cancelled.resultSetRevision).toBeNull();
+      expect(cancelled.taskOutcome?.classification).toBe('cancelled');
+      expect(cancelled.run!.transitions.at(-1)!.detail).toBe(CANCELLED_WITHOUT_REVISION);
+      second.markCleanShutdown();
+    } finally {
+      await secondOwner.dispose();
+      second.close();
     }
   }, 300_000);
 

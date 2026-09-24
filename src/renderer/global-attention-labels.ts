@@ -155,7 +155,7 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
   'analysis-waiting-slot': { tone: 'neutral', shape: 'ring' },
   'analysis-cancelling': { tone: 'attention', shape: 'half' },
   'analysis-pausing': { tone: 'attention', shape: 'half' },
-  'analysis-paused': { tone: 'neutral', shape: 'ring' },
+  'analysis-paused': { tone: 'neutral', shape: 'half' },
   'analysis-resumable': { tone: 'attention', shape: 'ring' },
   'review-running': { tone: 'progress', shape: 'half' },
   'review-continuable': { tone: 'attention', shape: 'ring' },

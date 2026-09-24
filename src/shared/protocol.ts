@@ -4046,8 +4046,11 @@ export interface TaskPlanRunControlProjection {
    * keeps the reused ranges in view. `null` for a first baseline, which reads every range.
    */
   update: null | { manuscriptUnits: number; reusedUnits: number };
-  /** A stopped Run's continuation point (S76b): how many of the units it submits it has kept; `null` while it runs. */
-  continuation: { unitsSettled: number; unitsTotal: number } | null;
+  /**
+   * A stopped Run's continuation point (S76b): how many of the units it submits it has kept — `unitsSettled` is `null`
+   * when that progress no longer reads back — and `null` while it runs.
+   */
+  continuation: { unitsSettled: number | null; unitsTotal: number } | null;
 }
 
 /**

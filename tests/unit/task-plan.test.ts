@@ -282,4 +282,37 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
       CANCELLATION_NO_EFFECTS,
     ]);
   });
+
+  it('reads what a Run no execution holds kept from its checkpoints, and says when that no longer reads back (S76b)', () => {
+    // Left 正在取消 when AI7 closed, with two ranges kept: its cancellation gathers them.
+    expect(baselineCancellationImpact(run('cancelling', null), null, { unitsSettled: 2, unitsTotal: 8 })).toEqual([
+      'AI7 上次关闭时这项任务没有结束，现在也没有在运行；其余 6 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。',
+      '已读完的 2 个阅读范围的结果与缺口会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。',
+      CANCELLATION_NO_EFFECTS,
+    ]);
+    expect(baselineCancellationImpact(run('executing', null), null, { unitsSettled: 0, unitsTotal: 8 })).toEqual([
+      'AI7 上次关闭时这项任务没有结束，现在也没有在运行；取消只结束这条运行记录，不会再发送任何内容。',
+      '它还没有读完任何阅读范围，不会形成结果集修订版。',
+      CANCELLATION_NO_EFFECTS,
+    ]);
+    expect(baselineCancellationImpact(run('cancelling', null), null, { unitsSettled: null, unitsTotal: 8 })[1])
+      .toBe('它已保存的阅读进度无法核对，不会形成结果集修订版。');
+    expect(baselineCancellationImpact(run('paused', null), null, { unitsSettled: null, unitsTotal: 8 })).toEqual([
+      '这项任务已经停下，它已保存的阅读进度无法核对；取消后不会发送任何内容，也不会形成结果集修订版。',
+      CANCELLATION_NO_EFFECTS,
+    ]);
+  });
+
+  it('keeps what a continuing Run kept in view while it waits its turn in the slot', () => {
+    // 续行 admitted with three ranges kept: nothing is in flight, and the three are its partial revision.
+    expect(baselineCancellationImpact(run('admitted', progress({ unitsSettled: 3, currentUnitOrdinal: null, currentUnitStartedAt: null, attemptState: null })))).toEqual([
+      '在这两个阅读范围之间停止；其余 5 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。',
+      '已读完的 3 个阅读范围的结果与缺口会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。',
+      CANCELLATION_NO_EFFECTS,
+    ]);
+    expect(baselineCancellationImpact(run('admitted', progress({ unitsSettled: 0, currentUnitOrdinal: null })))).toEqual([
+      '这项任务还没有开始阅读；取消后不会发送任何内容，也不会形成结果集修订版。',
+      CANCELLATION_NO_EFFECTS,
+    ]);
+  });
 });
