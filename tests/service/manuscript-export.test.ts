@@ -3,11 +3,18 @@ import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { parseDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
 import { EDITOR_AUTHOR_LABEL } from '../../src/service/docx-export.js';
-import { EXPORT_LEDGER_SCHEMA_SQL, stagedPathFor, writeAtomically } from '../../src/service/manuscript-export.js';
+import {
+  EXPORT_LEDGER_SCHEMA_SQL,
+  EXPORT_TARGET_UNREADABLE_DETAIL,
+  EXPORT_UNPREFIXED_RESTORATION_LINE,
+  stagedPathFor,
+  writeAtomically,
+} from '../../src/service/manuscript-export.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { CLARIFICATION_SCHEMA_VERSION, BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION, IMPORTED_MARK_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
@@ -27,6 +34,31 @@ import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js
 import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
 import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
 import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
+
+// What a real disk does to a write, planted one call at a time (Issue #537): a file held open without read sharing, or a
+// cloud placeholder that cannot download offline, cannot be read; another program can take a stage's name first.
+// Otherwise every call is the real one.
+const faults = vi.hoisted(() => ({ unreadable: null as string | null, readsBeforeUnreadable: 0, rivalAtStage: false }));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  const readFile = (async (path: Parameters<typeof actual.readFile>[0], ...rest: unknown[]) => {
+    if (faults.unreadable !== null && String(path) === faults.unreadable) {
+      // The reads the case lets through first — the approval's, say — and every one after them fails.
+      if (faults.readsBeforeUnreadable > 0) faults.readsBeforeUnreadable -= 1;
+      else throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+    }
+    return (actual.readFile as (...args: unknown[]) => Promise<unknown>)(path, ...rest);
+  }) as typeof actual.readFile;
+  const open = (async (path: Parameters<typeof actual.open>[0], flags?: string | number, mode?: number) => {
+    if (faults.rivalAtStage && flags === 'wx' && String(path).endsWith('.ai7-partial')) {
+      faults.rivalAtStage = false;
+      await actual.writeFile(path, 'another program staged here');
+      throw Object.assign(new Error('EEXIST: file already exists'), { code: 'EEXIST' });
+    }
+    return actual.open(path, flags, mode);
+  }) as typeof actual.open;
+  return { ...actual, readFile, open, default: { ...actual, readFile, open } };
+});
 
 // Service-integration suite (L2) for ④ 导出 · DOCX (Issue #413, plan slice S64) over the real `EditorialStore` on
 // a temporary Agent Data Root: the Export Fidelity Review, the frozen preparation, the approval and its atomic
@@ -48,6 +80,9 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  faults.unreadable = null;
+  faults.readsBeforeUnreadable = 0;
+  faults.rivalAtStage = false;
   await roots.dispose();
 });
 
@@ -357,6 +392,86 @@ describe('④ 导出: the Export Fidelity Review, the preparation, the approval 
     }
   }, 300_000);
 
+  it('refuses an approval whose bound file cannot be read now, in its own words, and records none (Issue #537)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const destination = join(outbox, '云端占位.docx');
+      await writeFile(destination, 'the dialog resolved this file');
+      const bound = await prepare(store, book, destination);
+      expect(bound.disposition).toBe('replace');
+      // Held open elsewhere, or not downloaded: AI7 cannot tell whether it changed, and says so rather than that it did.
+      faults.unreadable = destination;
+      const refused = await store.approveManuscriptExport({ bookId: book.bookId, preparationId: bound.preparationId }, true)
+        .then(() => null, (error: unknown) => error);
+      expect(refused).toBeInstanceOf(StoreError);
+      expect([(refused as StoreError).code, (refused as StoreError).message]).toEqual(['EXPORT_TARGET_UNREADABLE', EXPORT_TARGET_UNREADABLE_DETAIL]);
+      faults.unreadable = null;
+      expect(ledgerCounts()).toEqual({ export_preparations: 1, export_approvals: 0, export_receipts: 0 });
+      expect(await readFile(destination, 'utf8')).toBe('the dialog resolved this file');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 300_000);
+
+  it('records a replace whose file became unreadable after the approval as 未能导出 in its own words, and writes nothing (Issue #537)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const destination = join(outbox, '写时被占用.docx');
+      await writeFile(destination, 'the dialog resolved this file');
+      const bound = await prepare(store, book, destination);
+      expect(bound.disposition).toBe('replace');
+      // The approval reads the bound file as it was; by the write, another program holds it without read sharing.
+      faults.unreadable = destination;
+      faults.readsBeforeUnreadable = 1;
+      const receipt = await store.approveManuscriptExport({ bookId: book.bookId, preparationId: bound.preparationId }, true);
+      faults.unreadable = null;
+      expect(receipt).toMatchObject({ outcome: 'failed', outcomeLabel: '未能导出', detail: EXPORT_TARGET_UNREADABLE_DETAIL, revealAvailable: false, byteLength: null });
+      expect(receipt.technical.failureCode).toBe('EXPORT_TARGET_UNREADABLE');
+      // The record says the same, and nothing was written in the file's place.
+      expect(store.inspectDeliverables(book.bookId).exports.map((entry) => [entry.outcome, entry.detail])).toEqual([['failed', EXPORT_TARGET_UNREADABLE_DETAIL]]);
+      expect(await readFile(destination, 'utf8')).toBe('the dialog resolved this file');
+      expect(ledgerCounts()).toEqual({ export_preparations: 1, export_approvals: 1, export_receipts: 1 });
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 300_000);
+
+  it('says why a manuscript whose body binds no prefix is written fresh, in every class it carries (Issue #537)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      // The composed manuscript, its document element bound to WordprocessingML by the default namespace: the export
+      // cannot restore it in place, and writes it fresh from its blocks.
+      const composed = join(roots.inputRoot, 'prefixed.docx');
+      await composeManuscriptDocx(composed, { ...EXCERPT, retention: { field: { block: 2 } } });
+      const entries = unzipSync(new Uint8Array(await readFile(composed)));
+      const documentXml = strFromU8(entries['word/document.xml']!);
+      const namespace = /xmlns:w="([^"]+)"/.exec(documentXml)![1]!;
+      entries['word/document.xml'] = strToU8(documentXml.replace('<w:document ', `<document xmlns="${namespace}" `).replace('</w:document>', '</document>'));
+      const unprefixed = join(roots.inputRoot, `${randomUUID()}.docx`);
+      await writeFile(unprefixed, zipSync(entries));
+      const staged = await store.stageSelectedManuscript(randomUUID(), unprefixed);
+      // The field reads back as a degradation the editor accepts before the import commits.
+      const newBook = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+        { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, true);
+      const commitId = randomUUID();
+      const commit = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: newBook.draftVersion, reviewDigest: newBook.reviewDigest!, commitId });
+      await store.acknowledgeImportCompletion(commitId);
+      const reviewed = await review(store, { bookId: commit.bookId, manuscriptId: commit.manuscriptId, branchId: commit.branchId });
+      expect(reviewed.restorationLine).toBe(EXPORT_UNPREFIXED_RESTORATION_LINE);
+      // Every class the file carries is named with that reason — never the reason of a manuscript that has no mapping.
+      const unavailable = reviewed.fidelity.filter((row) => row.status === 'unavailable');
+      expect(unavailable.length).toBeGreaterThan(0);
+      for (const row of unavailable) expect(row.detail.startsWith('原文件的 XML 写法 AI7 无法在原处恢复')).toBe(true);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 300_000);
+
   it('refuses an approval once the payload or the destination drifted, and records none', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
@@ -548,6 +663,18 @@ describe('taking the chosen name', () => {
     expect(await partials()).toEqual([]);
   });
 
+  it('never removes a file another program put at its stage first, and writes nothing (Issue #537)', async () => {
+    const destination = join(outbox, '暂存被占.docx');
+    faults.rivalAtStage = true;
+    const written = await writeAtomically(destination, PAYLOAD, digest(PAYLOAD), 'create', randomUUID());
+    expect(written).toEqual({ outcome: 'failed', code: 'EXPORT_STAGE_FAILED' });
+    // The rival stands where it was put: the write removes only a stage it created itself.
+    const rivals = (await readdir(outbox)).filter((entry) => entry.startsWith('.暂存被占.docx.') && entry.endsWith('.ai7-partial'));
+    expect(rivals).toHaveLength(1);
+    expect(await readFile(join(outbox, rivals[0]!), 'utf8')).toBe('another program staged here');
+    expect(existsSync(destination)).toBe(false);
+  });
+
   it('stages a long name within the file-name bound, whole characters only', () => {
     const effectIntentId = randomUUID();
     const long = join(outbox, `${'长'.repeat(84)}.docx`);
@@ -558,6 +685,24 @@ describe('taking the chosen name', () => {
     expect(name.startsWith(`.${'长'.repeat(50)}`) && name.endsWith('.ai7-partial') && name.includes(effectIntentId)).toBe(true);
     // A short name is staged whole.
     expect(basename(stagedPathFor(join(outbox, '稿件.docx'), effectIntentId, 'r'))).toBe(`.稿件.docx.${effectIntentId}.r.ai7-partial`);
+    // A character outside the Basic Multilingual Plane, four bytes and two UTF-16 units, at the cut is kept or dropped
+    // whole (Issue #537). 55 three-byte characters leave three bytes: room for its first UTF-16 unit alone, which a cut
+    // by units would keep as a lone surrogate, and not for the character, which a cut by characters drops.
+    const astral = basename(stagedPathFor(join(outbox, `${'长'.repeat(55)}${'𠀀'.repeat(10)}.docx`), effectIntentId, randomUUID()));
+    expect(astral.isWellFormed()).toBe(true);
+    expect(Buffer.byteLength(astral, 'utf8')).toBeLessThanOrEqual(255);
+    expect(astral.startsWith(`.${'长'.repeat(55)}.`)).toBe(true);
+  });
+
+  it('refuses a replace whose file cannot be read now as unreadable, never as changed, and leaves it as it is (Issue #537)', async () => {
+    const destination = join(outbox, '被占用.docx');
+    await writeFile(destination, OTHER);
+    faults.unreadable = destination;
+    const written = await writeAtomically(destination, PAYLOAD, digest(PAYLOAD), 'replace', randomUUID(), { bytes: OTHER.byteLength, sha256: digest(OTHER) });
+    expect(written).toEqual({ outcome: 'failed', code: 'EXPORT_TARGET_UNREADABLE' });
+    faults.unreadable = null;
+    expect(new Uint8Array(await readFile(destination))).toEqual(OTHER);
+    expect(await partials()).toEqual([]);
   });
 
   it('refuses a replace whose file is gone, and writes nothing in its place', async () => {
