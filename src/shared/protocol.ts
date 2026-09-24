@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 46 as const;
+export const SERVICE_PROTOCOL_VERSION = 47 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -67,6 +67,7 @@ export const IPC_CHANNELS = {
   cancelBaselineAnalysisRun: 'ai7:j04:cancel-baseline-analysis-run',
   pauseBaselineAnalysisRun: 'ai7:j04:pause-baseline-analysis-run',
   resumeBaselineAnalysisRun: 'ai7:j04:resume-baseline-analysis-run',
+  editBaselineAnalysisPlan: 'ai7:j04:edit-baseline-analysis-plan',
   runReconnectPreflight: 'ai7:j04:run-reconnect-preflight',
   quickStartBaselineAnalysis: 'ai7:j04:quick-start-baseline-analysis',
   setDefaultExecutionRule: 'ai7:j04:set-default-execution-rule',
@@ -2537,12 +2538,27 @@ export type PlanRevisionDiffValue =
 
 /** One line of a concise Plan Revision diff: the field, its prior and proposed values, and whether it is material or a derived consequence. */
 export interface PlanRevisionDiffEntryProjection {
-  field: MaterialPlanField | 'reusePlan.counts';
+  field: MaterialPlanField | 'reusePlan.counts' | PlanEditField;
   label: string;
   prior: PlanRevisionDiffValue;
   proposed: PlanRevisionDiffValue;
-  materiality: 'material' | 'derived';
+  /** `edited` for the editor's own change to the plan (Issue #419, V2-UX-PLAN-011). */
+  materiality: 'material' | 'derived' | 'edited';
 }
+
+/**
+ * The editable plan (Issue #419, plan slice S73; V2-UX-PLAN-011): what the editor left out of a baseline analysis
+ * plan — only what its Run honours. The plan AI7 proposed leaves out nothing.
+ */
+export interface PlanEditsProjection {
+  /** 核对与抽检: the Run draws no assurance sample. */
+  removedSteps: ReadonlyArray<'assurance-sampling'>;
+  /** 不允许 the safe retry: a retry-safe failure settles as a gap. */
+  disallowedAdaptations: ReadonlyArray<'safe-retry'>;
+}
+
+/** The field a Plan Revision diff names for one edited item. */
+export type PlanEditField = 'steps.assurance-sampling' | 'adaptations.safe-retry';
 
 /** The Plan Boundary Split inside the canonical envelope: declared in-envelope adaptations, material fields, and expected editor participation. */
 export interface PlanBoundarySplitProjection {
@@ -2560,6 +2576,8 @@ export interface BaselineAnalysisPlanVersionProjection {
   planRevisionId: string | null;
   createdAt: string;
   state: 'current' | 'superseded' | 'bound';
+  /** What this version leaves out at the editor's word (Issue #419); nothing for a plan AI7 proposed. */
+  edits: PlanEditsProjection;
 }
 
 /**
@@ -2580,7 +2598,8 @@ export interface BaselineAnalysisPlanRevisionProjection {
   priorOrdinal: number;
   /** The version this revision yielded: the next one for `resolved`, the restored prior one for `reverted`, else `null`. */
   nextOrdinal: number | null;
-  trigger: 'prepare' | 'inspect' | 'reconfirm';
+  /** `plan-edit` for the editor's own 更新计划 (Issue #419). */
+  trigger: 'prepare' | 'inspect' | 'reconfirm' | 'plan-edit';
   /** The record time of a stored revision; `null` for a live entry derived on inspect. */
   detectedAt: string | null;
   changedFields: ReadonlyArray<string>;
@@ -2875,6 +2894,8 @@ export interface BaselineAnalysisProjection {
     effects: readonly [];
     unitCount: number;
     reducerStages: readonly ['unit-validation', 'section-reduction', 'contradiction-continuity', 'book-synthesis'];
+    /** Present only on an edited plan (Issue #419). */
+    editorEdits?: PlanEditsProjection;
     stopCondition: string;
   };
   planEnvelope: null | {
@@ -4106,8 +4127,42 @@ export interface TaskPlanStartProjection {
 
 /** One editorial business step and what it leaves behind (V2-UX-PLAN-003). */
 export interface TaskPlanStepProjection {
+  /** The step's identity in this plan, stable across versions, so an edit can name it (Issue #419). */
+  id: string;
   label: string;
   result: string;
+  /** Whether the editor may leave this step out (PLAN-011): only a step the Run can do without. */
+  removable: boolean;
+  /** Left out of this plan version at the editor's word. */
+  removed: boolean;
+}
+
+/** One adaptation AI7 may make on its own during the Run (PLAN-004, PLAN-011), with whether the editor withdrew it. */
+export interface TaskPlanAdaptationProjection {
+  id: string;
+  label: string;
+  /** Whether the editor may withdraw it (= 不允许). */
+  removable: boolean;
+  /** Withdrawn from this plan version at the editor's word. */
+  removed: boolean;
+}
+
+/**
+ * The editable plan (Issue #419, plan slice S73; V2-UX-PLAN-011): whether the editor can change this plan now, and
+ * the last change they made to it.
+ */
+export interface TaskPlanEditProjection {
+  /** The plan takes edits now: a baseline analysis Task prepared and not yet started, with no key-content change pending. */
+  editable: boolean;
+  /** Why it does not, when it is a kind that could; `null` when editable, or for a kind that keeps no plan versions. */
+  reason: string | null;
+  /** The editor's last edit, which made the version shown: its version, time, and each change. */
+  lastEdit: null | { ordinal: number; recordedAt: string; entries: ReadonlyArray<TaskPlanDriftEntryProjection> };
+  /**
+   * The envelope digest of the version shown, which 更新计划 edits; `null` when the plan takes no edit. It is the
+   * edit's own: 模型未连接 or 离线 withholds 开始任务's digest, never this one.
+   */
+  planEnvelopeDigest: string | null;
 }
 
 /**
@@ -4120,7 +4175,8 @@ export interface TaskPlanDriftEntryProjection {
   label: string;
   prior: string;
   proposed: string;
-  materiality: 'material' | 'derived';
+  /** `edited` for a line of the editor's own edit (Issue #419). */
+  materiality: 'material' | 'derived' | 'edited';
 }
 
 /**
@@ -4180,7 +4236,9 @@ export interface TaskPlanProjection {
   /** 不会做, split (editor-surfaces §10): what the editor cares about, and the technical statements. */
   notDo: { editorial: ReadonlyArray<string>; technical: ReadonlyArray<string> };
   /** The Plan Boundary Split in the editor's words (PLAN-004, PLAN-012). */
-  boundary: { adaptable: ReadonlyArray<string>; askFirst: ReadonlyArray<string> };
+  boundary: { adaptable: ReadonlyArray<TaskPlanAdaptationProjection>; askFirst: ReadonlyArray<string> };
+  /** Whether and how the editor can edit this plan (Issue #419). */
+  edit: TaskPlanEditProjection;
   /** The plan's key content changed since it froze, and how that is settled; `null` while it stands. */
   drift: null | {
     reasons: ReadonlyArray<string>;
@@ -5532,6 +5590,22 @@ export interface ServiceOperationMap {
     output: BaselineAnalysisProjection;
   };
   /**
+   * 更新计划 (Issue #419, plan slice S73; V2-UX-PLAN-009, PLAN-011): the plan the editor sees, as they left it — the full
+   * set of what it leaves out, against the version they were reading — becomes the next plan version, with its Plan
+   * Revision recording the edit. Nothing is recorded when the plan moved, a key-content change is pending, or nothing
+   * changed.
+   */
+  editBaselineAnalysisPlan: {
+    input: {
+      bookId: string;
+      taskIntentId: string;
+      planEnvelopeDigest: string;
+      removedSteps: ReadonlyArray<string>;
+      disallowedAdaptations: ReadonlyArray<string>;
+    };
+    output: BaselineAnalysisProjection;
+  };
+  /**
    * Reconnect Preflight now, over every waiting Run (OFF-007, OFF-008): what it admitted, blocked, or left waiting.
    * It names no Book because it only ever admits Runs the editor already authorized to start when online.
    */
@@ -5878,6 +5952,13 @@ export interface RendererApi {
   cancelBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
   pauseBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
   resumeBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
+  /** 更新计划 (Issue #419): the next plan version of the Book's baseline analysis Task, as the editor left it. */
+  editBaselineAnalysisPlan(input: {
+    taskIntentId: string;
+    planEnvelopeDigest: string;
+    removedSteps: ReadonlyArray<string>;
+    disallowedAdaptations: ReadonlyArray<string>;
+  }): Promise<BaselineAnalysisProjection>;
   runReconnectPreflight(): Promise<ReconnectPreflightProjection>;
   /** 快速开始 of the Book the window is showing, after 先看计划's preparation (Issue #421). */
   quickStartBaselineAnalysis(input: { taskIntentId: string; planEnvelopeDigest: string; ruleVersionId: string }): Promise<QuickStartBaselineAnalysisResult>;

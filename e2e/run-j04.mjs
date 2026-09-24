@@ -333,9 +333,9 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     database.exec('PRAGMA query_only = ON;');
     // Synchronized delta with Issue #467: this reads the same Agent Data Root store J-03 and J-12
     // read, so the pin moves with the terminal version the service stamps
-    // (`RUN_CONTINUATION_SCHEMA_VERSION` since Issue #422's second part). It read 19 until #467 — one revision
+    // (`PLAN_EDIT_SCHEMA_VERSION` since Issue #419). It read 19 until #467 — one revision
     // behind, because only a failed product cleanup reaches this fallback, so revision 20 never met it.
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 33, 'credential-cleanup-metadata-version');
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 34, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
               approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
@@ -602,6 +602,36 @@ function barActions(drawer) {
 }
 
 /**
+ * The editable plan as the editor reads it (Issue #419, S73): each step and adaptation with whether it is left out,
+ * its 你改的 mark, and the control beside it — `remove`, named for what it does, or `restore` — with the notes that say
+ * what takes no edit and the line that records the last edit.
+ */
+async function readEditable(renderer) {
+  return renderer.evaluate(`(() => {
+    const drawer=document.querySelector('#task-drawer');
+    if(!(drawer instanceof HTMLElement))return null;
+    const items=Array.from(drawer.querySelectorAll('[data-task-plan-item]')).map((item)=>{
+      const control=item.querySelector('[data-task-plan-edit]');
+      return { id:item.dataset.taskPlanItem, removed:item.classList.contains('task-plan-item-removed'), tag:item.querySelector('.task-plan-edit-tag')?.textContent??null,
+        control:control?.dataset.taskPlanEdit??null, name:control===null?null:(control.getAttribute('aria-label')??control.textContent) };
+    });
+    return { items, notes:Array.from(drawer.querySelectorAll('.task-plan-edit-note')).map((note)=>note.textContent), record:drawer.querySelector('.task-plan-edit-record')?.textContent??null };
+  })()`);
+}
+
+/** Tab and Enter as a keyboard sends them (J-14): only a key that carries its text activates the focused control. */
+async function pressTab(renderer) {
+  const tab = { key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 };
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...tab });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...tab });
+}
+async function pressEnter(renderer) {
+  const enter = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 };
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...enter, text: '\r', unmodifiedText: '\r' });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...enter });
+}
+
+/**
  * Start the prepared baseline Task from the drawer's authorization bar (Issue #420, S74a A2): the drawer
  * shows the Task the preparation opened it for, and the card's 查看计划并开始 opens it when it does not. One
  * activation of 开始任务 records the authorization and the Run and hands the Run to the one slot.
@@ -635,6 +665,11 @@ function predecessorUnitsReading(plan) {
 
 /** The editor's words for the one adaptation class the analysis envelopes declare, and the three locked groups. */
 const SAFE_RETRY_ADAPTATION = '模型服务暂时出错时，同一个阅读范围安全地再试一次';
+// The editable plan (Issue #419, S73): its two notes (`src/renderer/task-drawer-labels.ts`) and what a Run that
+// leaves out 核对与抽检 says instead of a sample (`src/service/analysis/plan-edits.ts`), each pinned by its unit suite.
+const PLAN_EDIT_STEPS_NOTE = '这项分析的步骤由分析工序决定：可以去掉「核对与抽检」，不能改写、增加或调换顺序。';
+const PLAN_EDIT_ASK_FIRST_NOTE = '改成「先问你」要等澄清请求，暂不提供。';
+const ASSURANCE_SAMPLING_REMOVED = '按你修改的计划，这次运行不做核对与抽检；保证抽样未发起。';
 const LOCKED_BOUNDARY = ['固定要做的事、处理范围、参考范围与所用工序', '固定模型服务、发送内容类别、预算上限', '固定结果类型、受控动作'];
 
 async function click(renderer, label, name) {
@@ -721,6 +756,16 @@ function sameRecord(actual, expected) {
   if (actual === null || typeof actual !== 'object') return false;
   const keys = Object.keys(expected);
   return Object.keys(actual).length === keys.length && keys.every((key) => actual[key] === expected[key]);
+}
+
+/** Two values the same however deep, whatever order their keys read back in (a stored record is canonical JSON). */
+function sameValue(actual, expected) {
+  const canonical = (value) => Array.isArray(value)
+    ? value.map(canonical)
+    : value !== null && typeof value === 'object'
+      ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]))
+      : value;
+  return JSON.stringify(canonical(actual)) === JSON.stringify(canonical(expected));
 }
 
 function requireRevisionShape(revision, prepared, attempt, fixtureDigest, name) {
@@ -1340,8 +1385,9 @@ async function main() {
     requireJourney(missingConnection?.credentialOperationState === 'missing' && firstFull?.bar?.state === 'ready' && firstFull.bar.start === 'ready' &&
       firstFull.bar.summary === `《${bookName}》 · 全书 · 计划版本 1 · 主编辑角色 · 未设置任务预算上限 · 产出：一份基线分析 · 不改稿` &&
       firstFull.bar.statement === BAR_STATEMENT && firstFull.bar.note === null && firstFull.bar.status === null && firstFull.bar.refusal === null &&
-      barActions(firstFull) === 'start:开始任务:enabled|revise:返回修改:disabled|save-draft:保存草稿:enabled' &&
-      firstFull.bar.actions[1]?.reason === '随计划编辑提供', 'analysis-bar-ready', firstFull?.bar);
+      // Synchronized delta with Issue #419 (S73): 返回修改 opens the editing of a plan that takes edits.
+      barActions(firstFull) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled' &&
+      firstFull.bar.actions[1]?.reason === null, 'analysis-bar-ready', firstFull?.bar);
     await assertRenderer(renderer, `${AUTHORIZE_LABELED_BUTTONS}===0`, 'analysis-bar-no-authorize-label');
 
     at('authorize-dispatch');
@@ -2508,7 +2554,7 @@ async function main() {
     const revertedDrawer = await drawerShowing(renderer, preparedDrift.taskIntent.taskIntentId, 'ready', 'plan-revision-revert-drawer');
     requireJourney(revertedDrawer?.drift === null && revertedDrawer.version === '1' && revertedDrawer.pill === '尚未开始' &&
       revertedDrawer.chips.position === `第 ${rangeA.startPosition}–${rangeA.endPosition} 段` && revertedDrawer.chips.selected === `已选 ${priorCount} 字` &&
-      revertedDrawer.bar?.state === 'ready' && barActions(revertedDrawer) === 'start:开始任务:enabled|revise:返回修改:disabled|save-draft:保存草稿:enabled',
+      revertedDrawer.bar?.state === 'ready' && barActions(revertedDrawer) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled',
     'plan-revision-revert-drawer-plan', revertedDrawer);
     // Back to the change this Task means to confirm: the same range drift, pending on its own again.
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-8'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-select-b');
@@ -2560,9 +2606,100 @@ async function main() {
       v2Drawer.technical['plan-envelope'] === v2Digest &&
       // Issue #420 (S74a): version 2 is startable from the bar, whose summary names it.
       v2Drawer.bar?.state === 'ready' && v2Drawer.bar.summary?.includes(' · 计划版本 2 · ') === true &&
-      barActions(v2Drawer) === 'start:开始任务:enabled|revise:返回修改:disabled|save-draft:保存草稿:enabled',
+      barActions(v2Drawer) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled',
     'plan-revision-drawer-range', v2Drawer);
     await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card .analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：重新分析所选范围 · 第 ${rangeB.startPosition}–${rangeB.endPosition} 段 · 重新分析 ${driftOptionB.expected.recomputed} 个阅读范围，沿用 ${driftOptionB.expected.reused} 个 · 任务输入修订版 ${reconfirmed.checkpoint.revisionLabel} · 计划版本 2`)}`, 'plan-revision-summary-range');
+
+    // ---- 更新计划 (Issue #419, plan slice S73; editor-surfaces §6 可编辑, V2-UX-PLAN-009, PLAN-011) --------------
+    // Version 2 is edited before it starts: the editor leaves out 核对与抽检 and withdraws the safe retry, which is all
+    // a baseline analysis can honour, and 更新计划 makes that version 3 — which the dispatch below runs.
+    at('plan-edit-open');
+    // 返回修改 opens the plan's editing: 完整, focused on the first thing that can change. Each item that can change
+    // offers ×, named for what it does; the others offer nothing, and two notes say why.
+    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="revise"]', 'plan-edit-revise');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerMode==='full' && document.activeElement?.dataset?.taskPlanEdit==='remove' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='assurance-sampling'`, 'plan-edit-focus', 10_000);
+    const editable = await readEditable(renderer);
+    requireJourney(JSON.stringify(editable?.items) === JSON.stringify([
+      { id: 'units', removed: false, tag: null, control: null, name: null },
+      { id: 'reduction', removed: false, tag: null, control: null, name: null },
+      { id: 'assurance-sampling', removed: false, tag: null, control: 'remove', name: '去掉这一步：核对与抽检' },
+      { id: 'safe-retry', removed: false, tag: null, control: 'remove', name: `不允许：${SAFE_RETRY_ADAPTATION}` },
+    ]) && JSON.stringify(editable.notes) === JSON.stringify([PLAN_EDIT_STEPS_NOTE, PLAN_EDIT_ASK_FIRST_NOTE]) && editable.record === null,
+    'plan-edit-controls', editable);
+    // The glyph is the style sheet's: the column still reads as the adaptation's words alone.
+    const openDrawer = await readDrawer(renderer);
+    requireJourney(JSON.stringify(openDrawer?.adaptable) === JSON.stringify([SAFE_RETRY_ADAPTATION]) && openDrawer.actions === 0, 'plan-edit-column-words', openDrawer?.adaptable);
+
+    at('plan-edit-remove');
+    // × on 核对与抽检 and on the safe retry: each reads 你改的 with 恢复, the bar counts two and offers 更新计划 where
+    // 开始任务 was, and 保存草稿 waits for them. Nothing is recorded yet.
+    await reviewAction(renderer, '#task-drawer [data-task-plan-item="assurance-sampling"] [data-task-plan-edit="remove"]', 'plan-edit-remove-sampling');
+    await reviewAction(renderer, '#task-drawer [data-task-plan-item="safe-retry"] [data-task-plan-edit="remove"]', 'plan-edit-withdraw-retry');
+    const pendingDrawer = await readDrawer(renderer);
+    requireJourney(pendingDrawer?.bar?.note === '你改了 2 处' && pendingDrawer.bar.statement === null && pendingDrawer.version === '2' &&
+      barActions(pendingDrawer) === 'update-plan:更新计划:enabled|discard-edits:撤销修改:enabled|save-draft:保存草稿:disabled' &&
+      pendingDrawer.bar.actions[2]?.reason === '先更新计划或撤销修改', 'plan-edit-pending-bar', pendingDrawer?.bar);
+    const pendingItems = await readEditable(renderer);
+    requireJourney(JSON.stringify(pendingItems?.items?.slice(2)) === JSON.stringify([
+      { id: 'assurance-sampling', removed: true, tag: '你改的 · 不做', control: 'restore', name: '恢复' },
+      { id: 'safe-retry', removed: true, tag: '你改的 · 不允许', control: 'restore', name: '恢复' },
+    ]), 'plan-edit-pending-items', pendingItems?.items);
+    const unrecordedEdit = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(unrecordedEdit?.planVersion?.ordinal === 2 && unrecordedEdit.planVersions?.length === 2 && unrecordedEdit.planRevisions?.length === 3, 'plan-edit-nothing-recorded');
+
+    at('plan-edit-discard');
+    // 撤销修改 lets them go: version 2 reads as it froze, with 开始任务 again.
+    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="discard-edits"]', 'plan-edit-discard-click');
+    await waitFor(renderer, `document.querySelectorAll('#task-drawer .task-plan-item-removed').length===0 && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'plan-edit-discarded', 10_000);
+    const discardedDrawer = await readDrawer(renderer);
+    requireJourney(barActions(discardedDrawer) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled' && discardedDrawer.bar.note === null,
+      'plan-edit-discarded-bar', discardedDrawer?.bar);
+
+    at('j14-plan-edit-keyboard');
+    // Without a pointer: Enter on 返回修改 lands on 核对与抽检's ×; Enter leaves it out and focus stays on the item, now
+    // on its 恢复; Tab reaches the safe retry's ×, and Enter withdraws it.
+    await assertRenderer(renderer, `(() => { const revise=document.querySelector('#task-drawer [data-task-drawer-control="revise"]'); if(!(revise instanceof HTMLButtonElement)||revise.disabled)return false; revise.focus(); return document.activeElement===revise; })()`, 'plan-edit-keyboard-start');
+    await pressEnter(renderer);
+    await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='remove' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='assurance-sampling' && document.activeElement.matches(':focus-visible')`, 'plan-edit-keyboard-remove-focused', 10_000);
+    await pressEnter(renderer);
+    await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='restore' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='assurance-sampling' && document.activeElement.matches(':focus-visible')`, 'plan-edit-keyboard-restore-focused', 10_000);
+    await pressTab(renderer);
+    await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='remove' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='safe-retry' && document.activeElement.matches(':focus-visible')`, 'plan-edit-keyboard-next', 10_000);
+    await pressEnter(renderer);
+    await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='restore' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='safe-retry' && document.querySelector('#task-drawer .task-bar-note')?.textContent==='你改了 2 处'`, 'plan-edit-keyboard-withdrawn', 10_000);
+
+    at('plan-edit-update');
+    // 更新计划: version 3 on the same Task, its Plan Revision the editor's edit — each line 你改的 — with the material
+    // inputs as they were; the envelope the Run will bind leaves the retry out, and the drawer says who changed what.
+    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="update-plan"]', 'plan-edit-update-click');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanVersion==='3' && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'plan-edit-version-3', 60_000);
+    const edited = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const v3Digest = edited?.planEnvelope?.digest;
+    const editRevision = edited?.planRevisions?.at(-1);
+    const PLAN_EDITS = { removedSteps: ['assurance-sampling'], disallowedAdaptations: ['safe-retry'] };
+    requireJourney(edited?.taskIntent?.taskIntentId === preparedDrift.taskIntent.taskIntentId && edited.state === 'prepared' && DIGEST_PATTERN.test(v3Digest) && v3Digest !== v2Digest &&
+      edited.planVersion?.ordinal === 3 && edited.planVersion.state === 'current' && sameValue(edited.planVersion.edits, PLAN_EDITS) &&
+      JSON.stringify(edited.planVersions?.map((version) => [version.ordinal, version.state])) === JSON.stringify([[1, 'superseded'], [2, 'superseded'], [3, 'current']]) &&
+      sameValue(edited.planVersion.materialInputs, reconfirmed.planVersion.materialInputs) && sameValue(edited.executionPlan?.editorEdits, PLAN_EDITS) &&
+      JSON.stringify(edited.planEnvelope?.boundary?.adaptable) === '[]' && edited.planRevisions?.length === 4 && edited.planRevision === null &&
+      editRevision?.trigger === 'plan-edit' && editRevision.state === 'resolved' && editRevision.priorOrdinal === 2 && editRevision.nextOrdinal === 3 &&
+      // The stored diff reads back in its canonical key order, so it is compared entry by entry, not as one string.
+      JSON.stringify(editRevision.diff?.map((entry) => [entry.field, entry.label, entry.prior, entry.proposed, entry.materiality])) === JSON.stringify([
+        ['steps.assurance-sampling', '核对与抽检', '要做', '不做', 'edited'],
+        ['adaptations.safe-retry', SAFE_RETRY_ADAPTATION, '允许', '不允许', 'edited'],
+      ]) && edited.actions?.canAuthorize === true,
+    'plan-edit-version', { planVersion: edited?.planVersion, planRevision: editRevision, boundary: edited?.planEnvelope?.boundary });
+    const v3Drawer = await readDrawer(renderer);
+    const v3Items = await readEditable(renderer);
+    requireJourney(v3Drawer?.version === '3' && v3Drawer.bar?.summary?.includes(' · 计划版本 3 · ') === true &&
+      barActions(v3Drawer) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled' &&
+      v3Items?.record?.startsWith('第 3 版由你修改（') === true && v3Items.record.endsWith('）：步骤 · 核对与抽检：要做 → 不做；可以自己调整 · 安全地再试一次：允许 → 不允许') &&
+      JSON.stringify(v3Items.items.slice(2).map((item) => [item.id, item.removed, item.tag, item.control])) === JSON.stringify([
+        ['assurance-sampling', true, '你改的 · 不做', 'restore'],
+        ['safe-retry', true, '你改的 · 不允许', 'restore'],
+      ]) && v3Drawer.technical['plan-envelope'] === v3Digest,
+    'plan-edit-drawer', { bar: v3Drawer?.bar, record: v3Items?.record, items: v3Items?.items });
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planVersion==='3' && card.dataset.planVersionCount==='3' && card.dataset.planRevisionPending==='false' && card.querySelector('.analysis-plan-revision-list [data-plan-revision-next="3"][data-plan-revision-trigger="plan-edit"]')?.textContent.includes('你改的 · 已更新计划')===true; })()`, 'plan-edit-card');
 
     at('plan-revision-dispatch');
     cancellation.throwIfRequested();
@@ -2570,19 +2707,23 @@ async function main() {
     const revision6 = settledDrift?.resultSetRevision;
     const attemptDrift = settledDrift?.run?.attempt;
     requireJourney(settledDrift?.state === 'settled' && settledDrift.run?.state === 'completed-with-gaps' &&
-      settledDrift.authorization?.planEnvelopeDigest === v2Digest && settledDrift.authorization?.planVersionOrdinal === 2 &&
-      JSON.stringify(settledDrift.planVersions?.map((version) => version.state)) === JSON.stringify(['superseded', 'bound']) &&
-      attemptDrift?.executionBinding?.planEnvelopeDigest === v2Digest && JSON.stringify(attemptDrift.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([2, 8]) &&
+      // Synchronized delta with Issue #419 (S73): the Run binds version 3, the one the editor edited.
+      settledDrift.authorization?.planEnvelopeDigest === v3Digest && settledDrift.authorization?.planVersionOrdinal === 3 &&
+      JSON.stringify(settledDrift.planVersions?.map((version) => version.state)) === JSON.stringify(['superseded', 'superseded', 'bound']) &&
+      attemptDrift?.executionBinding?.planEnvelopeDigest === v3Digest && JSON.stringify(attemptDrift.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([2, 8]) &&
       settledDrift.run.adaptations?.length === 0 &&
       revision6?.ordinal === 6 && revision6.update?.mode === 'reanalyze-range' && sameRecord(revision6.update?.selectedRange, rangeB) && sameRecord(revision6.update?.counts, driftOptionB.expected) &&
-      revision6.update?.predecessor?.revisionId === revision5.revisionId && revision6.provenance?.planVersion === 2 && JSON.stringify(revision6.provenance?.adaptations) === JSON.stringify({ count: 0, unitOrdinals: [] }) &&
-      // Synchronized delta (#274, #275): two recomputed units, the reduction's turn, and the sample's.
-      revision6.usage?.requests === 3 + SAMPLING_TURNS && revision6.adapterPin?.fixtureSha256 === retryFixtureDigest && revision6.gaps?.length === 1 && revision6.gaps[0].unitOrdinal === 2 &&
+      revision6.update?.predecessor?.revisionId === revision5.revisionId && revision6.provenance?.planVersion === 3 && JSON.stringify(revision6.provenance?.adaptations) === JSON.stringify({ count: 0, unitOrdinals: [] }) &&
+      // Synchronized delta (#274, #275, #419): two recomputed units and the reduction's turn; version 3 left 核对与抽检
+      // out, so no sample is drawn and the revision says why.
+      revision6.usage?.requests === 3 && revision6.assuranceSample?.state === 'not-run' && revision6.assuranceSample.reason === ASSURANCE_SAMPLING_REMOVED &&
+      settledDrift.taskOutcome?.report?.stages?.find((stage) => stage.stage === 'assurance-sampling')?.state === 'not-run' &&
+      revision6.adapterPin?.fixtureSha256 === retryFixtureDigest && revision6.gaps?.length === 1 && revision6.gaps[0].unitOrdinal === 2 &&
       // Synchronized delta (#276): this Run adapted nothing, and its reflection closed from the
       // fixture entry keyed by its own accounting.
       settledDrift.taskOutcome?.report?.units?.retried === 0 && settledDrift.taskOutcome?.report?.ifRedone?.state === 'closed',
-    'plan-revision-settled', { authorization: settledDrift?.authorization, planVersions: settledDrift?.planVersions, provenance: revision6?.provenance, update: revision6?.update });
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const history=card?.querySelector('.analysis-history'); return card?.dataset.resultRevisionOrdinal==='6' && card.dataset.adaptationCount==='0' && card.dataset.planVersion==='2' && card.querySelector('[data-plan-version-ordinal="2"][data-plan-version-state="bound"]')!==null && card.querySelector('.analysis-plan-versions [data-plan-revision-next="2"][data-plan-revision-resolved="true"]')!==null && card.textContent.includes('计划版本 2') && card.querySelector('.analysis-timeline')?.dataset.timelineAdaptations==='0' && history?.dataset.historyCount==='6' && ${ONLY_ANALYSIS_ACTIONS}; })()`, 'plan-revision-overview-surface');
+    'plan-revision-settled', { authorization: settledDrift?.authorization, planVersions: settledDrift?.planVersions, provenance: revision6?.provenance, update: revision6?.update, usage: revision6?.usage, sample: revision6?.assuranceSample, ifRedone: settledDrift?.taskOutcome?.report?.ifRedone, accountingDigest: settledDrift?.taskOutcome?.report?.accountingDigest, stages: settledDrift?.taskOutcome?.report?.stages });
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const history=card?.querySelector('.analysis-history'); return card?.dataset.resultRevisionOrdinal==='6' && card.dataset.adaptationCount==='0' && card.dataset.planVersion==='3' && card.querySelector('[data-plan-version-ordinal="3"][data-plan-version-state="bound"]')!==null && card.querySelector('.analysis-plan-versions [data-plan-revision-next="3"][data-plan-revision-resolved="true"]')!==null && card.textContent.includes('计划版本 3') && card.querySelector('.analysis-timeline')?.dataset.timelineAdaptations==='0' && history?.dataset.historyCount==='6' && ${ONLY_ANALYSIS_ACTIONS}; })()`, 'plan-revision-overview-surface');
 
     at('plan-revision-edit-unchanged');
     // (iii) An acknowledged manuscript edit after the checkpoint changes no plan version, no revision, and no binding.
@@ -2590,14 +2731,14 @@ async function main() {
     await saveEditorSuffix(renderer, '，J-04 计划版本形成后的确认编辑', nextSequence, cancellation);
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled' && document.querySelector('.baseline-analysis-card')?.dataset.freshnessState==='stale'`, 'plan-revision-edit-stale');
     const afterEdit = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
-    requireJourney(afterEdit?.taskIntent?.taskIntentId === preparedDrift.taskIntent.taskIntentId && afterEdit.planEnvelope?.digest === v2Digest &&
-      JSON.stringify(afterEdit.planVersions?.map((version) => [version.ordinal, version.state])) === JSON.stringify([[1, 'superseded'], [2, 'bound']]) &&
-      afterEdit.planRevisions?.length === 3 && afterEdit.planRevision === null && afterEdit.authorization?.planEnvelopeDigest === v2Digest &&
+    requireJourney(afterEdit?.taskIntent?.taskIntentId === preparedDrift.taskIntent.taskIntentId && afterEdit.planEnvelope?.digest === v3Digest &&
+      JSON.stringify(afterEdit.planVersions?.map((version) => [version.ordinal, version.state])) === JSON.stringify([[1, 'superseded'], [2, 'superseded'], [3, 'bound']]) &&
+      afterEdit.planRevisions?.length === 4 && afterEdit.planRevision === null && afterEdit.authorization?.planEnvelopeDigest === v3Digest &&
       afterEdit.run?.attempt?.executionBinding?.bindingDigest === attemptDrift.executionBinding.bindingDigest && afterEdit.run?.runRecordId === settledDrift.run.runRecordId &&
       afterEdit.resultSetRevision?.revisionId === revision6.revisionId && afterEdit.resultSetRevision?.freshness?.state === 'stale' && afterEdit.resultSetRevision?.freshness?.currentJournalSequence === nextSequence &&
       afterEdit.checkpoint?.revisionId === settledDrift.checkpoint.revisionId,
     'plan-revision-edit-unchanged', { planVersions: afterEdit?.planVersions, freshness: afterEdit?.resultSetRevision?.freshness, nextSequence });
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planVersion==='2' && card.dataset.planVersionCount==='2' && card.dataset.planRevisionPending==='false' && card.dataset.planEnvelopeDigest===${JSON.stringify(v2Digest)} && card.dataset.freshnessState==='stale' && card.dataset.resultRevisionOrdinal==='6'; })()`, 'plan-revision-edit-surface');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planVersion==='3' && card.dataset.planVersionCount==='3' && card.dataset.planRevisionPending==='false' && card.dataset.planEnvelopeDigest===${JSON.stringify(v3Digest)} && card.dataset.freshnessState==='stale' && card.dataset.resultRevisionOrdinal==='6'; })()`, 'plan-revision-edit-surface');
     cancellation.throwIfRequested();
 
     // ---- 联网后开始任务 (Issue #502, plan slice S74b; editor-surfaces §6 离线 / 等待网络; V2-UX-AUTH-002, AUTH-004,
@@ -2617,7 +2758,7 @@ async function main() {
     requireJourney(offlineDrawer?.pill === '离线' && offlineDrawer.bar?.state === 'offline' && offlineDrawer.bar.start === 'offline' &&
       offlineDrawer.bar.statement === '只是让 AI7 按这份计划做这一次；接受修改建议、批准受控动作、保存里程碑版本、设为发稿版本都仍由你另行决定' &&
       offlineDrawer.bar.note === '离线：这份计划要连到模型服务，而这台设备现在没有网络。联网后开始任务会先记录这次授权，联网后自动开始；在此之前不会发送任何内容' &&
-      barActions(offlineDrawer) === 'start-when-online:联网后开始任务:enabled|save-draft:仅保存任务草稿:enabled|revise:返回修改:disabled' &&
+      barActions(offlineDrawer) === 'start-when-online:联网后开始任务:enabled|save-draft:仅保存任务草稿:enabled|revise:返回修改:enabled' &&
       offlineDrawer.bar.status === null && offlineDrawer.bar.refusal === null,
     'offline-bar', offlineDrawer?.bar);
     await assertRenderer(renderer, `(() => { const bar=document.querySelector('#task-drawer .task-drawer-bar'); return bar instanceof HTMLElement && !bar.contains(document.activeElement) && bar.querySelector('[autofocus]')===null && [...bar.querySelectorAll('button')].every((button)=>!button.textContent.includes('授权')); })()`, 'offline-bar-nothing-preselected');
@@ -2742,7 +2883,7 @@ async function main() {
     const fellBackIntent = fellBack.taskIntent.taskIntentId;
     const fellBackDrawer = await drawerShowing(renderer, fellBackIntent, 'offline', 'quick-offline-drawer');
     requireJourney(fellBackDrawer?.bar?.refusal === '快速开始没有开始这项任务：离线：这份计划要连到模型服务，而这台设备现在没有网络；可以在计划里选择联网后开始任务。' &&
-      barActions(fellBackDrawer) === 'start-when-online:联网后开始任务:enabled|save-draft:仅保存任务草稿:enabled|revise:返回修改:disabled',
+      barActions(fellBackDrawer) === 'start-when-online:联网后开始任务:enabled|save-draft:仅保存任务草稿:enabled|revise:返回修改:enabled',
     'quick-offline-bar', fellBackDrawer?.bar);
 
     at('quick-start-started');

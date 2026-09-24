@@ -448,6 +448,11 @@ export const SET_RULE_FIRST_BASELINE = '首次基线分析只做一次，不能�
 export const SET_RULE_RANGE = '重新分析所选范围每次都要先选范围，不能设为快速开始默认。';
 export const SET_RULE_DEVELOPER_LIVE = '开发者实时模式下不能设快速开始默认：每次都先看计划，再开始任务。';
 export const SET_RULE_CHANGED = '计划的关键内容已变化；重新确认计划后才能设为快速开始默认。';
+/**
+ * A rule binds a plan's allowed variability and outcome classes exactly (TASK-022), and a quick start prepares the plan
+ * as the procedure proposes it: a plan the editor edited cannot be the rule, which would start without those edits.
+ */
+export const SET_RULE_EDITED = '这份计划改过步骤或限制；快速开始按工序原样准备计划，不会带上这些修改，所以不能设为快速开始默认。';
 export function setRuleAlreadyReason(ruleName: string): string {
   return `默认执行规则「${ruleName}」就是由这份计划设定的，正在使用。`;
 }

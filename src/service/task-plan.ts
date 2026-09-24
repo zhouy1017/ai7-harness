@@ -18,6 +18,7 @@ import type {
 } from '../shared/protocol.js';
 import { namedNonEffects } from './analysis/baseline-analysis-store.js';
 import type { ManifestBlockInput } from './analysis/coverage-manifest.js';
+import { PLAN_EDITABLE_ADAPTATIONS, PLAN_EDIT_ADAPTATION_LABELS, PLAN_EDIT_STEP_LABELS } from './analysis/plan-edits.js';
 import type { Connectivity } from './connectivity.js';
 import { graphemeCount, sliceGraphemes } from './analysis/factual-review-contract.js';
 import type { ReviewRunPlanFacts } from './review/review-runs.js';
@@ -71,7 +72,15 @@ const NOT_READ = '其他图书；来源材料（来源版本仅作血缘证据�
  */
 export const LOCKED_BOUNDARY = ['要做的事、处理范围、参考范围与所用工序', '模型服务、发送内容类别、预算上限', '结果类型、受控动作'] as const;
 /** `运行中 AI7 可以自己调整`: the one adaptation class the analysis ledgers declare (`safe-retry`). */
-const SAFE_RETRY_ADAPTATION = '模型服务暂时出错时，同一个阅读范围安全地再试一次';
+const SAFE_RETRY_ADAPTATION = PLAN_EDIT_ADAPTATION_LABELS['safe-retry'];
+/**
+ * Why a baseline analysis plan takes no edit now (Issue #419, V2-UX-PLAN-011): its key content changed, which
+ * 重新确认计划 settles first — the editor's pending edits are kept for the version it writes — or its Run began.
+ */
+export const PLAN_EDIT_DRIFT_REASON = '计划的关键内容已变化：先重新确认计划，你的改动会保留';
+export const PLAN_EDIT_STARTED_REASON = '任务已经开始，计划不能再改';
+/** A plan the editor cannot edit because its kind keeps no plan versions. */
+const NOT_EDITABLE: TaskPlanProjection['edit'] = { editable: false, reason: null, lastEdit: null, planEnvelopeDigest: null };
 /** §10's editorial 不会做: the technical half reads in 查看技术详情. */
 const EDITORIAL_NOT_DO = ['不会直接修改稿件', '不导出或发布', '不存里程碑版本'] as const;
 
@@ -196,6 +205,9 @@ export const DRIFT_FIELD_LABELS: Readonly<Record<string, string>> = {
   outboundDataCategory: '发送内容类别',
   expectedOutcome: '会得到的结果',
   'reusePlan.counts': '重新分析与沿用的阅读范围',
+  // The editor's own edits (Issue #419): a step left out, an adaptation withdrawn.
+  'steps.assurance-sampling': `步骤 · ${PLAN_EDIT_STEP_LABELS['assurance-sampling']}`,
+  'adaptations.safe-retry': '可以自己调整 · 安全地再试一次',
 };
 
 function countsReading(counts: AnalysisReusePlanCounts): string {
@@ -363,8 +375,8 @@ export function fixedTaskPlan(input: {
       notRead: NOT_READ,
     },
     steps: [
-      { label: '准备任务输入', result: `任务输入修订版 ${checkpoint.revisionLabel}` },
-      { label: '记录运行（不派发）', result: '运行记录' },
+      { id: 'task-input', label: '准备任务输入', result: `任务输入修订版 ${checkpoint.revisionLabel}`, removable: false, removed: false },
+      { id: 'record-run', label: '记录运行（不派发）', result: '运行记录', removable: false, removed: false },
     ],
     participation: { during: NO_PARTICIPATION, after: null },
     service: {
@@ -387,6 +399,7 @@ export function fixedTaskPlan(input: {
       technical: [...projection.namedNonEffects],
     },
     boundary: { adaptable: [], askFirst: [...LOCKED_BOUNDARY] },
+    edit: NOT_EDITABLE,
     drift: null,
     technical: [
       { key: 'task-intent', label: '任务意图', value: intent.taskIntentId },
@@ -484,6 +497,24 @@ function baselineState(projection: BaselineAnalysisProjection): TaskPlanProjecti
 }
 
 /**
+ * Whether the editor can edit the baseline analysis plan now, and the edit that made the version shown (Issue #419,
+ * V2-UX-PLAN-011): a plan takes edits while it is prepared and unauthorized and no key-content change is pending.
+ */
+function baselinePlanEdit(projection: BaselineAnalysisProjection, ordinal: number, blocks: ReadonlyArray<ManifestBlockInput>): TaskPlanProjection['edit'] {
+  const started = projection.authorization !== null;
+  const drifted = projection.planRevision !== null;
+  const madeBy = projection.planRevisions.find((entry) => entry.trigger === 'plan-edit' && entry.state === 'resolved' && entry.nextOrdinal === ordinal);
+  return {
+    editable: !started && !drifted,
+    reason: started ? PLAN_EDIT_STARTED_REASON : drifted ? PLAN_EDIT_DRIFT_REASON : null,
+    lastEdit: madeBy === undefined || madeBy.detectedAt === null
+      ? null
+      : { ordinal, recordedAt: madeBy.detectedAt, entries: madeBy.diff.map((entry) => driftEntry(entry, blocks)) },
+    planEnvelopeDigest: started || drifted ? null : projection.planEnvelope?.digest ?? null,
+  };
+}
+
+/**
  * The plan of the Book's baseline analysis Task. The range the chips name is the current plan version's —
  * the one `重新确认计划` froze last — never the range the Task Intent row first recorded (#288's visible
  * half): the plan version is the authority, and the intent row keeps what was first asked for.
@@ -543,10 +574,17 @@ export function baselineAnalysisPlan(input: {
       send: live ? `所读阅读范围的稿件正文（${recomputed} 个）` : '不发送任何内容',
       notRead: NOT_READ,
     },
+    // PLAN-011 (Issue #419): of the analysis's steps only 核对与抽检 can be left out with the result still formed.
     steps: [
-      { label: counts === null ? '逐章读取' : `逐章读取（重新读取 ${recomputed} 个阅读范围，沿用 ${reused} 个）`, result: '各章摘要' },
-      { label: '汇总全书', result: '梗概与人物、事件、关系、设定' },
-      { label: '核对与抽检', result: '可信程度说明' },
+      { id: 'units', label: counts === null ? '逐章读取' : `逐章读取（重新读取 ${recomputed} 个阅读范围，沿用 ${reused} 个）`, result: '各章摘要', removable: false, removed: false },
+      { id: 'reduction', label: '汇总全书', result: '梗概与人物、事件、关系、设定', removable: false, removed: false },
+      {
+        id: 'assurance-sampling',
+        label: PLAN_EDIT_STEP_LABELS['assurance-sampling'],
+        result: '可信程度说明',
+        removable: true,
+        removed: version.edits.removedSteps.includes('assurance-sampling'),
+      },
     ],
     participation: { during: boundary !== null && boundary.participation.expected ? boundary.participation.statement : NO_PARTICIPATION, after: null },
     service: {
@@ -575,10 +613,18 @@ export function baselineAnalysisPlan(input: {
       editorial: [...EDITORIAL_NOT_DO, range === null ? '不读这本书以外的内容' : '不重新读取所选范围以外的正文', '不作事实判定'],
       technical: [...projection.namedNonEffects],
     },
+    // The adaptation the kind declares, read against the envelope the version froze: withdrawn when the editor
+    // said 不允许, which leaves it out of the envelope's split (Issue #419).
     boundary: {
-      adaptable: boundary === null ? [] : boundary.adaptable.map((entry) => entry.adaptationClass === 'safe-retry' ? SAFE_RETRY_ADAPTATION : entry.label),
+      adaptable: boundary === null ? [] : PLAN_EDITABLE_ADAPTATIONS.map((adaptationClass) => ({
+        id: adaptationClass,
+        label: PLAN_EDIT_ADAPTATION_LABELS[adaptationClass],
+        removable: true,
+        removed: !boundary.adaptable.some((entry) => entry.adaptationClass === adaptationClass),
+      })),
       askFirst: [...LOCKED_BOUNDARY],
     },
+    edit: baselinePlanEdit(projection, version.ordinal, blocks),
     drift: revision === null ? null : {
       reasons: ['计划冻结之后，它的关键内容已经变化；原计划不能再开始。'],
       entries: revision.diff.map((entry) => driftEntry(entry, blocks)),
@@ -912,10 +958,13 @@ export function reviewRunPlan(input: {
     },
     steps: [
       ...categories.map((category): TaskPlanStepProjection => ({
+        id: `category:${category.categoryId}`,
         label: category.modelFree ? `读取基线分析的线索：${category.label}` : `逐章审读：${category.label}`,
         result: `${category.label}的发现（稿件上的标记）`,
+        removable: false,
+        removed: false,
       })),
-      { label: '汇总', result: '审阅报告' },
+      { id: 'report', label: '汇总', result: '审阅报告', removable: false, removed: false },
     ],
     participation: {
       during: NO_PARTICIPATION,
@@ -952,7 +1001,11 @@ export function reviewRunPlan(input: {
       ],
       technical: [...namedNonEffects(facts.live, unitsRead === 0 ? null : unitsRead)],
     },
-    boundary: { adaptable: tasks.length === 0 ? [] : [SAFE_RETRY_ADAPTATION], askFirst: [...LOCKED_BOUNDARY] },
+    boundary: {
+      adaptable: tasks.length === 0 ? [] : [{ id: 'safe-retry', label: SAFE_RETRY_ADAPTATION, removable: false, removed: false }],
+      askFirst: [...LOCKED_BOUNDARY],
+    },
+    edit: NOT_EDITABLE,
     drift: reasons.length === 0 ? null : {
       reasons,
       entries: [],

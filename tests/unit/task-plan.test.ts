@@ -83,6 +83,13 @@ describe('the diff of a plan whose key content changed (D8)', () => {
     const outbound = { field: 'outboundDataCategory' as const, label: '外发数据类别', prior: 'public-or-synthetic', proposed: 'public-or-synthetic', materiality: 'material' as const };
     expect(driftEntry(outbound, BLOCKS)).toMatchObject({ label: '发送内容类别', prior: '公开或合成材料' });
   });
+
+  it('reads the editor\'s own edits in the drawer\'s words, as edits (Issue #419, PLAN-011)', () => {
+    const step = { field: 'steps.assurance-sampling' as const, label: '核对与抽检', prior: '要做', proposed: '不做', materiality: 'edited' as const };
+    expect(driftEntry(step, BLOCKS)).toEqual({ field: 'steps.assurance-sampling', label: '步骤 · 核对与抽检', prior: '要做', proposed: '不做', materiality: 'edited' });
+    const retry = { field: 'adaptations.safe-retry' as const, label: '模型服务暂时出错时，同一个阅读范围安全地再试一次', prior: '允许', proposed: '不允许', materiality: 'edited' as const };
+    expect(driftEntry(retry, BLOCKS)).toEqual({ field: 'adaptations.safe-retry', label: '可以自己调整 · 安全地再试一次', prior: '允许', proposed: '不允许', materiality: 'edited' });
+  });
 });
 
 describe('the words the ceiling, the account limit and the boundary are fixed to', () => {
@@ -125,6 +132,7 @@ describe('route-aware readiness of the authorization bar (S74a A3; AUTH-005, MOD
       outcomes: ['一份基线分析'],
       notDo: { editorial: [], technical: [] },
       boundary: { adaptable: [], askFirst: [...LOCKED_BOUNDARY] },
+      edit: { editable: true, reason: null, lastEdit: null, planEnvelopeDigest: 'e'.repeat(64) },
       drift: null,
       technical: [{ key: 'plan-envelope', label: '计划权限边界', value: 'e'.repeat(64) }],
       start: { readiness: 'ready', needsModelConnection: true, planEnvelopeDigest: 'e'.repeat(64), categoryDigests: [], reconfirm: null, ...start },
@@ -143,6 +151,8 @@ describe('route-aware readiness of the authorization bar (S74a A3; AUTH-005, MOD
       expect(blocked.start).toEqual({ readiness: 'needs-connection', needsModelConnection: true, planEnvelopeDigest: null, categoryDigests: [], reconfirm: null });
       // The blocker is the Run's, never the plan's: no drift is invented and every frozen fact stays (OFF-009).
       expect(blocked.drift).toBeNull();
+      // 更新计划 keeps the version it edits: only 开始任务's digest is withheld (Issue #419).
+      expect(blocked.edit.planEnvelopeDigest).toBe('e'.repeat(64));
       expect({ ...blocked, state: live.state, start: live.start }).toEqual(live);
     }
   });
