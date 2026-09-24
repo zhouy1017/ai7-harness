@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { strFromU8, unzipSync } from 'fflate';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
+import { REPORT_EXPORT_FORMATS, REPORT_FORMAT_LINES } from '../../src/service/manuscript-export.js';
 import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
@@ -23,6 +26,7 @@ import {
 } from '../../src/service/review/review-scope.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
+  DEFAULT_MANUSCRIPT_EXPORT_OPTIONS,
   MAX_FRAME_BYTES,
   MAX_REVIEW_FINDINGS_PER_PAGE,
   MAX_REVIEW_RUN_SUMMARIES,
@@ -994,6 +998,95 @@ describe('the 审阅 operations as the service entry dispatches them', () => {
       expect(oldest.run).toMatchObject({ reviewRunId: prepared[0]!.reviewRunId, ordinal: 1 });
       expect(oldest.runs.some((summary) => summary.reviewRunId === prepared[0]!.reviewRunId)).toBe(false);
       expect(wireBytes(latest)).toBeLessThan(MAX_FRAME_BYTES);
+    });
+  }, 300_000);
+});
+
+/** The code a refused export call answers with. */
+async function exportCode(operation: () => Promise<unknown>): Promise<string> {
+  try {
+    await operation();
+  } catch (error) {
+    if (error instanceof StoreError) return error.code;
+    throw error;
+  }
+  return 'no-error';
+}
+
+describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S64b part 2)', () => {
+  it('exports one recorded report version as DOCX, PDF and Markdown under the export ledger, and 交付物 lists each', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
+      const report = session.store.generateReviewReport(book.bookId, run.reviewRunId).run!.report!;
+      const target = { kind: 'report' as const, reportId: report.reportId };
+      const options = { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS };
+      const outbox = join(roots.inputRoot, 'exports');
+      await mkdir(outbox);
+      const review = (format: 'docx' | 'pdf' | 'markdown') =>
+        session.store.reviewManuscriptExport({ bookId: book.bookId, target, options, format }, true);
+
+      // The review is the report's own: what the version is, its four parts, and a file named for it.
+      const docx = await review('docx');
+      expect(docx).toMatchObject({
+        format: 'docx', savedForExport: false, restoration: 'regenerated', degraded: false,
+        restorationLine: '审阅报告按第 1 版的记录写出：概览表、必须处理的事项、各类别摘要与附录，与审阅中显示的一致。',
+        formatLine: REPORT_FORMAT_LINES.docx,
+        suggestedFileName: 'L2 sample1 审阅记录 · 审阅报告 · 第 1 次审阅 · 第 1 版.docx',
+        target: {
+          kind: 'report', milestoneId: null, revisionId: run.manuscript.revisionId, revisionLabel: run.manuscript.revisionLabel,
+          report: { reportId: report.reportId, version: 1, reviewRunId: run.reviewRunId, runLabel: '第 1 次' },
+        },
+        technical: { sourceVersionId: null, writerIdentity: 'ai7-report-docx/1', revisionDigest: report.digest },
+      });
+      expect(docx.formats).toEqual(REPORT_EXPORT_FORMATS);
+      const must = report.record.mustItems.items.length;
+      expect(docx.fidelity.map((row) => `${row.key}:${row.status}:${row.count}`)).toEqual([
+        'report-overview:preserved:2', `report-must-items:preserved:${must}`, 'report-summaries:preserved:2', 'report-appendix:preserved:3',
+      ]);
+      expect((await review('markdown')).fidelity[0]).toMatchObject({ key: 'report-overview', status: 'degraded' });
+
+      const exported = async (format: 'docx' | 'pdf' | 'markdown', fileName: string): Promise<Buffer> => {
+        const reviewed = await review(format);
+        const destination = join(outbox, fileName);
+        const preparation = await session.store.prepareManuscriptExport({
+          bookId: book.bookId, revisionId: reviewed.target.revisionId, target, options, reviewDigest: reviewed.reviewDigest, destination, format,
+        }, true);
+        expect(preparation.target.report?.reportId).toBe(report.reportId);
+        const staged = await session.store.stageManuscriptExport({ bookId: book.bookId, preparationId: preparation.preparationId }, true);
+        if (format === 'pdf') {
+          const page = await readFile(staged.print!.pagePath, 'utf8');
+          expect(page).toContain('<thead><tr><th scope="col">类别</th><th scope="col">状态</th><th scope="col">发现</th></tr></thead>');
+          await writeFile(staged.print!.pdfPath, '%PDF-1.7\n% AI7 service suite stand-in\n%%EOF\n');
+        } else {
+          expect(staged.print).toBeNull();
+        }
+        const receipt = await session.store.approveManuscriptExport({ bookId: book.bookId, preparationId: preparation.preparationId }, true);
+        expect(receipt).toMatchObject({ format, outcome: 'created', target: { kind: 'report', report: { version: 1 } } });
+        return readFile(destination);
+      };
+      const written = await exported('docx', '审阅报告.docx');
+      const documentXml = strFromU8(unzipSync(written)['word/document.xml']!);
+      expect(documentXml.match(/<w:tbl>/gu)?.length).toBe(1);
+      expect(documentXml).toContain('>概览表<');
+      const markdown = (await exported('markdown', '审阅报告.md')).toString('utf8');
+      expect(markdown.startsWith('# L2 sample1 审阅记录 · 审阅报告\n\n第 1 次审阅 · ')).toBe(true);
+      expect(markdown).toContain('\n\n## 概览表\n\n| 类别 | 状态 | 发现 |\n| --- | --- | --- |\n');
+      expect((await exported('pdf', '审阅报告.pdf')).toString('latin1').startsWith('%PDF-')).toBe(true);
+
+      // The ledger binds the version, not a revision; 交付物 lists every export of the Book, the report's among them.
+      const db = database();
+      try {
+        expect(db.prepare('SELECT target_kind, target_id, revision_id, revision_digest, format FROM export_preparations ORDER BY rowid').all().map((row) => ({ ...row })))
+          .toEqual(['docx', 'markdown', 'pdf'].map((format) => ({ target_kind: 'report', target_id: report.reportId, revision_id: null, revision_digest: null, format })));
+      } finally {
+        db.close();
+      }
+      const listed = session.store.inspectDeliverables(book.bookId).exports;
+      expect(listed.map((record) => `${record.format}:${record.target.kind}:${record.target.report?.version}`)).toEqual(['pdf:report:1', 'markdown:report:1', 'docx:report:1']);
+
+      // A report that is not this Book's — or none at all — is refused, and nothing is prepared.
+      expect(await exportCode(() => session.store.reviewManuscriptExport({ bookId: book.bookId, target: { kind: 'report', reportId: randomUUID() }, options }, true)))
+        .toBe('EXPORT_TARGET_NOT_FOUND');
     });
   }, 300_000);
 });

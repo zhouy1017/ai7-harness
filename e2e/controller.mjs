@@ -695,6 +695,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'review-batch-apply',
     'review-ignore-with-reason',
     'review-report',
+    'review-report-export',
     'review-coverage-moves',
     'review-return-to-analysis',
     'zero-activity',

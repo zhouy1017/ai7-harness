@@ -156,6 +156,8 @@ function validExportFormat(value: unknown): boolean {
 function validExportTarget(value: unknown): boolean {
   if (!isRecord(value)) return false;
   if (value.kind === 'current') return hasExactKeys(value, ['kind']);
+  // One recorded version of a 审阅报告 (Issue #500, S64b part 2).
+  if (value.kind === 'report') return hasExactKeys(value, ['kind', 'reportId']) && validUuid(value.reportId);
   return value.kind === 'milestone' && hasExactKeys(value, ['kind', 'milestoneId']) && validUuid(value.milestoneId);
 }
 
