@@ -101,6 +101,7 @@ import {
   type DocumentAction,
 } from './production-document-labels.js';
 import { mountBookDeliveryPackage } from './book-delivery-package.js';
+import { mountMaintenance } from './maintenance-cases.js';
 import { renderWorkflowCardSummary } from './production-document-workflow.js';
 
 /**
@@ -126,6 +127,7 @@ export interface DeliverablesSurface {
 type DeliverablesApi = Pick<RendererApi, 'inspectDeliverables' | 'inspectProductionDocuments' | 'inspectBookDeliveryPackage' |
   'prepareBookDeliveryPackage' | 'reviewBookDeliveryPackageExport' | 'chooseBookDeliveryPackageExportFolder' |
   'approveBookDeliveryPackageExport' | 'designatePublicationVersion' | 'reviewManuscriptExport' |
+  'inspectMaintenanceCase' | 'recordMaintenanceCase' | 'appendMaintenanceCaseRevision' | 'saveMaintenanceErrata' |
   'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
   'createProductionDocument' | 'decideProductionDocumentType' | 'recordProductionDocumentDelivery'>;
 
@@ -209,6 +211,10 @@ function focusKeyOf(node: HTMLElement): string {
     node instanceof HTMLInputElement && node.type === 'radio' ? node.value : '',
     node.closest<HTMLElement>('ol.milestone-list > li')?.dataset['milestoneId'] ?? '',
     node.closest<HTMLElement>('ol.publication-versions > li')?.dataset['publicationVersionId'] ?? '',
+    // 维护事项 (Issue #426, S68a): a case's own controls and fields.
+    node.dataset['maintenanceAction'] ?? '',
+    node.dataset['maintenanceField'] ?? '',
+    node.closest<HTMLElement>('ol.maintenance-cases > li')?.dataset['caseId'] ?? '',
   ].join('|');
 }
 
@@ -244,6 +250,19 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     el('p', 'lede', DELIVERABLES_LEDE),
     host,
   );
+  // Each designation's 维护事项 (Issue #426, S68a) are drawn inside its item from the surface's own state.
+  const maintenance = mountMaintenance({
+    bookId,
+    api,
+    technicalDetails: options.technicalDetails,
+    setStatus: options.setStatus,
+    errorMessage: options.errorMessage,
+    refresh: () => {
+      refresh();
+      bundle.refresh();
+    },
+    redraw: () => render('keep'),
+  });
   const exporter = mountManuscriptExport({
     root: exportSlot,
     bookId,
@@ -495,6 +514,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     item.dataset['publicationOrdinal'] = String(designation.ordinal);
     item.dataset['publicationCurrent'] = String(designation.current);
     item.dataset['designatedMilestoneId'] = designation.milestoneId;
+    item.dataset['publicationWithdrawn'] = String(designation.maintenance.withdrawn);
     const heading = el('div', 'publication-version-heading');
     heading.append(el('strong', 'publication-version-title', publicationVersionHeading(designation)));
     if (designation.current) heading.append(el('span', 'publication-current-mark', PUBLICATION_CURRENT_MARK));
@@ -514,6 +534,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
         ...fact(DELIVERABLES_TECHNICAL_TERMS.events, publicationEventsLine(designation.technical.events)),
         ...fact(DELIVERABLES_TECHNICAL_TERMS.recordedAt, designation.createdAt),
       ),
+      maintenance.render(designation),
     );
     return item;
   }
@@ -1283,6 +1304,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       documentsGeneration += 1;
       exporter.destroy();
       bundle.destroy();
+      maintenance.destroy();
     },
   };
 }

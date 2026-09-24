@@ -2722,6 +2722,75 @@ function registerRendererHandlers(
         });
       }),
   );
+  // 维护事项 (Issue #426, S68a): one case of the route's Book, and each of its steps, serialized like every other command.
+  // The service checks the designation, the case and the step; main only names the route's Book.
+  const requireMaintenanceOfRoute = (route: { bookId: string }, bookId: string): void => {
+    if (bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '维护事项不属于当前图书工作台。');
+  };
+  ipcMain.handle(
+    IPC_CHANNELS.inspectMaintenanceCase,
+    (event, input: Parameters<RendererApi['inspectMaintenanceCase']>[0]) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('inspectMaintenanceCase', { bookId: route.bookId, caseId: input.caseId });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          requireMaintenanceOfRoute(route, result.bookId);
+          return result;
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.recordMaintenanceCase,
+    (event, input: Parameters<RendererApi['recordMaintenanceCase']>[0]) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('recordMaintenanceCase', { bookId: route.bookId, publicationVersionId: input.publicationVersionId, classification: input.classification, reason: input.reason, evidence: input.evidence });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          requireMaintenanceOfRoute(route, result.bookId);
+          return result;
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.appendMaintenanceCaseRevision,
+    (event, input: Parameters<RendererApi['appendMaintenanceCaseRevision']>[0]) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('appendMaintenanceCaseRevision', { bookId: route.bookId, caseId: input.caseId, expectedRevision: input.expectedRevision, step: input.step });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          requireMaintenanceOfRoute(route, result.bookId);
+          return result;
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.saveMaintenanceErrata,
+    (event, input: Parameters<RendererApi['saveMaintenanceErrata']>[0]) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('saveMaintenanceErrata', { bookId: route.bookId, caseId: input.caseId, expectedRevision: input.expectedRevision, body: input.body });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          requireMaintenanceOfRoute(route, result.bookId);
+          return result;
+        });
+      }),
+  );
   // 交付 · 生产文档 (Issue #415, plan slice S66): three deterministic commands of the route's Book, serialized with
   // every other effect of this window's authority and held to its route generation. 从来源材料创建 and 本书不做 name
   // a house type and a material by identity, and the service decides whether they are this Book's; 保存为版本 names

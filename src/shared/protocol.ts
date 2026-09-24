@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 62 as const;
+export const SERVICE_PROTOCOL_VERSION = 63 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -131,6 +131,10 @@ export const IPC_CHANNELS = {
   reviewBookDeliveryPackageExport: 'ai7:j07:review-book-delivery-package-export',
   chooseBookDeliveryPackageExportFolder: 'ai7:j07:choose-book-delivery-package-export-folder',
   approveBookDeliveryPackageExport: 'ai7:j07:approve-book-delivery-package-export',
+  inspectMaintenanceCase: 'ai7:j07:inspect-maintenance-case',
+  recordMaintenanceCase: 'ai7:j07:record-maintenance-case',
+  appendMaintenanceCaseRevision: 'ai7:j07:append-maintenance-case-revision',
+  saveMaintenanceErrata: 'ai7:j07:save-maintenance-errata',
   createProductionDocument: 'ai7:j07:create-production-document',
   decideProductionDocumentType: 'ai7:j07:decide-production-document-type',
   saveProductionDocumentVersion: 'ai7:j07:save-production-document-version',
@@ -4972,6 +4976,153 @@ export interface PublicationVersionProjection {
     permissionId: string;
     events: ReadonlyArray<{ eventId: string; kind: PublicationEventKind }>;
   };
+  /** Its 维护事项 (Issue #426, S68a; MAINT-001): the cases bound to this exact designation, and the internal states they set. */
+  maintenance: PublicationMaintenanceProjection;
+}
+
+// ---- 维护事项 (Issue #426, plan slice S68a; V2-UX-MAINT-001 to 011, ADR 0040) ----------------------------------------
+
+/** The six classifications (MAINT-002), in the order the form shows them, none preselected. */
+export type MaintenanceClassification = 'correction' | 'errata' | 'supersession' | 'withdrawal' | 'reissue' | 'archive';
+export const MAINTENANCE_CLASSIFICATIONS: readonly MaintenanceClassification[] = [
+  'correction', 'errata', 'supersession', 'withdrawal', 'reissue', 'archive',
+];
+/** A case's status as its newest revision records it (MAINT-007, MAINT-011). */
+export type MaintenanceCaseStatus = 'unresolved' | 'waiting' | 'complete';
+/** What one revision of a case recorded (MAINT-003): the case itself, a link, a 勘误 version, or a conclusion. */
+export type MaintenanceCaseStep = 'recorded' | 'proposal-linked' | 'publication-linked' | 'errata-saved' | 'concluded';
+/** The step a case offers next, named by the action the case shows for it. */
+export type MaintenanceNextStep = 'link-proposal' | 'link-publication' | 'write-errata' | 'conclude';
+
+/** 原因, 依据 and a conclusion's 结论说明, in characters (code points) once NFC-normalized and trimmed. */
+export const MAX_MAINTENANCE_REASON_CHARACTERS = 500;
+export const MAX_MAINTENANCE_EVIDENCE_CHARACTERS = 500;
+/** One 勘误 version's words. */
+export const MAX_MAINTENANCE_ERRATA_CHARACTERS = 4000;
+/** At most this many cases of one designation are listed on 交付物, newest first; the count says how many there are. */
+export const MAX_MAINTENANCE_CASES_LISTED = 5;
+/** At most this many revisions of one case are read; the count says how many there are. */
+export const MAX_MAINTENANCE_REVISIONS_LISTED = 60;
+/** At most this many 修改建议 are offered to 关联. */
+export const MAX_MAINTENANCE_PROPOSALS_OFFERED = 20;
+
+/** One case as its designation lists it: what it is, where it stands and what it asks next. */
+export interface MaintenanceCaseSummaryProjection {
+  caseId: string;
+  /** 第 N 项维护事项 of the Book. */
+  ordinal: number;
+  classification: MaintenanceClassification;
+  classificationLabel: string;
+  status: MaintenanceCaseStatus;
+  statusLabel: string;
+  nextStep: MaintenanceNextStep | null;
+  revisions: number;
+  recordedAt: string;
+  latestAt: string;
+}
+
+/** A designation's 维护事项, as far as 交付物's one read carries them. */
+export interface PublicationMaintenanceProjection {
+  cases: ReadonlyArray<MaintenanceCaseSummaryProjection>;
+  total: number;
+  /** A 撤回 case holds it: in AI7 it is no longer used for 发稿 (ADR 0040), and it stays readable. */
+  withdrawn: boolean;
+  /** An 归档 case holds it: its maintenance is closed; its use and its history are unchanged. */
+  archived: boolean;
+}
+
+/** What one revision links (MAINT-010), in the linked record's own words; linking grants the case nothing. */
+export type MaintenanceCaseLinkProjection =
+  | { kind: 'proposal'; markId: string; label: string; stateLabel: string }
+  | { kind: 'publication-version'; publicationVersionId: string; label: string }
+  | { kind: 'errata'; errataVersionId: string; version: number; body: string };
+
+/** One immutable revision of a case, on its timeline (MAINT-003, MAINT-010). */
+export interface MaintenanceCaseRevisionProjection {
+  revision: number;
+  step: MaintenanceCaseStep;
+  stepLabel: string;
+  status: MaintenanceCaseStatus;
+  statusLabel: string;
+  reason: string | null;
+  evidence: string | null;
+  link: MaintenanceCaseLinkProjection | null;
+  actor: '本机编辑';
+  recordedAt: string;
+  /** 查看技术详情 only. */
+  digest: string;
+}
+
+/** One 维护事项 in its workspace: its target, its timeline oldest first, and what it offers next. */
+export interface MaintenanceCaseProjection {
+  bookId: string;
+  caseId: string;
+  ordinal: number;
+  classification: MaintenanceClassification;
+  classificationLabel: string;
+  /** What the classification does, in the editor's words (ADR 0040). */
+  consequence: string;
+  /** 撤回 and 归档 only: MAINT-008's sentence, standing with the case. */
+  internalOnly: string | null;
+  /** The exact designation it is bound to, never retargeted. */
+  target: { publicationVersionId: string; ordinal: number; label: string; revisionId: string; revisionLabel: string };
+  status: MaintenanceCaseStatus;
+  statusLabel: string;
+  nextStep: MaintenanceNextStep | null;
+  revisions: ReadonlyArray<MaintenanceCaseRevisionProjection>;
+  revisionsTotal: number;
+  /** The newest 勘误 version, with how many there are; `null` before the first. */
+  errata: null | { errataVersionId: string; version: number; body: string; recordedAt: string };
+  /** What 关联… offers: the manuscript's 修改建议 made after the designation, and the designations after it. */
+  choices: {
+    proposals: ReadonlyArray<{ markId: string; label: string; stateLabel: string; createdAt: string }>;
+    publications: ReadonlyArray<{ publicationVersionId: string; label: string }>;
+  };
+  /** The revision the editor read: the next step names it, and a step against another is refused. */
+  expectedRevision: number;
+  technical: { caseDigest: string };
+}
+
+/** `记录维护事项` (MAINT-002, MAINT-003): one case and its first revision, bound to one exact designation. */
+export interface RecordMaintenanceCaseInput {
+  bookId: string;
+  publicationVersionId: string;
+  classification: MaintenanceClassification;
+  reason: string;
+  evidence: string | null;
+}
+
+export interface InspectMaintenanceCaseInput {
+  bookId: string;
+  caseId: string;
+}
+
+/** One later step of a case, appended as its next revision against the one the editor read. */
+export type MaintenanceCaseStepInput =
+  | { kind: 'link-proposal'; markId: string }
+  | { kind: 'link-publication'; publicationVersionId: string }
+  | { kind: 'conclude'; status: 'unresolved' | 'complete'; outcome: string };
+
+export interface AppendMaintenanceCaseRevisionInput {
+  bookId: string;
+  caseId: string;
+  expectedRevision: number;
+  step: MaintenanceCaseStepInput;
+}
+
+/** `保存勘误版本` (MAINT-005): the 勘误's next version, linked by the case's next revision. */
+export interface SaveMaintenanceErrataInput {
+  bookId: string;
+  caseId: string;
+  expectedRevision: number;
+  body: string;
+}
+
+/** What a step came to: the case as it stands and the completion words (`维护事项已记录` or `维护事项结论已记录`). */
+export interface MaintenanceCaseResultProjection {
+  bookId: string;
+  maintenanceCase: MaintenanceCaseProjection;
+  completion: string;
 }
 
 /** The pending 录入定价与首印 line the current designation leaves; it offers no action yet. */
@@ -6608,6 +6759,10 @@ export interface ServiceOperationMap {
   prepareBookDeliveryPackageExport: { input: PrepareBookDeliveryPackageExportInput; output: BookDeliveryPackageExportProjection };
   /** `按上述方式导出`: each file approved and written in turn, with its receipt; a file that stops it stops the rest. */
   approveBookDeliveryPackageExport: { input: ApproveBookDeliveryPackageExportInput; output: BookDeliveryPackageExportResultProjection };
+  inspectMaintenanceCase: { input: InspectMaintenanceCaseInput; output: MaintenanceCaseProjection };
+  recordMaintenanceCase: { input: RecordMaintenanceCaseInput; output: MaintenanceCaseResultProjection };
+  appendMaintenanceCaseRevision: { input: AppendMaintenanceCaseRevisionInput; output: MaintenanceCaseResultProjection };
+  saveMaintenanceErrata: { input: SaveMaintenanceErrataInput; output: MaintenanceCaseResultProjection };
   createProductionDocument: { input: CreateProductionDocumentInput; output: ProductionDocumentResultProjection };
   decideProductionDocumentType: { input: DecideProductionDocumentTypeInput; output: ProductionDocumentResultProjection };
   saveProductionDocumentVersion: { input: SaveProductionDocumentVersionInput; output: ProductionDocumentResultProjection };
@@ -6856,6 +7011,14 @@ export interface RendererApi {
   chooseBookDeliveryPackageExportFolder(input: Omit<PrepareBookDeliveryPackageExportInput, 'bookId' | 'folder'>): Promise<ChooseBookDeliveryPackageExportFolderResult>;
   /** `按上述方式导出` of a prepared package export: its files written, each with its receipt. */
   approveBookDeliveryPackageExport(input: Omit<ApproveBookDeliveryPackageExportInput, 'bookId'>): Promise<BookDeliveryPackageExportResultProjection>;
+  /** 维护事项 (Issue #426, S68a): one case of that Book in its workspace. */
+  inspectMaintenanceCase(input: Omit<InspectMaintenanceCaseInput, 'bookId'>): Promise<MaintenanceCaseProjection>;
+  /** `记录维护事项` on one of that Book's designations. */
+  recordMaintenanceCase(input: Omit<RecordMaintenanceCaseInput, 'bookId'>): Promise<MaintenanceCaseResultProjection>;
+  /** 关联修改建议, 关联发稿版本 or 记录维护事项结论: the case's next revision. */
+  appendMaintenanceCaseRevision(input: Omit<AppendMaintenanceCaseRevisionInput, 'bookId'>): Promise<MaintenanceCaseResultProjection>;
+  /** `保存勘误版本`. */
+  saveMaintenanceErrata(input: Omit<SaveMaintenanceErrataInput, 'bookId'>): Promise<MaintenanceCaseResultProjection>;
   /** 从来源材料创建 (Issue #415): a document of one house type of that Book, from one of its source-only materials. */
   createProductionDocument(input: Omit<CreateProductionDocumentInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 本书不做 or 恢复 for one house type of that Book. */

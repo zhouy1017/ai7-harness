@@ -12,6 +12,10 @@ import {
   MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS,
   MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS,
   MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS,
+  MAINTENANCE_CLASSIFICATIONS,
+  MAX_MAINTENANCE_ERRATA_CHARACTERS,
+  MAX_MAINTENANCE_EVIDENCE_CHARACTERS,
+  MAX_MAINTENANCE_REASON_CHARACTERS,
   PRODUCTION_DOCUMENT_RECIPIENT_KINDS,
   PRODUCTION_DOCUMENT_PHASE_ACTIONS,
   PRODUCTION_DOCUMENT_PHASE_IDS,
@@ -160,6 +164,15 @@ function validProductionDocumentTypeId(value: unknown): value is string {
 
 function validPublicationText(value: unknown, maximum: number): boolean {
   return isBoundedString(value, maximum * 4) && publicationText(value, maximum) !== null;
+}
+
+/** One later step of a 维护事项 (Issue #426, S68a): a link by its identity, or a conclusion with its status and words. */
+function validMaintenanceStep(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (value.kind === 'link-proposal') return hasExactKeys(value, ['kind', 'markId']) && validUuid(value.markId);
+  if (value.kind === 'link-publication') return hasExactKeys(value, ['kind', 'publicationVersionId']) && validUuid(value.publicationVersionId);
+  return value.kind === 'conclude' && hasExactKeys(value, ['kind', 'status', 'outcome']) &&
+    (value.status === 'unresolved' || value.status === 'complete') && validPublicationText(value.outcome, MAX_MAINTENANCE_REASON_CHARACTERS);
 }
 
 /** The version an export names: the current revision, or one milestone by its identity (Issue #413). */
@@ -1172,6 +1185,37 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'approveBookDeliveryPackageExport': {
       const input = requireInput(value.input, ['bookId', 'exportId'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.exportId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 维护事项 (Issue #426, S68a): the route's Book, one of its designations or cases, and words within their bounds.
+    case 'inspectMaintenanceCase': {
+      const input = requireInput(value.input, ['bookId', 'caseId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.caseId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'recordMaintenanceCase': {
+      const input = requireInput(value.input, ['bookId', 'publicationVersionId', 'classification', 'reason', 'evidence'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.publicationVersionId) || typeof input.classification !== 'string' ||
+          !(MAINTENANCE_CLASSIFICATIONS as readonly string[]).includes(input.classification) ||
+          !validPublicationText(input.reason, MAX_MAINTENANCE_REASON_CHARACTERS) ||
+          (input.evidence !== null && !validPublicationText(input.evidence, MAX_MAINTENANCE_EVIDENCE_CHARACTERS))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'appendMaintenanceCaseRevision': {
+      const input = requireInput(value.input, ['bookId', 'caseId', 'expectedRevision', 'step'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.caseId) || !isSafeInteger(input.expectedRevision, 1) || !validMaintenanceStep(input.step)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'saveMaintenanceErrata': {
+      const input = requireInput(value.input, ['bookId', 'caseId', 'expectedRevision', 'body'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.caseId) || !isSafeInteger(input.expectedRevision, 1) ||
+          !validPublicationText(input.body, MAX_MAINTENANCE_ERRATA_CHARACTERS)) {
+        throw new ProtocolError(tentativeId);
+      }
       break;
     }
     case 'createProductionDocument': {

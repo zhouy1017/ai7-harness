@@ -622,6 +622,25 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .package-version-list p { margin: .3rem 0 0; }
 .package-version-line { font-weight: 800; }
 .package-current-mark { margin-left: .5rem; padding: 0 .4rem; border: 1px solid currentColor; border-radius: 999px; font-size: .85rem; }
+/* 维护事项 (Issue #426, S68a): each designation's cases, the draft bound to it, and a case with its timeline in place. */
+.maintenance { margin-top: .6rem; padding-top: .55rem; border-top: 1px dashed #d5dcd9; }
+.maintenance h5 { margin: 0; font-size: .95rem; }
+.maintenance > p { margin: .35rem 0 0; }
+.maintenance-cases, .maintenance-timeline { display: grid; gap: .35rem; margin: .4rem 0 0; padding-left: 1.2rem; }
+.maintenance-cases > li, .maintenance-timeline > li { min-width: 0; }
+.maintenance-case-line { margin: 0; font-weight: 700; }
+.maintenance-timeline > li > span { display: block; }
+.maintenance-draft, .maintenance-case { margin-top: .6rem; padding: .75rem .85rem; border: 1px solid #c9d6d2; border-radius: 10px; background: #fffdf8; }
+.maintenance-draft p, .maintenance-case p { margin: .35rem 0 0; }
+.maintenance-classifications, .maintenance-choices { display: grid; gap: .35rem; margin: .5rem 0 0; padding: .5rem .6rem; border: 1px solid #ddd8cc; border-radius: 8px; }
+.maintenance-classification-option, .maintenance-choice-option { display: flex; gap: .5rem; align-items: flex-start; }
+.maintenance-classification-text, .maintenance-choice-text { display: grid; gap: .1rem; min-width: 0; }
+.maintenance-field { display: block; margin-top: .5rem; }
+.maintenance-field textarea { display: block; width: 100%; box-sizing: border-box; margin-top: .3rem; }
+.maintenance-reason[hidden] { display: none; }
+.maintenance-actions, .maintenance-steps .button-row { margin-top: .55rem; }
+.maintenance-errata { margin-top: .5rem; padding: .5rem .65rem; border-left: 4px solid #416458; background: #f1f4ec; }
+.maintenance-errata-body { white-space: pre-wrap; }
 /* A version's export (Issue #416, S67b): its history in lines, 导出…, and the card of the files it writes. */
 .package-version-list .button-row { margin-top: .45rem; }
 .package-export-list { display: grid; gap: .35rem; margin: .45rem 0 0; padding-left: 1.2rem; }
@@ -1081,6 +1100,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .document-phase, .phase-pill, .phase-chip, .document-phase-form fieldset,
   .document-delivery fieldset, .delivery-statement,
   .deliverables-package, .package-current-mark, .package-export, .package-export-result, .package-export-list > li,
+  .maintenance-draft, .maintenance-case, .maintenance-classifications, .maintenance-choices, .maintenance-errata,
   .task-drawer, .task-drawer-head, .task-drawer-footer, .task-drawer-modes, .task-plan-goal, .task-plan-compact,
   .task-plan-chip, .task-plan-boundary, .task-plan-lock, .task-plan-section-number, .task-plan-edit-remove, .task-plan-edit-tag,
   .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal,

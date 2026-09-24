@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MAX_MAINTENANCE_CASES_LISTED,
   MAX_DELIVERABLE_MILESTONES,
   MAX_EXPORT_DESTINATION_CODE_UNITS,
   MAX_EXPORT_RECORDS_LISTED,
@@ -107,6 +108,16 @@ describe('the words of 发稿', () => {
       technical: {
         revisionDigest: digest, digest, permissionId: identity,
         events: [{ eventId: identity, kind: 'actuals-prompt' }, { eventId: identity, kind: 'exemplar-archive' }],
+      },
+      // Issue #426 (S68a): each designation's 维护事项 as far as they are listed, each summary at its widest.
+      maintenance: {
+        cases: Array.from({ length: MAX_MAINTENANCE_CASES_LISTED }, () => ({
+          caseId: identity, ordinal: 9_999_999, classification: 'correction' as const, classificationLabel: '更正', status: 'waiting' as const,
+          statusLabel: '等待另设发稿版本', nextStep: 'link-publication' as const, revisions: 9_999_999, recordedAt: time, latestAt: time,
+        })),
+        total: 9_999_999,
+        withdrawn: true,
+        archived: true,
       },
     };
     const deliverables: DeliverablesProjection = {

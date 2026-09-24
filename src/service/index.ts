@@ -870,6 +870,14 @@ async function dispatch(
         id: request.id, ok: true, op: request.op,
         result: await store.approveBookDeliveryPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
       };
+    case 'inspectMaintenanceCase':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectMaintenanceCase(request.input) };
+    case 'recordMaintenanceCase':
+      return { id: request.id, ok: true, op: request.op, result: store.recordMaintenanceCase(request.input) };
+    case 'appendMaintenanceCaseRevision':
+      return { id: request.id, ok: true, op: request.op, result: store.appendMaintenanceCaseRevision(request.input) };
+    case 'saveMaintenanceErrata':
+      return { id: request.id, ok: true, op: request.op, result: store.saveMaintenanceErrata(request.input) };
     case 'createProductionDocument':
       return { id: request.id, ok: true, op: request.op, result: await store.createProductionDocument(request.input) };
     case 'decideProductionDocumentType':

@@ -853,6 +853,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'package-v2',
     // Issue #416 (S67b): v2 exported into a chosen folder, file by file with receipts, and its history.
     'package-export',
+    // Issue #426 (S68a): 维护事项 — a 勘误 recorded, written and concluded, and 撤回 of the current designation.
+    'maintenance-cases',
     'documents-restart',
     'zero-loopback-requests',
     'completion-browser-close',
