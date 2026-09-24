@@ -11,6 +11,7 @@ import {
   PRODUCTION_DOCUMENT_PHASE_IDS,
   MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED,
   MAX_FRAME_BYTES,
+  MAX_BOOK_DELIVERY_PACKAGE_EXPORTS_LISTED,
   MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS,
   MAX_BOOK_DELIVERY_PACKAGE_REPORTS_LISTED,
   MAX_BOOK_DELIVERY_PACKAGE_VERSIONS_LISTED,
@@ -128,7 +129,7 @@ describe('the words of 发稿', () => {
         bookId: identity,
         preparationId: identity,
         // A milestone's target, with its label at its bound, is wider than a 审阅报告's (Issue #500, S64b part 2).
-        target: { kind: 'milestone' as const, milestoneId: identity, milestoneLabel: label, revisionId: identity, revisionLabel: 'r9999999', report: null, document: null },
+        target: { kind: 'milestone' as const, milestoneId: identity, milestoneLabel: label, revisionId: identity, revisionLabel: 'r9999999', report: null, document: null, packageVersion: null },
         // Issue #500: the longest format name the receipt binds.
         format: 'markdown' as const,
         outcome: 'ambiguous' as const,
@@ -246,7 +247,14 @@ describe('the words of 发稿', () => {
       },
       versions: Array.from({ length: MAX_BOOK_DELIVERY_PACKAGE_VERSIONS_LISTED }, (_, index): BookDeliveryPackageVersionProjection => ({
         packageVersionId: identity, packageId: identity, version: index + 1, label: `v${index + 1}`, purpose: wide(MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS),
-        preparedAt: '2026-09-24T00:00:00.000Z', current: index === 0, summary: wide(200), exportHistoryLabel: '暂无导出记录',
+        preparedAt: '2026-09-24T00:00:00.000Z', current: index === 0, summary: wide(200), exportHistoryLabel: '已导出 9999999 次',
+        // Issue #416 (S67b): each version's exports as far as they are listed, each folder at its bound in code units.
+        exports: Array.from({ length: MAX_BOOK_DELIVERY_PACKAGE_EXPORTS_LISTED }, () => ({
+          exportId: identity, folder: '𠀀'.repeat(MAX_EXPORT_DESTINATION_CODE_UNITS / 2), state: 'incomplete' as const,
+          summary: '已导出 9999 个文件，9999 个未能导出，9999 个结果待确认，其余 9999 个没有写入', exportedAt: '2026-09-24T00:00:00.000Z', fileCount: 9999,
+          revealPreparationId: identity,
+        })),
+        exportsTruncated: true,
         technical: { contentDigest: digest, digest, priorVersionId: identity },
       })),
       versionsTruncated: true,

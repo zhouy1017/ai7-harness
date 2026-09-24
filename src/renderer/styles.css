@@ -622,6 +622,27 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .package-version-list p { margin: .3rem 0 0; }
 .package-version-line { font-weight: 800; }
 .package-current-mark { margin-left: .5rem; padding: 0 .4rem; border: 1px solid currentColor; border-radius: 999px; font-size: .85rem; }
+/* A version's export (Issue #416, S67b): its history in lines, 导出…, and the card of the files it writes. */
+.package-version-list .button-row { margin-top: .45rem; }
+.package-export-list { display: grid; gap: .35rem; margin: .45rem 0 0; padding-left: 1.2rem; }
+.package-export-list > li { min-width: 0; }
+.package-export-list > li p { margin: .15rem 0 0; }
+.package-export-line { font-weight: 700; }
+.package-export { margin-top: .7rem; padding: .85rem 1rem; border: 1px solid #c9d6d2; border-radius: 12px; background: #fffdf8; }
+.package-export h5 { margin: 0; }
+.package-export > p { margin: .45rem 0 0; }
+.package-export-files { display: grid; gap: .35rem; margin: .35rem 0 0; padding-left: 1.2rem; }
+.package-export-files > li { min-width: 0; }
+.package-export-files > li > span { display: block; }
+.package-export-files .status-pill { margin-top: .2rem; }
+.package-export-outcome.is-failed, .package-export-outcome.is-ambiguous, .package-export-outcome.is-not-written { font-weight: 800; }
+.package-export-folder-choice { margin-top: .8rem; padding-top: .7rem; border-top: 1px solid #d5dcd9; }
+.package-export-folder-line { margin: 0 0 .5rem; }
+.package-export .export-actions { margin-top: .7rem; }
+.package-export-result { margin-top: .8rem; padding: .7rem .8rem; border: 1px solid #9bb0a8; border-radius: 10px; background: #f4f9f7; }
+.package-export-result[data-package-export-state="incomplete"] { border-color: #c9a28a; background: #fff7f0; }
+.package-export-result p { margin: .35rem 0 0; }
+.package-export-result .button-row { margin-top: .55rem; }
 /* A Production Document's surface (DELIV-002): the 工作流程 column stands beside the text on a wide window and after it
    on a narrow one, so a 200% zoom never scrolls sideways. */
 .editor-workspace.document-workspace { grid-template-columns: minmax(0, 1fr) minmax(14rem, 18rem) 4.75rem; }
@@ -1059,7 +1080,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .deliverables-documents, .production-document-card, .document-create fieldset, .document-lens, .document-version-current,
   .document-phase, .phase-pill, .phase-chip, .document-phase-form fieldset,
   .document-delivery fieldset, .delivery-statement,
-  .deliverables-package, .package-current-mark,
+  .deliverables-package, .package-current-mark, .package-export, .package-export-result, .package-export-list > li,
   .task-drawer, .task-drawer-head, .task-drawer-footer, .task-drawer-modes, .task-plan-goal, .task-plan-compact,
   .task-plan-chip, .task-plan-boundary, .task-plan-lock, .task-plan-section-number, .task-plan-edit-remove, .task-plan-edit-tag,
   .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal,
@@ -1105,7 +1126,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .publication-statement { border-left: 4px solid CanvasText; }
   /* Without colour a chosen format or option keeps a heavier border, and the outcome of an export its frame. */
   .export-format-option:has(input:checked), .export-option:has(input:checked) { border-width: 3px; }
-  .export-receipt { border: 2px solid CanvasText; }
+  .export-receipt, .package-export-result { border: 2px solid CanvasText; }
   .export-degraded-note { border: 2px solid CanvasText; }
   .book-deliverables textarea:focus-visible { outline-color: Highlight; }
   .primary, .secondary, .quiet, .status-pill {

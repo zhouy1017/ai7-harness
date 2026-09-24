@@ -99,7 +99,11 @@ const EXPORTED_PARTS = Object.freeze(['[Content_Types].xml', '_rels/.rels', 'doc
 const ACTUALS_PROMPT = '录入定价与首印 · 随评估功能提供';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 // 导出's four members (Issue #413): the only renderer members named like an export, and none publishes or sends.
-const EXPORT_MEMBERS = Object.freeze(['approveManuscriptExport', 'chooseManuscriptExportDestination', 'revealManuscriptExport', 'reviewManuscriptExport']);
+// Issue #416 (S67b): a 图书交付包 version's export adds its own three, and nothing else that exports, publishes or sends.
+const EXPORT_MEMBERS = Object.freeze([
+  'approveBookDeliveryPackageExport', 'approveManuscriptExport', 'chooseBookDeliveryPackageExportFolder', 'chooseManuscriptExportDestination',
+  'revealManuscriptExport', 'reviewBookDeliveryPackageExport', 'reviewManuscriptExport',
+]);
 // Issue #415 (S66a): a 新闻稿's draft, composed at run time from exact sample1's paragraphs after the manuscript's own,
 // imported as source material and made the Book's 新闻稿; the house's five types in its order; and the document's edit.
 const DRAFT = Object.freeze({ source: ADMITTED_BASELINE_DOCX, startBlock: 31, blocks: 3, title: '新闻稿初稿' });
@@ -125,6 +129,10 @@ const PACKAGE_PURPOSE = '交出版社存档';
 const PACKAGE_PURPOSE_2 = '交印厂付印';
 const PACKAGE_STATEMENT = '图书交付包把已完成的工作放在一起：它不是发稿，也不是交付；准备它不改变任何记录，也不生成文件。';
 const OTHER_TYPES = Object.freeze(['promotion-article', 'review-article', 'launch-materials', 'marketing-points']);
+// Issue #416 (S67b): a version's export — what it says, the folder it asks for, and the files v2 writes, in order.
+const PACKAGE_EXPORT_STATEMENT = '导出只把这些文件写到你选择的文件夹：每个文件都有自己的导出记录，交付包本身不变；AI7 不会发送任何文件。';
+const PACKAGE_EXPORT_FOLDER_UNCHOSEN = '还没有选择文件夹。请选择一个空文件夹，或在系统的对话框里新建一个：已有同名文件的文件夹不能使用，导出不会替换任何文件。';
+const PACKAGE_MANIFEST_FILE = '交付包清单.md';
 const DELIVERY_RECIPIENTS = '["publicity:false:宣传部","editorial:false:编辑部","external-media:false:外部媒体","other:false:其他","custom:false:自行输入"]';
 const EXPORT_MEMBERS_ONLY = `JSON.stringify(Object.keys(window.ai7).filter((key) => /export|publish|send/i.test(key)).sort()) === ${JSON.stringify(JSON.stringify(EXPORT_MEMBERS))}`;
 
@@ -356,6 +364,11 @@ const PAGE_HELPERS = `(() => {
     condition: (id) => window.__j07.pkg()?.querySelector('ol.package-condition-list > li[data-condition-id="' + id + '"]') ?? null,
     packageVersions: () => Array.from(window.__j07.pkg()?.querySelectorAll('ol.package-version-list > li') ?? []),
     packageReason: () => document.getElementById(window.__j07.pkg()?.querySelector('[data-package-action="prepare"]')?.getAttribute('aria-describedby') ?? '')?.textContent ?? null,
+    // Its export (Issue #416, S67b): the card below a version, and each file's key, format, words and outcome.
+    packageExport: () => window.__j07.pkg()?.querySelector('ol.package-version-list > li > section.package-export') ?? null,
+    packageExportFiles: () => Array.from(window.__j07.packageExport()?.querySelectorAll('ol.package-export-files > li') ?? [])
+      .map((item) => [item.dataset.packageExportFile, item.dataset.packageExportFormat, item.querySelector('.package-export-file-label')?.textContent ?? '',
+        item.querySelector('.package-export-file-name')?.textContent ?? '', item.dataset.packageExportOutcome ?? '', item.querySelector('.package-export-outcome')?.textContent ?? ''].join('|')),
   };
   return true;
 })()`;
@@ -738,12 +751,15 @@ async function main() {
     const markdownPath = resolve(exportsRoot, MARKDOWN_FILE);
     // Issue #415 (S66b): the file of the 新闻稿's delivered version.
     const documentExportPath = resolve(exportsRoot, DOCUMENT_EXPORT_FILE);
+    // Issue #416 (S67b): the empty folder the folder dialog's launch control names for the package's export.
+    const packageFolder = resolve(runRoot, 'package-export');
+    await mkdir(packageFolder);
     const metadata = await lstat(manuscript);
     requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size > 1_000, 'fixture-composed');
     const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
-    const launch = async ({ picker, save } = {}) => {
+    const launch = async ({ picker, save, folder } = {}) => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
         '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
@@ -752,6 +768,8 @@ async function main() {
       if (picker) args.push('--j07-picker-path', picker);
       // Issue #413: the Save dialog's one answer for this launch, in place of the platform's own.
       if (save) args.push('--j07-save-path', save);
+      // Issue #416 (S67b): the folder dialog's one answer for this launch.
+      if (folder) args.push('--j07-folder-path', folder);
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       cancellation.throwIfRequested();
       browserAcquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args, env: productEnvironment(executable), timeout: 60_000 });
@@ -765,7 +783,7 @@ async function main() {
     at('import-and-open');
     let renderer = await launch({ picker: manuscript, save: exportPath });
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true'`, 'product-ready');
-    // The renderer holds the two 交付物 members and 导出's four, and nothing that could publish or send.
+    // The renderer holds the two 交付物 members, 导出's four and the package export's three, and nothing that could publish or send.
     await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && typeof window.ai7.inspectDeliverables === 'function' && typeof window.ai7.designatePublicationVersion === 'function' && ${EXPORT_MEMBERS_ONLY}`, 'renderer-api-boundary');
     await renderer.send('Page.setBypassCSP', { enabled: true });
     try {
@@ -1396,7 +1414,7 @@ async function main() {
     // what a Production Document starts from until the writing task drafts one.
     await close();
     // This launch also answers the Save dialog, for the export of the version delivered below (S66b).
-    renderer = await launch({ picker: draftPath, save: documentExportPath });
+    renderer = await launch({ picker: draftPath, save: documentExportPath, folder: packageFolder });
     await importDraftAsSource(renderer, bookId);
 
     at('documents-cards');
@@ -1753,9 +1771,103 @@ async function main() {
       secondPackage.v1 === v1Before && secondPackage.prior === true && secondPackage.stable === true, 'package-v2-names-v1', secondPackage?.labels);
     await assertRenderer(renderer, `JSON.stringify(window.__j07.packageVersions().map((item) => item.dataset.packageVersion + ':' + item.dataset.packageCurrent)) === '["2:true","1:false"]'`, 'package-v2-above-v1');
 
+    at('package-export');
+    // 导出… of v2 (Issue #416, S67b; BUNDLE-004, EXP-010 to EXP-022) lists the files it writes and binds nothing until a
+    // folder is chosen; 选择位置… answers the folder dialog with the run's own empty folder and prepares every file there,
+    // writing none; 按上述方式导出 writes them one by one, each with its receipt. The folder then holds exactly the three
+    // files — the 发稿版本's revision and the 新闻稿's delivered 版本 3 as DOCX, and the 交付包清单 in the package's own
+    // words — v2's history says so, and 交付物's export records and the package itself stay as they were.
+    const packageFiles = [
+      ['publication', 'docx', `稿件 · 发稿版本「${FIRST.label}」 · r1`, `${EXCERPT.title} · ${FIRST.label}.docx`],
+      ['document:news-release', 'docx', '新闻稿 · 版本 3', `${EXCERPT.title} · 新闻稿 · 版本 3.docx`],
+      ['manifest', 'markdown', '交付包清单', PACKAGE_MANIFEST_FILE],
+    ];
+    const packageFileLines = (outcome, words) => packageFiles.map(([key, format, label, fileName]) =>
+      [key, format, label, `「${fileName}」 · ${format === 'docx' ? 'DOCX' : 'Markdown'}`, outcome, words].join('|'));
+    const recordsBefore = await renderer.evaluate(`window.ai7.inspectDeliverables().then((answer) => JSON.stringify(answer.exports))`);
+    const packageAction = (action) => `[data-screen="book-deliverables"] ol.package-version-list > li[data-package-current="true"] [data-package-action="${action}"]`;
+    await clickSelector(renderer, packageAction('export'), 'package-export-open');
+    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'ready' && window.__j07.status() === '要导出的文件已列出'`, 'package-export-reviewed', 60_000);
+    await assertRenderer(renderer, `(() => {
+      const panel = window.__j07.packageExport();
+      const approve = panel.querySelector('[data-package-action="export-approve"]');
+      const reason = document.getElementById(approve?.getAttribute('aria-describedby') ?? '');
+      return panel.closest('li')?.dataset.packageVersion === '2' && panel.querySelector('h5')?.textContent === '导出 · 图书交付包 v2' &&
+        panel.querySelector('.export-local-line')?.textContent === ${JSON.stringify(PACKAGE_EXPORT_STATEMENT)} &&
+        JSON.stringify(window.__j07.packageExportFiles()) === ${JSON.stringify(JSON.stringify(packageFileLines('', '')))} &&
+        approve instanceof HTMLButtonElement && approve.disabled && reason?.textContent === '先选择位置。' &&
+        panel.querySelector('.package-export-folder-line')?.textContent === ${JSON.stringify(PACKAGE_EXPORT_FOLDER_UNCHOSEN)} &&
+        document.activeElement === panel.querySelector('[data-package-action="export-choose"]') && !/%|百分/.test(panel.textContent ?? '');
+    })()`, 'package-export-lists-the-files');
+    await clickSelector(renderer, packageAction('export-choose'), 'package-export-choose');
+    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'prepared' && window.__j07.status() === '已准备好导出文件，等待你确认。'`, 'package-export-prepared', 60_000);
+    await assertRenderer(renderer, `(() => {
+      const panel = window.__j07.packageExport();
+      const approve = panel.querySelector('[data-package-action="export-approve"]');
+      return panel.querySelector('.package-export-folder-line')?.textContent === ${JSON.stringify(`导出到：${packageFolder}`)} &&
+        JSON.stringify(window.__j07.packageExportFiles()) === ${JSON.stringify(JSON.stringify(packageFileLines('prepared', '已准备')))} &&
+        approve instanceof HTMLButtonElement && !approve.disabled && document.activeElement === approve &&
+        panel.querySelector('[data-package-action="export-choose"]')?.textContent === '重新选择位置…' &&
+        (window.__j07.packageVersions()[0].querySelector('.package-version-line')?.textContent ?? '').startsWith('v2 · 图书交付包已准备 · 暂无导出记录');
+    })()`, 'package-export-bound-to-the-folder');
+    requireJourney((await readdir(packageFolder)).length === 0, 'package-export-prepared-writes-nothing');
+    await clickSelector(renderer, packageAction('export-approve'), 'package-export-approve');
+    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'done' && window.__j07.status() === '已导出到所选位置 · 3 个文件'`, 'package-export-written', 60_000);
+    await assertRenderer(renderer, `(() => {
+      const panel = window.__j07.packageExport();
+      const result = panel.querySelector('.package-export-result');
+      const [v2, v1] = window.__j07.packageVersions();
+      const history = Array.from(v2.querySelectorAll('ol.package-export-list > li'));
+      return result?.dataset.packageExportState === 'exported' && result.querySelector('.package-export-summary')?.textContent === '已导出到所选位置 · 3 个文件' &&
+        result.querySelector('.package-export-stopped') === null &&
+        JSON.stringify(window.__j07.packageExportFiles()) === ${JSON.stringify(JSON.stringify(packageFileLines('created', '已导出到所选位置')))} &&
+        document.activeElement === result.querySelector('[data-package-action="export-reveal"]') && panel.querySelector('[data-package-action="export-choose"]') === null &&
+        (v2.querySelector('.package-version-line')?.textContent ?? '').startsWith('v2 · 图书交付包已准备 · 已导出 1 次') &&
+        history.length === 1 && history[0].dataset.packageExportState === 'exported' &&
+        (history[0].querySelector('.package-export-line')?.textContent ?? '').startsWith('已导出到所选位置 · 3 个文件 · ') &&
+        history[0].querySelector('.package-export-folder')?.textContent === ${JSON.stringify(packageFolder)} &&
+        history[0].querySelector('[data-package-action="reveal-export"]')?.textContent === '在文件夹中显示' &&
+        v1.querySelector('ol.package-export-list') === null && (v1.querySelector('.package-version-line')?.textContent ?? '').startsWith('v1 · 图书交付包已准备 · 暂无导出记录') &&
+        window.__j07.pkg().dataset.packageVersions === '2' && window.__j07.pkg().dataset.packageChanged === 'false';
+    })()`, 'package-export-history');
+    // The folder holds exactly the three files; each DOCX is a package, and the 交付包清单 is the version's own words, byte
+    // for byte, as the package and its Delivery Records answer them.
+    requireJourney(JSON.stringify((await readdir(packageFolder)).sort()) === JSON.stringify(packageFiles.map(([, , , fileName]) => fileName).sort()), 'package-export-folder-files');
+    for (const [key, format, , fileName] of packageFiles) {
+      if (format !== 'docx') continue;
+      const bytes = await readFile(resolve(packageFolder, fileName));
+      requireJourney(bytes.byteLength > 1_000 && bytes.subarray(0, 2).toString('latin1') === 'PK', `package-export-docx-${key}`);
+    }
+    const manifestInputs = await renderer.evaluate(`Promise.all([window.ai7.inspectBookDeliveryPackage(), window.ai7.inspectProductionDocuments()]).then(([bundle, documents]) => ({
+      version: bundle.versions[0], included: bundle.content.included, limitations: bundle.content.limitations, statement: bundle.statement,
+      deliveries: documents.types.find((type) => type.typeId === 'news-release').document.deliveries,
+    }))`);
+    const expectedManifest = [
+      `# ${EXCERPT.title} · 图书交付包 v2`, '',
+      `- 用途：${PACKAGE_PURPOSE_2}`, `- 准备于：${manifestInputs.version.preparedAt}`, `- 内容摘要：${manifestInputs.version.technical.contentDigest}`, '',
+      '## 包含', '',
+      `- 稿件 · ${manifestInputs.included[0].label}（${manifestInputs.included[0].detail}）`, `- ${manifestInputs.included[1].label}`, '',
+      '## 交付记录', '', '### 新闻稿', '',
+      ...manifestInputs.deliveries.map((delivery) =>
+        `- 第 ${delivery.ordinal} 次交付 · ${delivery.recipient.label} · ${delivery.versionLabel} · ${delivery.recordedAt}${delivery.note === null ? '' : `（备注：${delivery.note}）`}`),
+      '',
+      '## 不包含', '',
+      '- 备注：稿件与文档上的备注只供编辑自己参考', '- 资料库原件', '- 中间修订版：稿件只含发稿版本，文档只含交付过的版本', '- 本书不做：宣传文章、评论文章、发布会材料、营销要点', '',
+      '## 说明', '',
+      ...manifestInputs.limitations.map((line) => `- ${line}`), `- ${manifestInputs.statement}`, '',
+    ].join('\n');
+    const manifest = await readFile(resolve(packageFolder, PACKAGE_MANIFEST_FILE));
+    requireJourney(manifestInputs.included.length === 2 && manifestInputs.deliveries.length === 2 &&
+      createHash('sha256').update(manifest).digest('hex') === createHash('sha256').update(expectedManifest, 'utf8').digest('hex'), 'package-export-manifest-words');
+    requireJourney(await renderer.evaluate(`window.ai7.inspectDeliverables().then((answer) => JSON.stringify(answer.exports))`) === recordsBefore, 'package-export-not-in-export-records');
+    // 完成 closes the card; focus returns to v2's 导出….
+    await clickSelector(renderer, packageAction('export-close'), 'package-export-close');
+    await waitFor(renderer, `window.__j07.packageExport() === null && document.activeElement === window.__j07.packageVersions()[0].querySelector('[data-package-action="export"]')`, 'package-export-closed');
+    await assertNoForbiddenWords(renderer, 'package-export-without-forbidden-words');
+
     at('documents-restart');
     // A restart moves nothing: 交付物, 交付 · 生产文档 and 图书交付包 answer byte for byte as before, the card still names
-    // its second delivery, the package lists its two versions, and the 新闻稿 opens at 版本 3 with both its edits.
+    // its second delivery, the package lists its two versions and v2's export, and the 新闻稿 opens at 版本 3 with both its edits.
     const readBoth = `Promise.all([window.ai7.inspectDeliverables(), window.ai7.inspectProductionDocuments(), window.ai7.inspectBookDeliveryPackage()]).then((answers) => JSON.stringify(answers))`;
     const documentsBefore = await renderer.evaluate(readBoth);
     await close();
@@ -1763,7 +1875,7 @@ async function main() {
     await reopenDeliverables(renderer, 'documents-restart');
     const documentsAfter = await renderer.evaluate(readBoth);
     requireJourney(typeof documentsBefore === 'string' && documentsAfter === documentsBefore, 'documents-restart-moved-nothing');
-    await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentState === 'document' && window.__j07.card('news-release').dataset.documentDeliveries === '2' && window.__j07.card('news-release').dataset.documentChangedSinceDelivery === 'false' && window.__j07.packageVersions().length === 2`, 'documents-restart-card');
+    await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentState === 'document' && window.__j07.card('news-release').dataset.documentDeliveries === '2' && window.__j07.card('news-release').dataset.documentChangedSinceDelivery === 'false' && window.__j07.packageVersions().length === 2 && (window.__j07.packageVersions()[0].querySelector('ol.package-export-list > li .package-export-line')?.textContent ?? '').startsWith('已导出到所选位置 · 3 个文件 · ')`, 'documents-restart-card');
     await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="open"]', 'documents-restart-open');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] .editor-toolbar h2')?.textContent === '新闻稿 · 版本 3' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.textContent?.endsWith(${JSON.stringify(`${DOCUMENT_EDIT}${DELIVERY_EDIT}`)})`, 'documents-restart-document');
     await assertNoForbiddenWords(renderer, 'documents-without-forbidden-words');

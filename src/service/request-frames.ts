@@ -1154,6 +1154,26 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    // Its export (Issue #416, S67b): one version of the route's Book's package, the folder the dialog returned, an export.
+    case 'reviewBookDeliveryPackageExport': {
+      const input = requireInput(value.input, ['bookId', 'packageVersionId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.packageVersionId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'prepareBookDeliveryPackageExport': {
+      const input = requireInput(value.input, ['bookId', 'packageVersionId', 'reviewDigest', 'folder'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.packageVersionId) || !isBoundedString(input.reviewDigest, 64) ||
+          !HEX_DIGEST_PATTERN.test(input.reviewDigest) || !isBoundedString(input.folder, MAX_EXPORT_DESTINATION_CODE_UNITS) ||
+          !isAbsolute(input.folder)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'approveBookDeliveryPackageExport': {
+      const input = requireInput(value.input, ['bookId', 'exportId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.exportId)) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'createProductionDocument': {
       const input = requireInput(value.input, ['bookId', 'typeId', 'sourceVersionId'], tentativeId);
       if (!validUuid(input.bookId) || !validProductionDocumentTypeId(input.typeId) || !validUuid(input.sourceVersionId)) {

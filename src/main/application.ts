@@ -71,6 +71,8 @@ interface LaunchArguments {
   injectedPickerPath: string | undefined;
   /** J-07 only (Issue #413): the one answer the Save dialog gives, once, in place of the platform's own. */
   injectedSavePath: string | undefined;
+  /** J-07's answer to the folder dialog of a 图书交付包 export (Issue #416, S67b): single-use, like the Save dialog's. */
+  injectedFolderPath: string | undefined;
   importControl: J01ImportControl | undefined;
   foregroundExecutionControl: J03ForegroundExecutionControl | undefined;
   recoveryControl: J08RecoveryControl | undefined;
@@ -183,6 +185,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j09-picker-path' ||
           key === '--j10-picker-path' ||
           key === '--j07-save-path' ||
+          key === '--j07-folder-path' ||
           key === '--j04-save-path' ||
           key === '--j01-import-control' ||
           key === '--j03-foreground-execution-control' ||
@@ -269,6 +272,8 @@ function parseArguments(argv: string[]): LaunchArguments {
   requireDesktop(j07SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-07' && isAbsolute(j07SavePath)));
   requireDesktop(j04SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && isAbsolute(j04SavePath)));
   const injectedSavePath = j07SavePath ?? j04SavePath;
+  const injectedFolderPath = values.get('--j07-folder-path');
+  requireDesktop(injectedFolderPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-07' && isAbsolute(injectedFolderPath)));
   const importControlValue = values.get('--j01-import-control');
   const importControl =
     importControlValue === 'before-commit' ||
@@ -335,13 +340,15 @@ function parseArguments(argv: string[]): LaunchArguments {
     launchForm.trustedOperationalScope === 'development-ci' ||
       (process.env.AI7_E2E_JOURNEY === undefined && injectedPickerPath === undefined && observeJ12RevealValue === undefined &&
         importControlValue === undefined && foregroundExecutionControlValue === undefined && recoveryControlValue === undefined && modelAdapterControlValue === undefined &&
-        applyControlValue === undefined && injectedSavePath === undefined && connectivityPath === undefined && unitHoldPath === undefined),
+        applyControlValue === undefined && injectedSavePath === undefined && injectedFolderPath === undefined && connectivityPath === undefined &&
+        unitHoldPath === undefined),
   );
   return {
     dataRoot,
     launchForm,
     injectedPickerPath,
     injectedSavePath,
+    injectedFolderPath,
     importControl,
     foregroundExecutionControl,
     recoveryControl,
@@ -468,6 +475,7 @@ function registerRendererHandlers(
   consumeLostApplyAcknowledgement: () => boolean,
   consumeInjectedSavePath: () => string | undefined,
   printExportPage: (pagePath: string, pdfPath: string) => Promise<void>,
+  consumeInjectedFolderPath: () => string | undefined,
 ): () => void {
   const AMBIGUOUS_SERVICE_FAILURES = new Set([
     'COMMIT_PROOF_INCONCLUSIVE',
@@ -1142,6 +1150,28 @@ function registerRendererHandlers(
     if (chosen.canceled || chosen.filePath === undefined || chosen.filePath.length === 0) return undefined;
     requireDesktop(isAbsolute(chosen.filePath));
     return chosen.filePath;
+  };
+
+  /**
+   * The system's own folder dialog for a 图书交付包 export (Issue #416, S67b; EXP-019, EXP-020): the editor chooses a folder,
+   * or makes a new one in the dialog. J-07 answers it once with a launch control instead; `undefined` is a cancelled dialog.
+   */
+  const chooseExportFolder = async (owned: OwnedRendererWindow): Promise<string | undefined> => {
+    const injected = consumeInjectedFolderPath();
+    if (injected !== undefined) {
+      requireDesktop(isAbsolute(injected));
+      return injected;
+    }
+    const chosen = await dialog.showOpenDialog(owned.window, {
+      title: '选择导出图书交付包的文件夹',
+      buttonLabel: '导出到此文件夹',
+      defaultPath: app.getPath('documents'),
+      properties: ['openDirectory', 'createDirectory', 'promptToCreate'],
+    });
+    const folder = chosen.canceled ? undefined : chosen.filePaths[0];
+    if (folder === undefined || folder.length === 0) return undefined;
+    requireDesktop(isAbsolute(folder));
+    return folder;
   };
 
   ipcMain.on(MAIN_EVENTS.closeRiskChanged, closeRiskListener);
@@ -2758,6 +2788,66 @@ function registerRendererHandlers(
         });
       }),
   );
+  // Its export (Issue #416, S67b): the review is a read of the route's Book; choosing the folder prepares and 按上述方式导出
+  // writes, each serialized like every other command. The service checks the files and the folder; main only asks the
+  // platform's dialog.
+  ipcMain.handle(
+    IPC_CHANNELS.reviewBookDeliveryPackageExport,
+    (event, input: Parameters<RendererApi['reviewBookDeliveryPackageExport']>[0]) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('reviewBookDeliveryPackageExport', { bookId: route.bookId, packageVersionId: input.packageVersionId });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          requireBookDeliveryPackageOfRoute(route, result.bookId);
+          return result;
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.chooseBookDeliveryPackageExportFolder,
+    (event, input: Parameters<RendererApi['chooseBookDeliveryPackageExportFolder']>[0]) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async (): Promise<Awaited<ReturnType<RendererApi['chooseBookDeliveryPackageExportFolder']>>> => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const folder = await chooseExportFolder(owned);
+          // A cancelled dialog records nothing at all (V2-UX-EXP-020).
+          if (folder === undefined) return { outcome: 'cancelled' };
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          const prepared = await service.call('prepareBookDeliveryPackageExport', {
+            bookId: route.bookId,
+            packageVersionId: input.packageVersionId,
+            reviewDigest: input.reviewDigest,
+            folder,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          return { outcome: 'prepared', export: prepared };
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.approveBookDeliveryPackageExport,
+    (event, input: Parameters<RendererApi['approveBookDeliveryPackageExport']>[0]) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('approveBookDeliveryPackageExport', { bookId: route.bookId, exportId: input.exportId });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          requireBookDeliveryPackageOfRoute(route, result.bookId);
+          requireBookDeliveryPackageOfRoute(route, result.package.bookId);
+          return result;
+        });
+      }),
+  );
   ipcMain.handle(
     IPC_CHANNELS.createProductionDocument,
     (event, input: Omit<ServiceOperationMap['createProductionDocument']['input'], 'bookId'>) =>
@@ -3834,6 +3924,15 @@ export async function runApplication(): Promise<void> {
         };
       })(),
       (pagePath, pdfPath) => printStagedPage(exportStagingRoot, exportPrintSession, pagePath, pdfPath),
+      // J-07's folder-dialog answer for a package export (Issue #416, S67b) is single-use too.
+      (() => {
+        let pending = launch.injectedFolderPath;
+        return (): string | undefined => {
+          const path = pending;
+          pending = undefined;
+          return path;
+        };
+      })(),
     );
     startupLocation = reachStartup('renderer-first-paint');
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);

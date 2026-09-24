@@ -854,6 +854,22 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectBookDeliveryPackage(request.input.bookId) };
     case 'prepareBookDeliveryPackage':
       return { id: request.id, ok: true, op: request.op, result: store.prepareBookDeliveryPackage(request.input) };
+    // Its export (Issue #416, S67b): local only, and only under this launch's verified External Export Policy, as ④ 导出.
+    case 'reviewBookDeliveryPackageExport':
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: await store.reviewBookDeliveryPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
+      };
+    case 'prepareBookDeliveryPackageExport':
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: await store.prepareBookDeliveryPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
+      };
+    case 'approveBookDeliveryPackageExport':
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: await store.approveBookDeliveryPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
+      };
     case 'createProductionDocument':
       return { id: request.id, ok: true, op: request.op, result: await store.createProductionDocument(request.input) };
     case 'decideProductionDocumentType':

@@ -60,3 +60,77 @@ export function packagePreparedLine(label: string): string {
 export function packageUnchangedLine(label: string): string {
   return `内容和用途都没有变化，仍是图书交付包 ${label}`;
 }
+
+// ---- a version's export (Issue #416, plan slice S67b; BUNDLE-004, DPKG-011, EXP-010 to EXP-022) ------------------------
+
+/** The label of every `data-package-action` of a version's export. */
+export const PACKAGE_EXPORT_ACTION_LABELS = {
+  open: '导出…',
+  choose: '选择位置…',
+  chooseAgain: '重新选择位置…',
+  approve: '按上述方式导出',
+  cancel: '取消',
+  close: '完成',
+  reveal: '在文件夹中显示',
+} as const;
+export type PackageExportAction = keyof typeof PACKAGE_EXPORT_ACTION_LABELS;
+
+/** 导出… names the version it exports for a screen reader, since several stand side by side. */
+export function packageExportOpenAccessibleName(label: string): string {
+  return `导出图书交付包 ${label}…`;
+}
+
+export function packageExportHeading(label: string): string {
+  return `导出 · 图书交付包 ${label}`;
+}
+
+export const PACKAGE_EXPORT_FILES_LABEL = '写入所选文件夹的文件';
+export const PACKAGE_EXPORT_FILES_TRUNCATED = '其余文件也一并写入，这里只列出前面的。';
+export const PACKAGE_EXPORT_FORMAT_NAMES = { docx: 'DOCX', pdf: 'PDF', markdown: 'Markdown' } as const;
+
+/** `「书名 · 一审稿.docx」 · DOCX`. */
+export function packageExportFileName(fileName: string, format: keyof typeof PACKAGE_EXPORT_FORMAT_NAMES): string {
+  return `「${fileName}」 · ${PACKAGE_EXPORT_FORMAT_NAMES[format]}`;
+}
+
+/** EXP-019 as a package reads it: the folder must hold none of the names, so an export never replaces a file. */
+export const PACKAGE_EXPORT_FOLDER_UNCHOSEN =
+  '还没有选择文件夹。请选择一个空文件夹，或在系统的对话框里新建一个：已有同名文件的文件夹不能使用，导出不会替换任何文件。';
+
+export function packageExportFolderLine(folder: string): string {
+  return `导出到：${folder}`;
+}
+
+export const PACKAGE_EXPORT_APPROVE_REASON = '先选择位置。';
+
+/** The file that stopped the rest, and why (EXP-021): nothing after it was tried, and nothing is retried by itself. */
+export function packageExportStoppedLine(stopped: { fileName: string; reason: string }): string {
+  return `「${stopped.fileName}」没有导出：${stopped.reason}之后的文件没有写入，AI7 不会自动重试；可以重新导出到别的文件夹。`;
+}
+
+/** A version's Package Export History (DPKG-011), each export in one line. */
+export function packageExportsAccessibleName(label: string): string {
+  return `图书交付包 ${label} 的导出记录`;
+}
+
+/** `已导出到所选位置 · 3 个文件 · 9月24日 12:30`. */
+export function packageExportHistoryLine(summary: string, exportedAt: string): string {
+  return `${summary} · ${exportedAt}`;
+}
+
+export const PACKAGE_EXPORTS_TRUNCATED = '更早的导出保留在记录中。';
+
+export const PACKAGE_EXPORT_STATUS_LINES = {
+  reviewing: '正在列出要导出的文件…',
+  reviewed: '要导出的文件已列出',
+  reviewFailed: '无法准备图书交付包的导出。',
+  choosing: '正在打开系统的文件夹对话框…',
+  cancelled: '已取消选择位置，没有写入任何文件。',
+  prepared: '已准备好导出文件，等待你确认。',
+  chooseFailed: '未能准备导出文件。',
+  writing: '正在写入所选文件夹…',
+  approveFailed: '未能导出图书交付包。',
+  closed: '已关闭导出，没有写入任何文件。',
+  revealed: '已在文件夹中显示。',
+  revealFailed: '无法在文件夹中显示。',
+} as const;
