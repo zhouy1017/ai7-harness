@@ -36,6 +36,7 @@ import {
   exportSavedRevisionLine,
   exportShownRows,
   type ExportAction,
+  type ExportPendingLabel,
 } from './manuscript-export-labels.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 
@@ -55,6 +56,8 @@ export interface ManuscriptExportSurface {
   open(target: ManuscriptExportTargetInput, label: string | null, opener: HTMLElement | null): void;
   /** Whether a call of the card is in flight, so the destination does not redraw under it. */
   busy(): boolean;
+  /** Close the card without a word, unless a call of it is in flight: what it exports is no longer on show. */
+  close(): void;
   destroy(): void;
 }
 
@@ -78,7 +81,7 @@ type Phase = 'reviewing' | 'ready' | 'choosing' | 'prepared' | 'writing' | 'done
 
 interface CardState {
   target: ManuscriptExportTargetInput;
-  pendingLabel: { kind: 'current' } | { kind: 'milestone'; label: string };
+  pendingLabel: ExportPendingLabel;
   /** The format the card reviews (Issue #500, S64b): DOCX until the editor chooses another. */
   format: ManuscriptExportFormat;
   options: ManuscriptExportOptions;
@@ -269,6 +272,7 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
     section.dataset['exportPhase'] = current.phase;
     section.dataset['exportTarget'] = current.target.kind;
     if (current.target.kind === 'milestone') section.dataset['milestoneId'] = current.target.milestoneId;
+    if (current.target.kind === 'report') section.dataset['reportId'] = current.target.reportId;
     section.setAttribute('aria-busy', busy ? 'true' : 'false');
     const headingId = uid('heading');
     const heading = el('h4', undefined, exportCardHeading(current.review?.target ?? null, current.pendingLabel));
@@ -278,7 +282,9 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
     section.append(heading);
     if (current.review?.savedForExport === true) section.append(el('p', 'field-note export-saved-line', exportSavedRevisionLine(current.review.target.revisionLabel)));
     section.append(el('p', 'export-local-line', EXPORT_LOCAL_LINE));
-    section.append(renderFormats(current, busy), renderOptions(current, busy));
+    // A report carries no mark, so it has no 含批注, 含修改建议 or 含备注 to choose (Issue #500, S64b part 2).
+    section.append(renderFormats(current, busy));
+    if (current.target.kind !== 'report') section.append(renderOptions(current, busy));
     if (current.review !== null) section.append(renderFidelity(current.review));
     section.append(renderDestination(current, busy));
     const problem = el('p', 'export-problem', current.problem ?? '');
@@ -461,10 +467,19 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
 
   function renderTechnical(current: CardState): HTMLElement {
     const reviewed = current.review!;
+    const report = reviewed.target.report;
     const rows: HTMLElement[] = [
-      ...fact(EXPORT_TECHNICAL_TERMS.revision, `${reviewed.target.revisionLabel} · ${reviewed.target.revisionId}`),
-      ...fact(EXPORT_TECHNICAL_TERMS.revisionDigest, reviewed.technical.revisionDigest),
-      ...fact(EXPORT_TECHNICAL_TERMS.sourceVersion, reviewed.technical.sourceVersionId ?? '—'),
+      ...(report === null
+        ? [
+          ...fact(EXPORT_TECHNICAL_TERMS.revision, `${reviewed.target.revisionLabel} · ${reviewed.target.revisionId}`),
+          ...fact(EXPORT_TECHNICAL_TERMS.revisionDigest, reviewed.technical.revisionDigest),
+          ...fact(EXPORT_TECHNICAL_TERMS.sourceVersion, reviewed.technical.sourceVersionId ?? '—'),
+        ]
+        : [
+          ...fact(EXPORT_TECHNICAL_TERMS.report, `第 ${report.version} 版 · ${report.reportId}`),
+          ...fact(EXPORT_TECHNICAL_TERMS.reportDigest, reviewed.technical.revisionDigest),
+          ...fact(EXPORT_TECHNICAL_TERMS.revision, `${reviewed.target.revisionLabel} · ${reviewed.target.revisionId}`),
+        ]),
       ...fact(EXPORT_TECHNICAL_TERMS.writer, reviewed.technical.writerIdentity),
       ...fact(EXPORT_TECHNICAL_TERMS.input, reviewed.technical.inputDigest),
       ...fact(EXPORT_TECHNICAL_TERMS.review, reviewed.reviewDigest),
@@ -497,7 +512,7 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
       if (destroyed || working()) return;
       state = {
         target,
-        pendingLabel: target.kind === 'current' ? { kind: 'current' } : { kind: 'milestone', label: label ?? '' },
+        pendingLabel: target.kind === 'current' ? { kind: 'current' } : { kind: target.kind, label: label ?? '' },
         format: 'docx',
         options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS },
         review: null,
@@ -510,6 +525,13 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
       review('first');
     },
     busy: () => working(),
+    close() {
+      if (state === null || working()) return;
+      state = null;
+      ticket += 1;
+      card = null;
+      options.root.replaceChildren();
+    },
     destroy() {
       destroyed = true;
       ticket += 1;

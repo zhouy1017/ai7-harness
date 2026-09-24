@@ -25,6 +25,7 @@ import {
   exportStatusShape,
 } from '../../src/renderer/manuscript-export-labels.js';
 import { EXPORT_DISPOSITION_LABELS, EXPORT_FORMATS, EXPORT_OUTCOME_LABELS } from '../../src/service/manuscript-export.js';
+import { reportExportLabel } from '../../src/shared/report-wording.js';
 import {
   DEFAULT_MANUSCRIPT_EXPORT_OPTIONS,
   EXPORT_FIDELITY_STATUS_LABELS,
@@ -35,8 +36,13 @@ import {
 
 // The words of ④ 导出 (Issue #413; editor-surfaces §7 导出, V2-UX-EXP-001 to EXP-024), pinned byte for byte.
 
-const current: ManuscriptExportTargetProjection = { kind: 'current', milestoneId: null, milestoneLabel: null, revisionId: 'r', revisionLabel: 'r3' };
-const milestone: ManuscriptExportTargetProjection = { kind: 'milestone', milestoneId: 'm', milestoneLabel: '一审稿', revisionId: 'r', revisionLabel: 'r1' };
+const current: ManuscriptExportTargetProjection = { kind: 'current', milestoneId: null, milestoneLabel: null, revisionId: 'r', revisionLabel: 'r3', report: null };
+const milestone: ManuscriptExportTargetProjection = { kind: 'milestone', milestoneId: 'm', milestoneLabel: '一审稿', revisionId: 'r', revisionLabel: 'r1', report: null };
+// Issue #500 (S64b part 2): the second version of the 审阅报告 of a Book's first Review Run.
+const report: ManuscriptExportTargetProjection = {
+  kind: 'report', milestoneId: null, milestoneLabel: null, revisionId: 'r', revisionLabel: 'r2',
+  report: { reportId: 'p', version: 2, reviewRunId: 'v', runLabel: '第 1 次' },
+};
 
 function row(overrides: Partial<ExportFidelityRowProjection>): ExportFidelityRowProjection {
   return {
@@ -58,6 +64,7 @@ describe('the words of 导出', () => {
     expect(EXPORT_OPTIONS_NOTE).toBe('这些选项只改变导出的文件，不改变稿件和稿件上的标记。');
     expect(exportOpenAccessibleName({ kind: 'current' })).toBe('导出当前修订版…');
     expect(exportOpenAccessibleName({ kind: 'milestone', label: '一审稿' })).toBe('导出里程碑版本「一审稿」…');
+    expect(exportOpenAccessibleName({ kind: 'report', label: reportExportLabel('第 1 次', 2) })).toBe('导出「审阅报告 · 第 1 次审阅 · 第 2 版」…');
   });
 
   it('head the card with the exact version, and say when unsaved edits were saved for it', () => {
@@ -65,6 +72,8 @@ describe('the words of 导出', () => {
     expect(exportCardHeading(null, { kind: 'milestone', label: '一审稿' })).toBe('导出 · 里程碑版本「一审稿」');
     expect(exportCardHeading(current, { kind: 'current' })).toBe('导出 · 当前修订版 r3');
     expect(exportCardHeading(milestone, { kind: 'milestone', label: '一审稿' })).toBe('导出 · 里程碑版本「一审稿」 · r1');
+    expect(exportCardHeading(null, { kind: 'report', label: '审阅报告 · 第 1 次审阅 · 第 2 版' })).toBe('导出 · 审阅报告 · 第 1 次审阅 · 第 2 版');
+    expect(exportCardHeading(report, { kind: 'report', label: '' })).toBe('导出 · 审阅报告 · 第 1 次审阅 · 第 2 版');
     expect(exportSavedRevisionLine('r3')).toBe('未保存的修改已为导出保存为修订版 r3；这不是里程碑版本。');
     expect(EXPORT_LOCAL_LINE).toBe('导出只写到本机你选择的位置；AI7 不会发送、上传或发布这个文件。');
   });
@@ -119,6 +128,8 @@ describe('the words of 导出', () => {
     expect(exportRecordLine({ outcomeLabel: '已导出到所选位置', fileName: '稿件.docx', target: milestone }, '9月22日 10:00'))
       .toBe('已导出到所选位置 · 「稿件.docx」 · 里程碑版本「一审稿」 · r1 · 9月22日 10:00');
     expect(exportRecordLine({ outcomeLabel: '结果待确认', fileName: '稿件.docx', target: current }, null)).toBe('结果待确认 · 「稿件.docx」 · 修订版 r3');
+    expect(exportRecordLine({ outcomeLabel: '已导出到所选位置', fileName: '报告.md', target: report }, null))
+      .toBe('已导出到所选位置 · 「报告.md」 · 审阅报告 · 第 1 次审阅 · 第 2 版');
     expect(EXPORT_RECORDS_HEADING).toBe('导出记录');
   });
 

@@ -162,7 +162,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     setStatus: options.setStatus,
     errorMessage: options.errorMessage,
     onChanged: () => refresh(),
-    openerOf: (target) => block?.querySelector<HTMLElement>(target.kind === 'current'
+    // 交付物 opens the card for a manuscript version only; a 审阅报告 is exported from 审阅.
+    openerOf: (target) => target.kind === 'report' ? null : block?.querySelector<HTMLElement>(target.kind === 'current'
       ? '[data-export-action="open"][data-export-target="current"]'
       : `ol.milestone-list > li[data-milestone-id="${CSS.escape(target.milestoneId)}"] [data-export-action="open"]`) ?? null,
   });

@@ -113,7 +113,8 @@ describe('the words of 发稿', () => {
       exports: Array.from({ length: MAX_EXPORT_RECORDS_LISTED }, () => ({
         bookId: identity,
         preparationId: identity,
-        target: { kind: 'milestone' as const, milestoneId: identity, milestoneLabel: label, revisionId: identity, revisionLabel: 'r9999999' },
+        // A milestone's target, with its label at its bound, is wider than a 审阅报告's (Issue #500, S64b part 2).
+        target: { kind: 'milestone' as const, milestoneId: identity, milestoneLabel: label, revisionId: identity, revisionLabel: 'r9999999', report: null },
         // Issue #500: the longest format name the receipt binds.
         format: 'markdown' as const,
         outcome: 'ambiguous' as const,

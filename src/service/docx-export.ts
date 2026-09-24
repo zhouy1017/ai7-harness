@@ -245,6 +245,9 @@ function escapeText(value: string): string {
   return value.replace(INVALID_XML_CHARACTERS, '\uFFFD').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+/** Text as a DOCX part carries it, for a writer that builds its own body (Issue #500, S64b part 2: the 审阅报告). */
+export { escapeText as escapeWordText };
+
 function escapeAttribute(value: string): string {
   return escapeText(value).replace(/"/g, '&quot;').replace(/\t/g, '&#9;').replace(/\n/g, '&#10;').replace(/\r/g, '&#13;');
 }
@@ -1679,37 +1682,58 @@ function freshPackage(input: DocxExportInput, source: Extract<DocxExportSource, 
     `<w:p>${freshParagraphProperties(block, writer)}${writer.blockRuns(block, '', blockComments(plan, block), blockSuggestions(plan, block))}</w:p>`);
   const walk: MappedWalk = { documentXml: '', restoredBlocks: 0, regeneratedBlocks: input.blocks.length };
   if (!emit) return { bytes: null, facts, walk, written: writer.written };
+  const added: FreshParts = { relationships: [], overrides: [], parts: [] };
+  if (writer.comments.length > 0) {
+    added.relationships.push({ id: 'rId2', type: COMMENTS_TYPE, target: 'comments.xml', external: false });
+    added.relationships.push({ id: 'rId3', type: COMMENTS_EXTENDED_TYPE, target: 'commentsExtended.xml', external: false });
+    added.overrides.push(['/word/comments.xml', COMMENTS_CONTENT_TYPE], ['/word/commentsExtended.xml', COMMENTS_EXTENDED_CONTENT_TYPE]);
+    added.parts.push(['word/comments.xml', strToU8(writer.commentsPart(WORD_MAIN))]);
+    added.parts.push(['word/commentsExtended.xml', strToU8(writer.commentsExtendedPart())]);
+  }
+  return { bytes: assembleFreshPackage(input.title, paragraphs.join(''), added), facts, walk, written: writer.written };
+}
+
+/** What a fresh package carries beside its document, styles and core properties. */
+interface FreshParts {
+  relationships: Relationship[];
+  overrides: Array<[string, string]>;
+  parts: Array<[string, Uint8Array]>;
+}
+
+/**
+ * A fresh package around one body: A4 with the fresh build's margins, the styles every fresh build carries (Title and
+ * Heading 1 to 6), the title as `dc:title`, and the parts beside the document `added` names.
+ */
+function assembleFreshPackage(title: string, bodyXml: string, added: FreshParts): Uint8Array {
   const documentXml = `${XML_DECLARATION}<w:document xmlns:w="${WORD_MAIN}" xmlns:r="${DOCUMENT_RELATIONSHIPS}"><w:body>` +
-    `${paragraphs.join('')}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>` +
+    `${bodyXml}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>` +
     '<w:pgMar w:top="1440" w:right="1800" w:bottom="1440" w:left="1800" w:header="851" w:footer="992" w:gutter="0"/></w:sectPr>' +
     '</w:body></w:document>';
   const types: ContentTypes = {
     defaults: [['rels', RELATIONSHIPS_CONTENT_TYPE], ['xml', 'application/xml']],
-    overrides: [['/word/document.xml', MAIN_CONTENT_TYPE], ['/word/styles.xml', STYLES_CONTENT_TYPE], ['/docProps/core.xml', CORE_CONTENT_TYPE]],
+    overrides: [['/word/document.xml', MAIN_CONTENT_TYPE], ['/word/styles.xml', STYLES_CONTENT_TYPE], ['/docProps/core.xml', CORE_CONTENT_TYPE], ...added.overrides],
   };
-  const relationships: Relationship[] = [{ id: 'rId1', type: STYLES_TYPE, target: 'styles.xml', external: false }];
-  const entries: Array<[string, Uint8Array]> = [];
-  const comments: Array<[string, Uint8Array]> = [];
-  if (writer.comments.length > 0) {
-    relationships.push({ id: 'rId2', type: COMMENTS_TYPE, target: 'comments.xml', external: false });
-    relationships.push({ id: 'rId3', type: COMMENTS_EXTENDED_TYPE, target: 'commentsExtended.xml', external: false });
-    types.overrides.push(['/word/comments.xml', COMMENTS_CONTENT_TYPE], ['/word/commentsExtended.xml', COMMENTS_EXTENDED_CONTENT_TYPE]);
-    comments.push(['word/comments.xml', strToU8(writer.commentsPart(WORD_MAIN))]);
-    comments.push(['word/commentsExtended.xml', strToU8(writer.commentsExtendedPart())]);
-  }
-  entries.push(
+  const relationships: Relationship[] = [{ id: 'rId1', type: STYLES_TYPE, target: 'styles.xml', external: false }, ...added.relationships];
+  return zipPackage([
     ['[Content_Types].xml', strToU8(contentTypesXml(types))],
     ['_rels/.rels', strToU8(relationshipsXml([
       { id: 'rId1', type: OFFICE_DOCUMENT_TYPE, target: 'word/document.xml', external: false },
       { id: 'rId2', type: CORE_PROPERTIES_TYPE, target: 'docProps/core.xml', external: false },
     ]))],
-    ['docProps/core.xml', strToU8(`${XML_DECLARATION}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${escapeText(input.title)}</dc:title></cp:coreProperties>`)],
+    ['docProps/core.xml', strToU8(`${XML_DECLARATION}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${escapeText(title)}</dc:title></cp:coreProperties>`)],
     ['word/document.xml', strToU8(documentXml)],
     ['word/_rels/document.xml.rels', strToU8(relationshipsXml(relationships))],
     ['word/styles.xml', strToU8(FRESH_STYLES_XML)],
-    ...comments,
-  );
-  return { bytes: zipPackage(entries), facts, walk, written: writer.written };
+    ...added.parts,
+  ]);
+}
+
+/**
+ * A fresh package holding one body and nothing beside it (Issue #500, S64b part 2): the 审阅报告's DOCX, written with
+ * the same styles, page and title as a manuscript written fresh.
+ */
+export function freshBodyPackage(title: string, bodyXml: string): Uint8Array {
+  return assembleFreshPackage(title, bodyXml, { relationships: [], overrides: [], parts: [] });
 }
 
 // ---- the entry point -------------------------------------------------------------------------------------
