@@ -222,6 +222,7 @@ import {
   RULE_STATE_LABELS,
   SET_RULE_CHANGED,
   SET_RULE_DEVELOPER_LIVE,
+  SET_RULE_EDITED,
   SET_RULE_FIRST_BASELINE,
   SET_RULE_RANGE,
   defaultExecutionRuleBindingOf,
@@ -4024,7 +4025,9 @@ export class EditorialStore {
       ? SET_RULE_DEVELOPER_LIVE
       : projection.planRevision !== null
         ? SET_RULE_CHANGED
-        : current !== null && current.state === 'active' && current.fromThisPlan ? setRuleAlreadyReason(current.name) : null;
+        : version.edits.removedSteps.length > 0 || version.edits.disallowedAdaptations.length > 0
+          ? SET_RULE_EDITED
+          : current !== null && current.state === 'active' && current.fromThisPlan ? setRuleAlreadyReason(current.name) : null;
     return {
       canSet: reason === null,
       reason,
