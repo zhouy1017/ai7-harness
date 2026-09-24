@@ -317,7 +317,8 @@ export class ProductionDocuments {
         typeId: type.typeId,
         typeLabel: type.label,
         notForThisBook,
-        document: { documentId: row.documentId, changedSinceDelivery: deliveries[0] !== undefined && deliveries[0].revisionDigest !== working, deliveries },
+        // 交付后有修改 read as the document's own card reads it (DELIV-004): one check, in one place.
+        document: { documentId: row.documentId, changedSinceDelivery: this.changedSinceDelivery(row.documentId, working), deliveries },
       };
     });
   }
