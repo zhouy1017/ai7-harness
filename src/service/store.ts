@@ -12681,8 +12681,8 @@ export class EditorialStore {
               sir.source_version_disposition, sir.retained_boundary_json,
               sir.named_non_effects_json, sir.record_digest, sir.imported_at,
               sv.display_name, sv.format, sv.object_digest, sv.source_digest, sv.content_digest,
-              sv.structure_digest, sv.parser_identity, co.byte_length,
-              sp.acquisition_path, sp.locality, sp.sanitized_identity, sp.recorded_at
+              sv.structure_digest, sv.parser_identity, sv.working_object_digest, sv.converter_identity,
+              co.byte_length, sp.acquisition_path, sp.locality, sp.sanitized_identity, sp.recorded_at
        FROM import_commits ic
        JOIN source_import_records sir ON sir.commit_id = ic.commit_id
        JOIN source_versions sv
@@ -12742,6 +12742,7 @@ export class EditorialStore {
       importedAt,
     }));
     requireStore(recordDigest === asString(row.record_digest), 'STORE_CORRUPT', '来源导入记录摘要无效。');
+    const conversion = readConversionColumns(row, requireSourceFormat(asString(row.format)), '来源版本的转换记录不完整。');
     const receiptRecords = this.#sourceImportRecordPresentations(bookId, [sourceImportRecordId]);
     const receiptSource = receiptRecords.find((record) => record.kind === 'source');
     const receiptRecord = receiptRecords.find((record) => record.kind === 'source-import-record');
@@ -12763,9 +12764,10 @@ export class EditorialStore {
         sourceSha256: boundary.sourceSha256,
         sourceBytes: boundary.sourceBytes,
         provenanceLabel: '本机文件选择器 · 本地解析 · 未联网',
-        // A source-only import retained the original whole and read nothing through a converter.
-        conversion: null,
-        workingObjectSha256: null,
+        // A TXT, Markdown or legacy .doc kept as source material was read through its converter, and the
+        // commit recorded that working representation on the Source Version (ADR 0072 §2, #552).
+        conversion,
+        workingObjectSha256: conversion === null ? null : asString(row.working_object_digest),
       },
       retainedBoundary: boundary,
       provenance: {

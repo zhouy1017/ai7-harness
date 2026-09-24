@@ -2719,15 +2719,17 @@ function validateSourceImportDraftTargetTruth(db: DatabaseSync): void {
         ) as SqlRow | undefined;
         return committedReuse !== undefined && asNumber(committedReuse.matches) === 1;
       }
+      // An original staged unparsed has no snapshot: its source digest is its object's, and it has no content,
+      // structure or parser identity, so those compare with IS (as the store reads a draft, `#loadDraftSnapshot`).
       const reuse = db.prepare(
         `SELECT count(*) matches
          FROM source_versions sv
          JOIN import_drafts d ON d.draft_id = ?
-         JOIN staged_import_snapshots sis ON sis.draft_id = d.draft_id
+         LEFT JOIN staged_import_snapshots sis ON sis.draft_id = d.draft_id
          WHERE sv.source_version_id = ? AND sv.book_id = d.reviewed_existing_book_id
-           AND sv.object_digest = d.object_digest AND sv.source_digest = sis.source_digest
-           AND sv.content_digest = sis.content_digest AND sv.structure_digest = sis.structure_digest
-           AND sv.parser_identity = sis.parser_identity`,
+           AND sv.object_digest = d.object_digest AND sv.source_digest = coalesce(sis.source_digest, d.object_digest)
+           AND sv.content_digest IS sis.content_digest AND sv.structure_digest IS sis.structure_digest
+           AND sv.parser_identity IS sis.parser_identity`,
       ).get(asString(row.draft_id), asString(row.reviewed_reuse_source_version_id)) as SqlRow | undefined;
       return reuse !== undefined && asNumber(reuse.matches) === 1;
     }),
@@ -2796,6 +2798,17 @@ function validateSourceImportRecordTruth(db: DatabaseSync): void {
     const targetKind = asString(row.target_kind);
     const disposition = asString(row.source_version_disposition);
     const sourceVersionId = asString(row.source_version_id);
+    // The Source Version is wholly parsed or wholly unparsed, in the format it was read as (ADR 0072 §2), and the
+    // record's boundary says which, exactly as the store writes it (`store.ts`, `sourceImportRetainedBoundary`).
+    const parserIdentity = row.parser_identity === null ? null : asString(row.parser_identity);
+    const provenanceParserIdentity = row.provenance_parser_identity === null
+      ? null
+      : asString(row.provenance_parser_identity);
+    const contentDigest = row.content_digest === null ? null : asString(row.content_digest);
+    const structureDigest = row.structure_digest === null ? null : asString(row.structure_digest);
+    const retainedLabel = parserIdentity === null
+      ? '保留完整所选原始文件及其精确身份；未进行本地解析'
+      : '保留完整所选 DOCX 文件及本地解析出的完整内容与结构身份';
     const recordDigest = sha256(canonicalJson({
       schema: 'ai7.source-import-record/1',
       sourceImportRecordId: asString(row.source_import_record_id),
@@ -2812,16 +2825,16 @@ function validateSourceImportRecordTruth(db: DatabaseSync): void {
     requireBounded(
       (targetKind === 'new-book' || targetKind === 'existing-book') &&
         (disposition === 'created' || disposition === 'reused-same-book') &&
-        asString(row.object_digest) === asString(row.source_digest) && asString(row.format) === 'DOCX' &&
+        asString(row.object_digest) === asString(row.source_digest) &&
         boundary.kind === 'complete-local-file' &&
-        boundary.label === '保留完整所选 DOCX 文件及本地解析出的完整内容与结构身份' &&
-        boundary.format === 'DOCX' && boundary.displayName === asString(row.sanitized_identity) &&
+        boundary.label === retainedLabel &&
+        boundary.format === asString(row.format) && boundary.displayName === asString(row.sanitized_identity) &&
         boundary.sourceSha256 === asString(row.source_digest) &&
         boundary.sourceBytes === asNumber(row.byte_length) &&
-        boundary.contentDigest === asString(row.content_digest) &&
-        boundary.structureDigest === asString(row.structure_digest) &&
+        boundary.contentDigest === contentDigest &&
+        boundary.structureDigest === structureDigest &&
         asString(row.acquisition_path) === 'native-file-picker' && asString(row.locality) === 'local-provider-free' &&
-        asString(row.provenance_parser_identity) === asString(row.parser_identity) &&
+        provenanceParserIdentity === parserIdentity &&
         typeof row.recorded_at === 'string' &&
         asString(row.operation_kind) === 'source-import' && asString(row.draft_state) === 'committed' &&
         asString(row.committed_commit_id) === asString(row.commit_id) &&
@@ -3496,11 +3509,22 @@ function validateStagedDraftDerived(db: DatabaseSync, draftId: string): void {
 }
 
 function validateStagedDraftInventory(db: DatabaseSync): void {
+  // A draft holds a snapshot exactly when it was parsed: a DOCX, or a format read through its converter. An
+  // original staged unparsed (a PDF, say) has none, as the store stages it (`store.ts`, `#loadDraftSnapshot`).
+  // Before revision 18 every draft was a DOCX, and before revision 19 nothing was read through a converter.
+  const draftColumns = new Set(
+    (db.prepare('PRAGMA table_xinfo(import_drafts)').all() as SqlRow[]).map((column) => asString(column.name)),
+  );
+  const parsed = !draftColumns.has('source_format')
+    ? '1'
+    : draftColumns.has('working_object_digest')
+    ? `(d.source_format = 'DOCX' OR d.working_object_digest IS NOT NULL)`
+    : `(d.source_format = 'DOCX')`;
   const missingSnapshots = asNumber(one(
     db.prepare(
       `SELECT count(*) total FROM import_drafts d
        WHERE d.state IN ('staged', 'reviewed')
-         AND NOT EXISTS (SELECT 1 FROM staged_import_snapshots s WHERE s.draft_id = d.draft_id)`,
+         AND ${parsed} = NOT EXISTS (SELECT 1 FROM staged_import_snapshots s WHERE s.draft_id = d.draft_id)`,
     ).all() as SqlRow[],
     'SCHEMA_MIGRATION_FAILED',
     '无法校验暂存稿件快照清单。',
