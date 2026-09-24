@@ -673,8 +673,33 @@ function paragraphMarkInserted(paragraph: XmlElement): boolean {
   return markProperties?.children.some((child) => isElement(child) && (child.local === 'ins' || child.local === 'moveTo')) === true;
 }
 
-/** The inline containers a paragraph's own bookmarks may stand in; a text box's paragraphs are other paragraphs. */
-const BOOKMARK_CONTAINERS = new Set(['hyperlink', 'smartTag', 'sdt', 'sdtContent', 'customXml', 'fldSimple', 'ins', 'del', 'moveTo', 'moveFrom']);
+/**
+ * The inline containers a paragraph's own bookmarks may stand in; a text box's paragraphs are other paragraphs. A tracked
+ * insertion or move-to is none of them (Issue #537): the reading the import took rejects it whole, bookmarks and all, as a
+ * restored paragraph drops it, so a regenerated paragraph keeps exactly the bookmarks that reading keeps.
+ */
+const BOOKMARK_CONTAINERS = new Set(['hyperlink', 'smartTag', 'sdt', 'sdtContent', 'customXml', 'fldSimple', 'del', 'moveFrom']);
+
+const BOOKMARK_HALF = /<(?:[A-Za-z_][\w.-]*:)?bookmark(Start|End)\b([^>]*?)(?:\/>|>\s*<\/(?:[A-Za-z_][\w.-]*:)?bookmark(?:Start|End)>)/g;
+const BOOKMARK_ID = /(?:^|\s)(?:[A-Za-z_][\w.-]*:)?id\s*=\s*"([^"]*)"/;
+
+/**
+ * No bookmark is written half (Issue #537). A bookmark whose other half the written body does not hold — it stood in a
+ * tracked insertion the reading rejects, or in a paragraph not written — is dropped whole, so no end stands without its
+ * start and no start without its end.
+ */
+function withoutHalfBookmarks(xml: string): string {
+  const starts = new Set<string>();
+  const ends = new Set<string>();
+  for (const match of xml.matchAll(BOOKMARK_HALF)) {
+    const id = BOOKMARK_ID.exec(match[2]!)?.[1];
+    if (id !== undefined) (match[1] === 'Start' ? starts : ends).add(id);
+  }
+  return xml.replace(BOOKMARK_HALF, (whole: string, kind: string, attributes: string) => {
+    const id = BOOKMARK_ID.exec(attributes)?.[1];
+    return id === undefined || (kind === 'Start' ? ends : starts).has(id) ? whole : '';
+  });
+}
 
 /**
  * The bookmarks a regenerated paragraph keeps — a table of contents' `_Toc` targets among them — each start at the
@@ -1492,7 +1517,7 @@ function rewriteDocument(
   requireExport(pending.length === 0, 'DOCX_EXPORT_MAPPING_INVALID', '有稿件内容块未能写出。');
   const missing = input.blocks.filter((block) => !emitted.has(block.blockId));
   requireExport(missing.length === 0, 'DOCX_EXPORT_MAPPING_INVALID', '有稿件内容块未能写出。');
-  return { documentXml: `${XML_DECLARATION}${out.join('')}`, restoredBlocks, regeneratedBlocks, writer: writer!, mainUri };
+  return { documentXml: withoutHalfBookmarks(`${XML_DECLARATION}${out.join('')}`), restoredBlocks, regeneratedBlocks, writer: writer!, mainUri };
 }
 
 /** A part beside the body that anchors comments: its comment markup goes, since the comments are replaced. */
