@@ -128,6 +128,8 @@ import {
   taskPlanBudgetEdited,
   TASK_BAR_RESOLVE_MODEL_SERVICE,
   taskBarAccountLimitNote,
+  TASK_BAR_REPREPARE,
+  taskBarReprepareNote,
 } from '../../src/renderer/task-drawer-labels.js';
 import { localInstantLabel } from '../../src/renderer/plan-preview-labels.js';
 
@@ -173,6 +175,7 @@ function plan(overrides: Partial<TaskPlanProjection> = {}): TaskPlanProjection {
     defaultRule: { canSet: false, reason: '这份计划不能设为快速开始默认。', planEnvelopeDigest: null, current: null, binds: [], startedBy: null },
     runControl: null,
     redo: null,
+    reprepare: null,
     clarifications: [],
     budgetStop: null,
     ...overrides,
@@ -212,6 +215,7 @@ describe('the drawer', () => {
     const keys: TaskPlanStateKey[] = [
       'ready', 'changed', 'unconnected', 'offline', 'recorded', 'blocked', 'waiting', 'running', 'settled', 'stopped', 'cancelled',
       'cancelling', 'cancelled-after-start', 'pausing', 'paused', 'resumable', 'awaiting-clarification', 'budget-reached', 'account-limit',
+      'plan-moved',
     ];
     expect(Object.keys(TASK_PLAN_STATE_PILLS).sort()).toEqual([...keys].sort());
     // 已停止 · 预算已达上限 (Issue #51, S16a) asks for the editor: never the blocked square of 已中断.
@@ -219,6 +223,8 @@ describe('the drawer', () => {
     expect(TASK_PLAN_STATE_PILLS['budget-reached']).not.toEqual(TASK_PLAN_STATE_PILLS.stopped);
     // 模型服务账户限额 (Issue #51, S16b) never reads as 任务已中断 · 可续行 without colour (RUN-012).
     expect(TASK_PLAN_STATE_PILLS['account-limit'].shape).not.toBe(TASK_PLAN_STATE_PILLS.resumable.shape);
+    // 需要重新确认计划 (Issue #536) is a plan decision, never 派发前已阻止's blocked square.
+    expect(TASK_PLAN_STATE_PILLS['plan-moved'].shape).not.toBe(TASK_PLAN_STATE_PILLS.blocked.shape);
     expect(new Set(keys.map((key) => TASK_PLAN_STATE_PILLS[key].shape)).size).toBeGreaterThan(4);
     // 模型未连接 is its own shape among the pre-start states: it never reads as 计划已变化 without colour.
     expect(TASK_PLAN_STATE_PILLS.unconnected.shape).not.toBe(TASK_PLAN_STATE_PILLS.changed.shape);
@@ -821,5 +827,29 @@ describe('Clarification Requests in the drawer (S76d)', () => {
       clarifications: [question],
     }));
     expect(reading).toMatchObject({ status: '运行中', note: '有 1 个问题等你回答' });
+  });
+});
+
+// Issue #536 (V2-UX-OFF-008): a Run that waited for the network and whose plan moved meanwhile never ran. Its bar says so in
+// the drawer's words, with the drift reason, and offers 重新准备 — a new plan for the same goal and range — never 开始任务.
+describe('the drawer\'s bar for a waiting Run whose plan moved', () => {
+  it('reads 需要重新确认计划 with what moved, offers 重新准备 and the Run, and keeps 派发前已阻止 for any other block', () => {
+    const reason = '需要重新确认计划：处理范围已经变化，这次授权不再对应当前的情况。';
+    const reprepare = { reason, prepare: { goal: 'g', update: null } } as unknown as TaskPlanProjection['reprepare'];
+    const view = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
+      state: { key: 'plan-moved', label: '需要重新确认计划' }, reprepare,
+    }));
+    expect(view.status).toBe('需要重新确认计划');
+    expect(view.note).toBe(taskBarReprepareNote(reason));
+    expect(taskBarReprepareNote(reason)).toBe(`${reason}重新准备会按同样的目标和范围做一份新计划；看过之后再开始任务。`);
+    expect(view.actions.map((entry) => [entry.name, entry.label, entry.tone, entry.disabledReason])).toEqual([
+      ['reprepare', TASK_BAR_REPREPARE, 'primary', null],
+      ['run-link', '查看运行', 'secondary', null],
+    ]);
+    expect(TASK_BAR_REPREPARE).toBe('重新准备');
+    // Its pill is the plan decision's, as 计划已变化's; a Run this launch cannot carry keeps 派发前已阻止's square and its link.
+    expect(TASK_PLAN_STATE_PILLS['plan-moved']).toEqual(TASK_PLAN_STATE_PILLS.changed);
+    const blocked = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'blocked', label: '派发前已阻止' } }));
+    expect([blocked.status, blocked.actions.map((entry) => entry.name)]).toEqual(['派发前已阻止', ['run-link']]);
   });
 });

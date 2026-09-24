@@ -153,6 +153,7 @@ describe('route-aware readiness of the authorization bar (S74a A3; AUTH-005, MOD
       defaultRule: { canSet: false, reason: '这份计划不能设为快速开始默认。', planEnvelopeDigest: null, current: null, binds: [], startedBy: null },
       runControl: null,
       redo: null,
+      reprepare: null,
       clarifications: [],
       budgetStop: null,
     };
@@ -230,7 +231,7 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
   });
   const run = (state: Run['state'], live: Run['progress']): Run => ({
     runRecordId: 'run', state, stateLabel: '', recordedAt: '2026-09-24T01:00:00.000Z', transitions: [], adaptations: [],
-    blockedReasons: null, progress: live, attempt: null,
+    blockedReasons: null, blockedBy: null, progress: live, attempt: null,
   });
 
   it('says why 暂停 and 改计划重做 are not offered, and that the analysis leaves nothing committed', () => {

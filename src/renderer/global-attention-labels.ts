@@ -12,7 +12,7 @@ import {
 import { RUN_LIVENESS_STAGE_LABELS, localInstantLabel } from './plan-preview-labels.js';
 import type { ReviewPill } from './review-labels.js';
 import { REVIEW_ACTION_LABELS } from './review-labels.js';
-import { TASK_BAR_RECONFIRM, TASK_BAR_RUN_LINKS } from './task-drawer-labels.js';
+import { TASK_BAR_RECONFIRM, TASK_BAR_REPREPARE, TASK_BAR_RUN_LINKS } from './task-drawer-labels.js';
 import { RESOLVE_CONFLICT_LABEL } from './editorial-mark-labels.js';
 import { PROPOSAL_CONFLICT_CLASSIFICATION, REVERSAL_CONFLICT_LINE } from './proposal-conflict-labels.js';
 
@@ -119,6 +119,8 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   'review-stopped': '中途停止',
   // V2-UX-ATTN-003: the named decision itself, never a generic 待审批.
   'analysis-plan-revision': '计划修订',
+  // A waiting Run whose plan moved before it could start (Issue #536; OFF-008), in the drawer's words for it.
+  'analysis-plan-moved': '需要重新确认计划',
   // A Clarification Request (Issue #422, S76d): the bar's own words for it.
   'analysis-clarification': '等你回答',
   'analysis-queued': '正在排队',
@@ -156,6 +158,7 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
   'review-failed': { tone: 'blocked', shape: 'square' },
   'review-stopped': { tone: 'blocked', shape: 'square' },
   'analysis-plan-revision': { tone: 'attention', shape: 'triangle' },
+  'analysis-plan-moved': { tone: 'attention', shape: 'triangle' },
   'analysis-clarification': { tone: 'attention', shape: 'triangle' },
   'analysis-queued': { tone: 'progress', shape: 'half' },
   'analysis-running': { tone: 'progress', shape: 'half' },
@@ -193,6 +196,8 @@ export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionN
   'adjust-budget-redo': '调整预算并重做',
   // The remediation route of a Provider Account Limit (Issue #51, S16b; interaction-spec §1566).
   'resolve-model-service': '处理模型服务',
+  // The drawer's own action for a waiting Run whose plan moved (Issue #536; OFF-008).
+  reprepare: TASK_BAR_REPREPARE,
 };
 /** The two scopes a question can have (CLAR-004), in the card's own words. */
 export const GLOBAL_ATTENTION_CLARIFICATION_WAITING = '任务等待你的说明';
@@ -281,6 +286,8 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
         : facts.categories.map((category) => `「${category.label}」${category.stateLabel}`).join('；');
     case 'analysis-plan-revision':
       return '计划冻结之后，它的关键内容已经变化；原计划不能再开始。';
+    case 'analysis-plan-moved':
+      return '它等待联网时，计划依据的内容已经变化；这次授权不再对应当前的情况，它不会开始。';
     // Issue #422 (S76d; CLAR-004): whether only that step waits, or the whole Task.
     case 'analysis-clarification':
       return item.blocked

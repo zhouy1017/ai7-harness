@@ -93,6 +93,8 @@ export const TASK_PLAN_STATE_PILLS: Readonly<Record<TaskPlanStateKey, ReviewPill
   // 模型服务账户限额 (Issue #51, S16b): a blocker the model service resolves, in the diamond 模型未连接 has too — never the
   // ring of 任务已中断 · 可续行, which RUN-012 keeps apart.
   'account-limit': { tone: 'blocked', shape: 'diamond' },
+  // 需要重新确认计划 (Issue #536; OFF-008): the plan moved, as 计划已变化's did — the editor's decision, never 派发前已阻止's square.
+  'plan-moved': { tone: 'attention', shape: 'triangle' },
 };
 
 // ---- the goal block (S72 D5) ------------------------------------------------------------------------------
@@ -288,6 +290,15 @@ export const TASK_BAR_STATEMENT = '只是让 AI7 按这份计划做这一次；�
 export const TASK_BAR_CONNECT = '去设置连接';
 /** AUTH-006: a plan whose key content changed offers these two, and no start. */
 export const TASK_BAR_RECONFIRM = '重新确认计划';
+/**
+ * 需要重新确认计划 after Connectivity Wait (Issue #536; OFF-008): the way on for a Run whose plan moved before it could
+ * start — a new plan for the same goal and range, which starts only once the editor starts it.
+ */
+export const TASK_BAR_REPREPARE = '重新准备';
+export const TASK_BAR_REPREPARE_FAILED = '无法重新准备这项任务。';
+export function taskBarReprepareNote(reason: string): string {
+  return `${reason}重新准备会按同样的目标和范围做一份新计划；看过之后再开始任务。`;
+}
 /** One slot and no queue (S74a A2): the start is refused with this reason and nothing waits for the slot. */
 export const TASK_BAR_SLOT_BUSY = '另一项任务正在运行；它结束后再开始';
 /** The fallback when a start is refused for a reason the service does not word. */
@@ -416,6 +427,7 @@ export type TaskBarActionName =
   | 'resume'
   | 'cancel-run'
   | 'redo'
+  | 'reprepare'
   | 'run-link';
 
 export interface TaskBarAction {
@@ -632,6 +644,18 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
           { name: 'redo', label: TASK_BAR_REDO, tone: 'quiet', disabledReason: control.redo.reason },
           runLink,
         ],
+      };
+    }
+    // 需要重新确认计划 (Issue #536; OFF-008): the Run waited for the network and its plan moved meanwhile, so it never ran.
+    // 重新准备 makes the new plan and opens it; nothing starts until the editor starts it there.
+    if (plan.state.key === 'plan-moved' && plan.reprepare !== null) {
+      return {
+        readiness,
+        summary,
+        statement: null,
+        note: taskBarReprepareNote(plan.reprepare.reason),
+        status: plan.state.label,
+        actions: [{ name: 'reprepare', label: TASK_BAR_REPREPARE, tone: 'primary', disabledReason: null }, runLink],
       };
     }
     // Run Budget Ceiling Reached (Issue #51, S16a): what the Run read and used, 调整预算并重做, and the partial results.
