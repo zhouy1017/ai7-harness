@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstat, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -197,6 +197,55 @@ async function createEmptyBook(renderer, title) {
   return bookId;
 }
 
+// 知识库 › 审阅规范文件 (Issue #427, plan slice S79a): the house's own next version of 文字规范条款, written by the runner —
+// AI7's own words, never a manuscript — and handed to the product through J-15's picker control.
+const HOUSE_GUIDELINE_NAME = '本社文字规范.txt';
+const HOUSE_GUIDELINE = ['本社文字规范（J-15）', '', '1. 指出错字、别字、多字与漏字，给出改正后的文字。', '2. 指出成分残缺与搭配不当，给出通顺的改法。',
+  '3. 数字与标点按本社体例手册统一，', '体例手册未写到的，按国家现行规范。', '4. 专名在全书前后写法一致。', '5. 引文与原文核对后再改，不凭记忆改动。'].join('\n');
+const KNOWLEDGE_TABS = ['审阅规范文件', '评估方案', '工序与规则', '社级编辑记忆', '范例', '资料库', '外部来源留存'];
+const GUIDELINE_TITLES = ['文字规范条款', '体例条款', '线索条款', '事实核查契约', '引用与学术规范条款', '出版风险提示条款', '表达改进条款'];
+/** The 知识库 page as an editor reads it: its tabs, the chosen one, and each guideline card's words. */
+const READ_KNOWLEDGE = `(() => {
+  const page = document.querySelector('[data-screen="knowledge-base"] .knowledge-base');
+  if (!(page instanceof HTMLElement)) return null;
+  return {
+    tab: page.dataset.knowledgeTab ?? null,
+    tabs: Array.from(page.querySelectorAll('[role="tab"]'), (tab) => [tab.textContent, tab.getAttribute('aria-selected')]),
+    pending: page.querySelector('.knowledge-pending')?.textContent ?? null,
+    guidelines: page.querySelector('.review-guidelines')?.dataset.guidelines ?? null,
+    cards: Array.from(page.querySelectorAll('.guideline-card'), (card) => ({
+      id: card.dataset.guidelineDocument,
+      title: card.querySelector('h3')?.textContent ?? null,
+      pill: card.querySelector('.guideline-version-pill')?.textContent ?? null,
+      applied: card.querySelector('.guideline-applied')?.textContent ?? null,
+      clauses: Array.from(card.querySelectorAll('.guideline-clauses li'), (item) => [item.dataset.clauseId, item.querySelector('.guideline-citations')?.textContent ?? null]),
+      versions: Array.from(card.querySelectorAll('.guideline-version-list li'), (item) => item.textContent),
+      older: card.querySelector('.guideline-older')?.textContent ?? null,
+      preview: card.querySelector('.guideline-preview h4')?.textContent ?? null,
+      changes: card.querySelector('.guideline-preview-changes')?.textContent ?? null,
+      previewClauses: card.querySelectorAll('.guideline-preview li').length,
+      refusal: card.querySelector('.guideline-refusal')?.textContent ?? null,
+    })),
+  };
+})()`;
+async function readKnowledge(renderer, predicate, name) {
+  const deadline = Date.now() + 60_000;
+  let page = null;
+  while (Date.now() < deadline) {
+    page = await renderer.evaluate(READ_KNOWLEDGE).catch(() => null);
+    if (page !== null && predicate(page)) return page;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  const error = new Error(`J-15/${name}`);
+  error.detail = page;
+  throw error;
+}
+async function pressKey(renderer, key) {
+  const codes = { ArrowRight: 39, ArrowLeft: 37, Enter: 13 };
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: codes[key] });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: codes[key] });
+}
+
 async function focusAction(renderer, action, name) {
   await renderer.evaluate(`(() => { const active=document.activeElement; if(active instanceof HTMLElement)active.blur(); return true; })()`);
   for (let count = 0; count < 40; count += 1) {
@@ -245,6 +294,7 @@ async function constructPredecessorV12(dataRoot, bookId) {
     database.exec(`
       PRAGMA foreign_keys = OFF;
       BEGIN IMMEDIATE;
+      DROP TABLE review_guideline_versions;
       DROP TABLE book_people_versions;
       DROP TABLE maintenance_case_revisions;
       DROP TABLE maintenance_errata_versions;
@@ -404,11 +454,15 @@ async function main() {
     const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
+    const guidelinePath = resolve(runRoot, HOUSE_GUIDELINE_NAME);
+    await writeFile(guidelinePath, HOUSE_GUIDELINE, 'utf8');
     const launch = async () => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
         '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
         resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
+        // J-15's picker serves 导入新版本 of a review guideline document (Issue #427, S79a).
+        '--j15-picker-path', guidelinePath,
       ];
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       cancellation.throwIfRequested();
@@ -642,6 +696,85 @@ async function main() {
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await renderer.send('Emulation.clearDeviceMetricsOverride');
+
+    // ---- 知识库 › 审阅规范文件 (Issue #427, plan slice S79a; editor-surfaces §8.4, V2-UX-KB-001 to KB-003) ------------------
+    at('knowledge-guidelines');
+    // 知识库 from 书库: its seven classes as tabs, opening at 审阅规范文件 — every guideline document the review categories apply,
+    // at AI7's built-in first version, with its numbered clauses and a version no review has used yet.
+    await click(renderer, '返回图书列表', 'knowledge-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'knowledge-landing');
+    await click(renderer, '知识库', 'knowledge-open');
+    const opened = await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-guidelines-ready');
+    requireJourney(opened.tab === 'guidelines' && JSON.stringify(opened.tabs) === JSON.stringify(KNOWLEDGE_TABS.map((label, index) => [label, String(index === 0)])) &&
+      JSON.stringify(opened.cards.map((card) => card.title)) === JSON.stringify(GUIDELINE_TITLES) && opened.cards.every((card) => card.pill === '第 1 版 · AI7 内置默认') &&
+      opened.cards[0].applied === '用于：错别字与规范用语' && opened.cards[0].clauses.length === 4 &&
+      opened.cards[0].clauses.every(([clauseId, citations], index) => clauseId === `typos-and-usage/${index + 1}` && citations === '未被引用') &&
+      JSON.stringify(opened.cards[0].versions) === JSON.stringify(['第 1 版 · AI7 内置默认 · 内置 · 4 条 · 还没有审阅用过']) && opened.cards.every((card) => card.older === null),
+    'knowledge-guidelines-cards', opened);
+    // A class a later slice brings says what it will hold and that it is not there yet.
+    await click(renderer, '资料库', 'knowledge-library-tab');
+    const library = await readKnowledge(renderer, (page) => page.tab === 'library', 'knowledge-library-tab-open');
+    requireJourney(library.pending === '尚未提供：资料库还没有接通。' && library.cards.length === 0, 'knowledge-pending', library);
+    await click(renderer, '审阅规范文件', 'knowledge-back-to-guidelines');
+    await readKnowledge(renderer, (page) => page.tab === 'guidelines' && page.guidelines === 'ready', 'knowledge-guidelines-again');
+
+    at('knowledge-guideline-import');
+    // 导入新版本… on 文字规范条款: the picker's file is read as the next version would read it — five clauses, how they differ —
+    // and 确认导入 records 第 2 版, issued by the house; version 1 stays listed beneath it.
+    await assertRenderer(renderer, `(() => { const start=document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] [data-guideline-action="import"]'); if(!(start instanceof HTMLButtonElement)||start.disabled||start.textContent!=='导入新版本…')return false; start.click(); return true; })()`, 'knowledge-import-start');
+    const previewed = await readKnowledge(renderer, (page) => page.cards[0]?.preview !== null, 'knowledge-import-preview');
+    requireJourney(previewed.cards[0].preview === '将导入为《文字规范条款》第 2 版' &&
+      previewed.cards[0].changes === `${HOUSE_GUIDELINE_NAME} · 5 条 · 与第 1 版相比：改动 4 条，新增 1 条，删去 0 条` && previewed.cards[0].previewClauses === 5 &&
+      previewed.cards[0].pill === '第 1 版 · AI7 内置默认', 'knowledge-import-preview-words', previewed.cards[0]);
+    await waitFor(renderer, `document.activeElement === document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] .guideline-preview h4')`, 'knowledge-import-preview-focused', 10_000);
+    await assertRenderer(renderer, `(() => { const confirm=document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] [data-guideline-action="confirm"]'); if(!(confirm instanceof HTMLButtonElement)||confirm.disabled)return false; confirm.click(); return true; })()`, 'knowledge-import-confirm');
+    const importedPage = await readKnowledge(renderer, (page) => page.cards[0]?.pill === '第 2 版 · 本社', 'knowledge-imported');
+    requireJourney(importedPage.cards[0].preview === null && importedPage.cards[0].clauses.length === 5 && importedPage.cards[0].versions.length === 2 &&
+      importedPage.cards[0].versions[0].startsWith('第 2 版 · 本社 · 导入于 ') && importedPage.cards[0].versions[0].endsWith(` · ${HOUSE_GUIDELINE_NAME} · 5 条 · 还没有审阅用过`) &&
+      importedPage.cards[0].versions[1] === '第 1 版 · AI7 内置默认 · 内置 · 4 条 · 还没有审阅用过' &&
+      importedPage.cards.slice(1).every((card) => card.pill === '第 1 版 · AI7 内置默认'), 'knowledge-imported-card', importedPage.cards[0]);
+    await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '')==='已导入《文字规范条款》第 2 版；之后的审阅按第 2 版。'`, 'knowledge-imported-status', 10_000);
+    const service = await renderer.evaluate(`window.ai7.inspectReviewGuidelines().then((projection)=>projection.documents.map((document)=>[document.documentId, document.currentOrdinal, document.issuer]))`);
+    requireJourney(JSON.stringify(service?.[0]) === JSON.stringify(['ai7-builtin/typos-and-usage', 2, '本社']) && service.slice(1).every(([, ordinal]) => ordinal === 1), 'knowledge-imported-service', service);
+
+    at('j14-knowledge-keyboard');
+    // Without a pointer: the chosen tab takes focus, ArrowRight and ArrowLeft move between the classes, and each moved to is
+    // chosen with its focus visible.
+    await assertRenderer(renderer, `(() => { const tab=document.querySelector('#knowledge-tab-guidelines'); if(!(tab instanceof HTMLButtonElement))return false; tab.focus(); return document.activeElement===tab; })()`, 'knowledge-tab-focus');
+    await pressKey(renderer, 'ArrowRight');
+    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='evaluation' && document.activeElement?.id==='knowledge-tab-evaluation' && document.activeElement.getAttribute('aria-selected')==='true'`, 'knowledge-arrow-right', 10_000);
+    await pressKey(renderer, 'ArrowLeft');
+    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='guidelines' && document.activeElement?.id==='knowledge-tab-guidelines' && document.querySelector('.review-guidelines')?.dataset.guidelines==='ready'`, 'knowledge-arrow-left', 10_000);
+
+    at('j14-knowledge-reflow-forced-colors');
+    // At 200% the tabs, the cards and their clauses reflow into the width; under forced colours a card keeps its border and the
+    // chosen tab its heavier underline.
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
+    await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[document.querySelector('.knowledge-tabs'), ...document.querySelectorAll('.guideline-card')]; return parts.length===8 && parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2; })()`, 'knowledge-reflow', 10_000);
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
+    await assertRenderer(renderer, `(() => {
+      if (!matchMedia('(forced-colors: active)').matches) return false;
+      const card = document.querySelector('.guideline-card');
+      const chosen = document.querySelector('#knowledge-tab-guidelines');
+      const other = document.querySelector('#knowledge-tab-evaluation');
+      return card instanceof HTMLElement && getComputedStyle(card).borderTopStyle === 'solid' &&
+        chosen instanceof HTMLElement && other instanceof HTMLElement && parseFloat(getComputedStyle(chosen).borderBottomWidth) >= 3 &&
+        parseFloat(getComputedStyle(chosen).borderBottomWidth) > parseFloat(getComputedStyle(other).borderBottomWidth);
+    })()`, 'knowledge-forced-colors');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
+
+    at('knowledge-guideline-restart');
+    // A restart keeps the house's version, and the picker's file is no longer needed to read it.
+    await closeBrowser();
+    manager = await launch();
+    renderer = await waitForRenderer(manager, 'knowledge-restart-window');
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'knowledge-restart-ready');
+    await click(renderer, '知识库', 'knowledge-restart-open');
+    const restarted = await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-restart-ready-page');
+    requireJourney(restarted.cards[0].pill === '第 2 版 · 本社' && restarted.cards[0].versions.length === 2 && restarted.cards[0].clauses.length === 5, 'knowledge-restart-kept', restarted.cards[0]);
 
     at('zero-activity');
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key))`, 'exact-service-readiness-remained-zero');

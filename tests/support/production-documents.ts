@@ -1,8 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite';
 
 /**
- * The relations schema revisions 37 to 44 add (Issue #415, S66a to S66c; Issue #416, S67a and S67b; Issue #547; Issue #426,
- * S68a; Issue #431, S83), in drop order: each Book's people (revision 44), the 维护事项 of each 发稿版本 (revision 43), how a
+ * The relations schema revisions 37 to 45 add (Issue #415, S66a to S66c; Issue #416, S67a and S67b; Issue #547; Issue #426,
+ * S68a; Issue #431, S83; Issue #427, S79a), in drop order: the imported review guideline versions (revision 45), each Book's
+ * people (revision 44), the 维护事项 of each 发稿版本 (revision 43), how a
  * document's origin material was read (revision 42), a package's exports and their files (revision 41), a document's phase
  * moves and workflow instance (revision 40), the Book's 图书交付包 versions, which name documents' deliveries, then a
  * document's Delivery Records, decisions and versions before the document. A suite that plants a store at an earlier
@@ -11,6 +12,7 @@ import type { DatabaseSync } from 'node:sqlite';
  * validation accepts, exactly as a store an earlier build planted after this one would hold them.
  */
 export const PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER: ReadonlyArray<string> = [
+  'review_guideline_versions',
   'book_people_versions',
   'maintenance_case_revisions',
   'maintenance_errata_versions',
@@ -27,7 +29,7 @@ export const PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER: ReadonlyArray<string> = [
   'production_documents',
 ];
 
-/** Drop the relations revisions 37 to 44 added, foreign keys off around it. The caller sets the version. */
+/** Drop the relations revisions 37 to 45 added, foreign keys off around it. The caller sets the version. */
 export function dropProductionDocumentRelations(database: DatabaseSync): void {
   database.exec('PRAGMA foreign_keys = OFF');
   try {

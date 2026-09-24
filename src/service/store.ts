@@ -39,6 +39,8 @@ import type {
   BookPeopleResultProjection,
   BookSummaryFilter,
   UpdateBookPeopleInput,
+  ReviewGuidelinePreviewProjection,
+  ReviewGuidelinesProjection,
   AppendMaintenanceCaseRevisionInput,
   InspectMaintenanceCaseInput,
   MaintenanceCaseProjection,
@@ -279,6 +281,7 @@ import { initializeProductionDocumentDeliverySchema, initializeProductionDocumen
 import { BookDeliveryPackageError, BookDeliveryPackages, initializeBookDeliveryPackageSchema } from './book-delivery-packages.js';
 import { MaintenanceCaseError, MaintenanceCases, initializeMaintenanceCaseSchema } from './maintenance-cases.js';
 import { BookPeople, BookPeopleError, initializeBookPeopleSchema } from './book-people.js';
+import { ReviewGuidelineError, ReviewGuidelineLedger, initializeReviewGuidelineSchema, readGuidelineFile } from './review-guidelines.js';
 import {
   ProductionDocumentOriginError,
   initializeProductionDocumentOriginSchema,
@@ -375,6 +378,7 @@ import {
   PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
   MAINTENANCE_CASE_SCHEMA_VERSION,
   BOOK_PEOPLE_SCHEMA_VERSION,
+  REVIEW_GUIDELINE_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1595,7 +1599,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       currentVersion === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
       currentVersion === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      currentVersion === BOOK_PEOPLE_SCHEMA_VERSION,
+      currentVersion === BOOK_PEOPLE_SCHEMA_VERSION ||
+      currentVersion === REVIEW_GUIDELINE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1635,7 +1640,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       currentVersion === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
       currentVersion === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      currentVersion === BOOK_PEOPLE_SCHEMA_VERSION
+      currentVersion === BOOK_PEOPLE_SCHEMA_VERSION ||
+      currentVersion === REVIEW_GUIDELINE_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1989,7 +1995,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
       version === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      version === BOOK_PEOPLE_SCHEMA_VERSION,
+      version === BOOK_PEOPLE_SCHEMA_VERSION ||
+      version === REVIEW_GUIDELINE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2018,7 +2025,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
       version === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      version === BOOK_PEOPLE_SCHEMA_VERSION) return;
+      version === BOOK_PEOPLE_SCHEMA_VERSION ||
+      version === REVIEW_GUIDELINE_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2139,7 +2147,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
       version === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      version === BOOK_PEOPLE_SCHEMA_VERSION,
+      version === BOOK_PEOPLE_SCHEMA_VERSION ||
+      version === REVIEW_GUIDELINE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2167,7 +2176,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
       version === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      version === BOOK_PEOPLE_SCHEMA_VERSION) return;
+      version === BOOK_PEOPLE_SCHEMA_VERSION ||
+      version === REVIEW_GUIDELINE_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2460,7 +2470,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== BOOK_PEOPLE_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== REVIEW_GUIDELINE_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2491,6 +2501,7 @@ function validateModelServiceSchema(
       version >= PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
       version >= MAINTENANCE_CASE_SCHEMA_VERSION,
       version >= BOOK_PEOPLE_SCHEMA_VERSION,
+      version >= REVIEW_GUIDELINE_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2546,7 +2557,8 @@ function initializeModelServiceSchema(
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
       version === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      version === BOOK_PEOPLE_SCHEMA_VERSION,
+      version === BOOK_PEOPLE_SCHEMA_VERSION ||
+      version === REVIEW_GUIDELINE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2574,7 +2586,8 @@ function initializeModelServiceSchema(
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
       version === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      version === BOOK_PEOPLE_SCHEMA_VERSION) {
+      version === BOOK_PEOPLE_SCHEMA_VERSION ||
+      version === REVIEW_GUIDELINE_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3374,6 +3387,7 @@ export class EditorialStore {
   readonly #publicationVersions: PublicationVersionStore;
   readonly #maintenanceCases: MaintenanceCases;
   readonly #bookPeople: BookPeople;
+  readonly #reviewGuidelines: ReviewGuidelineLedger;
   readonly #productionDocuments: ProductionDocuments;
   /** Each Production Document's Deliverable Workflow (Issue #415, S66c). */
   readonly #documentWorkflow: ProductionDocumentWorkflow;
@@ -3427,10 +3441,12 @@ export class EditorialStore {
     this.#editorialMarks = new EditorialMarkStore(authority);
     this.#rules = new DefaultExecutionRuleLedger(authority);
     this.#manuscriptApply = new ManuscriptApplyStore(authority, boundedAuthority, this.#editorialMarks, lifetimeId);
+    // 知识库 › 审阅规范文件 (Issue #427, S79a): a Review Run prepared now applies each guideline document at its latest version.
+    this.#reviewGuidelines = new ReviewGuidelineLedger(authority);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
       ledgerOf: (entry) => this.#reviewLedgerOf(entry),
       baseline: () => this.#baselineAnalysis,
-    });
+    }, () => this.#reviewGuidelines.configuration());
     this.#manuscriptExport = new ManuscriptExportStore(authority, {
       readObject: (objectDigest) => this.#readContentObject(objectDigest),
       dataRoot,
@@ -3573,8 +3589,10 @@ export class EditorialStore {
       // 维护事项 of each 发稿版本.
       initializeProductionDocumentOriginSchema(authority);
       initializeMaintenanceCaseSchema(authority);
-      // Revision 44 (Issue #431, S83) adds each Book's people.
+      // Revision 44 (Issue #431, S83) adds each Book's people, and revision 45 (Issue #427, S79a) the versions a house imports
+      // of its review guideline documents.
       initializeBookPeopleSchema(authority);
+      initializeReviewGuidelineSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -5404,6 +5422,44 @@ export class EditorialStore {
         ? { title: last.title, bookId: last.bookId }
         : null,
     };
+  }
+
+  /** 知识库 › 审阅规范文件 (Issue #427, S79a; KB-001 to KB-003): every guideline document with its versions and their use. */
+  inspectReviewGuidelines(): ReviewGuidelinesProjection {
+    return this.#guidelineCall(() => this.#reviewGuidelines.projection());
+  }
+
+  /** 导入新版本's first step: the picked file's clauses as the next version of one document would read them; nothing is recorded. */
+  async previewReviewGuidelineVersion(documentId: string, path: string): Promise<ReviewGuidelinePreviewProjection> {
+    this.#assertAvailable();
+    let read: Awaited<ReturnType<typeof readGuidelineFile>>;
+    try {
+      read = await readGuidelineFile(path);
+    } catch (error) {
+      if (error instanceof ReviewGuidelineError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
+    return this.#guidelineCall(() => this.#reviewGuidelines.preview(documentId, read));
+  }
+
+  /** 确认导入: the previewed version recorded, and the page as it now reads. */
+  importReviewGuidelineVersion(previewId: string): ReviewGuidelinesProjection {
+    this.#guidelineCall(() => this.#transaction(this.#authority, () => this.#reviewGuidelines.commit(previewId)));
+    return this.inspectReviewGuidelines();
+  }
+
+  #guidelineCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof ReviewGuidelineError) throw new StoreError(error.code, error.message);
+      if (error instanceof AggregateError) {
+        this.#poisoned = true;
+        throw new StoreFatalError(error);
+      }
+      throw error;
+    }
   }
 
   /** `保存人员` (Issue #431, S83; BOOK-006): the Book's next people version, or none when nothing changed. */

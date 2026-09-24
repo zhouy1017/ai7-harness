@@ -706,6 +706,7 @@ interface PlannedCategory {
 interface PreparationWork {
   readonly workId: string;
   readonly bookId: string;
+  readonly configuration: ReviewCategoryConfiguration;
   readonly launchPolicy: LaunchPolicyProjection;
   readonly scope: ResolvedReviewScope;
   readonly planned: ReadonlyArray<PlannedCategory>;
@@ -755,7 +756,8 @@ export class ReviewRunStore {
   readonly #db: DatabaseSync;
   readonly #marks: EditorialMarkStore;
   readonly #ledgers: ReviewRunLedgers;
-  readonly #configuration: ReviewCategoryConfiguration;
+  /** The configuration as it applies now (Issue #427, S79a): each guideline document at its latest version. */
+  readonly #configuration: () => ReviewCategoryConfiguration;
   readonly #work = new Map<string, PreparationWork>();
   /** The Review Runs being driven in this service lifetime, with the Book each belongs to. */
   readonly #driving = new Map<string, string>();
@@ -764,7 +766,7 @@ export class ReviewRunStore {
     db: DatabaseSync,
     marks: EditorialMarkStore,
     ledgers: ReviewRunLedgers,
-    configuration: ReviewCategoryConfiguration = BUILTIN_REVIEW_CATEGORY_CONFIGURATION,
+    configuration: () => ReviewCategoryConfiguration = () => BUILTIN_REVIEW_CATEGORY_CONFIGURATION,
   ) {
     this.#db = db;
     this.#marks = marks;
@@ -802,16 +804,18 @@ export class ReviewRunStore {
     requireReview(!this.#bookIsDriving(bookId), 'REVIEW_RUN_ACTIVE', RUN_ACTIVE_REASON);
     // Two preparations of one Book would prepare the same category ledgers' Tasks under each other.
     requireReview(!Array.from(this.#work.values()).some((work) => work.bookId === bookId), 'REVIEW_RUN_PREPARING', '这本书有一次审阅正在准备计划；准备完成后再新建。');
-    requireReview(Array.isArray(input.categoryIds) && input.categoryIds.length >= 1 && input.categoryIds.length <= this.#configuration.categories.length &&
+    // The configuration a preparation starts under is the one its Run snapshots, whatever is imported meanwhile (REV-012).
+    const configuration = this.#configuration();
+    requireReview(Array.isArray(input.categoryIds) && input.categoryIds.length >= 1 && input.categoryIds.length <= configuration.categories.length &&
       new Set(input.categoryIds).size === input.categoryIds.length, 'REVIEW_CATEGORIES_INVALID', '请选择至少一个审阅类别，且不要重复。');
     for (const categoryId of input.categoryIds) {
-      requireReview(this.#configuration.categories.some((entry) => entry.categoryId === categoryId), 'REVIEW_CATEGORY_UNKNOWN', '没有这个审阅类别。');
+      requireReview(configuration.categories.some((entry) => entry.categoryId === categoryId), 'REVIEW_CATEGORY_UNKNOWN', '没有这个审阅类别。');
     }
     const chapters = this.#chapterOptions(bookId, head);
     const scope = this.#resolveScope(input.scope, chapters);
     const baseline = this.#readBaseline(bookId);
     // Configuration order is the categories' position in the Run, whatever order they were ticked in.
-    const planned = this.#configuration.categories
+    const planned = configuration.categories
       .filter((entry) => input.categoryIds.includes(entry.categoryId))
       .map((entry, position): PlannedCategory => {
         const reading = this.#readCategory(bookId, head, entry, baseline, undefined);
@@ -823,6 +827,7 @@ export class ReviewRunStore {
     const work: PreparationWork = {
       workId: randomUUID(),
       bookId,
+      configuration,
       launchPolicy: structuredClone(input.launchPolicy),
       scope,
       planned,
@@ -953,7 +958,7 @@ export class ReviewRunStore {
           workingDigest: head.workingDigest,
         },
         scope: { kind: work.scope.kind, label: reviewScopeLabel(work.scope), selectedRange: work.scope.selectedRange },
-        configuration: this.#configurationPin(),
+        configuration: this.#configurationPin(work.configuration),
         categories: work.prepared,
       };
       const record = canonicalRecord(snapshot);
@@ -969,11 +974,11 @@ export class ReviewRunStore {
     return reviewRunId;
   }
 
-  #configurationPin(): { schema: string; version: string; digest: string } {
+  #configurationPin(configuration: ReviewCategoryConfiguration): { schema: string; version: string; digest: string } {
     return {
-      schema: this.#configuration.schema,
-      version: this.#configuration.version,
-      digest: reviewCategoryConfigurationDigest(this.#configuration),
+      schema: configuration.schema,
+      version: configuration.version,
+      digest: reviewCategoryConfigurationDigest(configuration),
     };
   }
 
@@ -1832,7 +1837,8 @@ export class ReviewRunStore {
     requireReview(validFindingPage(page), 'REVIEW_PAGE_INVALID', '发现的分页或筛选无效。');
     const head = this.#head(bookId);
     const baseline = head === null ? { revision: null, error: null } : this.#readBaseline(bookId);
-    const readings = this.#configuration.categories.map((entry) => this.#readCategory(bookId, head, entry, baseline, progress));
+    const configuration = this.#configuration();
+    const readings = configuration.categories.map((entry) => this.#readCategory(bookId, head, entry, baseline, progress));
     const chapters = head === null ? { basis: 'outline' as const, chapters: [] } : this.#chapterOptions(bookId, head);
     // The 审阅记录 lists the newest Runs only; a Run beyond them is still opened when it is named.
     const rows = this.#db.prepare('SELECT * FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC LIMIT ?')
@@ -1851,7 +1857,7 @@ export class ReviewRunStore {
     const workspace: ReviewWorkspaceProjection = {
       bookId,
       manuscript: head,
-      configuration: this.#configurationPin(),
+      configuration: this.#configurationPin(configuration),
       categories: readings.map((reading) => this.#workspaceCategory(reading, chapters)),
       coverage: this.#coverage(bookId, head, readings, baseline),
       scopeOptions: this.#scopeOptions(head, chapters),

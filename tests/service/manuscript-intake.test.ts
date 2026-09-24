@@ -7,7 +7,7 @@ import { EditorialStore } from '../../src/service/store.js';
 import {
   MANUSCRIPT_INTAKE_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
-  CLARIFICATION_SCHEMA_VERSION, BOOK_PEOPLE_SCHEMA_VERSION,
+  CLARIFICATION_SCHEMA_VERSION, REVIEW_GUIDELINE_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import type { SourceFormat } from '../../src/shared/protocol.js';
 import { LOCAL_ONLY_DOC, localOnlyAvailable, localOnlyPath } from '../support/local-only-manuscripts.js';
@@ -635,7 +635,7 @@ describe('schema revision 18 over the real store', () => {
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
       expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
-        .toBe(BOOK_PEOPLE_SCHEMA_VERSION);
+        .toBe(REVIEW_GUIDELINE_SCHEMA_VERSION);
       // Every row is the row it was: the parsed DOCX keeps its digests, its parser, and its format.
       expect(tableRows(after, 'source_versions', REVISION_17_SOURCE_VERSION_COLUMNS)).toEqual(sourceVersionsBefore);
       expect(tableRows(after, 'source_provenance', REVISION_17_PROVENANCE_COLUMNS)).toEqual(provenanceBefore);
@@ -739,7 +739,7 @@ describe('schema revision 19 over the real store', () => {
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
       expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
-        .toBe(BOOK_PEOPLE_SCHEMA_VERSION);
+        .toBe(REVIEW_GUIDELINE_SCHEMA_VERSION);
       // Every row is the row it was; a DOCX read natively gains two columns and fills neither.
       expect(tableRows(after, 'source_versions', REVISION_18_SOURCE_VERSION_COLUMNS)).toEqual(sourceVersionsBefore);
       expect(tableRows(after, 'import_drafts', `${REVISION_17_DRAFT_COLUMNS}, source_format`)).toEqual(draftsBefore);

@@ -68,6 +68,16 @@ import {
 import { MARK_KIND_LABELS } from './editorial-mark-labels.js';
 import { mountDeliverables, type DeliverablesSurface } from './deliverables.js';
 import { mountBookPeople } from './book-people.js';
+import { mountReviewGuidelines } from './review-guidelines.js';
+import {
+  GUIDELINE_STATUS,
+  KNOWLEDGE_BASE_LEDE,
+  KNOWLEDGE_BASE_TABS_LABEL,
+  KNOWLEDGE_BASE_TAB_VIEWS,
+  KNOWLEDGE_BASE_TITLE,
+  knowledgeBaseTabView,
+  type KnowledgeBaseTab,
+} from './knowledge-base-labels.js';
 import { openTaskResultWindow, type TaskResultWindow } from './task-result-window.js';
 import { RETURN_CHIP_TITLE, TASK_PANEL_COMPOSE_STATUS, returnChipArrived, returnChipLabel, returnChipPlace } from './task-panel-labels.js';
 import {
@@ -208,7 +218,7 @@ const taskDrawer = mountTaskDrawer({
   onRecorded: (kind) => taskSurfaceRefresh[kind]?.(),
   openRunSurface: (plan) => void openTaskRunSurface(plan),
   openConnectionSettings: () => void renderModelServiceSettings(),
-  openRules: () => void renderKnowledgeBase(),
+  openRules: () => void renderKnowledgeBase('rules'),
   // ① 任务面 (Issue #423, S77a): a card's own record, 查看结果's floating window and 发起全书任务.
   openTaskTarget: (target) => void openGlobalAttentionTarget(target),
   openTaskResult: (entry, backToPanel) => openTaskResult(entry, backToPanel),
@@ -4194,31 +4204,102 @@ async function renderDataAndStorage(): Promise<void> {
 }
 
 /**
+ * 知识库 (Issue #427, plan slice S79a; editor-surfaces §8.4): its seven classes as tabs, in the specification's order, and the
+ * chosen class below them. `tabFocused` keeps the keyboard on the tab list when a class was chosen from it.
+ */
+async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocused = false): Promise<void> {
+  if (tab === 'rules') {
+    setStatus('正在读取工序与规则…', 'busy');
+    try {
+      renderKnowledgeBaseProjection(await window.ai7.inspectDefaultExecutionRules(), tabFocused);
+      setStatus('工序与规则已打开');
+    } catch (error) {
+      setStatus(rendererErrorMessage(error, '无法读取工序与规则。'), 'error');
+    }
+    return;
+  }
+  const { content, panelNode } = knowledgeBasePage(tab, tabFocused);
+  if (tab !== 'guidelines') {
+    setStatus(`${knowledgeBaseTabView(tab).label}已打开`);
+    return;
+  }
+  setStatus(GUIDELINE_STATUS.loading, 'busy');
+  const surface = mountReviewGuidelines({ root: panelNode, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, technicalDetails });
+  try {
+    await surface.load();
+    if (content.isConnected) setStatus(GUIDELINE_STATUS.opened);
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, GUIDELINE_STATUS.unavailable), 'error');
+  }
+}
+
+/**
+ * 知识库's page on screen: its heading, the seven classes as a tab list — arrow keys move between them — and the chosen
+ * class's panel, which says what the class holds and, for a class a later slice brings, why it shows nothing yet.
+ */
+function knowledgeBasePage(tab: KnowledgeBaseTab, tabFocused: boolean): { content: HTMLElement; panelNode: HTMLElement } {
+  const view = knowledgeBaseTabView(tab);
+  const content = panel();
+  content.classList.add('knowledge-base');
+  content.dataset['knowledgeTab'] = tab;
+  const tabs = element('div', 'knowledge-tabs');
+  tabs.setAttribute('role', 'tablist');
+  tabs.setAttribute('aria-label', KNOWLEDGE_BASE_TABS_LABEL);
+  KNOWLEDGE_BASE_TAB_VIEWS.forEach((entry, index) => {
+    const node = button(entry.label, entry.tab === tab ? 'secondary' : 'quiet', () => {
+      if (entry.tab !== tab) void renderKnowledgeBase(entry.tab, true);
+    });
+    node.id = `knowledge-tab-${entry.tab}`;
+    node.dataset['knowledgeTab'] = entry.tab;
+    node.setAttribute('role', 'tab');
+    node.setAttribute('aria-selected', String(entry.tab === tab));
+    node.setAttribute('aria-controls', 'knowledge-panel');
+    node.tabIndex = entry.tab === tab ? 0 : -1;
+    node.addEventListener('keydown', (event) => {
+      const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+      if (step === 0) return;
+      event.preventDefault();
+      const next = KNOWLEDGE_BASE_TAB_VIEWS[(index + step + KNOWLEDGE_BASE_TAB_VIEWS.length) % KNOWLEDGE_BASE_TAB_VIEWS.length]!;
+      void renderKnowledgeBase(next.tab, true);
+    });
+    tabs.append(node);
+  });
+  const panelNode = element('section', 'knowledge-panel');
+  panelNode.id = 'knowledge-panel';
+  panelNode.setAttribute('role', 'tabpanel');
+  panelNode.setAttribute('aria-labelledby', `knowledge-tab-${tab}`);
+  const back = element('div', 'button-row');
+  back.append(button('返回', 'quiet', () => void initializeStartup()));
+  const holds = element('p', 'lede knowledge-holds', view.holds);
+  content.append(
+    element('p', 'section-label', `${KNOWLEDGE_BASE_TITLE} · ${view.label}`),
+    element('h2', undefined, KNOWLEDGE_BASE_TITLE),
+    element('p', 'field-note', KNOWLEDGE_BASE_LEDE),
+    tabs,
+    holds,
+  );
+  if (view.pending !== null) {
+    const pending = element('p', 'field-note knowledge-pending', view.pending);
+    pending.dataset['knowledgePending'] = tab;
+    panelNode.append(pending);
+  }
+  content.append(panelNode, back);
+  replaceScreen('knowledge-base', content);
+  if (tabFocused) content.querySelector<HTMLElement>(`#knowledge-tab-${tab}`)?.focus();
+  return { content, panelNode };
+}
+
+/**
  * 知识库 › 工序与规则 (Issue #421, plan slice S75 D8): every Book's 默认执行规则 — what quick start does under it, what
  * it binds, who set it and when — with 查看 and 停用. A rule is changed by setting it again from a newly viewed plan
  * in the drawer (D7), never edited here, and turning it off keeps it on record.
  */
-async function renderKnowledgeBase(): Promise<void> {
-  setStatus('正在读取工序与规则…', 'busy');
-  try {
-    renderKnowledgeBaseProjection(await window.ai7.inspectDefaultExecutionRules());
-    setStatus('工序与规则已打开');
-  } catch (error) {
-    setStatus(rendererErrorMessage(error, '无法读取工序与规则。'), 'error');
-  }
-}
-
-function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjection): void {
-  const content = panel();
-  content.classList.add('knowledge-base');
+function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjection, tabFocused = false): void {
+  const { content, panelNode } = knowledgeBasePage('rules', tabFocused);
   content.dataset['ruleCount'] = String(projection.rules.length);
-  content.append(
-    element('p', 'section-label', '知识库 · 工序与规则'),
-    element('h2', undefined, '工序与规则'),
-    element('p', 'lede', projection.statement),
-  );
+  panelNode.append(element('p', 'field-note', projection.statement));
   if (projection.rules.length === 0) {
-    content.append(element('p', 'field-note default-rule-empty', '还没有默认执行规则。在分析的完整计划里点「设为快速开始默认…」就能设定。'));
+    panelNode.append(element('p', 'field-note default-rule-empty', '还没有默认执行规则。在分析的完整计划里点「设为快速开始默认…」就能设定。'));
   }
   const list = element('div', 'default-rule-list');
   for (const rule of projection.rules) {
@@ -4252,7 +4333,7 @@ function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjecti
         setStatus('正在停用默认执行规则…', 'busy');
         try {
           await window.ai7.deactivateDefaultExecutionRule({ ruleId: rule.ruleId });
-          await renderKnowledgeBase();
+          await renderKnowledgeBase('rules');
           setStatus(`已停用默认执行规则：${rule.name}；快速开始不再使用它。`, 'success');
         } catch (error) {
           off.disabled = false;
@@ -4266,10 +4347,7 @@ function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjecti
     }
     list.append(card);
   }
-  const back = element('div', 'button-row');
-  back.append(button('返回', 'quiet', () => void initializeStartup()));
-  content.append(list, back);
-  replaceScreen('knowledge-base', content);
+  panelNode.append(list);
 }
 
 function renderModelServiceSettingsProjection(projection: ModelServiceSettingsProjection): void {
@@ -4541,8 +4619,8 @@ function renderLanding(
   dataAndStorage.dataset['settingsRoute'] = 'data-storage';
   const modelService = button('模型服务', 'secondary', () => renderModelServiceSettings());
   modelService.dataset['settingsRoute'] = 'model-service';
-  // 知识库 (Issue #421, S75 D8): opens 工序与规则 only; its other classes arrive with S79.
-  const knowledgeBase = button('知识库', 'secondary', () => renderKnowledgeBase());
+  // 知识库 (Issue #427, S79a): its seven classes, opening at 审阅规范文件.
+  const knowledgeBase = button('知识库', 'secondary', () => renderKnowledgeBase('guidelines'));
   knowledgeBase.dataset['settingsRoute'] = 'knowledge-base';
   const landingActions = element('div', 'button-row');
   landingActions.append(importButton, createBook, dataAndStorage, modelService, knowledgeBase);
