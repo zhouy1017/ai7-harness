@@ -39,13 +39,13 @@ describe('what a 默认执行规则 binds', () => {
     // A later Run's own predecessor and range never read as drift.
     expect(defaultExecutionRuleDrift(binding, { ...INPUTS, predecessorRevision: { revisionId: 'revision-8', ordinal: 8, digest: 'd'.repeat(64) } })).toEqual([]);
     expect(defaultExecutionRuleDrift(binding, { ...INPUTS, selectedRange: { startPosition: 1, endPosition: 4 } })).toEqual([]);
-    // Every bound field that moves is named, in the Plan Revision diff's own labels and order.
+    // Every bound field that moves is named in the drawer's words for its field, in the Plan Revision diff's order.
     expect(defaultExecutionRuleDrift(binding, {
       ...INPUTS,
       providerBinding: { ...INPUTS.providerBinding, credentialReference: 'ref-2' },
       artifactPin: { ...INPUTS.artifactPin, sidecarRevision: 3 },
       runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 240_000 },
-    })).toEqual(['Provider 绑定 · Credential Reference', '权限承载构件 pin · 侧车修订', 'Run Budget Ceiling 状态']);
+    })).toEqual(['模型服务 · 连接', '所用工序 · 权限规则版本', '预算上限']);
   });
 
   it('lists what it binds in the editor\'s words', () => {
