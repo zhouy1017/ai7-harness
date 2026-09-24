@@ -12,7 +12,7 @@ import {
 import { RUN_LIVENESS_STAGE_LABELS, localInstantLabel } from './plan-preview-labels.js';
 import type { ReviewPill } from './review-labels.js';
 import { REVIEW_ACTION_LABELS } from './review-labels.js';
-import { TASK_BAR_RECONFIRM, TASK_BAR_REPREPARE, TASK_BAR_RUN_LINKS } from './task-drawer-labels.js';
+import { TASK_BAR_RECONFIRM, TASK_BAR_REDO, TASK_BAR_REPREPARE, TASK_BAR_RUN_LINKS } from './task-drawer-labels.js';
 import { RESOLVE_CONFLICT_LABEL } from './editorial-mark-labels.js';
 import { PROPOSAL_CONFLICT_CLASSIFICATION, REVERSAL_CONFLICT_LINE } from './proposal-conflict-labels.js';
 
@@ -198,6 +198,8 @@ export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionN
   'resolve-model-service': '处理模型服务',
   // The drawer's own action for a waiting Run whose plan moved (Issue #536; OFF-008).
   reprepare: TASK_BAR_REPREPARE,
+  // The drawer's own action for a Run the launch's ceiling stopped under developer-live (Issue #541).
+  redo: TASK_BAR_REDO,
 };
 /** The two scopes a question can have (CLAR-004), in the card's own words. */
 export const GLOBAL_ATTENTION_CLARIFICATION_WAITING = '任务等待你的说明';
@@ -271,8 +273,11 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
       return '运行失败，没有形成新的结果集修订版。';
     case 'analysis-interrupted':
       return '运行已在派发后中断；已完成单元的结果与缺口均已保留。';
+    // Issue #541: under developer-live the launch set the ceiling, and the plan cannot raise it.
     case 'analysis-budget-reached':
-      return '运行用到了你设的预算上限，已停止；读完的部分已保留。要接着读，请调整预算并重做。';
+      return item.nextStep === 'redo'
+        ? '运行用到了这次启动的预算上限，已停止；读完的部分已保留。要接着读，请以更高的预算上限重新启动，再改计划重做。'
+        : '运行用到了你设的预算上限，已停止；读完的部分已保留。要接着读，请调整预算并重做。';
     case 'analysis-account-limit':
       return '模型服务按账户限额拒绝了请求，这项任务已停下，读完的部分都已保存；处理好模型服务、限额解除后续行。';
     case 'analysis-blocked':
