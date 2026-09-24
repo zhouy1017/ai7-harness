@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -430,9 +430,21 @@ describe('交付 of a Production Document (S66b)', () => {
       const documentWindow = store.getManuscriptWindow(created.documentId, created.branchId, null);
       expect(written.map((block) => block.digest)).toEqual(documentWindow.blocks.map((block) => block.digest));
       // The Delivery Record shows what its export came to.
-      expect(store.inspectProductionDocuments(book.bookId).types[0]!.document!.deliveries[0]!.export).toEqual({
+      const recordedExport = {
         preparationId: preparation.preparationId, outcome: 'created', outcomeLabel: '已导出到所选位置', fileName: '交付记录组稿 · 新闻稿 · 版本 1.docx',
-      });
+      };
+      expect(store.inspectProductionDocuments(book.bookId).types[0]!.document!.deliveries[0]!.export).toEqual(recordedExport);
+      // A later export of the same version that writes nothing — its folder gone, as a removed drive leaves it — is the
+      // export ledger's to list, and never hides the file the delivery handed over.
+      const gone = join(outbox, '移动硬盘');
+      await mkdir(gone);
+      const retry = await store.prepareManuscriptExport({
+        bookId: book.bookId, revisionId: version1, target, options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS }, reviewDigest: reviewed.reviewDigest,
+        destination: join(gone, reviewed.suggestedFileName),
+      }, true);
+      await rm(gone, { recursive: true });
+      expect((await store.approveManuscriptExport({ bookId: book.bookId, preparationId: retry.preparationId }, true)).outcome).toBe('failed');
+      expect(store.inspectProductionDocuments(book.bookId).types[0]!.document!.deliveries[0]!.export).toEqual(recordedExport);
 
       // An edit: 交付后有修改, saved as 版本 2 or not, until the text is delivered again (DELIV-004).
       const edit = (insertText: string) => {
@@ -458,15 +470,16 @@ describe('交付 of a Production Document (S66b)', () => {
           [1, '版本 1', { kind: 'publicity', label: '宣传部' }, '发布会前一周给宣传部。', preparation.preparationId],
         ]);
       expect(second.document!.changedSinceDelivery).toBe(false);
-      // Delivering an earlier version again is a record like any other, and the text has moved past that version.
+      // Delivering an earlier version again is a record like any other, and no edit: the text is still 版本 2, delivered
+      // already, so nothing reads 交付后有修改 (DELIV-004).
       const third = await deliver(saved(version1), { kind: 'editorial', custom: null });
       expect(third.document!.deliveries[0]).toMatchObject({ ordinal: 3, versionLabel: '版本 1', recipient: { kind: 'editorial', label: '编辑部' }, export: null });
-      expect(third.document!.changedSinceDelivery).toBe(true);
+      expect(third.document!.changedSinceDelivery).toBe(false);
 
       // 交付 of the current text (DELIV-003): bound to the digest the form read, and saved as the next version first.
       edit('（交付前修订）');
       const before = store.inspectProductionDocuments(book.bookId).types[0]!.document!;
-      expect([before.changedSinceVersion, before.versions.length]).toEqual([true, 2]);
+      expect([before.changedSinceVersion, before.changedSinceDelivery, before.versions.length]).toEqual([true, true, 2]);
       expect(await asyncCode(() => deliver({ kind: 'current', workingDigest: savedVersion.workingDigest }, { kind: 'external-media', custom: null })))
         .toBe('PRODUCTION_DOCUMENT_DELIVERY_CHANGED');
       // A refused recipient saves no version either.
@@ -486,9 +499,10 @@ describe('交付 of a Production Document (S66b)', () => {
       const set = store.decideProductionDocumentType({ bookId: book.bookId, typeId: 'news-release', notForThisBook: true });
       expect(set.document!.deliveries.map((entry) => entry.ordinal)).toEqual([5, 4, 3, 2, 1]);
 
-      // 交付物's export list names the file as the document's version; the Manuscript's 发稿 records are untouched.
-      expect(store.inspectDeliverables(book.bookId).exports.map((entry) => [entry.preparationId, entry.target.kind, entry.target.document?.versionLabel]))
-        .toEqual([[preparation.preparationId, 'document', '版本 1']]);
+      // 交付物's export list names each attempt as the document's version, the one that wrote nothing too; the Manuscript's
+      // 发稿 records are untouched.
+      expect(store.inspectDeliverables(book.bookId).exports.map((entry) => [entry.preparationId, entry.outcome, entry.target.kind, entry.target.document?.versionLabel]))
+        .toEqual([[retry.preparationId, 'failed', 'document', '版本 1'], [preparation.preparationId, 'created', 'document', '版本 1']]);
       documentsBefore = JSON.stringify(store.inspectProductionDocuments(book.bookId));
       store.markCleanShutdown();
     } finally {

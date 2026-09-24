@@ -162,9 +162,6 @@ export class ProductionDocuments {
     requireDocument(versions.length > 0, 'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档没有版本。');
     const workingDigest = text(state.working_digest);
     const deliveries = this.#deliveries(row, MAX_PRODUCTION_DOCUMENT_DELIVERIES_LISTED + 1);
-    const lastDelivered = this.#db.prepare(
-      'SELECT revision_digest FROM production_document_deliveries WHERE document_id = ? ORDER BY ordinal DESC LIMIT 1',
-    ).get(row.documentId) as SqlRow | undefined;
     return {
       documentId: row.documentId,
       branchId: row.branchId,
@@ -177,9 +174,20 @@ export class ProductionDocuments {
       workingDigest,
       deliveries: deliveries.slice(0, MAX_PRODUCTION_DOCUMENT_DELIVERIES_LISTED),
       deliveriesTruncated: deliveries.length > MAX_PRODUCTION_DOCUMENT_DELIVERIES_LISTED,
-      // 交付后有修改 (DELIV-004): the text moved past the version last delivered, saved as a new version or not.
-      changedSinceDelivery: lastDelivered !== undefined && workingDigest !== text(lastDelivered.revision_digest),
+      changedSinceDelivery: this.changedSinceDelivery(row.documentId, workingDigest),
     };
+  }
+
+  /**
+   * 交付后有修改 (DELIV-004): an edit after a delivery — the document was delivered, and its text, saved as a new version
+   * or not, is no version it was delivered at. Delivering an earlier saved version is no edit, and raises nothing.
+   */
+  changedSinceDelivery(documentId: string, workingDigest: string): boolean {
+    const read = this.#db.prepare(
+      `SELECT EXISTS (SELECT 1 FROM production_document_deliveries WHERE document_id = ?) delivered,
+              EXISTS (SELECT 1 FROM production_document_deliveries WHERE document_id = ? AND revision_digest = ?) matched`,
+    ).get(documentId, documentId, workingDigest) as SqlRow;
+    return integer(read.delivered) === 1 && integer(read.matched) === 0;
   }
 
   /**
