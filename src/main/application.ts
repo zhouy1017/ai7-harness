@@ -2692,6 +2692,78 @@ function registerRendererHandlers(
         });
       }),
   );
+  // 交付 · 生产文档 (Issue #415, plan slice S66): three deterministic commands of the route's Book, serialized with
+  // every other effect of this window's authority and held to its route generation. 从来源材料创建 and 本书不做 name
+  // a house type and a material by identity, and the service decides whether they are this Book's; 保存为版本 names
+  // a document this window opened, so it needs the document's editing capability like any journal write.
+  const requireProductionDocumentResultOfRoute = (
+    route: Extract<ResolvedBookWorkbenchRoute, { kind: 'book' }>,
+    result: ServiceOperationMap['createProductionDocument']['output'],
+  ): ServiceOperationMap['createProductionDocument']['output'] => {
+    if (result.bookId !== route.bookId || (result.document !== null && result.deliverables.bookId !== route.bookId)) {
+      throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '生产文档不属于当前图书工作台。');
+    }
+    requireDeliverablesOfRoute(route, result.deliverables);
+    return result;
+  };
+  ipcMain.handle(
+    IPC_CHANNELS.createProductionDocument,
+    (event, input: Omit<ServiceOperationMap['createProductionDocument']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('createProductionDocument', {
+            bookId: route.bookId,
+            typeId: input.typeId,
+            sourceVersionId: input.sourceVersionId,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          return requireProductionDocumentResultOfRoute(route, result);
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.decideProductionDocumentType,
+    (event, input: Omit<ServiceOperationMap['decideProductionDocumentType']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('decideProductionDocumentType', {
+            bookId: route.bookId,
+            typeId: input.typeId,
+            notForThisBook: input.notForThisBook,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          return requireProductionDocumentResultOfRoute(route, result);
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.saveProductionDocumentVersion,
+    (event, input: Omit<ServiceOperationMap['saveProductionDocumentVersion']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const capability = requireManuscriptCapability(owned, { manuscriptId: input.documentId, branchId: input.branchId });
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('saveProductionDocumentVersion', {
+            bookId: capability.bookId,
+            documentId: capability.manuscriptId,
+            branchId: capability.branchId,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          return requireProductionDocumentResultOfRoute(route, result);
+        });
+      }),
+  );
   // 待我处理 (Issue #424, plan slice S78): a read across every Book, in any window whatever it shows. It needs no
   // Book route and takes none — unlike getStartup it claims nothing and leaves no workbench. It remembers only
   // which Recovery Attention States it showed this window, so opening one from there can claim it while no

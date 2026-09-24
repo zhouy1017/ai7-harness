@@ -3,6 +3,8 @@ import {
   MAX_PUBLICATION_SCOPE_CHARACTERS,
   type DeliverablesProjection,
   type MilestoneListItemProjection,
+  type ProductionDocumentProjection,
+  type ProductionDocumentTypeProjection,
   type PublicationVersionProjection,
   type RendererApi,
 } from '../shared/protocol.js';
@@ -55,6 +57,24 @@ import {
 import { localInstantLabel } from './plan-preview-labels.js';
 import { EXPORT_ACTION_LABELS, EXPORT_RECORDS_HEADING, EXPORT_TECHNICAL_TERMS, exportOpenAccessibleName, exportRecordLine } from './manuscript-export-labels.js';
 import { mountManuscriptExport } from './manuscript-export.js';
+import {
+  DOCUMENT_ACTION_LABELS,
+  DOCUMENT_CHANGED_SINCE_VERSION,
+  DOCUMENT_KEPT_NOTE,
+  DOCUMENT_NO_SOURCES,
+  DOCUMENT_SOURCE_HINT,
+  DOCUMENT_SOURCE_LEGEND,
+  DOCUMENT_STATE_NONE,
+  DOCUMENT_STATE_NOT_FOR_THIS_BOOK,
+  DOCUMENT_STATUS_LINES,
+  DOCUMENTS_HEADING,
+  DOCUMENTS_LEDE,
+  documentActionName,
+  documentCardLine,
+  documentCreatedLine,
+  documentSourceLine,
+  type DocumentAction,
+} from './production-document-labels.js';
 
 /**
  * ⑥ 交付物 as far as plan slice S65 reaches (Issue #414; editor-surfaces §9, V2-UX-MILE-008, PUB-002 to
@@ -62,7 +82,8 @@ import { mountManuscriptExport } from './manuscript-export.js';
  * none preselected — the Book's designations newest first, the Publication Version Change Notice and the
  * pending 录入定价与首印 line, and offers 设为发稿版本… as an inline form that states, before the editor
  * confirms, exactly what will be recorded and the fixed sentence 「仅表示此版本可用于上述发稿范围；AI7 不会
- * 发布或发送」. Production Documents and the 图书交付包 are later slices' and are not shown here.
+ * 发布或发送」. Since S66 (Issue #415) it also shows 交付 · 生产文档: one card per house type, a document made from
+ * the Book's source material, opened on the manuscript's own surface, and 本书不做. The 图书交付包 is S67's.
  *
  * Everything reads the service's projection: a mark, a notice and every count come from the records, and
  * the answer of 设为发稿版本 carries the 交付物 as they stand after it. Nothing here exports, sends or
@@ -76,7 +97,8 @@ export interface DeliverablesSurface {
 }
 
 type DeliverablesApi = Pick<RendererApi, 'inspectDeliverables' | 'designatePublicationVersion' | 'reviewManuscriptExport' |
-  'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport'>;
+  'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
+  'createProductionDocument' | 'decideProductionDocumentType'>;
 
 export interface MountDeliverablesOptions {
   /** The destination's panel: the surface appends its heading and its host, and the caller its persistent actions after them. */
@@ -87,7 +109,19 @@ export interface MountDeliverablesOptions {
   technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
+  /** 打开 a Production Document (Issue #415): the destination is left for the document's surface. */
+  openDocument(document: ProductionDocumentProjection, type: { typeId: string; label: string }): Promise<void>;
 }
+
+/** 从来源材料创建…'s inline form while it is open: the type it creates and the material chosen, if any. */
+interface DocumentForm {
+  typeId: string;
+  sourceVersionId: string | null;
+  problem: string | null;
+}
+
+/** Where focus goes once the documents block is drawn again. */
+type DocumentFocus = 'keep' | { typeId: string; action: DocumentAction | 'source' };
 
 /** 设为发稿版本's inline form while it is open: what the editor has chosen and written so far. */
 interface DesignateForm {
@@ -140,6 +174,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   let working = false;
   let form: DesignateForm | null = null;
   let block: HTMLElement | undefined;
+  let documentForm: DocumentForm | null = null;
+  let documentsBlock: HTMLElement | undefined;
 
   const host = el('div', 'deliverables-host');
   host.dataset['deliverablesBookId'] = bookId;
@@ -147,7 +183,9 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   // export in progress is never redrawn away.
   const blockSlot = el('div', 'deliverables-block-slot');
   const exportSlot = el('div', 'deliverables-export-slot');
-  host.append(blockSlot, exportSlot);
+  // 交付 · 生产文档 (Issue #415) has a slot of its own after them: the three things of 交付物 stay apart (DELIV-001).
+  const documentsSlot = el('div', 'deliverables-documents-slot');
+  host.append(blockSlot, exportSlot, documentsSlot);
   options.root.append(
     el('p', 'section-label', DELIVERABLES_SECTION_LABEL),
     el('h2', undefined, options.bookTitle),
@@ -268,6 +306,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       ));
     }
     swap(section);
+    drawDocuments(next, 'keep');
 
     // The form's first stop is the milestone already chosen, or the first choice when none is.
     const firstChoice = (): HTMLElement | null =>
@@ -599,6 +638,249 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       state.problem = options.errorMessage(error, DELIVERABLES_STATUS_LINES.designateFailed);
       render('confirm');
       options.setStatus(state.problem, 'error');
+    }
+  }
+
+  // ---- 交付 · 生产文档 (Issue #415) ------------------------------------------------------------------------
+
+  /**
+   * One card per house type in the configuration's order (DELIV-001, WORK-013): the type, its document's latest
+   * version and the material it was made from, or 尚未创建, or 本书不做. 从来源材料创建… opens a compact form whose
+   * materials are the Book's own, none preselected; 本书不做 and 恢复 are one deterministic record each. No card
+   * carries a percentage (WORK-007).
+   */
+  function drawDocuments(next: DeliverablesProjection, focus: DocumentFocus): void {
+    const documents = next.documents;
+    if (documentForm !== null && (documents.unavailableReason !== null ||
+      !documents.types.some((type) => type.typeId === documentForm!.typeId && type.document === null && !type.notForThisBook))) {
+      documentForm = null;
+    }
+    if (documentForm !== null && documentForm.sourceVersionId !== null &&
+      !documents.sources.some((source) => source.sourceVersionId === documentForm!.sourceVersionId)) {
+      documentForm.sourceVersionId = null;
+    }
+    const active = document.activeElement;
+    const restore = focus === 'keep' && active instanceof HTMLElement && documentsBlock?.contains(active) === true
+      ? documentFocusKeyOf(active)
+      : null;
+    const section = el('section', 'deliverables-documents');
+    section.dataset['documentTypes'] = String(documents.types.length);
+    section.dataset['documentSources'] = String(documents.sources.length);
+    const headingId = uid('documents-heading');
+    const heading = el('h3', undefined, DOCUMENTS_HEADING);
+    heading.id = headingId;
+    section.setAttribute('aria-labelledby', headingId);
+    section.append(heading, el('p', 'field-note', DOCUMENTS_LEDE));
+    if (documents.unavailableReason !== null) {
+      section.append(el('p', 'attention-note documents-unavailable', documents.unavailableReason));
+    }
+    const list = el('ol', 'production-document-cards');
+    for (const type of documents.types) list.append(renderDocumentCard(next, type));
+    section.append(list);
+    if (documentsBlock?.isConnected === true) documentsBlock.replaceWith(section);
+    else documentsSlot.replaceChildren(section);
+    documentsBlock = section;
+    if (focus !== 'keep') {
+      const card = section.querySelector<HTMLElement>(`li[data-document-type-id="${CSS.escape(focus.typeId)}"]`);
+      const target = focus.action === 'source'
+        ? card?.querySelector<HTMLElement>('input[name="document-source"]:checked') ?? card?.querySelector<HTMLElement>('input[name="document-source"]')
+        : card?.querySelector<HTMLElement>(`[data-document-action="${focus.action}"]`);
+      target?.focus();
+    } else if (restore !== null) {
+      const match = Array.from(section.querySelectorAll<HTMLElement>('button, input')).find((candidate) => documentFocusKeyOf(candidate) === restore);
+      if (match !== undefined && !(match instanceof HTMLButtonElement && match.disabled)) match.focus({ preventScroll: true });
+    }
+  }
+
+  function documentFocusKeyOf(node: HTMLElement): string {
+    return [
+      node.tagName,
+      node.dataset['documentAction'] ?? '',
+      node instanceof HTMLInputElement && node.type === 'radio' ? node.value : '',
+      node.closest<HTMLElement>('li[data-document-type-id]')?.dataset['documentTypeId'] ?? '',
+    ].join('|');
+  }
+
+  function documentButton(action: DocumentAction, type: ProductionDocumentTypeProjection, variant: 'primary' | 'secondary' | 'quiet'): HTMLButtonElement {
+    const control = el('button', variant, DOCUMENT_ACTION_LABELS[action]);
+    control.type = 'button';
+    control.dataset['documentAction'] = action;
+    control.setAttribute('aria-label', documentActionName(action, type.label));
+    control.disabled = working;
+    return control;
+  }
+
+  function renderDocumentCard(next: DeliverablesProjection, type: ProductionDocumentTypeProjection): HTMLElement {
+    const documents = next.documents;
+    const item = el('li', 'production-document-card');
+    item.dataset['documentTypeId'] = type.typeId;
+    item.dataset['documentState'] = type.notForThisBook ? 'not-for-this-book' : type.document === null ? 'none' : 'document';
+    const heading = el('h4', undefined, type.label);
+    heading.id = uid('document-type');
+    item.setAttribute('aria-labelledby', heading.id);
+    item.append(heading);
+    const actions = el('div', 'button-row compact-actions');
+    if (type.document !== null) {
+      const documentNow = type.document;
+      item.dataset['documentId'] = documentNow.documentId;
+      item.dataset['documentVersion'] = String(documentNow.versions[0]?.ordinal ?? 0);
+      item.dataset['documentChanged'] = String(documentNow.changedSinceVersion);
+      item.append(el('p', 'document-card-line', documentCardLine(documentNow)));
+      if (documentNow.changedSinceVersion) item.append(el('p', 'field-note document-changed', DOCUMENT_CHANGED_SINCE_VERSION));
+    }
+    if (type.notForThisBook) {
+      item.append(el('p', 'document-not-for-this-book', DOCUMENT_STATE_NOT_FOR_THIS_BOOK));
+      if (type.document !== null) item.append(el('p', 'field-note', DOCUMENT_KEPT_NOTE));
+      const restore = documentButton('restore', type, 'secondary');
+      restore.addEventListener('click', () => void decide(type, false));
+      actions.append(restore);
+      item.append(actions);
+      return item;
+    }
+    if (type.document !== null) {
+      const documentNow = type.document;
+      const open = documentButton('open', type, 'primary');
+      open.disabled = working || documents.unavailableReason !== null;
+      open.addEventListener('click', () => void openDocument(documentNow, type));
+      actions.append(open);
+    } else {
+      item.append(el('p', 'document-state-none', DOCUMENT_STATE_NONE));
+      const create = documentButton('create', type, 'secondary');
+      const formOpen = documentForm?.typeId === type.typeId;
+      create.setAttribute('aria-expanded', String(formOpen));
+      const blocked = documents.unavailableReason ?? (documents.sources.length === 0 ? DOCUMENT_NO_SOURCES : null);
+      if (blocked !== null) {
+        // Unavailable, with its reason in words beside it (the pattern of 设为发稿版本's, PUB-002).
+        create.disabled = true;
+        const why = el('p', 'field-note document-create-reason', blocked);
+        why.id = uid('document-create-reason');
+        create.setAttribute('aria-describedby', why.id);
+        const notForThisBook = documentButton('notForThisBook', type, 'quiet');
+        notForThisBook.addEventListener('click', () => void decide(type, true));
+        actions.append(create, notForThisBook);
+        item.append(actions, why);
+        return item;
+      }
+      create.addEventListener('click', () => {
+        documentForm = formOpen ? null : { typeId: type.typeId, sourceVersionId: null, problem: null };
+        drawDocuments(next, { typeId: type.typeId, action: formOpen ? 'create' : 'source' });
+      });
+      actions.append(create);
+    }
+    const notForThisBook = documentButton('notForThisBook', type, 'quiet');
+    notForThisBook.addEventListener('click', () => void decide(type, true));
+    actions.append(notForThisBook);
+    item.append(actions);
+    if (documentForm?.typeId === type.typeId && type.document === null) item.append(renderDocumentForm(next, type, documentForm));
+    return item;
+  }
+
+  /** The Book's source-only materials as choices, none preselected; 创建文档 waits for one. */
+  function renderDocumentForm(next: DeliverablesProjection, type: ProductionDocumentTypeProjection, state: DocumentForm): HTMLElement {
+    const form = el('form', 'document-create');
+    form.noValidate = true;
+    form.addEventListener('submit', (event) => event.preventDefault());
+    const fieldset = el('fieldset');
+    fieldset.append(el('legend', undefined, DOCUMENT_SOURCE_LEGEND));
+    const hint = el('p', 'field-note', DOCUMENT_SOURCE_HINT);
+    hint.id = uid('document-source-hint');
+    fieldset.append(hint);
+    for (const source of next.documents.sources) {
+      const label = el('label', 'choice-row');
+      const input = el('input');
+      input.type = 'radio';
+      input.name = 'document-source';
+      input.value = source.sourceVersionId;
+      input.checked = state.sourceVersionId === source.sourceVersionId;
+      input.disabled = working;
+      input.setAttribute('aria-describedby', hint.id);
+      input.addEventListener('change', () => {
+        state.sourceVersionId = source.sourceVersionId;
+        state.problem = null;
+        const confirm = form.querySelector<HTMLButtonElement>('[data-document-action="confirmCreate"]');
+        if (confirm !== null) confirm.disabled = working;
+      });
+      label.append(input, el('span', undefined, documentSourceLine(source, localInstantLabel(source.createdAt))));
+      fieldset.append(label);
+    }
+    form.append(fieldset);
+    if (state.problem !== null) form.append(el('p', 'attention-note', state.problem));
+    const row = el('div', 'button-row compact-actions');
+    const confirm = documentButton('confirmCreate', type, 'primary');
+    confirm.disabled = working || state.sourceVersionId === null;
+    confirm.addEventListener('click', () => void createDocument(type, state));
+    const cancel = documentButton('cancel', type, 'quiet');
+    cancel.addEventListener('click', () => {
+      documentForm = null;
+      drawDocuments(next, { typeId: type.typeId, action: 'create' });
+    });
+    row.append(confirm, cancel);
+    form.append(row);
+    return form;
+  }
+
+  function lockDocuments(): void {
+    documentsBlock?.setAttribute('aria-busy', 'true');
+    for (const control of documentsBlock?.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input') ?? []) control.disabled = true;
+  }
+
+  async function createDocument(type: ProductionDocumentTypeProjection, state: DocumentForm): Promise<void> {
+    if (destroyed || working || documentForm !== state || state.sourceVersionId === null) return;
+    working = true;
+    generation += 1;
+    lockDocuments();
+    options.setStatus(DOCUMENT_STATUS_LINES.creating, 'busy');
+    try {
+      const result = await api.createProductionDocument({ typeId: type.typeId, sourceVersionId: state.sourceVersionId });
+      if (destroyed) return;
+      if (result.bookId !== bookId || result.deliverables.bookId !== bookId || result.document === null) throw new Error(DOCUMENT_STATUS_LINES.createFailed);
+      working = false;
+      documentForm = null;
+      projection = result.deliverables;
+      render('keep');
+      options.setStatus(documentCreatedLine(type.label), 'success');
+      await openDocument(result.document, type);
+    } catch (error) {
+      working = false;
+      if (destroyed || projection === null) return;
+      state.problem = options.errorMessage(error, DOCUMENT_STATUS_LINES.createFailed);
+      drawDocuments(projection, { typeId: type.typeId, action: 'confirmCreate' });
+      options.setStatus(state.problem, 'error');
+    }
+  }
+
+  async function decide(type: ProductionDocumentTypeProjection, notForThisBook: boolean): Promise<void> {
+    if (destroyed || working) return;
+    working = true;
+    generation += 1;
+    lockDocuments();
+    options.setStatus(DOCUMENT_STATUS_LINES.deciding, 'busy');
+    try {
+      const result = await api.decideProductionDocumentType({ typeId: type.typeId, notForThisBook });
+      if (destroyed) return;
+      if (result.bookId !== bookId || result.deliverables.bookId !== bookId) throw new Error(DOCUMENT_STATUS_LINES.decideFailed);
+      working = false;
+      if (documentForm?.typeId === type.typeId) documentForm = null;
+      projection = result.deliverables;
+      render('keep');
+      drawDocuments(result.deliverables, { typeId: type.typeId, action: notForThisBook ? 'restore' : 'notForThisBook' });
+      options.setStatus(notForThisBook ? DOCUMENT_STATUS_LINES.notForThisBook : DOCUMENT_STATUS_LINES.restored, 'success');
+    } catch (error) {
+      working = false;
+      if (destroyed || projection === null) return;
+      drawDocuments(projection, 'keep');
+      options.setStatus(options.errorMessage(error, DOCUMENT_STATUS_LINES.decideFailed), 'error');
+    }
+  }
+
+  async function openDocument(documentNow: ProductionDocumentProjection, type: { typeId: string; label: string }): Promise<void> {
+    if (destroyed) return;
+    options.setStatus(DOCUMENT_STATUS_LINES.opening, 'busy');
+    try {
+      await options.openDocument(documentNow, { typeId: type.typeId, label: type.label });
+    } catch (error) {
+      if (destroyed) return;
+      options.setStatus(options.errorMessage(error, DOCUMENT_STATUS_LINES.openFailed), 'error');
     }
   }
 

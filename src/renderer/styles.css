@@ -575,6 +575,29 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .analysis-plan-summary { padding-top: 1rem; border-top: 1px solid #d5dcd9; }
 /* ④ 导出 (Issue #413): the card beside 交付物's 发稿 block, one version at a time, and the export records. */
 .deliverables-export-slot:empty { display: none; }
+/* 交付 · 生产文档 (Issue #415): one card per house type, in a grid that reflows to one column; no card shows progress. */
+.deliverables-documents { margin-top: 1.3rem; padding: 1.15rem 1.25rem; border: 1px solid #c9d6d2; border-radius: 12px; background: #f4f9f7; overflow-wrap: anywhere; }
+.deliverables-documents h3, .deliverables-documents h4 { margin: 0; }
+.deliverables-documents > p { margin: .45rem 0 0; }
+.production-document-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr)); gap: .6rem; margin: .8rem 0 0; padding: 0; list-style: none; }
+.production-document-card { min-width: 0; padding: .7rem .8rem; border: 1px solid #d5dcd9; border-radius: 9px; background: #fffdf8; }
+.production-document-card p { margin: .35rem 0 0; }
+.production-document-card[data-document-state="not-for-this-book"] { background: #f1f1ec; }
+.production-document-card .button-row { margin-top: .55rem; }
+.document-not-for-this-book { font-weight: 800; }
+.document-create { margin-top: .6rem; }
+.document-create fieldset { min-width: 0; margin: 0; padding: .55rem .6rem; border: 1px solid #d5dcd9; border-radius: 8px; }
+.document-create .choice-row { display: flex; gap: .45rem; align-items: flex-start; margin-top: .35rem; }
+/* A Production Document's surface (DELIV-002): the 工作流程 column stands beside the text on a wide window and after it
+   on a narrow one, so a 200% zoom never scrolls sideways. */
+.editor-workspace.document-workspace { grid-template-columns: minmax(0, 1fr) minmax(14rem, 18rem) 4.75rem; }
+.document-lens { min-width: 0; padding: 1rem; overflow-y: auto; border-left: 1px solid #ddd8cc; background: #fbf9f3; overflow-wrap: anywhere; }
+.document-lens h3 { margin: .8rem 0 0; font-size: 1rem; }
+.document-lens > .section-label { margin: 0; }
+.document-lens p { margin: .4rem 0 0; }
+.document-version-list { display: grid; gap: .35rem; margin: .5rem 0 0; padding-left: 1.2rem; }
+.document-version-list > li { min-width: 0; }
+.document-version-current { margin-left: .4rem; padding: 0 .35rem; border: 1px solid #416458; border-radius: 6px; font-size: .82rem; }
 .export-open-row { margin-top: .6rem; }
 .manuscript-export { margin-top: 1rem; padding: 1rem 1.15rem; border: 1px solid #c9d6d2; border-radius: 12px; background: #fffdf8; overflow-wrap: anywhere; }
 .manuscript-export h4, .manuscript-export h5 { margin: 0; }
@@ -906,6 +929,8 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .app-header { align-items: flex-start; padding: 1rem; }
   .editor-toolbar { align-items: flex-start; flex-direction: column; }
   .editor-workspace { grid-template-columns: minmax(0, 1fr) 3.4rem; }
+  .editor-workspace.document-workspace { grid-template-columns: minmax(0, 1fr) 3.4rem; }
+  .document-lens { grid-column: 1; grid-row: 2; border-left: 0; border-top: 1px solid #ddd8cc; }
   .manuscript-navigator { right: 3.4rem; width: min(21rem, calc(100% - 3.4rem)); }
   /* The narrow column keeps all three lanes inside itself: smaller markers, closer lanes. */
   .rail-marker { width: 6px; height: 6px; margin-top: -3px; }
@@ -969,6 +994,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .deliverables-publication, .milestone-list > li, .publication-versions > li, .publication-change-notice, .publication-actuals-prompt,
   .publication-designate, .publication-milestone-option, .publication-designate-summary, .publication-statement,
   .book-deliverables-summary, .milestone-section .milestone-purpose-option,
+  .deliverables-documents, .production-document-card, .document-create fieldset, .document-lens, .document-version-current,
   .task-drawer, .task-drawer-head, .task-drawer-footer, .task-drawer-modes, .task-plan-goal, .task-plan-compact,
   .task-plan-chip, .task-plan-boundary, .task-plan-lock, .task-plan-section-number, .task-plan-edit-remove, .task-plan-edit-tag,
   .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal,

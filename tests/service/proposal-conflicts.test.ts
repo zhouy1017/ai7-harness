@@ -4,7 +4,7 @@ import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { KEEP_CURRENT_REASON, PROPOSAL_CONFLICT_SCHEMA_SQL } from '../../src/service/proposal-conflicts.js';
-import { CLARIFICATION_SCHEMA_VERSION, REIMPORT_GROUP_SCHEMA_VERSION, PUBLICATION_VERSION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { CLARIFICATION_SCHEMA_VERSION, PRODUCTION_DOCUMENT_SCHEMA_VERSION, PUBLICATION_VERSION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { conflictUnits, initialResolutions, type ConflictUnitResolution } from '../../src/shared/conflict-units.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type { ManuscriptWindowProjection, ProposalConflictProjection } from '../../src/shared/protocol.js';
@@ -21,6 +21,7 @@ import { DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER } from '../support/default-
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js';
 import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
+import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
 import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
 
 // Service-integration suite (L2) for 稿件冲突 of a single 修改建议 (Issue #57, plan slice S22; ADR 0085). It
@@ -639,7 +640,7 @@ describe('稿件冲突 of a single 修改建议 (ADR 0085)', () => {
     // Plant revision 25: its relations are exactly the current ones less the three revision 26 adds.
     const truthBefore = withDatabase(false, (database) => {
       database.exec(`BEGIN IMMEDIATE;
-        ${[...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER].map((relation) => `DROP TABLE ${relation};`).join('\n        ')}
+        ${[...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER].map((relation) => `DROP TABLE ${relation};`).join('\n        ')}
         ${PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join('\n        ')}
         PRAGMA user_version = ${PUBLICATION_VERSION_SCHEMA_VERSION};
         COMMIT;`);
@@ -653,10 +654,10 @@ describe('稿件冲突 of a single 修改建议 (ADR 0085)', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(REIMPORT_GROUP_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(PRODUCTION_DOCUMENT_SCHEMA_VERSION);
       const truthAfter = relationTruth(database);
-      expect([...truthAfter.keys()]).toEqual([...truthBefore.keys(), ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER].sort());
-      for (const relation of [...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER]) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);
+      expect([...truthAfter.keys()]).toEqual([...truthBefore.keys(), ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER].sort());
+      for (const relation of [...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER]) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);
       expect([...truthBefore].filter(([name, before]) => truthAfter.get(name)!.sql !== before.sql).map(([name]) => name)).toEqual([]);
       expect([...truthBefore].filter(([name, before]) => truthAfter.get(name)!.content !== before.content).map(([name]) => name)).toEqual(['service_lifetimes']);
       expect(database.prepare(`SELECT count(*) total FROM sqlite_schema WHERE type = 'trigger' AND tbl_name IN (${LEDGER.map((table) => `'${table}'`).join(', ')})`).get())
