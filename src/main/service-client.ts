@@ -99,7 +99,7 @@ function serviceEnvironment(
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 57 &&
+    value.protocolVersion === 58 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&

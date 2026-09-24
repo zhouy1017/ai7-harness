@@ -12,8 +12,11 @@ export interface ReconnectPreflightDependencies {
   stillWaiting(runRecordId: string): boolean;
   /** The labels of the material inputs of the Run's bound plan that moved; none while the plan stands. */
   drift(runRecordId: string): ReadonlyArray<string>;
-  /** Block the Run with its reasons; it never dispatches. */
-  block(runRecordId: string, reasons: ReadonlyArray<string>): void;
+  /**
+   * Block the Run with its reasons and why (Issue #536): `plan-moved` when its bound plan moved, `launch` when this
+   * launch cannot admit it. It never dispatches.
+   */
+  block(runRecordId: string, reasons: ReadonlyArray<string>, cause: WaitingRunBlockCause): void;
   /** Whether this launch's baseline route reaches its model over the network. */
   reachesNetwork: boolean;
   /** This device's reading now: local, never a probe. */
@@ -29,9 +32,15 @@ export interface ReconnectPreflightDependencies {
 /** Admission refusals that are only a matter of time: the slot is held, or the service is stopping. */
 const RETRY_LATER = new Set(['EXECUTION_BUSY', 'EXECUTION_STOPPING']);
 
+/** Why Reconnect Preflight blocked a waiting Run (Issue #536): its bound plan moved, or this launch cannot admit it. */
+export type WaitingRunBlockCause = 'plan-moved' | 'launch';
+
+/** 需要重新确认计划 (OFF-008): the state of a waiting Run whose plan moved before it could start. */
+export const PLAN_MOVED_LABEL = '需要重新确认计划' as const;
+
 /** 需要重新确认计划 (OFF-008), with the material inputs that moved named in the reason. */
 export function planDriftReason(changed: ReadonlyArray<string>): string {
-  return `需要重新确认计划：${changed.join('、')}已经变化，这次授权不再对应当前的情况。`;
+  return `${PLAN_MOVED_LABEL}：${changed.join('、')}已经变化，这次授权不再对应当前的情况。`;
 }
 
 /**
@@ -64,7 +73,7 @@ export async function reconnectPreflight(deps: ReconnectPreflightDependencies): 
     }
     const changed = deps.drift(run.runRecordId);
     if (changed.length > 0) {
-      deps.block(run.runRecordId, [planDriftReason(changed)]);
+      deps.block(run.runRecordId, [planDriftReason(changed)], 'plan-moved');
       outcome.blocked += 1;
       continue;
     }
@@ -81,7 +90,7 @@ export async function reconnectPreflight(deps: ReconnectPreflightDependencies): 
         outcome.waiting += 1;
         continue;
       }
-      deps.block(run.runRecordId, [error instanceof Error && error.message.length > 0 ? error.message : '运行未能进入调度。']);
+      deps.block(run.runRecordId, [error instanceof Error && error.message.length > 0 ? error.message : '运行未能进入调度。'], 'launch');
       outcome.blocked += 1;
     }
   }

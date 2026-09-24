@@ -121,6 +121,8 @@ export interface AnalysisTaskAttentionReading {
     readonly budgetReached?: boolean;
     /** A resumable Run the provider's account limit stopped (Issue #51, S16b): 模型服务账户限额. */
     readonly accountLimited?: boolean;
+    /** A waiting Run blocked because its plan moved before it could start (Issue #536): 需要重新确认计划. */
+    readonly planMoved?: boolean;
   };
   /** A prepared Task's pending Plan Revision that 重新确认计划 settles; `null` otherwise. */
   readonly planRevision: null | {
@@ -389,6 +391,14 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading, waitingFor: Wai
       }
       return item('exceptions', 'analysis-interrupted', { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
     case 'blocked-before-dispatch':
+      // 需要重新确认计划 (Issue #536; OFF-008): the plan a waiting Run's authorization bound moved before it could start. It
+      // is the editor's plan decision, as a Plan Revision is, and the plan's 重新准备 is the way on.
+      if (run.planMoved === true) {
+        return item('decisions', 'analysis-plan-moved', {
+          itemId, blocked: true, at: run.stateAt, book, object, nextStep: 'reprepare',
+          target: { kind: 'analysis-plan', bookId: reading.bookId, taskIntentId: reading.taskIntentId }, technical,
+        });
+      }
       return item('exceptions', 'analysis-blocked', { itemId, blocked: true, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
     // 运行中与已暂停 (Issue #422, S76b): a paused Run, and one AI7 stopped under, wait for the editor's 续行 or 取消任务.
     case 'paused':

@@ -27,7 +27,7 @@ import {
 } from '../../src/renderer/global-attention-labels.js';
 import { localInstantLabel } from '../../src/renderer/plan-preview-labels.js';
 import { REVIEW_ACTION_LABELS } from '../../src/renderer/review-labels.js';
-import { TASK_BAR_ADJUST_BUDGET_REDO, TASK_BAR_RECONFIRM, TASK_BAR_RESOLVE_MODEL_SERVICE, TASK_BAR_RUN_LINKS } from '../../src/renderer/task-drawer-labels.js';
+import { TASK_BAR_ADJUST_BUDGET_REDO, TASK_BAR_RECONFIRM, TASK_BAR_REPREPARE, TASK_BAR_RESOLVE_MODEL_SERVICE, TASK_BAR_RUN_LINKS } from '../../src/renderer/task-drawer-labels.js';
 import { RESOLVE_CONFLICT_LABEL } from '../../src/renderer/editorial-mark-labels.js';
 import { PROPOSAL_CONFLICT_CLASSIFICATION } from '../../src/renderer/proposal-conflict-labels.js';
 import { REVIEW_RUN_CATEGORY_STATE_LABELS } from '../../src/service/review/review-run-state.js';
@@ -53,7 +53,7 @@ const STATES: ReadonlyArray<GlobalAttentionStateKey> = [
   'import-outcome-uncertain', 'import-cleanup-pending', 'recovery-pending', 'recovery-deferred',
   'manuscript-conflict', 'manuscript-conflict-deferred', 'analysis-failed',
   'analysis-interrupted', 'analysis-budget-reached', 'analysis-account-limit', 'analysis-blocked', 'analysis-orphaned', 'review-failed', 'review-stopped',
-  'analysis-plan-revision', 'analysis-clarification', 'analysis-queued', 'analysis-running', 'analysis-waiting-network', 'analysis-waiting-connection',
+  'analysis-plan-revision', 'analysis-plan-moved', 'analysis-clarification', 'analysis-queued', 'analysis-running', 'analysis-waiting-network', 'analysis-waiting-connection',
   'analysis-waiting-slot', 'analysis-cancelling', 'analysis-pausing', 'analysis-paused', 'analysis-resumable',
   'review-running', 'review-continuable',
   'analysis-completed', 'analysis-completed-with-gaps', 'review-completed',
@@ -154,6 +154,7 @@ describe('each item', () => {
       'review-failed': '运行失败',
       'review-stopped': '中途停止',
       'analysis-plan-revision': '计划修订',
+      'analysis-plan-moved': '需要重新确认计划',
       'analysis-clarification': '等你回答',
       'analysis-queued': '正在排队',
       'analysis-running': '运行中',
@@ -200,6 +201,7 @@ describe('each item', () => {
       'answer-clarification': '回答问题',
       'adjust-budget-redo': '调整预算并重做',
       'resolve-model-service': '处理模型服务',
+      reprepare: '重新准备',
     });
     // The drawer's own words for the way on from a Run the ceiling stopped (Issue #51, S16a).
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['adjust-budget-redo']).toBe(TASK_BAR_ADJUST_BUDGET_REDO);
@@ -207,6 +209,10 @@ describe('each item', () => {
     // A Provider Account Limit's remediation route (Issue #51, S16b), the drawer's own words for it.
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['resolve-model-service']).toBe(TASK_BAR_RESOLVE_MODEL_SERVICE);
     expect(GLOBAL_ATTENTION_STATE_PILLS['analysis-account-limit'].shape).not.toBe(GLOBAL_ATTENTION_STATE_PILLS['analysis-resumable'].shape);
+    // A waiting Run whose plan moved (Issue #536; OFF-008): the drawer's own words and pill, never 派发前已阻止's.
+    expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS.reprepare).toBe(TASK_BAR_REPREPARE);
+    expect(GLOBAL_ATTENTION_STATE_PILLS['analysis-plan-moved']).toEqual(TASK_PLAN_STATE_PILLS['plan-moved']);
+    expect(GLOBAL_ATTENTION_STATE_PILLS['analysis-plan-moved']).not.toEqual(GLOBAL_ATTENTION_STATE_PILLS['analysis-blocked']);
     // Pinned to the words the record's own surface uses there.
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['resolve-conflict']).toBe(RESOLVE_CONFLICT_LABEL);
     expect(GLOBAL_ATTENTION_STATE_LABELS['manuscript-conflict']).toBe(PROPOSAL_CONFLICT_CLASSIFICATION);
@@ -256,6 +262,7 @@ describe('each item', () => {
       'review-failed': globalAttentionReason(item('review-failed', { facts: { progress: null, revisionOrdinal: null, categories: categories([['错别字与规范用语', 'failed', null], ['体例与格式', 'refused', null]]) } })),
       'review-stopped': globalAttentionReason(item('review-stopped', { facts: { progress: null, revisionOrdinal: null, categories: categories([['事实核查', 'interrupted', null]]) } })),
       'analysis-plan-revision': globalAttentionReason(item('analysis-plan-revision')),
+      'analysis-plan-moved': globalAttentionReason(item('analysis-plan-moved')),
       'analysis-clarification': globalAttentionReason(item('analysis-clarification', { blocked: true })),
       'analysis-queued': globalAttentionReason(item('analysis-queued')),
       'analysis-running': globalAttentionReason(item('analysis-running', { facts: { progress: { stage: 'units', unitsSettled: 3, unitsTotal: 8 }, categories: [], revisionOrdinal: null } })),
@@ -288,6 +295,8 @@ describe('each item', () => {
       'review-failed': '「错别字与规范用语」运行失败；「体例与格式」未能开始',
       'review-stopped': '「事实核查」已中断',
       'analysis-plan-revision': '计划冻结之后，它的关键内容已经变化；原计划不能再开始。',
+      // Issue #536 (OFF-008): a waiting Run whose plan moved never starts; the plan's 重新准备 is the way on.
+      'analysis-plan-moved': '它等待联网时，计划依据的内容已经变化；这次授权不再对应当前的情况，它不会开始。',
       // Issue #422 (S76d; CLAR-004): the Task waits for the answer; a question asked while the Run reads on says so.
       'analysis-clarification': '任务等待你的说明：它想知道要不要把一个阅读范围安全地再试一次。',
       'analysis-queued': '已进入 AI7 调度器（单槽位）。',
