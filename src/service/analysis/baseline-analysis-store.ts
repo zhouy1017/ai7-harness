@@ -2048,9 +2048,9 @@ export class BaselineAnalysisStore {
     // prepared one is revised in place (Issue #48); an interrupted preparation is resumed only for the
     // same request; anything else is a new Task Intent.
     // A prepared Task is the same Task only while the text its Task Input checkpoint pinned is still the working text.
-    // After an edit the next preparation takes a new checkpoint as a new Task, so no start — a quick start above all,
-    // whose plan the editor never saw — reads text older than the editor's (TASK-024). 重新确认计划 revises the plan in
-    // place, whatever moved.
+    // After an edit the next preparation takes a new checkpoint as a new Task, so a quick start — whose plan the editor
+    // never saw — never reads text older than the editor's (TASK-024). 开始任务 in the drawer still starts the plan the
+    // editor is reading, at the Task Input revision that plan names; 重新确认计划 revises the plan in place, whatever moved.
     const checkpointCurrent = existing.checkpoint === null || this.#checkpointIsCurrent(existing.checkpoint, input.bookId);
     const sameTask = latestIntent !== null && existing.run === null && latestIntent.mode === mode &&
       latestIntent.predecessorRevisionId === (latest?.revisionId ?? null) && (input.reconfirm || checkpointCurrent);
