@@ -585,9 +585,11 @@ export function followReimportedMarks(db: DatabaseSync, branchId: string, rows: 
   const state = db.prepare('SELECT journal_sequence FROM branch_working_state WHERE branch_id = ?').get(branchId) as SqlRow | undefined;
   requireMark(state !== undefined, 'MANUSCRIPT_NOT_FOUND', '稿件工作状态不存在。');
   const journalSequence = integer(state.journal_sequence);
+  // A mark an earlier reimport set aside stays set aside: it is neither followed nor listed again.
   const marksOn = db.prepare(
-    `SELECT mark_id, kind, pinned_text, from_grapheme, to_grapheme, anchor_state
-     FROM editorial_marks WHERE branch_id = ? AND block_id = ? AND status IN ${LIVE_STATUSES} ORDER BY created_at, mark_id`,
+    `SELECT em.mark_id, em.kind, em.pinned_text, em.from_grapheme, em.to_grapheme, em.anchor_state
+     FROM editorial_marks em WHERE em.branch_id = ? AND em.block_id = ? AND em.status IN ${LIVE_STATUSES} AND NOT ${setAsideByReimport(db)}
+     ORDER BY em.created_at, em.mark_id`,
   );
   const blockText = db.prepare('SELECT text FROM working_blocks WHERE branch_id = ? AND block_id = ?');
   const update = db.prepare(
@@ -629,6 +631,20 @@ export function followReimportedMarks(db: DatabaseSync, branchId: string, rows: 
   return outcomes;
 }
 
+/**
+ * A mark a reimport set aside (Issue #412, S63): detached, with `unfollowed` as its latest reimport outcome. It stays set aside
+ * until the editor re-pins it — the record listed it, and the notice said it was taken off the text and kept — so a later
+ * rewrite of the branch, by another reimport or a recovery, never reads it against the text its block holds, and a later
+ * reimport never lists it again.
+ */
+function setAsideByReimport(db: DatabaseSync): string {
+  const kept = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'manuscript_reimport_mark_outcomes'").get() !== undefined;
+  return kept
+    ? `(em.anchor_state = 'detached' AND IFNULL((SELECT o.outcome FROM manuscript_reimport_mark_outcomes o WHERE o.mark_id = em.mark_id
+         ORDER BY o.recorded_at DESC, o.rowid DESC LIMIT 1), '') = 'unfollowed')`
+    : '0';
+}
+
 export function resolveBranchMarksAfterRewrite(db: DatabaseSync, branchId: string): void {
   if (!marksRelationExists(db)) return;
   const state = db.prepare('SELECT journal_sequence FROM branch_working_state WHERE branch_id = ?').get(branchId) as SqlRow | undefined;
@@ -638,7 +654,7 @@ export function resolveBranchMarksAfterRewrite(db: DatabaseSync, branchId: strin
     `SELECT em.mark_id, em.from_grapheme, em.to_grapheme, em.pinned_text, wb.text block_text
      FROM editorial_marks em
      LEFT JOIN working_blocks wb ON wb.branch_id = em.branch_id AND wb.block_id = em.block_id
-     WHERE em.branch_id = ? AND em.status IN ${LIVE_STATUSES}`,
+     WHERE em.branch_id = ? AND em.status IN ${LIVE_STATUSES} AND NOT ${setAsideByReimport(db)}`,
   ).all(branchId) as SqlRow[];
   const update = db.prepare(
     `UPDATE editorial_marks SET from_grapheme = ?, to_grapheme = ?, anchor_state = ?, followed_journal_sequence = ?

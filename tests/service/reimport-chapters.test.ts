@@ -263,6 +263,18 @@ describe('the chapter-level Reimport Comparison', () => {
       expect(result.receipt.markOutcomes).toMatchObject({ followed: 0, unfollowed: 1 });
       expect(result.receipt.markOutcomes.items.map((item) => item.markId)).toEqual([markId]);
       expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId).anchorState).toBe('detached');
+      // The author's next file changes another paragraph. The mark stays set aside, as the record and the notice said: the
+      // rewrite never reads it against the text its block holds — where its words now stand — and nothing lists it again.
+      const third = await compose('twice-later', [paragraph(span(21, 0, 6)), paragraph(span(21, 0, 6), span(22)), paragraph(span(23))]);
+      let later = await prepareReimport(store, book, third);
+      for (const row of store.getReimportMappingPage(later.draftId, later.draftVersion, null).items) {
+        if (row.verb === null) later = resolve(store, later, row.groupId, row.verbs.includes('rewrite') ? 'rewrite' : row.verbs[0]!);
+      }
+      const again = await commit(store, later);
+      expect(again.resultKind).toBe('changed');
+      expect(again.receipt.markOutcomes).toMatchObject({ followed: 0, unfollowed: 0, items: [] });
+      expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId).anchorState).toBe('detached');
+      expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).marks.map((entry) => entry.markId)).not.toContain(markId);
       store.markCleanShutdown();
     } finally {
       store.close();
