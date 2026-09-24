@@ -243,7 +243,7 @@ interface ManuscriptCheckpointBinding {
 }
 
 // The purposes the bounded manuscript's checkpoint names; this owner persists only its own (Issue #413 adds the export's).
-type CheckpointPurpose = typeof TASK_INPUT_CHECKPOINT_PURPOSE | 'Reimport Safety / 重新导入安全固定点' | 'Export Input / 导出输入';
+type CheckpointPurpose = typeof TASK_INPUT_CHECKPOINT_PURPOSE | 'Reimport Safety / 重新导入安全固定点' | 'Export Input / 导出输入' | 'Document Version / 文档版本';
 
 interface CheckpointOwner {
   createManuscriptCheckpointWork(manuscriptId: string, branchId: string, purpose: typeof TASK_INPUT_CHECKPOINT_PURPOSE):

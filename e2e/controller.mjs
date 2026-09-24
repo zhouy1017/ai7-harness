@@ -824,6 +824,15 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-export-forced-colors',
     'export-pdf',
     'export-markdown',
+    // Issue #415 (S66a): 交付 · 生产文档 — a document made from the Book's source material, edited and versioned on the
+    // manuscript's own surface, and 本书不做.
+    'documents-source-import',
+    'documents-cards',
+    'document-create',
+    'document-edit-and-version',
+    'document-card-after-version',
+    'document-not-for-this-book',
+    'documents-restart',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',
