@@ -940,7 +940,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   async function updatePlan(): Promise<void> {
     const current = plan;
     const asked = request;
-    const planEnvelopeDigest = current?.start.planEnvelopeDigest ?? null;
+    // The edit's own version: 模型未连接 or 离线 withholds 开始任务's digest, and the edit sends nothing.
+    const planEnvelopeDigest = current?.edit.planEnvelopeDigest ?? null;
     if (current === null || current.kind !== 'baseline-analysis' || planEnvelopeDigest === null || !beginWork()) return;
     const removedSteps = current.steps.filter((step) => step.removable && shownRemoved(current, step.id, step.removed)).map((step) => step.id);
     const disallowedAdaptations = current.boundary.adaptable
