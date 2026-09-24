@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 50 as const;
+export const SERVICE_PROTOCOL_VERSION = 51 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -4055,7 +4055,8 @@ export interface InspectTaskPlanInput {
  */
 export type TaskPlanStateKey =
   | 'ready' | 'changed' | 'unconnected' | 'offline' | 'recorded' | 'blocked' | 'waiting' | 'running' | 'settled' | 'stopped'
-  | 'cancelled' | 'cancelling' | 'cancelled-after-start' | 'pausing' | 'paused' | 'resumable' | 'awaiting-clarification' | 'budget-reached';
+  | 'cancelled' | 'cancelling' | 'cancelled-after-start' | 'pausing' | 'paused' | 'resumable' | 'awaiting-clarification' | 'budget-reached'
+  | 'account-limit';
 
 /**
  * A started Run's controls in the drawer's bar and its activity above the plan (Issue #422, plan slice S76a;
@@ -4100,6 +4101,12 @@ export interface TaskPlanRunControlProjection {
    * when that progress no longer reads back — and `null` while it runs.
    */
   continuation: { unitsSettled: number | null; unitsTotal: number } | null;
+  /**
+   * 模型服务账户限额 (Issue #51, S16b; V2-UX-MODEL-018): the provider's account limit stopped the Run — at the reading range it
+   * refused, or `null` for the reduction or the sample after them — with the refusal as AI7 classified it; `续行` goes on
+   * in the same Run once the condition clears. `null` for every other Run.
+   */
+  accountLimit: null | { unitOrdinal: number | null; condition: string };
 }
 
 /**
@@ -4982,6 +4989,7 @@ export type GlobalAttentionStateKey =
   | 'analysis-failed'
   | 'analysis-interrupted'
   | 'analysis-budget-reached'
+  | 'analysis-account-limit'
   | 'analysis-blocked'
   | 'analysis-orphaned'
   | 'review-failed'
@@ -5019,10 +5027,11 @@ export type GlobalAttentionNextStep =
   | 'await-local-check'
   | 'resolve-conflict'
   | 'answer-clarification'
-  | 'adjust-budget-redo';
+  | 'adjust-budget-redo'
+  | 'resolve-model-service';
 export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'view-run', 'view-review', 'reconfirm-plan', 'continue-review', 'return-to-recovery', 'retry-abandon-cleanup', 'await-local-check',
-  'resolve-conflict', 'answer-clarification', 'adjust-budget-redo',
+  'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service',
 ];
 
 /**

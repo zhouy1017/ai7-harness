@@ -194,6 +194,8 @@ const OUTCOME_LABELS = {
 const BUDGET_REACHED_OUTCOME_LABEL = '任务结果：任务运行预算已达上限 · 已保留部分结果' as const;
 /** …and the Run's, where ②A and its card read the Run (RUN-012): a terminal partial outcome, never 已中断. */
 export const BUDGET_REACHED_RUN_LABEL = '任务运行预算已达上限 · 已保留部分结果' as const;
+/** A Run the provider's account limit stopped (Issue #51, S16b; RUN-012): a remediable blocker, never 任务已中断 · 可续行. */
+export const ACCOUNT_LIMIT_RUN_LABEL = '模型服务账户限额' as const;
 
 /** Why an interrupted Run stopped, when a limit stopped it (Issue #51, S16a): the ceiling, what it used, and what it read. */
 export interface RunStop {
@@ -913,7 +915,7 @@ export class BaselineAnalysisStore {
               : state === 'cancelling' ? RUN_STATE_LABELS.cancelling
                 : state === 'pausing' ? RUN_STATE_LABELS.pausing
                   : state === 'paused' ? RUN_STATE_LABELS.paused
-                    : state === 'resumable' ? RUN_STATE_LABELS.resumable
+                    : state === 'resumable' ? (run !== null && this.accountLimitOf(run.runRecordId) !== null ? ACCOUNT_LIMIT_RUN_LABEL : RUN_STATE_LABELS.resumable)
                       : state === 'awaiting-clarification' ? RUN_STATE_LABELS['awaiting-clarification']
               : state === 'admitted' ? '已进入调度'
                 : state === 'executing' ? '正在执行'
@@ -1097,6 +1099,8 @@ export class BaselineAnalysisStore {
             openClarification: this.#openClarificationOf(runRecordId, state),
             // 已停止 · 预算已达上限 (Issue #51, S16a): an interrupted Run whose outcome names the ceiling.
             budgetReached: state === 'interrupted' && this.#runStop(runRecordId) !== null,
+            // 模型服务账户限额 (Issue #51, S16b): a resumable Run the provider's account limit stopped.
+            accountLimited: state === 'resumable' && this.accountLimitOf(runRecordId) !== null,
           },
           planRevision: null,
         });
@@ -1875,7 +1879,8 @@ export class BaselineAnalysisStore {
       runRecordId,
       state: current.state,
       stateLabel: current.state === 'cancelled' && runBegan(transitions) ? RUN_CANCELLED_AFTER_START_LABEL
-        : current.state === 'interrupted' && this.#runStop(runRecordId) !== null ? BUDGET_REACHED_RUN_LABEL : RUN_STATE_LABELS[current.state],
+        : current.state === 'interrupted' && this.#runStop(runRecordId) !== null ? BUDGET_REACHED_RUN_LABEL
+          : current.state === 'resumable' && this.accountLimitOf(runRecordId) !== null ? ACCOUNT_LIMIT_RUN_LABEL : RUN_STATE_LABELS[current.state],
       recordedAt: asString(runRecord.recorded_at),
       transitions,
       adaptations,
@@ -3085,6 +3090,52 @@ export class BaselineAnalysisStore {
       'INSERT INTO analysis_clarification_answers(answer_id, request_id, option_id, answered_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)',
     ).run(answerId, input.requestId, input.optionId, answeredAt, record.json, record.digest);
     return { answerId, runRecordId: run.runRecordId, runState: run.state };
+  }
+
+  /**
+   * The provider-account-limit stop of a resumable Run (Issue #51, S16b): the provider's words and the unit it refused
+   * — `null` for the reduction or a sample — read from the Run's latest state; `null` for every other Run.
+   */
+  accountLimitOf(runRecordId: string): { condition: string; unitOrdinal: number | null } | null {
+    const row = this.#db.prepare('SELECT state, canonical_json FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1')
+      .get(runRecordId) as SqlRow | undefined;
+    if (row === undefined || row.state !== 'resumable') return null;
+    const record = parseCanonicalJson(asString(row.canonical_json));
+    if (!isRecord(record) || record.stopReason !== 'provider-account-limit' || typeof record.condition !== 'string') return null;
+    return { condition: record.condition, unitOrdinal: typeof record.unitOrdinal === 'number' ? record.unitOrdinal : null };
+  }
+
+  /**
+   * The account-limit stop a Run goes on from (Issue #51, S16b): its latest stop, when that was the provider's limit, with
+   * the attempt the provider refused — which was sent — when it refused a unit. `null` when the Run's latest stop was
+   * anything else, or it never stopped.
+   */
+  accountLimitStopOf(runRecordId: string): {
+    condition: string;
+    unitOrdinal: number | null;
+    refusedAttempt: { attempts: number; wallMs: number; usage: { inputTokens: number; outputTokens: number } | null } | null;
+  } | null {
+    const row = this.#db.prepare(
+      "SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? AND state IN ('paused', 'resumable', 'awaiting-clarification') ORDER BY sequence DESC LIMIT 1",
+    ).get(runRecordId) as SqlRow | undefined;
+    if (row === undefined) return null;
+    const record = parseCanonicalJson(asString(row.canonical_json));
+    if (!isRecord(record) || record.stopReason !== 'provider-account-limit' || typeof record.condition !== 'string') return null;
+    const refused = record.refusedAttempt;
+    let refusedAttempt: { attempts: number; wallMs: number; usage: { inputTokens: number; outputTokens: number } | null } | null = null;
+    if (refused !== undefined) {
+      const usage = isRecord(refused) ? refused.usage : undefined;
+      requireAnalysis(isRecord(refused) && Number.isSafeInteger(refused.attempts) && (refused.attempts as number) >= 1 &&
+        typeof refused.wallMs === 'number' && refused.wallMs >= 0 &&
+        (usage === null || (isRecord(usage) && Number.isSafeInteger(usage.inputTokens) && Number.isSafeInteger(usage.outputTokens))),
+      'ANALYSIS_RECORD_INVALID', '运行记录的被拒绝尝试无效。');
+      refusedAttempt = {
+        attempts: refused.attempts as number,
+        wallMs: refused.wallMs as number,
+        usage: usage === null ? null : { inputTokens: (usage as Record<string, number>).inputTokens!, outputTokens: (usage as Record<string, number>).outputTokens! },
+      };
+    }
+    return { condition: record.condition, unitOrdinal: typeof record.unitOrdinal === 'number' ? record.unitOrdinal : null, refusedAttempt };
   }
 
   /** Why a Run's interrupted outcome says it stopped (Issue #51, S16a); `null` for any other Run, or one with no outcome. */

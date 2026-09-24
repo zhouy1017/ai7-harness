@@ -931,13 +931,15 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
     const settled = await runLive(store, bookId, prepared, execution);
 
     // Exactly one transmission: a Provider Account Limit is not retry-safe, so no unit is repeated
-    // and no later unit is dispatched.
+    // and no later unit is dispatched. Under developer-live the limit ends the Run (ADR 0067 §Quota), as it always has; the
+    // resumable stop of S16b is the rule outside it (MODEL-018).
     expect(calls).toHaveLength(1);
     expect(settled.run!.state).toBe('interrupted');
     expect(settled.taskOutcome!.classification).toBe('interrupted');
     expect(settled.taskOutcome!.safeNextAction).toContain('账户限额');
     expect(settled.taskOutcome!.safeNextAction).toContain('不会自动重试');
     expect(settled.taskOutcome!.safeNextAction).not.toContain('--run-budget-ceiling');
+    expect(store.baselineAnalysisLedger.accountLimitOf(settled.run!.runRecordId)).toBeNull();
 
     const lines = await ledgerLines(cacheRoot);
     expect(lines).toHaveLength(1);

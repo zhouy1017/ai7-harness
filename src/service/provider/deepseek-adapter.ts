@@ -479,7 +479,9 @@ function errorTextOf(body: unknown): string {
  * rate limit, exactly as it was.
  */
 export function isProviderAccountLimit(profile: ProviderRouteProfile, status: number, body: unknown): boolean {
-  const limitText = /insufficient[_ ]?(balance|quota)|quota|balance|usage limit|credit/u.test(errorTextOf(body));
+  // The words of a limit count only in a refusal of the request (4xx): a server error that mentions a quota, a balance or a
+  // credit is the server's failure, never the account's limit.
+  const limitText = status >= 400 && status < 500 && /insufficient[_ ]?(balance|quota)|quota|balance|usage limit|credit/u.test(errorTextOf(body));
   if (status === 402 || limitText) return true;
   return profile.limitPolicy === 'account-limit-terminal' && status === 429;
 }

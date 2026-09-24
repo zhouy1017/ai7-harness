@@ -65,6 +65,10 @@ export const NOTHING_SENT = '本环境不连接模型服务，不会发送任何
 export const BUDGET_NOT_SET = '未设置任务预算上限';
 /** V2-UX-MODEL-014: an unknown Provider Account Limit is said to be unknown, never given a value. */
 export const ACCOUNT_LIMIT_UNKNOWN = '未知 · 提供方未返回';
+/** ⑤'s 账户限额 once the provider's limit stopped the Run (Issue #51, S16b; MODEL-018): what the provider said. */
+export function accountLimitReached(condition: string): string {
+  return `已达到 · ${condition}`;
+}
 /** No Run has measured a duration this estimate could stand on. */
 export const DURATION_UNKNOWN = '暂无可靠估计';
 const NO_USAGE = '不发送，没有模型用量';
@@ -88,6 +92,8 @@ const NOT_EDITABLE: TaskPlanProjection['edit'] = { editable: false, reason: null
 
 /** 已停止 · 预算已达上限 (Issue #51, S16a; editor-surfaces §6 状态): the pill of a Run the Run Budget Ceiling stopped. */
 export const BUDGET_REACHED_STATE = { key: 'budget-reached', label: '已停止 · 预算已达上限' } as const;
+/** 模型服务账户限额 (Issue #51, S16b; interaction-spec §702, §1566): the pill of a Run the provider's account limit stopped. */
+export const ACCOUNT_LIMIT_STATE = { key: 'account-limit', label: '模型服务账户限额' } as const;
 /** §10's editorial 不会做: the technical half reads in 查看技术详情. */
 const EDITORIAL_NOT_DO = ['不会直接修改稿件', '不导出或发布', '不存里程碑版本'] as const;
 
@@ -464,7 +470,7 @@ const BASELINE_GOAL_SENTENCES: Readonly<Record<string, string>> = {
   'reanalyze-book': '重新分析全书，不沿用以前的结果',
 };
 
-function baselineState(projection: BaselineAnalysisProjection): TaskPlanProjection['state'] {
+function baselineState(projection: BaselineAnalysisProjection, stopped?: BaselineStoppedRunFacts): TaskPlanProjection['state'] {
   switch (projection.state) {
     case 'prepared':
       return projection.planRevision !== null || (projection.update !== null && !projection.update.predecessorCurrent)
@@ -490,7 +496,8 @@ function baselineState(projection: BaselineAnalysisProjection): TaskPlanProjecti
     case 'paused':
       return { key: 'paused', label: '已暂停' };
     case 'resumable':
-      return { key: 'resumable', label: '任务已中断 · 可续行' };
+      // 模型服务账户限额 (Issue #51, S16b; RUN-012): its own words, never 任务已中断 · 可续行's.
+      return stopped?.accountLimit != null ? { ...ACCOUNT_LIMIT_STATE } : { key: 'resumable', label: '任务已中断 · 可续行' };
     // 任务等待你的说明 (Issue #422, S76d; CLAR-004): every unit the Run could read is read; it waits for the answer.
     case 'awaiting-clarification':
       return { key: 'awaiting-clarification', label: '任务等待你的说明' };
@@ -582,7 +589,7 @@ export function baselineAnalysisPlan(input: {
     bookId: projection.bookId,
     kind: 'baseline-analysis',
     ref: intent.taskIntentId,
-    state: baselineState(projection),
+    state: baselineState(projection, input.stopped),
     planVersion: version.ordinal,
     goal: {
       sentence: intent.redoOf === null ? BASELINE_GOAL_SENTENCES[intent.mode] ?? intent.modeLabel : redoGoalSentence(counts),
@@ -629,7 +636,7 @@ export function baselineAnalysisPlan(input: {
       usageIsCeiling: ceiling !== 'unset',
       duration: DURATION_UNKNOWN,
       budgetCeiling: budgetCeilingLabel(ceiling),
-      accountLimit: ACCOUNT_LIMIT_UNKNOWN,
+      accountLimit: input.stopped?.accountLimit != null ? accountLimitReached(input.stopped.accountLimit.condition) : ACCOUNT_LIMIT_UNKNOWN,
     },
     outcomes: [
       update === null || update.predecessor === null
@@ -712,6 +719,8 @@ export function baselineAnalysisPlan(input: {
       ...(projection.run === null ? [] : [
         { key: 'run-record', label: '运行记录', value: `${projection.run.runRecordId} · ${projection.run.state} · ${projection.run.recordedAt}` },
       ]),
+      // 模型服务账户限额 (Issue #51, S16b): the refusal as AI7 classified it, one step below the bar's words.
+      ...(input.stopped?.accountLimit == null ? [] : [{ key: 'account-limit', label: '模型服务账户限额', value: input.stopped.accountLimit.condition }]),
     ],
     start: baselineStart(projection, envelope.digest),
     defaultRule: input.defaultRule ?? noDefaultRule(BASELINE_NO_RULE),
@@ -992,6 +1001,9 @@ function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: Ba
     executingSince: run.transitions.find((transition) => transition.state === 'executing')?.recordedAt ?? null,
     continuation,
     update,
+    accountLimit: run.state === 'resumable' && stopped?.accountLimit != null
+      ? { unitOrdinal: stopped.accountLimit.unitOrdinal, condition: stopped.accountLimit.condition }
+      : null,
   };
 }
 
@@ -1087,6 +1099,8 @@ export interface BaselineStoppedRunFacts {
    * with it, or form what it kept into its partial revision when it is cancelled. Read by the service.
    */
   readonly bindingHolds: boolean;
+  /** The provider's account limit stopped the Run (Issue #51, S16b), in the provider's words; absent or `null` otherwise. */
+  readonly accountLimit?: { readonly condition: string; readonly unitOrdinal: number | null } | null;
 }
 
 /** 续行's own words when the service cannot let the Run go on now (CONT-015): each names what it waits for. */

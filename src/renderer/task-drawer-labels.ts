@@ -90,6 +90,9 @@ export const TASK_PLAN_STATE_PILLS: Readonly<Record<TaskPlanStateKey, ReviewPill
   // 已停止 · 预算已达上限 (Issue #51, S16a): the square of a Run that ended, in attention's tone — the editor decides
   // whether to go on — never the blocked square of 已中断.
   'budget-reached': { tone: 'attention', shape: 'square' },
+  // 模型服务账户限额 (Issue #51, S16b): a blocker the model service resolves, in the diamond 模型未连接 has too — never the
+  // ring of 任务已中断 · 可续行, which RUN-012 keeps apart.
+  'account-limit': { tone: 'blocked', shape: 'diamond' },
 };
 
 // ---- the goal block (S72 D5) ------------------------------------------------------------------------------
@@ -349,6 +352,17 @@ export function taskBarBudgetStopNote(stop: NonNullable<TaskPlanProjection['budg
   return `已读完 ${stop.unitsSettled} / ${stop.unitsTotal} 个阅读范围，结果都已保留；这次运行用了 ${groupedCount(stop.usedTokens)} tokens，达到了预算上限 ${groupedCount(stop.maxTotalTokens)} tokens`;
 }
 
+/**
+ * 模型服务账户限额 (Issue #51, S16b; interaction-spec §702, §1566): the way to the model service, and what 续行 does once
+ * the provider-side condition clears — never 任务已中断 · 可续行's words.
+ */
+export const TASK_BAR_RESOLVE_MODEL_SERVICE = '处理模型服务';
+export function taskBarAccountLimitNote(unitOrdinal: number | null, unitsSettled: number, unitsTotal: number): string {
+  return unitOrdinal === null
+    ? `模型服务按账户限额拒绝了之后的归纳或抽样。全部 ${unitsTotal} 个阅读范围都已读完，结果都已保存；处理好模型服务、限额解除后点「续行」接着做`
+    : `模型服务按账户限额拒绝了第 ${unitOrdinal} 个阅读范围。已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存；处理好模型服务、限额解除后点「续行」从第 ${unitOrdinal} 个接着读`;
+}
+
 /** A stopped Run's continuation point, as the bar states it beside 续行; `null` when its kept progress no longer reads back. */
 export function taskBarContinuationNote(unitsSettled: number | null, unitsTotal: number): string {
   if (unitsSettled === null) return '已保存的阅读进度无法核对，这次运行不能续行；可以取消它，再重新开始';
@@ -559,6 +573,27 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
             : taskBarAwaitingAnswerNote(continuation.unitsSettled, continuation.unitsTotal, asked),
           status: asked === 0 ? plan.state.label : TASK_BAR_AWAITING_ANSWER,
           actions: [
+            { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
+            { name: 'redo', label: TASK_BAR_REDO, tone: control.redo.reason === null ? 'secondary' : 'quiet', disabledReason: control.redo.reason },
+            runLink,
+          ],
+        };
+      }
+      // 模型服务账户限额 (Issue #51, S16b; MODEL-018): 处理模型服务 and 续行 once the condition clears, 取消任务, 改计划重做.
+      if (control.resume !== null && control.accountLimit !== null) {
+        const continuation = control.continuation;
+        return {
+          readiness,
+          summary,
+          statement: null,
+          // A kept progress that no longer reads back is never stated as a count.
+          note: continuation === null || continuation.unitsSettled === null
+            ? null
+            : taskBarAccountLimitNote(control.accountLimit.unitOrdinal, continuation.unitsSettled, continuation.unitsTotal),
+          status: plan.state.label,
+          actions: [
+            { name: 'connect', label: TASK_BAR_RESOLVE_MODEL_SERVICE, tone: 'secondary', disabledReason: null },
+            { name: 'resume', label: TASK_BAR_RESUME, tone: 'primary', disabledReason: control.resume.reason },
             { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
             { name: 'redo', label: TASK_BAR_REDO, tone: control.redo.reason === null ? 'secondary' : 'quiet', disabledReason: control.redo.reason },
             runLink,
