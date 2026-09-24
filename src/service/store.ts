@@ -3,7 +3,7 @@ import { closeSync, constants, createReadStream, fstatSync, lstatSync, openSync,
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { J03_TASK_GOAL, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
+import { J03_TASK_GOAL, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
   InspectTaskPlanInput,
   TaskPlanProjection,
@@ -25,6 +25,10 @@ import type {
   ResolveProposalConflictInput,
   SaveProposalConflictDraftInput,
   DesignatePublicationVersionInput,
+  CreateProductionDocumentInput,
+  DecideProductionDocumentTypeInput,
+  ProductionDocumentResultProjection,
+  SaveProductionDocumentVersionInput,
   MilestonePurposeKind,
   PublicationDesignationProjection,
   BookCreationCommitProjection,
@@ -248,6 +252,9 @@ import {
 import { initializeRunCheckpointSchema } from './analysis/run-checkpoints.js';
 import { initializeClarificationSchema } from './analysis/clarifications.js';
 import { initializeReimportGroupSchema } from './reimport-group-ledger.js';
+import { initializeProductionDocumentSchema } from './production-document-ledger.js';
+import { PRODUCTION_DOCUMENTS_NEED_MANUSCRIPT, ProductionDocumentError, ProductionDocuments } from './production-documents.js';
+import { productionDocumentType } from './production-document-types.js';
 import { REIMPORT_GROUP_VERBS, groupReimportMappings, reimportGroupResolutions, reimportGroupVerbs } from './reimport-groups.js';
 import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
 import { reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './review/category-configuration.js';
@@ -317,6 +324,7 @@ import {
   PLAN_EDIT_SCHEMA_VERSION,
   CLARIFICATION_SCHEMA_VERSION,
   REIMPORT_GROUP_SCHEMA_VERSION,
+  PRODUCTION_DOCUMENT_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1529,7 +1537,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === RUN_CONTINUATION_SCHEMA_VERSION ||
       currentVersion === PLAN_EDIT_SCHEMA_VERSION ||
       currentVersion === CLARIFICATION_SCHEMA_VERSION ||
-      currentVersion === REIMPORT_GROUP_SCHEMA_VERSION,
+      currentVersion === REIMPORT_GROUP_SCHEMA_VERSION ||
+      currentVersion === PRODUCTION_DOCUMENT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1561,7 +1570,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === RUN_CONTINUATION_SCHEMA_VERSION ||
       currentVersion === PLAN_EDIT_SCHEMA_VERSION ||
       currentVersion === CLARIFICATION_SCHEMA_VERSION ||
-      currentVersion === REIMPORT_GROUP_SCHEMA_VERSION
+      currentVersion === REIMPORT_GROUP_SCHEMA_VERSION ||
+      currentVersion === PRODUCTION_DOCUMENT_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1907,7 +1917,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
       version === PLAN_EDIT_SCHEMA_VERSION ||
       version === CLARIFICATION_SCHEMA_VERSION ||
-      version === REIMPORT_GROUP_SCHEMA_VERSION,
+      version === REIMPORT_GROUP_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1928,7 +1939,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
       version === PLAN_EDIT_SCHEMA_VERSION ||
       version === CLARIFICATION_SCHEMA_VERSION ||
-      version === REIMPORT_GROUP_SCHEMA_VERSION) return;
+      version === REIMPORT_GROUP_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2041,7 +2053,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
       version === PLAN_EDIT_SCHEMA_VERSION ||
       version === CLARIFICATION_SCHEMA_VERSION ||
-      version === REIMPORT_GROUP_SCHEMA_VERSION,
+      version === REIMPORT_GROUP_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2061,7 +2074,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
       version === PLAN_EDIT_SCHEMA_VERSION ||
       version === CLARIFICATION_SCHEMA_VERSION ||
-      version === REIMPORT_GROUP_SCHEMA_VERSION) return;
+      version === REIMPORT_GROUP_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2354,7 +2368,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== REIMPORT_GROUP_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== PRODUCTION_DOCUMENT_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2377,6 +2391,7 @@ function validateModelServiceSchema(
       version >= RUN_CONTINUATION_SCHEMA_VERSION,
       version >= CLARIFICATION_SCHEMA_VERSION,
       version >= REIMPORT_GROUP_SCHEMA_VERSION,
+      version >= PRODUCTION_DOCUMENT_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2424,7 +2439,8 @@ function initializeModelServiceSchema(
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
       version === PLAN_EDIT_SCHEMA_VERSION ||
       version === CLARIFICATION_SCHEMA_VERSION ||
-      version === REIMPORT_GROUP_SCHEMA_VERSION,
+      version === REIMPORT_GROUP_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2444,7 +2460,8 @@ function initializeModelServiceSchema(
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
       version === PLAN_EDIT_SCHEMA_VERSION ||
       version === CLARIFICATION_SCHEMA_VERSION ||
-      version === REIMPORT_GROUP_SCHEMA_VERSION) {
+      version === REIMPORT_GROUP_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3230,6 +3247,7 @@ export class EditorialStore {
   readonly #manuscriptApply: ManuscriptApplyStore;
   readonly #reviewRuns: ReviewRunStore;
   readonly #publicationVersions: PublicationVersionStore;
+  readonly #productionDocuments: ProductionDocuments;
   readonly #manuscriptExport: ManuscriptExportStore;
   readonly #proposalConflicts: ProposalConflictStore;
   /** 默认执行规则 (Issue #421): the rules 快速开始 starts a Task under. */
@@ -3287,8 +3305,14 @@ export class EditorialStore {
       dataRoot,
       checkpointOwner: boundedAuthority,
     });
-    // 交付物 lists a Book's approved exports beside its 发稿 (Issue #413), read from the export ledger.
-    this.#publicationVersions = new PublicationVersionStore(authority, (bookId) => this.#manuscriptExport.records(bookId));
+    // 交付物 lists a Book's approved exports beside its 发稿 (Issue #413), read from the export ledger, and its
+    // Production Documents (Issue #415), read from their ledgers.
+    this.#productionDocuments = new ProductionDocuments(authority);
+    this.#publicationVersions = new PublicationVersionStore(
+      authority,
+      (bookId) => this.#manuscriptExport.records(bookId),
+      (bookId, hasManuscript) => this.#productionDocuments.documents(bookId, hasManuscript),
+    );
     this.#proposalConflicts = new ProposalConflictStore(authority, this.#editorialMarks);
     this.#workflowProfile = workflowProfile;
     this.#lifetimeId = lifetimeId;
@@ -3367,8 +3391,10 @@ export class EditorialStore {
       initializeDefaultExecutionRuleSchema(authority);
       initializeRunCheckpointSchema(authority);
       initializeClarificationSchema(authority);
-      // Revision 36 (Issue #412) adds the chapter-level Reimport Comparison's relations here.
+      // Revision 36 (Issue #412) adds the chapter-level Reimport Comparison's relations here, and revision 37
+      // (Issue #415) rebuilds `manuscripts` for Production Documents beside their ledgers.
       initializeReimportGroupSchema(authority);
+      initializeProductionDocumentSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -4542,7 +4568,7 @@ export class EditorialStore {
        ORDER BY m.created_at, m.manuscript_id`,
     ).all(bookId) as SqlRow[];
     const manuscriptAuthority = one(
-      this.#authority.prepare('SELECT count(*) manuscript_count FROM manuscripts WHERE book_id = ?').all(bookId) as SqlRow[],
+      this.#authority.prepare("SELECT count(*) manuscript_count FROM manuscripts WHERE book_id = ? AND role = 'primary'").all(bookId) as SqlRow[],
       'BOOK_MANUSCRIPT_STATE_INVALID',
       '无法核对图书主稿件关系。',
     );
@@ -4770,7 +4796,7 @@ export class EditorialStore {
     )`;
     const sql = `SELECT occurred_at, kind_rank, stable_id, event_kind FROM (
       SELECT mr.created_at occurred_at, 1 kind_rank, mr.revision_id stable_id, 'revision' event_kind, m.book_id
-      FROM manuscript_revisions mr JOIN manuscripts m ON m.manuscript_id = mr.manuscript_id
+      FROM manuscript_revisions mr JOIN manuscripts m ON m.manuscript_id = mr.manuscript_id AND m.role = 'primary'
       UNION ALL
       SELECT sir.imported_at, 2, sir.source_import_record_id, 'source-import', sir.book_id
       FROM source_import_records sir
@@ -5145,7 +5171,7 @@ export class EditorialStore {
       );
     }
     const sql = `SELECT b.book_id, b.stable_identity, b.title, b.internal_number,
-                        CASE WHEN EXISTS (SELECT 1 FROM manuscripts m WHERE m.book_id = b.book_id)
+                        CASE WHEN EXISTS (SELECT 1 FROM manuscripts m WHERE m.book_id = b.book_id AND m.role = 'primary')
                           THEN 'populated' ELSE 'empty' END manuscript_state
                  FROM books b
                  ${after === null ? '' : 'WHERE b.title COLLATE BINARY > ? COLLATE BINARY OR (b.title = ? COLLATE BINARY AND b.book_id > ?)'}
@@ -9110,8 +9136,10 @@ export class EditorialStore {
   getManuscriptRail(manuscriptId: string, branchId: string): ManuscriptRailProjection {
     const bookId = this.#boundedCall(() => this.#bounded.bookIdOf(manuscriptId, branchId));
     let unread: Array<{ blockIds: ReadonlyArray<string>; reason: string }> | null = null;
+    // The Book's analysis reads its Manuscript: a Production Document's rail has no unread ranges to show (Issue #415).
+    const primary = this.#authority.prepare("SELECT 1 FROM manuscripts WHERE manuscript_id = ? AND role = 'primary'").get(manuscriptId) !== undefined;
     try {
-      const revision = this.#baselineAnalysis.inspect(bookId, undefined, null).resultSetRevision;
+      const revision = primary ? this.#baselineAnalysis.inspect(bookId, undefined, null).resultSetRevision : null;
       if (revision !== null) unread = revision.gaps.map((gap) => ({ blockIds: gap.blockIds, reason: gap.reason }));
     } catch {
       // A Book whose analysis cannot be read has no unread ranges the rail can stand behind.
@@ -9377,6 +9405,201 @@ export class EditorialStore {
    */
   designatePublicationVersion(input: DesignatePublicationVersionInput): PublicationDesignationProjection {
     return this.#publicationCall(() => this.#publicationVersions.designate(input));
+  }
+
+  // ---- ⑥ 交付物 · 生产文档 (Issue #415, plan slice S66) -----------------------------------------------
+
+  /**
+   * 从来源材料创建 (V2-UX-DELIV-001, WORK-013): one Production Document of a house type, made from one of the Book's
+   * source-only materials. The retained file is read again by the current parser — outside any transaction, since it
+   * is a file read — and one transaction writes the document's row in the block store, its branch, its first
+   * revision (which carries the material's Source Version) with every block under a newly minted identity, its
+   * working state and indexes, the document's ledger row and its `版本 1`. The Book's Manuscript and every record of
+   * it are untouched.
+   */
+  async createProductionDocument(input: CreateProductionDocumentInput): Promise<ProductionDocumentResultProjection> {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(input.bookId) && UUID_PATTERN.test(input.sourceVersionId),
+      'PRODUCTION_DOCUMENT_INVALID', '生产文档参数无效。');
+    const type = productionDocumentType(input.typeId);
+    requireStore(type !== undefined, 'PRODUCTION_DOCUMENT_TYPE_INVALID', '这个文档类型不在本社的类型配置中。');
+    const plan = this.#documentCall(() => this.#productionDocumentPlan(input));
+    const object = one(
+      this.#authority.prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?').all(plan.objectDigest) as SqlRow[],
+      'PRODUCTION_DOCUMENT_SOURCE_INVALID', '来源材料的文件对象记录缺失。',
+    );
+    const blocks: ParsedDocxBlock[] = [];
+    let parsed: ParsedDocx;
+    try {
+      parsed = await parseDocx(
+        this.#contentObjectPath(plan.objectDigest, asString(object.relative_key)),
+        plan.displayName,
+        (block) => {
+          requireStore(blocks.length < MAX_PRODUCTION_DOCUMENT_BLOCKS, 'PRODUCTION_DOCUMENT_SOURCE_TOO_LARGE',
+            `一份文档最多从 ${MAX_PRODUCTION_DOCUMENT_BLOCKS.toLocaleString('zh-CN')} 段文字开始。`);
+          blocks.push(block);
+        },
+        { digest: plan.objectDigest, bytes: asNumber(object.byte_length) },
+        { formatIdentified: true },
+      );
+    } catch (error) {
+      if (error instanceof StoreError) throw error;
+      throw new StoreError('PRODUCTION_DOCUMENT_SOURCE_INVALID', '来源材料无法读出可编辑的文字。');
+    }
+    requireStore(blocks.length > 0 && blocks.length === parsed.blockCount, 'PRODUCTION_DOCUMENT_SOURCE_INVALID',
+      '来源材料没有可作为文档的文字。');
+    const now = new Date().toISOString();
+    const documentId = randomUUID();
+    const branchId = randomUUID();
+    const revisionId = randomUUID();
+    const characterCount = blocks.reduce((total, block) => total + block.graphemeLength, 0);
+    const revisionDigest = sha256(canonicalJson({
+      schema: 'ai7.production-document-revision/1',
+      documentId,
+      sourceVersionId: plan.sourceVersionId,
+      parserIdentity: parsed.parserIdentity,
+      contentDigest: parsed.contentDigest,
+      structureDigest: parsed.structureDigest,
+      blockCount: blocks.length,
+      characterCount,
+    }));
+    this.#documentCall(() => this.#transaction(this.#authority, () => {
+      // The checks again, inside the transaction that writes: a second 创建 of the type, or a 本书不做 recorded while
+      // the file was read, refuses this one.
+      this.#productionDocumentPlan(input);
+      this.#authority.prepare("INSERT INTO manuscripts(manuscript_id, book_id, role, created_at) VALUES (?, ?, 'production-document', ?)")
+        .run(documentId, input.bookId, now);
+      this.#authority.prepare('INSERT INTO manuscript_branches(branch_id, manuscript_id, name, created_at) VALUES (?, ?, ?, ?)')
+        .run(branchId, documentId, type.label, now);
+      this.#authority.prepare(
+        `INSERT INTO manuscript_revisions(
+           revision_id, manuscript_id, branch_id, ordinal, revision_label, parent_revision_id,
+           source_version_id, revision_digest, created_at
+         ) VALUES (?, ?, ?, 1, 'r1', NULL, ?, ?, ?)`,
+      ).run(revisionId, documentId, branchId, plan.sourceVersionId, revisionDigest, now);
+      this.#authority.prepare('UPDATE manuscript_branches SET base_revision_id = ? WHERE branch_id = ?').run(revisionId, branchId);
+      const insertBlock = this.#authority.prepare('INSERT INTO manuscript_blocks(block_id, manuscript_id, created_revision_id) VALUES (?, ?, ?)');
+      const insertVersion = this.#authority.prepare(
+        `INSERT INTO manuscript_block_versions(
+           revision_id, block_id, position, kind, level, text, digest, start_offset, grapheme_length
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      const insertWorking = this.#authority.prepare(
+        `INSERT INTO working_blocks(branch_id, block_id, position, kind, level, text, digest, grapheme_length)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      let offset = 0;
+      blocks.forEach((block, index) => {
+        const position = index + 1;
+        // A document's blocks are its own: a material imported for the Manuscript too keeps its identities there.
+        const blockId = `blk_${sha256(`${revisionId}\u0000${position}\u0000${block.digest}`).slice(0, 24)}`;
+        insertBlock.run(blockId, documentId, revisionId);
+        insertVersion.run(revisionId, blockId, position, block.kind, block.level, block.text, block.digest, offset, block.graphemeLength);
+        insertWorking.run(branchId, blockId, position, block.kind, block.level, block.text, block.digest, block.graphemeLength);
+        offset += block.graphemeLength;
+      });
+      this.#authority.prepare(
+        `INSERT INTO branch_working_state(
+           branch_id, manuscript_id, base_revision_id, journal_sequence, working_digest,
+           total_graphemes, history_sequence, last_checkpoint_sequence
+         ) VALUES (?, ?, ?, 0, ?, ?, 0, 0)`,
+      ).run(branchId, documentId, revisionId, revisionDigest, characterCount);
+      requireStore(
+        this.#boundedCall(() => this.#boundedAuthority.initializeImportedBranch(branchId)) === characterCount,
+        'PRODUCTION_DOCUMENT_INVALID', '文档索引无法由来源材料精确建立。',
+      );
+      this.#productionDocuments.record({
+        documentId, bookId: input.bookId, typeId: input.typeId, originSourceVersionId: plan.sourceVersionId,
+        parserIdentity: parsed.parserIdentity, createdAt: now,
+      });
+      this.#productionDocuments.recordVersion(documentId, revisionId, revisionDigest, 'created');
+    }));
+    return this.#productionDocumentResult(input.bookId, input.typeId);
+  }
+
+  /** `本书不做` or `恢复` for one house type of a Book (WORK-013): an appended decision, or no change. */
+  decideProductionDocumentType(input: DecideProductionDocumentTypeInput): ProductionDocumentResultProjection {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(input.bookId), 'PRODUCTION_DOCUMENT_INVALID', '生产文档参数无效。');
+    this.#documentCall(() => this.#transaction(this.#authority, () => {
+      one(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').all(input.bookId) as SqlRow[], 'BOOK_NOT_FOUND', '图书不存在。');
+      this.#productionDocuments.decide(input.bookId, input.typeId, input.notForThisBook);
+    }));
+    return this.#productionDocumentResult(input.bookId, input.typeId);
+  }
+
+  /**
+   * 保存为版本 (DELIV-002): the document's working text becomes its next version, through the block store's own
+   * checkpoint, and the version is recorded in the transaction that makes the revision. A document whose working text
+   * is its latest version already saves nothing and says so.
+   */
+  async saveProductionDocumentVersion(input: SaveProductionDocumentVersionInput): Promise<ProductionDocumentResultProjection> {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(input.bookId) && UUID_PATTERN.test(input.documentId) && UUID_PATTERN.test(input.branchId),
+      'PRODUCTION_DOCUMENT_INVALID', '生产文档参数无效。');
+    const row = this.#documentCall(() => this.#productionDocuments.documentById(input.bookId, input.documentId));
+    requireStore(row !== undefined && row.branchId === input.branchId, 'PRODUCTION_DOCUMENT_NOT_FOUND', '这本书没有这份生产文档。');
+    const owner = this.#boundedAuthority;
+    const work = this.#boundedCall(() => owner.createManuscriptCheckpointWork(input.documentId, input.branchId, 'Document Version / 文档版本'));
+    if (work.workId !== null) {
+      const workId = work.workId;
+      try {
+        for (;;) {
+          const progress = this.#boundedCall(() => owner.advanceManuscriptCheckpointWork(workId));
+          if (progress.done) break;
+          await new Promise<void>((resolveYield) => setImmediate(resolveYield));
+        }
+        this.#boundedCall(() => owner.finalizeManuscriptCheckpointWork(workId, (checkpoint, purpose) => {
+          requireStore(purpose === 'Document Version / 文档版本', 'PRODUCTION_DOCUMENT_INVALID', '文档版本的用途无效。');
+          this.#documentCall(() => this.#productionDocuments.recordVersion(input.documentId, checkpoint.revisionId, checkpoint.revisionDigest, 'saved'));
+        }));
+      } catch (error) {
+        this.#boundedCall(() => owner.cancelManuscriptCheckpointWork(workId));
+        throw error;
+      }
+    }
+    return this.#productionDocumentResult(input.bookId, row.typeId);
+  }
+
+  /** What 从来源材料创建 may do for this input, or the reason it may not: a Manuscript, a free type, a material of the Book's. */
+  #productionDocumentPlan(input: CreateProductionDocumentInput): {
+    sourceVersionId: string;
+    displayName: string;
+    objectDigest: string;
+  } {
+    const primary = this.#authority.prepare("SELECT 1 FROM manuscripts WHERE book_id = ? AND role = 'primary'").get(input.bookId);
+    requireStore(primary !== undefined, 'PRODUCTION_DOCUMENT_NEEDS_MANUSCRIPT', PRODUCTION_DOCUMENTS_NEED_MANUSCRIPT);
+    requireStore(this.#productionDocuments.documentOfType(input.bookId, input.typeId) === undefined,
+      'PRODUCTION_DOCUMENT_EXISTS', '这本书已经有这一类文档。');
+    requireStore(!this.#productionDocuments.notForThisBook(input.bookId, input.typeId),
+      'PRODUCTION_DOCUMENT_NOT_FOR_THIS_BOOK', '这一类文档已标为本书不做；先恢复。');
+    const source = this.#productionDocuments.source(input.bookId, input.sourceVersionId);
+    requireStore(source !== undefined, 'PRODUCTION_DOCUMENT_SOURCE_INVALID', '只能从这本书作为来源材料导入的文件创建文档。');
+    return {
+      sourceVersionId: source.sourceVersionId,
+      displayName: source.displayName,
+      objectDigest: source.workingObjectDigest ?? source.objectDigest,
+    };
+  }
+
+  #productionDocumentResult(bookId: string, typeId: string): ProductionDocumentResultProjection {
+    const deliverables = this.inspectDeliverables(bookId);
+    const card = deliverables.documents.types.find((type) => type.typeId === typeId);
+    return { bookId, deliverables, typeId, document: card?.document ?? null };
+  }
+
+  #documentCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof ProductionDocumentError) throw new StoreError(error.code, error.message);
+      if (error instanceof AggregateError) {
+        this.#poisoned = true;
+        throw new StoreFatalError(error);
+      }
+      throw error;
+    }
   }
 
   // ---- ④ 导出 · DOCX (Issue #413, plan slice S64) ------------------------------------------------------

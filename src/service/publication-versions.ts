@@ -250,11 +250,17 @@ function requireRecord(json: SQLOutputValue | undefined, digest: SQLOutputValue 
 export class PublicationVersionStore {
   readonly #db: DatabaseSync;
   readonly #exportsOf: (bookId: string) => DeliverablesProjection['exports'];
+  readonly #documentsOf: (bookId: string, hasManuscript: boolean) => DeliverablesProjection['documents'];
 
   /** `exportsOf` reads a Book's approved exports from the export ledger (Issue #413), which 交付物 lists too. */
-  constructor(db: DatabaseSync, exportsOf: (bookId: string) => DeliverablesProjection['exports'] = () => []) {
+  constructor(
+    db: DatabaseSync,
+    exportsOf: (bookId: string) => DeliverablesProjection['exports'],
+    documentsOf: (bookId: string, hasManuscript: boolean) => DeliverablesProjection['documents'],
+  ) {
     this.#db = db;
     this.#exportsOf = exportsOf;
+    this.#documentsOf = documentsOf;
   }
 
   /**
@@ -296,6 +302,7 @@ export class PublicationVersionStore {
         actualsPrompt: current?.actualsPrompt ?? null,
       },
       exports: this.#exportsOf(bookId),
+      documents: this.#documentsOf(bookId, head !== null),
     };
   }
 

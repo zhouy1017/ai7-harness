@@ -87,6 +87,7 @@ import {
   PLAN_EDIT_SCHEMA_VERSION,
   CLARIFICATION_SCHEMA_VERSION,
   REIMPORT_GROUP_SCHEMA_VERSION,
+  PRODUCTION_DOCUMENT_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -115,6 +116,13 @@ import {
 import { RUN_CHECKPOINT_FOREIGN_KEYS, RUN_CHECKPOINT_SCHEMA_SQL, RUN_CHECKPOINT_TRIGGER_SQL } from './analysis/run-checkpoints.js';
 import { CLARIFICATION_FOREIGN_KEYS, CLARIFICATION_SCHEMA_SQL, CLARIFICATION_TRIGGER_SQL } from './analysis/clarifications.js';
 import { REIMPORT_GROUP_FOREIGN_KEYS, REIMPORT_GROUP_SCHEMA_SQL } from './reimport-group-ledger.js';
+import {
+  MANUSCRIPTS_REVISION_37_SQL,
+  PRODUCTION_DOCUMENT_FOREIGN_KEYS,
+  PRODUCTION_DOCUMENT_INDEX_SQL,
+  PRODUCTION_DOCUMENT_SCHEMA_SQL,
+  PRODUCTION_DOCUMENT_TRIGGER_SQL,
+} from './production-document-ledger.js';
 import {
   MANUSCRIPT_EFFECT_FOREIGN_KEYS,
   MANUSCRIPT_EFFECT_SCHEMA_SQL,
@@ -436,12 +444,15 @@ const COMMON_SCHEMA_SQL = {
     decision TEXT NOT NULL,
     created_at TEXT NOT NULL
   ) STRICT`,
-  manuscripts: `CREATE TABLE manuscripts (
+  // Revision 37 (Issue #415) rebuilds the relation so that a Book's Production Documents are rows beside its one
+  // primary Manuscript. Below it the store holds the earlier text; revision 37's own exact validation accepts only
+  // the rebuilt one, and so does a store an earlier build planted after this one had already rebuilt it.
+  manuscripts: [`CREATE TABLE manuscripts (
     manuscript_id TEXT PRIMARY KEY,
     book_id TEXT NOT NULL UNIQUE REFERENCES books(book_id),
     role TEXT NOT NULL CHECK(role = 'primary'),
     created_at TEXT NOT NULL
-  ) STRICT`,
+  ) STRICT`, MANUSCRIPTS_REVISION_37_SQL],
   manuscript_branches: `CREATE TABLE manuscript_branches (
     branch_id TEXT PRIMARY KEY,
     manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
@@ -1810,6 +1821,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...CLARIFICATION_FOREIGN_KEYS,
   // Revision 36 (Issue #412, S63): the chapter-level Reimport Comparison, owned by `reimport-group-ledger.ts`.
   ...REIMPORT_GROUP_FOREIGN_KEYS,
+  ...PRODUCTION_DOCUMENT_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2417,6 +2429,7 @@ function requireManuscriptReimportTargetSchema(
   includeRunCheckpointTables = false,
   includeClarificationTables = false,
   includeReimportGroupTables = false,
+  includeProductionDocumentTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2480,8 +2493,16 @@ function requireManuscriptReimportTargetSchema(
       ...(includeClarificationTables ? CLARIFICATION_SCHEMA_SQL : {}),
       // Revision 36 (Issue #412) the chapter-level Reimport Comparison's groups, verbs and mark outcomes.
       ...(includeReimportGroupTables ? REIMPORT_GROUP_SCHEMA_SQL : {}),
+      // Revision 37 (Issue #415) rebuilt `manuscripts` for Production Documents beside the two ledgers it created.
+      ...(includeProductionDocumentTables ? { ...PRODUCTION_DOCUMENT_SCHEMA_SQL, manuscripts: MANUSCRIPTS_REVISION_37_SQL } : {}),
     },
-    MANUSCRIPT_REIMPORT_INDEX_SQL,
+    // The partial index that keeps one primary Manuscript per Book stands with the rebuilt relation, whatever the version.
+    {
+      ...MANUSCRIPT_REIMPORT_INDEX_SQL,
+      ...(includeProductionDocumentTables || schemaObjectSql(db, 'table', 'manuscripts')?.includes("'production-document'") === true
+        ? PRODUCTION_DOCUMENT_INDEX_SQL
+        : {}),
+    },
     true,
     {
       ...MANUSCRIPT_REIMPORT_TRIGGER_SQL,
@@ -2498,6 +2519,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeDefaultExecutionRuleTables ? DEFAULT_EXECUTION_RULE_TRIGGER_SQL : {}),
       ...(includeRunCheckpointTables ? RUN_CHECKPOINT_TRIGGER_SQL : {}),
       ...(includeClarificationTables ? CLARIFICATION_TRIGGER_SQL : {}),
+      ...(includeProductionDocumentTables ? PRODUCTION_DOCUMENT_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5175,6 +5197,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeRunCheckpointTables = false,
   includeClarificationTables = false,
   includeReimportGroupTables = false,
+  includeProductionDocumentTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5197,6 +5220,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeRunCheckpointTables,
     includeClarificationTables,
     includeReimportGroupTables,
+    includeProductionDocumentTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5265,7 +5289,8 @@ export function initializeBoundedSchema(
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
       version === PLAN_EDIT_SCHEMA_VERSION ||
       version === CLARIFICATION_SCHEMA_VERSION ||
-      version === REIMPORT_GROUP_SCHEMA_VERSION,
+      version === REIMPORT_GROUP_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5284,9 +5309,10 @@ export function initializeBoundedSchema(
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
       version === PLAN_EDIT_SCHEMA_VERSION ||
       version === CLARIFICATION_SCHEMA_VERSION ||
-      version === REIMPORT_GROUP_SCHEMA_VERSION) {
+      version === REIMPORT_GROUP_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== REIMPORT_GROUP_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== PRODUCTION_DOCUMENT_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5309,6 +5335,7 @@ export function initializeBoundedSchema(
           version >= RUN_CONTINUATION_SCHEMA_VERSION,
           version >= CLARIFICATION_SCHEMA_VERSION,
           version >= REIMPORT_GROUP_SCHEMA_VERSION,
+          version >= PRODUCTION_DOCUMENT_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);
@@ -5566,7 +5593,9 @@ export type ManuscriptCheckpointPurpose =
   | 'Task Input / 任务输入'
   // Issue #413: a current revision is exported only as an exact Manuscript Revision, so unsaved edits are
   // saved as one first (V2-UX-TASK-040's low ceremony: no milestone, no signoff, no decision).
-  | 'Export Input / 导出输入';
+  | 'Export Input / 导出输入'
+  // Issue #415: a Production Document's 保存为版本 — its working text becomes its next version.
+  | 'Document Version / 文档版本';
 
 export interface ManuscriptCheckpointBinding {
   bookId: string;
@@ -6057,6 +6086,13 @@ export class BoundedManuscriptStore {
     const purpose = validateShortText(purposeInput, 120, 'MILESTONE_INVALID', '里程碑用途必须为 1–120 个字符。');
     const note = validateShortText(noteInput, 500, 'MILESTONE_INVALID', '里程碑备注过长。', true) || null;
     const binding = this.#binding(manuscriptId, branchId);
+    // Milestone Versions belong to the primary Manuscript alone (V2-UX-MILE-014; Issue #415): a Production Document
+    // saves versions instead.
+    requireBounded(
+      (this.#db.prepare('SELECT role FROM manuscripts WHERE manuscript_id = ?').get(manuscriptId) as SqlRow | undefined)?.role === 'primary',
+      'MILESTONE_INVALID',
+      '生产文档没有里程碑版本；请用「保存为版本」。',
+    );
     this.#requireBranchEditable(branchId);
     requireBounded(
       this.#db.prepare('SELECT 1 ok FROM milestone_versions WHERE branch_id = ? AND label = ?').get(branchId, label) === undefined,
@@ -6105,6 +6141,8 @@ export class BoundedManuscriptStore {
   }
 
   listPriorWork(): ReadonlyArray<PriorWorkItemProjection> {
+    // A Book's recent work is its Manuscript; a Production Document (Issue #415) is listed only while it has a
+    // recovery to answer.
     const rows = this.#db.prepare(
       `SELECT b.book_id, b.title, m.manuscript_id, mb.branch_id, mb.name branch_name,
               mr.revision_id, mr.revision_label, bws.journal_sequence, bws.working_digest, bws.total_graphemes,
@@ -6124,6 +6162,7 @@ export class BoundedManuscriptStore {
          WHERE branch_id = mb.branch_id AND status IN ('pending', 'deferred')
          ORDER BY created_at, attention_id LIMIT 1
        )
+       WHERE m.role = 'primary' OR ra.attention_id IS NOT NULL
        ORDER BY b.created_at DESC, b.book_id DESC LIMIT 20`,
     ).all() as SqlRow[];
     return rows.map((row) => ({
@@ -6969,9 +7008,11 @@ export class BoundedManuscriptStore {
    */
   readManuscriptEntryPosition(manuscriptId: string, branchId: string): ManuscriptEntryPositionProjection | null {
     const binding = this.#binding(manuscriptId, branchId);
-    const select = `SELECT revision_id, block_id, grapheme FROM manuscript_entry_positions WHERE book_id = ?`;
-    const recorded = (this.#db.prepare(`${select} AND revision_id = ?`).get(binding.bookId, binding.revisionId)
-      ?? this.#db.prepare(`${select} ORDER BY recorded_at DESC, rowid DESC LIMIT 1`).get(binding.bookId)) as SqlRow | undefined;
+    // A position belongs to the manuscript it was recorded in (Issue #415): a Book's Production Documents never move
+    // where its Manuscript opens.
+    const select = `SELECT revision_id, block_id, grapheme FROM manuscript_entry_positions WHERE book_id = ? AND manuscript_id = ?`;
+    const recorded = (this.#db.prepare(`${select} AND revision_id = ?`).get(binding.bookId, manuscriptId, binding.revisionId)
+      ?? this.#db.prepare(`${select} ORDER BY recorded_at DESC, rowid DESC LIMIT 1`).get(binding.bookId, manuscriptId)) as SqlRow | undefined;
     if (recorded === undefined) return null;
     const recordedRevisionId = asString(recorded.revision_id);
     const recordedBlockId = asString(recorded.block_id);
