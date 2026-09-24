@@ -35,6 +35,7 @@ import type {
   PriorWorkItemProjection,
   ReplacementPreviewProjection,
   RecoveryComparisonProjection,
+  RecoveryRestorationProjection,
   RecoverySelection,
   RecoveryWindowProjection,
   ResolvedBookWorkbenchRoute,
@@ -70,7 +71,8 @@ import {
   DOCUMENT_SURFACE_LABEL,
   documentVersionSavedLine,
 } from './production-document-labels.js';
-import { renderDocumentLens, type ProductionDocumentContext } from './production-document-lens.js';
+import { documentStanding, renderDocumentLens, type ProductionDocumentContext } from './production-document-lens.js';
+import { conflictCompletionOn } from './proposal-conflict-labels.js';
 import { renderFidelityReview } from './import-fidelity.js';
 import {
   commitNote,
@@ -553,7 +555,7 @@ async function renderResolvedBookWorkbenchRoute(
       renderBookOverview(overview, undefined, recoveryReturn);
       return;
     }
-    renderEditorWindow(
+    await openEditorWindow(
       await window.ai7.getManuscriptWindowAt({
         manuscriptId: anchor.manuscriptId,
         branchId: anchor.branchId,
@@ -937,19 +939,35 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
     restore.disabled = true;
     defer.disabled = true;
     setStatus('正在原子创建恢复后代修订版…', 'busy');
+    let restored: RecoveryRestorationProjection;
     try {
-      const restored = await window.ai7.restoreRecovery({
+      restored = await window.ai7.restoreRecovery({
         attentionId: recovery.attentionId,
         expectedAttentionVersion: recovery.attentionVersion,
         selection,
       });
-      setStatus(`已恢复为新版本 ${restored.descendantRevisionLabel}`, 'success');
-      renderEditorWindow(restored.window, recovery.bookTitle);
     } catch (error) {
+      // Only a restore that did not happen can be tried again.
       setStatus(rendererErrorMessage(error, '恢复未完成。'), 'error');
       view.disabled = false;
       restore.disabled = false;
       defer.disabled = false;
+      return;
+    }
+    // The restore is committed and its claim released: it is said as done however its window draws, and a document's
+    // text, which no version holds yet, in the document's words (Issue #543 follow-up).
+    const onDocument = restored.window.deliverable === 'production-document';
+    try {
+      await openEditorWindow(restored.window, recovery.bookTitle);
+      setStatus(onDocument ? DOCUMENT_STATUS_LINES.recovered : `已恢复为新版本 ${restored.descendantRevisionLabel}`, 'success');
+    } catch (error) {
+      if (onDocument) {
+        renderBookDeliverables(recovery.bookId, recovery.bookTitle);
+        setStatus(DOCUMENT_STATUS_LINES.recoveredNotOpened, 'error');
+      } else {
+        await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId: recovery.bookId, bookTitle: recovery.bookTitle });
+        setStatus(`已恢复为新版本 ${restored.descendantRevisionLabel}，但稿件没能打开：${rendererErrorMessage(error, '请从图书再打开它。')}`, 'error');
+      }
     }
   });
   const selected = (
@@ -1122,7 +1140,7 @@ function renderHistoricalRevision(projection: HistoricalRevisionProjection): voi
             cursor: null,
           });
           if (current.bookId !== projection.bookId) throw new Error('AI7_WORKBENCH_ROUTE_INVALID');
-          renderEditorWindow(current, projection.bookTitle);
+          await openEditorWindow(current, projection.bookTitle);
         },
       );
     } catch (error) {
@@ -1734,7 +1752,7 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
         branchId: target.branchId,
         target: { kind: 'block', blockId: target.blockId },
       });
-      renderEditorWindow(opened, bookTitle, undefined, undefined, target.markId ?? undefined);
+      await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId ?? undefined);
     },
     openPlan: (reviewRunId) => openTaskPlan(bookId, 'review-run', reviewRunId),
     planChanged: () => taskDrawer.refresh('review-run'),
@@ -1798,17 +1816,23 @@ function renderProposalConflict(target: { bookId: string; manuscriptId: string; 
     errorMessage: rendererErrorMessage,
     errorCode: (error) => rendererErrorData(error)?.code ?? null,
     returnToManuscript: async (at, completion) => {
+      let opened: ManuscriptWindowProjection;
       if (at === null) {
-        await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId: target.bookId, bookTitle });
+        // With no place to return to, a conflict on a Production Document returns to that document, and one on the
+        // Manuscript to where the Book opens.
+        opened = await window.ai7.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null });
+        if (opened.deliverable === 'production-document') await openEditorWindow(opened, bookTitle);
+        else await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId: target.bookId, bookTitle });
       } else {
-        const opened = await window.ai7.getManuscriptWindowAt({
+        opened = await window.ai7.getManuscriptWindowAt({
           manuscriptId: target.manuscriptId,
           branchId: target.branchId,
           target: { kind: 'block', blockId: at.blockId },
         });
-        renderEditorWindow(opened, bookTitle, undefined, undefined, at.markId);
+        await openEditorWindow(opened, bookTitle, undefined, undefined, at.markId);
       }
-      if (completion !== null) setStatus(completion, 'success');
+      // Said once the window is drawn, so nothing drawn after it takes its place — on a document, in its own words.
+      if (completion !== null) setStatus(conflictCompletionOn(opened.deliverable === 'production-document', completion), 'success');
     },
     openConflict: (markId) => renderProposalConflict({ ...target, markId }, bookTitle),
   });
@@ -2145,7 +2169,7 @@ function renderBookOverview(
     const primaryActionButton = button('打开稿件', 'primary', async () => {
       setStatus('正在打开稿件…', 'busy');
       try {
-        renderEditorWindow(await window.ai7.getManuscriptWindow({
+        await openEditorWindow(await window.ai7.getManuscriptWindow({
           manuscriptId: manuscriptAction.manuscriptId,
           branchId: manuscriptAction.branchId,
           cursor: null,
@@ -2258,7 +2282,7 @@ function analysisReturnButton(
     returnToRange.disabled = true;
     setStatus('正在打开对应稿件范围…', 'busy');
     try {
-      renderEditorWindow(await window.ai7.getManuscriptWindowAt({ manuscriptId, branchId, target: { kind: 'block', blockId } }), bookTitle);
+      await openEditorWindow(await window.ai7.getManuscriptWindowAt({ manuscriptId, branchId, target: { kind: 'block', blockId } }), bookTitle);
     } catch (error) {
       returnToRange.disabled = false;
       setStatus(rendererErrorMessage(error, '无法打开对应稿件范围。'), 'error');
@@ -5684,6 +5708,30 @@ async function documentContextOf(window_: ManuscriptWindowProjection): Promise<P
   return { typeId: type.typeId, typeLabel: type.label, document: type.document };
 }
 
+/**
+ * An editor window, drawn as what it holds (Issue #415, S66): a Production Document's type and versions are read first,
+ * whichever way the editor reached it — 解决冲突 → 返回, recovery, 待我处理 — so it is drawn as the document it is. The
+ * caller awaits it: what it says once the window is on screen is said after the window is drawn, and a failed read
+ * reaches the caller's own error handling. The editor moving on while the document is read keeps the screen they are on.
+ */
+async function openEditorWindow(
+  initialWindow: ManuscriptWindowProjection,
+  bookTitle: string,
+  recoveryAttentionId?: string,
+  entryNotice?: string,
+  openMarkId?: string,
+  reimport?: ManuscriptReimportCommitProjection,
+): Promise<void> {
+  if (initialWindow.deliverable !== 'production-document') {
+    renderEditorWindow(initialWindow, bookTitle, recoveryAttentionId, entryNotice, openMarkId, reimport);
+    return;
+  }
+  const showing = screen.firstElementChild;
+  const context = await documentContextOf(initialWindow);
+  if (screen.firstElementChild !== showing) return;
+  renderEditorWindow(initialWindow, bookTitle, recoveryAttentionId, entryNotice, openMarkId, reimport, context);
+}
+
 function renderEditorWindow(
   initialWindow: ManuscriptWindowProjection,
   bookTitle: string,
@@ -5700,15 +5748,11 @@ function renderEditorWindow(
    */
   productionDocument?: ProductionDocumentContext,
 ): void {
-  // A Production Document reached any other way than 交付物's 打开 — 解决冲突 → 返回, recovery, 待我处理, 最近稿件 — is still
-  // drawn as the document it is (Issue #415, S66): its type and versions are read once, then the window is drawn with them.
+  // A Production Document is drawn with its type and versions, which `openEditorWindow` reads first (Issue #415, S66). A
+  // way in that reaches here without them still draws the document as what it is.
   if (productionDocument === undefined && initialWindow.deliverable === 'production-document') {
-    const showing = screen.firstElementChild;
-    void documentContextOf(initialWindow).then((context) => {
-      // The editor moved on while the document was read: the screen they are on stays.
-      if (screen.firstElementChild !== showing) return;
-      renderEditorWindow(initialWindow, bookTitle, recoveryAttentionId, entryNotice, openMarkId, reimport, context);
-    }, (error: unknown) => setStatus(rendererErrorMessage(error, '无法打开这份生产文档。'), 'error'));
+    void openEditorWindow(initialWindow, bookTitle, recoveryAttentionId, entryNotice, openMarkId, reimport)
+      .catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法打开这份生产文档。'), 'error'));
     return;
   }
   const content = panel();
@@ -5724,11 +5768,15 @@ function renderEditorWindow(
   }
   const toolbar = element('header', 'editor-toolbar');
   const title = element('div');
-  // A document names its version as its own ledger numbers it (`版本 N`), never the block store's revision label.
+  // A document names its version as its own ledger numbers it (`版本 N`), never the block store's revision label — the
+  // version its text stands on now, so an edit says the text moved past it as soon as it is written.
   const versionOf = (windowNow: ManuscriptWindowProjection): string | undefined =>
-    productionDocument?.document.versions.find((version) => version.revisionId === windowNow.revisionId)?.label;
-  const revisionWords = (windowNow: ManuscriptWindowProjection): string =>
-    isDocument ? `${DOCUMENT_CURRENT_VERSION} ${versionOf(windowNow) ?? DOCUMENT_CHANGED_SINCE_VERSION}` : `当前修订版 ${windowNow.revisionLabel}`;
+    productionDocument === undefined ? undefined : documentStanding(productionDocument.document, windowNow.workingDigest).current?.label;
+  const revisionWords = (windowNow: ManuscriptWindowProjection): string => {
+    if (!isDocument) return `当前修订版 ${windowNow.revisionLabel}`;
+    const label = versionOf(windowNow);
+    return label === undefined ? DOCUMENT_CHANGED_SINCE_VERSION : `${DOCUMENT_CURRENT_VERSION} ${label}`;
+  };
   title.append(
     element('p', 'section-label', isDocument ? `${bookTitle} · ${DOCUMENT_SURFACE_LABEL}` : `${bookTitle} · 主分支`),
     element('h2', undefined, productionDocument !== undefined
@@ -6162,6 +6210,7 @@ function renderEditorWindow(
   const updateWindowChrome = (): void => {
     position.textContent = currentWindow.position.label;
     revision.textContent = revisionWords(currentWindow);
+    documentLens?.update(currentWindow.workingDigest);
     journal.textContent = `修订日志序号 ${currentWindow.journalSequence}`;
     recoveredState.hidden = currentWindow.recoveredStateReview === null;
     positionRail.value = String(Math.round(currentWindow.position.proportion * 1_000_000));

@@ -19,6 +19,7 @@ import {
   PROPOSAL_CONFLICT_TITLE,
   REVERSAL_CONFLICT_LINE,
   conflictBulkSummary,
+  conflictCompletionOn,
   conflictDeferredLine,
   conflictDraftUnsaved,
   conflictKeyboardHint,
@@ -102,6 +103,11 @@ describe('the words of 稿件冲突', () => {
     expect(conflictSaveReason('unresolved', 2)).toBe('还有 2 处未解决；每一处都选定后才能保存为新提案版本。');
     expect(conflictSaveReason('unchanged', 0)).toBe('解决结果与当前稿件相同，请选「保留当前稿件」。');
     expect(conflictSaveReason('target-deleted', 1)).toBe('原文已被删去，不能在原处生成新版本；可选「保留当前稿件」或「暂不处理」。');
+    // On a Production Document the text kept is the document's (Issue #543 follow-up); the other completions name no 稿件.
+    expect(conflictCompletionOn(true, CONFLICT_COMPLETION.keepCurrent)).toBe('已保留文档现在的文字；文档没有改动。');
+    expect(conflictCompletionOn(false, CONFLICT_COMPLETION.keepCurrent)).toBe('已保留当前稿件；稿件没有改动。');
+    expect(conflictCompletionOn(true, CONFLICT_COMPLETION.defer)).toBe(CONFLICT_COMPLETION.defer);
+    expect(conflictCompletionOn(true, CONFLICT_COMPLETION.newVersion)).toBe(CONFLICT_COMPLETION.newVersion);
   });
 
   it('are the words J-06 checks the page for, so the Journey and the surface never drift apart', () => {

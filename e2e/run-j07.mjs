@@ -1580,6 +1580,12 @@ async function main() {
     await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '保存当前编辑' && !button.disabled)`, 'changed-edit-save-ready');
     await click(renderer, '保存当前编辑', 'changed-edit-save');
     await waitFor(renderer, `window.__j07.status().includes('已写入修订日志')`, 'changed-edit-durable');
+    // The document window follows the edit it wrote (Issue #543): the lens drops 当前 from 版本 2 and says both moves.
+    await waitFor(renderer, `(() => {
+      const lens = document.querySelector('aside.document-lens');
+      return lens?.querySelector('.document-changed-since-delivery')?.textContent === '交付后有修改' &&
+        lens.querySelector('[data-version-current]') === null && lens.querySelector('.document-changed')?.textContent === '有修改尚未保存为版本';
+    })()`, 'changed-edit-lens-repaints');
     await clickSelector(renderer, '.editor-shell[data-deliverable="production-document"] nav.book-work-group [data-work-destination="deliverables"]', 'changed-back');
     await waitForDeliverables(renderer, 'changed-back');
     await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentChangedSinceDelivery === 'true'`, 'changed-card');

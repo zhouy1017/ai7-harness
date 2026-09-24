@@ -121,6 +121,9 @@ export const DOCUMENT_STATUS_LINES = {
   versionUnchanged: '没有新的修改，当前已是最新版本',
   delivering: '正在记录交付…',
   deliverFailed: '无法记录这次交付。',
+  // A recovery restore of a document (Issue #543 follow-up): its text is the chosen one, which no version holds yet.
+  recovered: '文档已恢复为所选的文字，尚未保存为版本。',
+  recoveredNotOpened: '文档已恢复为所选的文字，但没能打开；已回到交付物，可以从这里再打开它。',
 } as const;
 
 /** `已创建「新闻稿」`. */
