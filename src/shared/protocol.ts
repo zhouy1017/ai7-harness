@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 58 as const;
+export const SERVICE_PROTOCOL_VERSION = 59 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -5385,10 +5385,12 @@ export type GlobalAttentionNextStep =
   | 'answer-clarification'
   | 'adjust-budget-redo'
   | 'resolve-model-service'
-  | 'reprepare';
+  | 'reprepare'
+  // 改计划重做 for a Run the launch's ceiling stopped under developer-live (Issue #541): the plan cannot raise it.
+  | 'redo';
 export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'view-run', 'view-review', 'reconfirm-plan', 'continue-review', 'return-to-recovery', 'retry-abandon-cleanup', 'await-local-check',
-  'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'reprepare',
+  'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'reprepare', 'redo',
 ];
 
 /**
