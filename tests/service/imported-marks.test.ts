@@ -2,11 +2,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { COMMENTS_REVISIONS_DETAIL, REIMPORT_COMMENTS_REVISIONS_DETAIL } from '../../src/service/docx.js';
+import { COMMENTS_REVISIONS_DETAIL } from '../../src/service/docx.js';
 import { EditorialMarkStore, proposalChangeItemsShape } from '../../src/service/editorial-marks.js';
 import { ImportedMarkError, createImportedMarks, stageImportedMarks } from '../../src/service/imported-marks.js';
 import { EditorialStore, StoreError, importedMarksRecord } from '../../src/service/store.js';
-import { CLARIFICATION_SCHEMA_VERSION, IMPORT_RETENTION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { CLARIFICATION_SCHEMA_VERSION, REIMPORT_GROUP_SCHEMA_VERSION, IMPORT_RETENTION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import type { EditorialMarkAnchorProjection, ManuscriptBlockProjection } from '../../src/shared/protocol.js';
 import {
   ADMITTED_BASELINE_DOCX,
@@ -21,6 +21,7 @@ import { EXPORT_LEDGER_RELATIONS_DROP_ORDER } from '../support/manuscript-export
 import { DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER } from '../support/default-execution-rules.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js';
+import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
 import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
 
 // Service-integration suite (L2) for imported marks (Issue #411, plan slice S62) over the real `EditorialStore`
@@ -345,40 +346,194 @@ describe('a DOCX\'s comments and tracked changes enter the imported manuscript (
     });
   }, 180_000);
 
-  it('states the class 不支持导入 on a reimport, which makes no mark, and asks for the decision', async () => {
+  it('makes the new file\'s comments and tracked changes marks on a reimport, and makes none twice (Issue #412)', async () => {
     const first = join(roots.inputRoot, 'first.docx');
     await composeManuscriptDocx(first, { source: SOURCE, startBlock: 8, blocks: 3, title: '重新导入组稿' });
     const second = await composeRevised();
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       const { commit } = await importRevised(store, first);
-      const staged = await store.stageSelectedManuscript(randomUUID(), second);
-      // At the target step nothing is decided yet: the file's own reading says what a new import would make.
-      expect(staged.fidelity[1]).toMatchObject({ count: IMPORTED_MARKS, status: 'preserved' });
-      const started = store.createManuscriptReimportPreparationWork(staged.draftId, staged.draftVersion, {
-        kind: 'existing-book', bookId: commit.bookId, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId: null,
-      });
-      let prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
-      while (!prepared.done) prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
-      const review = prepared.review!;
-      expect(review.fidelity[1]).toEqual({
-        key: 'comments-revisions', label: '批注与修订', count: IMPORTED_MARKS, status: 'unsupported', statusLabel: '不支持导入',
-        detail: REIMPORT_COMMENTS_REVISIONS_DETAIL,
-      });
-      expect(review.degradationDecision).toEqual({
-        state: 'required-unselected',
-        items: [{ categoryKey: 'comments-revisions', label: '批注与修订', count: IMPORTED_MARKS }],
-      });
-      expect(review.commitReady).toBe(false);
-      withDatabase(true, (database) => {
-        expect(database.prepare("SELECT count(*) total FROM editorial_marks WHERE source_kind = 'imported-author'").get()).toEqual({ total: 0 });
-      });
+      const reimport = (path: string, reuseSourceVersionId: string | null) => reimportInto(store, commit.bookId, path, reuseSourceVersionId);
+      const imported = () => importedMarkCount();
+      const changed = await reimport(second, null);
+      expect(changed.resultKind).toBe('changed');
+      expect(imported()).toEqual({ total: IMPORTED_MARKS });
+      // The same file again, its Source Version chosen as the exact match: nothing changed, and its comments already
+      // stand as they are — none is made twice.
+      const again = await reimport(second, changed.sourceVersionId);
+      expect(again.resultKind).toBe('no-change');
+      expect(imported()).toEqual({ total: IMPORTED_MARKS });
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
+  it('keeps the file\'s pending insertion one mark across a changed reimport, set exact again where it stood (Issue #412)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const { commit } = await importRevised(store, await composeRevised());
+      expect(importedMarkCount()).toEqual({ total: IMPORTED_MARKS });
+      // The same file with one paragraph added: a changed reimport, the added paragraph resolved 改写与新增. ¶2's insertion is a
+      // point, which the rewrite leaves drifted, since a point is never found by its words. The file's insertion at that
+      // same place is that one, set exact again rather than made twice beside it.
+      const extended = await composeRevised({ ...REVISED, paragraphs: [...REVISED.paragraphs, { runs: [text(span(21))] }] });
+      const changed = await reimportInto(store, commit.bookId, extended, null);
+      expect(changed.resultKind).toBe('changed');
+      expect(importedMarkCount()).toEqual({ total: IMPORTED_MARKS });
+      const points = withDatabase(true, (database) => database.prepare(
+        "SELECT anchor_state FROM editorial_marks WHERE source_kind = 'imported-author' AND pinned_text = '' ORDER BY created_at, mark_id",
+      ).all()).map((row) => ({ ...row }));
+      expect(points.length).toBeGreaterThan(0);
+      expect(points.every((row) => row.anchor_state === 'exact')).toBe(true);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
+  it('makes an insertion the author rewrote anew, and leaves the old one drifted for the editor to settle (Issue #412)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const { commit } = await importRevised(store, await composeRevised());
+      // The author rewrote ¶2's pending insertion — the same point, other words, not accepted — and added a paragraph at the
+      // end: a changed reimport in which ¶2, read without its insertions, is unchanged.
+      const paragraphs = REVISED.paragraphs.map((paragraph, index) => (index === 1
+        ? { runs: [text(span(10, 0, 20)), revised(span(11, 5, 10), 'ins', AUTHOR, '2026-09-02T10:01:00Z'), text(span(10, 20))] }
+        : paragraph));
+      const extended = await composeRevised({ ...REVISED, paragraphs: [...paragraphs, { runs: [text(span(21))] }] });
+      const changed = await reimportInto(store, commit.bookId, extended, null);
+      expect(changed.resultKind).toBe('changed');
+      // The file's insertion proposes other words now: it is made, exact at the point. The old one proposes words the file no
+      // longer does, so it is never set exact again showing them — it stays drifted, a 稿件冲突 the editor settles.
+      expect(importedMarkCount()).toEqual({ total: IMPORTED_MARKS + 1 });
+      expect(importedSuggestions().filter((row) => row.pinned === digest(''))).toEqual([
+        { state: 'drifted', pinned: digest(''), proposed: digest(await read(span(11, 0, 5))) },
+        { state: 'exact', pinned: digest(''), proposed: digest(await read(span(11, 5, 10))) },
+      ]);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
+  it('sets each of two insertions at one point exact again as itself, alike or not, and makes neither twice (Issue #412)', async () => {
+    // One author's two insertions at one point, made at different times, are two marks (D3 joins revisions only by their
+    // date): in ¶1 with other words each, in ¶2 with the same words twice.
+    const twice: Omit<ComposedRevisedRequest, 'source' | 'title'> = {
+      paragraphs: [
+        { runs: [
+          text(span(10, 0, 20)), revised(span(11, 0, 5), 'ins', AUTHOR, '2026-09-01T10:01:00Z'),
+          revised(span(11, 5, 10), 'ins', AUTHOR, '2026-09-01T10:05:00Z'), text(span(10, 20)),
+        ] },
+        { runs: [
+          text(span(13, 0, 5)), revised(span(14, 0, 6), 'ins', AUTHOR, '2026-09-01T10:02:00Z'),
+          revised(span(14, 0, 6), 'ins', AUTHOR, '2026-09-01T10:06:00Z'), text(span(13, 5)),
+        ] },
+      ],
+    };
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const { commit } = await importRevised(store, await composeRevised(twice));
+      const imported = importedSuggestions();
+      expect(imported.map((row) => row.state)).toEqual(['exact', 'exact', 'exact', 'exact']);
+      expect(new Set(imported.map((row) => row.proposed)).size).toBe(3);
+      // The same file with a paragraph added: a changed reimport. The rewrite leaves every point drifted; each of the file's
+      // four insertions is one of the four marks, set exact again as itself — none made twice, none left drifted.
+      const extended = await composeRevised({ paragraphs: [...twice.paragraphs, { runs: [text(span(21))] }] });
+      const changed = await reimportInto(store, commit.bookId, extended, null, 4);
+      expect(changed.resultKind).toBe('changed');
+      expect(importedSuggestions()).toEqual(imported);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
+  it('makes a tracked replacement the author rewrote anew, even when the file reads as the manuscript does (Issue #412)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const { commit } = await importRevised(store, await composeRevised());
+      // ¶3's replacement proposes other words now. The words it deletes are the same, so the file read without its
+      // insertions is the manuscript as it stands: a no-change reimport.
+      const paragraphs = REVISED.paragraphs.map((paragraph, index) => (index === 2
+        ? { runs: [
+            text(span(13, 0, 5)), revised(span(13, 5, 9), 'del', AUTHOR, '2026-09-02T10:02:00Z'),
+            revised(span(14, 6, 12), 'ins', AUTHOR, '2026-09-02T10:02:00Z'), text(span(13, 9)),
+          ] }
+        : paragraph));
+      const again = await reimportInto(store, commit.bookId, await composeRevised({ ...REVISED, paragraphs }), null);
+      expect(again.resultKind).toBe('no-change');
+      // The new proposal is made on the same words, exact; the old one stays as it was, the editor's to settle.
+      expect(importedMarkCount()).toEqual({ total: IMPORTED_MARKS + 1 });
+      const replaced = digest(await read(span(13, 5, 9)));
+      expect(importedSuggestions().filter((row) => row.pinned === replaced)).toEqual([
+        { state: 'exact', pinned: replaced, proposed: digest(await read(span(14, 0, 6))) },
+        { state: 'exact', pinned: replaced, proposed: digest(await read(span(14, 6, 12))) },
+      ]);
       store.markCleanShutdown();
     } finally {
       store.close();
     }
   }, 180_000);
 });
+
+/**
+ * A reimport of `path` into the Book, every row resolved by a verb its shape admits, none preselected; committed. The file
+ * carries `marks` comments and tracked changes.
+ */
+async function reimportInto(store: EditorialStore, bookId: string, path: string, reuseSourceVersionId: string | null, marks = IMPORTED_MARKS) {
+  const staged = await store.stageSelectedManuscript(randomUUID(), path);
+  expect(staged.fidelity[1]).toMatchObject({ count: marks, status: 'preserved' });
+  const started = store.createManuscriptReimportPreparationWork(staged.draftId, staged.draftVersion, {
+    kind: 'existing-book', bookId, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId,
+  });
+  let prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
+  while (!prepared.done) prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
+  let review = prepared.review!;
+  // A reimport converts them as the first import does (MARK-009): 完整保留, and no decision to take for them.
+  expect(review.fidelity[1]).toEqual({
+    key: 'comments-revisions', label: '批注与修订', count: marks, status: 'preserved', statusLabel: '完整保留',
+    detail: COMMENTS_REVISIONS_DETAIL,
+  });
+  expect(review.degradationDecision.items.some((item) => item.categoryKey === 'comments-revisions')).toBe(false);
+  // Every row resolved by a verb its shape admits, none preselected.
+  for (;;) {
+    const page = store.getReimportMappingPage(review.draftId, review.draftVersion, null);
+    const open = page.items.find((item) => item.verb === null);
+    if (open === undefined) break;
+    const work = store.createReimportResolutionWork(review.draftId, review.draftVersion, open.groupId,
+      open.verbs.includes('rewrite') ? 'rewrite' : open.verbs[0]!);
+    let progress = store.advanceReimportResolutionWork(work.workId);
+    while (!progress.done) progress = store.advanceReimportResolutionWork(work.workId);
+    review = progress.review!;
+  }
+  expect(review.commitReady).toBe(true);
+  const commitWork = await store.createManuscriptReimportCommitWork({
+    draftId: review.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId: randomUUID(),
+  });
+  let result = commitWork.result;
+  while (result === null) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    result = (await store.advanceManuscriptReimportCommitWork(commitWork.workId!)).result;
+  }
+  return result;
+}
+
+/** The imported 修改建议 in the order they were made: each one's anchor state, and its words and proposal by digest. */
+function importedSuggestions(): Array<{ state: string; pinned: string; proposed: string }> {
+  return withDatabase(true, (database) => database.prepare(
+    `SELECT em.anchor_state, em.pinned_text, i.proposed_text FROM editorial_marks em
+     JOIN proposal_change_items i ON i.mark_id = em.mark_id
+     WHERE em.source_kind = 'imported-author' ORDER BY em.rowid`,
+  ).all()).map((row) => ({ state: String(row.anchor_state), pinned: digest(String(row.pinned_text)), proposed: digest(String(row.proposed_text)) }));
+}
+
+/** The imported marks by the file's two authors, however many the reimports made. */
+function importedMarkCount() {
+  return withDatabase(true, (database) =>
+    database.prepare("SELECT count(*) total FROM editorial_marks WHERE source_kind = 'imported-author' AND source_label IN (?, ?)").get(AUTHOR, OTHER));
+}
 
 describe('schema revision 28 over the real store', () => {
   it('migrates a planted revision-27 store, rebuilding its Proposal Change Items byte for byte', async () => {
@@ -395,7 +550,7 @@ describe('schema revision 28 over the real store', () => {
       store.close();
     }
     const before = withDatabase(false, (database) => {
-      for (const relation of [...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER]) database.exec(`DROP TABLE ${relation}`);
+      for (const relation of [...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER]) database.exec(`DROP TABLE ${relation}`);
       for (const relation of IMPORTED_MARK_RELATIONS_DROP_ORDER) database.exec(`DROP TABLE ${relation}`);
       downgradeProposalChangeItemsToRevision27(database);
       database.exec(`PRAGMA user_version = ${IMPORT_RETENTION_SCHEMA_VERSION}`);
@@ -417,7 +572,7 @@ describe('schema revision 28 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(CLARIFICATION_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(REIMPORT_GROUP_SCHEMA_VERSION);
       expect(proposalChangeItemsShape(database)).toBe('current');
       const items = database.prepare('SELECT rowid, * FROM proposal_change_items ORDER BY rowid').all() as Row[];
       expect(items.slice(0, 2)).toEqual(before.items);

@@ -8,7 +8,7 @@ import {
   importFidelityCategoriesShape,
 } from '../../src/service/import-retention.js';
 import { EditorialStore } from '../../src/service/store.js';
-import { CLARIFICATION_SCHEMA_VERSION, PROPOSAL_CONFLICT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { CLARIFICATION_SCHEMA_VERSION, REIMPORT_GROUP_SCHEMA_VERSION, PROPOSAL_CONFLICT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import type { ManuscriptBlockProjection, TextBoxDisposition } from '../../src/shared/protocol.js';
 import {
   ADMITTED_BASELINE_DOCX,
@@ -22,6 +22,7 @@ import { DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER } from '../support/default-
 import { SAMPLE1_BLOCKS, importSample1Book, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js';
+import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
 import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
 
 // Service-integration suite (L2) for import retention (Issue #410, plan slice S61; ADR 0086) over the real
@@ -292,17 +293,18 @@ describe('import retention over the real store (ADR 0086)', () => {
       let prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
       while (!prepared.done) prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
       let review = prepared.review!;
-      // The one appended block is an insertion the editor resolves; nothing is preselected.
+      // The one appended block is a row the editor resolves (Issue #412: 改写与新增, the one verb it admits); nothing is preselected.
       const unresolved: string[] = [];
       let cursor: number | null = null;
       do {
         const page = store.getReimportMappingPage(review.draftId, review.draftVersion, cursor);
-        unresolved.push(...page.items.filter((item) => item.state === 'unresolved').map((item) => item.mappingId));
+        unresolved.push(...page.items.filter((item) => item.verb === null).map((item) => item.groupId));
+        expect(page.items.map((item) => item.verbs)).toEqual(page.items.map(() => ['rewrite']));
         cursor = page.nextCursor;
       } while (cursor !== null);
       expect(unresolved).toHaveLength(1);
-      for (const mappingId of unresolved) {
-        const resolution = store.createReimportResolutionWork(review.draftId, review.draftVersion, mappingId, 'create-new-identity', null);
+      for (const groupId of unresolved) {
+        const resolution = store.createReimportResolutionWork(review.draftId, review.draftVersion, groupId, 'rewrite');
         let progress = store.advanceReimportResolutionWork(resolution.workId);
         while (!progress.done) progress = store.advanceReimportResolutionWork(resolution.workId);
         review = progress.review!;
@@ -355,7 +357,7 @@ describe('schema revision 27 over the real store', () => {
       database.prepare("UPDATE source_versions SET parser_identity = 'ai7-docx-fflate-saxes/1' WHERE source_version_id = ?").run(String(review.source_version_id));
       database.prepare("UPDATE source_provenance SET parser_identity = 'ai7-docx-fflate-saxes/1' WHERE source_version_id = ?").run(String(review.source_version_id));
       database.prepare('DELETE FROM import_fidelity_categories WHERE fidelity_review_id = ?').run(reviewId);
-      for (const relation of [...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER]) database.exec(`DROP TABLE ${relation}`);
+      for (const relation of [...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER]) database.exec(`DROP TABLE ${relation}`);
       database.exec('DROP TABLE import_fidelity_categories');
       database.exec(IMPORT_FIDELITY_CATEGORIES_REVISION_26_SQL);
       const insert = database.prepare(
@@ -390,10 +392,10 @@ describe('schema revision 27 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(CLARIFICATION_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(REIMPORT_GROUP_SCHEMA_VERSION);
       expect(importFidelityCategoriesShape(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM import_fidelity_categories ORDER BY rowid').all()).toEqual(before);
-      for (const relation of [...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER]) {
+      for (const relation of [...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER]) {
         expect(database.prepare(`SELECT count(*) total FROM ${relation}`).get()).toEqual({ total: 0 });
       }
       expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);

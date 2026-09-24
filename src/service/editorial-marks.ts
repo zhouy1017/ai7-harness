@@ -525,12 +525,125 @@ export function followBlockTextChangeForMarks(
   for (const mark of followed) update.run(mark.fromGrapheme, mark.toGrapheme, mark.state, journalSequence, mark.markId);
 }
 
+/** One row of a reimport's chapter-level comparison as its marks see it (Issue #412, S63). */
+export interface ReimportMarkRow {
+  ordinal: number;
+  verb: 'split' | 'rewrite' | 'delete' | 'merge';
+  /** The row's blocks in the revision the reimport replaced, with their positions there. */
+  current: ReadonlyArray<{ blockId: string; position: number }>;
+  /** The blocks the new file put in the row's place, in the new revision. */
+  newBlockIds: ReadonlyArray<string>;
+}
+
+export interface ReimportMarkOutcome {
+  markId: string;
+  ordinal: number;
+  outcome: 'followed' | 'unfollowed';
+  kind: EditorialMarkKind;
+  words: string;
+  fromPosition: number;
+  toBlockId: string | null;
+}
+
+/** Every place a run of graphemes stands in another, by its first grapheme. */
+function occurrencesOf(parts: ReadonlyArray<string>, pinned: ReadonlyArray<string>): number[] {
+  const found: number[] = [];
+  if (pinned.length === 0 || pinned.length > parts.length) return found;
+  for (let index = 0; index + pinned.length <= parts.length; index += 1) {
+    let same = true;
+    for (let offset = 0; offset < pinned.length; offset += 1) {
+      if (parts[index + offset] !== pinned[offset]) {
+        same = false;
+        break;
+      }
+    }
+    if (same) found.push(index);
+  }
+  return found;
+}
+
+/**
+ * The marks of a reimport's changed rows (Issue #412, plan slice S63; V2-UX-IMP-057), after the working state was
+ * replaced and `resolveBranchMarksAfterRewrite` read every mark against the block it names. Every mark of a row goes to
+ * its words when they stand exactly once among the row's new paragraphs — a carried paragraph included, since its words
+ * may stand twice after a 拆分 and the rewrite may have moved the mark to the other place. Otherwise — under 删除, or
+ * where its words are gone or repeated — it is set aside from the text, kept, and listed for the editor. Marks outside
+ * the changed rows are not touched, each mark is settled once, and nothing is guessed: a mark never lands on words it
+ * was not on.
+ */
+export function followReimportedMarks(db: DatabaseSync, branchId: string, rows: ReadonlyArray<ReimportMarkRow>): ReimportMarkOutcome[] {
+  if (!marksRelationExists(db)) return [];
+  const state = db.prepare('SELECT journal_sequence FROM branch_working_state WHERE branch_id = ?').get(branchId) as SqlRow | undefined;
+  requireMark(state !== undefined, 'MANUSCRIPT_NOT_FOUND', '稿件工作状态不存在。');
+  const journalSequence = integer(state.journal_sequence);
+  // A mark an earlier reimport set aside stays set aside: it is neither followed nor listed again.
+  const marksOn = db.prepare(
+    `SELECT em.mark_id, em.kind, em.pinned_text, em.from_grapheme, em.to_grapheme, em.anchor_state
+     FROM editorial_marks em WHERE em.branch_id = ? AND em.block_id = ? AND em.status IN ${LIVE_STATUSES} AND NOT ${setAsideByReimport(db)}
+     ORDER BY em.created_at, em.mark_id`,
+  );
+  const blockText = db.prepare('SELECT text FROM working_blocks WHERE branch_id = ? AND block_id = ?');
+  const update = db.prepare(
+    `UPDATE editorial_marks SET block_id = ?, from_grapheme = ?, to_grapheme = ?, anchor_state = ?, followed_journal_sequence = ?
+     WHERE mark_id = ?`,
+  );
+  const outcomes: ReimportMarkOutcome[] = [];
+  // A mark is settled once: a move onto a later row's carried paragraph never has it read, and settled, again.
+  const settled = new Set<string>();
+  for (const row of rows) {
+    const newBlocks = row.newBlockIds.map((blockId) => {
+      const found = blockText.get(branchId, blockId) as SqlRow | undefined;
+      requireMark(found !== undefined, 'MARK_ANCHOR_INVALID', '重新导入的新段落不在稿件中。');
+      return { blockId, parts: graphemesOf(text(found.text)) };
+    });
+    // The row's marks are read once, before any of them moves: a mark moved onto a later paragraph of the row — a carried
+    // identity — is never read again there.
+    const rowMarks = row.current.flatMap((current) => (marksOn.all(branchId, current.blockId) as SqlRow[]).map((mark) => ({ current, mark })));
+    for (const { current, mark } of rowMarks) {
+      const markId = text(mark.mark_id);
+      if (settled.has(markId)) continue;
+      settled.add(markId);
+      const words = text(mark.pinned_text);
+      const base = { markId, ordinal: row.ordinal, kind: text(mark.kind) as EditorialMarkKind, words, fromPosition: current.position };
+      if (row.verb !== 'delete' && words !== '') {
+        const pinned = graphemesOf(words);
+        const places = newBlocks.flatMap((block) => occurrencesOf(block.parts, pinned).map((from) => ({ blockId: block.blockId, from })));
+        if (places.length === 1) {
+          const place = places[0]!;
+          update.run(place.blockId, place.from, place.from + pinned.length, 'exact', journalSequence, markId);
+          outcomes.push({ ...base, outcome: 'followed', toBlockId: place.blockId });
+          continue;
+        }
+      }
+      update.run(current.blockId, integer(mark.from_grapheme), integer(mark.to_grapheme), 'detached', journalSequence, markId);
+      outcomes.push({ ...base, outcome: 'unfollowed', toBlockId: null });
+    }
+  }
+  return outcomes;
+}
+
+/**
+ * A mark a reimport set aside (Issue #412, S63): detached, with `unfollowed` as its latest reimport outcome. It is set aside
+ * for good — the notice and the reimport's record list it as taken off the text and kept — since nothing takes a mark out of
+ * `detached`: Apply, its reversal and a conversion need the mark exact, an edit follows only exact and drifted marks, and
+ * the manuscript draws no detached one. So a later rewrite of the branch, by another reimport or a recovery, never reads
+ * it against the text its block holds, and a later reimport never lists it again.
+ */
+function setAsideByReimport(db: DatabaseSync): string {
+  const kept = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'manuscript_reimport_mark_outcomes'").get() !== undefined;
+  return kept
+    ? `(em.anchor_state = 'detached' AND IFNULL((SELECT o.outcome FROM manuscript_reimport_mark_outcomes o WHERE o.mark_id = em.mark_id
+         ORDER BY o.recorded_at DESC, o.rowid DESC LIMIT 1), '') = 'unfollowed')`
+    : '0';
+}
+
 /**
  * After the whole working state was replaced — a recovery restoration, a reimport — no spans exist
  * to follow. Every live mark is resolved against what its block holds now: `exact` where its pinned
  * text stands at its range or stands alone in the block, `drifted` otherwise, and `detached` when
  * the block is no longer part of the working state. A detached mark that finds its block again is
- * resolved like any other. A point pinned on no text has nothing to be found by, so it resolves
+ * resolved like any other, except one a reimport set aside (`setAsideByReimport`), which stays aside.
+ * A point pinned on no text has nothing to be found by, so it resolves
  * `drifted`: rewritten text never proves where an applied suggestion deleted its words, nor where a
  * pending insertion (Issue #411) would write its own.
  */
@@ -543,7 +656,7 @@ export function resolveBranchMarksAfterRewrite(db: DatabaseSync, branchId: strin
     `SELECT em.mark_id, em.from_grapheme, em.to_grapheme, em.pinned_text, wb.text block_text
      FROM editorial_marks em
      LEFT JOIN working_blocks wb ON wb.branch_id = em.branch_id AND wb.block_id = em.block_id
-     WHERE em.branch_id = ? AND em.status IN ${LIVE_STATUSES}`,
+     WHERE em.branch_id = ? AND em.status IN ${LIVE_STATUSES} AND NOT ${setAsideByReimport(db)}`,
   ).all(branchId) as SqlRow[];
   const update = db.prepare(
     `UPDATE editorial_marks SET from_grapheme = ?, to_grapheme = ?, anchor_state = ?, followed_journal_sequence = ?

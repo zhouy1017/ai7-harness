@@ -186,9 +186,20 @@ export function createImportedMarks(
   db: DatabaseSync,
   marks: EditorialMarkStore,
   draftId: string,
-  binding: { manuscriptId: string; branchId: string; blockIdOf: (position: number) => string },
+  binding: {
+    manuscriptId: string;
+    branchId: string;
+    blockIdOf: (position: number) => string;
+    /**
+     * A reimport's file mark that already stands on the manuscript as it is (Issue #412, S63): the same author, kind,
+     * block, words and range, and for a 修改建议 the same proposal. It is the file's comment still in the file, not a new
+     * one, so it is not made twice. Called once per file mark, in reading order.
+     */
+    alreadyStanding?: (mark: ParsedImportedMark, blockId: string) => boolean;
+  },
 ): number {
-  const staged = stagedImportedMarks(db, draftId);
+  const staged = stagedImportedMarks(db, draftId)
+    .filter((mark) => binding.alreadyStanding === undefined || !binding.alreadyStanding(mark, binding.blockIdOf(mark.blockPosition)));
   const inputs: ProducedEditorialMarkInput[] = staged.map((mark) => ({
     manuscriptId: binding.manuscriptId,
     branchId: binding.branchId,

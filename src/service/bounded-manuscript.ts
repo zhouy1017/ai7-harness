@@ -86,6 +86,7 @@ import {
   RUN_CONTINUATION_SCHEMA_VERSION,
   PLAN_EDIT_SCHEMA_VERSION,
   CLARIFICATION_SCHEMA_VERSION,
+  REIMPORT_GROUP_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -113,6 +114,7 @@ import {
 } from './default-execution-rules.js';
 import { RUN_CHECKPOINT_FOREIGN_KEYS, RUN_CHECKPOINT_SCHEMA_SQL, RUN_CHECKPOINT_TRIGGER_SQL } from './analysis/run-checkpoints.js';
 import { CLARIFICATION_FOREIGN_KEYS, CLARIFICATION_SCHEMA_SQL, CLARIFICATION_TRIGGER_SQL } from './analysis/clarifications.js';
+import { REIMPORT_GROUP_FOREIGN_KEYS, REIMPORT_GROUP_SCHEMA_SQL } from './reimport-group-ledger.js';
 import {
   MANUSCRIPT_EFFECT_FOREIGN_KEYS,
   MANUSCRIPT_EFFECT_SCHEMA_SQL,
@@ -1806,6 +1808,8 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...RUN_CHECKPOINT_FOREIGN_KEYS,
   // Revision 35 (Issue #422, S76d): the Run's Clarification Requests and answers, owned by `analysis/clarifications.ts`.
   ...CLARIFICATION_FOREIGN_KEYS,
+  // Revision 36 (Issue #412, S63): the chapter-level Reimport Comparison, owned by `reimport-group-ledger.ts`.
+  ...REIMPORT_GROUP_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2412,6 +2416,7 @@ function requireManuscriptReimportTargetSchema(
   includeDefaultExecutionRuleTables = false,
   includeRunCheckpointTables = false,
   includeClarificationTables = false,
+  includeReimportGroupTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2473,6 +2478,8 @@ function requireManuscriptReimportTargetSchema(
       ...(includeRunCheckpointTables ? RUN_CHECKPOINT_SCHEMA_SQL : {}),
       // Revision 35 (Issue #422) the Run's Clarification Requests and answers.
       ...(includeClarificationTables ? CLARIFICATION_SCHEMA_SQL : {}),
+      // Revision 36 (Issue #412) the chapter-level Reimport Comparison's groups, verbs and mark outcomes.
+      ...(includeReimportGroupTables ? REIMPORT_GROUP_SCHEMA_SQL : {}),
     },
     MANUSCRIPT_REIMPORT_INDEX_SQL,
     true,
@@ -4685,8 +4692,12 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
         checkpoint,
         lineage,
       }));
+      // Issue #412 (S63): a comparison prepared with its chapter-level rows binds each row's verb after the mappings'
+      // identities (`/3`); one prepared before revision 36 keeps the `/2` digest it was recorded with.
+      const grouped = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'manuscript_reimport_group_sets'").get() !== undefined &&
+        db.prepare('SELECT 1 FROM manuscript_reimport_group_sets WHERE comparison_id = ?').get(comparisonId) !== undefined;
       const resolutionHash = createHash('sha256');
-      resolutionHash.update(canonicalJson({ schema: 'ai7.manuscript-reimport-resolutions/2' }));
+      resolutionHash.update(canonicalJson({ schema: grouped ? 'ai7.manuscript-reimport-resolutions/3' : 'ai7.manuscript-reimport-resolutions/2' }));
       let mappingCursor = 0;
       let expectedPosition = 1;
       let changed = false;
@@ -4721,6 +4732,8 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
           ? asString(committedResult.resulting_revision_id)
           : asString(committedResult.previous_revision_id);
       while (true) {
+        // `claimed` is another mapping's resolution carrying this one's current identity: an insert claiming a
+        // delete's. A preserved edit carries its own, which is no claim.
         const mappings = db.prepare(
           `SELECT m.*, r.resolution, r.resolved_current_block_id,
                   r.comparison_id resolution_comparison_id,
@@ -4730,6 +4743,7 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
            LEFT JOIN manuscript_reimport_mapping_resolutions claimed
              ON claimed.comparison_id = m.comparison_id
             AND claimed.resolved_current_block_id = m.current_block_id
+            AND claimed.mapping_id <> m.mapping_id
            WHERE m.comparison_id = ? AND m.position > ? ORDER BY m.position LIMIT 64`,
         ).all(comparisonId, mappingCursor) as SqlRow[];
         if (mappings.length === 0) break;
@@ -4924,6 +4938,15 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
         asNumber(comparison.changed_mappings) === resolvedChangedCount &&
         asNumber(comparison.checkpoint_block_count) === currentAuthorityCount,
       'SCHEMA_INVALID', '稿件重新导入比较摘要或当前、暂存、结果块覆盖无效。');
+      if (grouped) {
+        const verbs = db.prepare(
+          `SELECT g.group_id, r.verb FROM manuscript_reimport_groups g
+           JOIN manuscript_reimport_group_resolutions r ON r.group_id = g.group_id
+           WHERE g.comparison_id = ? ORDER BY g.ordinal`,
+        ).all(comparisonId) as SqlRow[];
+        for (const row of verbs) resolutionHash.update(`
+${canonicalJson({ groupId: asString(row.group_id), verb: asString(row.verb) })}`);
+      }
       const resolutionDigest = resolutionHash.digest('hex');
       requireBounded(resolutionDigest === asString(comparison.resolution_digest),
         'SCHEMA_INVALID', '稿件重新导入当前解决摘要无效。');
@@ -5151,6 +5174,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeDefaultExecutionRuleTables = false,
   includeRunCheckpointTables = false,
   includeClarificationTables = false,
+  includeReimportGroupTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5172,6 +5196,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeDefaultExecutionRuleTables,
     includeRunCheckpointTables,
     includeClarificationTables,
+    includeReimportGroupTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5239,7 +5264,8 @@ export function initializeBoundedSchema(
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
       version === PLAN_EDIT_SCHEMA_VERSION ||
-      version === CLARIFICATION_SCHEMA_VERSION,
+      version === CLARIFICATION_SCHEMA_VERSION ||
+      version === REIMPORT_GROUP_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5257,9 +5283,10 @@ export function initializeBoundedSchema(
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
       version === PLAN_EDIT_SCHEMA_VERSION ||
-      version === CLARIFICATION_SCHEMA_VERSION) {
+      version === CLARIFICATION_SCHEMA_VERSION ||
+      version === REIMPORT_GROUP_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== CLARIFICATION_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== REIMPORT_GROUP_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5281,6 +5308,7 @@ export function initializeBoundedSchema(
           version >= DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
           version >= RUN_CONTINUATION_SCHEMA_VERSION,
           version >= CLARIFICATION_SCHEMA_VERSION,
+          version >= REIMPORT_GROUP_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);
