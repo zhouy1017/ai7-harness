@@ -274,6 +274,7 @@ import {
   initializeEditorialMarkSchema,
   followReimportedMarks,
   resolveBranchMarksAfterRewrite,
+  workingBlockDigests,
   type ReimportMarkOutcome,
   type ReimportMarkRow,
   type ProducedEditorialMarkInput,
@@ -8723,6 +8724,8 @@ export class EditorialStore {
         this.#authority.prepare('DELETE FROM manuscript_outline WHERE branch_id = ?').run(target.branchId);
         this.#authority.prepare('DELETE FROM working_block_search WHERE branch_id = ?').run(target.branchId);
         this.#authority.prepare('DELETE FROM working_offset_nodes WHERE branch_id = ?').run(target.branchId);
+        // Which blocks the rewrite leaves as they were (Issue #533): a point in one stands where it stood.
+        const blocksBefore = workingBlockDigests(this.#authority, target.branchId);
         this.#authority.prepare('DELETE FROM working_blocks WHERE branch_id = ?').run(target.branchId);
         const insertedWorking = this.#authority.prepare(
           `INSERT INTO working_blocks(branch_id, block_id, position, kind, level, text, digest, grapheme_length)
@@ -8774,7 +8777,7 @@ export class EditorialStore {
         // Issue #407: the working state was replaced whole. A mark whose block kept its identity is
         // resolved against the text that block holds now; one whose block was retired stays readable
         // as detached instead of pointing into a block that is no longer there.
-        resolveBranchMarksAfterRewrite(this.#authority, target.branchId);
+        resolveBranchMarksAfterRewrite(this.#authority, target.branchId, blocksBefore);
         // Issue #412 (S63): the marks of every changed row follow the new file to their words, or are set aside and
         // listed — never moved onto words they were not on.
         markOutcomes = followReimportedMarks(this.#authority, target.branchId, this.#reimportMarkRows(comparisonId, work.workId));

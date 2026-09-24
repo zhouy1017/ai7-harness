@@ -288,6 +288,324 @@ describe('a DOCX\'s comments and tracked changes enter the imported manuscript (
     }
   }, 180_000);
 
+  it('offers 保存为新提案版本 for an insertion whose point an edit took, and writes it where the edit left the point (Issue #533)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const { commit } = await importRevised(store, await composeRevised());
+      const book = { manuscriptId: commit.manuscriptId, branchId: commit.branchId };
+      const block = workingBlocks(store, commit.manuscriptId, commit.branchId)[1]!;
+      const insertion = windowMarks(store, commit.manuscriptId, commit.branchId)[1]!;
+      expect([insertion.blockId, insertion.fromGrapheme, insertion.toGrapheme, insertion.anchorState]).toEqual([block.blockId, 20, 20, 'exact']);
+      // The editor deletes graphemes 18 to 22 of ¶2, the words on both sides of the insertion's point: it drifts.
+      const window = store.getManuscriptWindow(commit.manuscriptId, commit.branchId, null);
+      const windowStartBlockId = window.blocks[0]!.blockId;
+      store.flushJournalEdit({
+        clientEditId: randomUUID(), ...book, baseRevisionId: window.revisionId, blockId: block.blockId, windowStartBlockId,
+        baseBlockDigest: block.digest, expectedJournalSequence: window.journalSequence, fromGrapheme: 18, toGrapheme: 22, insertText: '',
+      });
+      const drifted = windowMarks(store, commit.manuscriptId, commit.branchId).find((mark) => mark.markId === insertion.markId)!;
+      expect([drifted.anchorState, drifted.fromGrapheme, drifted.toGrapheme, drifted.conflict]).toEqual(['drifted', 18, 18, 'unresolved']);
+      // Nothing of the insertion was deleted, since it had no words there: its conflict offers a new version in place.
+      const words = await read(span(11, 0, 5));
+      const conflict = store.inspectProposalConflict({ ...book, markId: insertion.markId });
+      expect(conflict).toMatchObject({ conflictKind: 'suggestion', fromGrapheme: 18, toGrapheme: 18, newVersion: { available: true, blocker: null } });
+      expect([conflict.base, conflict.current, digest(conflict.proposed)]).toEqual(['', '', digest(words)]);
+      const draft = store.saveProposalConflictDraft({
+        ...book, markId: insertion.markId, basisDigest: conflict.basisDigest,
+        units: conflict.units.map((unit) => (unit.kind === 'same' ? { resolution: null, text: null } : { resolution: 'proposed' as const, text: null })),
+      });
+      expect(digest(draft.draft.text)).toBe(digest(words));
+      const resolved = store.resolveProposalConflict({
+        ...book, markId: insertion.markId, basisDigest: conflict.basisDigest, outcome: 'new-version', draftOrdinal: draft.draft.ordinal,
+      });
+      // The new version is an insertion at the point the edit left: the editor's, undecided, and exact.
+      const card = store.getEditorialMarkCard(commit.manuscriptId, commit.branchId, resolved.newMarkId!);
+      expect(card).toMatchObject({
+        kind: 'change-suggestion', status: 'open', anchorState: 'exact', blockId: block.blockId, fromGrapheme: 18, toGrapheme: 18,
+        pinnedText: '', conflict: null, convertedFrom: { markId: insertion.markId },
+      });
+      expect([card.suggestion?.changeType, card.suggestion?.currentText, digest(card.suggestion?.proposedText ?? '')]).toEqual(['insert', '', digest(words)]);
+      // 接受并应用 writes its words there.
+      store.applyChangeSuggestion({
+        ...book, windowStartBlockId, markId: resolved.newMarkId!, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null,
+      });
+      const original = await graphemes(span(10));
+      expect(digest(workingBlocks(store, commit.manuscriptId, commit.branchId)[1]!.text))
+        .toBe(digest([...original.slice(0, 18), words, ...original.slice(22)].join('')));
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
+  it('asks about a deletion applied before another author\'s insertion at its point, and not the other way round (Issue #533)', async () => {
+    // One author deleted words and another inserted words just after them: two marks, since their revisions differ. Each
+    // way has its own Book, so each file after the first carries one more plain paragraph.
+    const pair = { runs: [
+      text(span(13, 0, 5)), revised(span(13, 5, 9), 'del', AUTHOR, '2026-09-01T10:02:00Z'),
+      revised(span(14, 0, 6), 'ins', OTHER, '2026-09-01T11:02:00Z'), text(span(13, 9)),
+    ] };
+    const [block13, deleted, inserted, insertedGraphemes] = await Promise.all([
+      graphemes(span(13)), read(span(13, 5, 9)), read(span(14, 0, 6)), graphemes(span(14, 0, 6)),
+    ]);
+    const both = digest([...block13.slice(0, 5), inserted, ...block13.slice(9)].join(''));
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const ways = [['insertion first', 0], ['deletion first, kept', 1], ['deletion first, put back', 2]] as const;
+      for (const [way, plain] of ways) {
+        const paragraphs = [pair, ...Array.from({ length: plain }, () => ({ runs: [text(span(21))] }))];
+        const { commit } = await importRevised(store, await composeRevised({ paragraphs }));
+        const book = { manuscriptId: commit.manuscriptId, branchId: commit.branchId };
+        const windowStartBlockId = workingBlocks(store, commit.manuscriptId, commit.branchId)[0]!.blockId;
+        const [deletion, insertion] = windowMarks(store, commit.manuscriptId, commit.branchId);
+        expect([deletion!.fromGrapheme, deletion!.toGrapheme, insertion!.fromGrapheme, insertion!.toGrapheme]).toEqual([5, 9, 9, 9]);
+        const apply = (markId: string) => store.applyChangeSuggestion({
+          ...book, windowStartBlockId, markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null,
+        });
+        for (const mark of way === 'insertion first' ? [insertion!, deletion!] : [deletion!, insertion!]) apply(mark.markId);
+        // Either way the paragraph reads as both changes made.
+        expect(digest(workingBlocks(store, commit.manuscriptId, commit.branchId)[0]!.text)).toBe(both);
+        const anchorOf = (markId: string) => windowMarks(store, commit.manuscriptId, commit.branchId).find((mark) => mark.markId === markId)!;
+        if (way === 'insertion first') {
+          // The insertion written first leaves the deletion's words where they were: both stand exact, and nothing asks.
+          expect([anchorOf(deletion!.markId).conflict, anchorOf(insertion!.markId).conflict]).toEqual([null, null]);
+          continue;
+        }
+        // Deleted first, the words leave a point where the insertion's point already stood. Which side of the inserted words
+        // the deletion belongs on went with them, so AI7 asks rather than guessing: the deletion's point covers the words the
+        // insertion wrote, and undoing it is a reversal conflict over them.
+        expect([anchorOf(deletion!.markId).conflict, anchorOf(insertion!.markId).conflict]).toEqual(['unresolved', null]);
+        const reversal = store.inspectProposalConflict({ ...book, markId: deletion!.markId });
+        expect(reversal).toMatchObject({
+          conflictKind: 'reversal', fromGrapheme: 5, toGrapheme: 5 + insertedGraphemes.length, base: '', newVersion: { available: true, blocker: null },
+        });
+        expect([digest(reversal.current), digest(reversal.proposed)]).toEqual([digest(inserted), digest(deleted)]);
+        expect(reversal.units.map((unit) => unit.kind)).toEqual(['conflict']);
+        if (way === 'deletion first, kept') {
+          // 保留当前稿件 settles it, and nothing changes.
+          store.resolveProposalConflict({ ...book, markId: deletion!.markId, basisDigest: reversal.basisDigest, outcome: 'keep-current', draftOrdinal: null });
+          expect(anchorOf(deletion!.markId).conflict).toBe('resolved');
+          expect(digest(workingBlocks(store, commit.manuscriptId, commit.branchId)[0]!.text)).toBe(both);
+          continue;
+        }
+        // Or the editor puts the deleted words back where they stood, before the inserted ones: a Correction Proposal over
+        // the inserted words, which 接受并应用 writes. The paragraph reads as the insertion alone made.
+        const draft = store.saveProposalConflictDraft({
+          ...book, markId: deletion!.markId, basisDigest: reversal.basisDigest,
+          units: [{ resolution: 'both-proposed-first', text: null }],
+        });
+        expect(digest(draft.draft.text)).toBe(digest(deleted + inserted));
+        const resolved = store.resolveProposalConflict({
+          ...book, markId: deletion!.markId, basisDigest: reversal.basisDigest, outcome: 'new-version', draftOrdinal: draft.draft.ordinal,
+        });
+        expect(store.getEditorialMarkCard(commit.manuscriptId, commit.branchId, resolved.newMarkId!)).toMatchObject({
+          status: 'open', anchorState: 'exact', fromGrapheme: 5, toGrapheme: 5 + insertedGraphemes.length, convertedFrom: null,
+          resolvedFrom: { markId: deletion!.markId, conflictKind: 'reversal' },
+        });
+        expect(anchorOf(deletion!.markId).conflict).toBe('resolved');
+        apply(resolved.newMarkId!);
+        expect(digest(workingBlocks(store, commit.manuscriptId, commit.branchId)[0]!.text))
+          .toBe(digest([...block13.slice(0, 9), inserted, ...block13.slice(9)].join('')));
+        // The insertion still stands exact on its words, after the words put back.
+        const standing = anchorOf(insertion!.markId);
+        expect([standing.anchorState, standing.fromGrapheme, standing.toGrapheme]).toEqual(['exact', 9, 9 + insertedGraphemes.length]);
+      }
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 240_000);
+
+  it('lets the second of two insertions at one point cover the words the first wrote there, for the editor to order them (Issue #533)', async () => {
+    // Two authors inserted words at one place: two marks at one point, since their revisions differ.
+    const [block13, first, second, firstGraphemes] = await Promise.all([
+      graphemes(span(13)), read(span(14, 0, 3)), read(span(14, 3, 6)), graphemes(span(14, 0, 3)),
+    ]);
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const { commit } = await importRevised(store, await composeRevised({ paragraphs: [{ runs: [
+        text(span(13, 0, 5)), revised(span(14, 0, 3), 'ins', AUTHOR, '2026-09-01T10:02:00Z'),
+        revised(span(14, 3, 6), 'ins', OTHER, '2026-09-01T11:02:00Z'), text(span(13, 5)),
+      ] }] }));
+      const book = { manuscriptId: commit.manuscriptId, branchId: commit.branchId };
+      const windowStartBlockId = workingBlocks(store, commit.manuscriptId, commit.branchId)[0]!.blockId;
+      const cards = windowMarks(store, commit.manuscriptId, commit.branchId)
+        .map((mark) => store.getEditorialMarkCard(commit.manuscriptId, commit.branchId, mark.markId));
+      const one = cards.find((card) => card.source.label === AUTHOR)!;
+      const two = cards.find((card) => card.source.label === OTHER)!;
+      expect([one.fromGrapheme, one.toGrapheme, two.fromGrapheme, two.toGrapheme]).toEqual([5, 5, 5, 5]);
+      const apply = (markId: string) => store.applyChangeSuggestion({
+        ...book, windowStartBlockId, markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null,
+      });
+      const anchorOf = (markId: string) => {
+        const mark = windowMarks(store, commit.manuscriptId, commit.branchId).find((candidate) => candidate.markId === markId)!;
+        return [mark.anchorState, mark.fromGrapheme, mark.toGrapheme, mark.conflict];
+      };
+      const end = 5 + firstGraphemes.length;
+      apply(one.markId);
+      // The first stands on the words it wrote. Nothing says on which side of them the second belongs, so it covers them.
+      expect([anchorOf(one.markId), anchorOf(two.markId)]).toEqual([['exact', 5, end, null], ['drifted', 5, end, 'unresolved']]);
+      const conflict = store.inspectProposalConflict({ ...book, markId: two.markId });
+      expect(conflict).toMatchObject({ conflictKind: 'suggestion', fromGrapheme: 5, toGrapheme: end, base: '', newVersion: { available: true, blocker: null } });
+      expect([digest(conflict.current), digest(conflict.proposed)]).toEqual([digest(first), digest(second)]);
+      expect(conflict.units.map((unit) => unit.kind)).toEqual(['conflict']);
+      // The editor keeps the file's order, the first's words before the second's: a new version over the first's words.
+      const draft = store.saveProposalConflictDraft({
+        ...book, markId: two.markId, basisDigest: conflict.basisDigest, units: [{ resolution: 'both-current-first', text: null }],
+      });
+      expect(digest(draft.draft.text)).toBe(digest(first + second));
+      const resolved = store.resolveProposalConflict({
+        ...book, markId: two.markId, basisDigest: conflict.basisDigest, outcome: 'new-version', draftOrdinal: draft.draft.ordinal,
+      });
+      const card = store.getEditorialMarkCard(commit.manuscriptId, commit.branchId, resolved.newMarkId!);
+      expect(card).toMatchObject({ status: 'open', anchorState: 'exact', fromGrapheme: 5, toGrapheme: end, convertedFrom: { markId: two.markId } });
+      expect([card.suggestion?.changeType, digest(card.suggestion?.currentText ?? ''), digest(card.suggestion?.proposedText ?? '')])
+        .toEqual(['replace', digest(first), digest(first + second)]);
+      apply(resolved.newMarkId!);
+      expect(digest(workingBlocks(store, commit.manuscriptId, commit.branchId)[0]!.text))
+        .toBe(digest([...block13.slice(0, 5), first, second, ...block13.slice(5)].join('')));
+      expect(anchorOf(one.markId)).toEqual(['exact', 5, end, null]);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
+  it('covers what is written at an insertion\'s drifted point — an undo, a retyping — for the editor to place it there (Issue #533)', async () => {
+    const [original, words, typed, typedGraphemes] = await Promise.all([
+      graphemes(span(10)), read(span(11, 0, 5)), read(span(21, 0, 3)), graphemes(span(21, 0, 3)),
+    ]);
+    const typedLength = typedGraphemes.length;
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      // One Book each way; the second file carries one more plain paragraph.
+      for (const undo of [true, false]) {
+        const { commit } = await importRevised(store, await composeRevised(
+          undo ? REVISED : { ...REVISED, paragraphs: [...REVISED.paragraphs, { runs: [text(span(21))] }] },
+        ));
+        const book = { manuscriptId: commit.manuscriptId, branchId: commit.branchId };
+        const blockId = workingBlocks(store, commit.manuscriptId, commit.branchId)[1]!.blockId;
+        const insertion = windowMarks(store, commit.manuscriptId, commit.branchId)[1]!;
+        expect([insertion.blockId, insertion.fromGrapheme, insertion.toGrapheme]).toEqual([blockId, 20, 20]);
+        const anchorOf = () => {
+          const mark = windowMarks(store, commit.manuscriptId, commit.branchId).find((candidate) => candidate.markId === insertion.markId)!;
+          return [mark.anchorState, mark.fromGrapheme, mark.toGrapheme];
+        };
+        const edit = (fromGrapheme: number, toGrapheme: number, insertText: string) => {
+          const window = store.getManuscriptWindow(commit.manuscriptId, commit.branchId, null);
+          store.flushJournalEdit({
+            clientEditId: randomUUID(), ...book, baseRevisionId: window.revisionId, blockId, windowStartBlockId: window.blocks[0]!.blockId,
+            baseBlockDigest: window.blocks.find((block) => block.blockId === blockId)!.digest, expectedJournalSequence: window.journalSequence,
+            fromGrapheme, toGrapheme, insertText,
+          });
+        };
+        // The editor deletes graphemes 18 to 22 of ¶2, across the insertion's point: it drifts to 18.
+        edit(18, 22, '');
+        expect(anchorOf()).toEqual(['drifted', 18, 18]);
+        if (!undo) {
+          // The editor types new words there. The insertion covers them rather than standing after them, since nothing says
+          // on which side of them it belongs: its 稿件冲突 compares them with its own.
+          edit(18, 18, typed);
+          expect(anchorOf()).toEqual(['drifted', 18, 18 + typedLength]);
+          const conflict = store.inspectProposalConflict({ ...book, markId: insertion.markId });
+          expect(conflict).toMatchObject({
+            conflictKind: 'suggestion', fromGrapheme: 18, toGrapheme: 18 + typedLength, base: '', newVersion: { available: true, blocker: null },
+          });
+          expect([digest(conflict.current), digest(conflict.proposed)]).toEqual([digest(typed), digest(words)]);
+          // Typing at the edge of what it covers joins it; typing wholly in front of it moves it.
+          edit(18 + typedLength, 18 + typedLength, typed);
+          expect(anchorOf()).toEqual(['drifted', 18, 18 + 2 * typedLength]);
+          edit(0, 0, typed);
+          expect(anchorOf()).toEqual(['drifted', 18 + typedLength, 18 + 3 * typedLength]);
+          continue;
+        }
+        // The editor undoes the deletion. The words come back at the point, and the insertion covers them: standing after
+        // them, it would pass off a place four graphemes on from where the author put it.
+        store.undoManuscript(commit.manuscriptId, commit.branchId, store.getManuscriptWindow(commit.manuscriptId, commit.branchId, null).workingDigest);
+        expect(digest(workingBlocks(store, commit.manuscriptId, commit.branchId)[1]!.text)).toBe(digest(original.join('')));
+        expect(anchorOf()).toEqual(['drifted', 18, 22]);
+        const conflict = store.inspectProposalConflict({ ...book, markId: insertion.markId });
+        expect(conflict).toMatchObject({ conflictKind: 'suggestion', fromGrapheme: 18, toGrapheme: 22, base: '', newVersion: { available: true, blocker: null } });
+        expect([digest(conflict.current), digest(conflict.proposed)]).toEqual([digest(original.slice(18, 22).join('')), digest(words)]);
+        expect(conflict.units.map((unit) => unit.kind)).toEqual(['conflict']);
+        // The editor places the words where the author put them, after the second of those graphemes: a new version over
+        // them, which 接受并应用 writes as the insertion itself would have.
+        const placed = [...original.slice(18, 20), words, ...original.slice(20, 22)].join('');
+        const draft = store.saveProposalConflictDraft({
+          ...book, markId: insertion.markId, basisDigest: conflict.basisDigest, units: [{ resolution: 'edited', text: placed }],
+        });
+        const resolved = store.resolveProposalConflict({
+          ...book, markId: insertion.markId, basisDigest: conflict.basisDigest, outcome: 'new-version', draftOrdinal: draft.draft.ordinal,
+        });
+        const card = store.getEditorialMarkCard(commit.manuscriptId, commit.branchId, resolved.newMarkId!);
+        expect(card).toMatchObject({
+          status: 'open', anchorState: 'exact', blockId, fromGrapheme: 18, toGrapheme: 22, conflict: null, convertedFrom: { markId: insertion.markId },
+        });
+        expect([card.suggestion?.changeType, digest(card.suggestion?.currentText ?? ''), digest(card.suggestion?.proposedText ?? '')])
+          .toEqual(['replace', digest(original.slice(18, 22).join('')), digest(placed)]);
+        store.applyChangeSuggestion({
+          ...book, windowStartBlockId: store.getManuscriptWindow(commit.manuscriptId, commit.branchId, null).blocks[0]!.blockId,
+          markId: resolved.newMarkId!, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null,
+        });
+        expect(digest(workingBlocks(store, commit.manuscriptId, commit.branchId)[1]!.text))
+          .toBe(digest([...original.slice(0, 20), words, ...original.slice(20)].join('')));
+      }
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 240_000);
+
+  it('lets a pending insertion cover its paragraph once a recovery restores other text there, and leaves one in a kept paragraph where it stood (Issue #533)', async () => {
+    const insertions: Omit<ComposedRevisedRequest, 'source' | 'title'> = {
+      paragraphs: [
+        { runs: [text(span(10, 0, 20)), revised(span(11, 0, 5), 'ins', AUTHOR, '2026-09-01T10:01:00Z'), text(span(10, 20))] },
+        { runs: [text(span(13, 0, 5)), revised(span(14, 0, 6), 'ins', AUTHOR, '2026-09-01T10:02:00Z'), text(span(13, 5))] },
+      ],
+    };
+    const [first, typed, typedGraphemes] = await Promise.all([graphemes(span(10)), read(span(21, 0, 3)), graphemes(span(21, 0, 3))]);
+    let book: { manuscriptId: string; branchId: string };
+    let marks: EditorialMarkAnchorProjection[];
+    const interrupted = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const { commit } = await importRevised(interrupted, await composeRevised(insertions));
+      book = { manuscriptId: commit.manuscriptId, branchId: commit.branchId };
+      marks = windowMarks(interrupted, book.manuscriptId, book.branchId);
+      expect(marks.map((mark) => [mark.anchorState, mark.fromGrapheme, mark.toGrapheme])).toEqual([['exact', 20, 20], ['exact', 5, 5]]);
+      // The editor types in front of ¶1's insertion, which moves on with the words; then the product stops without closing.
+      const window = interrupted.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const block = window.blocks.find((candidate) => candidate.blockId === marks[0]!.blockId)!;
+      interrupted.flushJournalEdit({
+        clientEditId: randomUUID(), ...book, baseRevisionId: window.revisionId, blockId: block.blockId, windowStartBlockId: window.blocks[0]!.blockId,
+        baseBlockDigest: block.digest, expectedJournalSequence: window.journalSequence, fromGrapheme: 5, toGrapheme: 5, insertText: typed,
+      });
+      const moved = 20 + typedGraphemes.length;
+      expect(windowMarks(interrupted, book.manuscriptId, book.branchId)[0]).toMatchObject({ anchorState: 'exact', fromGrapheme: moved, toGrapheme: moved });
+    } finally {
+      // No `markCleanShutdown`: what an interrupted product process leaves behind.
+      interrupted.close();
+    }
+    const recovered = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const startup = await recovered.getStartup();
+      expect(startup.state).toBe('manuscript-recovery');
+      if (startup.state !== 'manuscript-recovery') throw new Error('unreachable');
+      // The editor restores the checkpoint, from before the typing: ¶1 reads as imported again.
+      await recovered.restoreRecovery(randomUUID(), startup.recovery.attentionId, startup.recovery.attentionVersion, { kind: 'checkpoint' });
+      expect(digest(workingBlocks(recovered, book.manuscriptId, book.branchId)[0]!.text)).toBe(digest(first.join('')));
+      // ¶1's insertion was counted in the typed words, so its index names no place in the text restored: it covers the whole
+      // paragraph, for the editor to place it. ¶2's text did not change, so its insertion drifts where it stood, still its place.
+      expect(windowMarks(recovered, book.manuscriptId, book.branchId).map((mark) => [mark.markId, mark.anchorState, mark.fromGrapheme, mark.toGrapheme]))
+        .toEqual([[marks[0]!.markId, 'drifted', 0, first.length], [marks[1]!.markId, 'drifted', 5, 5]]);
+      const conflict = recovered.inspectProposalConflict({ ...book, markId: marks[0]!.markId });
+      expect(conflict).toMatchObject({ conflictKind: 'suggestion', fromGrapheme: 0, toGrapheme: first.length, base: '', newVersion: { available: true, blocker: null } });
+      expect(digest(conflict.current)).toBe(digest(first.join('')));
+      recovered.markCleanShutdown();
+    } finally {
+      recovered.close();
+    }
+  }, 180_000);
+
   it('refuses the commit when a staged mark no longer matches its file, creating nothing', async () => {
     const path = await composeRevised();
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);

@@ -107,6 +107,7 @@ import {
   marksOfWindow,
   openMarkPlaces,
   resolveBranchMarksAfterRewrite,
+  workingBlockDigests,
 } from './editorial-marks.js';
 import { IMPORTED_MARK_FOREIGN_KEYS, IMPORTED_MARK_SCHEMA_SQL } from './imported-marks.js';
 import { EXPORT_LEDGER_FOREIGN_KEYS, EXPORT_LEDGER_SCHEMA_SQL, EXPORT_LEDGER_TRIGGER_SQL } from './manuscript-export.js';
@@ -6715,6 +6716,8 @@ export class BoundedManuscriptStore {
           expectedGraphemes = asNumber(inventory.graphemes);
         }
         requireBounded(expectedBlocks > 0, 'RECOVERY_SOURCE_INVALID', '恢复来源没有内容块。');
+        // Which blocks the restoration leaves as they were (Issue #533): a point in one stands where it stood.
+        const blocksBefore = workingBlockDigests(this.#db, binding.branchId);
         this.#db.prepare('DELETE FROM working_blocks WHERE branch_id = ?').run(binding.branchId);
         if (selection.kind === 'snapshot') {
           this.#db.prepare(
@@ -6733,7 +6736,7 @@ export class BoundedManuscriptStore {
         requireBounded(rebuiltTotal === expectedGraphemes, 'RECOVERY_SOURCE_INVALID', '恢复来源字符总数不一致。');
         // The working state was replaced whole, so no span exists to follow: every mark is resolved
         // against the text its block holds now, and one whose block is gone is kept as detached.
-        resolveBranchMarksAfterRewrite(this.#db, binding.branchId);
+        resolveBranchMarksAfterRewrite(this.#db, binding.branchId, blocksBefore);
       }
       this.#db.prepare(
         `INSERT INTO manuscript_revisions(
