@@ -7,6 +7,7 @@ import type {
   ManuscriptExportTargetProjection,
   ManuscriptExportFormat,
 } from '../shared/protocol.js';
+import { reportExportLabel } from '../shared/report-wording.js';
 
 /**
  * Every word of ④ 导出 (editor-surfaces §7 导出; V2-UX-EXP-001 to EXP-024) that the service projection does not
@@ -30,15 +31,23 @@ export const EXPORT_ACTION_LABELS = {
 } as const;
 export type ExportAction = keyof typeof EXPORT_ACTION_LABELS;
 
+/** What the card names before its first review: the version kind, and a milestone's or a report's own label. */
+export type ExportPendingLabel = { kind: 'current' } | { kind: 'milestone'; label: string } | { kind: 'report'; label: string };
+
 /** 导出… names the version it exports for a screen reader, since several stand side by side. */
-export function exportOpenAccessibleName(target: { kind: 'current' } | { kind: 'milestone'; label: string }): string {
+export function exportOpenAccessibleName(target: ExportPendingLabel): string {
+  if (target.kind === 'report') return `导出「${target.label}」…`;
   return target.kind === 'current' ? '导出当前修订版…' : `导出里程碑版本「${target.label}」…`;
 }
 
 // ---- the card ------------------------------------------------------------------------------------
 
-export function exportCardHeading(target: ManuscriptExportTargetProjection | null, pending: { kind: 'current' } | { kind: 'milestone'; label: string }): string {
-  if (target === null) return pending.kind === 'current' ? '导出 · 当前修订版' : `导出 · 里程碑版本「${pending.label}」`;
+export function exportCardHeading(target: ManuscriptExportTargetProjection | null, pending: ExportPendingLabel): string {
+  if (target === null) {
+    if (pending.kind === 'report') return `导出 · ${pending.label}`;
+    return pending.kind === 'current' ? '导出 · 当前修订版' : `导出 · 里程碑版本「${pending.label}」`;
+  }
+  if (target.report !== null) return `导出 · ${reportExportLabel(target.report.runLabel, target.report.version)}`;
   return target.kind === 'current'
     ? `导出 · 当前修订版 ${target.revisionLabel}`
     : `导出 · 里程碑版本「${target.milestoneLabel ?? ''}」 · ${target.revisionLabel}`;
@@ -156,6 +165,7 @@ export function exportReceiptMeta(receipt: Pick<ManuscriptExportReceiptProjectio
 }
 
 export function exportVersionText(target: ManuscriptExportTargetProjection): string {
+  if (target.report !== null) return reportExportLabel(target.report.runLabel, target.report.version);
   return target.kind === 'current' ? `修订版 ${target.revisionLabel}` : `里程碑版本「${target.milestoneLabel ?? ''}」 · ${target.revisionLabel}`;
 }
 
@@ -172,6 +182,8 @@ export function exportRecordLine(receipt: Pick<ManuscriptExportReceiptProjection
 export const EXPORT_TECHNICAL_TERMS = {
   revision: '修订版 ID',
   revisionDigest: '修订版摘要',
+  report: '审阅报告 ID',
+  reportDigest: '报告记录摘要',
   sourceVersion: '来源版本 ID',
   writer: '写出器',
   input: '导出输入摘要',

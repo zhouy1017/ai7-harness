@@ -15,8 +15,9 @@ import { graphemeCount, sliceGraphemes } from '../analysis/factual-review-contra
  * whole; nothing in an earlier version is rewritten, so a Report says what stood when it was made.
  *
  * A Report carries no manuscript text beyond the findings' own quotations, each at most 80 graphemes,
- * and places a finding by its block position rather than by a heading's words. Exporting it and
- * attaching it to a Delivery Package are S64's and S66's; it is a record here.
+ * and places a finding by its block position rather than by a heading's words. A recorded version exports
+ * through the export ledger in the manuscript's formats (`src/service/report-export.ts`, Issue #500); attaching
+ * it to a Delivery Package is S66's; it is a record here.
  */
 export const REVIEW_REPORT_SCHEMA = 'ai7.review.report/1' as const;
 const MAX_REPORT_QUOTE_GRAPHEMES = 80;

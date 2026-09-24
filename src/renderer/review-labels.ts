@@ -14,7 +14,21 @@ import {
   type ReviewScopeKind,
   type ReviewWorkspaceProjection,
 } from '../shared/protocol.js';
+import { reviewCountsLine } from '../shared/report-wording.js';
 import { attemptStateLabel, elapsedLabel, runStepIsStale } from './plan-preview-labels.js';
+
+// The 审阅报告's words have one owner, shared with the service's report writer (Issue #500, S64b part 2).
+export {
+  REVIEW_REPORT_HEADING,
+  REVIEW_REPORT_NO_MUST_ITEMS,
+  REVIEW_REPORT_OVERVIEW_COLUMNS,
+  reviewCountsLine,
+  reviewReportAppendixLine,
+  reviewReportConfigurationLine,
+  reviewReportExcludedLine,
+  reviewReportMustItemLine,
+  reviewReportVersionLine,
+} from '../shared/report-wording.js';
 
 /**
  * Every word of the 审阅 destination (editor-surfaces §4, V2-UX-REV-001 to REV-013) that the service
@@ -157,11 +171,6 @@ export function reviewCoverageChanges(row: Pick<ReviewCoverageRowProjection, 'ch
 /** One entry of the 审阅记录: `第 N 次 · 类别 · 范围 · 状态`, newest first. */
 export function reviewRunLine(summary: Pick<ReviewRunSummaryProjection, 'label' | 'categoryLabels' | 'scopeLabel' | 'stateLabel'>): string {
   return `${summary.label} · ${summary.categoryLabels.join('、')} · ${summary.scopeLabel} · ${summary.stateLabel}`;
-}
-
-/** Findings by severity and by status, each counted once in both. */
-export function reviewCountsLine(counts: ReviewFindingCountsProjection): string {
-  return `必须处理 ${counts.must} · 建议处理 ${counts.should} · 提示 ${counts.note} · 待处理 ${counts.pending} · 已处理 ${counts.handled} · 已忽略 ${counts.ignored}`;
 }
 
 export function reviewRunReportLine(reportVersion: number | null): string {
@@ -412,43 +421,11 @@ export function reviewBatchCappedLine(maximum: number): string {
 
 // ---- the 审阅报告 (V2-UX-REV-009) ---------------------------------------------------------------------
 
-export const REVIEW_REPORT_HEADING = '审阅报告';
 export const REVIEW_REPORT_NOTE = '报告按版本保存：再生成一次得到新的版本，旧版本原样保留。';
 export const REVIEW_REPORT_NONE = '还没有生成报告。';
-/** Export belongs to the Delivery Package (S64); until then it is shown, disabled, with this reason. */
-export const REVIEW_EXPORT_REASON = '导出随交付物功能提供。';
 export const REVIEW_REPORT_WAIT_RUNNING = '审阅进行中；结束后再生成报告。';
-export const REVIEW_REPORT_NO_MUST_ITEMS = '没有必须处理的事项。';
-
-export function reviewReportVersionLine(version: number, generatedAtLabel: string): string {
-  return `第 ${version} 版 · 生成于 ${generatedAtLabel}`;
-}
-
-export function reviewReportMustItemLine(item: { categoryLabel: string; locationLabel: string; quote: string; note: string; statusLabel: string }): string {
-  return `${item.categoryLabel} · ${item.locationLabel} · 「${item.quote}」 · ${item.note} · ${item.statusLabel}`;
-}
-
-export function reviewReportExcludedLine(excluded: number): string {
-  return excluded === 0 ? '列出的发现都已在稿件上定位' : `另有 ${excluded} 条无法在稿件上定位，没有列为发现`;
-}
-
-export const REVIEW_REPORT_OVERVIEW_COLUMNS = ['类别', '状态', '发现'] as const;
-
-export function reviewReportConfigurationLine(version: string): string {
-  return `审阅配置第 ${version} 版`;
-}
-
-/** 附录: what a category applied — its guideline documents and its 工序, each with its version (REV-009, REV-012). */
-export function reviewReportAppendixLine(category: {
-  label: string;
-  guidelineDocuments: ReadonlyArray<{ issuer: string; title: string; version: string }>;
-  procedure: { title: string; version: string };
-}): string {
-  const documents = category.guidelineDocuments.length === 0
-    ? '没有规范文件'
-    : category.guidelineDocuments.map((document) => `${document.issuer} · ${document.title}（第 ${document.version} 版）`).join('、');
-  return `${category.label}：${documents}；工序：${category.procedure.title}（第 ${category.procedure.version} 版）`;
-}
+/** 导出… exports the version on show (Issue #500, S64b part 2); with none generated yet, it waits for one. */
+export const REVIEW_EXPORT_NEEDS_REPORT = '先生成报告，再导出。';
 
 // ---- the opened Run --------------------------------------------------------------------------------
 

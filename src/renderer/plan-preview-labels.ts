@@ -75,20 +75,8 @@ export function launchPolicyIntegritySentence(label: LaunchPolicyProjection['pro
   return `策略完整性：已验证。当前${label.slice(0, separator)}范围保持${label.slice(separator + 1)}。`;
 }
 
-/**
- * The Decision Layer's form of an instant (V2-UX-LAYER-004): absolute local date and time, 24-hour, to
- * the second. It never replaces the exact instant, which sits beside it in the technical layer; an
- * unparsable value is returned as it came, because inventing a time is worse than showing a raw one.
- * `hourCycle` is stated rather than `hour12: false`, which reports midnight as hour 24 in some locales.
- */
-export function localInstantLabel(iso: string): string {
-  const at = new Date(iso);
-  if (Number.isNaN(at.getTime())) return iso;
-  return at.toLocaleString('zh-CN', {
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
-  });
-}
+/** The Decision Layer's form of an instant (V2-UX-LAYER-004), shared with the exported 审阅报告 (Issue #500, S64b). */
+export { localInstantLabel } from '../shared/report-wording.js';
 
 /** How long the step in flight has been running, as `mm:ss`; hours carry into the minutes place. */
 export function elapsedLabel(elapsedMs: number): string {

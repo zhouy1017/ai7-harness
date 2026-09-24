@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { lstat, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createServer } from 'node:http';
@@ -20,6 +20,10 @@ import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabl
 // Inputs: exact ADR 0043 SampleBooks/sample1.docx plus the hand-written synthetic model fixtures under
 // tests/fixtures/model/. The product executes every Run over the in-process ai7-local-deterministic route;
 // the remote DeepSeek binding stays denied under Provider Processing v1 and no socket is opened.
+
+// The Book's title as the import confirms it, and the 审阅报告's exported file (Issue #500, S64b part 2).
+const J04_BOOK_TITLE = 'J-04 sample1 基线稿件分析';
+const REPORT_EXPORT_FILE = '审阅报告.md';
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const SAMPLE1_BYTES = 29_550;
@@ -709,7 +713,7 @@ async function importSample1(renderer, cancellation) {
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, 'import-title-screen');
   at('sample1-import-title');
   await assertRenderer(renderer, `document.querySelector('[data-source-sha256]')?.textContent===${JSON.stringify(SAMPLE1_SHA256)} && document.querySelector('[data-source-bytes]')?.textContent===${JSON.stringify(String(SAMPLE1_BYTES))}`, 'import-exact-source');
-  await fill(renderer, '#book-title', 'J-04 sample1 基线稿件分析', 'import-title');
+  await fill(renderer, '#book-title', J04_BOOK_TITLE, 'import-title');
   cancellation.throwIfRequested();
   await click(renderer, '确认书名并复核', 'import-review');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'import-review-ready');
@@ -1116,11 +1120,17 @@ async function main() {
     // the deterministic route as one that reaches its model over the network. Absent, the reading is online, so
     // every stage before Connectivity Wait's reads exactly as it always has.
     const connectivityPath = resolve(runRoot, 'connectivity');
+    // Issue #500 (S64b part 2): the Save dialog's one answer per launch, for the 审阅报告's export, in a folder beside
+    // the data and outside it. No other stage opens the dialog, so every launch may carry it.
+    const exportsRoot = resolve(runRoot, 'exports');
+    await mkdir(exportsRoot);
+    const reportExportPath = resolve(exportsRoot, REPORT_EXPORT_FILE);
     const launchArgs = () => [
       '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
       '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
       resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
       '--j04-picker-path', SAMPLE1_PATH, '--j04-model-adapter', modelAdapterIdentity, '--j04-connectivity-path', connectivityPath,
+      '--j04-save-path', reportExportPath,
     ];
     requireJourney(!launchArgs().some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
     launchForCleanup = async (forCleanup = false) => {
@@ -3055,10 +3065,53 @@ async function main() {
     requireJourney(ignored?.status === 'ignored' && ignored.ignoreReason === ignoreReason && ignored.markStatus === 'removed', 'review-ignored-recorded', { status: ignored?.status, markStatus: ignored?.markStatus });
 
     at('review-report');
-    // The versioned 审阅报告 with its four parts; export belongs to the deliverables (V2-UX-REV-009).
+    // The versioned 审阅报告 with its four parts, and 导出… of the version on show (V2-UX-REV-009; Issue #500).
     await reviewAction(renderer, '[data-review-action="generate-report"]', 'review-report-generate');
     await waitFor(renderer, `document.querySelector('section.review-report')?.dataset.reportVersion==='1'`, 'review-report-version');
-    await assertRenderer(renderer, `(() => { const report=document.querySelector('section.review-report'); const parts=Array.from(report.querySelectorAll('section.review-report-part[data-report-part] > h6')).map((heading)=>heading.textContent); const exporter=report.querySelector('[data-review-action="export"]'); return JSON.stringify(parts)===JSON.stringify(['概览表','必须处理的事项','各类别摘要','附录']) && exporter instanceof HTMLButtonElement && exporter.disabled; })()`, 'review-report-parts');
+    await assertRenderer(renderer, `(() => { const report=document.querySelector('section.review-report'); const parts=Array.from(report.querySelectorAll('section.review-report-part[data-report-part] > h6')).map((heading)=>heading.textContent); const exporter=report.querySelector('[data-review-action="export"]'); return JSON.stringify(parts)===JSON.stringify(['概览表','必须处理的事项','各类别摘要','附录']) && exporter instanceof HTMLButtonElement && !exporter.disabled && exporter.textContent==='导出…' && exporter.dataset.reportVersion==='1'; })()`, 'review-report-parts');
+
+    at('review-report-export');
+    // Issue #500 (S64b part 2; ADR 0079 §3.4): 导出… opens ④ 导出's own card in the report — the report's own review of
+    // its parts, all kept, with no mark to include — and the Markdown 备用格式 chosen reviews again, its table 降级导出.
+    // This launch's Save-dialog answer is the destination; 按上述方式导出 writes the file. The runner reads it back:
+    // the Book's title, the Run and version it reports, the 概览表 as a table with a row per category the page lists,
+    // and the four parts in order.
+    const reportCard = `document.querySelector('section.review-report .review-report-export-slot > section.manuscript-export')`;
+    const runHeading = await renderer.evaluate(`document.querySelector('section.review-run .review-run-heading h4')?.textContent ?? ''`);
+    requireJourney(/^第 \d+ 次审阅$/u.test(runHeading ?? ''), 'report-export-run-heading', runHeading);
+    const reportLabel = `审阅报告 · ${runHeading} · 第 1 版`;
+    await assertRenderer(renderer, `document.querySelector('section.review-report [data-review-action="export"]')?.getAttribute('aria-label')===${JSON.stringify(`导出「${reportLabel}」…`)} && ${reportCard}===null`, 'report-export-named');
+    await reviewAction(renderer, 'section.review-report [data-review-action="export"]', 'report-export-open');
+    await waitFor(renderer, `(() => { const card=${reportCard}; return card?.dataset.exportPhase==='ready' && card.dataset.exportTarget==='report' && card.querySelector('input[name="export-format"]:checked')?.value==='docx'; })()`, 'report-export-reviewed', 60_000);
+    await assertRenderer(renderer, `(() => {
+      const card=${reportCard};
+      const rows=Array.from(card.querySelectorAll('ol.export-fidelity-list > li.export-fidelity-row')).map((row)=>row.dataset.exportFidelity+':'+row.dataset.exportStatus);
+      const fidelity=card.querySelector('section.export-fidelity');
+      return card.querySelector('h4')?.textContent===${JSON.stringify(`导出 · ${reportLabel}`)} && card.querySelector('fieldset.export-options')===null &&
+        ['report-overview:preserved','report-summaries:preserved','report-appendix:preserved'].every((row)=>rows.includes(row)) && rows.every((row)=>row.endsWith(':preserved')) &&
+        fidelity?.dataset.exportDegraded==='false' && (fidelity.querySelector('.export-restoration-line')?.textContent ?? '').startsWith('审阅报告按第 1 版的记录写出') &&
+        JSON.stringify(Array.from(card.querySelectorAll('input[name="export-format"]')).map((radio)=>radio.value+':'+radio.disabled))==='["docx:false","pdf:false","markdown:false"]';
+    })()`, 'report-export-review-is-the-reports');
+    await assertRenderer(renderer, `(() => { const radio=${reportCard}?.querySelector('input[name="export-format"][value="markdown"]'); if(!(radio instanceof HTMLInputElement)||radio.disabled)return false; radio.click(); return true; })()`, 'report-export-choose-markdown');
+    await waitFor(renderer, `(() => { const card=${reportCard}; return card?.dataset.exportPhase==='ready' && card.querySelector('input[name="export-format"]:checked')?.value==='markdown' && card.querySelector('li.export-fidelity-row[data-export-fidelity="report-overview"]')?.dataset.exportStatus==='degraded' && card.querySelector('section.export-fidelity')?.dataset.exportDegraded==='true'; })()`, 'report-export-markdown-reviewed', 60_000);
+    await reviewAction(renderer, 'section.review-report .review-report-export-slot [data-export-action="choose"]', 'report-export-choose');
+    await waitFor(renderer, `${reportCard}?.dataset.exportPhase==='prepared'`, 'report-export-prepared', 60_000);
+    await assertRenderer(renderer, `${reportCard}.querySelector('.export-destination-line')?.textContent===${JSON.stringify(`${reportExportPath}（新建文件）`)}`, 'report-export-destination-bound');
+    requireJourney((await readdir(exportsRoot)).length === 0, 'report-export-nothing-before-approval');
+    await reviewAction(renderer, 'section.review-report .review-report-export-slot [data-export-action="approve"]', 'report-export-approve');
+    await waitFor(renderer, `${reportCard}?.dataset.exportPhase==='done' && ${reportCard}.querySelector('.export-receipt')?.dataset.exportOutcome==='created' && ${reportCard}.querySelector('.export-outcome-detail')?.textContent===${JSON.stringify(`已新建「${REPORT_EXPORT_FILE}」。`)}`, 'report-export-written', 60_000);
+    const reportMarkdown = await readFile(reportExportPath, 'utf8');
+    const reportBlocks = reportMarkdown.slice(0, -1).split('\n\n');
+    const overviewRows = await renderer.evaluate(`document.querySelectorAll('section.review-report table.review-report-table tbody tr').length`);
+    const table = reportBlocks[reportBlocks.indexOf('## 概览表') + 1] ?? '';
+    requireJourney(reportMarkdown.endsWith('\n') && reportBlocks[0] === `# ${J04_BOOK_TITLE} · 审阅报告` && (reportBlocks[1] ?? '').startsWith(`${runHeading} · `) &&
+      (reportBlocks[1] ?? '').includes(' · 报告第 1 版 · 生成于 ') &&
+      JSON.stringify(reportBlocks.filter((block) => block.startsWith('## '))) === JSON.stringify(['## 概览表', '## 必须处理的事项', '## 各类别摘要', '## 附录']) &&
+      table.startsWith('| 类别 | 状态 | 发现 |\n| --- | --- | --- |\n') && table.split('\n').length === 2 + overviewRows && overviewRows > 0,
+    'report-export-file-reads-as-the-report', { blocks: reportBlocks.length, headings: reportBlocks.filter((block) => block.startsWith('#')).length, rows: overviewRows });
+    requireJourney(JSON.stringify(await readdir(exportsRoot)) === JSON.stringify([REPORT_EXPORT_FILE]), 'report-export-folder-holds-one-file');
+    await reviewAction(renderer, 'section.review-report .review-report-export-slot [data-export-action="close"]', 'report-export-close');
+    await waitFor(renderer, `${reportCard}===null && document.activeElement===document.querySelector('section.review-report [data-review-action="export"]')`, 'report-export-closed-focus-returns', 10_000);
 
     at('review-coverage-moves');
     // The batch wrote the manuscript, so what those two categories read is no longer the current text and

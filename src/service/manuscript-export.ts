@@ -21,9 +21,11 @@ import {
   type ManuscriptExportTargetProjection,
   type PrepareManuscriptExportInput,
   type ReviewManuscriptExportInput,
+  type ReviewReportRecord,
   type StageManuscriptExportInput,
 } from '../shared/protocol.js';
 import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
+import { reportExportLabel } from '../shared/report-wording.js';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
 import type { ManuscriptCheckpointBinding, ManuscriptCheckpointProgress, ManuscriptCheckpointPurpose } from './bounded-manuscript.js';
 import {
@@ -39,6 +41,7 @@ import {
   type DocxExportSource,
   type DocxExportSourceRow,
 } from './docx-export.js';
+import { REPORT_EXPORT_WRITER_IDENTITIES, renderReportExport, type ReportExportInput } from './report-export.js';
 import { MARKDOWN_EXPORT_WRITER_IDENTITY, PDF_EXPORT_WRITER_IDENTITY, renderMarkdownExport, renderPdfHtmlExport } from './text-export.js';
 
 /**
@@ -219,6 +222,24 @@ export const EXPORT_TEXT_RESTORATION_LINES: Readonly<Record<'pdf' | 'markdown', 
   pdf: '这份 PDF 按稿件文字排版生成：书名、章节标题与段落按稿件写出，不从原文件恢复任何内容。',
   markdown: '这份 Markdown 按稿件文字生成：标题层级写成 #，段落之间空一行，不从原文件恢复任何内容。',
 };
+/**
+ * A 审阅报告 exports in the manuscript's formats (ADR 0079 §3.4; Issue #500, S64b part 2), each saying what it
+ * promises of a report rather than of a manuscript.
+ */
+export const REPORT_EXPORT_FORMATS: ReadonlyArray<ManuscriptExportFormatProjection> = [
+  { format: 'docx', label: 'DOCX', available: true, note: '主要可编辑格式：可在 Word 中继续修改，概览表写成表格。' },
+  { format: 'pdf', label: 'PDF', available: true, note: '可选 · 固定版式，适合阅读与打印；不能继续编辑。' },
+  { format: 'markdown', label: 'Markdown（备用格式）', available: true, note: '备用格式 · 只写出文字、标题层级与表格，用于迁移或留底。' },
+];
+export const REPORT_FORMAT_LINES: Readonly<Record<ManuscriptExportFormat, string>> = {
+  docx: 'DOCX 可在 Word 中继续编辑；审阅报告的这一版本身不会因为导出而改变。',
+  pdf: 'PDF 是固定版式：按报告排成 A4 页面，适合阅读与打印，不能在 PDF 里继续修改；审阅报告的这一版本身不会因为导出而改变。',
+  markdown: 'Markdown 是备用格式：只写出文字、标题层级与表格；审阅报告的这一版本身不会因为导出而改变。',
+};
+/** How a report is written, in the editor's words: from its recorded version, with nothing restored from any file. */
+export function reportRestorationLine(version: number): string {
+  return `审阅报告按第 ${version} 版的记录写出：概览表、必须处理的事项、各类别摘要与附录，与审阅中显示的一致。`;
+}
 /** A PDF whose page was not printed yet cannot be approved: nothing is written, and the editor approves again. */
 export const EXPORT_PDF_NOT_PRINTED = 'PDF 还没有排版好，没有写入，所选位置没有变化；请再点一次「按上述方式导出」。';
 /** The folder inside AI7's own data where a PDF's page and its printed file wait between staging and the write. */
@@ -244,6 +265,8 @@ const APPROVAL_SCHEMA = 'ai7.export.approval/1' as const;
 const RECEIPT_SCHEMA = 'ai7.export.receipt/1' as const;
 const REVIEW_SCHEMA = 'ai7.export.review/1' as const;
 const INPUT_SCHEMA = 'ai7.export.input/1' as const;
+const REPORT_INPUT_SCHEMA = 'ai7.export.report-input/1' as const;
+const REVIEW_REPORT_SCHEMA = 'ai7.review.report/1' as const;
 const POLICY = { id: 'external-export-policy', version: 'v2' } as const;
 const INVALID_FILE_NAME_CHARACTERS = /[\\/:*?"<>|\u0000-\u001F]/gu;
 
@@ -269,25 +292,37 @@ export interface ManuscriptExportEnvironment {
 
 /** One exact version to export, resolved against the Book's primary Manuscript. */
 interface ResolvedTarget {
-  kind: 'current' | 'milestone';
-  targetKind: 'manuscript-revision' | 'milestone-version';
+  kind: 'current' | 'milestone' | 'report';
+  targetKind: 'manuscript-revision' | 'milestone-version' | 'report';
   targetId: string;
   milestoneId: string | null;
   milestoneLabel: string | null;
+  /** The revision exported, or for a report the revision its Review Run read. */
   revisionId: string;
   revisionLabel: string;
+  /** The digest a review binds: the revision's, or for a report its recorded version's. */
   revisionDigest: string;
   manuscriptId: string;
   branchId: string;
   bookTitle: string;
   savedForExport: boolean;
+  /** One recorded version of a 审阅报告 (Issue #500, S64b part 2); `null` for a manuscript version. */
+  report: ResolvedReport | null;
 }
 
-interface ExportPlan {
-  input: DocxExportInput;
-  inputDigest: string;
-  sourceVersionId: string;
+interface ResolvedReport {
+  reportId: string;
+  version: number;
+  reviewRunId: string;
+  runLabel: string;
+  generatedAt: string;
+  digest: string;
+  record: ReviewReportRecord;
 }
+
+type ExportPlan =
+  | { kind: 'manuscript'; input: DocxExportInput; inputDigest: string; sourceVersionId: string }
+  | { kind: 'report'; input: ReportExportInput; inputDigest: string; sourceVersionId: null };
 
 function text(value: SQLOutputValue | undefined): string {
   requireExport(typeof value === 'string' && value.isWellFormed(), 'EXPORT_RECORD_INVALID', '导出记录无效。');
@@ -342,6 +377,11 @@ function requireOptions(value: unknown): ManuscriptExportOptions {
   return { includeAnnotations: value.includeAnnotations, includeSuggestions: value.includeSuggestions, includeEditorNotes: value.includeEditorNotes };
 }
 
+/** The writer of one target in one format: a report's own, or the manuscript's. */
+function writerOf(target: { report: unknown }, format: ManuscriptExportFormat): string {
+  return target.report === null ? FORMAT_WRITERS[format] : REPORT_EXPORT_WRITER_IDENTITIES[format];
+}
+
 /** The format a request names; absent reads as DOCX, so a request made before S64b (Issue #500) means what it meant. */
 function requireFormat(value: unknown): ManuscriptExportFormat {
   requireExport(value === undefined || value === 'docx' || value === 'pdf' || value === 'markdown', 'EXPORT_FORMAT_INVALID', '导出格式无效。');
@@ -351,11 +391,13 @@ function requireFormat(value: unknown): ManuscriptExportFormat {
 function requireTarget(value: unknown): ManuscriptExportTargetInput {
   requireExport(
     isRecord(value) && ((value.kind === 'current' && Object.keys(value).length === 1) ||
-      (value.kind === 'milestone' && Object.keys(value).length === 2 && typeof value.milestoneId === 'string' && UUID_PATTERN.test(value.milestoneId))),
+      (value.kind === 'milestone' && Object.keys(value).length === 2 && typeof value.milestoneId === 'string' && UUID_PATTERN.test(value.milestoneId)) ||
+      (value.kind === 'report' && Object.keys(value).length === 2 && typeof value.reportId === 'string' && UUID_PATTERN.test(value.reportId))),
     'EXPORT_TARGET_INVALID',
     '导出对象无效。',
   );
-  return value.kind === 'current' ? { kind: 'current' } : { kind: 'milestone', milestoneId: value.milestoneId as string };
+  if (value.kind === 'current') return { kind: 'current' };
+  return value.kind === 'milestone' ? { kind: 'milestone', milestoneId: value.milestoneId as string } : { kind: 'report', reportId: value.reportId as string };
 }
 
 /** A file name the platform's dialog can offer: the Book's title and the version, without characters a path cannot hold. */
@@ -537,7 +579,7 @@ export class ManuscriptExportStore {
     const format = requireFormat(input.format);
     const resolved = await this.#resolve(input.bookId, target, true);
     const plan = await this.#plan(input.bookId, resolved, options, format);
-    const rendered = this.#render(plan.input, format, false);
+    const rendered = this.#render(plan, format, false);
     return this.#reviewOf(input.bookId, resolved, options, format, plan, rendered);
   }
 
@@ -562,7 +604,7 @@ export class ManuscriptExportStore {
     const resolved = await this.#resolve(input.bookId, target, false);
     requireExport(resolved.revisionId === input.revisionId, 'EXPORT_REVIEW_CHANGED', '稿件在查看导出后有了新的修订版，请重新查看导出。');
     const plan = await this.#plan(input.bookId, resolved, options, format);
-    const rendered = this.#render(plan.input, format, true);
+    const rendered = this.#render(plan, format, true);
     const review = this.#reviewOf(input.bookId, resolved, options, format, plan, rendered);
     requireExport(review.reviewDigest === input.reviewDigest, 'EXPORT_REVIEW_CHANGED', '导出保真审阅在查看后有了变化，请重新查看导出。');
     const payload = rendered.bytes!;
@@ -578,10 +620,12 @@ export class ManuscriptExportStore {
       bookId: input.bookId,
       targetKind: resolved.targetKind,
       targetId: resolved.targetId,
-      revisionId: resolved.revisionId,
-      revisionDigest: resolved.revisionDigest,
+      // A report binds its recorded version instead of a revision (the ledger's revision columns stay empty for it).
+      revisionId: resolved.report === null ? resolved.revisionId : null,
+      revisionDigest: resolved.report === null ? resolved.revisionDigest : null,
       revisionLabel: resolved.revisionLabel,
       milestoneLabel: resolved.milestoneLabel,
+      ...(resolved.report === null ? {} : { reportDigest: resolved.report.digest }),
       format,
       options,
       fidelitySha256: sha256Hex(fidelityJson),
@@ -594,7 +638,7 @@ export class ManuscriptExportStore {
       payloadBytes: payload.byteLength,
       policyId: POLICY.id,
       policyVersion: POLICY.version,
-      writer: FORMAT_WRITERS[format],
+      writer: writerOf(resolved, format),
       createdAt,
     });
     transact(this.#db, () => {
@@ -605,8 +649,8 @@ export class ManuscriptExportStore {
            payload_bytes, policy_id, policy_version, created_at, canonical_json, sha256
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
-        preparationId, effectIntentId, input.bookId, resolved.targetKind, resolved.targetId, resolved.revisionId,
-        resolved.revisionDigest, format, canonicalJson(options), fidelityJson, review.degraded ? 1 : 0, review.reviewDigest,
+        preparationId, effectIntentId, input.bookId, resolved.targetKind, resolved.targetId,
+        resolved.report === null ? resolved.revisionId : null, resolved.report === null ? resolved.revisionDigest : null, format, canonicalJson(options), fidelityJson, review.degraded ? 1 : 0, review.reviewDigest,
         destination.fileName, destination.path, destination.disposition, payloadSha256, payload.byteLength, POLICY.id,
         POLICY.version, createdAt, record.json, record.digest,
       );
@@ -634,7 +678,7 @@ export class ManuscriptExportStore {
     if (prior !== undefined) return this.#receiptProjection(row, prior);
     const resolved = this.#preparedTarget(input.bookId, row);
     const plan = await this.#plan(input.bookId, resolved, preparation.options, preparation.format);
-    const rendered = this.#render(plan.input, preparation.format, true);
+    const rendered = this.#render(plan, preparation.format, true);
     requireExport(sha256Hex(rendered.bytes!) === preparation.technical.payloadDigest, 'EXPORT_PAYLOAD_CHANGED',
       '稿件或标记在准备导出后有了变化，请重新准备导出。');
     // A PDF is the page the main process printed (Issue #500, S64b): the page is what the preparation bound, and the
@@ -718,7 +762,7 @@ export class ManuscriptExportStore {
     if (preparation.format !== 'pdf' || this.#outcomeRow(input.preparationId) !== undefined) return { format: preparation.format, print: null };
     const resolved = this.#preparedTarget(input.bookId, row);
     const plan = await this.#plan(input.bookId, resolved, preparation.options, 'pdf');
-    const page = this.#render(plan.input, 'pdf', true).bytes!;
+    const page = this.#render(plan, 'pdf', true).bytes!;
     requireExport(sha256Hex(page) === preparation.technical.payloadDigest, 'EXPORT_PAYLOAD_CHANGED',
       '稿件或标记在准备导出后有了变化，请重新准备导出。');
     const { pagePath, pdfPath } = await this.#stagingPaths(preparation.technical.effectIntentId);
@@ -851,6 +895,7 @@ export class ManuscriptExportStore {
    * review the editor read was of another version.
    */
   async #resolve(bookId: string, target: ManuscriptExportTargetInput, save: boolean): Promise<ResolvedTarget> {
+    if (target.kind === 'report') return this.#reportTarget(bookId, target.reportId);
     let head = this.#head(bookId);
     if (target.kind === 'milestone') {
       const row = this.#db.prepare(
@@ -863,7 +908,7 @@ export class ManuscriptExportStore {
       return {
         kind: 'milestone', targetKind: 'milestone-version', targetId: text(row.milestone_id), milestoneId: text(row.milestone_id),
         milestoneLabel: text(row.label), revisionId, revisionLabel: revision.revisionLabel, revisionDigest: revision.revisionDigest,
-        manuscriptId: head.manuscriptId, branchId: head.branchId, bookTitle: head.bookTitle, savedForExport: false,
+        manuscriptId: head.manuscriptId, branchId: head.branchId, bookTitle: head.bookTitle, savedForExport: false, report: null,
       };
     }
     let savedForExport = false;
@@ -877,7 +922,36 @@ export class ManuscriptExportStore {
     return {
       kind: 'current', targetKind: 'manuscript-revision', targetId: head.revisionId, milestoneId: null, milestoneLabel: null,
       revisionId: head.revisionId, revisionLabel: revision.revisionLabel, revisionDigest: revision.revisionDigest,
-      manuscriptId: head.manuscriptId, branchId: head.branchId, bookTitle: head.bookTitle, savedForExport,
+      manuscriptId: head.manuscriptId, branchId: head.branchId, bookTitle: head.bookTitle, savedForExport, report: null,
+    };
+  }
+
+  /**
+   * One recorded version of a Review Run's 审阅报告 of this Book (Issue #500, S64b part 2), read back to the digest it
+   * was recorded with. A version is never rewritten, so nothing is saved first and a preparation's version stays exact.
+   */
+  #reportTarget(bookId: string, reportId: string): ResolvedTarget {
+    const row = this.#db.prepare(
+      `SELECT rr.review_run_id, rr.version, rr.generated_at, rr.canonical_json, rr.sha256, r.book_id
+       FROM review_reports rr JOIN review_runs r ON r.review_run_id = rr.review_run_id WHERE rr.report_id = ?`,
+    ).get(reportId) as SqlRow | undefined;
+    requireExport(row !== undefined && text(row.book_id) === bookId, 'EXPORT_TARGET_NOT_FOUND', '所选审阅报告不属于这本书。');
+    const json = text(row.canonical_json);
+    const digest = text(row.sha256);
+    requireExport(sha256Hex(json) === digest, 'EXPORT_RECORD_INVALID', '审阅报告记录与其摘要不一致。');
+    const record = parseCanonicalJson(json) as ReviewReportRecord;
+    const version = integer(row.version);
+    requireExport(
+      isRecord(record) && record.schema === REVIEW_REPORT_SCHEMA && record.version === version && record.reviewRunId === text(row.review_run_id),
+      'EXPORT_RECORD_INVALID',
+      '审阅报告记录无效。',
+    );
+    const head = this.#head(bookId);
+    return {
+      kind: 'report', targetKind: 'report', targetId: reportId, milestoneId: null, milestoneLabel: null,
+      revisionId: record.run.manuscript.revisionId, revisionLabel: record.run.manuscript.revisionLabel, revisionDigest: digest,
+      manuscriptId: head.manuscriptId, branchId: head.branchId, bookTitle: head.bookTitle, savedForExport: false,
+      report: { reportId, version, reviewRunId: record.reviewRunId, runLabel: record.run.label, generatedAt: text(row.generated_at), digest, record },
     };
   }
 
@@ -903,6 +977,7 @@ export class ManuscriptExportStore {
 
   /** The version a preparation froze, read again exactly: a current revision stays that revision. */
   #preparedTarget(bookId: string, row: SqlRow): ResolvedTarget {
+    if (text(row.target_kind) === 'report') return this.#reportTarget(bookId, text(row.target_id));
     const head = this.#head(bookId);
     const revisionId = text(row.revision_id);
     const revision = this.#revision(revisionId);
@@ -925,6 +1000,7 @@ export class ManuscriptExportStore {
       branchId: head.branchId,
       bookTitle: head.bookTitle,
       savedForExport: false,
+      report: null,
     };
   }
 
@@ -932,6 +1008,19 @@ export class ManuscriptExportStore {
 
   /** Everything the file is written from: the version's blocks, its source, the mapping and the marks on it. */
   async #plan(bookId: string, target: ResolvedTarget, options: ManuscriptExportOptions, format: ManuscriptExportFormat): Promise<ExportPlan> {
+    if (target.report !== null) {
+      // A report is written from its recorded version alone: no block, no mark and no file of the manuscript.
+      const report = target.report;
+      const input: ReportExportInput = { bookTitle: target.bookTitle, version: report.version, generatedAt: report.generatedAt, record: report.record };
+      const inputDigest = canonicalRecord({
+        schema: REPORT_INPUT_SCHEMA,
+        writer: REPORT_EXPORT_WRITER_IDENTITIES[format],
+        reportId: report.reportId,
+        reportDigest: report.digest,
+        title: target.bookTitle,
+      }).digest;
+      return { kind: 'report', input, inputDigest, sourceVersionId: null };
+    }
     const blocks = (this.#db.prepare(
       'SELECT block_id, position, kind, level, text, digest FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position',
     ).all(target.revisionId) as SqlRow[]).map((row): DocxExportBlock => ({
@@ -979,7 +1068,7 @@ export class ManuscriptExportStore {
       options,
       title: target.bookTitle,
     }).digest;
-    return { input, inputDigest, sourceVersionId };
+    return { kind: 'manuscript', input, inputDigest, sourceVersionId };
   }
 
   /**
@@ -1085,8 +1174,16 @@ export class ManuscriptExportStore {
     return marks;
   }
 
-  /** The file of one format, or only its review (`emit: false`): DOCX restores from the original; PDF and Markdown do not. */
-  #render(input: DocxExportInput, format: ManuscriptExportFormat, emit: boolean): DocxExportResult {
+  /**
+   * The file of one format, or only its review (`emit: false`): DOCX restores from the original; PDF and Markdown do
+   * not; a report is laid out from its recorded version in any of them.
+   */
+  #render(plan: ExportPlan, format: ManuscriptExportFormat, emit: boolean): DocxExportResult {
+    if (plan.kind === 'report') {
+      const laid = renderReportExport(plan.input, format, { emit });
+      return { ...laid, restoration: 'regenerated', restoredBlocks: 0, regeneratedBlocks: 0, written: { annotations: 0, suggestions: 0, editorNotes: 0, replies: 0 } };
+    }
+    const input = plan.input;
     if (format !== 'docx') {
       const laid = format === 'pdf' ? renderPdfHtmlExport(input, { emit }) : renderMarkdownExport(input, { emit });
       return { ...laid, restoration: 'regenerated', restoredBlocks: 0, regeneratedBlocks: input.blocks.length };
@@ -1127,30 +1224,37 @@ export class ManuscriptExportStore {
       inputDigest: plan.inputDigest,
       fidelity,
     }).digest;
-    const restorationLine = format !== 'docx'
-      ? EXPORT_TEXT_RESTORATION_LINES[format]
-      : rendered.restoration === 'from-original'
-        ? `未改过、也没有带出标记的 ${rendered.restoredBlocks} 段从原文件恢复；其余 ${rendered.regeneratedBlocks} 段按稿件文字重新写出。`
-        : '这份稿件没有可以对应的原文件段落，导出按稿件文字重新生成 DOCX。';
+    const report = target.report;
+    const restorationLine = report !== null
+      ? reportRestorationLine(report.version)
+      : format !== 'docx'
+        ? EXPORT_TEXT_RESTORATION_LINES[format]
+        : rendered.restoration === 'from-original'
+          ? `未改过、也没有带出标记的 ${rendered.restoredBlocks} 段从原文件恢复；其余 ${rendered.regeneratedBlocks} 段按稿件文字重新写出。`
+          : '这份稿件没有可以对应的原文件段落，导出按稿件文字重新生成 DOCX。';
     return {
       bookId,
       bookTitle: target.bookTitle,
       target: targetProjection,
       savedForExport: target.savedForExport,
       format,
-      formats: EXPORT_FORMATS,
+      formats: report === null ? EXPORT_FORMATS : REPORT_EXPORT_FORMATS,
       options,
       restoration: rendered.restoration,
       restorationLine,
-      formatLine: FORMAT_LINES[format],
+      formatLine: report === null ? FORMAT_LINES[format] : REPORT_FORMAT_LINES[format],
       fidelity,
       degraded: rendered.degraded,
-      suggestedFileName: suggestedExportFileName(target.bookTitle, target.milestoneLabel ?? target.revisionLabel, format),
+      suggestedFileName: suggestedExportFileName(
+        target.bookTitle,
+        report === null ? target.milestoneLabel ?? target.revisionLabel : reportExportLabel(report.runLabel, report.version),
+        format,
+      ),
       reviewDigest,
       technical: {
         revisionDigest: target.revisionDigest,
         sourceVersionId: plan.sourceVersionId,
-        writerIdentity: FORMAT_WRITERS[format],
+        writerIdentity: writerOf(target, format),
         inputDigest: plan.inputDigest,
       },
     };
@@ -1163,6 +1267,9 @@ export class ManuscriptExportStore {
       milestoneLabel: target.milestoneLabel,
       revisionId: target.revisionId,
       revisionLabel: target.revisionLabel,
+      report: target.report === null
+        ? null
+        : { reportId: target.report.reportId, version: target.report.version, reviewRunId: target.report.reviewRunId, runLabel: target.report.runLabel },
     };
   }
 
@@ -1192,8 +1299,10 @@ export class ManuscriptExportStore {
     const fidelity = parseCanonicalJson(fidelityJson);
     requireExport(Array.isArray(fidelity), 'EXPORT_RECORD_INVALID', '导出保真审阅记录无效。');
     const targetKind = text(row.target_kind);
-    const revisionId = text(row.revision_id);
-    const revision = this.#revision(revisionId);
+    // A report's preparation names its recorded version; a manuscript version's, its revision.
+    const report = targetKind === 'report' ? this.#reportTarget(text(row.book_id), text(row.target_id)) : null;
+    const revisionId = report === null ? text(row.revision_id) : report.revisionId;
+    const revisionLabel = report === null ? this.#revision(revisionId).revisionLabel : report.revisionLabel;
     const milestoneLabel = targetKind === 'milestone-version'
       ? text((this.#db.prepare('SELECT label FROM milestone_versions WHERE milestone_id = ?').get(text(row.target_id)) as SqlRow | undefined)?.label)
       : null;
@@ -1205,10 +1314,11 @@ export class ManuscriptExportStore {
       bookId: text(row.book_id),
       targetKind,
       targetId: text(row.target_id),
-      revisionId,
-      revisionDigest: text(row.revision_digest),
-      revisionLabel: revision.revisionLabel,
+      revisionId: report === null ? revisionId : null,
+      revisionDigest: report === null ? text(row.revision_digest) : null,
+      revisionLabel,
       milestoneLabel,
+      ...(report === null ? {} : { reportDigest: report.revisionDigest }),
       format: text(row.format),
       options,
       fidelitySha256: sha256Hex(fidelityJson),
@@ -1226,12 +1336,13 @@ export class ManuscriptExportStore {
     return {
       bookId: text(row.book_id),
       preparationId,
-      target: {
+      target: report !== null ? this.#targetProjection(report) : {
         kind: targetKind === 'milestone-version' ? 'milestone' : 'current',
         milestoneId: targetKind === 'milestone-version' ? text(row.target_id) : null,
         milestoneLabel,
         revisionId,
-        revisionLabel: revision.revisionLabel,
+        revisionLabel,
+        report: null,
       },
       format: requireFormat(text(row.format)),
       options,

@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 52 as const;
+export const SERVICE_PROTOCOL_VERSION = 53 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -5100,11 +5100,17 @@ export const DEFAULT_MANUSCRIPT_EXPORT_OPTIONS: Readonly<ManuscriptExportOptions
   includeEditorNotes: false,
 });
 
-/** DOCX is the one format S64 writes; PDF and the Markdown 备用格式 are shown and not yet offered (S64b). */
+/** DOCX, the primary editable format; PDF, optional and fixed; Markdown, the 备用格式 (Issue #500, S64b). */
 export type ManuscriptExportFormat = 'docx' | 'pdf' | 'markdown';
 
-/** Which version is exported: the current revision (a dirty working state is saved first) or one milestone. */
-export type ManuscriptExportTargetInput = { kind: 'current' } | { kind: 'milestone'; milestoneId: string };
+/**
+ * What is exported: the current revision (a dirty working state is saved first), one milestone, or one version of
+ * a Review Run's 审阅报告 (Issue #500, S64b part 2; ADR 0079 §3.4), which exports in the manuscript's formats.
+ */
+export type ManuscriptExportTargetInput =
+  | { kind: 'current' }
+  | { kind: 'milestone'; milestoneId: string }
+  | { kind: 'report'; reportId: string };
 
 /**
  * The classes of the Export Fidelity Review (V2-UX-EXP-007): the content classes ADR 0086 retains with the
@@ -5123,7 +5129,12 @@ export type ExportFidelityKey =
   | 'headers-footers'
   | 'text-boxes'
   | 'fields'
-  | 'file-revisions';
+  | 'file-revisions'
+  // The four parts of a 审阅报告 (V2-UX-REV-009; Issue #500, S64b part 2).
+  | 'report-overview'
+  | 'report-must-items'
+  | 'report-summaries'
+  | 'report-appendix';
 
 /** `excluded`: a mark kind the editor left out of this export — a choice, not a loss. */
 export type ExportFidelityStatus = 'preserved' | 'degraded' | 'unavailable' | 'excluded';
@@ -5154,13 +5165,18 @@ export interface ExportFidelityRowProjection {
   positionsTruncated: boolean;
 }
 
-/** The exact version one export is of: the current revision, or one Milestone Version and the revision it froze. */
+/**
+ * The exact version one export is of: the current revision, one Milestone Version and the revision it froze, or one
+ * version of a 审阅报告 and the revision its Review Run read.
+ */
 export interface ManuscriptExportTargetProjection {
-  kind: 'current' | 'milestone';
+  kind: 'current' | 'milestone' | 'report';
   milestoneId: string | null;
   milestoneLabel: string | null;
   revisionId: string;
   revisionLabel: string;
+  /** The report version exported, and the Review Run it reports on; `null` for a manuscript version. */
+  report: { reportId: string; version: number; reviewRunId: string; runLabel: string } | null;
 }
 
 /** One format as the export card offers it: DOCX, the optional PDF, and the Markdown 备用格式 (Issue #500, S64b). */

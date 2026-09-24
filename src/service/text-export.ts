@@ -144,7 +144,7 @@ function written(notes: ReadonlyArray<Note>): TextExportResult['written'] {
 // ---- Markdown -----------------------------------------------------------------------------------------
 
 /** A character Markdown or CriticMarkup would read as syntax, escaped wherever it appears. */
-function escapeMarkdown(text: string): string {
+export function escapeMarkdown(text: string): string {
   return text.replace(/[\\`*_[\]<>{}|~&#]/gu, (character) => `\\${character}`);
 }
 
@@ -152,7 +152,7 @@ function escapeMarkdown(text: string): string {
  * A line that would open a quotation, a list, a heading's underline or an indented code block is escaped at its
  * start; a leading space or tab is written as its character reference, so it stays part of the words.
  */
-function escapeLineStart(line: string): string {
+export function escapeLineStart(line: string): string {
   const indent = /^[ \t]+/u.exec(line);
   if (indent !== null) return `${indent[0].replace(/[ \t]/gu, (space) => (space === ' ' ? '&#32;' : '&#9;'))}${line.slice(indent[0].length)}`;
   const list = /^(\d+)([.)])/u.exec(line);
@@ -218,24 +218,24 @@ export function renderMarkdownExport(input: DocxExportInput, options: { emit: bo
 
 // ---- PDF: the page the main process prints -----------------------------------------------------------------
 
-function escapeHtml(text: string): string {
+export function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/gu, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
 }
 
 /** Words on the page: escaped, each line break kept as one. */
-function lines(text: string): string {
+export function htmlLines(text: string): string {
   return text.split(/\r?\n/u).map(escapeHtml).join('<br>');
 }
 
 function htmlPiece(piece: Piece): string {
   switch (piece.kind) {
     case 'text':
-      return lines(piece.text);
+      return htmlLines(piece.text);
     case 'reference':
       return `<sup class="note-ref">${piece.note}</sup>`;
     case 'suggestion':
-      return `${piece.current.length === 0 ? '' : `<del>${lines(piece.current)}</del>`}` +
-        `${piece.proposed.length === 0 ? '' : `<ins>${lines(piece.proposed)}</ins>`}<sup class="note-ref">${piece.note}</sup>`;
+      return `${piece.current.length === 0 ? '' : `<del>${htmlLines(piece.current)}</del>`}` +
+        `${piece.proposed.length === 0 ? '' : `<ins>${htmlLines(piece.proposed)}</ins>`}<sup class="note-ref">${piece.note}</sup>`;
   }
 }
 
@@ -243,27 +243,29 @@ function htmlNote(note: Note): string {
   const mark = note.mark;
   if (mark.kind === 'change-suggestion') {
     return `<li value="${note.number}"><span class="note-kind">修改建议</span> · ${escapeHtml(mark.authorLabel)} · ${noteDate(mark.createdAt)}：` +
-      `「${lines(note.current ?? '')}」改为「${lines(note.proposed ?? '')}」</li>`;
+      `「${htmlLines(note.current ?? '')}」改为「${htmlLines(note.proposed ?? '')}」</li>`;
   }
   if (mark.kind === 'editor-note') {
-    return `<li value="${note.number}"><span class="note-kind">${EDITOR_NOTE_AUTHOR_LABEL}</span> · ${noteDate(mark.createdAt)}：${lines(mark.body)}</li>`;
+    return `<li value="${note.number}"><span class="note-kind">${EDITOR_NOTE_AUTHOR_LABEL}</span> · ${noteDate(mark.createdAt)}：${htmlLines(mark.body)}</li>`;
   }
-  const replies = mark.replies.map((reply) => `<p class="note-reply">回复 · ${noteDate(reply.createdAt)}：${lines(reply.body)}</p>`).join('');
+  const replies = mark.replies.map((reply) => `<p class="note-reply">回复 · ${noteDate(reply.createdAt)}：${htmlLines(reply.body)}</p>`).join('');
   return `<li value="${note.number}"><span class="note-kind">批注</span> · ${escapeHtml(mark.authorLabel)} · ${noteDate(mark.createdAt)}` +
-    `${mark.resolved ? ' · 已处理' : ''}：${lines(mark.body)}${replies}</li>`;
+    `${mark.resolved ? ' · 已处理' : ''}：${htmlLines(mark.body)}${replies}</li>`;
 }
 
 /**
  * The print sheet: A4, the reading faces a CJK system carries, and nothing the page could load — no script, no
  * remote font, no image — so the printed file holds the manuscript's words and nothing else.
  */
-const PRINT_STYLE = [
+export const PRINT_BASE_STYLE = [
   '@page{size:A4;margin:25mm 22mm}',
   "html{font-family:'Songti SC','STSong','SimSun','Noto Serif CJK SC','Source Han Serif SC','Noto Serif SC',serif;font-size:11pt;line-height:1.8;color:#000;background:#fff}",
   'body{margin:0}',
   'h1.book-title{text-align:center;font-size:20pt;margin:0 0 1.2em}',
   'h2,h3,h4,h5,h6{break-after:avoid;margin:1.2em 0 .6em}',
   'h2{font-size:16pt}h3{font-size:14pt}h4,h5,h6{font-size:12pt}',
+].join('');
+const PRINT_STYLE = PRINT_BASE_STYLE + [
   'p{margin:0 0 .5em;text-indent:2em;text-align:justify}',
   'del{text-decoration:line-through}ins{text-decoration:underline;text-decoration-style:double}',
   'sup.note-ref{font-size:.7em;line-height:0}',
@@ -290,11 +292,14 @@ export function renderPdfHtmlExport(input: DocxExportInput, options: { emit: boo
   const notes = laid.notes.length === 0
     ? ''
     : `<section class="notes"><h2>批注与修改建议</h2><ol>${laid.notes.map(htmlNote).join('')}</ol></section>`;
-  const html = '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">' +
+  return { bytes: new TextEncoder().encode(printPage(input.title, PRINT_STYLE, `<main>${blocks.join('')}</main>${notes}`)), ...result };
+}
+
+/** A page to print: its title, its print sheet and its body, under a policy that lets it load nothing at all. */
+export function printPage(title: string, style: string, body: string): string {
+  return '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">' +
     `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">` +
-    `<title>${escapeHtml(input.title)}</title><style>${PRINT_STYLE}</style></head>` +
-    `<body><main>${blocks.join('')}</main>${notes}</body></html>`;
-  return { bytes: new TextEncoder().encode(html), ...result };
+    `<title>${escapeHtml(title)}</title><style>${style}</style></head><body>${body}</body></html>`;
 }
 
 // ---- the review (V2-UX-EXP-007, EXP-009) -------------------------------------------------------------------
