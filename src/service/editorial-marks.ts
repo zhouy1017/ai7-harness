@@ -573,11 +573,12 @@ function occurrencesOf(parts: ReadonlyArray<string>, pinned: ReadonlyArray<strin
 
 /**
  * The marks of a reimport's changed rows (Issue #412, plan slice S63; V2-UX-IMP-057), after the working state was
- * replaced and `resolveBranchMarksAfterRewrite` read every mark against the block it names. A mark whose block the
- * row carried, and which still stands exactly on its words there, stays. Any other mark of a row goes to its words
- * when they stand exactly once among the row's new paragraphs. Otherwise — under 删除, or where its words are gone or
- * repeated — it is set aside from the text, kept, and listed for the editor. Marks outside the changed rows are not
- * touched, and nothing is guessed: a mark never lands on words it was not on.
+ * replaced and `resolveBranchMarksAfterRewrite` read every mark against the block it names. Every mark of a row goes to
+ * its words when they stand exactly once among the row's new paragraphs — a carried paragraph included, since its words
+ * may stand twice after a 拆分 and the rewrite may have moved the mark to the other place. Otherwise — under 删除, or
+ * where its words are gone or repeated — it is set aside from the text, kept, and listed for the editor. Marks outside
+ * the changed rows are not touched, each mark is settled once, and nothing is guessed: a mark never lands on words it
+ * was not on.
  */
 export function followReimportedMarks(db: DatabaseSync, branchId: string, rows: ReadonlyArray<ReimportMarkRow>): ReimportMarkOutcome[] {
   if (!marksRelationExists(db)) return [];
@@ -594,35 +595,35 @@ export function followReimportedMarks(db: DatabaseSync, branchId: string, rows: 
      WHERE mark_id = ?`,
   );
   const outcomes: ReimportMarkOutcome[] = [];
+  // A mark is settled once: a move onto a later row's carried paragraph never has it read, and settled, again.
+  const settled = new Set<string>();
   for (const row of rows) {
     const newBlocks = row.newBlockIds.map((blockId) => {
       const found = blockText.get(branchId, blockId) as SqlRow | undefined;
       requireMark(found !== undefined, 'MARK_ANCHOR_INVALID', '重新导入的新段落不在稿件中。');
       return { blockId, parts: graphemesOf(text(found.text)) };
     });
-    const carried = new Set(row.newBlockIds);
-    for (const current of row.current) {
-      for (const mark of marksOn.all(branchId, current.blockId) as SqlRow[]) {
-        const markId = text(mark.mark_id);
-        const words = text(mark.pinned_text);
-        const base = { markId, ordinal: row.ordinal, kind: text(mark.kind) as EditorialMarkKind, words, fromPosition: current.position };
-        if (row.verb !== 'delete' && carried.has(current.blockId) && text(mark.anchor_state) === 'exact') {
-          outcomes.push({ ...base, outcome: 'followed', toBlockId: current.blockId });
+    // The row's marks are read once, before any of them moves: a mark moved onto a later paragraph of the row — a carried
+    // identity — is never read again there.
+    const rowMarks = row.current.flatMap((current) => (marksOn.all(branchId, current.blockId) as SqlRow[]).map((mark) => ({ current, mark })));
+    for (const { current, mark } of rowMarks) {
+      const markId = text(mark.mark_id);
+      if (settled.has(markId)) continue;
+      settled.add(markId);
+      const words = text(mark.pinned_text);
+      const base = { markId, ordinal: row.ordinal, kind: text(mark.kind) as EditorialMarkKind, words, fromPosition: current.position };
+      if (row.verb !== 'delete' && words !== '') {
+        const pinned = graphemesOf(words);
+        const places = newBlocks.flatMap((block) => occurrencesOf(block.parts, pinned).map((from) => ({ blockId: block.blockId, from })));
+        if (places.length === 1) {
+          const place = places[0]!;
+          update.run(place.blockId, place.from, place.from + pinned.length, 'exact', journalSequence, markId);
+          outcomes.push({ ...base, outcome: 'followed', toBlockId: place.blockId });
           continue;
         }
-        if (row.verb !== 'delete' && words !== '') {
-          const pinned = graphemesOf(words);
-          const places = newBlocks.flatMap((block) => occurrencesOf(block.parts, pinned).map((from) => ({ blockId: block.blockId, from })));
-          if (places.length === 1) {
-            const place = places[0]!;
-            update.run(place.blockId, place.from, place.from + pinned.length, 'exact', journalSequence, markId);
-            outcomes.push({ ...base, outcome: 'followed', toBlockId: place.blockId });
-            continue;
-          }
-        }
-        update.run(current.blockId, integer(mark.from_grapheme), integer(mark.to_grapheme), 'detached', journalSequence, markId);
-        outcomes.push({ ...base, outcome: 'unfollowed', toBlockId: null });
       }
+      update.run(current.blockId, integer(mark.from_grapheme), integer(mark.to_grapheme), 'detached', journalSequence, markId);
+      outcomes.push({ ...base, outcome: 'unfollowed', toBlockId: null });
     }
   }
   return outcomes;

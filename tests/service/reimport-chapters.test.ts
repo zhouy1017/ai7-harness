@@ -215,6 +215,60 @@ describe('the chapter-level Reimport Comparison', () => {
     }
   }, 180_000);
 
+  it('settles a mark once when its words move onto the next paragraph of the same row', async () => {
+    // Two paragraphs: the first one's second half moves to the start of the second, which also gains words. One row,
+    // current 1–2 → new 1–2, resolved 改写与新增, so each new paragraph carries its current one's identity.
+    const first = await compose('moved-base', [paragraph(span(21)), paragraph(span(22))]);
+    const second = await compose('moved-revised', [paragraph(span(21, 0, 10)), paragraph(span(21, 10), span(22), span(23, 0, 8))]);
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store, first);
+      // A 批注 on words of the first paragraph's second half.
+      const moved = mark(store, book, 1, 10, 16, 'annotation', '这一句挪到下一段了。');
+      let review = await prepareReimport(store, book, second);
+      const page = store.getReimportMappingPage(review.draftId, review.draftVersion, null);
+      expect(page.items.map((row) => [row.current.from, row.current.to, row.staged.from, row.staged.to])).toEqual([[1, 2, 1, 2]]);
+      expect(page.items[0]!.verbs).toContain('rewrite');
+      review = resolve(store, review, page.items[0]!.groupId, 'rewrite');
+      // The mark follows its words onto the second paragraph and is settled once: the reimport commits.
+      const result = await commit(store, review);
+      expect(result.resultKind).toBe('changed');
+      expect(result.receipt.markOutcomes).toMatchObject({ followed: 1, unfollowed: 0 });
+      const view = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const standing = view.marks.find((entry) => entry.markId === moved);
+      expect(standing?.anchorState).toBe('exact');
+      expect(view.blocks.findIndex((block) => block.blockId === standing?.blockId) + 1).toBe(2);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
+  it('sets a mark aside when a split leaves its words twice, never landing it on the other place', async () => {
+    // One paragraph whose opening words stand twice; the new file splits it between the two.
+    const first = await compose('twice-base', [paragraph(span(21, 0, 6), span(21, 0, 6), span(22))]);
+    const second = await compose('twice-revised', [paragraph(span(21, 0, 6)), paragraph(span(21, 0, 6), span(22))]);
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store, first);
+      // A 批注 on the second place the words stand.
+      const markId = mark(store, book, 1, 6, 12, 'annotation', '第二处。');
+      let review = await prepareReimport(store, book, second);
+      const page = store.getReimportMappingPage(review.draftId, review.draftVersion, null);
+      expect(page.items.map((row) => [row.current.from, row.current.to, row.staged.from, row.staged.to])).toEqual([[1, 1, 1, 2]]);
+      expect(page.items[0]!.verbs).toContain('split');
+      review = resolve(store, review, page.items[0]!.groupId, 'split');
+      const result = await commit(store, review);
+      // Its words now stand in both new paragraphs: it is set aside and listed, never moved onto the first place.
+      expect(result.receipt.markOutcomes).toMatchObject({ followed: 0, unfollowed: 1 });
+      expect(result.receipt.markOutcomes.items.map((item) => item.markId)).toEqual([markId]);
+      expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId).anchorState).toBe('detached');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
   it('keeps an edited paragraph’s own identity in a three-way comparison, and the store opens again', async () => {
     // Three paragraphs of sample1. The editor adds words to the first and does not save a milestone; the new file keeps
     // the first as the source had it and replaces the second. Against the verified source the first is an edit row
