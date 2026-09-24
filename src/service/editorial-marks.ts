@@ -503,7 +503,10 @@ export function followBlockTextChangeForMarks(
       ? finalText
       : [...current.slice(0, span.fromGrapheme), ...span.inserted, ...current.slice(span.toGrapheme)];
     // Points that stand at one place — two deletions applied side by side — have lost the order between
-    // them: text inserted exactly there could belong between them, so none can say which side it is on.
+    // them: text inserted exactly there could belong between them, so none can say which side it is on. The same holds
+    // whatever the points' change kind (Issue #533): a pending insertion that stands where an applied deletion left its
+    // point, or two pending insertions at one place, lost their order when the words between them went, so text written
+    // there — an insertion's own Apply included — leaves each for the editor to place rather than guessing a side.
     const crowded = followed.filter((mark) => mark.pinned.length === 0 && mark.state === 'exact' &&
       mark.fromGrapheme === span.fromGrapheme && mark.toGrapheme === span.toGrapheme);
     for (const mark of followed) {
@@ -1380,7 +1383,8 @@ export class EditorialMarkStore {
     manuscriptId: string; branchId: string; blockId: string; blockDigest: string; fromGrapheme: number; toGrapheme: number;
     currentText: string; proposedText: string; rationale: string; basisJson: string; convertedFrom: string | null; now: string;
   }): string {
-    const pinned = this.#requireRange(input.branchId, input.blockId, input.blockDigest, input.fromGrapheme, input.toGrapheme, input.currentText);
+    // A pending insertion's new version stands at its point (Issue #533): no words, as the insertion it replaces.
+    const pinned = this.#requireRange(input.branchId, input.blockId, input.blockDigest, input.fromGrapheme, input.toGrapheme, input.currentText, input.currentText.length === 0);
     const content = this.#content('change-suggestion', null, '', input.proposedText, input.rationale, pinned);
     const state = this.#branchState(input.manuscriptId, input.branchId);
     const markId = randomUUID();

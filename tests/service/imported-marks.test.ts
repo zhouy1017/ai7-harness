@@ -288,6 +288,101 @@ describe('a DOCX\'s comments and tracked changes enter the imported manuscript (
     }
   }, 180_000);
 
+  it('offers 保存为新提案版本 for an insertion whose point an edit took, and writes it where the edit left the point (Issue #533)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const { commit } = await importRevised(store, await composeRevised());
+      const book = { manuscriptId: commit.manuscriptId, branchId: commit.branchId };
+      const block = workingBlocks(store, commit.manuscriptId, commit.branchId)[1]!;
+      const insertion = windowMarks(store, commit.manuscriptId, commit.branchId)[1]!;
+      expect([insertion.blockId, insertion.fromGrapheme, insertion.toGrapheme, insertion.anchorState]).toEqual([block.blockId, 20, 20, 'exact']);
+      // The editor deletes graphemes 18 to 22 of ¶2, the words on both sides of the insertion's point: it drifts.
+      const window = store.getManuscriptWindow(commit.manuscriptId, commit.branchId, null);
+      const windowStartBlockId = window.blocks[0]!.blockId;
+      store.flushJournalEdit({
+        clientEditId: randomUUID(), ...book, baseRevisionId: window.revisionId, blockId: block.blockId, windowStartBlockId,
+        baseBlockDigest: block.digest, expectedJournalSequence: window.journalSequence, fromGrapheme: 18, toGrapheme: 22, insertText: '',
+      });
+      const drifted = windowMarks(store, commit.manuscriptId, commit.branchId).find((mark) => mark.markId === insertion.markId)!;
+      expect([drifted.anchorState, drifted.fromGrapheme, drifted.toGrapheme, drifted.conflict]).toEqual(['drifted', 18, 18, 'unresolved']);
+      // Nothing of the insertion was deleted, since it had no words there: its conflict offers a new version in place.
+      const words = await read(span(11, 0, 5));
+      const conflict = store.inspectProposalConflict({ ...book, markId: insertion.markId });
+      expect(conflict).toMatchObject({ conflictKind: 'suggestion', fromGrapheme: 18, toGrapheme: 18, newVersion: { available: true, blocker: null } });
+      expect([conflict.base, conflict.current, digest(conflict.proposed)]).toEqual(['', '', digest(words)]);
+      const draft = store.saveProposalConflictDraft({
+        ...book, markId: insertion.markId, basisDigest: conflict.basisDigest,
+        units: conflict.units.map((unit) => (unit.kind === 'same' ? { resolution: null, text: null } : { resolution: 'proposed' as const, text: null })),
+      });
+      expect(digest(draft.draft.text)).toBe(digest(words));
+      const resolved = store.resolveProposalConflict({
+        ...book, markId: insertion.markId, basisDigest: conflict.basisDigest, outcome: 'new-version', draftOrdinal: draft.draft.ordinal,
+      });
+      // The new version is an insertion at the point the edit left: the editor's, undecided, and exact.
+      const card = store.getEditorialMarkCard(commit.manuscriptId, commit.branchId, resolved.newMarkId!);
+      expect(card).toMatchObject({
+        kind: 'change-suggestion', status: 'open', anchorState: 'exact', blockId: block.blockId, fromGrapheme: 18, toGrapheme: 18,
+        pinnedText: '', conflict: null, convertedFrom: { markId: insertion.markId },
+      });
+      expect([card.suggestion?.changeType, card.suggestion?.currentText, digest(card.suggestion?.proposedText ?? '')]).toEqual(['insert', '', digest(words)]);
+      // 接受并应用 writes its words there.
+      store.applyChangeSuggestion({
+        ...book, windowStartBlockId, markId: resolved.newMarkId!, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null,
+      });
+      const original = await graphemes(span(10));
+      expect(digest(workingBlocks(store, commit.manuscriptId, commit.branchId)[1]!.text))
+        .toBe(digest([...original.slice(0, 18), words, ...original.slice(22)].join('')));
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
+  it('asks about a deletion applied before another author\'s insertion at its point, and not the other way round (Issue #533)', async () => {
+    // One author deleted words and another inserted words just after them: two marks, since their revisions differ. Each
+    // order has its own Book, so the second file carries one more plain paragraph.
+    const pair = { runs: [
+      text(span(13, 0, 5)), revised(span(13, 5, 9), 'del', AUTHOR, '2026-09-01T10:02:00Z'),
+      revised(span(14, 0, 6), 'ins', OTHER, '2026-09-01T11:02:00Z'), text(span(13, 9)),
+    ] };
+    const [block13, inserted] = await Promise.all([graphemes(span(13)), read(span(14, 0, 6))]);
+    const both = digest([...block13.slice(0, 5), inserted, ...block13.slice(9)].join(''));
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      for (const deletionFirst of [true, false]) {
+        const { commit } = await importRevised(store, await composeRevised({ paragraphs: deletionFirst ? [pair] : [pair, { runs: [text(span(21))] }] }));
+        const book = { manuscriptId: commit.manuscriptId, branchId: commit.branchId };
+        const windowStartBlockId = workingBlocks(store, commit.manuscriptId, commit.branchId)[0]!.blockId;
+        const [deletion, insertion] = windowMarks(store, commit.manuscriptId, commit.branchId);
+        expect([deletion!.fromGrapheme, deletion!.toGrapheme, insertion!.fromGrapheme, insertion!.toGrapheme]).toEqual([5, 9, 9, 9]);
+        const apply = (markId: string) => store.applyChangeSuggestion({
+          ...book, windowStartBlockId, markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null,
+        });
+        for (const mark of deletionFirst ? [deletion!, insertion!] : [insertion!, deletion!]) apply(mark.markId);
+        // Either way the paragraph reads as both changes made.
+        expect(digest(workingBlocks(store, commit.manuscriptId, commit.branchId)[0]!.text)).toBe(both);
+        const conflictOf = (markId: string) => windowMarks(store, commit.manuscriptId, commit.branchId).find((mark) => mark.markId === markId)!.conflict;
+        if (!deletionFirst) {
+          // The insertion written first leaves the deletion's words where they were: both stand exact, and nothing asks.
+          expect([conflictOf(deletion!.markId), conflictOf(insertion!.markId)]).toEqual([null, null]);
+          continue;
+        }
+        // Deleted first, the words leave a point where the insertion's point already stood. Which side of the inserted words
+        // the deletion belongs on was lost with them, so AI7 asks rather than guessing: undoing it is a reversal conflict,
+        // which 保留当前稿件 settles, and nothing changes.
+        expect([conflictOf(deletion!.markId), conflictOf(insertion!.markId)]).toEqual(['unresolved', null]);
+        const reversal = store.inspectProposalConflict({ ...book, markId: deletion!.markId });
+        expect(reversal.conflictKind).toBe('reversal');
+        store.resolveProposalConflict({ ...book, markId: deletion!.markId, basisDigest: reversal.basisDigest, outcome: 'keep-current', draftOrdinal: null });
+        expect(conflictOf(deletion!.markId)).toBe('resolved');
+        expect(digest(workingBlocks(store, commit.manuscriptId, commit.branchId)[0]!.text)).toBe(both);
+      }
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
   it('refuses the commit when a staged mark no longer matches its file, creating nothing', async () => {
     const path = await composeRevised();
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
