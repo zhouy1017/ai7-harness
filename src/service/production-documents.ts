@@ -1,15 +1,24 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
+  MAX_PRODUCTION_DOCUMENT_DELIVERIES_LISTED,
+  MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS,
+  MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS,
   MAX_PRODUCTION_DOCUMENT_SOURCES_LISTED,
   MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED,
+  PRODUCTION_DOCUMENT_RECIPIENT_KINDS,
+  PRODUCTION_DOCUMENT_RECIPIENT_LABELS,
+  publicationText,
+  type ManuscriptExportReceiptProjection,
+  type ProductionDocumentDeliveryProjection,
   type ProductionDocumentProjection,
+  type ProductionDocumentRecipientKind,
   type ProductionDocumentsProjection,
   type ProductionDocumentSourceProjection,
   type ProductionDocumentVersionProjection,
   type SourceFormat,
 } from '../shared/protocol.js';
-import { UUID_PATTERN, canonicalJson, sha256Hex } from './analysis/canonical.js';
+import { UUID_PATTERN, canonicalJson, canonicalRecord, sha256Hex } from './analysis/canonical.js';
 import {
   BUILTIN_PRODUCTION_DOCUMENT_TYPES,
   BUILTIN_PRODUCTION_DOCUMENT_TYPES_DIGEST,
@@ -79,11 +88,19 @@ export interface ProductionDocumentRow {
   createdAt: string;
 }
 
+/**
+ * The newest approved export of one document version between two instants — a Delivery Record's file — as the export
+ * ledger reads it, or `null` (Issue #415, S66b).
+ */
+export type ProductionDocumentExportOf = (bookId: string, revisionId: string, from: string, until: string | null) => ManuscriptExportReceiptProjection | null;
+
 export class ProductionDocuments {
   readonly #db: DatabaseSync;
+  readonly #exportOf: ProductionDocumentExportOf;
 
-  constructor(db: DatabaseSync) {
+  constructor(db: DatabaseSync, exportOf: ProductionDocumentExportOf) {
     this.#db = db;
+    this.#exportOf = exportOf;
   }
 
   /** 交付 · 生产文档 of one Book: one card per house type, and the materials a document can start from. */
@@ -93,6 +110,7 @@ export class ProductionDocuments {
     const documents = new Map(this.#documentRows(bookId).map((row) => [row.typeId, row]));
     const read = this.#sources(bookId, MAX_PRODUCTION_DOCUMENT_SOURCES_LISTED + 1);
     return {
+      bookId,
       configuration: {
         schema: BUILTIN_PRODUCTION_DOCUMENT_TYPES.schema,
         version: BUILTIN_PRODUCTION_DOCUMENT_TYPES.version,
@@ -136,6 +154,10 @@ export class ProductionDocuments {
     }));
     requireDocument(versions.length > 0, 'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档没有版本。');
     const workingDigest = text(state.working_digest);
+    const deliveries = this.#deliveries(row, MAX_PRODUCTION_DOCUMENT_DELIVERIES_LISTED + 1);
+    const lastDelivered = this.#db.prepare(
+      'SELECT revision_digest FROM production_document_deliveries WHERE document_id = ? ORDER BY ordinal DESC LIMIT 1',
+    ).get(row.documentId) as SqlRow | undefined;
     return {
       documentId: row.documentId,
       branchId: row.branchId,
@@ -146,7 +168,96 @@ export class ProductionDocuments {
       changedSinceVersion: workingDigest !== versions[0]!.revisionDigest,
       journalSequence: integer(state.journal_sequence),
       workingDigest,
+      deliveries: deliveries.slice(0, MAX_PRODUCTION_DOCUMENT_DELIVERIES_LISTED),
+      deliveriesTruncated: deliveries.length > MAX_PRODUCTION_DOCUMENT_DELIVERIES_LISTED,
+      // 交付后有修改 (DELIV-004): the text moved past the version last delivered, saved as a new version or not.
+      changedSinceDelivery: lastDelivered !== undefined && workingDigest !== text(lastDelivered.revision_digest),
     };
+  }
+
+  /**
+   * 交付 (DELIV-003): one Delivery Record of one exact version of the document — to a recipient from the house's list or
+   * in the editor's own words, with an optional note. It is appended once, never sends anything, and leaves every earlier
+   * record and the Manuscript's 发稿 as they were.
+   */
+  recordDelivery(input: {
+    bookId: string;
+    documentId: string;
+    revisionId: string;
+    recipient: { kind: ProductionDocumentRecipientKind; custom: string | null };
+    note: string | null;
+  }): string {
+    const row = this.documentById(input.bookId, input.documentId);
+    requireDocument(row !== undefined, 'PRODUCTION_DOCUMENT_NOT_FOUND', '这本书没有这份生产文档。');
+    const version = this.#db.prepare(
+      `SELECT pv.version, pv.revision_digest FROM production_document_versions pv
+       JOIN manuscript_revisions mr ON mr.revision_id = pv.revision_id AND mr.manuscript_id = pv.document_id AND mr.branch_id = ?
+       WHERE pv.document_id = ? AND pv.revision_id = ?`,
+    ).get(row.branchId, input.documentId, input.revisionId) as SqlRow | undefined;
+    requireDocument(version !== undefined, 'PRODUCTION_DOCUMENT_DELIVERY_INVALID', '只能交付这份文档保存过的版本。');
+    requireDocument(PRODUCTION_DOCUMENT_RECIPIENT_KINDS.includes(input.recipient.kind), 'PRODUCTION_DOCUMENT_DELIVERY_INVALID', '请选择交给谁。');
+    const custom = input.recipient.kind === 'custom' ? publicationText(input.recipient.custom, MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS) : null;
+    requireDocument((input.recipient.kind === 'custom') === (custom !== null) && (input.recipient.kind === 'custom' || input.recipient.custom === null),
+      'PRODUCTION_DOCUMENT_DELIVERY_INVALID', `请写明交给谁（1–${MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS} 个字）。`);
+    const recipientLabel = input.recipient.kind === 'custom' ? custom! : PRODUCTION_DOCUMENT_RECIPIENT_LABELS[input.recipient.kind];
+    const note = input.note === null ? null : publicationText(input.note, MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS);
+    requireDocument(input.note === null || note !== null, 'PRODUCTION_DOCUMENT_DELIVERY_INVALID',
+      `备注最多 ${MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS} 个字。`);
+    const last = this.#db.prepare('SELECT max(ordinal) ordinal FROM production_document_deliveries WHERE document_id = ?').get(input.documentId) as SqlRow | undefined;
+    const ordinal = last?.ordinal === null || last?.ordinal === undefined ? 1 : integer(last.ordinal) + 1;
+    const deliveryId = randomUUID();
+    const recordedAt = new Date().toISOString();
+    const record = canonicalRecord({
+      schema: 'ai7.production-document-delivery/1',
+      deliveryId,
+      documentId: input.documentId,
+      bookId: input.bookId,
+      ordinal,
+      version: integer(version.version),
+      revisionId: input.revisionId,
+      revisionDigest: text(version.revision_digest),
+      recipient: { kind: input.recipient.kind, label: recipientLabel },
+      note,
+      actor: '本机编辑',
+      recordedAt,
+    });
+    this.#db.prepare(
+      `INSERT INTO production_document_deliveries(
+         delivery_id, document_id, book_id, ordinal, version, revision_id, revision_digest, recipient_kind, recipient_label,
+         note, actor, recorded_at, canonical_json, sha256
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '本机编辑', ?, ?, ?)`,
+    ).run(deliveryId, input.documentId, input.bookId, ordinal, integer(version.version), input.revisionId, text(version.revision_digest),
+      input.recipient.kind, recipientLabel, note, recordedAt, record.json, record.digest);
+    return deliveryId;
+  }
+
+  /** A document's Delivery Records newest first, each with what its export came to. */
+  #deliveries(row: ProductionDocumentRow, limit: number): ProductionDocumentDeliveryProjection[] {
+    const rows = this.#db.prepare(
+      `SELECT d.*, pv.version FROM production_document_deliveries d
+       JOIN production_document_versions pv ON pv.document_id = d.document_id AND pv.revision_id = d.revision_id
+       WHERE d.document_id = ? ORDER BY d.ordinal DESC LIMIT ?`,
+    ).all(row.documentId, limit) as SqlRow[];
+    return rows.map((delivery, index): ProductionDocumentDeliveryProjection => {
+      const json = text(delivery.canonical_json);
+      requireDocument(sha256Hex(json) === text(delivery.sha256), 'PRODUCTION_DOCUMENT_RECORD_INVALID', '交付记录与其摘要不一致。');
+      const recordedAt = text(delivery.recorded_at);
+      // The next delivery of the document, newer than this one, ends the window this one's export is read in.
+      const until = index === 0 ? null : text(rows[index - 1]!.recorded_at);
+      const exported = this.#exportOf(row.bookId, text(delivery.revision_id), recordedAt, until);
+      return {
+        deliveryId: text(delivery.delivery_id),
+        ordinal: integer(delivery.ordinal),
+        revisionId: text(delivery.revision_id),
+        versionLabel: productionDocumentVersionLabel(integer(delivery.version)),
+        recipient: { kind: text(delivery.recipient_kind) as ProductionDocumentRecipientKind, label: text(delivery.recipient_label) },
+        note: delivery.note === null ? null : text(delivery.note),
+        recordedAt,
+        export: exported === null
+          ? null
+          : { preparationId: exported.preparationId, outcome: exported.outcome, outcomeLabel: exported.outcomeLabel, fileName: exported.fileName },
+      };
+    });
   }
 
   /** The document of one type of a Book, or `undefined`. */

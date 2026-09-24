@@ -1,4 +1,4 @@
-import type { ProductionDocumentProjection, ProductionDocumentSourceProjection } from '../shared/protocol.js';
+import type { ProductionDocumentDeliveryProjection, ProductionDocumentProjection, ProductionDocumentSourceProjection } from '../shared/protocol.js';
 
 /**
  * Every word of 交付 · 生产文档 (Issue #415, plan slice S66; editor-surfaces §9; V2-UX-DELIV-001, DELIV-002,
@@ -33,6 +33,9 @@ export const DOCUMENT_ACTION_LABELS = {
   restore: '恢复',
   saveVersion: '保存为版本',
   back: '返回交付物',
+  deliver: '交付…',
+  redeliver: '再交付…',
+  confirmDeliver: '交付',
 } as const;
 export type DocumentAction = keyof typeof DOCUMENT_ACTION_LABELS;
 
@@ -56,6 +59,50 @@ export function documentActionName(action: DocumentAction, typeLabel: string): s
   return `${DOCUMENT_ACTION_LABELS[action]}：${typeLabel}`;
 }
 
+// ---- 交付 (Issue #415, S66b; DELIV-003, DELIV-004) --------------------------------------------------
+
+/** A document with no Delivery Record yet. */
+export const DOCUMENT_NOT_DELIVERED = '尚未交付';
+/** `交付后有修改` (DELIV-004): the text moved past the version last delivered. */
+export const DOCUMENT_CHANGED_SINCE_DELIVERY = '交付后有修改';
+export const DOCUMENT_DELIVERIES_HEADING = '交付记录';
+export const DELIVERY_FORM_HEADING = '交付';
+export const DELIVERY_VERSION_LEGEND = '交付哪一版';
+export const DELIVERY_UNSAVED_NOTE = '有修改尚未保存为版本：要交付现在的文字，先打开文档「保存为版本」；也可以交付已保存的版本。';
+export const DELIVERY_RECIPIENT_LEGEND = '交给谁';
+export const DELIVERY_CUSTOM_RECIPIENT = '自行输入';
+export const DELIVERY_CUSTOM_LABEL = '交给谁（自行输入）';
+export const DELIVERY_NOTE_LABEL = '备注（可不填）';
+/** Stated beside `交付` before the editor confirms (DELIV-003): a delivery records and never sends. */
+export const DELIVERY_STATEMENT = '交付只记录这一版交给了谁；AI7 不会发送，文件由你导出到所选位置后自行交出。';
+export const DELIVERY_BLOCKERS = {
+  version: '先选择要交付的版本',
+  recipient: '先选择交给谁',
+  custom: '请写明交给谁',
+} as const;
+/** What a Delivery Record's export came to, when none has been made yet. */
+export const DELIVERY_NO_EXPORT = '暂无导出记录';
+
+/** `第 1 次交付 · 宣传部 · 版本 2 · 9月24日 11:00`: never 已交付 (PUB-009's words stay out of 交付物). */
+export function documentDeliveryLine(delivery: Pick<ProductionDocumentDeliveryProjection, 'ordinal' | 'recipient' | 'versionLabel'>, recordedAt: string): string {
+  return `第 ${delivery.ordinal} 次交付 · ${delivery.recipient.label} · ${delivery.versionLabel} · ${recordedAt}`;
+}
+
+/** What the delivery's export came to: the file written, or nothing yet. */
+export function documentDeliveryExportLine(delivery: Pick<ProductionDocumentDeliveryProjection, 'export'>): string {
+  return delivery.export === null ? DELIVERY_NO_EXPORT : `${delivery.export.outcomeLabel} · ${delivery.export.fileName}`;
+}
+
+/** `已记录第 1 次交付 · 宣传部`. */
+export function documentDeliveredLine(ordinal: number, recipient: string): string {
+  return `已记录第 ${ordinal} 次交付 · ${recipient}`;
+}
+
+/** The export card's name for a document version: `新闻稿 · 版本 2`. */
+export function documentExportLabel(typeLabel: string, versionLabel: string): string {
+  return `${typeLabel} · ${versionLabel}`;
+}
+
 export const DOCUMENT_STATUS_LINES = {
   creating: '正在从来源材料创建文档…',
   deciding: '正在记录…',
@@ -68,6 +115,8 @@ export const DOCUMENT_STATUS_LINES = {
   savingVersion: '正在保存为版本…',
   saveVersionFailed: '无法保存为版本。',
   versionUnchanged: '没有新的修改，当前已是最新版本',
+  delivering: '正在记录交付…',
+  deliverFailed: '无法记录这次交付。',
 } as const;
 
 /** `已创建「新闻稿」`. */

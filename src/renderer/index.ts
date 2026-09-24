@@ -5676,9 +5676,9 @@ async function awaitServiceJob(
 
 /** A Production Document's type and versions, read for a window that holds it (Issue #415, S66). */
 async function documentContextOf(window_: ManuscriptWindowProjection): Promise<ProductionDocumentContext> {
-  const deliverables = await window.ai7.inspectDeliverables();
-  const type = deliverables.documents.types.find((entry) => entry.document?.documentId === window_.manuscriptId);
-  if (deliverables.bookId !== window_.bookId || type === undefined || type.document === null) throw new Error('这份生产文档已不在这本书的交付物中。');
+  const documents = await window.ai7.inspectProductionDocuments();
+  const type = documents.types.find((entry) => entry.document?.documentId === window_.manuscriptId);
+  if (documents.bookId !== window_.bookId || type === undefined || type.document === null) throw new Error('这份生产文档已不在这本书的交付物中。');
   return { typeId: type.typeId, typeLabel: type.label, document: type.document };
 }
 
