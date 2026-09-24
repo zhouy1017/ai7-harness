@@ -4299,7 +4299,14 @@ export interface TaskPlanProjection {
    * 已停止 · 预算已达上限 (Issue #51, S16a; V2-UX-MODEL-016, MODEL-017): the ceiling, what the Run used, and what it read
    * before the ceiling stopped it; `redo` is then 调整预算并重做. `null` for every other plan.
    */
-  budgetStop: null | { maxTotalTokens: number; usedTokens: number; unitsSettled: number; unitsTotal: number };
+  budgetStop: null | {
+    maxTotalTokens: number;
+    usedTokens: number;
+    unitsSettled: number;
+    unitsTotal: number;
+    /** The launch set the ceiling (developer-live): only a launch with a higher one raises it, never the plan. */
+    launchSetsCeiling: boolean;
+  };
 }
 
 /** The answers a question about a safe retry can have (Issue #422, S76d; CLAR-006, INPUT-002). */

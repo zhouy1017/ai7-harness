@@ -342,6 +342,8 @@ export const TASK_BAR_RESUME_FAILED = '无法续行这项任务。';
  * Task under a ceiling raised or removed, and the partial results are ②A's to show. No 续行 and no 重试.
  */
 export const TASK_BAR_ADJUST_BUDGET_REDO = '调整预算并重做';
+/** Under developer-live the launch sets the ceiling (ADR 0070): the plan cannot raise it, so the redo is 改计划重做's. */
+export const TASK_BAR_BUDGET_LAUNCH_NOTE = '预算上限由开发者实时启动参数决定：以更高的 --run-budget-ceiling 重新启动后再重做，新任务才会用新的上限';
 export const TASK_BAR_VIEW_PARTIAL = '查看部分结果';
 export function taskBarBudgetStopNote(stop: NonNullable<TaskPlanProjection['budgetStop']>): string {
   return `已读完 ${stop.unitsSettled} / ${stop.unitsTotal} 个阅读范围，结果都已保留；这次运行用了 ${groupedCount(stop.usedTokens)} tokens，达到了预算上限 ${groupedCount(stop.maxTotalTokens)} tokens`;
@@ -603,10 +605,12 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         readiness,
         summary,
         statement: null,
-        note: taskBarBudgetStopNote(plan.budgetStop),
+        note: plan.budgetStop.launchSetsCeiling ? `${taskBarBudgetStopNote(plan.budgetStop)}。${TASK_BAR_BUDGET_LAUNCH_NOTE}` : taskBarBudgetStopNote(plan.budgetStop),
         status: plan.state.label,
         actions: [
-          ...(plan.redo === null ? [] : [{ name: 'redo', label: TASK_BAR_ADJUST_BUDGET_REDO, tone: 'primary', disabledReason: null } as const]),
+          ...(plan.redo === null ? [] : [{
+            name: 'redo', label: plan.budgetStop.launchSetsCeiling ? TASK_BAR_REDO : TASK_BAR_ADJUST_BUDGET_REDO, tone: 'primary', disabledReason: null,
+          } as const]),
           { name: 'run-link', label: TASK_BAR_VIEW_PARTIAL, tone: 'secondary', disabledReason: null },
         ],
       };
