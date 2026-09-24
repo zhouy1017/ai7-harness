@@ -9,6 +9,8 @@ import {
   MAX_EXPORT_DESTINATION_CODE_UNITS,
   MAX_MARK_BODY_CODE_UNITS,
   MAX_MILESTONE_PURPOSE_CODE_UNITS,
+  MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS,
+  MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS,
   MAX_PROPOSAL_CONFLICT_UNITS,
   MAX_PUBLICATION_BASIS_CHARACTERS,
   MAX_PUBLICATION_SCOPE_CHARACTERS,
@@ -290,13 +292,23 @@ describe('decodeRequest accepts well-formed frames', () => {
     }
   });
 
-  it('accepts the three 生产文档 commands with a house type, a material and a document by their identities', () => {
+  it('accepts the 生产文档 read and commands with a house type, a material, a document and a delivery by their identities', () => {
     const bookId = randomUUID();
+    const delivery = { bookId, documentId: randomUUID(), revisionId: randomUUID() };
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'inspectProductionDocuments', input: { bookId } },
       { op: 'createProductionDocument', input: { bookId, typeId: 'news-release', sourceVersionId: randomUUID() } },
       { op: 'decideProductionDocumentType', input: { bookId, typeId: 'marketing-points', notForThisBook: true } },
       { op: 'decideProductionDocumentType', input: { bookId, typeId: 'promotion-article', notForThisBook: false } },
       { op: 'saveProductionDocumentVersion', input: { bookId, documentId: randomUUID(), branchId: randomUUID() } },
+      // Issue #415 (S66b): 交付 to a recipient from the house's list or in the editor's own words, with a note or none.
+      { op: 'recordProductionDocumentDelivery', input: { ...delivery, recipient: { kind: 'publicity', custom: null }, note: null } },
+      { op: 'recordProductionDocumentDelivery', input: { ...delivery, recipient: { kind: 'external-media', custom: null }, note: '发布会前一周。' } },
+      {
+        op: 'recordProductionDocumentDelivery',
+        input: { ...delivery, recipient: { kind: 'custom', custom: '𠀀'.repeat(MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS) },
+          note: '𠀀'.repeat(MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS) },
+      },
     ];
     for (const { op, input } of inputs) {
       const request = { id: randomUUID(), op, input };
@@ -304,10 +316,11 @@ describe('decodeRequest accepts well-formed frames', () => {
     }
   });
 
-  it('rejects a 生产文档 command whose type, identities, decision or key set is wrong', () => {
+  it('rejects a 生产文档 read or command whose type, identities, decision, recipient, note or key set is wrong', () => {
     const id = randomUUID();
     const bookId = randomUUID();
     const create = { bookId, typeId: 'news-release', sourceVersionId: randomUUID() };
+    const delivery = { bookId, documentId: randomUUID(), revisionId: randomUUID() };
     const refused: ReadonlyArray<{ op: string; input: unknown }> = [
       { op: 'createProductionDocument', input: { ...create, typeId: '' } },
       { op: 'createProductionDocument', input: { ...create, typeId: 'News Release' } },
@@ -319,6 +332,27 @@ describe('decodeRequest accepts well-formed frames', () => {
       { op: 'decideProductionDocumentType', input: { bookId, typeId: 'news-release' } },
       { op: 'saveProductionDocumentVersion', input: { bookId, documentId: 'not-a-uuid', branchId: randomUUID() } },
       { op: 'saveProductionDocumentVersion', input: { bookId, documentId: randomUUID() } },
+      { op: 'inspectProductionDocuments', input: {} },
+      { op: 'inspectProductionDocuments', input: { bookId: 'current' } },
+      { op: 'inspectProductionDocuments', input: { bookId, typeId: 'news-release' } },
+      // A delivery names one recipient kind; only 自行输入 carries words, within their bound, and a note stays in its own.
+      { op: 'recordProductionDocumentDelivery', input: { ...delivery, recipient: { kind: 'press', custom: null }, note: null } },
+      { op: 'recordProductionDocumentDelivery', input: { ...delivery, recipient: { kind: 'publicity', custom: '宣传部' }, note: null } },
+      { op: 'recordProductionDocumentDelivery', input: { ...delivery, recipient: { kind: 'custom', custom: null }, note: null } },
+      { op: 'recordProductionDocumentDelivery', input: { ...delivery, recipient: { kind: 'custom', custom: '   ' }, note: null } },
+      {
+        op: 'recordProductionDocumentDelivery',
+        input: { ...delivery, recipient: { kind: 'custom', custom: '字'.repeat(MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS + 1) }, note: null },
+      },
+      { op: 'recordProductionDocumentDelivery', input: { ...delivery, recipient: { kind: 'publicity' }, note: null } },
+      { op: 'recordProductionDocumentDelivery', input: { ...delivery, recipient: 'publicity', note: null } },
+      {
+        op: 'recordProductionDocumentDelivery',
+        input: { ...delivery, recipient: { kind: 'publicity', custom: null }, note: '字'.repeat(MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS + 1) },
+      },
+      { op: 'recordProductionDocumentDelivery', input: { ...delivery, recipient: { kind: 'publicity', custom: null } } },
+      { op: 'recordProductionDocumentDelivery', input: { ...delivery, revisionId: 'latest', recipient: { kind: 'publicity', custom: null }, note: null } },
+      { op: 'recordProductionDocumentDelivery', input: { ...delivery, recipient: { kind: 'publicity', custom: null }, note: null, sent: true } },
     ];
     for (const { op, input } of refused) {
       expect(rejectionFor(frameOf({ id, op, input })).requestId).toBe(id);
@@ -368,6 +402,13 @@ describe('decodeRequest accepts well-formed frames', () => {
       { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'report', reportId: randomUUID() }, options, format: 'markdown' } },
       { op: 'prepareManuscriptExport', input: { bookId, revisionId: randomUUID(), target: milestone, options, reviewDigest: 'f'.repeat(64), destination, format: 'docx' } },
       { op: 'stageManuscriptExport', input: { bookId, preparationId: randomUUID() } },
+      // Issue #415 (S66b): one saved version of a Production Document, named by the document and its revision.
+      { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'document', documentId: randomUUID(), revisionId: randomUUID() }, options } },
+      {
+        op: 'prepareManuscriptExport',
+        input: { bookId, revisionId: randomUUID(), target: { kind: 'document', documentId: randomUUID(), revisionId: randomUUID() }, options,
+          reviewDigest: 'c'.repeat(64), destination },
+      },
     ];
     for (const { op, input } of inputs) {
       const request = { id: randomUUID(), op, input };
@@ -767,6 +808,12 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'report', reportId: 'latest' }, options } },
       { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'report', reportId: randomUUID(), version: 1 }, options } },
       { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'report' }, options } },
+      { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'document', documentId: randomUUID() }, options } },
+      { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'document', documentId: randomUUID(), revisionId: '版本 2' }, options } },
+      {
+        op: 'reviewManuscriptExport',
+        input: { bookId, target: { kind: 'document', documentId: randomUUID(), revisionId: randomUUID(), typeId: 'news-release' }, options },
+      },
       { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'current' }, options: { ...options, includeHighlights: true } } },
       { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'current' }, options: { ...options, includeEditorNotes: 'yes' } } },
       { op: 'reviewManuscriptExport', input: { target: { kind: 'current' }, options } },

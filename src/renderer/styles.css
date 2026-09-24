@@ -588,6 +588,18 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .document-create { margin-top: .6rem; }
 .document-create fieldset { min-width: 0; margin: 0; padding: .55rem .6rem; border: 1px solid #d5dcd9; border-radius: 8px; }
 .document-create .choice-row { display: flex; gap: .45rem; align-items: flex-start; margin-top: .35rem; }
+/* 交付 (Issue #415, S66b): the delivery form and the Delivery Records inside a document's card. */
+.document-delivery { margin-top: .6rem; }
+.document-delivery h5, .document-deliveries-section h5 { margin: .6rem 0 0; font-size: .95rem; }
+.document-delivery fieldset { min-width: 0; margin: .45rem 0 0; padding: .55rem .6rem; border: 1px solid #d5dcd9; border-radius: 8px; }
+.document-delivery .choice-row { display: flex; gap: .45rem; align-items: flex-start; margin-top: .35rem; }
+.document-delivery input[type="text"], .document-delivery textarea { width: 100%; box-sizing: border-box; margin-top: .35rem; }
+.document-delivery .delivery-note { display: block; margin-top: .5rem; }
+.delivery-statement { margin: .6rem 0 0; padding: .5rem .65rem; border-left: 4px solid #416458; background: #f1f4ec; font-weight: 800; }
+.delivery-reason[hidden] { display: none; }
+.production-document-deliveries, .document-lens-deliveries { display: grid; gap: .4rem; margin: .45rem 0 0; padding-left: 1.2rem; }
+.production-document-deliveries > li, .document-lens-deliveries > li { min-width: 0; }
+.document-lens-deliveries > li > span { display: block; }
 /* A Production Document's surface (DELIV-002): the 工作流程 column stands beside the text on a wide window and after it
    on a narrow one, so a 200% zoom never scrolls sideways. */
 .editor-workspace.document-workspace { grid-template-columns: minmax(0, 1fr) minmax(14rem, 18rem) 4.75rem; }
@@ -991,6 +1003,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .publication-designate, .publication-milestone-option, .publication-designate-summary, .publication-statement,
   .book-deliverables-summary, .milestone-section .milestone-purpose-option,
   .deliverables-documents, .production-document-card, .document-create fieldset, .document-lens, .document-version-current,
+  .document-delivery fieldset, .delivery-statement,
   .task-drawer, .task-drawer-head, .task-drawer-footer, .task-drawer-modes, .task-plan-goal, .task-plan-compact,
   .task-plan-chip, .task-plan-boundary, .task-plan-lock, .task-plan-section-number, .task-plan-edit-remove, .task-plan-edit-tag,
   .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal,

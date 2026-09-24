@@ -20,7 +20,7 @@ import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-poli
 import { LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CONNECTIVITY_WAIT_SCHEMA_VERSION, CLARIFICATION_SCHEMA_VERSION, PRODUCTION_DOCUMENT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { CONNECTIVITY_WAIT_SCHEMA_VERSION, CLARIFICATION_SCHEMA_VERSION, PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
   BASELINE_ANALYSIS_TASK_GOAL,
@@ -178,7 +178,7 @@ describe('schema revision 31 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(PRODUCTION_DOCUMENT_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION);
       expect(analysisRunAuthorizationsShape(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all()).toEqual(before.authorizations);
       const after = relationTruth(database);

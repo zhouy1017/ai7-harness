@@ -272,6 +272,10 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
     section.dataset['exportTarget'] = current.target.kind;
     if (current.target.kind === 'milestone') section.dataset['milestoneId'] = current.target.milestoneId;
     if (current.target.kind === 'report') section.dataset['reportId'] = current.target.reportId;
+    if (current.target.kind === 'document') {
+      section.dataset['documentId'] = current.target.documentId;
+      section.dataset['revisionId'] = current.target.revisionId;
+    }
     section.setAttribute('aria-busy', busy ? 'true' : 'false');
     const headingId = uid('heading');
     const heading = el('h4', undefined, exportCardHeading(current.review?.target ?? null, current.pendingLabel));
@@ -462,8 +466,15 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
   function renderTechnical(current: CardState): HTMLElement {
     const reviewed = current.review!;
     const report = reviewed.target.report;
+    const documentVersion = reviewed.target.document;
     const rows: HTMLElement[] = [
-      ...(report === null
+      ...(documentVersion !== null
+        ? [
+          ...fact(EXPORT_TECHNICAL_TERMS.revision, `${documentVersion.versionLabel} · ${reviewed.target.revisionId}`),
+          ...fact(EXPORT_TECHNICAL_TERMS.revisionDigest, reviewed.technical.revisionDigest),
+          ...fact(EXPORT_TECHNICAL_TERMS.sourceVersion, reviewed.technical.sourceVersionId ?? '—'),
+        ]
+        : report === null
         ? [
           ...fact(EXPORT_TECHNICAL_TERMS.revision, `${reviewed.target.revisionLabel} · ${reviewed.target.revisionId}`),
           ...fact(EXPORT_TECHNICAL_TERMS.revisionDigest, reviewed.technical.revisionDigest),

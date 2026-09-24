@@ -27,6 +27,7 @@ import {
 import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
 import { reportExportLabel } from '../shared/report-wording.js';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
+import { productionDocumentType } from './production-document-types.js';
 import type { ManuscriptCheckpointBinding, ManuscriptCheckpointProgress, ManuscriptCheckpointPurpose } from './bounded-manuscript.js';
 import {
   DOCX_EXPORT_WRITER_IDENTITY,
@@ -292,8 +293,8 @@ export interface ManuscriptExportEnvironment {
 
 /** One exact version to export, resolved against the Book's primary Manuscript. */
 interface ResolvedTarget {
-  kind: 'current' | 'milestone' | 'report';
-  targetKind: 'manuscript-revision' | 'milestone-version' | 'report';
+  kind: 'current' | 'milestone' | 'report' | 'document';
+  targetKind: 'manuscript-revision' | 'milestone-version' | 'report' | 'production-document-version';
   targetId: string;
   milestoneId: string | null;
   milestoneLabel: string | null;
@@ -308,6 +309,8 @@ interface ResolvedTarget {
   savedForExport: boolean;
   /** One recorded version of a 审阅报告 (Issue #500, S64b part 2); `null` for a manuscript version. */
   report: ResolvedReport | null;
+  /** One version of a Production Document (Issue #415, S66b); `null` for any other target. */
+  document: { documentId: string; typeId: string; typeLabel: string; versionLabel: string } | null;
 }
 
 interface ResolvedReport {
@@ -392,11 +395,14 @@ function requireTarget(value: unknown): ManuscriptExportTargetInput {
   requireExport(
     isRecord(value) && ((value.kind === 'current' && Object.keys(value).length === 1) ||
       (value.kind === 'milestone' && Object.keys(value).length === 2 && typeof value.milestoneId === 'string' && UUID_PATTERN.test(value.milestoneId)) ||
-      (value.kind === 'report' && Object.keys(value).length === 2 && typeof value.reportId === 'string' && UUID_PATTERN.test(value.reportId))),
+      (value.kind === 'report' && Object.keys(value).length === 2 && typeof value.reportId === 'string' && UUID_PATTERN.test(value.reportId)) ||
+      (value.kind === 'document' && Object.keys(value).length === 3 && typeof value.documentId === 'string' && UUID_PATTERN.test(value.documentId) &&
+        typeof value.revisionId === 'string' && UUID_PATTERN.test(value.revisionId))),
     'EXPORT_TARGET_INVALID',
     '导出对象无效。',
   );
   if (value.kind === 'current') return { kind: 'current' };
+  if (value.kind === 'document') return { kind: 'document', documentId: value.documentId as string, revisionId: value.revisionId as string };
   return value.kind === 'milestone' ? { kind: 'milestone', milestoneId: value.milestoneId as string } : { kind: 'report', reportId: value.reportId as string };
 }
 
@@ -620,12 +626,14 @@ export class ManuscriptExportStore {
       bookId: input.bookId,
       targetKind: resolved.targetKind,
       targetId: resolved.targetId,
-      // A report binds its recorded version instead of a revision (the ledger's revision columns stay empty for it).
-      revisionId: resolved.report === null ? resolved.revisionId : null,
-      revisionDigest: resolved.report === null ? resolved.revisionDigest : null,
+      // A report binds its recorded version instead of a revision, and a document's version its own digest (the ledger's
+      // revision columns stay empty for both).
+      revisionId: resolved.report === null && resolved.document === null ? resolved.revisionId : null,
+      revisionDigest: resolved.report === null && resolved.document === null ? resolved.revisionDigest : null,
       revisionLabel: resolved.revisionLabel,
       milestoneLabel: resolved.milestoneLabel,
       ...(resolved.report === null ? {} : { reportDigest: resolved.report.digest }),
+      ...(resolved.document === null ? {} : { documentId: resolved.document.documentId, documentVersionDigest: resolved.revisionDigest }),
       format,
       options,
       fidelitySha256: sha256Hex(fidelityJson),
@@ -650,7 +658,8 @@ export class ManuscriptExportStore {
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         preparationId, effectIntentId, input.bookId, resolved.targetKind, resolved.targetId,
-        resolved.report === null ? resolved.revisionId : null, resolved.report === null ? resolved.revisionDigest : null, format, canonicalJson(options), fidelityJson, review.degraded ? 1 : 0, review.reviewDigest,
+        resolved.report === null && resolved.document === null ? resolved.revisionId : null,
+        resolved.report === null && resolved.document === null ? resolved.revisionDigest : null, format, canonicalJson(options), fidelityJson, review.degraded ? 1 : 0, review.reviewDigest,
         destination.fileName, destination.path, destination.disposition, payloadSha256, payload.byteLength, POLICY.id,
         POLICY.version, createdAt, record.json, record.digest,
       );
@@ -813,6 +822,18 @@ export class ManuscriptExportStore {
     return this.#receiptProjection(row, outcome);
   }
 
+  /** The newest approved export of one target between two instants (Issue #415): a Delivery Record's file, or `null`. */
+  latestExport(bookId: string, targetKind: 'production-document-version', targetId: string, from: string, until: string | null): ManuscriptExportReceiptProjection | null {
+    const row = this.#db.prepare(
+      `SELECT p.preparation_id FROM export_preparations p JOIN export_approvals a ON a.preparation_id = p.preparation_id
+       WHERE p.book_id = ? AND p.target_kind = ? AND p.target_id = ? AND a.approved_at >= ? AND (? IS NULL OR a.approved_at < ?)
+       ORDER BY a.approved_at DESC, a.rowid DESC LIMIT 1`,
+    ).get(bookId, targetKind, targetId, from, until, until) as SqlRow | undefined;
+    if (row === undefined) return null;
+    const preparationId = text(row.preparation_id);
+    return this.#receiptProjection(this.#preparationRow(bookId, preparationId), this.#outcomeRow(preparationId)!);
+  }
+
   /** The Book's approved exports newest first, each with what it came to, for 交付物. */
   records(bookId: string): ManuscriptExportReceiptProjection[] {
     const rows = this.#db.prepare(
@@ -896,6 +917,7 @@ export class ManuscriptExportStore {
    */
   async #resolve(bookId: string, target: ManuscriptExportTargetInput, save: boolean): Promise<ResolvedTarget> {
     if (target.kind === 'report') return this.#reportTarget(bookId, target.reportId);
+    if (target.kind === 'document') return this.#documentTarget(bookId, target.documentId, target.revisionId);
     let head = this.#head(bookId);
     if (target.kind === 'milestone') {
       const row = this.#db.prepare(
@@ -909,6 +931,7 @@ export class ManuscriptExportStore {
         kind: 'milestone', targetKind: 'milestone-version', targetId: text(row.milestone_id), milestoneId: text(row.milestone_id),
         milestoneLabel: text(row.label), revisionId, revisionLabel: revision.revisionLabel, revisionDigest: revision.revisionDigest,
         manuscriptId: head.manuscriptId, branchId: head.branchId, bookTitle: head.bookTitle, savedForExport: false, report: null,
+        document: null,
       };
     }
     let savedForExport = false;
@@ -923,6 +946,7 @@ export class ManuscriptExportStore {
       kind: 'current', targetKind: 'manuscript-revision', targetId: head.revisionId, milestoneId: null, milestoneLabel: null,
       revisionId: head.revisionId, revisionLabel: revision.revisionLabel, revisionDigest: revision.revisionDigest,
       manuscriptId: head.manuscriptId, branchId: head.branchId, bookTitle: head.bookTitle, savedForExport, report: null,
+      document: null,
     };
   }
 
@@ -952,6 +976,36 @@ export class ManuscriptExportStore {
       revisionId: record.run.manuscript.revisionId, revisionLabel: record.run.manuscript.revisionLabel, revisionDigest: digest,
       manuscriptId: head.manuscriptId, branchId: head.branchId, bookTitle: head.bookTitle, savedForExport: false,
       report: { reportId, version, reviewRunId: record.reviewRunId, runLabel: record.run.label, generatedAt: text(row.generated_at), digest, record },
+      document: null,
+    };
+  }
+
+  /**
+   * One saved version of a Production Document of this Book (Issue #415, S66b; EXP-024, DELIV-003): a revision the
+   * document's version ledger names, on the document's own branch. A version is never rewritten, so nothing is saved
+   * first; the ledger's revision columns stay empty for it, and the version travels as the target itself.
+   */
+  #documentTarget(bookId: string, documentId: string, revisionId: string): ResolvedTarget {
+    const row = this.#db.prepare(
+      `SELECT pd.type_id, pv.version, mr.revision_label, mr.revision_digest, mr.branch_id, b.title
+       FROM production_documents pd
+       JOIN manuscripts m ON m.manuscript_id = pd.document_id AND m.role = 'production-document' AND m.book_id = pd.book_id
+       JOIN production_document_versions pv ON pv.document_id = pd.document_id AND pv.revision_id = ?
+       JOIN manuscript_revisions mr ON mr.revision_id = pv.revision_id AND mr.manuscript_id = pd.document_id
+       JOIN books b ON b.book_id = pd.book_id
+       WHERE pd.document_id = ? AND pd.book_id = ?`,
+    ).get(revisionId, documentId, bookId) as SqlRow | undefined;
+    requireExport(row !== undefined, 'EXPORT_TARGET_NOT_FOUND', '所选版本不是这本书的生产文档的版本。');
+    const revisionDigest = text(row.revision_digest);
+    requireExport(DIGEST_PATTERN.test(revisionDigest), 'EXPORT_RECORD_INVALID', '文档版本摘要无效。');
+    const typeId = text(row.type_id);
+    const typeLabel = productionDocumentType(typeId)?.label ?? typeId;
+    const versionLabel = `版本 ${integer(row.version)}`;
+    return {
+      kind: 'document', targetKind: 'production-document-version', targetId: revisionId, milestoneId: null, milestoneLabel: null,
+      revisionId, revisionLabel: text(row.revision_label), revisionDigest, manuscriptId: documentId, branchId: text(row.branch_id),
+      bookTitle: `${text(row.title)} · ${typeLabel}`, savedForExport: false, report: null,
+      document: { documentId, typeId, typeLabel, versionLabel },
     };
   }
 
@@ -978,6 +1032,7 @@ export class ManuscriptExportStore {
   /** The version a preparation froze, read again exactly: a current revision stays that revision. */
   #preparedTarget(bookId: string, row: SqlRow): ResolvedTarget {
     if (text(row.target_kind) === 'report') return this.#reportTarget(bookId, text(row.target_id));
+    if (text(row.target_kind) === 'production-document-version') return this.#documentOfRevision(bookId, text(row.target_id));
     const head = this.#head(bookId);
     const revisionId = text(row.revision_id);
     const revision = this.#revision(revisionId);
@@ -1001,7 +1056,15 @@ export class ManuscriptExportStore {
       bookTitle: head.bookTitle,
       savedForExport: false,
       report: null,
+      document: null,
     };
+  }
+
+  /** The document version a preparation froze: the document is the one whose version the revision is. */
+  #documentOfRevision(bookId: string, revisionId: string): ResolvedTarget {
+    const row = this.#db.prepare('SELECT document_id FROM production_document_versions WHERE revision_id = ?').get(revisionId) as SqlRow | undefined;
+    requireExport(row !== undefined, 'EXPORT_RECORD_INVALID', '导出准备不再对应其文档版本。');
+    return this.#documentTarget(bookId, text(row.document_id), revisionId);
   }
 
   // ---- the export input ---------------------------------------------------------------------------------
@@ -1247,7 +1310,8 @@ export class ManuscriptExportStore {
       degraded: rendered.degraded,
       suggestedFileName: suggestedExportFileName(
         target.bookTitle,
-        report === null ? target.milestoneLabel ?? target.revisionLabel : reportExportLabel(report.runLabel, report.version),
+        report !== null ? reportExportLabel(report.runLabel, report.version)
+          : target.document !== null ? target.document.versionLabel : target.milestoneLabel ?? target.revisionLabel,
         format,
       ),
       reviewDigest,
@@ -1270,6 +1334,7 @@ export class ManuscriptExportStore {
       report: target.report === null
         ? null
         : { reportId: target.report.reportId, version: target.report.version, reviewRunId: target.report.reviewRunId, runLabel: target.report.runLabel },
+      document: target.document,
     };
   }
 
@@ -1299,8 +1364,9 @@ export class ManuscriptExportStore {
     const fidelity = parseCanonicalJson(fidelityJson);
     requireExport(Array.isArray(fidelity), 'EXPORT_RECORD_INVALID', '导出保真审阅记录无效。');
     const targetKind = text(row.target_kind);
-    // A report's preparation names its recorded version; a manuscript version's, its revision.
-    const report = targetKind === 'report' ? this.#reportTarget(text(row.book_id), text(row.target_id)) : null;
+    // A report's preparation names its recorded version, a document's its version; a manuscript version's, its revision.
+    const report = targetKind === 'report' ? this.#reportTarget(text(row.book_id), text(row.target_id))
+      : targetKind === 'production-document-version' ? this.#documentOfRevision(text(row.book_id), text(row.target_id)) : null;
     const revisionId = report === null ? text(row.revision_id) : report.revisionId;
     const revisionLabel = report === null ? this.#revision(revisionId).revisionLabel : report.revisionLabel;
     const milestoneLabel = targetKind === 'milestone-version'
@@ -1318,7 +1384,8 @@ export class ManuscriptExportStore {
       revisionDigest: report === null ? text(row.revision_digest) : null,
       revisionLabel,
       milestoneLabel,
-      ...(report === null ? {} : { reportDigest: report.revisionDigest }),
+      ...(report?.report == null ? {} : { reportDigest: report.revisionDigest }),
+      ...(report?.document == null ? {} : { documentId: report.document.documentId, documentVersionDigest: report.revisionDigest }),
       format: text(row.format),
       options,
       fidelitySha256: sha256Hex(fidelityJson),
@@ -1343,6 +1410,7 @@ export class ManuscriptExportStore {
         revisionId,
         revisionLabel,
         report: null,
+        document: null,
       },
       format: requireFormat(text(row.format)),
       options,
