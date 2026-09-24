@@ -2365,16 +2365,19 @@ export class BaselineAnalysisStore {
           update.selectedRange?.endPosition === expected.selectedRange?.endPosition),
       'ANALYSIS_REDO_INVALID', '改计划重做沿用这次运行已读完的部分，接着读其余的；什么都没读完时，照原样从头再做。');
     }
-    // 重新准备 (Issue #536; OFF-008) of a redo whose Run a moved plan blocked before it began: that redo prepared again as
-    // it was — the same way over the same range, its predecessor still the latest revision — so a redo's 同步 over the
-    // revision its stopped Run kept stays open to it, as it was to the redo.
+    // The latest Task asked for again as it was — the same way over the same range, its predecessor still the latest
+    // revision: 重新准备 (Issue #536; OFF-008) of a Task whose Run a moved plan blocked before it began, and 重新确认计划
+    // of a Task prepared and not yet started (Issue #551). A way ②A's own controls do not offer now stays open to it: a
+    // redo's 同步 over the revision its stopped Run kept, and so every Task 重新准备 makes of it, however often the plan
+    // moves while it waits.
     const blocked = existing.run;
-    const reprepared = redoOf === null && update !== null && blocked !== null && blocked.state === 'blocked-before-dispatch' &&
-      blocked.blockedBy === 'plan-moved' && existing.taskIntent !== null && 'redoOf' in existing.taskIntent &&
-      existing.taskIntent.redoOf !== null && existing.update !== null &&
-      existing.update.predecessorCurrent && update.mode === existing.update.mode &&
+    const asked = redoOf === null && update !== null && existing.update !== null && existing.update.predecessorCurrent &&
+      update.mode === existing.update.mode &&
       update.selectedRange?.startPosition === existing.update.selectedRange?.startPosition &&
-      update.selectedRange?.endPosition === existing.update.selectedRange?.endPosition;
+      update.selectedRange?.endPosition === existing.update.selectedRange?.endPosition &&
+      (input.reconfirm
+        ? blocked === null
+        : blocked !== null && blocked.state === 'blocked-before-dispatch' && blocked.blockedBy === 'plan-moved');
     let selectedRange: BaselineAnalysisSelectedRange | null = null;
     if (update === null) {
       requireAnalysis(latest === null, 'ANALYSIS_FIRST_BASELINE_EXISTS', '本图书已存在结果集修订版；请使用分析更新操作追加后继修订版。');
@@ -2388,8 +2391,8 @@ export class BaselineAnalysisStore {
       requireAnalysis(latest !== null && existing.updateControls !== null, 'ANALYSIS_PREDECESSOR_ABSENT', `本图书尚无结果集修订版；请先完成${initialLabel}。`);
       const control = (existing.updateControls!.actions as Readonly<Record<string, { available: boolean; unavailableReason: string | null }>>)[mode];
       // A redo's 同步 reads the gaps of a revision the manuscript has not moved past, which ②A's own 同步 waits for; so
-      // does that redo prepared again.
-      requireAnalysis(control !== undefined && (control.available || redoOf !== null || reprepared), 'ANALYSIS_UPDATE_MODE_UNAVAILABLE',
+      // does the latest Task asked for again as it was.
+      requireAnalysis(control !== undefined && (control.available || redoOf !== null || asked), 'ANALYSIS_UPDATE_MODE_UNAVAILABLE',
         control?.unavailableReason ?? changedModeUnavailableReason(this.#definition.mode(mode).label));
       if (this.#definition.mode(mode).rangeBound) {
         selectedRange = requireSelectedRange(update.selectedRange, existing.updateControls!.working.totalBlocks);

@@ -17,7 +17,7 @@ export interface AnalysisFollowStep<T> {
   again(): number | null;
   /** Draw the answer; that draw follows the card from there. */
   draw(next: T): void;
-  /** The read or its draw failed while this draw was still the card's. */
+  /** The read failed while this draw was still the card's, or the draw of its answer failed. */
   failed(error: unknown): void;
 }
 
@@ -65,8 +65,9 @@ export class AnalysisFollower<Host extends object> {
 
   async #follow<T>(host: Host, generation: number, step: AnalysisFollowStep<T>): Promise<void> {
     if (!this.current(host, generation) || !step.belongs(null)) return;
+    let next: T;
     try {
-      const next = await step.read();
+      next = await step.read();
       // A newer draw came while the read was out: that draw follows the card now, and this answer is not drawn.
       if (!this.current(host, generation) || !step.belongs(next)) return;
       if (step.unchanged(next)) {
@@ -74,9 +75,16 @@ export class AnalysisFollower<Host extends object> {
         if (again !== null) this.later(host, generation, again, step);
         return;
       }
-      step.draw(next);
     } catch (error) {
       if (this.current(host, generation) && step.belongs(null)) step.failed(error);
+      return;
+    }
+    // The draw is this answer's own, and it begins the card's next draw before it can fail, so a failed draw is said
+    // whatever draw it left behind (Issue #551).
+    try {
+      step.draw(next);
+    } catch (error) {
+      step.failed(error);
     }
   }
 }
