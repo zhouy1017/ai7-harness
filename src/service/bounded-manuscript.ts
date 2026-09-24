@@ -4732,6 +4732,8 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
           ? asString(committedResult.resulting_revision_id)
           : asString(committedResult.previous_revision_id);
       while (true) {
+        // `claimed` is another mapping's resolution carrying this one's current identity: an insert claiming a
+        // delete's. A preserved edit carries its own, which is no claim.
         const mappings = db.prepare(
           `SELECT m.*, r.resolution, r.resolved_current_block_id,
                   r.comparison_id resolution_comparison_id,
@@ -4741,6 +4743,7 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
            LEFT JOIN manuscript_reimport_mapping_resolutions claimed
              ON claimed.comparison_id = m.comparison_id
             AND claimed.resolved_current_block_id = m.current_block_id
+            AND claimed.mapping_id <> m.mapping_id
            WHERE m.comparison_id = ? AND m.position > ? ORDER BY m.position LIMIT 64`,
         ).all(comparisonId, mappingCursor) as SqlRow[];
         if (mappings.length === 0) break;
