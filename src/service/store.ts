@@ -8830,12 +8830,23 @@ export class EditorialStore {
       .find((record) => record.kind === 'manuscript-reimport-record');
     requireStore(reimportReceipt?.kind === 'manuscript-reimport-record',
       'IMPORT_POSTCONDITION_FAILED', '稿件重新导入完成凭据不完整。');
+    const overview = this.getBookOverview(committedResult.bookId);
     return {
       ...committedResult,
       receipt: reimportReceipt,
-      overview: this.getBookOverview(committedResult.bookId),
-      window: this.getManuscriptWindow(committedResult.manuscriptId, committedResult.branchId, null),
+      overview,
+      window: this.#reimportLandingWindow(overview, committedResult.manuscriptId, committedResult.branchId),
     };
+  }
+
+  /**
+   * Where a reimport lands (V2-UX-IMP-056; Issue #412): the editor's remembered place as the reimport mapped it —
+   * its paragraph where the identity carried, else the nearest one — or the start when none is remembered.
+   */
+  #reimportLandingWindow(overview: BookWorkOverviewProjection, manuscriptId: string, branchId: string): ManuscriptWindowProjection {
+    const entry = overview.manuscriptAnchor?.entry ?? null;
+    return this.getManuscriptWindowAt(manuscriptId, branchId,
+      entry === null ? { kind: 'start' } : { kind: 'block', blockId: entry.blockId });
   }
 
   /**
@@ -12145,6 +12156,7 @@ export class EditorialStore {
     const receipt = this.#reimportRecordPresentations(bookId, [reimportRecordId])
       .find((record) => record.kind === 'manuscript-reimport-record');
     requireStore(receipt?.kind === 'manuscript-reimport-record', 'STORE_CORRUPT', '稿件重新导入完成凭据不完整。');
+    const overview = this.getBookOverview(bookId);
     return {
       commitId: asString(row.commit_id),
       importedAt: asString(row.committed_at),
@@ -12166,8 +12178,8 @@ export class EditorialStore {
       resolutionDigest: asString(row.resolution_digest),
       source: storedSourceProjection(row),
       receipt,
-      overview: this.getBookOverview(bookId),
-      window: this.getManuscriptWindow(manuscriptId, branchId, null),
+      overview,
+      window: this.#reimportLandingWindow(overview, manuscriptId, branchId),
     };
   }
 

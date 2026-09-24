@@ -134,6 +134,9 @@ describe('the chapter-level Reimport Comparison', () => {
       // …and a 批注 on the third, which the new file keeps exactly: an anchor, one place later.
       anchoredMark = mark(store, book, 3, 0, 4, 'annotation', '这一段不动。');
       noteId = mark(store, book, 7, 0, 4, 'editor-note', '二校时再看。');
+      // The editor was last at the sixth paragraph, which the new file keeps as it was.
+      const entryBlockId = store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks[5]!.blockId;
+      store.recordManuscriptEntryPosition(book.manuscriptId, book.branchId, entryBlockId, 3);
 
       let review = await prepareReimport(store, book, second);
       expect(review.comparison).toMatchObject({ changed: true, groups: 4, unresolvedGroups: 4, exactBlocks: 4 });
@@ -168,6 +171,8 @@ describe('the chapter-level Reimport Comparison', () => {
 
       const result = await commit(store, review);
       expect(result.resultKind).toBe('changed');
+      // The reimport returns to the manuscript where the editor was, as the reimport mapped that place.
+      expect(result.window.focusBlockId).toBe(entryBlockId);
       record = result.receipt;
       store.markCleanShutdown();
     } finally {
