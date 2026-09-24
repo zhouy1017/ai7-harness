@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 40 as const;
+export const SERVICE_PROTOCOL_VERSION = 41 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -142,8 +142,8 @@ export type RendererCallResult<T> =
 
 /**
  * The Import Fidelity Review's content classes (ADR 0086 §1). A review parsed under
- * `ai7-docx-fflate-saxes/2` carries all ten, in this order; one recorded under `/1` carries the eight
- * it had, without `text-boxes` and `fields`. `round-trip-export` is the closing 预计往返 card.
+ * `ai7-docx-fflate-saxes/2` or `/3` carries all ten, in this order; one recorded under `/1` carries the
+ * eight it had, without `text-boxes` and `fields`. `round-trip-export` is the closing 预计往返 card.
  */
 export type FidelityCategoryKey =
   | 'inline-styles'
@@ -990,6 +990,8 @@ export type PersonalHighlightColor = 1 | 2 | 3;
 /** `applied`: a Change Suggestion whose replacement an AI7 Apply wrote; the mark now stands on the applied text. */
 export type EditorialMarkStatus = 'open' | 'resolved' | 'applied';
 export type ProposalItemDisposition = 'accepted' | 'rejected' | 'accepted-with-edit';
+/** A Proposal Change Item's kind (V2-UX-PROP-014): `insert` since schema revision 28 (Issue #411). */
+export type ProposalChangeType = 'replace' | 'delete' | 'insert';
 
 /**
  * Who a mark comes from (V2-UX-MARK-002): the editor, AI7 with what produced it — a Task, a review
@@ -1022,6 +1024,11 @@ export interface EditorialMarkAnchorProjection {
    * `null` for every other mark. The surface names them on the point it draws there.
    */
   deletedText: string | null;
+  /**
+   * The words a 修改建议 that inserts (Issue #411) would write at the point it stands on, while it is not
+   * applied; `null` for every other mark. The surface names them on the point it draws there.
+   */
+  insertedText: string | null;
   /** Where a 修改建议's Three-way Proposal Conflict stands (Issue #57); `null` for a mark that has none. */
   conflict: ProposalConflictState | null;
 }
@@ -1072,6 +1079,11 @@ export interface EditorialMarkCardProjection {
   basis: ReadonlyArray<EditorialMarkBasisProjection>;
   suggestion: null | {
     itemId: string;
+    /**
+     * What the item asks: replace its current text, delete it, or — for an insertion a file's author
+     * proposed (Issue #411) — write its proposal at a point, where its current text is empty.
+     */
+    changeType: ProposalChangeType;
     currentText: string;
     proposedText: string;
     rationale: string;

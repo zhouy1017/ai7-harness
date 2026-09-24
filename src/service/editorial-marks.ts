@@ -23,6 +23,7 @@ import {
   type EditorialMarkStatus,
   type ManuscriptApplyProjection,
   type PersonalHighlightColor,
+  type ProposalChangeType,
   type ProposalItemDecisionProjection,
   type ProposalItemDisposition,
   type RecordChangeSuggestionDecisionInput,
@@ -60,6 +61,12 @@ import {
  * there until an edit spans that point. A new store is created with the widened text; a store that
  * revision 22 created is rebuilt to it (`widenEditorialMarks`), and revision 22's text is kept only to
  * recognise and validate such a store (`EDITORIAL_MARK_REVISION_22_SQL`).
+ *
+ * Revision 28 (Issue #411) widened `proposal_change_items` for the third change kind a file's author can
+ * propose: `insert`, an item with no current text that writes its proposal at a point. Its mark stands on
+ * the empty range there, exactly like an applied deletion's. A store that revision 22 to 27 created is
+ * rebuilt to the widened text (`widenProposalChangeItems`), and revision 27's text is kept only to
+ * recognise and validate such a store (`PROPOSAL_CHANGE_ITEMS_REVISION_27_SQL`).
  */
 export const EDITORIAL_MARK_SCHEMA_SQL = {
   editorial_marks: `CREATE TABLE editorial_marks (
@@ -114,13 +121,14 @@ export const EDITORIAL_MARK_SCHEMA_SQL = {
   proposal_change_items: `CREATE TABLE proposal_change_items (
   item_id TEXT PRIMARY KEY,
   mark_id TEXT NOT NULL UNIQUE REFERENCES editorial_marks(mark_id),
-  change_type TEXT NOT NULL CHECK(change_type IN ('replace', 'delete')),
-  current_text TEXT NOT NULL CHECK(length(current_text) > 0),
+  change_type TEXT NOT NULL CHECK(change_type IN ('replace', 'delete', 'insert')),
+  current_text TEXT NOT NULL,
   proposed_text TEXT NOT NULL,
   rationale TEXT NOT NULL,
   atomic_group_id TEXT,
   created_at TEXT NOT NULL,
   CHECK((change_type = 'delete') = (length(proposed_text) = 0)),
+  CHECK((change_type = 'insert') = (length(current_text) = 0)),
   CHECK(proposed_text <> current_text)
 ) STRICT`,
   proposal_item_decisions: `CREATE TABLE proposal_item_decisions (
@@ -193,6 +201,24 @@ export const EDITORIAL_MARK_REVISION_22_SQL = {
   UNIQUE(branch_id, block_id, mark_id)
 ) STRICT`,
 } as const;
+
+/**
+ * `proposal_change_items` exactly as schema revisions 22 to 27 carried it: a replacement or a deletion of
+ * text that is there, never an insertion. Kept only to recognise and validate, exactly, a store created
+ * before revision 28 rebuilds the relation; nothing is ever created from it.
+ */
+export const PROPOSAL_CHANGE_ITEMS_REVISION_27_SQL = `CREATE TABLE proposal_change_items (
+  item_id TEXT PRIMARY KEY,
+  mark_id TEXT NOT NULL UNIQUE REFERENCES editorial_marks(mark_id),
+  change_type TEXT NOT NULL CHECK(change_type IN ('replace', 'delete')),
+  current_text TEXT NOT NULL CHECK(length(current_text) > 0),
+  proposed_text TEXT NOT NULL,
+  rationale TEXT NOT NULL,
+  atomic_group_id TEXT,
+  created_at TEXT NOT NULL,
+  CHECK((change_type = 'delete') = (length(proposed_text) = 0)),
+  CHECK(proposed_text <> current_text)
+) STRICT`;
 
 const LEDGER_TABLES = ['editorial_mark_replies', 'proposal_change_items', 'proposal_item_decisions', 'proposal_decision_reasons'] as const;
 
@@ -361,6 +387,51 @@ export function widenEditorialMarks(db: DatabaseSync): void {
   requireMark(rows() === before, 'SCHEMA_MIGRATION_FAILED', '标记表迁移未保留全部记录。');
 }
 
+/**
+ * Which of its two texts `proposal_change_items` holds: revision 27's, or revision 28's that admits an
+ * insertion. No other text was ever created, so any other is refused.
+ */
+export function proposalChangeItemsShape(db: DatabaseSync): 'revision-27' | 'current' {
+  const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'proposal_change_items'").get() as SqlRow | undefined;
+  const sql = row === undefined ? '' : foldedSql(text(row.sql));
+  if (sql === foldedSql(EDITORIAL_MARK_SCHEMA_SQL.proposal_change_items)) return 'current';
+  requireMark(sql === foldedSql(PROPOSAL_CHANGE_ITEMS_REVISION_27_SQL), 'SCHEMA_MIGRATION_FAILED', '提案修改项表结构不兼容。');
+  return 'revision-27';
+}
+
+/**
+ * Revision 27 → 28 for `proposal_change_items` (Issue #411): the ledger is rebuilt from its current text,
+ * which admits the `insert` kind, with every row copied byte for byte, rowid included, in rowid order, and
+ * its two ledger triggers — and any index — re-armed from their own texts once the rows are back. It runs
+ * in the caller's transaction with foreign keys off, so the decisions and the Effect targets that name an
+ * item keep their rows while the relation they reference is re-created; the caller checks every reference
+ * before it commits.
+ */
+export function widenProposalChangeItems(db: DatabaseSync): void {
+  requireMark(
+    db.isTransaction && integer((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys) === 0,
+    'SCHEMA_MIGRATION_FAILED',
+    '提案修改项表只能在停用引用校验的事务中重建。',
+  );
+  const columnsOf = (): string => (db.prepare("SELECT name FROM pragma_table_info('proposal_change_items') ORDER BY cid").all() as SqlRow[])
+    .map((row) => text(row.name)).join(', ');
+  const rows = (): number => integer((db.prepare('SELECT count(*) total FROM proposal_change_items').get() as SqlRow).total);
+  const columns = columnsOf();
+  const before = rows();
+  const attached = (db.prepare(
+    "SELECT sql FROM sqlite_schema WHERE tbl_name = 'proposal_change_items' AND type IN ('index', 'trigger') AND sql IS NOT NULL ORDER BY type, name",
+  ).all() as SqlRow[]).map((row) => text(row.sql));
+  db.exec('CREATE TEMP TABLE migrate_proposal_change_items AS SELECT rowid AS migrate_rowid, * FROM proposal_change_items');
+  db.exec('DROP TABLE proposal_change_items');
+  db.exec(EDITORIAL_MARK_SCHEMA_SQL.proposal_change_items);
+  requireMark(columnsOf() === columns, 'SCHEMA_MIGRATION_FAILED', '提案修改项表迁移前后的列不一致。');
+  db.exec(`INSERT INTO proposal_change_items(rowid, ${columns})
+    SELECT migrate_rowid, ${columns} FROM temp.migrate_proposal_change_items ORDER BY migrate_rowid`);
+  db.exec('DROP TABLE temp.migrate_proposal_change_items');
+  for (const sql of attached) db.exec(sql);
+  requireMark(rows() === before, 'SCHEMA_MIGRATION_FAILED', '提案修改项表迁移未保留全部记录。');
+}
+
 const relationSeen = new WeakSet<DatabaseSync>();
 
 /**
@@ -460,7 +531,8 @@ export function followBlockTextChangeForMarks(
  * text stands at its range or stands alone in the block, `drifted` otherwise, and `detached` when
  * the block is no longer part of the working state. A detached mark that finds its block again is
  * resolved like any other. A point pinned on no text has nothing to be found by, so it resolves
- * `drifted`: rewritten text never proves where an applied suggestion deleted its words.
+ * `drifted`: rewritten text never proves where an applied suggestion deleted its words, nor where a
+ * pending insertion (Issue #411) would write its own.
  */
 export function resolveBranchMarksAfterRewrite(db: DatabaseSync, branchId: string): void {
   if (!marksRelationExists(db)) return;
@@ -571,7 +643,10 @@ export function openMarkPlaces(
 function anchorSelect(withConflicts: boolean): string {
   return `SELECT em.mark_id, em.kind, em.block_id, em.from_grapheme, em.to_grapheme, em.anchor_state, em.status,
        em.highlight_color, em.source_kind,
-       CASE WHEN em.pinned_text = '' THEN (SELECT i.current_text FROM proposal_change_items i WHERE i.mark_id = em.mark_id) END deleted_text,
+       CASE WHEN em.pinned_text = '' THEN (SELECT i.current_text FROM proposal_change_items i
+                                           WHERE i.mark_id = em.mark_id AND i.change_type <> 'insert') END deleted_text,
+       CASE WHEN em.pinned_text = '' THEN (SELECT i.proposed_text FROM proposal_change_items i
+                                           WHERE i.mark_id = em.mark_id AND i.change_type = 'insert') END inserted_text,
        (SELECT d.disposition FROM proposal_change_items i
           JOIN proposal_item_decisions d ON d.item_id = i.item_id
          WHERE i.mark_id = em.mark_id ORDER BY d.ordinal DESC LIMIT 1) current_disposition,
@@ -594,6 +669,7 @@ function anchorProjection(row: SqlRow): EditorialMarkAnchorProjection {
     sourceKind: text(row.source_kind) as EditorialMarkSourceProjection['kind'],
     disposition: disposition === null || disposition === 'withdrawn' ? null : disposition as ProposalItemDisposition,
     deletedText: nullableText(row.deleted_text),
+    insertedText: nullableText(row.inserted_text),
     conflict: nullableText(row.conflict_state) as EditorialMarkAnchorProjection['conflict'],
   };
 }
@@ -642,6 +718,11 @@ export interface ProducedEditorialMarkInput {
   source: { kind: 'ai7'; origin: 'task' | 'review-category' | 'analysis'; label: string; taskId: string | null }
     | { kind: 'imported-author'; label: string };
   basis: ReadonlyArray<EditorialMarkBasisProjection>;
+  /**
+   * A file's own comment marked done arrives 已处理 (Issue #411); every other produced mark is open. Only an
+   * imported 批注 may say so.
+   */
+  status?: 'open' | 'resolved';
 }
 
 export class EditorialMarkStore {
@@ -740,13 +821,17 @@ export class EditorialMarkStore {
     requireMark(UUID_PATTERN.test(input.manuscriptId) && UUID_PATTERN.test(input.branchId) && BLOCK_PATTERN.test(input.blockId), 'MARK_INVALID', '标记标识无效。');
     requireMark(input.kind === 'change-suggestion' || input.kind === 'annotation', 'MARK_INVALID', '标记种类无效。');
     requireMark(input.source.label.trim().length > 0 && input.source.label.length <= 200, 'MARK_INVALID', '标记来源无效。');
+    const status = input.status ?? 'open';
+    requireMark(status === 'open' || (input.kind === 'annotation' && input.source.kind === 'imported-author'), 'MARK_INVALID', '标记状态无效。');
+    // An insertion a file's author proposed stands at a point: it has no current text (Issue #411).
+    const point = input.kind === 'change-suggestion' && input.source.kind === 'imported-author' && input.pinnedText === '';
     const content = this.#content(input.kind, null, input.body, input.proposedText, input.rationale, input.pinnedText);
     const markId = randomUUID();
     const state = this.#branchState(input.manuscriptId, input.branchId);
     const block = this.#db.prepare('SELECT digest FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(input.branchId, input.blockId) as SqlRow | undefined;
     requireMark(block !== undefined, 'MARK_ANCHOR_CHANGED', '所选文字已不在当前稿件中。');
     const digest = text(block.digest);
-    const pinned = this.#requireRange(input.branchId, input.blockId, digest, input.fromGrapheme, input.toGrapheme, input.pinnedText);
+    const pinned = this.#requireRange(input.branchId, input.blockId, digest, input.fromGrapheme, input.toGrapheme, input.pinnedText, point);
     const now = new Date().toISOString();
     const source: EditorialMarkSourceProjection = input.source.kind === 'ai7'
       ? { kind: 'ai7', origin: input.source.origin, label: input.source.label, taskId: input.source.taskId }
@@ -755,7 +840,7 @@ export class EditorialMarkStore {
       markId, clientMarkId: randomUUID(), state, manuscriptId: input.manuscriptId, branchId: input.branchId,
       blockId: input.blockId, blockDigest: digest, fromGrapheme: input.fromGrapheme, toGrapheme: input.toGrapheme,
       pinnedText: pinned, kind: input.kind, highlightColor: null, body: content.body, source,
-      basis: input.basis, convertedFrom: null, anchorState: 'exact', now,
+      basis: input.basis, convertedFrom: null, anchorState: 'exact', now, status,
     });
     if (input.kind === 'change-suggestion') this.#insertItem(markId, pinned, content.proposedText!, content.rationale, input.atomicGroupId, now);
     return markId;
@@ -963,6 +1048,8 @@ export class EditorialMarkStore {
     requireMark(mark.status !== 'applied', 'MARK_ACTION_INVALID', '已经应用的修改建议不能转换。');
     requireMark(mark.anchor_state === 'exact', 'MARK_ANCHOR_CHANGED', '原文已变，请先重新标注再转换。');
     const pinnedText = text(mark.pinned_text);
+    // A 批注 stands on text; an insertion stands at a point, where there is none (Issue #411).
+    requireMark(pinnedText.length > 0, 'MARK_ACTION_INVALID', '插入建议没有原文可以批注，不能转为批注。');
     let source: EditorialMarkSourceProjection = { kind: 'editor', origin: null, label: null, taskId: null };
     let body = '';
     let proposedText: string | null = null;
@@ -1012,7 +1099,7 @@ export class EditorialMarkStore {
 
   #suggestion(markId: string): NonNullable<EditorialMarkCardProjection['suggestion']> {
     const item = this.#db.prepare(
-      'SELECT item_id, current_text, proposed_text, rationale, atomic_group_id FROM proposal_change_items WHERE mark_id = ?',
+      'SELECT item_id, change_type, current_text, proposed_text, rationale, atomic_group_id FROM proposal_change_items WHERE mark_id = ?',
     ).get(markId) as SqlRow | undefined;
     requireMark(item !== undefined, 'MARK_STORE_INVALID', '修改建议缺少提案修改项。');
     const row = this.#db.prepare(
@@ -1030,6 +1117,7 @@ export class EditorialMarkStore {
     };
     return {
       itemId: text(item.item_id),
+      changeType: text(item.change_type) as ProposalChangeType,
       currentText: text(item.current_text),
       proposedText: text(item.proposed_text),
       rationale: text(item.rationale),
@@ -1250,13 +1338,18 @@ export class EditorialMarkStore {
     };
   }
 
-  /** The range must hold exactly the text the caller says it marks, in the block the caller saw. */
-  #requireRange(branchId: string, blockId: string, blockDigest: string, from: number, to: number, selectedText: string): string {
+  /**
+   * The range must hold exactly the text the caller says it marks, in the block the caller saw. Only an
+   * insertion a file's author proposed (Issue #411) may stand at a point, where it holds no text.
+   */
+  #requireRange(
+    branchId: string, blockId: string, blockDigest: string, from: number, to: number, selectedText: string, point = false,
+  ): string {
     const block = this.#db.prepare('SELECT text, digest FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(branchId, blockId) as SqlRow | undefined;
     requireMark(block !== undefined && text(block.digest) === blockDigest, 'MARK_ANCHOR_CHANGED', '所选文字所在的段落已变化，请重新选择。');
     const parts = graphemesOf(text(block.text));
     requireMark(
-      Number.isSafeInteger(from) && Number.isSafeInteger(to) && from >= 0 && to > from && to <= parts.length,
+      Number.isSafeInteger(from) && Number.isSafeInteger(to) && from >= 0 && (point ? to === from : to > from) && to <= parts.length,
       'MARK_RANGE_INVALID',
       '所选文字范围无效。',
     );
@@ -1311,6 +1404,7 @@ export class EditorialMarkStore {
     highlightColor: PersonalHighlightColor | null; body: string; source: EditorialMarkSourceProjection;
     basis: ReadonlyArray<EditorialMarkBasisProjection>; convertedFrom: string | null; anchorState: 'exact'; now: string;
     live?: { fromGrapheme: number; toGrapheme: number; followed: number };
+    status?: 'open' | 'resolved';
   }): void {
     this.#db.prepare(
       `INSERT INTO editorial_marks(
@@ -1319,21 +1413,23 @@ export class EditorialMarkStore {
          pinned_text, pinned_text_digest, from_grapheme, to_grapheme, anchor_state, followed_journal_sequence,
          body, source_kind, source_origin, source_label, source_task_id, basis_json, export_disposition, status,
          converted_from_mark_id, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       input.markId, input.clientMarkId, input.state.bookId, input.manuscriptId, input.branchId, input.blockId, input.kind,
       input.highlightColor, input.state.revisionId, input.state.journalSequence, input.blockDigest, input.fromGrapheme,
       input.toGrapheme, input.pinnedText, sha256(input.pinnedText), input.live?.fromGrapheme ?? input.fromGrapheme,
       input.live?.toGrapheme ?? input.toGrapheme, input.anchorState, input.live?.followed ?? input.state.journalSequence,
       input.body, input.source.kind, input.source.origin, input.source.label, input.source.taskId,
-      JSON.stringify(input.basis), EXPORT_DISPOSITION[input.kind], input.convertedFrom, input.now, input.now,
+      JSON.stringify(input.basis), EXPORT_DISPOSITION[input.kind], input.status ?? 'open', input.convertedFrom, input.now, input.now,
     );
   }
 
+  /** An item with no current text is an insertion at its mark's point (Issue #411); one with no proposal deletes. */
   #insertItem(markId: string, currentText: string, proposedText: string, rationale: string, atomicGroupId: string | null, now: string): void {
+    const changeType = currentText.length === 0 ? 'insert' : proposedText.length === 0 ? 'delete' : 'replace';
     this.#db.prepare(
       `INSERT INTO proposal_change_items(item_id, mark_id, change_type, current_text, proposed_text, rationale, atomic_group_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(randomUUID(), markId, proposedText.length === 0 ? 'delete' : 'replace', currentText, proposedText, rationale, atomicGroupId, now);
+    ).run(randomUUID(), markId, changeType, currentText, proposedText, rationale, atomicGroupId, now);
   }
 }

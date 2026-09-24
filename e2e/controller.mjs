@@ -144,6 +144,8 @@ const J01_COMPLETION_PHASES_BY_SCENARIO = Object.freeze({
   'retention-degraded': J01_COMMON_COMPLETION_PHASES,
   'retention-text-box-retain': J01_COMMON_COMPLETION_PHASES,
   'retention-text-box-merge': J01_COMMON_COMPLETION_PHASES,
+  // Issue #411: a DOCX's comments and tracked changes enter as 批注 and 修改建议 whose source is its author.
+  'imported-marks': J01_COMMON_COMPLETION_PHASES,
   'before-paint': Object.freeze([
     'imported-transition',
     'content-contract',
@@ -194,6 +196,7 @@ const J01_LAUNCH_SCENARIOS = Object.freeze([
   'retention-degraded',
   'retention-text-box-retain',
   'retention-text-box-merge',
+  'imported-marks',
   'source-only-pdf',
   'text-manuscript',
   'doc-manuscript',
@@ -367,6 +370,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'continuity-review',
     'legacy-review',
     'retention-review',
+    'imported-marks-review',
+    'imported-marks-record',
+    'imported-marks-editor',
+    'imported-marks-apply',
     'before-paint-review',
     'before-commit-review',
     'after-commit-review',

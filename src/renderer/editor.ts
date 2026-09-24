@@ -4,7 +4,7 @@ import { Schema, type DOMOutputSpec, type Node as ProseMirrorNode } from 'prosem
 import { EditorState, Plugin, TextSelection, type Transaction } from 'prosemirror-state';
 import { Decoration, DecorationSet, EditorView } from 'prosemirror-view';
 import { deriveSpanEdit, followSpanEdit } from '../shared/mark-anchor.js';
-import { markPointLabel } from './editorial-mark-labels.js';
+import { markPointKind, markPointLabel } from './editorial-mark-labels.js';
 import {
   MAX_BLOCK_CODE_UNITS,
   MAX_BLOCK_GRAPHEMES,
@@ -403,12 +403,32 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         }
         const from = position(followed.fromGrapheme);
         const to = position(followed.toGrapheme);
+        const previewing = activeMark?.markId === mark.markId && activeMark.previewText !== null && !drifted;
+        const preview = (at: number): void => {
+          const previewText = activeMark!.previewText!;
+          decorations.push(Decoration.widget(at, () => {
+            const element = window.document.createElement('ins');
+            element.className = 'editorial-mark-preview';
+            element.contentEditable = 'false';
+            element.dataset['markPreview'] = mark.markId;
+            const proposed = window.document.createElement('span');
+            proposed.className = 'editorial-mark-preview-text';
+            proposed.textContent = previewText.length === 0 ? '（删去）' : previewText;
+            const label = window.document.createElement('span');
+            label.className = 'editorial-mark-preview-label';
+            label.textContent = '预览 · 未应用';
+            element.append(proposed, label);
+            return element;
+          }, { side: 1, key: `preview:${mark.markId}:${previewText}`, ignoreSelection: true }));
+        };
         if (to <= from) {
-          // No text is left under the mark — the point an applied deletion left, or a mark whose own
-          // words an edit took away — so a point is drawn there: no part of the document, no room in
-          // the line, text typed at it landing in front of it, and a click on it opening the mark's
-          // card as a click on a mark does, without moving the caret.
+          // No text is left under the mark — the point an applied deletion left, the point a pending
+          // insertion would write at (Issue #411), or a mark whose own words an edit took away — so a point
+          // is drawn there: no part of the document, no room in the line, text typed at it landing in front
+          // of it, and a click on it opening the mark's card as a click on a mark does, without moving the
+          // caret. A pending insertion whose card is open previews its words beside it.
           const label = markPointLabel(mark, drifted);
+          const pointKind = markPointKind(mark);
           const active = activeMark?.markId === mark.markId;
           const anchor = drifted ? 'drifted' : 'exact';
           decorations.push(Decoration.widget(from, () => {
@@ -423,6 +443,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
             point.dataset['markSource'] = mark.sourceKind;
             point.dataset['markStatus'] = mark.status;
             point.dataset['markAnchor'] = anchor;
+            point.dataset['markPoint'] = pointKind;
             if (mark.disposition !== null) point.dataset['markDisposition'] = mark.disposition;
             point.addEventListener('mousedown', (event) => {
               if (event.button === 0) event.preventDefault();
@@ -433,9 +454,9 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
             ignoreSelection: true,
             key: `point:${mark.markId}:${mark.status}:${mark.disposition ?? ''}:${anchor}:${active ? 'active' : ''}:${label}`,
           }));
+          if (previewing && pointKind === 'insertion') preview(from);
           continue;
         }
-        const previewing = activeMark?.markId === mark.markId && activeMark.previewText !== null && !drifted;
         decorations.push(Decoration.inline(from, to, {
           class: [
             'editorial-mark',
@@ -451,23 +472,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
           ...(mark.highlightColor === null ? {} : { 'data-mark-color': String(mark.highlightColor) }),
           ...(mark.disposition === null ? {} : { 'data-mark-disposition': mark.disposition }),
         }));
-        if (previewing) {
-          const previewText = activeMark!.previewText!;
-          decorations.push(Decoration.widget(to, () => {
-            const preview = window.document.createElement('ins');
-            preview.className = 'editorial-mark-preview';
-            preview.contentEditable = 'false';
-            preview.dataset['markPreview'] = mark.markId;
-            const proposed = window.document.createElement('span');
-            proposed.className = 'editorial-mark-preview-text';
-            proposed.textContent = previewText.length === 0 ? '（删去）' : previewText;
-            const label = window.document.createElement('span');
-            label.className = 'editorial-mark-preview-label';
-            label.textContent = '预览 · 未应用';
-            preview.append(proposed, label);
-            return preview;
-          }, { side: 1, key: `preview:${mark.markId}:${previewText}`, ignoreSelection: true }));
-        }
+        if (previewing) preview(to);
       }
       if (line !== undefined) {
         decorations.push(Decoration.node(offset, offset + node.nodeSize, { class: 'has-editorial-mark', 'data-mark-line': line }));

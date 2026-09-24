@@ -7,9 +7,26 @@ import { deriveImportFidelityPlan, parseDocx, type ParsedDocxBlock } from '../..
 
 // The runners' plain-JS twin of the composed-fixture builder (`e2e/composed-docx.mjs`), read through the
 // product's own parser so its retention content is exactly what the Journeys import.
-const { ADMITTED_BASELINE_DOCX, composeAdmittedDocx } = (await import(new URL('../../e2e/composed-docx.mjs', import.meta.url).href)) as {
+const {
+  ADMITTED_BASELINE_DOCX,
+  IMPORTED_MARKS_AUTHOR,
+  IMPORTED_MARKS_COUNT,
+  IMPORTED_MARKS_OTHER_AUTHOR,
+  IMPORTED_MARKS_RECIPE,
+  IMPORTED_MARKS_REJECTED_BLOCKS,
+  admittedSpanText,
+  composeAdmittedDocx,
+  composeRevisedAdmittedDocx,
+} = (await import(new URL('../../e2e/composed-docx.mjs', import.meta.url).href)) as {
   ADMITTED_BASELINE_DOCX: string;
+  IMPORTED_MARKS_AUTHOR: string;
+  IMPORTED_MARKS_COUNT: number;
+  IMPORTED_MARKS_OTHER_AUTHOR: string;
+  IMPORTED_MARKS_RECIPE: Record<string, unknown>;
+  IMPORTED_MARKS_REJECTED_BLOCKS: ReadonlyArray<number>;
+  admittedSpanText(source: string, span: { block: number; from?: number; to?: number }): Promise<string>;
   composeAdmittedDocx(path: string, request: Record<string, unknown>): Promise<Uint8Array>;
+  composeRevisedAdmittedDocx(path: string, request: Record<string, unknown>): Promise<Uint8Array>;
 };
 
 // Unit suite for the runner twin's retention content (Issue #410; ADR 0086). Every assertion is a count,
@@ -49,6 +66,29 @@ describe('the runners\' composed-docx helper', () => {
     expect(parsed.textBoxes.map((box) => [box.boxOrdinal, box.paragraphs.length])).toEqual([[1, 2]]);
     expect(parsed.fidelity.filter((category) => category.count > 0).map((category) => [category.key, category.count, category.status]))
       .toEqual([['text-boxes', 1, 'retained']]);
+    expect(deriveImportFidelityPlan(parsed.fidelity, parsed.sourceDigest, parsed.archiveBytes)?.outcome).toBe('clean-import-no-round-trip');
+  });
+
+  it('writes J-01\'s comments and tracked changes so that the parser reads the source rejected and seven marks (Issue #411)', async () => {
+    const path = join(sandbox, 'revised.docx');
+    await composeRevisedAdmittedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '修订组稿', ...IMPORTED_MARKS_RECIPE });
+    const blocks: ParsedDocxBlock[] = [];
+    const parsed = await parseDocx(path, 'revised.docx', (block) => blocks.push(block));
+    const digest = (value: string): string => createHash('sha256').update(value, 'utf8').digest('hex');
+    const expected = await Promise.all(IMPORTED_MARKS_REJECTED_BLOCKS.map(async (block) => digest(await admittedSpanText(ADMITTED_BASELINE_DOCX, { block }))));
+    expect(blocks.map((block) => digest(block.text))).toEqual(expected);
+    expect(parsed.importedMarks.map((mark) => [mark.blockPosition, mark.kind, mark.origin, mark.authorLabel, mark.status])).toEqual([
+      [1, 'change-suggestion', 'deletion', IMPORTED_MARKS_AUTHOR, 'open'],
+      [2, 'change-suggestion', 'insertion', IMPORTED_MARKS_AUTHOR, 'open'],
+      [3, 'change-suggestion', 'replacement', IMPORTED_MARKS_AUTHOR, 'open'],
+      [4, 'annotation', 'comment', IMPORTED_MARKS_AUTHOR, 'open'],
+      [5, 'annotation', 'comment', IMPORTED_MARKS_AUTHOR, 'resolved'],
+      [5, 'annotation', 'paragraph-insertion', IMPORTED_MARKS_OTHER_AUTHOR, 'open'],
+      [6, 'annotation', 'move', IMPORTED_MARKS_AUTHOR, 'open'],
+    ]);
+    expect(parsed.importedMarks).toHaveLength(IMPORTED_MARKS_COUNT);
+    expect(parsed.fidelity.filter((category) => category.count > 0).map((category) => [category.key, category.count, category.status]))
+      .toEqual([['inline-styles', 1, 'retained'], ['comments-revisions', IMPORTED_MARKS_COUNT, 'preserved']]);
     expect(deriveImportFidelityPlan(parsed.fidelity, parsed.sourceDigest, parsed.archiveBytes)?.outcome).toBe('clean-import-no-round-trip');
   });
 

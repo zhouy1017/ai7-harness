@@ -123,6 +123,7 @@ import {
   isCleanTracerFidelity,
   MAX_ARCHIVE_BYTES,
   parseDocx,
+  reimportFidelityReport,
   withTextBoxDisposition,
   type FidelityConversionIdentity,
   type ImportFidelityPlan,
@@ -165,6 +166,13 @@ import {
   type StagedImportSources,
   type StagedTextBoxParagraph,
 } from './import-retention.js';
+import {
+  ImportedMarkError,
+  createImportedMarks,
+  initializeImportedMarkSchema,
+  stageImportedMarks,
+  stagedImportedMarksMatch,
+} from './imported-marks.js';
 import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
 import { reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './review/category-configuration.js';
 import { reviewCategoryKindDefinition } from './review/review-category-kind.js';
@@ -221,6 +229,7 @@ import {
   PUBLICATION_VERSION_SCHEMA_VERSION,
   PROPOSAL_CONFLICT_SCHEMA_VERSION,
   IMPORT_RETENTION_SCHEMA_VERSION,
+  IMPORTED_MARK_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1424,7 +1433,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
       currentVersion === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       currentVersion === PUBLICATION_VERSION_SCHEMA_VERSION || currentVersion === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      currentVersion === IMPORT_RETENTION_SCHEMA_VERSION,
+      currentVersion === IMPORT_RETENTION_SCHEMA_VERSION || currentVersion === IMPORTED_MARK_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1450,7 +1459,7 @@ function initializeSchema(db: DatabaseSync): void {
     currentVersion === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
     currentVersion === EDITORIAL_REVIEW_SCHEMA_VERSION ||
     currentVersion === PUBLICATION_VERSION_SCHEMA_VERSION || currentVersion === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      currentVersion === IMPORT_RETENTION_SCHEMA_VERSION
+      currentVersion === IMPORT_RETENTION_SCHEMA_VERSION || currentVersion === IMPORTED_MARK_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1790,7 +1799,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION,
+      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1805,7 +1814,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION) return;
+      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -1912,7 +1921,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION,
+      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1926,7 +1935,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION) return;
+      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2219,7 +2228,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== IMPORT_RETENTION_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== IMPORTED_MARK_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2236,6 +2245,7 @@ function validateModelServiceSchema(
       version >= PUBLICATION_VERSION_SCHEMA_VERSION,
       version >= PROPOSAL_CONFLICT_SCHEMA_VERSION,
       version >= IMPORT_RETENTION_SCHEMA_VERSION,
+      version >= IMPORTED_MARK_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2277,7 +2287,7 @@ function initializeModelServiceSchema(
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION,
+      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2291,7 +2301,7 @@ function initializeModelServiceSchema(
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION) {
+      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -2410,11 +2420,21 @@ function continuationNotice(access: OriginalFileAccessProjection): string {
   return `${access.label}。已重新校验完整暂存快照，不会从原路径读取或替换暂存内容。`;
 }
 
+/** What an import that converts a file's comments and tracked changes also creates (Issue #411, D4). */
+export function importedMarksRecord(count: number): string {
+  return `来自文件作者的批注与修改建议 ${count} 条`;
+}
+
 function recordsToCreate(
   plan: ImportFidelityPlan,
   targetKind: 'new-book' | 'existing-book' = 'new-book',
 ): ReadonlyArray<string> {
-  const records = targetKind === 'existing-book' ? BASE_RECORDS_TO_CREATE.slice(2) : BASE_RECORDS_TO_CREATE;
+  const base = targetKind === 'existing-book' ? BASE_RECORDS_TO_CREATE.slice(2) : BASE_RECORDS_TO_CREATE;
+  // The marks stand on r1's blocks, so they follow the block-source mapping.
+  const sourcesIndex = base.indexOf('来源段落对应');
+  const records = plan.importedMarks === 0
+    ? base
+    : [...base.slice(0, sourcesIndex + 1), importedMarksRecord(plan.importedMarks), ...base.slice(sourcesIndex + 1)];
   if (plan.degradations.length === 0) return records;
   const fidelityIndex = records.indexOf('导入保真审阅');
   return [...records.slice(0, fidelityIndex + 1), '导入降级决定', ...records.slice(fidelityIndex + 1)];
@@ -3162,6 +3182,8 @@ export class EditorialStore {
       // #414) adds the Publication Version relations here and revision 26 (Issue #57) the proposal-conflict
       // relations, and the version stamp is the only other move. Revision 27 (Issue #410) widens
       // `import_fidelity_categories` and adds the import-retention relations here, in one transaction.
+      // Revision 28 (Issue #411) widens `proposal_change_items` to the `insert` kind and adds the staged
+      // imported marks here, in one transaction.
       initializeManuscriptIntakeSchema(authority);
       initializeTextConversionSchema(authority);
       initializeManuscriptEntryPositionSchema(authority);
@@ -3171,6 +3193,7 @@ export class EditorialStore {
       initializePublicationVersionSchema(authority);
       initializeProposalConflictSchema(authority);
       initializeImportRetentionSchema(authority);
+      initializeImportedMarkSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -6022,7 +6045,7 @@ export class EditorialStore {
     const resolutionDigest = emptyReimportResolutionDigest();
     const reviewDigest = createReimportReviewDigest(
       { ...snapshot, version: nextVersion }, target, comparisonDigest, resolutionDigest,
-      degradationReview(this.#requireFidelityPlan(snapshot), false).state,
+      degradationReview(this.#reimportFidelity(snapshot).plan, false).state,
     );
     const reviewedAt = new Date().toISOString();
     const persistComparison = (): void => {
@@ -6214,7 +6237,7 @@ export class EditorialStore {
       snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '重新导入复核已变化。');
     const target = this.#reconstructReviewedReimportTarget(snapshot);
     requireStore(target !== null, 'REVIEW_CHANGED', '重新导入复核无法由当前权威状态重建。');
-    const plan = this.#requireFidelityPlan(snapshot);
+    const { plan } = this.#reimportFidelity(snapshot);
     requireStore(plan.degradations.length > 0, 'DEGRADATION_ACCEPTANCE_INVALID', '本次重新导入不需要降级接受。');
     const evidence = this.#reimportEvidence(draftId);
     const nextVersion = expectedDraftVersion + 1;
@@ -6458,7 +6481,7 @@ export class EditorialStore {
     const nextVersion = work.expectedDraftVersion + 1;
     const reviewDigest = createReimportReviewDigest(
       { ...snapshot, version: nextVersion }, target, asString(mapping.comparison_digest), resolutionDigest,
-      degradationReview(this.#requireFidelityPlan(snapshot), work.degradationAccepted).state,
+      degradationReview(this.#reimportFidelity(snapshot).plan, work.degradationAccepted).state,
     );
     this.#transaction(this.#authority, () => {
       requireStore(this.#authority.prepare(
@@ -6869,6 +6892,17 @@ export class EditorialStore {
         'IMPORT_POSTCONDITION_FAILED',
         '稿件索引无法由暂存快照精确建立。',
       );
+      // Issue #411 (D5): the file's comments and tracked changes become 批注 and 修改建议 on r1 in this same
+      // transaction, whose source is the file's author — all of them, or no import. A staged body block keeps
+      // its identity in r1 whether or not text boxes were merged.
+      const stagedBlockId = this.#authority.prepare('SELECT staged_block_id FROM staged_import_blocks WHERE draft_id = ? AND position = ?');
+      const importedMarks = this.#importedMarkCall(() => createImportedMarks(this.#authority, this.#editorialMarks, input.draftId, {
+        manuscriptId,
+        branchId,
+        blockIdOf: (position) => asString(one(stagedBlockId.all(input.draftId, position) as SqlRow[],
+          'IMPORT_MARK_ANCHOR_FAILED', '文件中的批注或修订无法准确落在稿件文字上，本次导入没有提交。').staged_block_id),
+      }));
+      requireStore(importedMarks === plan.importedMarks, 'IMPORT_POSTCONDITION_FAILED', '导入的批注与修改建议与保真审阅的数量不一致。');
 
       result = {
         commitId: input.commitId,
@@ -7775,7 +7809,7 @@ export class EditorialStore {
       const evidence = this.#reimportEvidence(input.draftId);
       requireStore(evidence.unresolvedMappings === 0 && canonicalJson(evidence) === canonicalJson(work.evidence),
         'REIMPORT_MAPPING_UNRESOLVED', '重新导入比较证据在提交期间已变化。');
-      const fidelityPlan = this.#requireFidelityPlan(snapshot);
+      const { fidelity: reimportFidelity, plan: fidelityPlan } = this.#reimportFidelity(snapshot);
       const degradationAcceptance = one(this.#authority.prepare(
         'SELECT degradation_accepted FROM manuscript_reimport_comparisons WHERE draft_id = ?',
       ).all(input.draftId) as SqlRow[], 'REIMPORT_COMPARISON_INVALID', '重新导入比较不存在。');
@@ -7826,7 +7860,7 @@ export class EditorialStore {
         sourceVersionId,
         sourceDigest: snapshot.sourceDigest,
         sourceBytes: snapshot.sourceBytes,
-        categories: snapshot.fidelity,
+        categories: reimportFidelity,
         outcome: fidelityPlan.outcome,
       }));
       this.#authority.prepare(
@@ -7840,7 +7874,7 @@ export class EditorialStore {
            fidelity_review_id, category_key, display_label, item_count, status, detail, position
          ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       );
-      snapshot.fidelity.forEach((category, index) => insertFidelity.run(
+      reimportFidelity.forEach((category, index) => insertFidelity.run(
         fidelityReviewId, category.key, category.label, category.count, category.status, category.detail, index + 1,
       ));
       // A reimport offers no text-box choice (ADR 0086 §2): the file's text boxes stay with it, and the
@@ -9618,16 +9652,22 @@ export class EditorialStore {
     requireStore(inserted.changes === parsed.blockCount, 'SNAPSHOT_INCOMPLETE', '暂存摄入无法完整提升为权威快照。');
     requireStore(ingested.sources.blockSourceIndexes.length === parsed.blockCount, 'SNAPSHOT_INCOMPLETE', '暂存摄入的来源段落不完整。');
     this.#retentionCall(() => stageImportSources(this.#authority, draftId, ingested.sources));
+    // The file's comments and tracked changes, pinned in the blocks just staged (Issue #411).
+    this.#importedMarkCall(() => stageImportedMarks(this.#authority, draftId, parsed.importedMarks));
     const removed = this.#authority
       .prepare('DELETE FROM import_ingest_blocks WHERE ingest_id = ? AND draft_id = ?')
       .run(ingested.ingestId, draftId);
     requireStore(removed.changes === parsed.blockCount, 'SNAPSHOT_INCOMPLETE', '暂存摄入无法完成原子清理。');
   }
 
-  /** The block rows of a fresh parse against the staged ones, and its sources against the staged sources. */
+  /**
+   * The block rows of a fresh parse against the staged ones, and its sources and imported marks against the
+   * staged sources and marks.
+   */
   #ingestMatchesSnapshot(ingested: IngestedDocx, draftId: string): boolean {
     return this.#ingestBlocksMatchSnapshot(ingested.ingestId, draftId) &&
-      this.#retentionCall(() => stagedImportSourcesMatch(this.#authority, draftId, ingested.sources));
+      this.#retentionCall(() => stagedImportSourcesMatch(this.#authority, draftId, ingested.sources)) &&
+      this.#importedMarkCall(() => stagedImportedMarksMatch(this.#authority, draftId, ingested.parsed.importedMarks));
   }
 
   #ingestBlocksMatchSnapshot(ingestId: string, draftId: string): boolean {
@@ -10707,7 +10747,7 @@ export class EditorialStore {
         evidence.comparisonDigest,
         evidence.resolutionDigest,
         degradationReview(
-          this.#requireFidelityPlan(snapshot),
+          this.#reimportFidelity(snapshot).plan,
           asNumber(comparison.degradation_accepted) === 1,
         ).state,
       ) === snapshot.reviewDigest
@@ -10727,7 +10767,7 @@ export class EditorialStore {
     const comparison = one(this.#authority.prepare(
       'SELECT degradation_accepted FROM manuscript_reimport_comparisons WHERE draft_id = ?',
     ).all(snapshot.draftId) as SqlRow[], 'REIMPORT_COMPARISON_INVALID', '重新导入比较不存在。');
-    const plan = this.#requireFidelityPlan(snapshot);
+    const { fidelity, plan } = this.#reimportFidelity(snapshot);
     const degradationAccepted = asNumber(comparison.degradation_accepted) === 1;
     requireStore(snapshot.reviewDigest !== null, 'REVIEW_CHANGED', '重新导入复核摘要缺失。');
     return {
@@ -10778,7 +10818,7 @@ export class EditorialStore {
         changed: evidence.changed,
         resultPreviewLabel: evidence.changed ? '稿件将重新导入' : '未发现稿件变化',
       },
-      fidelity: snapshot.fidelity,
+      fidelity,
       degradationDecision: degradationReview(plan, degradationAccepted),
       commitReady: evidence.unresolvedMappings === 0 &&
         (plan.degradations.length === 0 || degradationAccepted),
@@ -11185,6 +11225,21 @@ export class EditorialStore {
     return plan;
   }
 
+  /**
+   * The fidelity a reimport states of the staged report, and its plan (Issue #411): a reimport makes no mark
+   * of the file's comments and tracked changes — S63 does — so a report that would convert them states the
+   * class `不支持导入`, and the reimport needs the editor's decision for it (V2-UX-IMP-005).
+   */
+  #reimportFidelity(snapshot: DraftSnapshot): { fidelity: FidelityCategoryProjection[]; plan: ImportFidelityPlan } {
+    this.#requireFidelityPlan(snapshot);
+    const conversion = fidelityConversion(snapshot.conversion);
+    const fidelity = reimportFidelityReport(snapshot.fidelity, conversion, snapshot.parserIdentity!);
+    requireStore(fidelity, 'FIDELITY_OUTSIDE_TRACER', '当前导入的保真计划不符合受限边界。');
+    const plan = deriveImportFidelityPlan(fidelity, snapshot.sourceDigest, snapshot.sourceBytes, conversion, snapshot.parserIdentity!);
+    requireStore(plan, 'FIDELITY_OUTSIDE_TRACER', '当前导入的保真计划不符合受限边界。');
+    return { fidelity, plan };
+  }
+
   #loadPersistedFidelity(fidelityReviewId: string): FidelityCategoryProjection[] {
     return (
       this.#authority
@@ -11234,6 +11289,16 @@ export class EditorialStore {
       message,
     );
     return { categories, plan };
+  }
+
+  /** An imported-mark refusal (Issue #411), or a mark refusing to be pinned, is the caller's `StoreError`. */
+  #importedMarkCall<T>(operation: () => T): T {
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof ImportedMarkError || error instanceof EditorialMarkError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
   }
 
   /** An import-retention refusal is the caller's `StoreError`, under its own code. */
@@ -11356,6 +11421,13 @@ export class EditorialStore {
       'STORE_CORRUPT', '导入提交保真记录无效。',
     );
     requireStore(asString(row.outcome) === plan.outcome && asNumber(row.round_trip_guaranteed) === 0, 'STORE_CORRUPT', '导入保真结论无效。');
+    // Issue #411 (D5): the committed graph still holds every mark its review counted. A mark is never deleted —
+    // it is applied, resolved, removed or converted, and an Apply re-pins it — so the manuscript's marks from
+    // the file's author can only have grown in number since the commit wrote exactly these.
+    const importedMarks = one(this.#authority.prepare(
+      "SELECT count(*) total FROM editorial_marks WHERE manuscript_id = ? AND source_kind = 'imported-author'",
+    ).all(asString(row.manuscript_id)) as SqlRow[], 'STORE_CORRUPT', '导入的批注与修改建议无法计数。');
+    requireStore(asNumber(importedMarks.total) >= plan.importedMarks, 'STORE_CORRUPT', '导入提交记录图缺少导入的批注与修改建议。');
     const degradationDecisionId = row.degradation_decision_id === null ? null : asString(row.degradation_decision_id);
     if (plan.degradations.length === 0) {
       requireStore(degradationDecisionId === null && row.decision === null, 'STORE_CORRUPT', '洁净导入意外关联了降级决定。');
@@ -11554,7 +11626,9 @@ export class EditorialStore {
                   AND source_version_id = ? AND fidelity_review_id = ? AND resulting_revision_id = ?
                   AND degradation_decision_id IS ?) imports,
              (SELECT count(*) FROM manuscript_block_sources
-                WHERE revision_id = ? AND source_version_id = ?) block_sources`,
+                WHERE revision_id = ? AND source_version_id = ?) block_sources,
+             (SELECT count(*) FROM editorial_marks
+                WHERE manuscript_id = ? AND source_kind = 'imported-author' AND pinned_revision_id = ?) imported_marks`,
         )
         .all(
           input.bookId,
@@ -11594,6 +11668,8 @@ export class EditorialStore {
           input.degradationDecisionId,
           input.revisionId,
           input.sourceVersionId,
+          input.manuscriptId,
+          input.revisionId,
         ) as SqlRow[],
       'IMPORT_POSTCONDITION_FAILED',
       '导入提交后置条件缺失。',
@@ -11614,7 +11690,9 @@ export class EditorialStore {
         asNumber(counts.degradation_decisions) === (input.degradationDecisionId === null ? 0 : 1) &&
         asNumber(counts.workflows) === 1 &&
         asNumber(counts.imports) === 1 &&
-        asNumber(counts.block_sources) === input.blockCount,
+        asNumber(counts.block_sources) === input.blockCount &&
+        // Issue #411: exactly the marks the review counted, every one pinned on r1.
+        asNumber(counts.imported_marks) === input.fidelityPlan.importedMarks,
       'IMPORT_POSTCONDITION_FAILED',
       '导入提交未形成完整记录图。',
     );

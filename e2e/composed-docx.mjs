@@ -204,6 +204,163 @@ function retentionParts(excerpt, available, retention, strToU8) {
   return parts;
 }
 
+// ---- comments and tracked changes (Issue #411) -------------------------------------------------------
+
+const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
+
+/** The graphemes `[from, to)` of the source's 1-based `block`-th block; the whole block by default. */
+export async function admittedSpanText(source, { block, from, to }) {
+  const available = await admittedBlocks(source);
+  const text = available[block - 1]?.text;
+  if (text === undefined) throw new Error(`composed span outside the source: ${admittedSourcePath(source)}`);
+  const graphemes = Array.from(segmenter.segment(text), ({ segment }) => segment);
+  const start = from ?? 0;
+  const end = to ?? graphemes.length;
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end > graphemes.length || end <= start) {
+    throw new Error('composed span outside its block');
+  }
+  return graphemes.slice(start, end).join('');
+}
+
+const W14 = 'xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"';
+const W15 = 'xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"';
+
+function commentParagraphId(commentId) {
+  return (0x10000000 + commentId).toString(16).toUpperCase();
+}
+
+/**
+ * Compose a DOCX whose paragraphs carry comments and tracked changes, every word a span of the admitted
+ * source — the twin of `composeRevisedDocx` in `tests/support/composed-fixture.ts`, written the way Word
+ * writes them: `w:ins`/`w:del`/`w:moveFrom`/`w:moveTo` around runs, deleted text in `w:delText`, the paragraph
+ * mark's revision in `w:pPr/w:rPr`, a formatting revision as `w:pPrChange` and `w:rPrChange`, comment ranges
+ * and references in the body, the comments in `word/comments.xml` and their threads and 已处理 in
+ * `word/commentsExtended.xml`. A paragraph's `runs` are `{ text: span, revision? }` or `{ comment, id }`.
+ */
+export async function composeRevisedAdmittedDocx(path, { source, title, paragraphs, comments = [] }) {
+  const { zipSync, strToU8 } = await carriers();
+  let revisionId = 1000;
+  const attributes = (author, date) => ` w:id="${revisionId++}" w:author="${escapeXml(author)}" w:date="${escapeXml(date)}"`;
+  const runXmlOf = async (span, wrap) => {
+    const text = escapeXml(await admittedSpanText(source, span));
+    const chain = [];
+    for (let current = wrap; current !== undefined; current = current.inner) chain.push(current);
+    const deleted = chain.at(-1)?.kind === 'del';
+    let xml = `<w:r>${deleted ? `<w:delText xml:space="preserve">${text}</w:delText>` : `<w:t xml:space="preserve">${text}</w:t>`}</w:r>`;
+    for (const layer of chain.reverse()) xml = `<w:${layer.kind}${attributes(layer.author, layer.date)}>${xml}</w:${layer.kind}>`;
+    return xml;
+  };
+  const body = [];
+  for (const paragraph of paragraphs) {
+    const properties = [];
+    if (paragraph.formattingRevision !== undefined) {
+      const { author, date } = paragraph.formattingRevision;
+      properties.push(`<w:pPrChange${attributes(author, date)}><w:pPr><w:pStyle w:val="Heading1"/></w:pPr></w:pPrChange>`);
+    }
+    if (paragraph.markRevision !== undefined) {
+      const { kind, author, date } = paragraph.markRevision;
+      properties.push(`<w:rPr><w:${kind}${attributes(author, date)}/></w:rPr>`);
+    }
+    const runs = [];
+    for (const [index, run] of paragraph.runs.entries()) {
+      if (run.comment !== undefined) {
+        runs.push(run.comment === 'start'
+          ? `<w:commentRangeStart w:id="${run.id}"/>`
+          : run.comment === 'end' ? `<w:commentRangeEnd w:id="${run.id}"/>` : `<w:r><w:commentReference w:id="${run.id}"/></w:r>`);
+        continue;
+      }
+      let xml = await runXmlOf(run.text, run.revision);
+      if (index === 0 && paragraph.formattingRevision !== undefined) {
+        const { author, date } = paragraph.formattingRevision;
+        xml = xml.replace('<w:r>', `<w:r><w:rPr><w:b/><w:rPrChange${attributes(author, date)}><w:rPr/></w:rPrChange></w:rPr>`);
+      }
+      runs.push(xml);
+    }
+    body.push(`<w:p>${properties.length === 0 ? '' : `<w:pPr>${properties.join('')}</w:pPr>`}${runs.join('')}</w:p>`);
+  }
+  const parts = {
+    'word/document.xml': strToU8(
+      '<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      `<w:body>${body.join('')}<w:sectPr/></w:body></w:document>`,
+    ),
+  };
+  if (comments.length > 0) {
+    const commentXml = [];
+    for (const comment of comments) {
+      const commentParagraphs = [];
+      for (const [index, span] of comment.text.entries()) {
+        const id = index === comment.text.length - 1 ? ` w14:paraId="${commentParagraphId(comment.id)}"` : '';
+        commentParagraphs.push(`<w:p${id}><w:r><w:t xml:space="preserve">${escapeXml(await admittedSpanText(source, span))}</w:t></w:r></w:p>`);
+      }
+      if (comment.text.length === 0) commentParagraphs.push(`<w:p w14:paraId="${commentParagraphId(comment.id)}"/>`);
+      commentXml.push(`<w:comment w:id="${comment.id}" w:author="${escapeXml(comment.author)}" w:date="2026-09-01T00:00:00Z" w:initials="示">${commentParagraphs.join('')}</w:comment>`);
+    }
+    parts['word/comments.xml'] = strToU8(
+      '<?xml version="1.0" encoding="UTF-8"?>' +
+      `<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ${W14}>${commentXml.join('')}</w:comments>`,
+    );
+    const threads = comments.map((comment) => {
+      const parent = comment.replyTo === undefined ? '' : ` w15:paraIdParent="${commentParagraphId(comment.replyTo)}"`;
+      return `<w15:commentEx w15:paraId="${commentParagraphId(comment.id)}"${parent} w15:done="${comment.done === true ? 1 : 0}"/>`;
+    });
+    parts['word/commentsExtended.xml'] = strToU8(`<?xml version="1.0" encoding="UTF-8"?><w15:commentsEx ${W15}>${threads.join('')}</w15:commentsEx>`);
+  }
+  const archive = zipSync({
+    '[Content_Types].xml': strToU8('<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>'),
+    'docProps/core.xml': strToU8(`<?xml version="1.0" encoding="UTF-8"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${escapeXml(title)}</dc:title></cp:coreProperties>`),
+    ...parts,
+  }, { level: 6, mtime: new Date('2026-01-01T00:00:00.000Z') });
+  await writeFile(path, archive, { flag: 'wx' });
+  return archive;
+}
+
+/** The neutral author names of J-01's comments-and-revisions input. */
+export const IMPORTED_MARKS_AUTHOR = '示例作者';
+export const IMPORTED_MARKS_OTHER_AUTHOR = '另一位作者';
+
+const plain = (block, from, to) => ({ text: { block, from, to } });
+const revised = (block, from, to, kind, author, date) => ({ text: { block, from, to }, revision: { kind, author, date } });
+
+/**
+ * J-01's comments-and-revisions input (Issue #411, D8), every word sample1's own: a deletion, an insertion, a
+ * same-author same-time replacement, a comment with a reply by another author, a comment marked done, a whole
+ * paragraph inserted, a move and a formatting change. It reads with every revision rejected as the source's
+ * blocks `IMPORTED_MARKS_REJECTED_BLOCKS` and becomes `IMPORTED_MARKS_COUNT` marks.
+ */
+export const IMPORTED_MARKS_RECIPE = Object.freeze({
+  paragraphs: [
+    { runs: [plain(8, 0, 10), revised(8, 10, 14, 'del', IMPORTED_MARKS_AUTHOR, '2026-09-01T10:00:00Z'), plain(8, 14)] },
+    { runs: [plain(10, 0, 20), revised(11, 0, 5, 'ins', IMPORTED_MARKS_AUTHOR, '2026-09-01T10:01:00Z'), plain(10, 20)] },
+    {
+      runs: [
+        plain(13, 0, 5), revised(13, 5, 9, 'del', IMPORTED_MARKS_AUTHOR, '2026-09-01T10:02:00Z'),
+        revised(14, 0, 6, 'ins', IMPORTED_MARKS_AUTHOR, '2026-09-01T10:02:00Z'), plain(13, 9),
+      ],
+    },
+    {
+      runs: [
+        plain(15, 0, 10), { comment: 'start', id: 1 }, { comment: 'start', id: 2 }, plain(15, 10, 20),
+        { comment: 'end', id: 1 }, { comment: 'reference', id: 1 }, { comment: 'end', id: 2 }, { comment: 'reference', id: 2 }, plain(15, 20),
+      ],
+    },
+    { runs: [plain(16, 0, 5), { comment: 'start', id: 3 }, plain(16, 5, 9), { comment: 'end', id: 3 }, { comment: 'reference', id: 3 }, plain(16, 9)] },
+    {
+      markRevision: { kind: 'ins', author: IMPORTED_MARKS_OTHER_AUTHOR, date: '2026-09-01T11:00:00Z' },
+      runs: [revised(17, undefined, undefined, 'ins', IMPORTED_MARKS_OTHER_AUTHOR, '2026-09-01T11:00:00Z')],
+    },
+    { runs: [plain(19, 0, 10), revised(20, 0, 5, 'moveTo', IMPORTED_MARKS_AUTHOR, '2026-09-01T12:00:00Z'), plain(19, 10)] },
+    { runs: [revised(20, 0, 5, 'moveFrom', IMPORTED_MARKS_AUTHOR, '2026-09-01T12:00:00Z'), plain(20, 5)] },
+    { runs: [plain(12)], formattingRevision: { author: IMPORTED_MARKS_AUTHOR, date: '2026-09-01T13:00:00Z' } },
+  ],
+  comments: [
+    { id: 1, author: IMPORTED_MARKS_AUTHOR, text: [{ block: 14, from: 0, to: 10 }] },
+    { id: 2, author: IMPORTED_MARKS_OTHER_AUTHOR, text: [{ block: 16, from: 10, to: 18 }], replyTo: 1 },
+    { id: 3, author: IMPORTED_MARKS_AUTHOR, text: [{ block: 9, from: 0, to: 8 }], done: true },
+  ],
+});
+export const IMPORTED_MARKS_REJECTED_BLOCKS = Object.freeze([8, 10, 13, 15, 16, 19, 20, 12]);
+export const IMPORTED_MARKS_COUNT = 7;
+
 /**
  * Compose one DOCX at `path` from the contiguous 1-based excerpt `[startBlock, startBlock + blocks)` of
  * `source` under exact root `SampleBooks/`, carrying the caller's `title` as the package's `dc:title` —
