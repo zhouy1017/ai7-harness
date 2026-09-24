@@ -108,6 +108,17 @@ const DOCUMENT_TYPES = Object.freeze([
   ['news-release', '新闻稿'], ['promotion-article', '宣传文章'], ['review-article', '评论文章'], ['launch-materials', '发布会材料'], ['marketing-points', '营销要点'],
 ]);
 const DOCUMENT_EDIT = '〔文档修订〕';
+// Issue #415 (S66b): 交付 — 版本 2 to 宣传部 with a note and its file exported under the Save dialog's answer, then an edit
+// the card reads as 交付后有修改, and 再交付… of the current text — saved as 版本 3 first — in the editor's own words, its
+// export cancelled.
+const DELIVERY_NOTE = '发布会前一周交宣传部。';
+const DELIVERY_CUSTOM = '出版社发行部';
+const DELIVERY_EDIT = '〔交付后修订〕';
+const DOCUMENT_EXPORT_FILE = '新闻稿 · 版本 2.docx';
+const DELIVERY_STATEMENT = '交付只记录这一版交给了谁；AI7 不会发送，文件由你导出到所选位置后自行交出。';
+const DELIVERY_UNSAVED = '有修改尚未保存为版本：交付「现在的文字」会先把它保存为新的版本；也可以交付已保存的版本。';
+const DELIVERY_CURRENT_TEXT = '现在的文字（交付时先保存为版本 3）';
+const DELIVERY_RECIPIENTS = '["publicity:false:宣传部","editorial:false:编辑部","external-media:false:外部媒体","other:false:其他","custom:false:自行输入"]';
 const EXPORT_MEMBERS_ONLY = `JSON.stringify(Object.keys(window.ai7).filter((key) => /export|publish|send/i.test(key)).sort()) === ${JSON.stringify(JSON.stringify(EXPORT_MEMBERS))}`;
 
 let location = 'entry';
@@ -329,6 +340,10 @@ const PAGE_HELPERS = `(() => {
     documents: () => document.querySelector('[data-screen="book-deliverables"] .deliverables-documents-slot > section.deliverables-documents'),
     card: (typeId) => window.__j07.documents()?.querySelector('li.production-document-card[data-document-type-id="' + typeId + '"]') ?? null,
     cardAction: (typeId, action) => window.__j07.card(typeId)?.querySelector('[data-document-action="' + action + '"]') ?? null,
+    // 交付 (Issue #415, S66b): a card's delivery form and its Delivery Records, newest first.
+    delivery: (typeId) => window.__j07.card(typeId)?.querySelector('form.document-delivery') ?? null,
+    deliveries: (typeId) => Array.from(window.__j07.card(typeId)?.querySelectorAll('ol.production-document-deliveries > li') ?? []),
+    deliveryReason: (typeId) => document.getElementById(window.__j07.cardAction(typeId, 'confirmDeliver')?.getAttribute('aria-describedby') ?? '')?.textContent ?? null,
   };
   return true;
 })()`;
@@ -645,7 +660,7 @@ async function designate(renderer, { milestoneId, scope, basis }, completion, na
 
 /** V2-UX-PUB-009: neither the page nor the record it reads ever says published, sent, delivered or received. */
 async function assertNoForbiddenWords(renderer, name) {
-  await assertRenderer(renderer, `(async () => { const words = ${JSON.stringify(FORBIDDEN_WORDS)}; const page = document.body.textContent ?? ''; const record = JSON.stringify(await window.ai7.inspectDeliverables()); return words.every((word) => !page.includes(word) && !record.includes(word)); })()`, name);
+  await assertRenderer(renderer, `(async () => { const words = ${JSON.stringify(FORBIDDEN_WORDS)}; const page = document.body.textContent ?? ''; const record = JSON.stringify([await window.ai7.inspectDeliverables(), await window.ai7.inspectProductionDocuments()]); return words.every((word) => !page.includes(word) && !record.includes(word)); })()`, name);
 }
 
 async function main() {
@@ -709,6 +724,8 @@ async function main() {
     const cancelledPath = resolve(exportsRoot, CANCELLED_FILE);
     const pdfPath = resolve(exportsRoot, PDF_FILE);
     const markdownPath = resolve(exportsRoot, MARKDOWN_FILE);
+    // Issue #415 (S66b): the file of the 新闻稿's delivered version.
+    const documentExportPath = resolve(exportsRoot, DOCUMENT_EXPORT_FILE);
     const metadata = await lstat(manuscript);
     requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size > 1_000, 'fixture-composed');
     const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
@@ -1356,7 +1373,8 @@ async function main() {
     // Issue #415 (S66a): a 新闻稿's draft enters the Book as its source material — 导入稿件 → 作为来源材料导入 — which is
     // what a Production Document starts from until the writing task drafts one.
     await close();
-    renderer = await launch({ picker: draftPath });
+    // This launch also answers the Save dialog, for the export of the version delivered below (S66b).
+    renderer = await launch({ picker: draftPath, save: documentExportPath });
     await importDraftAsSource(renderer, bookId);
 
     at('documents-cards');
@@ -1444,20 +1462,172 @@ async function main() {
     await assertRenderer(renderer, `window.__j07.card('promotion-article').querySelector('.document-not-for-this-book')?.textContent === '本书不做' && window.__j07.cardAction('promotion-article', 'create') === null`, 'document-not-for-this-book-card');
     await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="promotion-article"] [data-document-action="restore"]', 'document-restore');
     await waitFor(renderer, `window.__j07.card('promotion-article')?.dataset.documentState === 'none' && document.activeElement === window.__j07.cardAction('promotion-article', 'notForThisBook') && window.__j07.status() === '已恢复'`, 'document-restored');
-    const documentsRead = await renderer.evaluate(`window.ai7.inspectDeliverables().then((deliverables) => deliverables.documents.types.map((type) => [type.typeId, type.notForThisBook, type.document === null ? null : type.document.versions.map((version) => version.label)]))`);
+    const documentsRead = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then((documents) => documents.types.map((type) => [type.typeId, type.notForThisBook, type.document === null ? null : type.document.versions.map((version) => version.label)]))`);
     requireJourney(JSON.stringify(documentsRead) === JSON.stringify(DOCUMENT_TYPES.map(([typeId]) => [typeId, false, typeId === 'news-release' ? ['版本 2', '版本 1'] : null])), 'documents-service-agrees', documentsRead);
 
+    at('document-deliver');
+    // 交付… (DELIV-003): the 新闻稿's card says 尚未交付; the form offers its two saved versions and the house's recipients,
+    // none preselected, beside the sentence that a delivery records and never sends, and 交付 waits for both choices.
+    // 交付 records 第 1 次交付 and opens the export card on the delivered version by itself.
+    await assertRenderer(renderer, `(() => {
+      const card = window.__j07.card('news-release');
+      const deliver = window.__j07.cardAction('news-release', 'deliver');
+      return card.dataset.documentDeliveries === '0' && card.dataset.documentChangedSinceDelivery === 'false' &&
+        card.querySelector('.document-delivery-line')?.textContent === '尚未交付' && deliver?.textContent === '交付…' &&
+        deliver.getAttribute('aria-expanded') === 'false' && window.__j07.deliveries('news-release').length === 0;
+    })()`, 'deliver-card-not-delivered');
+    await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="deliver"]', 'deliver-open');
+    await waitFor(renderer, `window.__j07.delivery('news-release') !== null && document.activeElement === window.__j07.delivery('news-release').querySelector('input[name="delivery-version"]')`, 'deliver-form');
+    await assertRenderer(renderer, `(() => {
+      const form = window.__j07.delivery('news-release');
+      const versions = Array.from(form.querySelectorAll('input[name="delivery-version"]'));
+      const recipients = Array.from(form.querySelectorAll('input[name="delivery-recipient"]'));
+      const confirm = window.__j07.cardAction('news-release', 'confirmDeliver');
+      return JSON.stringify(Array.from(form.querySelectorAll('legend'), (item) => item.textContent)) === '["交付哪一版","交给谁"]' &&
+        JSON.stringify(versions.map((item) => item.checked + ':' + (item.closest('label')?.querySelector('span')?.textContent ?? '').split(' · ')[0])) === '["false:版本 2","false:版本 1"]' &&
+        JSON.stringify(recipients.map((item) => item.value + ':' + item.checked + ':' + item.closest('label')?.querySelector('span')?.textContent)) === ${JSON.stringify(DELIVERY_RECIPIENTS)} &&
+        form.querySelector('[data-delivery-field="custom"]')?.disabled === true && form.querySelector('.delivery-unsaved') === null &&
+        form.querySelector('.delivery-statement')?.textContent === ${JSON.stringify(DELIVERY_STATEMENT)} &&
+        confirm?.textContent === '交付' && confirm.disabled === true && window.__j07.deliveryReason('news-release') === '先选择要交付的版本';
+    })()`, 'deliver-nothing-preselected');
+    await assertRenderer(renderer, `(() => { const version = window.__j07.delivery('news-release').querySelector('input[name="delivery-version"]'); version.click(); return version.checked && window.__j07.cardAction('news-release', 'confirmDeliver').disabled === true && window.__j07.deliveryReason('news-release') === '先选择交给谁'; })()`, 'deliver-choose-version');
+    await assertRenderer(renderer, `(() => {
+      const form = window.__j07.delivery('news-release');
+      const recipient = form.querySelector('input[name="delivery-recipient"][value="publicity"]');
+      recipient.click();
+      const note = form.querySelector('[data-delivery-field="note"]');
+      note.value = ${JSON.stringify(DELIVERY_NOTE)};
+      note.dispatchEvent(new Event('input', { bubbles: true }));
+      return recipient.checked && window.__j07.cardAction('news-release', 'confirmDeliver').disabled === false;
+    })()`, 'deliver-choose-recipient');
+    await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="confirmDeliver"]', 'deliver-confirm');
+    await waitFor(renderer, `window.__j07.deliveries('news-release').length === 1 && window.__j07.exportCard()?.dataset.exportTarget === 'document'`, 'deliver-recorded', 60_000);
+    await assertRenderer(renderer, `(() => {
+      const card = window.__j07.card('news-release');
+      const [record] = window.__j07.deliveries('news-release');
+      return card.dataset.documentDeliveries === '1' && card.dataset.documentChangedSinceDelivery === 'false' && window.__j07.delivery('news-release') === null &&
+        (card.querySelector('.document-delivery-line')?.textContent ?? '').startsWith('第 1 次交付 · 宣传部 · 版本 2 · ') &&
+        record.dataset.deliveryOrdinal === '1' && record.querySelector('.document-delivery-note')?.textContent === ${JSON.stringify(DELIVERY_NOTE)} &&
+        window.__j07.cardAction('news-release', 'redeliver')?.textContent === '再交付…' && window.__j07.cardAction('news-release', 'deliver') === null;
+    })()`, 'deliver-record-shown');
+    const deliveredDocument = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then((documents) => { const news = documents.types[0].document; return { documentId: news.documentId, revisionId: news.versions[0].revisionId, deliveries: news.deliveries.map((delivery) => ({ ordinal: delivery.ordinal, revisionId: delivery.revisionId, versionLabel: delivery.versionLabel, recipient: delivery.recipient, note: delivery.note })) }; })`);
+    requireJourney(UUID_PATTERN.test(deliveredDocument?.documentId ?? '') && JSON.stringify(deliveredDocument.deliveries) === JSON.stringify([
+      { ordinal: 1, revisionId: deliveredDocument.revisionId, versionLabel: '版本 2', recipient: { kind: 'publicity', label: '宣传部' }, note: DELIVERY_NOTE },
+    ]), 'deliver-service-agrees', deliveredDocument?.deliveries);
+
+    at('document-delivery-export');
+    // The export card is the delivered version's — 新闻稿 · 版本 2, DOCX chosen — and exports it under this launch's
+    // Save-dialog answer; the Delivery Record then names the file, and the file reads as that version of the 新闻稿.
+    await waitFor(renderer, `(() => { const card = window.__j07.exportCard(); return card?.dataset.exportPhase === 'ready' && card.querySelector('input[name="export-format"]:checked')?.value === 'docx'; })()`, 'delivery-export-reviewed', 120_000);
+    await assertRenderer(renderer, `(() => {
+      const card = window.__j07.exportCard();
+      return card.dataset.exportTarget === 'document' && card.dataset.documentId === ${JSON.stringify(deliveredDocument.documentId)} &&
+        card.dataset.revisionId === ${JSON.stringify(deliveredDocument.revisionId)} && card.querySelector('h4')?.textContent === '导出 · 新闻稿 · 版本 2' &&
+        card.querySelector('.export-saved-line') === null && card.querySelector('.export-local-line')?.textContent === ${JSON.stringify(EXPORT_LOCAL_LINE)};
+    })()`, 'delivery-export-names-the-version');
+    await exportAct(renderer, 'choose', 'delivery-export-choose');
+    await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'prepared' && window.__j07.status() === '已准备好导出文件，等待你确认。'`, 'delivery-export-prepared', 120_000);
+    await assertRenderer(renderer, `window.__j07.exportCard().querySelector('.export-destination-line')?.textContent === ${JSON.stringify(`${documentExportPath}（新建文件）`)} && window.__j07.exportAction('approve')?.disabled === false`, 'delivery-export-destination-bound');
+    requireJourney(!existsSync(documentExportPath), 'delivery-export-nothing-written-before-approval');
+    await exportAct(renderer, 'approve', 'delivery-export-approve');
+    await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'done' && window.__j07.status() === ${JSON.stringify(EXPORTED_LABEL)} && window.__j07.tone() === 'success'`, 'delivery-export-written', 120_000);
+    await waitFor(renderer, `window.__j07.deliveries('news-release')[0]?.dataset.deliveryExport === 'created'`, 'delivery-export-on-the-record', 30_000);
+    await assertRenderer(renderer, `window.__j07.deliveries('news-release')[0].querySelector('.document-delivery-export')?.textContent === ${JSON.stringify(`${EXPORTED_LABEL} · ${DOCUMENT_EXPORT_FILE}`)}`, 'delivery-export-line');
+    const deliveryExport = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then((documents) => documents.types[0].document.deliveries[0].export)`);
+    requireJourney(deliveryExport?.outcome === 'created' && deliveryExport.fileName === DOCUMENT_EXPORT_FILE && UUID_PATTERN.test(deliveryExport.preparationId ?? ''), 'delivery-export-service-agrees', deliveryExport);
+    const documentFile = await readExportedDocx(documentExportPath);
+    const deliveredParagraphs = draftParagraphs.map((text, index) => digestOf(index === 0 ? `${text}${DOCUMENT_EDIT}` : text));
+    requireJourney(JSON.stringify(documentFile.paragraphs.map((paragraph) => paragraph.digest)) === JSON.stringify(deliveredParagraphs), 'delivery-export-is-the-version',
+      { paragraphs: documentFile.paragraphs.length, differing: documentFile.paragraphs.map((paragraph, index) => paragraph.digest === deliveredParagraphs[index] ? 0 : index + 1).filter(Boolean) });
+    // 完成 closes the card, and focus finds the Delivery Record's own 导出….
+    await exportAct(renderer, 'close', 'delivery-export-close');
+    await waitFor(renderer, `window.__j07.exportCard() === null && document.activeElement === window.__j07.deliveries('news-release')[0]?.querySelector('[data-export-action="open"]')`, 'delivery-export-closed-focus-returns', 10_000);
+
+    at('document-changed-since-delivery');
+    // The document's 工作流程 column lists the delivery beside its versions. An edit after it: the card reads
+    // 交付后有修改 (DELIV-004) beside 有修改尚未保存为版本.
+    await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="open"]', 'changed-open');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] .editor-toolbar h2')?.textContent === '新闻稿 · 版本 2' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]') !== null`, 'changed-document', 120_000);
+    await assertRenderer(renderer, `(() => {
+      const lens = document.querySelector('aside.document-lens');
+      const records = Array.from(lens?.querySelectorAll('ol.document-lens-deliveries > li') ?? []);
+      return lens?.querySelector('section.document-versions h4')?.textContent === '交付记录' && records.length === 1 &&
+        (records[0].querySelector('.document-delivery-record')?.textContent ?? '').startsWith('第 1 次交付 · 宣传部 · 版本 2 · ') &&
+        records[0].querySelector('.document-delivery-export')?.textContent === ${JSON.stringify(`${EXPORTED_LABEL} · ${DOCUMENT_EXPORT_FILE}`)} &&
+        lens.querySelector('.document-changed-since-delivery') === null;
+    })()`, 'changed-lens-lists-the-delivery');
+    await assertRenderer(renderer, `(() => { const block = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]'); if (!(block instanceof HTMLElement)) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText', false, ${JSON.stringify(DELIVERY_EDIT)}); return block.textContent?.endsWith(${JSON.stringify(`${DOCUMENT_EDIT}${DELIVERY_EDIT}`)}); })()`, 'changed-edit');
+    await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '保存当前编辑' && !button.disabled)`, 'changed-edit-save-ready');
+    await click(renderer, '保存当前编辑', 'changed-edit-save');
+    await waitFor(renderer, `window.__j07.status().includes('已写入修订日志')`, 'changed-edit-durable');
+    await clickSelector(renderer, '.editor-shell[data-deliverable="production-document"] nav.book-work-group [data-work-destination="deliverables"]', 'changed-back');
+    await waitForDeliverables(renderer, 'changed-back');
+    await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentChangedSinceDelivery === 'true'`, 'changed-card');
+    await assertRenderer(renderer, `(() => {
+      const card = window.__j07.card('news-release');
+      return card.querySelector('.document-changed-since-delivery')?.textContent === '交付后有修改' && card.dataset.documentChanged === 'true' &&
+        card.querySelector('.document-changed')?.textContent === '有修改尚未保存为版本' && card.dataset.documentDeliveries === '1' &&
+        window.__j07.cardAction('news-release', 'redeliver')?.textContent === '再交付…';
+    })()`, 'changed-card-says-so');
+
+    at('document-redeliver');
+    // 再交付… of the current text in the editor's own words (DELIV-003, DELIV-004): the form offers the text as it stands —
+    // saved as 版本 3 when delivered — before the saved versions, none preselected, and 自行输入 needs its words. The
+    // second record is 版本 3's, newest first, and 交付后有修改 is gone; its export, cancelled, leaves it at 暂无导出记录
+    // and writes nothing.
+    await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="redeliver"]', 'redeliver-open');
+    await waitFor(renderer, `window.__j07.delivery('news-release') !== null && document.activeElement === window.__j07.delivery('news-release').querySelector('input[name="delivery-version"]')`, 'redeliver-form');
+    await assertRenderer(renderer, `(() => {
+      const form = window.__j07.delivery('news-release');
+      const versions = Array.from(form.querySelectorAll('input[name="delivery-version"]'));
+      return form.querySelector('.delivery-unsaved')?.textContent === ${JSON.stringify(DELIVERY_UNSAVED)} &&
+        JSON.stringify(versions.map((item) => item.value === 'current' ? item.closest('label')?.querySelector('span')?.textContent : (item.closest('label')?.querySelector('span')?.textContent ?? '').split(' · ')[0])) === ${JSON.stringify(JSON.stringify([DELIVERY_CURRENT_TEXT, '版本 2', '版本 1']))} &&
+        Array.from(form.querySelectorAll('input[name="delivery-version"], input[name="delivery-recipient"]')).every((item) => !item.checked);
+    })()`, 'redeliver-current-text-offered');
+    await assertRenderer(renderer, `(() => {
+      const form = window.__j07.delivery('news-release');
+      form.querySelector('input[name="delivery-version"]').click();
+      form.querySelector('input[name="delivery-recipient"][value="custom"]').click();
+      const custom = form.querySelector('[data-delivery-field="custom"]');
+      return custom.disabled === false && document.activeElement === custom && window.__j07.cardAction('news-release', 'confirmDeliver').disabled === true &&
+        window.__j07.deliveryReason('news-release') === '请写明交给谁';
+    })()`, 'redeliver-custom-needs-words');
+    await assertRenderer(renderer, `(() => { const custom = window.__j07.delivery('news-release').querySelector('[data-delivery-field="custom"]'); custom.value = ${JSON.stringify(DELIVERY_CUSTOM)}; custom.dispatchEvent(new Event('input', { bubbles: true })); return window.__j07.cardAction('news-release', 'confirmDeliver').disabled === false; })()`, 'redeliver-custom-written');
+    await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="confirmDeliver"]', 'redeliver-confirm');
+    await waitFor(renderer, `window.__j07.deliveries('news-release').length === 2 && window.__j07.exportCard()?.dataset.exportPhase === 'ready'`, 'redelivered', 120_000);
+    await assertRenderer(renderer, `window.__j07.exportCard().querySelector('h4')?.textContent === '导出 · 新闻稿 · 版本 3'`, 'redeliver-export-is-version-3');
+    await exportAct(renderer, 'cancel', 'redeliver-export-cancel');
+    await waitFor(renderer, `window.__j07.exportCard() === null && document.activeElement === window.__j07.deliveries('news-release')[0]?.querySelector('[data-export-action="open"]')`, 'redeliver-export-cancelled', 10_000);
+    await assertRenderer(renderer, `(() => {
+      const card = window.__j07.card('news-release');
+      const records = window.__j07.deliveries('news-release');
+      return card.dataset.documentDeliveries === '2' && card.dataset.documentChangedSinceDelivery === 'false' &&
+        card.dataset.documentVersion === '3' && card.dataset.documentChanged === 'false' && card.querySelector('.document-changed-since-delivery') === null &&
+        card.querySelector('.document-card-line')?.textContent === ${JSON.stringify(`版本 3 · 由「${DRAFT_FILE}」创建`)} &&
+        (card.querySelector('.document-delivery-line')?.textContent ?? '').startsWith(${JSON.stringify(`第 2 次交付 · ${DELIVERY_CUSTOM} · 版本 3 · `)}) &&
+        JSON.stringify(records.map((record) => record.dataset.deliveryOrdinal + ':' + record.dataset.deliveryExport)) === '["2:none","1:created"]' &&
+        records[0].querySelector('.document-delivery-export')?.textContent === '暂无导出记录' && records[0].querySelector('.document-delivery-note') === null;
+    })()`, 'redeliver-records-newest-first');
+    requireJourney(JSON.stringify((await readdir(exportsRoot)).sort()) === JSON.stringify([EXPORT_FILE, MARKDOWN_FILE, PDF_FILE, DOCUMENT_EXPORT_FILE].sort()), 'redeliver-nothing-written');
+    const redelivered = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then((documents) => { const news = documents.types[0].document; return { changedSinceDelivery: news.changedSinceDelivery, versions: news.versions.map((version) => version.label), deliveries: news.deliveries.map((delivery) => [delivery.ordinal, delivery.versionLabel, delivery.recipient.kind, delivery.recipient.label, delivery.note, delivery.export === null ? null : delivery.export.outcome]) }; })`);
+    requireJourney(JSON.stringify(redelivered) === JSON.stringify({
+      changedSinceDelivery: false, versions: ['版本 3', '版本 2', '版本 1'],
+      deliveries: [[2, '版本 3', 'custom', DELIVERY_CUSTOM, null, null], [1, '版本 2', 'publicity', '宣传部', DELIVERY_NOTE, 'created']],
+    }), 'redeliver-service-agrees', redelivered);
+
     at('documents-restart');
-    // A restart moves nothing: 交付物 answers byte for byte as before, and the 新闻稿 opens at 版本 2 with its edit.
-    const documentsBefore = await renderer.evaluate(`window.ai7.inspectDeliverables().then((deliverables) => JSON.stringify(deliverables))`);
+    // A restart moves nothing: 交付物 and 交付 · 生产文档 answer byte for byte as before, the card still names its second
+    // delivery, and the 新闻稿 opens at 版本 3 with both its edits.
+    const readBoth = `Promise.all([window.ai7.inspectDeliverables(), window.ai7.inspectProductionDocuments()]).then((answers) => JSON.stringify(answers))`;
+    const documentsBefore = await renderer.evaluate(readBoth);
     await close();
     renderer = await launch();
     await reopenDeliverables(renderer, 'documents-restart');
-    const documentsAfter = await renderer.evaluate(`window.ai7.inspectDeliverables().then((deliverables) => JSON.stringify(deliverables))`);
+    const documentsAfter = await renderer.evaluate(readBoth);
     requireJourney(typeof documentsBefore === 'string' && documentsAfter === documentsBefore, 'documents-restart-moved-nothing');
-    await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentState === 'document'`, 'documents-restart-card');
+    await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentState === 'document' && window.__j07.card('news-release').dataset.documentDeliveries === '2' && window.__j07.card('news-release').dataset.documentChangedSinceDelivery === 'false'`, 'documents-restart-card');
     await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="open"]', 'documents-restart-open');
-    await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] .editor-toolbar h2')?.textContent === '新闻稿 · 版本 2' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.textContent?.endsWith(${JSON.stringify(DOCUMENT_EDIT)})`, 'documents-restart-document');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] .editor-toolbar h2')?.textContent === '新闻稿 · 版本 3' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.textContent?.endsWith(${JSON.stringify(`${DOCUMENT_EDIT}${DELIVERY_EDIT}`)})`, 'documents-restart-document');
     await assertNoForbiddenWords(renderer, 'documents-without-forbidden-words');
 
     at('zero-loopback-requests');

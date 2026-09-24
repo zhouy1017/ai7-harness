@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { PUBLICATION_FORBIDDEN_WORDS, type ProductionDocumentProjection } from '../../src/shared/protocol.js';
 import * as labels from '../../src/renderer/production-document-labels.js';
 
-// The words of 交付 · 生产文档 (Issue #415, plan slice S66a; V2-UX-DELIV-001, DELIV-002, WORK-013, MILE-014), byte for byte.
+// The words of 交付 · 生产文档 (Issue #415, plan slices S66a and S66b; V2-UX-DELIV-001 to DELIV-004, WORK-013, MILE-014),
+// byte for byte.
 
 const identity = '00000000-0000-4000-8000-000000000000';
 const document: ProductionDocumentProjection = {
@@ -18,6 +19,9 @@ const document: ProductionDocumentProjection = {
   changedSinceVersion: true,
   journalSequence: 3,
   workingDigest: 'c'.repeat(64),
+  deliveries: [],
+  deliveriesTruncated: false,
+  changedSinceDelivery: false,
 };
 
 describe('the words of 交付 · 生产文档', () => {
@@ -38,6 +42,9 @@ describe('the words of 交付 · 生产文档', () => {
       restore: '恢复',
       saveVersion: '保存为版本',
       back: '返回交付物',
+      deliver: '交付…',
+      redeliver: '再交付…',
+      confirmDeliver: '交付',
     });
     expect(labels.documentActionName('create', '新闻稿')).toBe('从来源材料创建…：新闻稿');
   });
@@ -56,7 +63,12 @@ describe('the words of 交付 · 生产文档', () => {
       labels.DOCUMENT_SURFACE_LABEL, labels.DOCUMENT_CURRENT_VERSION, labels.DOCUMENT_LENS_LABEL, labels.DOCUMENT_VERSIONS_HEADING,
       labels.DOCUMENT_VERSIONS_TRUNCATED, labels.DOCUMENT_VERSION_CURRENT_MARK, labels.DOCUMENT_MATERIALS_HEADING,
       labels.DOCUMENT_MATERIALS_EMPTY, labels.DOCUMENT_CHANGED_SINCE_VERSION, ...Object.values(labels.DOCUMENT_ACTION_LABELS),
-      ...Object.values(labels.DOCUMENT_STATUS_LINES),
+      ...Object.values(labels.DOCUMENT_STATUS_LINES), labels.DOCUMENT_NOT_DELIVERED, labels.DOCUMENT_CHANGED_SINCE_DELIVERY,
+      labels.DOCUMENT_DELIVERIES_HEADING, labels.DELIVERY_FORM_HEADING, labels.DELIVERY_VERSION_LEGEND, labels.DELIVERY_UNSAVED_NOTE,
+      labels.DELIVERY_RECIPIENT_LEGEND, labels.DELIVERY_CUSTOM_RECIPIENT, labels.DELIVERY_CUSTOM_LABEL, labels.DELIVERY_NOTE_LABEL,
+      labels.DELIVERY_STATEMENT, ...Object.values(labels.DELIVERY_BLOCKERS), labels.DELIVERY_NO_EXPORT,
+      labels.documentDeliveryLine({ ordinal: 1, recipient: { kind: 'publicity', label: '宣传部' }, versionLabel: '版本 2' }, '9月24日 11:00'),
+      labels.documentDeliveredLine(1, '宣传部'), labels.documentCurrentTextChoice(3),
     ];
     expect(labels.DOCUMENT_LENS_LABEL).toBe('工作流程');
     expect(labels.DOCUMENT_VERSIONS_HEADING).toBe('版本与交付');
@@ -66,5 +78,31 @@ describe('the words of 交付 · 生产文档', () => {
       expect(words).not.toMatch(/里程碑|签发|发稿/u);
       for (const forbidden of PUBLICATION_FORBIDDEN_WORDS) expect(words).not.toContain(forbidden);
     }
+  });
+
+  it('says what 交付 records — which version went to whom — and that AI7 sends nothing (DELIV-003, DELIV-004)', () => {
+    expect(labels.DOCUMENT_NOT_DELIVERED).toBe('尚未交付');
+    expect(labels.DOCUMENT_CHANGED_SINCE_DELIVERY).toBe('交付后有修改');
+    expect(labels.DOCUMENT_DELIVERIES_HEADING).toBe('交付记录');
+    expect(labels.DELIVERY_FORM_HEADING).toBe('交付');
+    expect(labels.DELIVERY_VERSION_LEGEND).toBe('交付哪一版');
+    expect(labels.DELIVERY_UNSAVED_NOTE).toBe('有修改尚未保存为版本：交付「现在的文字」会先把它保存为新的版本；也可以交付已保存的版本。');
+    expect(labels.documentCurrentTextChoice(3)).toBe('现在的文字（交付时先保存为版本 3）');
+    expect(labels.DELIVERY_RECIPIENT_LEGEND).toBe('交给谁');
+    expect(labels.DELIVERY_CUSTOM_RECIPIENT).toBe('自行输入');
+    expect(labels.DELIVERY_CUSTOM_LABEL).toBe('交给谁（自行输入）');
+    expect(labels.DELIVERY_NOTE_LABEL).toBe('备注（可不填）');
+    expect(labels.DELIVERY_STATEMENT).toBe('交付只记录这一版交给了谁；AI7 不会发送，文件由你导出到所选位置后自行交出。');
+    expect(labels.DELIVERY_BLOCKERS).toEqual({ version: '先选择要交付的版本', recipient: '先选择交给谁', custom: '请写明交给谁' });
+    expect(labels.DOCUMENT_STATUS_LINES.delivering).toBe('正在记录交付…');
+    expect(labels.DOCUMENT_STATUS_LINES.deliverFailed).toBe('无法记录这次交付。');
+    expect(labels.documentDeliveryLine({ ordinal: 2, recipient: { kind: 'custom', label: '出版社发行部' }, versionLabel: '版本 3' }, '9月24日 11:00'))
+      .toBe('第 2 次交付 · 出版社发行部 · 版本 3 · 9月24日 11:00');
+    expect(labels.documentDeliveredLine(2, '出版社发行部')).toBe('已记录第 2 次交付 · 出版社发行部');
+    expect(labels.documentDeliveryExportLine({ export: null })).toBe('暂无导出记录');
+    expect(labels.documentDeliveryExportLine({
+      export: { preparationId: identity, outcome: 'created', outcomeLabel: '已导出到所选位置', fileName: '新闻稿 · 版本 2.docx' },
+    })).toBe('已导出到所选位置 · 新闻稿 · 版本 2.docx');
+    expect(labels.documentExportLabel('新闻稿', '版本 2')).toBe('新闻稿 · 版本 2');
   });
 });

@@ -1,17 +1,28 @@
 import { randomUUID } from 'node:crypto';
+import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { parseDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
 import { productionDocumentMarksNotCarried } from '../../src/service/production-documents.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { PRODUCTION_DOCUMENT_SCHEMA_VERSION, REIMPORT_GROUP_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
-import type { ProductionDocumentResultProjection } from '../../src/shared/protocol.js';
+import {
+  PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION,
+  PRODUCTION_DOCUMENT_SCHEMA_VERSION,
+  REIMPORT_GROUP_SCHEMA_VERSION,
+} from '../../src/service/task-authorization.js';
+import {
+  DEFAULT_MANUSCRIPT_EXPORT_OPTIONS,
+  type ProductionDocumentDeliveryVersionInput,
+  type ProductionDocumentRecipientKind,
+  type ProductionDocumentResultProjection,
+} from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, sourceSpanText, type SourceSpan } from '../support/composed-fixture.js';
 import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
-// Service-integration suite (L2) for 交付 · 生产文档 (Issue #415, plan slice S66a; V2-UX-DELIV-001, DELIV-002, WORK-013,
-// MILE-014) over the real `EditorialStore` on a temporary Agent Data Root. The manuscript and the draft a document starts
+// Service-integration suite (L2) for 交付 · 生产文档 (Issue #415, plan slices S66a and S66b; V2-UX-DELIV-001 to DELIV-004,
+// WORK-013, MILE-014, EXP-024) over the real `EditorialStore` on a temporary Agent Data Root. The manuscript and the draft a document starts
 // from are composed from exact `sample1`'s paragraphs; assertions compare identities, counts and positions, and no
 // manuscript text is printed.
 
@@ -91,16 +102,16 @@ describe('Production Documents', () => {
       const manuscriptWindowBefore = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
 
       // Before any material: five cards in the house's order, nothing to start from.
-      let deliverables = store.inspectDeliverables(book.bookId);
-      expect(deliverables.documents.types.map((type) => [type.typeId, type.label, type.notForThisBook, type.document])).toEqual([
+      let deliverables = store.inspectProductionDocuments(book.bookId);
+      expect(deliverables.types.map((type) => [type.typeId, type.label, type.notForThisBook, type.document])).toEqual([
         ['news-release', '新闻稿', false, null],
         ['promotion-article', '宣传文章', false, null],
         ['review-article', '评论文章', false, null],
         ['launch-materials', '发布会材料', false, null],
         ['marketing-points', '营销要点', false, null],
       ]);
-      expect(deliverables.documents.sources).toEqual([]);
-      expect(deliverables.documents.unavailableReason).toBeNull();
+      expect(deliverables.sources).toEqual([]);
+      expect(deliverables.unavailableReason).toBeNull();
       // The Manuscript's own file is no material a document starts from.
       const manuscriptSource = overviewBefore.records.find((record) => record.kind === 'source');
       if (manuscriptSource?.kind !== 'source') throw new Error('the Book has no source version');
@@ -108,8 +119,8 @@ describe('Production Documents', () => {
         .toBe('PRODUCTION_DOCUMENT_SOURCE_INVALID');
 
       const sourceVersionId = await importSource(store, book.bookId, draftPath);
-      deliverables = store.inspectDeliverables(book.bookId);
-      expect(deliverables.documents.sources.map((source) => [source.sourceVersionId, source.format])).toEqual([[sourceVersionId, 'DOCX']]);
+      deliverables = store.inspectProductionDocuments(book.bookId);
+      expect(deliverables.sources.map((source) => [source.sourceVersionId, source.format])).toEqual([[sourceVersionId, 'DOCX']]);
       expect(await asyncCode(() => store.createProductionDocument({ bookId: book.bookId, typeId: 'press-kit', sourceVersionId })))
         .toBe('PRODUCTION_DOCUMENT_TYPE_INVALID');
 
@@ -145,7 +156,7 @@ describe('Production Documents', () => {
         blockId: first.blockId, windowStartBlockId: first.blockId, baseBlockDigest: first.digest,
         expectedJournalSequence: documentWindow.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText: '（修订）',
       });
-      expect(store.inspectDeliverables(book.bookId).documents.types[0]!.document!.changedSinceVersion).toBe(true);
+      expect(store.inspectProductionDocuments(book.bookId).types[0]!.document!.changedSinceVersion).toBe(true);
       const saved = await store.saveProductionDocumentVersion({ bookId: book.bookId, documentId, branchId: documentWindow.branchId });
       expect(saved.document!.versions.map((version) => version.label)).toEqual(['版本 2', '版本 1']);
       expect(saved.document!.changedSinceVersion).toBe(false);
@@ -173,7 +184,7 @@ describe('Production Documents', () => {
       // 本书不做 keeps a document and its versions; a type marked so is not created until 恢复.
       const notForThisBook = store.decideProductionDocumentType({ bookId: book.bookId, typeId: 'news-release', notForThisBook: true });
       expect(notForThisBook.document?.versions.length).toBe(2);
-      expect(notForThisBook.deliverables.documents.types[0]!.notForThisBook).toBe(true);
+      expect(notForThisBook.documents.types[0]!.notForThisBook).toBe(true);
       store.decideProductionDocumentType({ bookId: book.bookId, typeId: 'promotion-article', notForThisBook: true });
       expect(await asyncCode(() => store.createProductionDocument({ bookId: book.bookId, typeId: 'promotion-article', sourceVersionId })))
         .toBe('PRODUCTION_DOCUMENT_NOT_FOR_THIS_BOOK');
@@ -181,9 +192,9 @@ describe('Production Documents', () => {
       store.decideProductionDocumentType({ bookId: book.bookId, typeId: 'promotion-article', notForThisBook: true });
       expect(code(() => store.decideProductionDocumentType({ bookId: book.bookId, typeId: 'review-article', notForThisBook: false }))).toBe('no-error');
       const restored = store.decideProductionDocumentType({ bookId: book.bookId, typeId: 'promotion-article', notForThisBook: false });
-      expect(restored.deliverables.documents.types[1]!.notForThisBook).toBe(false);
+      expect(restored.documents.types[1]!.notForThisBook).toBe(false);
 
-      deliverablesBefore = JSON.stringify(store.inspectDeliverables(book.bookId));
+      deliverablesBefore = JSON.stringify(store.inspectProductionDocuments(book.bookId));
       store.markCleanShutdown();
     } finally {
       store.close();
@@ -200,7 +211,7 @@ describe('Production Documents', () => {
     }
     const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
-      expect(JSON.stringify(reopened.inspectDeliverables(book!.bookId))).toBe(deliverablesBefore!);
+      expect(JSON.stringify(reopened.inspectProductionDocuments(book!.bookId))).toBe(deliverablesBefore!);
       reopened.markCleanShutdown();
     } finally {
       reopened.close();
@@ -268,7 +279,7 @@ describe('Production Documents', () => {
       // Recovery returns to the document's own window, which says what it holds.
       expect(restoration.window.deliverable).toBe('production-document');
       // The restored state is a revision with nothing left to check point: 保存为版本 saves that revision as 版本 2, once.
-      expect(recovered.inspectDeliverables(book!.bookId).documents.types[0]!.document!.changedSinceVersion).toBe(true);
+      expect(recovered.inspectProductionDocuments(book!.bookId).types[0]!.document!.changedSinceVersion).toBe(true);
       const saved = await recovered.saveProductionDocumentVersion({ bookId: book!.bookId, documentId: documentId!, branchId: branchId! });
       expect(saved.document!.versions.map((version) => version.label)).toEqual(['版本 2', '版本 1']);
       expect(saved.document!.versions[0]!.revisionId).toBe(restoration.descendantRevisionId);
@@ -290,8 +301,8 @@ describe('Production Documents', () => {
       const commitId = randomUUID();
       const commit = await store.commitSourceImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId });
       await store.acknowledgeImportCompletion(commitId);
-      const deliverables = store.inspectDeliverables(commit.bookId);
-      expect(deliverables.documents.unavailableReason).toBe('先导入稿件，再创建生产文档');
+      const deliverables = store.inspectProductionDocuments(commit.bookId);
+      expect(deliverables.unavailableReason).toBe('先导入稿件，再创建生产文档');
       expect(await asyncCode(() => store.createProductionDocument({ bookId: commit.bookId, typeId: 'news-release', sourceVersionId: commit.sourceVersionId })))
         .toBe('PRODUCTION_DOCUMENT_NEEDS_MANUSCRIPT');
       store.markCleanShutdown();
@@ -342,13 +353,225 @@ describe('Production Documents', () => {
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(PRODUCTION_DOCUMENT_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION);
       expect(after.prepare('SELECT rowid, * FROM manuscripts ORDER BY rowid').all()).toEqual(rows!);
       expect((after.prepare("SELECT sql FROM sqlite_schema WHERE name = 'manuscripts'").get() as { sql: string }).sql).toContain("'production-document'");
       expect(after.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'index' AND name = 'manuscripts_one_primary_per_book'").get()).toBeDefined();
       for (const relation of PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER) {
         expect((after.prepare(`SELECT count(*) count FROM ${relation}`).get() as { count: number }).count).toBe(0);
       }
+    } finally {
+      after.close();
+    }
+  }, 120_000);
+});
+
+describe('交付 of a Production Document (S66b)', () => {
+  it('records which version went to whom, exports exactly that version, and says when the text moved past it', async () => {
+    const manuscriptPath = await compose('交付记录组稿', [1, 2, 3, 4]);
+    const draftPath = await compose('新闻稿初稿', [21, 22, 23]);
+    const outbox = join(roots.inputRoot, 'exports');
+    await mkdir(outbox);
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let bookId: string;
+    let documentsBefore: string;
+    try {
+      const book = await importBook(store, manuscriptPath);
+      bookId = book.bookId;
+      const sourceVersionId = await importSource(store, book.bookId, draftPath);
+      const created = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', sourceVersionId })).document!;
+      expect([created.deliveries, created.deliveriesTruncated, created.changedSinceDelivery]).toEqual([[], false, false]);
+      const version1 = created.versions[0]!.revisionId;
+      const saved = (revisionId: string): ProductionDocumentDeliveryVersionInput => ({ kind: 'saved', revisionId });
+      const deliver = (version: ProductionDocumentDeliveryVersionInput, recipient: { kind: ProductionDocumentRecipientKind; custom: string | null }, note: string | null = null) =>
+        store.recordProductionDocumentDelivery({ bookId: book.bookId, documentId: created.documentId, version, recipient, note });
+      const versionCount = () => store.inspectProductionDocuments(book.bookId).types[0]!.document!.versions.length;
+
+      // Only a version the document saved is delivered, to one recipient, with a note within its bound.
+      const manuscriptRevision = store.getManuscriptWindow(book.manuscriptId, book.branchId, null).revisionId;
+      expect(await asyncCode(() => deliver(saved(manuscriptRevision), { kind: 'publicity', custom: null }))).toBe('PRODUCTION_DOCUMENT_DELIVERY_INVALID');
+      expect(await asyncCode(() => deliver(saved(version1), { kind: 'custom', custom: '   ' }))).toBe('PRODUCTION_DOCUMENT_DELIVERY_INVALID');
+      expect(await asyncCode(() => deliver(saved(version1), { kind: 'publicity', custom: '宣传部' }))).toBe('PRODUCTION_DOCUMENT_DELIVERY_INVALID');
+      expect(await asyncCode(() => deliver(saved(version1), { kind: 'publicity', custom: null }, '注'.repeat(501)))).toBe('PRODUCTION_DOCUMENT_DELIVERY_INVALID');
+      expect(await asyncCode(() => store.recordProductionDocumentDelivery({
+        bookId: book.bookId, documentId: randomUUID(), version: saved(version1), recipient: { kind: 'publicity', custom: null }, note: null,
+      }))).toBe('PRODUCTION_DOCUMENT_NOT_FOUND');
+
+      // 第 1 次交付: 版本 1 to 宣传部 with a note. It records and sends nothing: 交付物's 发稿 block reads as it did.
+      const deliverablesBefore = JSON.stringify(store.inspectDeliverables(book.bookId));
+      const first = await deliver(saved(version1), { kind: 'publicity', custom: null }, ' 发布会前一周给宣传部。 ');
+      expect(first.document!.deliveries.map((entry) => [entry.ordinal, entry.revisionId, entry.versionLabel, entry.recipient, entry.note, entry.export]))
+        .toEqual([[1, version1, '版本 1', { kind: 'publicity', label: '宣传部' }, '发布会前一周给宣传部。', null]]);
+      expect(first.document!.changedSinceDelivery).toBe(false);
+      expect(JSON.stringify(store.inspectDeliverables(book.bookId))).toBe(deliverablesBefore);
+
+      // The export card exports exactly that version, under the document's name and its 版本 N (EXP-024).
+      const target = { kind: 'document', documentId: created.documentId, revisionId: version1 } as const;
+      const reviewed = await store.reviewManuscriptExport({ bookId: book.bookId, target, options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS } }, true);
+      expect(reviewed.target).toMatchObject({
+        kind: 'document', revisionId: version1, milestoneId: null, report: null,
+        document: { documentId: created.documentId, typeId: 'news-release', typeLabel: '新闻稿', versionLabel: '版本 1' },
+      });
+      expect(reviewed.savedForExport).toBe(false);
+      expect(reviewed.suggestedFileName).toBe('交付记录组稿 · 新闻稿 · 版本 1.docx');
+      // A version of another document, or of none, is no target.
+      expect(await asyncCode(() => store.reviewManuscriptExport({
+        bookId: book.bookId, target: { ...target, revisionId: manuscriptRevision }, options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS },
+      }, true))).toBe('EXPORT_TARGET_NOT_FOUND');
+      const destination = join(outbox, reviewed.suggestedFileName);
+      const preparation = await store.prepareManuscriptExport({
+        bookId: book.bookId, revisionId: version1, target, options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS }, reviewDigest: reviewed.reviewDigest, destination,
+      }, true);
+      const receipt = await store.approveManuscriptExport({ bookId: book.bookId, preparationId: preparation.preparationId }, true);
+      expect(receipt).toMatchObject({ outcome: 'created', fileName: '交付记录组稿 · 新闻稿 · 版本 1.docx', target: { kind: 'document', revisionId: version1 } });
+      // The file is the document's version, block for block, and nothing of the Manuscript.
+      const written: ParsedDocxBlock[] = [];
+      await parseDocx(destination, 'written.docx', (block) => written.push(block));
+      const documentWindow = store.getManuscriptWindow(created.documentId, created.branchId, null);
+      expect(written.map((block) => block.digest)).toEqual(documentWindow.blocks.map((block) => block.digest));
+      // The Delivery Record shows what its export came to.
+      const recordedExport = {
+        preparationId: preparation.preparationId, outcome: 'created', outcomeLabel: '已导出到所选位置', fileName: '交付记录组稿 · 新闻稿 · 版本 1.docx',
+      };
+      expect(store.inspectProductionDocuments(book.bookId).types[0]!.document!.deliveries[0]!.export).toEqual(recordedExport);
+      // A later export of the same version that writes nothing — its folder gone, as a removed drive leaves it — is the
+      // export ledger's to list, and never hides the file the delivery handed over.
+      const gone = join(outbox, '移动硬盘');
+      await mkdir(gone);
+      const retry = await store.prepareManuscriptExport({
+        bookId: book.bookId, revisionId: version1, target, options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS }, reviewDigest: reviewed.reviewDigest,
+        destination: join(gone, reviewed.suggestedFileName),
+      }, true);
+      await rm(gone, { recursive: true });
+      expect((await store.approveManuscriptExport({ bookId: book.bookId, preparationId: retry.preparationId }, true)).outcome).toBe('failed');
+      expect(store.inspectProductionDocuments(book.bookId).types[0]!.document!.deliveries[0]!.export).toEqual(recordedExport);
+
+      // An edit: 交付后有修改, saved as 版本 2 or not, until the text is delivered again (DELIV-004).
+      const edit = (insertText: string) => {
+        const window = store.getManuscriptWindow(created.documentId, created.branchId, null);
+        const block = window.blocks[0]!;
+        store.flushJournalEdit({
+          clientEditId: randomUUID(), manuscriptId: created.documentId, branchId: created.branchId, baseRevisionId: window.revisionId,
+          blockId: block.blockId, windowStartBlockId: block.blockId, baseBlockDigest: block.digest,
+          expectedJournalSequence: window.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText,
+        });
+      };
+      edit('（修订）');
+      expect(store.inspectProductionDocuments(book.bookId).types[0]!.document!.changedSinceDelivery).toBe(true);
+      const savedVersion = (await store.saveProductionDocumentVersion({ bookId: book.bookId, documentId: created.documentId, branchId: created.branchId })).document!;
+      expect(savedVersion.changedSinceDelivery).toBe(true);
+      const version2 = savedVersion.versions[0]!.revisionId;
+
+      // 第 2 次交付: 版本 2, in the editor's own words. The first keeps its export; the second has none yet.
+      const second = await deliver(saved(version2), { kind: 'custom', custom: ' 出版社发行部 ' });
+      expect(second.document!.deliveries.map((entry) => [entry.ordinal, entry.versionLabel, entry.recipient, entry.note, entry.export?.preparationId ?? null]))
+        .toEqual([
+          [2, '版本 2', { kind: 'custom', label: '出版社发行部' }, null, null],
+          [1, '版本 1', { kind: 'publicity', label: '宣传部' }, '发布会前一周给宣传部。', preparation.preparationId],
+        ]);
+      expect(second.document!.changedSinceDelivery).toBe(false);
+      // Delivering an earlier version again is a record like any other, and no edit: the text is still 版本 2, delivered
+      // already, so nothing reads 交付后有修改 (DELIV-004).
+      const third = await deliver(saved(version1), { kind: 'editorial', custom: null });
+      expect(third.document!.deliveries[0]).toMatchObject({ ordinal: 3, versionLabel: '版本 1', recipient: { kind: 'editorial', label: '编辑部' }, export: null });
+      expect(third.document!.changedSinceDelivery).toBe(false);
+
+      // 交付 of the current text (DELIV-003): bound to the digest the form read, and saved as the next version first.
+      edit('（交付前修订）');
+      const before = store.inspectProductionDocuments(book.bookId).types[0]!.document!;
+      expect([before.changedSinceVersion, before.changedSinceDelivery, before.versions.length]).toEqual([true, true, 2]);
+      expect(await asyncCode(() => deliver({ kind: 'current', workingDigest: savedVersion.workingDigest }, { kind: 'external-media', custom: null })))
+        .toBe('PRODUCTION_DOCUMENT_DELIVERY_CHANGED');
+      // A refused recipient saves no version either.
+      expect(await asyncCode(() => deliver({ kind: 'current', workingDigest: before.workingDigest }, { kind: 'custom', custom: null })))
+        .toBe('PRODUCTION_DOCUMENT_DELIVERY_INVALID');
+      expect(versionCount()).toBe(2);
+      const fourth = (await deliver({ kind: 'current', workingDigest: before.workingDigest }, { kind: 'external-media', custom: null })).document!;
+      expect(fourth.versions.map((version) => version.label)).toEqual(['版本 3', '版本 2', '版本 1']);
+      expect([fourth.changedSinceVersion, fourth.changedSinceDelivery, fourth.workingDigest]).toEqual([false, false, before.workingDigest]);
+      expect(fourth.deliveries[0]).toMatchObject({ ordinal: 4, revisionId: fourth.versions[0]!.revisionId, versionLabel: '版本 3', recipient: { kind: 'external-media', label: '外部媒体' } });
+      // The current text that is the latest version already is delivered as that version, and saves nothing.
+      const fifth = (await deliver({ kind: 'current', workingDigest: fourth.workingDigest }, { kind: 'other', custom: null })).document!;
+      expect(fifth.versions.length).toBe(3);
+      expect(fifth.deliveries[0]).toMatchObject({ ordinal: 5, versionLabel: '版本 3', recipient: { kind: 'other', label: '其他' } });
+
+      // 本书不做 keeps a document's Delivery Records, as it keeps its versions.
+      const set = store.decideProductionDocumentType({ bookId: book.bookId, typeId: 'news-release', notForThisBook: true });
+      expect(set.document!.deliveries.map((entry) => entry.ordinal)).toEqual([5, 4, 3, 2, 1]);
+
+      // 交付物's export list names each attempt as the document's version, the one that wrote nothing too; the Manuscript's
+      // 发稿 records are untouched.
+      expect(store.inspectDeliverables(book.bookId).exports.map((entry) => [entry.preparationId, entry.outcome, entry.target.kind, entry.target.document?.versionLabel]))
+        .toEqual([[retry.preparationId, 'failed', 'document', '版本 1'], [preparation.preparationId, 'created', 'document', '版本 1']]);
+      documentsBefore = JSON.stringify(store.inspectProductionDocuments(book.bookId));
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+
+    // The records are append-only, verify on the next open and read exactly as they were; the version 交付 saved says so.
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      expect(() => database.prepare("UPDATE production_document_deliveries SET recipient_label = '外部媒体'").run()).toThrow(/PRODUCTION_DOCUMENT_LEDGER_IMMUTABLE/);
+      expect(() => database.prepare('DELETE FROM production_document_deliveries').run()).toThrow(/PRODUCTION_DOCUMENT_LEDGER_IMMUTABLE/);
+      expect(database.prepare('SELECT ordinal, version, recipient_kind FROM production_document_deliveries ORDER BY ordinal').all().map((row) => ({ ...row })))
+        .toEqual([
+          { ordinal: 1, version: 1, recipient_kind: 'publicity' }, { ordinal: 2, version: 2, recipient_kind: 'custom' },
+          { ordinal: 3, version: 1, recipient_kind: 'editorial' }, { ordinal: 4, version: 3, recipient_kind: 'external-media' },
+          { ordinal: 5, version: 3, recipient_kind: 'other' },
+        ]);
+      expect(database.prepare('SELECT version, origin FROM production_document_versions ORDER BY version').all().map((row) => ({ ...row })))
+        .toEqual([{ version: 1, origin: 'created' }, { version: 2, origin: 'saved' }, { version: 3, origin: 'delivery' }]);
+    } finally {
+      database.close();
+    }
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(JSON.stringify(reopened.inspectProductionDocuments(bookId!))).toBe(documentsBefore!);
+      reopened.markCleanShutdown();
+    } finally {
+      reopened.close();
+    }
+  }, 180_000);
+
+  it('adds the Delivery Records to a revision-37 store empty, and reads its documents as they were', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let bookId: string;
+    let before: string;
+    try {
+      const book = await importBook(store, await compose('迁移交付组稿', [1, 2]));
+      bookId = book.bookId;
+      const sourceVersionId = await importSource(store, book.bookId, await compose('新闻稿初稿', [21, 22]));
+      await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', sourceVersionId });
+      before = JSON.stringify(store.inspectProductionDocuments(book.bookId));
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const planted = new DatabaseSync(path);
+    try {
+      // Revision 37: everything as it is, but no Delivery Records.
+      planted.exec('PRAGMA foreign_keys = OFF');
+      planted.exec(`BEGIN IMMEDIATE;
+        DROP TABLE production_document_deliveries;
+        PRAGMA user_version = ${PRODUCTION_DOCUMENT_SCHEMA_VERSION};
+        COMMIT;`);
+      planted.exec('PRAGMA foreign_keys = ON');
+    } finally {
+      planted.close();
+    }
+    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(JSON.stringify(migrated.inspectProductionDocuments(bookId!))).toBe(before!);
+      migrated.markCleanShutdown();
+    } finally {
+      migrated.close();
+    }
+    const after = new DatabaseSync(path, { readOnly: true });
+    try {
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION);
+      expect((after.prepare('SELECT count(*) count FROM production_document_deliveries').get() as { count: number }).count).toBe(0);
     } finally {
       after.close();
     }

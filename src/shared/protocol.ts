@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 55 as const;
+export const SERVICE_PROTOCOL_VERSION = 56 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -125,9 +125,11 @@ export const IPC_CHANNELS = {
   saveMilestone: 'ai7:j02:save-milestone',
   inspectDeliverables: 'ai7:j07:inspect-deliverables',
   designatePublicationVersion: 'ai7:j07:designate-publication-version',
+  inspectProductionDocuments: 'ai7:j07:inspect-production-documents',
   createProductionDocument: 'ai7:j07:create-production-document',
   decideProductionDocumentType: 'ai7:j07:decide-production-document-type',
   saveProductionDocumentVersion: 'ai7:j07:save-production-document-version',
+  recordProductionDocumentDelivery: 'ai7:j07:record-production-document-delivery',
   inspectGlobalAttention: 'ai7:j09:inspect-global-attention',
   reviewManuscriptExport: 'ai7:j07:review-manuscript-export',
   chooseManuscriptExportDestination: 'ai7:j07:choose-manuscript-export-destination',
@@ -4984,8 +4986,6 @@ export interface DeliverablesProjection {
    * came to — a receipt, a failure that changed nothing, or `结果待确认`.
    */
   exports: ReadonlyArray<ManuscriptExportReceiptProjection>;
-  /** 交付 · 生产文档 (Issue #415, S66): one card per house type, and the materials a document can start from. */
-  documents: ProductionDocumentsProjection;
 }
 
 // ---- ⑥ 交付物 · 生产文档 (Issue #415, plan slice S66; V2-UX-DELIV-001, DELIV-002, WORK-013) ----------------
@@ -5021,6 +5021,43 @@ export interface ProductionDocumentProjection {
   changedSinceVersion: boolean;
   journalSequence: number;
   workingDigest: string;
+  /** Every Delivery Record newest first, at most `MAX_PRODUCTION_DOCUMENT_DELIVERIES_LISTED` (Issue #415, S66b). */
+  deliveries: ReadonlyArray<ProductionDocumentDeliveryProjection>;
+  deliveriesTruncated: boolean;
+  /** `交付后有修改` (DELIV-004): the document has a delivery, and its text moved past the version last delivered. */
+  changedSinceDelivery: boolean;
+}
+
+/** Who a delivery is for: the house's list, or the editor's own words (DELIV-003). */
+export type ProductionDocumentRecipientKind = 'publicity' | 'editorial' | 'external-media' | 'other' | 'custom';
+export const PRODUCTION_DOCUMENT_RECIPIENT_KINDS: readonly ProductionDocumentRecipientKind[] = ['publicity', 'editorial', 'external-media', 'other', 'custom'];
+/** The house's recipients in their order; `custom` is the editor's own words. */
+export const PRODUCTION_DOCUMENT_RECIPIENT_LABELS: Readonly<Record<Exclude<ProductionDocumentRecipientKind, 'custom'>, string>> = {
+  publicity: '宣传部',
+  editorial: '编辑部',
+  'external-media': '外部媒体',
+  other: '其他',
+};
+/** A recipient in the editor's own words, and a delivery's note, in characters once NFC-normalized and trimmed. */
+export const MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS = 40;
+export const MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS = 500;
+export const MAX_PRODUCTION_DOCUMENT_DELIVERIES_LISTED = 20;
+
+/**
+ * One Delivery Record (DELIV-003): which version went to whom, with the editor's note, and what its export came to —
+ * the file written to the chosen place, or nothing yet. A delivery never sends, designates or publishes anything.
+ */
+export interface ProductionDocumentDeliveryProjection {
+  deliveryId: string;
+  /** 第 N 次交付 of the document. */
+  ordinal: number;
+  revisionId: string;
+  versionLabel: string;
+  recipient: { kind: ProductionDocumentRecipientKind; label: string };
+  note: string | null;
+  recordedAt: string;
+  /** The newest export of the delivered version recorded after this delivery and before the next; `null` when none. */
+  export: null | { preparationId: string; outcome: 'created' | 'replaced' | 'ambiguous' | 'failed'; outcomeLabel: string; fileName: string };
 }
 
 /** One house type's card in 交付物. */
@@ -5040,7 +5077,13 @@ export interface ProductionDocumentSourceProjection {
   createdAt: string;
 }
 
+/**
+ * 交付 · 生产文档 of one Book (Issue #415, S66), read on its own beside the 发稿 block: one card per house type and the
+ * materials a document can start from. A read of its own, since a document's versions and Delivery Records would not
+ * fit one service frame beside the Manuscript's milestones and designations.
+ */
 export interface ProductionDocumentsProjection {
+  bookId: string;
   /** The house type configuration in force: its schema, version and digest. */
   configuration: { schema: string; version: string; digest: string };
   /** Why no document can be made yet, or `null`. */
@@ -5064,6 +5107,24 @@ export interface DecideProductionDocumentTypeInput {
   notForThisBook: boolean;
 }
 
+/**
+ * The version `交付` hands over (DELIV-003): one the document saved, or its current text — saved as the next version
+ * first when it moved past the latest — bound to the working digest the form read, so an edit made since is never
+ * delivered unseen.
+ */
+export type ProductionDocumentDeliveryVersionInput =
+  | { kind: 'saved'; revisionId: string }
+  | { kind: 'current'; workingDigest: string };
+
+/** `交付`: one exact version of a document of the route's Book, to one recipient, with an optional note (DELIV-003). */
+export interface RecordProductionDocumentDeliveryInput {
+  bookId: string;
+  documentId: string;
+  version: ProductionDocumentDeliveryVersionInput;
+  recipient: { kind: ProductionDocumentRecipientKind; custom: string | null };
+  note: string | null;
+}
+
 /** `保存为版本`: the document's working text becomes its next version. */
 export interface SaveProductionDocumentVersionInput {
   bookId: string;
@@ -5071,10 +5132,15 @@ export interface SaveProductionDocumentVersionInput {
   branchId: string;
 }
 
-/** What a document operation came to: the 交付物 as they stand after it, and the document it was about. */
+/** The read of 交付 · 生产文档: the route's Book, supplied by the main process. */
+export interface InspectProductionDocumentsInput {
+  bookId: string;
+}
+
+/** What a document operation came to: 交付 · 生产文档 as they stand after it, and the document it was about. */
 export interface ProductionDocumentResultProjection {
   bookId: string;
-  deliverables: DeliverablesProjection;
+  documents: ProductionDocumentsProjection;
   document: ProductionDocumentProjection | null;
   typeId: string;
   /** What 从来源材料创建 did not carry into the document, said where the document opens; `null` when it carried everything. */
@@ -5298,7 +5364,9 @@ export type ManuscriptExportFormat = 'docx' | 'pdf' | 'markdown';
 export type ManuscriptExportTargetInput =
   | { kind: 'current' }
   | { kind: 'milestone'; milestoneId: string }
-  | { kind: 'report'; reportId: string };
+  | { kind: 'report'; reportId: string }
+  // Issue #415 (S66b): one exact version of a Production Document of the route's Book (EXP-024, DELIV-003).
+  | { kind: 'document'; documentId: string; revisionId: string };
 
 /**
  * The classes of the Export Fidelity Review (V2-UX-EXP-007): the content classes ADR 0086 retains with the
@@ -5358,13 +5426,15 @@ export interface ExportFidelityRowProjection {
  * version of a 审阅报告 and the revision its Review Run read.
  */
 export interface ManuscriptExportTargetProjection {
-  kind: 'current' | 'milestone' | 'report';
+  kind: 'current' | 'milestone' | 'report' | 'document';
   milestoneId: string | null;
   milestoneLabel: string | null;
   revisionId: string;
   revisionLabel: string;
   /** The report version exported, and the Review Run it reports on; `null` for a manuscript version. */
   report: { reportId: string; version: number; reviewRunId: string; runLabel: string } | null;
+  /** The Production Document version exported (Issue #415, S66b): its type and `版本 N`; `null` for any other target. */
+  document: { documentId: string; typeId: string; typeLabel: string; versionLabel: string } | null;
 }
 
 /** One format as the export card offers it: DOCX, the optional PDF, and the Markdown 备用格式 (Issue #500, S64b). */
@@ -6149,9 +6219,15 @@ export interface ServiceOperationMap {
    * from one source-only material; 本书不做 / 恢复 records a decision about a type; 保存为版本 makes the
    * document's working text its next version. Each answers with the 交付物 as they stand.
    */
+  inspectProductionDocuments: { input: InspectProductionDocumentsInput; output: ProductionDocumentsProjection };
   createProductionDocument: { input: CreateProductionDocumentInput; output: ProductionDocumentResultProjection };
   decideProductionDocumentType: { input: DecideProductionDocumentTypeInput; output: ProductionDocumentResultProjection };
   saveProductionDocumentVersion: { input: SaveProductionDocumentVersionInput; output: ProductionDocumentResultProjection };
+  /**
+   * 交付 (Issue #415, S66b): one Delivery Record of one exact version — the current text saved as the next version first
+   * when it is none yet; the export follows on the export card.
+   */
+  recordProductionDocumentDelivery: { input: RecordProductionDocumentDeliveryInput; output: ProductionDocumentResultProjection };
   /**
    * 待我处理 (Issue #424, plan slice S78): every Book's items in the four groups. It takes no input and names
    * no Book, because it reads across them; it is a read and records nothing.
@@ -6379,12 +6455,16 @@ export interface RendererApi {
   inspectDeliverables(): Promise<DeliverablesProjection>;
   /** 设为发稿版本 over one exact milestone of that Book; an identical repeat of the current one is no change. */
   designatePublicationVersion(input: Omit<DesignatePublicationVersionInput, 'bookId'>): Promise<PublicationDesignationProjection>;
+  /** 交付 · 生产文档 of that Book (Issue #415): one card per house type and the materials a document can start from. */
+  inspectProductionDocuments(): Promise<ProductionDocumentsProjection>;
   /** 从来源材料创建 (Issue #415): a document of one house type of that Book, from one of its source-only materials. */
   createProductionDocument(input: Omit<CreateProductionDocumentInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 本书不做 or 恢复 for one house type of that Book. */
   decideProductionDocumentType(input: Omit<DecideProductionDocumentTypeInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 保存为版本: one document of that Book gets its working text as its next version. */
   saveProductionDocumentVersion(input: Omit<SaveProductionDocumentVersionInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
+  /** 交付: a Delivery Record of one exact version of a document of that Book; nothing is sent. */
+  recordProductionDocumentDelivery(input: Omit<RecordProductionDocumentDeliveryInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 待我处理 across every Book (Issue #424): a read in any window, whatever it shows; it holds and grants nothing. */
   inspectGlobalAttention(): Promise<GlobalAttentionProjection>;
   /**

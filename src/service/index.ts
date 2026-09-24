@@ -847,12 +847,16 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectDeliverables(request.input.bookId) };
     case 'designatePublicationVersion':
       return { id: request.id, ok: true, op: request.op, result: store.designatePublicationVersion(request.input) };
+    case 'inspectProductionDocuments':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectProductionDocuments(request.input.bookId) };
     case 'createProductionDocument':
       return { id: request.id, ok: true, op: request.op, result: await store.createProductionDocument(request.input) };
     case 'decideProductionDocumentType':
       return { id: request.id, ok: true, op: request.op, result: store.decideProductionDocumentType(request.input) };
     case 'saveProductionDocumentVersion':
       return { id: request.id, ok: true, op: request.op, result: await store.saveProductionDocumentVersion(request.input) };
+    case 'recordProductionDocumentDelivery':
+      return { id: request.id, ok: true, op: request.op, result: await store.recordProductionDocumentDelivery(request.input) };
     // 待我处理 (Issue #424, plan slice S78): a read across every Book. The one owner's progress reader and its
     // slot say which Run is in flight, exactly as the analysis inspections read them; nothing is written.
     case 'inspectGlobalAttention':

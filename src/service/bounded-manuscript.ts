@@ -88,6 +88,7 @@ import {
   CLARIFICATION_SCHEMA_VERSION,
   REIMPORT_GROUP_SCHEMA_VERSION,
   PRODUCTION_DOCUMENT_SCHEMA_VERSION,
+  PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -118,6 +119,9 @@ import { CLARIFICATION_FOREIGN_KEYS, CLARIFICATION_SCHEMA_SQL, CLARIFICATION_TRI
 import { REIMPORT_GROUP_FOREIGN_KEYS, REIMPORT_GROUP_SCHEMA_SQL } from './reimport-group-ledger.js';
 import {
   MANUSCRIPTS_REVISION_37_SQL,
+  PRODUCTION_DOCUMENT_DELIVERY_FOREIGN_KEYS,
+  PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_SQL,
+  PRODUCTION_DOCUMENT_DELIVERY_TRIGGER_SQL,
   PRODUCTION_DOCUMENT_FOREIGN_KEYS,
   PRODUCTION_DOCUMENT_INDEX_SQL,
   PRODUCTION_DOCUMENT_SCHEMA_SQL,
@@ -1822,6 +1826,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   // Revision 36 (Issue #412, S63): the chapter-level Reimport Comparison, owned by `reimport-group-ledger.ts`.
   ...REIMPORT_GROUP_FOREIGN_KEYS,
   ...PRODUCTION_DOCUMENT_FOREIGN_KEYS,
+  ...PRODUCTION_DOCUMENT_DELIVERY_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2430,6 +2435,7 @@ function requireManuscriptReimportTargetSchema(
   includeClarificationTables = false,
   includeReimportGroupTables = false,
   includeProductionDocumentTables = false,
+  includeProductionDocumentDeliveryTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2495,6 +2501,8 @@ function requireManuscriptReimportTargetSchema(
       ...(includeReimportGroupTables ? REIMPORT_GROUP_SCHEMA_SQL : {}),
       // Revision 37 (Issue #415) rebuilt `manuscripts` for Production Documents beside the two ledgers it created.
       ...(includeProductionDocumentTables ? { ...PRODUCTION_DOCUMENT_SCHEMA_SQL, manuscripts: MANUSCRIPTS_REVISION_37_SQL } : {}),
+      // Revision 38 (Issue #415, S66b) adds the documents' Delivery Records.
+      ...(includeProductionDocumentDeliveryTables ? PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_SQL : {}),
     },
     // The partial index that keeps one primary Manuscript per Book stands with the rebuilt relation, whatever the version.
     {
@@ -2520,6 +2528,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeRunCheckpointTables ? RUN_CHECKPOINT_TRIGGER_SQL : {}),
       ...(includeClarificationTables ? CLARIFICATION_TRIGGER_SQL : {}),
       ...(includeProductionDocumentTables ? PRODUCTION_DOCUMENT_TRIGGER_SQL : {}),
+      ...(includeProductionDocumentDeliveryTables ? PRODUCTION_DOCUMENT_DELIVERY_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5198,6 +5207,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeClarificationTables = false,
   includeReimportGroupTables = false,
   includeProductionDocumentTables = false,
+  includeProductionDocumentDeliveryTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5221,6 +5231,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeClarificationTables,
     includeReimportGroupTables,
     includeProductionDocumentTables,
+    includeProductionDocumentDeliveryTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5290,7 +5301,8 @@ export function initializeBoundedSchema(
       version === PLAN_EDIT_SCHEMA_VERSION ||
       version === CLARIFICATION_SCHEMA_VERSION ||
       version === REIMPORT_GROUP_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_SCHEMA_VERSION,
+      version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5310,9 +5322,10 @@ export function initializeBoundedSchema(
       version === PLAN_EDIT_SCHEMA_VERSION ||
       version === CLARIFICATION_SCHEMA_VERSION ||
       version === REIMPORT_GROUP_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_SCHEMA_VERSION) {
+      version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== PRODUCTION_DOCUMENT_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5336,6 +5349,7 @@ export function initializeBoundedSchema(
           version >= CLARIFICATION_SCHEMA_VERSION,
           version >= REIMPORT_GROUP_SCHEMA_VERSION,
           version >= PRODUCTION_DOCUMENT_SCHEMA_VERSION,
+          version >= PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);

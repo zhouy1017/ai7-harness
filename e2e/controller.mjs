@@ -838,6 +838,11 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'document-edit-and-version',
     'document-card-after-version',
     'document-not-for-this-book',
+    // Issue #415 (S66b): 交付 — a Delivery Record of one saved version, its export, 交付后有修改 and 再交付….
+    'document-deliver',
+    'document-delivery-export',
+    'document-changed-since-delivery',
+    'document-redeliver',
     'documents-restart',
     'zero-loopback-requests',
     'completion-browser-close',

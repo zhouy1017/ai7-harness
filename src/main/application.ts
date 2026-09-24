@@ -2700,12 +2700,24 @@ function registerRendererHandlers(
     route: Extract<ResolvedBookWorkbenchRoute, { kind: 'book' }>,
     result: ServiceOperationMap['createProductionDocument']['output'],
   ): ServiceOperationMap['createProductionDocument']['output'] => {
-    if (result.bookId !== route.bookId || (result.document !== null && result.deliverables.bookId !== route.bookId)) {
+    if (result.bookId !== route.bookId || result.documents.bookId !== route.bookId) {
       throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '生产文档不属于当前图书工作台。');
     }
-    requireDeliverablesOfRoute(route, result.deliverables);
     return result;
   };
+  ipcMain.handle(IPC_CHANNELS.inspectProductionDocuments, (event) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectProductionDocuments', { bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '生产文档不属于当前图书工作台。');
+      return result;
+    }),
+  );
   ipcMain.handle(
     IPC_CHANNELS.createProductionDocument,
     (event, input: Omit<ServiceOperationMap['createProductionDocument']['input'], 'bookId'>) =>
@@ -2758,6 +2770,30 @@ function registerRendererHandlers(
             bookId: capability.bookId,
             documentId: capability.manuscriptId,
             branchId: capability.branchId,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          return requireProductionDocumentResultOfRoute(route, result);
+        });
+      }),
+  );
+  // 交付 (Issue #415, S66b): a Delivery Record of one version of a document of the route's Book — a saved one, or the
+  // current text saved as the next version first; the service decides whether the document and the version are that
+  // Book's. Nothing is sent: the export follows on its card.
+  ipcMain.handle(
+    IPC_CHANNELS.recordProductionDocumentDelivery,
+    (event, input: Omit<ServiceOperationMap['recordProductionDocumentDelivery']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('recordProductionDocumentDelivery', {
+            bookId: route.bookId,
+            documentId: input.documentId,
+            version: input.version,
+            recipient: input.recipient,
+            note: input.note,
           });
           requireCurrentRouteGeneration(owned, routeGeneration);
           return requireProductionDocumentResultOfRoute(route, result);
