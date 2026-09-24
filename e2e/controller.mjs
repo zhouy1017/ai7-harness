@@ -837,6 +837,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'documents-cards',
     'document-create',
     'document-edit-and-version',
+    // Issue #415 (S66c): the document's Deliverable Workflow — 开始, 完成, 跳过 and 重新打开 with their reasons.
+    'document-workflow',
     'document-card-after-version',
     'document-not-for-this-book',
     // Issue #415 (S66b): 交付 — a Delivery Record of one saved version, its export, 交付后有修改 and 再交付….

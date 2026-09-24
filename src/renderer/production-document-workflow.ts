@@ -1,0 +1,305 @@
+import {
+  MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS,
+  PRODUCTION_DOCUMENT_REOPEN_REASONS,
+  PRODUCTION_DOCUMENT_SKIP_REASONS,
+  type ProductionDocumentPhaseAction,
+  type ProductionDocumentPhaseId,
+  type ProductionDocumentPhaseProjection,
+  type ProductionDocumentProjection,
+  type ProductionDocumentWorkflowProjection,
+} from '../shared/protocol.js';
+import { localInstantLabel } from './plan-preview-labels.js';
+import {
+  DOCUMENT_PHASE_ACTION_LABELS,
+  DOCUMENT_PHASE_CANCEL,
+  DOCUMENT_PHASE_CONFIRM_LABELS,
+  DOCUMENT_PHASE_CUSTOM_NEEDED,
+  DOCUMENT_PHASE_MOVE_FAILED,
+  DOCUMENT_PHASE_MOVING,
+  DOCUMENT_PHASE_REASON_LEGENDS,
+  DOCUMENT_PHASE_REASON_NEEDED,
+  DOCUMENT_PHASE_REASON_TEXT_LABEL,
+  DOCUMENT_PHASE_SHOW_REASON,
+  DOCUMENT_WORKFLOW_NEXT_EMPTY,
+  DOCUMENT_WORKFLOW_NEXT_HEADING,
+  DOCUMENT_WORKFLOW_PHASES_HEADING,
+  phaseActionName,
+  phaseLatestLine,
+  phaseMovedLine,
+  phaseMovesLine,
+  workflowProfileLine,
+} from './production-document-labels.js';
+
+/** What the lens may ask of the service: move a phase, and read the document again once a move was refused. */
+export interface DocumentWorkflowActions {
+  move(input: {
+    phaseId: ProductionDocumentPhaseId;
+    action: ProductionDocumentPhaseAction;
+    expectedTransitions: number;
+    reason: { choice: string; text: string | null } | null;
+  }): Promise<ProductionDocumentProjection | null>;
+  read(): Promise<ProductionDocumentProjection | null>;
+  setStatus(text: string, tone?: 'busy' | 'success' | 'error'): void;
+  errorMessage(error: unknown, fallback: string): string;
+}
+
+interface ReasonForm {
+  phaseId: ProductionDocumentPhaseId;
+  action: 'skip' | 'reopen';
+  choice: string | null;
+  text: string;
+  problem: string | null;
+}
+
+function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+let sequence = 0;
+const uid = (prefix: string): string => `${prefix}-${++sequence}`;
+
+/**
+ * The Deliverable Workflow of a Production Document at the top of its 工作流程 column (Issue #415, S66c; V2-UX-WORK-001 to
+ * 009): the profile it follows and since when, its summary, 下一项需要处理, and its seven phases, each with its pill, what
+ * it waits on, its latest move and the moves open to it. 跳过… and 重新打开… open the phase's own reason form, whose
+ * choices start unselected (WORK-009). A move is the editor's command and nothing else: the lens records it and paints what
+ * the service answers, never a guess. Without `actions` — a window that cannot move phases — it only reads.
+ */
+export function renderDocumentWorkflow(
+  initial: ProductionDocumentWorkflowProjection,
+  actions: DocumentWorkflowActions | null,
+): { element: HTMLElement; paint(next: ProductionDocumentWorkflowProjection): void } {
+  const section = el('section', 'document-lens-section document-workflow');
+  let workflow = initial;
+  let form: ReasonForm | null = null;
+  let working = false;
+  // Where focus goes once the next draw is in: a phase's reason form, or the phase itself after a move.
+  let focusNext: { phaseId: ProductionDocumentPhaseId; target: 'form' | 'phase' | 'action' } | null = null;
+
+  const move = async (
+    phase: ProductionDocumentPhaseProjection,
+    action: ProductionDocumentPhaseAction,
+    reason: { choice: string; text: string | null } | null,
+  ): Promise<void> => {
+    if (actions === null || working) return;
+    working = true;
+    draw();
+    actions.setStatus(DOCUMENT_PHASE_MOVING, 'busy');
+    try {
+      const next = await actions.move({ phaseId: phase.phaseId, action, expectedTransitions: workflow.transitions, reason });
+      if (next !== null) workflow = next.workflow;
+      form = null;
+      focusNext = { phaseId: phase.phaseId, target: 'phase' };
+      actions.setStatus(phaseMovedLine(action, phase.label), 'success');
+    } catch (error) {
+      actions.setStatus(actions.errorMessage(error, DOCUMENT_PHASE_MOVE_FAILED), 'error');
+      // What stands now, so the next move is against it: another window may have moved the workflow first.
+      try {
+        const now = await actions.read();
+        if (now !== null) workflow = now.workflow;
+      } catch {
+        // The status line already says the move failed; the lens keeps what it last read.
+      }
+      if (form !== null && !workflow.phases.some((entry) => entry.phaseId === form!.phaseId && entry.actions.includes(form!.action))) form = null;
+      focusNext = { phaseId: phase.phaseId, target: form === null ? 'phase' : 'form' };
+    } finally {
+      working = false;
+      draw();
+    }
+  };
+
+  function phaseRow(phase: ProductionDocumentPhaseProjection): HTMLElement {
+    const item = el('li', 'document-phase');
+    item.dataset['phaseId'] = phase.phaseId;
+    item.dataset['phaseState'] = phase.state;
+    item.dataset['phaseWaiting'] = String(phase.waiting !== null);
+    item.tabIndex = -1;
+    const name = el('strong', 'document-phase-name', phase.label);
+    name.id = uid('document-phase');
+    item.setAttribute('aria-labelledby', name.id);
+    const pill = el('span', 'phase-pill', phase.stateLabel);
+    pill.dataset['phaseState'] = phase.waiting === null ? phase.state : 'waiting';
+    const head = el('div', 'document-phase-head');
+    head.append(name, pill);
+    item.append(head);
+    if (phase.waiting !== null) item.append(el('p', 'attention-note document-phase-waiting', phase.waiting));
+    if (phase.latest !== null) {
+      const line = phaseLatestLine(phase.latest, localInstantLabel(phase.latest.recordedAt));
+      if (phase.latest.reason === null) {
+        item.append(el('p', 'field-note document-phase-latest', line));
+      } else {
+        const why = el('details', 'document-phase-reason');
+        why.append(el('summary', undefined, DOCUMENT_PHASE_SHOW_REASON), el('p', 'document-phase-latest', line));
+        item.append(why);
+      }
+    }
+    if (phase.moves > 1) item.append(el('p', 'field-note document-phase-moves', phaseMovesLine(phase.moves)));
+    if (actions !== null && phase.actions.length > 0) {
+      const buttons = el('div', 'button-row compact-actions');
+      for (const action of phase.actions) {
+        const control = el('button', action === 'start' || action === 'complete' ? 'secondary' : 'quiet', DOCUMENT_PHASE_ACTION_LABELS[action]);
+        control.type = 'button';
+        control.dataset['phaseAction'] = action;
+        control.setAttribute('aria-label', phaseActionName(action, phase.label));
+        control.disabled = working;
+        if (action === 'skip' || action === 'reopen') {
+          const open = form?.phaseId === phase.phaseId && form.action === action;
+          control.setAttribute('aria-expanded', String(open));
+          control.addEventListener('click', () => {
+            form = open ? null : { phaseId: phase.phaseId, action, choice: null, text: '', problem: null };
+            focusNext = { phaseId: phase.phaseId, target: open ? 'action' : 'form' };
+            draw();
+          });
+        } else {
+          control.addEventListener('click', () => void move(phase, action, null));
+        }
+        buttons.append(control);
+      }
+      item.append(buttons);
+    }
+    if (actions !== null && form !== null && form.phaseId === phase.phaseId) item.append(reasonForm(phase, form));
+    return item;
+  }
+
+  function reasonForm(phase: ProductionDocumentPhaseProjection, state: ReasonForm): HTMLElement {
+    const node = el('form', 'document-phase-form');
+    node.dataset['phaseForm'] = state.action;
+    node.noValidate = true;
+    const choices = el('fieldset');
+    choices.append(el('legend', undefined, DOCUMENT_PHASE_REASON_LEGENDS[state.action]));
+    const reasons: Readonly<Record<string, string>> = state.action === 'skip' ? PRODUCTION_DOCUMENT_SKIP_REASONS : PRODUCTION_DOCUMENT_REOPEN_REASONS;
+    const group = uid('document-phase-reason');
+    for (const [choice, label] of Object.entries(reasons)) {
+      const option = el('label', 'choice');
+      const radio = el('input');
+      radio.type = 'radio';
+      radio.name = group;
+      radio.value = choice;
+      radio.checked = state.choice === choice;
+      radio.disabled = working;
+      radio.addEventListener('change', () => {
+        if (!radio.checked) return;
+        state.choice = choice;
+        state.problem = null;
+      });
+      option.append(radio, el('span', undefined, label));
+      choices.append(option);
+    }
+    const textLabel = el('label', 'field');
+    const words = el('textarea');
+    words.rows = 2;
+    words.maxLength = MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS * 2;
+    words.value = state.text;
+    words.disabled = working;
+    words.dataset['phaseReasonText'] = 'true';
+    words.addEventListener('input', () => {
+      state.text = words.value;
+    });
+    textLabel.append(el('span', undefined, DOCUMENT_PHASE_REASON_TEXT_LABEL), words);
+    node.append(choices, textLabel);
+    if (state.problem !== null) {
+      const problem = el('p', 'field-error', state.problem);
+      problem.setAttribute('role', 'alert');
+      node.append(problem);
+    }
+    const buttons = el('div', 'button-row compact-actions');
+    const confirm = el('button', 'primary', DOCUMENT_PHASE_CONFIRM_LABELS[state.action]);
+    confirm.type = 'submit';
+    confirm.dataset['phaseFormConfirm'] = 'true';
+    confirm.disabled = working;
+    const cancel = el('button', 'quiet', DOCUMENT_PHASE_CANCEL);
+    cancel.type = 'button';
+    cancel.disabled = working;
+    cancel.addEventListener('click', () => {
+      form = null;
+      focusNext = { phaseId: phase.phaseId, target: 'action' };
+      draw();
+    });
+    buttons.append(confirm, cancel);
+    node.append(buttons);
+    node.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const text = state.text.trim();
+      const problem = state.choice === null ? DOCUMENT_PHASE_REASON_NEEDED : state.choice === 'custom' && text.length === 0 ? DOCUMENT_PHASE_CUSTOM_NEEDED : null;
+      if (problem !== null) {
+        state.problem = problem;
+        focusNext = { phaseId: phase.phaseId, target: 'form' };
+        draw();
+        return;
+      }
+      void move(phase, state.action, { choice: state.choice!, text: text.length === 0 ? null : text });
+    });
+    return node;
+  }
+
+  function draw(): void {
+    section.dataset['workflowTransitions'] = String(workflow.transitions);
+    const profile = el('p', 'field-note document-workflow-profile',
+      workflowProfileLine(workflow.profile.name, workflow.profile.version, localInstantLabel(workflow.profile.activatedAt)));
+    const summary = el('p', 'document-workflow-summary', workflow.summary);
+    const nextHeading = el('h3', undefined, DOCUMENT_WORKFLOW_NEXT_HEADING);
+    nextHeading.id = uid('document-workflow-next');
+    const next = workflow.next.length === 0
+      ? el('p', 'field-note document-workflow-next-empty', DOCUMENT_WORKFLOW_NEXT_EMPTY)
+      : el('ol', 'document-workflow-next');
+    if (workflow.next.length > 0) {
+      next.setAttribute('aria-labelledby', nextHeading.id);
+      for (const entry of workflow.next) {
+        const item = el('li', undefined, entry.text);
+        item.dataset['phaseId'] = entry.phaseId;
+        next.append(item);
+      }
+    }
+    const phasesHeading = el('h3', undefined, DOCUMENT_WORKFLOW_PHASES_HEADING);
+    phasesHeading.id = uid('document-phases');
+    const phases = el('ol', 'document-phases');
+    phases.setAttribute('aria-labelledby', phasesHeading.id);
+    for (const phase of workflow.phases) phases.append(phaseRow(phase));
+    section.replaceChildren(profile, summary, nextHeading, next, phasesHeading, phases);
+    const target = focusNext;
+    focusNext = null;
+    if (target === null) return;
+    const row = phases.querySelector<HTMLElement>(`li[data-phase-id="${target.phaseId}"]`);
+    const focusable = target.target === 'form'
+      ? row?.querySelector<HTMLElement>('.document-phase-form input:checked, .document-phase-form input')
+      : target.target === 'action'
+        ? row?.querySelector<HTMLElement>('[data-phase-action="skip"], [data-phase-action="reopen"]')
+        : row;
+    focusable?.focus();
+  }
+
+  draw();
+  return {
+    element: section,
+    paint(next) {
+      workflow = next;
+      if (form !== null && !next.phases.some((entry) => entry.phaseId === form!.phaseId && entry.actions.includes(form!.action))) form = null;
+      draw();
+    },
+  };
+}
+
+/** The 交付物 card's reading of a document's workflow: its summary, the first 下一项, and a chip per phase. */
+export function renderWorkflowCardSummary(workflow: ProductionDocumentWorkflowProjection): HTMLElement {
+  const node = el('div', 'document-workflow-card');
+  node.dataset['workflowTransitions'] = String(workflow.transitions);
+  node.append(el('p', 'document-workflow-summary', workflow.summary));
+  const first = workflow.next[0];
+  if (first !== undefined) {
+    const next = el('p', 'document-workflow-next-line', `${DOCUMENT_WORKFLOW_NEXT_HEADING}：${first.text}`);
+    next.dataset['phaseId'] = first.phaseId;
+    node.append(next);
+  }
+  const chips = el('ol', 'document-phase-chips');
+  for (const phase of workflow.phases) {
+    const chip = el('li', 'phase-chip', `${phase.label} · ${phase.stateLabel}`);
+    chip.dataset['phaseId'] = phase.phaseId;
+    chip.dataset['phaseState'] = phase.waiting === null ? phase.state : 'waiting';
+    chips.append(chip);
+  }
+  node.append(chips);
+  return node;
+}

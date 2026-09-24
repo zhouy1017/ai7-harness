@@ -1,4 +1,10 @@
-import type { ProductionDocumentDeliveryProjection, ProductionDocumentProjection, ProductionDocumentSourceProjection } from '../shared/protocol.js';
+import type {
+  ProductionDocumentDeliveryProjection,
+  ProductionDocumentPhaseAction,
+  ProductionDocumentPhaseTransitionProjection,
+  ProductionDocumentProjection,
+  ProductionDocumentSourceProjection,
+} from '../shared/protocol.js';
 
 /**
  * Every word of 交付 · 生产文档 (Issue #415, plan slice S66; editor-surfaces §9; V2-UX-DELIV-001, DELIV-002,
@@ -152,4 +158,62 @@ export const DOCUMENT_MATERIALS_EMPTY = '暂无材料。任务简报、引语台
 /** A version row: `版本 2 · 2026年9月24日 10:30`. */
 export function documentVersionLine(label: string, createdAt: string): string {
   return `${label} · ${createdAt}`;
+}
+
+// ---- the Deliverable Workflow Lens (Issue #415, S66c; V2-UX-WORK-001 to 009) ------------------------------------------
+// The phases' names, their states' pills, the summary, what each open phase waits on and the reasons' words come from the
+// service projection; these are the lens's own.
+
+export const DOCUMENT_WORKFLOW_NEXT_HEADING = '下一项需要处理';
+export const DOCUMENT_WORKFLOW_NEXT_EMPTY = '目前没有需要处理的事项';
+export const DOCUMENT_WORKFLOW_PHASES_HEADING = '阶段';
+/** A phase's four moves (WORK-008): 跳过 and 重新打开 ask for their reason first. */
+export const DOCUMENT_PHASE_ACTION_LABELS: Readonly<Record<ProductionDocumentPhaseAction, string>> = {
+  start: '开始',
+  complete: '完成',
+  skip: '跳过…',
+  reopen: '重新打开…',
+};
+export const DOCUMENT_PHASE_REASON_LEGENDS: Readonly<Record<'skip' | 'reopen', string>> = {
+  skip: '跳过的原因',
+  reopen: '重新打开的原因',
+};
+export const DOCUMENT_PHASE_CONFIRM_LABELS: Readonly<Record<'skip' | 'reopen', string>> = {
+  skip: '确认跳过',
+  reopen: '确认重新打开',
+};
+export const DOCUMENT_PHASE_REASON_TEXT_LABEL = '说明（选「自行输入」时必填）';
+export const DOCUMENT_PHASE_CANCEL = '取消';
+export const DOCUMENT_PHASE_REASON_NEEDED = '请先选一个原因。';
+export const DOCUMENT_PHASE_CUSTOM_NEEDED = '选了「自行输入」，请写下原因。';
+export const DOCUMENT_PHASE_SHOW_REASON = '查看原因';
+export const DOCUMENT_PHASE_MOVING = '正在记录…';
+export const DOCUMENT_PHASE_MOVE_FAILED = '无法记录这一步。';
+
+/** `基础书稿编辑流程 2.0.0 · 启用于 2026年9月24日 10:30`: the profile the document follows (WORK-002). */
+export function workflowProfileLine(name: string, version: string, activatedAt: string): string {
+  return `${name} ${version} · 启用于 ${activatedAt}`;
+}
+
+/** An accessible name for a phase's move: `开始「起草」`. */
+export function phaseActionName(action: ProductionDocumentPhaseAction, phaseLabel: string): string {
+  return `${DOCUMENT_PHASE_ACTION_LABELS[action].replace('…', '')}「${phaseLabel}」`;
+}
+
+/** What the phase's latest move was and when, with a skip's or reopen's reason: `跳过于 … · 这一阶段已在别处完成`. */
+export function phaseLatestLine(latest: ProductionDocumentPhaseTransitionProjection, at: string): string {
+  const verb = { start: '开始于', complete: '完成于', skip: '跳过于', reopen: '重新打开于' }[latest.action];
+  const reason = latest.reason === null ? '' : ` · ${latest.reason.choice === 'custom' ? '' : latest.reason.label}` +
+    (latest.reason.text === null ? '' : `${latest.reason.choice === 'custom' ? '' : '：'}${latest.reason.text}`);
+  return `${verb} ${at}${reason}`;
+}
+
+/** How often the phase moved, when more than once: its earlier moves stay recorded (WORK-009). */
+export function phaseMovesLine(moves: number): string {
+  return `共 ${moves} 次变动`;
+}
+
+/** The status after a move: `「起草」已开始`. */
+export function phaseMovedLine(action: ProductionDocumentPhaseAction, phaseLabel: string): string {
+  return `「${phaseLabel}」${{ start: '已开始', complete: '已完成', skip: '已跳过', reopen: '已重新打开' }[action]}`;
 }

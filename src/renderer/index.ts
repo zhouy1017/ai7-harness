@@ -6131,7 +6131,13 @@ function renderEditorWindow(
   const railColumn = element('div', 'rail-column');
   railColumn.append(positionRailLabel, railTrack);
   edge.append(edgeEntries, railColumn);
-  const documentLens = productionDocument === undefined ? undefined : renderDocumentLens(productionDocument);
+  // The document's workflow moves by the editor's commands in its lens (Issue #415, S66c); a refused move reads it again.
+  const documentLens = productionDocument === undefined ? undefined : renderDocumentLens(productionDocument, {
+    move: async (input) => (await window.ai7.transitionProductionDocumentPhase({ documentId: productionDocument.document.documentId, ...input })).document,
+    read: async () => (await window.ai7.inspectProductionDocuments()).types.find((type) => type.typeId === productionDocument.typeId)?.document ?? null,
+    setStatus,
+    errorMessage: rendererErrorMessage,
+  });
   if (documentLens !== undefined) workspace.classList.add('document-workspace');
   workspace.append(manuscript, ...(documentLens === undefined ? [] : [documentLens.element]), navigator, edge);
 

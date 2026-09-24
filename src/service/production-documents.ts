@@ -20,6 +20,7 @@ import {
 } from '../shared/protocol.js';
 import { UUID_PATTERN, canonicalJson, canonicalRecord, sha256Hex } from './analysis/canonical.js';
 import type { PackageDeliveryReading, PackageDocumentReading } from './book-delivery-packages.js';
+import type { ProductionDocumentWorkflow } from './production-document-workflow.js';
 import {
   BUILTIN_PRODUCTION_DOCUMENT_TYPES,
   BUILTIN_PRODUCTION_DOCUMENT_TYPES_DIGEST,
@@ -105,10 +106,12 @@ export type ProductionDocumentExportOf = (bookId: string, revisionId: string, fr
 export class ProductionDocuments {
   readonly #db: DatabaseSync;
   readonly #exportOf: ProductionDocumentExportOf;
+  readonly #workflow: ProductionDocumentWorkflow;
 
-  constructor(db: DatabaseSync, exportOf: ProductionDocumentExportOf) {
+  constructor(db: DatabaseSync, exportOf: ProductionDocumentExportOf, workflow: ProductionDocumentWorkflow) {
     this.#db = db;
     this.#exportOf = exportOf;
+    this.#workflow = workflow;
   }
 
   /** 交付 · 生产文档 of one Book: one card per house type, and the materials a document can start from. */
@@ -163,6 +166,13 @@ export class ProductionDocuments {
     requireDocument(versions.length > 0, 'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档没有版本。');
     const workingDigest = text(state.working_digest);
     const deliveries = this.#deliveries(row, MAX_PRODUCTION_DOCUMENT_DELIVERIES_LISTED + 1);
+    const changedSinceVersion = workingDigest !== versions[0]!.revisionDigest;
+    const changedSinceDelivery = this.changedSinceDelivery(row.documentId, workingDigest);
+    // What the document's own open phases wait on (Issue #415, S66c): its open 修改建议, and where its text stands against
+    // its versions and deliveries.
+    const openSuggestions = integer((this.#db.prepare(
+      "SELECT count(*) total FROM editorial_marks WHERE manuscript_id = ? AND branch_id = ? AND kind = 'change-suggestion' AND status = 'open'",
+    ).get(row.documentId, row.branchId) as SqlRow).total);
     return {
       documentId: row.documentId,
       branchId: row.branchId,
@@ -170,12 +180,15 @@ export class ProductionDocuments {
       origin: { sourceVersionId: row.originSourceVersionId, displayName: text(state.display_name) },
       versions: versions.slice(0, MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED),
       versionsTruncated: versions.length > MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED,
-      changedSinceVersion: workingDigest !== versions[0]!.revisionDigest,
+      changedSinceVersion,
       journalSequence: integer(state.journal_sequence),
       workingDigest,
       deliveries: deliveries.slice(0, MAX_PRODUCTION_DOCUMENT_DELIVERIES_LISTED),
       deliveriesTruncated: deliveries.length > MAX_PRODUCTION_DOCUMENT_DELIVERIES_LISTED,
-      changedSinceDelivery: this.changedSinceDelivery(row.documentId, workingDigest),
+      changedSinceDelivery,
+      workflow: this.#workflow.projection(row.documentId, {
+        changedSinceVersion, delivered: deliveries.length > 0, changedSinceDelivery, openSuggestions,
+      }),
     };
   }
 

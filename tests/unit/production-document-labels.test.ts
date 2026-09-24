@@ -23,6 +23,13 @@ const document: ProductionDocumentProjection = {
   deliveries: [],
   deliveriesTruncated: false,
   changedSinceDelivery: false,
+  workflow: {
+    profile: { id: 'ai7.manuscript.editorial.zh-CN', name: '基础书稿编辑流程', version: '2.0.0', activatedAt: '2026-09-24T02:00:00.000Z' },
+    summary: '七个阶段都未开始',
+    next: [],
+    phases: [],
+    transitions: 0,
+  },
 };
 
 describe('the words of 交付 · 生产文档', () => {
@@ -105,6 +112,41 @@ describe('the words of 交付 · 生产文档', () => {
       export: { preparationId: identity, outcome: 'created', outcomeLabel: '已导出到所选位置', fileName: '新闻稿 · 版本 2.docx' },
     })).toBe('已导出到所选位置 · 新闻稿 · 版本 2.docx');
     expect(labels.documentExportLabel('新闻稿', '版本 2')).toBe('新闻稿 · 版本 2');
+  });
+});
+
+// Issue #415 (S66c): the Deliverable Workflow Lens's own words; the phases, pills, summary and reasons come from the service.
+describe('the words of a document\'s workflow', () => {
+  it('names the profile, the lists and a phase\'s four moves, and asks for a reason before 跳过 and 重新打开', () => {
+    expect(labels.workflowProfileLine('基础书稿编辑流程', '2.0.0', '2026年9月24日 10:30')).toBe('基础书稿编辑流程 2.0.0 · 启用于 2026年9月24日 10:30');
+    expect([labels.DOCUMENT_WORKFLOW_NEXT_HEADING, labels.DOCUMENT_WORKFLOW_NEXT_EMPTY, labels.DOCUMENT_WORKFLOW_PHASES_HEADING])
+      .toEqual(['下一项需要处理', '目前没有需要处理的事项', '阶段']);
+    expect(labels.DOCUMENT_PHASE_ACTION_LABELS).toEqual({ start: '开始', complete: '完成', skip: '跳过…', reopen: '重新打开…' });
+    expect(['start', 'complete', 'skip', 'reopen'].map((action) => labels.phaseActionName(action as 'start', '起草')))
+      .toEqual(['开始「起草」', '完成「起草」', '跳过「起草」', '重新打开「起草」']);
+    expect([labels.DOCUMENT_PHASE_REASON_LEGENDS, labels.DOCUMENT_PHASE_CONFIRM_LABELS])
+      .toEqual([{ skip: '跳过的原因', reopen: '重新打开的原因' }, { skip: '确认跳过', reopen: '确认重新打开' }]);
+    expect([labels.DOCUMENT_PHASE_REASON_NEEDED, labels.DOCUMENT_PHASE_CUSTOM_NEEDED, labels.DOCUMENT_PHASE_SHOW_REASON])
+      .toEqual(['请先选一个原因。', '选了「自行输入」，请写下原因。', '查看原因']);
+  });
+
+  it('says a phase\'s latest move with its reason in the editor\'s words, how often it moved, and each move once made', () => {
+    const at = '2026年9月24日 10:30';
+    const move = (action: 'start' | 'complete' | 'skip' | 'reopen', reason: { choice: string; label: string; text: string | null } | null) =>
+      ({ action, fromState: 'not-started' as const, toState: 'in-progress' as const, reason, recordedAt: '2026-09-24T02:30:00.000Z' });
+    expect(labels.phaseLatestLine(move('start', null), at)).toBe(`开始于 ${at}`);
+    expect(labels.phaseLatestLine(move('complete', null), at)).toBe(`完成于 ${at}`);
+    expect(labels.phaseLatestLine(move('skip', { choice: 'done-elsewhere', label: '这一阶段已在别处完成', text: null }), at))
+      .toBe(`跳过于 ${at} · 这一阶段已在别处完成`);
+    expect(labels.phaseLatestLine(move('reopen', { choice: 'needs-change', label: '发现需要再改的地方', text: '开头' }), at))
+      .toBe(`重新打开于 ${at} · 发现需要再改的地方：开头`);
+    expect(labels.phaseLatestLine(move('reopen', { choice: 'custom', label: '自行输入', text: '读者反馈后要改开头' }), at))
+      .toBe(`重新打开于 ${at} · 读者反馈后要改开头`);
+    expect(labels.phaseMovesLine(3)).toBe('共 3 次变动');
+    expect(['start', 'complete', 'skip', 'reopen'].map((action) => labels.phaseMovedLine(action as 'start', '交付')))
+      .toEqual(['「交付」已开始', '「交付」已完成', '「交付」已跳过', '「交付」已重新打开']);
+    // Completing 交付 never reads as a document 已交付.
+    expect(labels.phaseMovedLine('complete', '交付')).not.toContain('已交付');
   });
 });
 

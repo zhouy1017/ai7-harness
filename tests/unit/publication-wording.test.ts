@@ -6,7 +6,9 @@ import {
   MAX_PRODUCTION_DOCUMENT_DELIVERIES_LISTED,
   MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS,
   MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS,
+  MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS,
   MAX_PRODUCTION_DOCUMENT_SOURCES_LISTED,
+  PRODUCTION_DOCUMENT_PHASE_IDS,
   MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED,
   MAX_FRAME_BYTES,
   MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS,
@@ -186,6 +188,23 @@ describe('the words of 发稿', () => {
             })),
             deliveriesTruncated: true,
             changedSinceDelivery: true,
+            // Issue #415 (S66c): seven phases, each with its latest move at its widest reason.
+            workflow: {
+              profile: { id: 'p'.repeat(128), name: '流'.repeat(64), version: '9'.repeat(32), activatedAt: time },
+              summary: '7 个阶段进行中 · 7 项等待处理',
+              next: PRODUCTION_DOCUMENT_PHASE_IDS.map((phaseId) => ({ phaseId, text: `${'阶'.repeat(8)} · 9999999 条修改建议待处理` })),
+              phases: PRODUCTION_DOCUMENT_PHASE_IDS.map((phaseId) => ({
+                phaseId, label: '阶'.repeat(8), state: 'reopened' as const, stateLabel: '等待你处理', waiting: '9999999 条修改建议待处理',
+                actions: ['complete', 'skip'] as const,
+                latest: {
+                  action: 'reopen' as const, fromState: 'skipped' as const, toState: 'reopened' as const,
+                  reason: { choice: 'redo-after-delivery', label: '交付后需要重做', text: '𠀀'.repeat(MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS) },
+                  recordedAt: time,
+                },
+                moves: 9_999_999,
+              })),
+              transitions: 9_999_999,
+            },
           },
         })),
         sources: Array.from({ length: MAX_PRODUCTION_DOCUMENT_SOURCES_LISTED }, () => ({

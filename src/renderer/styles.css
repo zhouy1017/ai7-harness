@@ -632,6 +632,34 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .document-version-list { display: grid; gap: .35rem; margin: .5rem 0 0; padding-left: 1.2rem; }
 .document-version-list > li { min-width: 0; }
 .document-version-current { margin-left: .4rem; padding: 0 .35rem; border: 1px solid #416458; border-radius: 6px; font-size: .82rem; }
+/* The Deliverable Workflow at the top of the lens and on 交付物's card (Issue #415, S66c). A phase's pill draws its state as a
+   shape before its words (editor-surfaces §0.3), so it reads without colour and in forced colours. */
+.document-workflow-summary { font-weight: 600; }
+.document-workflow-next { display: grid; gap: .3rem; margin: .45rem 0 0; padding-left: 1.2rem; }
+.document-phases { display: grid; gap: .45rem; margin: .5rem 0 0; padding: 0; list-style: none; }
+.document-phase { min-width: 0; padding: .5rem .6rem; border: 1px solid #ddd8cc; border-radius: 8px; background: #fffdf8; }
+.document-phase:focus-visible { outline: 3px solid #1f5f99; outline-offset: 2px; }
+.document-phase-head { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.document-phase .compact-actions { margin-top: .4rem; }
+.phase-pill, .phase-chip { display: inline-flex; align-items: center; gap: .3rem; padding: 0 .45rem; border: 1px solid #b8b2a4; border-radius: 999px; background: #f4f1ea; color: #4e4a40; font-size: .82rem; }
+.phase-pill::before, .phase-chip::before { content: ""; display: inline-block; flex: none; width: .6em; height: .6em; border: 1.5px solid currentColor; border-radius: 50%; }
+.phase-pill[data-phase-state="in-progress"], .phase-chip[data-phase-state="in-progress"] { border-color: #7d9cbd; background: #e8eff6; color: #2f5d8a; }
+.phase-pill[data-phase-state="in-progress"]::before, .phase-chip[data-phase-state="in-progress"]::before { background: linear-gradient(90deg, currentColor 50%, transparent 50%); }
+.phase-pill[data-phase-state="completed"], .phase-chip[data-phase-state="completed"] { border-color: #88b194; background: #e5f1e7; color: #28533a; }
+.phase-pill[data-phase-state="completed"]::before, .phase-chip[data-phase-state="completed"]::before { width: .32em; height: .62em; border-width: 0 2px 2px 0; border-radius: 0; transform: rotate(45deg) translateY(-.08em); }
+.phase-pill[data-phase-state="skipped"], .phase-chip[data-phase-state="skipped"] { color: #5a574f; }
+.phase-pill[data-phase-state="skipped"]::before, .phase-chip[data-phase-state="skipped"]::before { height: .2em; border: 0; border-radius: 1px; background: currentColor; }
+.phase-pill[data-phase-state="reopened"], .phase-chip[data-phase-state="reopened"] { border-color: #c9a55e; background: #f6ecd6; color: #6b4e16; }
+.phase-pill[data-phase-state="reopened"]::before, .phase-chip[data-phase-state="reopened"]::before { border: 0; border-radius: 0; background: currentColor; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.phase-pill[data-phase-state="waiting"], .phase-chip[data-phase-state="waiting"] { border-color: #d19a78; background: #fbe8dc; color: #8a3b12; }
+.phase-pill[data-phase-state="waiting"]::before, .phase-chip[data-phase-state="waiting"]::before { border: 0; border-radius: 0; background: currentColor; transform: rotate(45deg) scale(.85); }
+.document-phase-reason summary { cursor: pointer; font-size: .9rem; }
+.document-phase-form { margin-top: .5rem; }
+.document-phase-form fieldset { display: grid; gap: .3rem; margin: 0; padding: .5rem; border: 1px solid #ddd8cc; border-radius: 8px; }
+.document-phase-form .field { display: grid; gap: .25rem; margin-top: .45rem; }
+.document-phase-form textarea { width: 100%; box-sizing: border-box; }
+.document-workflow-card { margin-top: .45rem; }
+.document-phase-chips { display: flex; flex-wrap: wrap; gap: .3rem; margin: .4rem 0 0; padding: 0; list-style: none; }
 .export-open-row { margin-top: .6rem; }
 .manuscript-export { margin-top: 1rem; padding: 1rem 1.15rem; border: 1px solid #c9d6d2; border-radius: 12px; background: #fffdf8; overflow-wrap: anywhere; }
 .manuscript-export h4, .manuscript-export h5 { margin: 0; }
@@ -1029,6 +1057,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .publication-designate, .publication-milestone-option, .publication-designate-summary, .publication-statement,
   .book-deliverables-summary, .milestone-section .milestone-purpose-option,
   .deliverables-documents, .production-document-card, .document-create fieldset, .document-lens, .document-version-current,
+  .document-phase, .phase-pill, .phase-chip, .document-phase-form fieldset,
   .document-delivery fieldset, .delivery-statement,
   .deliverables-package, .package-current-mark,
   .task-drawer, .task-drawer-head, .task-drawer-footer, .task-drawer-modes, .task-plan-goal, .task-plan-compact,

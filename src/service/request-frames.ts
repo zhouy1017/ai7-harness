@@ -13,6 +13,11 @@ import {
   MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS,
   MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS,
   PRODUCTION_DOCUMENT_RECIPIENT_KINDS,
+  PRODUCTION_DOCUMENT_PHASE_ACTIONS,
+  PRODUCTION_DOCUMENT_PHASE_IDS,
+  MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS,
+  type ProductionDocumentPhaseAction,
+  type ProductionDocumentPhaseId,
   type ProductionDocumentRecipientKind,
   MAX_PUBLICATION_SCOPE_CHARACTERS,
   MAX_REPLACEMENT_EXCLUSIONS,
@@ -1184,6 +1189,22 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
             ? !validPublicationText(recipient.custom, MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS)
             : recipient.custom !== null) ||
           (input.note !== null && !validPublicationText(input.note, MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // A document's workflow phase (Issue #415, S66c): a known phase and move, the count the editor saw, and a reason — a
+    // choice and optional words within their bound — or none. Which moves need a reason is the store's to decide.
+    case 'transitionProductionDocumentPhase': {
+      const input = requireInput(value.input, ['bookId', 'documentId', 'phaseId', 'action', 'expectedTransitions', 'reason'], tentativeId);
+      const reason = input.reason;
+      if (!validUuid(input.bookId) || !validUuid(input.documentId) ||
+          !PRODUCTION_DOCUMENT_PHASE_IDS.includes(input.phaseId as ProductionDocumentPhaseId) ||
+          !PRODUCTION_DOCUMENT_PHASE_ACTIONS.includes(input.action as ProductionDocumentPhaseAction) ||
+          !isSafeInteger(input.expectedTransitions) || (input.expectedTransitions as number) < 0 || (input.expectedTransitions as number) > 1_000_000 ||
+          (reason !== null && (!isRecord(reason) || !hasExactKeys(reason, ['choice', 'text']) || !isBoundedString(reason.choice, 32) ||
+            !/^[a-z]+(?:-[a-z]+)*$/.test(reason.choice as string) ||
+            (reason.text !== null && !validPublicationText(reason.text, MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS))))) {
         throw new ProtocolError(tentativeId);
       }
       break;
