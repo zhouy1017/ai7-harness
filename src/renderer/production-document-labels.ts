@@ -68,7 +68,7 @@ export const DOCUMENT_CHANGED_SINCE_DELIVERY = '交付后有修改';
 export const DOCUMENT_DELIVERIES_HEADING = '交付记录';
 export const DELIVERY_FORM_HEADING = '交付';
 export const DELIVERY_VERSION_LEGEND = '交付哪一版';
-export const DELIVERY_UNSAVED_NOTE = '有修改尚未保存为版本：要交付现在的文字，先打开文档「保存为版本」；也可以交付已保存的版本。';
+export const DELIVERY_UNSAVED_NOTE = '有修改尚未保存为版本：交付「现在的文字」会先把它保存为新的版本；也可以交付已保存的版本。';
 export const DELIVERY_RECIPIENT_LEGEND = '交给谁';
 export const DELIVERY_CUSTOM_RECIPIENT = '自行输入';
 export const DELIVERY_CUSTOM_LABEL = '交给谁（自行输入）';
@@ -80,6 +80,10 @@ export const DELIVERY_BLOCKERS = {
   recipient: '先选择交给谁',
   custom: '请写明交给谁',
 } as const;
+/** The first choice while the text moved past the latest version (DELIV-003): `现在的文字（交付时先保存为版本 3）`. */
+export function documentCurrentTextChoice(nextOrdinal: number): string {
+  return `现在的文字（交付时先保存为版本 ${nextOrdinal}）`;
+}
 /** What a Delivery Record's export came to, when none has been made yet. */
 export const DELIVERY_NO_EXPORT = '暂无导出记录';
 

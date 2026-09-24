@@ -2776,8 +2776,9 @@ function registerRendererHandlers(
         });
       }),
   );
-  // 交付 (Issue #415, S66b): a Delivery Record of one saved version of a document of the route's Book; the service
-  // decides whether the document and the version are that Book's. Nothing is sent: the export follows on its card.
+  // 交付 (Issue #415, S66b): a Delivery Record of one version of a document of the route's Book — a saved one, or the
+  // current text saved as the next version first; the service decides whether the document and the version are that
+  // Book's. Nothing is sent: the export follows on its card.
   ipcMain.handle(
     IPC_CHANNELS.recordProductionDocumentDelivery,
     (event, input: Omit<ServiceOperationMap['recordProductionDocumentDelivery']['input'], 'bookId'>) =>
@@ -2790,7 +2791,7 @@ function registerRendererHandlers(
           const result = await service.call('recordProductionDocumentDelivery', {
             bookId: route.bookId,
             documentId: input.documentId,
-            revisionId: input.revisionId,
+            version: input.version,
             recipient: input.recipient,
             note: input.note,
           });
