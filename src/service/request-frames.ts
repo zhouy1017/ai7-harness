@@ -1156,9 +1156,13 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     // 交付 (Issue #415, S66b): a document's saved version, a recipient from the house's list or in the editor's own
     // words, and an optional note, bounded here exactly as the store bounds them.
     case 'recordProductionDocumentDelivery': {
-      const input = requireInput(value.input, ['bookId', 'documentId', 'revisionId', 'recipient', 'note'], tentativeId);
+      const input = requireInput(value.input, ['bookId', 'documentId', 'version', 'recipient', 'note'], tentativeId);
       const recipient = input.recipient;
-      if (!validUuid(input.bookId) || !validUuid(input.documentId) || !validUuid(input.revisionId) ||
+      const version = input.version;
+      if (!validUuid(input.bookId) || !validUuid(input.documentId) || !isRecord(version) ||
+          !(version.kind === 'saved' ? hasExactKeys(version, ['kind', 'revisionId']) && validUuid(version.revisionId)
+            : version.kind === 'current' && hasExactKeys(version, ['kind', 'workingDigest']) &&
+              isBoundedString(version.workingDigest, 64) && HEX_DIGEST_PATTERN.test(version.workingDigest)) ||
           !isRecord(recipient) || !hasExactKeys(recipient, ['kind', 'custom']) ||
           !PRODUCTION_DOCUMENT_RECIPIENT_KINDS.includes(recipient.kind as ProductionDocumentRecipientKind) ||
           (recipient.kind === 'custom'

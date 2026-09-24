@@ -5107,11 +5107,20 @@ export interface DecideProductionDocumentTypeInput {
   notForThisBook: boolean;
 }
 
+/**
+ * The version `交付` hands over (DELIV-003): one the document saved, or its current text — saved as the next version
+ * first when it moved past the latest — bound to the working digest the form read, so an edit made since is never
+ * delivered unseen.
+ */
+export type ProductionDocumentDeliveryVersionInput =
+  | { kind: 'saved'; revisionId: string }
+  | { kind: 'current'; workingDigest: string };
+
 /** `交付`: one exact version of a document of the route's Book, to one recipient, with an optional note (DELIV-003). */
 export interface RecordProductionDocumentDeliveryInput {
   bookId: string;
   documentId: string;
-  revisionId: string;
+  version: ProductionDocumentDeliveryVersionInput;
   recipient: { kind: ProductionDocumentRecipientKind; custom: string | null };
   note: string | null;
 }
@@ -6214,7 +6223,10 @@ export interface ServiceOperationMap {
   createProductionDocument: { input: CreateProductionDocumentInput; output: ProductionDocumentResultProjection };
   decideProductionDocumentType: { input: DecideProductionDocumentTypeInput; output: ProductionDocumentResultProjection };
   saveProductionDocumentVersion: { input: SaveProductionDocumentVersionInput; output: ProductionDocumentResultProjection };
-  /** 交付 (Issue #415, S66b): one Delivery Record of one exact version; the export follows on the export card. */
+  /**
+   * 交付 (Issue #415, S66b): one Delivery Record of one exact version — the current text saved as the next version first
+   * when it is none yet; the export follows on the export card.
+   */
   recordProductionDocumentDelivery: { input: RecordProductionDocumentDeliveryInput; output: ProductionDocumentResultProjection };
   /**
    * 待我处理 (Issue #424, plan slice S78): every Book's items in the four groups. It takes no input and names
