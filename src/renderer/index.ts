@@ -22,6 +22,8 @@ import type {
   ForegroundExecutionBoundaryProjection,
   GlobalAttentionItemProjection,
   ImportCommitProjection,
+  ManuscriptReimportCommitProjection,
+  ReimportGroupProjection,
   ImportDraftRecoveryProjection,
   ImportStartupProjection,
   HistoricalRevisionProjection,
@@ -54,8 +56,10 @@ import {
   MAX_REPLACEMENT_EXCLUSIONS,
   MILESTONE_PURPOSE_KINDS,
   MILESTONE_PURPOSE_LABELS,
+  REIMPORT_GROUP_VERB_LABELS,
   type MilestonePurposeKind,
 } from '../shared/protocol.js';
+import { MARK_KIND_LABELS } from './editorial-mark-labels.js';
 import { mountDeliverables, type DeliverablesSurface } from './deliverables.js';
 import { renderFidelityReview } from './import-fidelity.js';
 import {
@@ -708,8 +712,11 @@ function nextVisibleFrame(signal: AbortSignal): Promise<boolean> {
 }
 
 async function acknowledgeCompletionAfterPaint(result: ImportCommitProjection): Promise<boolean> {
+  // A reimport lands in the manuscript, not the overview (V2-UX-IMP-056; Issue #412): its result is acknowledged
+  // once the manuscript is on screen with the result's notice.
+  const landing = 'reimportRecordId' in result ? 'editor' : 'imported';
   const presentedCommit = screen.querySelector<HTMLElement>('[data-import-commit-id]');
-  if (screen.dataset['screen'] !== 'imported' || presentedCommit?.dataset['importCommitId'] !== result.commitId) {
+  if (screen.dataset['screen'] !== landing || presentedCommit?.dataset['importCommitId'] !== result.commitId) {
     return false;
   }
   const presentation = new AbortController();
@@ -755,7 +762,7 @@ async function acknowledgeCompletionAfterPaint(result: ImportCommitProjection): 
       if (presentationObserver.takeRecords().length > 0) presentation.abort();
       if (presentation.signal.aborted) return false;
       const currentCommit = screen.querySelector<HTMLElement>('[data-import-commit-id]');
-      if (screen.dataset['screen'] !== 'imported' || currentCommit !== presentedCommit ||
+      if (screen.dataset['screen'] !== landing || currentCommit !== presentedCommit ||
         currentCommit.dataset['importCommitId'] !== result.commitId) return false;
       if (eligibilityChanged || !twoFramesPresented || !productIsVisibleAndReady()) continue;
       break;
@@ -1479,6 +1486,17 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       break;
   }
   detail.append(values);
+  if (record.kind === 'manuscript-reimport-record' && record.groups.count > 0) {
+    // The rows the editor resolved, each with its verb (Issue #412, S63), and the marks that could not follow.
+    const rows = element('ul', 'degradation-list reimport-record-groups');
+    for (const group of record.groups.items) {
+      const row = element('li', undefined, `第 ${group.ordinal} 处 · ${group.verbLabel} · ${reimportRangeLine(group.currentFrom, group.currentTo, group.stagedFrom, group.stagedTo)}${group.chapterLabel === null ? '' : ` · 「${group.chapterLabel}」`}`);
+      row.dataset['reimportGroupVerb'] = group.verb;
+      rows.append(row);
+    }
+    detail.append(element('h4', undefined, `章节对应 · ${record.groups.count} 处`), rows);
+    detail.append(element('p', 'field-note', `标记：${record.markOutcomes.followed} 条已跟随，${record.markOutcomes.unfollowed} 条未能跟随。`));
+  }
   if (record.kind === 'import-record' || record.kind === 'manuscript-reimport-record') {
     const fidelity = element('details', 'degradation-disclosure');
     fidelity.append(element('summary', undefined, fidelityDisclosureSummary(record.fidelityCategories)));
@@ -4990,6 +5008,27 @@ function renderSourceImportReview(
   replaceScreen('review', content);
 }
 
+/** What each verb means for a row, beside its button (Issue #412, S63; V2-UX-IMP-057). */
+const REIMPORT_VERB_NOTES: Readonly<Record<ReimportGroupProjection['verbs'][number], string>> = {
+  split: '当前这一段在新文件中拆成了几段；标记跟随到它的文字所在的新段落。',
+  rewrite: '新文件在这里改写或新增了段落；当前段落按顺序延续，标记跟随到仍在的文字。',
+  delete: '新文件删去了这些段落；它们上面的标记不跟随，重新导入后会列出。',
+  merge: '当前这几段在新文件中并成了一段；标记跟随到它们的文字所在的新段落。',
+};
+
+/** Where a row stands: the current revision's paragraphs, and the new file's. */
+function reimportRangeLine(currentFrom: number | null, currentTo: number | null, stagedFrom: number | null, stagedTo: number | null): string {
+  const range = (from: number | null, to: number | null): string =>
+    from === null ? '无' : from === to ? `第 ${from} 段` : `第 ${from}–${to} 段`;
+  return `当前${range(currentFrom, currentTo)} → 新文件${range(stagedFrom, stagedTo)}`;
+}
+
+/** The comparison in one line: what the result will be, how many rows, how many are left, how many paragraphs matched exactly. */
+function reimportSummaryLine(review: ReviewBeforeManuscriptReimportProjection): string {
+  const comparison = review.comparison;
+  return `${comparison.resultPreviewLabel} · ${comparison.groups} 处变化 · ${comparison.unresolvedGroups} 处待你确定 · ${comparison.exactBlocks} 段完全一致，已自动对应`;
+}
+
 function renderManuscriptReimportReview(
   review: ReviewBeforeManuscriptReimportProjection,
   recoveryNotice?: string,
@@ -5007,7 +5046,7 @@ function renderManuscriptReimportReview(
   content.dataset['reimportCommitAttemptId'] = review.commitAttemptId ?? '';
   content.append(
     element('p', 'section-label', '步骤 2 / 3 · 稿件重新导入复核'),
-    element('h2', undefined, '逐块复核稿件重新导入'),
+    element('h2', undefined, '按章节复核稿件重新导入'),
     element('p', 'lede', review.lineage.status === 'verified'
       ? '已由所选图书拥有的精确来源版本建立三方比较。'
       : '来源关系未确认；本次使用保守的两方比较，但不会阻断重新导入。'),
@@ -5055,11 +5094,13 @@ function renderManuscriptReimportReview(
   summary.dataset['comparisonDigest'] = review.comparison.comparisonDigest;
   summary.append(
     element('h3', undefined, '比较摘要'),
-    element('p', undefined, `${review.comparison.resultPreviewLabel} · ${review.comparison.totalMappings} 个位置 · ${review.comparison.unresolvedMappings} 个未解决`),
+    element('p', undefined, reimportSummaryLine(review)),
     element('p', 'field-note', review.comparison.changed
-      ? '每个变化位置都必须明确接受暂存内容；系统不执行模糊匹配或自动合并。'
+      ? '完全一致的段落已自动对应；每一处变化由你选一个动词确定——拆分、改写与新增、删除或并入，系统不预选，也不做模糊匹配。'
       : '当前主稿件与暂存稿件逐块完全一致；提交只记录“未发现稿件变化”，不会创建空修订版。'),
   );
+  summary.dataset['reimportGroups'] = String(review.comparison.groups);
+  summary.dataset['reimportUnresolvedGroups'] = String(review.comparison.unresolvedGroups);
   content.append(summary);
 
   const fidelity = element('section', 'review-section');
@@ -5098,7 +5139,7 @@ function renderManuscriptReimportReview(
 
   const mappingsHost = element('section', 'review-section');
   mappingsHost.dataset['reimportMappings'] = 'loading';
-  mappingsHost.append(element('h3', undefined, '逐块映射'), element('p', 'field-note', '正在读取持久比较事实…'));
+  mappingsHost.append(element('h3', undefined, '章节对应'), element('p', 'field-note', '正在读取持久比较事实…'));
   content.append(mappingsHost);
   void Promise.resolve().then(async () => {
     try {
@@ -5109,20 +5150,14 @@ function renderManuscriptReimportReview(
       });
       if (!mappingsHost.isConnected) return;
       const list = element('div', 'comparison-list');
-      const resolve = async (
-        mappingId: string,
-        resolution: 'preserve-current-identity' | 'create-new-identity' | 'retire-current-identity',
-        currentBlockId: string | null,
-        control: HTMLButtonElement,
-      ) => {
-        control.disabled = true;
+      const resolve = async (group: ReimportGroupProjection, verb: ReimportGroupProjection['verbs'][number], control: HTMLButtonElement) => {
+        for (const choice of list.querySelectorAll<HTMLButtonElement>('[data-reimport-verb-choice]')) choice.disabled = true;
         try {
           const initial = await window.ai7.resolveReimportMapping({
             draftId: review.draftId,
             expectedDraftVersion: review.draftVersion,
-            mappingId,
-            resolution,
-            currentBlockId,
+            groupId: group.groupId,
+            verb,
           });
           const cancelResolution = button('取消当前操作', 'quiet', async () => {
             cancelResolution.disabled = true;
@@ -5140,98 +5175,66 @@ function renderManuscriptReimportReview(
           });
           if (completed.state === 'cancelled') {
             cancelResolution.remove();
-            control.disabled = false;
-            setStatus('结构身份解决已取消；复核权威未变化。', 'success');
+            for (const choice of list.querySelectorAll<HTMLButtonElement>('[data-reimport-verb-choice]')) choice.disabled = false;
+            setStatus('这一处的选择已取消；复核未变化。', 'success');
             return;
           }
-          if (completed.kind !== 'reimport-resolution') {
-            throw new Error('结构身份解决任务未返回复核结果。');
-          }
+          if (completed.kind !== 'reimport-resolution') throw new Error('对应行解决任务未返回复核结果。');
           const refreshed = completed.result;
-          if (refreshed === null || !('draftId' in refreshed)) throw new Error('结构身份解决任务未返回复核结果。');
+          if (refreshed === null || !('draftId' in refreshed)) throw new Error('对应行解决任务未返回复核结果。');
           cancelResolution.remove();
           renderManuscriptReimportReview(refreshed, recoveryNotice, recoveryReturn, mappingAfter);
-          setStatus('结构身份后果已持久化；复核摘要已更新', 'success');
+          setStatus(`第 ${group.ordinal} 处已按「${REIMPORT_GROUP_VERB_LABELS[verb]}」确定；复核摘要已更新`, 'success');
         } catch (error) {
           if (hasErrorCode(error, 'DRAFT_VERSION_CHANGED') || hasErrorCode(error, 'REVIEW_CHANGED')) {
             await initializeStartup();
             return;
           }
-          control.disabled = false;
-          setStatus(rendererErrorMessage(error, '无法持久化结构身份后果。'), 'error');
+          for (const choice of list.querySelectorAll<HTMLButtonElement>('[data-reimport-verb-choice]')) choice.disabled = false;
+          setStatus(rendererErrorMessage(error, '无法记录这一处的选择。'), 'error');
         }
       };
-      for (const mapping of page.items) {
-        const row = element('article', 'comparison-item');
-        row.dataset['reimportMappingId'] = mapping.mappingId;
-        row.dataset['reimportChangeKind'] = mapping.changeKind;
-        row.dataset['reimportMappingState'] = mapping.state;
-        row.dataset['currentBlockId'] = mapping.currentBlockId ?? '';
-        row.dataset['stagedBlockId'] = mapping.stagedBlockId ?? '';
-        row.dataset['resolvedCurrentBlockId'] = mapping.resolvedCurrentBlockId ?? '';
-        row.dataset['currentText'] = mapping.currentText ?? '';
-        row.dataset['stagedText'] = mapping.stagedText ?? '';
-        row.append(
-          element('strong', undefined, `位置 ${mapping.position} · ${mapping.changeKind}`),
-          element('p', 'field-note', `当前：${mapping.currentText ?? '—'}`),
-          ...(review.lineage.status === 'verified'
-            ? [element('p', 'field-note', `来源基线：${mapping.lineageText ?? '—'}`)]
-            : []),
-          element('p', 'field-note', `暂存：${mapping.stagedText ?? '—'}`),
-        );
-        if (mapping.state === 'unresolved') {
-          if (mapping.changeKind === 'delete') {
-            const retire = button('退役当前结构身份', 'secondary', async () => {
-              setStatus(`正在记录位置 ${mapping.position} 的退役后果…`, 'busy');
-              await resolve(mapping.mappingId, 'retire-current-identity', null, retire);
-            });
-            retire.dataset['resolveReimportMapping'] = mapping.mappingId;
-            retire.dataset['identityResolution'] = 'retire-current-identity';
-            row.append(retire);
-          } else {
-            const create = button('创建新的结构身份', 'secondary', async () => {
-              setStatus(`正在记录位置 ${mapping.position} 的新身份后果…`, 'busy');
-              await resolve(mapping.mappingId, 'create-new-identity', null, create);
-            });
-            create.dataset['resolveReimportMapping'] = mapping.mappingId;
-            create.dataset['identityResolution'] = 'create-new-identity';
-            const candidatesHost = element('div', 'comparison-list');
-            const showCandidates = async (candidateAfter: number | null): Promise<void> => {
-              const candidates = await window.ai7.getReimportIdentityCandidatePage({
-                draftId: review.draftId,
-                expectedDraftVersion: review.draftVersion,
-                mappingId: mapping.mappingId,
-                after: candidateAfter,
-              });
-              const candidateItems = element('div', 'comparison-list');
-              for (const candidate of candidates.items) {
-                const preserve = button(`保留当前身份 · 位置 ${candidate.position}`, 'quiet', async () => {
-                  setStatus(`正在把当前结构身份绑定到位置 ${mapping.position}…`, 'busy');
-                  await resolve(mapping.mappingId, 'preserve-current-identity', candidate.currentBlockId, preserve);
-                });
-                preserve.dataset['resolveReimportMapping'] = mapping.mappingId;
-                preserve.dataset['identityResolution'] = 'preserve-current-identity';
-                preserve.dataset['currentBlockId'] = candidate.currentBlockId;
-                candidateItems.append(element('p', 'field-note', candidate.text), preserve);
-              }
-              const navigation = element('div', 'button-row compact-actions');
-              if (candidateAfter !== null) {
-                navigation.append(element('span', 'field-note', '候选使用向前分页；重新打开可从第一页开始。'));
-              }
-              if (candidates.nextCursor !== null) {
-                navigation.append(button('下一页候选', 'quiet', () => void showCandidates(candidates.nextCursor)));
-              }
-              candidatesHost.replaceChildren(candidateItems, navigation);
-            };
-            const choose = button('选择要保留的当前结构身份', 'quiet', () => void showCandidates(null));
-            row.append(create, choose, candidatesHost);
+      for (const group of page.items) {
+        const row = element('article', 'comparison-item reimport-group');
+        row.dataset['reimportGroupId'] = group.groupId;
+        row.dataset['reimportGroupOrdinal'] = String(group.ordinal);
+        row.dataset['reimportGroupVerb'] = group.verb ?? '';
+        row.dataset['reimportGroupShape'] = `${group.current.count}:${group.staged.count}`;
+        row.append(element('strong', undefined,
+          `第 ${group.ordinal} 处${group.chapterLabel === null ? '' : ` · 「${group.chapterLabel}」`} · ${reimportRangeLine(group.current.from, group.current.to, group.staged.from, group.staged.to)}`));
+        const side = (label: string, part: ReimportGroupProjection['current']): HTMLElement => {
+          const host = element('div', 'reimport-group-side');
+          host.dataset['reimportSide'] = label;
+          if (part.count === 0) {
+            host.append(element('p', 'field-note', `${label}：这里没有段落。`));
+            return host;
           }
+          for (const excerpt of part.excerpts) {
+            const line = element('p', 'field-note', `${label}第 ${excerpt.position} 段：${excerpt.text}${excerpt.truncated ? '…' : ''}`);
+            line.dataset['reimportExcerptPosition'] = String(excerpt.position);
+            host.append(line);
+          }
+          if (part.count > part.excerpts.length) host.append(element('p', 'field-note', `另有 ${part.count - part.excerpts.length} 段。`));
+          return host;
+        };
+        row.append(side('当前', group.current), side('新文件', group.staged));
+        if (group.verb === null) {
+          const choices = element('div', 'button-row compact-actions reimport-verbs');
+          for (const verb of group.verbs) {
+            const choice = button(REIMPORT_GROUP_VERB_LABELS[verb], 'secondary', async () => {
+              setStatus(`正在按「${REIMPORT_GROUP_VERB_LABELS[verb]}」确定第 ${group.ordinal} 处…`, 'busy');
+              await resolve(group, verb, choice);
+            });
+            choice.dataset['reimportVerbChoice'] = verb;
+            choice.dataset['reimportGroupId'] = group.groupId;
+            choice.setAttribute('aria-describedby', `${group.groupId}-${verb}`);
+            const note = element('small', 'field-note', REIMPORT_VERB_NOTES[verb]);
+            note.id = `${group.groupId}-${verb}`;
+            choices.append(choice, note);
+          }
+          row.append(choices);
         } else {
-          row.append(element('p', 'success-note', mapping.identityConsequence === 'preserve-current-identity'
-            ? '已明确保留当前结构身份'
-            : mapping.identityConsequence === 'create-new-identity'
-              ? '已明确创建新的结构身份'
-              : '已明确退役当前结构身份'));
+          row.append(element('p', 'success-note', `已选择：${REIMPORT_GROUP_VERB_LABELS[group.verb]}`));
         }
         list.append(row);
       }
@@ -5250,12 +5253,13 @@ function renderManuscriptReimportReview(
       }
       mappingsHost.dataset['reimportMappings'] = 'ready';
       mappingsHost.dataset['reimportPageItemCount'] = String(page.items.length);
-      mappingsHost.replaceChildren(element('h3', undefined, '逐块映射'), list, navigation);
+      mappingsHost.replaceChildren(element('h3', undefined, '章节对应'),
+        ...(page.items.length === 0 ? [element('p', 'field-note', '没有需要你确定的变化。')] : [list]), navigation);
     } catch (error) {
       mappingsHost.dataset['reimportMappings'] = 'failed';
       mappingsHost.replaceChildren(
-        element('h3', undefined, '逐块映射'),
-        element('p', 'attention-note', rendererErrorMessage(error, '无法读取逐块映射。')),
+        element('h3', undefined, '章节对应'),
+        element('p', 'attention-note', rendererErrorMessage(error, '无法读取章节对应。')),
       );
     }
   });
@@ -5556,7 +5560,65 @@ function renderReview(
 function renderImported(result: ImportCommitProjection, recoveryReturn?: RecoveryReturnContext): void {
   delete document.documentElement.dataset['ai7ImportCompletionPainted'];
   delete document.documentElement.dataset['ai7ImportCompletionAcknowledged'];
+  if ('reimportRecordId' in result) {
+    // A reimport returns to the manuscript (V2-UX-IMP-056; Issue #412, S63): the first import of a manuscript ends in
+    // the Book Work Overview once, an update of it does not.
+    renderEditorWindow(result.window, result.overview.book.title, recoveryReturn?.attentionId, undefined, undefined, result);
+    void acknowledgeCompletionAfterPaint(result).then((acknowledged) => {
+      if (acknowledged) setStatus(result.completionLabel, 'success');
+    });
+    return;
+  }
   renderBookOverview(result.overview, result, recoveryReturn);
+}
+
+/** How many graphemes of a mark's words the reimport notice quotes. */
+const REIMPORT_NOTICE_WORDS = 40;
+
+/**
+ * What a reimport came to, where the editor lands after it (Issue #412, S63; V2-UX-IMP-056, IMP-057): the result, how
+ * many rows were resolved and marks followed, and — kept until the editor dismisses it — every mark that could not
+ * follow the new file, with its words and where it stood. It carries the commit it reports, which the completion
+ * acknowledgement reads.
+ */
+function reimportLandingSection(result: ManuscriptReimportCommitProjection): HTMLElement {
+  const record = result.receipt;
+  const section = element('section', 'reimport-landing');
+  section.dataset['importCommitId'] = result.commitId;
+  section.dataset['reimportResultKind'] = result.resultKind;
+  section.dataset['reimportUnfollowedMarks'] = String(record.markOutcomes.unfollowed);
+  section.setAttribute('role', 'status');
+  section.append(
+    element('h3', undefined, result.completionLabel),
+    element('p', undefined, result.resultKind === 'changed'
+      ? `已形成修订版 ${result.window.revisionLabel}：${record.groups.count} 处变化按你选的动词对应，${record.markOutcomes.followed} 条标记已跟随到新文件中它们的文字。`
+      : '新文件与当前稿件逐段一致：已记录这次重新导入，没有创建新的修订版。'),
+  );
+  if (record.markOutcomes.unfollowed > 0) {
+    section.append(element('p', 'attention-note',
+      `${record.markOutcomes.unfollowed} 条标记未能跟随新文件：它们的文字已删去、改写或不止一处，已从正文移开并保留。`));
+    const list = element('ul', 'reimport-unfollowed');
+    for (const item of record.markOutcomes.items) {
+      const words = Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(item.words), ({ segment }) => segment);
+      const quoted = words.length > REIMPORT_NOTICE_WORDS ? `${words.slice(0, REIMPORT_NOTICE_WORDS).join('')}…` : item.words;
+      const entry = element('li', undefined, `${MARK_KIND_LABELS[item.kind]} · 原第 ${item.fromPosition} 段 · 「${quoted}」`);
+      entry.dataset['reimportUnfollowedMarkId'] = item.markId;
+      list.append(entry);
+    }
+    section.append(list);
+    if (record.markOutcomes.unfollowed > record.markOutcomes.items.length) {
+      section.append(element('p', 'field-note', `另有 ${record.markOutcomes.unfollowed - record.markOutcomes.items.length} 条，见稿件重新导入记录。`));
+    }
+  }
+  const detail = element('div', 'reimport-landing-record');
+  const actions = element('div', 'button-row compact-actions');
+  const view = button('查看稿件重新导入记录', 'secondary', () => detail.replaceChildren(recordPresentation(record)));
+  view.dataset['viewReimportRecordId'] = result.reimportRecordId;
+  const dismiss = button('知道了', 'quiet', () => section.remove());
+  dismiss.dataset['dismissReimportLanding'] = result.commitId;
+  actions.append(view, dismiss);
+  section.append(actions, detail);
+  return section;
 }
 
 function delay(milliseconds: number): Promise<void> {
@@ -5603,6 +5665,8 @@ function renderEditorWindow(
   entryNotice?: string,
   /** 审阅's 回到原文: the mark whose card opens once the window is on screen. */
   openMarkId?: string,
+  /** A reimport that just ended here (Issue #412, S63): its notice stands above the manuscript until dismissed. */
+  reimport?: ManuscriptReimportCommitProjection,
 ): void {
   const content = panel();
   content.classList.add('editor-shell');
@@ -5970,6 +6034,7 @@ function renderEditorWindow(
   );
   identities.append(identityGrid);
   content.append(toolbar, workspace, identities);
+  if (reimport !== undefined) toolbar.after(reimportLandingSection(reimport));
   replaceScreen('editor', content);
   // …and the drawer opening closes 导航: the slot is this manuscript's while it is on screen.
   closeNavigation = () => {

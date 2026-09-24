@@ -208,13 +208,11 @@ export class CooperativeJobOwner {
   startReimportResolution(
     draftId: string,
     expectedDraftVersion: number,
-    mappingId: string,
-    resolution: Parameters<EditorialStore['createReimportResolutionWork']>[3],
-    currentBlockId: string | null,
+    groupId: string,
+    verb: Parameters<EditorialStore['createReimportResolutionWork']>[3],
   ): ServiceJobProjection {
     this.#requireCapacity();
-    const work = this.#store.createReimportResolutionWork(
-      draftId, expectedDraftVersion, mappingId, resolution, currentBlockId);
+    const work = this.#store.createReimportResolutionWork(draftId, expectedDraftVersion, groupId, verb);
     const jobId = randomUUID();
     const job: JobRecord = {
       subjectId: work.workId,
@@ -224,7 +222,7 @@ export class CooperativeJobOwner {
         jobId,
         kind: 'reimport-resolution',
         state: 'queued',
-        progress: { completed: 0, total: work.total, label: '正在有界核对结构身份解决…' },
+        progress: { completed: 0, total: work.total, label: '正在按所选动词解决这一行…' },
         result: null,
         failure: null,
       },
