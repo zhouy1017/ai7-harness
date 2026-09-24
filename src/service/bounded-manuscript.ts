@@ -6878,6 +6878,10 @@ export class BoundedManuscriptStore {
       },
       blocks,
       ...marksOfWindow(this.#db, branchId, asNumber(first.position)),
+      // A Production Document says so on every window of it, whichever way it was reached (Issue #415, S66).
+      ...((this.#db.prepare('SELECT role FROM manuscripts WHERE manuscript_id = ?').get(manuscriptId) as SqlRow | undefined)?.role === 'production-document'
+        ? { deliverable: 'production-document' as const }
+        : {}),
     };
     return projection;
   }
