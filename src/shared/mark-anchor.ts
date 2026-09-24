@@ -82,6 +82,30 @@ export function followSpanEdit(range: GraphemeRange, edit: GraphemeEdit): Graphe
   return { fromGrapheme, toGrapheme: Math.max(fromGrapheme, toGrapheme), touched: true };
 }
 
+/**
+ * Follow a point that cannot say which side of text written at it it belongs on (Issue #533): a pending insertion whose
+ * point already drifted, or any point among several standing at one place. Text written at it or into what it covers
+ * joins what it covers, so the editor places the point among those words; text written wholly before it moves it, and
+ * text wholly after it leaves it. It is `drifted` from then on, as a point never proves its place again.
+ */
+export function coverSpanEdit(range: GraphemeRange, edit: GraphemeEdit, length: number): FollowedAnchor {
+  const delta = edit.insertedGraphemes - (edit.toGrapheme - edit.fromGrapheme);
+  let fromGrapheme: number;
+  let toGrapheme: number;
+  if (edit.toGrapheme < range.fromGrapheme) {
+    fromGrapheme = range.fromGrapheme + delta;
+    toGrapheme = range.toGrapheme + delta;
+  } else if (edit.fromGrapheme > range.toGrapheme) {
+    fromGrapheme = range.fromGrapheme;
+    toGrapheme = range.toGrapheme;
+  } else {
+    fromGrapheme = Math.min(range.fromGrapheme, edit.fromGrapheme);
+    toGrapheme = range.toGrapheme >= edit.toGrapheme ? range.toGrapheme + delta : edit.fromGrapheme + edit.insertedGraphemes;
+  }
+  const from = Math.min(Math.max(0, fromGrapheme), length);
+  return { fromGrapheme: from, toGrapheme: Math.min(Math.max(from, toGrapheme), length), state: 'drifted' };
+}
+
 function holdsAt(text: ReadonlyArray<string>, pinned: ReadonlyArray<string>, at: number): boolean {
   if (at < 0 || at + pinned.length > text.length) return false;
   for (let index = 0; index < pinned.length; index += 1) {
