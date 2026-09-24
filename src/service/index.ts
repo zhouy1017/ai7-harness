@@ -626,18 +626,6 @@ async function dispatch(
           request.input.after,
         ),
       };
-    case 'getReimportIdentityCandidatePage':
-      return {
-        id: request.id,
-        ok: true,
-        op: request.op,
-        result: store.getReimportIdentityCandidatePage(
-          request.input.draftId,
-          request.input.expectedDraftVersion,
-          request.input.mappingId,
-          request.input.after,
-        ),
-      };
     case 'getReimportLineageSourceVersionPage':
       return {
         id: request.id,
@@ -660,9 +648,8 @@ async function dispatch(
         result: jobs.startReimportResolution(
           request.input.draftId,
           request.input.expectedDraftVersion,
-          request.input.mappingId,
-          request.input.resolution,
-          request.input.currentBlockId,
+          request.input.groupId,
+          request.input.verb,
         ),
       };
     case 'resolveAcknowledgedManuscriptReimportReplay':

@@ -660,14 +660,6 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           !(input.after === null || isSafeInteger(input.after))) throw new ProtocolError(tentativeId);
       break;
     }
-    case 'getReimportIdentityCandidatePage': {
-      const input = requireInput(value.input, ['draftId', 'expectedDraftVersion', 'mappingId', 'after'], tentativeId);
-      if (!isBoundedString(input.draftId, 36) || !UUID_PATTERN.test(input.draftId) ||
-          !isSafeInteger(input.expectedDraftVersion, 1) ||
-          !isBoundedString(input.mappingId, 36) || !UUID_PATTERN.test(input.mappingId) ||
-          !(input.after === null || isSafeInteger(input.after))) throw new ProtocolError(tentativeId);
-      break;
-    }
     case 'getReimportLineageSourceVersionPage': {
       const input = requireInput(value.input, ['bookId', 'after'], tentativeId);
       if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId) ||
@@ -681,18 +673,13 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           !isSafeInteger(input.expectedDraftVersion, 1)) throw new ProtocolError(tentativeId);
       break;
     }
+    // One row of the chapter-level comparison and one of the four verbs (Issue #412, S63).
     case 'resolveReimportMapping': {
-      const input = requireInput(
-        value.input,
-        ['draftId', 'expectedDraftVersion', 'mappingId', 'resolution', 'currentBlockId'],
-        tentativeId,
-      );
+      const input = requireInput(value.input, ['draftId', 'expectedDraftVersion', 'groupId', 'verb'], tentativeId);
       if (!isBoundedString(input.draftId, 36) || !UUID_PATTERN.test(input.draftId) ||
           !isSafeInteger(input.expectedDraftVersion, 1) ||
-          !isBoundedString(input.mappingId, 36) || !UUID_PATTERN.test(input.mappingId) ||
-          !['preserve-current-identity', 'create-new-identity', 'retire-current-identity'].includes(input.resolution as string) ||
-          !(input.currentBlockId === null ||
-            (isBoundedString(input.currentBlockId, 28) && /^blk_[0-9a-f]{24}$/.test(input.currentBlockId)))) {
+          !isBoundedString(input.groupId, 36) || !UUID_PATTERN.test(input.groupId) ||
+          !['split', 'rewrite', 'delete', 'merge'].includes(input.verb as string)) {
         throw new ProtocolError(tentativeId);
       }
       break;

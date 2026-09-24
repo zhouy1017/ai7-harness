@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 53 as const;
+export const SERVICE_PROTOCOL_VERSION = 54 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -88,7 +88,6 @@ export const IPC_CHANNELS = {
   commitSourceImport: 'ai7:j01:commit-source-import',
   prepareManuscriptReimport: 'ai7:j01:prepare-manuscript-reimport',
   getReimportMappingPage: 'ai7:j01:get-reimport-mapping-page',
-  getReimportIdentityCandidatePage: 'ai7:j01:get-reimport-identity-candidate-page',
   getReimportLineageSourceVersionPage: 'ai7:j01:get-reimport-lineage-source-version-page',
   acceptReimportDegradation: 'ai7:j01:accept-reimport-degradation',
   resolveReimportMapping: 'ai7:j01:resolve-reimport-mapping',
@@ -413,9 +412,49 @@ export type BookRecordPresentation =
       degradationDecision:
         | { summaryLabel: '含已接受的降级'; acceptedItems: ReadonlyArray<ImportDegradationItemProjection> }
         | null;
+      /**
+       * The chapter-level rows the editor resolved, in order, each with its verb (Issue #412, S63): at most
+       * `MAX_REIMPORT_RECORD_ITEMS`, the count saying how many there were. None for a record before them.
+       */
+      groups: { count: number; items: ReadonlyArray<ReimportRecordGroupProjection> };
+      /** What each editorial mark of a changed row came to: followed to its words, or listed as unable to follow. */
+      markOutcomes: { followed: number; unfollowed: number; items: ReadonlyArray<ReimportUnfollowedMarkProjection> };
       recordDigest: string;
       importedAt: string;
     };
+
+/** At most this many rows and unfollowed marks a Manuscript Reimport Record lists; its counts say how many there were. */
+export const MAX_REIMPORT_RECORD_ITEMS = 50;
+
+/** The verb that resolved one row of a chapter-level Reimport Comparison (Issue #412, S63; V2-UX-IMP-057). */
+export type ReimportGroupVerb = 'split' | 'rewrite' | 'delete' | 'merge';
+export const REIMPORT_GROUP_VERB_LABELS: Readonly<Record<ReimportGroupVerb, '拆分' | '改写与新增' | '删除' | '并入'>> = Object.freeze({
+  split: '拆分',
+  rewrite: '改写与新增',
+  delete: '删除',
+  merge: '并入',
+});
+
+export interface ReimportRecordGroupProjection {
+  ordinal: number;
+  verb: ReimportGroupVerb;
+  verbLabel: string;
+  chapterLabel: string | null;
+  currentFrom: number | null;
+  currentTo: number | null;
+  stagedFrom: number | null;
+  stagedTo: number | null;
+}
+
+/** One editorial mark that could not follow the new file: set aside from the text, kept, and listed for the editor. */
+export interface ReimportUnfollowedMarkProjection {
+  markId: string;
+  kind: EditorialMarkKind;
+  /** The words the mark was on, as it recorded them. */
+  words: string;
+  /** Where it stood in the revision the reimport replaced, 1-based. */
+  fromPosition: number;
+}
 
 export interface BookHistoryCursor {
   occurredAt: string;
@@ -871,6 +910,10 @@ export interface ReviewBeforeManuscriptReimportProjection {
     unresolvedMappings: number;
     changed: boolean;
     resultPreviewLabel: '稿件将重新导入' | '未发现稿件变化';
+    /** The chapter-level rows (Issue #412, S63): how many, how many the editor has still to resolve, and how many paragraphs matched exactly. */
+    groups: number;
+    unresolvedGroups: number;
+    exactBlocks: number;
   };
   fidelity: ReadonlyArray<FidelityCategoryProjection>;
   degradationDecision: ImportDegradationDecisionReviewProjection;
@@ -879,27 +922,40 @@ export interface ReviewBeforeManuscriptReimportProjection {
   namedNonEffects: ReadonlyArray<string>;
 }
 
+/**
+ * One row of the chapter-level Reimport Comparison (Issue #412, plan slice S63; V2-UX-IMP-041, IMP-057): a run of
+ * changed paragraphs between two that match exactly — what the current revision has there and what the new file has —
+ * with the verbs its shape admits and the one chosen, or none yet. A side shows its first paragraphs, each cut to
+ * `MAX_REIMPORT_EXCERPT_GRAPHEMES`, and says how many more there are.
+ */
+export interface ReimportGroupProjection {
+  groupId: string;
+  ordinal: number;
+  /** The heading the row stands under; `null` in a manuscript without headings. */
+  chapterLabel: string | null;
+  current: ReimportGroupSideProjection;
+  staged: ReimportGroupSideProjection;
+  verbs: ReadonlyArray<ReimportGroupVerb>;
+  verb: ReimportGroupVerb | null;
+}
+
+export interface ReimportGroupSideProjection {
+  count: number;
+  from: number | null;
+  to: number | null;
+  excerpts: ReadonlyArray<{ position: number; text: string; truncated: boolean }>;
+}
+
+/** At most this many paragraphs a row shows on each side, each cut to this many graphemes. */
+export const MAX_REIMPORT_EXCERPTS_PER_SIDE = 3;
+export const MAX_REIMPORT_EXCERPT_GRAPHEMES = 400;
+
 export interface ReimportMappingPageProjection {
   draftId: string;
   draftVersion: number;
   reviewDigest: string;
-  items: ReadonlyArray<ReimportMappingProjection>;
-  previousCursor: number | null;
-  nextCursor: number | null;
-}
-
-export interface ReimportIdentityCandidatePageProjection {
-  draftId: string;
-  draftVersion: number;
-  mappingId: string;
-  items: ReadonlyArray<{
-    currentBlockId: string;
-    position: number;
-    kind: 'title' | 'heading' | 'paragraph';
-    level: number | null;
-    text: string;
-    digest: string;
-  }>;
+  items: ReadonlyArray<ReimportGroupProjection>;
+  /** The group ordinal before the page, and after it. */
   previousCursor: number | null;
   nextCursor: number | null;
 }
@@ -5833,10 +5889,6 @@ export interface ServiceOperationMap {
     input: { draftId: string; expectedDraftVersion: number; after: number | null };
     output: ReimportMappingPageProjection;
   };
-  getReimportIdentityCandidatePage: {
-    input: { draftId: string; expectedDraftVersion: number; mappingId: string; after: number | null };
-    output: ReimportIdentityCandidatePageProjection;
-  };
   getReimportLineageSourceVersionPage: {
     input: { bookId: string; after: string | null };
     output: ReimportLineageSourceVersionPageProjection;
@@ -5845,13 +5897,13 @@ export interface ServiceOperationMap {
     input: { draftId: string; expectedDraftVersion: number };
     output: ReviewBeforeManuscriptReimportProjection;
   };
+  /** One row of the chapter-level comparison resolved by one verb (Issue #412, S63): never preselected, never guessed. */
   resolveReimportMapping: {
     input: {
       draftId: string;
       expectedDraftVersion: number;
-      mappingId: string;
-      resolution: 'preserve-current-identity' | 'create-new-identity' | 'retire-current-identity';
-      currentBlockId: string | null;
+      groupId: string;
+      verb: ReimportGroupVerb;
     };
     output: ServiceJobProjection;
   };
@@ -6139,7 +6191,6 @@ export interface RendererApi {
   commitSourceImport(input: CommitSourceImportRendererInput): Promise<SourceImportCommitProjection>;
   prepareManuscriptReimport(input: ServiceOperationMap['prepareManuscriptReimport']['input']): Promise<ServiceJobProjection>;
   getReimportMappingPage(input: ServiceOperationMap['getReimportMappingPage']['input']): Promise<ReimportMappingPageProjection>;
-  getReimportIdentityCandidatePage(input: ServiceOperationMap['getReimportIdentityCandidatePage']['input']): Promise<ReimportIdentityCandidatePageProjection>;
   getReimportLineageSourceVersionPage(input: ServiceOperationMap['getReimportLineageSourceVersionPage']['input']): Promise<ReimportLineageSourceVersionPageProjection>;
   acceptReimportDegradation(input: ServiceOperationMap['acceptReimportDegradation']['input']): Promise<ReviewBeforeManuscriptReimportProjection>;
   resolveReimportMapping(input: ServiceOperationMap['resolveReimportMapping']['input']): Promise<ServiceJobProjection>;
