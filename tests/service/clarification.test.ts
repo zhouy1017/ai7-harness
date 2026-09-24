@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { CLARIFICATION_CANCELLED_UNANSWERED, CLARIFICATION_RECORD_GAP } from '../../src/service/analysis/clarifications.js';
+import { CLARIFICATION_CANCELLED_ANSWERED, CLARIFICATION_CANCELLED_UNANSWERED, CLARIFICATION_RECORD_GAP } from '../../src/service/analysis/clarifications.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { ASK_FIRST_SAFE_RETRY_STATEMENT } from '../../src/service/analysis/plan-boundary.js';
 import { PLAN_EDIT_ADAPTATION_LABELS } from '../../src/service/analysis/plan-edits.js';
@@ -13,6 +13,8 @@ import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/p
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { CLARIFICATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
+  ANSWER_BLOCKED_OFFLINE,
+  RESUME_BLOCKED_BINDING,
   CLARIFICATION_SCOPE_CONTINUING,
   CLARIFICATION_SCOPE_WAITING,
   CLARIFICATION_UNANSWERABLE_ENDED,
@@ -396,6 +398,78 @@ describe('Clarification Requests over the real store', () => {
     } finally {
       await execution.dispose();
       await next?.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('takes no answer while the Run could not go on by it, and says why on the card', async () => {
+    const store = await openWithRoute(transient);
+    const execution = owner(store, transient);
+    let next: BaselineAnalysisExecutionOwner | null = null;
+    try {
+      const bookId = await importedBook(store, 'L2 sample1 澄清重新核对');
+      const { taskIntentId, runRecordId } = askingRun(store, bookId);
+      execution.admitAndDispatch(runRecordId);
+      await execution.whenIdle();
+      const input = { bookId, kind: 'baseline-analysis' as const, ref: taskIntentId };
+      // Offline, under a route that reaches its model over the network: the answer waits for the network.
+      const offline = await store.inspectTaskPlanWithConnection(input, async () => null, { reading: () => 'offline', reachesNetwork: () => true, slotBusy: () => false }, () => null);
+      expect(offline.clarifications[0]).toMatchObject({ state: 'open', answerable: { reason: ANSWER_BLOCKED_OFFLINE } });
+      // A busy slot only queues an answer: it is taken.
+      const busy = await store.inspectTaskPlanWithConnection(input, async () => null, { reading: () => 'online', reachesNetwork: () => false, slotBusy: () => true }, () => null);
+      expect(busy.clarifications[0]!.answerable.reason).toBeNull();
+      // A launch that can no longer carry the Run's binding could not take it on by any answer, and its summary says
+      // what it read cannot become a revision.
+      await execution.dispose();
+      next = owner(store, happy);
+      const carrier = next;
+      const moved = await store.inspectTaskPlanWithConnection(input, async () => null, {
+        reading: () => 'online', reachesNetwork: () => false, slotBusy: () => false, carriesStoppedRun: (id) => carrier.carriesStoppedRun(id),
+      }, () => null);
+      expect(moved.clarifications[0]!.answerable.reason).toBe(RESUME_BLOCKED_BINDING);
+      expect(moved.runControl?.cancel.impact[1]).toBe('执行绑定已经变化，已读完的 7 个阅读范围不能整理成结果集修订版；这次取消不会形成修订版。');
+      expect(moved.runControl?.cancel.impact[2]).toBe('第 5 个阅读范围在等你的回答；取消后不再重试。');
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      await next?.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('names an answer a cancellation leaves unapplied, and ends its range as a gap in those words', async () => {
+    const store = await openWithRoute(transient);
+    const execution = owner(store, transient, true);
+    try {
+      const first = await importedBook(store, 'L2 sample1 已答未接着做甲');
+      const second = await importedBook(store, 'L2 sample1 已答未接着做乙', false);
+      const asking = askingRun(store, first);
+      execution.admitAndDispatch(asking.runRecordId);
+      await execution.whenIdle();
+      // Another Book's Run holds the slot, so the answer is recorded and queued.
+      const prepared = prepare(store, second);
+      writeFileSync(holdPath, '1');
+      const other = store.authorizeBaselineAnalysis(second, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+      execution.admitAndDispatch(other);
+      await until(() => execution.progressFor(other)?.currentUnitOrdinal === 2, 'the other Run in flight');
+      const input = { bookId: first, kind: 'baseline-analysis' as const, ref: asking.taskIntentId };
+      const card = store.inspectTaskPlan(input).clarifications[0]!;
+      store.answerBaselineAnalysisClarification({ bookId: first, taskIntentId: asking.taskIntentId, requestId: card.requestId, optionId: 'retry', note: null });
+      expect(execution.continueAnswered(asking.runRecordId, store.baselineAnalysisLedger)).toBe('queued');
+      // The summary names the range: answered, and not yet gone on by.
+      expect(store.inspectTaskPlan(input).runControl?.cancel.impact).toContain('第 5 个阅读范围你已回答，但还没有按回答接着做；取消后不再重试，在这份修订版里记为缺口。');
+      // Cancelled before it went on by the answer: nothing is retried, and the gap says the answer was not yet applied.
+      store.requestBaselineAnalysisCancel(first, asking.taskIntentId);
+      expect(execution.cancelRun(asking.runRecordId, store.baselineAnalysisLedger)).toBe('stopping');
+      writeFileSync(holdPath, 'release');
+      await execution.whenIdle();
+      const cancelled = store.inspectBaselineAnalysis(first, () => null);
+      expect(cancelled.run!.state).toBe('cancelled');
+      expect(turns(cancelled).filter(([unit]) => unit === 5)).toEqual([[5, 1]]);
+      expect(cancelled.resultSetRevision!.gaps.find((entry) => entry.unitOrdinal === 5)!.reason.endsWith(`；${CLARIFICATION_CANCELLED_ANSWERED}`)).toBe(true);
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
       store.close();
     }
   }, 300_000);
