@@ -3124,6 +3124,13 @@ function renderAnalysisHistory(card: HTMLElement, projection: BaselineAnalysisPr
 }
 
 function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisProjection, bookTitle: string): void {
+  // A draw replaces what the card follows (Issue #539): a follow-up armed for an earlier draw — of a revision the editor
+  // has since left — never draws over this one, and this draw arms its own if it needs one.
+  const pending = analysisRefreshTimers.get(host);
+  if (pending !== undefined) {
+    window.clearTimeout(pending);
+    analysisRefreshTimers.delete(host);
+  }
   const card = element('section', 'baseline-analysis-card');
   card.dataset['analysisState'] = projection.state;
   card.dataset['analysisBookId'] = projection.bookId;

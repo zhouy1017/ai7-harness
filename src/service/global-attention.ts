@@ -208,8 +208,24 @@ const WAITING_STATES: Readonly<Record<WaitingFor, GlobalAttentionStateKey>> = {
   network: 'analysis-waiting-network',
   connection: 'analysis-waiting-connection',
   slot: 'analysis-waiting-slot',
-  admitting: 'analysis-queued',
+  // Online, credential there, slot free: the next Reconnect Preflight admits it — until then it is not in the scheduler
+  // (Issue #539), so it never reads as 已进入 AI7 调度器.
+  admitting: 'analysis-waiting-admission',
 };
+
+/**
+ * What a waiting Run waits for, as 待我处理 reads it (Issue #539): read only while a Run waits — the credential check it
+ * makes is the keyring's, and a read of 待我处理 every few seconds must not make it for nothing — and a check that fails
+ * reads as the plain case, `admitting`, rather than failing the whole read.
+ */
+export async function attentionWaitingFor(anyWaiting: boolean, read: () => Promise<WaitingFor>): Promise<WaitingFor> {
+  if (!anyWaiting) return 'admitting';
+  try {
+    return await read();
+  } catch {
+    return 'admitting';
+  }
+}
 
 function item(
   group: GlobalAttentionGroupKey,

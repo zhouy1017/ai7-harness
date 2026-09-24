@@ -129,6 +129,8 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   'analysis-waiting-network': '等待网络',
   'analysis-waiting-connection': '需要处理模型连接',
   'analysis-waiting-slot': '等待运行名额',
+  // The drawer's own word for it (Issue #539): nothing runs yet.
+  'analysis-waiting-admission': '正在排队',
   'analysis-cancelling': '正在取消',
   'analysis-pausing': '正在暂停',
   'analysis-paused': '已暂停',
@@ -165,6 +167,7 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
   'analysis-waiting-network': { tone: 'neutral', shape: 'ring' },
   'analysis-waiting-connection': { tone: 'attention', shape: 'triangle' },
   'analysis-waiting-slot': { tone: 'neutral', shape: 'ring' },
+  'analysis-waiting-admission': { tone: 'neutral', shape: 'ring' },
   'analysis-cancelling': { tone: 'attention', shape: 'half' },
   'analysis-pausing': { tone: 'attention', shape: 'half' },
   'analysis-paused': { tone: 'neutral', shape: 'half' },
@@ -306,6 +309,8 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
       return '模型连接缺少凭据：到设置连接模型服务后，任务会在联网时开始。';
     case 'analysis-waiting-slot':
       return '另一项任务正在运行；它结束后，这项任务在联网时开始。';
+    case 'analysis-waiting-admission':
+      return '已经联网：AI7 先核对计划，没有变化就开始；现在什么都没有运行。';
     case 'analysis-running':
       return runningReason(facts.progress);
     case 'analysis-cancelling':
