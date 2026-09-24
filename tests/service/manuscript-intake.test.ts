@@ -206,6 +206,31 @@ function expectStoreErrorCode(run: () => unknown, code: string): void {
   throw new Error(`Expected a ${code} refusal.`);
 }
 
+/** Opens the store at the test's data root again and closes it cleanly; its open-time truth checks are the proof. */
+async function expectStoreReopens(): Promise<void> {
+  const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  reopened.markCleanShutdown();
+  reopened.close();
+}
+
+/** 导入稿件 → 作为来源材料导入 → 新建图书, committed and acknowledged. */
+async function commitSourceOnlyNewBook(
+  store: EditorialStore,
+  path: string,
+  confirmedTitle: string,
+): Promise<{ bookId: string; sourceVersionId: string; format: SourceFormat }> {
+  const staged = await store.stageSelectedManuscript(randomUUID(), path);
+  const review = store.prepareSourceImportReview(staged.draftId, staged.draftVersion, {
+    kind: 'new-book', choiceId: 'new-book', confirmedTitle, relationship: 'source-only',
+  });
+  const commitId = randomUUID();
+  const commit = await store.commitSourceImport({
+    draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId,
+  });
+  expect(await store.acknowledgeImportCompletion(commitId)).toEqual({ state: 'acknowledged' });
+  return { bookId: commit.bookId, sourceVersionId: commit.sourceVersionId, format: commit.source.format };
+}
+
 /** Synthetic inputs only: bytes with no manuscript content, in every format the router recognises. */
 const SOURCE_ONLY_INPUTS: ReadonlyArray<{ format: SourceFormat; fileName: string; bytes: () => Uint8Array; reason: string }> = [
   {
@@ -306,9 +331,65 @@ describe('multi-format intake over the real store', () => {
       } finally {
         database.close();
       }
+
+      // The store's open-time truth checks read the unparsed original as the store wrote it (#552).
+      await expectStoreReopens();
     },
     120_000,
   );
+
+  it('reopens over a parsed non-DOCX source import and a reviewed reuse of an unparsed original', async () => {
+    const textPath = join(roots.inputRoot, '来源说明.txt');
+    await writeFile(textPath, '第一段说明。\n\n第二段说明。\n');
+    const pdfPath = join(roots.inputRoot, '固定版式样例.pdf');
+    await writeFile(pdfPath, syntheticPdfBytes());
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let pdfBookId: string;
+    let pdfSourceVersionId: string;
+    let reuse: { draftId: string; draftVersion: number; reviewDigest: string };
+    try {
+      const text = await commitSourceOnlyNewBook(store, textPath, '来源材料 TXT');
+      expect(text.format).toBe('TXT');
+      const pdf = await commitSourceOnlyNewBook(store, pdfPath, '来源材料 PDF');
+      expect(pdf.format).toBe('PDF');
+      pdfBookId = pdf.bookId;
+      pdfSourceVersionId = pdf.sourceVersionId;
+
+      // The same file again into its own Book, reusing the unparsed Source Version, reviewed and left uncommitted.
+      const staged = await store.stageSelectedManuscript(randomUUID(), pdfPath);
+      const review = store.prepareSourceImportReview(staged.draftId, staged.draftVersion, {
+        kind: 'existing-book', bookId: pdfBookId, relationship: 'source-only', reuseSourceVersionId: pdfSourceVersionId,
+      });
+      reuse = { draftId: staged.draftId, draftVersion: review.draftVersion, reviewDigest: review.reviewDigest };
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const commitId = randomUUID();
+      const commit = await store.commitSourceImport({
+        draftId: reuse.draftId, expectedDraftVersion: reuse.draftVersion, reviewDigest: reuse.reviewDigest, commitId,
+      });
+      expect(commit.sourceVersionId).toBe(pdfSourceVersionId);
+      expect(await store.acknowledgeImportCompletion(commitId)).toEqual({ state: 'acknowledged' });
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+
+    await expectStoreReopens();
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      expect(tableRows(database, 'source_import_records', 'book_id, source_version_disposition')
+        .filter((row) => row.book_id === pdfBookId)
+        .map((row) => row.source_version_disposition)
+        .sort()).toEqual(['created', 'reused-same-book']);
+    } finally {
+      database.close();
+    }
+  }, 120_000);
 
   it('keeps refusing a hostile archive instead of retaining it', async () => {
     // A traversal entry name is a hostile-input bound, not a "this is not a DOCX" verdict, so it
