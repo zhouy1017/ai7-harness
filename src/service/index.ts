@@ -394,6 +394,38 @@ async function dispatch(
     // 更新计划 (Issue #419, plan slice S73; PLAN-009, PLAN-011): the next plan version, as the editor left the plan.
     case 'editBaselineAnalysisPlan':
       return { id: request.id, ok: true, op: request.op, result: store.editBaselineAnalysisPlan(request.input, analysisProgress) };
+    // 提交回答 (Issue #422, S76d; CLAR-006): the answer is recorded; a Run that stopped for it goes on — at once when the
+    // slot is free, or once it is. A Run still reading finds it at its next unit boundary, and a paused one at 续行.
+    case 'answerBaselineAnalysisClarification': {
+      // An answer that would take a waiting Run on is revalidated first, as 续行 is (CONT-015, CONT-016): while the Run
+      // could not go on — the plan moved, its progress no longer reads back, the launch cannot carry it, the credential is
+      // missing, or the device is offline — it is refused with the card's own reason, and nothing is recorded. A stale
+      // answer is left to the store's own checks, which refuse it in their words.
+      let blocked: string | null = null;
+      try {
+        const plan = await store.inspectTaskPlanWithConnection(
+          { bookId: request.input.bookId, kind: 'baseline-analysis', ref: request.input.taskIntentId },
+          () => analysisExecution.liveCredentialReadiness(),
+          connectivity.planConnectivity,
+          analysisProgress,
+        );
+        const card = plan.clarifications.find((entry) => entry.requestId === request.input.requestId);
+        if (plan.state.key === 'awaiting-clarification' && card?.state === 'open') blocked = card.answerable.reason;
+      } catch {
+        blocked = null;
+      }
+      if (blocked !== null) throw new StoreErrorClass('ANALYSIS_CLARIFICATION_BLOCKED', blocked);
+      const answered = store.answerBaselineAnalysisClarification(request.input);
+      if (answered.runState === 'awaiting-clarification') {
+        try {
+          analysisExecution.continueAnswered(answered.runRecordId, store.baselineAnalysisLedger);
+        } catch (error) {
+          const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
+          throw new StoreErrorClass(code, error instanceof Error ? error.message : '回答已记下，但这项任务未能按回答接着做。');
+        }
+      }
+      return { id: request.id, ok: true, op: request.op, result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress) };
+    }
     // 暂停 (Issue #422, S76b; CTRL-001): `pausing` is recorded, and the owner stops the Run at the next unit boundary —
     // or, holding no execution of it, settles it `paused` at once.
     case 'pauseBaselineAnalysisRun': {
@@ -1111,6 +1143,14 @@ async function run(): Promise<void> {
         analysisExecution.cancelRun(runRecordId, store.baselineAnalysisLedger);
       } catch {
         // The Run stays 正在取消 and is offered 取消任务 again, which settles it.
+      }
+    }
+    // A Run the editor had answered before AI7 closed goes on now, one after another through the slot (Issue #422, S76d).
+    for (const runRecordId of reconciled.answered) {
+      try {
+        analysisExecution.continueAnswered(runRecordId, store.baselineAnalysisLedger);
+      } catch {
+        // It stays 任务等待你的说明 with its answer; the next launch takes it on again.
       }
     }
     // A Review Run's categories take the one owner's single slot one after another.

@@ -103,6 +103,7 @@ import type {
   TaskAuthorizationProjection,
   BaselineAnalysisGoal,
   BaselineAnalysisProjection,
+  BaselineAnalysisRunState,
   BaselineAnalysisQuickStartProjection,
   BaselineAnalysisUpdateActionProjection,
   BaselineAnalysisUpdateMode,
@@ -178,12 +179,15 @@ import {
   TaskPlanError,
   withConnectionReadiness,
   withConnectivityReadiness,
+  withAnswerBlockers,
   withResumeBlockers,
   RESUME_BLOCKED_BINDING,
   withWaitingReason,
   type WaitingFor,
   RESUME_BLOCKED_CONNECTION,
   RESUME_BLOCKED_OFFLINE,
+  ANSWER_BLOCKED_CONNECTION,
+  ANSWER_BLOCKED_OFFLINE,
   RESUME_BLOCKED_SLOT,
   type BaselineStoppedRunFacts,
 } from './task-plan.js';
@@ -238,6 +242,7 @@ import {
   type DefaultExecutionRuleRecord,
 } from './default-execution-rules.js';
 import { initializeRunCheckpointSchema } from './analysis/run-checkpoints.js';
+import { initializeClarificationSchema } from './analysis/clarifications.js';
 import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
 import { reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './review/category-configuration.js';
 import { reviewCategoryKindDefinition } from './review/review-category-kind.js';
@@ -301,6 +306,7 @@ import {
   RUN_CANCELLATION_SCHEMA_VERSION,
   RUN_CONTINUATION_SCHEMA_VERSION,
   PLAN_EDIT_SCHEMA_VERSION,
+  CLARIFICATION_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1508,7 +1514,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === EXPORT_LEDGER_SCHEMA_VERSION || currentVersion === CONNECTIVITY_WAIT_SCHEMA_VERSION || currentVersion === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       currentVersion === RUN_CANCELLATION_SCHEMA_VERSION ||
       currentVersion === RUN_CONTINUATION_SCHEMA_VERSION ||
-      currentVersion === PLAN_EDIT_SCHEMA_VERSION,
+      currentVersion === PLAN_EDIT_SCHEMA_VERSION ||
+      currentVersion === CLARIFICATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1538,7 +1545,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === EXPORT_LEDGER_SCHEMA_VERSION || currentVersion === CONNECTIVITY_WAIT_SCHEMA_VERSION || currentVersion === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       currentVersion === RUN_CANCELLATION_SCHEMA_VERSION ||
       currentVersion === RUN_CONTINUATION_SCHEMA_VERSION ||
-      currentVersion === PLAN_EDIT_SCHEMA_VERSION
+      currentVersion === PLAN_EDIT_SCHEMA_VERSION ||
+      currentVersion === CLARIFICATION_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1882,7 +1890,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION,
+      version === PLAN_EDIT_SCHEMA_VERSION ||
+      version === CLARIFICATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1901,7 +1910,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION) return;
+      version === PLAN_EDIT_SCHEMA_VERSION ||
+      version === CLARIFICATION_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2012,7 +2022,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION,
+      version === PLAN_EDIT_SCHEMA_VERSION ||
+      version === CLARIFICATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2030,7 +2041,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION) return;
+      version === PLAN_EDIT_SCHEMA_VERSION ||
+      version === CLARIFICATION_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2323,7 +2335,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== PLAN_EDIT_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== CLARIFICATION_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2389,7 +2401,8 @@ function initializeModelServiceSchema(
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION,
+      version === PLAN_EDIT_SCHEMA_VERSION ||
+      version === CLARIFICATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2407,7 +2420,8 @@ function initializeModelServiceSchema(
       version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
       version === RUN_CANCELLATION_SCHEMA_VERSION ||
       version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION) {
+      version === PLAN_EDIT_SCHEMA_VERSION ||
+      version === CLARIFICATION_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3315,6 +3329,7 @@ export class EditorialStore {
       initializeExportLedgerSchema(authority);
       initializeDefaultExecutionRuleSchema(authority);
       initializeRunCheckpointSchema(authority);
+      initializeClarificationSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -3745,7 +3760,9 @@ export class EditorialStore {
       const blocks = this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
       const defaultRule = this.#baselineDefaultRule(projection);
       const stopped = this.#baselineStoppedRun(projection, carriesStoppedRun);
-      const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, defaultRule, ...(stopped === null ? {} : { stopped }) }));
+      // What the Run asked the editor, and the answers (Issue #422, S76d).
+      const clarifications = projection.run === null ? [] : this.#analysisCall(() => this.#baselineAnalysis.clarificationsOf(projection.run!.runRecordId));
+      const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, defaultRule, clarifications, ...(stopped === null ? {} : { stopped }) }));
       return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     const reviewRunId = input.ref;
@@ -3791,6 +3808,15 @@ export class EditorialStore {
       if (plan.start.needsModelConnection && (await credentialReadiness()) === 'missing') blockers.push(RESUME_BLOCKED_CONNECTION);
       if (reaches && connectivity.reading() === 'offline') blockers.push(RESUME_BLOCKED_OFFLINE);
       plan = withResumeBlockers(plan, blockers);
+    }
+    // A Run waiting for the editor's answer goes on once answered (Issue #422, S76d; CLAR-006): it is answered only while
+    // the service could take it on — the route's credential there, and the device online when the route reaches its
+    // model over the network. A busy slot only queues it.
+    if (plan.state.key === 'awaiting-clarification') {
+      const blockers: string[] = [];
+      if (plan.start.needsModelConnection && (await credentialReadiness()) === 'missing') blockers.push(ANSWER_BLOCKED_CONNECTION);
+      if (reaches && connectivity.reading() === 'offline') blockers.push(ANSWER_BLOCKED_OFFLINE);
+      plan = withAnswerBlockers(plan, blockers);
     }
     if (plan.state.key !== 'waiting') return plan;
     if (reaches && connectivity.reading() === 'offline') return withWaitingReason(plan, 'network');
@@ -3877,12 +3903,33 @@ export class EditorialStore {
    * Task, as the editor left it, and the Book's analysis as it then reads.
    */
   editBaselineAnalysisPlan(
-    input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string; removedSteps: ReadonlyArray<string>; disallowedAdaptations: ReadonlyArray<string> },
+    input: {
+      bookId: string;
+      taskIntentId: string;
+      planEnvelopeDigest: string;
+      removedSteps: ReadonlyArray<string>;
+      disallowedAdaptations: ReadonlyArray<string>;
+      askFirstAdaptations?: ReadonlyArray<string>;
+    },
     progress?: ProgressReader,
   ): BaselineAnalysisProjection {
     this.#assertAvailable();
     this.#analysisCall(() => this.#baselineAnalysis.editPlan(input.bookId, input));
     return this.inspectBaselineAnalysis(input.bookId, progress);
+  }
+
+  /**
+   * 提交回答 (Issue #422, plan slice S76d; V2-UX-CLAR-005, CLAR-006): the editor's answer to a question the Book's current
+   * baseline Task's Run asked, recorded with who and when; and the Run it belongs to, with the state it was in, so the
+   * service can take a Run that waits for it on.
+   */
+  answerBaselineAnalysisClarification(input: { bookId: string; taskIntentId: string; requestId: string; optionId: string; note: string | null }): {
+    runRecordId: string;
+    runState: BaselineAnalysisRunState;
+  } {
+    this.#assertAvailable();
+    const answered = this.#analysisCall(() => this.#baselineAnalysis.recordClarificationAnswer(input.bookId, input));
+    return { runRecordId: answered.runRecordId, runState: answered.runState };
   }
 
   /**
@@ -3904,7 +3951,7 @@ export class EditorialStore {
    * Startup reconciliation (CONT-014): the baseline Runs a stopped service left under way are settled `paused` or
    * `resumable`; the ones left cancelling are named for the execution owner to finish.
    */
-  reconcileStoppedBaselineAnalysisRuns(): { settled: number; cancelling: ReadonlyArray<string> } {
+  reconcileStoppedBaselineAnalysisRuns(): { settled: number; cancelling: ReadonlyArray<string>; answered: ReadonlyArray<string> } {
     this.#assertAvailable();
     return this.#analysisCall(() => this.#baselineAnalysis.reconcileStoppedRuns());
   }
@@ -3917,7 +3964,7 @@ export class EditorialStore {
   #baselineStoppedRun(projection: BaselineAnalysisProjection, carriesStoppedRun: (runRecordId: string) => boolean): BaselineStoppedRunFacts | null {
     const run = projection.run;
     if (run === null || run.progress !== null) return null;
-    const stopped = run.state === 'paused' || run.state === 'resumable';
+    const stopped = run.state === 'paused' || run.state === 'resumable' || run.state === 'awaiting-clarification';
     const unheld = run.state === 'admitted' || run.state === 'executing' || run.state === 'cancelling' || run.state === 'pausing';
     if (!stopped && !unheld) return null;
     const unitsTotal = projection.update === null ? (projection.coverageManifest?.units.length ?? 0) : projection.update.reusePlan?.counts.recomputed ?? 0;
@@ -3925,17 +3972,23 @@ export class EditorialStore {
     return this.#analysisCall(() => {
       let unitsSettled: number | null;
       let unitsClosed: number | null;
+      let waiting: Array<{ unitOrdinal: number; answered: boolean }> = [];
       try {
         const checkpoints = this.#baselineAnalysis.unitCheckpoints(run.runRecordId);
         unitsSettled = checkpoints.length;
         unitsClosed = checkpoints.filter((checkpoint) => checkpoint.unit.closed.state === 'closed').length;
+        // The units that asked the editor and have not settled since (Issue #422, S76d).
+        const settled = new Set(checkpoints.map((checkpoint) => checkpoint.unit.unitOrdinal));
+        waiting = this.#baselineAnalysis.clarificationsOf(run.runRecordId)
+          .filter((request) => !settled.has(request.unitOrdinal))
+          .map((request) => ({ unitOrdinal: request.unitOrdinal, answered: request.answer !== null }));
       } catch {
         // Its kept progress no longer reads back: 续行 names that, and a cancellation forms no revision from it.
         unitsSettled = null;
         unitsClosed = null;
       }
       const blockers = stopped ? [...this.#baselineAnalysis.continuationBlockers(run.runRecordId), ...(bindingHolds ? [] : [RESUME_BLOCKED_BINDING])] : [];
-      return { unitsSettled, unitsClosed, unitsTotal, blockers, bindingHolds };
+      return { unitsSettled, unitsClosed, unitsTotal, blockers, bindingHolds, waiting };
     });
   }
 
@@ -4038,7 +4091,7 @@ export class EditorialStore {
       ? SET_RULE_DEVELOPER_LIVE
       : projection.planRevision !== null
         ? SET_RULE_CHANGED
-        : version.edits.removedSteps.length > 0 || version.edits.disallowedAdaptations.length > 0
+        : version.edits.removedSteps.length > 0 || version.edits.disallowedAdaptations.length > 0 || (version.edits.askFirstAdaptations ?? []).length > 0
           ? SET_RULE_EDITED
           : current !== null && current.state === 'active' && current.fromThisPlan ? setRuleAlreadyReason(current.name) : null;
     return {

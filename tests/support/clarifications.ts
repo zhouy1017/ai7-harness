@@ -1,23 +1,22 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { RUN_CHECKPOINT_SCHEMA_SQL } from '../../src/service/analysis/run-checkpoints.js';
-import { CLARIFICATION_RELATIONS_DROP_ORDER } from './clarifications.js';
-import { ANALYSIS_LEDGER_REVISION_32_SQL, ANALYSIS_LEDGER_SCHEMA_SQL } from '../../src/service/task-authorization.js';
+import { CLARIFICATION_SCHEMA_SQL } from '../../src/service/analysis/clarifications.js';
+import { ANALYSIS_LEDGER_REVISION_34_SQL, ANALYSIS_LEDGER_SCHEMA_SQL } from '../../src/service/task-authorization.js';
 
 /**
- * The relation schema revision 33 adds (Issue #422, S76b), in drop order. A suite that plants a store at an earlier
- * revision drops it with whatever else later revisions added: a store that old never held it.
+ * The relations schema revision 35 adds (Issue #422, S76d), in drop order: an answer before the request it answers. A
+ * suite that plants a store at an earlier revision drops them with whatever else later revisions added: a store that
+ * old never held them.
  */
-export const RUN_CHECKPOINT_RELATIONS_DROP_ORDER: ReadonlyArray<string> = Object.keys(RUN_CHECKPOINT_SCHEMA_SQL).reverse();
+export const CLARIFICATION_RELATIONS_DROP_ORDER: ReadonlyArray<string> = Object.keys(CLARIFICATION_SCHEMA_SQL).reverse();
 
-/** Drop the relations revision 33 added, foreign keys off around it. The caller sets the version. */
-export function dropRunCheckpointRelations(database: DatabaseSync): void {
+/** Drop the relations revision 35 added, foreign keys off around it. The caller sets the version. */
+export function dropClarificationRelations(database: DatabaseSync): void {
   database.exec('PRAGMA foreign_keys = OFF');
   try {
     database.exec('BEGIN IMMEDIATE');
     try {
       // A suite may plant one earlier revision over another, so a relation already gone stays gone.
-      // Revision 35's relations are newer still, so a store before revision 33 never held them either.
-      for (const relation of [...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER]) database.exec(`DROP TABLE IF EXISTS ${relation}`);
+      for (const relation of CLARIFICATION_RELATIONS_DROP_ORDER) database.exec(`DROP TABLE IF EXISTS ${relation}`);
       database.exec('COMMIT');
     } catch (error) {
       database.exec('ROLLBACK');
@@ -29,12 +28,12 @@ export function dropRunCheckpointRelations(database: DatabaseSync): void {
 }
 
 /**
- * Take a store the current code built back to exactly what revision 32 left: the checkpoint relation dropped and the
- * Run states narrowed to revision 32's text, every row copied, rowid included, triggers re-armed. No Run of the store
- * may be pausing, paused or resumable. The caller sets the version.
+ * Take a store the current code built back to exactly what revision 34 left: the clarification relations dropped and
+ * the Run states narrowed to revision 34's text, every row copied, rowid included, triggers re-armed. No Run of the
+ * store may be awaiting clarification. The caller sets the version.
  */
-export function plantRevision32Relations(database: DatabaseSync): void {
-  dropRunCheckpointRelations(database);
+export function plantRevision34Relations(database: DatabaseSync): void {
+  dropClarificationRelations(database);
   const columns = (database.prepare("SELECT name FROM pragma_table_info('analysis_run_states') ORDER BY cid").all() as { name: string }[])
     .map((column) => column.name)
     .join(', ');
@@ -47,7 +46,7 @@ export function plantRevision32Relations(database: DatabaseSync): void {
     try {
       database.exec(`CREATE TEMP TABLE plant_analysis_run_states AS SELECT rowid AS plant_rowid, * FROM analysis_run_states;
         DROP TABLE analysis_run_states;
-        ${ANALYSIS_LEDGER_REVISION_32_SQL.analysis_run_states};
+        ${ANALYSIS_LEDGER_REVISION_34_SQL.analysis_run_states};
         INSERT INTO analysis_run_states(rowid, ${columns}) SELECT plant_rowid, ${columns} FROM temp.plant_analysis_run_states ORDER BY plant_rowid;
         DROP TABLE temp.plant_analysis_run_states;`);
       for (const sql of attached) database.exec(sql);
@@ -61,11 +60,11 @@ export function plantRevision32Relations(database: DatabaseSync): void {
   }
 }
 
-/** Which of its shapes the Run-state relation holds: revision 32's, the current one, or neither. */
-export function runStatesShapeAt32(database: DatabaseSync): 'revision-32' | 'current' | 'other' {
+/** Which of its shapes the Run-state relation holds: revision 34's, the current one, or neither. */
+export function runStatesShapeAt34(database: DatabaseSync): 'revision-34' | 'current' | 'other' {
   const row = database.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'analysis_run_states'").get() as { sql: string } | undefined;
   const normalized = (value: string): string => value.trim().replace(/\s+/gu, ' ');
   if (row === undefined) return 'other';
-  if (normalized(row.sql) === normalized(ANALYSIS_LEDGER_REVISION_32_SQL.analysis_run_states)) return 'revision-32';
+  if (normalized(row.sql) === normalized(ANALYSIS_LEDGER_REVISION_34_SQL.analysis_run_states)) return 'revision-34';
   return normalized(row.sql) === normalized(ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_states) ? 'current' : 'other';
 }

@@ -1,4 +1,13 @@
-import type { RendererApi, ServiceJobProjection, TaskPlanKind, TaskPlanProjection, TaskPlanRunControlProjection } from '../shared/protocol.js';
+import type {
+  ClarificationOptionId,
+  RendererApi,
+  ServiceJobProjection,
+  TaskPlanClarificationProjection,
+  TaskPlanKind,
+  TaskPlanProjection,
+  TaskPlanRunControlProjection,
+} from '../shared/protocol.js';
+import { localInstantLabel } from './plan-preview-labels.js';
 import {
   TASK_BAR_CANCEL_CONFIRM,
   TASK_BAR_CANCEL_FAILED,
@@ -49,6 +58,18 @@ import {
   TASK_PLAN_EDIT,
   TASK_PLAN_EDIT_REASON,
   TASK_PLAN_EDIT_ADAPTATION_WITHDRAWN,
+  TASK_PLAN_EDIT_ADAPTATION_ASK_FIRST,
+  taskPlanEditAskFirst,
+  TASK_PLAN_CLARIFICATION_DEFER,
+  TASK_PLAN_CLARIFICATION_FAILED,
+  TASK_PLAN_CLARIFICATION_HEADING,
+  TASK_PLAN_CLARIFICATION_RECOMMENDED,
+  TASK_PLAN_CLARIFICATION_RECORD,
+  TASK_PLAN_CLARIFICATION_REOPEN,
+  TASK_PLAN_CLARIFICATION_SUBMIT,
+  TASK_PLAN_CLARIFICATION_SUBMIT_REASON,
+  TASK_PLAN_CLARIFICATION_SUBMITTED,
+  taskBarQuestionsNote,
   TASK_PLAN_EDIT_ASK_FIRST_NOTE,
   TASK_PLAN_EDIT_RESTORE,
   TASK_PLAN_EDIT_STEP_REMOVED,
@@ -141,6 +162,7 @@ type DrawerApi = Pick<
   | 'pauseBaselineAnalysisRun'
   | 'resumeBaselineAnalysisRun'
   | 'editBaselineAnalysisPlan'
+  | 'answerBaselineAnalysisClarification'
   | 'runReconnectPreflight'
   | 'setDefaultExecutionRule'
 >;
@@ -177,6 +199,8 @@ const DRIFT_TABLE_ID = 'task-drawer-drift-table';
 /** The Cancellation Impact Summary 取消任务 opens inline (Issue #422, CTRL-004); one bar, so one summary. */
 const CANCEL_IMPACT_ID = 'task-drawer-cancel-impact';
 const REDO_SUMMARY_ID = 'task-drawer-redo-summary';
+/** How the editor left an editable item (Issue #419; S76d): kept, left out or withheld, or asked first. */
+type ItemEdit = 'kept' | 'removed' | 'ask-first';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -228,7 +252,14 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
    * state where it differs from the version shown. It lives outside every repaint — a read of the plan redraws the body
    * — so closing the drawer keeps it; only 更新计划, 撤销修改 or a restart of AI7 lets it go.
    */
-  const editBuffers = new Map<string, Map<string, boolean>>();
+  const editBuffers = new Map<string, Map<string, ItemEdit>>();
+  /**
+   * 澄清卡 (Issue #422, S76d; INPUT-004): the choice and the note the editor has on each open question, kept outside every
+   * repaint until they submit it; and the questions they set aside with 暂不回答, which records nothing (CLAR-007).
+   */
+  const clarificationDrafts = new Map<string, { optionId: ClarificationOptionId | null; noteOpen: boolean; note: string }>();
+  const deferredQuestions = new Set<string>();
+  let questionsPainted = '';
   let ticket = 0;
   let interrupted = false;
   let focusTitle = false;
@@ -289,6 +320,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   close.addEventListener('click', () => surface.close(true));
   header.append(back, title, pill, modes, close, backReason);
   const body = el('div', 'task-drawer-body');
+  // The open questions stand first in the body, and a repaint of the plan below them never removes them: a note being
+  // written keeps its focus and its composition while the Run reads on (Issue #422, S76d).
+  const questions = el('div', 'task-drawer-questions');
+  questions.dataset['taskDrawerQuestions'] = '';
   // The footer region never scrolls with the plan (LAYER-005): PLAN-007's line, then the authorization bar.
   const foot = el('div', 'task-drawer-foot');
   const footer = el('p', 'task-drawer-footer', TASK_DRAWER_FOOTER);
@@ -335,8 +370,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     clearPoll();
     const waiting = next.state.key === 'waiting';
     // 正在取消 and 正在暂停 are followed like 运行中 until the Run has stopped (Issue #422, CTRL-005); a stopped Run is
-    // read again slowly, so 续行 is offered once what it waits for — the slot, the network — is back.
-    const stopped = next.state.key === 'paused' || next.state.key === 'resumable';
+    // read again slowly, so 续行 is offered once what it waits for — the slot, the network — is back, and so is one
+    // waiting for the editor's answer, which the service takes on by itself once the slot is free (S76d).
+    const stopped = next.state.key === 'paused' || next.state.key === 'resumable' || next.state.key === 'awaiting-clarification';
     const followed = next.state.key === 'running' || next.state.key === 'cancelling' || next.state.key === 'pausing';
     if ((!followed && !waiting && !stopped) || interrupted || root.hidden) return;
     pollTimer = window.setTimeout(() => {
@@ -421,8 +457,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     pill.textContent = next.state.label;
     const active = document.activeElement;
     const restore = active instanceof HTMLElement && (body.contains(active) || bar.contains(active)) ? active.dataset['taskDrawerControl'] ?? null : null;
-    body.replaceChildren(
+    paintQuestions(next);
+    replaceBody(
       ...(next.runControl === null ? [] : [activityBlock(next.runControl)]),
+      ...(next.clarifications.some((card) => card.state !== 'open') ? [clarificationRecord(next)] : []),
       goalBlock(next),
       ...(next.defaultRule.startedBy === null ? [] : [quickStartedBlock(next.defaultRule.startedBy)]),
       ...(next.drift === null ? [] : [driftBlock(next.drift)]),
@@ -627,18 +665,22 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const adaptable = el('div', 'task-plan-boundary-column');
     adaptable.dataset['taskPlanBoundary'] = 'adaptable';
     const adaptations = el('ul', 'task-plan-list');
-    if (next.boundary.adaptable.length === 0) adaptations.append(el('li', undefined, TASK_PLAN_NO_ADAPTATION));
+    // An adaptation moved into 先问你 (Issue #422, S76d) stands in the right column, where the editor sees it asked first.
+    const asked: HTMLElement[] = [];
     for (const entry of next.boundary.adaptable) {
       const item = el('li');
       item.dataset['taskPlanItem'] = entry.id;
-      const removed = shownRemoved(next, entry.id, entry.removed);
-      if (removed) item.classList.add('task-plan-item-removed');
+      const committed = committedEdit(entry);
+      const shown = shownEdit(next, entry.id, committed);
+      if (shown === 'removed') item.classList.add('task-plan-item-removed');
       item.append(el('span', 'task-plan-adaptation', entry.label));
-      if (entry.removable) item.append(...editControls(next, entry.id, entry.label, entry.removed, removed, 'adaptation'));
-      adaptations.append(item);
+      if (entry.removable || entry.movable) item.append(...adaptationControls(next, entry, committed, shown));
+      if (shown === 'ask-first') asked.push(item);
+      else adaptations.append(item);
     }
+    if (next.boundary.adaptable.length === 0 || adaptations.childElementCount === 0) adaptations.append(el('li', undefined, TASK_PLAN_NO_ADAPTATION));
     adaptable.append(el('h4', undefined, TASK_PLAN_BOUNDARY_COLUMNS[0]), adaptations);
-    if (next.edit.editable && next.boundary.adaptable.some((entry) => entry.removable)) {
+    if (next.edit.editable && next.boundary.adaptable.some((entry) => entry.movable)) {
       adaptable.append(el('p', 'field-note task-plan-edit-note', TASK_PLAN_EDIT_ASK_FIRST_NOTE));
     }
     const askFirst = el('div', 'task-plan-boundary-column');
@@ -649,7 +691,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       entry.append(el('span', 'task-plan-lock', TASK_PLAN_LOCKED), item);
       locked.append(entry);
     }
-    askFirst.append(el('h4', undefined, TASK_PLAN_BOUNDARY_COLUMNS[1]), locked, el('p', 'field-note', TASK_PLAN_LOCKED_NOTE));
+    const movedIn = el('ul', 'task-plan-list task-plan-asked');
+    movedIn.append(...asked);
+    askFirst.append(el('h4', undefined, TASK_PLAN_BOUNDARY_COLUMNS[1]), ...(asked.length === 0 ? [] : [movedIn]), locked, el('p', 'field-note', TASK_PLAN_LOCKED_NOTE));
     section.append(adaptable, askFirst);
     return section;
   }
@@ -910,9 +954,18 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     return `${next.kind}:${next.ref}`;
   }
 
+  /** An item as the version shown has it: a step kept or left out; an adaptation allowed, withheld or asked first. */
+  function committedEdit(entry: { removed: boolean; askFirst?: boolean }): ItemEdit {
+    return entry.askFirst === true ? 'ask-first' : entry.removed ? 'removed' : 'kept';
+  }
+
   /** An item as the editor now sees it: their pending edit where they made one, else the version shown. */
-  function shownRemoved(next: TaskPlanProjection, id: string, committed: boolean): boolean {
+  function shownEdit(next: TaskPlanProjection, id: string, committed: ItemEdit): ItemEdit {
     return editBuffers.get(editKey(next))?.get(id) ?? committed;
+  }
+
+  function shownRemoved(next: TaskPlanProjection, id: string, committed: boolean): boolean {
+    return shownEdit(next, id, committed ? 'removed' : 'kept') === 'removed';
   }
 
   /**
@@ -927,25 +980,25 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       editBuffers.delete(key);
       return 0;
     }
-    const committed = new Map<string, boolean>([
-      ...next.steps.filter((step) => step.removable).map((step) => [step.id, step.removed] as const),
-      ...next.boundary.adaptable.filter((entry) => entry.removable).map((entry) => [entry.id, entry.removed] as const),
+    const committed = new Map<string, ItemEdit>([
+      ...next.steps.filter((step) => step.removable).map((step) => [step.id, committedEdit(step)] as const),
+      ...next.boundary.adaptable.filter((entry) => entry.removable || entry.movable).map((entry) => [entry.id, committedEdit(entry)] as const),
     ]);
-    for (const [id, removed] of buffer) {
-      if (committed.get(id) === undefined || committed.get(id) === removed) buffer.delete(id);
+    for (const [id, state] of buffer) {
+      if (committed.get(id) === undefined || committed.get(id) === state) buffer.delete(id);
     }
     if (buffer.size === 0) editBuffers.delete(key);
     return buffer.size;
   }
 
   /** One item's edit, kept until 更新计划 or 撤销修改; focus stays on the item, now on its other control. */
-  function setItemRemoved(next: TaskPlanProjection, id: string, committed: boolean, removed: boolean): void {
+  function setItemEdit(next: TaskPlanProjection, id: string, committed: ItemEdit, state: ItemEdit): void {
     // The plan on show, which a read may have replaced since this control was drawn; never another Task's.
     if (plan === null || editKey(plan) !== editKey(next) || working || interrupted || !plan.edit.editable) return;
     const key = editKey(plan);
-    const buffer = editBuffers.get(key) ?? new Map<string, boolean>();
-    if (removed === committed) buffer.delete(id);
-    else buffer.set(id, removed);
+    const buffer = editBuffers.get(key) ?? new Map<string, ItemEdit>();
+    if (state === committed) buffer.delete(id);
+    else buffer.set(id, state);
     if (buffer.size === 0) editBuffers.delete(key);
     else editBuffers.set(key, buffer);
     paint(plan, true);
@@ -975,8 +1028,54 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       button.setAttribute('aria-label', name);
       button.title = name;
     }
-    button.addEventListener('click', () => setItemRemoved(next, id, committed, !removed));
+    button.addEventListener('click', () => setItemEdit(next, id, committed ? 'removed' : 'kept', removed ? 'kept' : 'removed'));
     parts.push(button);
+    return parts;
+  }
+
+  /**
+   * An adaptation's mark and controls (PLAN-011, PLAN-012): allowed, it offers `×` (= 不允许) and 先问你; withheld or
+   * asked first, it says so beside 你改的 with 恢复. A plan that takes no edit shows the mark and no control.
+   */
+  function adaptationControls(next: TaskPlanProjection, entry: TaskPlanProjection['boundary']['adaptable'][number], committed: ItemEdit, shown: ItemEdit): HTMLElement[] {
+    const parts: HTMLElement[] = [];
+    if (shown !== 'kept') {
+      parts.push(el('span', 'task-plan-edit-tag', `${TASK_PLAN_EDIT_TAG} · ${shown === 'removed' ? TASK_PLAN_EDIT_ADAPTATION_WITHDRAWN : TASK_PLAN_EDIT_ADAPTATION_ASK_FIRST}`));
+    }
+    if (!next.edit.editable) return parts;
+    if (shown !== 'kept') {
+      const restore = document.createElement('button');
+      restore.type = 'button';
+      restore.dataset['taskPlanEdit'] = 'restore';
+      restore.className = 'quiet task-plan-edit-restore';
+      restore.textContent = TASK_PLAN_EDIT_RESTORE;
+      restore.addEventListener('click', () => setItemEdit(next, entry.id, committed, 'kept'));
+      parts.push(restore);
+      return parts;
+    }
+    if (entry.removable) {
+      const name = taskPlanEditWithdraw(entry.label);
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.dataset['taskPlanEdit'] = 'remove';
+      remove.className = 'quiet task-plan-edit-remove';
+      remove.setAttribute('aria-label', name);
+      remove.title = name;
+      remove.addEventListener('click', () => setItemEdit(next, entry.id, committed, 'removed'));
+      parts.push(remove);
+    }
+    if (entry.movable) {
+      const move = document.createElement('button');
+      move.type = 'button';
+      move.dataset['taskPlanEdit'] = 'ask-first';
+      // Its words are the style sheet's, as `×`'s glyph is, so the item's text stays the adaptation's own words; the
+      // name says what it does.
+      move.className = 'quiet task-plan-edit-ask-first';
+      move.setAttribute('aria-label', taskPlanEditAskFirst(entry.label));
+      move.title = taskPlanEditAskFirst(entry.label);
+      move.addEventListener('click', () => setItemEdit(next, entry.id, committed, 'ask-first'));
+      parts.push(move);
+    }
     return parts;
   }
 
@@ -989,11 +1088,21 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     if (current === null || current.kind !== 'baseline-analysis' || planEnvelopeDigest === null || !beginWork()) return;
     const removedSteps = current.steps.filter((step) => step.removable && shownRemoved(current, step.id, step.removed)).map((step) => step.id);
     const disallowedAdaptations = current.boundary.adaptable
-      .filter((entry) => entry.removable && shownRemoved(current, entry.id, entry.removed))
+      .filter((entry) => entry.removable && shownEdit(current, entry.id, committedEdit(entry)) === 'removed')
+      .map((entry) => entry.id);
+    // 先问你 (Issue #422, S76d): named only when something is asked first, as the plan's own record names it.
+    const askFirstAdaptations = current.boundary.adaptable
+      .filter((entry) => entry.movable && shownEdit(current, entry.id, committedEdit(entry)) === 'ask-first')
       .map((entry) => entry.id);
     options.setStatus('正在更新计划…', 'busy');
     try {
-      const updated = await api.editBaselineAnalysisPlan({ taskIntentId: current.ref, planEnvelopeDigest, removedSteps, disallowedAdaptations });
+      const updated = await api.editBaselineAnalysisPlan({
+        taskIntentId: current.ref,
+        planEnvelopeDigest,
+        removedSteps,
+        disallowedAdaptations,
+        ...(askFirstAdaptations.length === 0 ? {} : { askFirstAdaptations }),
+      });
       editBuffers.delete(editKey(current));
       options.setStatus(`计划已更新为第 ${updated.planVersion?.ordinal ?? '?'} 版。`, 'success');
       focusBar = true;
@@ -1371,6 +1480,198 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
   }
 
+  // ---- Clarification Requests (Issue #422, plan slice S76d; CLAR-001 to CLAR-007, INPUT-001 to INPUT-004) ------
+
+  /** The plan below the open questions: everything in the body after them goes, and they stay where they are. */
+  function replaceBody(...children: HTMLElement[]): void {
+    if (body.firstElementChild !== questions) body.prepend(questions);
+    for (const child of [...body.children]) if (child !== questions) child.remove();
+    body.append(...children);
+  }
+
+  /**
+   * The open questions of the Task's Run, first in the body: drawn again only when what they are changes — a question
+   * asked or answered, its scope, 暂不回答, the note opened, or an action under way — never because the Run read on.
+   */
+  function paintQuestions(next: TaskPlanProjection): void {
+    const open = next.clarifications.filter((card) => card.state === 'open');
+    const key = JSON.stringify({
+      ref: next.ref,
+      open: open.map((card) => [card.requestId, card.scope, card.answerable.reason, deferredQuestions.has(card.requestId),
+        clarificationDrafts.get(card.requestId)?.noteOpen ?? false]),
+      working,
+      interrupted,
+    });
+    if (key === questionsPainted) return;
+    questionsPainted = key;
+    const active = document.activeElement;
+    const keep = active instanceof HTMLElement && questions.contains(active) ? active.dataset['taskDrawerControl'] ?? null : null;
+    questions.replaceChildren(...open.map((card) => questionCard(next, card)));
+    if (keep !== null) questions.querySelector<HTMLElement>(`[data-task-drawer-control="${keep}"]`)?.focus();
+  }
+
+  function repaintQuestions(focus: string | null): void {
+    questionsPainted = '';
+    if (plan !== null) paintQuestions(plan);
+    if (focus !== null) questions.querySelector<HTMLElement>(`[data-task-drawer-control="${focus}"]`)?.focus();
+  }
+
+  /**
+   * One open question as its card (CLAR-002, INPUT-002 to INPUT-004): the question and why it is asked, what waits and
+   * what goes on, what an answer does, the choices — none chosen, 推荐 marked with its reason — the note that may
+   * qualify a choice, and 提交回答, which alone records; 暂不回答 sets the card aside and records nothing.
+   */
+  function questionCard(next: TaskPlanProjection, card: TaskPlanClarificationProjection): HTMLElement {
+    const id = card.requestId;
+    if (deferredQuestions.has(id)) {
+      const line = el('p', 'task-plan-clarification-deferred');
+      line.dataset['taskPlanClarification'] = id;
+      line.dataset['clarificationState'] = 'deferred';
+      const reopen = control(TASK_PLAN_CLARIFICATION_REOPEN, 'secondary', `clarification-reopen:${id}`);
+      reopen.addEventListener('click', () => {
+        deferredQuestions.delete(id);
+        repaintQuestions(`clarification-heading:${id}`);
+      });
+      line.append(el('span', undefined, taskBarQuestionsNote(1)), reopen);
+      return line;
+    }
+    const draft = clarificationDrafts.get(id) ?? { optionId: null, noteOpen: false, note: '' };
+    const section = el('section', 'task-plan-clarification');
+    section.dataset['taskPlanClarification'] = id;
+    section.dataset['clarificationState'] = 'open';
+    section.setAttribute('role', 'group');
+    const heading = el('h4', undefined, TASK_PLAN_CLARIFICATION_HEADING);
+    heading.id = uid('clarification');
+    heading.tabIndex = -1;
+    heading.dataset['taskDrawerControl'] = `clarification-heading:${id}`;
+    section.setAttribute('aria-labelledby', heading.id);
+    const scope = el('p', 'task-plan-clarification-scope', card.scope);
+    scope.dataset['clarificationScope'] = '';
+    const choices = el('fieldset', 'task-plan-clarification-choices');
+    choices.append(el('legend', 'task-plan-clarification-question', card.question));
+    const submit = control(TASK_PLAN_CLARIFICATION_SUBMIT, 'primary', `clarification-submit:${id}`);
+    const submitWhy = el('small', 'field-note', TASK_PLAN_CLARIFICATION_SUBMIT_REASON);
+    submitWhy.id = uid('clarification-submit');
+    // A drawer whose service stopped offers nothing; the card says why it cannot be answered only when the Run says so.
+    const blocked = card.answerable.reason ?? (interrupted ? '' : null);
+    const ready = (): void => {
+      submit.disabled = draft.optionId === null || working || blocked !== null;
+      submitWhy.textContent = blocked ?? TASK_PLAN_CLARIFICATION_SUBMIT_REASON;
+      submitWhy.hidden = !submit.disabled;
+      if (submit.disabled) submit.setAttribute('aria-describedby', submitWhy.id);
+      else submit.removeAttribute('aria-describedby');
+    };
+    for (const option of card.options) {
+      const choice = el('label', 'task-plan-choice');
+      choice.dataset['clarificationOption'] = option.id;
+      const input = document.createElement('input');
+      input.type = 'radio';
+      input.name = `clarification-${id}`;
+      input.value = option.id;
+      input.checked = draft.optionId === option.id;
+      input.disabled = blocked !== null;
+      input.dataset['taskDrawerControl'] = `clarification-option:${id}:${option.id}`;
+      // A choice stays editable until 提交回答 (INPUT-004); choosing records nothing and moves no Run.
+      input.addEventListener('change', () => {
+        if (!input.checked) return;
+        draft.optionId = option.id;
+        clarificationDrafts.set(id, draft);
+        ready();
+      });
+      const text = el('span', 'task-plan-choice-text');
+      text.append(el('span', 'task-plan-choice-label', option.label));
+      if (option.recommended !== null) {
+        text.append(el('span', 'task-plan-choice-recommended', TASK_PLAN_CLARIFICATION_RECOMMENDED), el('small', 'field-note task-plan-choice-why', option.recommended));
+      }
+      text.append(el('small', 'field-note task-plan-choice-consequence', option.consequence));
+      choice.append(input, text);
+      choices.append(choice);
+    }
+    const noteToggle = control(card.note.label, 'quiet', `clarification-note-toggle:${id}`);
+    noteToggle.setAttribute('aria-expanded', draft.noteOpen ? 'true' : 'false');
+    noteToggle.disabled = blocked !== null;
+    noteToggle.addEventListener('click', () => {
+      draft.noteOpen = !draft.noteOpen;
+      clarificationDrafts.set(id, draft);
+      repaintQuestions(draft.noteOpen ? `clarification-note:${id}` : `clarification-note-toggle:${id}`);
+    });
+    const parts: HTMLElement[] = [heading, scope, choices, el('p', 'field-note task-plan-clarification-why', card.why),
+      el('p', 'field-note task-plan-clarification-detail', card.detail), noteToggle];
+    if (draft.noteOpen) {
+      // The note is IME-safe: Enter writes into it and nothing is submitted but by 提交回答.
+      const note = document.createElement('textarea');
+      note.className = 'task-plan-clarification-note';
+      note.rows = 3;
+      note.maxLength = card.note.maxLength;
+      note.value = draft.note;
+      note.disabled = blocked !== null;
+      note.dataset['taskDrawerControl'] = `clarification-note:${id}`;
+      note.setAttribute('aria-label', card.note.label);
+      const hint = el('small', 'field-note', card.note.hint);
+      hint.id = uid('clarification-note');
+      note.setAttribute('aria-describedby', hint.id);
+      note.addEventListener('input', () => {
+        draft.note = note.value;
+        clarificationDrafts.set(id, draft);
+      });
+      parts.push(note, hint);
+    }
+    const defer = control(TASK_PLAN_CLARIFICATION_DEFER, 'secondary', `clarification-defer:${id}`);
+    defer.addEventListener('click', () => {
+      deferredQuestions.add(id);
+      repaintQuestions(`clarification-reopen:${id}`);
+    });
+    submit.addEventListener('click', () => void submitAnswer(next, card, draft));
+    ready();
+    const actions = el('div', 'button-row');
+    actions.append(submit, defer);
+    parts.push(el('p', 'field-note task-plan-clarification-after', card.after), actions, submitWhy);
+    section.append(...parts);
+    return section;
+  }
+
+  /** What the Run asked and how each question was answered, below the activity card (CLAR-005). */
+  function clarificationRecord(next: TaskPlanProjection): HTMLElement {
+    const section = el('section', 'task-plan-clarification-record');
+    section.append(el('h4', undefined, TASK_PLAN_CLARIFICATION_RECORD));
+    const list = el('ul', 'task-plan-list');
+    for (const card of next.clarifications.filter((entry) => entry.state !== 'open')) {
+      const item = el('li');
+      item.dataset['taskPlanClarification'] = card.requestId;
+      item.dataset['clarificationState'] = card.state;
+      item.append(el('span', undefined, card.question));
+      item.append(el('span', 'field-note task-plan-clarification-answer', card.answer === null
+        ? card.answerable.reason ?? ''
+        : `${card.answer.line}（${localInstantLabel(card.answer.answeredAt)}）`));
+      list.append(item);
+    }
+    section.append(list);
+    return section;
+  }
+
+  /** 提交回答 (CLAR-005, CLAR-006): the choice and the note, recorded as the editor's answer; a refusal is said beside the bar. */
+  async function submitAnswer(next: TaskPlanProjection, card: TaskPlanClarificationProjection, draft: { optionId: ClarificationOptionId | null; noteOpen: boolean; note: string }): Promise<void> {
+    const current = plan;
+    const asked = request;
+    const optionId = draft.optionId;
+    if (current === null || current.ref !== next.ref || optionId === null || !beginWork()) return;
+    options.setStatus('正在提交回答…', 'busy');
+    try {
+      const note = draft.noteOpen && draft.note.trim().length > 0 ? draft.note.trim() : null;
+      await api.answerBaselineAnalysisClarification({ taskIntentId: current.ref, requestId: card.requestId, optionId, note });
+      clarificationDrafts.delete(card.requestId);
+      deferredQuestions.delete(card.requestId);
+      options.setStatus(TASK_PLAN_CLARIFICATION_SUBMITTED, 'success');
+      focusBar = true;
+      options.onRecorded(current.kind, current.bookId);
+    } catch (error) {
+      refusal = options.errorMessage(error, TASK_PLAN_CLARIFICATION_FAILED);
+      options.setStatus(refusal, 'error');
+    } finally {
+      endWork(asked);
+    }
+  }
+
   // ---- the surface --------------------------------------------------------------------------------------
 
   const surface: TaskDrawerSurface = {
@@ -1394,7 +1695,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       delete root.dataset['taskPlanStart'];
       root.dataset['taskPlanState'] = 'loading';
       pill.hidden = true;
-      body.replaceChildren(el('p', 'field-note task-drawer-loading', TASK_DRAWER_LOADING));
+      questions.replaceChildren();
+      questionsPainted = '';
+      body.replaceChildren(questions, el('p', 'field-note task-drawer-loading', TASK_DRAWER_LOADING));
       bar.hidden = true;
       bar.replaceChildren();
       options.onOpen();

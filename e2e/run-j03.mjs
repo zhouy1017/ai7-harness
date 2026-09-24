@@ -212,10 +212,10 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     // proposal-conflict relations, revision 27 the import-retention relations, revision 28 the staged
     // imported marks, revision 29 the export ledger, revision 30 widens the Run states for Connectivity Wait,
     // revision 31 adds the default-execution-rule ledger, revision 32 widens the Run states and the Task Outcomes
-    // for 取消任务, revision 33 widens the Run states again and adds the unit checkpoints for 暂停 and 续行, and revision
-    // 34 widens the Plan Revisions for 更新计划, so this pin moves with the terminal version the service stamps
-    // (`PLAN_EDIT_SCHEMA_VERSION`).
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 34, 'credential-cleanup-metadata-version');
+    // for 取消任务, revision 33 widens the Run states again and adds the unit checkpoints for 暂停 and 续行, revision 34
+    // widens the Plan Revisions for 更新计划, and revision 35 widens the Run states once more and adds the Clarification
+    // Requests and answers, so this pin moves with the terminal version the service stamps (`CLARIFICATION_SCHEMA_VERSION`).
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 35, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
               approved_fallback_chain, credential_slot, credential_reference, credential_operation_state

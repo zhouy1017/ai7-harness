@@ -68,6 +68,20 @@ import {
   TASK_BAR_UPDATE_PLAN,
   TASK_PLAN_EDIT_ADAPTATION_WITHDRAWN,
   TASK_PLAN_EDIT_ASK_FIRST_NOTE,
+  TASK_PLAN_EDIT_ADAPTATION_ASK_FIRST,
+  taskPlanEditAskFirst,
+  TASK_PLAN_CLARIFICATION_DEFER,
+  TASK_PLAN_CLARIFICATION_FAILED,
+  TASK_PLAN_CLARIFICATION_HEADING,
+  TASK_PLAN_CLARIFICATION_RECOMMENDED,
+  TASK_PLAN_CLARIFICATION_RECORD,
+  TASK_PLAN_CLARIFICATION_REOPEN,
+  TASK_PLAN_CLARIFICATION_SUBMIT,
+  TASK_PLAN_CLARIFICATION_SUBMIT_REASON,
+  TASK_PLAN_CLARIFICATION_SUBMITTED,
+  TASK_BAR_AWAITING_ANSWER,
+  taskBarAwaitingAnswerNote,
+  taskBarQuestionsNote,
   TASK_PLAN_EDIT_RESTORE,
   TASK_PLAN_EDIT_STEP_REMOVED,
   TASK_PLAN_EDIT_STEPS_NOTE,
@@ -143,6 +157,7 @@ function plan(overrides: Partial<TaskPlanProjection> = {}): TaskPlanProjection {
     defaultRule: { canSet: false, reason: '这份计划不能设为快速开始默认。', planEnvelopeDigest: null, current: null, binds: [], startedBy: null },
     runControl: null,
     redo: null,
+    clarifications: [],
     ...overrides,
   };
 }
@@ -179,7 +194,7 @@ describe('the drawer', () => {
   it('gives every state a tone and a shape, so the pill never speaks by colour alone', () => {
     const keys: TaskPlanStateKey[] = [
       'ready', 'changed', 'unconnected', 'offline', 'recorded', 'blocked', 'waiting', 'running', 'settled', 'stopped', 'cancelled',
-      'cancelling', 'cancelled-after-start', 'pausing', 'paused', 'resumable',
+      'cancelling', 'cancelled-after-start', 'pausing', 'paused', 'resumable', 'awaiting-clarification',
     ];
     expect(Object.keys(TASK_PLAN_STATE_PILLS).sort()).toEqual([...keys].sort());
     expect(new Set(keys.map((key) => TASK_PLAN_STATE_PILLS[key].shape)).size).toBeGreaterThan(4);
@@ -584,7 +599,8 @@ describe('the editable plan (S73)', () => {
     expect(taskPlanEditWithdraw('模型服务暂时出错时，同一个阅读范围安全地再试一次')).toBe('不允许：模型服务暂时出错时，同一个阅读范围安全地再试一次');
     expect(TASK_PLAN_EDIT_RESTORE).toBe('恢复');
     expect(TASK_PLAN_EDIT_STEPS_NOTE).toBe('这项分析的步骤由分析工序决定：可以去掉「核对与抽检」，不能改写、增加或调换顺序。');
-    expect(TASK_PLAN_EDIT_ASK_FIRST_NOTE).toBe('改成「先问你」要等澄清请求，暂不提供。');
+    // S76d (Issue #422): the move is offered now, and the note says what it means for the Run.
+    expect(TASK_PLAN_EDIT_ASK_FIRST_NOTE).toBe('「先问你」：运行中遇到这种情况，AI7 先停下这一步来问你，其余阅读范围照常进行。');
     expect(TASK_PLAN_FULL_LINK_EDITABLE).toBe('完整计划（6 段）· 可以改步骤与限制');
     expect(TASK_PLAN_MATERIALITY_LABELS).toEqual({ material: '关键内容', derived: '随之变化', edited: '你改的' });
     expect(taskPlanEditCount(2)).toBe('你改了 2 处');
@@ -651,5 +667,48 @@ describe('改计划重做 (S76c)', () => {
     expect(TASK_BAR_REDO_CONFIRM).toBe('确认改计划重做');
     expect(TASK_BAR_REDO_KEEP).toBe('先不重做');
     expect(TASK_BAR_REDOING_NOTE).toBe('已记下改计划重做：这次运行正在取消，取消完成后准备新任务');
+  });
+});
+
+// Issue #422 (plan slice S76d; CLAR-002, CLAR-004, CLAR-007, INPUT-002 to INPUT-004): the question card's controls, the
+// move into 先问你, and what the bar says while questions wait.
+describe('Clarification Requests in the drawer (S76d)', () => {
+  it('names the card\'s controls and the move', () => {
+    expect([TASK_PLAN_CLARIFICATION_HEADING, TASK_PLAN_CLARIFICATION_RECOMMENDED, TASK_PLAN_CLARIFICATION_SUBMIT, TASK_PLAN_CLARIFICATION_DEFER, TASK_PLAN_CLARIFICATION_REOPEN])
+      .toEqual(['需要你回答', '推荐', '提交回答', '暂不回答', '回答']);
+    expect([TASK_PLAN_CLARIFICATION_SUBMIT_REASON, TASK_PLAN_CLARIFICATION_SUBMITTED, TASK_PLAN_CLARIFICATION_FAILED, TASK_PLAN_CLARIFICATION_RECORD])
+      .toEqual(['先选一个回答', '已记下你的回答。', '无法提交回答。', '问过你的问题']);
+    expect(TASK_PLAN_EDIT_ADAPTATION_ASK_FIRST).toBe('先问你');
+    expect(taskPlanEditAskFirst('模型服务暂时出错时，同一个阅读范围安全地再试一次')).toBe('改成先问你：模型服务暂时出错时，同一个阅读范围安全地再试一次');
+    expect(TASK_BAR_AWAITING_ANSWER).toBe('等你回答');
+    expect(taskBarQuestionsNote(1)).toBe('有 1 个问题等你回答');
+    expect(taskBarAwaitingAnswerNote(7, 8, 1)).toBe('已读完 7 / 8 个阅读范围；1 个问题等你回答，回答后接着做');
+    // Answered, and waiting only for the slot another Task holds.
+    expect(taskBarAwaitingAnswerNote(7, 8, 0)).toBe('已读完 7 / 8 个阅读范围；你已回答，另一项任务结束后就接着做');
+    expect(TASK_PLAN_STATE_PILLS['awaiting-clarification']).toEqual({ tone: 'attention', shape: 'ring' });
+  });
+
+  it('shows 等你回答 while the Run waits for its answer, and says so while it reads on', () => {
+    const question = { state: 'open' } as never;
+    const control = {
+      runRecordId: 'run', cancelling: false, pausing: false,
+      cancel: { reason: null, impact: [] }, pause: { reason: '这项任务现在没有在运行，不能暂停；可以取消它' }, resume: null, redo: { reason: null },
+      activity: null, executingSince: null, continuation: { unitsSettled: 7, unitsTotal: 8 },
+    };
+    const waiting = taskBarView(plan({
+      state: { key: 'awaiting-clarification', label: '任务等待你的说明' },
+      start: { ...plan().start, readiness: 'started' },
+      runControl: control as never,
+      clarifications: [question],
+    }));
+    expect(waiting).toMatchObject({ status: '等你回答', note: '已读完 7 / 8 个阅读范围；1 个问题等你回答，回答后接着做' });
+    expect(waiting.actions.map((action) => [action.name, action.disabledReason])).toEqual([['cancel-run', null], ['redo', null], ['run-link', null]]);
+    const reading = taskBarView(plan({
+      state: { key: 'running', label: '运行中' },
+      start: { ...plan().start, readiness: 'started' },
+      runControl: { ...control, pause: { reason: null }, redo: { reason: '先暂停，再改计划重做' }, continuation: null } as never,
+      clarifications: [question],
+    }));
+    expect(reading).toMatchObject({ status: '运行中', note: '有 1 个问题等你回答' });
   });
 });

@@ -23,6 +23,18 @@ import {
   RUN_CONTROL_PAUSE_REASON,
   RUN_CONTROL_REDO_REASON,
   redoGoalSentence,
+  CLARIFICATION_AFTER,
+  CLARIFICATION_NOTE,
+  CLARIFICATION_OPTIONS,
+  CLARIFICATION_SCOPE_CONTINUING,
+  CLARIFICATION_SCOPE_PAUSED,
+  CLARIFICATION_SCOPE_RESUMABLE,
+  CLARIFICATION_SCOPE_WAITING,
+  CLARIFICATION_UNANSWERABLE_CANCELLING,
+  CLARIFICATION_UNANSWERABLE_ENDED,
+  CLARIFICATION_WHY,
+  clarificationAnsweredLine,
+  clarificationQuestion,
   RESUME_BLOCKED_BINDING,
   RESUME_BLOCKED_CONNECTION,
   RESUME_BLOCKED_OFFLINE,
@@ -141,6 +153,7 @@ describe('route-aware readiness of the authorization bar (S74a A3; AUTH-005, MOD
       defaultRule: { canSet: false, reason: '这份计划不能设为快速开始默认。', planEnvelopeDigest: null, current: null, binds: [], startedBy: null },
       runControl: null,
       redo: null,
+      clarifications: [],
     };
   }
 
@@ -245,7 +258,7 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
     // Units 3 and 7 edited, then 同步到当前稿件: two ranges read again, six reused.
     const impact = baselineCancellationImpact(run('executing', progress({ unitsTotal: 2, unitsSettled: 1, currentUnitOrdinal: 7 })), { manuscriptUnits: 8, reusedUnits: 6 });
     expect(impact.slice(0, 2)).toEqual([
-      '正在读的第 7 个阅读范围读完后停止；其余 0 个要重新分析的阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。',
+      '正在读的第 7 个阅读范围读完后停止；之后的归纳、抽样都不再进行，不再发送任何内容。',
       '已读完的 1 个阅读范围和正在读的这一个的结果与缺口，连同沿用上一份分析的 6 个阅读范围，会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。',
     ]);
   });
@@ -330,6 +343,29 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
     ]);
   });
 
+  it('names the ranges that asked the editor, answered or not, and ends them as gaps (S76d, D7)', () => {
+    // Seven ranges read, the eighth asked: the summary names it, and nothing else is left to read.
+    expect(baselineCancellationImpact(run('awaiting-clarification', null), null, { unitsSettled: 7, unitsTotal: 8, waiting: [{ unitOrdinal: 5, answered: false }] })).toEqual([
+      '这项任务已经停下；之后的归纳、抽样都不再进行，不再发送任何内容。',
+      '已读完的 7 个阅读范围的结果与缺口会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。',
+      '第 5 个阅读范围在等你的回答；取消后不再重试，在这份修订版里记为缺口。',
+      CANCELLATION_NO_EFFECTS,
+    ]);
+    // Every range it read asked: its gaps are its revision, one of them answered but not yet gone on by.
+    expect(baselineCancellationImpact(run('paused', null), null, { unitsSettled: 0, unitsTotal: 4, waiting: [{ unitOrdinal: 3, answered: true }, { unitOrdinal: 7, answered: false }] })).toEqual([
+      '这项任务已经停下；其余 2 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。',
+      '第 7 个阅读范围在等你的回答；取消后不再重试，记为缺口。',
+      '第 3 个阅读范围你已回答，但还没有按回答接着做；取消后不再重试，记为缺口。',
+      '这些缺口和没读到的阅读范围（记为未尝试）会保留在一份新的结果集修订版里；这份修订版会成为这本书最新的分析。',
+      CANCELLATION_NO_EFFECTS,
+    ]);
+    // Under a launch that can no longer carry the Run, nothing of it becomes a revision.
+    expect(baselineCancellationImpact(run('paused', null), null, { unitsSettled: 0, unitsTotal: 4, bindingHolds: false, waiting: [{ unitOrdinal: 3, answered: false }] }).slice(1, 3)).toEqual([
+      '第 3 个阅读范围在等你的回答；取消后不再重试。',
+      '执行绑定已经变化，这次取消不会形成结果集修订版。',
+    ]);
+  });
+
   it('keeps what a continuing Run kept in view while it waits its turn in the slot', () => {
     // 续行 admitted with three ranges kept: nothing is in flight, and the three are its partial revision.
     expect(baselineCancellationImpact(run('admitted', progress({ unitsSettled: 3, currentUnitOrdinal: null, currentUnitStartedAt: null, attemptState: null })))).toEqual([
@@ -341,5 +377,27 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
       '这项任务还没有开始阅读；取消后不会发送任何内容，也不会形成结果集修订版。',
       CANCELLATION_NO_EFFECTS,
     ]);
+  });
+});
+
+// Issue #422 (plan slice S76d; CLAR-002, INPUT-002, INPUT-003): the question card's own words.
+describe('a Clarification Request card (S76d)', () => {
+  it('asks in the editor\'s words, with two choices — one 推荐 with its reason — and a note that qualifies one', () => {
+    expect(clarificationQuestion(5)).toBe('第 5 个阅读范围：模型服务暂时出错，这一次没有读成。要安全地再试一次吗？');
+    expect(CLARIFICATION_WHY).toBe('你把「模型服务暂时出错时，同一个阅读范围安全地再试一次」改成了「先问你」，所以 AI7 先停下这一步来问你。');
+    expect([CLARIFICATION_SCOPE_CONTINUING, CLARIFICATION_SCOPE_WAITING]).toEqual(['该步骤等待说明 · 其他步骤仍在继续', '任务等待你的说明']);
+    expect(CLARIFICATION_SCOPE_PAUSED).toBe('任务已暂停：回答会先记下，续行后按它接着做');
+    expect(CLARIFICATION_SCOPE_RESUMABLE).toBe('任务已中断：回答会先记下，续行后按它接着做');
+    expect(CLARIFICATION_AFTER).toBe('回答后：选「再试一次」，AI7 把这个阅读范围再发送一次；选「不重试，记为缺口」，它记为缺口。之后接着做归纳和抽样。');
+    expect(CLARIFICATION_OPTIONS.map((option) => [option.id, option.label, option.recommended])).toEqual([
+      ['retry', '再试一次', '推荐：这类错误通常是暂时的，再试一次就能安全地补上这个阅读范围'],
+      ['record-gap', '不重试，记为缺口', null],
+    ]);
+    expect(CLARIFICATION_NOTE).toEqual({ label: '自行说明…', hint: '补充你的考虑，和所选的回答一起记下；不改变所选回答的意思。', maxLength: 500 });
+    expect(clarificationAnsweredLine('再试一次', null)).toBe('你已回答：再试一次');
+    expect(clarificationAnsweredLine('不重试，记为缺口', '先看看')).toBe('你已回答：不重试，记为缺口 · 说明：先看看');
+    expect([CLARIFICATION_UNANSWERABLE_ENDED, CLARIFICATION_UNANSWERABLE_CANCELLING])
+      .toEqual(['这次运行已经结束，这个问题不再等你回答', '任务正在取消，这个问题不再等你回答']);
+    expect(RESUME_BLOCKED_BINDING.endsWith('请改计划重做。')).toBe(true);
   });
 });

@@ -66,6 +66,14 @@ import {
 } from './plan-boundary.js';
 import { NO_PLAN_EDITS, canonicalPlanEdits, planEditDiff, planEditsAreEmpty, planEditsOf, type PlanEdits } from './plan-edits.js';
 import {
+  CLARIFICATION_ANSWER_SCHEMA,
+  CLARIFICATION_NOTE_MAX,
+  CLARIFICATION_OPTION_IDS,
+  CLARIFICATION_REQUEST_SCHEMA,
+  type ClarificationFacts,
+  type ClarificationOptionId,
+} from './clarifications.js';
+import {
   AnalysisError,
   DIGEST_PATTERN,
   UUID_PATTERN,
@@ -132,6 +140,7 @@ const RUN_STATE_LABELS: Record<BaselineAnalysisRunState, string> = {
   pausing: '正在暂停',
   paused: '已暂停',
   resumable: '任务已中断 · 可续行',
+  'awaiting-clarification': '任务等待你的说明',
 };
 
 /**
@@ -544,7 +553,7 @@ function firstBaselineCounts(unitCount: number): AnalysisReusePlanCounts {
  */
 function runIsActive(state: BaselineAnalysisRunState | null): boolean {
   return state === 'authorized' || state === 'awaiting-connectivity' || state === 'admitted' || state === 'executing' ||
-    state === 'cancelling' || state === 'pausing' || state === 'paused' || state === 'resumable';
+    state === 'cancelling' || state === 'pausing' || state === 'paused' || state === 'resumable' || state === 'awaiting-clarification';
 }
 
 /** Why an active Run blocks a new Task, in the words of its state: a waiting Run is never said to be under way. */
@@ -796,6 +805,7 @@ export class BaselineAnalysisStore {
               : run.state === 'pausing' ? 'pausing'
                 : run.state === 'paused' ? 'paused'
                   : run.state === 'resumable' ? 'resumable'
+                    : run.state === 'awaiting-clarification' ? 'awaiting-clarification'
         : run.state === 'admitted' ? 'admitted'
           : run.state === 'executing' ? 'executing'
             : run.state === 'completed' || run.state === 'completed-with-gaps' ? 'settled'
@@ -865,6 +875,7 @@ export class BaselineAnalysisStore {
                 : state === 'pausing' ? RUN_STATE_LABELS.pausing
                   : state === 'paused' ? RUN_STATE_LABELS.paused
                     : state === 'resumable' ? RUN_STATE_LABELS.resumable
+                      : state === 'awaiting-clarification' ? RUN_STATE_LABELS['awaiting-clarification']
               : state === 'admitted' ? '已进入调度'
                 : state === 'executing' ? '正在执行'
                   : state === 'settled' ? '已形成结果集修订版'
@@ -1042,6 +1053,7 @@ export class BaselineAnalysisStore {
             stateAt: asString(row.last_state_at),
             recordedAt: asString(row.run_recorded_at),
             progress: state === 'admitted' || state === 'executing' || state === 'cancelling' || state === 'pausing' ? progress(runRecordId) : null,
+            openClarification: this.#openClarificationOf(runRecordId, state),
           },
           planRevision: null,
         });
@@ -1530,7 +1542,10 @@ export class BaselineAnalysisStore {
    * only: a version whose other components would differ — the route or the fixture this launch binds has moved since
    * the plan froze — is refused rather than written.
    */
-  editPlan(bookId: string, input: { taskIntentId: string; planEnvelopeDigest: string; removedSteps: unknown; disallowedAdaptations: unknown }): AnalysisProjection {
+  editPlan(
+    bookId: string,
+    input: { taskIntentId: string; planEnvelopeDigest: string; removedSteps: unknown; disallowedAdaptations: unknown; askFirstAdaptations?: unknown },
+  ): AnalysisProjection {
     requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND, 'ANALYSIS_PLAN_EDIT_UNSUPPORTED', '这类任务的计划不能在这里修改。');
     const existing = this.inspect(bookId);
     const intentRow = this.#latestIntentRow(bookId);
@@ -2563,7 +2578,7 @@ export class BaselineAnalysisStore {
       behaviorCompositionDigest: composition.digest,
       // The plan version and the Plan Boundary Split are part of the canonical envelope (Issue #48).
       planVersion: ordinal,
-      boundary: planBoundarySplit(input.edits.disallowedAdaptations),
+      boundary: planBoundarySplit(input.edits.disallowedAdaptations, input.edits.askFirstAdaptations ?? []),
     };
     const envelope = canonicalRecord(reusePlan === null ? envelopeBase : {
       ...envelopeBase,
@@ -2705,8 +2720,10 @@ export class BaselineAnalysisStore {
     if (run.state === 'cancelled') return { projection: current, runRecordId: null };
     if (run.state === 'cancelling') return { projection: current, runRecordId: run.runRecordId };
     requireAnalysis(run.state !== 'awaiting-connectivity', 'ANALYSIS_CANCEL_WAITING', '这项任务还在等待开始；请用等待中的「取消」。');
-    // A paused Run, one pausing, and one left 可续行 are cancelled as a running one is (Issue #422, S76b).
-    requireAnalysis(run.state === 'admitted' || run.state === 'executing' || run.state === 'pausing' || run.state === 'paused' || run.state === 'resumable',
+    // A paused Run, one pausing, one left 可续行 (Issue #422, S76b) and one waiting for the editor's answer (S76d) are
+    // cancelled as a running one is.
+    requireAnalysis(run.state === 'admitted' || run.state === 'executing' || run.state === 'pausing' || run.state === 'paused' || run.state === 'resumable' ||
+      run.state === 'awaiting-clarification',
       'ANALYSIS_CANCEL_NOT_RUNNING', '只有正在运行或暂停中的任务可以取消；它尚未开始或已经结束。');
     this.recordRunState(run.runRecordId, 'cancelling', { detail: RUN_CANCELLING_DETAIL });
     return { projection: this.inspect(bookId), runRecordId: run.runRecordId };
@@ -2733,7 +2750,7 @@ export class BaselineAnalysisStore {
     const current = this.inspect(bookId);
     const run = current.run;
     requireAnalysis(current.taskIntent?.taskIntentId === taskIntentId && run !== null, 'ANALYSIS_PAUSE_STALE', '这项任务已经变化；无法暂停。');
-    if (run.state === 'paused' || run.state === 'resumable') return { projection: current, runRecordId: null };
+    if (run.state === 'paused' || run.state === 'resumable' || run.state === 'awaiting-clarification') return { projection: current, runRecordId: null };
     if (run.state === 'pausing') return { projection: current, runRecordId: run.runRecordId };
     requireAnalysis(run.state === 'admitted' || run.state === 'executing', 'ANALYSIS_PAUSE_NOT_RUNNING', '只有正在运行的任务可以暂停；它尚未开始、正在取消或已经结束。');
     this.recordRunState(run.runRecordId, 'pausing', { detail: RUN_PAUSING_DETAIL });
@@ -2812,6 +2829,169 @@ export class BaselineAnalysisStore {
     });
   }
 
+  // ---- Clarification Requests (Issue #422, plan slice S76d) ---------------------------------------------------
+
+  /**
+   * What the Run asked the editor at an adaptation moved into 先问你 (CLAR-001, CLAR-005): the unit whose safe retry
+   * waits, bound to the Run, its attempt, the plan version and envelope it runs under, with the failure that raised it
+   * and what the first attempt cost. One request per unit and Run; the unit waits until it is answered.
+   */
+  recordClarificationRequest(input: {
+    runRecordId: string;
+    attemptId: string;
+    taskIntentId: string;
+    unitOrdinal: number;
+    planVersion: number;
+    planEnvelopeDigest: string;
+    requestDigest: string;
+    failure: { code: string; failureClass: string; status: number | null; reason: string };
+    firstPayloadDigest: string | null;
+    firstUsage: { inputTokens: number; outputTokens: number } | null;
+    firstWallMs: number;
+  }): string {
+    requireAnalysis(UUID_PATTERN.test(input.runRecordId) && UUID_PATTERN.test(input.attemptId) && UUID_PATTERN.test(input.taskIntentId) &&
+      Number.isSafeInteger(input.unitOrdinal) && input.unitOrdinal >= 1 && Number.isSafeInteger(input.planVersion) && input.planVersion >= 1 &&
+      DIGEST_PATTERN.test(input.planEnvelopeDigest) && DIGEST_PATTERN.test(input.requestDigest) &&
+      (input.firstPayloadDigest === null || DIGEST_PATTERN.test(input.firstPayloadDigest)),
+    'ANALYSIS_RECORD_INVALID', '澄清请求记录无效。');
+    const requestId = randomUUID();
+    const raisedAt = new Date().toISOString();
+    const record = canonicalRecord({
+      schema: CLARIFICATION_REQUEST_SCHEMA,
+      requestId,
+      runRecordId: input.runRecordId,
+      attemptId: input.attemptId,
+      taskIntentId: input.taskIntentId,
+      unitOrdinal: input.unitOrdinal,
+      kind: 'ask-first-adaptation',
+      adaptationClass: 'safe-retry',
+      planVersion: input.planVersion,
+      planEnvelopeDigest: input.planEnvelopeDigest,
+      requestDigest: input.requestDigest,
+      failure: input.failure,
+      firstPayloadDigest: input.firstPayloadDigest,
+      firstUsage: input.firstUsage,
+      firstWallMs: Math.max(0, Math.round(input.firstWallMs)),
+      raisedAt,
+    });
+    this.#db.prepare(
+      'INSERT INTO analysis_clarification_requests(request_id, run_record_id, unit_ordinal, kind, raised_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ).run(requestId, input.runRecordId, input.unitOrdinal, 'ask-first-adaptation', raisedAt, record.json, record.digest);
+    return requestId;
+  }
+
+  /** A Run's Clarification Requests in unit order, each with its answer when it has one, read back against their digests. */
+  clarificationsOf(runRecordId: string): ClarificationFacts[] {
+    requireAnalysis(UUID_PATTERN.test(runRecordId), 'ANALYSIS_RUN_INVALID', '运行记录标识无效。');
+    const rows = this.#db.prepare(
+      `SELECT q.request_id, q.unit_ordinal, q.canonical_json q_json, q.sha256 q_sha, a.answer_id, a.option_id, a.canonical_json a_json, a.sha256 a_sha
+       FROM analysis_clarification_requests q
+       LEFT JOIN analysis_clarification_answers a ON a.request_id = q.request_id
+       WHERE q.run_record_id = ? ORDER BY q.unit_ordinal`,
+    ).all(runRecordId) as SqlRow[];
+    return rows.map((row) => {
+      const request = parseCanonicalJson(asString(row.q_json)) as Record<string, unknown>;
+      requireAnalysis(canonicalRecord(request).digest === asString(row.q_sha) && request.schema === CLARIFICATION_REQUEST_SCHEMA &&
+        request.requestId === asString(row.request_id) && request.runRecordId === runRecordId && request.unitOrdinal === asNumber(row.unit_ordinal),
+      'ANALYSIS_RECORD_INVALID', '澄清请求记录与其摘要不一致。');
+      let answer: ClarificationFacts['answer'] = null;
+      if (row.answer_id !== null) {
+        const record = parseCanonicalJson(asString(row.a_json)) as Record<string, unknown>;
+        requireAnalysis(canonicalRecord(record).digest === asString(row.a_sha) && record.schema === CLARIFICATION_ANSWER_SCHEMA &&
+          record.answerId === asString(row.answer_id) && record.requestId === request.requestId && record.optionId === asString(row.option_id) &&
+          record.requestSha256 === asString(row.q_sha),
+        'ANALYSIS_RECORD_INVALID', '澄清回答记录与其摘要不一致。');
+        answer = {
+          answerId: record.answerId as string,
+          optionId: record.optionId as ClarificationOptionId,
+          note: record.note as string | null,
+          answeredAt: record.answeredAt as string,
+        };
+      }
+      return {
+        requestId: request.requestId as string,
+        runRecordId,
+        attemptId: request.attemptId as string,
+        taskIntentId: request.taskIntentId as string,
+        unitOrdinal: request.unitOrdinal as number,
+        planVersion: request.planVersion as number,
+        raisedAt: request.raisedAt as string,
+        requestDigest: request.requestDigest as string,
+        failure: request.failure as ClarificationFacts['failure'],
+        firstPayloadDigest: request.firstPayloadDigest as string | null,
+        firstUsage: request.firstUsage as ClarificationFacts['firstUsage'],
+        firstWallMs: request.firstWallMs as number,
+        answer,
+      };
+    });
+  }
+
+  /**
+   * 提交回答 (CLAR-005, CLAR-006, INPUT-004): the editor's one answer to a question the Book's current Task's Run asked —
+   * the option chosen and the note that qualifies it — bound to the exact request shown, with who and when. Refused, and
+   * nothing recorded, when the question is not that Run's, is already answered, or the Run has ended or is stopping.
+   */
+  recordClarificationAnswer(bookId: string, input: { taskIntentId: string; requestId: string; optionId: unknown; note: unknown }): {
+    answerId: string;
+    runRecordId: string;
+    runState: BaselineAnalysisRunState;
+  } {
+    requireAnalysis(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(input.taskIntentId) && UUID_PATTERN.test(input.requestId),
+      'ANALYSIS_CLARIFICATION_INVALID', '回答的参数无效。');
+    requireAnalysis(typeof input.optionId === 'string' && (CLARIFICATION_OPTION_IDS as ReadonlyArray<string>).includes(input.optionId),
+      'ANALYSIS_CLARIFICATION_INVALID', '请选择一个回答。');
+    const note = typeof input.note === 'string' ? input.note.trim() : null;
+    requireAnalysis(input.note === null || (typeof input.note === 'string' && input.note.isWellFormed() && input.note.length <= CLARIFICATION_NOTE_MAX),
+      'ANALYSIS_CLARIFICATION_INVALID', `说明最多 ${CLARIFICATION_NOTE_MAX} 字。`);
+    const current = this.inspect(bookId);
+    const run = current.run;
+    requireAnalysis(current.taskIntent?.taskIntentId === input.taskIntentId && run !== null,
+      'ANALYSIS_CLARIFICATION_STALE', '这项任务已经变化；这个问题不再等你回答。');
+    requireAnalysis(run.state === 'admitted' || run.state === 'executing' || run.state === 'pausing' || run.state === 'paused' ||
+      run.state === 'resumable' || run.state === 'awaiting-clarification',
+    'ANALYSIS_CLARIFICATION_STALE', '这次运行已经结束或正在取消；这个问题不再等你回答。');
+    const request = this.clarificationsOf(run.runRecordId).find((entry) => entry.requestId === input.requestId);
+    requireAnalysis(request !== undefined, 'ANALYSIS_CLARIFICATION_STALE', '这个问题不是这次运行提的。');
+    requireAnalysis(request.answer === null, 'ANALYSIS_CLARIFICATION_ANSWERED', '这个问题已经回答过了。');
+    const requestRow = this.#db.prepare('SELECT sha256 FROM analysis_clarification_requests WHERE request_id = ?').get(input.requestId) as SqlRow;
+    const answerId = randomUUID();
+    const answeredAt = new Date().toISOString();
+    const record = canonicalRecord({
+      schema: CLARIFICATION_ANSWER_SCHEMA,
+      answerId,
+      requestId: input.requestId,
+      requestSha256: asString(requestRow.sha256),
+      runRecordId: run.runRecordId,
+      optionId: input.optionId,
+      note: note === null || note.length === 0 ? null : note,
+      actor: 'editor',
+      answeredAt,
+    });
+    this.#db.prepare(
+      'INSERT INTO analysis_clarification_answers(answer_id, request_id, option_id, answered_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)',
+    ).run(answerId, input.requestId, input.optionId, answeredAt, record.json, record.digest);
+    return { answerId, runRecordId: run.runRecordId, runState: run.state };
+  }
+
+  /** The first question of a Run under way or stopped that still waits for its answer; `null` when none does. */
+  #openClarificationOf(runRecordId: string, state: BaselineAnalysisRunState): { requestId: string; unitOrdinal: number; raisedAt: string } | null {
+    if (!(state === 'admitted' || state === 'executing' || state === 'pausing' || state === 'paused' || state === 'resumable' ||
+      state === 'awaiting-clarification')) return null;
+    const open = this.clarificationsOf(runRecordId).find((entry) => entry.answer === null);
+    return open === undefined ? null : { requestId: open.requestId, unitOrdinal: open.unitOrdinal, raisedAt: open.raisedAt };
+  }
+
+  /** How many turns each unit of a Run was given across its executions so far, from the spans its attempt recorded. */
+  unitAttemptsOf(runRecordId: string): Map<number, number> {
+    requireAnalysis(UUID_PATTERN.test(runRecordId), 'ANALYSIS_RUN_INVALID', '运行记录标识无效。');
+    const rows = this.#db.prepare(
+      `SELECT s.unit_ordinal, count(*) turns FROM analysis_harness_spans s
+       JOIN analysis_execution_attempts a ON a.attempt_id = s.attempt_id
+       WHERE a.run_record_id = ? AND s.unit_ordinal IS NOT NULL GROUP BY s.unit_ordinal`,
+    ).all(runRecordId) as SqlRow[];
+    return new Map(rows.map((row) => [asNumber(row.unit_ordinal), asNumber(row.turns)] as const));
+  }
+
   /** The attempt and Execution Binding a Run persisted, for 续行 to go on under; `null` before it persisted them. */
   executionBindingOf(runRecordId: string): { attemptId: string; binding: ExecutionBindingRecord; bindingDigest: string; spanCount: number } | null {
     const attempt = this.#db.prepare('SELECT attempt_id FROM analysis_execution_attempts WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
@@ -2831,7 +3011,7 @@ export class BaselineAnalysisStore {
    * executing `resumable`, 任务已中断 · 可续行, its Run Authorization kept and nothing dispatched until 续行. A Run left
    * cancelling is named for the execution owner, which finishes the cancellation.
    */
-  reconcileStoppedRuns(): { settled: number; cancelling: ReadonlyArray<string> } {
+  reconcileStoppedRuns(): { settled: number; cancelling: ReadonlyArray<string>; answered: ReadonlyArray<string> } {
     const rows = this.#db.prepare(
       `SELECT r.run_record_id,
               (SELECT s.state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1) last_state
@@ -2842,6 +3022,9 @@ export class BaselineAnalysisStore {
     ).all(this.#definition.kind) as SqlRow[];
     let settled = 0;
     const cancelling: string[] = [];
+    // A Run that waits for an answer the editor has already given (Issue #422, S76d) — answered while another Run held
+    // the slot, before AI7 closed — is named for the owner to take on, as CLAR-006 goes on without being asked again.
+    const answered: string[] = [];
     for (const row of rows) {
       const runRecordId = asString(row.run_record_id);
       const state = row.last_state === null ? null : asString(row.last_state);
@@ -2853,9 +3036,11 @@ export class BaselineAnalysisStore {
         settled += 1;
       } else if (state === 'cancelling') {
         cancelling.push(runRecordId);
+      } else if (state === 'awaiting-clarification' && this.clarificationsOf(runRecordId).every((entry) => entry.answer !== null)) {
+        answered.push(runRecordId);
       }
     }
-    return { settled, cancelling };
+    return { settled, cancelling, answered };
   }
 
   /** Every Run of this kind waiting in Connectivity Wait, oldest first, with its Book. */
@@ -2986,8 +3171,12 @@ export class BaselineAnalysisStore {
       throw new AnalysisError('ANALYSIS_RECORD_INVALID', '计划记录的修改无效。');
     }
     const split = envelope.boundary as PlanBoundarySplitProjection | undefined;
+    // Only the classes the editor withdrew, or moved into 先问你 (Issue #422, S76d), are looked for: neither may be in the
+    // adaptable list, and each moved one is in the split's own.
     const withdrawn: ReadonlyArray<string> = editorEdits.disallowedAdaptations;
-    requireAnalysis(split === undefined || !split.adaptable.some((entry) => withdrawn.includes(entry.adaptationClass)),
+    const asked: ReadonlyArray<string> = editorEdits.askFirstAdaptations ?? [];
+    requireAnalysis(split === undefined || (!split.adaptable.some((entry) => withdrawn.includes(entry.adaptationClass) || asked.includes(entry.adaptationClass)) &&
+      asked.every((adaptationClass) => (split.askFirst ?? []).some((entry) => entry.adaptationClass === adaptationClass))),
       'ANALYSIS_RECORD_INVALID', '计划信封与计划修改不一致。');
     let update: ExecutionUpdateFacts | null = null;
     if (this.#carriesPlan(intent.mode)) {

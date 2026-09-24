@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ADAPTATION_MODE_WORDS,
   ASSURANCE_SAMPLING_REMOVED,
   NO_PLAN_EDITS,
   PLAN_EDIT_ADAPTATION_LABELS,
   PLAN_EDIT_STEP_LABELS,
   SAFE_RETRY_WITHHELD,
+  adaptationMode,
   assuranceSamplingKept,
   canonicalPlanEdits,
   planEditDiff,
@@ -13,7 +15,7 @@ import {
   safeRetryAllowed,
   samePlanEdits,
 } from '../../src/service/analysis/plan-edits.js';
-import { planBoundarySplit } from '../../src/service/analysis/plan-boundary.js';
+import { ASK_FIRST_SAFE_RETRY_STATEMENT, planBoundarySplit } from '../../src/service/analysis/plan-boundary.js';
 
 // The editable plan (Issue #419, plan slice S73; V2-UX-PLAN-011): the two edits a baseline analysis plan takes — the
 // step the Run can do without and the adaptation it can be denied — as one canonical record, the diff its Plan Revision
@@ -70,5 +72,44 @@ describe('what an editor may leave out of a baseline analysis plan', () => {
     expect(planBoundarySplit().adaptable.map((entry) => entry.adaptationClass)).toEqual(['safe-retry']);
     expect(planBoundarySplit(['safe-retry']).adaptable).toEqual([]);
     expect(planBoundarySplit(['safe-retry']).material).toEqual(planBoundarySplit().material);
+  });
+});
+
+// Issue #422 (plan slice S76d; PLAN-011, PLAN-012): the safe retry moved into 先问你 — the Run asks the editor before
+// it makes it — as the canonical edit names it, the diff says it, and the envelope's split holds it apart.
+describe('先问你 (S76d)', () => {
+  const asked = { removedSteps: [], disallowedAdaptations: [], askFirstAdaptations: ['safe-retry'] as const };
+
+  it('names the move only when something is asked first, and never with the same adaptation withheld', () => {
+    expect(canonicalPlanEdits({ removedSteps: [], disallowedAdaptations: [], askFirstAdaptations: ['safe-retry'] })).toEqual(asked);
+    // Absent or empty, the record reads as it did before S76d, byte for byte.
+    expect(canonicalPlanEdits({ removedSteps: [], disallowedAdaptations: [], askFirstAdaptations: [] })).toEqual(NO_PLAN_EDITS);
+    expect(canonicalPlanEdits({ removedSteps: [], disallowedAdaptations: [], askFirstAdaptations: [] })).not.toHaveProperty('askFirstAdaptations');
+    expect(canonicalPlanEdits({ removedSteps: [], disallowedAdaptations: ['safe-retry'], askFirstAdaptations: ['safe-retry'] })).toBeNull();
+    expect(canonicalPlanEdits({ removedSteps: [], disallowedAdaptations: [], askFirstAdaptations: ['assurance-sampling'] })).toBeNull();
+    expect(canonicalPlanEdits({ removedSteps: [], disallowedAdaptations: [], askFirstAdaptations: 'safe-retry' })).toBeNull();
+    expect(planEditsOf({ editorEdits: asked })).toEqual(asked);
+  });
+
+  it('says how the Run may make the retry, and diffs each change in the plan\'s words', () => {
+    expect([adaptationMode(NO_PLAN_EDITS, 'safe-retry'), adaptationMode(asked, 'safe-retry'),
+      adaptationMode({ removedSteps: [], disallowedAdaptations: ['safe-retry'] }, 'safe-retry')]).toEqual(['automatic', 'ask-first', 'withheld']);
+    expect([safeRetryAllowed(asked), planEditsAreEmpty(asked), samePlanEdits(asked, NO_PLAN_EDITS)]).toEqual([true, false, false]);
+    expect(ADAPTATION_MODE_WORDS).toEqual({ automatic: '允许', 'ask-first': '先问你', withheld: '不允许' });
+    expect(planEditDiff(NO_PLAN_EDITS, asked)).toEqual([
+      { field: 'adaptations.safe-retry', label: '模型服务暂时出错时，同一个阅读范围安全地再试一次', prior: '允许', proposed: '先问你', materiality: 'edited' },
+    ]);
+    expect(planEditDiff(asked, { removedSteps: [], disallowedAdaptations: ['safe-retry'] })[0]).toMatchObject({ prior: '先问你', proposed: '不允许' });
+  });
+
+  it('holds an asked adaptation apart in the split, and says where the editor may be asked', () => {
+    const split = planBoundarySplit([], ['safe-retry']);
+    expect(split.adaptable).toEqual([]);
+    expect(split.askFirst?.map((entry) => entry.adaptationClass)).toEqual(['safe-retry']);
+    expect(split.participation).toEqual({ expected: true, statement: ASK_FIRST_SAFE_RETRY_STATEMENT });
+    expect(ASK_FIRST_SAFE_RETRY_STATEMENT).toBe('模型服务暂时出错时，先问你要不要把这个阅读范围安全地再试一次；只有等你回答的这一步会停下。');
+    // A split with nothing asked first is the one every earlier plan froze.
+    expect(planBoundarySplit()).not.toHaveProperty('askFirst');
+    expect(planBoundarySplit().participation).toEqual({ expected: false, statement: '预计无需中途参与' });
   });
 });

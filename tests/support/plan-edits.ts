@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { ANALYSIS_LEDGER_REVISION_33_SQL, ANALYSIS_LEDGER_SCHEMA_SQL } from '../../src/service/task-authorization.js';
+import { dropClarificationRelations } from './clarifications.js';
 
 /**
  * Take a store the current code built back to exactly what revision 33 left (Issue #419): the Plan Revisions narrowed to
@@ -7,6 +8,8 @@ import { ANALYSIS_LEDGER_REVISION_33_SQL, ANALYSIS_LEDGER_SCHEMA_SQL } from '../
  * `plan-edit`. The caller sets the version.
  */
 export function plantRevision33Relations(database: DatabaseSync): void {
+  // Revision 35's relations are newer, so a store at revision 33 never held them.
+  dropClarificationRelations(database);
   const columns = (database.prepare("SELECT name FROM pragma_table_info('analysis_plan_revisions') ORDER BY cid").all() as { name: string }[])
     .map((column) => column.name)
     .join(', ');
