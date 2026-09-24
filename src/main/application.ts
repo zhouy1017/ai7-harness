@@ -183,6 +183,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j09-picker-path' ||
           key === '--j10-picker-path' ||
           key === '--j07-save-path' ||
+          key === '--j04-save-path' ||
           key === '--j01-import-control' ||
           key === '--j03-foreground-execution-control' ||
           key === '--j08-recovery-control' ||
@@ -261,11 +262,13 @@ function parseArguments(argv: string[]): LaunchArguments {
   const injectedPickerPath =
     j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath ?? j04PickerPath ?? j05PickerPath ?? j06PickerPath ??
       j07PickerPath ?? j09PickerPath ?? j10PickerPath;
-  // The Save dialog's launch control is guarded exactly as the picker controls are: J-07's own, and absolute.
-  const injectedSavePath = values.get('--j07-save-path');
-  requireDesktop(
-    injectedSavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-07' && isAbsolute(injectedSavePath)),
-  );
+  // The Save dialog's launch control is guarded exactly as the picker controls are: each Journey's own, and absolute —
+  // J-07's for its exports, J-04's for the 审阅报告's (Issue #500, S64b part 2).
+  const j07SavePath = values.get('--j07-save-path');
+  const j04SavePath = values.get('--j04-save-path');
+  requireDesktop(j07SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-07' && isAbsolute(j07SavePath)));
+  requireDesktop(j04SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && isAbsolute(j04SavePath)));
+  const injectedSavePath = j07SavePath ?? j04SavePath;
   const importControlValue = values.get('--j01-import-control');
   const importControl =
     importControlValue === 'before-commit' ||

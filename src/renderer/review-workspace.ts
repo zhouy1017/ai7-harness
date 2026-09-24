@@ -19,8 +19,11 @@ import {
   type RendererApi,
   type ServiceJobProjection,
 } from '../shared/protocol.js';
+import { reportExportLabel } from '../shared/report-wording.js';
 import { applyOnce } from './manuscript-apply.js';
 import { localInstantLabel } from './plan-preview-labels.js';
+import { mountManuscriptExport } from './manuscript-export.js';
+import { EXPORT_ACTION_LABELS, exportOpenAccessibleName } from './manuscript-export-labels.js';
 import { TASK_PLAN_OPEN_START, taskPlanSummaryLine } from './task-drawer-labels.js';
 import {
   REVIEW_ACTION_LABELS,
@@ -50,7 +53,7 @@ import {
   REVIEW_COVERAGE_HEADING,
   REVIEW_COVERAGE_NOTE,
   REVIEW_COVERAGE_PILLS,
-  REVIEW_EXPORT_REASON,
+  REVIEW_EXPORT_NEEDS_REPORT,
   REVIEW_FILTER_ALL,
   REVIEW_FILTER_LABELS,
   REVIEW_FILTER_NOTE,
@@ -162,7 +165,8 @@ type ReviewApi = Pick<
   RendererApi,
   'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'recordReviewFindingDisposition' |
   'generateReviewReport' | 'cancelServiceJob' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' |
-  'updateEditorialMark' | 'getEditorialMarkCard'
+  'updateEditorialMark' | 'getEditorialMarkCard' |
+  'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport'
 >;
 
 export interface MountReviewWorkspaceOptions {
@@ -337,6 +341,22 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     el('p', 'lede', REVIEW_LEDE),
     host,
   );
+
+  // The 审阅报告's export (Issue #500, S64b part 2; ADR 0079 §3.4): ④ 导出's own card, drawn into one slot that every
+  // render of the report section takes back under its actions, so a card open across a redraw keeps its state. It
+  // belongs to the Run whose report it exports and closes when another Run is opened; an export changes nothing here.
+  const exportSlot = el('div', 'review-report-export-slot');
+  let exportRunId: string | null = null;
+  const exporter = mountManuscriptExport({
+    root: exportSlot,
+    bookId,
+    api,
+    technicalDetails: options.technicalDetails,
+    setStatus: options.setStatus,
+    errorMessage: options.errorMessage,
+    onChanged: () => undefined,
+    openerOf: () => host.querySelector<HTMLElement>('section.review-report [data-review-action="export"]'),
+  });
 
   // ---- reading --------------------------------------------------------------------------------------
 
@@ -647,6 +667,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   }
 
   function openRun(reviewRunId: string): void {
+    if (exportRunId !== null && exportRunId !== reviewRunId) {
+      exporter.close();
+      exportRunId = null;
+    }
     query.reviewRunId = reviewRunId;
     query.filters = { ...NO_FILTERS };
     query.pages = 1;
@@ -1083,17 +1107,33 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
     const actions = el('div', 'button-row review-report-actions');
     const label = reviewGenerateReportLabel(run.report?.version ?? null);
+    const report = run.report;
     actions.append(
       run.state === 'running'
         ? unavailableAction('generate-report', REVIEW_REPORT_WAIT_RUNNING, label)
         : actionButton('generate-report', 'secondary', () => void generateReport(run), label),
-      unavailableAction('export', REVIEW_EXPORT_REASON),
+      report === null ? unavailableAction('export', REVIEW_EXPORT_NEEDS_REPORT, EXPORT_ACTION_LABELS.open) : exportReportAction(run, report),
     );
     if (working) for (const button of actions.querySelectorAll('button')) button.disabled = true;
     section.append(actions);
+    if (exportRunId === run.reviewRunId) section.append(exportSlot);
     if (run.report === null) section.append(el('p', 'field-note', REVIEW_REPORT_NONE));
     else section.append(renderReportRecord(run.report));
     return section;
+  }
+
+  /** 导出… of the report version on show, named for a screen reader by that version. */
+  function exportReportAction(run: ReviewRunProjection, report: ReviewReportProjection): HTMLButtonElement {
+    const reportLabel = reportExportLabel(run.label, report.version);
+    const control = actionButton('export', 'secondary', () => {
+      if (destroyed || working || exporter.busy()) return;
+      exportRunId = run.reviewRunId;
+      control.closest('.review-report-actions')?.after(exportSlot);
+      exporter.open({ kind: 'report', reportId: report.reportId }, reportLabel, control);
+    }, EXPORT_ACTION_LABELS.open);
+    control.dataset['reportVersion'] = String(report.version);
+    control.setAttribute('aria-label', exportOpenAccessibleName({ kind: 'report', label: reportLabel }));
+    return control;
   }
 
   function renderReportRecord(report: ReviewReportProjection): HTMLElement {
@@ -1718,6 +1758,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       generation += 1;
       clearPoll();
       if (sheet.open) sheet.close();
+      exporter.destroy();
     },
   };
 }
