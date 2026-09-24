@@ -11938,6 +11938,9 @@ export class EditorialStore {
       if (current.bookStateDigest !== snapshot.reviewedBookStateDigest ||
         current.manuscriptId !== snapshot.reviewedManuscriptId || current.branchId !== snapshot.reviewedBranchId ||
         current.exactSourceVersionId !== snapshot.reviewedReuseSourceVersionId) return null;
+      // The Source Version it reuses must have been read the way this draft is (Issue #532): a review made before an
+      // update that changed the parser does not come back ready, and preparing it again says why.
+      if (current.exactSourceVersionId !== null) this.#requireSameParser(current.exactSourceVersionId, snapshot);
       const lineage = comparison.lineage_status === 'verified'
         ? {
             status: 'verified' as const,

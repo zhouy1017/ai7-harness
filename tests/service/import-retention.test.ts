@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
+import { unzipSync, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseDocx, type ParsedDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
 import {
@@ -454,6 +456,37 @@ describe('schema revision 27 over the real store', () => {
       // The way on the words name: the file comes in as a new Book.
       const renewed = await importSample1Book(migrated, roots.codeRoot, '重新导入为新书');
       expect(renewed.bookId).not.toBe(bookId);
+      migrated.markCleanShutdown();
+    } finally {
+      migrated.close();
+    }
+  }, 180_000);
+
+  it('finds a Book an earlier parser read by its content when the same content comes in another file (Issue #532)', async () => {
+    await requireExactSample1(roots.codeRoot);
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      await importSample1Book(store, roots.codeRoot, '旧读取方式');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    plantRevision26();
+    const [sourceVersionId, sourceDigest] = withDatabase(true, (database) => {
+      const row = database.prepare('SELECT source_version_id, source_digest FROM source_versions').get() as Row;
+      return [String(row.source_version_id), String(row.source_digest)];
+    });
+    // sample1's own parts in another container: other bytes, the same body, so the same content and structure.
+    const twin = join(roots.inputRoot, 'sample1-另存.docx');
+    writeFileSync(twin, zipSync(unzipSync(readFileSync(sample1Path(roots.codeRoot))), { mtime: new Date('2001-01-01T00:00:00Z') }));
+    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const staged = await migrated.stageSelectedManuscript(randomUUID(), twin);
+      expect(staged.source.sourceSha256).not.toBe(sourceDigest);
+      // Read under /1 and under this build's parser, the content and structure agree: the Book is found.
+      expect(staged.identityFindings.map((finding) => [finding.sourceVersionId, finding.identityClass])).toEqual([
+        [sourceVersionId, { kind: 'parsed-content-structure', label: '发现相同内容' }],
+      ]);
       migrated.markCleanShutdown();
     } finally {
       migrated.close();
