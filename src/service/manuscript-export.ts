@@ -877,12 +877,17 @@ export class ManuscriptExportStore {
     return this.#receiptProjection(row, outcome);
   }
 
-  /** The newest approved export of one target between two instants (Issue #415): a Delivery Record's file, or `null`. */
+  /**
+   * A Delivery Record's file (Issue #415): the newest approved export of one target between two instants that wrote its
+   * file, else the newest attempt, or `null`. A later attempt that wrote nothing — a failed or unconfirmed re-export — never
+   * hides the file the delivery handed over.
+   */
   latestExport(bookId: string, targetKind: 'production-document-version', targetId: string, from: string, until: string | null): ManuscriptExportReceiptProjection | null {
     const row = this.#db.prepare(
       `SELECT p.preparation_id FROM export_preparations p JOIN export_approvals a ON a.preparation_id = p.preparation_id
+       LEFT JOIN export_receipts r ON r.preparation_id = p.preparation_id
        WHERE p.book_id = ? AND p.target_kind = ? AND p.target_id = ? AND a.approved_at >= ? AND (? IS NULL OR a.approved_at < ?)
-       ORDER BY a.approved_at DESC, a.rowid DESC LIMIT 1`,
+       ORDER BY coalesce(r.outcome IN ('created', 'replaced'), 0) DESC, a.approved_at DESC, a.rowid DESC LIMIT 1`,
     ).get(bookId, targetKind, targetId, from, until, until) as SqlRow | undefined;
     if (row === undefined) return null;
     const preparationId = text(row.preparation_id);
