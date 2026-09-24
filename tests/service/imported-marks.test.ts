@@ -353,45 +353,8 @@ describe('a DOCX\'s comments and tracked changes enter the imported manuscript (
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       const { commit } = await importRevised(store, first);
-      const reimport = async (path: string, reuseSourceVersionId: string | null) => {
-        const staged = await store.stageSelectedManuscript(randomUUID(), path);
-        expect(staged.fidelity[1]).toMatchObject({ count: IMPORTED_MARKS, status: 'preserved' });
-        const started = store.createManuscriptReimportPreparationWork(staged.draftId, staged.draftVersion, {
-          kind: 'existing-book', bookId: commit.bookId, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId,
-        });
-        let prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
-        while (!prepared.done) prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
-        let review = prepared.review!;
-        // A reimport converts them as the first import does (MARK-009): 完整保留, and no decision to take for them.
-        expect(review.fidelity[1]).toEqual({
-          key: 'comments-revisions', label: '批注与修订', count: IMPORTED_MARKS, status: 'preserved', statusLabel: '完整保留',
-          detail: COMMENTS_REVISIONS_DETAIL,
-        });
-        expect(review.degradationDecision.items.some((item) => item.categoryKey === 'comments-revisions')).toBe(false);
-        // Every row resolved by a verb its shape admits, none preselected.
-        for (;;) {
-          const page = store.getReimportMappingPage(review.draftId, review.draftVersion, null);
-          const open = page.items.find((item) => item.verb === null);
-          if (open === undefined) break;
-          const work = store.createReimportResolutionWork(review.draftId, review.draftVersion, open.groupId,
-            open.verbs.includes('rewrite') ? 'rewrite' : open.verbs[0]!);
-          let progress = store.advanceReimportResolutionWork(work.workId);
-          while (!progress.done) progress = store.advanceReimportResolutionWork(work.workId);
-          review = progress.review!;
-        }
-        expect(review.commitReady).toBe(true);
-        const commitWork = await store.createManuscriptReimportCommitWork({
-          draftId: review.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId: randomUUID(),
-        });
-        let result = commitWork.result;
-        while (result === null) {
-          await new Promise((resolve) => setTimeout(resolve, 5));
-          result = (await store.advanceManuscriptReimportCommitWork(commitWork.workId!)).result;
-        }
-        return result;
-      };
-      const imported = () => withDatabase(true, (database) =>
-        database.prepare("SELECT count(*) total FROM editorial_marks WHERE source_kind = 'imported-author' AND source_label IN (?, ?)").get(AUTHOR, OTHER));
+      const reimport = (path: string, reuseSourceVersionId: string | null) => reimportInto(store, commit.bookId, path, reuseSourceVersionId);
+      const imported = () => importedMarkCount();
       const changed = await reimport(second, null);
       expect(changed.resultKind).toBe('changed');
       expect(imported()).toEqual({ total: IMPORTED_MARKS });
@@ -405,7 +368,75 @@ describe('a DOCX\'s comments and tracked changes enter the imported manuscript (
       store.close();
     }
   }, 180_000);
+
+  it('keeps the file\'s pending insertion one mark across a changed reimport, set exact again where it stood (Issue #412)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const { commit } = await importRevised(store, await composeRevised());
+      expect(importedMarkCount()).toEqual({ total: IMPORTED_MARKS });
+      // The same file with one paragraph added: a changed reimport, the added paragraph resolved 改写与新增. ¶2's insertion is a
+      // point, which the rewrite leaves drifted, since a point is never found by its words. The file's insertion at that
+      // same place is that one, set exact again rather than made twice beside it.
+      const extended = await composeRevised({ ...REVISED, paragraphs: [...REVISED.paragraphs, { runs: [text(span(21))] }] });
+      const changed = await reimportInto(store, commit.bookId, extended, null);
+      expect(changed.resultKind).toBe('changed');
+      expect(importedMarkCount()).toEqual({ total: IMPORTED_MARKS });
+      const points = withDatabase(true, (database) => database.prepare(
+        "SELECT anchor_state FROM editorial_marks WHERE source_kind = 'imported-author' AND pinned_text = '' ORDER BY created_at, mark_id",
+      ).all()).map((row) => ({ ...row }));
+      expect(points.length).toBeGreaterThan(0);
+      expect(points.every((row) => row.anchor_state === 'exact')).toBe(true);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
 });
+
+/** A reimport of `path` into the Book, every row resolved by a verb its shape admits, none preselected; committed. */
+async function reimportInto(store: EditorialStore, bookId: string, path: string, reuseSourceVersionId: string | null) {
+  const staged = await store.stageSelectedManuscript(randomUUID(), path);
+  expect(staged.fidelity[1]).toMatchObject({ count: IMPORTED_MARKS, status: 'preserved' });
+  const started = store.createManuscriptReimportPreparationWork(staged.draftId, staged.draftVersion, {
+    kind: 'existing-book', bookId, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId,
+  });
+  let prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
+  while (!prepared.done) prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
+  let review = prepared.review!;
+  // A reimport converts them as the first import does (MARK-009): 完整保留, and no decision to take for them.
+  expect(review.fidelity[1]).toEqual({
+    key: 'comments-revisions', label: '批注与修订', count: IMPORTED_MARKS, status: 'preserved', statusLabel: '完整保留',
+    detail: COMMENTS_REVISIONS_DETAIL,
+  });
+  expect(review.degradationDecision.items.some((item) => item.categoryKey === 'comments-revisions')).toBe(false);
+  // Every row resolved by a verb its shape admits, none preselected.
+  for (;;) {
+    const page = store.getReimportMappingPage(review.draftId, review.draftVersion, null);
+    const open = page.items.find((item) => item.verb === null);
+    if (open === undefined) break;
+    const work = store.createReimportResolutionWork(review.draftId, review.draftVersion, open.groupId,
+      open.verbs.includes('rewrite') ? 'rewrite' : open.verbs[0]!);
+    let progress = store.advanceReimportResolutionWork(work.workId);
+    while (!progress.done) progress = store.advanceReimportResolutionWork(work.workId);
+    review = progress.review!;
+  }
+  expect(review.commitReady).toBe(true);
+  const commitWork = await store.createManuscriptReimportCommitWork({
+    draftId: review.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId: randomUUID(),
+  });
+  let result = commitWork.result;
+  while (result === null) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    result = (await store.advanceManuscriptReimportCommitWork(commitWork.workId!)).result;
+  }
+  return result;
+}
+
+/** The imported marks by the file's two authors, however many the reimports made. */
+function importedMarkCount() {
+  return withDatabase(true, (database) =>
+    database.prepare("SELECT count(*) total FROM editorial_marks WHERE source_kind = 'imported-author' AND source_label IN (?, ?)").get(AUTHOR, OTHER));
+}
 
 describe('schema revision 28 over the real store', () => {
   it('migrates a planted revision-27 store, rebuilding its Proposal Change Items byte for byte', async () => {

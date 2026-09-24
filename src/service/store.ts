@@ -8704,13 +8704,22 @@ export class EditorialStore {
       // on the manuscript in this same transaction — all of them, or no reimport — after the editor's own marks have
       // followed. One that already stands there as it is, exactly on its words — the file's comment still in the file — is
       // not made twice; one that drifted or was set aside no longer shows the file's comment, so the new file's makes it.
+      // A point — a pending insertion — is never found by its words, so the rewrite leaves it drifted where it stood: the
+      // file's insertion at that same place is that one, set exact again rather than made twice.
       if (fidelityPlan.importedMarks > 0) {
         const placedAt = this.#authority.prepare('SELECT block_id FROM temp.reimport_commit_rows WHERE work_id = ? AND position = ?');
         const standing = this.#authority.prepare(
-          `SELECT 1 FROM editorial_marks
+          `SELECT mark_id, anchor_state FROM editorial_marks
            WHERE branch_id = ? AND block_id = ? AND source_kind = 'imported-author' AND source_label = ? AND kind = ?
              AND pinned_text = ? AND body = ? AND from_grapheme = ? AND to_grapheme = ? AND status IN ('open', 'resolved', 'applied')
-             AND anchor_state = 'exact'`,
+             AND (anchor_state = 'exact' OR (anchor_state = 'drifted' AND pinned_text = ''))`,
+        );
+        const followedAt = asNumber(one(
+          this.#authority.prepare('SELECT journal_sequence FROM branch_working_state WHERE branch_id = ?').all(target.branchId) as SqlRow[],
+          'REIMPORT_TARGET_CHANGED', '重新导入提交时分支已变化。',
+        ).journal_sequence);
+        const repin = this.#authority.prepare(
+          "UPDATE editorial_marks SET anchor_state = 'exact', followed_journal_sequence = ? WHERE mark_id = ? AND anchor_state = 'drifted'",
         );
         let alreadyStanding = 0;
         const created = this.#importedMarkCall(() => createImportedMarks(this.#authority, this.#editorialMarks, input.draftId, {
@@ -8720,9 +8729,11 @@ export class EditorialStore {
             'IMPORT_MARK_ANCHOR_FAILED', '文件中的批注或修订无法准确落在稿件文字上，本次重新导入没有提交。').block_id),
           alreadyStanding: (mark, blockId) => {
             const found = standing.get(target.branchId, blockId, mark.authorLabel, mark.kind, mark.pinnedText, mark.body,
-              mark.fromGrapheme, mark.toGrapheme) !== undefined;
-            if (found) alreadyStanding += 1;
-            return found;
+              mark.fromGrapheme, mark.toGrapheme) as SqlRow | undefined;
+            if (found === undefined) return false;
+            if (asString(found.anchor_state) === 'drifted') repin.run(followedAt, asString(found.mark_id));
+            alreadyStanding += 1;
+            return true;
           },
         }));
         requireStore(created + alreadyStanding === fidelityPlan.importedMarks, 'IMPORT_POSTCONDITION_FAILED',
