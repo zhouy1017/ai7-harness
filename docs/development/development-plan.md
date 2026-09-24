@@ -91,7 +91,7 @@ Exit criterion: an editor opens a Book into the manuscript at the last position,
 | 2.11 | S64 | #413 | T3 | J-07 | ④ Export to DOCX with 含批注 / 含修改建议, fidelity table, system picker, receipt (B17) | S58, S61, S62 (the External Export Policy v2 bytes are integrated, PR #440, and need no further confirmation) | integrated (PR #501, `dev@fdda1b3`) |
 | 2.11b | S64b | #500 | T3 | J-07 | ④ The same export to PDF and Markdown, and the 审阅报告 export (B17) | S64 | built (PRs #526 and #527, in the stack) |
 | 2.12 | S65 | #414 | T3 | J-07 | ⑥ 发稿: Manuscript-only milestones and 设为发稿版本 (B26) | — | integrated (PR #488, `dev@f169695`), taken ahead of S64; admits J-07 |
-| 2.13 | S66 | #415 | T3 | J-07 | ⑥ Production Documents: types, versions, workflow and gates, Delivery Records, 交付后有修改, 本书不做 (B27) | S64, S58 | S66a and S66b built (PRs #529 and #530, in the stack) |
+| 2.13 | S66 | #415 | T3 | J-07 | ⑥ Production Documents: types, versions, workflow and gates, Delivery Records, 交付后有修改, 本书不做 (B27) | S64, S58 | S66a and S66b built (PRs #529 and #530, in the stack); S66c and S66d follow |
 | 2.14 | S67 | #416 | T3 | J-07 | ⑥ 图书交付包: conditions, frozen manifest, versions, export history (B28) | S64, S65, S66 | S67a built (PR #531, in the stack); S67b follows |
 
 Each slice's detail is in its Issue and in the specification's screen section; this table carries only the order and the dependencies. J-05 and J-07 are admitted by S58 and S65, and J-06 by S22's pull request (#491). Under [CI and test boundaries](../agents/ci-test-boundaries.md) admitting one is an explicit Owner routing decision, and on 2026-09-20 the Owner gave it for these and for J-09, J-10, J-11, J-13 and J-16 ("admit as you need"): the first slice of each supplies the real runner in its own pull request and cuts it over atomically into `ADMITTED_JOURNEYS`, `JOURNEY_MODULES`, `JOURNEY_LOCATIONS`, `e2e/run-all.mjs` and the nightly's full set, `GATE_JOURNEYS` unchanged.
@@ -106,7 +106,7 @@ Exit criterion: any Task shows its plan in the Task Drawer in 精简 or 完整 m
 | 3.2 | S73 | #419 | T3 | J-03 | ③ Editable plan → 更新计划 → next plan version (B9) | S72 | built (PR #519, in the stack) |
 | 3.3 | S74a | #420 | T2 | J-03 | ③ The Task Drawer’s authorization bar: 开始任务 in one click for every kind (B10) | S72 | integrated (PR #503, `dev@80554ad`) |
 | 3.3b | S74b | #502 | T2 | J-03 | ③ 联网后开始任务, the Reconnect Preflight and the Connectivity Wait (B10) | S74a | integrated (PR #512, `dev@0865589`); 需要重新确认计划 at reconnect is #536 |
-| 3.4 | S75 | #421 | T3 | J-03 | ③ / ⑤ 快速开始 under a Default Execution Rule; 设为快速开始默认 (B11) | S72, S74a | built (PR #514, in the stack) |
+| 3.4 | S75 | #421 | T3 | J-03 | ③ / ⑤ 快速开始 under a Default Execution Rule; 设为快速开始默认 (B11) | S72, S74a | integrated (PR #514, `dev@da94971`) |
 | 3.5 | S76 | #422 | T3 | J-10 | ③ Running-Run controls, Clarification Requests, the activity card, 续行 (B12) | S72, S74a | S76a to S76d built (PRs #515, #516, #520 and #522, in the stack); admits J-10 |
 | 3.6 | S13-f1 | #281 | T2 | J-04 | Every material plan field from durable state; the revert path; the dead `inspect` trigger kind | S13 | integrated (PR #445, `dev@6ecffb9`) |
 | 3.7 | S16 | #51 | T2 | J-10 | Run Budget Ceiling termination, Provider Account Limit recovery, ambiguous outcomes | S76 | S16a and S16b built (PRs #523 and #524, in the stack); S16c waits for a route that can produce an ambiguous turn |
