@@ -827,7 +827,7 @@ async function dispatch(
     case 'saveProductionDocumentVersion':
       return { id: request.id, ok: true, op: request.op, result: await store.saveProductionDocumentVersion(request.input) };
     case 'recordProductionDocumentDelivery':
-      return { id: request.id, ok: true, op: request.op, result: store.recordProductionDocumentDelivery(request.input) };
+      return { id: request.id, ok: true, op: request.op, result: await store.recordProductionDocumentDelivery(request.input) };
     // 待我处理 (Issue #424, plan slice S78): a read across every Book. The one owner's progress reader and its
     // slot say which Run is in flight, exactly as the analysis inspections read them; nothing is written.
     case 'inspectGlobalAttention':

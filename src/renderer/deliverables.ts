@@ -91,6 +91,7 @@ import {
   documentActionName,
   documentCardLine,
   documentCreatedLine,
+  documentCurrentTextChoice,
   documentDeliveredLine,
   documentDeliveryExportLine,
   documentDeliveryLine,
@@ -146,12 +147,16 @@ interface DocumentForm {
 /** 交付…'s inline form while it is open (DELIV-003): the version, who it goes to and the note, none preselected. */
 interface DeliveryForm {
   typeId: string;
+  /** A saved version's revision, or `CURRENT_TEXT`: the text as it stands, saved as the next version first. */
   revisionId: string | null;
   recipient: ProductionDocumentRecipientKind | null;
   custom: string;
   note: string;
   problem: string | null;
 }
+
+/** The delivery form's choice of the current text, which no revision identity can equal. */
+const CURRENT_TEXT = 'current';
 
 /** Where focus goes once the documents block is drawn again. */
 type DocumentFocus = 'keep' | { typeId: string; action: DocumentAction | 'source' | 'delivery-version' };
@@ -720,8 +725,9 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     }
     const deliverable = deliveryForm === null ? undefined : documents.types.find((type) => type.typeId === deliveryForm!.typeId);
     if (deliveryForm !== null && (deliverable?.document == null || deliverable.notForThisBook)) deliveryForm = null;
-    if (deliveryForm !== null && deliveryForm.revisionId !== null &&
-      !deliverable!.document!.versions.some((version) => version.revisionId === deliveryForm!.revisionId)) {
+    if (deliveryForm !== null && deliveryForm.revisionId !== null && !(deliveryForm.revisionId === CURRENT_TEXT
+      ? deliverable!.document!.changedSinceVersion
+      : deliverable!.document!.versions.some((version) => version.revisionId === deliveryForm!.revisionId))) {
       deliveryForm.revisionId = null;
     }
     const active = document.activeElement;
@@ -872,8 +878,10 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   }
 
   /**
-   * 交付… (DELIV-003): the document's saved versions and the house's recipients as choices with none preselected, an
-   * optional note, and the sentence that a delivery records and never sends. 交付 waits for a version and a recipient.
+   * 交付… (DELIV-003): the document's versions and the house's recipients as choices with none preselected, an optional
+   * note, and the sentence that a delivery records and never sends. While the text moved past the latest version, the
+   * first choice is the text as it stands, saved as the next version when delivered. 交付 waits for a version and a
+   * recipient.
    */
   function renderDeliveryForm(type: ProductionDocumentTypeProjection, documentNow: ProductionDocumentProjection, state: DeliveryForm): HTMLElement {
     const form = el('form', 'document-delivery');
@@ -893,20 +901,22 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       reason.hidden = blockers.length === 0;
       confirm.disabled = working || blockers.length > 0;
     };
-    for (const version of documentNow.versions) {
+    const choices: Array<[string, string]> = documentNow.versions.map((version) => [version.revisionId, `${version.label} · ${localInstantLabel(version.createdAt)}`]);
+    if (documentNow.changedSinceVersion) choices.unshift([CURRENT_TEXT, documentCurrentTextChoice((documentNow.versions[0]?.ordinal ?? 0) + 1)]);
+    for (const [value, words] of choices) {
       const label = el('label', 'choice-row');
       const input = el('input');
       input.type = 'radio';
       input.name = 'delivery-version';
-      input.value = version.revisionId;
-      input.checked = state.revisionId === version.revisionId;
+      input.value = value;
+      input.checked = state.revisionId === value;
       input.disabled = working;
       input.addEventListener('change', () => {
-        state.revisionId = version.revisionId;
+        state.revisionId = value;
         state.problem = null;
         sync();
       });
-      label.append(input, el('span', undefined, `${version.label} · ${localInstantLabel(version.createdAt)}`));
+      label.append(input, el('span', undefined, words));
       versions.append(label);
     }
     form.append(versions);
@@ -1030,7 +1040,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     try {
       const result = await api.recordProductionDocumentDelivery({
         documentId: documentNow.documentId,
-        revisionId,
+        // The current text is bound to what this form read of it: an edit made since is refused, never delivered unseen.
+        version: revisionId === CURRENT_TEXT ? { kind: 'current', workingDigest: documentNow.workingDigest } : { kind: 'saved', revisionId },
         recipient: { kind: recipient, custom: recipient === 'custom' ? state.custom : null },
         note,
       });
@@ -1045,7 +1056,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       options.setStatus(documentDeliveredLine(delivered.ordinal, delivered.recipient.label), 'success');
       const opener = documentsBlock?.querySelector<HTMLElement>(`ol.production-document-deliveries > li[data-delivery-id="${CSS.escape(delivered.deliveryId)}"] [data-export-action="open"]`);
       if (opener instanceof HTMLButtonElement) {
-        exporter.open({ kind: 'document', documentId: documentNow.documentId, revisionId }, documentExportLabel(type.label, delivered.versionLabel), opener);
+        exporter.open({ kind: 'document', documentId: documentNow.documentId, revisionId: delivered.revisionId }, documentExportLabel(type.label, delivered.versionLabel), opener);
       }
     } catch (error) {
       working = false;
@@ -1053,6 +1064,9 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       state.problem = options.errorMessage(error, DOCUMENT_STATUS_LINES.deliverFailed);
       drawDocuments(documentsProjection, { typeId: type.typeId, action: 'confirmDeliver' });
       options.setStatus(state.problem, 'error');
+      // The document may have moved under the form — an edit elsewhere, a version saved — so it is read again; the form
+      // keeps what the editor chose.
+      refreshDocuments();
     }
   }
 
