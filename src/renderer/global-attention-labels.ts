@@ -117,6 +117,10 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   'analysis-plan-revision': '计划修订',
   'analysis-queued': '正在排队',
   'analysis-running': '运行中',
+  // A Run in Connectivity Wait (Issue #502), in the drawer's words for what it waits for: never 运行中, never 已暂停.
+  'analysis-waiting-network': '等待网络',
+  'analysis-waiting-connection': '需要处理模型连接',
+  'analysis-waiting-slot': '等待运行名额',
   'review-running': '运行中',
   // A Review Run a stopped service left mid-way; there is no pause yet, so it is never called 已暂停.
   'review-continuable': '中途停止 · 可继续审阅',
@@ -142,6 +146,9 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
   'analysis-plan-revision': { tone: 'attention', shape: 'triangle' },
   'analysis-queued': { tone: 'progress', shape: 'half' },
   'analysis-running': { tone: 'progress', shape: 'half' },
+  'analysis-waiting-network': { tone: 'neutral', shape: 'ring' },
+  'analysis-waiting-connection': { tone: 'attention', shape: 'triangle' },
+  'analysis-waiting-slot': { tone: 'neutral', shape: 'ring' },
   'review-running': { tone: 'progress', shape: 'half' },
   'review-continuable': { tone: 'attention', shape: 'ring' },
   'analysis-completed': { tone: 'good', shape: 'check' },
@@ -247,6 +254,12 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
       return '计划冻结之后，它的关键内容已经变化；原计划不能再开始。';
     case 'analysis-queued':
       return '已进入 AI7 调度器（单槽位）。';
+    case 'analysis-waiting-network':
+      return '联网后开始任务：恢复联网后，AI7 先核对计划再开始；现在什么都没有运行。';
+    case 'analysis-waiting-connection':
+      return '模型连接缺少凭据：到设置连接模型服务后，任务会在联网时开始。';
+    case 'analysis-waiting-slot':
+      return '另一项任务正在运行；它结束后，这项任务在联网时开始。';
     case 'analysis-running':
       return runningReason(facts.progress);
     case 'review-running': {

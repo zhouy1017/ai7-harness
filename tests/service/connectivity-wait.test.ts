@@ -212,9 +212,11 @@ describe('联网后开始任务 and Connectivity Wait over the real store', () =
       expect(waiting.authorization).toMatchObject({ origin: 'standard-direct', authority: 'standard-direct-dispatch' });
       expect(waiting.run).toMatchObject({ state: 'awaiting-connectivity', stateLabel: '等待网络 · 未启动', attempt: null, progress: null });
       expect(waiting.run?.transitions.map((transition) => transition.state)).toEqual(['authorized', 'awaiting-connectivity']);
-      // A repeat answers as the first did, and a waiting Run is active: nothing is prepared over it.
+      // A repeat answers as the first did, and a waiting Run is active: nothing is prepared over it — and the refusal
+      // says it waits to start, never that it is under way (OFF-005, OFF-006).
       expect(store.startBaselineAnalysisWhenOnline(bookId, taskIntentId, prepared.planEnvelope!.digest).run?.runRecordId).toBe(waiting.run?.runRecordId);
       expect(await refusal(() => prepare(store, bookId))).toBe('ANALYSIS_TASK_ACTIVE');
+      expect(() => prepare(store, bookId)).toThrow('有一项分析任务在等待联网后开始；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的更新任务。');
       expect(store.waitingBaselineAnalysisRuns(null)).toEqual([{ bookId, taskIntentId, runRecordId: waiting.run!.runRecordId }]);
       expect(store.waitingBaselineAnalysisRuns(bookId)).toHaveLength(1);
       store.markCleanShutdown();
@@ -249,6 +251,8 @@ describe('联网后开始任务 and Connectivity Wait over the real store', () =
       expect(cancelled.run).toMatchObject({ state: 'cancelled', stateLabel: '已取消 · 未启动', attempt: null });
       expect(cancelled.run?.transitions.map((transition) => transition.state)).toEqual(['authorized', 'awaiting-connectivity', 'cancelled']);
       expect(cancelled.taskOutcome).toBeNull();
+      // The Book still holds no revision, so the first baseline is offered again.
+      expect(cancelled.actions.canPrepare).toBe(true);
       expect(store.cancelWaitingBaselineAnalysis(bookId, taskIntentId).run?.transitions).toHaveLength(3);
       expect(store.waitingBaselineAnalysisRuns(null)).toEqual([]);
       expect(prepare(store, bookId).taskIntent?.taskIntentId).not.toBe(taskIntentId);

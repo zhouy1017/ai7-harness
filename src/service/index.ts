@@ -24,6 +24,7 @@ import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../shared/protecte
 import { DEVELOPER_LIVE_POLICY_BINDING, resolveDeveloperLiveLaunch, type DeveloperLiveRuntime } from './launch-policy.js';
 import { decodeRequest, isSafeInteger, ProtocolError } from './request-frames.js';
 import { controlledConnectivity, hostConnectivity, type TaskPlanConnectivity } from './connectivity.js';
+import type { WaitingFor } from './task-plan.js';
 import { reconnectPreflight } from './reconnect-preflight.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from './provider/egress-gate.js';
 import type { DormantHarnessRuntime } from './runtime.js';
@@ -124,6 +125,8 @@ function driveReviewRun(reviewRuns: ReviewRunDriver, reviewRunId: string): void 
 interface ConnectivityContext {
   planConnectivity: TaskPlanConnectivity;
   preflight(): Promise<ReconnectPreflightProjection>;
+  /** What a Run in Connectivity Wait waits for now, as the drawer reads it: the network, a model connection, or the slot. */
+  waitingFor(): Promise<WaitingFor>;
 }
 
 async function dispatch(
@@ -370,7 +373,8 @@ async function dispatch(
     // once — so a start made just as the network came back is admitted now rather than at the next look.
     case 'startBaselineAnalysisWhenOnline': {
       store.startBaselineAnalysisWhenOnline(request.input.bookId, request.input.taskIntentId, request.input.planEnvelopeDigest);
-      await connectivity.preflight();
+      // A look that fails leaves the Run waiting as recorded; the next look admits it.
+      await connectivity.preflight().catch(() => undefined);
       return {
         id: request.id,
         ok: true,
@@ -738,7 +742,7 @@ async function dispatch(
     // 待我处理 (Issue #424, plan slice S78): a read across every Book. The one owner's progress reader and its
     // slot say which Run is in flight, exactly as the analysis inspections read them; nothing is written.
     case 'inspectGlobalAttention':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAttention(analysisProgress, analysisExecution.busy) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAttention(analysisProgress, analysisExecution.busy, await connectivity.waitingFor()) };
     // ④ 导出 (Issue #413, plan slice S64): local only, and only under this launch's verified External Export Policy.
     case 'reviewManuscriptExport':
       return {
@@ -1012,6 +1016,11 @@ async function run(): Promise<void> {
     let preflightInFlight: Promise<ReconnectPreflightProjection> | null = null;
     const connectivity: ConnectivityContext = {
       planConnectivity: { reading, reachesNetwork, slotBusy: () => owner.busy },
+      // A waiting Run's route reaches its model over the network, or it would not wait: offline first, then a missing
+      // credential, then the slot — the order the drawer reads them in.
+      waitingFor: async () => reading() === 'offline'
+        ? 'network'
+        : (await owner.liveCredentialReadiness()) === 'missing' ? 'connection' : owner.busy ? 'slot' : 'admitting',
       // One at a time: a look already under way answers a second request for one.
       preflight: () => {
         preflightInFlight ??= reconnectPreflight({

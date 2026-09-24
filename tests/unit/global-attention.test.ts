@@ -42,6 +42,7 @@ const NONE: GlobalAttentionReadings = {
   reviewRuns: [],
   reviewCompletions: [],
   busy: false,
+  waitingFor: 'admitting',
 };
 
 function readings(partial: Partial<GlobalAttentionReadings>): GlobalAttentionReadings {
@@ -181,6 +182,23 @@ describe('the four groups of 待我处理', () => {
     });
     expect(exceptions[0]!.technical.map((row) => row.key)).toEqual(['mark', 'conflict-kind', 'manuscript', 'branch', 'state-at']);
     expect(projection.actionableCount).toBe(2);
+  });
+
+  it('lists a Run waiting to start once online under 运行中与已暂停, in the words of what it waits for (Issue #502, ATTN-004)', () => {
+    const waiting = analysisTask('等网之书', { run: run('awaiting-connectivity', minutesAgo(6)) });
+    const states = (['network', 'connection', 'slot', 'admitting'] as const).map((waitingFor) => {
+      const projection = composeGlobalAttention(readings({ analysisTasks: [waiting], waitingFor }), NOW);
+      const [entry] = group(projection, 'active');
+      return [entry?.state, entry?.blocked, entry?.nextStep, projection.actionableCount, projection.running];
+    });
+    // Only a missing model connection asks the editor to act; none of them is an exception or a decision to count.
+    // A reader follows a waiting Run until it starts.
+    expect(states).toEqual([
+      ['analysis-waiting-network', false, 'view-run', 0, true],
+      ['analysis-waiting-connection', true, 'view-run', 0, true],
+      ['analysis-waiting-slot', false, 'view-run', 0, true],
+      ['analysis-queued', false, 'view-run', 0, true],
+    ]);
   });
 
   it('places each record by its own state, with the next step and the record it opens', () => {

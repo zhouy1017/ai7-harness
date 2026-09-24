@@ -2824,7 +2824,7 @@ function renderAnalysisUpdateControls(card: HTMLElement, projection: BaselineAna
     element('dt', undefined, '目标修订版身份'), element('dd', 'technical-identity', `${controls.target.revisionId} · ${controls.target.digest}`),
     element('dt', undefined, '当前稿件摘要'), element('dd', 'technical-identity', controls.working.workingDigest),
   ));
-  if (controls.blockedByActiveRun) section.append(element('p', 'attention-note', '当前已有分析任务在调度或执行中；在其结束前不能准备新的更新任务。'));
+  if (controls.blockedReason !== null) section.append(element('p', 'attention-note', controls.blockedReason));
   const actionButtons: HTMLButtonElement[] = [];
   const cancel = analysisCancelButton();
   const modes: BaselineAnalysisUpdateMode[] = ['sync-current', 'reanalyze-range', 'reanalyze-book'];
@@ -3031,21 +3031,34 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
     projection.providerResolutionPlan?.remoteBinding.providerProcessing ?? projection.resultSetRevision?.policyPin ?? null,
   )));
 
+  // One follow-up read per card at a time, of the revision the editor is looking at: a newer draw replaces the
+  // pending one rather than adding another loop, and an answer that changed nothing draws nothing, so the editor's
+  // place and focus stay while a Run waits (Issue #502).
   const refreshLater = (delayMs = 250): void => {
-    window.setTimeout(async () => {
+    const pending = analysisRefreshTimers.get(host);
+    if (pending !== undefined) window.clearTimeout(pending);
+    analysisRefreshTimers.set(host, window.setTimeout(async () => {
+      analysisRefreshTimers.delete(host);
       if (!host.isConnected || host.dataset['analysisBookId'] !== projection.bookId) return;
       try {
-        const next = await window.ai7.inspectBaselineAnalysis();
-        if (host.isConnected && next.bookId === host.dataset['analysisBookId']) renderBaselineAnalysis(host, next, bookTitle);
+        const inspected = projection.inspectedRevision?.revision.revisionId ?? null;
+        const next = await window.ai7.inspectBaselineAnalysis(inspected === null ? undefined : { revisionId: inspected });
+        if (!host.isConnected || next.bookId !== host.dataset['analysisBookId']) return;
+        if (JSON.stringify(next) === JSON.stringify(projection)) {
+          if (projection.state === 'waiting' || projection.state === 'admitted' || projection.state === 'executing') refreshLater(delayMs);
+          return;
+        }
+        renderBaselineAnalysis(host, next, bookTitle);
       } catch (error) {
         if (host.isConnected) setStatus(rendererErrorMessage(error, '无法刷新基线稿件分析状态。'), 'error');
       }
-    }, delayMs);
+    }, delayMs));
   };
 
   // The first-baseline form exists only while the Book holds no Result Set Revision; afterwards every
-  // new Task is one of the three Analysis Update Controls below the Overview.
-  if (projection.state === 'available' && projection.history === null) {
+  // new Task is one of the three Analysis Update Controls below the Overview. A first baseline cancelled while
+  // it waited to start leaves no revision either, so the form is offered again (Issue #502, OFF-010).
+  if ((projection.state === 'available' || (projection.state === 'cancelled' && projection.actions.canPrepare)) && projection.history === null) {
     const form = element('section', 'form-row analysis-form');
     const label = element('label', undefined, '固定任务目标');
     label.htmlFor = 'j04-analysis-goal';
@@ -3118,6 +3131,9 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
   // moves on by itself once Reconnect Preflight admits it.
   if (projection.state === 'waiting') refreshLater(2_000);
 }
+
+/** ②A's one pending follow-up read per card host (Issue #502): a later draw replaces it, never adds another loop. */
+const analysisRefreshTimers = new WeakMap<HTMLElement, number>();
 
 /**
  * The latest Task's plan on ②A (S72 D4): one line naming it and 查看计划, which opens the whole plan in the
