@@ -73,6 +73,9 @@ type ComposedBodyItem =
       link?: boolean;
       /** A bookmark of this name around the paragraph's runs, the way a table of contents marks a heading. */
       bookmark?: string;
+      /** Raw markup before and after the paragraph's runs: a bookmark half, alone or in a tracked insertion. */
+      before?: string;
+      after?: string;
     }
   | { table: ReadonlyArray<ReadonlyArray<SourceSpan>> };
 
@@ -102,6 +105,8 @@ async function paragraphXml(item: Extract<ComposedBodyItem, { runs: unknown }>):
     runs.unshift(`<w:bookmarkStart w:id="0" w:name="${item.bookmark}"/>`);
     runs.push('<w:bookmarkEnd w:id="0"/>');
   }
+  if (item.before !== undefined) runs.unshift(item.before);
+  if (item.after !== undefined) runs.push(item.after);
   if (item.drawing) {
     runs.push(`<w:r><w:drawing><wp:inline ${WP}><a:graphic ${A}><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
       `<pic:pic ${PIC}/></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`);
@@ -260,6 +265,35 @@ describe('a regenerated paragraph keeps its bookmarks', () => {
     expect(start >= 0 && start < text && text < end).toBe(true);
     expect(document.split('w:name="mark"').length).toBe(2);
     expect(document).toContain('w:anchor="mark"');
+  });
+
+  it('never writes half a bookmark whose other half stood in a tracked insertion (Issue #537)', async () => {
+    const inserted = async (half: string) =>
+      `<w:ins w:id="101" w:author="${AUTHOR}" w:date="2026-09-01T00:00:00Z">${half}${await runXml({ span: { block: 5, from: 0, to: 4 } })}</w:ins>`;
+    const start = '<w:bookmarkStart w:id="7" w:name="split"/>';
+    const end = '<w:bookmarkEnd w:id="7"/>';
+    const halves = (document: string) => [document.includes('w:id="7" w:name="split"'), document.includes('<w:bookmarkEnd w:id="7"/>')];
+    // A restored paragraph drops its insertion whole, the reading the import took; the edited, regenerated one writes
+    // its own half. Either way round, and with the insertion in the regenerated paragraph instead, no half is left.
+    const cases: Array<[string, ComposedBodyItem[], number]> = [
+      ['start inserted in the restored paragraph', [{ runs: [{ span: { block: 3 } }], before: await inserted(start) }, { runs: [{ span: { block: 4 } }], after: end }], 1],
+      ['end inserted in the restored paragraph', [{ runs: [{ span: { block: 3 } }], before: start }, { runs: [{ span: { block: 4 } }], after: await inserted(end) }], 0],
+      ['start inserted in the regenerated paragraph', [{ runs: [{ span: { block: 3 } }], before: await inserted(start) }, { runs: [{ span: { block: 4 } }], after: end }], 0],
+    ];
+    for (const [name, body, editedIndex] of cases) {
+      const path = join(sandbox, `${name}.docx`);
+      const original = await composeSource(path, { body });
+      const { blocks } = await parse(path);
+      const result = renderDocxExport({
+        title: '书签',
+        blocks: exportBlocks(blocks).map((block, index) => index === editedIndex ? edited(block, `${block.text}（改）`) : block),
+        marks: [],
+        options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS },
+        source: { kind: 'mapped', original, rows: bodyRows(blocks), textBoxes: 'retain' },
+      }, { emit: true });
+      expect([name, result.restoredBlocks, result.regeneratedBlocks]).toEqual([name, 1, 1]);
+      expect([name, ...halves(partOf(result.bytes!, 'word/document.xml')!)]).toEqual([name, false, false]);
+    }
   });
 });
 

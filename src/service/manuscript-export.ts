@@ -253,10 +253,18 @@ export function reportRestorationLine(version: number): string {
 export const EXPORT_PDF_NOT_PRINTED = 'PDF 还没有排版好，没有写入，所选位置没有变化；请再点一次「按上述方式导出」。';
 /** The folder inside AI7's own data where a PDF's page and its printed file wait between staging and the write. */
 export const EXPORT_STAGING_DIRECTORY = 'export-staging';
+/**
+ * The file a `replace` binds is there but cannot be read now (Issue #537) — held open by another program without read
+ * sharing, or a cloud placeholder that cannot download offline — so AI7 cannot tell whether it changed: nothing is
+ * written, and the words say so rather than that it changed.
+ */
+export const EXPORT_TARGET_UNREADABLE_DETAIL = '要替换的文件现在无法读取（可能被另一个程序打开，或是还没有下载到本机的云端文件），没有写入，所选位置没有变化；请让它可以读取后再导出。';
 const FAILURE_DETAILS: Readonly<Record<string, string>> = {
   EXPORT_STAGE_FAILED: '无法在所选文件夹中写入导出文件，所选位置没有变化。',
   EXPORT_STAGE_VERIFY_FAILED: '写入的临时文件校验不一致，已经删除，所选位置没有变化。',
   EXPORT_TARGET_CHANGED: '所选位置在批准后发生了变化，没有写入；请重新选择保存位置。',
+  // Issue #537: a file AI7 cannot read is not a file that changed.
+  EXPORT_TARGET_UNREADABLE: EXPORT_TARGET_UNREADABLE_DETAIL,
   EXPORT_COMMIT_FAILED: '无法把导出文件放到所选位置，所选位置没有变化。',
   EXPORT_CREATE_UNSUPPORTED: '所选位置所在的磁盘不能安全地新建文件，没有写入，所选位置没有变化。请换一个位置保存，或选择替换一个已有的文件。',
   EXPORT_COMMIT_UNCERTAIN: '系统没有确认文件是否已放到所选位置。请到所选位置核对；AI7 不会自动重试。',
@@ -568,6 +576,10 @@ export async function writeAtomically(
   // there since is left as it is, and nothing is written.
   if (disposition === 'replace') {
     const standing = await fileDigest(destination);
+    if (standing === null && replaces !== null) {
+      await discard();
+      return { outcome: 'failed', code: 'EXPORT_TARGET_UNREADABLE' };
+    }
     if (replaces === null || standing?.bytes !== replaces.bytes || standing.sha256 !== replaces.sha256) {
       await discard();
       return { outcome: 'failed', code: 'EXPORT_TARGET_CHANGED' };
@@ -749,6 +761,7 @@ export class ManuscriptExportStore {
     const state = await targetState(preparation.destination);
     const replaces = this.#replacedFileOf(row);
     const standing = preparation.disposition === 'replace' ? await fileDigest(preparation.destination) : null;
+    requireExport(preparation.disposition !== 'replace' || state !== 'file' || standing !== null, 'EXPORT_TARGET_UNREADABLE', EXPORT_TARGET_UNREADABLE_DETAIL);
     requireExport(
       (preparation.disposition === 'create' && state === 'absent') ||
         (preparation.disposition === 'replace' && state === 'file' && standing?.bytes === replaces?.bytes && standing?.sha256 === replaces?.sha256),
