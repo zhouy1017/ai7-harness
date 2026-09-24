@@ -72,7 +72,7 @@ function preflight(store: EditorialStore, owner: BaselineAnalysisExecutionOwner,
     waitingRuns: () => store.waitingBaselineAnalysisRuns(null),
     stillWaiting: (runRecordId) => store.baselineAnalysisRunWaits(runRecordId),
     drift: (runRecordId) => store.baselineAnalysisPreflightDrift(runRecordId),
-    block: (runRecordId, reasons) => store.blockWaitingBaselineAnalysisRun(runRecordId, reasons),
+    block: (runRecordId, reasons, cause) => store.blockWaitingBaselineAnalysisRun(runRecordId, reasons, cause),
     reachesNetwork: true,
     connectivity,
     credentialReadiness: () => owner.liveCredentialReadiness(),
@@ -396,12 +396,59 @@ describe('联网后开始任务 and Connectivity Wait over the real store', () =
       expect(blocked.run?.state).toBe('blocked-before-dispatch');
       expect(blocked.run?.attempt).toBeNull();
       expect(blocked.run?.blockedReasons).toEqual([`需要重新确认计划：${changed.join('、')}已经变化，这次授权不再对应当前的情况。`]);
-      // A blocked Run no longer holds the Book: back under the launch it was prepared for, the editor prepares again.
+      // 需要重新确认计划 (Issue #536): the Run keeps why it was blocked, and every place it is shown says so, never 派发前已阻止.
+      const taskIntentId = prepared.taskIntent!.taskIntentId;
+      expect([blocked.run?.blockedBy, blocked.state, blocked.stateLabel, blocked.run?.stateLabel])
+        .toEqual(['plan-moved', 'authorized-blocked', '需要重新确认计划', '需要重新确认计划']);
+      const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
+      expect(plan.state).toEqual({ key: 'plan-moved', label: '需要重新确认计划' });
+      // 重新准备 is the Task it was — the first baseline — prepared anew; nothing is started by reading it.
+      expect(plan.reprepare).toEqual({ reason: blocked.run!.blockedReasons![0], prepare: { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null } });
+      const itemOf = () => store.inspectGlobalAttention(() => null, false).groups
+        .flatMap((group) => group.items.map((entry) => ({ group: group.key, entry })))
+        .find(({ entry }) => entry.itemId === `analysis:${taskIntentId}`);
+      // 待我处理 puts it with the other plan decisions, blocking, with 重新准备 as its step and the plan as its target.
+      expect(itemOf()).toMatchObject({
+        group: 'decisions',
+        entry: { state: 'analysis-plan-moved', blocked: true, nextStep: 'reprepare', target: { kind: 'analysis-plan', bookId, taskIntentId } },
+      });
+      // A blocked Run no longer holds the Book: back under the launch it was prepared for, 重新准备's request prepares the
+      // new plan, and the decision is made — nothing of the old Task asks for the editor any more.
       store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null });
-      expect(prepare(store, bookId).taskIntent?.taskIntentId).not.toBe(prepared.taskIntent!.taskIntentId);
+      let progress = store.createBaselineAnalysisPreparationWork(bookId, plan.reprepare!.prepare.goal, plan.reprepare!.prepare.update, launchPolicy);
+      while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
+      expect(progress.projection?.state).toBe('prepared');
+      expect(progress.projection?.taskIntent?.taskIntentId).not.toBe(taskIntentId);
+      expect(itemOf()).toBeUndefined();
       store.markCleanShutdown();
     } finally {
       await owner.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('keeps 派发前已阻止 for a waiting Run this launch cannot admit, and records why in the state it wrote (Issue #536)', async () => {
+    const store = await openWithRoute();
+    try {
+      const { bookId, prepared } = await preparedBook(store, 'L2 sample1 启动无法接纳');
+      const taskIntentId = prepared.taskIntent!.taskIntentId;
+      store.startBaselineAnalysisWhenOnline(bookId, taskIntentId, prepared.planEnvelope!.digest);
+      const runRecordId = store.waitingBaselineAnalysisRuns(bookId)[0]!.runRecordId;
+      expect(await refusal(() => store.blockWaitingBaselineAnalysisRun(runRecordId, ['运行未能进入调度。'], 'unknown' as 'launch'))).toBe('ANALYSIS_RUN_INVALID');
+      store.blockWaitingBaselineAnalysisRun(runRecordId, ['当前图书不在可传输的集合内；未发起任何传输。'], 'launch');
+      const blocked = store.inspectBaselineAnalysis(bookId, () => null);
+      expect([blocked.run?.blockedBy, blocked.stateLabel, blocked.run?.stateLabel]).toEqual(['launch', '已授权 · 派发前阻止', '派发前阻止 · 未启动']);
+      const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
+      expect([plan.state, plan.reprepare]).toEqual([{ key: 'blocked', label: '派发前已阻止' }, null]);
+      expect(store.inspectGlobalAttention(() => null, false).groups.find((group) => group.key === 'exceptions')?.items
+        .find((entry) => entry.itemId === `analysis:${taskIntentId}`)).toMatchObject({ state: 'analysis-blocked', nextStep: 'view-run' });
+      // Why travels in the state record's canonical detail: no schema change.
+      const detail = withDatabase(true, (database) => database.prepare(
+        'SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1',
+      ).get(runRecordId) as { canonical_json: string });
+      expect(JSON.parse(detail.canonical_json)).toMatchObject({ state: 'blocked-before-dispatch', cause: 'launch', reasons: ['当前图书不在可传输的集合内；未发起任何传输。'] });
+      store.markCleanShutdown();
+    } finally {
       store.close();
     }
   }, 300_000);

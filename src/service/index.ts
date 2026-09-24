@@ -1182,7 +1182,7 @@ async function run(): Promise<void> {
           waitingRuns: () => openStore.waitingBaselineAnalysisRuns(null),
           stillWaiting: (runRecordId) => openStore.baselineAnalysisRunWaits(runRecordId),
           drift: (runRecordId) => openStore.baselineAnalysisPreflightDrift(runRecordId),
-          block: (runRecordId, reasons) => openStore.blockWaitingBaselineAnalysisRun(runRecordId, reasons),
+          block: (runRecordId, reasons, cause) => openStore.blockWaitingBaselineAnalysisRun(runRecordId, reasons, cause),
           reachesNetwork: developerLive !== null || (connectivityPath !== undefined && fixture !== null),
           connectivity: reading,
           credentialReadiness: () => owner.liveCredentialReadiness(),
