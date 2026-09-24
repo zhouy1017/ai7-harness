@@ -64,10 +64,12 @@ function mark(store: EditorialStore, book: Book, position: number, from: number,
   return store.createEditorialMark(input).markId;
 }
 
-async function prepareReimport(store: EditorialStore, book: Book, path: string): Promise<ReviewBeforeManuscriptReimportProjection> {
+async function prepareReimport(store: EditorialStore, book: Book, path: string, lineageSourceVersionId: string | null = null): Promise<ReviewBeforeManuscriptReimportProjection> {
   const staged = await store.stageSelectedManuscript(randomUUID(), path);
   const started = store.createManuscriptReimportPreparationWork(staged.draftId, staged.draftVersion, {
-    kind: 'existing-book', bookId: book.bookId, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId: null,
+    kind: 'existing-book', bookId: book.bookId, relationship: 'reimport',
+    lineage: lineageSourceVersionId === null ? { kind: 'unconfirmed' } : { kind: 'verified-source-version', sourceVersionId: lineageSourceVersionId },
+    reuseSourceVersionId: null,
   });
   let prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
   while (!prepared.done) prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
@@ -196,6 +198,55 @@ describe('the chapter-level Reimport Comparison', () => {
       // The 备注 on the dropped paragraph is set aside, kept, and not drawn on the text.
       expect(standing.has(noteId!)).toBe(false);
       expect(reopened.getEditorialMarkCard(book!.manuscriptId, book!.branchId, noteId!).anchorState).toBe('detached');
+      reopened.markCleanShutdown();
+    } finally {
+      reopened.close();
+    }
+  }, 180_000);
+
+  it('keeps an edited paragraph’s own identity in a three-way comparison, and the store opens again', async () => {
+    // Three paragraphs of sample1. The editor adds words to the first and does not save a milestone; the new file keeps
+    // the first as the source had it and replaces the second. Against the verified source the first is an edit row
+    // (the new file's words are the source's), the second a delete and an insert: one row, current 1–2 → new 1–2.
+    const first = await compose('base', [paragraph(span(21)), paragraph(span(22)), paragraph(span(23))]);
+    const second = await compose('revised', [paragraph(span(21)), paragraph(span(24)), paragraph(span(23))]);
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let book: Book;
+    let before: string[];
+    try {
+      book = await importBook(store, first);
+      const source = store.getBookOverview(book.bookId).records.find((record) => record.kind === 'source');
+      if (source?.kind !== 'source') throw new Error('the imported Book has no source version');
+      const view = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      before = view.blocks.map((block) => block.blockId);
+      const edited = view.blocks[0]!;
+      store.flushJournalEdit({
+        clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId,
+        baseRevisionId: view.revisionId, blockId: edited.blockId, windowStartBlockId: edited.blockId,
+        baseBlockDigest: edited.digest, expectedJournalSequence: view.journalSequence,
+        fromGrapheme: 0, toGrapheme: 0, insertText: '（本地）',
+      });
+
+      let review = await prepareReimport(store, book, second, source.sourceVersionId);
+      expect(review.lineage.comparisonKind).toBe('three-way');
+      expect(review.comparison).toMatchObject({ groups: 1, unresolvedGroups: 1, exactBlocks: 1 });
+      const page = store.getReimportMappingPage(review.draftId, review.draftVersion, null);
+      expect(page.items.map((row) => [row.current.from, row.current.to, row.staged.from, row.staged.to, row.verbs]))
+        .toEqual([[1, 2, 1, 2, ['rewrite', 'delete']]]);
+      review = resolve(store, review, page.items[0]!.groupId, 'rewrite');
+      expect((await commit(store, review)).resultKind).toBe('changed');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+
+    // The restart validates the edit row's resolution: it carries the paragraph's own identity, which no other row
+    // claims. 改写与新增 kept both current identities in order.
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const view = reopened.getManuscriptWindow(book!.manuscriptId, book!.branchId, null);
+      expect(view.blocks.map((block) => block.blockId)).toEqual(before!);
+      expect(view.blocks.map((block) => block.text)).toEqual(await Promise.all([21, 24, 23].map((block) => sourceSpanText(SOURCE, span(block)))));
       reopened.markCleanShutdown();
     } finally {
       reopened.close();
