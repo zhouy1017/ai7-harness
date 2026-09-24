@@ -430,7 +430,7 @@ describe('改计划重做 over the real store', () => {
       const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
       // Admitted when the service stopped, it is reconciled 可续行 without having read a range.
       store.baselineAnalysisLedger.recordRunState(runRecordId, 'admitted', { detail: '已进入 AI7 调度器（单槽位）。' });
-      expect(store.reconcileStoppedBaselineAnalysisRuns()).toEqual({ settled: 1, cancelling: [], answered: [] });
+      expect(store.reconcileStoppedBaselineAnalysisRuns()).toEqual({ settled: 1, cancelling: [], answered: [], queued: [] });
       const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
       expect(plan.state.key).toBe('resumable');
       expect(plan.runControl?.redo).toEqual({ reason: RUN_CONTROL_REDO_NOT_BEGUN_REASON });

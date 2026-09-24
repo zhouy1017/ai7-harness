@@ -333,11 +333,11 @@ function parseArguments(argv: string[]): LaunchArguments {
   // simulates whether the adapter's route has a network, it sits beside the adapter rather than excluding it.
   const connectivityPath = values.get('--j04-connectivity-path');
   requireDesktop(connectivityPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && isAbsolute(connectivityPath)));
-  // J-10's unit hold (Issue #422) is guarded the same way — J-10's own, and J-16's to hold a Run in its 任务 panel (Issue
-  // #423), and absolute — and sits beside the adapter.
+  // J-10's unit hold (Issue #422) is guarded the same way — J-10's own, J-16's to hold a Run in its 任务 panel (Issue
+  // #423), and J-09's to hold several Books' Runs at once (Issue #49), and absolute — and sits beside the adapter.
   const unitHoldPath = values.get('--j10-unit-hold-path');
   requireDesktop(unitHoldPath === undefined ||
-    ((process.env.AI7_E2E_JOURNEY === 'J-10' || process.env.AI7_E2E_JOURNEY === 'J-16') && isAbsolute(unitHoldPath)));
+    ((process.env.AI7_E2E_JOURNEY === 'J-09' || process.env.AI7_E2E_JOURNEY === 'J-10' || process.env.AI7_E2E_JOURNEY === 'J-16') && isAbsolute(unitHoldPath)));
   requireDesktop(
     observeJ12RevealValue === undefined ||
       (process.env.AI7_E2E_JOURNEY === 'J-12' && observeJ12RevealValue === 'true'),

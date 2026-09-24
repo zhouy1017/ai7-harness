@@ -118,6 +118,7 @@ export function taskPanelCardView(entry: BookTaskItemProjection): TaskPanelCardV
       actions = [action('resume', true), action('cancel'), action('plan')];
       break;
     case 'analysis-cancelling':
+    case 'analysis-waiting-capacity':
     case 'analysis-waiting-network':
     case 'analysis-waiting-connection':
     case 'analysis-waiting-slot':

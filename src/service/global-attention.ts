@@ -213,7 +213,7 @@ export interface GlobalAttentionReadings {
   readonly reviewCompletions: ReadonlyArray<ReviewRunAttentionReading>;
   /** Every 维护事项 still waiting on the editor (Issue #426, S68b). */
   readonly maintenance: ReadonlyArray<MaintenanceAttentionReading>;
-  /** Whether a Run holds the execution owner's one slot now. */
+  /** Whether Runs hold every place of the execution owner's governor now (Issue #49, S14). */
   readonly busy: boolean;
   /**
    * What a Run in Connectivity Wait waits for now, as the drawer reads it (Issue #502): the device's reading, the
@@ -420,6 +420,11 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading, waitingFor: Wai
       target: { kind: 'analysis-plan', bookId: reading.bookId, taskIntentId: reading.taskIntentId },
       technical: [...technical, { key: 'clarification', label: '澄清请求', value: `${asked.requestId} · 第 ${asked.unitOrdinal} 个阅读范围` }],
     });
+  }
+  // 等待运行名额 (Issue #49, S14; CONC-007): a start waiting on the governor for a place — 运行中与已暂停's, never an
+  // exception, and never a ceiling's or an account limit's.
+  if (run.state === 'authorized') {
+    return item('active', 'analysis-waiting-capacity', { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
   }
   if (ACTIVE_RUN_STATES.has(run.state)) {
     if (run.progress !== null) {
@@ -669,10 +674,10 @@ export function composeGlobalAttention(readings: GlobalAttentionReadings, now: D
   return {
     groups,
     actionableCount: groups.filter((group) => GLOBAL_ATTENTION_COUNTED_GROUPS.includes(group.key)).reduce((sum, group) => sum + group.total, 0),
-    // A Run holds the slot, or a Review Run is being driven — between two categories it holds none — or a Run waits to
-    // start once online, which a reader follows until it starts (Issue #502).
+    // A Run holds a place of the governor's, or waits for one (Issue #49, S14), or a Review Run is being driven — between
+    // two categories it holds none — or a Run waits to start once online, which a reader follows until it starts (Issue #502).
     running: readings.busy || readings.reviewRuns.some((reading) => reading.state === 'running') ||
-      readings.analysisTasks.some((reading) => reading.run?.state === 'awaiting-connectivity'),
+      readings.analysisTasks.some((reading) => reading.run !== null && followedRun(reading.run)),
   };
 }
 
@@ -732,8 +737,14 @@ function preparedReviewItem(reading: ReviewRunAttentionReading): GlobalAttention
   });
 }
 
-/** The Run states the panel follows until they end: in flight, stopping, or waiting to start once online. */
-const FOLLOWED_RUN_STATES: ReadonlySet<BaselineAnalysisRunState> = new Set([...ACTIVE_RUN_STATES, 'awaiting-connectivity']);
+/**
+ * Whether a reader follows a Run until it ends: one the execution owner holds — in flight, stopping, or stopped with its
+ * cancellation waiting for a place — one waiting on the governor for a place (Issue #49, S14), and one waiting to start
+ * once online. A Run left executing that nothing holds is an exception's to name, and nothing moves it.
+ */
+function followedRun(run: NonNullable<AnalysisTaskAttentionReading['run']>): boolean {
+  return run.progress !== null || run.state === 'authorized' || run.state === 'awaiting-connectivity';
+}
 
 /**
  * The Book's 任务 panel from its readings (TASK-044): each Task is 待我处理's item for it, or the panel's own for the three
@@ -776,7 +787,7 @@ export function composeBookTasks(readings: BookTaskReadings): BookTasksProjectio
   return {
     bookId: readings.bookId,
     groups,
-    running: own(readings.analysisTasks).some((reading) => reading.run !== null && FOLLOWED_RUN_STATES.has(reading.run.state)) ||
+    running: own(readings.analysisTasks).some((reading) => reading.run !== null && followedRun(reading.run)) ||
       own(readings.reviewRuns).some((reading) => reading.state === 'running'),
   };
 }

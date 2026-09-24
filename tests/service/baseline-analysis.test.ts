@@ -381,7 +381,8 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       const admitted = store.inspectBaselineAnalysis(bookId, (runRecordId) => owner.progressFor(runRecordId));
       expect(['admitted', 'executing']).toContain(admitted.state);
       expect(admitted.run?.progress).toMatchObject({ unitsTotal: SAMPLE1_UNITS });
-      expect(() => owner.admitAndDispatch(authorized.dispatchRunRecordId!)).toThrowError(/EXECUTION_BUSY|一次只执行一个运行/u);
+      // A Run already executing takes no second place (Issue #49, S14).
+      expect(() => owner.admitAndDispatch(authorized.dispatchRunRecordId!)).toThrowError(/已经在执行/u);
 
       const settled = await settle(owner, store, bookId);
       expect(settled.state).toBe('settled');

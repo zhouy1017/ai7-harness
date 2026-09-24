@@ -108,7 +108,6 @@ import {
 } from './reuse-plan.js';
 import { NO_TASK_OUTCOME_REASON, PRE_RUN_REPORT_REASON, runReportDigest, runReportProjection, type RunReportRecord } from './run-report.js';
 import { baselineAnalysisKindDefinition } from './kind-definition.js';
-import { EXECUTION_SLOT_BUSY, EXECUTION_SLOT_BUSY_REASON } from './execution-error.js';
 import { describeComposition } from '../harness/primary-agent-harness.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provider/egress-gate.js';
 import type { AnalysisOutcomeAttentionReading, AnalysisTaskAttentionReading } from '../global-attention.js';
@@ -124,6 +123,10 @@ const SUCCESSOR_BEHAVIOR ='每次更新都是新的用户发起任务，经准�
 const ACTIVE_RUN_REASON = '当前已有分析任务在调度或执行中；在其结束前不能准备新的更新任务。' as const;
 /** A Run in Connectivity Wait blocks a new Task too, but it is not running: it waits to start once online (OFF-005, OFF-006). */
 const WAITING_RUN_REASON = '有一项分析任务在等待联网后开始；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的更新任务。' as const;
+/** A Run waiting on the governor blocks a new Task too, and it is not running either (Issue #49, S14; CONC-007). */
+const QUEUED_RUN_REASON = '有一项分析任务在等待运行名额；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的更新任务。' as const;
+/** A queued Run's own words (Issue #49, S14; CONC-007): what it waits for, and that nothing has begun. */
+export const RUN_QUEUED_LABEL = '等待运行名额' as const;
 /** The waiting state's own words (Issue #502, OFF-005): recorded, and nothing has been sent or begun. */
 const CONNECTIVITY_WAIT_DETAIL = '已记录授权；联网并通过重新联网预检后开始。此前不调用模型、不产生用量。' as const;
 
@@ -599,7 +602,7 @@ function runIsActive(state: BaselineAnalysisRunState | null): boolean {
 
 /** Why an active Run blocks a new Task, in the words of its state: a waiting Run is never said to be under way. */
 function activeRunReason(state: BaselineAnalysisRunState | null): string {
-  return state === 'awaiting-connectivity' ? WAITING_RUN_REASON : ACTIVE_RUN_REASON;
+  return state === 'awaiting-connectivity' ? WAITING_RUN_REASON : state === 'authorized' ? QUEUED_RUN_REASON : ACTIVE_RUN_REASON;
 }
 
 /**
@@ -841,9 +844,12 @@ export class BaselineAnalysisStore {
     const runRecord = this.#db.prepare('SELECT * FROM analysis_run_records WHERE task_intent_id = ?').get(intent.taskIntentId) as SqlRow | undefined;
     const run = runRecord === undefined ? null : this.#runProjection(runRecord, progress);
     const outcome = this.#db.prepare('SELECT * FROM analysis_task_outcomes WHERE task_intent_id = ?').get(intent.taskIntentId) as SqlRow | undefined;
+    // A Run whose last state is `authorized` is one the governor has not admitted yet: it waits for a place (Issue #49,
+    // S14; CONC-007). One with no route is recorded blocked before dispatch in the same transaction.
     const state: BaselineAnalysisProjection['state'] = run === null
       ? 'prepared'
-      : run.state === 'authorized' || run.state === 'blocked-before-dispatch'
+      : run.state === 'authorized' ? 'queued'
+        : run.state === 'blocked-before-dispatch'
         ? 'authorized-blocked'
         // A cancelled Run never ran, so it reads as cancelled — never as 已中断, which OFF-012 keeps for a Run
         // that can resume (Issue #502).
@@ -918,6 +924,7 @@ export class BaselineAnalysisStore {
       // and one stopping at the editor's word 正在取消 (Issue #422).
       stateLabel: state === 'prepared' ? '计划已冻结 · 待授权'
         : state === 'authorized-blocked' ? (run?.blockedBy === 'plan-moved' ? PLAN_MOVED_LABEL : '已授权 · 派发前阻止')
+          : state === 'queued' ? RUN_QUEUED_LABEL
           : state === 'waiting' ? RUN_STATE_LABELS['awaiting-connectivity']
             : state === 'cancelled' ? (run !== null && runBegan(run.transitions) ? RUN_CANCELLED_AFTER_START_LABEL : RUN_STATE_LABELS.cancelled)
               : state === 'cancelling' ? RUN_STATE_LABELS.cancelling
@@ -2743,9 +2750,9 @@ export class BaselineAnalysisStore {
   // ---- authorization -----------------------------------------------------------------------------
 
   /**
-   * `slotBusy` is the execution owner's word that another Run holds its one slot (Issue #420, S74a A2). A
-   * Run that would dispatch is then refused before anything is recorded — no queue — while a repeat of an
-   * authorization already recorded answers as it always has, and a Run that never dispatches is unaffected.
+   * A Run that would dispatch is recorded `authorized` and named for the execution owner, which admits it at once or,
+   * while the governor has no place, when one frees (Issue #49, S14; CONC-007): nothing is refused for a busy
+   * instance, and a repeat of an authorization already recorded answers as it always has.
    *
    * `start` is `when-online` for 联网后开始任务 (Issue #502; AUTH-004, OFF-005): the same exact Run Authorization
    * and Run Record, and the Run then waits in Connectivity Wait instead of being handed to the slot — nothing
@@ -2760,7 +2767,6 @@ export class BaselineAnalysisStore {
     bookId: string,
     taskIntentId: string,
     planEnvelopeDigest: string,
-    slotBusy = false,
     start: 'now' | 'when-online' = 'now',
     origin: AnalysisAuthorizationOrigin = STANDARD_DIRECT,
   ): { projection: AnalysisProjection; dispatchRunRecordId: string | null } {
@@ -2786,7 +2792,6 @@ export class BaselineAnalysisStore {
       'ANALYSIS_PREDECESSOR_DRIFT', '该任务的前一修订版已不再是结果集的最新修订版；无法授权。请基于最新修订版重新准备更新。');
     const dispatchAllowed = prepared.planEnvelope.dispatchAllowed;
     requireAnalysis(start === 'now' || dispatchAllowed, 'ANALYSIS_START_WHEN_ONLINE_INVALID', '这份计划没有可执行的路由，不能联网后开始。');
-    requireAnalysis(!(slotBusy && dispatchAllowed && start === 'now'), EXECUTION_SLOT_BUSY, EXECUTION_SLOT_BUSY_REASON);
     const authorizationId = randomUUID();
     const runRecordId = randomUUID();
     const instant = new Date().toISOString();
@@ -2836,8 +2841,13 @@ export class BaselineAnalysisStore {
     const run = current.run;
     requireAnalysis(current.taskIntent?.taskIntentId === taskIntentId && run !== null, 'ANALYSIS_CANCEL_STALE', '这项任务已经变化；无法取消。');
     if (run.state === 'cancelled') return current;
-    requireAnalysis(run.state === 'awaiting-connectivity', 'ANALYSIS_CANCEL_NOT_WAITING', '只有等待中的任务可以在这里取消；它已经开始或已经结束。');
-    this.recordRunState(run.runRecordId, 'cancelled', { detail: '编辑在派发前取消了这项等待中的任务；没有发送任何内容，也没有产生用量。' });
+    // A Run waiting on the governor (Issue #49, S14) is cancelled the same way: nothing of it ran either.
+    requireAnalysis(run.state === 'awaiting-connectivity' || run.state === 'authorized', 'ANALYSIS_CANCEL_NOT_WAITING', '只有等待中的任务可以在这里取消；它已经开始或已经结束。');
+    this.recordRunState(run.runRecordId, 'cancelled', {
+      detail: run.state === 'authorized'
+        ? '编辑在派发前取消了这项等待运行名额的任务；没有发送任何内容，也没有产生用量。'
+        : '编辑在派发前取消了这项等待中的任务；没有发送任何内容，也没有产生用量。',
+    });
     return this.inspect(bookId);
   }
 
@@ -2857,7 +2867,7 @@ export class BaselineAnalysisStore {
     requireAnalysis(current.taskIntent?.taskIntentId === taskIntentId && run !== null, 'ANALYSIS_CANCEL_STALE', '这项任务已经变化；无法取消。');
     if (run.state === 'cancelled') return { projection: current, runRecordId: null };
     if (run.state === 'cancelling') return { projection: current, runRecordId: run.runRecordId };
-    requireAnalysis(run.state !== 'awaiting-connectivity', 'ANALYSIS_CANCEL_WAITING', '这项任务还在等待开始；请用等待中的「取消」。');
+    requireAnalysis(run.state !== 'awaiting-connectivity' && run.state !== 'authorized', 'ANALYSIS_CANCEL_WAITING', '这项任务还在等待开始；请用等待中的「取消」。');
     // A paused Run, one pausing, one left 可续行 (Issue #422, S76b) and one waiting for the editor's answer (S76d) are
     // cancelled as a running one is.
     requireAnalysis(run.state === 'admitted' || run.state === 'executing' || run.state === 'pausing' || run.state === 'paused' || run.state === 'resumable' ||
@@ -3250,7 +3260,7 @@ export class BaselineAnalysisStore {
    * executing `resumable`, 任务已中断 · 可续行, its Run Authorization kept and nothing dispatched until 续行. A Run left
    * cancelling is named for the execution owner, which finishes the cancellation.
    */
-  reconcileStoppedRuns(): { settled: number; cancelling: ReadonlyArray<string>; answered: ReadonlyArray<string> } {
+  reconcileStoppedRuns(): { settled: number; cancelling: ReadonlyArray<string>; answered: ReadonlyArray<string>; queued: ReadonlyArray<string> } {
     const rows = this.#db.prepare(
       `SELECT r.run_record_id,
               (SELECT s.state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1) last_state
@@ -3264,6 +3274,9 @@ export class BaselineAnalysisStore {
     // A Run that waits for an answer the editor has already given (Issue #422, S76d) — answered while another Run held
     // the slot, before AI7 closed — is named for the owner to take on, as CLAR-006 goes on without being asked again.
     const answered: string[] = [];
+    // A Run the governor had not admitted yet (Issue #49, S14): still `authorized`, named in its order for the owner to
+    // queue again — as a service that stopped between an authorization and its admission leaves one too.
+    const queued: string[] = [];
     for (const row of rows) {
       const runRecordId = asString(row.run_record_id);
       const state = row.last_state === null ? null : asString(row.last_state);
@@ -3277,9 +3290,11 @@ export class BaselineAnalysisStore {
         cancelling.push(runRecordId);
       } else if (state === 'awaiting-clarification' && this.clarificationsOf(runRecordId).every((entry) => entry.answer !== null)) {
         answered.push(runRecordId);
+      } else if (state === 'authorized') {
+        queued.push(runRecordId);
       }
     }
-    return { settled, cancelling, answered };
+    return { settled, cancelling, answered, queued };
   }
 
   /** Every Run of this kind waiting in Connectivity Wait, oldest first, with its Book. */

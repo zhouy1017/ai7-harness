@@ -75,6 +75,8 @@ export const TASK_PLAN_STATE_PILLS: Readonly<Record<TaskPlanStateKey, ReviewPill
   // never reads as the square of 已中断 (OFF-012).
   offline: { tone: 'attention', shape: 'dash' },
   waiting: { tone: 'progress', shape: 'ring' },
+  // 等待运行名额 (Issue #49, S14): hollow like every wait before a Run begins.
+  queued: { tone: 'progress', shape: 'ring' },
   cancelled: { tone: 'neutral', shape: 'dash' },
   // 取消任务 (Issue #422): 正在取消 is half-filled like 运行中, in attention's tone and its own words, since the Run is
   // still stopping; a Run cancelled after it began reading keeps the dash of every 已取消, never the square of 已中断.
@@ -299,8 +301,12 @@ export const TASK_BAR_REPREPARE_FAILED = '无法重新准备这项任务。';
 export function taskBarReprepareNote(reason: string): string {
   return `${reason}重新准备会按同样的目标和范围做一份新计划；看过之后再开始任务。`;
 }
-/** One slot and no queue (S74a A2): the start is refused with this reason and nothing waits for the slot. */
-export const TASK_BAR_SLOT_BUSY = '另一项任务正在运行；它结束后再开始';
+/** Every place of the governor taken (S74a A2; Issue #49, S14): a Review Run's approval is refused with this reason. */
+export const TASK_BAR_SLOT_BUSY = '运行名额已满：正在运行的任务结束后再开始';
+/** 等待运行名额 (Issue #49, S14; CONC-007): the plain reason a start waits on the governor, and that nothing has begun. */
+export const TASK_BAR_QUEUED_NOTE = '运行名额已满：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送，也不产生用量';
+/** The status line of a start that waits for a place (Issue #49, S14): the event — recorded — never that it began. */
+export const TASK_BAR_QUEUED_STATUS = '已记录任务 · 等待运行名额';
 /** The fallback when a start is refused for a reason the service does not word. */
 export const TASK_BAR_START_FAILED = '无法开始这项任务。';
 /** J-03's record, as the bar states it once made (§6 AUTH-007: 运行中 / 已记录（不派发）). */
@@ -544,6 +550,17 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
   if (readiness === 'started') {
     // A Run in Connectivity Wait (Issue #502; AUTH-007, OFF-006): what it waits for, cancelled directly, and the
     // connection setting beside it when the connection is what it waits for (OFF-009).
+    // 等待运行名额 (Issue #49, S14; CONC-007): what it waits for in plain words, and 取消 before it begins.
+    if (plan.state.key === 'queued') {
+      return {
+        readiness,
+        summary,
+        statement: null,
+        note: TASK_BAR_QUEUED_NOTE,
+        status: plan.state.label,
+        actions: [{ name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null }, runLink],
+      };
+    }
     if (plan.state.key === 'waiting') {
       return {
         readiness,

@@ -75,13 +75,15 @@ function openWithRoute(fixture: ResolvedModelFixture): Promise<EditorialStore> {
   });
 }
 
-function owner(store: EditorialStore, fixture: ResolvedModelFixture, held = false): BaselineAnalysisExecutionOwner {
+/** `capacity` 1 is the governor with one place (Issue #49, S14), for the cases where another Run takes every place. */
+function owner(store: EditorialStore, fixture: ResolvedModelFixture, held = false, capacity?: number): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
     ledger: store.baselineAnalysisLedger,
     launchPolicy,
     fixture,
     secretResolver: { resolve: async () => null },
     ...(held ? { unitHold: controlledUnitHold(holdPath, { pollMs: 5 }) } : {}),
+    ...(capacity === undefined ? {} : { capacity }),
   });
 }
 
@@ -364,7 +366,7 @@ describe('Clarification Requests over the real store', () => {
 
   it('takes a Run answered while another holds the slot on once it is free, and after AI7 closes before that', async () => {
     const store = await openWithRoute(transient);
-    const execution = owner(store, transient, true);
+    const execution = owner(store, transient, true, 1);
     let next: BaselineAnalysisExecutionOwner | null = null;
     try {
       const first = await importedBook(store, 'L2 sample1 澄清排队甲');
@@ -441,7 +443,7 @@ describe('Clarification Requests over the real store', () => {
 
   it('names an answer a cancellation leaves unapplied, and ends its range as a gap in those words', async () => {
     const store = await openWithRoute(transient);
-    const execution = owner(store, transient, true);
+    const execution = owner(store, transient, true, 1);
     try {
       const first = await importedBook(store, 'L2 sample1 已答未接着做甲');
       const second = await importedBook(store, 'L2 sample1 已答未接着做乙', false);

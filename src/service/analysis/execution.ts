@@ -101,15 +101,29 @@ import {
  *
  * One owner serves every ledger (Issue #417). `admitAndDispatch` takes the ledger of the Run it is
  * handed — the baseline ledger it was constructed with when none is named — and the Run in flight
- * carries that ledger to every write it makes, so a Review Run's category Tasks execute one after
- * another through this same single slot: a second dispatch of any kind is refused while one runs.
+ * carries that ledger to every write it makes; a Review Run's drive loop hands it its category Tasks
+ * one after another.
+ *
+ * The owner is the instance's concurrency governor (Issue #49, plan slice S14; ADR 0021, V2-UX-CONC-007):
+ * up to `capacity` Runs execute at once, across Books, each with its own attempt, Session, progress, usage,
+ * ceiling and outcome — nothing one Run holds is another's. A start the governor has no place for waits,
+ * authorized and not yet admitted — 等待运行名额 — and is admitted in its turn as a place frees.
  */
 export { ExecutionAdmissionError };
+
+/**
+ * How many Runs the governor executes at once (Issue #49, S14; ADR 0021): two under development-ci. Under
+ * developer-live the human-attended scope and its live-once Provider testing (ADR 0065, ADR 0067) keep one Run in
+ * flight, so a launch there holds one.
+ */
+export const EXECUTION_RUN_CAPACITY = 2;
 export { remapReusedResult } from './reused-result.js';
 
 export interface ExecutionOwnerDependencies {
   /** The baseline kind's ledger: the one a dispatch that names no ledger runs against. */
   readonly ledger: BaselineAnalysisStore;
+  /** How many Runs execute at once; `EXECUTION_RUN_CAPACITY` under development-ci and one under developer-live when absent. */
+  readonly capacity?: number;
   readonly launchPolicy: LaunchPolicyProjection;
   readonly fixture: ResolvedModelFixture | null;
   readonly secretResolver: SecretResolver;
@@ -357,14 +371,22 @@ export const DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS: ReadonlySet<string> = 
 export class BaselineAnalysisExecutionOwner {
   readonly #deps: ExecutionOwnerDependencies;
   readonly #broker: CredentialBroker;
-  #active: ActiveRun | null = null;
+  readonly #capacity: number;
+  /** The Runs executing now, by Run Record (Issue #49, S14): never more than `#capacity`. */
+  readonly #active = new Map<string, ActiveRun>();
+  /**
+   * The Runs authorized and waiting on the governor (Issue #49, S14; CONC-007), in the order they were started: each is
+   * admitted, in its turn, as a place frees. Their ledger records them `authorized` until then, so a service that
+   * stops keeps the queue, and the next start queues them again in the same order.
+   */
+  readonly #queued: Array<{ runRecordId: string; ledger: BaselineAnalysisStore }> = [];
   #disposed = false;
   /**
-   * Stopped Runs whose cancellation waits for the one slot to finish them (Issue #422, S76b), each with what it reads
+   * Stopped Runs whose cancellation waits for a place to finish them (Issue #422, S76b), each with what it reads
    * meanwhile: stopped between two ranges, with what it kept.
    */
   readonly #pendingCancels: Array<{ runRecordId: string; ledger: BaselineAnalysisStore; progress: RunProgress }> = [];
-  /** Runs the editor answered while another Run held the slot (Issue #422, S76d): each goes on once it is free. */
+  /** Runs the editor answered while every place was taken (Issue #422, S76d): each goes on once one frees. */
   readonly #pendingAnswers: Array<{ runRecordId: string; ledger: BaselineAnalysisStore }> = [];
 
   constructor(deps: ExecutionOwnerDependencies) {
@@ -377,22 +399,80 @@ export class BaselineAnalysisExecutionOwner {
     }
     this.#deps = deps;
     this.#broker = new CredentialBroker(deps.secretResolver);
+    const capacity = deps.capacity ?? (live !== null ? 1 : EXECUTION_RUN_CAPACITY);
+    if (!Number.isSafeInteger(capacity) || capacity < 1 || (live !== null && capacity !== 1)) {
+      throw new ExecutionAdmissionError('EXECUTION_CAPACITY_INVALID', '运行名额设置无效。');
+    }
+    this.#capacity = capacity;
   }
 
   progressFor(runRecordId: string): RunProgress | null {
-    const active = this.#active;
-    if (active !== null && active.runRecordId === runRecordId) return { ...active.progress, attemptState: attemptStateOf(active) };
-    // A stopped Run whose cancellation waits for the slot is held as well: every read has it 正在取消 with what it
+    const active = this.#active.get(runRecordId);
+    if (active !== undefined) return { ...active.progress, attemptState: attemptStateOf(active) };
+    // A stopped Run whose cancellation waits for a place is held as well: every read has it 正在取消 with what it
     // kept, never as a Run nothing holds (Issue #422, S76b; CTRL-005).
     return this.#pendingCancels.find((entry) => entry.runRecordId === runRecordId)?.progress ?? null;
   }
 
   /**
-   * Whether a Run holds the one slot now (Issue #420, S74a A2). The editor's start is refused while it
-   * does — before anything is recorded — so nothing ever waits in a queue for the slot to free.
+   * Whether the governor has no place now (Issue #49, S14): as many Runs execute as it holds. A start then waits in
+   * its queue (`admitOrQueue`); a quick start, a Review Run's approval and a 续行 wait for a place with their reasons.
    */
   get busy(): boolean {
-    return this.#active !== null;
+    return this.#active.size >= this.#capacity;
+  }
+
+  /** How many Runs execute at once. */
+  get capacity(): number {
+    return this.#capacity;
+  }
+
+  /** A queued Run's place in the governor's queue, first being 1; `null` for any Run not waiting there. */
+  queuePosition(runRecordId: string): number | null {
+    const index = this.#queued.findIndex((entry) => entry.runRecordId === runRecordId);
+    return index < 0 ? null : index + 1;
+  }
+
+  /**
+   * A start the editor just authorized (Issue #49, S14; CONC-007): admitted at once while the governor has a place and
+   * no Run waits before it, else queued — `authorized` in its ledger, read as 等待运行名额 — and admitted in its turn.
+   */
+  admitOrQueue(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): 'admitted' | 'queued' {
+    // AI7 is closing: the start stays `authorized`, and the next launch queues it again.
+    if (this.#disposed) throw new ExecutionAdmissionError('EXECUTION_STOPPING', '本地业务服务正在停止。');
+    if (this.#active.has(runRecordId)) return 'admitted';
+    if (this.#queued.some((entry) => entry.runRecordId === runRecordId)) return 'queued';
+    if (!this.busy && this.#queued.length === 0) {
+      this.#admitInTurn(runRecordId, ledger);
+      return 'admitted';
+    }
+    this.#queued.push({ runRecordId, ledger });
+    return 'queued';
+  }
+
+  /**
+   * A start admitted in its turn (Issue #49, S14). One that can no longer be admitted — this launch has no route for it,
+   * or its Book is outside what may be transmitted — is blocked before dispatch with the reason and the refusal thrown:
+   * it never reads 等待运行名额 for a turn it cannot take.
+   */
+  #admitInTurn(runRecordId: string, ledger: BaselineAnalysisStore): void {
+    try {
+      this.admitAndDispatch(runRecordId, ledger);
+    } catch (error) {
+      if (ledger.currentRunState(runRecordId) === 'authorized') {
+        const reason = error instanceof Error ? error.message : '运行未能进入调度。';
+        ledger.recordRunState(runRecordId, 'blocked-before-dispatch', { detail: reason, reasons: [reason] });
+      }
+      throw error;
+    }
+  }
+
+  /** A queued Run the editor cancelled before its turn (Issue #49, S14): it leaves the queue; nothing of it ran. */
+  dequeue(runRecordId: string): boolean {
+    const index = this.#queued.findIndex((entry) => entry.runRecordId === runRecordId);
+    if (index < 0) return false;
+    this.#queued.splice(index, 1);
+    return true;
   }
 
   /**
@@ -407,12 +487,12 @@ export class BaselineAnalysisExecutionOwner {
   }
 
   /**
-   * Single-slot admission: one Run per instance; a second dispatch is refused, never queued.
+   * Admission into one of the governor's places (Issue #49, S14): a dispatch while it has none is refused here; a
+   * start the editor makes waits for one through `admitOrQueue` instead.
    *
    * `ledger` is the ledger the Run Record belongs to and defaults to the baseline kind's, so every
-   * caller that has always dispatched a baseline Run still does exactly that. The slot is the owner's
-   * and not a ledger's: a Run of any kind holds it, which is what keeps a Review Run's category Tasks
-   * one after another rather than side by side (Issue #417).
+   * caller that has always dispatched a baseline Run still does exactly that. The places are the owner's
+   * and not a ledger's: a Run of any kind takes one.
    */
   /**
    * `afterReconnectPreflight` is the one way a Run waiting in Connectivity Wait is admitted (Issue #502): the
@@ -431,7 +511,8 @@ export class BaselineAnalysisExecutionOwner {
     options: { afterReconnectPreflight?: boolean; resume?: boolean; cancel?: boolean } = {},
   ): void {
     if (this.#disposed) throw new ExecutionAdmissionError('EXECUTION_STOPPING', '本地业务服务正在停止。');
-    if (this.#active !== null) throw new ExecutionAdmissionError('EXECUTION_BUSY', '当前已有一个运行在执行；本实例一次只执行一个运行。');
+    if (this.#active.has(runRecordId)) throw new ExecutionAdmissionError('EXECUTION_STATE_INVALID', '这个运行已经在执行。');
+    if (this.busy) throw new ExecutionAdmissionError('EXECUTION_BUSY', `运行名额已满：本实例一次执行 ${this.#capacity} 个运行。`);
     const live = this.#deps.developerLive ?? null;
     if (live === null && this.#deps.fixture === null) throw new ExecutionAdmissionError('EXECUTION_ROUTE_ABSENT', '没有可执行的本地确定性路由。');
     // Every ledger this owner serves froze its plans under the launch this owner executes under. One
@@ -475,10 +556,10 @@ export class BaselineAnalysisExecutionOwner {
     if (!(resuming && options.cancel === true)) {
       ledger.recordRunState(runRecordId, 'admitted', {
         detail: !resuming
-          ? '已进入 AI7 调度器（单槽位）。'
+          ? '已进入 AI7 调度器。'
           : state === 'awaiting-clarification'
-            ? '按你的回答接着做：已进入 AI7 调度器（单槽位），从已保存的进度接着读。'
-            : '续行：已进入 AI7 调度器（单槽位），从已保存的进度接着读。',
+            ? '按你的回答接着做：已进入 AI7 调度器，从已保存的进度接着读。'
+            : '续行：已进入 AI7 调度器，从已保存的进度接着读。',
         ...(resuming ? { resumed: true } : {}),
         unitsTotal: facts.manifest.units.length,
         ...(facts.update === null ? {} : { updateMode: facts.update.mode, unitsRecomputed: submitted, unitsReused: facts.update.reusePlan.counts.reused }),
@@ -507,12 +588,12 @@ export class BaselineAnalysisExecutionOwner {
       resumableOnInterrupt: ledger.definition.kind === BASELINE_ANALYSIS_KIND,
       done: Promise.resolve(),
     };
-    this.#active = active;
+    this.#active.set(runRecordId, active);
     active.done = this.#execute(active, facts, continuation).catch((error: unknown) => {
       this.#recordFailure(ledger, facts, error);
     }).finally(() => {
-      if (this.#active === active) this.#active = null;
-      this.#finishPendingCancel();
+      if (this.#active.get(runRecordId) === active) this.#active.delete(runRecordId);
+      this.#drain();
     });
   }
 
@@ -549,9 +630,12 @@ export class BaselineAnalysisExecutionOwner {
     }
   }
 
-  /** The next stopped Run whose cancellation waited for the slot, finished now that the slot is free. */
-  #finishPendingCancel(): void {
-    while (this.#active === null && !this.#disposed && this.#pendingCancels.length > 0) {
+  /**
+   * A place freed (Issue #49, S14): first a stopped Run whose cancellation waited for one, then a Run the editor answered
+   * meanwhile, then the queued starts in their order — each while the governor has a place.
+   */
+  #drain(): void {
+    while (!this.busy && !this.#disposed && this.#pendingCancels.length > 0) {
       const next = this.#pendingCancels.shift()!;
       try {
         if (next.ledger.currentRunState(next.runRecordId) !== 'cancelling') continue;
@@ -560,8 +644,8 @@ export class BaselineAnalysisExecutionOwner {
         settleCancelWithoutRevision(next.ledger, next.runRecordId, CANCELLED_WITHOUT_REVISION);
       }
     }
-    // Then a Run the editor answered while the slot was held (Issue #422, S76d), if it still waits for that answer.
-    while (this.#active === null && !this.#disposed && this.#pendingAnswers.length > 0) {
+    // Then a Run the editor answered while every place was taken (Issue #422, S76d), if it still waits for that answer.
+    while (!this.busy && !this.#disposed && this.#pendingAnswers.length > 0) {
       const next = this.#pendingAnswers.shift()!;
       if (next.ledger.currentRunState(next.runRecordId) !== 'awaiting-clarification') continue;
       try {
@@ -570,14 +654,25 @@ export class BaselineAnalysisExecutionOwner {
         // It stays 任务等待你的说明 with its answer recorded; 续行 is not needed, but the answer's next look finds it.
       }
     }
+    // Then the starts waiting on the governor, in their order (CONC-007). One cancelled meanwhile is skipped; one that
+    // can no longer be admitted is blocked before dispatch with the reason, never left waiting for a turn it cannot take.
+    while (!this.busy && !this.#disposed && this.#queued.length > 0) {
+      const next = this.#queued.shift()!;
+      try {
+        if (next.ledger.currentRunState(next.runRecordId) !== 'authorized') continue;
+        this.#admitInTurn(next.runRecordId, next.ledger);
+      } catch {
+        // Blocked before dispatch with its reason; the next start in the queue takes the place.
+      }
+    }
   }
 
   /**
    * The editor answered what a Run waiting for them asked (Issue #422, S76d; CLAR-006): it goes on inside its unchanged
-   * envelope — a new span of the same attempt, as 续行 is — at once when the slot is free, or as soon as it is.
+   * envelope — a new span of the same attempt, as 续行 is — at once when the governor has a place, or as soon as it has.
    */
   continueAnswered(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): 'continuing' | 'queued' {
-    if (this.#active === null && !this.#disposed) {
+    if (!this.busy && !this.#disposed) {
       this.admitAndDispatch(runRecordId, ledger, { resume: true });
       return 'continuing';
     }
@@ -585,25 +680,38 @@ export class BaselineAnalysisExecutionOwner {
     return 'queued';
   }
 
-  /** Resolve once no Run is executing; used by the service suites to observe settlement. */
+  /** Resolve once no Run is executing — a queued one admitted meanwhile included; used by the service suites. */
   async whenIdle(): Promise<void> {
-    while (this.#active !== null) {
-      const current = this.#active;
-      await current.done;
-      if (this.#active === current) return;
+    while (this.#active.size > 0) {
+      await Promise.all([...this.#active.values()].map((active) => active.done));
     }
+  }
+
+  /**
+   * Resolve once the governor has a place (Issue #49, S14): a Review Run's next category waits for one, never for every
+   * other Book's Run to end. A queued start admitted as a place frees takes it first, and this waits on.
+   */
+  async whenPlaceFree(): Promise<void> {
+    while (this.busy) {
+      await Promise.race([...this.#active.values()].map((active) => active.done));
+    }
+  }
+
+  /** Resolve once this Run no longer executes (Issue #49, S14): a Review Run's category is waited for alone. */
+  whenDone(runRecordId: string): Promise<void> {
+    return this.#active.get(runRecordId)?.done ?? Promise.resolve();
   }
 
   /**
    * 取消任务 (Issue #422, plan slice S76a; CTRL-005, CTRL-008), once `cancelling` is recorded. The Run this owner
    * executes stops at the next unit boundary: the unit in flight finishes, nothing after it is sent, and the Run ends
    * `cancelled` with what it completed kept. A Run it does not hold — paused, left 可续行, or one AI7 left behind when
-   * it last closed — has nothing running: what it kept is gathered through the slot, and one that kept nothing is
+   * it last closed — has nothing running: what it kept is gathered in a place of the governor's, and one that kept nothing is
    * settled here at once.
    */
   cancelRun(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): 'stopping' | 'settled' {
-    const active = this.#active;
-    if (active !== null && active.runRecordId === runRecordId) {
+    const active = this.#active.get(runRecordId);
+    if (active !== undefined) {
       active.cancelRequested = true;
       return 'stopping';
     }
@@ -611,7 +719,7 @@ export class BaselineAnalysisExecutionOwner {
       throw new ExecutionAdmissionError('EXECUTION_STATE_INVALID', '只有已记录“正在取消”的运行可以结束取消。');
     }
     // A stopped Run that kept units ends the way a running one does — its partial revision, then 已取消 — through the
-    // one slot, sending nothing; while another Run holds the slot it waits for it, held and read as 正在取消. So does one
+    // governor, sending nothing; while every place is taken it waits for one, held and read as 正在取消. So does one
     // whose units asked the editor (Issue #422, S76d): their first attempts were sent, and they end as the gaps they are.
     // One that kept and asked nothing ends here, and so does one whose kept progress no longer reads back: nothing of it
     // can be gathered.
@@ -631,7 +739,7 @@ export class BaselineAnalysisExecutionOwner {
     // AI7 is closing: the Run stays 正在取消, and the next start's reconciliation finishes it.
     if (this.#disposed) return 'stopping';
     try {
-      if (this.#active === null) {
+      if (!this.busy) {
         this.admitAndDispatch(runRecordId, ledger, { resume: true, cancel: true });
       } else if (!this.#pendingCancels.some((entry) => entry.runRecordId === runRecordId)) {
         this.#pendingCancels.push({ runRecordId, ledger, progress: stoppedRunProgress(ledger.loadExecutionPlan(runRecordId), checkpoints) });
@@ -649,8 +757,8 @@ export class BaselineAnalysisExecutionOwner {
    * nothing executes has reached its boundary already, and settles here.
    */
   pauseRun(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): 'pausing' | 'settled' {
-    const active = this.#active;
-    if (active !== null && active.runRecordId === runRecordId) {
+    const active = this.#active.get(runRecordId);
+    if (active !== undefined) {
       active.pauseRequested = true;
       return 'pausing';
     }
@@ -663,11 +771,14 @@ export class BaselineAnalysisExecutionOwner {
 
   async dispose(): Promise<void> {
     this.#disposed = true;
-    const active = this.#active;
-    if (active === null) return;
-    active.interrupted = true;
-    active.harness?.interrupt();
-    await active.done;
+    // A queued start stays `authorized` in its ledger, and the next start queues it again in its order.
+    this.#queued.length = 0;
+    const running = [...this.#active.values()];
+    for (const active of running) {
+      active.interrupted = true;
+      active.harness?.interrupt();
+    }
+    await Promise.all(running.map((active) => active.done));
   }
 
   #recordFailure(ledger: BaselineAnalysisStore, facts: ExecutionPlanFacts, error: unknown): void {
@@ -2046,7 +2157,7 @@ function submittedUnitsOf(facts: ExecutionPlanFacts): number {
 }
 
 /**
- * What a stopped Run whose cancellation waits for the slot reads meanwhile (Issue #422, S76b): stopped between two
+ * What a stopped Run whose cancellation waits for a place reads meanwhile (Issue #422, S76b): stopped between two
  * ranges, with the units it kept and the model turns they took, and nothing in flight.
  */
 function stoppedRunProgress(facts: ExecutionPlanFacts, checkpoints: ReadonlyArray<UnitCheckpoint>): RunProgress {

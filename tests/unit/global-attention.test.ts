@@ -251,7 +251,7 @@ describe('the four groups of 待我处理', () => {
     const interrupted = analysisTask('中断之书', { run: run('interrupted', minutesAgo(21)) });
     const blocked = analysisTask('阻止之书', { run: run('blocked-before-dispatch', minutesAgo(22)) });
     const orphaned = analysisTask('停止之书', { run: run('executing', minutesAgo(23)) });
-    const orphanedAuthorized = analysisTask('未派发之书', { run: run('authorized', minutesAgo(24)) });
+    const waitingForPlace = analysisTask('等名额之书', { run: run('authorized', minutesAgo(24)) });
     const revised = analysisTask('修订之书', {
       planRevision: { planRevisionId: randomUUID(), at: minutesAgo(25), priorOrdinal: 1, changedFields: ['selectedRange', 'reusePlan.counts'] },
     });
@@ -284,7 +284,7 @@ describe('the four groups of 待我处理', () => {
     const projection = composeGlobalAttention(readings({
       imports: [uncertain, cleanup],
       recoveries: [pending, deferred],
-      analysisTasks: [failed, interrupted, blocked, orphaned, orphanedAuthorized, revised, prepared, executing, queued, settled],
+      analysisTasks: [failed, interrupted, blocked, orphaned, waitingForPlace, revised, prepared, executing, queued, settled],
       analysisOutcomes: [completed, withGaps],
       reviewRuns: [reviewFailed, reviewStopped, reviewRunning, reviewContinuable, reviewSettled, reviewPrepared],
       reviewCompletions: [reviewSettled],
@@ -310,10 +310,11 @@ describe('the four groups of 待我处理', () => {
     expect(summary(find(`analysis:${failed.taskIntentId}`))).toEqual(['exceptions', 'analysis-failed', 'view-run', 'analysis', false]);
     expect(summary(find(`analysis:${interrupted.taskIntentId}`))).toEqual(['exceptions', 'analysis-interrupted', 'view-run', 'analysis', false]);
     expect(summary(find(`analysis:${blocked.taskIntentId}`))).toEqual(['exceptions', 'analysis-blocked', 'view-run', 'analysis', true]);
-    // A Run left admitted, executing or only authorized with nothing in flight is read as stopped, and it
-    // keeps the Book from a new update Task, so it counts as blocked.
+    // A Run left admitted or executing with nothing in flight is read as stopped, and it keeps the Book from a new update
+    // Task, so it counts as blocked.
     expect(summary(find(`analysis:${orphaned.taskIntentId}`))).toEqual(['exceptions', 'analysis-orphaned', 'view-run', 'analysis', true]);
-    expect(summary(find(`analysis:${orphanedAuthorized.taskIntentId}`))).toEqual(['exceptions', 'analysis-orphaned', 'view-run', 'analysis', true]);
+    // One only authorized waits on the governor for a place (Issue #49, S14; CONC-007): 运行中与已暂停's, never counted.
+    expect(summary(find(`analysis:${waitingForPlace.taskIntentId}`))).toEqual(['active', 'analysis-waiting-capacity', 'view-run', 'analysis', false]);
     expect(find(`analysis:${failed.taskIntentId}`).target).toEqual({ kind: 'analysis', bookId: failed.bookId, taskIntentId: failed.taskIntentId });
     expect(find(`analysis:${failed.taskIntentId}`).object).toEqual({ kind: 'analysis', mode: 'first-baseline' });
 
@@ -352,11 +353,11 @@ describe('the four groups of 待我处理', () => {
     expect(all.some((entry) => entry.itemId === `review:${reviewPrepared.reviewRunId}`)).toBe(false);
 
     // The count is the first two groups' and no other (V2-UX-ATTN-006).
-    expect(group(projection, 'exceptions')).toHaveLength(11);
+    expect(group(projection, 'exceptions')).toHaveLength(10);
     expect(group(projection, 'decisions')).toHaveLength(1);
-    expect(group(projection, 'active')).toHaveLength(4);
+    expect(group(projection, 'active')).toHaveLength(5);
     expect(group(projection, 'recent')).toHaveLength(3);
-    expect(projection.actionableCount).toBe(12);
+    expect(projection.actionableCount).toBe(11);
     expect(projection.running).toBe(true);
   });
 

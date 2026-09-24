@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { lstat, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -18,7 +18,15 @@ import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabl
 // under 异常与结果待确认, the Plan Revision under 等待你的决定, 运行中与已暂停 empty with its quiet line, and the
 // completion under 最近完成. Each item opens its own record in the window that asked; reading the view moves no
 // stored byte; and the view is reached, read and left by keyboard, reflows at 200% and keeps its shapes and
-// rules in forced colours. Concurrency (#49) and Enrollment (#95) are not this Journey's.
+// rules in forced colours.
+//
+// Concurrent Book work (Issue #49, plan slice S14; ADR 0021, V2-UX-CONC-001 to 009) follows in the same launch, with
+// J-10's unit hold holding each Run's reading range in flight: a third Book is made from the same input; 甲's first
+// baseline and 丙's execute at once, and 乙's range update, started while both places are taken, waits as 等待运行名额 —
+// recorded, nothing sent — in the Task Drawer, on ②A and in 待我处理, which lists the three by Book and counts none.
+// 暂停 on 甲 hands its place to 乙, whose Run starts in the background while the editor's caret stays in 丙's
+// manuscript; 取消任务 on 丙 keeps what it read as 丙's own partial revision; and each Run's revision, attempt and
+// record stay its own Book's. Enrollment (#95) is not this Journey's.
 //
 // The runner reads the service's projection through `window.ai7.inspectGlobalAttention()` only to cross-check
 // what the page shows, and opens the product database read-only only to digest every relation before and
@@ -32,12 +40,18 @@ const SAMPLE1_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f4
 const FIXTURE_IDENTITY = 'sample1-baseline-happy';
 const FIRST = Object.freeze({ title: '待我处理旅程甲' });
 const SECOND = Object.freeze({ title: '待我处理旅程乙' });
+const THIRD = Object.freeze({ title: '待我处理旅程丙' });
+const SAMPLE1_UNITS = 8;
 const GROUP_ORDER = Object.freeze(['exceptions', 'decisions', 'active', 'recent']);
 const GROUP_LABELS = Object.freeze(['异常与结果待确认', '等待你的决定', '运行中与已暂停', '最近完成']);
 // The screen's own words (`src/renderer/global-attention-labels.ts`), pinned there by its unit suite.
 const REASON_BLOCKED = '授权已记录，派发前阻止：当前启动没有可执行的路由。';
 const REASON_PLAN_REVISION = '计划冻结之后，它的关键内容已经变化；原计划不能再开始。';
 const ACTIVE_EMPTY = '没有正在运行或中途停止的任务。';
+// A start waiting on the instance's concurrency governor (Issue #49, S14; CONC-007), in 待我处理's words and the bar's
+// (`src/renderer/task-drawer-labels.ts`), pinned there by their unit suites.
+const REASON_WAITING_CAPACITY = '运行名额已满：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送。';
+const QUEUED_NOTE = '运行名额已满：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送，也不产生用量';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
@@ -438,10 +452,11 @@ async function openAnalysisOf(renderer, bookId, name) {
 
 /**
  * 开始基线稿件分析 prepares the Task and opens its plan in the drawer (the card's 查看计划并开始 opens it when it
- * does not); the bar's 开始任务 records the Run — and, with a route, hands it to the one slot.
+ * does not); the bar's 开始任务 records the Run — and, with a route, hands it to the execution owner's governor.
+ * `from` is the card's state before: a Book whose first Run was blocked before dispatch offers the same start again.
  */
-async function startFirstBaseline(renderer, readiness, name) {
-  await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='available'`, `${name}-available`);
+async function startFirstBaseline(renderer, readiness, name, from = 'available') {
+  await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState===${JSON.stringify(from)}`, `${name}-${from}`);
   await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="prepare"]', `${name}-prepare`);
   await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, `${name}-prepared`, 120_000);
   const showing = await renderer.evaluate(`(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer==='open' && drawer.dataset.taskPlanKind==='baseline-analysis' && drawer.dataset.taskPlanRef===document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId; })()`);
@@ -460,6 +475,89 @@ async function prepareRange(renderer, unitOrdinal, name) {
   await assertRenderer(renderer, `(() => { const chooser=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] [data-analysis-action="choose-reanalyze-range"]'); if(!(chooser instanceof HTMLButtonElement)||chooser.disabled)return false; if(chooser.getAttribute('aria-expanded')!=='true')chooser.click(); return chooser.getAttribute('aria-expanded')==='true'; })()`, `${name}-choose`);
   await assertRenderer(renderer, `(() => { const block=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"]'); const choice=block?.querySelector('.analysis-update-choice'); const plan=choice?.querySelector('[data-analysis-action="reanalyze-range"]'); if(!(choice instanceof HTMLElement)||choice.hidden||!(plan instanceof HTMLButtonElement)||plan.disabled||plan.textContent!=='先看计划')return false; plan.click(); return true; })()`, `${name}-plan-first`);
 }
+
+/** 书库 from wherever the window is: the header's 待我处理, then its 返回图书列表. */
+async function toLibrary(renderer, name) {
+  await openAttention(renderer, `${name}-attention`);
+  await click(renderer, '返回图书列表', `${name}-library`);
+  await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
+}
+
+/** Open a Book from the library into its manuscript. */
+async function openManuscriptOf(renderer, bookId, name) {
+  await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
+  await clickSelector(renderer, `button[data-book-id=${JSON.stringify(bookId)}]`, `${name}-book`);
+  await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}]')`, `${name}-manuscript`);
+}
+
+/** The current Book's analysis once its Run has read `settled` ranges and holds the next one in flight. */
+async function runHeldAt(renderer, bookId, settled, name) {
+  const deadline = Date.now() + 120_000;
+  let analysis;
+  for (;;) {
+    analysis = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    if (analysis?.bookId === bookId && analysis.run?.state === 'executing' && analysis.run.progress?.unitsSettled === settled &&
+      analysis.run.progress.currentUnitOrdinal === settled + 1) return analysis;
+    if (Date.now() > deadline) break;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  }
+  requireJourney(false, name, { state: analysis?.state, run: analysis?.run?.state, progress: analysis?.run?.progress });
+  return analysis;
+}
+
+/** Every item of 待我处理 as the service answers it, with its group and how far a Run has read. */
+const READ_ITEMS = `window.ai7.inspectGlobalAttention().then((projection) => ({
+  count: projection.actionableCount,
+  running: projection.running,
+  items: projection.groups.flatMap((group) => group.items.map((item) => ({ group: group.key, itemId: item.itemId, bookId: item.book.bookId, state: item.state, progress: item.facts?.progress ?? null }))),
+}))`;
+async function waitForItems(renderer, predicate, name, timeout = 120_000) {
+  const deadline = Date.now() + timeout;
+  let answer;
+  while (Date.now() < deadline) {
+    answer = await renderer.evaluate(READ_ITEMS);
+    if (answer !== null && predicate(answer)) return answer;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  }
+  requireJourney(false, name, answer?.items?.map((item) => [item.group, item.state]));
+  return answer;
+}
+
+/** The Task Drawer's bar as the editor reads it: its state, pill, status, note, and each action's words and use. */
+const READ_BAR = `(() => {
+  const drawer = document.querySelector('#task-drawer');
+  if (!(drawer instanceof HTMLElement) || drawer.dataset.taskDrawer !== 'open') return null;
+  const text = (node) => node?.textContent ?? null;
+  return JSON.stringify({
+    state: drawer.dataset.taskPlanState ?? null,
+    pill: text(drawer.querySelector('.task-drawer-pill')),
+    status: text(drawer.querySelector('.task-bar-status')),
+    note: text(drawer.querySelector('.task-bar-note')),
+    actions: Array.from(drawer.querySelectorAll('.task-bar-actions button[data-task-drawer-control]')).map((button) => [button.dataset.taskDrawerControl, button.textContent, button.disabled ? 'disabled' : 'enabled']),
+  });
+})()`;
+async function waitForBar(renderer, expected, name, timeout = 60_000) {
+  const want = JSON.stringify(expected);
+  const deadline = Date.now() + timeout;
+  let last = null;
+  while (Date.now() < deadline) {
+    last = await renderer.evaluate(READ_BAR).catch(() => null);
+    if (last === want) return;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  requireJourney(false, name, last);
+}
+
+/** Where the editor is: the screen, its Book, whether the caret is in the manuscript's text, and the drawer. */
+const FOCUS_STATE = `(() => {
+  const text = document.querySelector('[data-screen="editor"] .ProseMirror');
+  return {
+    screen: document.querySelector('[data-screen]')?.dataset.screen ?? null,
+    book: document.querySelector('.editor-shell')?.dataset.bookId ?? null,
+    focused: text instanceof HTMLElement && document.activeElement === text,
+    drawer: document.querySelector('#task-drawer')?.hidden ?? null,
+  };
+})()`;
 
 /** Press the enabled button with exactly these words inside one region of the screen. */
 async function clickIn(renderer, scope, label, name) {
@@ -549,6 +647,7 @@ async function main() {
   let credentialRemoved = false;
   let credentialReferenceForCleanup;
   let syntheticSecret;
+  let holdPath;
   let cleanupFailure;
   let credentialCleanupFailure;
   let cleanupPromise;
@@ -722,11 +821,13 @@ async function main() {
     runRoot = await runRootAcquisition;
     cancellation.throwIfRequested();
     requireJourney(dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j09-e2e-'), 'temp-root');
+    // J-10's unit hold, which J-09 writes once three Books' Runs are to be held at once (Issue #49); absent, it holds nothing.
+    holdPath = resolve(runRoot, 'j09-unit-hold.txt');
     dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
     electronExecutableForCleanup = executable;
-    // Each launch names the picker's file and, for the second, the J-04 model adapter this Journey may bind.
+    // Each launch names the picker's file and, for the second, the J-04 model adapter this Journey may bind and J-10's unit hold.
     let launchControls = { picker: true, adapter: false };
     const launchArgs = ({ forCleanup }) => {
       const args = [
@@ -735,7 +836,7 @@ async function main() {
         resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
       ];
       if (!forCleanup && launchControls.picker) args.push('--j09-picker-path', SAMPLE1_PATH);
-      if (!forCleanup && launchControls.adapter) args.push('--j04-model-adapter', FIXTURE_IDENTITY);
+      if (!forCleanup && launchControls.adapter) args.push('--j04-model-adapter', FIXTURE_IDENTITY, '--j10-unit-hold-path', holdPath);
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       return args;
     };
@@ -990,6 +1091,168 @@ async function main() {
         group instanceof HTMLElement && style(group).boxShadow === 'none';
     })()`, 'shapes-and-rules-without-colour');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
+
+    // ---- concurrent Book work (Issue #49, plan slice S14; ADR 0021, V2-UX-CONC-001 to 009) --------------------------
+    at('concurrent-third-book');
+    // A third Book from the one admitted input, so that three Books each start a Run: two execute at once, and the
+    // third waits for a place. The picker's file serves one import per launch, so AI7 opens again first, under the
+    // same controls.
+    await closeOwnedBrowser();
+    cancellation.throwIfRequested();
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'third-ready');
+    const bookC = await importSample1(renderer, THIRD.title, true, 'third-import');
+    requireJourney(bookC !== bookA && bookC !== bookB, 'three-books');
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'third-artifact-enable-ready');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'third-artifact-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'third-artifact-enabled');
+    await click(renderer, '返回图书列表', 'third-return-library');
+
+    at('concurrent-first-run');
+    // From here each Run holds its second reading range in flight once it has read one. 甲's first baseline starts
+    // again under this launch — its Run of the first launch was blocked before dispatch — and executes.
+    await writeFile(holdPath, '1', 'utf8');
+    await openAnalysisOf(renderer, bookA, 'concurrent-a');
+    await startFirstBaseline(renderer, 'ready', 'concurrent-a-baseline', 'authorized-blocked');
+    const heldA = await runHeldAt(renderer, bookA, 1, 'concurrent-a-held');
+    const taskA = heldA.taskIntent.taskIntentId;
+    const runA = heldA.run.runRecordId;
+    requireJourney(taskA !== blockedA.taskIntent.taskIntentId, 'concurrent-a-new-task');
+
+    at('concurrent-second-run');
+    // 丙's first baseline starts while 甲's executes: the instance has two places, and both Runs execute at once, each
+    // having read one range of its own Book.
+    await toLibrary(renderer, 'concurrent-c');
+    await openAnalysisOf(renderer, bookC, 'concurrent-c');
+    await startFirstBaseline(renderer, 'ready', 'concurrent-c-baseline');
+    const heldC = await runHeldAt(renderer, bookC, 1, 'concurrent-c-held');
+    const taskC = heldC.taskIntent.taskIntentId;
+    const runC = heldC.run.runRecordId;
+    const twoAtOnce = await renderer.evaluate(READ_ITEMS);
+    const runningOf = (answer, bookId) => answer.items.find((item) => item.group === 'active' && item.bookId === bookId) ?? null;
+    requireJourney(twoAtOnce?.running === true && [bookA, bookC].every((bookId) => runningOf(twoAtOnce, bookId)?.state === 'analysis-running' &&
+      runningOf(twoAtOnce, bookId).progress?.unitsSettled === 1) && runA !== runC,
+    'two-runs-at-once', twoAtOnce?.items?.map((item) => [item.group, item.state, item.progress?.unitsSettled ?? null]));
+
+    at('concurrent-queued-run');
+    // 乙's range update, reconfirmed and started while 甲 and 丙 hold both places: its start is recorded and waits for a
+    // place — 等待运行名额 in the bar, with why and its 取消, and on ②A — and nothing of it is sent.
+    await openAttention(renderer, 'concurrent-b');
+    await openItem(renderer, decisionItem.itemId, 'concurrent-b-revision');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(pendingB.taskIntent.taskIntentId)} && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='changed' && document.querySelector('#task-drawer [data-task-drawer-control="reconfirm-plan"]')?.disabled===false`, 'concurrent-b-reconfirm-ready', 30_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="reconfirm-plan"]', 'concurrent-b-reconfirm');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planVersion==='2' && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'concurrent-b-start-ready', 120_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'concurrent-b-start');
+    await waitForBar(renderer, {
+      state: 'queued', pill: '等待运行名额', status: '等待运行名额', note: QUEUED_NOTE,
+      actions: [['cancel-wait', '取消', 'enabled'], ['run-link', '查看运行', 'enabled']],
+    }, 'concurrent-b-queued-bar', 30_000);
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='queued' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='等待运行名额'`, 'concurrent-b-queued-card', 30_000);
+    const queuedB = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(queuedB?.bookId === bookB && queuedB.state === 'queued' && queuedB.stateLabel === '等待运行名额' &&
+      queuedB.taskIntent?.taskIntentId === pendingB.taskIntent.taskIntentId && queuedB.run?.state === 'authorized' &&
+      JSON.stringify(queuedB.run.transitions.map((transition) => transition.state)) === '["authorized"]' && (queuedB.run.progress ?? null) === null &&
+      (queuedB.run.attempt ?? null) === null,
+    'concurrent-b-queued-record', { state: queuedB?.state, run: queuedB?.run?.state, transitions: queuedB?.run?.transitions?.map((transition) => transition.state) });
+    const runB = queuedB.run.runRecordId;
+
+    at('j14-queued-forced-colors');
+    // Without colour 等待运行名额 keeps its pill's hollow ring, as every wait before a Run begins.
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
+    await assertRenderer(renderer, `(() => { if (!matchMedia('(forced-colors: active)').matches) return false; const pill=document.querySelector('#task-drawer .task-drawer-pill'); return pill instanceof HTMLElement && pill.textContent==='等待运行名额' && pill.dataset.pillShape==='ring' && getComputedStyle(pill, '::before').content !== 'none'; })()`, 'queued-pill-without-colour');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
+
+    at('concurrent-attention');
+    // 待我处理 lists the three under 运行中与已暂停, each by its own Book — 甲 and 丙 运行中, 乙 等待运行名额 with why —
+    // counts none of them, and has nothing waiting for the editor.
+    await openAttention(renderer, 'concurrent-attention');
+    const concurrentService = await renderer.evaluate(READ_SERVICE);
+    const concurrentIds = JSON.stringify(concurrentService?.groups?.map((group) => group.items.map((item) => item.itemId)) ?? null);
+    await waitFor(renderer, `(() => { const page=${READ_PAGE}; return JSON.stringify(page.groups.map((group)=>group.items.map((item)=>item.itemId)))===${JSON.stringify(concurrentIds)}; })()`, 'concurrent-page-current', 30_000);
+    const concurrentPage = await renderer.evaluate(READ_PAGE);
+    const activeItems = concurrentPage?.groups?.[2]?.items ?? [];
+    const itemOf = (bookId) => activeItems.find((item) => item.bookId === bookId) ?? null;
+    const queuedItem = itemOf(bookB);
+    requireJourney(concurrentService?.count === 0 && concurrentService.running === true && concurrentPage.count === '0' && activeItems.length === 3 &&
+      itemOf(bookA)?.state === 'analysis-running' && itemOf(bookA).book === `《${FIRST.title}》` &&
+      itemOf(bookC)?.state === 'analysis-running' && itemOf(bookC).book === `《${THIRD.title}》` &&
+      queuedItem?.state === 'analysis-waiting-capacity' && queuedItem.book === `《${SECOND.title}》` && queuedItem.itemId === `analysis:${pendingB.taskIntent.taskIntentId}` &&
+      queuedItem.pill === '等待运行名额' && queuedItem.shape === 'ring' && queuedItem.reason === REASON_WAITING_CAPACITY && queuedItem.blocked === 'false' &&
+      queuedItem.next === '安全的下一步：查看运行' && concurrentPage.groups[0].items.length === 0 && concurrentPage.groups[1].items.length === 0,
+    'concurrent-attention-by-book', concurrentPage?.groups?.map((group) => ({ key: group.key, items: group.items.map((item) => [item.book, item.state, item.pill]) })));
+    await waitFor(renderer, `document.querySelector('#global-attention-entry')?.dataset.attentionCount==='0' && document.querySelector('#global-attention-entry .global-attention-badge')?.hidden===true`, 'concurrent-count-zero', 30_000);
+
+    at('concurrent-pause');
+    // 暂停 on 甲, from its own plan: 正在暂停 while its range in flight finishes.
+    await openItem(renderer, `analysis:${taskA}`, 'concurrent-a-item');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookA)}] .baseline-analysis-card')?.dataset.analysisState==='executing'`, 'concurrent-a-record', 30_000);
+    await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'concurrent-a-plan');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(taskA)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='running' && document.querySelector('#task-drawer [data-task-drawer-control="pause"]')?.disabled===false`, 'concurrent-a-pause-ready', 30_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="pause"]', 'concurrent-a-pause');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='pausing'`, 'concurrent-a-pausing', 30_000);
+
+    at('concurrent-no-focus-theft');
+    // The editor turns to 丙's manuscript, the caret in its text. Meanwhile 甲 finishes its range and pauses, and its
+    // place goes to 乙, whose Run starts in the background: the screen, the Book and the focus stay the editor's.
+    await toLibrary(renderer, 'focus');
+    await openManuscriptOf(renderer, bookC, 'focus');
+    await assertRenderer(renderer, `(() => { const text=document.querySelector('[data-screen="editor"] .ProseMirror'); if(!(text instanceof HTMLElement))return false; text.focus(); return document.activeElement===text; })()`, 'focus-in-text');
+    const focusBefore = await renderer.evaluate(FOCUS_STATE);
+    requireJourney(focusBefore?.screen === 'editor' && focusBefore.book === bookC && focusBefore.focused === true, 'focus-before', focusBefore);
+    await writeFile(holdPath, '2', 'utf8');
+    await waitForItems(renderer, (answer) => answer.items.some((item) => item.bookId === bookA && item.state === 'analysis-paused') &&
+      !answer.items.some((item) => item.bookId === bookB && item.state === 'analysis-waiting-capacity'), 'concurrent-a-paused-b-admitted');
+    const focusAfter = await renderer.evaluate(FOCUS_STATE);
+    const routeAfter = await renderer.evaluate(`window.ai7.getBookWorkbenchRoute()`);
+    requireJourney(JSON.stringify(focusAfter) === JSON.stringify(focusBefore) && routeAfter?.bookId === bookC, 'background-run-steals-nothing', { before: focusBefore, after: focusAfter, route: routeAfter?.bookId === bookC });
+
+    at('concurrent-cancel');
+    // 取消任务 on 丙, from its own plan: its range in flight finishes, it stops there, and what it read forms 丙's own
+    // partial revision — while 乙 runs to its end beside it.
+    await assertRenderer(renderer, `(() => { const open=document.querySelector('.editor-shell nav.book-records-group button[data-records-destination="analysis"]'); if(!(open instanceof HTMLButtonElement)||open.disabled)return false; open.click(); return true; })()`, 'concurrent-c-analysis-entry');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookC)}] .baseline-analysis-card')?.dataset.analysisState==='executing'`, 'concurrent-c-record', 30_000);
+    await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'concurrent-c-plan');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(taskC)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='running' && document.querySelector('#task-drawer [data-task-drawer-control="cancel-run"]')?.disabled===false`, 'concurrent-c-cancel-ready', 30_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="cancel-run"]', 'concurrent-c-cancel');
+    await waitFor(renderer, `document.activeElement !== null && document.activeElement === document.querySelector('#task-drawer-cancel-impact h4')`, 'concurrent-c-impact', 10_000);
+    await clickSelector(renderer, '#task-drawer-cancel-impact [data-task-drawer-control="confirm-cancel-run"]', 'concurrent-c-confirm');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='cancelling'`, 'concurrent-c-cancelling', 30_000);
+    await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='cancelled-after-start'`, 'concurrent-c-cancelled', 120_000);
+
+    at('concurrent-isolation');
+    // Each Run kept to its own Book, from its own attempt: 丙's partial revision holds the three ranges it read; 乙's
+    // range update, admitted by the governor, is its Book's second revision; 甲 is paused with the two ranges it read
+    // kept, and holds no revision.
+    const cancelledC = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(cancelledC?.bookId === bookC && cancelledC.state === 'cancelled' && cancelledC.run?.runRecordId === runC &&
+      cancelledC.taskOutcome?.classification === 'cancelled' && cancelledC.resultSetRevision?.ordinal === 1 &&
+      cancelledC.resultSetRevision.coverage?.unitsClosed === 3 && cancelledC.resultSetRevision.manuscriptPin?.bookId === bookC &&
+      cancelledC.resultSetRevision.provenance?.runRecordId === runC && cancelledC.run.attempt?.spans?.length === 3,
+    'concurrent-c-own-partial-revision', { state: cancelledC?.state, closed: cancelledC?.resultSetRevision?.coverage?.unitsClosed, spans: cancelledC?.run?.attempt?.spans?.length });
+    const settledAll = await waitForItems(renderer, (answer) => answer.items.some((item) => item.group === 'recent' && item.bookId === bookB && item.itemId !== completionItem.itemId) &&
+      !answer.items.some((item) => item.group === 'active' && item.bookId === bookB) &&
+      answer.items.some((item) => item.group === 'active' && item.bookId === bookA && item.state === 'analysis-paused'), 'concurrent-b-completed');
+    const completionB = settledAll.items.find((item) => item.group === 'recent' && item.bookId === bookB && item.itemId !== completionItem.itemId);
+    await openAttention(renderer, 'isolation-b');
+    await openItem(renderer, completionB.itemId, 'isolation-b');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}] .baseline-analysis-card')?.dataset.analysisState==='settled'`, 'isolation-b-record', 30_000);
+    const settledB2 = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const transitionsB = settledB2?.run?.transitions ?? [];
+    requireJourney(settledB2?.bookId === bookB && settledB2.state === 'settled' && settledB2.run?.runRecordId === runB && settledB2.taskIntent?.mode === 'reanalyze-range' &&
+      JSON.stringify(transitionsB.slice(0, 3).map((transition) => transition.state)) === '["authorized","admitted","executing"]' &&
+      transitionsB[1]?.detail === '已进入 AI7 调度器。' && settledB2.resultSetRevision?.ordinal === 2 &&
+      settledB2.resultSetRevision.manuscriptPin?.bookId === bookB && settledB2.resultSetRevision.provenance?.runRecordId === runB &&
+      settledB2.run.attempt?.attemptId !== cancelledC.run.attempt.attemptId,
+    'concurrent-b-own-revision', { state: settledB2?.state, run: settledB2?.run?.state, transitions: transitionsB.map((transition) => transition.state), ordinal: settledB2?.resultSetRevision?.ordinal });
+    await openAttention(renderer, 'isolation-a');
+    await openItem(renderer, `analysis:${taskA}`, 'isolation-a');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookA)}] .baseline-analysis-card')?.dataset.analysisState==='paused'`, 'isolation-a-record', 30_000);
+    const pausedA = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(pausedA?.bookId === bookA && pausedA.state === 'paused' && pausedA.run?.runRecordId === runA && (pausedA.resultSetRevision ?? null) === null &&
+      pausedA.run.attempt?.spans?.length === 2 &&
+      new Set([pausedA.run.attempt.attemptId, settledB2.run.attempt.attemptId, cancelledC.run.attempt.attemptId]).size === 3,
+    'concurrent-a-paused-own', { state: pausedA?.state, spans: pausedA?.run?.attempt?.spans?.length, revision: pausedA?.resultSetRevision ?? null });
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
