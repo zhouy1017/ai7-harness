@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 43 as const;
+export const SERVICE_PROTOCOL_VERSION = 44 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -65,6 +65,10 @@ export const IPC_CHANNELS = {
   startBaselineAnalysisWhenOnline: 'ai7:j04:start-baseline-analysis-when-online',
   cancelWaitingBaselineAnalysis: 'ai7:j04:cancel-waiting-baseline-analysis',
   runReconnectPreflight: 'ai7:j04:run-reconnect-preflight',
+  quickStartBaselineAnalysis: 'ai7:j04:quick-start-baseline-analysis',
+  setDefaultExecutionRule: 'ai7:j04:set-default-execution-rule',
+  inspectDefaultExecutionRules: 'ai7:j04:inspect-default-execution-rules',
+  deactivateDefaultExecutionRule: 'ai7:j04:deactivate-default-execution-rule',
   inspectReviewWorkspace: 'ai7:j04:inspect-review-workspace',
   prepareReviewRun: 'ai7:j04:prepare-review-run',
   authorizeReviewRun: 'ai7:j04:authorize-review-run',
@@ -2705,6 +2709,25 @@ export interface BaselineAnalysisUpdateActionProjection {
   unavailableReason: string | null;
   /** The expected reuse-versus-recompute counts against the latest revision; `null` when the choice decides them. */
   expected: AnalysisReusePlanCounts | null;
+  /**
+   * 快速开始 of this mode (Issue #421, plan slice S75; V2-UX-TASK-017, TASK-019): offered only while the Book
+   * has a 默认执行规则 for the mode in force that still matches the Book's facts. Absent for a kind whose
+   * modes never take a rule.
+   */
+  quickStart?: BaselineAnalysisQuickStartProjection;
+}
+
+/**
+ * Whether one mode of ②A can start at once under the Book's 默认执行规则 (Issue #421), and why not. One
+ * activation prepares the Task exactly as 先看计划 does and then starts it exactly as 开始任务 would, its
+ * authorization naming the rule version; whatever would make the start differ from the rule stops at the plan.
+ */
+export interface BaselineAnalysisQuickStartProjection {
+  available: boolean;
+  /** Why the quick start is not offered, in the editor's words; `null` while it is. */
+  reason: string | null;
+  /** The rule in force for this mode; `null` when none is. */
+  rule: null | DefaultExecutionRuleReference;
 }
 
 /**
@@ -2867,7 +2890,10 @@ export interface BaselineAnalysisProjection {
     planEnvelopeDigest: string;
     /** The plan version the authorization bound, resolved from the envelope digest. */
     planVersionOrdinal: number | null;
-    origin: 'standard-direct';
+    /** `default-execution-rule` when 快速开始 started the Task under a 默认执行规则 (Issue #421). */
+    origin: 'standard-direct' | 'default-execution-rule';
+    /** The rule version the authorization names; `null` for a standard-direct start. */
+    ruleVersionId: string | null;
     authority: 'standard-direct-dispatch' | 'record-only-no-dispatch';
     authorizedAt: string;
   };
@@ -4105,6 +4131,89 @@ export interface TaskPlanProjection {
   technical: ReadonlyArray<{ key: string; label: string; value: string }>;
   /** The authorization bar: what 开始任务 does for this plan now, and exactly what it binds (Issue #420). */
   start: TaskPlanStartProjection;
+  /** `设为快速开始默认…` and the rule that started the Task, when one did (Issue #421). */
+  defaultRule: TaskPlanDefaultRuleProjection;
+}
+
+/**
+ * 默认执行规则 (Issue #421, plan slice S75; V2-UX-TASK-017, TASK-019, TASK-020, TASK-028, AUTH-009): the task
+ * patterns a rule may cover — the baseline analysis's two updates of the whole Book, which ask for no range.
+ */
+export type DefaultExecutionRulePattern = 'sync-current' | 'reanalyze-book';
+export const DEFAULT_EXECUTION_RULE_PATTERNS: readonly DefaultExecutionRulePattern[] = ['sync-current', 'reanalyze-book'];
+
+/**
+ * What a rule version binds: the material inputs of the plan the editor viewed when setting it that stay the same
+ * from one Run to the next — the model service binding, the procedure pin, the Run Budget Ceiling, the outbound
+ * data category and the outcome class. The range and the predecessor revision are each Run's own, never a rule's.
+ */
+export interface DefaultExecutionRuleBinding {
+  providerBinding: MaterialPlanInputsProjection['providerBinding'];
+  artifactPin: MaterialPlanInputsProjection['artifactPin'];
+  runBudgetCeiling: RunBudgetCeilingState;
+  outboundDataCategory: MaterialPlanInputsProjection['outboundDataCategory'];
+  expectedOutcome: string;
+}
+
+/** One rule version, as a quick start or a started Task names it. */
+export interface DefaultExecutionRuleReference {
+  ruleId: string;
+  ruleVersionId: string;
+  ordinal: number;
+  /** `开始同步 · 第 2 版`: the quick start the rule gives and the version in force. */
+  name: string;
+}
+
+/** One 默认执行规则 as 知识库 › 工序与规则 lists it. */
+export interface DefaultExecutionRuleProjection extends DefaultExecutionRuleReference {
+  bookId: string;
+  bookTitle: string;
+  taskKind: 'baseline-analysis';
+  pattern: DefaultExecutionRulePattern;
+  state: 'active' | 'deactivated';
+  stateLabel: string;
+  /** What 快速开始 does under the rule, in one sentence. */
+  does: string;
+  /** What the rule binds, in the editor's words — the same rows the confirmation listed. */
+  binds: ReadonlyArray<{ label: string; value: string }>;
+  setBy: '本机编辑';
+  /** When this version was set, from the plan it names. */
+  setAt: string;
+  /** When the rule was last set or turned off. */
+  stateRecordedAt: string;
+  sourceTaskIntentId: string;
+  sourcePlanEnvelopeDigest: string;
+  binding: DefaultExecutionRuleBinding;
+}
+
+export interface DefaultExecutionRulesProjection {
+  /** Every rule of every Book, the Book's rules together, active before turned off. */
+  rules: ReadonlyArray<DefaultExecutionRuleProjection>;
+  /** The page's statement: a rule starts nothing by itself. */
+  statement: string;
+}
+
+/** The drawer's `设为快速开始默认…` for one plan, and the rule that started its Task, when one did. */
+export interface TaskPlanDefaultRuleProjection {
+  canSet: boolean;
+  /** Why the plan cannot be set as the quick-start default, in the editor's words; `null` when it can. */
+  reason: string | null;
+  /** The exact Plan Envelope a set binds — the plan on show; `null` when it cannot be set. */
+  planEnvelopeDigest: string | null;
+  /** The Book's rule for this plan's pattern — in force or turned off — and whether this plan set it; `null` when none was set. */
+  current: null | (DefaultExecutionRuleReference & { state: 'active' | 'deactivated'; fromThisPlan: boolean });
+  /** What a rule set from this plan binds, in the editor's words: the confirmation lists exactly these. */
+  binds: ReadonlyArray<{ label: string; value: string }>;
+  /** The rule version 快速开始 started this Task under; `null` for a Task started from its plan. */
+  startedBy: null | DefaultExecutionRuleReference;
+}
+
+/** What one quick start did: started the Task under the rule, or stopped at the plan with the reasons. */
+export interface QuickStartBaselineAnalysisResult {
+  outcome: 'started' | 'fell-back';
+  /** Why the Task was not started, in the editor's words; empty once it started. */
+  reasons: ReadonlyArray<string>;
+  projection: BaselineAnalysisProjection;
 }
 
 /** Every analysis projection, discriminated on `kind`. */
@@ -5338,6 +5447,30 @@ export interface ServiceOperationMap {
     output: ReconnectPreflightProjection;
   };
   /**
+   * 快速开始 (Issue #421; TASK-017, TASK-020, TASK-026): the Task the caller just prepared exactly as 先看计划
+   * prepares it is started exactly as 开始任务 would start it, its authorization naming the rule version — or,
+   * when anything would make the start differ from the rule, left at its plan with the reasons.
+   */
+  quickStartBaselineAnalysis: {
+    input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string; ruleVersionId: string };
+    output: QuickStartBaselineAnalysisResult;
+  };
+  /** `设为快速开始默认…` (AUTH-009, TASK-019): a new rule, or the rule's next version, from the plan on show. */
+  setDefaultExecutionRule: {
+    input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string };
+    output: DefaultExecutionRuleProjection;
+  };
+  /** 知识库 › 工序与规则: every rule of every Book. */
+  inspectDefaultExecutionRules: {
+    input: Record<string, never>;
+    output: DefaultExecutionRulesProjection;
+  };
+  /** 停用: the rule stays on record and quick start stops using it. */
+  deactivateDefaultExecutionRule: {
+    input: { ruleId: string };
+    output: DefaultExecutionRuleProjection;
+  };
+  /**
    * 审阅 (Issue #417, plan slice S69). The workspace is one read; preparing a Review Run is a
    * cooperative job; the one approval records the Run's authorization and starts its drive loop at once,
    * so the answer already reads the Run `running`; 继续审阅 drives a stopped Run again. A finding's
@@ -5650,6 +5783,11 @@ export interface RendererApi {
   startBaselineAnalysisWhenOnline(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisProjection>;
   cancelWaitingBaselineAnalysis(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
   runReconnectPreflight(): Promise<ReconnectPreflightProjection>;
+  /** 快速开始 of the Book the window is showing, after 先看计划's preparation (Issue #421). */
+  quickStartBaselineAnalysis(input: { taskIntentId: string; planEnvelopeDigest: string; ruleVersionId: string }): Promise<QuickStartBaselineAnalysisResult>;
+  setDefaultExecutionRule(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<DefaultExecutionRuleProjection>;
+  inspectDefaultExecutionRules(): Promise<DefaultExecutionRulesProjection>;
+  deactivateDefaultExecutionRule(input: { ruleId: string }): Promise<DefaultExecutionRuleProjection>;
   /**
    * 审阅 of the Book the window is showing (Issue #417). Inspecting without a Run opens the latest; a
    * running Run is followed by inspecting it again, and its executing category carries its progress.

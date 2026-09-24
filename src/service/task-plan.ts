@@ -1,6 +1,7 @@
 import type {
   AnalysisReusePlanCounts,
   BaselineAnalysisPlanRevisionProjection,
+  DefaultExecutionRuleBinding,
   BaselineAnalysisProjection,
   BaselineAnalysisSelectedRange,
   PlanRevisionDiffEntryProjection,
@@ -8,6 +9,7 @@ import type {
   ProviderProcessingPin,
   RunBudgetCeilingState,
   TaskAuthorizationProjection,
+  TaskPlanDefaultRuleProjection,
   TaskPlanDriftEntryProjection,
   TaskPlanProjection,
   TaskPlanStartProjection,
@@ -102,6 +104,33 @@ export function budgetCeilingLabel(ceiling: RunBudgetCeilingState): string {
   return ceiling === 'unset' ? BUDGET_NOT_SET : `任务运行预算上限：${groupedCount(ceiling.maxTotalTokens)} tokens`;
 }
 
+// ---- 默认执行规则 (Issue #421, plan slice S75) -----------------------------------------------------------------
+
+/** `设为快速开始默认…` where the plan's kind takes no rule: shown, disabled, with the reason (S75 D3). */
+export function noDefaultRule(reason: string): TaskPlanDefaultRuleProjection {
+  return { canSet: false, reason, planEnvelopeDigest: null, current: null, binds: [], startedBy: null };
+}
+/** J-03's fixed Task is only ever recorded (ADR 0055): there is nothing a rule could start. */
+export const FIXED_TASK_NO_RULE = '这项固定任务只记录运行，不能设为快速开始默认。';
+/** A Review Run's quick start stays unavailable (S75 D3). */
+export const REVIEW_RUN_NO_RULE = '审阅还不能设为快速开始默认：每次审阅都先看计划，再开始审阅。';
+
+/**
+ * What a rule set from a plan binds, in the editor's words: the confirmation of `设为快速开始默认…` lists exactly
+ * these rows, and 知识库 › 工序与规则 lists them again for the rule in force.
+ */
+export function defaultRuleBindingRows(binding: DefaultExecutionRuleBinding): ReadonlyArray<{ label: string; value: string }> {
+  const provider = binding.providerBinding;
+  const pin = binding.artifactPin;
+  return [
+    { label: '模型服务', value: `${providerLabel(provider.providerId)} · ${provider.modelId}（凭据引用 ${provider.credentialReference}）` },
+    { label: '工序', value: `基线分析 · ${pin.identity} ${pin.version}（方案修订 ${pin.sidecarRevision}）` },
+    { label: '预算上限', value: budgetCeilingLabel(binding.runBudgetCeiling) },
+    { label: '发送内容类别', value: outboundLabel(binding.outboundDataCategory) },
+    { label: '会得到', value: binding.expectedOutcome },
+  ];
+}
+
 /**
  * The Provider Processing pin exactly as the plan has always read it: `development-ci · v1 · 拒绝 · 0 次实时传输`
  * is the reading J-03 pins; a future scope's pin reads faithfully instead of repeating that constant.
@@ -149,7 +178,7 @@ export function positionLabel(reading: RangeReading): string {
 // ---- the plan's key content, relabelled by field key (D8) -------------------------------------------------
 
 /** The editor's name for each field a stored Plan Revision diff names; the stored label stays in the record. */
-const DRIFT_FIELD_LABELS: Readonly<Record<string, string>> = {
+export const DRIFT_FIELD_LABELS: Readonly<Record<string, string>> = {
   'providerBinding.providerId': '模型服务 · 提供方',
   'providerBinding.modelId': '模型服务 · 模型',
   'providerBinding.adapterRevision': '模型服务 · 接入修订',
@@ -393,10 +422,14 @@ export function fixedTaskPlan(input: {
     start: recorded || !projection.actions.canAuthorize
       ? startedBar(false)
       : { readiness: 'record-only', needsModelConnection: false, planEnvelopeDigest: envelope.digest, categoryDigests: [], reconfirm: null },
+    defaultRule: noDefaultRule(FIXED_TASK_NO_RULE),
   };
 }
 
 // ---- the baseline analysis ------------------------------------------------------------------------------
+
+/** The baseline plan read without the Book's rules: nothing can be set from it here. */
+const BASELINE_NO_RULE = '这份计划不能设为快速开始默认。';
 
 /** The task sentence of each baseline mode in the editor's words; the stored goal reads in the technical layer. */
 const BASELINE_GOAL_SENTENCES: Readonly<Record<string, string>> = {
@@ -444,6 +477,8 @@ export function baselineAnalysisPlan(input: {
   projection: BaselineAnalysisProjection;
   bookTitle: string;
   blocks: ReadonlyArray<ManifestBlockInput>;
+  /** What the store read of the Book's rules for this plan (Issue #421); absent reads as a plan no rule can come from. */
+  defaultRule?: TaskPlanDefaultRuleProjection;
 }): TaskPlanProjection {
   const { projection, bookTitle, blocks } = input;
   const intent = projection.taskIntent;
@@ -580,6 +615,7 @@ export function baselineAnalysisPlan(input: {
       ]),
     ],
     start: baselineStart(projection, envelope.digest),
+    defaultRule: input.defaultRule ?? noDefaultRule(BASELINE_NO_RULE),
   };
 }
 
@@ -762,5 +798,6 @@ export function reviewRunPlan(input: {
       ...(facts.authorizedAt === null ? [] : [{ key: 'authorization', label: '审阅授权', value: facts.authorizedAt }]),
     ],
     start,
+    defaultRule: noDefaultRule(REVIEW_RUN_NO_RULE),
   };
 }

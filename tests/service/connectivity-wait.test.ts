@@ -10,13 +10,14 @@ import { LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gat
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { reconnectPreflight } from '../../src/service/reconnect-preflight.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CONNECTIVITY_WAIT_SCHEMA_VERSION, EXPORT_LEDGER_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { DEFAULT_EXECUTION_RULE_SCHEMA_VERSION, EXPORT_LEDGER_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
   type BaselineAnalysisProjection,
   type LaunchPolicyProjection,
 } from '../../src/shared/protocol.js';
 import { analysisRunStatesShape, downgradeAnalysisRunStatesToRevision29 } from '../support/connectivity-wait.js';
+import { DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, plantRevision30Relations } from '../support/default-execution-rules.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
@@ -130,7 +131,7 @@ function relationTruth(database: DatabaseSync): Map<string, { sql: string; conte
 }
 
 describe('schema revision 30 over the real store', () => {
-  it('widens a planted revision-29 store\'s Run states with every row as it was, and moves nothing else', async () => {
+  it('widens a planted revision-29 store\'s Run states with every row as it was, and moves nothing revision 31 does not', async () => {
     // A Task authorized with no route: the two Run states revision 29 already admitted.
     const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
@@ -144,6 +145,9 @@ describe('schema revision 30 over the real store', () => {
       first.close();
     }
     const before = withDatabase(false, (database) => {
+      // Revision 31 (Issue #421) came after: a store revision 29 left holds neither its rule ledger nor its
+      // widened authorization origin.
+      plantRevision30Relations(database);
       downgradeAnalysisRunStatesToRevision29(database);
       database.exec(`PRAGMA user_version = ${EXPORT_LEDGER_SCHEMA_VERSION}`);
       expect(analysisRunStatesShape(database)).toBe('revision-29');
@@ -161,12 +165,15 @@ describe('schema revision 30 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(CONNECTIVITY_WAIT_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DEFAULT_EXECUTION_RULE_SCHEMA_VERSION);
       expect(analysisRunStatesShape(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_run_states ORDER BY rowid').all()).toEqual(before.states);
       const after = relationTruth(database);
-      expect([...after.keys()]).toEqual([...before.truth.keys()]);
-      expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name)).toEqual(['analysis_run_states']);
+      // Revision 31 then adds its rule ledger, empty, and widens the authorization origin the same way.
+      expect([...after.keys()]).toEqual([...before.truth.keys(), ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER].sort());
+      for (const relation of DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER) expect(after.get(relation)?.content).toMatch(/^0:/);
+      expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name))
+        .toEqual(['analysis_run_authorizations', 'analysis_run_states']);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['service_lifetimes']);
       expect(database.prepare("SELECT name FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = 'analysis_run_states' ORDER BY name").all())
         .toEqual([{ name: 'analysis_run_states_no_delete' }, { name: 'analysis_run_states_no_update' }]);
@@ -182,6 +189,7 @@ describe('schema revision 30 over the real store', () => {
       first.close();
     }
     withDatabase(false, (database) => {
+      plantRevision30Relations(database);
       downgradeAnalysisRunStatesToRevision29(database);
       // A hand-altered relation: a column no revision ever wrote.
       database.exec(`PRAGMA foreign_keys = OFF;

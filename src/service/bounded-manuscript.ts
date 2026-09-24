@@ -60,6 +60,7 @@ import {
   ANALYSIS_LEDGER_REVISION_19_SQL,
   ANALYSIS_LEDGER_REVISION_23_SQL,
   ANALYSIS_LEDGER_REVISION_29_SQL,
+  ANALYSIS_LEDGER_REVISION_30_SQL,
   ANALYSIS_LEDGER_REVISION_17_TABLES,
   ANALYSIS_LEDGER_SCHEMA_SQL,
   ANALYSIS_LEDGER_TRIGGER_SQL,
@@ -76,6 +77,7 @@ import {
   IMPORTED_MARK_SCHEMA_VERSION,
   EXPORT_LEDGER_SCHEMA_VERSION,
   CONNECTIVITY_WAIT_SCHEMA_VERSION,
+  DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -96,6 +98,11 @@ import {
 } from './editorial-marks.js';
 import { IMPORTED_MARK_FOREIGN_KEYS, IMPORTED_MARK_SCHEMA_SQL } from './imported-marks.js';
 import { EXPORT_LEDGER_FOREIGN_KEYS, EXPORT_LEDGER_SCHEMA_SQL, EXPORT_LEDGER_TRIGGER_SQL } from './manuscript-export.js';
+import {
+  DEFAULT_EXECUTION_RULE_FOREIGN_KEYS,
+  DEFAULT_EXECUTION_RULE_SCHEMA_SQL,
+  DEFAULT_EXECUTION_RULE_TRIGGER_SQL,
+} from './default-execution-rules.js';
 import {
   MANUSCRIPT_EFFECT_FOREIGN_KEYS,
   MANUSCRIPT_EFFECT_SCHEMA_SQL,
@@ -152,6 +159,10 @@ const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | Read
     ANALYSIS_LEDGER_REVISION_19_SQL.analysis_result_set_revisions,
   ],
   analysis_run_states: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_states, ANALYSIS_LEDGER_REVISION_29_SQL.analysis_run_states],
+  analysis_run_authorizations: [
+    ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_authorizations,
+    ANALYSIS_LEDGER_REVISION_30_SQL.analysis_run_authorizations,
+  ],
 };
 
 /** The analysis ledger before revision 17 (Issue #48): the same relations without the plan-version, Plan Revision, and Plan Adaptation tables and their triggers. */
@@ -1769,6 +1780,8 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...IMPORTED_MARK_FOREIGN_KEYS,
   // Revision 29 (Issue #413): the export ledger, owned and spelled by `manuscript-export.ts`.
   ...EXPORT_LEDGER_FOREIGN_KEYS,
+  // Revision 31 (Issue #421): the default-execution-rule ledger, owned and spelled by `default-execution-rules.ts`.
+  ...DEFAULT_EXECUTION_RULE_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2372,6 +2385,7 @@ function requireManuscriptReimportTargetSchema(
   includeImportRetentionTables = false,
   includeImportedMarkTables = false,
   includeExportLedgerTables = false,
+  includeDefaultExecutionRuleTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2426,8 +2440,10 @@ function requireManuscriptReimportTargetSchema(
         ? { proposal_change_items: [PROPOSAL_CHANGE_ITEMS_REVISION_27_SQL, EDITORIAL_MARK_SCHEMA_SQL.proposal_change_items] }
         : {}),
       ...(includeImportedMarkTables ? IMPORTED_MARK_SCHEMA_SQL : {}),
-      // Revision 29 (Issue #413) adds the export ledger the same way, behind a flag of its own.
+      // Revision 29 (Issue #413) adds the export ledger the same way, behind a flag of its own, and
+      // revision 31 (Issue #421) the default-execution-rule ledger.
       ...(includeExportLedgerTables ? EXPORT_LEDGER_SCHEMA_SQL : {}),
+      ...(includeDefaultExecutionRuleTables ? DEFAULT_EXECUTION_RULE_SCHEMA_SQL : {}),
     },
     MANUSCRIPT_REIMPORT_INDEX_SQL,
     true,
@@ -2443,6 +2459,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeProposalConflictTables ? PROPOSAL_CONFLICT_TRIGGER_SQL : {}),
       ...(includeImportRetentionTables ? IMPORT_RETENTION_TRIGGER_SQL : {}),
       ...(includeExportLedgerTables ? EXPORT_LEDGER_TRIGGER_SQL : {}),
+      ...(includeDefaultExecutionRuleTables ? DEFAULT_EXECUTION_RULE_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5100,6 +5117,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeImportRetentionTables = false,
   includeImportedMarkTables = false,
   includeExportLedgerTables = false,
+  includeDefaultExecutionRuleTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5118,6 +5136,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeImportRetentionTables,
     includeImportedMarkTables,
     includeExportLedgerTables,
+    includeDefaultExecutionRuleTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5181,7 +5200,7 @@ export function initializeBoundedSchema(
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION || version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION,
+      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5195,9 +5214,9 @@ export function initializeBoundedSchema(
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION) {
+      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== CONNECTIVITY_WAIT_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== DEFAULT_EXECUTION_RULE_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5216,6 +5235,7 @@ export function initializeBoundedSchema(
           version >= IMPORT_RETENTION_SCHEMA_VERSION,
           version >= IMPORTED_MARK_SCHEMA_VERSION,
           version >= EXPORT_LEDGER_SCHEMA_VERSION,
+          version >= DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);

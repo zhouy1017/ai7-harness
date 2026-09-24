@@ -3,6 +3,9 @@ import type {
   AnalysisReusePlanProjection,
   BaselineAnalysisPlanRevisionProjection,
   BaselineAnalysisProjection,
+  DefaultExecutionRuleReference,
+  DefaultExecutionRulesProjection,
+  QuickStartBaselineAnalysisResult,
   BaselineAnalysisResultSetRevisionProjection,
   BaselineAnalysisSelectedRange,
   BaselineAnalysisUpdateMode,
@@ -93,6 +96,7 @@ import {
   TASK_PLAN_DRIFT_HEADING,
   TASK_PLAN_OPEN,
   TASK_PLAN_OPEN_START,
+  taskPlanQuickStartFellBack,
   taskPlanSummaryLine,
 } from './task-drawer-labels.js';
 import {
@@ -168,11 +172,15 @@ const taskDrawer = mountTaskDrawer({
   onRecorded: (kind) => taskSurfaceRefresh[kind]?.(),
   openRunSurface: (plan) => void openTaskRunSurface(plan),
   openConnectionSettings: () => void renderModelServiceSettings(),
+  openRules: () => void renderKnowledgeBase(),
 });
 
-/** Open one Task's plan in the drawer (S72 D4); closing it returns focus to the surface's 查看计划. */
-function openTaskPlan(bookId: string, kind: TaskPlanKind, ref: string | null): void {
-  taskDrawer.open({ bookId, kind, ref }, () => screen.querySelector<HTMLElement>(`[data-task-plan-open="${kind}"]:not(:disabled)`));
+/**
+ * Open one Task's plan in the drawer (S72 D4); closing it returns focus to the surface's 查看计划. `note` is said
+ * beside the bar's actions — why a quick start stopped at this plan (Issue #421).
+ */
+function openTaskPlan(bookId: string, kind: TaskPlanKind, ref: string | null, note?: string): void {
+  taskDrawer.open({ bookId, kind, ref }, () => screen.querySelector<HTMLElement>(`[data-task-plan-open="${kind}"]:not(:disabled)`), note);
 }
 
 /**
@@ -2739,6 +2747,7 @@ async function startAnalysisPreparation(
   bookTitle: string,
   input: { goal: string; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean },
   controls: { start: HTMLButtonElement; cancel: HTMLButtonElement; others: ReadonlyArray<HTMLButtonElement> },
+  quick: DefaultExecutionRuleReference | null = null,
 ): Promise<void> {
   const { start, cancel, others } = controls;
   start.disabled = true;
@@ -2763,6 +2772,10 @@ async function startAnalysisPreparation(
         !('coverageManifest' in completed.result)) throw new Error('基线稿件分析准备未返回计划。');
     if (host.isConnected && completed.result.bookId === host.dataset['analysisBookId']) {
       renderBaselineAnalysis(host, completed.result, bookTitle);
+      if (quick !== null) {
+        await quickStartPrepared(host, bookTitle, completed.result, quick);
+        return;
+      }
       setStatus(completed.result.planRevision !== null
         ? '计划的关键内容已变化：请在任务计划里查看计划修订并重新确认计划。'
         : '任务计划已准备；可在任务计划里开始任务。', 'success');
@@ -2775,6 +2788,40 @@ async function startAnalysisPreparation(
     cancel.hidden = true;
     setStatus(rendererErrorMessage(error, '无法开始基线稿件分析。'), 'error');
   }
+}
+
+/**
+ * 快速开始 (Issue #421; TASK-017, TASK-020, TASK-026): the Task 先看计划's own preparation just froze is started under
+ * the rule version the editor clicked, exactly as 开始任务 would start it. Whatever would make the start differ from
+ * the rule leaves the Task at its plan, open in the drawer with the reason beside the bar, and nothing recorded.
+ */
+async function quickStartPrepared(host: HTMLElement, bookTitle: string, prepared: BaselineAnalysisProjection, rule: DefaultExecutionRuleReference): Promise<void> {
+  const taskIntentId = prepared.taskIntent?.taskIntentId ?? null;
+  const planEnvelopeDigest = prepared.planEnvelope?.digest ?? null;
+  if (taskIntentId === null || planEnvelopeDigest === null) throw new Error('基线稿件分析准备未返回计划。');
+  setStatus(`正在按默认执行规则「${rule.name}」开始…`, 'busy');
+  let result: QuickStartBaselineAnalysisResult;
+  try {
+    result = await window.ai7.quickStartBaselineAnalysis({ taskIntentId, planEnvelopeDigest, ruleVersionId: rule.ruleVersionId });
+  } catch (error) {
+    // The plan stands prepared: the bar starts it as usual.
+    setStatus(rendererErrorMessage(error, '快速开始没有开始任务；计划已准备，可在任务计划里开始。'), 'error');
+    openTaskPlan(prepared.bookId, 'baseline-analysis', taskIntentId);
+    return;
+  }
+  if (!host.isConnected || result.projection.bookId !== host.dataset['analysisBookId']) return;
+  renderBaselineAnalysis(host, result.projection, bookTitle);
+  if (result.outcome === 'started') {
+    // A start the launch has no route for is recorded and blocked before dispatch: it never began.
+    setStatus(result.projection.state === 'authorized-blocked'
+      ? `已按默认执行规则「${rule.name}」记下这项任务；当前启动没有可执行的路由，派发前已阻止。`
+      : `已按默认执行规则「${rule.name}」开始任务。`, 'success');
+    openTaskPlan(result.projection.bookId, 'baseline-analysis', taskIntentId);
+    return;
+  }
+  const note = taskPlanQuickStartFellBack(result.reasons);
+  setStatus(note);
+  openTaskPlan(result.projection.bookId, 'baseline-analysis', taskIntentId, note);
 }
 
 function analysisCancelButton(): HTMLButtonElement {
@@ -2898,18 +2945,37 @@ function renderAnalysisUpdateControls(card: HTMLElement, projection: BaselineAna
     start.disabled = !action.available || mode === 'reanalyze-range';
     actionButtons.push(start);
     // The mode's own button opens the two ways to begin (editor-surfaces §3). 先看计划 prepares the Task
-    // and shows its plan, which is the only way a Run is authorized today. The quick start is a Default
-    // Execution Rule's to give (S75, B11); until one exists it is shown, disabled, with the reason — a
+    // and shows its plan in the drawer, whose bar starts it. The quick start is the Book's 默认执行规则's to give
+    // (Issue #421, S75): it prepares the Task the same way and starts it under the rule — or stops at the plan
+    // with the reason. Without a rule in force that matches, it is shown, disabled, with the reason beside it: a
     // Run never starts behind a plan the editor has not seen and no rule has spoken for.
-    const quick = button(mode === 'sync-current' ? '开始同步' : mode === 'reanalyze-range' ? '开始重新分析' : '开始全部重来', 'primary', () => undefined);
+    const quickStart = action.quickStart ?? null;
+    const quickRule = quickStart !== null && quickStart.available ? quickStart.rule : null;
+    const quick = button(mode === 'sync-current' ? '开始同步' : mode === 'reanalyze-range' ? '开始重新分析' : '开始全部重来', 'primary', async () => {
+      if (quickRule === null) return;
+      await startAnalysisPreparation(host, bookTitle, { goal: action.goal, update: { mode, selectedRange: null }, reconfirm: false }, {
+        start: quick,
+        cancel,
+        others: actionButtons.filter((other) => other !== quick),
+      }, quickRule);
+    });
     quick.dataset['analysisAction'] = `quick-${mode}`;
-    quick.disabled = true;
+    quick.disabled = quickRule === null;
+    if (quickStart?.rule) quick.dataset['ruleVersionId'] = quickStart.rule.ruleVersionId;
+    // Only a quick start on offer joins the actions a preparation holds and gives back.
+    if (quickRule !== null) actionButtons.push(quick);
+    const quickNote = element('p', 'field-note analysis-quick-note', quickRule !== null
+      ? `按默认执行规则「${quickRule.name}」：先准备计划，与规则一致时直接开始；有任何不同都会停在计划上。`
+      : quickStart?.reason ?? '这种更新没有快速开始；请先看计划。');
+    quickNote.id = `analysis-quick-note-${mode}`;
+    quickNote.dataset['quickStart'] = quickRule !== null ? 'available' : 'unavailable';
+    quick.setAttribute('aria-describedby', quickNote.id);
     const choice = element('div', 'analysis-update-choice');
     choice.id = `analysis-update-choice-${mode}`;
     choice.hidden = true;
     const choiceActions = element('div', 'button-row analysis-actions');
     choiceActions.append(quick, start);
-    choice.append(choiceActions, element('p', 'field-note', '快速开始要先有「快速开始默认」，目前还没有设定；请先看计划，再开始任务。'));
+    choice.append(choiceActions, quickNote);
     const chooser = button(action.label, mode === 'sync-current' ? 'primary' : 'secondary', () => {
       choice.hidden = !choice.hidden;
       chooser.setAttribute('aria-expanded', choice.hidden ? 'false' : 'true');
@@ -3803,6 +3869,85 @@ async function renderDataAndStorage(): Promise<void> {
   }
 }
 
+/**
+ * 知识库 › 工序与规则 (Issue #421, plan slice S75 D8): every Book's 默认执行规则 — what quick start does under it, what
+ * it binds, who set it and when — with 查看 and 停用. A rule is changed by setting it again from a newly viewed plan
+ * in the drawer (D7), never edited here, and turning it off keeps it on record.
+ */
+async function renderKnowledgeBase(): Promise<void> {
+  setStatus('正在读取工序与规则…', 'busy');
+  try {
+    renderKnowledgeBaseProjection(await window.ai7.inspectDefaultExecutionRules());
+    setStatus('工序与规则已打开');
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, '无法读取工序与规则。'), 'error');
+  }
+}
+
+function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjection): void {
+  const content = panel();
+  content.classList.add('knowledge-base');
+  content.dataset['ruleCount'] = String(projection.rules.length);
+  content.append(
+    element('p', 'section-label', '知识库 · 工序与规则'),
+    element('h2', undefined, '工序与规则'),
+    element('p', 'lede', projection.statement),
+  );
+  if (projection.rules.length === 0) {
+    content.append(element('p', 'field-note default-rule-empty', '还没有默认执行规则。在分析的完整计划里点「设为快速开始默认…」就能设定。'));
+  }
+  const list = element('div', 'default-rule-list');
+  for (const rule of projection.rules) {
+    const card = element('article', 'default-rule-card');
+    card.dataset['ruleId'] = rule.ruleId;
+    card.dataset['ruleState'] = rule.state;
+    card.dataset['rulePattern'] = rule.pattern;
+    card.dataset['ruleOrdinal'] = String(rule.ordinal);
+    const heading = element('div', 'default-rule-heading');
+    const state = element('span', `status-pill default-rule-state-${rule.state}`, rule.stateLabel);
+    heading.append(element('h3', undefined, `《${rule.bookTitle}》 · ${rule.name}`), state);
+    const set = `由${rule.setBy}设定于 ${localInstantLabel(rule.setAt)}${rule.state === 'deactivated' ? ` · 停用于 ${localInstantLabel(rule.stateRecordedAt)}` : ''}`;
+    // 查看: what the rule binds, in the rows the confirmation listed, and one step further the exact identities.
+    const view = element('details', 'default-rule-details');
+    const summary = element('summary', undefined, '查看');
+    summary.dataset['ruleAction'] = 'view';
+    const binds = element('dl', 'default-rule-binds');
+    for (const row of rule.binds) {
+      const value = element('dd', undefined, row.value);
+      value.dataset['ruleBind'] = row.label;
+      binds.append(element('dt', undefined, row.label), value);
+    }
+    view.append(summary, binds, technicalDetails('default-rule-facts',
+      element('dt', undefined, '规则'), element('dd', 'technical-identity', `${rule.ruleId} · ${rule.taskKind} · ${rule.pattern}`),
+      element('dt', undefined, '规则版本'), element('dd', 'technical-identity', `第 ${rule.ordinal} 版 · ${rule.ruleVersionId}`),
+      element('dt', undefined, '设定时查看的计划'), element('dd', 'technical-identity', `${rule.sourceTaskIntentId} · ${rule.sourcePlanEnvelopeDigest}`)));
+    card.append(heading, element('p', undefined, rule.does), element('p', 'field-note', set), view);
+    if (rule.state === 'active') {
+      const off = button('停用', 'secondary', async () => {
+        off.disabled = true;
+        setStatus('正在停用默认执行规则…', 'busy');
+        try {
+          await window.ai7.deactivateDefaultExecutionRule({ ruleId: rule.ruleId });
+          await renderKnowledgeBase();
+          setStatus(`已停用默认执行规则：${rule.name}；快速开始不再使用它。`, 'success');
+        } catch (error) {
+          off.disabled = false;
+          setStatus(rendererErrorMessage(error, '无法停用默认执行规则。'), 'error');
+        }
+      });
+      off.dataset['ruleAction'] = 'deactivate';
+      const actions = element('div', 'button-row');
+      actions.append(off);
+      card.append(actions);
+    }
+    list.append(card);
+  }
+  const back = element('div', 'button-row');
+  back.append(button('返回', 'quiet', () => void initializeStartup()));
+  content.append(list, back);
+  replaceScreen('knowledge-base', content);
+}
+
 function renderModelServiceSettingsProjection(projection: ModelServiceSettingsProjection): void {
   const content = panel();
   content.classList.add('model-service-settings');
@@ -3993,8 +4138,11 @@ function renderLanding(
   dataAndStorage.dataset['settingsRoute'] = 'data-storage';
   const modelService = button('模型服务', 'secondary', () => renderModelServiceSettings());
   modelService.dataset['settingsRoute'] = 'model-service';
+  // 知识库 (Issue #421, S75 D8): opens 工序与规则 only; its other classes arrive with S79.
+  const knowledgeBase = button('知识库', 'secondary', () => renderKnowledgeBase());
+  knowledgeBase.dataset['settingsRoute'] = 'knowledge-base';
   const landingActions = element('div', 'button-row');
-  landingActions.append(importButton, createBook, dataAndStorage, modelService);
+  landingActions.append(importButton, createBook, dataAndStorage, modelService, knowledgeBase);
   copy.append(landingActions);
   const note = element('aside', 'hero-note', '所有导入都要求先明确选择图书目标；系统不会自动选择已有图书或稿件关系。');
   content.append(copy, note);

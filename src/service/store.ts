@@ -103,7 +103,15 @@ import type {
   TaskAuthorizationProjection,
   BaselineAnalysisGoal,
   BaselineAnalysisProjection,
+  BaselineAnalysisQuickStartProjection,
+  BaselineAnalysisUpdateActionProjection,
+  BaselineAnalysisUpdateMode,
   BaselineAnalysisUpdateRequest,
+  DefaultExecutionRulePattern,
+  DefaultExecutionRuleProjection,
+  DefaultExecutionRuleReference,
+  DefaultExecutionRulesProjection,
+  TaskPlanDefaultRuleProjection,
   FactualReviewGoal,
   FactualReviewProjection,
   ReviewCategoryGoal,
@@ -163,7 +171,9 @@ import {
 import { ALWAYS_ONLINE, type TaskPlanConnectivity } from './connectivity.js';
 import {
   baselineAnalysisPlan,
+  defaultRuleBindingRows,
   fixedTaskPlan,
+  noDefaultRule,
   reviewRunPlan,
   TaskPlanError,
   withConnectionReadiness,
@@ -191,6 +201,35 @@ import {
   stagedImportedMarksMatch,
 } from './imported-marks.js';
 import { ExportLedgerError, ManuscriptExportStore, initializeExportLedgerSchema } from './manuscript-export.js';
+import {
+  DEFAULT_EXECUTION_RULES_STATEMENT,
+  DefaultExecutionRuleError,
+  DefaultExecutionRuleLedger,
+  QUICK_START_DEVELOPER_LIVE,
+  QUICK_START_MODE_UNAVAILABLE,
+  QUICK_START_NEEDS_CONNECTION,
+  QUICK_START_NOT_READY,
+  QUICK_START_OFFLINE,
+  QUICK_START_PLAN_CHANGED,
+  QUICK_START_RANGE_REASON,
+  QUICK_START_RULE_CHANGED,
+  QUICK_START_SLOT_BUSY,
+  RULE_STATE_LABELS,
+  SET_RULE_CHANGED,
+  SET_RULE_DEVELOPER_LIVE,
+  SET_RULE_FIRST_BASELINE,
+  SET_RULE_RANGE,
+  defaultExecutionRuleBindingOf,
+  defaultExecutionRuleDoes,
+  defaultExecutionRuleDrift,
+  defaultExecutionRuleReference,
+  initializeDefaultExecutionRuleSchema,
+  isDefaultExecutionRulePattern,
+  quickStartNoRuleReason,
+  ruleDriftReason,
+  setRuleAlreadyReason,
+  type DefaultExecutionRuleRecord,
+} from './default-execution-rules.js';
 import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
 import { reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './review/category-configuration.js';
 import { reviewCategoryKindDefinition } from './review/review-category-kind.js';
@@ -250,6 +289,7 @@ import {
   IMPORTED_MARK_SCHEMA_VERSION,
   EXPORT_LEDGER_SCHEMA_VERSION,
   CONNECTIVITY_WAIT_SCHEMA_VERSION,
+  DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1454,7 +1494,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       currentVersion === PUBLICATION_VERSION_SCHEMA_VERSION || currentVersion === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       currentVersion === IMPORT_RETENTION_SCHEMA_VERSION || currentVersion === IMPORTED_MARK_SCHEMA_VERSION ||
-      currentVersion === EXPORT_LEDGER_SCHEMA_VERSION || currentVersion === CONNECTIVITY_WAIT_SCHEMA_VERSION,
+      currentVersion === EXPORT_LEDGER_SCHEMA_VERSION || currentVersion === CONNECTIVITY_WAIT_SCHEMA_VERSION || currentVersion === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1481,7 +1521,7 @@ function initializeSchema(db: DatabaseSync): void {
     currentVersion === EDITORIAL_REVIEW_SCHEMA_VERSION ||
     currentVersion === PUBLICATION_VERSION_SCHEMA_VERSION || currentVersion === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       currentVersion === IMPORT_RETENTION_SCHEMA_VERSION || currentVersion === IMPORTED_MARK_SCHEMA_VERSION ||
-      currentVersion === EXPORT_LEDGER_SCHEMA_VERSION || currentVersion === CONNECTIVITY_WAIT_SCHEMA_VERSION
+      currentVersion === EXPORT_LEDGER_SCHEMA_VERSION || currentVersion === CONNECTIVITY_WAIT_SCHEMA_VERSION || currentVersion === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1822,7 +1862,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION,
+      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1838,7 +1878,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION) return;
+      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -1946,7 +1986,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION,
+      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1961,7 +2001,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION) return;
+      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2254,7 +2294,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== CONNECTIVITY_WAIT_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== DEFAULT_EXECUTION_RULE_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2273,6 +2313,7 @@ function validateModelServiceSchema(
       version >= IMPORT_RETENTION_SCHEMA_VERSION,
       version >= IMPORTED_MARK_SCHEMA_VERSION,
       version >= EXPORT_LEDGER_SCHEMA_VERSION,
+      version >= DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2315,7 +2356,7 @@ function initializeModelServiceSchema(
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION,
+      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2330,7 +2371,7 @@ function initializeModelServiceSchema(
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
       version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION) {
+      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3104,6 +3145,8 @@ export class EditorialStore {
   readonly #publicationVersions: PublicationVersionStore;
   readonly #manuscriptExport: ManuscriptExportStore;
   readonly #proposalConflicts: ProposalConflictStore;
+  /** 默认执行规则 (Issue #421): the rules 快速开始 starts a Task under. */
+  readonly #rules: DefaultExecutionRuleLedger;
   readonly #workflowProfile: BuiltInWorkflowProfile;
   readonly #lifetimeId: string;
   readonly #control: StoreControl;
@@ -3146,6 +3189,7 @@ export class EditorialStore {
     this.#baselineAnalysis = baselineAnalysis;
     this.#factualReview = factualReview;
     this.#editorialMarks = new EditorialMarkStore(authority);
+    this.#rules = new DefaultExecutionRuleLedger(authority);
     this.#manuscriptApply = new ManuscriptApplyStore(authority, boundedAuthority, this.#editorialMarks, lifetimeId);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
       ledgerOf: (entry) => this.#reviewLedgerOf(entry),
@@ -3219,7 +3263,9 @@ export class EditorialStore {
       // relations, and the version stamp is the only other move. Revision 27 (Issue #410) widens
       // `import_fidelity_categories` and adds the import-retention relations here, in one transaction.
       // Revision 28 (Issue #411) widens `proposal_change_items` to the `insert` kind and adds the staged
-      // imported marks here, in one transaction. Revision 29 (Issue #413) adds the export ledger here.
+      // imported marks here, in one transaction. Revision 29 (Issue #413) adds the export ledger here, and
+      // revision 31 (Issue #421) the default-execution-rule ledger; `initializeTaskAuthorizationSchema` widens
+      // the Run Authorization origin for it and stamps the version.
       initializeManuscriptIntakeSchema(authority);
       initializeTextConversionSchema(authority);
       initializeManuscriptEntryPositionSchema(authority);
@@ -3231,6 +3277,7 @@ export class EditorialStore {
       initializeImportRetentionSchema(authority);
       initializeImportedMarkSchema(authority);
       initializeExportLedgerSchema(authority);
+      initializeDefaultExecutionRuleSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -3338,8 +3385,9 @@ export class EditorialStore {
 
   // ---- J-04 baseline manuscript analysis (Issue #92) ----------------------------------------------
 
+  /** ②A's analysis; each update mode carries its quick start (Issue #421). */
   inspectBaselineAnalysis(bookId: string, progress?: ProgressReader, revisionId: string | null = null): BaselineAnalysisProjection {
-    return this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId, progress, revisionId)) as BaselineAnalysisProjection;
+    return this.#withQuickStart(this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId, progress, revisionId)) as BaselineAnalysisProjection);
   }
 
   // ---- J-04 factual review (Issue #53, plan slice S18a) -------------------------------------------
@@ -3653,7 +3701,8 @@ export class EditorialStore {
       requireStore(projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', '这项分析还没有准备计划。');
       current(projection.taskIntent.taskIntentId);
       const blocks = this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
-      const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks }));
+      const defaultRule = this.#baselineDefaultRule(projection);
+      const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, defaultRule }));
       return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     const reviewRunId = input.ref;
@@ -3721,7 +3770,8 @@ export class EditorialStore {
   /** One baseline preparation step, with its projection read as the kind the caller asked for. */
   #baselineProgress(body: () => BaselineAnalysisPreparationResult): AnalysisPreparationResult<BaselineAnalysisProjection> {
     const result = this.#analysisCall(body);
-    return { ...result, projection: result.projection as BaselineAnalysisProjection | null };
+    // The prepared projection carries the quick start ②A offers, as every other read of it does.
+    return { ...result, projection: result.projection === null ? null : this.#withQuickStart(result.projection as BaselineAnalysisProjection) };
   }
 
   cancelBaselineAnalysisPreparationWork(workId: string): boolean {
@@ -3779,6 +3829,225 @@ export class EditorialStore {
   baselineAnalysisRunWaits(runRecordId: string): boolean {
     this.#assertAvailable();
     return this.#analysisCall(() => this.#baselineAnalysis.currentRunState(runRecordId)) === 'awaiting-connectivity';
+  }
+
+  // ---- 默认执行规则 and 快速开始 (Issue #421, plan slice S75) ---------------------------------------------------
+
+  /**
+   * ②A's quick start of each update mode (TASK-017, TASK-019): offered only while the Book has a rule for the mode in
+   * force, this launch may use one, the mode itself can start, and what the rule binds is what the Book's durable
+   * state reads now. Anything else is shown, disabled, with its reason; a rule never widens what a Run may do.
+   */
+  #withQuickStart(projection: BaselineAnalysisProjection): BaselineAnalysisProjection {
+    const controls = projection.updateControls;
+    if (controls === null) return projection;
+    const quick = <T extends BaselineAnalysisUpdateActionProjection>(mode: BaselineAnalysisUpdateMode, action: T): T =>
+      ({ ...action, quickStart: this.#quickStartOf(projection.bookId, mode, action) });
+    return {
+      ...projection,
+      updateControls: {
+        ...controls,
+        actions: {
+          'sync-current': quick('sync-current', controls.actions['sync-current']),
+          'reanalyze-range': quick('reanalyze-range', controls.actions['reanalyze-range']),
+          'reanalyze-book': quick('reanalyze-book', controls.actions['reanalyze-book']),
+        },
+      },
+    };
+  }
+
+  #quickStartOf(bookId: string, mode: BaselineAnalysisUpdateMode, action: BaselineAnalysisUpdateActionProjection): BaselineAnalysisQuickStartProjection {
+    if (!isDefaultExecutionRulePattern(mode)) return { available: false, reason: QUICK_START_RANGE_REASON, rule: null };
+    const rule = this.#ruleCall(() => this.#rules.activeFor(bookId, mode));
+    if (rule === null) return { available: false, reason: quickStartNoRuleReason(mode), rule: null };
+    const reference = defaultExecutionRuleReference(rule, rule.version);
+    if (this.#baselineAnalysis.launch.live !== null) return { available: false, reason: QUICK_START_DEVELOPER_LIVE, rule: reference };
+    if (!action.available) return { available: false, reason: action.unavailableReason ?? QUICK_START_MODE_UNAVAILABLE, rule: reference };
+    let drift: ReadonlyArray<string>;
+    try {
+      drift = defaultExecutionRuleDrift(rule.version.binding, this.#baselineAnalysis.currentRuleFacts(bookId, mode));
+    } catch (error) {
+      if (error instanceof AnalysisError) return { available: false, reason: error.message, rule: reference };
+      throw error;
+    }
+    if (drift.length > 0) return { available: false, reason: ruleDriftReason(reference.name, drift), rule: reference };
+    return { available: true, reason: null, rule: reference };
+  }
+
+  /**
+   * The drawer's `设为快速开始默认…` for the Book's baseline plan (AUTH-009, TASK-019), and the rule its Task was
+   * started under, when 快速开始 started it. A rule comes only from a plan of a whole-Book update whose key content
+   * has not changed, and never under developer-live.
+   */
+  #baselineDefaultRule(projection: BaselineAnalysisProjection): TaskPlanDefaultRuleProjection {
+    const intent = projection.taskIntent;
+    const envelope = projection.planEnvelope;
+    const version = projection.planVersion;
+    if (intent === null || envelope === null || version === null) return noDefaultRule(QUICK_START_NOT_READY);
+    const authorization = projection.authorization;
+    let startedBy: DefaultExecutionRuleReference | null = null;
+    if (authorization !== null && authorization.origin === 'default-execution-rule' && authorization.ruleVersionId !== null) {
+      const ruleVersionId = authorization.ruleVersionId;
+      const found = this.#ruleCall(() => this.#rules.version(ruleVersionId));
+      requireStore(found !== null && found.rule.bookId === projection.bookId, 'ANALYSIS_RECORD_INVALID', '运行授权指向的默认执行规则不存在。');
+      startedBy = defaultExecutionRuleReference(found.rule, found.version);
+    }
+    const pattern = intent.mode;
+    if (!isDefaultExecutionRulePattern(pattern)) {
+      return { ...noDefaultRule(pattern === 'first-baseline' ? SET_RULE_FIRST_BASELINE : SET_RULE_RANGE), startedBy };
+    }
+    const rule = this.#ruleCall(() => this.#rules.forPattern(projection.bookId, pattern));
+    const current = rule === null ? null : {
+      ...defaultExecutionRuleReference(rule, rule.version),
+      state: rule.state,
+      fromThisPlan: rule.version.sourcePlanEnvelopeDigest === envelope.digest,
+    };
+    const reason = envelope.providerStatus === 'remote-eligible-developer-live'
+      ? SET_RULE_DEVELOPER_LIVE
+      : projection.planRevision !== null
+        ? SET_RULE_CHANGED
+        : current !== null && current.state === 'active' && current.fromThisPlan ? setRuleAlreadyReason(current.name) : null;
+    return {
+      canSet: reason === null,
+      reason,
+      planEnvelopeDigest: reason === null ? envelope.digest : null,
+      current,
+      binds: defaultRuleBindingRows(defaultExecutionRuleBindingOf(version.materialInputs)),
+      startedBy,
+    };
+  }
+
+  /**
+   * `设为快速开始默认…` (AUTH-009, TASK-019): the plan on show — which must still be the Book's current plan, unchanged —
+   * sets the Book's rule for its pattern, or the rule's next version. The standard authorization never does.
+   */
+  setDefaultExecutionRule(bookId: string, taskIntentId: string, planEnvelopeDigest: string): DefaultExecutionRuleProjection {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest),
+      'DEFAULT_EXECUTION_RULE_INVALID', '默认执行规则的参数无效。');
+    const projection = this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId)) as BaselineAnalysisProjection;
+    const intent = projection.taskIntent;
+    const version = projection.planVersion;
+    requireStore(intent !== null && intent.taskIntentId === taskIntentId && projection.planEnvelope?.digest === planEnvelopeDigest && version !== null,
+      'DEFAULT_EXECUTION_RULE_STALE', '这份计划已经变化；请重新打开计划后再设为快速开始默认。');
+    const offer = this.#baselineDefaultRule(projection);
+    const pattern = intent.mode;
+    // The plan that set the rule in force, set again, answers with the rule as it is.
+    if (offer.current !== null && offer.current.state === 'active' && offer.current.fromThisPlan && isDefaultExecutionRulePattern(pattern)) {
+      const same = this.#ruleCall(() => this.#rules.activeFor(bookId, pattern));
+      if (same !== null) return this.#ruleProjection(same);
+    }
+    requireStore(offer.canSet && isDefaultExecutionRulePattern(pattern), 'DEFAULT_EXECUTION_RULE_UNAVAILABLE', offer.reason ?? SET_RULE_RANGE);
+    const record = this.#ruleCall(() => this.#rules.set({
+      bookId,
+      pattern,
+      sourceTaskIntentId: taskIntentId,
+      sourcePlanEnvelopeDigest: planEnvelopeDigest,
+      binding: defaultExecutionRuleBindingOf(version.materialInputs),
+    }));
+    return this.#ruleProjection(record);
+  }
+
+  /** 知识库 › 工序与规则: every rule of every Book, and the page's statement that a rule starts nothing by itself. */
+  inspectDefaultExecutionRules(): DefaultExecutionRulesProjection {
+    this.#assertAvailable();
+    const rules = this.#ruleCall(() => this.#rules.list()).map((record) => this.#ruleProjection(record));
+    return { rules, statement: DEFAULT_EXECUTION_RULES_STATEMENT };
+  }
+
+  /** 停用 (S75 D7): the rule stays on record with every version, and quick start stops using it. */
+  deactivateDefaultExecutionRule(ruleId: string): DefaultExecutionRuleProjection {
+    this.#assertAvailable();
+    return this.#ruleProjection(this.#ruleCall(() => this.#rules.deactivate(ruleId)));
+  }
+
+  /**
+   * 快速开始 (TASK-017, TASK-020, TASK-026): the Task the caller has just prepared exactly as 先看计划 prepares it is
+   * started exactly as 开始任务 would start it, its authorization naming the rule version the editor started under.
+   * Whatever would make the start differ from the rule — the rule changed or was turned off, the plan's key content
+   * or what the rule binds moved, developer-live, the model service not connected, no network, a busy slot — leaves
+   * the Task at its plan with the reason, and nothing is recorded. The one wait comes first, so every check after it
+   * and the authorization read the same state.
+   */
+  async quickStartBaselineAnalysis(
+    bookId: string,
+    taskIntentId: string,
+    planEnvelopeDigest: string,
+    ruleVersionId: string,
+    runtime: { credentialReadiness: () => Promise<'present' | 'missing' | null>; connectivity: TaskPlanConnectivity },
+  ): Promise<{ outcome: 'started' | 'fell-back'; reasons: ReadonlyArray<string>; dispatchRunRecordId: string | null }> {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest) && UUID_PATTERN.test(ruleVersionId),
+      'QUICK_START_INVALID', '快速开始的参数无效。');
+    const plan = await this.inspectTaskPlanWithConnection({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, runtime.credentialReadiness, runtime.connectivity);
+    const projection = this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId)) as BaselineAnalysisProjection;
+    const intent = projection.taskIntent;
+    const envelope = projection.planEnvelope;
+    const version = projection.planVersion;
+    requireStore(intent !== null && intent.taskIntentId === taskIntentId && envelope?.digest === planEnvelopeDigest && version !== null,
+      'ANALYSIS_AUTHORIZATION_STALE', '任务计划已经变化；无法记录该授权。');
+    requireStore(isDefaultExecutionRulePattern(intent.mode), 'QUICK_START_INVALID', '这项任务没有快速开始。');
+    if (projection.authorization !== null) {
+      // The same quick start made twice answers as the first did; a Task started any other way is not started again.
+      requireStore(projection.authorization.origin === 'default-execution-rule' && projection.authorization.ruleVersionId === ruleVersionId,
+        'ANALYSIS_AUTHORIZATION_STALE', '这项任务已经开始了。');
+      return { outcome: 'started', reasons: [], dispatchRunRecordId: null };
+    }
+    const fellBack = (reason: string) => ({ outcome: 'fell-back' as const, reasons: [reason], dispatchRunRecordId: null });
+    const rule = this.#ruleCall(() => this.#rules.activeFor(bookId, intent.mode as DefaultExecutionRulePattern));
+    if (rule === null || rule.version.ruleVersionId !== ruleVersionId) return fellBack(QUICK_START_RULE_CHANGED);
+    if (this.#baselineAnalysis.launch.live !== null) return fellBack(QUICK_START_DEVELOPER_LIVE);
+    if (projection.planRevision !== null) return fellBack(QUICK_START_PLAN_CHANGED);
+    const drift = defaultExecutionRuleDrift(rule.version.binding, version.materialInputs);
+    if (drift.length > 0) return fellBack(ruleDriftReason(defaultExecutionRuleReference(rule, rule.version).name, drift));
+    switch (plan.start.readiness) {
+      case 'ready':
+      case 'no-route':
+        break;
+      case 'needs-connection':
+        return fellBack(QUICK_START_NEEDS_CONNECTION);
+      case 'offline':
+        return fellBack(QUICK_START_OFFLINE);
+      default:
+        return fellBack(QUICK_START_NOT_READY);
+    }
+    if (envelope.dispatchAllowed && runtime.connectivity.slotBusy()) return fellBack(QUICK_START_SLOT_BUSY);
+    const authorized = this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, false, 'now',
+      { kind: 'default-execution-rule', ruleVersionId }));
+    return { outcome: 'started', reasons: [], dispatchRunRecordId: authorized.dispatchRunRecordId };
+  }
+
+  #ruleProjection(record: DefaultExecutionRuleRecord): DefaultExecutionRuleProjection {
+    const book = this.#authority.prepare('SELECT title FROM books WHERE book_id = ?').get(record.bookId) as SqlRow | undefined;
+    requireStore(book !== undefined, 'DEFAULT_EXECUTION_RULE_RECORD_INVALID', '默认执行规则所属的图书不存在。');
+    return {
+      ...defaultExecutionRuleReference(record, record.version),
+      bookId: record.bookId,
+      bookTitle: asString(book.title),
+      taskKind: record.taskKind,
+      pattern: record.pattern,
+      state: record.state,
+      stateLabel: RULE_STATE_LABELS[record.state],
+      does: defaultExecutionRuleDoes(record.pattern),
+      binds: defaultRuleBindingRows(record.version.binding),
+      setBy: '本机编辑',
+      setAt: record.version.createdAt,
+      stateRecordedAt: record.stateRecordedAt,
+      sourceTaskIntentId: record.version.sourceTaskIntentId,
+      sourcePlanEnvelopeDigest: record.version.sourcePlanEnvelopeDigest,
+      binding: record.version.binding,
+    };
+  }
+
+  #ruleCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof DefaultExecutionRuleError) throw new StoreError(error.code, error.message);
+      if (error instanceof AnalysisError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
   }
 
   /** The append-only analysis ledger the execution owner writes through; service-internal. */

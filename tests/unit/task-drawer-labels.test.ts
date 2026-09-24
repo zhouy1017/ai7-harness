@@ -33,6 +33,12 @@ import {
   TASK_PLAN_CEILING_NOTE,
   TASK_PLAN_COMPACT_TERMS,
   TASK_PLAN_DEFAULT_RULE,
+  TASK_PLAN_DEFAULT_RULE_CANCEL,
+  TASK_PLAN_DEFAULT_RULE_CONFIRM,
+  TASK_PLAN_DEFAULT_RULE_FAILED,
+  TASK_PLAN_DEFAULT_RULE_HEADING,
+  TASK_PLAN_DEFAULT_RULE_LEAD,
+  TASK_PLAN_VIEW_RULES,
   TASK_PLAN_DRIFT_COLUMNS,
   TASK_PLAN_DRIFT_HEADING,
   TASK_PLAN_DRIFT_VIEW,
@@ -51,6 +57,10 @@ import {
   taskDrawerModeOf,
   taskPlanChips,
   taskPlanCompactRows,
+  taskPlanDefaultRuleCurrent,
+  taskPlanDefaultRuleSet,
+  taskPlanQuickStartFellBack,
+  taskPlanQuickStarted,
   taskPlanSavedLine,
   taskPlanSummaryLine,
 } from '../../src/renderer/task-drawer-labels.js';
@@ -93,6 +103,7 @@ function plan(overrides: Partial<TaskPlanProjection> = {}): TaskPlanProjection {
     drift: null,
     technical: [],
     start: { readiness: 'ready', needsModelConnection: false, planEnvelopeDigest: 'a'.repeat(64), categoryDigests: [], reconfirm: null },
+    defaultRule: { canSet: false, reason: '这份计划不能设为快速开始默认。', planEnvelopeDigest: null, current: null, binds: [], startedBy: null },
     ...overrides,
   };
 }
@@ -194,6 +205,21 @@ describe('精简 and 完整 (D6)', () => {
     expect(TASK_PLAN_SERVICE_TERMS).toEqual(['模型角色', '提供方', '提供方状态', '会发送', '发送内容类别', '用量上限', '所需时间', '预算上限', '账户限额']);
     expect(TASK_PLAN_BOUNDARY_COLUMNS).toEqual(['运行中 AI7 可以自己调整', '这些一变就先停下来问你']);
     expect(TASK_PLAN_DEFAULT_RULE).toBe('设为快速开始默认…');
+  });
+
+  // Issue #421 (plan slice S75): 设为快速开始默认…'s confirmation, the rule named beside it, and the two quick-start notes.
+  it('says what setting the quick-start default means, and what quick start did', () => {
+    expect(TASK_PLAN_DEFAULT_RULE_HEADING).toBe('设为快速开始默认');
+    expect(TASK_PLAN_DEFAULT_RULE_LEAD).toBe('以后用快速开始更新这本书的分析时，AI7 会先准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。规则不会自己开始任何任务。');
+    expect([TASK_PLAN_DEFAULT_RULE_CONFIRM, TASK_PLAN_DEFAULT_RULE_CANCEL, TASK_PLAN_DEFAULT_RULE_FAILED]).toEqual(['设为默认', '取消', '无法设为快速开始默认。']);
+    expect(taskPlanDefaultRuleSet('开始同步 · 第 1 版')).toBe('已设为快速开始默认：开始同步 · 第 1 版');
+    const current = { ruleId: 'r', ruleVersionId: 'v', ordinal: 2, name: '开始同步 · 第 2 版' };
+    expect(taskPlanDefaultRuleCurrent({ ...current, state: 'active', fromThisPlan: true })).toBe('这本书的默认执行规则：开始同步 · 第 2 版（使用中，由这份计划设定）');
+    expect(taskPlanDefaultRuleCurrent({ ...current, state: 'active', fromThisPlan: false })).toBe('这本书的默认执行规则：开始同步 · 第 2 版（使用中）');
+    expect(taskPlanDefaultRuleCurrent({ ...current, state: 'deactivated', fromThisPlan: false })).toBe('这本书的默认执行规则：开始同步 · 第 2 版（已停用）');
+    expect(taskPlanQuickStarted('开始同步 · 第 2 版')).toBe('已按默认执行规则「开始同步 · 第 2 版」快速开始');
+    expect(TASK_PLAN_VIEW_RULES).toBe('查看规则');
+    expect(taskPlanQuickStartFellBack(['离线：这台设备现在没有网络。'])).toBe('快速开始没有开始这项任务：离线：这台设备现在没有网络。');
   });
 });
 
