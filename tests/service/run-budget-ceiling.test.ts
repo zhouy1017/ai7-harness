@@ -10,6 +10,7 @@ import {
   SAFE_RETRY_BUDGET_REACHED,
 } from '../../src/service/analysis/execution.js';
 import { ASSURANCE_SAMPLING_REMOVED } from '../../src/service/analysis/plan-edits.js';
+import { RUN_REPORT_REVISION_USAGE_STAGES, runReportUsageReconciles } from '../../src/service/analysis/run-report.js';
 import { SET_RULE_BUDGET } from '../../src/service/default-execution-rules.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -336,6 +337,43 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
     }
   }, 300_000);
 
+  it('keeps back an answered retry at a spent ceiling even when a pause comes at that boundary, in the ceiling\'s words', async () => {
+    // The transient-retry fixture as above: unit 5 asks after units 1 to 4 spent 5,300; 6 and 7 bring it to 8,560.
+    const transient = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry');
+    const store = await openWithRoute(transient);
+    const execution = owner(store, transient);
+    try {
+      const bookId = await importedBook(store, 'L2 sample1 预算、答复与暂停');
+      const prepared = prepare(store, bookId);
+      const taskIntentId = prepared.taskIntent!.taskIntentId;
+      const edited = store.editBaselineAnalysisPlan({
+        bookId, taskIntentId, planEnvelopeDigest: prepared.planEnvelope!.digest, removedSteps: [], disallowedAdaptations: [],
+        askFirstAdaptations: ['safe-retry'], runBudgetCeiling: tokens(8000),
+      });
+      const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, edited.planEnvelope!.digest).dispatchRunRecordId!;
+      writeFileSync(holdPath, '5');
+      execution.admitAndDispatch(runRecordId);
+      await until(() => execution.progressFor(runRecordId)?.currentUnitOrdinal === 7, 'unit 7 in flight');
+      const card = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, (id) => execution.progressFor(id)).clarifications[0]!;
+      store.answerBaselineAnalysisClarification({ bookId, taskIntentId, requestId: card.requestId, optionId: 'retry', note: null });
+      // 暂停 while unit 7 is out: at the next boundary the answer waits, the ceiling is spent, and a pause has come.
+      store.requestBaselineAnalysisPause(bookId, taskIntentId);
+      execution.pauseRun(runRecordId, store.baselineAnalysisLedger);
+      writeFileSync(holdPath, 'release');
+      await execution.whenIdle();
+      // The ceiling is read first (Issue #541): the retry is kept back as the ceiling's, and the Run ends there.
+      const stopped = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(stopped.run?.state).toBe('interrupted');
+      expect(stopped.taskOutcome?.stop).toMatchObject({ reason: 'run-budget-ceiling-reached', maxTotalTokens: 8000, usedTokens: 8560 });
+      expect(stopped.resultSetRevision?.gaps.find((entry) => entry.unitOrdinal === 5)?.reason).toContain(SAFE_RETRY_BUDGET_REACHED);
+      expect(stopped.resultSetRevision?.gaps.find((entry) => entry.unitOrdinal === 8)?.code).toBe('not-attempted');
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
   it('counts what a paused Run spent on its reduction toward the ceiling after 续行', async () => {
     let release!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
@@ -385,6 +423,14 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
       expect(stopped.resultSetRevision?.crossUnitReduction?.state).toBe('closed');
       // The sample is drawn, and its one turn is not sent: the ceiling is spent before it.
       expect(stopped.resultSetRevision?.assuranceSample).toMatchObject({ state: 'gap', reason: expect.stringContaining('任务运行预算上限已达到，本轮未派发') });
+      // The Run's report states both reductions, in the stage they were spent in, and reconciles with the revision's usage:
+      // every token the stop counts is in it (Issue #541).
+      const report = stopped.taskOutcome!.report!;
+      expect(report.usagePerStage['cross-unit-reduction'].requests).toBe(2);
+      expect(report.usagePerStage['cross-unit-reduction'].inputTokens + report.usagePerStage['cross-unit-reduction'].outputTokens).toBe(2 * reduction);
+      expect(runReportUsageReconciles(report, stopped.resultSetRevision!.usage)).toBe(true);
+      const reported = RUN_REPORT_REVISION_USAGE_STAGES.reduce((total, stage) => total + report.usagePerStage[stage].inputTokens + report.usagePerStage[stage].outputTokens, 0);
+      expect(reported).toBe(stopped.taskOutcome!.stop!.usedTokens);
       store.markCleanShutdown();
     } finally {
       await execution.dispose();

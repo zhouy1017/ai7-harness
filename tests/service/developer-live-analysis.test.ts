@@ -730,6 +730,11 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
     // interruptions are told apart, and it names the ceiling rather than a limit window.
     expect(settled.taskOutcome!.safeNextAction).toContain('--run-budget-ceiling');
     expect(settled.taskOutcome!.safeNextAction).not.toContain('账户限额');
+    // 待我处理 says it as the drawer does (Issue #541): the launch set the ceiling, which the plan cannot raise, so the way on
+    // is 改计划重做 after a relaunch, never 调整预算并重做.
+    const budgetItem = store.inspectGlobalAttention(() => null, false).groups.flatMap((group) => group.items)
+      .find((entry) => entry.state === 'analysis-budget-reached');
+    expect(budgetItem).toMatchObject({ nextStep: 'redo', target: { kind: 'analysis-plan', bookId } });
     // The partial revision survives: one unit closed, the rest recorded as exact gaps.
     const revision = settled.resultSetRevision!;
     expect(revision.coverage.unitsTotal).toBe(SAMPLE1_UNITS);

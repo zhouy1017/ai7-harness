@@ -119,6 +119,8 @@ export interface AnalysisTaskAttentionReading {
     readonly openClarification?: null | { readonly requestId: string; readonly unitOrdinal: number; readonly raisedAt: string };
     /** An interrupted Run the Run Budget Ceiling stopped (Issue #51, S16a): 已停止 · 预算已达上限. */
     readonly budgetReached?: boolean;
+    /** Whether the launch set that ceiling, under developer-live, rather than the editor's plan (Issue #541). */
+    readonly launchSetsCeiling?: boolean;
     /** A resumable Run the provider's account limit stopped (Issue #51, S16b): 模型服务账户限额. */
     readonly accountLimited?: boolean;
     /** A waiting Run blocked because its plan moved before it could start (Issue #536): 需要重新确认计划. */
@@ -382,10 +384,11 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading, waitingFor: Wai
     case 'failed':
       return item('exceptions', 'analysis-failed', { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
     case 'interrupted':
-      // 已停止 · 预算已达上限 (Issue #51, S16a; MODEL-016, MODEL-017): the way on is the plan's 调整预算并重做.
+      // 已停止 · 预算已达上限 (Issue #51, S16a; MODEL-016, MODEL-017): the way on is the plan's 调整预算并重做 — or, when the launch
+      // set the ceiling under developer-live, 改计划重做 after a relaunch, as the drawer says (Issue #541).
       if (run.budgetReached === true) {
         return item('exceptions', 'analysis-budget-reached', {
-          itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'adjust-budget-redo',
+          itemId, blocked: false, at: run.stateAt, book, object, nextStep: run.launchSetsCeiling === true ? 'redo' : 'adjust-budget-redo',
           target: { kind: 'analysis-plan', bookId: reading.bookId, taskIntentId: reading.taskIntentId }, technical,
         });
       }

@@ -704,6 +704,13 @@ export function providerConsequence(live: LaunchBinding['live'], unitCount: numb
 }
 
 /**
+ * The stages a stop keeps its usage for (Issue #541): a reduction or a sample 续行 forms again was spent all the same. A unit
+ * a stop kept carries its own usage in its checkpoint.
+ */
+export const CARRIED_STAGES = ['cross-unit-reduction', 'assurance-sampling'] as const;
+export type CarriedStages = Record<(typeof CARRIED_STAGES)[number], { requests: number; inputTokens: number; outputTokens: number }>;
+
+/**
  * The append-only ledger of one analysis kind of one Book database. The kind it serves is the
  * {@link AnalysisKindDefinition} it is constructed with: the identity it tags every row with, the
  * contract version, the Task modes and their goals, the frozen prompt contract its plans freeze, the
@@ -1098,8 +1105,10 @@ export class BaselineAnalysisStore {
             recordedAt: asString(row.run_recorded_at),
             progress: state === 'admitted' || state === 'executing' || state === 'cancelling' || state === 'pausing' ? progress(runRecordId) : null,
             openClarification: this.#openClarificationOf(runRecordId, state),
-            // 已停止 · 预算已达上限 (Issue #51, S16a): an interrupted Run whose outcome names the ceiling.
+            // 已停止 · 预算已达上限 (Issue #51, S16a): an interrupted Run whose outcome names the ceiling — and whether the
+            // launch set it, under developer-live (Issue #541).
             budgetReached: state === 'interrupted' && this.#runStop(runRecordId) !== null,
+            launchSetsCeiling: state === 'interrupted' && this.#runStop(runRecordId) !== null && this.#launchSetsCeiling(asString(row.task_intent_id)),
             // 模型服务账户限额 (Issue #51, S16b): a resumable Run the provider's account limit stopped.
             accountLimited: state === 'resumable' && this.accountLimitOf(runRecordId) !== null,
             // 需要重新确认计划 (Issue #536; OFF-008): a waiting Run blocked because its plan moved.
@@ -2927,17 +2936,34 @@ export class BaselineAnalysisStore {
    * What a stopped Run spent beyond its units before it stopped — a reduction or a sample 续行 forms again — as its latest
    * stop kept it (Issue #51, S16a): the ceiling counts it after 续行 as it did before. `null` when no stop kept any.
    */
-  carriedUsageOf(runRecordId: string): { inputTokens: number; outputTokens: number } | null {
+  carriedUsageOf(runRecordId: string): { inputTokens: number; outputTokens: number; stages: CarriedStages | null } | null {
     const rows = this.#db.prepare(
       "SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? AND state IN ('paused', 'resumable', 'awaiting-clarification') ORDER BY sequence DESC",
     ).all(runRecordId) as SqlRow[];
+    const count = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
     for (const row of rows) {
       const carried = (parseCanonicalJson(asString(row.canonical_json)) as { carriedUsage?: unknown }).carriedUsage;
       if (carried === undefined) continue;
-      const usage = carried as { inputTokens?: unknown; outputTokens?: unknown };
-      requireAnalysis(carried !== null && typeof carried === 'object' && Number.isSafeInteger(usage.inputTokens) && Number.isSafeInteger(usage.outputTokens) &&
-        (usage.inputTokens as number) >= 0 && (usage.outputTokens as number) >= 0, 'ANALYSIS_RECORD_INVALID', '运行记录的已用量无效。');
-      return { inputTokens: usage.inputTokens as number, outputTokens: usage.outputTokens as number };
+      const usage = carried as { inputTokens?: unknown; outputTokens?: unknown; stages?: unknown };
+      requireAnalysis(carried !== null && typeof carried === 'object' && count(usage.inputTokens) && count(usage.outputTokens),
+        'ANALYSIS_RECORD_INVALID', '运行记录的已用量无效。');
+      // The stages a stop kept its usage by (Issue #541); a stop recorded before they were kept names none.
+      let stages: CarriedStages | null = null;
+      if (usage.stages !== undefined) {
+        const kept = usage.stages as Record<string, { requests?: unknown; inputTokens?: unknown; outputTokens?: unknown } | undefined>;
+        requireAnalysis(usage.stages !== null && typeof usage.stages === 'object' && Object.keys(usage.stages).length === CARRIED_STAGES.length &&
+          CARRIED_STAGES.every((stage) => kept[stage] !== undefined && count(kept[stage]!.requests) && count(kept[stage]!.inputTokens) && count(kept[stage]!.outputTokens)),
+        'ANALYSIS_RECORD_INVALID', '运行记录的已用量无效。');
+        stages = Object.fromEntries(CARRIED_STAGES.map((stage) => [stage, {
+          requests: kept[stage]!.requests as number, inputTokens: kept[stage]!.inputTokens as number, outputTokens: kept[stage]!.outputTokens as number,
+        }])) as CarriedStages;
+        const summed = CARRIED_STAGES.reduce((total, stage) => ({
+          inputTokens: total.inputTokens + stages![stage].inputTokens, outputTokens: total.outputTokens + stages![stage].outputTokens,
+        }), { inputTokens: 0, outputTokens: 0 });
+        requireAnalysis(summed.inputTokens <= (usage.inputTokens as number) && summed.outputTokens <= (usage.outputTokens as number),
+          'ANALYSIS_RECORD_INVALID', '运行记录的已用量无效。');
+      }
+      return { inputTokens: usage.inputTokens as number, outputTokens: usage.outputTokens as number, stages };
     }
     return null;
   }
@@ -3157,6 +3183,16 @@ export class BaselineAnalysisStore {
   }
 
   /** Why a Run's interrupted outcome says it stopped (Issue #51, S16a); `null` for any other Run, or one with no outcome. */
+  /** Whether the plan a Task holds was frozen under developer-live, where the launch sets the Run Budget Ceiling (Issue #541). */
+  #launchSetsCeiling(taskIntentId: string): boolean {
+    const row = this.#db.prepare(
+      "SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND component = 'plan-envelope' ORDER BY plan_version DESC LIMIT 1",
+    ).get(taskIntentId) as SqlRow | undefined;
+    if (row === undefined) return false;
+    const envelope = parseCanonicalJson(asString(row.canonical_json));
+    return isRecord(envelope) && envelope.providerStatus === 'remote-eligible-developer-live';
+  }
+
   #runStop(runRecordId: string): RunStop | null {
     const row = this.#db.prepare("SELECT canonical_json FROM analysis_task_outcomes WHERE run_record_id = ? AND classification = 'interrupted'")
       .get(runRecordId) as SqlRow | undefined;
