@@ -1379,22 +1379,30 @@ async function main() {
     await assertRenderer(renderer, `(() => { const radio = window.__j07.card('news-release').querySelector('input[name="document-source"]'); radio.click(); return radio.checked && window.__j07.cardAction('news-release', 'confirmCreate')?.disabled === false; })()`, 'document-create-choose');
     await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="confirmCreate"]', 'document-create-confirm');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"][data-document-type-id="news-release"] [data-testid="manuscript-editor"] > [data-block-id]') !== null`, 'document-opened', 120_000);
-    await assertRenderer(renderer, `(() => {
+    const surface = await renderer.evaluate(`(() => {
       const shell = document.querySelector('.editor-shell[data-deliverable="production-document"][data-document-type-id="news-release"]');
       const lens = shell?.querySelector('aside.document-lens');
       const work = Array.from(shell?.querySelectorAll('nav.book-work-group button[data-work-destination]') ?? []).map((item) => item.dataset.workDestination + ':' + item.textContent);
       const edge = Array.from(shell?.querySelectorAll('.edge-entries button') ?? []).map((item) => item.dataset.edgeEntry);
       const versions = Array.from(lens?.querySelectorAll('ol.document-version-list > li') ?? []).map((item) => item.dataset.versionOrdinal + ':' + (item.dataset.versionCurrent ?? ''));
-      const surface = (shell?.textContent ?? '');
-      return shell?.dataset.bookId === ${JSON.stringify(bookId)} && shell.querySelector('.editor-toolbar .section-label')?.textContent === ${JSON.stringify(`${EXCERPT.title} · 生产文档`)} &&
-        shell.querySelector('.editor-toolbar h2')?.textContent === '新闻稿 · 版本 1' && Array.from(shell.querySelectorAll('.editor-meta > span')).some((item) => item.textContent === '当前版本 版本 1') &&
-        lens?.querySelector(':scope > .section-label')?.textContent === '工作流程' &&
-        JSON.stringify(Array.from(lens.querySelectorAll('h3')).map((item) => item.textContent)) === '["版本与交付","这份文档的材料"]' &&
-        JSON.stringify(versions) === '["1:true"]' && lens.querySelector('.document-materials .field-note')?.textContent === '暂无材料。任务简报、引语台账、事实核查记录与参考的范例会列在这里。' &&
-        JSON.stringify(work) === '["deliverables:返回交付物"]' && shell.querySelector('[data-records-destination="analysis"]') === null &&
-        JSON.stringify(edge) === '["navigation"]' && shell.querySelector('details.milestone-section') === null &&
-        shell.querySelector('[data-document-action="saveVersion"]')?.textContent === '保存为版本' && !/里程碑|签发|发稿/.test(surface);
-    })()`, 'document-surface-is-the-documents');
+      return {
+        book: shell?.dataset.bookId === ${JSON.stringify(bookId)},
+        label: shell?.querySelector('.editor-toolbar .section-label')?.textContent === ${JSON.stringify(`${EXCERPT.title} · 生产文档`)},
+        heading: shell?.querySelector('.editor-toolbar h2')?.textContent === '新闻稿 · 版本 1',
+        meta: Array.from(shell?.querySelectorAll('.editor-meta > span') ?? []).some((item) => item.textContent === '当前版本 版本 1'),
+        lens: lens?.querySelector(':scope > .section-label')?.textContent === '工作流程',
+        sections: JSON.stringify(Array.from(lens?.querySelectorAll('h3') ?? []).map((item) => item.textContent)) === '["版本与交付","这份文档的材料"]',
+        versions: JSON.stringify(versions) === '["1:true"]',
+        materials: lens?.querySelector('.document-materials .field-note')?.textContent === '暂无材料。任务简报、引语台账、事实核查记录与参考的范例会列在这里。',
+        work: JSON.stringify(work) === '["deliverables:返回交付物"]',
+        noAnalysis: shell?.querySelector('[data-records-destination="analysis"]') === null,
+        edge: JSON.stringify(edge) === '["navigation"]',
+        noMilestone: shell?.querySelector('details.milestone-section') === null,
+        saveVersion: shell?.querySelector('[data-document-action="saveVersion"]')?.textContent === '保存为版本',
+        noManuscriptWords: !/里程碑|签发|发稿/.test(shell?.textContent ?? ''),
+      };
+    })()`);
+    requireJourney(surface !== null && typeof surface === 'object' && Object.values(surface).every((value) => value === true), 'document-surface-is-the-documents', surface);
     const documentTexts = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]'), (block) => block.textContent ?? '')`);
     const draftParagraphs = await admittedParagraphs(DRAFT);
     requireJourney(Array.isArray(documentTexts) && JSON.stringify(documentTexts.map(digestOf)) === JSON.stringify(draftParagraphs.map(digestOf)), 'document-reads-as-the-draft', { blocks: documentTexts?.length });
