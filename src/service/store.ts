@@ -179,12 +179,15 @@ import {
   TaskPlanError,
   withConnectionReadiness,
   withConnectivityReadiness,
+  withAnswerBlockers,
   withResumeBlockers,
   RESUME_BLOCKED_BINDING,
   withWaitingReason,
   type WaitingFor,
   RESUME_BLOCKED_CONNECTION,
   RESUME_BLOCKED_OFFLINE,
+  ANSWER_BLOCKED_CONNECTION,
+  ANSWER_BLOCKED_OFFLINE,
   RESUME_BLOCKED_SLOT,
   type BaselineStoppedRunFacts,
 } from './task-plan.js';
@@ -3806,6 +3809,15 @@ export class EditorialStore {
       if (reaches && connectivity.reading() === 'offline') blockers.push(RESUME_BLOCKED_OFFLINE);
       plan = withResumeBlockers(plan, blockers);
     }
+    // A Run waiting for the editor's answer goes on once answered (Issue #422, S76d; CLAR-006): it is answered only while
+    // the service could take it on — the route's credential there, and the device online when the route reaches its
+    // model over the network. A busy slot only queues it.
+    if (plan.state.key === 'awaiting-clarification') {
+      const blockers: string[] = [];
+      if (plan.start.needsModelConnection && (await credentialReadiness()) === 'missing') blockers.push(ANSWER_BLOCKED_CONNECTION);
+      if (reaches && connectivity.reading() === 'offline') blockers.push(ANSWER_BLOCKED_OFFLINE);
+      plan = withAnswerBlockers(plan, blockers);
+    }
     if (plan.state.key !== 'waiting') return plan;
     if (reaches && connectivity.reading() === 'offline') return withWaitingReason(plan, 'network');
     if ((await credentialReadiness()) === 'missing') return withWaitingReason(plan, 'connection');
@@ -3960,17 +3972,23 @@ export class EditorialStore {
     return this.#analysisCall(() => {
       let unitsSettled: number | null;
       let unitsClosed: number | null;
+      let waiting: Array<{ unitOrdinal: number; answered: boolean }> = [];
       try {
         const checkpoints = this.#baselineAnalysis.unitCheckpoints(run.runRecordId);
         unitsSettled = checkpoints.length;
         unitsClosed = checkpoints.filter((checkpoint) => checkpoint.unit.closed.state === 'closed').length;
+        // The units that asked the editor and have not settled since (Issue #422, S76d).
+        const settled = new Set(checkpoints.map((checkpoint) => checkpoint.unit.unitOrdinal));
+        waiting = this.#baselineAnalysis.clarificationsOf(run.runRecordId)
+          .filter((request) => !settled.has(request.unitOrdinal))
+          .map((request) => ({ unitOrdinal: request.unitOrdinal, answered: request.answer !== null }));
       } catch {
         // Its kept progress no longer reads back: 续行 names that, and a cancellation forms no revision from it.
         unitsSettled = null;
         unitsClosed = null;
       }
       const blockers = stopped ? [...this.#baselineAnalysis.continuationBlockers(run.runRecordId), ...(bindingHolds ? [] : [RESUME_BLOCKED_BINDING])] : [];
-      return { unitsSettled, unitsClosed, unitsTotal, blockers, bindingHolds };
+      return { unitsSettled, unitsClosed, unitsTotal, blockers, bindingHolds, waiting };
     });
   }
 

@@ -3114,7 +3114,7 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
         const next = await window.ai7.inspectBaselineAnalysis(inspected === null ? undefined : { revisionId: inspected });
         if (!host.isConnected || next.bookId !== host.dataset['analysisBookId']) return;
         if (JSON.stringify(next) === JSON.stringify(projection)) {
-          if (projection.state === 'waiting' || projection.state === 'admitted' || projection.state === 'executing') refreshLater(delayMs);
+          if (projection.state === 'waiting' || projection.state === 'awaiting-clarification' || projection.state === 'admitted' || projection.state === 'executing') refreshLater(delayMs);
           return;
         }
         renderBaselineAnalysis(host, next, bookTitle);
@@ -3215,8 +3215,9 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
   // 已暂停 (Issue #422).
   if (projection.state === 'admitted' || projection.state === 'executing' || projection.state === 'cancelling' || projection.state === 'pausing') refreshLater();
   // A Run in Connectivity Wait is followed too, more slowly — it may wait a long time (Issue #502) — so the card
-  // moves on by itself once Reconnect Preflight admits it.
-  if (projection.state === 'waiting') refreshLater(2_000);
+  // moves on by itself once Reconnect Preflight admits it; and so is one waiting for the editor's answer, which the
+  // service takes on once the slot another Run holds is free (Issue #422, S76d).
+  if (projection.state === 'waiting' || projection.state === 'awaiting-clarification') refreshLater(2_000);
 }
 
 /** ②A's one pending follow-up read per card host (Issue #502): a later draw replaces it, never adds another loop. */

@@ -35,7 +35,9 @@ import { ExecutionAdmissionError } from './execution-error.js';
 import { applyAssuranceSample, type AnalysisKindDefinition, type AnalysisReductionResult } from './kind-definition.js';
 import { ASSURANCE_SAMPLING_REMOVED, SAFE_RETRY_WITHHELD, adaptationMode, assuranceSamplingKept } from './plan-edits.js';
 import {
+  CLARIFICATION_CANCELLED_ANSWERED,
   CLARIFICATION_CANCELLED_UNANSWERED,
+  CLARIFICATION_ENDED_ANSWERED,
   CLARIFICATION_ENDED_UNANSWERED,
   CLARIFICATION_RECORD_GAP,
   awaitingClarificationDetail,
@@ -581,16 +583,20 @@ export class BaselineAnalysisExecutionOwner {
       throw new ExecutionAdmissionError('EXECUTION_STATE_INVALID', '只有已记录“正在取消”的运行可以结束取消。');
     }
     // A stopped Run that kept units ends the way a running one does — its partial revision, then 已取消 — through the
-    // one slot, sending nothing; while another Run holds the slot it waits for it, held and read as 正在取消. One that
-    // kept none ends here, and so does one whose kept progress no longer reads back: nothing of it can be gathered.
+    // one slot, sending nothing; while another Run holds the slot it waits for it, held and read as 正在取消. So does one
+    // whose units asked the editor (Issue #422, S76d): their first attempts were sent, and they end as the gaps they are.
+    // One that kept and asked nothing ends here, and so does one whose kept progress no longer reads back: nothing of it
+    // can be gathered.
     let checkpoints: UnitCheckpoint[];
+    let asked: boolean;
     try {
       checkpoints = ledger.unitCheckpoints(runRecordId);
+      asked = ledger.clarificationsOf(runRecordId).length > 0;
     } catch {
       settleCancelWithoutRevision(ledger, runRecordId, CANCELLED_WITHOUT_REVISION);
       return 'settled';
     }
-    if (checkpoints.length === 0) {
+    if (checkpoints.length === 0 && !asked) {
       settleCancelWithoutRevision(ledger, runRecordId, CANCELLED_WITHOUT_EXECUTION);
       return 'settled';
     }
@@ -922,8 +928,9 @@ export class BaselineAnalysisExecutionOwner {
       };
       harness.bindExecution({ harnessSessionId, behaviorCompositionDigest: harness.composition.digest, promptContractDigest });
       // 取消任务 before the Run kept any unit (CTRL-008): nothing of it is left to gather, so it ends here without
-      // provider work and without a revision. A stopped Run that kept units is finished below, sending nothing.
-      if (active.cancelRequested && checkpoints.length === 0) {
+      // provider work and without a revision. A stopped Run that kept units — or whose units asked the editor, their first
+      // attempts sent (Issue #422, S76d) — is finished below, sending nothing.
+      if (active.cancelRequested && checkpoints.length === 0 && ledger.clarificationsOf(facts.runRecordId).length === 0) {
         recordCancelledWithoutRevision(ledger, facts.runRecordId, facts.taskIntentId, attemptId, CANCELLED_BEFORE_UNITS);
         return;
       }
@@ -1395,10 +1402,16 @@ export class BaselineAnalysisExecutionOwner {
         return false;
       };
       if (stopWithoutEnding()) return;
-      // A question the Run's end leaves open stays on record (CLAR-005), and its unit settles as the gap it is, unretried.
+      // A question the Run's end leaves open stays on record (CLAR-005), and its unit settles as the gap it is, unretried —
+      // in words that say whether the editor had answered it, read now, since an answer may have come while it ran.
+      const answeredUnits = new Set(waiting.size === 0 ? [] : ledger.clarificationsOf(facts.runRecordId).filter((entry) => entry.answer !== null).map((entry) => entry.unitOrdinal));
       for (const w of waiting.values()) {
+        const answered = answeredUnits.has(w.unit.ordinal);
+        const words = active.cancelRequested
+          ? answered ? CLARIFICATION_CANCELLED_ANSWERED : CLARIFICATION_CANCELLED_UNANSWERED
+          : answered ? CLARIFICATION_ENDED_ANSWERED : CLARIFICATION_ENDED_UNANSWERED;
         settleGap(w.unit, w.requestDigest, { unitOrdinal: w.unit.ordinal, attempts: w.attempts, wallMs: w.wallMs, usage: w.usage },
-          'adapter-failure', `${w.failure.reason}（${w.failure.code}）；${active.cancelRequested ? CLARIFICATION_CANCELLED_UNANSWERED : CLARIFICATION_ENDED_UNANSWERED}`);
+          'adapter-failure', `${w.failure.reason}（${w.failure.code}）；${words}`);
       }
       waiting.clear();
       if (active.interrupted && terminalClassification === 'completed') terminalClassification = 'interrupted';

@@ -258,7 +258,7 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
     // Units 3 and 7 edited, then 同步到当前稿件: two ranges read again, six reused.
     const impact = baselineCancellationImpact(run('executing', progress({ unitsTotal: 2, unitsSettled: 1, currentUnitOrdinal: 7 })), { manuscriptUnits: 8, reusedUnits: 6 });
     expect(impact.slice(0, 2)).toEqual([
-      '正在读的第 7 个阅读范围读完后停止；其余 0 个要重新分析的阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。',
+      '正在读的第 7 个阅读范围读完后停止；之后的归纳、抽样都不再进行，不再发送任何内容。',
       '已读完的 1 个阅读范围和正在读的这一个的结果与缺口，连同沿用上一份分析的 6 个阅读范围，会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。',
     ]);
   });
@@ -340,6 +340,29 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
     expect(baselineCancellationImpact(run('paused', null), null, { unitsSettled: null, unitsTotal: 8 })).toEqual([
       '这项任务已经停下，它已保存的阅读进度无法核对；取消后不会发送任何内容，也不会形成结果集修订版。',
       CANCELLATION_NO_EFFECTS,
+    ]);
+  });
+
+  it('names the ranges that asked the editor, answered or not, and ends them as gaps (S76d, D7)', () => {
+    // Seven ranges read, the eighth asked: the summary names it, and nothing else is left to read.
+    expect(baselineCancellationImpact(run('awaiting-clarification', null), null, { unitsSettled: 7, unitsTotal: 8, waiting: [{ unitOrdinal: 5, answered: false }] })).toEqual([
+      '这项任务已经停下；之后的归纳、抽样都不再进行，不再发送任何内容。',
+      '已读完的 7 个阅读范围的结果与缺口会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。',
+      '第 5 个阅读范围在等你的回答；取消后不再重试，在这份修订版里记为缺口。',
+      CANCELLATION_NO_EFFECTS,
+    ]);
+    // Every range it read asked: its gaps are its revision, one of them answered but not yet gone on by.
+    expect(baselineCancellationImpact(run('paused', null), null, { unitsSettled: 0, unitsTotal: 4, waiting: [{ unitOrdinal: 3, answered: true }, { unitOrdinal: 7, answered: false }] })).toEqual([
+      '这项任务已经停下；其余 2 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。',
+      '第 7 个阅读范围在等你的回答；取消后不再重试，记为缺口。',
+      '第 3 个阅读范围你已回答，但还没有按回答接着做；取消后不再重试，记为缺口。',
+      '这些缺口和没读到的阅读范围（记为未尝试）会保留在一份新的结果集修订版里；这份修订版会成为这本书最新的分析。',
+      CANCELLATION_NO_EFFECTS,
+    ]);
+    // Under a launch that can no longer carry the Run, nothing of it becomes a revision.
+    expect(baselineCancellationImpact(run('paused', null), null, { unitsSettled: 0, unitsTotal: 4, bindingHolds: false, waiting: [{ unitOrdinal: 3, answered: false }] }).slice(1, 3)).toEqual([
+      '第 3 个阅读范围在等你的回答；取消后不再重试。',
+      '执行绑定已经变化，这次取消不会形成结果集修订版。',
     ]);
   });
 
