@@ -4158,6 +4158,11 @@ export interface TaskPlanEditProjection {
   reason: string | null;
   /** The editor's last edit, which made the version shown: its version, time, and each change. */
   lastEdit: null | { ordinal: number; recordedAt: string; entries: ReadonlyArray<TaskPlanDriftEntryProjection> };
+  /**
+   * The envelope digest of the version shown, which 更新计划 edits; `null` when the plan takes no edit. It is the
+   * edit's own: 模型未连接 or 离线 withholds 开始任务's digest, never this one.
+   */
+  planEnvelopeDigest: string | null;
 }
 
 /**
