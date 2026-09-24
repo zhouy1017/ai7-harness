@@ -9,6 +9,7 @@ import {
 } from '../shared/protocol.js';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
 import { diffMaterialPlanInputs } from './analysis/plan-boundary.js';
+import { DRIFT_FIELD_LABELS } from './task-plan.js';
 
 /**
  * 默认执行规则 — the rules 快速开始 starts a Task under (Issue #421, plan slice S75; V2-UX-TASK-017, TASK-019,
@@ -189,8 +190,9 @@ export function defaultExecutionRuleBindingOf(inputs: MaterialPlanInputsProjecti
  * never count: a rule does not bind them.
  */
 export function defaultExecutionRuleDrift(binding: DefaultExecutionRuleBinding, inputs: MaterialPlanInputsProjection): ReadonlyArray<string> {
+  // Named in the drawer's words by field key, never by the engineering label a stored diff carries.
   return diffMaterialPlanInputs({ ...binding, selectedRange: inputs.selectedRange, predecessorRevision: inputs.predecessorRevision }, inputs)
-    .map((entry) => entry.label);
+    .map((entry) => DRIFT_FIELD_LABELS[entry.field] ?? entry.label);
 }
 
 function isBinding(value: unknown): value is DefaultExecutionRuleBinding {

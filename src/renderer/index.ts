@@ -2812,7 +2812,10 @@ async function quickStartPrepared(host: HTMLElement, bookTitle: string, prepared
   if (!host.isConnected || result.projection.bookId !== host.dataset['analysisBookId']) return;
   renderBaselineAnalysis(host, result.projection, bookTitle);
   if (result.outcome === 'started') {
-    setStatus(`已按默认执行规则「${rule.name}」开始任务。`, 'success');
+    // A start the launch has no route for is recorded and blocked before dispatch: it never began.
+    setStatus(result.projection.state === 'authorized-blocked'
+      ? `已按默认执行规则「${rule.name}」记下这项任务；当前启动没有可执行的路由，派发前已阻止。`
+      : `已按默认执行规则「${rule.name}」开始任务。`, 'success');
     openTaskPlan(result.projection.bookId, 'baseline-analysis', taskIntentId);
     return;
   }

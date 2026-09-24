@@ -1719,6 +1719,12 @@ export class BaselineAnalysisStore {
     };
   }
 
+  /** Whether a Task Input checkpoint still pins the working text: no edit since, by journal sequence and digest. */
+  #checkpointIsCurrent(checkpoint: NonNullable<BaselineAnalysisProjection['checkpoint']>, bookId: string): boolean {
+    const head = this.#workingHead(checkpoint.manuscriptId, bookId);
+    return head.currentJournalSequence === checkpoint.journalSequence && head.currentWorkingDigest === checkpoint.revisionDigest;
+  }
+
   #workingHead(manuscriptId: string, bookId: string): { branchId: string; currentRevisionId: string; currentRevisionLabel: string; currentWorkingDigest: string; currentJournalSequence: number } {
     const head = this.#db.prepare(
       `SELECT bws.branch_id, bws.base_revision_id, bws.journal_sequence, bws.working_digest, mr.revision_label
@@ -2041,8 +2047,13 @@ export class BaselineAnalysisStore {
     // The same Task: the latest intent, no Run yet, the same update mode and the same predecessor. A
     // prepared one is revised in place (Issue #48); an interrupted preparation is resumed only for the
     // same request; anything else is a new Task Intent.
+    // A prepared Task is the same Task only while the text its Task Input checkpoint pinned is still the working text.
+    // After an edit the next preparation takes a new checkpoint as a new Task, so no start — a quick start above all,
+    // whose plan the editor never saw — reads text older than the editor's (TASK-024). 重新确认计划 revises the plan in
+    // place, whatever moved.
+    const checkpointCurrent = existing.checkpoint === null || this.#checkpointIsCurrent(existing.checkpoint, input.bookId);
     const sameTask = latestIntent !== null && existing.run === null && latestIntent.mode === mode &&
-      latestIntent.predecessorRevisionId === (latest?.revisionId ?? null);
+      latestIntent.predecessorRevisionId === (latest?.revisionId ?? null) && (input.reconfirm || checkpointCurrent);
     if (sameTask && existing.checkpoint !== null) {
       return { done: true, workId: null, completed: 1, total: 1, projection: this.#revisePreparedPlan(input.bookId, latestIntent, existing, selectedRange, input.reconfirm) };
     }

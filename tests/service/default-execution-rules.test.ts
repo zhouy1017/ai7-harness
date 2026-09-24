@@ -387,6 +387,49 @@ describe('快速开始 over the real store (TASK-017, TASK-020, TASK-026, TASK-0
     }
   }, 300_000);
 
+  it('prepares the Task again after an edit, so a quick start never reads text older than the editor (TASK-024)', async () => {
+    const store = await openWithRoute();
+    const owner = ownerOf(store);
+    try {
+      const bookId = await analysedBook(store, owner, 'L2 sample1 快速开始后又编辑');
+      const source = prepare(store, bookId, 'reanalyze-book');
+      const rule = store.setDefaultExecutionRule(bookId, source.taskIntent!.taskIntentId, source.planEnvelope!.digest);
+      const state = { connectivity: 'offline' as Connectivity, busy: false };
+      const runtime = { credentialReadiness: async () => null, connectivity: reader(state) };
+      // 开始全部重来 falls back offline: the Task stays prepared, pinned to the text it read.
+      expect((await store.quickStartBaselineAnalysis(bookId, source.taskIntent!.taskIntentId, source.planEnvelope!.digest, rule.ruleVersionId, runtime)).outcome)
+        .toBe('fell-back');
+      // Preparing again with nothing edited answers with the same Task.
+      expect(prepare(store, bookId, 'reanalyze-book').taskIntent!.taskIntentId).toBe(source.taskIntent!.taskIntentId);
+
+      // The editor edits, then presses the quick start again: the preparation it makes pins the edited text, as a new Task.
+      const checkpoint = source.checkpoint!;
+      const window = store.getManuscriptWindow(checkpoint.manuscriptId, checkpoint.branchId, null);
+      const block = window.blocks.find((candidate) => candidate.kind === 'paragraph')!;
+      store.flushJournalEdit({
+        clientEditId: randomUUID(), manuscriptId: checkpoint.manuscriptId, branchId: checkpoint.branchId, baseRevisionId: window.revisionId,
+        blockId: block.blockId, windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: block.digest,
+        expectedJournalSequence: window.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText: '〔快速开始前的改动〕',
+      });
+      const again = prepare(store, bookId, 'reanalyze-book');
+      expect(again.taskIntent!.taskIntentId).not.toBe(source.taskIntent!.taskIntentId);
+      expect(again.checkpoint!.journalSequence).toBeGreaterThan(checkpoint.journalSequence);
+      expect(again.checkpoint!.revisionId).not.toBe(checkpoint.revisionId);
+      state.connectivity = 'online';
+      const quick = await store.quickStartBaselineAnalysis(bookId, again.taskIntent!.taskIntentId, again.planEnvelope!.digest, rule.ruleVersionId, runtime);
+      expect(quick.outcome).toBe('started');
+      expect(store.inspectBaselineAnalysis(bookId, () => null).checkpoint!.revisionId).toBe(again.checkpoint!.revisionId);
+      if (quick.dispatchRunRecordId !== null) {
+        owner.admitAndDispatch(quick.dispatchRunRecordId);
+        await owner.whenIdle();
+      }
+      store.markCleanShutdown();
+    } finally {
+      await owner.dispose();
+      store.close();
+    }
+  }, 300_000);
+
   it('stops at the plan when what the rule binds differs from the plan, naming what differs', async () => {
     const store = await openWithRoute();
     const owner = ownerOf(store);
@@ -403,7 +446,7 @@ describe('快速开始 over the real store (TASK-017, TASK-020, TASK-026, TASK-0
           binding: { ...current.version.binding, providerBinding: { ...current.version.binding.providerBinding, credentialReference: randomUUID() } },
         });
       });
-      const reason = `默认执行规则「开始全部重来 · 第 2 版」定下的「Provider 绑定 · Credential Reference」已经变化，不能按规则直接开始；请看过计划后再开始，也可以把新的计划设为快速开始默认。`;
+      const reason = `默认执行规则「开始全部重来 · 第 2 版」定下的「模型服务 · 连接」已经变化，不能按规则直接开始；请看过计划后再开始，也可以把新的计划设为快速开始默认。`;
       const quick = await store.quickStartBaselineAnalysis(bookId, source.taskIntent!.taskIntentId, source.planEnvelope!.digest, other.version.ruleVersionId,
         { credentialReadiness: async () => null, connectivity: reader({ connectivity: 'online', busy: false }) });
       expect(quick).toEqual({ outcome: 'fell-back', reasons: [reason], dispatchRunRecordId: null });

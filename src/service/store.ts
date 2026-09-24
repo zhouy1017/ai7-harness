@@ -3770,7 +3770,8 @@ export class EditorialStore {
   /** One baseline preparation step, with its projection read as the kind the caller asked for. */
   #baselineProgress(body: () => BaselineAnalysisPreparationResult): AnalysisPreparationResult<BaselineAnalysisProjection> {
     const result = this.#analysisCall(body);
-    return { ...result, projection: result.projection as BaselineAnalysisProjection | null };
+    // The prepared projection carries the quick start ②A offers, as every other read of it does.
+    return { ...result, projection: result.projection === null ? null : this.#withQuickStart(result.projection as BaselineAnalysisProjection) };
   }
 
   cancelBaselineAnalysisPreparationWork(workId: string): boolean {
