@@ -1822,6 +1822,8 @@ function renderBookDeliverables(bookId: string, bookTitle: string): void {
       const opened = await window.ai7.getManuscriptWindow({ manuscriptId: documentNow.documentId, branchId: documentNow.branchId, cursor: null });
       renderEditorWindow(opened, bookTitle, undefined, notice ?? undefined, undefined, undefined, { typeId: type.typeId, typeLabel: type.label, document: documentNow });
     },
+    // 前往审阅 from 图书交付包's work records (Issue #416): the Book's 审阅, where a report is generated.
+    openReview: () => renderBookReview(bookId, bookTitle),
   });
   const actions = element('div', 'button-row workbench-actions');
   const openManuscript = button(DELIVERABLES_DESTINATION_ACTIONS[0], 'primary', async () => {

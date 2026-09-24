@@ -118,6 +118,11 @@ const DOCUMENT_EXPORT_FILE = '新闻稿 · 版本 2.docx';
 const DELIVERY_STATEMENT = '交付只记录这一版交给了谁；AI7 不会发送，文件由你导出到所选位置后自行交出。';
 const DELIVERY_UNSAVED = '有修改尚未保存为版本：交付「现在的文字」会先把它保存为新的版本；也可以交付已保存的版本。';
 const DELIVERY_CURRENT_TEXT = '现在的文字（交付时先保存为版本 3）';
+// Issue #416 (S67a): 图书交付包 — prepared once with a purpose, again unchanged, and once more with a new purpose.
+const PACKAGE_PURPOSE = '交出版社存档';
+const PACKAGE_PURPOSE_2 = '交印厂付印';
+const PACKAGE_STATEMENT = '图书交付包把已完成的工作放在一起：它不是发稿，也不是交付；准备它不改变任何记录，也不生成文件。';
+const OTHER_TYPES = Object.freeze(['promotion-article', 'review-article', 'launch-materials', 'marketing-points']);
 const DELIVERY_RECIPIENTS = '["publicity:false:宣传部","editorial:false:编辑部","external-media:false:外部媒体","other:false:其他","custom:false:自行输入"]';
 const EXPORT_MEMBERS_ONLY = `JSON.stringify(Object.keys(window.ai7).filter((key) => /export|publish|send/i.test(key)).sort()) === ${JSON.stringify(JSON.stringify(EXPORT_MEMBERS))}`;
 
@@ -344,6 +349,11 @@ const PAGE_HELPERS = `(() => {
     delivery: (typeId) => window.__j07.card(typeId)?.querySelector('form.document-delivery') ?? null,
     deliveries: (typeId) => Array.from(window.__j07.card(typeId)?.querySelectorAll('ol.production-document-deliveries > li') ?? []),
     deliveryReason: (typeId) => document.getElementById(window.__j07.cardAction(typeId, 'confirmDeliver')?.getAttribute('aria-describedby') ?? '')?.textContent ?? null,
+    // 图书交付包 (Issue #416, S67a): the block in its own slot, one condition row, the prepared versions and 准备's reason.
+    pkg: () => document.querySelector('[data-screen="book-deliverables"] .deliverables-package-slot > section.deliverables-package'),
+    condition: (id) => window.__j07.pkg()?.querySelector('ol.package-condition-list > li[data-condition-id="' + id + '"]') ?? null,
+    packageVersions: () => Array.from(window.__j07.pkg()?.querySelectorAll('ol.package-version-list > li') ?? []),
+    packageReason: () => document.getElementById(window.__j07.pkg()?.querySelector('[data-package-action="prepare"]')?.getAttribute('aria-describedby') ?? '')?.textContent ?? null,
   };
   return true;
 })()`;
@@ -783,7 +793,7 @@ async function main() {
         block.dataset.publicationState === 'no-milestone' && window.__j07.items().length === 0 && block.querySelector('.milestone-list-empty') !== null &&
         designate instanceof HTMLButtonElement && designate.disabled && designate.textContent === '设为发稿版本…' && reason?.textContent === '先保存里程碑版本' &&
         window.__j07.form() === null && window.__j07.versions().length === 0 && block.querySelector('.publication-actuals-prompt') === null &&
-        block.querySelector('.publication-change-notice') === null && !/图书交付包/.test(page.textContent ?? '') &&
+        block.querySelector('.publication-change-notice') === null &&
         window.__j07.documents()?.querySelector(':scope > h3')?.textContent === '交付 · 生产文档' &&
         Array.from(window.__j07.documents().querySelectorAll('li.production-document-card')).every((card) => {
           const create = card.querySelector('[data-document-action="create"]');
@@ -792,6 +802,16 @@ async function main() {
             reason?.textContent === '先把文档的初稿作为来源材料导入：导入稿件时选「作为来源材料导入」。';
         });
     })()`, 'designate-unavailable-before-a-milestone');
+    // Issue #416 (S67a): 图书交付包 comes last and waits for everything, naming what is missing.
+    await waitFor(renderer, `window.__j07.pkg()?.dataset.packageReady === 'false'`, 'package-before-milestone');
+    await assertRenderer(renderer, `(() => {
+      const bundle = window.__j07.pkg();
+      const prepare = bundle.querySelector('[data-package-action="prepare"]');
+      return bundle.querySelector(':scope > h3')?.textContent === '图书交付包' && bundle.parentElement?.parentElement?.lastElementChild === bundle.parentElement &&
+        window.__j07.condition('publication')?.dataset.conditionMet === 'false' && window.__j07.condition('work-records')?.dataset.conditionMet === 'true' &&
+        prepare instanceof HTMLButtonElement && prepare.disabled &&
+        window.__j07.packageReason() === '还不能准备：发稿版本、新闻稿、宣传文章、评论文章、发布会材料、营销要点未满足。' && window.__j07.packageVersions().length === 0;
+    })()`, 'package-unavailable-before-a-milestone');
     const nothing = await renderer.evaluate(READ_PUBLICATION);
     requireJourney(nothing?.bookId === bookId && nothing.milestones.length === 0 && nothing.designations.length === 0 &&
       nothing.designate?.available === false && nothing.designate.unavailableReason === '先保存里程碑版本' && nothing.notice === null && nothing.prompt === null,
@@ -1391,7 +1411,7 @@ async function main() {
         cards.every((card) => card.querySelector('.document-state-none')?.textContent === '尚未创建' &&
           window.__j07.cardAction(card.dataset.documentTypeId, 'create')?.disabled === false &&
           window.__j07.cardAction(card.dataset.documentTypeId, 'notForThisBook')?.disabled === false) &&
-        !/%|百分/.test(block.textContent ?? '') && !/图书交付包/.test(document.body.textContent ?? '');
+        !/%|百分/.test(block.textContent ?? '');
     })()`, 'documents-five-cards-none-made');
 
     at('document-create');
@@ -1615,17 +1635,97 @@ async function main() {
       deliveries: [[2, '版本 3', 'custom', DELIVERY_CUSTOM, null, null], [1, '版本 2', 'publicity', '宣传部', DELIVERY_NOTE, 'created']],
     }), 'redeliver-service-agrees', redelivered);
 
+    at('package-conditions');
+    // 图书交付包 (Issue #416, S67a; BUNDLE-001 to 005): the last block of 交付物 says what a package is and is not and
+    // lists its conditions — the 发稿版本 set, with 自发稿版本后有修改 beside it; the 新闻稿 delivered; the four other
+    // types neither made nor 本书不做; no review to finish — and 准备图书交付包 waits, naming the four. A row's route
+    // takes the editor to where it is met: here, the type's own card.
+    await waitFor(renderer, `window.__j07.pkg()?.dataset.packageReady === 'false' && window.__j07.condition('document:news-release')?.dataset.conditionMet === 'true'`, 'package-read');
+    await assertRenderer(renderer, `(() => {
+      const bundle = window.__j07.pkg();
+      const rows = Array.from(bundle.querySelectorAll('ol.package-condition-list > li'))
+        .map((row) => row.dataset.conditionId + ':' + row.dataset.conditionMet + ':' + (row.querySelector('.package-condition-detail')?.textContent ?? ''));
+      const prepare = bundle.querySelector('[data-package-action="prepare"]');
+      return bundle.querySelector('.package-statement')?.textContent === ${JSON.stringify(PACKAGE_STATEMENT)} &&
+        JSON.stringify(rows) === ${JSON.stringify(JSON.stringify([
+          `publication:true:发稿版本「${FIRST.label}」 · r1`,
+          'document:news-release:true:第 2 次交付 · 版本 3',
+          ...OTHER_TYPES.map((typeId) => `document:${typeId}:false:尚未创建`),
+          'work-records:true:暂无审阅记录',
+        ]))} &&
+        window.__j07.condition('publication').querySelector('.package-condition-notice')?.textContent === '自发稿版本后有修改：可以另设发稿版本，也可以按当前发稿版本打包。' &&
+        window.__j07.condition('document:news-release').querySelector('[data-package-route]') === null &&
+        prepare instanceof HTMLButtonElement && prepare.disabled && window.__j07.packageReason() === '还不能准备：宣传文章、评论文章、发布会材料、营销要点未满足。' &&
+        !/%|百分/.test(bundle.textContent ?? '');
+    })()`, 'package-conditions-name-what-is-missing');
+    await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-condition-id="document:promotion-article"] [data-package-route="document"]', 'package-route-document');
+    await waitFor(renderer, `document.activeElement === window.__j07.cardAction('promotion-article', 'create')`, 'package-route-focuses-the-card');
+
+    at('package-not-for-this-book');
+    // The four other types 本书不做 on their own cards: every condition holds, 准备 waits only for a purpose, and the
+    // preview lists the 发稿版本 and the 新闻稿 at its delivered 版本 3 as included, the four types and the fixed
+    // exclusions as left out, and what the package cannot say.
+    for (const typeId of OTHER_TYPES) {
+      await clickSelector(renderer, `[data-screen="book-deliverables"] li[data-document-type-id="${typeId}"] [data-document-action="notForThisBook"]`, `package-not-for-this-book-${typeId}`);
+      await waitFor(renderer, `window.__j07.card(${JSON.stringify(typeId)})?.dataset.documentState === 'not-for-this-book' && window.__j07.condition(${JSON.stringify(`document:${typeId}`)})?.dataset.conditionMet === 'true'`, `package-condition-${typeId}`);
+    }
+    await waitFor(renderer, `window.__j07.pkg()?.dataset.packageReady === 'true'`, 'package-ready');
+    await assertRenderer(renderer, `(() => {
+      const bundle = window.__j07.pkg();
+      const lines = (selector) => Array.from(bundle.querySelectorAll(selector)).map((item) => item.dataset.itemKind + ':' + item.querySelector('.package-item-label')?.textContent);
+      const limitations = Array.from(bundle.querySelectorAll('ul.package-limitations > li')).map((item) => item.textContent);
+      return JSON.stringify(lines('ul.package-included > li')) === ${JSON.stringify(JSON.stringify([`publication:发稿版本「${FIRST.label}」 · r1`, 'document:新闻稿 · 版本 3']))} &&
+        JSON.stringify(lines('ul.package-excluded > li')) === ${JSON.stringify(JSON.stringify([
+          ...['宣传文章', '评论文章', '发布会材料', '营销要点'].map((label) => `not-for-this-book:${label}`), 'exclusion:备注', 'exclusion:资料库原件', 'exclusion:中间修订版',
+        ]))} &&
+        JSON.stringify(limitations) === ${JSON.stringify(JSON.stringify(['稿件：自发稿版本后有修改，本包按发稿版本。', '评估记录与定稿的审稿意见：AI7 尚未提供这两类记录，本包不含。']))} &&
+        bundle.querySelector('[data-package-action="prepare"]').disabled && window.__j07.packageReason() === '先写明交付包用途。';
+    })()`, 'package-preview-lists-what-it-holds');
+
+    at('package-prepare');
+    // 准备图书交付包 with a purpose freezes v1 — 图书交付包已准备 · 暂无导出记录 — and writes no file anywhere; the same
+    // content with the same purpose is v1, unchanged.
+    await assertRenderer(renderer, `(() => { const input = window.__j07.pkg().querySelector('[data-package-field="purpose"]'); input.value = ${JSON.stringify(PACKAGE_PURPOSE)}; input.dispatchEvent(new Event('input', { bubbles: true })); return window.__j07.pkg().querySelector('[data-package-action="prepare"]').disabled === false && window.__j07.packageReason() === ''; })()`, 'package-purpose-written');
+    const exportsBefore = JSON.stringify((await readdir(exportsRoot)).sort());
+    await clickSelector(renderer, '[data-screen="book-deliverables"] section.deliverables-package [data-package-action="prepare"]', 'package-prepare');
+    await waitFor(renderer, `window.__j07.packageVersions().length === 1 && window.__j07.status() === '已准备图书交付包 v1'`, 'package-v1', 60_000);
+    await assertRenderer(renderer, `(() => {
+      const [v1] = window.__j07.packageVersions();
+      const line = v1.querySelector('.package-version-line');
+      return v1.dataset.packageCurrent === 'true' && (line?.textContent ?? '').startsWith('v1 · 图书交付包已准备 · 暂无导出记录') &&
+        line.querySelector('.package-current-mark')?.textContent === '当前' && document.activeElement === line &&
+        (v1.querySelector('.package-version-meta')?.textContent ?? '').startsWith(${JSON.stringify(`用途：${PACKAGE_PURPOSE} · `)}) &&
+        v1.querySelector('.package-version-summary')?.textContent === ${JSON.stringify(`发稿版本「${FIRST.label}」 · r1 · 生产文档 1 份 · 本书不做 4 类 · 审阅报告 0 份`)} &&
+        window.__j07.pkg().dataset.packageChanged === 'false';
+    })()`, 'package-v1-listed');
+    requireJourney(JSON.stringify((await readdir(exportsRoot)).sort()) === exportsBefore, 'package-writes-no-file');
+    const preparedPackage = await renderer.evaluate(`window.ai7.inspectBookDeliveryPackage().then((bundle) => ({ ready: bundle.ready, changed: bundle.changedSinceLatest, versions: bundle.versions.map((version) => [version.label, version.purpose, version.current, version.exportHistoryLabel]) }))`);
+    requireJourney(JSON.stringify(preparedPackage) === JSON.stringify({ ready: true, changed: false, versions: [['v1', PACKAGE_PURPOSE, true, '暂无导出记录']] }), 'package-service-agrees', preparedPackage);
+    await clickSelector(renderer, '[data-screen="book-deliverables"] section.deliverables-package [data-package-action="prepare"]', 'package-prepare-again');
+    await waitFor(renderer, `window.__j07.status() === '内容和用途都没有变化，仍是图书交付包 v1' && window.__j07.packageVersions().length === 1`, 'package-unchanged', 60_000);
+
+    at('package-v2');
+    // A new purpose is a new version: v2 stands above v1 and names it, and v1 is kept exactly as it was.
+    const v1Before = await renderer.evaluate(`window.ai7.inspectBookDeliveryPackage().then((bundle) => JSON.stringify({ ...bundle.versions[0], current: false }))`);
+    await assertRenderer(renderer, `(() => { const input = window.__j07.pkg().querySelector('[data-package-field="purpose"]'); input.value = ${JSON.stringify(PACKAGE_PURPOSE_2)}; input.dispatchEvent(new Event('input', { bubbles: true })); return window.__j07.pkg().querySelector('[data-package-action="prepare"]').disabled === false; })()`, 'package-new-purpose');
+    await clickSelector(renderer, '[data-screen="book-deliverables"] section.deliverables-package [data-package-action="prepare"]', 'package-prepare-v2');
+    await waitFor(renderer, `window.__j07.packageVersions().length === 2 && window.__j07.status() === '已准备图书交付包 v2'`, 'package-v2', 60_000);
+    const secondPackage = await renderer.evaluate(`window.ai7.inspectBookDeliveryPackage().then((bundle) => ({ labels: bundle.versions.map((version) => version.label + ':' + version.current + ':' + version.purpose), v1: JSON.stringify(bundle.versions[1]), prior: bundle.versions[0].technical.priorVersionId === bundle.versions[1].packageVersionId, stable: bundle.versions[0].packageId === bundle.versions[1].packageId }))`);
+    requireJourney(JSON.stringify(secondPackage?.labels) === JSON.stringify([`v2:true:${PACKAGE_PURPOSE_2}`, `v1:false:${PACKAGE_PURPOSE}`]) &&
+      secondPackage.v1 === v1Before && secondPackage.prior === true && secondPackage.stable === true, 'package-v2-names-v1', secondPackage?.labels);
+    await assertRenderer(renderer, `JSON.stringify(window.__j07.packageVersions().map((item) => item.dataset.packageVersion + ':' + item.dataset.packageCurrent)) === '["2:true","1:false"]'`, 'package-v2-above-v1');
+
     at('documents-restart');
-    // A restart moves nothing: 交付物 and 交付 · 生产文档 answer byte for byte as before, the card still names its second
-    // delivery, and the 新闻稿 opens at 版本 3 with both its edits.
-    const readBoth = `Promise.all([window.ai7.inspectDeliverables(), window.ai7.inspectProductionDocuments()]).then((answers) => JSON.stringify(answers))`;
+    // A restart moves nothing: 交付物, 交付 · 生产文档 and 图书交付包 answer byte for byte as before, the card still names
+    // its second delivery, the package lists its two versions, and the 新闻稿 opens at 版本 3 with both its edits.
+    const readBoth = `Promise.all([window.ai7.inspectDeliverables(), window.ai7.inspectProductionDocuments(), window.ai7.inspectBookDeliveryPackage()]).then((answers) => JSON.stringify(answers))`;
     const documentsBefore = await renderer.evaluate(readBoth);
     await close();
     renderer = await launch();
     await reopenDeliverables(renderer, 'documents-restart');
     const documentsAfter = await renderer.evaluate(readBoth);
     requireJourney(typeof documentsBefore === 'string' && documentsAfter === documentsBefore, 'documents-restart-moved-nothing');
-    await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentState === 'document' && window.__j07.card('news-release').dataset.documentDeliveries === '2' && window.__j07.card('news-release').dataset.documentChangedSinceDelivery === 'false'`, 'documents-restart-card');
+    await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentState === 'document' && window.__j07.card('news-release').dataset.documentDeliveries === '2' && window.__j07.card('news-release').dataset.documentChangedSinceDelivery === 'false' && window.__j07.packageVersions().length === 2`, 'documents-restart-card');
     await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="open"]', 'documents-restart-open');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] .editor-toolbar h2')?.textContent === '新闻稿 · 版本 3' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.textContent?.endsWith(${JSON.stringify(`${DOCUMENT_EDIT}${DELIVERY_EDIT}`)})`, 'documents-restart-document');
     await assertNoForbiddenWords(renderer, 'documents-without-forbidden-words');

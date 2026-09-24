@@ -11,6 +11,7 @@ import {
   MAX_PUBLICATION_BASIS_CHARACTERS,
   MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS,
   MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS,
+  MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS,
   PRODUCTION_DOCUMENT_RECIPIENT_KINDS,
   type ProductionDocumentRecipientKind,
   MAX_PUBLICATION_SCOPE_CHARACTERS,
@@ -1132,6 +1133,20 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectProductionDocuments': {
       const input = requireInput(value.input, ['bookId'], tentativeId);
       if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 图书交付包 (Issue #416, S67a): the route's Book, and for 准备 the purpose within its bound and the content's digest.
+    case 'inspectBookDeliveryPackage': {
+      const input = requireInput(value.input, ['bookId'], tentativeId);
+      if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'prepareBookDeliveryPackage': {
+      const input = requireInput(value.input, ['bookId', 'purpose', 'expectedContentDigest'], tentativeId);
+      if (!validUuid(input.bookId) || !validPublicationText(input.purpose, MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS) ||
+          !isBoundedString(input.expectedContentDigest, 64) || !HEX_DIGEST_PATTERN.test(input.expectedContentDigest)) {
+        throw new ProtocolError(tentativeId);
+      }
       break;
     }
     case 'createProductionDocument': {

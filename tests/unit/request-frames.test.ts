@@ -5,6 +5,7 @@ import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION } from '../../src/service/review/
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
   BASELINE_ANALYSIS_TASK_GOAL,
+  MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS,
   MAX_EDIT_CODE_UNITS,
   MAX_EXPORT_DESTINATION_CODE_UNITS,
   MAX_MARK_BODY_CODE_UNITS,
@@ -371,6 +372,40 @@ describe('decodeRequest accepts well-formed frames', () => {
       { op: 'recordProductionDocumentDelivery', input: { ...delivery, version: randomUUID(), recipient: { kind: 'publicity', custom: null }, note: null } },
       { op: 'recordProductionDocumentDelivery', input: { bookId, documentId: randomUUID(), revisionId: randomUUID(), recipient: { kind: 'publicity', custom: null }, note: null } },
       { op: 'recordProductionDocumentDelivery', input: { ...delivery, recipient: { kind: 'publicity', custom: null }, note: null, sent: true } },
+    ];
+    for (const { op, input } of refused) {
+      expect(rejectionFor(frameOf({ id, op, input })).requestId).toBe(id);
+    }
+  });
+
+  it('accepts the read of 图书交付包, and 准备 with a purpose in its bound and the digest of the content read (Issue #416)', () => {
+    const bookId = randomUUID();
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'inspectBookDeliveryPackage', input: { bookId } },
+      { op: 'prepareBookDeliveryPackage', input: { bookId, purpose: '交出版社存档', expectedContentDigest: 'a'.repeat(64) } },
+      { op: 'prepareBookDeliveryPackage', input: { bookId, purpose: '𠀀'.repeat(MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS), expectedContentDigest: 'b'.repeat(64) } },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+  });
+
+  it('rejects a 图书交付包 read or 准备 whose Book, purpose, digest or key set is wrong (Issue #416)', () => {
+    const id = randomUUID();
+    const bookId = randomUUID();
+    const prepare = { bookId, purpose: '交出版社存档', expectedContentDigest: 'a'.repeat(64) };
+    const refused: ReadonlyArray<{ op: string; input: unknown }> = [
+      { op: 'inspectBookDeliveryPackage', input: {} },
+      { op: 'inspectBookDeliveryPackage', input: { bookId: 'current' } },
+      { op: 'inspectBookDeliveryPackage', input: { bookId, version: 1 } },
+      { op: 'prepareBookDeliveryPackage', input: { ...prepare, purpose: '   ' } },
+      { op: 'prepareBookDeliveryPackage', input: { ...prepare, purpose: '字'.repeat(MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS + 1) } },
+      { op: 'prepareBookDeliveryPackage', input: { ...prepare, purpose: null } },
+      { op: 'prepareBookDeliveryPackage', input: { ...prepare, expectedContentDigest: 'A'.repeat(64) } },
+      { op: 'prepareBookDeliveryPackage', input: { ...prepare, expectedContentDigest: 'a'.repeat(63) } },
+      { op: 'prepareBookDeliveryPackage', input: { bookId, purpose: '交出版社存档' } },
+      { op: 'prepareBookDeliveryPackage', input: { ...prepare, destination: 'C:/导出' } },
     ];
     for (const { op, input } of refused) {
       expect(rejectionFor(frameOf({ id, op, input })).requestId).toBe(id);

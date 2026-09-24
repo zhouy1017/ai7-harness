@@ -59,6 +59,7 @@ import {
 import { deriveCoverageManifest } from '../analysis/coverage-manifest.js';
 import { EXECUTION_SLOT_BUSY, EXECUTION_SLOT_BUSY_REASON } from '../analysis/execution-error.js';
 import { graphemeCount, sliceGraphemes } from '../analysis/factual-review-contract.js';
+import type { PackageReviewRunReading } from '../book-delivery-packages.js';
 import type { EditorialMarkStore, ProducedEditorialMarkInput } from '../editorial-marks.js';
 import type { ReviewRunAttentionReading } from '../global-attention.js';
 import {
@@ -2136,6 +2137,31 @@ export class ReviewRunStore {
       state,
       canContinue,
     };
+  }
+
+  // ---- 图书交付包 (Issue #416, plan slice S67a) -----------------------------------------------------------
+
+  /**
+   * What 图书交付包 reads of a Book's Review Runs (BUNDLE-001, BUNDLE-002): each Run oldest first, with its state as
+   * `#runView` derives it — a category a stopped service left dispatched is read, never recorded — and its newest
+   * report version, if it has one. A read.
+   */
+  packageReadings(bookId: string): PackageReviewRunReading[] {
+    const rows = this.#db.prepare('SELECT * FROM review_runs WHERE book_id = ? ORDER BY ordinal').all(bookId) as SqlRow[];
+    const latestReport = this.#db.prepare('SELECT report_id, version, generated_at, sha256 FROM review_reports WHERE review_run_id = ? ORDER BY version DESC LIMIT 1');
+    return rows.map((row) => {
+      const view = this.#runStateView(this.#snapshotOf(row));
+      const report = latestReport.get(view.snapshot.reviewRunId) as SqlRow | undefined;
+      return {
+        reviewRunId: view.snapshot.reviewRunId,
+        ordinal: view.snapshot.ordinal,
+        label: `第 ${view.snapshot.ordinal} 次`,
+        state: view.state,
+        report: report === undefined
+          ? null
+          : { reportId: text(report.report_id), version: integer(report.version), digest: text(report.sha256), generatedAt: text(report.generated_at) },
+      };
+    });
   }
 
   // ---- 待我处理 (Issue #424, plan slice S78) ------------------------------------------------------------
