@@ -446,7 +446,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
   try {
     database.exec('PRAGMA query_only = ON;');
     const version = database.prepare('PRAGMA user_version').get();
-    // Synchronized delta with Issues #467, #407, #408, #417, #414, #57, #410, #411, #413, #502, #421 and #422 (twice): schema revision 21
+    // Synchronized delta with Issues #467, #407, #408, #417, #414, #57, #410, #411, #413, #502, #421, #422 (twice) and #412: schema revision 21
     // added the manuscript entry-position relation, revision 22 the editorial-mark relations, revision 23 the
     // manuscript-effect relations, revision 24 rebuilt the three kind-coupled analysis relations for the
     // review-category kind family, revision 25 added the Publication Version relations, revision 26 the
@@ -454,9 +454,10 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     // imported marks, revision 29 the export ledger, revision 30 widens the Run states for Connectivity Wait,
     // revision 31 adds the default-execution-rule ledger, revision 32 widens the Run states and the Task Outcomes
     // for 取消任务, revision 33 widens the Run states again and adds the unit checkpoints for 暂停 and 续行, revision 34
-    // widens the Plan Revisions for 更新计划, and revision 35 widens the Run states once more and adds the Clarification
-    // Requests and answers, so this pin moves with the terminal version the service stamps (`CLARIFICATION_SCHEMA_VERSION`).
-    requireJourney(version?.user_version === 35, 'credential-cleanup-metadata-version');
+    // widens the Plan Revisions for 更新计划, revision 35 widens the Run states once more and adds the Clarification
+    // Requests and answers, and revision 36 adds the chapter-level reimport rows, so this pin moves with the terminal
+    // version the service stamps (`REIMPORT_GROUP_SCHEMA_VERSION`).
+    requireJourney(version?.user_version === 36, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, connection_name, provider_id, model_id,
               adapter_revision, configuration_revision, approved_fallback_chain,
