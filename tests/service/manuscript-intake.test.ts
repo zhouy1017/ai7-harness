@@ -391,6 +391,31 @@ describe('multi-format intake over the real store', () => {
     }
   }, 120_000);
 
+  it('refuses at open a Source Version whose format does not say whether it was parsed (Issue #583)', async () => {
+    const textPath = join(roots.inputRoot, '来源说明.txt');
+    await writeFile(textPath, '第一段说明。\n\n第二段说明。\n');
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect((await commitSourceOnlyNewBook(store, textPath, '来源材料 TXT')).format).toBe('TXT');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    // A parsed TXT with its working representation taken away: its record still reads, since the working object is not in
+    // it, but no Source Version the store writes is parsed without being a DOCX or converted.
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      database.exec("UPDATE source_versions SET working_object_digest = NULL, converter_identity = NULL WHERE format = 'TXT'");
+    } finally {
+      database.close();
+    }
+    const opened = await EditorialStore.open(roots.dataRoot, roots.codeRoot).then((reopened) => {
+      reopened.close();
+      return null;
+    }, (error: unknown) => error);
+    expect([(opened as { code?: unknown } | null)?.code, opened instanceof Error ? opened.message : null]).toEqual(['SCHEMA_INVALID', '来源版本的格式与是否解析不一致。']);
+  }, 120_000);
+
   it('keeps refusing a hostile archive instead of retaining it', async () => {
     // A traversal entry name is a hostile-input bound, not a "this is not a DOCX" verdict, so it
     // stays a refusal with no source-only offer.
@@ -844,6 +869,24 @@ function downgradeToRevision18(databasePath: string): void {
 const REVISION_18_SOURCE_VERSION_COLUMNS = REVISION_17_SOURCE_VERSION_COLUMNS;
 
 describe('schema revision 19 over the real store', () => {
+  it('reads a revision-18 store holding parsed and unparsed source imports, where no Source Version has a working representation (Issue #583)', async () => {
+    await requireExactSample1(roots.codeRoot);
+    const pdfPath = join(roots.inputRoot, '固定版式样例.pdf');
+    await writeFile(pdfPath, syntheticPdfBytes());
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect((await commitSourceOnlyNewBook(store, pdfPath, '来源材料 PDF')).format).toBe('PDF');
+      expect((await commitSourceOnlyNewBook(store, sample1Path(roots.codeRoot), '来源材料 DOCX')).format).toBe('DOCX');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    downgradeToRevision18(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    // At revision 18 the record check reads each Source Version without the column revision 19 adds: the unparsed PDF and
+    // the parsed DOCX both stand, and the store opens and migrates.
+    await expectStoreReopens();
+  }, 120_000);
+
   it('migrates a revision-18 store holding a staged PDF draft forward with every Source Version row byte for byte', async () => {
     await requireExactSample1(roots.codeRoot);
     const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
