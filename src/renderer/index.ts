@@ -70,6 +70,8 @@ import {
   DOCUMENT_STATUS_LINES,
   DOCUMENT_SURFACE_LABEL,
   documentVersionSavedLine,
+  RECOVERY_RESTORED_HEADING,
+  RECOVERY_RESTORED_SECTION_LABEL,
 } from './production-document-labels.js';
 import { documentStanding, renderDocumentLens, type ProductionDocumentContext } from './production-document-lens.js';
 import { AnalysisFollower } from './analysis-follow.js';
@@ -896,9 +898,11 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
   let selection: RecoverySelection | undefined;
   const content = panel();
   content.classList.add('manuscript-recovery-panel');
+  const sectionLabel = element('p', 'section-label', `稿件恢复优先 · ${recovery.unresolvedCount} 项待确认`);
+  const heading = element('h2', undefined, '先确认中断后的稿件状态');
   content.append(
-    element('p', 'section-label', `稿件恢复优先 · ${recovery.unresolvedCount} 项待确认`),
-    element('h2', undefined, '先确认中断后的稿件状态'),
+    sectionLabel,
+    heading,
     element('p', 'lede', recovery.snapshot.state === 'eligible'
       ? '系统不会替你选择恢复来源。三个已校验证据保持并列，恢复只会形成新的后代修订版。'
       : '系统不会替你选择恢复来源。当前两个可选证据保持并列；快照状态另行披露，恢复只会形成新的后代修订版。'),
@@ -925,7 +929,8 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
   const choices = element('fieldset', 'recovery-comparison');
   choices.setAttribute('role', 'radiogroup');
   choices.setAttribute('aria-label', '恢复来源比较');
-  choices.append(element('legend', undefined, '选择一个证据来源（默认不选择）'));
+  const legend = element('legend', undefined, '选择一个证据来源（默认不选择）');
+  choices.append(legend);
   const cards = element('div', 'recovery-candidate-grid');
   cards.dataset['eligibleCandidateCount'] = recovery.snapshot.state === 'eligible' ? '3' : '2';
   const consequence = element('p', 'recovery-selection-consequence');
@@ -985,6 +990,10 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
       // manuscript — as 打开稿件 does when it fails, with focus on it (Issue #582).
       choices.disabled = true;
       consequence.hidden = true;
+      // Nothing waits on the editor's confirmation any more (Issue #593), so the screen's words stop asking for a decision.
+      sectionLabel.textContent = RECOVERY_RESTORED_SECTION_LABEL;
+      heading.textContent = RECOVERY_RESTORED_HEADING;
+      legend.hidden = true;
       const reopen = button(onDocument ? PUBLICATION_ACTION_LABELS.open : '打开图书', 'primary', async () => {
         reopen.disabled = true;
         setStatus(onDocument ? DELIVERABLES_STATUS_LINES.opening : '正在打开图书…', 'busy');
