@@ -1381,7 +1381,7 @@ function renderImportRecovery(
     const reselect = button('重新选择原文件', 'primary', async () => {
       reselect.disabled = true;
       abandonButton.disabled = true;
-      setStatus('请选择与原暂存来源摘要精确一致的 DOCX…', 'busy');
+      setStatus('请选择与原暂存来源摘要精确一致的原文件…', 'busy');
       try {
         const result = await window.ai7.reselectImportDraft({
           draftId: recovery.draftId,
