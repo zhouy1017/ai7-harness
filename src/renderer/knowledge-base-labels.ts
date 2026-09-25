@@ -97,11 +97,25 @@ export function guidelineAppliedBy(document: Pick<ReviewGuidelineDocumentProject
   return `用于：${document.appliedBy.map((category) => category.label).join('、')}`;
 }
 
+/**
+ * What a document AI7 fixes says in place of 导入新版本 (Issue #427 review): its categories do not read its clauses, so a
+ * house version would change nothing they do. `null` for a document whose clauses the categories read.
+ */
+export function guidelineFixedStatement(document: Pick<ReviewGuidelineDocumentProjection, 'use' | 'appliedBy'>): string | null {
+  if (document.use === 'clauses') return null;
+  const categories = document.appliedBy.map((category) => `「${category.label}」`).join('、');
+  const does = document.use === 'leads'
+    ? `${categories}把基线分析里的线索变成批注，不按这里的条款找问题`
+    : `${categories}按 AI7 固定的事实核查契约执行，不读取这里的条款`;
+  return `${does}。这是 AI7 的固定说明，不能导入新版本。`;
+}
+
 /** The Books that will read under a newer version at their next review, or `null` when none still reads an older one. */
-export function guidelineOlderBooks(document: Pick<ReviewGuidelineDocumentProjection, 'olderVersionBooks' | 'currentOrdinal'>): string | null {
-  if (document.olderVersionBooks.length === 0) return null;
+export function guidelineOlderBooks(document: Pick<ReviewGuidelineDocumentProjection, 'olderVersionBooks' | 'olderVersionBookCount' | 'currentOrdinal'>): string | null {
+  if (document.olderVersionBookCount === 0) return null;
   const books = document.olderVersionBooks.map((book) => `《${book.bookTitle}》第 ${book.ordinal} 版`).join('、');
-  return `还在用旧版：${books}；这些书下次审阅会按第 ${document.currentOrdinal} 版。`;
+  const more = document.olderVersionBookCount > document.olderVersionBooks.length ? ` 等 ${document.olderVersionBookCount} 本书` : '';
+  return `还在用旧版：${books}${more}；这些书下次审阅会按第 ${document.currentOrdinal} 版。`;
 }
 
 export function guidelineClausesSummary(count: number): string {
@@ -116,12 +130,16 @@ export function guidelineVersionsSummary(count: number): string {
   return `版本（${count}）`;
 }
 
-/** One version's line: its number and issuer, when and from what it came, and which reviews used it. */
+/**
+ * One version's line: its number and issuer, when and from what it came, and which reviews used it — every one while they
+ * are few, and past that how many, with the latest named.
+ */
 export function guidelineVersionLine(version: ReviewGuidelineVersionProjection, instant: (iso: string) => string): string {
   const origin = version.recordedAt === null ? '内置' : `导入于 ${instant(version.recordedAt)}${version.source === null ? '' : ` · ${version.source.displayName}`}`;
-  const used = version.usedBy.length === 0
+  const named = version.usedBy.map((run) => `《${run.bookTitle}》第 ${run.reviewOrdinal} 次审阅`).join('、');
+  const used = version.usedByCount === 0
     ? GUIDELINE_UNUSED
-    : `用于 ${version.usedBy.map((run) => `《${run.bookTitle}》第 ${run.reviewOrdinal} 次审阅`).join('、')}`;
+    : version.usedByCount > version.usedBy.length ? `用于 ${version.usedByCount} 次审阅，最近：${named}` : `用于 ${named}`;
   return `第 ${version.ordinal} 版 · ${version.issuer} · ${origin} · ${version.clauseCount} 条 · ${used}`;
 }
 

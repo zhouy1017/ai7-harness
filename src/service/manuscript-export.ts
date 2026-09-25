@@ -315,6 +315,8 @@ export interface ManuscriptExportEnvironment {
   checkpointOwner: ExportCheckpointOwner;
   /** One frozen package version's 交付包清单, as the package's owner writes it (Issue #416, S67b); `null` when it is none of the Book's. */
   packageManifest?(bookId: string, packageVersionId: string): PackageManifest | null;
+  /** One frozen package version's label and the revision it binds, from its record alone; `null` when it is none of the Book's. */
+  packageVersion?(bookId: string, packageVersionId: string): { versionLabel: string; revisionId: string } | null;
 }
 
 /** A target only the service names (Issue #416, S67b): the 交付包清单 of one frozen 图书交付包 version. */
@@ -705,11 +707,17 @@ export class ManuscriptExportStore {
 
   /**
    * The review of one file of a 图书交付包 export (Issue #416, S67b): a version the package froze, or the package's own
-   * 交付包清单, under the default options — a package never names the working text, so nothing is saved first.
+   * 交付包清单, under the options the package export chose — a package never names the working text, so nothing is saved
+   * first.
    */
-  async reviewPackageFile(bookId: string, target: ExportTargetInput, format: ManuscriptExportFormat, available: boolean): Promise<ManuscriptExportReviewProjection> {
+  async reviewPackageFile(
+    bookId: string,
+    target: ExportTargetInput,
+    format: ManuscriptExportFormat,
+    options: ManuscriptExportOptions,
+    available: boolean,
+  ): Promise<ManuscriptExportReviewProjection> {
     this.#requireAvailable(available);
-    const options = defaultExportOptions();
     const resolved = await this.#resolve(bookId, target, false);
     const plan = await this.#plan(bookId, resolved, options, format);
     const rendered = this.#render(plan, format, false);
@@ -721,13 +729,54 @@ export class ManuscriptExportStore {
    * freezes the renderer's, and always a new file — a package export never replaces one.
    */
   async preparePackageFile(
-    input: { bookId: string; target: ExportTargetInput; format: ManuscriptExportFormat; revisionId: string; reviewDigest: string; destination: string },
+    input: {
+      bookId: string;
+      target: ExportTargetInput;
+      format: ManuscriptExportFormat;
+      options: ManuscriptExportOptions;
+      revisionId: string;
+      reviewDigest: string;
+      destination: string;
+    },
     available: boolean,
   ): Promise<ManuscriptExportPreparationProjection> {
     this.#requireAvailable(available);
     const destination = await this.#requireDestination(input.destination, input.format);
     requireExport(destination.disposition === 'create', 'EXPORT_DESTINATION_INVALID', `所选文件夹里已有「${destination.fileName}」，请选择别的文件夹。`);
-    return this.#prepare(input.bookId, input.target, defaultExportOptions(), input.format, input.revisionId, input.reviewDigest, destination);
+    return this.#prepare(input.bookId, input.target, requireOptions(input.options), input.format, input.revisionId, input.reviewDigest, destination);
+  }
+
+  /**
+   * What `按上述方式导出` checks before it records anything, alone (Issue #416 review): the payload written again is the
+   * prepared one, and the destination is still what the dialog resolved. A package export checks every file so before it
+   * writes the first, so a set that drifted is refused whole and writes nothing.
+   */
+  async checkPrepared(bookId: string, preparationId: string, available: boolean): Promise<void> {
+    this.#requireAvailable(available);
+    const row = this.#preparationRow(bookId, preparationId);
+    const preparation = this.#preparationProjection(row);
+    requireExport(this.#outcomeRow(preparationId) === undefined, 'EXPORT_ALREADY_APPROVED', '这次导出已经批准过。');
+    await this.#requireAsPrepared(bookId, row, preparation);
+  }
+
+  /** The payload written again is exactly the prepared one, and the destination still what the dialog resolved. */
+  async #requireAsPrepared(bookId: string, row: SqlRow, preparation: ManuscriptExportPreparationProjection): Promise<Uint8Array> {
+    const resolved = this.#preparedTarget(bookId, row);
+    const plan = await this.#plan(bookId, resolved, preparation.options, preparation.format);
+    const rendered = this.#render(plan, preparation.format, true);
+    requireExport(sha256Hex(rendered.bytes!) === preparation.technical.payloadDigest, 'EXPORT_PAYLOAD_CHANGED',
+      '稿件或标记在准备导出后有了变化，请重新准备导出。');
+    const state = await targetState(preparation.destination);
+    const replaces = this.#replacedFileOf(row);
+    const standing = preparation.disposition === 'replace' ? await fileDigest(preparation.destination) : null;
+    requireExport(preparation.disposition !== 'replace' || state !== 'file' || standing !== null, 'EXPORT_TARGET_UNREADABLE', EXPORT_TARGET_UNREADABLE_DETAIL);
+    requireExport(
+      (preparation.disposition === 'create' && state === 'absent') ||
+        (preparation.disposition === 'replace' && state === 'file' && standing?.bytes === replaces?.bytes && standing?.sha256 === replaces?.sha256),
+      'EXPORT_TARGET_CHANGED',
+      '所选位置在准备后发生了变化，请重新选择保存位置。',
+    );
+    return rendered.bytes!;
   }
 
   async #prepare(
@@ -821,25 +870,12 @@ export class ManuscriptExportStore {
     const preparation = this.#preparationProjection(row);
     const prior = this.#outcomeRow(input.preparationId);
     if (prior !== undefined) return this.#receiptProjection(row, prior);
-    const resolved = this.#preparedTarget(input.bookId, row);
-    const plan = await this.#plan(input.bookId, resolved, preparation.options, preparation.format);
-    const rendered = this.#render(plan, preparation.format, true);
-    requireExport(sha256Hex(rendered.bytes!) === preparation.technical.payloadDigest, 'EXPORT_PAYLOAD_CHANGED',
-      '稿件或标记在准备导出后有了变化，请重新准备导出。');
+    const page = await this.#requireAsPrepared(input.bookId, row, preparation);
     // A PDF is the page the main process printed (Issue #500, S64b): the page is what the preparation bound, and the
     // printed file is what is written and receipted. Nothing is approved before it exists.
-    const payload = preparation.format === 'pdf' ? await this.#printed(preparation) : rendered.bytes!;
+    const payload = preparation.format === 'pdf' ? await this.#printed(preparation) : page;
     const payloadSha256 = sha256Hex(payload);
-    const state = await targetState(preparation.destination);
     const replaces = this.#replacedFileOf(row);
-    const standing = preparation.disposition === 'replace' ? await fileDigest(preparation.destination) : null;
-    requireExport(preparation.disposition !== 'replace' || state !== 'file' || standing !== null, 'EXPORT_TARGET_UNREADABLE', EXPORT_TARGET_UNREADABLE_DETAIL);
-    requireExport(
-      (preparation.disposition === 'create' && state === 'absent') ||
-        (preparation.disposition === 'replace' && state === 'file' && standing?.bytes === replaces?.bytes && standing?.sha256 === replaces?.sha256),
-      'EXPORT_TARGET_CHANGED',
-      '所选位置在准备后发生了变化，请重新选择保存位置。',
-    );
     const approvalId = randomUUID();
     const approvedAt = new Date().toISOString();
     const approval = canonicalRecord({
@@ -1604,11 +1640,12 @@ export class ManuscriptExportStore {
     requireExport(Array.isArray(fidelity), 'EXPORT_RECORD_INVALID', '导出保真审阅记录无效。');
     const targetKind = text(row.target_kind);
     // A report's preparation names its recorded version, a document's its version; a manuscript version's, its revision.
+    // A 交付包清单's is read from its own record, never written again to be read (Issue #416 review).
+    const manifest = targetKind === 'book-delivery-package-version' ? this.#storedManifest(row) : null;
     const report = targetKind === 'report' ? this.#reportTarget(text(row.book_id), text(row.target_id))
-      : targetKind === 'production-document-version' ? this.#documentOfRevision(text(row.book_id), text(row.target_id))
-        : targetKind === 'book-delivery-package-version' ? this.#manifestTarget(text(row.book_id), text(row.target_id)) : null;
-    const revisionId = report === null ? text(row.revision_id) : report.revisionId;
-    const revisionLabel = report === null ? this.#revision(revisionId).revisionLabel : report.revisionLabel;
+      : targetKind === 'production-document-version' ? this.#documentOfRevision(text(row.book_id), text(row.target_id)) : null;
+    const revisionId = manifest !== null ? manifest.revisionId : report === null ? text(row.revision_id) : report.revisionId;
+    const revisionLabel = manifest !== null ? manifest.versionLabel : report === null ? this.#revision(revisionId).revisionLabel : report.revisionLabel;
     const milestoneLabel = targetKind === 'milestone-version'
       ? text((this.#db.prepare('SELECT label FROM milestone_versions WHERE milestone_id = ?').get(text(row.target_id)) as SqlRow | undefined)?.label)
       : null;
@@ -1620,13 +1657,13 @@ export class ManuscriptExportStore {
       bookId: text(row.book_id),
       targetKind,
       targetId: text(row.target_id),
-      revisionId: report === null ? revisionId : null,
-      revisionDigest: report === null ? text(row.revision_digest) : null,
+      revisionId: report === null && manifest === null ? revisionId : null,
+      revisionDigest: report === null && manifest === null ? text(row.revision_digest) : null,
       revisionLabel,
       milestoneLabel,
       ...(report?.report == null ? {} : { reportDigest: report.revisionDigest }),
       ...(report?.document == null ? {} : { documentId: report.document.documentId, documentVersionDigest: report.revisionDigest }),
-      ...(report?.manifest == null ? {} : { packageVersionId: report.manifest.packageVersionId, manifestDigest: report.revisionDigest }),
+      ...(manifest === null ? {} : { packageVersionId: manifest.packageVersionId, manifestDigest: manifest.digest }),
       format: text(row.format),
       options,
       fidelitySha256: sha256Hex(fidelityJson),
@@ -1644,7 +1681,16 @@ export class ManuscriptExportStore {
     return {
       bookId: text(row.book_id),
       preparationId,
-      target: report !== null ? this.#targetProjection(report) : {
+      target: manifest !== null ? {
+        kind: 'package-manifest',
+        milestoneId: null,
+        milestoneLabel: null,
+        revisionId,
+        revisionLabel,
+        report: null,
+        document: null,
+        packageVersion: { packageVersionId: manifest.packageVersionId, versionLabel: manifest.versionLabel },
+      } : report !== null ? this.#targetProjection(report) : {
         kind: targetKind === 'milestone-version' ? 'milestone' : 'current',
         milestoneId: targetKind === 'milestone-version' ? text(row.target_id) : null,
         milestoneLabel,
@@ -1671,6 +1717,24 @@ export class ManuscriptExportStore {
         policy: `${text(row.policy_id)} ${text(row.policy_version)}`,
       },
     };
+  }
+
+  /**
+   * The 交付包清单 a preparation froze, from its own record (Issue #416 review): its package version, the version's label and
+   * the revision it binds from the version's frozen record, and the digest of the list as it was written then. Reading it
+   * never writes the list again — the words a later release writes it in may differ, and a record never changes for them;
+   * only an approval writes it again, where a difference is a changed payload. The record's own digest is checked with the
+   * rest of it.
+   */
+  #storedManifest(row: SqlRow): { packageVersionId: string; versionLabel: string; revisionId: string; digest: string } {
+    const packageVersionId = text(row.target_id);
+    const record = parseCanonicalJson(text(row.canonical_json));
+    const digest = isRecord(record) ? record.manifestDigest : undefined;
+    requireExport(isRecord(record) && record.packageVersionId === packageVersionId && typeof digest === 'string' && DIGEST_PATTERN.test(digest),
+      'EXPORT_RECORD_INVALID', '交付包清单的导出准备无效。');
+    const version = this.#environment.packageVersion?.(text(row.book_id), packageVersionId) ?? null;
+    requireExport(version !== null, 'EXPORT_RECORD_INVALID', '导出所属的交付包版本不存在。');
+    return { packageVersionId, versionLabel: version.versionLabel, revisionId: version.revisionId, digest };
   }
 
   #receiptProjection(preparationRow: SqlRow, outcome: SqlRow): ManuscriptExportReceiptProjection {

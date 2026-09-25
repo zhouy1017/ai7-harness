@@ -10,6 +10,7 @@ import {
   KNOWLEDGE_BASE_TAB_VIEWS,
   guidelineAppliedBy,
   guidelineCitations,
+  guidelineFixedStatement,
   guidelineImported,
   guidelineOlderBooks,
   guidelinePreviewChanges,
@@ -40,19 +41,35 @@ describe('知识库', () => {
     expect([GUIDELINE_IMPORT, GUIDELINE_CONFIRM, GUIDELINE_CANCEL]).toEqual(['导入新版本…', '确认导入', '取消']);
     expect(guidelineVersionPill({ currentOrdinal: 2, issuer: '本社' })).toBe('第 2 版 · 本社');
     expect(guidelineAppliedBy({ appliedBy: [{ categoryId: 'a', label: '错别字与规范用语' }, { categoryId: 'b', label: '体例与格式' }] })).toBe('用于：错别字与规范用语、体例与格式');
-    expect(guidelineOlderBooks({ olderVersionBooks: [], currentOrdinal: 2 })).toBeNull();
-    expect(guidelineOlderBooks({ olderVersionBooks: [{ bookId: 'x', bookTitle: '甲书', ordinal: 1 }], currentOrdinal: 3 }))
+    expect(guidelineOlderBooks({ olderVersionBooks: [], olderVersionBookCount: 0, currentOrdinal: 2 })).toBeNull();
+    expect(guidelineOlderBooks({ olderVersionBooks: [{ bookId: 'x', bookTitle: '甲书', ordinal: 1 }], olderVersionBookCount: 1, currentOrdinal: 3 }))
       .toBe('还在用旧版：《甲书》第 1 版；这些书下次审阅会按第 3 版。');
+    // Past the Books it names, the line says how many there are.
+    expect(guidelineOlderBooks({ olderVersionBooks: [{ bookId: 'x', bookTitle: '甲书', ordinal: 1 }, { bookId: 'y', bookTitle: '乙书', ordinal: 2 }], olderVersionBookCount: 14, currentOrdinal: 3 }))
+      .toBe('还在用旧版：《甲书》第 1 版、《乙书》第 2 版 等 14 本书；这些书下次审阅会按第 3 版。');
+    // A document AI7 fixes says why it takes no house version; one whose clauses the categories read says nothing.
+    expect(guidelineFixedStatement({ use: 'clauses', appliedBy: [{ categoryId: 'a', label: '错别字与规范用语' }] })).toBeNull();
+    expect(guidelineFixedStatement({ use: 'leads', appliedBy: [{ categoryId: 'p', label: '情节逻辑与前后一致' }] }))
+      .toBe('「情节逻辑与前后一致」把基线分析里的线索变成批注，不按这里的条款找问题。这是 AI7 的固定说明，不能导入新版本。');
+    expect(guidelineFixedStatement({ use: 'factual-kind', appliedBy: [{ categoryId: 'f', label: '事实核查' }] }))
+      .toBe('「事实核查」按 AI7 固定的事实核查契约执行，不读取这里的条款。这是 AI7 的固定说明，不能导入新版本。');
     expect([guidelineCitations(0), guidelineCitations(4)]).toEqual(['未被引用', '被引用 4 次']);
     const version = (overrides: Partial<ReviewGuidelineVersionProjection>): ReviewGuidelineVersionProjection => ({
-      ordinal: 1, issuer: 'AI7 内置默认', versionId: null, recordedAt: null, source: null, clauseCount: 4, digest: 'a'.repeat(64), usedBy: [], ...overrides,
+      ordinal: 1, issuer: 'AI7 内置默认', versionId: null, recordedAt: null, source: null, clauseCount: 4, digest: 'a'.repeat(64), usedByCount: 0, usedBy: [], ...overrides,
     });
     expect(guidelineVersionLine(version({}), () => 'T')).toBe('第 1 版 · AI7 内置默认 · 内置 · 4 条 · 还没有审阅用过');
     expect(guidelineVersionLine(version({
       ordinal: 2, issuer: '本社', recordedAt: '2026-09-25T00:00:00.000Z', clauseCount: 5,
       source: { displayName: '本社文字规范.docx', format: 'docx', sha256: 'b'.repeat(64), bytes: 10 },
-      usedBy: [{ bookId: 'x', bookTitle: '甲书', reviewRunId: 'r', reviewOrdinal: 2, createdAt: '2026-09-25T00:00:00.000Z' }],
+      usedByCount: 1, usedBy: [{ bookId: 'x', bookTitle: '甲书', reviewRunId: 'r', reviewOrdinal: 2, createdAt: '2026-09-25T00:00:00.000Z' }],
     }), () => '9月25日 08:00')).toBe('第 2 版 · 本社 · 导入于 9月25日 08:00 · 本社文字规范.docx · 5 条 · 用于 《甲书》第 2 次审阅');
+    // Past the reviews it names, the line says how many used the version and names the latest.
+    expect(guidelineVersionLine(version({
+      usedByCount: 12, usedBy: [
+        { bookId: 'x', bookTitle: '甲书', reviewRunId: 'r2', reviewOrdinal: 7, createdAt: '2026-09-25T00:00:00.000Z' },
+        { bookId: 'y', bookTitle: '乙书', reviewRunId: 'r1', reviewOrdinal: 3, createdAt: '2026-09-24T00:00:00.000Z' },
+      ],
+    }), () => 'T')).toBe('第 1 版 · AI7 内置默认 · 内置 · 4 条 · 用于 12 次审阅，最近：《甲书》第 7 次审阅、《乙书》第 3 次审阅');
     expect(guidelinePreviewHeading({ ordinal: 2, title: '文字规范条款' })).toBe('将导入为《文字规范条款》第 2 版');
     expect(guidelinePreviewChanges({
       source: { displayName: '规范.txt', format: 'text', sha256: 'c'.repeat(64), bytes: 3 }, currentOrdinal: 1,
@@ -85,6 +102,13 @@ describe('a guideline file\'s numbered clauses', () => {
     ]);
     expect(parseGuidelineClauses(['第一条 甲。', '第二条：乙。', '以上两条自发布之日起施行。'], 'q').map((clause) => clause.clauseId)).toEqual(['q/1', 'q/2']);
     expect(parseGuidelineClauses(Array.from({ length: 12 }, (_, index) => `第${['一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '十二'][index]}条 条款。`), 'r').map((clause) => clause.clauseId).at(-1)).toBe('r/12');
+    // Full-width digits number a clause as the half-width ones do.
+    expect(parseGuidelineClauses(['１．甲。', '２、乙。', '３）丙。'], 's')).toEqual([
+      { clauseId: 's/1', text: '甲。' },
+      { clauseId: 's/2', text: '乙。' },
+      { clauseId: 's/3', text: '丙。' },
+    ]);
+    expect(parseGuidelineClauses(['第１条 甲。', '第２条：乙。'], 't').map((clause) => clause.clauseId)).toEqual(['t/1', 't/2']);
   });
 
   it('refuses a file that is no numbered list of short clauses, naming what is wrong', () => {
