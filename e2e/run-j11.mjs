@@ -598,6 +598,15 @@ async function main() {
       finalizedPage.record.allDisabled === true && finalizedPage.record.actions.length === 0 && finalizedPage.start === '重新评估' &&
       finalizedPage.record.total === '总分 66.5 / 80 · 优秀（1 项不评）', 'evaluation-finalized-words', finalizedPage.record);
 
+    at('evaluation-from-manuscript');
+    // 评估 is one of the manuscript's 工作 destinations (IA-012, editor-surfaces §0.3): from 评估's own 打开稿件, the manuscript's
+    // 工作 group reads 审阅 · 评估 · 交付物, and its 评估 opens the version just finalized.
+    await assertRenderer(renderer, `(() => { const open = Array.from(document.querySelectorAll('[data-screen="book-evaluation"] .workbench-actions button')).find((button) => button.textContent === '打开稿件'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'evaluation-open-manuscript');
+    await waitFor(renderer, `document.querySelector('.editor-shell [data-testid="manuscript-editor"] > [data-block-id]') !== null && document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]') !== null`, 'evaluation-manuscript-ready', 60_000);
+    await assertRenderer(renderer, `(() => { const group = document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const entries = Array.from(group?.querySelectorAll('button[data-work-destination]') ?? []).map((item) => item.dataset.workDestination + ':' + item.textContent); const open = group?.querySelector('button[data-work-destination="evaluation"]'); if (entries.join('|') !== 'review:审阅|evaluation:评估|deliverables:交付物' || !(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'evaluation-work-group-entry');
+    const returned = await readEvaluation(renderer, (page) => page.state === 'ready' && page.record?.state === 'finalized', 'evaluation-from-manuscript-ready');
+    requireJourney(returned.record.heading === '第 1 版 · 定稿' && returned.start === '重新评估' && returned.versions.length === 1, 'evaluation-from-manuscript-words', returned);
+
     at('evaluation-reevaluate');
     // 重新评估: version 2 begins from 定稿's scores; one moved item shows against version 1.
     await clickSelector(renderer, '[data-evaluation-action="start"]', 'evaluation-again');

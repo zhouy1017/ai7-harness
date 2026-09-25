@@ -1028,6 +1028,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'evaluation-start',
     'evaluation-score',
     'evaluation-finalize',
+    // Issue #429 review: 评估 is reached from the manuscript's 工作 group, between 审阅 and 交付物.
+    'evaluation-from-manuscript',
     'evaluation-reevaluate',
     'j14-evaluation-reflow-forced-colors',
     'evaluation-overview-and-profile',

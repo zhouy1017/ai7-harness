@@ -6612,6 +6612,24 @@ function renderEditorWindow(
   });
   openDeliverables.dataset['workDestination'] = 'deliverables';
   if (isDocument) openDeliverables.textContent = DOCUMENT_ACTION_LABELS.back;
+  // 评估 (Issue #429, S81a review; IA-012, editor-surfaces §0.3) sits between 审阅 and 交付物, and leaves the manuscript as
+  // they do: local edits settled and the position taken first, and a refusal keeps the manuscript on screen.
+  const openEvaluation = button(EVALUATION_TITLE, 'secondary', async () => {
+    openEvaluation.disabled = true;
+    setStatus(EVALUATION_STATUS.leaving, 'busy');
+    try {
+      if (!(await settleLocalEdit())) {
+        openEvaluation.disabled = authoritativeMutationBusy();
+        return;
+      }
+      await rememberEntryPosition();
+      renderBookEvaluation(currentWindow.bookId, bookTitle);
+    } catch (error) {
+      openEvaluation.disabled = authoritativeMutationBusy();
+      setStatus(rendererErrorMessage(error, EVALUATION_STATUS.openFailed), 'error');
+    }
+  });
+  openEvaluation.dataset['workDestination'] = 'evaluation';
   const toolbarActions = element('div', 'button-row');
   if (recoveryAttentionId) {
     toolbarActions.append(button('返回恢复待确认', 'secondary', async () => {
@@ -6629,12 +6647,12 @@ function renderEditorWindow(
   const recordsGroup = element('nav', 'book-records-group');
   recordsGroup.setAttribute('aria-label', '资料与记录');
   recordsGroup.append(element('span', 'section-label', '资料与记录'), ...(isDocument ? [] : [openAnalysis]), backToOverview);
-  // IA-006's `工作` group (稿件 / 审阅 / 评估 / 交付物), as much of it as exists: 审阅 (editor-surfaces §4) and
-  // 交付物 (§9). They are destinations of the Book beside 资料与记录, never entries on the right edge, whose
-  // three entries are 导航 / 分析 / 任务.
+  // IA-006's `工作` group (稿件 / 审阅 / 评估 / 交付物): 审阅 (editor-surfaces §4), 评估 (§5) and 交付物 (§9) — a document has
+  // only its way back. They are destinations of the Book beside 资料与记录, never entries on the right edge, whose three
+  // entries are 导航 / 分析 / 任务.
   const workGroup = element('nav', 'book-work-group');
   workGroup.setAttribute('aria-label', REVIEW_WORK_GROUP_LABEL);
-  workGroup.append(element('span', 'section-label', REVIEW_WORK_GROUP_LABEL), ...(isDocument ? [] : [openReview]), openDeliverables);
+  workGroup.append(element('span', 'section-label', REVIEW_WORK_GROUP_LABEL), ...(isDocument ? [] : [openReview, openEvaluation]), openDeliverables);
   // 保存为版本 (Issue #415): a document's working text becomes its next version; the manuscript's milestones stay its own.
   const saveVersion = button(DOCUMENT_ACTION_LABELS.saveVersion, 'secondary', () => void saveDocumentVersion());
   saveVersion.dataset['documentAction'] = 'saveVersion';
@@ -6970,6 +6988,7 @@ function renderEditorWindow(
     backToOverview.disabled = busy;
     openAnalysis.disabled = busy;
     openReview.disabled = busy;
+    openEvaluation.disabled = busy;
     openDeliverables.disabled = busy;
     undo.disabled = busy;
     redo.disabled = busy;
