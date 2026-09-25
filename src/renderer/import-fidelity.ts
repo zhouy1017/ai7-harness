@@ -116,9 +116,14 @@ export function renderFidelityReview(
   const table = el('div', 'fidelity-list');
   table.setAttribute('role', 'table');
   table.setAttribute('aria-label', '导入保真审阅');
+  // The summary says what the choice does as the editor makes it, not only once the review states it (Issue #532).
+  let summary: HTMLElement | null = null;
   for (const category of fidelityRows(fidelity)) {
     const choice = category.key === 'text-boxes' && category.count > 0 && (offered || stated)
-      ? textBoxChoice(offered ? 'offer' : 'stated', chosen, (disposition) => { chosen = disposition; })
+      ? textBoxChoice(offered ? 'offer' : 'stated', chosen, (disposition) => {
+          chosen = disposition;
+          if (summary !== null) summary.textContent = fidelitySummaryLine(fidelity, chosen);
+        })
       : null;
     table.append(fidelityRow(category, choice));
   }
@@ -133,7 +138,7 @@ export function renderFidelityReview(
   if (needsDegradationDecision(fidelity)) {
     elements.push(...body);
   } else {
-    const summary = el('p', 'fidelity-summary', fidelitySummaryLine(fidelity));
+    summary = el('p', 'fidelity-summary', fidelitySummaryLine(fidelity, offered || stated ? chosen : null));
     summary.dataset['fidelitySummary'] = 'no-decision';
     const details = el('details', 'fidelity-details');
     // The rows stay folded unless the editor has a choice to make in them.

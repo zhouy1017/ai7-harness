@@ -1,6 +1,7 @@
 import {
   GATE_JOURNEYS,
   classifyJourneyResult,
+  collectReadinessTrace,
   collectJourneyDisclosures,
   normalizePnpmArgs,
   runJourneyProcess,
@@ -35,6 +36,8 @@ if (args.length !== 0) {
       console.error(`GATE_COMPLETION/${journey}/fail`);
       const failure = classifyJourneyResult(result, journey);
       console.error(`GATE_COMPLETION/${journey}/fail/${failure.location}/${failure.errorClass}`);
+      const readiness = collectReadinessTrace(result, journey);
+      if (readiness !== null) console.error(`GATE_COMPLETION/${journey}/readiness/${readiness}`);
       process.exitCode = result.code || 1;
       break;
     }
