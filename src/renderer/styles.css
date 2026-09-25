@@ -611,6 +611,21 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .evaluation-profile { display: grid; gap: .45rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
 .evaluation-profile h3, .evaluation-profile h4, .evaluation-profile p { margin: 0; overflow-wrap: anywhere; }
 .evaluation-profile ul { display: grid; gap: .25rem; margin: 0; padding-left: 1.2rem; overflow-wrap: anywhere; }
+/* ②A 分析反馈 (S38): the card opens under the item it judges, inside the list, never a modal; the Book's tally under the synopsis. */
+.analysis-feedback { display: grid; gap: .35rem; margin: .3rem 0 .5rem; min-width: 0; }
+.analysis-feedback-line { margin: 0; color: #3f4a44; overflow-wrap: anywhere; }
+.analysis-feedback-card { display: grid; gap: .5rem; min-width: 0; padding: .7rem .8rem; border: 2px solid #2c463b; border-radius: 10px; background: #f6f8f2; }
+.analysis-feedback-card fieldset { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .9rem; min-width: 0; margin: 0; padding: .45rem .7rem; border: 1px solid #ded9cd; border-radius: 8px; }
+.analysis-feedback-card legend { font-weight: 700; overflow-wrap: anywhere; }
+.analysis-feedback-card fieldset[hidden], .analysis-feedback-field[hidden], .analysis-feedback-other[hidden] { display: none; }
+.analysis-feedback-choice { display: inline-flex; align-items: center; gap: .35rem; overflow-wrap: anywhere; }
+.analysis-feedback-other { flex: 1 1 14rem; min-width: 0; font: inherit; }
+.analysis-feedback-field { display: grid; gap: .3rem; min-width: 0; }
+.analysis-feedback-field textarea { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; }
+.analysis-feedback-refusal { margin: 0; }
+.analysis-feedback-metric { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #d5dcd9; }
+.analysis-feedback-metric h5, .analysis-feedback-metric p { margin: 0 0 .4rem; overflow-wrap: anywhere; }
+.analysis-feedback-total { font-weight: 700; }
 /* 知识库 › 资料库 (S79c): one card per collected item; the arrival form and each decision open inside the page, never a modal. */
 .library-list { display: grid; gap: .8rem; }
 .library-material, .library-preview { display: grid; gap: .45rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
@@ -1222,6 +1237,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .task-plan-default-rule-confirm, .default-rule-card, .guideline-card, .guideline-preview, .exemplar-book, .task-plan-activity, .task-bar-cancel-impact,
   .library-material, .library-preview, .library-chooser, .library-chooser fieldset, .library-kinds,
   .evaluation-record, .evaluation-item, .evaluation-risk, .evaluation-conclusion, .evaluation-comparison, .evaluation-profile,
+  .analysis-feedback-card, .analysis-feedback-card fieldset,
   .task-plan-clarification, .task-plan-choice, .task-plan-choice-recommended, .task-plan-clarification-deferred, .task-plan-edit-ask-first,
   .task-plan-budget-form, .task-plan-budget-input {
     color: CanvasText;

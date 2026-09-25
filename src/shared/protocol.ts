@@ -1,6 +1,7 @@
+import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 72 as const;
+export const SERVICE_PROTOCOL_VERSION = 73 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -87,6 +88,8 @@ export const IPC_CHANNELS = {
   inspectEvaluation: 'ai7:j11:inspect-evaluation',
   startEvaluation: 'ai7:j11:start-evaluation',
   saveEvaluation: 'ai7:j11:save-evaluation',
+  inspectAnalysisFeedback: 'ai7:j11:inspect-analysis-feedback',
+  recordAnalysisFeedback: 'ai7:j11:record-analysis-feedback',
   inspectReviewWorkspace: 'ai7:j04:inspect-review-workspace',
   prepareReviewRun: 'ai7:j04:prepare-review-run',
   authorizeReviewRun: 'ai7:j04:authorize-review-run',
@@ -4933,6 +4936,79 @@ export interface EvaluationWorkspaceProjection {
   readonly start: { readonly allowed: true; readonly kind: 'first' | 'again' } | { readonly allowed: false; readonly reason: string };
 }
 
+// ---- ②A 分析反馈 (Issue #94, plan slice S38; V2-UX-ANALYSIS-023, ANALYSIS-024, FDBK-005 to FDBK-008) -------------------
+
+export const MAX_ANALYSIS_FEEDBACK_TEXT_GRAPHEMES = 300;
+
+/** One explicit judgment the editor recorded on one item: never inferred, and a later one supersedes it on record. */
+export interface AnalysisFeedbackSignalProjection {
+  readonly signalId: string;
+  readonly judgment: AnalysisFeedbackJudgment;
+  /** The optional reason: one of the alternatives offered, or `other` with the editor's own words; `null` when none was given. */
+  readonly reason: null | { readonly choice: string; readonly text: string | null };
+  /** The editor's own correction, when they wrote one. */
+  readonly correction: string | null;
+  readonly recordedAt: string;
+  /** The signal it succeeded, when the editor changed an earlier judgment. */
+  readonly supersedes: string | null;
+}
+
+/** One item of a Result Set Revision as feedback names it: its place, the digest of exactly what it says, and its latest judgment. */
+export interface AnalysisFeedbackItemProjection {
+  /** `synopsis`, or `<dimension>/<index>` within the revision's synthesis. */
+  readonly itemKey: string;
+  readonly dimension: AnalysisFeedbackDimension;
+  readonly index: number;
+  readonly digest: string;
+  readonly latest: AnalysisFeedbackSignalProjection | null;
+  /** How many signals the item holds, the superseded included. */
+  readonly signals: number;
+}
+
+/**
+ * The Analysis Quality Metric of one Book (ANALYSIS-024): only explicit judgments count — an item nobody judged is neither
+ * approved nor faulted — each item's latest judgment once, over every Result Set Revision of the Book, by dimension. It is
+ * a measure, never a proof, a policy, an eligibility or leave to change anything; no other Book's judgments enter it.
+ */
+export interface AnalysisQualityMetricProjection {
+  readonly definition: 'ai7.analysis-quality-metric/1';
+  readonly scope: 'book';
+  readonly judged: number;
+  readonly accurate: number;
+  readonly inaccurate: number;
+  readonly incomplete: number;
+  readonly byDimension: ReadonlyArray<{
+    readonly dimension: AnalysisFeedbackDimension;
+    readonly judged: number;
+    readonly accurate: number;
+    readonly inaccurate: number;
+    readonly incomplete: number;
+  }>;
+  /** The digest of the ordered signals the metric counted: its exact input lineage. */
+  readonly lineageDigest: string;
+}
+
+/** ②A's feedback on one Result Set Revision, and the Book's metric. */
+export interface AnalysisFeedbackProjection {
+  readonly bookId: string;
+  readonly revisionId: string;
+  readonly revisionOrdinal: number;
+  readonly items: ReadonlyArray<AnalysisFeedbackItemProjection>;
+  readonly metric: AnalysisQualityMetricProjection;
+}
+
+export interface RecordAnalysisFeedbackInput {
+  readonly revisionId: string;
+  readonly itemKey: string;
+  /** The item's digest as the editor saw it: refused when the revision no longer says exactly that there. */
+  readonly itemDigest: string;
+  /** The latest signal the editor saw on the item, or `null` for its first judgment. */
+  readonly expectedLatestSignalId: string | null;
+  readonly judgment: AnalysisFeedbackJudgment;
+  readonly reason: null | { readonly choice: string; readonly text: string | null };
+  readonly correction: string | null;
+}
+
 /** The drawer's `设为快速开始默认…` for one plan, and the rule that started its Task, when one did. */
 export interface TaskPlanDefaultRuleProjection {
   canSet: boolean;
@@ -7130,6 +7206,16 @@ export interface ServiceOperationMap {
     input: { bookId: string; recordId: string; expectedEntries: number; content: EvaluationContent; finalize: boolean };
     output: EvaluationWorkspaceProjection;
   };
+  /** ②A 分析反馈 (Issue #94, S38): one Result Set Revision's items with their latest judgments, and the Book's metric. */
+  inspectAnalysisFeedback: {
+    input: { bookId: string; revisionId: string };
+    output: AnalysisFeedbackProjection;
+  };
+  /** 记录反馈: one explicit judgment appended as a Quality Signal, refused when the item or its latest judgment moved. */
+  recordAnalysisFeedback: {
+    input: RecordAnalysisFeedbackInput & { bookId: string };
+    output: AnalysisFeedbackProjection;
+  };
   /**
    * 审阅 (Issue #417, plan slice S69). The workspace is one read; preparing a Review Run is a
    * cooperative job; the one approval records the Run's authorization and starts its drive loop at once,
@@ -7519,6 +7605,9 @@ export interface RendererApi {
   inspectEvaluation(input: { recordId: string | null }): Promise<EvaluationWorkspaceProjection>;
   startEvaluation(): Promise<EvaluationWorkspaceProjection>;
   saveEvaluation(input: { recordId: string; expectedEntries: number; content: EvaluationContent; finalize: boolean }): Promise<EvaluationWorkspaceProjection>;
+  /** ②A 分析反馈 of the Book the window is showing (Issue #94, S38); the renderer never names the Book. */
+  inspectAnalysisFeedback(input: { revisionId: string }): Promise<AnalysisFeedbackProjection>;
+  recordAnalysisFeedback(input: RecordAnalysisFeedbackInput): Promise<AnalysisFeedbackProjection>;
   /**
    * 审阅 of the Book the window is showing (Issue #417). Inspecting without a Run opens the latest; a
    * running Run is followed by inspecting it again, and its executing category carries its progress.

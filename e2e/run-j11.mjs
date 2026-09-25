@@ -1,9 +1,11 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
@@ -17,6 +19,14 @@ import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabl
 // product's own import: the editor's scores out of each item's 满分, a 不评 with its reason, the risk items capping 推荐出版,
 // 保存评估 and 定稿, and 重新评估 compared with the version before — then 知识库 › 评估方案 counting its use. Every score and
 // word is the Journey's own; nothing of the manuscript is read.
+//
+// Since #94 (S38) J-11 also walks ②A 分析反馈 on the same Book: its workspace profile enabled and one Main Editorial Role
+// connection whose synthetic credential is saved and removed again, as J-16 makes them, then its first baseline run to its
+// end on the J-04 model adapter. Every item of the revision offers 反馈…, with nothing judged and the tally saying so; an
+// entry is judged 不准确 for a reason fitted to it, with a correction; the synopsis 不完整 in the editor's own words; the
+// entry changed to 准确 as a successor the service keeps beside the first; the same judgment again refused as changing
+// nothing; Enter and Escape without a pointer; the card at 200% and without colour; what nobody judged left unjudged and
+// unlisted; and a restart moving nothing. Every correction and reason is the Journey's own stand-in.
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -27,8 +37,20 @@ const PEOPLE = Object.freeze({ authors: '周一、吴二', editors: '郑三', re
 const PEOPLE_NOTE = '作者与责编用于标注和查找这本书，也是之后反馈与学习记录的归属；它们不是账号，也不决定谁能做什么。';
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const THIRD = Object.freeze({ title: '评估旅程丙' });
+/** The J-04 model adapter's base fixture: every unit, the reduction and the sample of exact `sample1` answered (Issue #94). */
+const FIXTURE_IDENTITY = 'sample1-baseline-happy';
+/** 分析反馈's words the Journey writes: stand-ins of its own, never the manuscript's. */
+const ENTITY_CORRECTION = '（旅程示例）应分作两个人物';
+const SYNOPSIS_REASON = '（旅程示例）少了尾声';
+const METRIC_NOTE = '只统计你明确给出的判断：没有判断的条目不算认可；这是对分析结果的评价，不代表事实核实，也不改变 AI7 的做法。';
+const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
+const CREDENTIAL_CLEANUP_TIMEOUT_MS = 15_000;
+const FORCE_EXIT_TIMEOUT_MS = 5_000;
+const BROWSER_CLOSE_TIMEOUT = new Error('J-11/browser-close-timeout');
+const CREDENTIAL_CLEANUP_TIMEOUT = new Error('J-11/credential-cleanup-timeout');
 let location = 'entry';
 let electronExecutable;
+let runnerLifecycleIncomplete = false;
 
 function at(next) {
   location = next;
@@ -70,6 +92,171 @@ function productEnvironment(executable) {
     selected.PATH = [dirname(executable), resolve(systemRoot, 'System32'), resolve(systemRoot)].join(delimiter);
   } else selected.PATH = [dirname(executable), '/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(delimiter);
   return selected;
+}
+
+async function awaitFixedOperation(operation, timeoutMs, timeoutError) {
+  operation.catch(() => undefined);
+  let timeout;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(timeoutError), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// ---- the one synthetic credential, and its cleanup (J-03 and J-04's ownership, as J-16 carries it) ------------------
+
+async function assertSecretsAbsentFromDataRoot(root, secrets) {
+  const needles = secrets.flatMap((secret) => {
+    const digest = createHash('sha256').update(secret, 'utf8').digest();
+    return [
+      Buffer.from(secret, 'utf8'),
+      Buffer.from(secret, 'utf16le'),
+      digest,
+      Buffer.from(digest.toString('hex'), 'utf8'),
+      Buffer.from(digest.toString('base64'), 'utf8'),
+      Buffer.from(digest.toString('base64url'), 'utf8'),
+    ];
+  });
+  const visit = async (directory) => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = resolve(directory, entry.name);
+      const metadata = await lstat(path);
+      requireJourney(!metadata.isSymbolicLink(), 'cleanup-data-symlink');
+      if (metadata.isDirectory()) await visit(path);
+      else if (metadata.isFile()) {
+        const bytes = await readFile(path);
+        requireJourney(!needles.some((needle) => bytes.includes(needle)), 'secret-absent-from-product-data');
+      }
+    }
+  };
+  await visit(root);
+}
+
+const CREDENTIAL_CLEANUP_SCRIPT = `
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => {
+  input += chunk;
+  if (input.length > 128) process.exit(2);
+});
+process.stdin.once('end', async () => {
+  try {
+    const value = JSON.parse(input);
+    if (value === null || typeof value !== 'object' ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.credentialReference)) {
+      process.exit(2);
+    }
+    const { pathToFileURL } = require('node:url');
+    const { resolve } = require('node:path');
+    const denial = await import(pathToFileURL(resolve('dist/shared/network-denial.mjs')).href);
+    denial.installNodeNetworkDenial();
+    const { AsyncEntry } = require('@napi-rs/keyring');
+    const removed = await new AsyncEntry(
+      'io.github.zhouy1017.ai7.model-service',
+      'credential-reference:' + value.credentialReference,
+    ).deleteCredential();
+    process.exit(removed === true ? 0 : 3);
+  } catch {
+    process.exit(4);
+  }
+});
+`;
+
+async function removeSyntheticCredentialWithElectron(executable, credentialReference) {
+  requireJourney(isAbsolute(executable), 'credential-direct-cleanup-executable');
+  requireJourney(UUID_PATTERN.test(credentialReference), 'credential-direct-cleanup-reference');
+  requireJourney(
+    process.env.NAPI_RS_NATIVE_LIBRARY_PATH === undefined && process.env.NAPI_RS_FORCE_WASI === undefined,
+    'credential-direct-cleanup-override',
+  );
+  const child = spawn(executable, ['-e', CREDENTIAL_CLEANUP_SCRIPT], {
+    cwd: ROOT,
+    env: { ...productEnvironment(executable), ELECTRON_RUN_AS_NODE: '1' },
+    stdio: ['pipe', 'ignore', 'ignore'],
+    windowsHide: true,
+  });
+  child.stdin.on('error', () => undefined);
+  const terminal = new Promise((resolveTerminal, rejectTerminal) => {
+    child.once('error', rejectTerminal);
+    child.once('exit', (code, signal) => resolveTerminal({ code, signal }));
+  });
+  terminal.catch(() => undefined);
+  child.stdin.end(JSON.stringify({ credentialReference }));
+  let result;
+  try {
+    result = await awaitFixedOperation(terminal, CREDENTIAL_CLEANUP_TIMEOUT_MS, CREDENTIAL_CLEANUP_TIMEOUT);
+  } catch (error) {
+    try { child.kill('SIGKILL'); } catch {
+      // The bounded terminal observation below remains authoritative.
+    }
+    try {
+      await awaitFixedOperation(terminal, FORCE_EXIT_TIMEOUT_MS, CREDENTIAL_CLEANUP_TIMEOUT);
+    } catch {
+      child.unref();
+    }
+    throw error;
+  }
+  requireJourney(result.code === 0 && result.signal === null, 'credential-direct-cleanup-unconfirmed');
+}
+
+function hasErrorCode(error, code) {
+  return error !== null && typeof error === 'object' && 'code' in error && error.code === code;
+}
+
+async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
+  requireJourney(dataRoot === resolve(runRoot, 'data') && inside(runRoot, dataRoot), 'credential-cleanup-metadata-root');
+  const databasePath = resolve(dataRoot, 'store', 'ai7.sqlite');
+  let metadata;
+  try {
+    metadata = await lstat(databasePath);
+  } catch (error) {
+    if (hasErrorCode(error, 'ENOENT')) return { kind: 'not-started' };
+    throw new Error('J-11/credential-cleanup-metadata');
+  }
+  requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && (await realpath(databasePath)) === databasePath,
+    'credential-cleanup-metadata-file');
+  let database;
+  try {
+    database = new DatabaseSync(databasePath, { readOnly: true });
+  } catch {
+    throw new Error('J-11/credential-cleanup-metadata');
+  }
+  try {
+    database.exec('PRAGMA query_only = ON;');
+    // The terminal version the service stamps, as J-16 reads it: the 分析反馈 revision since Issue #94 (S38), and after it
+    // this pin moves with whatever revision a later slice takes.
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 48, 'credential-cleanup-metadata-version');
+    const rows = database.prepare(
+      `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
+              approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
+       FROM model_service_connections LIMIT 2`,
+    ).all();
+    requireJourney(rows.length <= 1, 'credential-cleanup-metadata-cardinality');
+    if (rows.length === 0) return { kind: 'not-started' };
+    const row = rows[0];
+    requireJourney(
+      row.connection_id === 'main-editorial-deepseek-v4-pro' && row.role_id === 'main-editorial' &&
+      row.provider_id === 'deepseek-open-platform' && row.model_id === 'deepseek-v4-pro' &&
+      row.adapter_revision === 1 && row.configuration_revision === 1 && row.approved_fallback_chain === '[]' &&
+      row.credential_slot === 'deepseek-api-key' && typeof row.credential_reference === 'string' &&
+      UUID_PATTERN.test(row.credential_reference) && ['ready', 'missing', 'needs-attention'].includes(row.credential_operation_state),
+      'credential-cleanup-metadata-binding',
+    );
+    return row.credential_operation_state === 'missing'
+      ? { kind: 'removed' }
+      : { kind: 'reference', credentialReference: row.credential_reference };
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('J-11/')) throw error;
+    throw new Error('J-11/credential-cleanup-metadata');
+  } finally {
+    database.close();
+  }
 }
 
 async function createLoopbackSentinel() {
@@ -313,33 +500,253 @@ const item = (itemId) => `[data-screen="book-evaluation"] .evaluation-item[data-
 const risk = (riskId) => `[data-screen="book-evaluation"] .evaluation-risk[data-risk-id="${riskId}"]`;
 const ITEM_LEGENDS = ['文学品质与作者声音 · 满分 20', '主题、价值与社会文化语境 · 满分 20', '结构、叙事逻辑与连贯 · 满分 20', '中文语言与表达 · 满分 20', '读者与市场潜力 · 满分 20'];
 
+/** Open a Book with a manuscript from 书库 into its manuscript, then its 分析 (②A) from the 资料与记录 group, as J-16 does. */
+async function openAnalysisOf(renderer, bookId, name) {
+  await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
+  await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(bookId)}]`, `${name}-book`);
+  await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}]')`, `${name}-manuscript`, 120_000);
+  await assertRenderer(renderer, `(() => { const group=document.querySelector('.editor-shell nav.book-records-group'); const open=group?.querySelector('button[data-records-destination="analysis"]'); if(!(open instanceof HTMLButtonElement)||open.disabled||open.textContent!=='分析')return false; open.click(); return true; })()`, `${name}-analysis-entry`);
+  await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookId)}] .baseline-analysis-card')`, `${name}-analysis`);
+}
+
+/** The first baseline prepared from ②A's card and its plan open in the drawer, ready to start, as J-16 does. */
+async function prepareFirstBaseline(renderer, readiness, name) {
+  await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='available'`, `${name}-available`);
+  await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="prepare"]', `${name}-prepare`);
+  await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, `${name}-prepared`, 120_000);
+  const showing = await renderer.evaluate(`(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer==='open' && drawer.dataset.taskPlanKind==='baseline-analysis' && drawer.dataset.taskPlanRef===document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId; })()`);
+  if (!showing) await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', `${name}-open-plan`);
+  await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanKind==='baseline-analysis' && document.querySelector('#task-drawer')?.dataset.taskPlanRef===document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId && document.querySelector('#task-drawer')?.dataset.taskPlanStart===${JSON.stringify(readiness)} && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, `${name}-bar-ready`);
+}
+
+/**
+ * ②A 分析反馈 as the editor reads it: each item by its place with its judgment, how many it holds, its recorded line and its
+ * toggle; the one open card, with its choices, whether its words and correction show, 记录反馈 and any refusal; the Book's
+ * tally; and where focus is. Nothing of an item's own reading is read, so nothing of the manuscript is carried.
+ */
+const READ_FEEDBACK = `(() => {
+  const card = document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card');
+  if (!(card instanceof HTMLElement)) return null;
+  const metric = card.querySelector('.analysis-feedback-metric');
+  const open = card.querySelector('.analysis-feedback-card');
+  const shown = (node) => node instanceof HTMLElement && !node.hidden;
+  const active = document.activeElement;
+  return {
+    items: Array.from(card.querySelectorAll('[data-analysis-item-key]'), (item) => [
+      item.dataset.analysisItemKey, item.dataset.analysisFeedbackJudgment ?? null, item.dataset.analysisFeedbackSignals ?? null,
+      item.querySelector(':scope > .analysis-feedback > .analysis-feedback-line')?.textContent ?? null,
+      item.querySelector(':scope > .analysis-feedback > [data-analysis-feedback-action="open"]')?.textContent ?? null,
+    ]),
+    card: open === null ? null : {
+      item: open.closest('[data-analysis-item-key]')?.dataset.analysisItemKey ?? null,
+      judgments: Array.from(open.querySelectorAll('.analysis-feedback-judgments input'), (input) => [input.value, input.checked]),
+      reasons: shown(open.querySelector('.analysis-feedback-reasons'))
+        ? Array.from(open.querySelectorAll('.analysis-feedback-reasons label'), (label) => [label.querySelector('input')?.value ?? null, label.textContent, label.querySelector('input')?.checked ?? null])
+        : null,
+      other: shown(open.querySelector('.analysis-feedback-other')),
+      correction: shown(open.querySelector('.analysis-feedback-correction')),
+      record: open.querySelector('[data-analysis-feedback-action="record"]')?.disabled === false ? 'enabled' : 'disabled',
+      refusal: open.querySelector('.analysis-feedback-refusal')?.textContent ?? null,
+    },
+    metric: metric === null || metric.dataset.metricJudged === undefined ? null : {
+      judged: metric.dataset.metricJudged,
+      lineage: metric.dataset.metricLineage ?? null,
+      total: metric.querySelector('.analysis-feedback-total')?.textContent ?? null,
+      dimensions: Array.from(metric.querySelectorAll('.analysis-feedback-dimensions li'), (item) => item.textContent),
+      note: metric.querySelector('.analysis-feedback-note')?.textContent ?? null,
+    },
+    focus: active instanceof HTMLElement && active.closest('[data-analysis-item-key]') !== null
+      ? [active.closest('[data-analysis-item-key]').dataset.analysisItemKey, active.dataset.analysisFeedbackAction ?? active.dataset.analysisFeedbackField ?? (active instanceof HTMLInputElement ? active.value : active.tagName)]
+      : null,
+  };
+})()`;
+async function readFeedback(renderer, predicate, name) {
+  const deadline = Date.now() + 60_000;
+  let page = null;
+  while (Date.now() < deadline) {
+    page = await renderer.evaluate(READ_FEEDBACK).catch(() => null);
+    if (page !== null && predicate(page)) return page;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  const error = new Error(`J-11/${name}`);
+  error.detail = page;
+  throw error;
+}
+const feedbackItem = (itemKey) => `[data-screen="book-analysis"] [data-analysis-item-key="${itemKey}"]`;
+const rowOf = (page, itemKey) => page.items.find(([key]) => key === itemKey) ?? [];
+
 async function main() {
   parseJourney();
+  let browser;
+  let browserAcquisition;
+  let renderer;
   let loopback;
   let loopbackAcquisition;
   let runRoot;
   let runRootAcquisition;
-  let browser;
-  let browserAcquisition;
   let tempParent;
+  let dataRoot;
+  let launchForCleanup;
+  let electronExecutableForCleanup;
+  let credentialMutationReached = false;
+  let credentialRemoved = false;
+  let credentialReferenceForCleanup;
+  let syntheticSecret;
+  let cleanupFailure;
+  let credentialCleanupFailure;
+  let cleanupPromise;
+  let finalCleanupRequested = false;
+  let activeBrowserClose;
+  let browserCloseRejected = false;
   let journeyCompleted = false;
-  const closeOwnedBrowser = async () => {
-    const ownedBrowser = browser ?? (browserAcquisition === undefined ? undefined : await browserAcquisition.catch(() => undefined));
-    await ownedBrowser?.close().catch(() => undefined);
-    browser = undefined;
+  // 分析反馈's baseline needs a Main Editorial Role connection (Issue #94, S38), so J-11 owns the one synthetic credential
+  // and its cleanup exactly as J-16 does: through the product while it answers, relaunched for cleanup when it does not, and
+  // directly by its reference as the last resort.
+  const closeBrowserBounded = async (ownedBrowser) => {
+    if (ownedBrowser === undefined || !ownedBrowser.isConnected()) return;
+    if (activeBrowserClose !== undefined) return activeBrowserClose;
+    const closePromise = ownedBrowser.close();
+    closePromise.catch(() => undefined);
+    const boundedClose = awaitFixedOperation(closePromise, BROWSER_CLOSE_TIMEOUT_MS, BROWSER_CLOSE_TIMEOUT);
+    activeBrowserClose = boundedClose;
+    try {
+      await boundedClose;
+    } catch (error) {
+      browserCloseRejected = true;
+      runnerLifecycleIncomplete = true;
+      throw error;
+    } finally {
+      if (activeBrowserClose === boundedClose) activeBrowserClose = undefined;
+    }
+    if (ownedBrowser.isConnected()) {
+      browserCloseRejected = true;
+      runnerLifecycleIncomplete = true;
+      throw new Error('J-11/browser-close-unconfirmed');
+    }
   };
-  const cancellation = installJourneyCancellationCleanup(async () => {
-    await closeOwnedBrowser();
+  const closeOwnedBrowser = async () => {
+    const ownedBrowser = browser;
+    const ownedAcquisition = browserAcquisition;
+    let acquiredBrowser = ownedBrowser;
+    if (acquiredBrowser === undefined && ownedAcquisition !== undefined) {
+      try {
+        acquiredBrowser = await ownedAcquisition;
+      } catch {
+        if (browserAcquisition === ownedAcquisition) browserAcquisition = undefined;
+        renderer = undefined;
+        return;
+      }
+    }
+    await closeBrowserBounded(acquiredBrowser);
+    if (browser === acquiredBrowser) browser = undefined;
+    if (browserAcquisition === ownedAcquisition) browserAcquisition = undefined;
+    renderer = undefined;
+  };
+  const closeOwnedBrowserForCleanup = async () => {
+    try {
+      await closeOwnedBrowser();
+      return true;
+    } catch (error) {
+      cleanupFailure ??= error;
+      return false;
+    }
+  };
+  const removeCredentialThroughProduct = async () => {
+    if (!credentialMutationReached || credentialRemoved) return credentialRemoved;
+    if (renderer === undefined) return false;
+    const state = await renderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection??null)`);
+    if (UUID_PATTERN.test(state?.credentialReference)) {
+      requireJourney(credentialReferenceForCleanup === undefined || credentialReferenceForCleanup === state.credentialReference, 'credential-cleanup-reference');
+      credentialReferenceForCleanup = state.credentialReference;
+    }
+    if (state === null || state.credentialOperationState === 'missing') {
+      credentialRemoved = true;
+      return true;
+    }
+    await renderer.evaluate(`window.ai7.removeModelServiceCredential()`);
+    const after = await renderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection??null)`);
+    if (UUID_PATTERN.test(after?.credentialReference)) {
+      requireJourney(credentialReferenceForCleanup === undefined || credentialReferenceForCleanup === after.credentialReference, 'credential-cleanup-reference');
+      credentialReferenceForCleanup = after.credentialReference;
+    }
+    credentialRemoved = after === null || after.credentialOperationState === 'missing';
+    requireJourney(credentialRemoved, 'credential-cleanup-state');
+    return true;
+  };
+  const cleanup = () => (cleanupPromise ??= (async () => {
+    if (browserCloseRejected) throw cleanupFailure ?? new Error('J-11/browser-cleanup-failed');
+    if (credentialMutationReached && !credentialRemoved) {
+      try {
+        await removeCredentialThroughProduct();
+      } catch (error) {
+        credentialCleanupFailure ??= error;
+      }
+      if (!credentialRemoved && launchForCleanup !== undefined) {
+        const closedForRetry = await closeOwnedBrowserForCleanup();
+        if (browserCloseRejected) throw cleanupFailure ?? new Error('J-11/browser-cleanup-failed');
+        if (closedForRetry) {
+          try {
+            await launchForCleanup({ forCleanup: true });
+            await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true'`, 'credential-cleanup-ready');
+            await removeCredentialThroughProduct();
+          } catch (error) {
+            credentialCleanupFailure ??= error;
+          }
+        }
+      }
+      if (!credentialRemoved) {
+        if (browserCloseRejected) throw cleanupFailure ?? new Error('J-11/browser-cleanup-failed');
+        const closedForFallback = await closeOwnedBrowserForCleanup();
+        if (browserCloseRejected) throw cleanupFailure ?? new Error('J-11/browser-cleanup-failed');
+        if (closedForFallback && credentialReferenceForCleanup === undefined && dataRoot !== undefined && runRoot !== undefined) {
+          try {
+            const recovered = await recoverSyntheticCredentialCleanupState(dataRoot, runRoot);
+            if (recovered.kind === 'not-started' || recovered.kind === 'removed') credentialRemoved = true;
+            else credentialReferenceForCleanup = recovered.credentialReference;
+          } catch (error) {
+            credentialCleanupFailure ??= error;
+          }
+        }
+        if (closedForFallback && !credentialRemoved && credentialReferenceForCleanup !== undefined) {
+          try {
+            requireJourney(electronExecutableForCleanup !== undefined, 'credential-direct-cleanup-executable');
+            await removeSyntheticCredentialWithElectron(electronExecutableForCleanup, credentialReferenceForCleanup);
+            credentialRemoved = true;
+          } catch (error) {
+            credentialCleanupFailure ??= error;
+          }
+        }
+      }
+    }
+    if (browserCloseRejected) throw cleanupFailure ?? new Error('J-11/browser-cleanup-failed');
+    const browserClosed = await closeOwnedBrowserForCleanup();
+    if (!browserClosed) throw cleanupFailure ?? new Error('J-11/browser-cleanup-failed');
     const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
-    await ownedLoopback?.close().catch(() => undefined);
+    try { await ownedLoopback?.close(); } catch (error) { cleanupFailure ??= error; }
     loopback = undefined;
+    if (credentialMutationReached && !credentialRemoved) {
+      throw credentialCleanupFailure ?? new Error('J-11/credential-cleanup-failed');
+    }
     const ownedRoot = runRoot ?? (runRootAcquisition === undefined ? undefined : await runRootAcquisition.catch(() => undefined));
     if (ownedRoot !== undefined) {
-      requireJourney(tempParent !== undefined && dirname(ownedRoot) === tempParent && basename(ownedRoot).startsWith('ai7-j11-e2e-') && (await realpath(ownedRoot)) === ownedRoot, 'cleanup-target');
-      await rm(ownedRoot, { recursive: true, force: true });
-      runRoot = undefined;
+      if (syntheticSecret !== undefined && dataRoot !== undefined) {
+        try { await assertSecretsAbsentFromDataRoot(dataRoot, [syntheticSecret]); } catch (error) { cleanupFailure ??= error; }
+      }
+      try {
+        requireJourney(tempParent !== undefined && dirname(ownedRoot) === tempParent && basename(ownedRoot).startsWith('ai7-j11-e2e-') && (await realpath(ownedRoot)) === ownedRoot, 'cleanup-target');
+        await rm(ownedRoot, { recursive: true, force: true });
+        runRoot = undefined;
+      } catch (error) {
+        cleanupFailure ??= error;
+      }
     }
-  }, closeOwnedBrowser);
+    if (cleanupFailure !== undefined) throw cleanupFailure;
+  })());
+  const interruptOwnedBrowser = async () => {
+    if (finalCleanupRequested) return;
+    await closeOwnedBrowser();
+  };
+  const cancellation = installJourneyCancellationCleanup(cleanup, interruptOwnedBrowser);
   try {
     at('controller-loopback-sentinel');
     cancellation.throwIfRequested();
@@ -362,31 +769,41 @@ async function main() {
     runRoot = await runRootAcquisition;
     cancellation.throwIfRequested();
     requireJourney(dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j11-e2e-'), 'temp-root');
-    const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
+    dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
+    electronExecutableForCleanup = executable;
     const sample1Bytes = await readFile(SAMPLE1_PATH);
     const sample1 = { sha256: createHash('sha256').update(sample1Bytes).digest('hex'), bytes: sample1Bytes.length };
-    const launch = async () => {
+    const launch = async ({ forCleanup = false } = {}) => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
         '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
         resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
-        // J-11's picker imports the manuscript its 评估 evaluates (Issue #429, S81a): one choice per window.
-        '--j11-picker-path', SAMPLE1_PATH,
       ];
+      // J-11's picker imports the manuscript its 评估 evaluates (Issue #429, S81a): one choice per window. The J-04 model
+      // adapter runs the baseline 分析反馈 judges (Issue #94, S38). A cleanup launch names neither.
+      if (!forCleanup) args.push('--j11-picker-path', SAMPLE1_PATH, '--j04-model-adapter', FIXTURE_IDENTITY);
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
-      cancellation.throwIfRequested();
-      browserAcquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args, env: productEnvironment(executable), timeout: 60_000 });
-      browser = await browserAcquisition;
-      attachProductOutput('J-11', browser, 'launch');
-      cancellation.throwIfRequested();
-      return attachRenderer(browser);
+      if (!forCleanup) cancellation.throwIfRequested();
+      const acquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args, env: productEnvironment(executable), timeout: 60_000 });
+      browserAcquisition = acquisition;
+      const acquiredBrowser = await acquisition;
+      attachProductOutput('J-11', acquiredBrowser, forCleanup ? 'cleanup' : 'launch');
+      if (browserAcquisition === acquisition) {
+        browser = acquiredBrowser;
+        browserAcquisition = undefined;
+      }
+      if (!forCleanup) cancellation.throwIfRequested();
+      renderer = await attachRenderer(acquiredBrowser);
+      if (!forCleanup) cancellation.throwIfRequested();
+      return renderer;
     };
-    const close = async () => { await browser.close(); browser = undefined; };
+    launchForCleanup = launch;
+    const close = () => closeOwnedBrowser();
 
     at('renderer-api-boundary');
-    let renderer = await launch();
+    await launch();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true'`, 'product-ready');
     // The renderer gains the one people command and nothing named like an account, a role grant or a permission.
     await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && typeof window.ai7.updateBookPeople === 'function' && !Object.keys(window.ai7).some((key) => /account|permission|login|grant/i.test(key))`, 'renderer-api-boundary');
@@ -643,6 +1060,204 @@ async function main() {
     const service = await renderer.evaluate(`window.ai7.inspectEvaluationProfiles().then((projection) => projection.profiles.map((entry) => [entry.records, entry.books]))`);
     requireJourney(JSON.stringify(service) === JSON.stringify([[2, 1]]) && typeof thirdId === 'string', 'evaluation-profile-service', service);
 
+    // ---- ②A 分析反馈 (Issue #94, plan slice S38; V2-UX-ANALYSIS-023, ANALYSIS-024, FDBK-005 to FDBK-008) ----------------
+    at('feedback-prerequisites');
+    // The analysis's prerequisites through the product's own setup, as J-16 makes them: the editorial workspace profile at
+    // Revision 2 for 评估旅程丙, and one Main Editorial Role connection whose synthetic credential is saved and removed
+    // again, so only its reference is recorded — the J-04 adapter's route sends nothing and needs no credential.
+    await click(renderer, '返回', 'feedback-knowledge-back');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'feedback-landing');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(thirdId)}]`, 'feedback-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(thirdId)}]')`, 'feedback-manuscript', 120_000);
+    await click(renderer, '返回图书工作概览', 'feedback-overview');
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="install-disabled"]')`, 'feedback-artifact-install-ready');
+    await click(renderer, '获取并安装（保持停用）', 'feedback-artifact-install');
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'feedback-artifact-enable-ready');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'feedback-artifact-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'feedback-artifact-enabled');
+    await click(renderer, '返回图书列表', 'feedback-model-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'feedback-model-landing');
+    await click(renderer, '模型服务', 'feedback-model-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'feedback-model-ready');
+    cancellation.throwIfRequested();
+    syntheticSecret = randomBytes(48).toString('base64url');
+    await fill(renderer, '#main-editorial-connection-name', 'J-11 主编辑连接', 'feedback-model-name');
+    await fill(renderer, '#main-editorial-credential', syntheticSecret, 'feedback-model-secret');
+    cancellation.throwIfRequested();
+    credentialMutationReached = true;
+    await click(renderer, '保护并保存', 'feedback-model-save');
+    at('model-credential-saved');
+    await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('[data-credential-state="ready"]')`, 'feedback-model-saved');
+    const readyConnection = await renderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
+    requireJourney(UUID_PATTERN.test(readyConnection?.credentialReference) && readyConnection?.credentialOperationState === 'ready', 'feedback-model-ready-reference');
+    credentialReferenceForCleanup = readyConnection.credentialReference;
+    await click(renderer, '移除', 'feedback-model-remove');
+    at('model-credential-removed');
+    await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'feedback-model-removed');
+    credentialRemoved = true;
+    await click(renderer, '返回', 'feedback-model-back');
+
+    at('feedback-analysis-settled');
+    // The Book's first baseline: prepared from ②A's card, started from its plan's bar, and run to its end on the J-04
+    // adapter; the drawer then closes, leaving ②A the width.
+    await openAnalysisOf(renderer, thirdId, 'feedback-analysis');
+    await prepareFirstBaseline(renderer, 'ready', 'feedback-analysis');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'feedback-analysis-start');
+    await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, 'feedback-analysis-ended', 180_000);
+    await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'feedback-analysis-settled-state');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'feedback-drawer-close');
+    await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'feedback-drawer-closed');
+
+    at('feedback-card-offered');
+    // Every item of the revision offers 反馈… and nothing is judged: the tally says so, and what it is and is not.
+    const revisionId = await renderer.evaluate(`document.querySelector('.baseline-analysis-card')?.dataset.resultRevisionId ?? null`);
+    requireJourney(UUID_PATTERN.test(revisionId ?? ''), 'feedback-revision');
+    const serviceItems = await renderer.evaluate(`window.ai7.inspectAnalysisFeedback({ revisionId: ${JSON.stringify(revisionId)} }).then((projection) => projection.items.map((item) => item.itemKey))`);
+    requireJourney(Array.isArray(serviceItems) && serviceItems[0] === 'synopsis' && serviceItems.includes('entities/0') && serviceItems.includes('events/0'), 'feedback-service-items', serviceItems);
+    const offered = await readFeedback(renderer, (page) => page.metric?.judged === '0' && page.items.every(([, judgment]) => judgment !== null), 'feedback-offered');
+    requireJourney(JSON.stringify(offered.items.map(([key]) => key)) === JSON.stringify(serviceItems) &&
+      offered.items.every(([, judgment, signals, line, toggle]) => judgment === 'none' && signals === '0' && line === null && toggle === '反馈…') &&
+      offered.metric.total === '还没有给出判断。' && offered.metric.dimensions.length === 0 && offered.metric.note === METRIC_NOTE && offered.card === null,
+    'feedback-offered-words', offered);
+
+    at('feedback-judge-item');
+    // 人物与名称's first entry: 反馈… opens its card with nothing chosen and 记录反馈 closed; 不准确 offers three reasons fitted
+    // to a name, 其他 beside them, none chosen, and the correction; one reason, the correction and 记录反馈 record it there.
+    await clickSelector(renderer, '#analysis-tab-entities', 'feedback-entities-tab');
+    await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-feedback-action="open"]`, 'feedback-entity-open');
+    const entityCard = await readFeedback(renderer, (page) => page.card?.item === 'entities/0', 'feedback-entity-card');
+    requireJourney(JSON.stringify(entityCard.card.judgments) === JSON.stringify([['accurate', false], ['inaccurate', false], ['incomplete', false]]) &&
+      entityCard.card.reasons === null && entityCard.card.correction === false && entityCard.card.record === 'disabled' &&
+      JSON.stringify(entityCard.focus) === JSON.stringify(['entities/0', 'accurate']), 'feedback-entity-card-fresh', entityCard);
+    await tick(renderer, `${feedbackItem('entities/0')} .analysis-feedback-judgments input[value="inaccurate"]`, 'feedback-entity-inaccurate');
+    const reasonsOffered = await readFeedback(renderer, (page) => Array.isArray(page.card?.reasons), 'feedback-entity-reasons');
+    requireJourney(JSON.stringify(reasonsOffered.card.reasons) === JSON.stringify([
+      ['misnamed', '名字或称谓不对', false], ['merged', '把不同人物当成一个', false], ['wrong-kind', '类别标错', false], ['other', '其他 / 自行输入', false],
+    ]) && reasonsOffered.card.other === false && reasonsOffered.card.correction === true && reasonsOffered.card.record === 'enabled',
+    'feedback-entity-reasons-words', reasonsOffered.card);
+    await tick(renderer, `${feedbackItem('entities/0')} .analysis-feedback-reasons input[value="merged"]`, 'feedback-entity-reason');
+    await fill(renderer, `${feedbackItem('entities/0')} [data-analysis-feedback-field="correction"]`, ENTITY_CORRECTION, 'feedback-entity-correction');
+    await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-feedback-action="record"]`, 'feedback-entity-record');
+    await waitFor(renderer, `${status} === '反馈已记录。'`, 'feedback-entity-recorded-status');
+    const entityJudged = await readFeedback(renderer, (page) => page.card === null && page.metric?.judged === '1', 'feedback-entity-recorded');
+    const entityRow = rowOf(entityJudged, 'entities/0');
+    requireJourney(entityRow[1] === 'inaccurate' && entityRow[2] === '1' && (entityRow[3] ?? '').startsWith(`你的反馈：不准确 · 把不同人物当成一个 · 修正：${ENTITY_CORRECTION} · `) &&
+      entityRow[4] === '改反馈…' && JSON.stringify(entityJudged.focus) === JSON.stringify(['entities/0', 'open']) &&
+      entityJudged.metric.total === '这本书判断了 1 条：准确 0、不准确 1、不完整 0' &&
+      JSON.stringify(entityJudged.metric.dimensions) === JSON.stringify(['人物与名称：1 条，准确 0、不准确 1、不完整 0']), 'feedback-entity-recorded-words', entityJudged);
+
+    at('feedback-own-reason');
+    // The synopsis 不完整 for the editor's own reason: 其他 / 自行输入 opens their words beside the alternatives, focused.
+    await clickSelector(renderer, '#analysis-tab-synopsis', 'feedback-synopsis-tab');
+    await clickSelector(renderer, `${feedbackItem('synopsis')} [data-analysis-feedback-action="open"]`, 'feedback-synopsis-open');
+    await readFeedback(renderer, (page) => page.card?.item === 'synopsis', 'feedback-synopsis-card');
+    await tick(renderer, `${feedbackItem('synopsis')} .analysis-feedback-judgments input[value="incomplete"]`, 'feedback-synopsis-incomplete');
+    const synopsisReasons = await readFeedback(renderer, (page) => Array.isArray(page.card?.reasons), 'feedback-synopsis-reasons');
+    requireJourney(JSON.stringify(synopsisReasons.card.reasons) === JSON.stringify([['key-plot-missing', '漏了关键情节', false], ['ending-missing', '没有概括到结尾', false], ['other', '其他 / 自行输入', false]]),
+      'feedback-synopsis-reasons-words', synopsisReasons.card);
+    await tick(renderer, `${feedbackItem('synopsis')} .analysis-feedback-reasons input[value="other"]`, 'feedback-synopsis-other');
+    const ownWords = await readFeedback(renderer, (page) => page.card?.other === true, 'feedback-synopsis-own-words');
+    requireJourney(JSON.stringify(ownWords.focus) === JSON.stringify(['synopsis', 'other']), 'feedback-synopsis-own-words-focused', ownWords.focus);
+    await fill(renderer, `${feedbackItem('synopsis')} [data-analysis-feedback-field="other"]`, SYNOPSIS_REASON, 'feedback-synopsis-reason-text');
+    await clickSelector(renderer, `${feedbackItem('synopsis')} [data-analysis-feedback-action="record"]`, 'feedback-synopsis-record');
+    const synopsisJudged = await readFeedback(renderer, (page) => page.card === null && page.metric?.judged === '2', 'feedback-synopsis-recorded');
+    const synopsisRow = rowOf(synopsisJudged, 'synopsis');
+    requireJourney(synopsisRow[1] === 'incomplete' && (synopsisRow[3] ?? '').startsWith(`你的反馈：不完整 · ${SYNOPSIS_REASON} · `) &&
+      synopsisJudged.metric.total === '这本书判断了 2 条：准确 0、不准确 1、不完整 1' &&
+      JSON.stringify(synopsisJudged.metric.dimensions) === JSON.stringify(['全书梗概：1 条，准确 0、不准确 0、不完整 1', '人物与名称：1 条，准确 0、不准确 1、不完整 0']),
+    'feedback-synopsis-recorded-words', synopsisJudged);
+
+    at('feedback-change');
+    // 改反馈… records a successor: 准确 asks for no reason and no correction; the earlier judgment stays on record beside it,
+    // and the tally counts the entry once, by its latest.
+    await clickSelector(renderer, '#analysis-tab-entities', 'feedback-change-tab');
+    await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-feedback-action="open"]`, 'feedback-change-open');
+    await readFeedback(renderer, (page) => page.card?.item === 'entities/0', 'feedback-change-card');
+    await tick(renderer, `${feedbackItem('entities/0')} .analysis-feedback-judgments input[value="accurate"]`, 'feedback-change-accurate');
+    const accurateCard = await readFeedback(renderer, (page) => page.card?.judgments?.[0]?.[1] === true, 'feedback-change-accurate-card');
+    requireJourney(accurateCard.card.reasons === null && accurateCard.card.correction === false && accurateCard.card.record === 'enabled',
+      'feedback-change-accurate-asks-nothing', accurateCard.card);
+    await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-feedback-action="record"]`, 'feedback-change-record');
+    const changed = await readFeedback(renderer, (page) => page.card === null && rowOf(page, 'entities/0')[2] === '2', 'feedback-changed');
+    const changedRow = rowOf(changed, 'entities/0');
+    requireJourney(changedRow[1] === 'accurate' && (changedRow[3] ?? '').startsWith('你的反馈：准确 · ') && !(changedRow[3] ?? '').includes('修正') &&
+      changed.metric.total === '这本书判断了 2 条：准确 1、不准确 0、不完整 1', 'feedback-changed-words', changed);
+    const recorded = await renderer.evaluate(`window.ai7.inspectAnalysisFeedback({ revisionId: ${JSON.stringify(revisionId)} })`);
+    const recordedEntity = recorded?.items?.find((entry) => entry.itemKey === 'entities/0');
+    requireJourney(recordedEntity?.signals === 2 && UUID_PATTERN.test(recordedEntity.latest?.supersedes ?? '') && recordedEntity.latest.judgment === 'accurate' &&
+      recorded.metric.judged === 2 && recorded.metric.definition === 'ai7.analysis-quality-metric/1' && recorded.metric.scope === 'book' &&
+      recorded.metric.lineageDigest === changed.metric.lineage, 'feedback-changed-service', { signals: recordedEntity?.signals, metric: recorded?.metric });
+
+    at('feedback-unchanged');
+    // The same judgment again would change nothing: it is refused in the card, with why, and the entry keeps its two.
+    await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-feedback-action="open"]`, 'feedback-unchanged-open');
+    await readFeedback(renderer, (page) => page.card?.item === 'entities/0', 'feedback-unchanged-card');
+    await tick(renderer, `${feedbackItem('entities/0')} .analysis-feedback-judgments input[value="accurate"]`, 'feedback-unchanged-accurate');
+    await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-feedback-action="record"]`, 'feedback-unchanged-record');
+    const unchanged = await readFeedback(renderer, (page) => typeof page.card?.refusal === 'string', 'feedback-unchanged-refused');
+    requireJourney(unchanged.card.refusal === '反馈没有变化。' && rowOf(unchanged, 'entities/0')[2] === '2' &&
+      JSON.stringify(unchanged.card.judgments) === JSON.stringify([['accurate', true], ['inaccurate', false], ['incomplete', false]]), 'feedback-unchanged-words', unchanged);
+    await waitFor(renderer, `${status} === '反馈没有变化。'`, 'feedback-unchanged-status');
+    await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-feedback-action="cancel"]`, 'feedback-unchanged-cancel');
+    await readFeedback(renderer, (page) => page.card === null, 'feedback-unchanged-closed');
+
+    at('j14-feedback-keyboard');
+    // Without a pointer: Enter on an event's 反馈… opens its card at the first judgment, nothing chosen, and Escape closes it
+    // with nothing recorded and the focus back on 反馈….
+    await clickSelector(renderer, '#analysis-tab-events', 'feedback-keyboard-tab');
+    const eventToggle = `${feedbackItem('events/0')} [data-analysis-feedback-action="open"]`;
+    await assertRenderer(renderer, `(() => { const open = document.querySelector(${JSON.stringify(eventToggle)}); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.focus(); return document.activeElement === open; })()`, 'feedback-keyboard-focused');
+    await pressEnter(renderer);
+    const keyboardCard = await readFeedback(renderer, (page) => page.card?.item === 'events/0' && JSON.stringify(page.focus) === JSON.stringify(['events/0', 'accurate']), 'feedback-keyboard-open');
+    requireJourney(keyboardCard.card.judgments.every(([, checked]) => checked === false), 'feedback-keyboard-nothing-chosen', keyboardCard.card);
+    await pressEscape(renderer);
+    const keyboardClosed = await readFeedback(renderer, (page) => page.card === null && JSON.stringify(page.focus) === JSON.stringify(['events/0', 'open']), 'feedback-keyboard-closed');
+    requireJourney(rowOf(keyboardClosed, 'events/0')[2] === '0' && keyboardClosed.metric.judged === '2', 'feedback-keyboard-nothing-recorded', keyboardClosed);
+
+    at('j14-feedback-reflow-forced-colors');
+    // At 200% an open card, its judgments, its reasons and its correction reflow into the width; without colour the card
+    // and both its groups keep their borders.
+    await clickSelector(renderer, eventToggle, 'feedback-reflow-open');
+    await readFeedback(renderer, (page) => page.card?.item === 'events/0', 'feedback-reflow-card');
+    await tick(renderer, `${feedbackItem('events/0')} .analysis-feedback-judgments input[value="incomplete"]`, 'feedback-reflow-incomplete');
+    await readFeedback(renderer, (page) => Array.isArray(page.card?.reasons), 'feedback-reflow-reasons');
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
+    await waitFor(renderer, `(() => { const root = document.documentElement; const parts = [document.querySelector('.analysis-feedback-card'), ...document.querySelectorAll('.analysis-feedback-card fieldset'), document.querySelector('.analysis-feedback-correction')]; return parts.length === 4 && parts.every((part) => part instanceof HTMLElement && part.scrollWidth <= part.clientWidth + 2) && root.scrollWidth <= root.clientWidth + 2; })()`, 'feedback-reflow', 10_000);
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
+    await assertRenderer(renderer, `(() => {
+      if (!matchMedia('(forced-colors: active)').matches) return false;
+      const card = document.querySelector('.analysis-feedback-card');
+      const groups = Array.from(document.querySelectorAll('.analysis-feedback-card fieldset'));
+      return card instanceof HTMLElement && getComputedStyle(card).borderTopStyle === 'solid' && groups.length === 2 && groups.every((group) => getComputedStyle(group).borderTopStyle === 'solid');
+    })()`, 'feedback-forced-colors');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
+    await clickSelector(renderer, `${feedbackItem('events/0')} [data-analysis-feedback-action="cancel"]`, 'feedback-reflow-cancel');
+    await readFeedback(renderer, (page) => page.card === null, 'feedback-reflow-closed');
+
+    at('feedback-silence-is-not-approval');
+    // What nobody judged stays unjudged: every other item reads no judgment, the tally counts the two, and nothing asks for
+    // more — 待我处理 lists no feedback.
+    const silence = await readFeedback(renderer, (page) => page.card === null, 'feedback-silence');
+    requireJourney(silence.items.filter(([, judgment]) => judgment !== 'none').map(([key, judgment]) => `${key}:${judgment}`).join() === 'synopsis:incomplete,entities/0:accurate' &&
+      silence.metric.judged === '2', 'feedback-silence-unjudged', silence.items.map(([key, judgment]) => [key, judgment]));
+    const attention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
+    requireJourney(Array.isArray(attention?.groups) && attention.groups.every((group) => group.items.every((entry) => !/feedback/i.test(String(entry.state)))), 'feedback-no-attention');
+
+    at('feedback-restart');
+    // A restart moves nothing: each judgment and the tally read as before, over the same lineage.
+    const feedbackBefore = await readFeedback(renderer, (page) => page.card === null, 'feedback-restart-before');
+    await close();
+    cancellation.throwIfRequested();
+    await launch();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'feedback-restart-ready');
+    await openAnalysisOf(renderer, thirdId, 'feedback-restart');
+    const feedbackAfter = await readFeedback(renderer, (page) => page.metric?.judged === '2' && page.items.every(([, judgment]) => judgment !== null), 'feedback-restart-after');
+    requireJourney(JSON.stringify(feedbackAfter.items) === JSON.stringify(feedbackBefore.items) && JSON.stringify(feedbackAfter.metric) === JSON.stringify(feedbackBefore.metric),
+      'feedback-restart-unmoved', { before: feedbackBefore.items, after: feedbackAfter.items });
+
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
 
@@ -651,14 +1266,14 @@ async function main() {
     await loopback.close();
     journeyCompleted = true;
   } finally {
-    try {
-      // Only a Journey that finished names its cleanup; one that failed keeps the stage it failed at.
-      if (journeyCompleted) at('completion-cleanup');
-      await cancellation.cleanup();
-    } finally {
-      cancellation.dispose();
-    }
+    // Only a Journey that finished names its cleanup; one that failed keeps the stage it failed at.
+    if (journeyCompleted) at('completion-cleanup');
+    finalCleanupRequested = true;
+    try { await cancellation.cleanup(); } finally { cancellation.dispose(); }
   }
 }
 
-main().catch((error) => reportJourneyFailure('J-11', location, error));
+main().catch((error) => {
+  reportJourneyFailure('J-11', location, error);
+  if (runnerLifecycleIncomplete) process.stderr.write('', () => process.exit(1));
+});

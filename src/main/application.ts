@@ -333,11 +333,11 @@ function parseArguments(argv: string[]): LaunchArguments {
     recoveryControlValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-08' && recoveryControl !== undefined),
   );
   // The model adapter binds a Journey whose Runs execute: J-04's analysis, J-09's 运行中 and 最近完成 (Issue #424),
-  // J-10's cancelled Run (Issue #422), and J-16's 任务 panel (Issue #423).
+  // J-10's cancelled Run (Issue #422), J-16's 任务 panel (Issue #423), and J-11's 分析反馈 (Issue #94).
   requireDesktop(
     modelAdapterControlValue === undefined ||
       ((process.env.AI7_E2E_JOURNEY === 'J-04' || process.env.AI7_E2E_JOURNEY === 'J-09' || process.env.AI7_E2E_JOURNEY === 'J-10' ||
-        process.env.AI7_E2E_JOURNEY === 'J-16') &&
+        process.env.AI7_E2E_JOURNEY === 'J-16' || process.env.AI7_E2E_JOURNEY === 'J-11') &&
         modelAdapterControl !== undefined),
   );
   requireDesktop([importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length <= 1);
@@ -2613,6 +2613,45 @@ function registerRendererHandlers(
       requireSender(event);
       requireAuthority();
       return service.call('inspectKnowledgeProcedures', {});
+    }),
+  );
+  // ②A 分析反馈 (Issue #94, S38) is the route's Book's, as ②A is: the renderer names a revision, never the Book.
+  ipcMain.handle(IPC_CHANNELS.inspectAnalysisFeedback, (event, input: Parameters<RendererApi['inspectAnalysisFeedback']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectAnalysisFeedback', { bookId: route.bookId, revisionId: input.revisionId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '分析反馈不属于当前图书工作台。');
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.recordAnalysisFeedback, (event, input: Parameters<RendererApi['recordAnalysisFeedback']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('recordAnalysisFeedback', {
+          bookId: route.bookId,
+          revisionId: input.revisionId,
+          itemKey: input.itemKey,
+          itemDigest: input.itemDigest,
+          expectedLatestSignalId: input.expectedLatestSignalId,
+          judgment: input.judgment,
+          reason: input.reason,
+          correction: input.correction,
+        });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '分析反馈不属于当前图书工作台。');
+        return result;
+      });
     }),
   );
   // 知识库 › 评估方案 (Issue #429, S81a) names no Book; ②C 评估 is the route's Book's — the renderer never names it, the
