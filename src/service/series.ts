@@ -160,6 +160,8 @@ export interface SeriesImpactFacts {
   readonly seriesScopedRuns: number;
   readonly learningMaterials: number;
   readonly learningDecided: number;
+  /** Items of the Series' knowledge holding a revision taken from the Book (Issue #63, S28b). */
+  readonly knowledgeFromBook?: number;
 }
 
 /** The Book's Learning Material as the preview names it (SER-007): how many, and how many the editor has decided. */
@@ -183,6 +185,7 @@ export function seriesMembershipImpact(kind: SeriesMembershipChangeKind, facts: 
   const runs = facts.seriesScopedRuns === 0
     ? `现在没有使用${series}范围、已授权或正在运行的任务。`
     : `${facts.seriesScopedRuns} 个使用${series}范围的任务已授权或正在运行。`;
+  const knowledge = (facts.knowledgeFromBook ?? 0) === 0 ? [] : [`${series}的书系知识里有 ${facts.knowledgeFromBook} 个条目取自${book}的稿件；它们留在书系知识中不变。`];
   const learning = facts.learningMaterials === 0
     ? `${book}还没有学习材料。`
     : `${book}有 ${facts.learningMaterials} 项学习材料，其中 ${facts.learningDecided} 项已决定学习准入。`;
@@ -191,14 +194,14 @@ export function seriesMembershipImpact(kind: SeriesMembershipChangeKind, facts: 
       impactGroup('future-tasks', [`以后新建任务时，可以明确选用${series}的范围，其中会包括${book}。`],
         [`不会把${book}自动加进任何任务，也不会因此授权运行、让其他图书读到它的原文或发给模型服务。`]),
       impactGroup('runs', [], [runs, '已授权或正在运行的任务按各自冻结的范围继续，计划不会被改动。']),
-      impactGroup('knowledge-learning', [], [learning, '书系知识、学习准入和学习记录各有自己的决定；加入书系不会纳入、启用或删除它们。']),
+      impactGroup('knowledge-learning', [], [...knowledge, learning, '书系知识、学习准入和学习记录各有自己的决定；加入书系不会纳入、启用或删除它们。']),
       impactGroup('history', ['追加一条书系成员变更记录，书系和图书两边都能查看。'], ['已完成的任务、结果、决定和以前的记录都保持原样。']),
     ];
   }
   return [
     impactGroup('future-tasks', [`以后新建任务时，${series}的范围不再包括${book}。`], [`${book}自己的任务照旧。`]),
     impactGroup('runs', [], [runs, '已经冻结的任务范围不会因移出而改变，任务也不会被取消。']),
-    impactGroup('knowledge-learning', [], [learning, '书系知识、学习准入和学习记录各有自己的决定；移出书系不会删除或改动它们。']),
+    impactGroup('knowledge-learning', [], [...knowledge, learning, '书系知识、学习准入和学习记录各有自己的决定；移出书系不会删除或改动它们。']),
     impactGroup('history', ['追加一条书系成员变更记录，书系和图书两边都能查看。'], [`${book}和书系以前的记录都不会删除。`]),
   ];
 }

@@ -45,6 +45,8 @@ import {
   TASK_PLAN_KINDS,
   isReviewCategoryId,
   publicationText,
+  SERIES_KNOWLEDGE_CLASSES,
+  SERIES_KNOWLEDGE_REUSE_SCOPES,
   type BaselineAnalysisUpdateMode,
   type MilestonePurposeKind,
   type ReviewFindingSeverity,
@@ -154,6 +156,28 @@ function validLibraryDecision(value: unknown): boolean {
   return value.kind === 'eligibility' && hasExactKeys(value, ['kind', 'choice', 'reason']) &&
     (value.choice === 'book' || value.choice === 'house' || value.choice === 'excluded' || value.choice === 'deferred') &&
     (value.reason === null || isBoundedString(value.reason, MAX_LEARNING_ELIGIBILITY_REASON_GRAPHEMES * 8, true));
+}
+
+/** A Series Knowledge Candidate's item (Issue #63, S28b): a new one by name and class, or one existing item by identity. */
+function validKnowledgeTarget(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (value.kind === 'new') {
+    return hasExactKeys(value, ['kind', 'subject', 'knowledgeClass']) && isBoundedString(value.subject, 400) &&
+      (SERIES_KNOWLEDGE_CLASSES as readonly unknown[]).includes(value.knowledgeClass);
+  }
+  return value.kind === 'existing' && hasExactKeys(value, ['kind', 'itemId']) && validUuid(value.itemId);
+}
+
+/** The manuscript span a candidate cites, as a mark names its range, or `null` for the editor's own words. */
+function validKnowledgeSpan(value: unknown): boolean {
+  if (value === null) return true;
+  return isRecord(value) && hasExactKeys(value, [
+    'manuscriptId', 'branchId', 'windowStartBlockId', 'baseRevisionId', 'expectedJournalSequence', 'blockId', 'baseBlockDigest', 'fromGrapheme',
+    'toGrapheme', 'selectedText',
+  ]) && validMarkBinding(value) && isBoundedString(value.baseRevisionId, 36) && UUID_PATTERN.test(value.baseRevisionId) &&
+    isSafeInteger(value.expectedJournalSequence, 0) && isBoundedString(value.blockId, 28) && MARK_BLOCK_PATTERN.test(value.blockId) &&
+    isBoundedString(value.baseBlockDigest, 64) && HEX_DIGEST_PATTERN.test(value.baseBlockDigest) && isSafeInteger(value.fromGrapheme, 0) &&
+    isSafeInteger(value.toGrapheme, 1) && isBoundedString(value.selectedText, MAX_BLOCK_CODE_UNITS);
 }
 
 function validMarkBinding(input: Record<string, unknown>): boolean {
@@ -727,6 +751,38 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectBookSeries': {
       const input = requireInput(value.input, ['bookId'], tentativeId);
       if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 书系知识 (Issue #63, S28b): a candidate names its Series, a new item by name and class or an existing one, its words and —
+    // when it cites a member Book's manuscript — the exact span as a mark names one; a review and a promotion name the candidate.
+    case 'proposeSeriesKnowledge': {
+      const input = requireInput(value.input, ['seriesId', 'target', 'content', 'span'], tentativeId);
+      if (!validUuid(input.seriesId) || !validKnowledgeTarget(input.target) || !isBoundedString(input.content, 8_000) || !validKnowledgeSpan(input.span)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'inspectSeriesKnowledgeReview': {
+      const input = requireInput(value.input, ['seriesId', 'candidateId'], tentativeId);
+      if (!validUuid(input.seriesId) || !validUuid(input.candidateId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'editSeriesKnowledgeCandidate': {
+      const input = requireInput(value.input, ['seriesId', 'candidateId', 'expectedVersion', 'target', 'content'], tentativeId);
+      if (!validUuid(input.seriesId) || !validUuid(input.candidateId) || !isSafeInteger(input.expectedVersion, 1) || !validKnowledgeTarget(input.target) ||
+          !isBoundedString(input.content, 8_000)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'promoteSeriesKnowledge': {
+      const input = requireInput(value.input, ['seriesId', 'candidateId', 'candidateVersion', 'reviewDigest', 'reuseScope', 'conflictDisposition'], tentativeId);
+      if (!validUuid(input.seriesId) || !validUuid(input.candidateId) || !isSafeInteger(input.candidateVersion, 1) ||
+          !isBoundedString(input.reviewDigest, 64) || !HEX_DIGEST_PATTERN.test(input.reviewDigest) ||
+          !(SERIES_KNOWLEDGE_REUSE_SCOPES as readonly unknown[]).includes(input.reuseScope) ||
+          (input.conflictDisposition !== 'none' && input.conflictDisposition !== 'preserved')) {
+        throw new ProtocolError(tentativeId);
+      }
       break;
     }
     // 质量与学习 › 学习准入 (Issue #61, S26b): every Book's Learning Material, or one Book's.

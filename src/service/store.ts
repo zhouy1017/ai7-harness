@@ -116,6 +116,18 @@ import type {
   SeriesMembershipChangeResultProjection,
   SeriesMembershipPreviewProjection,
   SeriesProjection,
+  EditSeriesKnowledgeCandidateInput,
+  PromoteSeriesKnowledgeInput,
+  ProposeSeriesKnowledgeInput,
+  SeriesKnowledgeCandidateProjection,
+  SeriesKnowledgeItemProjection,
+  SeriesKnowledgePromotionProjection,
+  SeriesKnowledgeProposalProjection,
+  SeriesKnowledgeProvenanceProjection,
+  SeriesKnowledgeReviewProjection,
+  SeriesKnowledgeRevisionProjection,
+  SeriesKnowledgeSpanInput,
+  SeriesKnowledgeTarget,
   EvaluationCalibrationProjection,
   RecordPublicationActualsInput,
   SetEvaluationPreferencesInput,
@@ -353,8 +365,32 @@ import {
   MAX_SERIES_CANDIDATES_LISTED,
   MAX_SERIES_HISTORY_LISTED,
   MAX_SERIES_MEMBERS_LISTED,
+  MAX_SERIES_KNOWLEDGE_CONTENT_CHARACTERS,
+  MAX_SERIES_KNOWLEDGE_LISTED,
+  MAX_SERIES_KNOWLEDGE_SUBJECT_CHARACTERS,
   PUBLICATION_ACTUALS_RECORDED_STATE,
+  SERIES_KNOWLEDGE_CLASS_LABELS,
+  SERIES_KNOWLEDGE_CONFLICT_LABEL,
+  SERIES_KNOWLEDGE_REUSE_LABELS,
+  SERIES_KNOWLEDGE_REUSE_SCOPES,
 } from '../shared/protocol.js';
+import {
+  SeriesKnowledgeError,
+  SeriesKnowledgeLedger,
+  initializeSeriesKnowledgeSchema,
+  isSeriesKnowledgeClass,
+  isSeriesKnowledgeReuseScope,
+  seriesKnowledgeConflicts,
+  seriesKnowledgeContent,
+  seriesKnowledgeReviewDigest,
+  seriesKnowledgeSubject,
+  type FoundConflict,
+  type ResolvedTarget,
+  type StoredCandidate,
+  type StoredItem,
+  type StoredProvenance,
+  type StoredRevision,
+} from './series-knowledge.js';
 import { readExemplars } from './exemplars.js';
 import { readKnowledgeProcedures } from './knowledge-procedures.js';
 import {
@@ -461,6 +497,7 @@ import {
   LEARNING_ELIGIBILITY_SCHEMA_VERSION,
   EVALUATION_CALIBRATION_SCHEMA_VERSION,
   SERIES_SCHEMA_VERSION,
+  SERIES_KNOWLEDGE_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1689,7 +1726,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === DECISION_FEEDBACK_SCHEMA_VERSION ||
       currentVersion === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
       currentVersion === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
-      currentVersion === SERIES_SCHEMA_VERSION,
+      currentVersion === SERIES_SCHEMA_VERSION ||
+      currentVersion === SERIES_KNOWLEDGE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1737,7 +1775,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === DECISION_FEEDBACK_SCHEMA_VERSION ||
       currentVersion === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
       currentVersion === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
-      currentVersion === SERIES_SCHEMA_VERSION
+      currentVersion === SERIES_SCHEMA_VERSION ||
+      currentVersion === SERIES_KNOWLEDGE_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2099,7 +2138,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === DECISION_FEEDBACK_SCHEMA_VERSION ||
       version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
-      version === SERIES_SCHEMA_VERSION,
+      version === SERIES_SCHEMA_VERSION ||
+      version === SERIES_KNOWLEDGE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2136,7 +2176,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === DECISION_FEEDBACK_SCHEMA_VERSION ||
       version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
-      version === SERIES_SCHEMA_VERSION) return;
+      version === SERIES_SCHEMA_VERSION ||
+      version === SERIES_KNOWLEDGE_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2265,7 +2306,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === DECISION_FEEDBACK_SCHEMA_VERSION ||
       version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
-      version === SERIES_SCHEMA_VERSION,
+      version === SERIES_SCHEMA_VERSION ||
+      version === SERIES_KNOWLEDGE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2301,7 +2343,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === DECISION_FEEDBACK_SCHEMA_VERSION ||
       version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
-      version === SERIES_SCHEMA_VERSION) return;
+      version === SERIES_SCHEMA_VERSION ||
+      version === SERIES_KNOWLEDGE_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2594,7 +2637,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== SERIES_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== SERIES_KNOWLEDGE_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2633,6 +2676,7 @@ function validateModelServiceSchema(
       version >= LEARNING_ELIGIBILITY_SCHEMA_VERSION,
       version >= EVALUATION_CALIBRATION_SCHEMA_VERSION,
       version >= SERIES_SCHEMA_VERSION,
+      version >= SERIES_KNOWLEDGE_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2696,7 +2740,8 @@ function initializeModelServiceSchema(
       version === DECISION_FEEDBACK_SCHEMA_VERSION ||
       version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
-      version === SERIES_SCHEMA_VERSION,
+      version === SERIES_SCHEMA_VERSION ||
+      version === SERIES_KNOWLEDGE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2732,7 +2777,8 @@ function initializeModelServiceSchema(
       version === DECISION_FEEDBACK_SCHEMA_VERSION ||
       version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
-      version === SERIES_SCHEMA_VERSION) {
+      version === SERIES_SCHEMA_VERSION ||
+      version === SERIES_KNOWLEDGE_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3554,6 +3600,7 @@ export class EditorialStore {
   readonly #learningEligibility: LearningEligibilityLedger;
   readonly #evaluationCalibration: EvaluationCalibrationLedger;
   readonly #series: SeriesLedger;
+  readonly #seriesKnowledge: SeriesKnowledgeLedger;
   /** ②C 评估 (Issue #429, S81a): each Book's versioned Evaluation Records. */
   readonly #evaluations: EvaluationRecords;
   /** ②A 分析反馈 (Issue #94, S38): the editor's judgments of analysis results. */
@@ -3617,6 +3664,7 @@ export class EditorialStore {
     this.#learningEligibility = new LearningEligibilityLedger(authority);
     this.#evaluationCalibration = new EvaluationCalibrationLedger(authority);
     this.#series = new SeriesLedger(authority);
+    this.#seriesKnowledge = new SeriesKnowledgeLedger(authority);
     this.#evaluations = new EvaluationRecords(authority, { current: (bookId) => this.#evaluationManuscript(bookId) });
     this.#analysisFeedback = new AnalysisFeedbackLedger(authority);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
@@ -3770,7 +3818,8 @@ export class EditorialStore {
       // revision 47 (Issue #429, S81a) each Book's Evaluation Records, revision 48 (Issue #94, S38) the editor's judgments
       // of analysis results, revision 49 (Issue #61, S26a) the 不说明 and later reasons of Proposal Decisions, and revision 50
       // (Issue #61, S26b) the editor's Learning Eligibility decisions, and revision 51 (Issue #430, S82) each Book's 定价与首印
-      // and the house's evaluation preferences; revision 52 (Issue #63, S28a) the house's Series and their membership changes.
+      // and the house's evaluation preferences; revision 52 (Issue #63, S28a) the house's Series and their membership changes,
+      // and revision 53 (Issue #63, S28b) Series Knowledge: candidates, items, revisions and promotion decisions.
       initializeBookPeopleSchema(authority);
       initializeReviewGuidelineSchema(authority);
       initializeLibraryMaterialSchema(authority);
@@ -3780,6 +3829,7 @@ export class EditorialStore {
       initializeLearningEligibilitySchema(authority);
       initializeEvaluationCalibrationSchema(authority);
       initializeSeriesSchema(authority);
+      initializeSeriesKnowledgeSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -10523,6 +10573,7 @@ export class EditorialStore {
       // No Task kind can name a Series in its scope before Series-scope pins (Issue #64, S29): none is authorized or running.
       seriesScopedRuns: 0,
       ...seriesLearningFacts(materials),
+      knowledgeFromBook: this.#seriesKnowledge.itemsFromBook(series.seriesId, input.bookId),
     });
     return {
       seriesId: series.seriesId,
@@ -10563,6 +10614,7 @@ export class EditorialStore {
       candidatesTruncated: candidates.length > MAX_SERIES_CANDIDATES_LISTED,
       history: history.slice(0, MAX_SERIES_HISTORY_LISTED).map((change) => this.#seriesChange(change, series.title, titles.get(change.bookId) ?? '')),
       historyTruncated: history.length > MAX_SERIES_HISTORY_LISTED,
+      knowledge: this.#seriesKnowledgeProjection(series.seriesId, titles),
     };
   }
 
@@ -10583,13 +10635,248 @@ export class EditorialStore {
     };
   }
 
+  // ---- 书系知识 (Issue #63, plan slice S28b; V2-UX-SER-013 to SER-019; ADR 0036) ---------------------------------------
+
+  /**
+   * 提议为书系知识 (SER-013, SER-014): the editor's own words, or the exact span of a member Book's manuscript, becomes a
+   * non-authoritative candidate for a new or an exact existing item. Nothing reads it until it is taken in.
+   */
+  proposeSeriesKnowledge(input: ProposeSeriesKnowledgeInput): SeriesKnowledgeProposalProjection {
+    return this.#seriesCall(() => {
+      const created = this.#transaction(this.#authority, () => {
+        const series = this.#requireSeries(input.seriesId);
+        const target = this.#knowledgeTarget(series.seriesId, input.target);
+        const content = seriesKnowledgeContent(input.content);
+        requireStore(content !== null, 'SERIES_KNOWLEDGE_CONTENT_INVALID', `内容要 1–${MAX_SERIES_KNOWLEDGE_CONTENT_CHARACTERS} 个字。`);
+        const provenance = input.span === null ? null : this.#knowledgeSpan(series, input.span);
+        return this.#seriesKnowledge.propose({ seriesId: series.seriesId, target, content, provenance });
+      });
+      const series = this.#requireSeries(input.seriesId);
+      return { candidateId: created.candidateId, completionLabel: `已提议为书系「${series.title}」的知识候选项`, series: this.#seriesProjection(series) };
+    });
+  }
+
+  /** 书系知识纳入审阅 (SER-015, SER-016, SER-019) of one open candidate as it stands now. A read. */
+  inspectSeriesKnowledgeReview(input: { seriesId: string; candidateId: string }): SeriesKnowledgeReviewProjection {
+    return this.#seriesCall(() => this.#seriesKnowledgeReview(input.seriesId, input.candidateId).projection);
+  }
+
+  /** 编辑候选项 (SER-015): the candidate's next version, read again in review against the item as it stands now. */
+  editSeriesKnowledgeCandidate(input: EditSeriesKnowledgeCandidateInput): SeriesKnowledgeReviewProjection {
+    return this.#seriesCall(() => {
+      this.#transaction(this.#authority, () => {
+        const series = this.#requireSeries(input.seriesId);
+        requireStore(typeof input.candidateId === 'string' && UUID_PATTERN.test(input.candidateId), 'SERIES_KNOWLEDGE_CANDIDATE_INVALID', '候选项标识无效。');
+        const candidate = this.#seriesKnowledge.candidate(input.candidateId);
+        requireStore(candidate !== null && candidate.seriesId === series.seriesId, 'SERIES_KNOWLEDGE_CANDIDATE_NOT_FOUND', '这个候选项不存在。');
+        const target = this.#knowledgeTarget(series.seriesId, input.target);
+        const content = seriesKnowledgeContent(input.content);
+        requireStore(content !== null, 'SERIES_KNOWLEDGE_CONTENT_INVALID', `内容要 1–${MAX_SERIES_KNOWLEDGE_CONTENT_CHARACTERS} 个字。`);
+        this.#seriesKnowledge.edit(input.candidateId, input.expectedVersion, target, content);
+      });
+      return this.#seriesKnowledgeReview(input.seriesId, input.candidateId).projection;
+    });
+  }
+
+  /**
+   * 纳入书系知识 (SER-017 to SER-019): against the exact review the editor read — a moved candidate, item, conflict or
+   * membership refuses it — a conflict kept only by 保留已披露冲突, and where it may later be used chosen by the editor.
+   */
+  promoteSeriesKnowledge(input: PromoteSeriesKnowledgeInput): SeriesKnowledgePromotionProjection {
+    return this.#seriesCall(() => {
+      const promoted = this.#transaction(this.#authority, () => {
+        const review = this.#seriesKnowledgeReview(input.seriesId, input.candidateId);
+        requireStore(review.candidate.version === input.candidateVersion && review.projection.reviewDigest === input.reviewDigest,
+          'SERIES_KNOWLEDGE_REVIEW_STALE', '候选项、条目或冲突在审阅之后有了变化；请重新审阅。');
+        requireStore(review.projection.blocked === null, 'SERIES_KNOWLEDGE_BLOCKED', review.projection.blocked ?? '');
+        requireStore(isSeriesKnowledgeReuseScope(input.reuseScope), 'SERIES_KNOWLEDGE_REUSE_INVALID', '请选择以后的用途。');
+        if (review.conflicts.length > 0) {
+          requireStore(input.conflictDisposition === 'preserved', 'SERIES_KNOWLEDGE_CONFLICT_UNRESOLVED',
+            `${SERIES_KNOWLEDGE_CONFLICT_LABEL}：请编辑候选项，或选择保留已披露冲突。`);
+        } else {
+          requireStore(input.conflictDisposition === 'none', 'SERIES_KNOWLEDGE_DISPOSITION_INVALID', '没有已披露的冲突可以保留。');
+        }
+        return this.#seriesKnowledge.promote({ candidate: review.candidate, conflicts: review.conflicts, reuseScope: input.reuseScope, reviewDigest: input.reviewDigest });
+      });
+      return {
+        itemId: promoted.itemId,
+        revisionId: promoted.revisionId,
+        completionLabel: promoted.outcome === 'created' ? '书系知识已纳入' as const : '书系知识已更新' as const,
+        series: this.#seriesProjection(this.#requireSeries(input.seriesId)),
+      };
+    });
+  }
+
+  /** The item a candidate proposes, resolved against the Series as it stands: a new name and class, or the exact item now. */
+  #knowledgeTarget(seriesId: string, target: SeriesKnowledgeTarget): ResolvedTarget {
+    requireStore(typeof target === 'object' && target !== null && (target.kind === 'new' || target.kind === 'existing'), 'SERIES_KNOWLEDGE_TARGET_INVALID', '候选项要写明是新条目还是已有条目。');
+    if (target.kind === 'new') {
+      const subject = seriesKnowledgeSubject(target.subject);
+      requireStore(subject !== null, 'SERIES_KNOWLEDGE_SUBJECT_INVALID', `条目名称要 1–${MAX_SERIES_KNOWLEDGE_SUBJECT_CHARACTERS} 个字，写在一行里。`);
+      requireStore(isSeriesKnowledgeClass(target.knowledgeClass), 'SERIES_KNOWLEDGE_CLASS_INVALID', '请选择条目类别。');
+      return { kind: 'new', subject, knowledgeClass: target.knowledgeClass };
+    }
+    requireStore(typeof target.itemId === 'string' && UUID_PATTERN.test(target.itemId), 'SERIES_KNOWLEDGE_TARGET_INVALID', '候选项要写明是新条目还是已有条目。');
+    const item = this.#seriesKnowledge.item(target.itemId);
+    requireStore(item !== null && item.seriesId === seriesId, 'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识条目不存在。');
+    return { kind: 'existing', itemId: item.itemId, subject: item.subject, knowledgeClass: item.knowledgeClass, baseRevisionId: item.revisions.at(-1)!.revisionId };
+  }
+
+  /** The exact span a provenance-bound candidate cites (SER-013): verified as a mark's is, in a Book the Series holds now. */
+  #knowledgeSpan(series: StoredSeries, span: SeriesKnowledgeSpanInput): StoredProvenance {
+    requireStore(typeof span === 'object' && span !== null, 'SERIES_KNOWLEDGE_SPAN_INVALID', '所选文字无效。');
+    const verified = this.#markCall(() => this.#editorialMarks.verifySpan(span));
+    const bookTitle = this.#evaluationBookTitle(verified.bookId);
+    requireStore(this.#series.seriesOf(verified.bookId).some((entry) => entry.seriesId === series.seriesId), 'SERIES_KNOWLEDGE_NOT_MEMBER',
+      `《${bookTitle}》不在书系「${series.title}」中；只有成员图书的稿件可以提议为书系知识。`);
+    return {
+      kind: 'manuscript-revision',
+      bookId: verified.bookId,
+      manuscriptId: span.manuscriptId,
+      branchId: span.branchId,
+      revisionId: verified.revisionId,
+      revisionLabel: verified.revisionLabel,
+      journalSequence: verified.journalSequence,
+      blockId: span.blockId,
+      fromGrapheme: span.fromGrapheme,
+      toGrapheme: span.toGrapheme,
+      quote: verified.text,
+    };
+  }
+
+  #seriesKnowledgeReview(seriesId: string, candidateId: string): {
+    readonly projection: SeriesKnowledgeReviewProjection;
+    readonly candidate: StoredCandidate;
+    readonly conflicts: FoundConflict[];
+  } {
+    const series = this.#requireSeries(seriesId);
+    requireStore(typeof candidateId === 'string' && UUID_PATTERN.test(candidateId), 'SERIES_KNOWLEDGE_CANDIDATE_INVALID', '候选项标识无效。');
+    const candidate = this.#seriesKnowledge.candidate(candidateId);
+    requireStore(candidate !== null && candidate.seriesId === series.seriesId, 'SERIES_KNOWLEDGE_CANDIDATE_NOT_FOUND', '这个候选项不存在。');
+    requireStore(!candidate.promoted, 'SERIES_KNOWLEDGE_ALREADY_PROMOTED', '这个候选项已经纳入书系知识。');
+    const items = this.#seriesKnowledge.items(series.seriesId);
+    const conflicts = seriesKnowledgeConflicts(candidate, items, this.#seriesKnowledge.open(series.seriesId));
+    const target = candidate.target;
+    const current = target.kind === 'existing' ? items.find((item) => item.itemId === target.itemId)?.revisions.at(-1) ?? null : null;
+    const titles = this.#bookTitles();
+    // A provenance-bound candidate cites a member Book's manuscript: once the Book has left the Series it cannot be taken in.
+    const blocked = candidate.provenance !== null && !this.#series.seriesOf(candidate.provenance.bookId).some((entry) => entry.seriesId === series.seriesId)
+      ? `《${titles.get(candidate.provenance.bookId) ?? ''}》已不在书系「${series.title}」中；来自它的候选项不能纳入。`
+      : null;
+    return {
+      candidate,
+      conflicts,
+      projection: {
+        seriesId: series.seriesId,
+        seriesTitle: series.title,
+        candidate: this.#knowledgeCandidateProjection(candidate, items, conflicts.length, titles),
+        current: current === null ? null : this.#knowledgeRevisionProjection(current, titles),
+        conflicts: conflicts.map((entry) => ({ kind: entry.kind, line: entry.line })),
+        conflictLabel: conflicts.length === 0 ? null : SERIES_KNOWLEDGE_CONFLICT_LABEL,
+        reuseScopes: SERIES_KNOWLEDGE_REUSE_SCOPES.map((scope) => ({ scope, label: SERIES_KNOWLEDGE_REUSE_LABELS[scope] })),
+        blocked,
+        reviewDigest: seriesKnowledgeReviewDigest({ seriesId: series.seriesId, candidateVersionId: candidate.versionId, currentRevisionId: current?.revisionId ?? null, conflicts, blocked }),
+        actionLabel: '纳入书系知识',
+      },
+    };
+  }
+
+  #seriesKnowledgeProjection(seriesId: string, titles: ReadonlyMap<string, string>): SeriesProjection['knowledge'] {
+    const items = this.#seriesKnowledge.items(seriesId);
+    const open = this.#seriesKnowledge.open(seriesId);
+    return {
+      items: items.slice(0, MAX_SERIES_KNOWLEDGE_LISTED).map((item) => this.#knowledgeItemProjection(item, titles)),
+      itemsTruncated: items.length > MAX_SERIES_KNOWLEDGE_LISTED,
+      candidates: open.slice(0, MAX_SERIES_KNOWLEDGE_LISTED)
+        .map((candidate) => this.#knowledgeCandidateProjection(candidate, items, seriesKnowledgeConflicts(candidate, items, open).length, titles)),
+      candidatesTruncated: open.length > MAX_SERIES_KNOWLEDGE_LISTED,
+    };
+  }
+
+  #bookTitles(): Map<string, string> {
+    return new Map((this.#authority.prepare('SELECT book_id, title FROM books').all() as SqlRow[]).map((row) => [asString(row.book_id), asString(row.title)]));
+  }
+
+  #knowledgeProvenance(provenance: StoredProvenance | null, titles: ReadonlyMap<string, string>): SeriesKnowledgeProvenanceProjection | null {
+    if (provenance === null) return null;
+    return {
+      kind: provenance.kind,
+      bookId: provenance.bookId,
+      bookTitle: titles.get(provenance.bookId) ?? '',
+      manuscriptId: provenance.manuscriptId,
+      revisionId: provenance.revisionId,
+      revisionLabel: provenance.revisionLabel,
+      journalSequence: provenance.journalSequence,
+      blockId: provenance.blockId,
+      fromGrapheme: provenance.fromGrapheme,
+      toGrapheme: provenance.toGrapheme,
+      quote: provenance.quote,
+    };
+  }
+
+  #knowledgeCandidateProjection(
+    candidate: StoredCandidate,
+    items: ReadonlyArray<StoredItem>,
+    conflicts: number,
+    titles: ReadonlyMap<string, string>,
+  ): SeriesKnowledgeCandidateProjection {
+    const target = candidate.target;
+    const base = target.kind === 'existing'
+      ? items.find((item) => item.itemId === target.itemId)?.revisions.find((revision) => revision.revisionId === target.baseRevisionId) ?? null
+      : null;
+    return {
+      candidateId: candidate.candidateId,
+      version: candidate.version,
+      target: {
+        kind: target.kind,
+        itemId: target.kind === 'existing' ? target.itemId : null,
+        subject: target.subject,
+        knowledgeClass: target.knowledgeClass,
+        classLabel: SERIES_KNOWLEDGE_CLASS_LABELS[target.knowledgeClass],
+        baseRevisionOrdinal: base?.ordinal ?? null,
+      },
+      content: candidate.content,
+      authoring: candidate.authoring,
+      provenance: this.#knowledgeProvenance(candidate.provenance, titles),
+      recordedAt: candidate.recordedAt,
+      conflicts,
+    };
+  }
+
+  #knowledgeRevisionProjection(revision: StoredRevision, titles: ReadonlyMap<string, string>): SeriesKnowledgeRevisionProjection {
+    return {
+      revisionId: revision.revisionId,
+      ordinal: revision.ordinal,
+      content: revision.content,
+      authoring: revision.authoring,
+      provenance: this.#knowledgeProvenance(revision.provenance, titles),
+      conflicts: revision.conflicts,
+      reuseScope: revision.reuseScope,
+      reuseLabel: SERIES_KNOWLEDGE_REUSE_LABELS[revision.reuseScope],
+      decisionId: revision.decisionId,
+      outcome: revision.outcome,
+      recordedAt: revision.recordedAt,
+    };
+  }
+
+  #knowledgeItemProjection(item: StoredItem, titles: ReadonlyMap<string, string>): SeriesKnowledgeItemProjection {
+    return {
+      itemId: item.itemId,
+      subject: item.subject,
+      knowledgeClass: item.knowledgeClass,
+      classLabel: SERIES_KNOWLEDGE_CLASS_LABELS[item.knowledgeClass],
+      createdAt: item.createdAt,
+      revisions: [...item.revisions].reverse().map((revision) => this.#knowledgeRevisionProjection(revision, titles)),
+    };
+  }
+
   #seriesCall<T>(operation: () => T): T {
     this.#assertAvailable();
     try {
       return operation();
     } catch (error) {
-      if (error instanceof SeriesError || error instanceof LearningEligibilityError || error instanceof DecisionFeedbackError ||
-          error instanceof AnalysisFeedbackError) {
+      if (error instanceof SeriesError || error instanceof SeriesKnowledgeError || error instanceof LearningEligibilityError ||
+          error instanceof DecisionFeedbackError || error instanceof AnalysisFeedbackError) {
         throw new StoreError(error.code, error.message);
       }
       throw error;

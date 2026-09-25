@@ -356,6 +356,14 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['changeSeriesMembership']['output']>(IPC_CHANNELS.changeSeriesMembership, input),
   inspectBookSeries: (input: ServiceOperationMap['inspectBookSeries']['input']) =>
     invoke<ServiceOperationMap['inspectBookSeries']['output']>(IPC_CHANNELS.inspectBookSeries, input),
+  proposeSeriesKnowledge: (input: ServiceOperationMap['proposeSeriesKnowledge']['input']) =>
+    invoke<ServiceOperationMap['proposeSeriesKnowledge']['output']>(IPC_CHANNELS.proposeSeriesKnowledge, input),
+  inspectSeriesKnowledgeReview: (input: ServiceOperationMap['inspectSeriesKnowledgeReview']['input']) =>
+    invoke<ServiceOperationMap['inspectSeriesKnowledgeReview']['output']>(IPC_CHANNELS.inspectSeriesKnowledgeReview, input),
+  editSeriesKnowledgeCandidate: (input: ServiceOperationMap['editSeriesKnowledgeCandidate']['input']) =>
+    invoke<ServiceOperationMap['editSeriesKnowledgeCandidate']['output']>(IPC_CHANNELS.editSeriesKnowledgeCandidate, input),
+  promoteSeriesKnowledge: (input: ServiceOperationMap['promoteSeriesKnowledge']['input']) =>
+    invoke<ServiceOperationMap['promoteSeriesKnowledge']['output']>(IPC_CHANNELS.promoteSeriesKnowledge, input),
   applyChangeSuggestion: (input: ServiceOperationMap['applyChangeSuggestion']['input']) =>
     invoke<ServiceOperationMap['applyChangeSuggestion']['output']>(IPC_CHANNELS.applyChangeSuggestion, input),
   applyChangeSuggestionBatch: (input: ServiceOperationMap['applyChangeSuggestionBatch']['input']) =>

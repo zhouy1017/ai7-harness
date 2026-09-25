@@ -22,6 +22,7 @@ import type {
   BookSummaryPageProjection,
   BookWorkbenchRoute,
   BookWorkOverviewProjection,
+  ProposeSeriesKnowledgeInput,
   FidelityCategoryProjection,
   ContinueImportProjection,
   EditorialWorkspaceProfileProjection,
@@ -8064,6 +8065,12 @@ function renderEditorWindow(
     marksChanged: () => manuscriptRail?.refresh(),
     openReviewFinding: (target) => void leaveForReview({ reviewRunId: target.reviewRunId, findingId: target.findingId }),
     openConflict: (markId) => void leaveForConflict(markId),
+    // 书系知识 (Issue #63, S28b): a member Book's manuscript offers its selected words to each Series it is in; a Production
+    // Document offers nothing of 书系.
+    ...(isDocument ? {} : {
+      seriesOf: () => window.ai7.inspectBookSeries({ bookId: initialWindow.bookId }).then((answer) => answer.memberships),
+      proposeSeriesKnowledge: (input: ProposeSeriesKnowledgeInput) => window.ai7.proposeSeriesKnowledge(input),
+    }),
     // An Apply is an authoritative write like a replacement or an undo: the window is reloaded from the
     // service and must show exactly the manuscript state the Effect Receipt names.
     writeManuscript: async (operation, done) => {

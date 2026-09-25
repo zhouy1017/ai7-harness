@@ -562,6 +562,14 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.changeSeriesMembership(request.input) };
     case 'inspectBookSeries':
       return { id: request.id, ok: true, op: request.op, result: store.inspectBookSeries(request.input.bookId) };
+    case 'proposeSeriesKnowledge':
+      return { id: request.id, ok: true, op: request.op, result: store.proposeSeriesKnowledge(request.input) };
+    case 'inspectSeriesKnowledgeReview':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeReview(request.input) };
+    case 'editSeriesKnowledgeCandidate':
+      return { id: request.id, ok: true, op: request.op, result: store.editSeriesKnowledgeCandidate(request.input) };
+    case 'promoteSeriesKnowledge':
+      return { id: request.id, ok: true, op: request.op, result: store.promoteSeriesKnowledge(request.input) };
     case 'inspectEvaluationProfiles':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluationProfiles() };
     case 'inspectEvaluation':

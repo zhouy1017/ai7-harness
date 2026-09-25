@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 78 as const;
+export const SERVICE_PROTOCOL_VERSION = 79 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -131,6 +131,10 @@ export const IPC_CHANNELS = {
   previewSeriesMembershipChange: 'ai7:j13:preview-series-membership-change',
   changeSeriesMembership: 'ai7:j13:change-series-membership',
   inspectBookSeries: 'ai7:j13:inspect-book-series',
+  proposeSeriesKnowledge: 'ai7:j13:propose-series-knowledge',
+  inspectSeriesKnowledgeReview: 'ai7:j13:inspect-series-knowledge-review',
+  editSeriesKnowledgeCandidate: 'ai7:j13:edit-series-knowledge-candidate',
+  promoteSeriesKnowledge: 'ai7:j13:promote-series-knowledge',
   applyChangeSuggestion: 'ai7:j05:apply-change-suggestion',
   applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
   reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
@@ -5282,9 +5286,140 @@ export interface SeriesMemberProjection {
   readonly seriesConsistencyReview: { readonly reviewedAt: string } | null;
 }
 
+// ---- 书系知识 (Issue #63, plan slice S28b; V2-UX-SER-013 to SER-019; ADR 0036) -------------------------------------------
+
+/** The stable knowledge classes a Series Knowledge Item belongs to (CONTEXT: Series Knowledge). */
+export const SERIES_KNOWLEDGE_CLASSES = ['canon', 'characters', 'places', 'chronology', 'terminology', 'continuity', 'style', 'positioning'] as const;
+export type SeriesKnowledgeClass = (typeof SERIES_KNOWLEDGE_CLASSES)[number];
+export const SERIES_KNOWLEDGE_CLASS_LABELS: Readonly<Record<SeriesKnowledgeClass, string>> = {
+  canon: '正典设定',
+  characters: '人物',
+  places: '地点',
+  chronology: '时间线',
+  terminology: '术语',
+  continuity: '连续性规则',
+  style: '共同文风',
+  positioning: '定位',
+};
+/** Where a promoted revision may later be chosen (SER-014, SER-015): named at review, none preselected. */
+export const SERIES_KNOWLEDGE_REUSE_SCOPES = ['series-tasks', 'consistency-review'] as const;
+export type SeriesKnowledgeReuseScope = (typeof SERIES_KNOWLEDGE_REUSE_SCOPES)[number];
+export const SERIES_KNOWLEDGE_REUSE_LABELS: Readonly<Record<SeriesKnowledgeReuseScope, string>> = {
+  'series-tasks': '以后的书系范围任务都可以选用',
+  'consistency-review': '只用于书系一致性审阅',
+};
+export const MAX_SERIES_KNOWLEDGE_SUBJECT_CHARACTERS = 40;
+export const MAX_SERIES_KNOWLEDGE_CONTENT_CHARACTERS = 2_000;
+/** How many items and open candidates one Series answer lists at most. */
+export const MAX_SERIES_KNOWLEDGE_LISTED = 200;
+export const SERIES_KNOWLEDGE_CONFLICT_LABEL = '存在书系知识冲突 · 需要处理' as const;
+
+/** The Series Knowledge Item a candidate proposes: a new one, named and classed, or one exact existing item. */
+export type SeriesKnowledgeTarget =
+  | { readonly kind: 'new'; readonly subject: string; readonly knowledgeClass: SeriesKnowledgeClass }
+  | { readonly kind: 'existing'; readonly itemId: string };
+
+/** The exact span of a member Book's working manuscript a candidate cites, as the editor selected it (SER-013). */
+export interface SeriesKnowledgeSpanInput {
+  readonly manuscriptId: string;
+  readonly branchId: string;
+  readonly windowStartBlockId: string;
+  readonly baseRevisionId: string;
+  readonly expectedJournalSequence: number;
+  readonly blockId: string;
+  readonly baseBlockDigest: string;
+  readonly fromGrapheme: number;
+  readonly toGrapheme: number;
+  readonly selectedText: string;
+}
+
+export interface ProposeSeriesKnowledgeInput {
+  readonly seriesId: string;
+  readonly target: SeriesKnowledgeTarget;
+  readonly content: string;
+  /** `null` for the editor's own words; the exact span of a member Book's manuscript otherwise. */
+  readonly span: SeriesKnowledgeSpanInput | null;
+}
+
+/** Where a provenance-bound candidate came from: one member Book's manuscript, at an exact revision and journal position. */
+export interface SeriesKnowledgeProvenanceProjection {
+  readonly kind: 'manuscript-revision';
+  readonly bookId: string;
+  readonly bookTitle: string;
+  readonly manuscriptId: string;
+  readonly revisionId: string;
+  readonly revisionLabel: string;
+  readonly journalSequence: number;
+  readonly blockId: string;
+  readonly fromGrapheme: number;
+  readonly toGrapheme: number;
+  readonly quote: string;
+}
+
+/** A disclosed conflict (SER-016), found by identity: the same item or name, never by meaning. */
+export interface SeriesKnowledgeConflictProjection {
+  readonly kind: 'existing-item' | 'competing-candidate' | 'item-updated';
+  readonly line: string;
+}
+
+export interface SeriesKnowledgeTargetProjection {
+  readonly kind: 'new' | 'existing';
+  readonly itemId: string | null;
+  readonly subject: string;
+  readonly knowledgeClass: SeriesKnowledgeClass;
+  readonly classLabel: string;
+  /** For an existing item: the revision the candidate was written against. */
+  readonly baseRevisionOrdinal: number | null;
+}
+
+/** A Series Knowledge Candidate as it stands: non-authoritative, read by no Task (SER-014). */
+export interface SeriesKnowledgeCandidateProjection {
+  readonly candidateId: string;
+  readonly version: number;
+  readonly target: SeriesKnowledgeTargetProjection;
+  readonly content: string;
+  readonly authoring: 'editor' | 'manuscript-revision';
+  readonly provenance: SeriesKnowledgeProvenanceProjection | null;
+  readonly recordedAt: string;
+  readonly conflicts: number;
+}
+
+/** One immutable Series Knowledge Revision with the decision that made it (SER-017). */
+export interface SeriesKnowledgeRevisionProjection {
+  readonly revisionId: string;
+  readonly ordinal: number;
+  readonly content: string;
+  readonly authoring: 'editor' | 'manuscript-revision';
+  readonly provenance: SeriesKnowledgeProvenanceProjection | null;
+  /** The conflicts the editor chose to keep with this revision; never a verification. */
+  readonly conflicts: ReadonlyArray<SeriesKnowledgeConflictProjection>;
+  readonly reuseScope: SeriesKnowledgeReuseScope;
+  readonly reuseLabel: string;
+  readonly decisionId: string;
+  readonly outcome: 'created' | 'updated';
+  readonly recordedAt: string;
+}
+
+/** A stable Series Knowledge Item and its revisions, newest first. */
+export interface SeriesKnowledgeItemProjection {
+  readonly itemId: string;
+  readonly subject: string;
+  readonly knowledgeClass: SeriesKnowledgeClass;
+  readonly classLabel: string;
+  readonly createdAt: string;
+  readonly revisions: ReadonlyArray<SeriesKnowledgeRevisionProjection>;
+}
+
+export interface SeriesKnowledgeProjection {
+  readonly items: ReadonlyArray<SeriesKnowledgeItemProjection>;
+  readonly itemsTruncated: boolean;
+  readonly candidates: ReadonlyArray<SeriesKnowledgeCandidateProjection>;
+  readonly candidatesTruncated: boolean;
+}
+
 /**
  * 书系 › one Series › 成员与共享范围 (SER-001): its member Books, the Books that may be added, and every membership change,
- * newest first. It is not a reader of the member manuscripts.
+ * newest first, and its Series Knowledge (Issue #63, S28b). It is not a reader of the member manuscripts.
  */
 export interface SeriesProjection {
   readonly seriesId: string;
@@ -5297,6 +5432,57 @@ export interface SeriesProjection {
   readonly candidatesTruncated: boolean;
   readonly history: ReadonlyArray<SeriesMembershipChangeProjection>;
   readonly historyTruncated: boolean;
+  readonly knowledge: SeriesKnowledgeProjection;
+}
+
+export interface SeriesKnowledgeProposalProjection {
+  readonly candidateId: string;
+  /** `已提议为书系「…」的知识候选项`. */
+  readonly completionLabel: string;
+  readonly series: SeriesProjection;
+}
+
+/**
+ * 书系知识纳入审阅 (SER-015 to SER-019): the exact Series and item, the candidate's content and provenance, the item's current
+ * revision when it would be superseded, the disclosed conflicts, and where it may later be used — none preselected.
+ */
+export interface SeriesKnowledgeReviewProjection {
+  readonly seriesId: string;
+  readonly seriesTitle: string;
+  readonly candidate: SeriesKnowledgeCandidateProjection;
+  readonly current: SeriesKnowledgeRevisionProjection | null;
+  readonly conflicts: ReadonlyArray<SeriesKnowledgeConflictProjection>;
+  readonly conflictLabel: typeof SERIES_KNOWLEDGE_CONFLICT_LABEL | null;
+  readonly reuseScopes: ReadonlyArray<{ readonly scope: SeriesKnowledgeReuseScope; readonly label: string }>;
+  /** Why the candidate cannot be taken in at all now, or `null`. */
+  readonly blocked: string | null;
+  readonly reviewDigest: string;
+  readonly actionLabel: '纳入书系知识';
+}
+
+export interface EditSeriesKnowledgeCandidateInput {
+  readonly seriesId: string;
+  readonly candidateId: string;
+  readonly expectedVersion: number;
+  readonly target: SeriesKnowledgeTarget;
+  readonly content: string;
+}
+
+export interface PromoteSeriesKnowledgeInput {
+  readonly seriesId: string;
+  readonly candidateId: string;
+  readonly candidateVersion: number;
+  readonly reviewDigest: string;
+  readonly reuseScope: SeriesKnowledgeReuseScope;
+  /** `preserved` only when the review disclosed a conflict and the editor chose 保留已披露冲突. */
+  readonly conflictDisposition: 'none' | 'preserved';
+}
+
+export interface SeriesKnowledgePromotionProjection {
+  readonly itemId: string;
+  readonly revisionId: string;
+  readonly completionLabel: '书系知识已纳入' | '书系知识已更新';
+  readonly series: SeriesProjection;
 }
 
 export interface PreviewSeriesMembershipChangeInput {
@@ -7686,6 +7872,10 @@ export interface ServiceOperationMap {
   previewSeriesMembershipChange: { input: PreviewSeriesMembershipChangeInput; output: SeriesMembershipPreviewProjection };
   changeSeriesMembership: { input: ChangeSeriesMembershipInput; output: SeriesMembershipChangeResultProjection };
   inspectBookSeries: { input: { bookId: string }; output: BookSeriesProjection };
+  proposeSeriesKnowledge: { input: ProposeSeriesKnowledgeInput; output: SeriesKnowledgeProposalProjection };
+  inspectSeriesKnowledgeReview: { input: { seriesId: string; candidateId: string }; output: SeriesKnowledgeReviewProjection };
+  editSeriesKnowledgeCandidate: { input: EditSeriesKnowledgeCandidateInput; output: SeriesKnowledgeReviewProjection };
+  promoteSeriesKnowledge: { input: PromoteSeriesKnowledgeInput; output: SeriesKnowledgePromotionProjection };
   /**
    * AI7 Apply for Change Suggestions (Issue #408). The batch form is 确认应用 on 审阅's confirmation
    * strip (Issue #417): one Effect over exactly the suggestions the strip named, all or none.
@@ -8022,6 +8212,10 @@ export interface RendererApi {
   previewSeriesMembershipChange(input: PreviewSeriesMembershipChangeInput): Promise<SeriesMembershipPreviewProjection>;
   changeSeriesMembership(input: ChangeSeriesMembershipInput): Promise<SeriesMembershipChangeResultProjection>;
   inspectBookSeries(input: { bookId: string }): Promise<BookSeriesProjection>;
+  proposeSeriesKnowledge(input: ProposeSeriesKnowledgeInput): Promise<SeriesKnowledgeProposalProjection>;
+  inspectSeriesKnowledgeReview(input: { seriesId: string; candidateId: string }): Promise<SeriesKnowledgeReviewProjection>;
+  editSeriesKnowledgeCandidate(input: EditSeriesKnowledgeCandidateInput): Promise<SeriesKnowledgeReviewProjection>;
+  promoteSeriesKnowledge(input: PromoteSeriesKnowledgeInput): Promise<SeriesKnowledgePromotionProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */
   applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): Promise<ManuscriptApplyCommandProjection>;

@@ -1,4 +1,5 @@
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -9,8 +10,13 @@ import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabl
 // with a name refused past its bound; one Series' 成员与共享范围; 加入书系 through the four-part Series Membership Impact Preview
 // whose only committing action is exactly `加入书系`; a preview another change moved past, refused and read again; 书库's
 // search by 书系; each Book's own 书系 records on its 工作概览; 移出书系 as prospective; a restart that keeps everything; and the
-// preview by keyboard, at 200% and under forced colours. The Books are empty and every name is the runner's own: no
-// manuscript, no credential, no Provider.
+// preview by keyboard, at 200% and under forced colours. Those Books are empty and every name is the runner's own.
+//
+// Since S28b (Issue #63; V2-UX-SER-013 to SER-019) a fourth Book is made from the one admitted input, exact `sample1`, through
+// the launch control `--j13-picker-path`, and joins the Series. Its selected words become a Series Knowledge Candidate from
+// the manuscript's selection menu; an editor-authored candidate for the same name discloses a conflict; 书系知识纳入审阅 keeps
+// it by `保留已披露冲突` and `纳入书系知识` creates the item; 编辑候选项 retargets the other candidate to that item, which is
+// taken in as its second revision. No credential, no Provider.
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -24,6 +30,11 @@ const SERIES_LEDE = '书系把相关的图书放在一起。加入书系只让�
 const SCOPE_NOTE = '成员只表示以后的任务可以明确选用这个书系的范围；这里不汇总、也不打开成员图书的原文。';
 const STALE = '预览之后，书系成员或相关记录有了变化；请重新查看影响，再决定。';
 const GROUPS = [['future-tasks', '未来任务'], ['runs', '已授权或正在运行'], ['knowledge-learning', '书系知识与学习'], ['history', '历史记录']];
+const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
+const MEMBER = '星河之三';
+const PLACE = '海边小城';
+const EDITOR_WORDS = '三部曲里海边小城的地名，以第一部的写法为准。';
+const KNOWLEDGE_NOTE = '书系知识只有经过纳入审阅才会成为书系可以选用的知识；候选项不会被任何任务读取，纳入也不会授权读取、发送或改动稿件。';
 let location = 'entry';
 
 function at(next) {
@@ -341,6 +352,154 @@ async function bookSide(renderer, bookId, name) {
   return readBookSeries(renderer, (side) => side.bookId === bookId, `${name}-series`);
 }
 
+/** Exact `sample1` through the import flow, as a new Book with its first manuscript; the Book's identity. */
+async function importSample1(renderer, title, sample1, name) {
+  await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
+  await click(renderer, '导入稿件', `${name}-start`);
+  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, `${name}-target`);
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
+  await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, `${name}-relationship`);
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
+  await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, `${name}-title-screen`);
+  await assertRenderer(renderer, `document.querySelector('[data-source-sha256]')?.textContent===${JSON.stringify(sample1.sha256)} && document.querySelector('[data-source-bytes]')?.textContent===${JSON.stringify(String(sample1.bytes))}`, `${name}-exact-source`);
+  await fill(renderer, '#book-title', title, `${name}-title`);
+  await click(renderer, '确认书名并复核', `${name}-review`);
+  await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, `${name}-review-ready`);
+  await waitFor(renderer, `!document.querySelector('#accept-import-degradation')&&Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='新建图书并导入稿件'&&!button.disabled)`, `${name}-review-clean`);
+  await click(renderer, '新建图书并导入稿件', `${name}-commit`);
+  await waitFor(renderer, `document.querySelector('[data-screen="imported"] .book-overview[data-manuscript-state="populated"]')`, `${name}-completed`, 180_000);
+  await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged==='true'`, `${name}-acknowledged`, 180_000);
+  const bookId = await renderer.evaluate(`document.querySelector('.book-overview')?.dataset.bookId ?? null`);
+  requireJourney(UUID_PATTERN.test(bookId ?? ''), `${name}-book-identity`);
+  return bookId;
+}
+
+// A hand on the manuscript, as J-11 has it: a selection put into a block by offset, a right-click the way a pointer does,
+// and the floating Mark surface acted on by its data attributes. A block's durable text leaves out any preview's words.
+const MARK_HELPERS = `(() => {
+  if (window.__j13) return true;
+  const editor = () => document.querySelector('[data-testid="manuscript-editor"]');
+  const block = (id) => editor()?.querySelector('[data-block-id="' + id + '"]') ?? null;
+  const durable = (root) => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) => node.parentElement?.closest('[data-mark-preview]') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    return nodes;
+  };
+  const point = (root, offset) => {
+    let left = offset;
+    for (const node of durable(root)) {
+      if (left <= node.data.length) return [node, left];
+      left -= node.data.length;
+    }
+    return null;
+  };
+  const layer = () => document.querySelector('.editorial-mark-layer');
+  window.__j13 = {
+    place: (id, from, to) => {
+      const root = block(id);
+      if (!root) return false;
+      editor().focus();
+      const start = point(root, from);
+      const end = point(root, to);
+      if (!start || !end) return false;
+      const range = document.createRange();
+      range.setStart(start[0], start[1]);
+      range.setEnd(end[0], end[1]);
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return selection.toString().length === to - from;
+    },
+    rightClick: (element) => {
+      if (!(element instanceof HTMLElement)) return false;
+      const rect = element.getBoundingClientRect();
+      const init = { bubbles: true, cancelable: true, button: 2, buttons: 2, clientX: rect.left + Math.min(10, rect.width / 2), clientY: rect.top + Math.min(24, rect.height / 2) };
+      element.dispatchEvent(new MouseEvent('mousedown', init));
+      element.dispatchEvent(new MouseEvent('mouseup', { ...init, buttons: 0 }));
+      element.dispatchEvent(new MouseEvent('contextmenu', { ...init, buttons: 0 }));
+      return true;
+    },
+    block,
+    menu: () => document.querySelector('.editorial-mark-menu-layer [data-mark-menu]'),
+    item: (action) => document.querySelector('.editorial-mark-menu-layer [data-mark-menu] [data-mark-action="' + action + '"]'),
+    composer: () => layer()?.querySelector('[data-mark-composer]') ?? null,
+    act: (action) => {
+      const control = layer()?.querySelector('[data-mark-composer] [data-mark-action="' + action + '"]');
+      if (!(control instanceof HTMLButtonElement) || control.disabled) return false;
+      control.click();
+      return true;
+    },
+    write: (field, value) => {
+      const input = layer()?.querySelector('[data-mark-field="' + field + '"]');
+      if (!(input instanceof HTMLTextAreaElement) && !(input instanceof HTMLSelectElement)) return false;
+      input.value = value;
+      input.dispatchEvent(new Event(input instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
+      return input.value === value;
+    },
+  };
+  return true;
+})()`;
+
+/** A menu opened with the pointer: the editor reads a selection a tick after the page sets it, so it is asked again until it shows. */
+async function openSelectionMenu(renderer, blockId, from, to, name) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    await assertRenderer(renderer, `window.__j13.place(${JSON.stringify(blockId)}, ${from}, ${to})`, `${name}-prepare`);
+    await new Promise((resolveWait) => setTimeout(resolveWait, 80));
+    await assertRenderer(renderer, `window.__j13.rightClick(window.__j13.block(${JSON.stringify(blockId)}))`, `${name}-right-click`);
+    if (await renderer.evaluate(`Boolean(window.__j13.menu()?.dataset.markMenu === 'selection' && window.__j13.menu().textContent.includes('已选 ${to - from} 字'))`)) return;
+    await press(renderer, 'Escape');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 120));
+  }
+  throw new Error(`J-13/${name}`);
+}
+
+/** 书系知识 on the Series page as the editor reads it: items, candidates, the propose form, the review, and focus. */
+const READ_KNOWLEDGE = `(() => {
+  const root = document.querySelector('[data-screen="series"] .series-knowledge');
+  if (!(root instanceof HTMLElement) || root.dataset.knowledgeItems === undefined) return null;
+  const review = root.querySelector('.knowledge-review');
+  const form = root.querySelector('form.knowledge-form-propose');
+  const active = document.activeElement;
+  const promote = review?.querySelector('[data-knowledge-action="promote"]');
+  const text = (node) => node?.textContent ?? null;
+  return {
+    note: text(root.querySelector('.knowledge-note')),
+    items: Array.from(root.querySelectorAll('li.knowledge-item'), (item) => [item.dataset.itemId ?? null, text(item.querySelector('.knowledge-item-title')), text(item.querySelector('.knowledge-item-content')),
+      text(item.querySelector('.knowledge-item-provenance')), text(item.querySelector('.knowledge-item-reuse')), text(item.querySelector('.knowledge-item-conflicts')), text(item.querySelector('details.knowledge-item-history > summary'))]),
+    itemsEmpty: text(root.querySelector('.knowledge-items-empty')),
+    candidates: Array.from(root.querySelectorAll('li.knowledge-candidate'), (item) => [item.dataset.candidateId ?? null, item.dataset.authoring ?? null, text(item.querySelector('.knowledge-candidate-target')),
+      text(item.querySelector('.knowledge-candidate-provenance')), item.querySelector('.knowledge-candidate-conflict') !== null]),
+    candidatesEmpty: text(root.querySelector('.knowledge-candidates-empty')),
+    form: form === null ? null : {
+      targets: Array.from(form.querySelectorAll('input[name="knowledge-target"]'), (radio) => [radio.value, radio.checked, radio.parentElement?.textContent ?? '']),
+      subject: form.querySelector('#knowledge-subject-propose') !== null,
+    },
+    review: review === null ? null : {
+      candidateId: review.dataset.candidateId ?? null,
+      identity: text(review.querySelector('.knowledge-review-identity')),
+      provenance: text(review.querySelector('.knowledge-review-provenance')),
+      superseded: text(review.querySelector('.knowledge-review-superseded')),
+      conflictLabel: text(review.querySelector('.knowledge-conflict-label')),
+      conflicts: Array.from(review.querySelectorAll('.knowledge-review-conflicts li'), (line) => [line.dataset.conflictKind ?? null, line.textContent ?? '']),
+      dispositions: Array.from(review.querySelectorAll('.knowledge-dispositions [data-knowledge-action]'), (button) => [button.dataset.knowledgeAction ?? null, button.textContent ?? '', button.getAttribute('aria-pressed')]),
+      preserved: text(review.querySelector('.knowledge-preserved-note')),
+      reuse: Array.from(review.querySelectorAll('input[name="knowledge-reuse"]'), (radio) => [radio.value, radio.checked]),
+      promote: promote instanceof HTMLButtonElement ? [promote.textContent, promote.disabled] : null,
+      waits: text(review.querySelector('.knowledge-promote-waits')),
+      editing: review.querySelector('form.knowledge-form-edit') !== null,
+      editTargets: Array.from(review.querySelectorAll('form.knowledge-form-edit input[name="knowledge-target"]'), (radio) => [radio.value, radio.checked]),
+    },
+    focus: active instanceof HTMLElement && root.contains(active)
+      ? (active.dataset.knowledgeAction ?? (active.classList.contains('knowledge-review-heading') ? 'review-heading' : active.classList.contains('knowledge-item-title') ? 'item-title' : (active.getAttribute('name') || active.id || active.tagName)))
+      : null,
+  };
+})()`;
+const readKnowledge = (renderer, predicate, name) => readUntil(renderer, READ_KNOWLEDGE, predicate, name);
+
 async function main() {
   parseJourney();
   let loopback;
@@ -399,11 +558,16 @@ async function main() {
     const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
+    const sample1Bytes = await readFile(SAMPLE1_PATH);
+    const sample1 = { sha256: createHash('sha256').update(sample1Bytes).digest('hex'), bytes: sample1Bytes.length };
+    requireJourney(sample1.sha256 === 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' && sample1.bytes === 29_550, 'exact-sample1');
     const launch = async () => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
         '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
         resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
+        // J-13's picker imports the member Book whose words become a Series Knowledge Candidate (Issue #63, S28b).
+        '--j13-picker-path', SAMPLE1_PATH,
       ];
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       cancellation.throwIfRequested();
@@ -641,6 +805,147 @@ async function main() {
     await clickSelector(renderer, '[data-series-action="preview-cancel"]', 'reflow-cancel');
     const cancelled = await readSeries(renderer, (read) => read.preview === null && read.focus === 'remove-open', 'reflow-cancelled');
     requireJourney(cancelled.members.length === 1 && cancelled.history.length === 5, 'reflow-recorded-nothing', cancelled);
+
+    at('knowledge-member-book');
+    // A fourth Book from exact sample1 through the product's own import, then 加入书系 for it like the others.
+    await leaveSeries(renderer, 'knowledge-leave');
+    const member = await importSample1(renderer, MEMBER, sample1, 'knowledge-import');
+    await click(renderer, '返回图书列表', 'knowledge-import-back');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work article.book-summary-item')`, 'knowledge-import-library');
+    await openSeries(renderer, seriesId, 'knowledge-series');
+    await clickSelector(renderer, '[data-series-action="add-open"]', 'knowledge-add-open');
+    await readSeries(renderer, (read) => read.chooser?.some(([id]) => id === member), 'knowledge-add-chooser');
+    await clickSelector(renderer, `input[name="series-add-book"][value="${member}"]`, 'knowledge-add-choose');
+    await clickSelector(renderer, '[data-series-action="preview"]', 'knowledge-add-preview');
+    await readSeries(renderer, (read) => read.preview?.bookId === member && read.preview.heading !== null, 'knowledge-add-preview-shown');
+    await clickSelector(renderer, '[data-series-action="commit"]', 'knowledge-add-commit');
+    await waitFor(renderer, `${status} === ${JSON.stringify(`已加入书系「${SERIES}」：《${MEMBER}》`)}`, 'knowledge-added');
+    const noKnowledge = await readKnowledge(renderer, () => true, 'knowledge-empty');
+    requireJourney(noKnowledge.note === KNOWLEDGE_NOTE && noKnowledge.itemsEmpty === '还没有书系知识。' && noKnowledge.candidatesEmpty === '没有待审阅的候选项。' &&
+      noKnowledge.form === null && noKnowledge.review === null, 'knowledge-empty-words', noKnowledge);
+
+    at('knowledge-from-manuscript');
+    // In the member Book's manuscript the selection menu offers its Series: the composer quotes the selected words, asks for
+    // the item's name and class with none chosen, and keeps the words as the content until the editor changes them.
+    await leaveSeries(renderer, 'knowledge-manuscript');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]`, 'knowledge-open-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(member)}]') && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'knowledge-editor', 120_000);
+    await assertRenderer(renderer, MARK_HELPERS, 'knowledge-mark-helpers');
+    // A paragraph whose first 40 code units are 40 graphemes, so a range by offset is a range of characters.
+    const blockId = await renderer.evaluate(`(() => { const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }); return Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).find((node) => { const head = (node.textContent ?? '').slice(0, 40); return head.length === 40 && Array.from(segmenter.segment(head)).length === 40; })?.dataset.blockId ?? null; })()`);
+    requireJourney(/^blk_[0-9a-f]{24}$/.test(blockId ?? ''), 'knowledge-markable-paragraph');
+    const quote = await renderer.evaluate(`(window.__j13.block(${JSON.stringify(blockId)})?.textContent ?? '').slice(2, 8)`);
+    await openSelectionMenu(renderer, blockId, 2, 8, 'knowledge-menu');
+    const menu = await renderer.evaluate(`(() => { const groups = Array.from(window.__j13.menu().querySelectorAll('[role="group"]'), (group) => group.getAttribute('aria-label')); const item = window.__j13.item('propose-series-knowledge'); return [groups, item?.textContent ?? null, item instanceof HTMLButtonElement && !item.disabled]; })()`);
+    requireJourney(JSON.stringify(menu[0]?.slice(-1)) === JSON.stringify(['书系']) && menu[1] === `提议为书系「${SERIES}」的知识…` && menu[2] === true, 'knowledge-menu-words', menu);
+    await assertRenderer(renderer, `(() => { const item = window.__j13.item('propose-series-knowledge'); if (!(item instanceof HTMLButtonElement) || item.disabled) return false; item.click(); return true; })()`, 'knowledge-menu-choose');
+    await waitFor(renderer, `window.__j13.composer()?.dataset.markComposer === 'propose-series-knowledge'`, 'knowledge-composer');
+    const composer = await renderer.evaluate(`(() => { const box = window.__j13.composer(); const field = (name) => box.querySelector('[data-mark-field="' + name + '"]'); return [box.querySelector('[data-mark-quote]')?.textContent ?? null, field('subject')?.value ?? null, field('knowledgeClass')?.value ?? null, Array.from(field('knowledgeClass')?.options ?? [], (option) => option.textContent), field('body')?.value ?? null]; })()`);
+    requireJourney(composer[0] === quote && composer[1] === '' && composer[2] === '' && JSON.stringify(composer[3]) === JSON.stringify(['请选择', '正典设定', '人物', '地点', '时间线', '术语', '连续性规则', '共同文风', '定位']) && composer[4] === quote,
+      'knowledge-composer-words', composer);
+    await assertRenderer(renderer, `window.__j13.write('subject', ${JSON.stringify(PLACE)}) && window.__j13.write('knowledgeClass', 'places') && window.__j13.act('submit')`, 'knowledge-composer-submit');
+    await waitFor(renderer, `${status} === ${JSON.stringify(`已提议为书系「${SERIES}」的知识候选项`)} && window.__j13.composer() === null`, 'knowledge-proposed');
+
+    at('knowledge-editor-authored');
+    // On the Series page the candidate waits with where it came from; the editor's own candidate for the same name — however
+    // it is spaced — discloses a conflict on both.
+    // The manuscript leaves for 书库 through the header's 待我处理, as J-07 does.
+    await clickSelector(renderer, '#global-attention-entry', 'knowledge-editor-attention');
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]')`, 'knowledge-editor-attention-screen');
+    await click(renderer, '返回图书列表', 'knowledge-editor-back');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work article.book-summary-item')`, 'knowledge-editor-library');
+    await openSeries(renderer, seriesId, 'knowledge-candidates');
+    const waiting = await readKnowledge(renderer, (read) => read.candidates.length === 1, 'knowledge-candidate-listed');
+    requireJourney(waiting.candidates[0][1] === 'manuscript-revision' && waiting.candidates[0][2] === `新条目「${PLACE}」（地点）` &&
+      waiting.candidates[0][3] === `来自《${MEMBER}》r1 的原文：「${quote}」` && waiting.candidates[0][4] === false, 'knowledge-candidate-words', waiting);
+    await clickSelector(renderer, '[data-knowledge-action="propose-open"]', 'knowledge-propose-open');
+    const proposeForm = await readKnowledge(renderer, (read) => read.form !== null && read.focus === 'knowledge-target', 'knowledge-propose-form');
+    requireJourney(JSON.stringify(proposeForm.form.targets) === JSON.stringify([['new', false, '新条目']]) && proposeForm.form.subject === false, 'knowledge-propose-form-words', proposeForm);
+    await clickSelector(renderer, 'form.knowledge-form-propose input[name="knowledge-target"][value="new"]', 'knowledge-propose-new');
+    await readKnowledge(renderer, (read) => read.form?.subject === true, 'knowledge-propose-new-fields');
+    await fill(renderer, '#knowledge-subject-propose', '海边 小城', 'knowledge-propose-subject');
+    await choose(renderer, '#knowledge-class-propose', 'places', 'knowledge-propose-class');
+    await fill(renderer, '#knowledge-content-propose', EDITOR_WORDS, 'knowledge-propose-content');
+    await clickSelector(renderer, '[data-knowledge-action="propose"]', 'knowledge-propose');
+    await waitFor(renderer, `${status} === ${JSON.stringify(`已提议为书系「${SERIES}」的知识候选项`)}`, 'knowledge-proposed-again');
+    const twoCandidates = await readKnowledge(renderer, (read) => read.candidates.length === 2 && read.form === null, 'knowledge-two-candidates');
+    requireJourney(twoCandidates.candidates.every((candidate) => candidate[4] === true) && twoCandidates.candidates[1][1] === 'editor' && twoCandidates.candidates[1][3] === '编辑撰写' && twoCandidates.focus === 'review',
+      'knowledge-two-candidates-words', twoCandidates);
+    const [fromManuscript, fromEditor] = twoCandidates.candidates.map(([id]) => id);
+
+    at('knowledge-review-conflict');
+    // 书系知识纳入审阅 names the exact Series and item, discloses the other candidate, offers the three choices and the two uses
+    // none chosen, and keeps 纳入书系知识 unavailable, saying why, until the conflict is kept explicitly.
+    await clickSelector(renderer, `[data-candidate-id="${fromManuscript}"] [data-knowledge-action="review"]`, 'knowledge-review-open');
+    const review = await readKnowledge(renderer, (read) => read.review?.identity !== null && read.review?.identity !== undefined && read.focus === 'review-heading', 'knowledge-review');
+    requireJourney(review.review.identity === `书系「${SERIES}」 · 新条目「${PLACE}」（地点）` && review.review.provenance === `来自《${MEMBER}》r1 的原文：「${quote}」` &&
+      review.review.superseded === null && review.review.conflictLabel === '存在书系知识冲突 · 需要处理' &&
+      JSON.stringify(review.review.conflicts) === JSON.stringify([['competing-candidate', `另一个候选项也在提议「海边 小城」：${EDITOR_WORDS}`]]) &&
+      JSON.stringify(review.review.dispositions) === JSON.stringify([['edit', '编辑候选项', null], ['preserve', '保留已披露冲突', 'false'], ['review-cancel', '取消', null]]) &&
+      JSON.stringify(review.review.reuse) === JSON.stringify([['series-tasks', false], ['consistency-review', false]]) &&
+      JSON.stringify(review.review.promote) === JSON.stringify(['纳入书系知识', true]) && review.review.waits === '先处理已披露的冲突：编辑候选项，或选择保留已披露冲突。',
+    'knowledge-review-words', review);
+    await clickSelector(renderer, 'input[name="knowledge-reuse"][value="consistency-review"]', 'knowledge-reuse');
+    const stillWaits = await readKnowledge(renderer, (read) => read.review?.reuse.some(([scope, checked]) => scope === 'consistency-review' && checked), 'knowledge-reuse-chosen');
+    requireJourney(stillWaits.review.promote[1] === true, 'knowledge-still-waits', stillWaits);
+    await clickSelector(renderer, '[data-knowledge-action="preserve"]', 'knowledge-preserve');
+    const kept = await readKnowledge(renderer, (read) => read.review?.preserved !== null && read.review?.preserved !== undefined, 'knowledge-preserved');
+    requireJourney(kept.review.preserved === '已选择保留已披露冲突：冲突会随这一版一起记录，不代表核实。' && kept.review.dispositions[1][2] === 'true' && kept.review.promote[1] === false && kept.review.waits === null,
+      'knowledge-preserved-words', kept);
+    await clickSelector(renderer, '[data-knowledge-action="promote"]', 'knowledge-promote');
+    await waitFor(renderer, `${status} === '书系知识已纳入'`, 'knowledge-promoted-status');
+    const promotedOne = await readKnowledge(renderer, (read) => read.items.length === 1 && read.review === null, 'knowledge-promoted');
+    requireJourney(promotedOne.items[0][1] === `「${PLACE}」 · 地点 · 第 1 版` && promotedOne.items[0][2] === quote && promotedOne.items[0][3] === `来自《${MEMBER}》r1 的原文：「${quote}」` &&
+      promotedOne.items[0][4] === '以后的用途：只用于书系一致性审阅' && promotedOne.items[0][5] === '保留了 1 处已披露冲突，未作核实。' && promotedOne.focus === 'item-title' &&
+      promotedOne.candidates.length === 1 && promotedOne.candidates[0][0] === fromEditor && promotedOne.candidates[0][4] === true, 'knowledge-promoted-words', promotedOne);
+    const itemId = promotedOne.items[0][0];
+
+    at('knowledge-review-edit');
+    // The editor's candidate now names an item that exists. 编辑候选项 retargets it to that item; read again, it discloses
+    // nothing, states the version it would supersede, waits only for its use, and becomes the item's second revision.
+    await clickSelector(renderer, `[data-candidate-id="${fromEditor}"] [data-knowledge-action="review"]`, 'knowledge-edit-review');
+    const existing = await readKnowledge(renderer, (read) => read.review?.candidateId === fromEditor && read.review.identity !== null, 'knowledge-edit-review-open');
+    requireJourney(JSON.stringify(existing.review.conflicts.map(([kind]) => kind)) === JSON.stringify(['existing-item']) &&
+      existing.review.conflicts[0][1] === `书系知识里已有「${PLACE}」（地点）第 1 版：${quote}`, 'knowledge-existing-conflict', existing);
+    await clickSelector(renderer, '[data-knowledge-action="edit"]', 'knowledge-edit-open');
+    const editing = await readKnowledge(renderer, (read) => read.review?.editing === true, 'knowledge-editing');
+    requireJourney(JSON.stringify(editing.review.editTargets) === JSON.stringify([['new', true], [itemId, false]]), 'knowledge-editing-words', editing);
+    await clickSelector(renderer, `form.knowledge-form-edit input[name="knowledge-target"][value="${itemId}"]`, 'knowledge-edit-target');
+    await readKnowledge(renderer, (read) => JSON.stringify(read.review?.editTargets) === JSON.stringify([['new', false], [itemId, true]]), 'knowledge-edit-target-chosen');
+    await clickSelector(renderer, '[data-knowledge-action="edit-save"]', 'knowledge-edit-save');
+    await waitFor(renderer, `${status} === '候选项已更新，请重新审阅。'`, 'knowledge-edited');
+    const reread = await readKnowledge(renderer, (read) => read.review?.editing === false && read.review.identity !== null && read.focus === 'review-heading', 'knowledge-reread');
+    requireJourney(reread.review.identity === `书系「${SERIES}」 · 条目「${PLACE}」（地点）` && reread.review.conflictLabel === null && reread.review.conflicts.length === 0 &&
+      reread.review.superseded === `将被取代的当前版本：第 1 版 · ${quote}` && JSON.stringify(reread.review.promote) === JSON.stringify(['纳入书系知识', true]) &&
+      reread.review.waits === '先选择以后的用途。', 'knowledge-reread-words', reread);
+    await clickSelector(renderer, 'input[name="knowledge-reuse"][value="series-tasks"]', 'knowledge-edit-reuse');
+    await readKnowledge(renderer, (read) => read.review?.promote?.[1] === false, 'knowledge-edit-ready');
+    await clickSelector(renderer, '[data-knowledge-action="promote"]', 'knowledge-edit-promote');
+    await waitFor(renderer, `${status} === '书系知识已更新'`, 'knowledge-updated-status');
+    const updated = await readKnowledge(renderer, (read) => read.items[0]?.[1] === `「${PLACE}」 · 地点 · 第 2 版` && read.review === null, 'knowledge-updated');
+    requireJourney(updated.items[0][2] === EDITOR_WORDS && updated.items[0][3] === '编辑撰写' && updated.items[0][4] === '以后的用途：以后的书系范围任务都可以选用' &&
+      updated.items[0][5] === null && updated.items[0][6] === '历次版本（2）' && updated.candidatesEmpty === '没有待审阅的候选项。', 'knowledge-updated-words', updated);
+    const knowledgeService = await renderer.evaluate(`window.ai7.inspectSeries({ seriesId: ${JSON.stringify(seriesId)} }).then((answer) => [answer.knowledge.items.map((item) => [item.itemId, item.subject, item.knowledgeClass, item.revisions.map((revision) => [revision.ordinal, revision.outcome, revision.authoring, revision.conflicts.length, revision.reuseScope])]), answer.knowledge.candidates.length])`);
+    requireJourney(JSON.stringify(knowledgeService) === JSON.stringify([[[itemId, PLACE, 'places', [[2, 'updated', 'editor', 0, 'series-tasks'], [1, 'created', 'manuscript-revision', 1, 'consistency-review']]]], 0]),
+      'knowledge-service', knowledgeService);
+
+    at('j14-knowledge-keyboard');
+    // Without a pointer: Enter on 提议为书系知识… opens the form at its first choice, and Escape closes it back onto the opener.
+    await assertRenderer(renderer, `(() => { const open=document.querySelector('[data-knowledge-action="propose-open"]'); if(!(open instanceof HTMLButtonElement)||open.disabled)return false; open.focus(); return document.activeElement===open; })()`, 'knowledge-keyboard-opener');
+    await press(renderer, 'Enter');
+    await readKnowledge(renderer, (read) => read.form !== null && read.focus === 'knowledge-target', 'knowledge-keyboard-form');
+    await press(renderer, 'Escape');
+    await readKnowledge(renderer, (read) => read.form === null && read.focus === 'propose-open', 'knowledge-keyboard-escaped');
+
+    at('knowledge-restart');
+    // After a restart the item keeps both revisions and no candidate waits.
+    await closeBrowser();
+    manager = await launch();
+    renderer = await waitForRenderer(manager, 'knowledge-restart-window');
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"] section.recent-work article.book-summary-item')`, 'knowledge-restart-ready');
+    await openSeries(renderer, seriesId, 'knowledge-restart-series');
+    const restarted = await readKnowledge(renderer, (read) => read.items.length === 1, 'knowledge-restarted');
+    requireJourney(restarted.items[0][1] === `「${PLACE}」 · 地点 · 第 2 版` && restarted.items[0][6] === '历次版本（2）' && restarted.candidatesEmpty === '没有待审阅的候选项。', 'knowledge-restarted-words', restarted);
 
     at('zero-activity');
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key))`, 'exact-service-readiness-remained-zero');

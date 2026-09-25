@@ -920,6 +920,32 @@ export class EditorialMarkStore {
   }
 
   /**
+   * An exact span of the working manuscript, verified as a mark's range is (Issue #63, S28b): the window's binding, the
+   * revision and journal position the editor saw, and the words at the range — what a provenance-bound Series Knowledge
+   * Candidate cites. Nothing is written.
+   */
+  verifySpan(input: {
+    manuscriptId: string; branchId: string; windowStartBlockId: string; baseRevisionId: string; expectedJournalSequence: number;
+    blockId: string; baseBlockDigest: string; fromGrapheme: number; toGrapheme: number; selectedText: string;
+  }): { bookId: string; revisionId: string; revisionLabel: string; journalSequence: number; text: string } {
+    this.#requireBinding(input);
+    requireMark(
+      UUID_PATTERN.test(input.baseRevisionId) && BLOCK_PATTERN.test(input.blockId) && DIGEST_PATTERN.test(input.baseBlockDigest) &&
+        Number.isSafeInteger(input.expectedJournalSequence) && input.expectedJournalSequence >= 0 && typeof input.selectedText === 'string',
+      'MARK_INVALID',
+      '所选文字的标识无效。',
+    );
+    const state = this.#branchState(input.manuscriptId, input.branchId);
+    requireMark(
+      state.revisionId === input.baseRevisionId && state.journalSequence === input.expectedJournalSequence,
+      'MARK_BINDING_CHANGED',
+      '稿件已有新的写入，请重新选择文字。',
+    );
+    const text = this.#requireRange(input.branchId, input.blockId, input.baseBlockDigest, input.fromGrapheme, input.toGrapheme, input.selectedText);
+    return { bookId: state.bookId, revisionId: state.revisionId, revisionLabel: state.revisionLabel, journalSequence: state.journalSequence, text };
+  }
+
+  /**
    * A mark made by AI7 or carried in from an imported file. The range is verified against the working
    * state exactly as an editor's is; nothing reaches the manuscript surface unanchored.
    */
