@@ -2521,6 +2521,7 @@ function requireManuscriptReimportTargetSchema(
   includeMaintenanceCaseTables ||= committed(MAINTENANCE_CASE_SCHEMA_SQL);
   includeBookPeopleTables ||= committed(BOOK_PEOPLE_SCHEMA_SQL);
   includeReviewGuidelineTables ||= committed(REVIEW_GUIDELINE_SCHEMA_SQL);
+  includeLibraryMaterialTables ||= committed(LIBRARY_MATERIAL_SCHEMA_SQL);
   requireExactSchema(
     db,
     {
