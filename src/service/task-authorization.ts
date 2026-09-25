@@ -319,9 +319,15 @@ export const STORE_VERSION_SCHEMA_VERSION = 54;
 /**
  * The database-export revision (Issue #434, S86a; V2-UX-DSTO-017; ADR 0079 §1.7): three additive, append-only relations owned
  * by `database-exports.ts` and created before this version is stamped — each 导出数据库's preparation, approval and receipt.
- * No existing row changes. This is the terminal version.
+ * No existing row changes.
  */
 export const DATABASE_EXPORT_SCHEMA_VERSION = 55;
+/**
+ * The scheduled-backup revision (Issue #434, S86b; V2-UX-DSTO-018; ADR 0079 §1.4): three additive, append-only relations owned
+ * by `scheduled-backups.ts` and created before this version is stamped — the 定期自动备份 switch's changes, each backup made
+ * and each backup removed. No existing row changes. This is the terminal version.
+ */
+export const SCHEDULED_BACKUP_SCHEMA_VERSION = 56;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
@@ -1377,7 +1383,7 @@ function validateRevision16AnalysisLedgerSchema(db: DatabaseSync): void {
 
 export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
-  requireTask(version === DATABASE_EXPORT_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
+  requireTask(version === SCHEDULED_BACKUP_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
   validateJ03TaskAuthorizationSchema(db);
   validateAnalysisLedgerSchema(db);
 }
@@ -1575,7 +1581,7 @@ function migrateAnalysisLedgerToRevision17(db: DatabaseSync, from: typeof J04_BA
         db.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_delete`]!);
       }
       seedInitialPlanVersions(db);
-      db.exec(`PRAGMA user_version = ${DATABASE_EXPORT_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${SCHEDULED_BACKUP_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -1640,7 +1646,7 @@ function migrateAnalysisLedgerToRevision24(db: DatabaseSync): void {
  * terminal shape first.
  */
 function advanceToTerminalRevision(db: DatabaseSync): void {
-  migrateInTransaction(db, `PRAGMA user_version = ${DATABASE_EXPORT_SCHEMA_VERSION};`, 'Terminal version');
+  migrateInTransaction(db, `PRAGMA user_version = ${SCHEDULED_BACKUP_SCHEMA_VERSION};`, 'Terminal version');
 }
 
 /**
@@ -1665,7 +1671,7 @@ function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24
                   mode, predecessor_revision_id, selected_start_position, selected_end_position
            FROM temp.migrate_analysis_task_intents ORDER BY migrate_rowid`);
       rebuildResultSetRelations(db);
-      db.exec(`PRAGMA user_version = ${DATABASE_EXPORT_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${SCHEDULED_BACKUP_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -1718,10 +1724,10 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === REVIEW_GUIDELINE_SCHEMA_VERSION || version === LIBRARY_MATERIAL_SCHEMA_VERSION || version === EVALUATION_RECORD_SCHEMA_VERSION ||
       version === ANALYSIS_FEEDBACK_SCHEMA_VERSION || version === DECISION_FEEDBACK_SCHEMA_VERSION || version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION || version === SERIES_SCHEMA_VERSION || version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      version === STORE_VERSION_SCHEMA_VERSION || version === DATABASE_EXPORT_SCHEMA_VERSION,
+      version === STORE_VERSION_SCHEMA_VERSION || version === DATABASE_EXPORT_SCHEMA_VERSION || version === SCHEDULED_BACKUP_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === DATABASE_EXPORT_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === SCHEDULED_BACKUP_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
   // Revisions 30 to 32 widen the Run states, the Run Authorizations' origin and the Task Outcomes first, for every
   // store that has an analysis ledger: each revision from 15 up carries them as revision 15 created them or as an
   // earlier one of these widenings left them, so once widened, every older revision's own validation below reads
@@ -1752,9 +1758,9 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === BOOK_PEOPLE_SCHEMA_VERSION || version === REVIEW_GUIDELINE_SCHEMA_VERSION || version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
       version === EVALUATION_RECORD_SCHEMA_VERSION || version === ANALYSIS_FEEDBACK_SCHEMA_VERSION || version === DECISION_FEEDBACK_SCHEMA_VERSION ||
       version === LEARNING_ELIGIBILITY_SCHEMA_VERSION || version === EVALUATION_CALIBRATION_SCHEMA_VERSION || version === SERIES_SCHEMA_VERSION ||
-      version === SERIES_KNOWLEDGE_SCHEMA_VERSION || version === STORE_VERSION_SCHEMA_VERSION) {
+      version === SERIES_KNOWLEDGE_SCHEMA_VERSION || version === STORE_VERSION_SCHEMA_VERSION || version === DATABASE_EXPORT_SCHEMA_VERSION) {
     // Revisions 25 to 29 add no task-authorization or analysis relation, revisions 30 to 35 have just widened the
-    // four they move, and revisions 36 to 55 add none, so the ledger a revision-24 to revision-54 store carries is
+    // four they move, and revisions 36 to 56 add none, so the ledger a revision-24 to revision-55 store carries is
     // already the terminal one: it is validated as the terminal shape, and nothing but the version moves.
     validateJ03TaskAuthorizationSchema(db);
     validateAnalysisLedgerSchema(db);
@@ -1790,7 +1796,7 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   }
   const analysisStatements = `${Object.values(ANALYSIS_LEDGER_SCHEMA_SQL).join(';\n')};
       ${Object.values(ANALYSIS_LEDGER_TRIGGER_SQL).join(';\n')};
-      PRAGMA user_version = ${DATABASE_EXPORT_SCHEMA_VERSION};`;
+      PRAGMA user_version = ${SCHEDULED_BACKUP_SCHEMA_VERSION};`;
   if (version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION) {
     validateJ03TaskAuthorizationSchema(db);
     return migrateInTransaction(db, analysisStatements, 'Analysis ledger');

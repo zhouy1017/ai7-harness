@@ -460,7 +460,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     // Production Documents beside their ledgers, revision 38 adds their Delivery Records and revision 39 the Book's
     // 图书交付包 versions, so this pin moves with the terminal version the service stamps
     // (`BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION`).
-    requireJourney(version?.user_version === 55, 'credential-cleanup-metadata-version');
+    requireJourney(version?.user_version === 56, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, connection_name, provider_id, model_id,
               adapter_revision, configuration_revision, approved_fallback_chain,
@@ -1498,11 +1498,21 @@ async function main() {
     await click(primary, '按上述方式导出', 'database-export-approve');
     await waitFor(primary, `document.querySelector('.database-export-prepared')?.dataset.outcome === 'created'`, 'database-export-created');
     await assertRenderer(primary, `document.querySelector('.database-export-outcome')?.textContent === '已导出到所选位置：已新建「AI7 数据库.ai7db」。' && document.querySelector('.database-export')?.dataset.databaseExports === '1'`, 'database-export-outcome-words');
+    // 定期自动备份 (Issue #434, S86b; DSTO-018): off by default; turned on, it backs up at once into the fixed location beside
+    // the data; turned off, it keeps what it made.
+    const backupLocation = `${dataRoot}-backups`;
+    const turnBackup = (on) => primary.evaluate(`(() => { const input = document.querySelector('[data-scheduled-backup-switch]'); if (!(input instanceof HTMLInputElement) || input.disabled || input.checked === ${on}) return false; input.click(); return true; })()`);
+    await waitFor(primary, `document.querySelector('.scheduled-backup')?.dataset.enabled === 'false' && document.querySelector('.scheduled-backup-location')?.textContent === ${JSON.stringify(backupLocation)}`, 'scheduled-backup-off-by-default');
+    requireJourney(await turnBackup(true), 'scheduled-backup-turn-on');
+    await waitFor(primary, `document.querySelector('.scheduled-backup')?.dataset.enabled === 'true' && document.querySelector('.scheduled-backup')?.dataset.backups === '1'`, 'scheduled-backup-made');
+    await assertRenderer(primary, `document.querySelector('.scheduled-backup-state')?.textContent === '已打开 · 每天一次 · 保留 14 天' && document.activeElement instanceof HTMLInputElement && document.activeElement.matches('[data-scheduled-backup-switch]')`, 'scheduled-backup-words');
+    requireJourney(await turnBackup(false), 'scheduled-backup-turn-off');
+    await waitFor(primary, `document.querySelector('.scheduled-backup')?.dataset.enabled === 'false' && document.querySelector('.scheduled-backup')?.dataset.backups === '1' && document.querySelector('.scheduled-backup-state')?.textContent === '已关闭'`, 'scheduled-backup-off-keeps');
     await close();
     const packaged = unzipSync(await readFile(databaseExportPath));
     const manifest = JSON.parse(strFromU8(packaged['manifest.json']));
     requireJourney(
-      manifest.schema === 'ai7.database-package/1' && manifest.dataVersion === 1 && manifest.schemaRevision === 55 &&
+      manifest.schema === 'ai7.database-package/1' && manifest.dataVersion === 1 && manifest.schemaRevision === 56 &&
         manifest.credentials === 'excluded' && manifest.contents?.books === booksShown && Object.keys(packaged)[0] === 'store/ai7.sqlite',
       'database-export-manifest',
       { schema: manifest.schema, dataVersion: manifest.dataVersion, schemaRevision: manifest.schemaRevision, contents: manifest.contents },
@@ -1510,6 +1520,15 @@ async function main() {
     const membersWithSecret = Object.entries(packaged).filter(([, bytes]) => [secretOne, secretTwo].some((secret) =>
       Buffer.from(bytes).includes(Buffer.from(secret, 'utf8')) || Buffer.from(bytes).includes(Buffer.from(secret, 'utf16le')))).map(([name]) => name);
     requireJourney(membersWithSecret.length === 0, 'database-export-no-credential', membersWithSecret);
+    const backupFiles = (await readdir(backupLocation)).filter((name) => name.endsWith('.ai7db'));
+    requireJourney(backupFiles.length === 1 && backupFiles[0].startsWith('AI7 自动备份 '), 'scheduled-backup-file', backupFiles);
+    const backupPackage = unzipSync(await readFile(resolve(backupLocation, backupFiles[0])));
+    const backupManifest = JSON.parse(strFromU8(backupPackage['manifest.json']));
+    requireJourney(backupManifest.origin === 'scheduled-backup' && backupManifest.schemaRevision === 56 && backupManifest.credentials === 'excluded',
+      'scheduled-backup-manifest', { origin: backupManifest.origin, schemaRevision: backupManifest.schemaRevision });
+    const backupMembersWithSecret = Object.entries(backupPackage).filter(([, bytes]) => [secretOne, secretTwo].some((secret) =>
+      Buffer.from(bytes).includes(Buffer.from(secret, 'utf8')) || Buffer.from(bytes).includes(Buffer.from(secret, 'utf16le')))).map(([name]) => name);
+    requireJourney(backupMembersWithSecret.length === 0, 'scheduled-backup-no-credential', backupMembersWithSecret);
 
     at('model-service-remove-and-restart');
     manager = await launch();

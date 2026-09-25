@@ -133,6 +133,8 @@ import type {
   DatabaseExportPreparationProjection,
   DatabaseExportReceiptProjection,
   DatabaseExportsProjection,
+  ScheduledBackupsProjection,
+  SetScheduledBackupInput,
   EvaluationCalibrationProjection,
   RecordPublicationActualsInput,
   SetEvaluationPreferencesInput,
@@ -390,6 +392,7 @@ import {
   readSoftwareVersion,
 } from './data-version.js';
 import { DatabaseExportError, DatabaseExports, initializeDatabaseExportSchema } from './database-exports.js';
+import { ScheduledBackupError, ScheduledBackups, initializeScheduledBackupSchema } from './scheduled-backups.js';
 import {
   SeriesKnowledgeError,
   SeriesKnowledgeLedger,
@@ -516,6 +519,7 @@ import {
   SERIES_KNOWLEDGE_SCHEMA_VERSION,
   STORE_VERSION_SCHEMA_VERSION,
   DATABASE_EXPORT_SCHEMA_VERSION,
+  SCHEDULED_BACKUP_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1747,7 +1751,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === SERIES_SCHEMA_VERSION ||
       currentVersion === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
       currentVersion === STORE_VERSION_SCHEMA_VERSION ||
-      currentVersion === DATABASE_EXPORT_SCHEMA_VERSION,
+      currentVersion === DATABASE_EXPORT_SCHEMA_VERSION ||
+      currentVersion === SCHEDULED_BACKUP_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1798,7 +1803,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === SERIES_SCHEMA_VERSION ||
       currentVersion === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
       currentVersion === STORE_VERSION_SCHEMA_VERSION ||
-      currentVersion === DATABASE_EXPORT_SCHEMA_VERSION
+      currentVersion === DATABASE_EXPORT_SCHEMA_VERSION ||
+      currentVersion === SCHEDULED_BACKUP_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2163,7 +2169,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === SERIES_SCHEMA_VERSION ||
       version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
       version === STORE_VERSION_SCHEMA_VERSION ||
-      version === DATABASE_EXPORT_SCHEMA_VERSION,
+      version === DATABASE_EXPORT_SCHEMA_VERSION ||
+      version === SCHEDULED_BACKUP_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2203,7 +2210,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === SERIES_SCHEMA_VERSION ||
       version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
       version === STORE_VERSION_SCHEMA_VERSION ||
-      version === DATABASE_EXPORT_SCHEMA_VERSION) return;
+      version === DATABASE_EXPORT_SCHEMA_VERSION ||
+      version === SCHEDULED_BACKUP_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2335,7 +2343,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === SERIES_SCHEMA_VERSION ||
       version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
       version === STORE_VERSION_SCHEMA_VERSION ||
-      version === DATABASE_EXPORT_SCHEMA_VERSION,
+      version === DATABASE_EXPORT_SCHEMA_VERSION ||
+      version === SCHEDULED_BACKUP_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2374,7 +2383,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === SERIES_SCHEMA_VERSION ||
       version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
       version === STORE_VERSION_SCHEMA_VERSION ||
-      version === DATABASE_EXPORT_SCHEMA_VERSION) return;
+      version === DATABASE_EXPORT_SCHEMA_VERSION ||
+      version === SCHEDULED_BACKUP_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2667,7 +2677,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== DATABASE_EXPORT_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== SCHEDULED_BACKUP_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2709,6 +2719,7 @@ function validateModelServiceSchema(
       version >= SERIES_KNOWLEDGE_SCHEMA_VERSION,
       version >= STORE_VERSION_SCHEMA_VERSION,
       version >= DATABASE_EXPORT_SCHEMA_VERSION,
+      version >= SCHEDULED_BACKUP_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2775,7 +2786,8 @@ function initializeModelServiceSchema(
       version === SERIES_SCHEMA_VERSION ||
       version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
       version === STORE_VERSION_SCHEMA_VERSION ||
-      version === DATABASE_EXPORT_SCHEMA_VERSION,
+      version === DATABASE_EXPORT_SCHEMA_VERSION ||
+      version === SCHEDULED_BACKUP_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2814,7 +2826,8 @@ function initializeModelServiceSchema(
       version === SERIES_SCHEMA_VERSION ||
       version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
       version === STORE_VERSION_SCHEMA_VERSION ||
-      version === DATABASE_EXPORT_SCHEMA_VERSION) {
+      version === DATABASE_EXPORT_SCHEMA_VERSION ||
+      version === SCHEDULED_BACKUP_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3646,6 +3659,8 @@ export class EditorialStore {
   readonly #dataVersions: DataVersionLedger;
   /** 导出数据库 (Issue #434, S86a): the package's preparations, approvals and receipts. */
   readonly #databaseExports: DatabaseExports;
+  /** 定期自动备份 (Issue #434, S86b): the switch, the backups made and those removed. */
+  readonly #scheduledBackups: ScheduledBackups;
   /** The software this store was opened by (Issue #433, S85a): read once from the package it ships in. */
   #softwareVersion = '';
   /** ②C 评估 (Issue #429, S81a): each Book's versioned Evaluation Records. */
@@ -3714,7 +3729,11 @@ export class EditorialStore {
     this.#seriesKnowledge = new SeriesKnowledgeLedger(authority);
     this.#dataVersions = new DataVersionLedger(authority);
     this.#databaseExports = new DatabaseExports(authority, dataRoot, {
-      facts: () => ({ dataVersion: DATA_VERSION, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_EXPORT_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: DATA_VERSION, softwareVersion: this.#softwareVersion, schemaRevision: SCHEDULED_BACKUP_SCHEMA_VERSION }),
+      contents: () => this.#databaseContents(),
+    });
+    this.#scheduledBackups = new ScheduledBackups(authority, dataRoot, {
+      facts: () => ({ dataVersion: DATA_VERSION, softwareVersion: this.#softwareVersion, schemaRevision: SCHEDULED_BACKUP_SCHEMA_VERSION }),
       contents: () => this.#databaseContents(),
     });
     this.#evaluations = new EvaluationRecords(authority, { current: (bookId) => this.#evaluationManuscript(bookId) });
@@ -3877,7 +3896,8 @@ export class EditorialStore {
       // (Issue #61, S26b) the editor's Learning Eligibility decisions, and revision 51 (Issue #430, S82) each Book's 定价与首印
       // and the house's evaluation preferences; revision 52 (Issue #63, S28a) the house's Series and their membership changes,
       // and revision 53 (Issue #63, S28b) Series Knowledge: candidates, items, revisions and promotion decisions; revision 54
-      // (Issue #433, S85a) the versions that opened the store; and revision 55 (Issue #434, S86a) the database exports.
+      // (Issue #433, S85a) the versions that opened the store; revision 55 (Issue #434, S86a) the database exports; and revision 56
+      // (Issue #434, S86b) the scheduled backups.
       initializeBookPeopleSchema(authority);
       initializeReviewGuidelineSchema(authority);
       initializeLibraryMaterialSchema(authority);
@@ -3890,6 +3910,7 @@ export class EditorialStore {
       initializeSeriesKnowledgeSchema(authority);
       initializeDataVersionSchema(authority);
       initializeDatabaseExportSchema(authority);
+      initializeScheduledBackupSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -3932,7 +3953,7 @@ export class EditorialStore {
       store.#dataVersionCall(() => store.#transaction(authority, () => store.#dataVersions.recordOpen({
         softwareVersion,
         dataVersion: DATA_VERSION,
-        schemaRevision: DATABASE_EXPORT_SCHEMA_VERSION,
+        schemaRevision: SCHEDULED_BACKUP_SCHEMA_VERSION,
       })));
       return store;
     } catch (error) {
@@ -10986,6 +11007,43 @@ export class EditorialStore {
       return await operation();
     } catch (error) {
       if (error instanceof DatabaseExportError || error instanceof ExportLedgerError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
+  }
+
+  // ---- 设置 › 数据与存储 › 定期自动备份 (Issue #434, plan slice S86b; V2-UX-DSTO-018; ADR 0079 §1.4, §1.7) ----------------
+
+  /** The switch, the fixed backup location and the backups kept. A read. */
+  inspectScheduledBackups(now: Date = new Date()): ScheduledBackupsProjection {
+    this.#assertAvailable();
+    try {
+      return this.#scheduledBackups.projection(now);
+    } catch (error) {
+      if (error instanceof ScheduledBackupError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
+  }
+
+  /** Turn the switch from the state the editor saw; turned on, it backs up at once when none was made in the day before. */
+  async setScheduledBackup(input: SetScheduledBackupInput, now: Date = new Date()): Promise<ScheduledBackupsProjection> {
+    return this.#scheduledBackupCall(async () => {
+      this.#scheduledBackups.setEnabled(input.enabled, input.expectedOrdinal);
+      await this.#scheduledBackups.runIfDue(now);
+      return this.#scheduledBackups.projection(now);
+    });
+  }
+
+  /** The running service's check: a backup when one is due, and only fourteen days kept. Answers whether one was made. */
+  async runScheduledBackupIfDue(now: Date = new Date()): Promise<boolean> {
+    return this.#scheduledBackupCall(() => this.#scheduledBackups.runIfDue(now));
+  }
+
+  async #scheduledBackupCall<T>(operation: () => Promise<T>): Promise<T> {
+    this.#assertAvailable();
+    try {
+      return await operation();
+    } catch (error) {
+      if (error instanceof ScheduledBackupError || error instanceof DatabaseExportError) throw new StoreError(error.code, error.message);
       throw error;
     }
   }

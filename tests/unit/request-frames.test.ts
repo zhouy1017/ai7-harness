@@ -1295,6 +1295,10 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'prepareDatabaseExport', input: { destination } },
       { op: 'approveDatabaseExport', input: { preparationId: randomUUID() } },
       { op: 'inspectDatabaseExports', input: {} },
+      // 定期自动备份 (Issue #434, S86b): the switch and its state as the editor saw it.
+      { op: 'inspectScheduledBackups', input: {} },
+      { op: 'setScheduledBackup', input: { enabled: true, expectedOrdinal: 0 } },
+      { op: 'setScheduledBackup', input: { enabled: false, expectedOrdinal: 3 } },
     ];
     for (const { op, input } of inputs) {
       const request = { id: randomUUID(), op, input };
@@ -1309,6 +1313,11 @@ describe('decodeRequest rejects malformed frames', () => {
       ['approveDatabaseExport', { preparationId: 'preparation' }],
       ['approveDatabaseExport', {}],
       ['inspectDatabaseExports', { total: 1 }],
+      ['inspectScheduledBackups', { enabled: true }],
+      ['setScheduledBackup', { enabled: 'yes', expectedOrdinal: 0 }],
+      ['setScheduledBackup', { enabled: true, expectedOrdinal: -1 }],
+      ['setScheduledBackup', { enabled: true, expectedOrdinal: 1.5 }],
+      ['setScheduledBackup', { enabled: true }],
     ] as const) {
       expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
     }

@@ -30,6 +30,12 @@ Since #434 (S86a), a stage after the credential is replaced relaunches with `--j
 - The runner then opens the package and checks its manifest: Data Version 1, schema revision 55, credentials excluded, and the number of Books the card counted.
 - It finds neither synthetic credential in any member, in UTF-8 or UTF-16.
 
+Since S86b, the same stage checks 定期自动备份:
+- The switch is off by default, and the page names the backup location beside the data root.
+- Turning it on makes one backup at once and reads `已打开 · 每天一次 · 保留 14 天`, with focus kept on the switch.
+- Turning it off keeps that backup.
+- The runner finds the one `AI7 自动备份 …` file there. Its manifest says `scheduled-backup` and schema revision 56, and no member holds either synthetic credential.
+
 ## J-15 native artifact lifecycle
 
 Uses two synthetic empty Books to exercise the fixed repository-bundled `编辑工作区方案` through the production renderer, Main-owned current-Book route, private stdio service, SQLite, and Agent Data Root. Installation retains the unchanged native carrier and materializes the fixed `ai7.editorial-workspace-profile.authority` Revision 1 and Revision 2 definitions while remaining disabled; fresh enablement pins the Book directly to Revision 2. The Journey then closes the product, constructs a disposable exact schema-v12 predecessor with a canonical future-skewed enablement time, and proves production migration pins the existing enabled Book to Revision 1 until the same action explicitly appends Revision 2. Restart retains the append-only history while a later Book remains disabled and unpinned. Revision 2 adds eligibility only for the current Book's primary Manuscript Revision and Source Version; every Task, Plan, Run, Provider, credential, network, Effect, Enrollment, Apply, export, and release authority remains absent. The predecessor constructor drops every post-v12 table; a new schema layer must add its tables to that list.

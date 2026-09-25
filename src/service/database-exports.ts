@@ -160,8 +160,8 @@ export function initializeDatabaseExportSchema(db: DatabaseSync): void {
 
 // ---- the package --------------------------------------------------------------------------------------
 
-/** Why a package was made. S86a writes the editor's own exports; the backups of S86b and S85b write the same package. */
-export type DatabasePackageOrigin = 'database-export';
+/** Why a package was made: the editor's own export (S86a), or a 定期自动备份 (S86b). S85b writes the same package. */
+export type DatabasePackageOrigin = 'database-export' | 'scheduled-backup';
 
 export interface DatabasePackageFacts {
   readonly dataVersion: number;
