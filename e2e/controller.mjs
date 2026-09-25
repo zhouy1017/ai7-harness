@@ -468,6 +468,12 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-ime-command-guard-command-ran',
     'j14-ime-command-guard-status-missing',
     'j14-keyboard-search-focus',
+    // Issue #579: which precondition of ⌘F was missing, or what the command did instead.
+    'j14-keyboard-search-focus-composition-open',
+    'j14-keyboard-search-focus-window-unfocused',
+    'j14-keyboard-search-focus-editor-unfocused',
+    'j14-keyboard-search-focus-guard-announced',
+    'j14-keyboard-search-focus-no-focus-move',
     'j14-visible-focus',
     'j14-keyboard-focus-keeps-window',
     'j14-keyboard-focus-keeps-window-precondition',
