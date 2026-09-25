@@ -11,7 +11,9 @@ import {
   PRODUCTION_DOCUMENT_PHASE_IDS,
   MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED,
   MAX_FRAME_BYTES,
+  MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED,
   MAX_BOOK_DELIVERY_PACKAGE_EXPORTS_LISTED,
+  MAX_EXPORT_FIDELITY_POSITIONS,
   MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS,
   MAX_BOOK_DELIVERY_PACKAGE_REPORTS_LISTED,
   MAX_BOOK_DELIVERY_PACKAGE_VERSIONS_LISTED,
@@ -36,7 +38,10 @@ import {
   type MilestoneListItemProjection,
   type PublicationDesignationProjection,
   type ProductionDocumentsProjection,
+  type BookDeliveryPackageExportReviewFileProjection,
+  type BookDeliveryPackageExportReviewProjection,
   type BookDeliveryPackageItemProjection,
+  type ExportFidelityRowProjection,
   type BookDeliveryPackageProjection,
   type BookDeliveryPackageVersionProjection,
   type PublicationVersionProjection,
@@ -261,6 +266,37 @@ describe('the words of 发稿', () => {
       changedSinceLatest: true,
     };
     const response = { id: identity, ok: true, op: 'prepareBookDeliveryPackage', result: { bookId: identity, outcome: 'prepared', version: 21, package: answer } };
+    expect(Buffer.byteLength(JSON.stringify(response), 'utf8')).toBeLessThan(MAX_FRAME_BYTES);
+  });
+
+  it('keep the widest 图书交付包 export review within one service frame, each listed file with its fidelity (Issue #416 review)', () => {
+    const identity = '00000000-0000-4000-8000-000000000000';
+    const wide = (length: number) => '𠀀'.repeat(length);
+    // The service's own sentences are BMP characters; their widest detail is under a hundred of them.
+    const words = (length: number) => '字'.repeat(length);
+    const row = (key: ExportFidelityRowProjection['key']): ExportFidelityRowProjection => ({
+      key, label: words(12), count: 9_999_999, status: 'degraded', statusLabel: '降级导出', detail: words(120),
+      positions: Array.from({ length: MAX_EXPORT_FIDELITY_POSITIONS }, () => 9_999_999), positionsTruncated: true,
+    });
+    const manuscriptKeys: ReadonlyArray<ExportFidelityRowProjection['key']> = [
+      'inline-styles', 'annotations', 'change-suggestions', 'editor-notes', 'notes', 'tables', 'images-captions', 'sections',
+      'headers-footers', 'text-boxes', 'fields', 'file-revisions',
+    ];
+    const file = (key: string, rows: ReadonlyArray<ExportFidelityRowProjection['key']>): BookDeliveryPackageExportReviewFileProjection => ({
+      key, label: wide(120), fileName: wide(120), format: 'docx', restoration: 'from-original', restorationLine: words(100), formatLine: words(100),
+      fidelity: rows.map(row), degraded: true,
+    });
+    // The 发稿版本 and the five house types carry the manuscript's classes; every other listed file is a report's four.
+    const files = [
+      ...Array.from({ length: 6 }, (_, index) => file(`document:${index}`, manuscriptKeys)),
+      ...Array.from({ length: MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED - 6 }, (_, index) => file(`report:${index}`,
+        ['report-overview', 'report-must-items', 'report-summaries', 'report-appendix'])),
+    ];
+    const answer: BookDeliveryPackageExportReviewProjection = {
+      bookId: identity, packageVersionId: identity, versionLabel: 'v9999999', options: { includeAnnotations: true, includeSuggestions: true },
+      files, filesTruncated: true, degraded: true, statement: words(80), reviewDigest: 'f'.repeat(64),
+    };
+    const response = { id: identity, ok: true, op: 'reviewBookDeliveryPackageExport', result: answer };
     expect(Buffer.byteLength(JSON.stringify(response), 'utf8')).toBeLessThan(MAX_FRAME_BYTES);
   });
 });
