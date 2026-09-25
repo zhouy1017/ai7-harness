@@ -7,6 +7,7 @@ import type {
   BookTaskItemProjection,
   DefaultExecutionRuleReference,
   DefaultExecutionRulesProjection,
+  EvaluationProfilesProjection,
   ExemplarsProjection,
   KnowledgeProceduresProjection,
   QuickStartBaselineAnalysisResult,
@@ -72,6 +73,17 @@ import { mountDeliverables, type DeliverablesSurface } from './deliverables.js';
 import { mountBookPeople } from './book-people.js';
 import { mountReviewGuidelines } from './review-guidelines.js';
 import { mountLibraryMaterials } from './library-materials.js';
+import { mountEvaluation } from './evaluation.js';
+import {
+  EVALUATION_LEDE,
+  EVALUATION_STATUS,
+  EVALUATION_TITLE,
+  evaluationBandLine,
+  evaluationItemLegend,
+  evaluationOverviewLine,
+  evaluationProfilePill,
+  evaluationProfileUse,
+} from './evaluation-labels.js';
 import {
   PROCEDURES_HEADING,
   PROCEDURE_STATE_LABELS,
@@ -2089,6 +2101,57 @@ function renderProposalConflict(target: { bookId: string; manuscriptId: string; 
   surface.start();
 }
 
+/**
+ * ②C 评估 (Issue #429, plan slice S81a; editor-surfaces §5): the Book's Evaluation Records under the house profile — the surface
+ * is `evaluation.ts` — with the way back to the manuscript and to 工作概览.
+ */
+function renderBookEvaluation(bookId: string, bookTitle: string): void {
+  const content = panel();
+  content.classList.add('book-evaluation');
+  content.dataset['bookId'] = bookId;
+  const host = element('div', 'evaluation-host');
+  content.append(
+    element('p', 'section-label', `${EVALUATION_TITLE} · 《${bookTitle}》`),
+    element('h2', undefined, EVALUATION_TITLE),
+    element('p', 'field-note', EVALUATION_LEDE),
+    host,
+  );
+  const surface = mountEvaluation({ root: host, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, technicalDetails });
+  const actions = element('div', 'button-row workbench-actions');
+  const openManuscript = button(DELIVERABLES_DESTINATION_ACTIONS[0], 'primary', async () => {
+    openManuscript.disabled = true;
+    setStatus('正在打开稿件…', 'busy');
+    try {
+      await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle });
+    } catch (error) {
+      openManuscript.disabled = false;
+      setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
+    }
+  });
+  const openOverview = button(DELIVERABLES_DESTINATION_ACTIONS[1], 'secondary', async () => {
+    openOverview.disabled = true;
+    setStatus('正在打开图书工作概览…', 'busy');
+    try {
+      renderBookOverview(await window.ai7.getBookOverview({ bookId, historyCursor: null }));
+    } catch (error) {
+      openOverview.disabled = false;
+      setStatus(rendererErrorMessage(error, '无法打开图书工作概览。'), 'error');
+    }
+  });
+  actions.append(openManuscript, openOverview);
+  content.append(actions);
+  replaceScreen('book-evaluation', content);
+  setStatus(EVALUATION_STATUS.loading, 'busy');
+  void surface.load().then(
+    () => {
+      if (content.isConnected) setStatus(EVALUATION_STATUS.opened);
+    },
+    (error: unknown) => {
+      if (content.isConnected) setStatus(rendererErrorMessage(error, EVALUATION_STATUS.unavailable), 'error');
+    },
+  );
+}
+
 function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { caseId: string; publicationVersionId: string }): void {
   const content = panel();
   content.classList.add('book-deliverables');
@@ -2359,8 +2422,33 @@ function renderBookOverview(
       },
     );
   };
+  // 评估 is one line too (Issue #429, S81a; editor-surfaces §5): the latest version, its state, total and conclusion, one step
+  // from its destination.
+  const evaluationHost = element('section', 'book-evaluation-summary');
+  evaluationHost.dataset['evaluationBookId'] = overview.book.bookId;
+  const inspectEvaluationSummary = (): void => {
+    if (!evaluationHost.isConnected || overview.manuscriptState.state !== 'populated') return;
+    const open = button('打开评估', 'secondary', () => renderBookEvaluation(overview.book.bookId, overview.book.title));
+    open.dataset['evaluationAction'] = 'open';
+    void window.ai7.inspectEvaluation({ recordId: null }).then(
+      (workspace) => {
+        if (!evaluationHost.isConnected || workspace.bookId !== evaluationHost.dataset['evaluationBookId']) return;
+        evaluationHost.dataset['evaluationState'] = workspace.records[0]?.state ?? 'empty';
+        evaluationHost.replaceChildren(element('h3', undefined, EVALUATION_TITLE), element('p', undefined, evaluationOverviewLine(workspace)), open);
+      },
+      (error) => {
+        if (!evaluationHost.isConnected) return;
+        evaluationHost.dataset['evaluationState'] = 'unavailable';
+        evaluationHost.replaceChildren(
+          element('h3', undefined, EVALUATION_TITLE),
+          element('p', 'attention-note', rendererErrorMessage(error, EVALUATION_STATUS.unavailable)),
+          open,
+        );
+      },
+    );
+  };
   if (overview.manuscriptState.state === 'populated') {
-    content.append(taskHost, reviewHost, deliverablesHost, analysisHost);
+    content.append(taskHost, reviewHost, evaluationHost, deliverablesHost, analysisHost);
   }
 
   const detailHost = element('div');
@@ -2508,12 +2596,14 @@ function renderBookOverview(
       }
       inspectTaskAuthorization();
       inspectReviewSummary();
+      inspectEvaluationSummary();
       inspectDeliverablesSummary();
       inspectBaselineAnalysis();
     });
   } else {
     inspectTaskAuthorization();
     inspectReviewSummary();
+    inspectEvaluationSummary();
     inspectDeliverablesSummary();
     inspectBaselineAnalysis();
     setStatus('图书工作概览已打开');
@@ -4241,6 +4331,17 @@ async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocu
     return;
   }
   const { content, panelNode } = knowledgeBasePage(tab, tabFocused);
+  // 评估方案 (Issue #429, S81a; KB-001, EVAL-003, EVAL-005): the profile each 评估 version snapshots, and its use.
+  if (tab === 'evaluation') {
+    setStatus('正在读取评估方案…', 'busy');
+    try {
+      renderEvaluationProfiles(panelNode, await window.ai7.inspectEvaluationProfiles());
+      if (content.isConnected) setStatus('评估方案已打开');
+    } catch (error) {
+      setStatus(rendererErrorMessage(error, '无法读取评估方案。'), 'error');
+    }
+    return;
+  }
   if (tab === 'exemplars') {
     setStatus('正在读取范例…', 'busy');
     try {
@@ -4276,6 +4377,34 @@ async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocu
     if (content.isConnected) setStatus(GUIDELINE_STATUS.opened);
   } catch (error) {
     setStatus(rendererErrorMessage(error, GUIDELINE_STATUS.unavailable), 'error');
+  }
+}
+
+/** 知识库 › 评估方案's card (Issue #429, S81a): the items and their 满分, the bands, the risk items and the conclusions. */
+function renderEvaluationProfiles(root: HTMLElement, projection: EvaluationProfilesProjection): void {
+  root.dataset['evaluationProfiles'] = String(projection.profiles.length);
+  for (const profile of projection.profiles) {
+    const card = element('article', 'evaluation-profile');
+    card.dataset['profileId'] = profile.profileId;
+    card.dataset['profileRecords'] = String(profile.records);
+    const heading = element('div', 'guideline-heading');
+    heading.append(element('h3', undefined, profile.title), element('span', 'status-pill evaluation-profile-pill', evaluationProfilePill(profile)));
+    const items = element('ul', 'evaluation-profile-items');
+    for (const item of profile.items) items.append(element('li', undefined, evaluationItemLegend(item)));
+    const bands = element('ul', 'evaluation-profile-bands');
+    for (const band of profile.bands) bands.append(element('li', undefined, evaluationBandLine(band)));
+    card.append(
+      heading,
+      element('p', 'field-note evaluation-profile-use', evaluationProfileUse(profile)),
+      element('h4', undefined, `评分项 · 总分 ${profile.total}`), items,
+      element('h4', undefined, '档位'), bands,
+      element('h4', undefined, '风险项（低 / 中 / 高，不计入总分）'),
+      element('p', 'evaluation-profile-risks', profile.risks.map((risk) => risk.label).join('、')),
+      element('h4', undefined, '结论'),
+      element('p', 'evaluation-profile-conclusions', profile.conclusions.map((conclusion) => conclusion.label).join(' · ')),
+      technicalDetails('evaluation-profile-facts', element('dt', undefined, '评估方案摘要'), element('dd', 'technical-identity', profile.sha256)),
+    );
+    root.append(card);
   }
 }
 

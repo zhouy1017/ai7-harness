@@ -107,6 +107,30 @@ function optionalOrNull(input: Record<string, unknown>, key: string, check: (val
 
 const MARK_BLOCK_PATTERN = /^blk_[0-9a-f]{24}$/;
 
+const EVALUATION_TEXT_CODE_UNITS = 16_000;
+
+function optionalText(value: unknown): boolean {
+  return value === null || isBoundedString(value, EVALUATION_TEXT_CODE_UNITS, true);
+}
+
+/**
+ * One 评估 version's content (Issue #429, S81a): its items, risks and lists of their closed shapes, each field present; the
+ * store holds them to the profile, the scale and the bounds.
+ */
+function validEvaluationContent(value: unknown): boolean {
+  if (!isRecord(value) || !hasExactKeys(value, ['items', 'risks', 'readiness', 'strengths', 'weaknesses', 'verdict', 'conclusion'])) return false;
+  const lines = (list: unknown): boolean => Array.isArray(list) && list.length <= 64 && list.every((line) => isBoundedString(line, 2_000, true));
+  return Array.isArray(value.items) && value.items.length <= 32 && value.items.every((item) => isRecord(item) &&
+      hasExactKeys(item, ['itemId', 'score', 'notRated', 'comment']) && isBoundedString(item.itemId, 64) &&
+      (item.score === null || (typeof item.score === 'number' && Number.isFinite(item.score))) && optionalText(item.notRated) && optionalText(item.comment)) &&
+    Array.isArray(value.risks) && value.risks.length <= 16 && value.risks.every((risk) => isRecord(risk) &&
+      hasExactKeys(risk, ['riskId', 'level', 'statement', 'reviewed']) && isBoundedString(risk.riskId, 64) &&
+      (risk.level === null || risk.level === 'low' || risk.level === 'medium' || risk.level === 'high') && optionalText(risk.statement) &&
+      typeof risk.reviewed === 'boolean') &&
+    lines(value.readiness) && lines(value.strengths) && lines(value.weaknesses) && optionalText(value.verdict) &&
+    (value.conclusion === null || value.conclusion === 'recommend' || value.conclusion === 'revise' || value.conclusion === 'defer' || value.conclusion === 'reject');
+}
+
 /**
  * One 资料库 decision (Issue #427, S79c): an attribution to one Book or to the house, or a Learning Eligibility choice with
  * its optional note — each of exactly its own keys. Whether the Book exists and the choice fits the attribution is the store's.
@@ -270,6 +294,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectExemplars':
     case 'inspectKnowledgeProcedures':
     case 'inspectLibraryMaterials':
+    case 'inspectEvaluationProfiles':
     case 'shutdown': {
       requireInput(value.input, [], tentativeId);
       break;
@@ -594,6 +619,27 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'addLibraryMaterial': {
       const input = requireInput(value.input, ['previewId', 'title', 'kind'], tentativeId);
       if (!validUuid(input.previewId) || !isBoundedString(input.title, 2_000) || !LIBRARY_MATERIAL_KINDS.includes(input.kind as LibraryMaterialKind)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // ②C 评估 (Issue #429, S81a): the route's Book, and a version by its identity or the latest.
+    case 'inspectEvaluation': {
+      const input = requireInput(value.input, ['bookId', 'recordId'], tentativeId);
+      if (!validUuid(input.bookId) || !(input.recordId === null || validUuid(input.recordId))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'startEvaluation': {
+      const input = requireInput(value.input, ['bookId'], tentativeId);
+      if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 保存评估 or 定稿: the version, how many entries the editor saw, and content of the closed shape; the store holds it to the
+    // profile the version snapshotted.
+    case 'saveEvaluation': {
+      const input = requireInput(value.input, ['bookId', 'recordId', 'expectedEntries', 'content', 'finalize'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.recordId) || !isSafeInteger(input.expectedEntries, 1) || typeof input.finalize !== 'boolean' ||
+          !validEvaluationContent(input.content)) {
         throw new ProtocolError(tentativeId);
       }
       break;
