@@ -70,7 +70,14 @@ import { MARK_KIND_LABELS } from './editorial-mark-labels.js';
 import { mountDeliverables, type DeliverablesSurface } from './deliverables.js';
 import { mountBookPeople } from './book-people.js';
 import { openTaskResultWindow, type TaskResultWindow } from './task-result-window.js';
-import { RETURN_CHIP_TITLE, TASK_PANEL_COMPOSE_STATUS, returnChipArrived, returnChipLabel, returnChipPlace } from './task-panel-labels.js';
+import {
+  RETURN_CHIP_TITLE,
+  TASK_PANEL_COMPOSE_STATUS,
+  TASK_PANEL_LEAVE_STATUS,
+  returnChipArrived,
+  returnChipLabel,
+  returnChipPlace,
+} from './task-panel-labels.js';
 import {
   BOOK_FILTER_ACTIONS,
   BOOK_FILTER_FIELD_LABEL,
@@ -208,11 +215,11 @@ const taskDrawer = mountTaskDrawer({
   awaitServiceJob,
   onOpen: () => closeNavigation?.(),
   onRecorded: (kind) => taskSurfaceRefresh[kind]?.(),
-  openRunSurface: (plan) => void openTaskRunSurface(plan),
+  openRunSurface: (plan) => void leaveThen(() => openTaskRunSurface(plan)),
   openConnectionSettings: () => void renderModelServiceSettings(),
   openRules: () => void renderKnowledgeBase(),
   // ① 任务面 (Issue #423, S77a): a card's own record, 查看结果's floating window and 发起全书任务.
-  openTaskTarget: (target) => void openGlobalAttentionTarget(target),
+  openTaskTarget: (target) => void leaveThen(() => openGlobalAttentionTarget(target)),
   openTaskResult: (entry, backToPanel) => openTaskResult(entry, backToPanel),
   startWholeBookTask: (bookId, input) => startWholeBookTask(bookId, input),
 });
@@ -238,7 +245,7 @@ function openTaskResult(entry: BookTaskItemProjection, backToPanel: () => void):
     jump: (target) => {
       if (bookId !== null) void jumpToManuscript(bookId, target);
     },
-    openSurface: (target) => void openGlobalAttentionTarget(target),
+    openSurface: (target) => void leaveThen(() => openGlobalAttentionTarget(target)),
     onClose: (back) => {
       taskResultWindow = undefined;
       if (back) backToPanel();
@@ -256,6 +263,9 @@ async function startWholeBookTask(
   bookId: string,
   input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; quick: DefaultExecutionRuleReference | null },
 ): Promise<{ ref: string; note?: string } | null> {
+  // The Task Input is frozen from the journal: the words typed just now, and any held after a failed write, are
+  // settled first, or nothing is prepared.
+  if (!(await settleScreen())) return null;
   setStatus(TASK_PANEL_COMPOSE_STATUS.preparing, 'busy');
   try {
     const initial = await window.ai7.prepareBaselineAnalysis({ goal: input.goal, update: input.update, reconfirm: false });
@@ -412,6 +422,31 @@ let globalAttentionSurface: GlobalAttentionSurface | undefined;
  */
 let leaveGuard: (() => Promise<boolean>) | null = null;
 let authorityInterrupted = false;
+
+/**
+ * A way out that is not the surface's own — a 任务 card, 查看结果's window, the drawer's 查看运行 — and 发起全书任务 settle
+ * the surface on screen as its own ways out do (Issue #423 review): the manuscript's local edits are written and its
+ * position taken first, and a refusal keeps it on screen. `true` once it may go on; with nothing to settle, at once.
+ */
+async function settleScreen(): Promise<boolean> {
+  const guard = leaveGuard;
+  if (guard === null) return true;
+  setStatus(TASK_PANEL_LEAVE_STATUS.settling, 'busy');
+  try {
+    if (await guard()) return true;
+    // The surface's own refusal stands; only a silent one is named here.
+    if (persistenceStatus.textContent === TASK_PANEL_LEAVE_STATUS.settling) setStatus(TASK_PANEL_LEAVE_STATUS.stayed, 'error');
+    return false;
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, TASK_PANEL_LEAVE_STATUS.stayed), 'error');
+    return false;
+  }
+}
+
+/** Open another page once the surface on screen has settled; a refusal keeps it. */
+async function leaveThen(open: () => Promise<void>): Promise<void> {
+  if (await settleScreen()) await open();
+}
 
 /**
  * 待我处理 (Issue #424, plan slice S78): one reader for the whole window, read on every screen change and

@@ -149,6 +149,15 @@ export const TASK_PANEL_COMPOSE_NONE = '这本书现在没有可以发起的全�
 export const TASK_PANEL_COMPOSE_FIRST = { label: '首次基线分析', meaning: '梳理全书的人物、事件、关系与设定，作为其他任务的底稿。' } as const;
 /** No 默认执行规则 is ever set for the first baseline (Issue #421): it starts from its plan. */
 export const TASK_PANEL_COMPOSE_FIRST_QUICK = '首次基线分析没有快速开始：先看计划再开始。';
+/**
+ * A card's or 查看结果's way to another page, and 发起全书任务, while the manuscript is on screen (Issue #423 review): its local
+ * edits are settled first, as its own ways out do, and a refusal keeps it there.
+ */
+export const TASK_PANEL_LEAVE_STATUS = {
+  settling: '正在保存当前编辑…',
+  stayed: '当前页面还有保存或写入没有完成；完成后再继续。',
+} as const;
+
 export const TASK_PANEL_COMPOSE_STATUS = {
   preparing: '正在为任务保存修订版…',
   prepared: '任务计划已准备；可在任务计划里开始任务。',

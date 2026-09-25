@@ -735,8 +735,33 @@ function preparedReviewItem(reading: ReviewRunAttentionReading): GlobalAttention
   });
 }
 
-/** The Run states the panel follows until they end: in flight, stopping, or waiting to start once online. */
-const FOLLOWED_RUN_STATES: ReadonlySet<BaselineAnalysisRunState> = new Set([...ACTIVE_RUN_STATES, 'awaiting-connectivity']);
+/**
+ * The Run states the panel follows until they end: in flight, stopping, waiting to start once online, or answered and
+ * waiting its turn to go on.
+ */
+const FOLLOWED_RUN_STATES: ReadonlySet<BaselineAnalysisRunState> = new Set([...ACTIVE_RUN_STATES, 'awaiting-connectivity', 'awaiting-clarification']);
+
+/**
+ * A Task the editor cancelled while it waited to start (Issue #423 review): its Run never ran, so no Task Outcome names it,
+ * and it stands in 最近完成 as 已取消 with nothing formed, as a cancelled Run's outcome does.
+ */
+function cancelledBeforeStartItem(reading: AnalysisTaskAttentionReading, run: NonNullable<AnalysisTaskAttentionReading['run']>): GlobalAttentionItemProjection {
+  return item('recent', 'analysis-cancelled', {
+    itemId: `analysis:${reading.taskIntentId}`,
+    blocked: false,
+    at: run.stateAt,
+    book: { bookId: reading.bookId, title: reading.bookTitle },
+    object: { kind: 'analysis', mode: reading.mode },
+    facts: { revisionOrdinal: null },
+    nextStep: 'view-run',
+    target: { kind: 'analysis', bookId: reading.bookId, taskIntentId: reading.taskIntentId },
+    technical: [
+      { key: 'task-intent', label: '任务意图', value: reading.taskIntentId },
+      { key: 'run-record', label: '运行记录', value: `${run.runRecordId} · ${run.state}` },
+      { key: 'state-at', label: '状态记录时间', value: run.stateAt },
+    ],
+  });
+}
 
 /**
  * The Book's 任务 panel from its readings (TASK-044): each Task is 待我处理's item for it, or the panel's own for the three
@@ -748,9 +773,13 @@ const FOLLOWED_RUN_STATES: ReadonlySet<BaselineAnalysisRunState> = new Set([...A
 export function composeBookTasks(readings: BookTaskReadings): BookTasksProjection {
   const own = <T extends { readonly bookId: string }>(list: ReadonlyArray<T>): T[] => list.filter((reading) => reading.bookId === readings.bookId);
   const entries: BookTaskItemProjection[] = [];
+  const outcomeRuns = new Set(own(readings.analysisOutcomes).map((reading) => reading.runRecordId));
   for (const reading of own(readings.analysisTasks)) {
     const built = reading.run === null && reading.planRevision === null ? preparedAnalysisItem(reading) : analysisTaskItem(reading, readings.waitingFor);
     if (built !== null) entries.push({ item: built, result: null });
+    else if (reading.run !== null && reading.run.state === 'cancelled' && !outcomeRuns.has(reading.run.runRecordId)) {
+      entries.push({ item: cancelledBeforeStartItem(reading, reading.run), result: null });
+    }
   }
   for (const reading of own(readings.analysisOutcomes)) {
     entries.push({
