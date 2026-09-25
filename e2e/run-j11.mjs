@@ -1178,16 +1178,26 @@ async function main() {
       finalizedPage.record.allDisabled === true && finalizedPage.record.actions.length === 0 && finalizedPage.start === '重新评估' &&
       finalizedPage.record.total === '总分 66.5 / 80 · 优秀（1 项不评）', 'evaluation-finalized-words', finalizedPage.record);
 
+    at('evaluation-from-manuscript');
+    // 评估 is one of the manuscript's 工作 destinations (IA-012, editor-surfaces §0.3): from 评估's own 打开稿件, the manuscript's
+    // 工作 group reads 审阅 · 评估 · 交付物, and its 评估 opens the version just finalized.
+    await assertRenderer(renderer, `(() => { const open = Array.from(document.querySelectorAll('[data-screen="book-evaluation"] .workbench-actions button')).find((button) => button.textContent === '打开稿件'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'evaluation-open-manuscript');
+    await waitFor(renderer, `document.querySelector('.editor-shell [data-testid="manuscript-editor"] > [data-block-id]') !== null && document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]') !== null`, 'evaluation-manuscript-ready', 60_000);
+    await assertRenderer(renderer, `(() => { const group = document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const entries = Array.from(group?.querySelectorAll('button[data-work-destination]') ?? []).map((item) => item.dataset.workDestination + ':' + item.textContent); const open = group?.querySelector('button[data-work-destination="evaluation"]'); if (entries.join('|') !== 'review:审阅|evaluation:评估|deliverables:交付物' || !(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'evaluation-work-group-entry');
+    const returned = await readEvaluation(renderer, (page) => page.state === 'ready' && page.record?.state === 'finalized', 'evaluation-from-manuscript-ready');
+    requireJourney(returned.record.heading === '第 1 版 · 定稿' && returned.start === '重新评估' && returned.versions.length === 1, 'evaluation-from-manuscript-words', returned);
+
     at('evaluation-reevaluate');
-    // 重新评估: version 2 begins from 定稿's scores; one moved item shows against version 1.
+    // 重新评估: version 2 begins from 定稿's scores but not its conclusion, which the editor decides again for this text; one
+    // moved item shows against version 1.
     await clickSelector(renderer, '[data-evaluation-action="start"]', 'evaluation-again');
     const again = await readEvaluation(renderer, (page) => page.record?.heading === '第 2 版 · 编辑评分中', 'evaluation-again-started');
     requireJourney(JSON.stringify(again.record.items.map(([, , score]) => score)) === JSON.stringify(['18', '16.5', '15', '17', '']) &&
-      JSON.stringify(again.record.comparison) === JSON.stringify(['与第 1 版相比', '总分：66.5 / 80 → 66.5 / 80']), 'evaluation-again-seeded', again.record);
+      JSON.stringify(again.record.comparison) === JSON.stringify(['与第 1 版相比', '总分：66.5 / 80 → 66.5 / 80', '结论：修改后再议 → 结论未定']), 'evaluation-again-seeded', again.record);
     await fill(renderer, `${item('literary-quality')} [data-evaluation-field="score"]`, '19', 'evaluation-again-score');
     await clickSelector(renderer, '[data-evaluation-action="save"]', 'evaluation-again-save');
-    const compared = await readEvaluation(renderer, (page) => page.record?.entries === '2' && page.record.comparison?.length === 3, 'evaluation-compared');
-    requireJourney(JSON.stringify(compared.record.comparison) === JSON.stringify(['与第 1 版相比', '文学品质与作者声音：18 → 19', '总分：66.5 / 80 → 67.5 / 80']) &&
+    const compared = await readEvaluation(renderer, (page) => page.record?.entries === '2' && page.record.comparison?.length === 4, 'evaluation-compared');
+    requireJourney(JSON.stringify(compared.record.comparison) === JSON.stringify(['与第 1 版相比', '文学品质与作者声音：18 → 19', '总分：66.5 / 80 → 67.5 / 80', '结论：修改后再议 → 结论未定']) &&
       compared.versions.length === 2 && compared.versions[1] === '第 1 版 · 定稿 · 修订版 r1 · 总分 66.5 / 80 · 优秀（1 项不评） · 修改后再议', 'evaluation-compared-words', compared);
 
     at('j14-evaluation-reflow-forced-colors');
@@ -1208,7 +1218,7 @@ async function main() {
     at('evaluation-overview-and-profile');
     // 工作概览 names the version on show in one line; 知识库 › 评估方案 names the profile and counts its use.
     await assertRenderer(renderer, `(() => { const open = Array.from(document.querySelectorAll('[data-screen="book-evaluation"] .workbench-actions button')).find((button) => button.textContent === '工作概览'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'evaluation-overview');
-    await waitFor(renderer, `document.querySelector('.book-evaluation-summary')?.dataset.evaluationState === 'editing' && document.querySelector('.book-evaluation-summary p')?.textContent === '第 2 版 · 编辑评分中 · 修订版 r1 · 总分 67.5 / 80 · 优秀（1 项不评） · 修改后再议'`, 'evaluation-overview-line');
+    await waitFor(renderer, `document.querySelector('.book-evaluation-summary')?.dataset.evaluationState === 'editing' && document.querySelector('.book-evaluation-summary p')?.textContent === '第 2 版 · 编辑评分中 · 修订版 r1 · 总分 67.5 / 80 · 优秀（1 项不评）'`, 'evaluation-overview-line');
     await click(renderer, '返回图书列表', 'evaluation-profile-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'evaluation-profile-landing');
     await click(renderer, '知识库', 'evaluation-profile-knowledge');
@@ -1282,6 +1292,9 @@ async function main() {
       offered.items.every(([, judgment, signals, line, toggle]) => judgment === 'none' && signals === '0' && line === null && toggle === '反馈…') &&
       offered.metric.total === '还没有给出判断。' && offered.metric.dimensions.length === 0 && offered.metric.note === METRIC_NOTE && offered.card === null,
     'feedback-offered-words', offered);
+
+    // 待我处理 as it reads before any judgment: judging asks nothing of it, so it must read the same after.
+    const attentionBefore = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => projection.groups.map((group) => [group.key, group.items.map((entry) => entry.itemId)]))`);
 
     at('feedback-judge-item');
     // 人物与名称's first entry: 反馈… opens its card with nothing chosen and 记录反馈 closed; 不准确 offers three reasons fitted
@@ -1406,8 +1419,8 @@ async function main() {
     const silence = await readFeedback(renderer, (page) => page.card === null, 'feedback-silence');
     requireJourney(silence.items.filter(([, judgment]) => judgment !== 'none').map(([key, judgment]) => `${key}:${judgment}`).join() === 'synopsis:incomplete,entities/0:accurate' &&
       silence.metric.judged === '2', 'feedback-silence-unjudged', silence.items.map(([key, judgment]) => [key, judgment]));
-    const attention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
-    requireJourney(Array.isArray(attention?.groups) && attention.groups.every((group) => group.items.every((entry) => !/feedback/i.test(String(entry.state)))), 'feedback-no-attention');
+    const attentionAfter = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => projection.groups.map((group) => [group.key, group.items.map((entry) => entry.itemId)]))`);
+    requireJourney(Array.isArray(attentionBefore) && JSON.stringify(attentionAfter) === JSON.stringify(attentionBefore), 'feedback-no-attention', { before: attentionBefore, after: attentionAfter });
 
     at('feedback-restart');
     // A restart moves nothing: each judgment and the tally read as before, over the same lineage.

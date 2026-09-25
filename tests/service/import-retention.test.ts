@@ -5,6 +5,7 @@ import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { unzipSync, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseDocx, type ParsedDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
+import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import {
   IMPORT_FIDELITY_CATEGORIES_REVISION_26_SQL,
   importFidelityCategoriesShape,
@@ -374,6 +375,62 @@ describe('import retention over the real store (ADR 0086)', () => {
   }, 180_000);
 });
 
+describe('the startup validation J-01 proves (Issue #584)', () => {
+  it('refuses a store whose reimport proof the tamper control altered, as the validator and not as the control', async () => {
+    const first = await composed({ source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 6, title: '篡改证明组稿' });
+    const second = await composed({ source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 7, title: '篡改证明组稿' });
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importComposed(store, first.path);
+      const staged = await store.stageSelectedManuscript(randomUUID(), second.path);
+      const started = store.createManuscriptReimportPreparationWork(staged.draftId, staged.draftVersion, {
+        kind: 'existing-book', bookId: book.bookId, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId: null,
+      });
+      let prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
+      while (!prepared.done) prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
+      let review = prepared.review!;
+      let cursor: number | null = null;
+      do {
+        const page = store.getReimportMappingPage(review.draftId, review.draftVersion, cursor);
+        for (const item of page.items.filter((entry) => entry.verb === null)) {
+          const resolution = store.createReimportResolutionWork(review.draftId, review.draftVersion, item.groupId, 'rewrite');
+          let progress = store.advanceReimportResolutionWork(resolution.workId);
+          while (!progress.done) progress = store.advanceReimportResolutionWork(resolution.workId);
+          review = progress.review!;
+        }
+        cursor = page.nextCursor;
+      } while (cursor !== null);
+      const commit = await store.createManuscriptReimportCommitWork({
+        draftId: review.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId: randomUUID(),
+      });
+      let result = commit.result;
+      while (result === null) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        result = (await store.advanceManuscriptReimportCommitWork(commit.workId!)).result;
+      }
+      expect(result.resultKind).toBe('changed');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    // The control alters one mapping that has staged text, and the store is then refused by what validates it — never by
+    // the control's own E2E_CONTROL_INVALID, nor by a statement that could not be prepared.
+    const opened = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
+      induceUnprovableReconciliation: false,
+      persistLegacyReviewedDraft: false,
+      induceReimportProofTamper: true,
+      induceAbandonObjectRemovalFailure: false,
+      interruptAfterAbandonObjectRemoval: false,
+      baselineAnalysisRoute: null,
+    }).then((store) => {
+      store.close();
+      return null;
+    }, (error: unknown) => error);
+    expect([opened instanceof Error ? opened.name : typeof opened, (opened as { code?: unknown } | null)?.code, opened instanceof Error ? opened.message : null])
+      .toEqual(['BoundedStoreError', 'SCHEMA_INVALID', '稿件重新导入块摘要无效。']);
+  }, 180_000);
+});
+
 describe('schema revision 27 over the real store', () => {
   it('migrates a revision-26 store holding a legacy eight-row review, with every fidelity row byte for byte', async () => {
     await requireExactSample1(roots.codeRoot);
@@ -462,6 +519,60 @@ describe('schema revision 27 over the real store', () => {
     }
   }, 180_000);
 
+  it('does not bring back ready a reimport review over a Source Version an earlier parser read, and says why when it is prepared again (Issue #580)', async () => {
+    await requireExactSample1(roots.codeRoot);
+    let draftId: string;
+    let draftVersion: number;
+    let bookId: string;
+    let sourceVersionId: string;
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      bookId = (await importSample1Book(store, roots.codeRoot, '旧读取方式')).bookId;
+      sourceVersionId = withDatabase(true, (database) => String((database.prepare('SELECT source_version_id FROM source_versions').get() as Row).source_version_id));
+      // The unchanged file taken again as a reimport that reuses its exact Source Version: a review ready under this parser.
+      const again = await store.stageSelectedManuscript(randomUUID(), sample1Path(roots.codeRoot));
+      const started = store.createManuscriptReimportPreparationWork(again.draftId, again.draftVersion, {
+        kind: 'existing-book', bookId, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId: sourceVersionId,
+      });
+      let prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
+      while (!prepared.done) prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
+      draftId = prepared.review!.draftId;
+      draftVersion = prepared.review!.draftVersion;
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    // The Source Version as an earlier parser left it. sample1 has no comments or revisions, so its /2 and /3 reports are one.
+    withDatabase(false, (database) => {
+      database.prepare("UPDATE source_versions SET parser_identity = 'ai7-docx-fflate-saxes/2' WHERE source_version_id = ?").run(sourceVersionId);
+      database.prepare("UPDATE source_provenance SET parser_identity = 'ai7-docx-fflate-saxes/2' WHERE source_version_id = ?").run(sourceVersionId);
+    });
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const continued = await reopened.continueImportDraft(draftId!, draftVersion!);
+      expect(continued.state === 'target-review-required' && continued.reviewInvalidated).toBe(true);
+      const staged = continued.state === 'target-review-required' ? continued.staged : null;
+      const refused = ((): [string, string] | null => {
+        try {
+          const started = reopened.createManuscriptReimportPreparationWork(staged!.draftId, staged!.draftVersion, {
+            kind: 'existing-book', bookId: bookId!, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId: sourceVersionId!,
+          });
+          let progress = reopened.advanceManuscriptReimportPreparationWork(started.workId);
+          while (!progress.done) progress = reopened.advanceManuscriptReimportPreparationWork(started.workId);
+        } catch (error) {
+          if (error instanceof StoreError) return [error.code, error.message];
+          throw error;
+        }
+        return null;
+      })();
+      expect(refused).toEqual(['SOURCE_VERSION_PARSER_CHANGED', SOURCE_VERSION_PARSER_CHANGED_MESSAGE]);
+      expect(SOURCE_VERSION_PARSER_CHANGED_MESSAGE.endsWith('可以把它作为新建图书导入。')).toBe(true);
+      reopened.markCleanShutdown();
+    } finally {
+      reopened.close();
+    }
+  }, 180_000);
+
   it('finds a Book an earlier parser read by its content when the same content comes in another file (Issue #532)', async () => {
     await requireExactSample1(roots.codeRoot);
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -478,7 +589,7 @@ describe('schema revision 27 over the real store', () => {
     });
     // sample1's own parts in another container: other bytes, the same body, so the same content and structure.
     const twin = join(roots.inputRoot, 'sample1-另存.docx');
-    writeFileSync(twin, zipSync(unzipSync(readFileSync(sample1Path(roots.codeRoot))), { mtime: new Date('2001-01-01T00:00:00Z') }));
+    writeFileSync(twin, zipSync(unzipSync(readFileSync(sample1Path(roots.codeRoot))), { mtime: fixedArchiveTime() }));
     const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       const staged = await migrated.stageSelectedManuscript(randomUUID(), twin);

@@ -129,8 +129,8 @@ describe('the 任务 panel of one Book (S77a)', () => {
     expect(panel.groups.find((group) => group.key === 'running')!.items[0]!.item.facts.progress).toEqual({ stage: 'units', unitsSettled: 3, unitsTotal: 8 });
   });
 
-  it('follows a Run until it ends: in flight, stopping, or waiting to start once online — and not one stopped for the editor', () => {
-    for (const state of ['authorized', 'admitted', 'executing', 'pausing', 'cancelling', 'awaiting-connectivity'] as const) {
+  it('follows a Run until it ends: in flight, stopping, waiting to start once online or to go on once answered — and not one stopped for the editor', () => {
+    for (const state of ['authorized', 'admitted', 'executing', 'pausing', 'cancelling', 'awaiting-connectivity', 'awaiting-clarification'] as const) {
       expect(composeBookTasks(readings({ analysisTasks: [task({ run: run(state, progress()) })] })).running).toBe(true);
     }
     for (const state of ['paused', 'resumable', 'failed', 'interrupted', 'blocked-before-dispatch'] as const) {
@@ -154,6 +154,14 @@ describe('the 任务 panel of one Book (S77a)', () => {
     // A Task cancelled before it read anything formed no result: it opens its Run instead.
     const early = composeBookTasks(readings({ analysisOutcomes: [cancelledEarly] })).groups[2]!.items[0]!;
     expect([early.item.state, early.item.nextStep, early.result]).toEqual(['analysis-cancelled', 'view-run', null]);
+    // A Task cancelled while it waited to start has no outcome: its Run stands for it, 已取消 with nothing formed; a
+    // cancelled Run with its outcome is listed once, as the outcome.
+    const waiting = task({ run: run('cancelled') });
+    const before = composeBookTasks(readings({ analysisTasks: [waiting] })).groups[2]!.items;
+    expect(before.map((entry) => [entry.item.itemId, entry.item.state, entry.item.at, entry.item.facts.revisionOrdinal, entry.result]))
+      .toEqual([[`analysis:${waiting.taskIntentId}`, 'analysis-cancelled', waiting.run!.stateAt, null, null]]);
+    const withOutcome = composeBookTasks(readings({ analysisTasks: [task({ run: { ...run('cancelled'), runRecordId: cancelled.runRecordId } })], analysisOutcomes: [cancelled] }));
+    expect(withOutcome.groups[2]!.items.map((entry) => entry.item.itemId)).toEqual([`analysis-outcome:${cancelled.outcomeId}`]);
     // 待我处理 never lists a cancellation.
     const global = composeGlobalAttention({
       imports: [], recoveries: [], conflicts: [], analysisTasks: [], analysisOutcomes: [cancelled], reviewRuns: [], reviewCompletions: [],

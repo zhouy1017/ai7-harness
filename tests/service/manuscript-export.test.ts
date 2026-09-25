@@ -6,6 +6,7 @@ import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
+import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import { parseDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
 import { EDITOR_AUTHOR_LABEL } from '../../src/service/docx-export.js';
 import {
@@ -452,7 +453,7 @@ describe('④ 导出: the Export Fidelity Review, the preparation, the approval 
       const namespace = /xmlns:w="([^"]+)"/.exec(documentXml)![1]!;
       entries['word/document.xml'] = strToU8(documentXml.replace('<w:document ', `<document xmlns="${namespace}" `).replace('</w:document>', '</document>'));
       const unprefixed = join(roots.inputRoot, `${randomUUID()}.docx`);
-      await writeFile(unprefixed, zipSync(entries));
+      await writeFile(unprefixed, zipSync(entries, { mtime: fixedArchiveTime() }));
       const staged = await store.stageSelectedManuscript(randomUUID(), unprefixed);
       // The field reads back as a degradation the editor accepts before the import commits.
       const newBook = store.prepareNewBookReview(staged.draftId, staged.draftVersion,

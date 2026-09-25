@@ -2504,6 +2504,38 @@ function requireManuscriptReimportTargetSchema(
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
+  // From revision 21 on, an upgrade step commits its revision's relations in a transaction of its own and the version
+  // stamp follows in another (Issue #596), so a store that stopped between them holds all of a revision's relations
+  // below that revision. They count as the revision's: the exact check accepts them, the step skips relations that
+  // exist, and the next open stamps the version. None of them present still requires their absence, and only some of
+  // them present is still refused.
+  const committed = (relations: Readonly<Record<string, unknown>>): boolean =>
+    Object.keys(relations).every((name) => schemaObjectSql(db, 'table', name) !== undefined);
+  includeManuscriptEntryPositionTable ||= committed({ manuscript_entry_positions: MANUSCRIPT_ENTRY_POSITION_SCHEMA_SQL });
+  includeEditorialMarkTables ||= committed(EDITORIAL_MARK_SCHEMA_SQL);
+  includeManuscriptEffectTables ||= committed(MANUSCRIPT_EFFECT_SCHEMA_SQL);
+  includeReviewRunTables ||= committed(REVIEW_RUN_SCHEMA_SQL);
+  includePublicationVersionTables ||= committed(PUBLICATION_VERSION_SCHEMA_SQL);
+  includeProposalConflictTables ||= committed(PROPOSAL_CONFLICT_SCHEMA_SQL);
+  includeImportRetentionTables ||= committed(IMPORT_RETENTION_SCHEMA_SQL);
+  includeImportedMarkTables ||= committed(IMPORTED_MARK_SCHEMA_SQL);
+  includeExportLedgerTables ||= committed(EXPORT_LEDGER_SCHEMA_SQL);
+  includeDefaultExecutionRuleTables ||= committed(DEFAULT_EXECUTION_RULE_SCHEMA_SQL);
+  includeRunCheckpointTables ||= committed(RUN_CHECKPOINT_SCHEMA_SQL);
+  includeClarificationTables ||= committed(CLARIFICATION_SCHEMA_SQL);
+  includeReimportGroupTables ||= committed(REIMPORT_GROUP_SCHEMA_SQL);
+  includeProductionDocumentTables ||= committed(PRODUCTION_DOCUMENT_SCHEMA_SQL);
+  includeProductionDocumentDeliveryTables ||= committed(PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_SQL);
+  includeBookDeliveryPackageTables ||= committed(BOOK_DELIVERY_PACKAGE_SCHEMA_SQL);
+  includeProductionDocumentWorkflowTables ||= committed(PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_SQL);
+  includeBookDeliveryPackageExportTables ||= committed(BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_SQL);
+  includeProductionDocumentOriginTables ||= committed(PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_SQL);
+  includeMaintenanceCaseTables ||= committed(MAINTENANCE_CASE_SCHEMA_SQL);
+  includeBookPeopleTables ||= committed(BOOK_PEOPLE_SCHEMA_SQL);
+  includeReviewGuidelineTables ||= committed(REVIEW_GUIDELINE_SCHEMA_SQL);
+  includeLibraryMaterialTables ||= committed(LIBRARY_MATERIAL_SCHEMA_SQL);
+  includeEvaluationRecordTables ||= committed(EVALUATION_RECORD_SCHEMA_SQL);
+  includeAnalysisFeedbackTables ||= committed(ANALYSIS_FEEDBACK_SCHEMA_SQL);
   requireExactSchema(
     db,
     {
@@ -2528,9 +2560,16 @@ function requireManuscriptReimportTargetSchema(
         ? { manuscript_entry_positions: MANUSCRIPT_ENTRY_POSITION_SCHEMA_SQL }
         : {}),
       // Revision 23 widened `editorial_marks` in the transaction that created the Effect relations: a
-      // store without them holds revision 22's text of it, and a store with them only the widened one.
+      // store without them holds revision 22's text of it — or, when this build's revision-22 step ran and the
+      // upgrade stopped before revision 23's (Issue #596), the widened text this build creates, which revision 23's
+      // step leaves as it is — and a store with them only the widened one.
       ...(includeEditorialMarkTables
-        ? { ...EDITORIAL_MARK_SCHEMA_SQL, ...(includeManuscriptEffectTables ? {} : EDITORIAL_MARK_REVISION_22_SQL) }
+        ? {
+            ...EDITORIAL_MARK_SCHEMA_SQL,
+            ...(includeManuscriptEffectTables
+              ? {}
+              : { editorial_marks: [EDITORIAL_MARK_REVISION_22_SQL.editorial_marks, EDITORIAL_MARK_SCHEMA_SQL.editorial_marks] }),
+          }
         : {}),
       ...(includeManuscriptEffectTables ? MANUSCRIPT_EFFECT_SCHEMA_SQL : {}),
       // Revision 24 (Issue #417) adds the Review Run relations beside the three analysis relations it
@@ -2806,15 +2845,17 @@ function validateSourceImportDraftTargetTruth(db: DatabaseSync): void {
         ) as SqlRow | undefined;
         return committedReuse !== undefined && asNumber(committedReuse.matches) === 1;
       }
+      // An original staged unparsed has no snapshot: its source digest is its object's, and it has no content,
+      // structure or parser identity, so those compare with IS (as the store reads a draft, `#loadDraftSnapshot`).
       const reuse = db.prepare(
         `SELECT count(*) matches
          FROM source_versions sv
          JOIN import_drafts d ON d.draft_id = ?
-         JOIN staged_import_snapshots sis ON sis.draft_id = d.draft_id
+         LEFT JOIN staged_import_snapshots sis ON sis.draft_id = d.draft_id
          WHERE sv.source_version_id = ? AND sv.book_id = d.reviewed_existing_book_id
-           AND sv.object_digest = d.object_digest AND sv.source_digest = sis.source_digest
-           AND sv.content_digest = sis.content_digest AND sv.structure_digest = sis.structure_digest
-           AND sv.parser_identity = sis.parser_identity`,
+           AND sv.object_digest = d.object_digest AND sv.source_digest = coalesce(sis.source_digest, d.object_digest)
+           AND sv.content_digest IS sis.content_digest AND sv.structure_digest IS sis.structure_digest
+           AND sv.parser_identity IS sis.parser_identity`,
       ).get(asString(row.draft_id), asString(row.reviewed_reuse_source_version_id)) as SqlRow | undefined;
       return reuse !== undefined && asNumber(reuse.matches) === 1;
     }),
@@ -2836,12 +2877,18 @@ function validateSourceImportRecordTruth(db: DatabaseSync): void {
     '不创建发稿版本、公开发布许可或公开发布事实',
     '不导出、不发送、不交付、不发布',
   ] as const;
+  // A working representation read through a converter exists from revision 19 (ADR 0072 §3); this check also reads stores
+  // at earlier revisions, which have no such column and no such representation.
+  const sourceColumns = new Set(
+    (db.prepare('PRAGMA table_xinfo(source_versions)').all() as SqlRow[]).map((column) => asString(column.name)),
+  );
+  const workingObject = sourceColumns.has('working_object_digest') ? 'sv.working_object_digest' : 'NULL';
   const rows = db.prepare(
     `SELECT sir.source_import_record_id, sir.commit_id, sir.book_id, sir.source_version_id,
             sir.provenance_id, sir.target_kind, sir.source_version_disposition,
             sir.retained_boundary_json, sir.named_non_effects_json, sir.record_digest, sir.imported_at,
             sv.object_digest, sv.source_digest, sv.content_digest, sv.structure_digest,
-            sv.parser_identity, sv.format, co.byte_length,
+            sv.parser_identity, sv.format, ${workingObject} working_object_digest, co.byte_length,
             sp.acquisition_path, sp.locality, sp.sanitized_identity,
             sp.parser_identity provenance_parser_identity, sp.recorded_at,
             ic.operation_kind, ic.committed_at, d.state draft_state,
@@ -2883,6 +2930,25 @@ function validateSourceImportRecordTruth(db: DatabaseSync): void {
     const targetKind = asString(row.target_kind);
     const disposition = asString(row.source_version_disposition);
     const sourceVersionId = asString(row.source_version_id);
+    // The Source Version is wholly parsed or wholly unparsed, in the format it was read as (ADR 0072 §2), and the
+    // record's boundary says which, exactly as the store writes it (`store.ts`, `sourceImportRetainedBoundary`).
+    const parserIdentity = row.parser_identity === null ? null : asString(row.parser_identity);
+    const provenanceParserIdentity = row.provenance_parser_identity === null
+      ? null
+      : asString(row.provenance_parser_identity);
+    const contentDigest = row.content_digest === null ? null : asString(row.content_digest);
+    const structureDigest = row.structure_digest === null ? null : asString(row.structure_digest);
+    const retainedLabel = parserIdentity === null
+      ? '保留完整所选原始文件及其精确身份；未进行本地解析'
+      : '保留完整所选 DOCX 文件及本地解析出的完整内容与结构身份';
+    // Parsed exactly when it is a DOCX or was read through its converter, as the store writes a Source Version and as
+    // `validateStagedDraftInventory` holds a draft to (Issue #583): an unparsed DOCX, a parsed PDF, RTF, ODT or unknown
+    // file, or a parsed file with no working representation is none the store wrote.
+    requireBounded(
+      (parserIdentity !== null) === (asString(row.format) === 'DOCX' || row.working_object_digest !== null),
+      'SCHEMA_INVALID',
+      '来源版本的格式与是否解析不一致。',
+    );
     const recordDigest = sha256(canonicalJson({
       schema: 'ai7.source-import-record/1',
       sourceImportRecordId: asString(row.source_import_record_id),
@@ -2899,16 +2965,16 @@ function validateSourceImportRecordTruth(db: DatabaseSync): void {
     requireBounded(
       (targetKind === 'new-book' || targetKind === 'existing-book') &&
         (disposition === 'created' || disposition === 'reused-same-book') &&
-        asString(row.object_digest) === asString(row.source_digest) && asString(row.format) === 'DOCX' &&
+        asString(row.object_digest) === asString(row.source_digest) &&
         boundary.kind === 'complete-local-file' &&
-        boundary.label === '保留完整所选 DOCX 文件及本地解析出的完整内容与结构身份' &&
-        boundary.format === 'DOCX' && boundary.displayName === asString(row.sanitized_identity) &&
+        boundary.label === retainedLabel &&
+        boundary.format === asString(row.format) && boundary.displayName === asString(row.sanitized_identity) &&
         boundary.sourceSha256 === asString(row.source_digest) &&
         boundary.sourceBytes === asNumber(row.byte_length) &&
-        boundary.contentDigest === asString(row.content_digest) &&
-        boundary.structureDigest === asString(row.structure_digest) &&
+        boundary.contentDigest === contentDigest &&
+        boundary.structureDigest === structureDigest &&
         asString(row.acquisition_path) === 'native-file-picker' && asString(row.locality) === 'local-provider-free' &&
-        asString(row.provenance_parser_identity) === asString(row.parser_identity) &&
+        provenanceParserIdentity === parserIdentity &&
         typeof row.recorded_at === 'string' &&
         asString(row.operation_kind) === 'source-import' && asString(row.draft_state) === 'committed' &&
         asString(row.committed_commit_id) === asString(row.commit_id) &&
@@ -3583,11 +3649,22 @@ function validateStagedDraftDerived(db: DatabaseSync, draftId: string): void {
 }
 
 function validateStagedDraftInventory(db: DatabaseSync): void {
+  // A draft holds a snapshot exactly when it was parsed: a DOCX, or a format read through its converter. An
+  // original staged unparsed (a PDF, say) has none, as the store stages it (`store.ts`, `#loadDraftSnapshot`).
+  // Before revision 18 every draft was a DOCX, and before revision 19 nothing was read through a converter.
+  const draftColumns = new Set(
+    (db.prepare('PRAGMA table_xinfo(import_drafts)').all() as SqlRow[]).map((column) => asString(column.name)),
+  );
+  const parsed = !draftColumns.has('source_format')
+    ? '1'
+    : draftColumns.has('working_object_digest')
+    ? `(d.source_format = 'DOCX' OR d.working_object_digest IS NOT NULL)`
+    : `(d.source_format = 'DOCX')`;
   const missingSnapshots = asNumber(one(
     db.prepare(
       `SELECT count(*) total FROM import_drafts d
        WHERE d.state IN ('staged', 'reviewed')
-         AND NOT EXISTS (SELECT 1 FROM staged_import_snapshots s WHERE s.draft_id = d.draft_id)`,
+         AND ${parsed} = NOT EXISTS (SELECT 1 FROM staged_import_snapshots s WHERE s.draft_id = d.draft_id)`,
     ).all() as SqlRow[],
     'SCHEMA_MIGRATION_FAILED',
     '无法校验暂存稿件快照清单。',

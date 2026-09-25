@@ -136,9 +136,15 @@ describe('②C 评估 over the real store', () => {
       });
       const again = store.startEvaluation(book.bookId);
       const second = again.record!;
-      expect(second).toMatchObject({ ordinal: 2, state: 'editing', revisionLabel: 'r1', uncheckpointed: true, entries: 1, conclusion: 'recommend' });
+      // It starts from 定稿's scores and words, never its conclusion; each risk keeps its level and statement, but a person's
+      // review of the old text does not count for the changed one, so 推荐出版 waits for a review of this version.
+      expect(second).toMatchObject({ ordinal: 2, state: 'editing', revisionLabel: 'r1', uncheckpointed: true, entries: 1, conclusion: null, recommendationBlocked: true });
       expect(second.content.items).toEqual(finalized.content.items);
-      expect(second.comparison).toMatchObject({ previousOrdinal: 1, conclusion: { previous: 'recommend', current: 'recommend' } });
+      expect(second.content.risks).toEqual(finalized.content.risks.map((risk) => ({ ...risk, reviewed: false })));
+      expect(second.comparison).toMatchObject({ previousOrdinal: 1, conclusion: { previous: 'recommend', current: null } });
+      expect(await refusal(() => store.saveEvaluation({
+        bookId: book.bookId, recordId: second.recordId, expectedEntries: 1, finalize: true, content: { ...second.content, conclusion: 'recommend' },
+      }))).toMatch(/^EVALUATION_RECOMMEND_BLOCKED:/u);
       const changed = store.saveEvaluation({
         bookId: book.bookId, recordId: second.recordId, expectedEntries: 1, finalize: false,
         content: { ...second.content, items: second.content.items.map((item, index) => (index === 0 ? { ...item, score: 19 } : index === 4 ? { ...item, score: 14, notRated: null } : item)) },
