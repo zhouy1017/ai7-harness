@@ -5633,8 +5633,18 @@ export class EditorialStore {
   async #convertSelectedManuscript(
     selectedPath: string,
     format: ManuscriptConversionProjection['sourceFormat'],
+    expected?: { digest: string; byteLength: number },
   ): Promise<{ docx: Uint8Array; loss: ConversionLoss } | null> {
     const bytes = await readFile(selectedPath);
+    // A kept original is the digest of record (ADR 0072 §2): the bytes converted are the bytes the digest names, read
+    // once, so a same-size change that converts to the same working representation is still refused (#606's review).
+    if (expected !== undefined) {
+      requireStore(
+        bytes.byteLength === expected.byteLength && sha256(bytes) === expected.digest,
+        'SNAPSHOT_RESELECTION_REQUIRED',
+        '暂存对象摘要无效。',
+      );
+    }
     try {
       return format === 'DOC' ? await convertDocManuscript(bytes) : convertTextManuscript(bytes, { format });
     } catch (error) {
@@ -8257,7 +8267,9 @@ export class EditorialStore {
         signal: abortController.signal,
         onArchiveProgress: (bytes) => {
           if (this.#reimportCommitWork.get(workId) === work) {
-            work.parseBytes = Math.min(bytes, snapshotBeforeAttempt.sourceBytes);
+            // The segment is sized by the original's bytes; a working representation's parse is scaled into it.
+            const scaled = converted === null ? bytes : Math.round(bytes * snapshotBeforeAttempt.sourceBytes / converted.byteLength);
+            work.parseBytes = Math.min(scaled, snapshotBeforeAttempt.sourceBytes);
           }
         },
       });
@@ -10563,7 +10575,10 @@ export class EditorialStore {
     originalPath: string,
   ): Promise<{ digest: string; byteLength: number; path: string; fidelity: FidelityCategoryProjection[] }> {
     const conversion = snapshot.conversion!;
-    const converted = await this.#convertSelectedManuscript(originalPath, conversion.sourceFormat);
+    const converted = await this.#convertSelectedManuscript(originalPath, conversion.sourceFormat, {
+      digest: snapshot.sourceDigest,
+      byteLength: snapshot.sourceBytes,
+    });
     requireStore(converted !== null, 'SNAPSHOT_RESELECTION_REQUIRED', '保留的原始文件无法再次转换。');
     const digest = sha256(converted.docx);
     requireStore(
