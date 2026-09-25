@@ -1166,7 +1166,9 @@ function registerRendererHandlers(
       title: '选择导出图书交付包的文件夹',
       buttonLabel: '导出到此文件夹',
       defaultPath: app.getPath('documents'),
-      properties: ['openDirectory', 'createDirectory', 'promptToCreate'],
+      // `createDirectory` makes a new folder inside the dialog on macOS; Windows' dialog makes one by itself. Windows'
+      // `promptToCreate` would answer with a folder that does not exist yet, which AI7 never creates, so it is not asked.
+      properties: ['openDirectory', 'createDirectory'],
     });
     const folder = chosen.canceled ? undefined : chosen.filePaths[0];
     if (folder === undefined || folder.length === 0) return undefined;
@@ -2744,6 +2746,26 @@ function registerRendererHandlers(
       }),
   );
   ipcMain.handle(
+    IPC_CHANNELS.listMaintenanceCases,
+    (event, input: Parameters<RendererApi['listMaintenanceCases']>[0]) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('listMaintenanceCases', {
+            bookId: route.bookId,
+            publicationVersionId: input.publicationVersionId,
+            beforeOrdinal: input.beforeOrdinal,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          requireMaintenanceOfRoute(route, result.bookId);
+          return result;
+        });
+      }),
+  );
+  ipcMain.handle(
     IPC_CHANNELS.recordMaintenanceCase,
     (event, input: Parameters<RendererApi['recordMaintenanceCase']>[0]) =>
       envelope(async () => {
@@ -2869,7 +2891,11 @@ function registerRendererHandlers(
           requireAuthority();
           const route = requireCurrentBookRoute(owned);
           const routeGeneration = owned.routeGeneration;
-          const result = await service.call('reviewBookDeliveryPackageExport', { bookId: route.bookId, packageVersionId: input.packageVersionId });
+          const result = await service.call('reviewBookDeliveryPackageExport', {
+            bookId: route.bookId,
+            packageVersionId: input.packageVersionId,
+            options: input.options,
+          });
           requireCurrentRouteGeneration(owned, routeGeneration);
           requireBookDeliveryPackageOfRoute(route, result.bookId);
           return result;
@@ -2892,6 +2918,7 @@ function registerRendererHandlers(
           const prepared = await service.call('prepareBookDeliveryPackageExport', {
             bookId: route.bookId,
             packageVersionId: input.packageVersionId,
+            options: input.options,
             reviewDigest: input.reviewDigest,
             folder,
           });

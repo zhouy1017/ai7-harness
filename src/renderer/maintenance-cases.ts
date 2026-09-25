@@ -21,8 +21,8 @@ import {
 import {
   MAINTENANCE_ACTION_LABELS,
   MAINTENANCE_BLOCKERS,
-  MAINTENANCE_CASES_TRUNCATED,
   MAINTENANCE_CLASSIFICATION_LEGEND,
+  MAINTENANCE_COMPLETE_AFTER_LINK,
   MAINTENANCE_CONCLUSION_CHOICES,
   MAINTENANCE_CONCLUSION_LEGEND,
   MAINTENANCE_ERRATA_LABEL,
@@ -46,6 +46,7 @@ import {
   maintenanceErrataHeading,
   maintenanceEvidenceLine,
   maintenanceLinkLine,
+  maintenanceOlderLine,
   maintenanceReasonLine,
   maintenanceRecordAccessibleName,
   maintenanceRevisionLine,
@@ -75,7 +76,8 @@ export interface MaintenanceSurface {
 
 export interface MountMaintenanceOptions {
   bookId: string;
-  api: Pick<RendererApi, 'inspectMaintenanceCase' | 'recordMaintenanceCase' | 'appendMaintenanceCaseRevision' | 'saveMaintenanceErrata'>;
+  api: Pick<RendererApi, 'inspectMaintenanceCase' | 'listMaintenanceCases' | 'recordMaintenanceCase' | 'appendMaintenanceCaseRevision' |
+    'saveMaintenanceErrata'>;
   technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
@@ -140,6 +142,11 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
   let ticket = 0;
   let draft: Draft | null = null;
   let open: OpenCase | null = null;
+  /**
+   * The older cases `更早的维护事项…` read for each designation, below the ones 交付物 lists (MAINT-001). A step on one of
+   * them updates its line from the step's answer; 交付物's own read refreshes the rest.
+   */
+  const older = new Map<string, MaintenanceCaseSummaryProjection[]>();
   /** Where focus goes once 交付物 has drawn the surface again: a selector inside one designation's section. */
   let pendingFocus: { publicationVersionId: string; selector: string } | null = null;
 
@@ -177,12 +184,22 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     section.append(heading);
     if (maintenance.withdrawn) section.append(el('p', 'attention-note maintenance-withdrawn', `${MAINTENANCE_WITHDRAWN}：${MAINTENANCE_INTERNAL_ONLY}`));
     if (maintenance.archived) section.append(el('p', 'field-note maintenance-archived', MAINTENANCE_ARCHIVED));
-    if (maintenance.cases.length > 0) {
+    // 交付物's newest cases, then the older ones read so far, each once.
+    const listed = new Set(maintenance.cases.map((summary) => summary.caseId));
+    const shown = [...maintenance.cases, ...(older.get(designation.publicationVersionId) ?? []).filter((summary) => !listed.has(summary.caseId))];
+    if (shown.length > 0) {
       const list = el('ol', 'maintenance-cases');
-      for (const summary of maintenance.cases) list.append(renderSummary(summary, designation.publicationVersionId));
+      for (const summary of shown) list.append(renderSummary(summary, designation.publicationVersionId));
       section.append(list);
     }
-    if (maintenance.total > maintenance.cases.length) section.append(el('p', 'field-note', MAINTENANCE_CASES_TRUNCATED));
+    if (maintenance.total > shown.length) {
+      const more = el('div', 'maintenance-older');
+      more.append(el('p', 'field-note', maintenanceOlderLine(maintenance.total - shown.length)));
+      const read = actionButton('older', 'quiet', () => void loadOlder(designation.publicationVersionId, shown));
+      read.disabled = working;
+      more.append(read);
+      section.append(more);
+    }
     const drafting = draft !== null && draft.publicationVersionId === designation.publicationVersionId;
     const row = el('div', 'button-row compact-actions');
     const record = actionButton('record', 'secondary', () => openDraft(designation));
@@ -448,8 +465,10 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
         current.choice, (value) => { current.choice = value; }));
     } else {
       if (panel === 'conclude') {
-        form.append(radios(MAINTENANCE_CONCLUSION_LEGEND, (['unresolved', 'complete'] as const).map((value) => ({ value, label: MAINTENANCE_CONCLUSION_CHOICES[value], detail: null })),
+        // Only the conclusions the case may record now: a 替代 or 再版 still waiting for its version is never 已完成.
+        form.append(radios(MAINTENANCE_CONCLUSION_LEGEND, projection.conclusions.map((value) => ({ value, label: MAINTENANCE_CONCLUSION_CHOICES[value], detail: null })),
           current.conclusion, (value) => { current.conclusion = value === 'complete' ? 'complete' : 'unresolved'; }));
+        if (!projection.conclusions.includes('complete')) form.append(el('p', 'field-note maintenance-complete-after-link', MAINTENANCE_COMPLETE_AFTER_LINK));
       }
       const area = el('textarea');
       area.dataset['maintenanceField'] = panel === 'errata' ? 'errata' : 'outcome';
@@ -489,6 +508,31 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     draft = null;
     options.redraw();
     if (announce) options.setStatus(MAINTENANCE_STATUS_LINES.cancelled);
+  }
+
+  /** `更早的维护事项…`: the next page of the designation's cases before the oldest one shown; focus goes to the first. */
+  async function loadOlder(publicationVersionId: string, shown: ReadonlyArray<MaintenanceCaseSummaryProjection>): Promise<void> {
+    if (destroyed || working || shown.length === 0) return;
+    const request = ++ticket;
+    working = true;
+    options.redraw();
+    options.setStatus(MAINTENANCE_STATUS_LINES.loadingOlder, 'busy');
+    try {
+      const page = await api.listMaintenanceCases({ publicationVersionId, beforeOrdinal: Math.min(...shown.map((summary) => summary.ordinal)) });
+      working = false;
+      if (destroyed || request !== ticket) return;
+      if (page.bookId !== bookId || page.publicationVersionId !== publicationVersionId) throw new Error(MAINTENANCE_STATUS_LINES.olderFailed);
+      older.set(publicationVersionId, [...(older.get(publicationVersionId) ?? []), ...page.cases]);
+      const first = page.cases[0];
+      pendingFocus = first === undefined ? null : { publicationVersionId, selector: caseSelector(first.caseId, '[data-maintenance-action="toggle-case"]') };
+      options.redraw();
+      options.setStatus(MAINTENANCE_STATUS_LINES.olderLoaded, 'success');
+    } catch (error) {
+      working = false;
+      if (destroyed || request !== ticket) return;
+      options.redraw();
+      options.setStatus(options.errorMessage(error, MAINTENANCE_STATUS_LINES.olderFailed), 'error');
+    }
   }
 
   async function toggleCase(summary: MaintenanceCaseSummaryProjection, publicationVersionId: string): Promise<void> {
@@ -612,6 +656,18 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
   function settle(result: MaintenanceCaseResultProjection): void {
     const projection = result.maintenanceCase;
     const publicationVersionId = projection.target.publicationVersionId;
+    // An older case's line is the surface's own: it says what the step's answer says.
+    const loaded = older.get(publicationVersionId);
+    if (loaded !== undefined) {
+      older.set(publicationVersionId, loaded.map((summary) => (summary.caseId !== projection.caseId ? summary : {
+        ...summary,
+        status: projection.status,
+        statusLabel: projection.statusLabel,
+        nextStep: projection.nextStep,
+        revisions: projection.revisionsTotal,
+        latestAt: projection.revisions.at(-1)?.recordedAt ?? summary.latestAt,
+      })));
+    }
     open = { caseId: projection.caseId, publicationVersionId, projection, panel: null, choice: null, text: '', conclusion: null, problem: null };
     ticket += 1;
     pendingFocus = {

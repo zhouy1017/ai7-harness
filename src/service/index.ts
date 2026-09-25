@@ -872,6 +872,8 @@ async function dispatch(
       };
     case 'inspectMaintenanceCase':
       return { id: request.id, ok: true, op: request.op, result: store.inspectMaintenanceCase(request.input) };
+    case 'listMaintenanceCases':
+      return { id: request.id, ok: true, op: request.op, result: store.listMaintenanceCases(request.input) };
     case 'recordMaintenanceCase':
       return { id: request.id, ok: true, op: request.op, result: store.recordMaintenanceCase(request.input) };
     case 'appendMaintenanceCaseRevision':
