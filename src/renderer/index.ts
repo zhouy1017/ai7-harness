@@ -4453,12 +4453,26 @@ function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjecti
     const artifacts = element('ul', 'knowledge-artifact-list');
     for (const artifact of procedures.artifacts) {
       const item = element('li', undefined, artifactLine(artifact));
-      item.dataset['artifactId'] = artifact.artifactId;
       item.dataset['artifactState'] = artifact.state;
       item.dataset['artifactEnabledBooks'] = String(artifact.enabledBooks);
       artifacts.append(item);
     }
-    section.append(element('h3', undefined, PROCEDURES_HEADING), list, artifacts);
+    // The identities are the Technical Identity Layer's (ADR 0071 §1, LAYER-001): the 方案's carrier and 权限侧车, and each
+    // 工序's own id, one step away from the words above.
+    const identities = technicalDetails(
+      'native-artifact-facts',
+      ...procedures.artifacts.flatMap((artifact) => [
+        element('dt', undefined, '原生载体身份'), element('dd', 'technical-identity', artifact.technical.artifactId),
+        element('dt', undefined, '原生载体版本'), element('dd', 'technical-identity', artifact.technical.version),
+        element('dt', undefined, 'SHA-256'), element('dd', 'technical-identity', artifact.technical.sha256),
+        element('dt', undefined, '权限侧车'), element('dd', 'technical-identity', artifact.technical.sidecarId),
+        ...(artifact.technical.sidecarSha256 === null
+          ? []
+          : [element('dt', undefined, '权限侧车 SHA-256'), element('dd', 'technical-identity', artifact.technical.sidecarSha256)]),
+      ]),
+      ...procedures.procedures.flatMap((procedure) => [element('dt', undefined, procedure.title), element('dd', 'technical-identity', procedure.procedureId)]),
+    );
+    section.append(element('h3', undefined, PROCEDURES_HEADING), list, artifacts, identities);
     panelNode.append(section, element('h3', undefined, RULES_HEADING));
   }
   panelNode.append(element('p', 'field-note', projection.statement));

@@ -106,10 +106,12 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
     const procedure = { procedureId: 'p', title: '出版风险点标注', version: '1', categoryId: 'c', categoryLabel: '出版风险', state: 'enabled' as const, unavailableReason: null, reviewRuns: 0 };
     expect(procedureLine(procedure)).toBe('出版风险点标注 · 第 1 版 · 内置 · 用于「出版风险」 · 还没有审阅用过');
     expect(procedureLine({ ...procedure, reviewRuns: 3 })).toBe('出版风险点标注 · 第 1 版 · 内置 · 用于「出版风险」 · 已用于 3 次审阅');
-    const artifact = { artifactId: 'a', title: '编辑工作区方案', version: '1.0.0', state: 'installed' as const, enabledBooks: 2 };
-    expect(artifactLine(artifact)).toBe('编辑工作区方案 · 1.0.0 · 已安装 · 已为 2 本书启用');
-    expect(artifactLine({ ...artifact, enabledBooks: 0 })).toBe('编辑工作区方案 · 1.0.0 · 已安装 · 还没有图书启用');
-    expect(artifactLine({ ...artifact, version: null, state: 'not-installed' })).toBe('编辑工作区方案 · 尚未安装');
+    // The 方案 in the house's words, 本社方案 vN, in its lifecycle; no identifier of the carrier's.
+    const artifact = { title: '本社方案', revision: 2, state: 'installed' as const, enabledBooks: 2 };
+    expect(artifactLine(artifact)).toBe('本社方案 v2 · 已安装 · 已为 2 本书启用');
+    expect(artifactLine({ ...artifact, enabledBooks: 0 })).toBe('本社方案 v2 · 已安装 · 还没有图书启用');
+    expect(artifactLine({ ...artifact, revision: null, state: 'available-to-install' })).toBe('本社方案 · 可获取 · 尚未安装');
+    expect(artifactLine({ ...artifact, state: 'unavailable-needs-attention' })).toBe('本社方案 v2 · 不可用 · 需要处理');
   });
 });
 

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
+import { appendFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +7,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { LaunchBinding } from '../../src/service/analysis/baseline-analysis-store.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
+import {
+  EDITORIAL_WORKSPACE_PROFILE_DIGEST,
+  EDITORIAL_WORKSPACE_PROFILE_ID,
+  EDITORIAL_WORKSPACE_PROFILE_RETAINED_KEY,
+  EDITORIAL_WORKSPACE_PROFILE_SIDECAR_ID,
+  EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_2_DIGEST,
+  EDITORIAL_WORKSPACE_PROFILE_VERSION,
+} from '../../src/service/editorial-workspace-profile.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
@@ -178,15 +186,24 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
         ['typos-and-usage/1', 0], ['typos-and-usage/2', 0], ['typos-and-usage/3', 0], ['typos-and-usage/4', 0],
       ]);
       expect(typosDocument(fresh).versions).toEqual([expect.objectContaining({ ordinal: 1, versionId: null, source: null, usedByCount: 0, usedBy: [] })]);
-      // 工序与规则's expert 工序 (S79d): the nine categories' 工序, none used yet, and the native artifact not installed.
-      const freshProcedures = store.inspectKnowledgeProcedures();
+      // 工序与规则's expert 工序 (S79d): the nine categories' 工序, none used yet, and 本社方案 not installed yet — its identities
+      // only for 查看技术详情.
+      const freshProcedures = await store.inspectKnowledgeProcedures();
       expect(freshProcedures.procedures.map((procedure) => [procedure.title, procedure.state, procedure.reviewRuns])).toEqual([
         ['错别字与规范用语审阅工序', 'enabled', 0], ['体例与格式审阅工序', 'enabled', 0], ['线索转批注', 'enabled', 0], ['断言列举与引文定位', 'enabled', 0],
         ['引用风险点标注', 'enabled', 0], ['出版风险点标注', 'enabled', 0], ['文学性与表达改进工序', 'enabled', 0],
         ['书系一致性检查', 'unavailable', 0], ['跨交付物一致性检查', 'unavailable', 0],
       ]);
-      expect(freshProcedures.procedures.filter((procedure) => procedure.state === 'unavailable').every((procedure) => (procedure.unavailableReason ?? '').length > 0)).toBe(true);
-      expect(freshProcedures.artifacts).toEqual([{ artifactId: '@ai7/editorial-workspace-profile', title: '编辑工作区方案', version: null, state: 'not-installed', enabledBooks: 0 }]);
+      // The two not connected yet say why of the house, never of one Book.
+      expect(freshProcedures.procedures.filter((procedure) => procedure.state === 'unavailable').map((procedure) => procedure.unavailableReason))
+        .toEqual(['书系知识还没有接通。', '生产文档之间的一致性核对还没有接通。']);
+      expect(freshProcedures.artifacts).toEqual([{
+        title: '本社方案', revision: null, state: 'available-to-install', enabledBooks: 0,
+        technical: {
+          artifactId: EDITORIAL_WORKSPACE_PROFILE_ID, version: EDITORIAL_WORKSPACE_PROFILE_VERSION, sha256: EDITORIAL_WORKSPACE_PROFILE_DIGEST,
+          sidecarId: EDITORIAL_WORKSPACE_PROFILE_SIDECAR_ID, sidecarSha256: null,
+        },
+      }]);
 
       // One review of 错别字与规范用语 under version 1: its findings cite the clauses, and the version names the Run.
       const imported = await importSample1Book(store, roots.codeRoot, 'L2 审阅规范');
@@ -210,10 +227,12 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       expect(reviewed.versions[0]!.usedBy).toEqual([expect.objectContaining({ bookId: imported.bookId, bookTitle: 'L2 审阅规范', reviewRunId: first.reviewRunId, reviewOrdinal: 1 })]);
       expect(reviewed.versions[0]!.usedByCount).toBe(1);
       expect(reviewed.olderVersionBooks).toEqual([]);
-      const afterReview = store.inspectKnowledgeProcedures();
+      const afterReview = await store.inspectKnowledgeProcedures();
       expect(afterReview.procedures.find((procedure) => procedure.categoryId === TYPOS)!.reviewRuns).toBe(1);
       expect(afterReview.procedures.filter((procedure) => procedure.categoryId !== TYPOS).every((procedure) => procedure.reviewRuns === 0)).toBe(true);
-      expect(afterReview.artifacts[0]).toMatchObject({ state: 'installed', version: '1.0.0', enabledBooks: 1 });
+      expect(afterReview.artifacts[0]).toMatchObject({
+        title: '本社方案', revision: 2, state: 'installed', enabledBooks: 1, technical: { sidecarSha256: EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_2_DIGEST },
+      });
 
       // 全书重新审阅 under the same version finds the same findings again: each still counts once, and the version names both
       // reviews, the latest first.
@@ -266,7 +285,12 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       const now = typosDocument(store.inspectReviewGuidelines());
       expect(now.olderVersionBooks).toEqual([{ bookId: imported.bookId, bookTitle: 'L2 审阅规范', ordinal: 1 }]);
       expect(now.versions.map((version) => version.usedBy.map((run) => run.reviewOrdinal))).toEqual([[], [2, 1]]);
-      expect(store.inspectKnowledgeProcedures().procedures.find((procedure) => procedure.categoryId === TYPOS)!.reviewRuns).toBe(2);
+      // 已用于 counts the two approved reviews, never the two only prepared.
+      expect((await store.inspectKnowledgeProcedures()).procedures.find((procedure) => procedure.categoryId === TYPOS)!.reviewRuns).toBe(2);
+      // A retained carrier altered on disk: 知识库 reads the 方案 as the Book card does, needing attention.
+      appendFileSync(join(roots.dataRoot, 'native-artifacts', ...EDITORIAL_WORKSPACE_PROFILE_RETAINED_KEY.split('/')), ' ');
+      expect((await store.inspectKnowledgeProcedures()).artifacts[0]!.state).toBe('unavailable-needs-attention');
+      expect((await store.inspectEditorialWorkspaceProfile(imported.bookId)).lifecycle.state).toBe('unavailable-needs-attention');
     } finally {
       await close(session);
     }

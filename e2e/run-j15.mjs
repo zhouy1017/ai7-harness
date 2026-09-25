@@ -786,18 +786,41 @@ async function main() {
     requireJourney(restarted.cards[0].pill === '第 2 版 · 本社' && restarted.cards[0].versions.length === 2 && restarted.cards[0].clauses.length === 5, 'knowledge-restart-kept', restarted.cards[0]);
 
     at('knowledge-procedures');
-    // 工序与规则 (Issue #427, S79d): the nine review 工序 by what each does — seven 已启用, the two whose basis does not exist yet
-    // 尚未接通 — none used by a review in this Journey, and 编辑工作区方案 installed and enabled for the one Book that enabled it.
+    // 工序与规则 (Issue #427, S79d): the nine review 工序 by what each does — seven 已启用 drawn solid, the two whose basis does
+    // not exist yet 尚未接通 drawn dashed, with why said of the house — none used by a review in this Journey, and the 方案
+    // in the house's words, 本社方案 v2, installed and enabled for the one Book that enabled it. Both layers (LAYER-008): the
+    // words carry no identifier, and 查看技术详情, closed, holds the carrier's and the 权限侧车's identities and each 工序's id.
     await click(renderer, '工序与规则', 'knowledge-procedures-tab');
     await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='rules' && document.querySelector('.knowledge-procedures')?.dataset.procedureCount==='9'`, 'knowledge-procedures-painted');
-    const procedures = await renderer.evaluate(`({
-      states: Array.from(document.querySelectorAll('.knowledge-procedure-list > li'), (item) => [item.dataset.procedureState, item.querySelector('.status-pill')?.textContent ?? null, item.dataset.procedureRuns]),
-      first: document.querySelector('.knowledge-procedure-list > li')?.textContent ?? null,
-      artifact: document.querySelector('.knowledge-artifact-list > li')?.textContent ?? null,
-    })`);
-    requireJourney(JSON.stringify(procedures?.states) === JSON.stringify([...Array(7).fill(['enabled', '已启用', '0']), ['unavailable', '尚未接通', '0'], ['unavailable', '尚未接通', '0']]) &&
+    const procedures = await renderer.evaluate(`(() => {
+      const section = document.querySelector('.knowledge-procedures');
+      const details = section?.querySelector(':scope > details.technical-details') ?? null;
+      const decision = Array.from(section?.children ?? []).filter((child) => child !== details).map((child) => child.textContent).join('\\n');
+      return {
+        states: Array.from(document.querySelectorAll('.knowledge-procedure-list > li'), (item) => {
+          const pill = item.querySelector('.status-pill');
+          return [item.dataset.procedureState, pill?.textContent ?? null, item.dataset.procedureRuns, pill instanceof HTMLElement ? getComputedStyle(pill).borderTopStyle : null];
+        }),
+        first: document.querySelector('.knowledge-procedure-list > li')?.textContent ?? null,
+        reasons: Array.from(document.querySelectorAll('.knowledge-procedure-list .procedure-reason'), (reason) => reason.textContent),
+        artifact: document.querySelector('.knowledge-artifact-list > li')?.textContent ?? null,
+        identifierInWords: /1\\.0\\.0|@ai7\\/|[0-9a-f]{64}|ai7-review-procedure/u.test(decision),
+        detailsOpen: details === null ? null : details.open,
+        summary: details?.querySelector('summary')?.textContent ?? null,
+        technical: Array.from(details?.querySelectorAll(':scope > dl > dt') ?? [], (term) => [term.textContent, term.nextElementSibling?.textContent ?? null]),
+      };
+    })()`);
+    const technical = new Map(procedures?.technical ?? []);
+    requireJourney(JSON.stringify(procedures?.states) === JSON.stringify([...Array(7).fill(['enabled', '已启用', '0', 'solid']), ['unavailable', '尚未接通', '0', 'dashed'], ['unavailable', '尚未接通', '0', 'dashed']]) &&
       procedures.first === '已启用 错别字与规范用语审阅工序 · 第 1 版 · 内置 · 用于「错别字与规范用语」 · 还没有审阅用过' &&
-      procedures.artifact === '编辑工作区方案 · 1.0.0 · 已安装 · 已为 1 本书启用', 'knowledge-procedures-list', procedures);
+      JSON.stringify(procedures.reasons) === JSON.stringify([' · 书系知识还没有接通。', ' · 生产文档之间的一致性核对还没有接通。']) &&
+      procedures.artifact === '本社方案 v2 · 已安装 · 已为 1 本书启用' && procedures.identifierInWords === false &&
+      procedures.detailsOpen === false && procedures.summary === '查看技术详情' &&
+      technical.get('原生载体身份') === '@ai7/editorial-workspace-profile' && technical.get('原生载体版本') === '1.0.0' &&
+      /^[0-9a-f]{64}$/u.test(technical.get('SHA-256') ?? '') && technical.get('权限侧车') === 'ai7.editorial-workspace-profile.authority' &&
+      /^[0-9a-f]{64}$/u.test(technical.get('权限侧车 SHA-256') ?? '') && procedures.technical.length === 5 + 9 &&
+      procedures.technical.slice(5).every(([, procedureId]) => /^ai7-review-procedure\//u.test(procedureId ?? '')),
+    'knowledge-procedures-list', procedures);
 
     at('zero-activity');
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key))`, 'exact-service-readiness-remained-zero');

@@ -222,9 +222,14 @@ export function procedureLine(procedure: KnowledgeProcedureProjection): string {
   return `${procedure.title} · 第 ${procedure.version} 版 · 内置 · 用于「${procedure.categoryLabel}」 · ${used}`;
 }
 
-/** The native artifact in its own lifecycle words: installed or not, and how many Books enabled it. */
-export function artifactLine(artifact: KnowledgeArtifactProjection): string {
-  if (artifact.state === 'not-installed') return `${artifact.title} · 尚未安装`;
+/**
+ * The native artifact in the house's words (editor-surfaces §10): 本社方案 vN in its lifecycle — as the Book card reads it —
+ * and how many Books enabled it. Its identity and version identifiers stay in 查看技术详情 (ADR 0071 §1).
+ */
+export function artifactLine(artifact: Pick<KnowledgeArtifactProjection, 'title' | 'revision' | 'state' | 'enabledBooks'>): string {
+  const named = artifact.revision === null ? artifact.title : `${artifact.title} v${artifact.revision}`;
+  if (artifact.state === 'unavailable-needs-attention') return `${named} · 不可用 · 需要处理`;
+  if (artifact.state === 'available-to-install') return `${named} · 可获取 · 尚未安装`;
   const enabled = artifact.enabledBooks === 0 ? '还没有图书启用' : `已为 ${artifact.enabledBooks} 本书启用`;
-  return `${artifact.title} · ${artifact.version} · 已安装 · ${enabled}`;
+  return `${named} · 已安装 · ${enabled}`;
 }

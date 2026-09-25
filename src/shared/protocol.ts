@@ -4738,18 +4738,31 @@ export interface KnowledgeProcedureProjection {
   readonly categoryLabel: string;
   /** `enabled` when its category can run; `unavailable` when the category's basis does not exist yet. */
   readonly state: 'enabled' | 'unavailable';
+  /** Why it cannot run yet, said of the house rather than of one Book; `null` while it can. */
   readonly unavailableReason: string | null;
-  /** How many Review Runs applied it. */
+  /** How many approved Review Runs applied this version of it; a Run only prepared applied nothing. */
   readonly reviewRuns: number;
 }
 
-/** A native artifact AI7 carries, in its own lifecycle words (REUSE-030). */
+/**
+ * A native artifact AI7 carries, in the house's words (editor-surfaces §10; REUSE-030): the 编辑工作区方案 with its AI7 权限侧车
+ * reads 本社方案 vN, in its lifecycle as the Book card reads it. Its identities are the Technical Identity Layer's (ADR 0071
+ * §1, LAYER-001), for 查看技术详情 only.
+ */
 export interface KnowledgeArtifactProjection {
-  readonly artifactId: string;
+  /** The house's word for it: 本社方案. */
   readonly title: string;
-  readonly version: string | null;
-  readonly state: 'not-installed' | 'installed';
+  /** The newest AI7 权限侧车 revision the installed 方案 offers — the N of 本社方案 vN; `null` before it is installed. */
+  readonly revision: number | null;
+  readonly state: 'available-to-install' | 'installed' | 'unavailable-needs-attention';
   readonly enabledBooks: number;
+  readonly technical: {
+    readonly artifactId: string;
+    readonly version: string;
+    readonly sha256: string;
+    readonly sidecarId: string;
+    readonly sidecarSha256: string | null;
+  };
 }
 
 export interface KnowledgeProceduresProjection {
