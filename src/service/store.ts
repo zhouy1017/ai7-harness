@@ -4208,7 +4208,7 @@ export class EditorialStore {
    * Startup reconciliation (CONT-014): the baseline Runs a stopped service left under way are settled `paused` or
    * `resumable`; the ones left cancelling are named for the execution owner to finish.
    */
-  reconcileStoppedBaselineAnalysisRuns(): { settled: number; cancelling: ReadonlyArray<string>; answered: ReadonlyArray<string>; queued: ReadonlyArray<string> } {
+  reconcileStoppedBaselineAnalysisRuns(): { settled: number; cancelling: ReadonlyArray<string>; answered: ReadonlyArray<string> } {
     this.#assertAvailable();
     return this.#analysisCall(() => this.#baselineAnalysis.reconcileStoppedRuns());
   }
