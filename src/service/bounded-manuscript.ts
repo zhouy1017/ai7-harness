@@ -2448,6 +2448,29 @@ function requireManuscriptReimportTargetSchema(
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
+  // From revision 21 on, an upgrade step commits its revision's relations in a transaction of its own and the version
+  // stamp follows in another (Issue #596), so a store that stopped between them holds all of a revision's relations
+  // below that revision. They count as the revision's: the exact check accepts them, the step skips relations that
+  // exist, and the next open stamps the version. None of them present still requires their absence, and only some of
+  // them present is still refused.
+  const committed = (relations: Readonly<Record<string, unknown>>): boolean =>
+    Object.keys(relations).every((name) => schemaObjectSql(db, 'table', name) !== undefined);
+  includeManuscriptEntryPositionTable ||= committed({ manuscript_entry_positions: MANUSCRIPT_ENTRY_POSITION_SCHEMA_SQL });
+  includeEditorialMarkTables ||= committed(EDITORIAL_MARK_SCHEMA_SQL);
+  includeManuscriptEffectTables ||= committed(MANUSCRIPT_EFFECT_SCHEMA_SQL);
+  includeReviewRunTables ||= committed(REVIEW_RUN_SCHEMA_SQL);
+  includePublicationVersionTables ||= committed(PUBLICATION_VERSION_SCHEMA_SQL);
+  includeProposalConflictTables ||= committed(PROPOSAL_CONFLICT_SCHEMA_SQL);
+  includeImportRetentionTables ||= committed(IMPORT_RETENTION_SCHEMA_SQL);
+  includeImportedMarkTables ||= committed(IMPORTED_MARK_SCHEMA_SQL);
+  includeExportLedgerTables ||= committed(EXPORT_LEDGER_SCHEMA_SQL);
+  includeDefaultExecutionRuleTables ||= committed(DEFAULT_EXECUTION_RULE_SCHEMA_SQL);
+  includeRunCheckpointTables ||= committed(RUN_CHECKPOINT_SCHEMA_SQL);
+  includeClarificationTables ||= committed(CLARIFICATION_SCHEMA_SQL);
+  includeReimportGroupTables ||= committed(REIMPORT_GROUP_SCHEMA_SQL);
+  includeProductionDocumentTables ||= committed(PRODUCTION_DOCUMENT_SCHEMA_SQL);
+  includeProductionDocumentDeliveryTables ||= committed(PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_SQL);
+  includeBookDeliveryPackageTables ||= committed(BOOK_DELIVERY_PACKAGE_SCHEMA_SQL);
   requireExactSchema(
     db,
     {
@@ -2472,9 +2495,16 @@ function requireManuscriptReimportTargetSchema(
         ? { manuscript_entry_positions: MANUSCRIPT_ENTRY_POSITION_SCHEMA_SQL }
         : {}),
       // Revision 23 widened `editorial_marks` in the transaction that created the Effect relations: a
-      // store without them holds revision 22's text of it, and a store with them only the widened one.
+      // store without them holds revision 22's text of it — or, when this build's revision-22 step ran and the
+      // upgrade stopped before revision 23's (Issue #596), the widened text this build creates, which revision 23's
+      // step leaves as it is — and a store with them only the widened one.
       ...(includeEditorialMarkTables
-        ? { ...EDITORIAL_MARK_SCHEMA_SQL, ...(includeManuscriptEffectTables ? {} : EDITORIAL_MARK_REVISION_22_SQL) }
+        ? {
+            ...EDITORIAL_MARK_SCHEMA_SQL,
+            ...(includeManuscriptEffectTables
+              ? {}
+              : { editorial_marks: [EDITORIAL_MARK_REVISION_22_SQL.editorial_marks, EDITORIAL_MARK_SCHEMA_SQL.editorial_marks] }),
+          }
         : {}),
       ...(includeManuscriptEffectTables ? MANUSCRIPT_EFFECT_SCHEMA_SQL : {}),
       // Revision 24 (Issue #417) adds the Review Run relations beside the three analysis relations it
