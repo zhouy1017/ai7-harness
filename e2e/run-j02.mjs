@@ -1129,15 +1129,23 @@ async function runAccessibilityJourney(renderer) {
     at('j14-keyboard-focus-keeps-window-precondition');
     requireJourney(false, 'keyboard-focus-precondition', { stopBeforeText, beforeFocus });
   }
+  // Every scroll of the pane from here on is recorded, so a reveal the pane took back is told from none (#604).
+  await renderer.evaluate(`(() => { const pane = document.querySelector('.editor-window'); const probe = { tops: [] }; const onScroll = () => probe.tops.push(Math.round(pane.scrollTop)); pane.addEventListener('scroll', onScroll); probe.stop = () => pane.removeEventListener('scroll', onScroll); globalThis.__ai7RevealProbe = probe; return true; })()`);
   // Tab walks forward from that stop until it enters the text; no stop on the way is inside the pane,
   // so the pane stays where it was put until the focus that is under test arrives.
   const walked = [];
+  let entered = null;
   for (let tabs = 0; tabs < 12; tabs += 1) {
     await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
     await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
     const stop = await renderer.evaluate(`(() => { const active = document.activeElement; const editor = document.querySelector('[data-testid="manuscript-editor"]'); return active === editor ? 'TEXT' : (active?.id || active?.className || active?.tagName || 'none') + ':' + (active?.textContent ?? '').slice(0, 12) + '@' + Math.round(document.querySelector('.editor-window').scrollTop); })()`);
     walked.push(stop);
-    if (stop === 'TEXT') break;
+    if (stop === 'TEXT') {
+      // What the focus found as it entered the text (#604): whether the window had focus, and where the caret stood —
+      // at the text's start, as the cleared selection leaves it, or elsewhere, as #493's restored selection did.
+      entered = await renderer.evaluate(`(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const selection = document.getSelection(); let caret = 'none'; if (selection && selection.rangeCount > 0) { if (!editor.contains(selection.anchorNode)) caret = 'outside'; else { const before = document.createRange(); before.setStart(editor, 0); before.setEnd(selection.anchorNode, selection.anchorOffset); caret = before.toString().length === 0 ? 'at-start' : 'elsewhere'; } } return { hasFocus: document.hasFocus(), caret }; })()`);
+      break;
+    }
   }
   if (localDebugEnabled()) recordDebugDetail('J-02', `tab walk ${JSON.stringify(walked)}`);
   if (walked.at(-1) !== 'TEXT') {
@@ -1148,14 +1156,20 @@ async function runAccessibilityJourney(renderer) {
   // enough for it to show on the slowest hosted runner.
   await new Promise((resolveWait) => setTimeout(resolveWait, 1_500));
   const afterFocus = await renderer.evaluate(windowProbe);
+  const scrolled = await renderer.evaluate(`(() => { const probe = globalThis.__ai7RevealProbe; probe?.stop(); globalThis.__ai7RevealProbe = undefined; return probe?.tops ?? []; })()`);
   if (afterFocus?.first !== beforeFocus.first || afterFocus?.position !== beforeFocus.position) {
     at('j14-keyboard-focus-keeps-window-paged');
     requireJourney(false, 'keyboard-focus-keeps-window', { beforeFocus, afterFocus });
   }
   if (afterFocus.top === beforeFocus.top) {
-    // The browser revealed nothing, so nothing was proven: say so rather than pass on it.
-    at('j14-keyboard-focus-keeps-window-no-reveal');
-    requireJourney(false, 'keyboard-focus-reveal', { beforeFocus, afterFocus });
+    // The browser revealed nothing, so nothing was proven: say so rather than pass on it. A hosted run prints only the
+    // location (#604), so it tells the facts apart: the window without focus, a caret the focus found away from the
+    // text's start, or a pane that moved and came back; the plain name is left for none of them.
+    if (entered?.hasFocus !== true) at('j14-keyboard-focus-keeps-window-no-reveal-window-unfocused');
+    else if (entered.caret !== 'at-start') at('j14-keyboard-focus-keeps-window-no-reveal-caret-not-at-start');
+    else if (Array.isArray(scrolled) && scrolled.some((top) => top !== beforeFocus.top)) at('j14-keyboard-focus-keeps-window-no-reveal-moved-back');
+    else at('j14-keyboard-focus-keeps-window-no-reveal');
+    requireJourney(false, 'keyboard-focus-reveal', { beforeFocus, afterFocus, entered, scrolled });
   }
   at('j14-top-edge-pages-back-once');
   // The reader's own scroll to the top edge still asks for the window before — once: the pane then
