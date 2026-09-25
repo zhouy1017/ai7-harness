@@ -64,6 +64,7 @@ import type { EditorialMarkStore, ProducedEditorialMarkInput } from '../editoria
 import type { ReviewRunAttentionReading } from '../global-attention.js';
 import {
   BUILTIN_REVIEW_CATEGORY_CONFIGURATION,
+  houseGuidelineDocuments,
   reviewCategoryBasisStatement,
   reviewCategoryConfigurationDigest,
   type ReviewCategoryConfiguration,
@@ -392,6 +393,21 @@ const UNSTARTED_DETAIL = '尚未开始；继续审阅时从这一类接着审。
 const UNWRITTEN_DETAIL = '运行已结束，发现尚未标到稿件上；继续审阅时写入。' as const;
 const INTERRUPTED_DETAIL = '服务在这一类运行期间停止；继续审阅时记为已中断，再接着审其余类别。' as const;
 const FAILED_UNRECORDED_DETAIL = '这一类的运行失败了；继续审阅时记下这一结果，再接着审其余类别。' as const;
+export const HOUSE_GUIDELINE_NOT_TRANSMITTABLE = 'REVIEW_GUIDELINE_NOT_TRANSMITTABLE' as const;
+
+/**
+ * Under developer-live, a category whose guideline clauses the house imported is refused before any dispatch (Issue #427,
+ * S79a review): those clauses would enter the category's prompt, and the active Provider Processing policy admits only
+ * public or synthetic text until the Owner admits house guideline text in a policy revision. Under development-ci nothing
+ * is transmitted, so nothing is refused. `null` when nothing stands in the way.
+ */
+export function houseGuidelineRefusal(entry: ReviewCategoryConfigurationEntry, live: boolean): string | null {
+  if (!live || entry.executor !== 'review-category-contract') return null;
+  const house = houseGuidelineDocuments(entry);
+  if (house.length === 0) return null;
+  const named = house.map((document) => `《${document.title}》第 ${document.version} 版`).join('、');
+  return `这一类按本社导入的${named}审阅；开发者实时模式下，本社的条款在获准发给模型之前不会发出，这一类暂不能开始。`;
+}
 
 /** ADR 0066's tiers read as V2-UX-REV-004's severities (ambiguity A3, decided by the slice). */
 const FACTUAL_TIER_SEVERITY: Readonly<Record<FactualSeverityTier, ReviewFindingSeverity>> = { A: 'must', B: 'should', C: 'note' };
@@ -1282,6 +1298,12 @@ export class ReviewRunStore {
     const approved = this.#authorizationOf(reviewRunId)?.approvals.get(categoryId);
     requireReview(approved !== undefined, 'REVIEW_RUN_NOT_AUTHORIZED', '这次审阅尚未授权这一类的计划。');
     const ledger = this.#ledgers.ledgerOf(category.entry);
+    // House guideline text never reaches a live model before the Owner admits it, whenever the Run was prepared.
+    const withheld = houseGuidelineRefusal(category.entry, ledger.launch.live !== null);
+    if (withheld !== null) {
+      this.#recordEvent(reviewRunId, categoryId, 'refused', withheld, { extra: { code: HOUSE_GUIDELINE_NOT_TRANSMITTABLE } });
+      return null;
+    }
     let dispatchRunRecordId: string | null;
     try {
       dispatchRunRecordId = ledger.authorize(snapshot.bookId, category.task.taskIntentId, approved).dispatchRunRecordId;
@@ -1964,6 +1986,8 @@ export class ReviewRunStore {
     if (entry.executor === 'baseline-leads') {
       return { entry, unavailableReason: baseline.error ?? (baseline.revision === null ? LEADS_ABSENT_REASON : null), facts: none, projection: null };
     }
+    const withheld = houseGuidelineRefusal(entry, this.#ledgers.baseline().launch.live !== null);
+    if (withheld !== null) return { entry, unavailableReason: withheld, facts: none, projection: null };
     let projection: AnalysisProjection;
     try {
       projection = this.#ledgers.ledgerOf(entry).inspect(bookId, progress);

@@ -4580,6 +4580,10 @@ export interface DefaultExecutionRulesProjection {
 
 /** The largest guideline file 导入新版本 reads: a Word document or plain text of numbered clauses. */
 export const MAX_REVIEW_GUIDELINE_FILE_BYTES = 2 * 1024 * 1024;
+/** The Review Runs a guideline version names, the latest first; the page counts the rest (Issue #427 review). */
+export const MAX_GUIDELINE_VERSION_RUNS_SHOWN = 5;
+/** The Books 还在用旧版 names, by title; the page counts the rest (Issue #427 review). */
+export const MAX_GUIDELINE_OLDER_BOOKS_SHOWN = 10;
 
 /** The file one imported version was read from: its name as picked, how it was read, and its exact bytes. */
 export interface ReviewGuidelineSourceProjection {
@@ -4606,9 +4610,22 @@ export interface ReviewGuidelineVersionProjection {
   readonly source: ReviewGuidelineSourceProjection | null;
   readonly clauseCount: number;
   readonly digest: string;
-  /** The Review Runs that applied exactly this version, oldest first. */
+  /**
+   * How many Review Runs used exactly this version: a category of the Run that applies the document formed its findings
+   * under it. A Run only prepared, refused or failed has used nothing yet.
+   */
+  readonly usedByCount: number;
+  /** The latest of those Runs, newest first, at most `MAX_GUIDELINE_VERSION_RUNS_SHOWN`. */
   readonly usedBy: ReadonlyArray<{ readonly bookId: string; readonly bookTitle: string; readonly reviewRunId: string; readonly reviewOrdinal: number; readonly createdAt: string }>;
 }
+
+/**
+ * How the review categories that apply a guideline document read it (Issue #427 review). `clauses`: the Editorial Review
+ * Contract hands its numbered clauses to the model, so the house may import its own next version. `leads`: the category
+ * turns the baseline analysis's leads into annotations and reads no clause. `factual-kind`: the category runs AI7's own
+ * fixed factual-review contract. The last two are AI7's fixed statements of what the category does, never imported.
+ */
+export type ReviewGuidelineDocumentUse = 'clauses' | 'leads' | 'factual-kind';
 
 export interface ReviewGuidelineDocumentProjection {
   readonly documentId: string;
@@ -4616,13 +4633,16 @@ export interface ReviewGuidelineDocumentProjection {
   /** Who issued the version that applies now: `AI7 内置默认`, or `本社` once the house imported its own. */
   readonly issuer: string;
   readonly currentOrdinal: number;
+  readonly use: ReviewGuidelineDocumentUse;
   /** The review categories that apply this document. */
   readonly appliedBy: ReadonlyArray<{ readonly categoryId: string; readonly label: string }>;
   /** The clauses of the version that applies now. */
   readonly clauses: ReadonlyArray<ReviewGuidelineClauseProjection>;
   /** Every version, newest first. */
   readonly versions: ReadonlyArray<ReviewGuidelineVersionProjection>;
-  /** The Books whose latest Review Run applying this document used an older version than the current one. */
+  /** How many Books' latest Review Run that used this document used an older version than the current one. */
+  readonly olderVersionBookCount: number;
+  /** Those Books by title, at most `MAX_GUIDELINE_OLDER_BOOKS_SHOWN`. */
   readonly olderVersionBooks: ReadonlyArray<{ readonly bookId: string; readonly bookTitle: string; readonly ordinal: number }>;
 }
 

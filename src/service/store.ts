@@ -13591,7 +13591,9 @@ export class EditorialStore {
     try {
       return operation();
     } catch (error) {
-      if (error instanceof ReviewRunError || error instanceof AnalysisError || error instanceof EditorialMarkError || error instanceof ProposalConflictError) {
+      // A guideline version that no longer reads refuses the review's configuration in its own words (Issue #427 review).
+      if (error instanceof ReviewRunError || error instanceof AnalysisError || error instanceof EditorialMarkError || error instanceof ProposalConflictError ||
+        error instanceof ReviewGuidelineError) {
         throw new StoreError(error.code, error.message);
       }
       if (error instanceof BoundedStoreFatalError) {

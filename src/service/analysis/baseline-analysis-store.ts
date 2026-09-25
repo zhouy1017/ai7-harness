@@ -2431,8 +2431,12 @@ export class BaselineAnalysisStore {
     // never saw — never reads text older than the editor's (TASK-024). 开始任务 in the drawer still starts the plan the
     // editor is reading, at the Task Input revision that plan names; 重新确认计划 revises the plan in place, whatever moved.
     const checkpointCurrent = existing.checkpoint === null || this.#checkpointIsCurrent(existing.checkpoint, input.bookId);
+    // Nor is a Task whose plan froze another prompt contract of this kind — a review category whose guideline clauses were
+    // imported anew since (Issue #427 review): its plan could never execute under this contract, so the preparation is a
+    // new Task Intent under the contract that applies now.
+    const contractCurrent = existing.planEnvelope === null || existing.planEnvelope.promptContractDigest === this.#definition.promptContractDigest;
     const sameTask = latestIntent !== null && existing.run === null && latestIntent.mode === mode &&
-      latestIntent.predecessorRevisionId === (latest?.revisionId ?? null) && (input.reconfirm || checkpointCurrent);
+      latestIntent.predecessorRevisionId === (latest?.revisionId ?? null) && (input.reconfirm || checkpointCurrent) && contractCurrent;
     if (sameTask && existing.checkpoint !== null) {
       return { done: true, workId: null, completed: 1, total: 1, projection: this.#revisePreparedPlan(input.bookId, latestIntent, existing, selectedRange, input.reconfirm) };
     }
