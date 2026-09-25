@@ -2506,6 +2506,7 @@ function requireManuscriptReimportTargetSchema(
   includeProductionDocumentWorkflowTables ||= committed(PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_SQL);
   includeBookDeliveryPackageExportTables ||= committed(BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_SQL);
   includeProductionDocumentOriginTables ||= committed(PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_SQL);
+  includeMaintenanceCaseTables ||= committed(MAINTENANCE_CASE_SCHEMA_SQL);
   requireExactSchema(
     db,
     {
