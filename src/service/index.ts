@@ -538,6 +538,10 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: await store.addLibraryMaterial(request.input) };
     case 'decideLibraryMaterial':
       return { id: request.id, ok: true, op: request.op, result: store.decideLibraryMaterial(request.input) };
+    case 'inspectLearningMaterials':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectLearningMaterials(request.input.bookId) };
+    case 'decideLearningMaterial':
+      return { id: request.id, ok: true, op: request.op, result: store.decideLearningMaterial(request.input) };
     case 'inspectEvaluationProfiles':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluationProfiles() };
     case 'inspectEvaluation':

@@ -156,6 +156,9 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   'library-attribution-pending': '资料库归属待定',
   'learning-eligibility-pending': '学习准入待定',
   'learning-eligibility-deferred': '学习准入待定 · 稍后决定',
+  // A Book's Learning Material (Issue #61, S26b; LEARN-002): the words of the spec's attention item.
+  'learning-materials-pending': '学习准入待处理',
+  'learning-materials-deferred': '学习准入待处理 · 稍后决定',
 };
 
 /** The state pill's tone and shape: words and a shape, never colour alone. */
@@ -201,6 +204,8 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
   'library-attribution-pending': { tone: 'attention', shape: 'triangle' },
   'learning-eligibility-pending': { tone: 'attention', shape: 'triangle' },
   'learning-eligibility-deferred': { tone: 'attention', shape: 'triangle' },
+  'learning-materials-pending': { tone: 'attention', shape: 'triangle' },
+  'learning-materials-deferred': { tone: 'attention', shape: 'triangle' },
 };
 
 /**
@@ -237,6 +242,7 @@ export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionN
   // A 资料库 item's own two decisions (Issue #427, S79c), in its card's words.
   'set-library-attribution': LIBRARY_ATTRIBUTE,
   'set-learning-eligibility': LIBRARY_ELIGIBILITY,
+  'decide-learning-materials': '定学习准入…',
 };
 /** The two scopes a question can have (CLAR-004), in the card's own words. */
 export const GLOBAL_ATTENTION_CLARIFICATION_WAITING = '任务等待你的说明';
@@ -291,6 +297,8 @@ export function globalAttentionObjectLabel(object: GlobalAttentionObjectProjecti
       return `维护事项 · 第 ${object.ordinal} 项 · ${MAINTENANCE_CLASSIFICATION_LABELS[object.classification]} · 第 ${object.publicationOrdinal} 次发稿版本`;
     case 'library-material':
       return `资料库 · ${LIBRARY_KIND_LABELS[object.materialKind]}「${object.title}」`;
+    case 'learning-materials':
+      return `学习材料 · ${object.pending} 条待定${object.deferred > 0 ? `，${object.deferred} 条稍后决定` : ''}`;
   }
 }
 
@@ -422,6 +430,11 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
       return '归属已定，学习准入还没有定：没有你的决定，它不会用来学习，任务也还不能把它列进「允许参考」。';
     case 'learning-eligibility-deferred':
       return '学习准入记为稍后决定：决定之前，它不会用来学习，任务也还不能把它列进「允许参考」。';
+    // A Book's Learning Material (Issue #61, S26b; LEARN-002, LEARN-006): nothing of it is used to learn until the editor says.
+    case 'learning-materials-pending':
+      return '你的反馈与改动里有可以用来学习的材料：学习准入策略还只是建议，没有你的决定，它们不会用来学习。';
+    case 'learning-materials-deferred':
+      return '这些学习材料记为稍后决定：决定之前，它们不会用来学习。';
   }
 }
 
@@ -504,6 +517,7 @@ export const GLOBAL_ATTENTION_MATERIAL_GROUPS = [
   { material: 'external-source-retention-failed', label: '外部来源留存失败', group: 'exceptions' },
   { material: 'library-attribution-pending', label: '资料库归属待定', group: 'decisions' },
   { material: 'learning-eligibility-pending', label: '学习准入待定', group: 'decisions' },
+  { material: 'learning-materials-pending', label: '学习准入待处理', group: 'decisions' },
   { material: 'indexing-completed', label: '索引完成', group: 'recent' },
 ] as const satisfies ReadonlyArray<{ material: string; label: string; group: GlobalAttentionGroupKey }>;
 

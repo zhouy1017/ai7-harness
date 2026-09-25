@@ -32,6 +32,12 @@ import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabl
 // the same manuscript through the selection menu: 拒绝 asks why under 你的处理, and 不说明 records no more than that, never
 // asked again on reopening; of the editor's own accord 补充原因… takes their words and 改原因… a successor; 接受并应用 asks
 // too, and moving on without answering records nothing; Enter reaches the row without a pointer; a restart asks nothing.
+//
+// Since #61 (S26b) J-11 also walks 质量与学习 › 学习准入 on the material those records make: 待我处理 lists the Book once in
+// 等待你的决定; its Review Card reads in place with the choice unselected and 仅纳入当前图书 recommended; a wider choice says
+// its consequence first; one material is decided for the Book with the editor's note and the other left for later, which
+// 待我处理 then says; Enter and Escape reach the card without a pointer; it reflows at 200% and keeps its borders without
+// colour; and a restart moves nothing.
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -52,6 +58,10 @@ const METRIC_NOTE = '只统计你明确给出的判断：没有判断的条目�
 const SUGGESTION_REJECTED = '（旅程示例一）';
 const SUGGESTION_APPLIED = '（旅程示例二）';
 const OWN_REASON = '（旅程示例）篇幅所限';
+/** 学习准入's words (Issue #61, S26b): the Journey's note, and what the page says of every decision. */
+const LEARNING_NOTE = '（旅程示例）只在这本书里参考';
+const LEARNING_BASIS = '学习准入策略还在「仅建议」阶段：没有批准任何可以自动纳入的材料或范围，所以每一条都由你决定。';
+const LEARNING_INFLUENCE = '纳入以后，它只可能在所选范围内帮 AI7 以后的建议更接近你的判断：不会改动稿件或它来自的记录，不会自动生效为规则，不会启用记忆，也不会被发送出去。';
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
 const CREDENTIAL_CLEANUP_TIMEOUT_MS = 15_000;
 const FORCE_EXIT_TIMEOUT_MS = 5_000;
@@ -240,7 +250,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     database.exec('PRAGMA query_only = ON;');
     // The terminal version the service stamps, as J-16 reads it: the 分析反馈 revision since Issue #94 (S38), and after it
     // this pin moves with whatever revision a later slice takes.
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 49, 'credential-cleanup-metadata-version');
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 50, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
               approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
@@ -737,6 +747,75 @@ async function readDecision(renderer, predicate, name) {
   error.detail = card;
   throw error;
 }
+
+// ---- 质量与学习 › 学习准入 as the editor reads it (Issue #61, S26b) --------------------------------------------------------
+
+/** One 待我处理 item as the editor reads it: its group, state, Book, object, pill and next step. */
+const readAttentionItem = (selector) => `(() => {
+  const item = document.querySelector(${JSON.stringify(selector)});
+  if (!(item instanceof HTMLElement)) return null;
+  return {
+    group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null,
+    state: item.dataset.attentionState ?? null,
+    book: item.querySelector('.global-attention-book')?.textContent ?? null,
+    object: item.querySelector('button.global-attention-open')?.textContent ?? null,
+    pill: item.querySelector('.global-attention-pill')?.textContent ?? null,
+    next: item.querySelector('.global-attention-next')?.textContent ?? null,
+  };
+})()`;
+
+/**
+ * 学习准入 as the editor reads it: each Book's heading and people, each material's kind, state and origin; the open Review
+ * Card's heading, the heads of its excerpt lines and its last line, its facts, its choices and recommendation, the
+ * consequence shown, 记录 and any refusal; and where focus is. The excerpt's manuscript words are never read.
+ */
+const READ_LEARNING = `(() => {
+  const root = document.querySelector('[data-screen="quality-learning"] .learning-materials');
+  if (!(root instanceof HTMLElement) || root.querySelector('.learning-basis') === null) return null;
+  const card = root.querySelector('.learning-card');
+  const active = document.activeElement;
+  const kindOf = (node) => node?.dataset.materialKey?.split(':')[0] ?? null;
+  const consequence = card?.querySelector('.learning-consequence');
+  return {
+    basis: root.querySelector('.learning-basis')?.textContent ?? null,
+    books: Array.from(root.querySelectorAll('.learning-book'), (book) => ({
+      bookId: book.dataset.bookId ?? null,
+      heading: book.querySelector('h3')?.textContent ?? null,
+      people: book.querySelector('.learning-people')?.textContent ?? null,
+      materials: Array.from(book.querySelectorAll('li.learning-material'), (item) => [
+        kindOf(item), item.dataset.learningState ?? null, item.querySelector('.learning-state')?.textContent ?? null,
+        (item.querySelector('.learning-origin')?.textContent ?? '').split(' · 记录于')[0],
+      ]),
+    })),
+    card: card === null ? null : {
+      material: kindOf(card.closest('li.learning-material')),
+      heading: card.querySelector('h4')?.textContent ?? null,
+      excerptHeads: Array.from(card.querySelectorAll('.learning-excerpt li'), (line) => (line.textContent ?? '').split('：')[0]),
+      excerptTail: card.querySelector('.learning-excerpt li:last-child')?.textContent ?? null,
+      facts: Object.fromEntries(Array.from(card.querySelectorAll('[data-learning-fact]'), (fact) => [fact.dataset.learningFact, fact.dataset.learningFact === 'excerpt' ? null : fact.textContent])),
+      choices: Array.from(card.querySelectorAll('.learning-choices input'), (input) => [input.value, input.checked, input.disabled]),
+      recommended: card.querySelector('.learning-recommended')?.closest('label')?.querySelector('input')?.value ?? null,
+      seriesReason: card.querySelector('.learning-series-reason')?.textContent ?? null,
+      consequence: consequence instanceof HTMLElement && !consequence.hidden ? consequence.textContent : null,
+      record: card.querySelector('[data-learning-action="record"]')?.disabled === false ? 'enabled' : 'disabled',
+      refusal: card.querySelector('.learning-refusal')?.textContent ?? null,
+    },
+    focus: active instanceof HTMLElement && root.contains(active) ? [kindOf(active.closest('li.learning-material')), active.dataset.learningAction ?? active.tagName] : null,
+  };
+})()`;
+async function readLearning(renderer, predicate, name) {
+  const deadline = Date.now() + 60_000;
+  let page = null;
+  while (Date.now() < deadline) {
+    page = await renderer.evaluate(READ_LEARNING).catch(() => null);
+    if (page !== null && predicate(page)) return page;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  const error = new Error(`J-11/${name}`);
+  error.detail = page;
+  throw error;
+}
+const learningRow = (kind) => `[data-screen="quality-learning"] li.learning-material[data-material-key^="${kind}:"]`;
 
 async function main() {
   parseJourney();
@@ -1526,6 +1605,123 @@ async function main() {
     const keptApplied = await readDecision(renderer, (card) => card.applied && card.state === 'none', 'decision-restart-applied-read');
     requireJourney(keptApplied.prompt === null && keptApplied.later === '补充原因…', 'decision-restart-applied-not-asked', keptApplied);
     await pressEscape(renderer);
+
+    // ---- 质量与学习 › 学习准入 (Issue #61, plan slice S26b; LEARN-001 to LEARN-012, ATTN-009, FDBK-013) --------------------
+    at('learning-attention');
+    // 待我处理 lists the Book once, in 等待你的决定: two of its records say why — the rejection's reason and the synopsis's
+    // own words — and wait for the editor; the acceptance nobody explained and the bare 准确 are no material.
+    const learningItem = `learning-materials:${thirdId}`;
+    const learningSelector = `[data-screen="global-attention"] li.global-attention-item[data-attention-item=${JSON.stringify(learningItem)}]`;
+    await clickSelector(renderer, '#global-attention-entry', 'learning-attention-entry');
+    await waitFor(renderer, `document.querySelectorAll('[data-screen="global-attention"] section.global-attention-group').length === 4 && document.querySelector(${JSON.stringify(learningSelector)}) !== null`, 'learning-attention-listed', 30_000);
+    const learningListed = await renderer.evaluate(readAttentionItem(learningSelector));
+    requireJourney(learningListed?.group === 'decisions' && learningListed.state === 'learning-materials-pending' && learningListed.book === `《${THIRD.title}》` &&
+      learningListed.object === '学习材料 · 2 条待定' && learningListed.pill === '学习准入待处理' && learningListed.next === '安全的下一步：定学习准入…',
+    'learning-attention-words', learningListed);
+    await clickSelector(renderer, `${learningSelector} button.global-attention-open`, 'learning-attention-open');
+    const learningOpened = await readLearning(renderer, (page) => page.books.length === 1, 'learning-opened');
+    requireJourney(learningOpened.basis === LEARNING_BASIS && learningOpened.books[0].bookId === thirdId && learningOpened.books[0].heading === `《${THIRD.title}》 · 2 条` &&
+      learningOpened.books[0].people === '作者与责编：尚未填写' && learningOpened.card === null &&
+      JSON.stringify(learningOpened.books[0].materials) === JSON.stringify([
+        ['proposal-decision', 'pending', '待定', '修改建议 · 拒绝'], ['analysis-feedback', 'pending', '待定', '分析反馈 · 全书梗概'],
+      ]), 'learning-opened-words', learningOpened);
+
+    at('learning-review-card');
+    // 查看… opens the Review Card in place at its heading: the bounded material, where it came from, why it is one, the basis,
+    // what it could later influence, and no decision yet; the choice unselected, 仅纳入当前图书 marked 建议, 纳入当前书系 shown
+    // with why it is not there, and 记录学习准入决定 closed until a choice is made.
+    await clickSelector(renderer, `${learningRow('proposal-decision')} [data-learning-action="open"]`, 'learning-open-card');
+    const learningCard = await readLearning(renderer, (page) => page.card?.material === 'proposal-decision', 'learning-card');
+    requireJourney(learningCard.card.heading === '修改建议 · 拒绝' && JSON.stringify(learningCard.card.excerptHeads) === JSON.stringify(['原文', '建议', '你的原因']) &&
+      learningCard.card.excerptTail === '你的原因：证据不足' && learningCard.card.facts.rationale === '你说明了为什么这样处理：它可以帮 AI7 以后的建议更接近你的判断。' &&
+      learningCard.card.facts.basis === LEARNING_BASIS && learningCard.card.facts.influence === LEARNING_INFLUENCE && learningCard.card.facts.decision === '还没有决定。' &&
+      JSON.stringify(learningCard.card.choices) === JSON.stringify([['book', false, false], ['series', false, true], ['house', false, false], ['excluded', false, false], ['deferred', false, false]]) &&
+      learningCard.card.recommended === 'book' && learningCard.card.seriesReason === '还没有书系：书系接通后，才能把材料纳入书系。' &&
+      learningCard.card.consequence === null && learningCard.card.record === 'disabled' && JSON.stringify(learningCard.focus) === JSON.stringify(['proposal-decision', 'H4']),
+    'learning-card-words', learningCard);
+
+    at('learning-decide');
+    // 纳入出版社经验 says its house-wide consequence beside it before anything is recorded, 仅纳入当前图书 the Book's; with the
+    // editor's note, 记录学习准入决定 records the Book, and the row reads 已决定 with the focus back on 查看….
+    await tick(renderer, `${learningRow('proposal-decision')} .learning-choices input[value="house"]`, 'learning-choose-house');
+    const houseCard = await readLearning(renderer, (page) => typeof page.card?.consequence === 'string', 'learning-house-consequence');
+    requireJourney(houseCard.card.consequence === '纳入出版社经验：全社以后的图书都可能从它学习。' && houseCard.card.record === 'enabled', 'learning-house-words', houseCard.card);
+    await tick(renderer, `${learningRow('proposal-decision')} .learning-choices input[value="book"]`, 'learning-choose-book');
+    const bookCard = await readLearning(renderer, (page) => page.card?.consequence?.startsWith('仅纳入当前图书') === true, 'learning-book-consequence');
+    requireJourney(bookCard.card.consequence === `仅纳入当前图书：它只在《${THIRD.title}》里帮 AI7 学习。`, 'learning-book-words', bookCard.card);
+    await fill(renderer, `${learningRow('proposal-decision')} [data-learning-field="note"]`, LEARNING_NOTE, 'learning-note');
+    await clickSelector(renderer, `${learningRow('proposal-decision')} [data-learning-action="record"]`, 'learning-record');
+    await waitFor(renderer, `${status} === '学习准入决定已记录。'`, 'learning-recorded-status');
+    const learningRecorded = await readLearning(renderer, (page) => page.card === null && page.books[0]?.materials[0]?.[1] === 'decided', 'learning-recorded');
+    requireJourney(learningRecorded.books[0].materials[0][2] === '已决定' && JSON.stringify(learningRecorded.focus) === JSON.stringify(['proposal-decision', 'open']),
+      'learning-recorded-words', learningRecorded);
+    const learningService = await renderer.evaluate(`window.ai7.inspectLearningMaterials({ bookId: ${JSON.stringify(thirdId)} }).then((projection) => projection.books[0].materials.map((material) => [material.kind, material.state, material.decision?.choice ?? null, material.decision?.note ?? null, material.decisions]))`);
+    requireJourney(JSON.stringify(learningService) === JSON.stringify([['proposal-decision', 'decided', 'book', LEARNING_NOTE, 1], ['analysis-feedback', 'pending', null, null, 0]]),
+      'learning-recorded-service', learningService);
+
+    at('learning-defer');
+    // 稍后决定 on the synopsis's own words keeps it unresolved — neither taught from nor excluded — and 待我处理 still lists the
+    // Book once, as left for later.
+    await clickSelector(renderer, `${learningRow('analysis-feedback')} [data-learning-action="open"]`, 'learning-open-analysis');
+    const analysisCard = await readLearning(renderer, (page) => page.card?.material === 'analysis-feedback', 'learning-analysis-card');
+    requireJourney(analysisCard.card.heading === '分析反馈 · 全书梗概' && JSON.stringify(analysisCard.card.excerptHeads) === JSON.stringify(['全书梗概', '你的判断']) &&
+      analysisCard.card.excerptTail === `你的判断：不完整 · ${SYNOPSIS_REASON}`, 'learning-analysis-card-words', analysisCard.card);
+    await tick(renderer, `${learningRow('analysis-feedback')} .learning-choices input[value="deferred"]`, 'learning-choose-deferred');
+    await clickSelector(renderer, `${learningRow('analysis-feedback')} [data-learning-action="record"]`, 'learning-defer-record');
+    const learningDeferred = await readLearning(renderer, (page) => page.card === null && page.books[0]?.materials[1]?.[1] === 'deferred', 'learning-deferred');
+    requireJourney(learningDeferred.books[0].materials[1][2] === '稍后决定', 'learning-deferred-words', learningDeferred);
+    await clickSelector(renderer, '#global-attention-entry', 'learning-deferred-attention');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(learningSelector)})?.dataset.attentionState === 'learning-materials-deferred'`, 'learning-deferred-listed', 30_000);
+    const deferredListed = await renderer.evaluate(readAttentionItem(learningSelector));
+    requireJourney(deferredListed?.object === '学习材料 · 0 条待定，1 条稍后决定' && deferredListed.pill === '学习准入待处理 · 稍后决定', 'learning-deferred-attention-words', deferredListed);
+    await clickSelector(renderer, `${learningSelector} button.global-attention-open`, 'learning-deferred-open');
+    await readLearning(renderer, (page) => page.books.length === 1 && page.books[0].materials[1]?.[1] === 'deferred', 'learning-deferred-reopened');
+
+    at('j14-learning-keyboard');
+    // Without a pointer: Enter on 查看… opens the card at its heading, the decision it has stated and nothing chosen anew, and
+    // Escape closes it with nothing recorded and the focus back on 查看….
+    const decidedOpen = `${learningRow('proposal-decision')} [data-learning-action="open"]`;
+    await assertRenderer(renderer, `(() => { const open = document.querySelector(${JSON.stringify(decidedOpen)}); if (!(open instanceof HTMLButtonElement)) return false; open.focus(); return document.activeElement === open; })()`, 'learning-keyboard-focused');
+    await pressEnter(renderer);
+    const keyboardLearning = await readLearning(renderer, (page) => page.card?.material === 'proposal-decision' && page.focus?.[1] === 'H4', 'learning-keyboard-card');
+    requireJourney((keyboardLearning.card.facts.decision ?? '').startsWith('仅纳入当前图书 · ') && (keyboardLearning.card.facts.decision ?? '').endsWith(` · ${LEARNING_NOTE}`) &&
+      keyboardLearning.card.choices.every(([, checked]) => checked === false), 'learning-keyboard-card-words', keyboardLearning.card);
+    await pressEscape(renderer);
+    await readLearning(renderer, (page) => page.card === null && JSON.stringify(page.focus) === JSON.stringify(['proposal-decision', 'open']), 'learning-keyboard-closed');
+
+    at('j14-learning-reflow-forced-colors');
+    // At 200% the Book, an open card, its facts and its choices reflow into the width; without colour each keeps its border.
+    await clickSelector(renderer, decidedOpen, 'learning-reflow-open');
+    await readLearning(renderer, (page) => page.card?.material === 'proposal-decision', 'learning-reflow-card');
+    await tick(renderer, `${learningRow('proposal-decision')} .learning-choices input[value="house"]`, 'learning-reflow-house');
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
+    await waitFor(renderer, `(() => { const root = document.documentElement; const parts = [document.querySelector('.learning-book'), document.querySelector('.learning-card'), document.querySelector('.learning-facts'), document.querySelector('.learning-choices')]; return parts.every((part) => part instanceof HTMLElement && part.scrollWidth <= part.clientWidth + 2) && root.scrollWidth <= root.clientWidth + 2; })()`, 'learning-reflow', 10_000);
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
+    await assertRenderer(renderer, `(() => {
+      if (!matchMedia('(forced-colors: active)').matches) return false;
+      const parts = [document.querySelector('.learning-book'), document.querySelector('.learning-card'), document.querySelector('.learning-choices')];
+      return parts.every((part) => part instanceof HTMLElement && getComputedStyle(part).borderTopStyle === 'solid');
+    })()`, 'learning-forced-colors');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
+    await clickSelector(renderer, `${learningRow('proposal-decision')} [data-learning-action="cancel"]`, 'learning-reflow-cancel');
+    await readLearning(renderer, (page) => page.card === null, 'learning-reflow-closed');
+
+    at('learning-restart');
+    // A restart moves nothing: 质量与学习, opened from the landing, lists the one Book with material exactly as before.
+    const learningBefore = await renderer.evaluate(`window.ai7.inspectLearningMaterials({ bookId: null }).then((projection) => JSON.stringify(projection))`);
+    await close();
+    cancellation.throwIfRequested();
+    await launch();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'learning-restart-ready');
+    await click(renderer, '质量与学习', 'learning-restart-open');
+    const learningAfterPage = await readLearning(renderer, (page) => page.books.length === 1, 'learning-restart-page');
+    requireJourney(JSON.stringify(learningAfterPage.books[0].materials.map(([kind, state]) => [kind, state])) === JSON.stringify([['proposal-decision', 'decided'], ['analysis-feedback', 'deferred']]),
+      'learning-restart-page-words', learningAfterPage);
+    const learningAfter = await renderer.evaluate(`window.ai7.inspectLearningMaterials({ bookId: null }).then((projection) => JSON.stringify(projection))`);
+    requireJourney(typeof learningBefore === 'string' && learningAfter === learningBefore, 'learning-restart-unmoved');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

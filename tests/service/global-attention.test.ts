@@ -465,6 +465,8 @@ describe('待我处理 over Manuscript Conflicts (V2-UX-ATTN-002)', () => {
       store.resolveProposalConflict({ ...book, markId, basisDigest: again.basisDigest, outcome: 'keep-current', draftOrdinal: null });
       const resolved = readWritingNothing(() => store.inspectGlobalAttention(() => null, false));
       expect(items(resolved, 'exceptions')).toEqual([]);
+      // The rejection 保留当前稿件 recorded carries AI7's reason, not the editor's: it is no Learning Material (Issue #61, S26b).
+      expect(items(resolved, 'decisions')).toEqual([]);
       expect(resolved.actionableCount).toBe(0);
       store.markCleanShutdown();
     } finally {

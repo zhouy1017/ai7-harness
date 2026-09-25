@@ -103,6 +103,9 @@ import type {
   ModelServiceConnectionProjection,
   RecordChangeSuggestionDecisionInput,
   RecordProposalDecisionFeedbackInput,
+  DecideLearningMaterialInput,
+  LearningMaterialsBookProjection,
+  LearningMaterialsProjection,
   RecordProposalDecisionReasonInput,
   ReverseAppliedChangeSuggestionInput,
   UpdateEditorialMarkInput,
@@ -146,6 +149,7 @@ import type {
   TaskAuthorizationProjection,
   BaselineAnalysisGoal,
   BaselineAnalysisProjection,
+  BaselineAnalysisResultSetRevisionProjection,
   BaselineAnalysisRunState,
   BaselineAnalysisQuickStartProjection,
   BaselineAnalysisUpdateActionProjection,
@@ -211,6 +215,7 @@ import {
   readImportAttention,
   readRecoveryAttention,
   recentWindowStart,
+  type LearningMaterialsAttentionReading,
 } from './global-attention.js';
 import { ALWAYS_ONLINE, type TaskPlanConnectivity } from './connectivity.js';
 import {
@@ -234,7 +239,7 @@ import {
   RESUME_BLOCKED_SLOT,
   type BaselineStoppedRunFacts,
 } from './task-plan.js';
-import { initializeProposalConflictSchema, ProposalConflictError, ProposalConflictStore, readConflictAttention } from './proposal-conflicts.js';
+import { decisionResolvesConflict, initializeProposalConflictSchema, ProposalConflictError, ProposalConflictStore, readConflictAttention } from './proposal-conflicts.js';
 import {
   ImportRetentionError,
   initializeImportRetentionSchema,
@@ -296,7 +301,19 @@ import { ReviewGuidelineError, ReviewGuidelineLedger, initializeReviewGuidelineS
 import { LibraryMaterialError, LibraryMaterialLedger, initializeLibraryMaterialSchema, libraryMaterialTitle } from './library-materials.js';
 import { EvaluationError, EvaluationRecords, initializeEvaluationRecordSchema } from './evaluation-records.js';
 import { AnalysisFeedbackError, AnalysisFeedbackLedger, analysisFeedbackItems, initializeAnalysisFeedbackSchema } from './analysis-feedback.js';
-import { DecisionFeedbackError, initializeDecisionFeedbackSchema } from './decision-feedback.js';
+import { DecisionFeedbackError, DecisionFeedbackLedger, initializeDecisionFeedbackSchema } from './decision-feedback.js';
+import {
+  LEARNING_ELIGIBILITY_BASIS,
+  LearningEligibilityError,
+  LearningEligibilityLedger,
+  analysisFeedbackCandidate,
+  initializeLearningEligibilitySchema,
+  learningMaterialDigest,
+  proposalDecisionCandidate,
+  reviewDispositionCandidate,
+  type LearningMaterialCandidate,
+} from './learning-eligibility.js';
+import { reviewCategoryEntry } from './review/category-configuration.js';
 import { readExemplars } from './exemplars.js';
 import { readKnowledgeProcedures } from './knowledge-procedures.js';
 import {
@@ -400,6 +417,7 @@ import {
   EVALUATION_RECORD_SCHEMA_VERSION,
   ANALYSIS_FEEDBACK_SCHEMA_VERSION,
   DECISION_FEEDBACK_SCHEMA_VERSION,
+  LEARNING_ELIGIBILITY_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1625,7 +1643,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === LIBRARY_MATERIAL_SCHEMA_VERSION ||
       currentVersion === EVALUATION_RECORD_SCHEMA_VERSION ||
       currentVersion === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
-      currentVersion === DECISION_FEEDBACK_SCHEMA_VERSION,
+      currentVersion === DECISION_FEEDBACK_SCHEMA_VERSION ||
+      currentVersion === LEARNING_ELIGIBILITY_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1670,7 +1689,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === LIBRARY_MATERIAL_SCHEMA_VERSION ||
       currentVersion === EVALUATION_RECORD_SCHEMA_VERSION ||
       currentVersion === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
-      currentVersion === DECISION_FEEDBACK_SCHEMA_VERSION
+      currentVersion === DECISION_FEEDBACK_SCHEMA_VERSION ||
+      currentVersion === LEARNING_ELIGIBILITY_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2029,7 +2049,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
       version === EVALUATION_RECORD_SCHEMA_VERSION ||
       version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
-      version === DECISION_FEEDBACK_SCHEMA_VERSION,
+      version === DECISION_FEEDBACK_SCHEMA_VERSION ||
+      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2063,7 +2084,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
       version === EVALUATION_RECORD_SCHEMA_VERSION ||
       version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
-      version === DECISION_FEEDBACK_SCHEMA_VERSION) return;
+      version === DECISION_FEEDBACK_SCHEMA_VERSION ||
+      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2189,7 +2211,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
       version === EVALUATION_RECORD_SCHEMA_VERSION ||
       version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
-      version === DECISION_FEEDBACK_SCHEMA_VERSION,
+      version === DECISION_FEEDBACK_SCHEMA_VERSION ||
+      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2222,7 +2245,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
       version === EVALUATION_RECORD_SCHEMA_VERSION ||
       version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
-      version === DECISION_FEEDBACK_SCHEMA_VERSION) return;
+      version === DECISION_FEEDBACK_SCHEMA_VERSION ||
+      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2515,7 +2539,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== DECISION_FEEDBACK_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== LEARNING_ELIGIBILITY_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2551,6 +2575,7 @@ function validateModelServiceSchema(
       version >= EVALUATION_RECORD_SCHEMA_VERSION,
       version >= ANALYSIS_FEEDBACK_SCHEMA_VERSION,
       version >= DECISION_FEEDBACK_SCHEMA_VERSION,
+      version >= LEARNING_ELIGIBILITY_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2611,7 +2636,8 @@ function initializeModelServiceSchema(
       version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
       version === EVALUATION_RECORD_SCHEMA_VERSION ||
       version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
-      version === DECISION_FEEDBACK_SCHEMA_VERSION,
+      version === DECISION_FEEDBACK_SCHEMA_VERSION ||
+      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2644,7 +2670,8 @@ function initializeModelServiceSchema(
       version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
       version === EVALUATION_RECORD_SCHEMA_VERSION ||
       version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
-      version === DECISION_FEEDBACK_SCHEMA_VERSION) {
+      version === DECISION_FEEDBACK_SCHEMA_VERSION ||
+      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3421,6 +3448,22 @@ function workflowProfilePin(profile: BuiltInWorkflowProfile): WorkflowProfilePin
   return { id: profile.projection.id, name: profile.projection.name, version: profile.projection.version, digest: profile.projection.digest };
 }
 
+/** An analysis item's own words, for its Learning Material's excerpt: the synopsis, or one entry of the four lists. */
+function analysisItemLabel(revision: BaselineAnalysisResultSetRevisionProjection | null, itemKey: string): string | null {
+  if (revision === null) return null;
+  const synthesis = revision.synthesis;
+  if (itemKey === 'synopsis') return synthesis.synopsis;
+  const [dimension, index] = itemKey.split('/');
+  const at = Number(index);
+  switch (dimension) {
+    case 'entities': { const entity = synthesis.entities[at]; return entity === undefined ? null : entity.name; }
+    case 'events': { const event = synthesis.events[at]; return event === undefined ? null : event.summary; }
+    case 'relationships': { const relationship = synthesis.relationships[at]; return relationship === undefined ? null : `${relationship.subject}—${relationship.relation}—${relationship.object}`; }
+    case 'settings': { const claim = synthesis.settingClaims[at]; return claim === undefined ? null : `${claim.subject}：${claim.claim}`; }
+    default: return null;
+  }
+}
+
 export class EditorialStore {
   readonly #dataRoot: string;
   readonly #objectsRoot: string;
@@ -3447,6 +3490,7 @@ export class EditorialStore {
   readonly #reviewGuidelines: ReviewGuidelineLedger;
   /** 知识库 › 资料库 (Issue #427, S79c): the items an editor collected and the decisions about them. */
   readonly #libraryMaterials: LibraryMaterialLedger;
+  readonly #learningEligibility: LearningEligibilityLedger;
   /** ②C 评估 (Issue #429, S81a): each Book's versioned Evaluation Records. */
   readonly #evaluations: EvaluationRecords;
   /** ②A 分析反馈 (Issue #94, S38): the editor's judgments of analysis results. */
@@ -3507,6 +3551,7 @@ export class EditorialStore {
     // 知识库 › 审阅规范文件 (Issue #427, S79a): a Review Run prepared now applies each guideline document at its latest version.
     this.#reviewGuidelines = new ReviewGuidelineLedger(authority);
     this.#libraryMaterials = new LibraryMaterialLedger(authority, dataRoot);
+    this.#learningEligibility = new LearningEligibilityLedger(authority);
     this.#evaluations = new EvaluationRecords(authority, { current: (bookId) => this.#evaluationManuscript(bookId) });
     this.#analysisFeedback = new AnalysisFeedbackLedger(authority);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
@@ -3658,13 +3703,15 @@ export class EditorialStore {
       // Revision 44 (Issue #431, S83) adds each Book's people, revision 45 (Issue #427, S79a) the versions a house imports
       // of its review guideline documents, and revision 46 (Issue #427, S79c) the items put into 资料库 and their decisions;
       // revision 47 (Issue #429, S81a) each Book's Evaluation Records, revision 48 (Issue #94, S38) the editor's judgments
-      // of analysis results, and revision 49 (Issue #61, S26a) the 不说明 and later reasons of Proposal Decisions.
+      // of analysis results, revision 49 (Issue #61, S26a) the 不说明 and later reasons of Proposal Decisions, and revision 50
+      // (Issue #61, S26b) the editor's Learning Eligibility decisions.
       initializeBookPeopleSchema(authority);
       initializeReviewGuidelineSchema(authority);
       initializeLibraryMaterialSchema(authority);
       initializeEvaluationRecordSchema(authority);
       initializeAnalysisFeedbackSchema(authority);
       initializeDecisionFeedbackSchema(authority);
+      initializeLearningEligibilitySchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -5651,6 +5698,161 @@ export class EditorialStore {
       this.#transaction(this.#authority, () => this.#analysisFeedback.record(input.bookId, revision.bound, revision.items, input));
       return this.#analysisFeedback.projection(input.bookId, revision.bound, revision.items);
     });
+  }
+
+  /**
+   * 质量与学习 › 学习准入 (Issue #61, plan slice S26b; LEARN-001 to LEARN-012, FDBK-013): the Learning Material of every Book
+   * that has any, or of the one Book named, each with its Review Card's excerpt and where it stands. A read.
+   */
+  inspectLearningMaterials(bookId: string | null): LearningMaterialsProjection {
+    return this.#learningCall(() => {
+      requireStore(bookId === null || UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+      const books = bookId === null
+        ? (this.#authority.prepare('SELECT book_id FROM books ORDER BY title, book_id').all() as SqlRow[]).map((row) => asString(row.book_id))
+        : [bookId];
+      return {
+        basis: LEARNING_ELIGIBILITY_BASIS,
+        books: books.flatMap((id) => {
+          const book = this.#learningBook(id, true);
+          return book.materials.length === 0 && bookId === null ? [] : [book];
+        }),
+      };
+    });
+  }
+
+  /** 记录学习准入决定 for the exact version the editor read, attributed to the Book's people as they stand (FDBK-013). */
+  decideLearningMaterial(input: DecideLearningMaterialInput): LearningMaterialsProjection {
+    return this.#learningCall(() => {
+      requireStore(UUID_PATTERN.test(input.bookId), 'BOOK_INVALID', '图书标识无效。');
+      this.#transaction(this.#authority, () => {
+        const candidate = this.#learningCandidates(input.bookId, false).find((entry) => entry.materialKey === input.materialKey);
+        requireStore(candidate !== undefined, 'LEARNING_MATERIAL_NOT_FOUND', '这条材料已经不在学习准入之列。');
+        requireStore(learningMaterialDigest(candidate) === input.materialDigest, 'LEARNING_MATERIAL_CHANGED', '这条材料在你打开后改过；请看过现在的内容再定。');
+        const people = this.#bookPeople.current(input.bookId);
+        this.#learningEligibility.decide({
+          bookId: input.bookId,
+          candidate,
+          expectedDecisions: input.expectedDecisions,
+          choice: input.choice,
+          note: input.note,
+          attribution: { peopleVersion: people.version, authors: people.authors, editors: people.editors },
+        });
+      });
+      return { basis: LEARNING_ELIGIBILITY_BASIS, books: [this.#learningBook(input.bookId, true)] };
+    });
+  }
+
+  #learningBook(bookId: string, withExcerpt: boolean): LearningMaterialsBookProjection {
+    const title = this.#evaluationBookTitle(bookId);
+    const people = this.#bookPeople.current(bookId);
+    return {
+      bookId,
+      title,
+      authors: people.authors,
+      editors: people.editors,
+      materials: this.#learningEligibility.project(bookId, this.#learningCandidates(bookId, withExcerpt)),
+    };
+  }
+
+  /**
+   * One Book's Learning Material, identified from the records that own it (LEARN-001): each 修改建议's current decision that
+   * carries the editor's reason or their own wording, each analysis item whose latest judgment says why, and each 审阅
+   * finding the editor last ignored with a reason. Nothing is asked of the editor to find them.
+   */
+  #learningCandidates(bookId: string, withExcerpt: boolean): LearningMaterialCandidate[] {
+    const candidates: LearningMaterialCandidate[] = [];
+    const reasons = new DecisionFeedbackLedger(this.#authority);
+    const decisions = this.#authority.prepare(
+      `SELECT i.current_text, i.proposed_text, d.decision_id, d.disposition, d.edited_text, d.recorded_at, r.reason, r.reason_source
+       FROM editorial_marks m
+       JOIN proposal_change_items i ON i.mark_id = m.mark_id
+       JOIN proposal_item_decisions d ON d.item_id = i.item_id
+       LEFT JOIN proposal_decision_reasons r ON r.decision_id = d.decision_id
+       WHERE m.book_id = ? AND m.status IN ('open', 'resolved', 'applied') AND d.disposition <> 'withdrawn'
+         AND d.ordinal = (SELECT max(latest.ordinal) FROM proposal_item_decisions latest WHERE latest.item_id = i.item_id)
+       ORDER BY d.recorded_at, d.decision_id`,
+    ).all(bookId) as SqlRow[];
+    for (const row of decisions) {
+      const decisionId = asString(row.decision_id);
+      const first = row.reason === null || row.reason === undefined
+        ? null
+        : { reason: asString(row.reason), source: asString(row.reason_source) as 'reason-field' | 'suggested' | 'free-text' };
+      const standing = reasons.standing(decisionId, first);
+      const disposition = asString(row.disposition);
+      if (standing.reasonState !== 'given' && disposition !== 'accepted-with-edit') continue;
+      // 保留当前稿件 resolved a conflict with a rejection whose reason AI7 wrote (Issue #57): the editor judged no suggestion
+      // by it, so it is material only once they give a reason of their own.
+      if (standing.reasonRevisedAt === null && decisionResolvesConflict(this.#authority, decisionId)) continue;
+      candidates.push(proposalDecisionCandidate({
+        decisionId,
+        disposition,
+        currentText: asString(row.current_text),
+        proposedText: asString(row.proposed_text),
+        editedText: row.edited_text === null ? null : asString(row.edited_text),
+        reason: standing.reason,
+        reasonSource: standing.reasonSource,
+        recordedAt: standing.reasonRevisedAt ?? asString(row.recorded_at),
+      }, withExcerpt));
+    }
+    const labels = new Map<string, BaselineAnalysisResultSetRevisionProjection | null>();
+    for (const signal of this.#analysisFeedback.latestWithWords(bookId)) {
+      let label: string | null = null;
+      if (withExcerpt) {
+        if (!labels.has(signal.revisionId)) {
+          const inspected = this.inspectBaselineAnalysis(bookId, undefined, signal.revisionId);
+          labels.set(signal.revisionId, inspected.inspectedRevision?.revision ?? inspected.resultSetRevision);
+        }
+        label = analysisItemLabel(labels.get(signal.revisionId) ?? null, signal.itemKey);
+      }
+      candidates.push(analysisFeedbackCandidate(signal, withExcerpt ? label ?? '' : null));
+    }
+    const ignored = this.#authority.prepare(
+      `SELECT signal_id, review_run_id, finding_id, category_id, reason, recorded_at FROM quality_signals q
+       WHERE book_id = ? AND kind = 'review-finding-ignored'
+         AND recorded_at = (SELECT max(latest.recorded_at) FROM quality_signals latest
+                            WHERE latest.review_run_id = q.review_run_id AND latest.finding_id = q.finding_id)
+       ORDER BY recorded_at, signal_id`,
+    ).all(bookId) as SqlRow[];
+    for (const row of ignored) {
+      const categoryId = asString(row.category_id);
+      candidates.push(reviewDispositionCandidate({
+        signalId: asString(row.signal_id),
+        reviewRunId: asString(row.review_run_id),
+        findingId: asString(row.finding_id),
+        categoryLabel: reviewCategoryEntry(categoryId)?.label ?? categoryId,
+        reason: asString(row.reason),
+        recordedAt: asString(row.recorded_at),
+      }, withExcerpt));
+    }
+    return candidates;
+  }
+
+  /** Each Book whose Learning Material waits: how many wait for a decision or changed since one, and how many were deferred. */
+  #learningAttention(limit: number): LearningMaterialsAttentionReading[] {
+    const readings: LearningMaterialsAttentionReading[] = [];
+    for (const row of this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').all() as SqlRow[]) {
+      const bookId = asString(row.book_id);
+      const materials = this.#learningEligibility.project(bookId, this.#learningCandidates(bookId, false));
+      const waiting = materials.filter((material) => material.state === 'pending' || material.state === 'changed');
+      const deferred = materials.filter((material) => material.state === 'deferred');
+      if (waiting.length === 0 && deferred.length === 0) continue;
+      const at = [...waiting, ...deferred].map((material) => material.recordedAt).sort().at(-1)!;
+      readings.push({ bookId, bookTitle: asString(row.title), pending: waiting.length, deferred: deferred.length, at });
+      if (readings.length >= limit) break;
+    }
+    return readings;
+  }
+
+  #learningCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof LearningEligibilityError || error instanceof DecisionFeedbackError || error instanceof AnalysisFeedbackError) {
+        throw new StoreError(error.code, error.message);
+      }
+      throw error;
+    }
   }
 
   /** The revision feedback binds: one of this Book's baseline Result Set Revisions, as ②A shows it, and its items. */
@@ -10414,11 +10616,13 @@ export class EditorialStore {
           reviewCompletions: review.completed,
           maintenance: this.#maintenanceCases.attentionReadings(limit),
           libraryMaterials: this.#libraryMaterials.attentionReadings(limit),
+          learningMaterials: this.#learningAttention(limit),
           busy,
           waitingFor,
         }, now);
       } catch (error) {
-        if (error instanceof GlobalAttentionError || error instanceof MaintenanceCaseError || error instanceof LibraryMaterialError) {
+        if (error instanceof GlobalAttentionError || error instanceof MaintenanceCaseError || error instanceof LibraryMaterialError ||
+            error instanceof LearningEligibilityError || error instanceof DecisionFeedbackError || error instanceof AnalysisFeedbackError) {
           throw new StoreError(error.code, error.message);
         }
         throw error;

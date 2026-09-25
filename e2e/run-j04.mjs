@@ -346,7 +346,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     // read, so the pin moves with the terminal version the service stamps
     // (`BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION` since Issue #416, S67a). It read 19 until #467 — one revision
     // behind, because only a failed product cleanup reaches this fallback, so revision 20 never met it.
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 49, 'credential-cleanup-metadata-version');
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 50, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
               approved_fallback_chain, credential_slot, credential_reference, credential_operation_state

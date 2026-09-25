@@ -670,6 +670,26 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    // 质量与学习 › 学习准入 (Issue #61, S26b): every Book's Learning Material, or one Book's.
+    case 'inspectLearningMaterials': {
+      const input = requireInput(value.input, ['bookId'], tentativeId);
+      if (!(input.bookId === null || validUuid(input.bookId))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 记录学习准入决定: the material by its place and exact version, how many decisions the editor saw, one choice of the closed
+    // set, and an optional note; whether the material still stands so is the store's.
+    case 'decideLearningMaterial': {
+      const input = requireInput(value.input, ['bookId', 'materialKey', 'materialDigest', 'expectedDecisions', 'choice', 'note'], tentativeId);
+      if (!validUuid(input.bookId) || !isBoundedString(input.materialKey, 160) ||
+          !/^(?:proposal-decision|analysis-feedback|review-disposition):[0-9a-z/:.-]{1,140}$/u.test(input.materialKey) ||
+          !isBoundedString(input.materialDigest, 64) || !HEX_DIGEST_PATTERN.test(input.materialDigest) ||
+          !Number.isSafeInteger(input.expectedDecisions) || (input.expectedDecisions as number) < 0 ||
+          (input.choice !== 'book' && input.choice !== 'house' && input.choice !== 'excluded' && input.choice !== 'deferred') ||
+          !(input.note === null || isBoundedString(input.note, 4_000, true))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     // 定归属 or 定学习准入: the item, how many decisions the editor saw, and one decision of the closed shapes.
     case 'decideLibraryMaterial': {
       const input = requireInput(value.input, ['materialId', 'expectedDecisions', 'decision'], tentativeId);
