@@ -473,6 +473,9 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-keyboard-search-focus-window-unfocused',
     'j14-keyboard-search-focus-editor-unfocused',
     'j14-keyboard-search-focus-guard-announced',
+    // Issue #591: the ⌘F keydown never reached the page, or reached it without the platform's modifier.
+    'j14-keyboard-search-focus-key-not-received',
+    'j14-keyboard-search-focus-modifier-missing',
     'j14-keyboard-search-focus-no-focus-move',
     'j14-visible-focus',
     'j14-keyboard-focus-keeps-window',
