@@ -5,6 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { fixedArchiveTime } from './composed-docx.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const CHARACTER_COUNT = 10_000_000;
@@ -143,6 +144,7 @@ async function createSyntheticDocx(path) {
   });
   const pushEntry = async (name, value) => {
     const entry = new ZipPassThrough(name);
+    entry.mtime = fixedArchiveTime();
     zip.add(entry);
     entry.push(strToU8(value), true);
     await waitForPendingDrain();
@@ -156,6 +158,7 @@ async function createSyntheticDocx(path) {
     '<?xml version="1.0" encoding="UTF-8"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>千万字有界编辑校验</dc:title></cp:coreProperties>',
   );
   const document = new ZipPassThrough('word/document.xml');
+  document.mtime = fixedArchiveTime();
   zip.add(document);
   document.push(strToU8('<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'), false);
   await waitForPendingDrain();

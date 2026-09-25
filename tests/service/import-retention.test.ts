@@ -5,6 +5,7 @@ import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { unzipSync, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseDocx, type ParsedDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
+import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import {
   IMPORT_FIDELITY_CATEGORIES_REVISION_26_SQL,
   importFidelityCategoriesShape,
@@ -588,7 +589,7 @@ describe('schema revision 27 over the real store', () => {
     });
     // sample1's own parts in another container: other bytes, the same body, so the same content and structure.
     const twin = join(roots.inputRoot, 'sample1-另存.docx');
-    writeFileSync(twin, zipSync(unzipSync(readFileSync(sample1Path(roots.codeRoot))), { mtime: new Date('2001-01-01T00:00:00Z') }));
+    writeFileSync(twin, zipSync(unzipSync(readFileSync(sample1Path(roots.codeRoot))), { mtime: fixedArchiveTime() }));
     const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       const staged = await migrated.stageSelectedManuscript(randomUUID(), twin);
