@@ -1,5 +1,6 @@
 import { writeFile } from 'node:fs/promises';
 import { strToU8, zipSync } from 'fflate';
+import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 
 // Generated-only DOCX fixtures for tests whose subject is the container: malformed packaging, a
 // missing part, an import bound, a fixture whose only role is to exist. A test whose subject is
@@ -125,7 +126,7 @@ export function buildSyntheticDocx(options: SyntheticDocxOptions = {}): Uint8Arr
     || options.nestingDepth?.part === 'docProps/core.xml';
   if (wantsCoreProperties) entries['docProps/core.xml'] = strToU8(coreDocumentXml(options));
   for (const [name, bytes] of Object.entries(options.extraEntries ?? {})) entries[name] = bytes;
-  return zipSync(entries, { level: 6, mtime: new Date('2026-01-01T00:00:00.000Z') });
+  return zipSync(entries, { level: 6, mtime: fixedArchiveTime() });
 }
 
 export async function writeSyntheticDocx(path: string, options: SyntheticDocxOptions = {}): Promise<Uint8Array> {
