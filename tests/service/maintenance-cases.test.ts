@@ -261,23 +261,31 @@ describe('⑥ 维护事项 (S68a)', () => {
       const b = store.designatePublicationVersion({ bookId, milestoneId: milestone.milestoneId, scope: '电子版首发', basis: '同一修订版' }).publicationVersionId;
       const record = (classification: 'errata' | 'supersession' | 'withdrawal' | 'archive', target: string) =>
         store.recordMaintenanceCase({ bookId, publicationVersionId: target, classification, reason: '读者来信', evidence: null }).maintenanceCase;
+      // Two cases recorded in the same millisecond sort by their item's id: compared here in the order of their ids.
       const maintenanceItems = () => store.inspectGlobalAttention(() => null, false).groups
-        .flatMap((group) => group.items.filter((entry) => entry.target.kind === 'maintenance').map((entry) => [group.key, entry.itemId, entry.state, entry.nextStep, entry.blocked] as const));
+        .flatMap((group) => group.items.filter((entry) => entry.target.kind === 'maintenance').map((entry) => [group.key, entry.itemId, entry.state, entry.nextStep, entry.blocked] as const))
+        .sort((left, right) => left[1].localeCompare(right[1]));
+      const byId = <T extends readonly [string, string, ...unknown[]]>(rows: T[]) => rows.sort((left, right) => left[1].localeCompare(right[1]));
       const errata = record('errata', a);
       const supersession = record('supersession', a);
       record('withdrawal', b);
-      expect(maintenanceItems()).toEqual([
-        ['decisions', `maintenance:${errata.caseId}`, 'maintenance-pending', 'maintenance-write-errata', false],
-        ['decisions', `maintenance:${supersession.caseId}`, 'maintenance-waiting', 'maintenance-link-publication', false],
-      ]);
+      expect(maintenanceItems()).toEqual(byId([
+        ['decisions', `maintenance:${errata.caseId}`, 'maintenance-pending', 'maintenance-write-errata', false] as const,
+        ['decisions', `maintenance:${supersession.caseId}`, 'maintenance-waiting', 'maintenance-link-publication', false] as const,
+      ]));
       const counted = store.inspectGlobalAttention(() => null, false).actionableCount;
       expect(counted).toBe(2);
-      const item = store.inspectGlobalAttention(() => null, false).groups.find((group) => group.key === 'decisions')!.items[0]!;
+      const item = store.inspectGlobalAttention(() => null, false).groups.find((group) => group.key === 'decisions')!.items
+        .find((entry) => entry.itemId === `maintenance:${errata.caseId}`)!;
       expect(item).toMatchObject({
         book: { bookId },
         object: { kind: 'maintenance', classification: 'errata', ordinal: errata.ordinal, publicationOrdinal: 1 },
         target: { kind: 'maintenance', bookId, publicationVersionId: a, caseId: errata.caseId },
       });
+      // A 替代 concluded 仍未解决 in the meantime still waits for its version, and says so (MAINT-007).
+      store.appendMaintenanceCaseRevision({ bookId, caseId: supersession.caseId, expectedRevision: 1, step: { kind: 'conclude', status: 'unresolved', outcome: '另设版本尚未确定' } });
+      expect(maintenanceItems().find(([, itemId]) => itemId === `maintenance:${supersession.caseId}`)).toEqual(
+        ['decisions', `maintenance:${supersession.caseId}`, 'maintenance-waiting', 'maintenance-link-publication', false]);
       // Concluded, it leaves; an 归档 of its 发稿版本 closes the rest of that version's maintenance.
       store.appendMaintenanceCaseRevision({ bookId, caseId: errata.caseId, expectedRevision: 1, step: { kind: 'conclude', status: 'complete', outcome: '已处理' } });
       expect(maintenanceItems().map(([, itemId]) => itemId)).toEqual([`maintenance:${supersession.caseId}`]);

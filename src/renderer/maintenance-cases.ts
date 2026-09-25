@@ -131,6 +131,22 @@ function fact(term: string, value: string): HTMLElement[] {
 }
 
 /** How a designation names itself on a case: the same words the service's target line uses. */
+/** A case as its designation would list it, from the case's own answer. */
+function summaryOf(projection: MaintenanceCaseProjection): MaintenanceCaseSummaryProjection {
+  return {
+    caseId: projection.caseId,
+    ordinal: projection.ordinal,
+    classification: projection.classification,
+    classificationLabel: projection.classificationLabel,
+    status: projection.status,
+    statusLabel: projection.statusLabel,
+    nextStep: projection.nextStep,
+    revisions: projection.revisionsTotal,
+    recordedAt: projection.revisions[0]?.recordedAt ?? '',
+    latestAt: projection.revisions.at(-1)?.recordedAt ?? '',
+  };
+}
+
 function designationLabel(designation: PublicationVersionProjection): string {
   return `第 ${designation.ordinal} 次 · 「${designation.milestoneLabel}」 · ${designation.revisionLabel} · ${designation.scope}`;
 }
@@ -187,14 +203,20 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     // 交付物's newest cases, then the older ones read so far, each once.
     const listed = new Set(maintenance.cases.map((summary) => summary.caseId));
     const shown = [...maintenance.cases, ...(older.get(designation.publicationVersionId) ?? []).filter((summary) => !listed.has(summary.caseId))];
-    if (shown.length > 0) {
+    // The case 待我处理 opened stays in reach however old it is (MAINT-012): drawn open below the listed ones until a page
+    // lists it, and gone once closed.
+    const pinned = open !== null && open.publicationVersionId === designation.publicationVersionId && open.projection !== null &&
+      !shown.some((summary) => summary.caseId === open!.caseId) ? summaryOf(open.projection) : null;
+    if (shown.length > 0 || pinned !== null) {
       const list = el('ol', 'maintenance-cases');
       for (const summary of shown) list.append(renderSummary(summary, designation.publicationVersionId));
+      if (pinned !== null) list.append(renderSummary(pinned, designation.publicationVersionId));
       section.append(list);
     }
-    if (maintenance.total > shown.length) {
+    const remaining = maintenance.total - shown.length - (pinned === null ? 0 : 1);
+    if (remaining > 0) {
       const more = el('div', 'maintenance-older');
-      more.append(el('p', 'field-note', maintenanceOlderLine(maintenance.total - shown.length)));
+      more.append(el('p', 'field-note', maintenanceOlderLine(remaining)));
       const read = actionButton('older', 'quiet', () => void loadOlder(designation.publicationVersionId, shown));
       read.disabled = working;
       more.append(read);

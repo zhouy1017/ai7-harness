@@ -348,8 +348,12 @@ describe('each item', () => {
       }));
     expect(maintenance('correction', 'maintenance-link-proposal')).toBe('更正还没有关联修改建议：先在稿件中提出修改建议，再在这个维护事项中关联它。');
     expect(maintenance('correction', 'maintenance-link-publication')).toBe('修改建议已关联：更正后的文字另行保存里程碑版本、设为发稿版本后，在这个维护事项中关联它。');
-    expect(maintenance('correction', 'maintenance-conclude')).toBe('这个维护事项的步骤已经记录：在这里记录它的结论。');
+    expect(maintenance('correction', 'maintenance-conclude')).toBe('这个维护事项的步骤已经记录：在这个维护事项中记录它的结论。');
     expect(maintenance('reissue', 'maintenance-link-publication')).toBe('再版等待另设的发稿版本：另行设为发稿版本后，在这个维护事项中关联它。');
+    // Only a 更正 reads 修改建议已关联: a 替代 read as pending still says what it waits for.
+    expect(globalAttentionReason(item('maintenance-pending', {
+      object: { kind: 'maintenance', classification: 'supersession', ordinal: 3, publicationOrdinal: 1 }, nextStep: 'maintenance-link-publication',
+    }))).toBe('替代等待另设的发稿版本：另行设为发稿版本后，在这个维护事项中关联它。');
     // The recovery reason of a deferred state is the landing's own sentence, word for word.
     expect(RENDERER).toContain(`'${reasons['recovery-deferred']}'`);
   });

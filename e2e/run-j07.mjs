@@ -153,6 +153,7 @@ const MAINTENANCE_INTERNAL_ONLY = '仅在 AI7 内记录；不代表已撤稿、�
 // Issue #426 (S68b): a 替代 that waits in 待我处理, and the 归档 that closes that designation's maintenance.
 const MAINTENANCE_SUPERSESSION = '拟另设新的发稿版本取代这一版';
 const MAINTENANCE_ARCHIVE = '这一版的维护到此为止';
+const MAINTENANCE_MORE = '读者来信又指出一处需要勘误';
 const DELIVERY_RECIPIENTS = '["publicity:false:宣传部","editorial:false:编辑部","external-media:false:外部媒体","other:false:其他","custom:false:自行输入"]';
 const EXPORT_MEMBERS_ONLY = `JSON.stringify(Object.keys(window.ai7).filter((key) => /export|publish|send/i.test(key)).sort()) === ${JSON.stringify(JSON.stringify(EXPORT_MEMBERS))}`;
 
@@ -2051,6 +2052,28 @@ async function main() {
     await clickSelector(renderer, `[data-screen="global-attention"] [data-attention-open="maintenance:${supersessionCase.caseId}"]`, 'maintenance-attention-open');
     await waitFor(renderer, `(() => { const heading = document.querySelector(${JSON.stringify(`${designationItem(1)} li[data-case-id="${supersessionCase.caseId}"] section.maintenance-case .maintenance-case-heading`)}); return heading instanceof HTMLElement && document.activeElement === heading && heading.textContent === '第 3 项维护事项 · 替代'; })()`, 'maintenance-attention-returns-to-the-case', 60_000);
     await assertRenderer(renderer, PAGE_HELPERS, 'maintenance-attention-page-helpers');
+    // However old it grows, the case still opens back from 待我处理 (Issue #426 review): five more 勘误 on the first
+    // designation push the 替代 out of the five 交付物 lists, and opening it draws it open below them, with focus on it, and
+    // one older case left to 更早的维护事项….
+    for (let index = 1; index <= 5; index += 1) {
+      await clickSelector(renderer, maintenanceAction(1, 'record'), `maintenance-more-${index}-open`);
+      await assertRenderer(renderer, `(() => { const radio = document.querySelector(${JSON.stringify(`${designationItem(1)} form.maintenance-draft input[type="radio"][value="errata"]`)}); radio.click(); return radio.checked; })()`, `maintenance-more-${index}-errata`);
+      await fill(renderer, `${designationItem(1)} form.maintenance-draft textarea[data-maintenance-field="reason"]`, `${MAINTENANCE_MORE}（${index}）`, `maintenance-more-${index}-reason`);
+      await clickSelector(renderer, maintenanceAction(1, 'confirmRecord'), `maintenance-more-${index}-record`);
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${designationItem(1)} section.maintenance-case .maintenance-case-heading`)})?.textContent === ${JSON.stringify(`第 ${3 + index} 项维护事项 · 勘误`)}`, `maintenance-more-${index}-recorded`, 60_000);
+    }
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(attentionEntry)})?.dataset.attentionCount === ${JSON.stringify(String(attentionBefore + 6))}`, 'maintenance-attention-more-counted', 30_000);
+    await clickSelector(renderer, attentionEntry, 'maintenance-attention-entry-again');
+    const olderOpen = `[data-screen="global-attention"] [data-attention-open="maintenance:${supersessionCase.caseId}"]`;
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(olderOpen)}) !== null`, 'maintenance-attention-listed-again', 30_000);
+    await clickSelector(renderer, olderOpen, 'maintenance-attention-open-older');
+    await waitFor(renderer, `(() => {
+      const listed = Array.from(document.querySelectorAll(${JSON.stringify(`${designationItem(1)} ol.maintenance-cases > li`)}), (item) => item.dataset.caseId);
+      const heading = document.querySelector(${JSON.stringify(`${designationItem(1)} li[data-case-id="${supersessionCase.caseId}"] section.maintenance-case .maintenance-case-heading`)});
+      return listed.length === 6 && listed[5] === ${JSON.stringify(supersessionCase.caseId)} && heading instanceof HTMLElement && document.activeElement === heading &&
+        heading.textContent === '第 3 项维护事项 · 替代' &&
+        document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-older .field-note`)})?.textContent === '还有 1 项更早的维护事项';
+    })()`, 'maintenance-attention-older-opened', 60_000);
     // 归档 of that designation: its maintenance is closed, and the 替代 leaves 待我处理 without being concluded.
     await clickSelector(renderer, maintenanceAction(1, 'record'), 'maintenance-archive-open');
     await assertRenderer(renderer, `(() => { const radio = document.querySelector(${JSON.stringify(`${designationItem(1)} form.maintenance-draft input[type="radio"][value="archive"]`)}); radio.click(); return radio.checked; })()`, 'maintenance-choose-archive');
