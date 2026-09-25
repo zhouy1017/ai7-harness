@@ -1120,6 +1120,30 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
+  it('accepts 不说明 and 改原因 after a Proposal Decision in their own shapes (Issue #61, S26a)', () => {
+    const binding = { manuscriptId: randomUUID(), branchId: randomUUID(), windowStartBlockId: `blk_${'a'.repeat(24)}` };
+    const dismiss = { ...binding, markId: randomUUID(), decisionId: randomUUID(), expectedFeedback: 0, action: 'dismiss', reason: null, reasonSource: null };
+    const revise = { ...dismiss, expectedFeedback: 2, action: 'revise', reason: '其实是篇幅所限', reasonSource: 'free-text' };
+    for (const input of [dismiss, revise, { ...revise, reasonSource: 'suggested' }]) {
+      const request = { id: randomUUID(), op: 'recordProposalDecisionFeedback', input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    for (const input of [
+      { ...dismiss, reason: '顺带一句' },
+      { ...dismiss, reasonSource: 'suggested' },
+      { ...revise, reason: null },
+      { ...revise, reasonSource: null },
+      { ...revise, reasonSource: 'reason-field' },
+      { ...revise, action: 'withdraw' },
+      { ...dismiss, expectedFeedback: -1 },
+      { ...dismiss, expectedFeedback: 1.5 },
+      { ...dismiss, decisionId: 'decision' },
+      { ...dismiss, rating: 5 },
+    ]) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op: 'recordProposalDecisionFeedback', input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('accepts ②A 分析反馈: a read of one revision, and a judgment of one item by its place and digest (Issue #94, S38)', () => {
     const bookId = randomUUID();
     const revisionId = randomUUID();

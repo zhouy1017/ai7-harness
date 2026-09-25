@@ -102,6 +102,7 @@ import type {
   ModelCredentialOperationState,
   ModelServiceConnectionProjection,
   RecordChangeSuggestionDecisionInput,
+  RecordProposalDecisionFeedbackInput,
   RecordProposalDecisionReasonInput,
   ReverseAppliedChangeSuggestionInput,
   UpdateEditorialMarkInput,
@@ -295,6 +296,7 @@ import { ReviewGuidelineError, ReviewGuidelineLedger, initializeReviewGuidelineS
 import { LibraryMaterialError, LibraryMaterialLedger, initializeLibraryMaterialSchema, libraryMaterialTitle } from './library-materials.js';
 import { EvaluationError, EvaluationRecords, initializeEvaluationRecordSchema } from './evaluation-records.js';
 import { AnalysisFeedbackError, AnalysisFeedbackLedger, analysisFeedbackItems, initializeAnalysisFeedbackSchema } from './analysis-feedback.js';
+import { DecisionFeedbackError, initializeDecisionFeedbackSchema } from './decision-feedback.js';
 import { readExemplars } from './exemplars.js';
 import { readKnowledgeProcedures } from './knowledge-procedures.js';
 import {
@@ -397,6 +399,7 @@ import {
   LIBRARY_MATERIAL_SCHEMA_VERSION,
   EVALUATION_RECORD_SCHEMA_VERSION,
   ANALYSIS_FEEDBACK_SCHEMA_VERSION,
+  DECISION_FEEDBACK_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1621,7 +1624,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === REVIEW_GUIDELINE_SCHEMA_VERSION ||
       currentVersion === LIBRARY_MATERIAL_SCHEMA_VERSION ||
       currentVersion === EVALUATION_RECORD_SCHEMA_VERSION ||
-      currentVersion === ANALYSIS_FEEDBACK_SCHEMA_VERSION,
+      currentVersion === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
+      currentVersion === DECISION_FEEDBACK_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1665,7 +1669,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === REVIEW_GUIDELINE_SCHEMA_VERSION ||
       currentVersion === LIBRARY_MATERIAL_SCHEMA_VERSION ||
       currentVersion === EVALUATION_RECORD_SCHEMA_VERSION ||
-      currentVersion === ANALYSIS_FEEDBACK_SCHEMA_VERSION
+      currentVersion === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
+      currentVersion === DECISION_FEEDBACK_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2023,7 +2028,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
       version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
       version === EVALUATION_RECORD_SCHEMA_VERSION ||
-      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION,
+      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
+      version === DECISION_FEEDBACK_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2056,7 +2062,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
       version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
       version === EVALUATION_RECORD_SCHEMA_VERSION ||
-      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION) return;
+      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
+      version === DECISION_FEEDBACK_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2181,7 +2188,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
       version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
       version === EVALUATION_RECORD_SCHEMA_VERSION ||
-      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION,
+      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
+      version === DECISION_FEEDBACK_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2213,7 +2221,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
       version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
       version === EVALUATION_RECORD_SCHEMA_VERSION ||
-      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION) return;
+      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
+      version === DECISION_FEEDBACK_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2506,7 +2515,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== ANALYSIS_FEEDBACK_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== DECISION_FEEDBACK_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2541,6 +2550,7 @@ function validateModelServiceSchema(
       version >= LIBRARY_MATERIAL_SCHEMA_VERSION,
       version >= EVALUATION_RECORD_SCHEMA_VERSION,
       version >= ANALYSIS_FEEDBACK_SCHEMA_VERSION,
+      version >= DECISION_FEEDBACK_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2600,7 +2610,8 @@ function initializeModelServiceSchema(
       version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
       version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
       version === EVALUATION_RECORD_SCHEMA_VERSION ||
-      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION,
+      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
+      version === DECISION_FEEDBACK_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2632,7 +2643,8 @@ function initializeModelServiceSchema(
       version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
       version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
       version === EVALUATION_RECORD_SCHEMA_VERSION ||
-      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION) {
+      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
+      version === DECISION_FEEDBACK_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3645,13 +3657,14 @@ export class EditorialStore {
       initializeMaintenanceCaseSchema(authority);
       // Revision 44 (Issue #431, S83) adds each Book's people, revision 45 (Issue #427, S79a) the versions a house imports
       // of its review guideline documents, and revision 46 (Issue #427, S79c) the items put into 资料库 and their decisions;
-      // revision 47 (Issue #429, S81a) each Book's Evaluation Records, and revision 48 (Issue #94, S38) the editor's judgments
-      // of analysis results.
+      // revision 47 (Issue #429, S81a) each Book's Evaluation Records, revision 48 (Issue #94, S38) the editor's judgments
+      // of analysis results, and revision 49 (Issue #61, S26a) the 不说明 and later reasons of Proposal Decisions.
       initializeBookPeopleSchema(authority);
       initializeReviewGuidelineSchema(authority);
       initializeLibraryMaterialSchema(authority);
       initializeEvaluationRecordSchema(authority);
       initializeAnalysisFeedbackSchema(authority);
+      initializeDecisionFeedbackSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -9642,6 +9655,11 @@ export class EditorialStore {
     return this.#markCall(() => this.#editorialMarks.recordDecisionReason(input));
   }
 
+  /** `不说明` or `改原因` after a Proposal Decision (Issue #61, S26a). */
+  recordProposalDecisionFeedback(input: RecordProposalDecisionFeedbackInput): EditorialMarkCommandProjection {
+    return this.#markCall(() => this.#editorialMarks.recordDecisionFeedback(input));
+  }
+
   /**
    * AI7 Apply for Change Suggestions (Issue #408): the one path by which a suggestion's text reaches
    * the manuscript, each commit written with its Effect Receipt in one transaction on the authority
@@ -13564,7 +13582,10 @@ export class EditorialStore {
       return operation();
     } catch (error) {
       // A card reads its mark's conflict records (Issue #57), which refuse to show a record that does not verify.
-      if (error instanceof EditorialMarkError || error instanceof ProposalConflictError) throw new StoreError(error.code, error.message);
+      // A card's decision reads its reason's entries (Issue #61, S26a), which refuse to show a record that does not verify.
+      if (error instanceof EditorialMarkError || error instanceof ProposalConflictError || error instanceof DecisionFeedbackError) {
+        throw new StoreError(error.code, error.message);
+      }
       throw error;
     }
   }

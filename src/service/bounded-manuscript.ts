@@ -99,6 +99,7 @@ import {
   LIBRARY_MATERIAL_SCHEMA_VERSION,
   EVALUATION_RECORD_SCHEMA_VERSION,
   ANALYSIS_FEEDBACK_SCHEMA_VERSION,
+  DECISION_FEEDBACK_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -168,6 +169,7 @@ import { REVIEW_GUIDELINE_FOREIGN_KEYS, REVIEW_GUIDELINE_SCHEMA_SQL, REVIEW_GUID
 import { LIBRARY_MATERIAL_FOREIGN_KEYS, LIBRARY_MATERIAL_SCHEMA_SQL, LIBRARY_MATERIAL_TRIGGER_SQL } from './library-materials.js';
 import { EVALUATION_RECORD_FOREIGN_KEYS, EVALUATION_RECORD_SCHEMA_SQL, EVALUATION_RECORD_TRIGGER_SQL } from './evaluation-records.js';
 import { ANALYSIS_FEEDBACK_FOREIGN_KEYS, ANALYSIS_FEEDBACK_SCHEMA_SQL, ANALYSIS_FEEDBACK_TRIGGER_SQL } from './analysis-feedback.js';
+import { DECISION_FEEDBACK_FOREIGN_KEYS, DECISION_FEEDBACK_SCHEMA_SQL, DECISION_FEEDBACK_TRIGGER_SQL } from './decision-feedback.js';
 import {
   MANUSCRIPT_EFFECT_FOREIGN_KEYS,
   MANUSCRIPT_EFFECT_SCHEMA_SQL,
@@ -1878,6 +1880,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...LIBRARY_MATERIAL_FOREIGN_KEYS,
   ...EVALUATION_RECORD_FOREIGN_KEYS,
   ...ANALYSIS_FEEDBACK_FOREIGN_KEYS,
+  ...DECISION_FEEDBACK_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2497,6 +2500,7 @@ function requireManuscriptReimportTargetSchema(
   includeLibraryMaterialTables = false,
   includeEvaluationRecordTables = false,
   includeAnalysisFeedbackTables = false,
+  includeDecisionFeedbackTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2583,6 +2587,8 @@ function requireManuscriptReimportTargetSchema(
       ...(includeEvaluationRecordTables ? EVALUATION_RECORD_SCHEMA_SQL : {}),
       // Revision 48 (Issue #94, S38) adds the editor's judgments of analysis results.
       ...(includeAnalysisFeedbackTables ? ANALYSIS_FEEDBACK_SCHEMA_SQL : {}),
+      // Revision 49 (Issue #61, S26a) adds the 不说明 and later reasons of Proposal Decisions.
+      ...(includeDecisionFeedbackTables ? DECISION_FEEDBACK_SCHEMA_SQL : {}),
     },
     // The partial index that keeps one primary Manuscript per Book stands with the rebuilt relation, whatever the version.
     {
@@ -2619,6 +2625,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeLibraryMaterialTables ? LIBRARY_MATERIAL_TRIGGER_SQL : {}),
       ...(includeEvaluationRecordTables ? EVALUATION_RECORD_TRIGGER_SQL : {}),
       ...(includeAnalysisFeedbackTables ? ANALYSIS_FEEDBACK_TRIGGER_SQL : {}),
+      ...(includeDecisionFeedbackTables ? DECISION_FEEDBACK_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5308,6 +5315,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeLibraryMaterialTables = false,
   includeEvaluationRecordTables = false,
   includeAnalysisFeedbackTables = false,
+  includeDecisionFeedbackTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5342,6 +5350,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeLibraryMaterialTables,
     includeEvaluationRecordTables,
     includeAnalysisFeedbackTables,
+    includeDecisionFeedbackTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5422,7 +5431,8 @@ export function initializeBoundedSchema(
       version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
       version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
       version === EVALUATION_RECORD_SCHEMA_VERSION ||
-      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION,
+      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
+      version === DECISION_FEEDBACK_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5453,9 +5463,10 @@ export function initializeBoundedSchema(
       version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
       version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
       version === EVALUATION_RECORD_SCHEMA_VERSION ||
-      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION) {
+      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
+      version === DECISION_FEEDBACK_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== ANALYSIS_FEEDBACK_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== DECISION_FEEDBACK_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5490,6 +5501,7 @@ export function initializeBoundedSchema(
           version >= LIBRARY_MATERIAL_SCHEMA_VERSION,
           version >= EVALUATION_RECORD_SCHEMA_VERSION,
           version >= ANALYSIS_FEEDBACK_SCHEMA_VERSION,
+          version >= DECISION_FEEDBACK_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);

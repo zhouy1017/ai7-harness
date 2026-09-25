@@ -331,6 +331,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['recordChangeSuggestionDecision']['output']>(IPC_CHANNELS.recordChangeSuggestionDecision, input),
   recordProposalDecisionReason: (input: ServiceOperationMap['recordProposalDecisionReason']['input']) =>
     invoke<ServiceOperationMap['recordProposalDecisionReason']['output']>(IPC_CHANNELS.recordProposalDecisionReason, input),
+  recordProposalDecisionFeedback: (input: ServiceOperationMap['recordProposalDecisionFeedback']['input']) =>
+    invoke<ServiceOperationMap['recordProposalDecisionFeedback']['output']>(IPC_CHANNELS.recordProposalDecisionFeedback, input),
   applyChangeSuggestion: (input: ServiceOperationMap['applyChangeSuggestion']['input']) =>
     invoke<ServiceOperationMap['applyChangeSuggestion']['output']>(IPC_CHANNELS.applyChangeSuggestion, input),
   applyChangeSuggestionBatch: (input: ServiceOperationMap['applyChangeSuggestionBatch']['input']) =>

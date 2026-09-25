@@ -7,12 +7,21 @@ import type {
   EditorialMarkKind,
   ManuscriptApplyCommandProjection,
   PersonalHighlightColor,
+  ProposalItemDecisionProjection,
   RendererApi,
   ReviewFindingOfMarkProjection,
   UpdateEditorialMarkInput,
 } from '../shared/protocol.js';
 import {
+  DECISION_REASON_ADD,
+  DECISION_REASON_CANCEL,
   DECISION_REASON_CHIPS,
+  DECISION_REASON_DISMISS,
+  DECISION_REASON_OWN,
+  DECISION_REASON_PROMPTS,
+  DECISION_REASON_REVISE,
+  DECISION_REASON_STATUS,
+  decisionReasonLine,
   HIGHLIGHT_COLOR_LABELS,
   INSERTION_CONVERT_REASON,
   MARK_KIND_LABELS,
@@ -58,7 +67,7 @@ interface MountOptions {
   api: Pick<
     RendererApi,
     'createEditorialMark' | 'getEditorialMarkCard' | 'updateEditorialMark' | 'recordChangeSuggestionDecision' |
-    'recordProposalDecisionReason' | 'runEditorClipboardCommand' | 'applyChangeSuggestion' | 'reverseAppliedChangeSuggestion' |
+    'recordProposalDecisionReason' | 'recordProposalDecisionFeedback' | 'runEditorClipboardCommand' | 'applyChangeSuggestion' | 'reverseAppliedChangeSuggestion' |
     'getManuscriptApplyOutcome' | 'inspectReviewFindingOfMark'
   >;
   /**
@@ -169,6 +178,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   let floating: HTMLElement | undefined;
   let floatingBlockId: string | undefined;
   let openCardId: string | undefined;
+  /**
+   * The one reason row open on the card (Issue #61, S26a): the prompt a decision just recorded asks once, or the editor's
+   * own `补充原因…` / `改原因…`. Leaving the card ends it; reopening the card never asks again (FDBK-001).
+   */
+  let promptFor: { readonly markId: string; readonly decisionId: string; readonly mode: 'prompt' | 'add' | 'revise' } | null = null;
   let collapsedBeforeContextClick = true;
   let working = false;
   let closedAt: { top: number } | undefined;
@@ -209,6 +223,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     }
     floating = undefined;
     floatingBlockId = undefined;
+    promptFor = null;
     if (openCardId !== undefined) {
       openCardId = undefined;
       editor.setActiveMark(null);
@@ -572,6 +587,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   function showCard(card: EditorialMarkCardProjection, form?: (cancel: () => void) => FormConfig): void {
     closeMenu();
     floating?.remove();
+    if (promptFor !== null && promptFor.markId !== card.markId) promptFor = null;
     const panel = el('section', 'editorial-mark-card');
     panel.setAttribute('role', 'dialog');
     panel.setAttribute('aria-label', `${MARK_KIND_LABELS[card.kind]}浮卡`);
@@ -662,10 +678,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         const receipt = el('p', 'editorial-mark-recorded', `已应用 · 已写入稿件 · ${markTimeLabel(applied.committedAt)} · 你`);
         receipt.dataset['markApplication'] = applied.effectId;
         yours.append(receipt);
-        if (decision?.reason) {
-          const reason = el('p', 'muted', `你的原因：${decision.reason}`);
-          reason.dataset['markReason'] = decision.reasonSource ?? '';
-          yours.append(reason);
+        if (decision) {
+          yours.dataset['markReasonState'] = decision.reasonState;
+          yours.append(...reasonNodes(card, decision));
         }
         const credentials = el('details', 'editorial-mark-receipt');
         credentials.dataset['markReceipt'] = applied.receiptId;
@@ -712,7 +727,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           exact
             ? actionButton('accept-and-apply', '接受并应用', 'primary', () => void writeManuscript(card.markId, (clientEffectId) => api.applyChangeSuggestion({
                 ...binding(), markId: card.markId, clientEffectId, interaction: 'accept-and-apply', editedText: null, reason: null,
-              }), '已应用这条修改建议。'))
+              }), '已应用这条修改建议。', null))
             : disabledAction('accept-and-apply', '接受并应用', '原文已变，无法应用这条修改建议。'),
           ...resolveConflict(),
           actionButton('reject', '拒绝', 'secondary', () => void decide(card, 'rejected', null, null)),
@@ -732,7 +747,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
                 submit: (values) => writeManuscript(card.markId, (clientEffectId) => api.applyChangeSuggestion({
                   ...binding(), markId: card.markId, clientEffectId, interaction: 'accept-edited-and-apply',
                   editedText: values.proposedText, reason: values.reason.trim().length > 0 ? values.reason : null,
-                }), '已按你改定的文字应用。'),
+                }), '已按你改定的文字应用。', null),
                 cancel,
               })))
             : disabledAction('accept-with-edit', '修改后接受', '原文已变，无法接受这条修改建议。'),
@@ -749,7 +764,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           disposition.append(exact
             ? actionButton('apply-recorded', '应用到稿件', 'primary', () => void writeManuscript(card.markId, (clientEffectId) => api.applyChangeSuggestion({
                 ...binding(), markId: card.markId, clientEffectId, interaction: 'apply-recorded-decision', editedText: null, reason: null,
-              }), '已按你改定的文字应用。'))
+              }), '已按你改定的文字应用。', decision.decisionId))
             : disabledAction('apply-recorded', '应用到稿件', '原文已变，无法应用这条修改建议。'), ...resolveConflict());
         }
         // 保留当前稿件 resolved a conflict with this rejection; that resolution is final (Issue #57).
@@ -757,13 +772,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           disposition.append(actionButton('withdraw', '撤回', 'quiet', () => void decide(card, 'withdrawn', null, null)));
         }
         yours.append(recorded, disposition, ...(decision.disposition === 'accepted-with-edit' ? safeMerge() : []));
-        if (decision.reason !== null) {
-          const reason = el('p', 'muted', `你的原因：${decision.reason}`);
-          reason.dataset['markReason'] = decision.reasonSource ?? '';
-          yours.append(reason);
-        } else if (decision.disposition !== 'accepted') {
-          yours.append(reasonChips(card, decision.decisionId, decision.disposition));
-        }
+        yours.dataset['markReasonState'] = decision.reasonState;
+        yours.append(...reasonNodes(card, decision));
         if (form) yours.append(buildForm(form(reopen)));
       }
       if (card.source.kind === 'ai7') yours.append(viewTaskAction(card));
@@ -854,23 +864,61 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (!form) dismiss.focus({ preventScroll: true });
   }
 
-  function reasonChips(card: EditorialMarkCardProjection, decisionId: string, disposition: 'rejected' | 'accepted-with-edit'): HTMLElement {
+  /**
+   * The reason under `你的处理` (Issue #61, S26a): as it stands, if one was given; the one row asking for it, while it is open;
+   * otherwise the editor's own way to give or change it. Nothing here counts, reminds or asks again.
+   */
+  function reasonNodes(card: EditorialMarkCardProjection, decision: ProposalItemDecisionProjection): HTMLElement[] {
+    const asking = promptFor !== null && promptFor.markId === card.markId && promptFor.decisionId === decision.decisionId ? promptFor.mode : null;
+    const nodes: HTMLElement[] = [];
+    if (decision.reasonState === 'given' && decision.reason !== null) {
+      const reason = el('p', 'muted', decisionReasonLine(decision.reason, decision.reasonRevisedAt, markTimeLabel));
+      reason.dataset['markReason'] = decision.reasonSource ?? '';
+      nodes.push(reason);
+    }
+    if (asking !== null) {
+      nodes.push(reasonChips(card, decision, asking));
+    } else {
+      const later = el('div', 'button-row editorial-mark-reason-later');
+      const revising = decision.reasonState === 'given';
+      later.append(actionButton(revising ? 'reason-revise' : 'reason-add', revising ? DECISION_REASON_REVISE : DECISION_REASON_ADD, 'quiet', () => {
+        promptFor = { markId: card.markId, decisionId: decision.decisionId, mode: revising ? 'revise' : 'add' };
+        showCard(card);
+        floating?.querySelector<HTMLElement>('[data-mark-reasons] button')?.focus();
+      }));
+      nodes.push(later);
+    }
+    return nodes;
+  }
+
+  function reasonChips(card: EditorialMarkCardProjection, decision: ProposalItemDecisionProjection, mode: 'prompt' | 'add' | 'revise'): HTMLElement {
+    const disposition = decision.disposition;
     const wrap = el('div', 'editorial-mark-reasons');
     wrap.dataset['markReasons'] = disposition;
-    wrap.append(el('p', 'muted', disposition === 'rejected' ? '为什么拒绝？（可选）' : '为什么这样改？（可选）'));
+    wrap.dataset['markReasonMode'] = mode;
+    wrap.append(el('p', 'muted', DECISION_REASON_PROMPTS[disposition]));
     const row = el('div', 'button-row');
-    const record = (reason: string, reasonSource: 'suggested' | 'free-text'): void => void command(async () => {
-      const result = await api.recordProposalDecisionReason({ ...binding(), markId: card.markId, decisionId, reason, reasonSource });
+    const finish = (result: EditorialMarkCommandProjection, status: string): void => {
+      promptFor = null;
       applyCommand(result);
-      options.setStatus('已记下你的原因。', 'success');
+      options.setStatus(status, 'success');
       if (result.card) showCard(result.card);
-    }, '原因未能记录。');
+    };
+    const record = (reason: string, reasonSource: 'suggested' | 'free-text'): void => void command(async () => {
+      if (mode === 'revise') {
+        finish(await api.recordProposalDecisionFeedback({
+          ...binding(), markId: card.markId, decisionId: decision.decisionId, expectedFeedback: decision.feedbackEntries, action: 'revise', reason, reasonSource,
+        }), DECISION_REASON_STATUS.revised);
+      } else {
+        finish(await api.recordProposalDecisionReason({ ...binding(), markId: card.markId, decisionId: decision.decisionId, reason, reasonSource }), DECISION_REASON_STATUS.recorded);
+      }
+    }, DECISION_REASON_STATUS.failed);
     for (const chip of DECISION_REASON_CHIPS[disposition]) {
       const control = actionButton('reason-chip', chip, 'quiet', () => record(chip, 'suggested'));
       control.dataset['markReasonChip'] = chip;
       row.append(control);
     }
-    row.append(actionButton('reason-own', '自行输入', 'quiet', () => showCard(card, (cancel) => ({
+    row.append(actionButton('reason-own', DECISION_REASON_OWN, 'quiet', () => showCard(card, (cancel) => ({
       id: 'decision-reason',
       title: '你的原因',
       quote: null,
@@ -879,8 +927,27 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       submit: async (values) => record(values.reason, 'free-text'),
       cancel,
     }))));
+    // The prompt a decision raised ends with 不说明, recorded as no more than that; the editor's own row just closes.
+    row.append(mode === 'prompt'
+      ? actionButton('reason-dismiss', DECISION_REASON_DISMISS, 'quiet', () => void command(async () => {
+          finish(await api.recordProposalDecisionFeedback({
+            ...binding(), markId: card.markId, decisionId: decision.decisionId, expectedFeedback: decision.feedbackEntries, action: 'dismiss', reason: null, reasonSource: null,
+          }), DECISION_REASON_STATUS.dismissed);
+        }, DECISION_REASON_STATUS.failed))
+      : actionButton('reason-cancel', DECISION_REASON_CANCEL, 'quiet', () => {
+          promptFor = null;
+          showCard(card);
+        }));
     wrap.append(row);
     return wrap;
+  }
+
+  /** A decision just recorded, and not already carrying a reason, is asked why once (FDBK-001, MARK-005). */
+  function notePrompt(before: string | null, after: EditorialMarkCardProjection | null): void {
+    const decision = after?.suggestion?.decision ?? null;
+    promptFor = after !== null && decision !== null && decision.decisionId !== before && decision.reasonState === 'none'
+      ? { markId: after.markId, decisionId: decision.decisionId, mode: 'prompt' }
+      : null;
   }
 
   async function decide(
@@ -889,6 +956,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     editedText: string | null,
     reason: string | null,
   ): Promise<void> {
+    const before = card.suggestion?.decision?.decisionId ?? null;
     await command(async () => {
       const result = await api.recordChangeSuggestionDecision({
         ...binding(),
@@ -905,6 +973,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
             : '已记录「修改后接受」；稿件尚未改动。',
         'success',
       );
+      notePrompt(before, result.card);
       if (result.card) showCard(result.card);
     }, '你的处理未能记录。');
   }
@@ -917,6 +986,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     markId: string,
     run: (clientEffectId: string) => Promise<ManuscriptApplyCommandProjection>,
     done: string,
+    /** The decision an Apply starts from, when it may record a new one to ask about; `undefined` for a reversal. */
+    decidedBefore?: string | null,
   ): Promise<void> {
     if (destroyed || refuseWhileBusy()) return;
     working = true;
@@ -928,6 +999,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         (input) => api.getManuscriptApplyOutcome(input),
       );
       if (applied.acknowledged) {
+        if (decidedBefore !== undefined) notePrompt(decidedBefore, applied.result.card);
         if (applied.result.card !== null) showCard(applied.result.card);
         return;
       }

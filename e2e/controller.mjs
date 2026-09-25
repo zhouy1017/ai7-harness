@@ -993,7 +993,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   ]),
   // J-11 (Issue #431, plan slice S83): a Book's 作者, 责编 and 相关人 on its 工作概览, on 书库's cards, found by 书名, 作者
   // and 责编, and kept across a restart — two empty Books, no manuscript read. Then ②C 评估 on a third Book from exact
-  // sample1 (Issue #429, S81a), and ②A 分析反馈 on its first baseline, run on the J-04 model adapter (Issue #94, S38).
+  // sample1 (Issue #429, S81a), ②A 分析反馈 on its first baseline, run on the J-04 model adapter (Issue #94, S38), and the
+  // reason a Proposal Decision is asked for once, on 修改建议 of the Journey's own words (Issue #61, S26a).
   'J-11': Object.freeze([
     'entry',
     'controller-loopback-sentinel',
@@ -1032,6 +1033,12 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-feedback-reflow-forced-colors',
     'feedback-silence-is-not-approval',
     'feedback-restart',
+    'decision-feedback-suggestions',
+    'decision-feedback-dismiss',
+    'decision-feedback-own-accord',
+    'decision-feedback-after-apply',
+    'j14-decision-feedback-keyboard',
+    'decision-feedback-restart',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',

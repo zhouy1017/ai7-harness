@@ -41,7 +41,7 @@ const KEPT_CARD: Pick<EditorialMarkCardProjection, 'kind' | 'status' | 'anchorSt
   anchorState: 'drifted',
   suggestion: {
     itemId: 'item', changeType: 'replace', currentText: '原文', proposedText: '改后', rationale: '', atomicGroupId: null, application: null,
-    decision: { decisionId: 'decision', disposition: 'rejected', editedText: null, reason: '保留当前稿件', reasonSource: 'suggested', recordedAt: '2026-09-22T00:00:00.000Z' },
+    decision: { decisionId: 'decision', disposition: 'rejected', editedText: null, reason: '保留当前稿件', reasonSource: 'suggested', reasonState: 'given', feedbackEntries: 0, reasonRevisedAt: null, recordedAt: '2026-09-22T00:00:00.000Z' },
   },
   conflict: { kind: 'suggestion', state: 'resolved', deferredAt: null, outcome: 'keep-current', newMarkId: null, resolvedAt: '2026-09-22T00:00:00.000Z' },
 };

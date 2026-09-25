@@ -771,6 +771,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.recordChangeSuggestionDecision(request.input) };
     case 'recordProposalDecisionReason':
       return { id: request.id, ok: true, op: request.op, result: store.recordProposalDecisionReason(request.input) };
+    case 'recordProposalDecisionFeedback':
+      return { id: request.id, ok: true, op: request.op, result: store.recordProposalDecisionFeedback(request.input) };
     case 'applyChangeSuggestion':
       return { id: request.id, ok: true, op: request.op, result: store.applyChangeSuggestion(request.input) };
     case 'applyChangeSuggestionBatch':

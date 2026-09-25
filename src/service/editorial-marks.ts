@@ -28,6 +28,7 @@ import {
   type ProposalItemDecisionProjection,
   type ProposalItemDisposition,
   type RecordChangeSuggestionDecisionInput,
+  type RecordProposalDecisionFeedbackInput,
   type RecordProposalDecisionReasonInput,
   type UpdateEditorialMarkInput,
 } from '../shared/protocol.js';
@@ -38,6 +39,7 @@ import {
   proposalConflictRelationsExist,
   resolvedFromOf,
 } from './proposal-conflicts.js';
+import { DecisionFeedbackLedger } from './decision-feedback.js';
 
 /**
  * Editorial Marks and the Proposal Change Items behind 修改建议 (Issue #407, schema revision 22).
@@ -308,6 +310,12 @@ function nullableText(value: SQLOutputValue | undefined): string | null {
 
 function sha256(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+/** A decision's first reason, as revision 22 keeps it beside the decision. */
+function firstReasonOf(row: SqlRow): { reason: string; source: 'reason-field' | 'suggested' | 'free-text' } | null {
+  const reason = nullableText(row.reason);
+  return reason === null ? null : { reason, source: text(row.reason_source) as 'reason-field' | 'suggested' | 'free-text' };
 }
 
 function transact<T>(db: DatabaseSync, operation: () => T): T {
@@ -867,9 +875,11 @@ export interface ProducedEditorialMarkInput {
 
 export class EditorialMarkStore {
   readonly #db: DatabaseSync;
+  readonly #decisionFeedback: DecisionFeedbackLedger;
 
   constructor(db: DatabaseSync) {
     this.#db = db;
+    this.#decisionFeedback = new DecisionFeedbackLedger(db);
   }
 
   create(input: CreateEditorialMarkInput): EditorialMarkCommandProjection {
@@ -1182,6 +1192,48 @@ export class EditorialMarkStore {
     return this.#command(input, input.markId);
   }
 
+  /**
+   * `不说明` or `改原因` for the decision the card shows (Issue #61, S26a; FDBK-006, FDBK-007): recorded after the decision,
+   * never instead of it, and refused once the decision is no longer the mark's current one.
+   */
+  recordDecisionFeedback(input: RecordProposalDecisionFeedbackInput): EditorialMarkCommandProjection {
+    this.#requireBinding(input);
+    requireMark(UUID_PATTERN.test(input.markId) && UUID_PATTERN.test(input.decisionId), 'MARK_INVALID', '标记标识无效。');
+    requireMark(Number.isSafeInteger(input.expectedFeedback) && input.expectedFeedback >= 0, 'MARK_INVALID', '原因记录序号无效。');
+    requireMark(
+      input.action === 'dismiss'
+        ? input.reason === null && input.reasonSource === null
+        : input.action === 'revise' && typeof input.reason === 'string' && (input.reasonSource === 'suggested' || input.reasonSource === 'free-text'),
+      'MARK_INVALID',
+      '原因操作无效。',
+    );
+    const reason = input.action === 'revise' ? { text: this.#body(input.reason!), source: input.reasonSource! } : null;
+    transact(this.#db, () => {
+      const mark = this.#liveMark(input);
+      const current = this.#db.prepare(
+        `SELECT d.decision_id, d.disposition, r.reason, r.reason_source FROM proposal_change_items i
+         JOIN proposal_item_decisions d ON d.item_id = i.item_id
+         LEFT JOIN proposal_decision_reasons r ON r.decision_id = d.decision_id
+         WHERE i.mark_id = ? ORDER BY d.ordinal DESC LIMIT 1`,
+      ).get(input.markId) as SqlRow | undefined;
+      requireMark(
+        current !== undefined && text(current.decision_id) === input.decisionId && current.disposition !== 'withdrawn',
+        'MARK_DECISION_INVALID',
+        '这次处理已经变化，无法补记原因。',
+      );
+      this.#decisionFeedback.record({
+        bookId: text(mark.book_id),
+        markId: input.markId,
+        decisionId: input.decisionId,
+        expectedFeedback: input.expectedFeedback,
+        action: input.action,
+        reason,
+        first: firstReasonOf(current),
+      });
+    });
+    return this.#command(input, input.markId);
+  }
+
   #convert(input: UpdateEditorialMarkInput, mark: SqlRow, kind: EditorialMarkKind, now: string): string {
     const target = input.targetKind;
     requireMark(target !== null && CONVERSIONS[kind].includes(target), 'MARK_ACTION_INVALID', '这种标记不能这样转换。');
@@ -1247,12 +1299,12 @@ export class EditorialMarkStore {
        FROM proposal_item_decisions d LEFT JOIN proposal_decision_reasons r ON r.decision_id = d.decision_id
        WHERE d.item_id = ? ORDER BY d.ordinal DESC LIMIT 1`,
     ).get(text(item.item_id)) as SqlRow | undefined;
+    // The reason as it now stands: a later change, the first reason, the editor's 不说明, or none (Issue #61, S26a).
     const decision: ProposalItemDecisionProjection | null = row === undefined || row.disposition === 'withdrawn' ? null : {
       decisionId: text(row.decision_id),
       disposition: text(row.disposition) as ProposalItemDisposition,
       editedText: nullableText(row.edited_text),
-      reason: nullableText(row.reason),
-      reasonSource: nullableText(row.reason_source) as ProposalItemDecisionProjection['reasonSource'],
+      ...this.#decisionFeedback.standing(text(row.decision_id), firstReasonOf(row)),
       recordedAt: text(row.recorded_at),
     };
     return {

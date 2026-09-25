@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 73 as const;
+export const SERVICE_PROTOCOL_VERSION = 74 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -118,6 +118,7 @@ export const IPC_CHANNELS = {
   updateEditorialMark: 'ai7:j05:update-editorial-mark',
   recordChangeSuggestionDecision: 'ai7:j05:record-change-suggestion-decision',
   recordProposalDecisionReason: 'ai7:j05:record-proposal-decision-reason',
+  recordProposalDecisionFeedback: 'ai7:j11:record-proposal-decision-feedback',
   applyChangeSuggestion: 'ai7:j05:apply-change-suggestion',
   applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
   reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
@@ -1214,9 +1215,18 @@ export interface ProposalItemDecisionProjection {
   disposition: ProposalItemDisposition;
   /** The text the editor accepted instead of AI7's or their own first wording. */
   editedText: string | null;
-  /** The editor's Non-blocking Decision Reason and how it was given (V2-UX-PDEC-010). */
+  /** The editor's Non-blocking Decision Reason as it now stands, and how it was given (V2-UX-PDEC-010). */
   reason: string | null;
   reasonSource: 'reason-field' | 'suggested' | 'free-text' | null;
+  /**
+   * Whether the editor gave a reason, said `不说明`, or neither (Issue #61, S26a; FDBK-006, FDBK-007). A dismissal records
+   * only that no reason was given: never agreement, satisfaction or a judgment of any kind.
+   */
+  reasonState: 'none' | 'given' | 'dismissed';
+  /** How many `不说明` and `改原因` entries follow the decision: the count the next one names. */
+  feedbackEntries: number;
+  /** When the editor last changed the reason after first giving it; `null` when it is the first. */
+  reasonRevisedAt: string | null;
   recordedAt: string;
 }
 
@@ -1340,6 +1350,20 @@ export interface RecordProposalDecisionReasonInput extends EditorialMarkBindingI
   decisionId: string;
   reason: string;
   reasonSource: 'suggested' | 'free-text';
+}
+
+/**
+ * After a decision (Issue #61, S26a; FDBK-006, FDBK-007, interaction-spec's feedback rules): `不说明`, which records only that
+ * no reason was given and ends the prompt, or `改原因`, a successor to the reason that keeps the one it replaced. Either names
+ * how many entries the editor saw after the decision.
+ */
+export interface RecordProposalDecisionFeedbackInput extends EditorialMarkBindingInput {
+  markId: string;
+  decisionId: string;
+  expectedFeedback: number;
+  action: 'dismiss' | 'revise';
+  reason: string | null;
+  reasonSource: 'suggested' | 'free-text' | null;
 }
 
 export interface EditorialMarkCommandProjection {
@@ -7325,6 +7349,7 @@ export interface ServiceOperationMap {
   updateEditorialMark: { input: UpdateEditorialMarkInput; output: EditorialMarkCommandProjection };
   recordChangeSuggestionDecision: { input: RecordChangeSuggestionDecisionInput; output: EditorialMarkCommandProjection };
   recordProposalDecisionReason: { input: RecordProposalDecisionReasonInput; output: EditorialMarkCommandProjection };
+  recordProposalDecisionFeedback: { input: RecordProposalDecisionFeedbackInput; output: EditorialMarkCommandProjection };
   /**
    * AI7 Apply for Change Suggestions (Issue #408). The batch form is 确认应用 on 审阅's confirmation
    * strip (Issue #417): one Effect over exactly the suggestions the strip named, all or none.
@@ -7648,6 +7673,7 @@ export interface RendererApi {
   updateEditorialMark(input: UpdateEditorialMarkInput): Promise<EditorialMarkCommandProjection>;
   recordChangeSuggestionDecision(input: RecordChangeSuggestionDecisionInput): Promise<EditorialMarkCommandProjection>;
   recordProposalDecisionReason(input: RecordProposalDecisionReasonInput): Promise<EditorialMarkCommandProjection>;
+  recordProposalDecisionFeedback(input: RecordProposalDecisionFeedbackInput): Promise<EditorialMarkCommandProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */
   applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): Promise<ManuscriptApplyCommandProjection>;
