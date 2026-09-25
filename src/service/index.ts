@@ -548,6 +548,10 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.startEvaluation(request.input.bookId) };
     case 'saveEvaluation':
       return { id: request.id, ok: true, op: request.op, result: store.saveEvaluation(request.input) };
+    case 'inspectAnalysisFeedback':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectAnalysisFeedback(request.input.bookId, request.input.revisionId) };
+    case 'recordAnalysisFeedback':
+      return { id: request.id, ok: true, op: request.op, result: store.recordAnalysisFeedback(request.input) };
     case 'deactivateDefaultExecutionRule':
       return { id: request.id, ok: true, op: request.op, result: store.deactivateDefaultExecutionRule(request.input.ruleId) };
     // 审阅 (Issue #417, plan slice S69). Every answer that shows a Run reads the one owner's progress, so
@@ -1076,11 +1080,11 @@ function parseArguments(argv: string[]): {
     (recoveryControlValue !== undefined &&
       (recoveryControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-08')) ||
     // The model adapter binds a Journey whose Runs execute: J-04's analysis, J-09's 运行中 and 最近完成, J-10's
-    // cancelled Run (Issue #422) and J-16's 任务 panel (Issue #423).
+    // cancelled Run (Issue #422), J-16's 任务 panel (Issue #423) and J-11's 分析反馈 (Issue #94).
     (modelAdapterControlValue !== undefined &&
       (modelAdapterControl === undefined ||
         (process.env.AI7_E2E_JOURNEY !== 'J-04' && process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' &&
-          process.env.AI7_E2E_JOURNEY !== 'J-16'))) ||
+          process.env.AI7_E2E_JOURNEY !== 'J-16' && process.env.AI7_E2E_JOURNEY !== 'J-11'))) ||
     (connectivityPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-04' || !isAbsolute(connectivityPath))) ||
     (unitHoldPath !== undefined && ((process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' && process.env.AI7_E2E_JOURNEY !== 'J-16') ||
       !isAbsolute(unitHoldPath))) ||

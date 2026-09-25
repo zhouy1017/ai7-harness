@@ -107,6 +107,12 @@ function optionalOrNull(input: Record<string, unknown>, key: string, check: (val
 
 const MARK_BLOCK_PATTERN = /^blk_[0-9a-f]{24}$/;
 
+/** A feedback reason (Issue #94, S38): `null`, or one choice with the editor's words or none. */
+function validFeedbackReason(value: unknown): boolean {
+  return value === null || (isRecord(value) && hasExactKeys(value, ['choice', 'text']) && isBoundedString(value.choice, 40) &&
+    /^[a-z][a-z-]{0,39}$/u.test(value.choice) && (value.text === null || isBoundedString(value.text, 4_000, true)));
+}
+
 const EVALUATION_TEXT_CODE_UNITS = 16_000;
 
 function optionalText(value: unknown): boolean {
@@ -672,6 +678,26 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       const input = requireInput(value.input, ['bookId', 'recordId', 'expectedEntries', 'content', 'finalize'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.recordId) || !isSafeInteger(input.expectedEntries, 1) || typeof input.finalize !== 'boolean' ||
           !validEvaluationContent(input.content)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // ②A 分析反馈 (Issue #94, S38): the route's Book and one of its Result Set Revisions.
+    case 'inspectAnalysisFeedback': {
+      const input = requireInput(value.input, ['bookId', 'revisionId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.revisionId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 记录反馈: the item by its place and digest, the latest judgment the editor saw, and the judgment of the closed shape;
+    // whether the reason is one offered for it is the store's.
+    case 'recordAnalysisFeedback': {
+      const input = requireInput(value.input, ['bookId', 'revisionId', 'itemKey', 'itemDigest', 'expectedLatestSignalId', 'judgment', 'reason', 'correction'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.revisionId) || !isBoundedString(input.itemKey, 64) ||
+          !/^(?:synopsis|(?:entities|events|relationships|settings)\/\d{1,5})$/u.test(input.itemKey) ||
+          !isBoundedString(input.itemDigest, 64) || !HEX_DIGEST_PATTERN.test(input.itemDigest) ||
+          !(input.expectedLatestSignalId === null || validUuid(input.expectedLatestSignalId)) ||
+          (input.judgment !== 'accurate' && input.judgment !== 'inaccurate' && input.judgment !== 'incomplete') ||
+          !validFeedbackReason(input.reason) || !(input.correction === null || isBoundedString(input.correction, 4_000, true))) {
         throw new ProtocolError(tentativeId);
       }
       break;

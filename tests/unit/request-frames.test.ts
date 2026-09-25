@@ -1158,6 +1158,39 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
+  it('accepts ②A 分析反馈: a read of one revision, and a judgment of one item by its place and digest (Issue #94, S38)', () => {
+    const bookId = randomUUID();
+    const revisionId = randomUUID();
+    const itemDigest = 'a'.repeat(64);
+    const judged = { bookId, revisionId, itemKey: 'entities/0', itemDigest, expectedLatestSignalId: null, judgment: 'accurate', reason: null, correction: null };
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'inspectAnalysisFeedback', input: { bookId, revisionId } },
+      { op: 'recordAnalysisFeedback', input: judged },
+      { op: 'recordAnalysisFeedback', input: { ...judged, itemKey: 'synopsis', expectedLatestSignalId: randomUUID(), judgment: 'incomplete', reason: { choice: 'ending-missing', text: null }, correction: '结尾的和解没有写到' } },
+      { op: 'recordAnalysisFeedback', input: { ...judged, itemKey: 'settings/12', judgment: 'inaccurate', reason: { choice: 'other', text: '年代写错了' }, correction: null } },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    for (const [op, input] of [
+      ['inspectAnalysisFeedback', { bookId }],
+      ['inspectAnalysisFeedback', { bookId, revisionId: 'latest' }],
+      ['recordAnalysisFeedback', { ...judged, itemKey: 'chapters/0' }],
+      ['recordAnalysisFeedback', { ...judged, itemKey: 'entities' }],
+      ['recordAnalysisFeedback', { ...judged, itemKey: 'entities/-1' }],
+      ['recordAnalysisFeedback', { ...judged, itemDigest: 'A'.repeat(64) }],
+      ['recordAnalysisFeedback', { ...judged, judgment: 'approved' }],
+      ['recordAnalysisFeedback', { ...judged, judgment: null }],
+      ['recordAnalysisFeedback', { ...judged, reason: { choice: 'Misnamed', text: null } }],
+      ['recordAnalysisFeedback', { ...judged, reason: { choice: 'misnamed' } }],
+      ['recordAnalysisFeedback', { ...judged, expectedLatestSignalId: 'none' }],
+      ['recordAnalysisFeedback', { ...judged, rating: 5 }],
+    ] as const) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('accepts 知识库 › 资料库: the read naming nothing, a preview by absolute path, an arrival, and a decision of a closed shape (Issue #427, S79c)', () => {
     const materialId = randomUUID();
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [

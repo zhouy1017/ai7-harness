@@ -75,6 +75,7 @@ import { mountBookPeople } from './book-people.js';
 import { mountReviewGuidelines } from './review-guidelines.js';
 import { mountLibraryMaterials } from './library-materials.js';
 import { mountEvaluation } from './evaluation.js';
+import { analysisFeedbackEngaged, mountAnalysisFeedback } from './analysis-feedback.js';
 import {
   EVALUATION_LEDE,
   EVALUATION_STATUS,
@@ -2790,9 +2791,13 @@ function analysisTabs(card: HTMLElement, bookId: string, initial: AnalysisTabId)
   return { panels, select };
 }
 
-/** One list tab: its reading of how many there are, the items, and their exact ranges one step away. */
+/**
+ * One list tab: its reading of how many there are, the items, and their exact ranges one step away. Each item carries its
+ * place in the revision, which is where its Analysis Feedback Card attaches (Issue #94, S38).
+ */
 function renderAnalysisListPanel(
   panel: HTMLElement,
+  dimension: 'entities' | 'events' | 'relationships' | 'settings',
   heading: string,
   emptyReading: string,
   items: ReadonlyArray<{ reading: string; name: string; ranges: BaselineAnalysisResultSetRevisionProjection['synthesis']['entities'][number]['sourceRanges']; blockId: string | undefined }>,
@@ -2802,13 +2807,14 @@ function renderAnalysisListPanel(
   const list = element('ul', 'analysis-list');
   if (items.length === 0) list.append(element('li', undefined, emptyReading));
   const exact: HTMLElement[] = [];
-  for (const entry of items) {
+  items.forEach((entry, index) => {
     const item = element('li');
+    item.dataset['analysisItemKey'] = `${dimension}/${index}`;
     item.append(element('span', undefined, `${entry.reading} `));
     if (entry.blockId !== undefined) item.append(returnButton(entry.blockId));
     list.append(item);
     exact.push(element('dt', undefined, entry.name), element('dd', 'technical-identity', analysisRanges(entry.ranges)));
-  }
+  });
   panel.append(list);
   if (exact.length > 0) panel.append(technicalDetails('analysis-facts', ...exact));
   return list;
@@ -2971,34 +2977,38 @@ function renderBaselineAnalysisOverview(
     sentences.append(section);
   }
   const synthesis = element('section', 'analysis-synthesis');
+  if (revision.synthesis.synopsis.length > 0) synthesis.dataset['analysisItemKey'] = 'synopsis';
   synthesis.append(
     element('h4', undefined, '全书梗概'),
     element('p', 'analysis-synopsis', revision.synthesis.synopsis.length > 0 ? revision.synthesis.synopsis : '（还没有读完的范围可供合并）'),
   );
-  synopsis.append(sentences, synthesis);
+  // The editor's judgments of this revision and the Book's Analysis Quality Metric (Issue #94, S38): drawn once the
+  // feedback is read, below the synopsis they most often start from.
+  const feedbackMetric = element('section', 'analysis-feedback-metric');
+  synopsis.append(sentences, synthesis, feedbackMetric);
 
   // Provenance and identity as counts with disclosure (V2-UX-LAYER-006): every list names its items'
   // ranges as a block count and keeps the identifiers one step below it.
-  const entityList = renderAnalysisListPanel(panels.entities, '人物与名称', '没有记录人物或名称。', revision.synthesis.entities.map((entity) => ({
+  const entityList = renderAnalysisListPanel(panels.entities, 'entities', '人物与名称', '没有记录人物或名称。', revision.synthesis.entities.map((entity) => ({
     reading: `${entity.name}（${ANALYSIS_ENTITY_KIND_LABELS[entity.kind]}${entity.aliases.length > 0 ? `，别名 ${entity.aliases.join('、')}` : ''}）· ${analysisProvenanceSummary(entity.unitOrdinals, entity.sourceRanges)}`,
     name: entity.name,
     ranges: entity.sourceRanges,
     blockId: entity.sourceRanges[0]?.blockId,
   })), returnButton);
   entityList.classList.add('analysis-entity-list');
-  renderAnalysisListPanel(panels.events, '事件', '没有记录事件。', revision.synthesis.events.map((event) => ({
+  renderAnalysisListPanel(panels.events, 'events', '事件', '没有记录事件。', revision.synthesis.events.map((event) => ({
     reading: `${event.summary}${event.chronology === null ? '' : `（${event.chronology}）`}${event.participants.length === 0 ? '' : ` · ${event.participants.join('、')}`} · ${analysisProvenanceSummary([event.unitOrdinal], event.sourceRanges)}`,
     name: event.summary,
     ranges: event.sourceRanges,
     blockId: event.sourceRanges[0]?.blockId,
   })), returnButton).classList.add('analysis-event-list');
-  renderAnalysisListPanel(panels.relationships, '关系', '没有记录关系。', revision.synthesis.relationships.map((relationship) => ({
+  renderAnalysisListPanel(panels.relationships, 'relationships', '关系', '没有记录关系。', revision.synthesis.relationships.map((relationship) => ({
     reading: `${relationship.subject} — ${relationship.relation} — ${relationship.object} · ${analysisProvenanceSummary(relationship.unitOrdinals, relationship.sourceRanges)}`,
     name: `${relationship.subject} · ${relationship.object}`,
     ranges: relationship.sourceRanges,
     blockId: relationship.sourceRanges[0]?.blockId,
   })), returnButton).classList.add('analysis-relationship-list');
-  renderAnalysisListPanel(panels.settings, '设定', '没有记录设定。', revision.synthesis.settingClaims.map((claim) => ({
+  renderAnalysisListPanel(panels.settings, 'settings', '设定', '没有记录设定。', revision.synthesis.settingClaims.map((claim) => ({
     reading: `${claim.subject}：${claim.claim} · ${analysisProvenanceSummary([claim.unitOrdinal], claim.sourceRanges)}`,
     name: claim.subject,
     ranges: claim.sourceRanges,
@@ -3107,6 +3117,9 @@ function renderBaselineAnalysisOverview(
   // listed here either — 审阅 carries each one as a 批注 with its exact ranges (V2-UX-REV-011).
   technical.append(element('h5', undefined, `计划内调整 · ${adaptedUnits.length} 次`), adaptations);
   synopsis.append(technical);
+  void mountAnalysisFeedback({
+    card, metric: feedbackMetric, revisionId: revision.revisionId, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, technicalDetails,
+  }).load();
 }
 
 /**
@@ -3567,6 +3580,8 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
     },
     unchanged: (next) => JSON.stringify(next) === JSON.stringify(projection),
     again: () => analysisFollowDelayMs(projection.state),
+    // An open 分析反馈 card the editor is in stays as it is: the Run's progress is drawn once they leave it (Issue #94 review).
+    held: () => analysisFeedbackEngaged(host),
     draw: (next) => renderBaselineAnalysis(host, next, bookTitle),
     failed: (error) => setStatus(rendererErrorMessage(error, '无法刷新基线稿件分析状态。'), 'error'),
   });
