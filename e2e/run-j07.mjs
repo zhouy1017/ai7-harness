@@ -1645,6 +1645,9 @@ async function main() {
         records[0].querySelector('.document-delivery-export')?.textContent === ${JSON.stringify(`${EXPORTED_LABEL} · ${DOCUMENT_EXPORT_FILE}`)} &&
         lens.querySelector('.document-changed-since-delivery') === null;
     })()`, 'changed-lens-lists-the-delivery');
+    // 交付 started now reads 进行中: the document stands on the version it delivered.
+    await clickSelector(renderer, 'aside.document-lens li.document-phase[data-phase-id="delivery"] [data-phase-action="start"]', 'changed-delivery-start');
+    await waitFor(renderer, `(() => { const row = document.querySelector('aside.document-lens li.document-phase[data-phase-id="delivery"]'); return row?.dataset.phaseState === 'in-progress' && row.dataset.phaseWaiting === 'false' && row.querySelector('.phase-pill')?.textContent === '进行中' && window.__j07.status() === '「交付」已开始'; })()`, 'changed-delivery-started');
     await assertRenderer(renderer, `(() => { const block = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]'); if (!(block instanceof HTMLElement)) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText', false, ${JSON.stringify(DELIVERY_EDIT)}); return block.textContent?.endsWith(${JSON.stringify(`${DOCUMENT_EDIT}${DELIVERY_EDIT}`)}); })()`, 'changed-edit');
     await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '保存当前编辑' && !button.disabled)`, 'changed-edit-save-ready');
     await click(renderer, '保存当前编辑', 'changed-edit-save');
@@ -1655,6 +1658,16 @@ async function main() {
       return lens?.querySelector('.document-changed-since-delivery')?.textContent === '交付后有修改' &&
         lens.querySelector('[data-version-current]') === null && lens.querySelector('.document-changed')?.textContent === '有修改尚未保存为版本';
     })()`, 'changed-edit-lens-repaints');
+    // And the workflow reads what 交付 now waits on, with no phase moved (WORK-005): the lens reads the document again once
+    // the edit rests, and 下一项需要处理 leads with it.
+    await waitFor(renderer, `(() => {
+      const section = document.querySelector('aside.document-lens section.document-workflow');
+      const row = section?.querySelector('li.document-phase[data-phase-id="delivery"]');
+      return section?.dataset.workflowTransitions === '5' && row?.dataset.phaseWaiting === 'true' && row.querySelector('.phase-pill')?.textContent === '等待你处理' &&
+        row.querySelector('.document-phase-waiting')?.textContent === '有修改尚未保存为版本' &&
+        section.querySelector('.document-workflow-summary')?.textContent === '2 个阶段进行中 · 1 项等待处理' &&
+        JSON.stringify(Array.from(section.querySelectorAll('ol.document-workflow-next > li'), (item) => item.textContent)) === '["交付 · 有修改尚未保存为版本","起草 · 已重新打开"]';
+    })()`, 'changed-edit-workflow-repaints');
     await clickSelector(renderer, '.editor-shell[data-deliverable="production-document"] nav.book-work-group [data-work-destination="deliverables"]', 'changed-back');
     await waitForDeliverables(renderer, 'changed-back');
     await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentChangedSinceDelivery === 'true'`, 'changed-card');
@@ -1818,6 +1831,37 @@ async function main() {
         panel.querySelector('.package-export-folder-line')?.textContent === ${JSON.stringify(PACKAGE_EXPORT_FOLDER_UNCHOSEN)} &&
         document.activeElement === panel.querySelector('[data-package-action="export-choose"]') && !/%|百分/.test(panel.textContent ?? '');
     })()`, 'package-export-lists-the-files');
+    // 含批注 and 含修改建议（作为修订） are offered on (EXP-023), and each file carries its own Export Fidelity Review
+    // (EXP-007), open by itself when something in it is not written as it was: the classes the service's own review of the
+    // version shows, and its restoration line.
+    const packageVersionId = await renderer.evaluate(`window.__j07.packageVersions()[0].dataset.packageVersionId`);
+    const packageReview = await renderer.evaluate(`window.ai7.reviewBookDeliveryPackageExport({ packageVersionId: ${JSON.stringify(packageVersionId)}, options: { includeAnnotations: true, includeSuggestions: true } })
+      .then((review) => ({ degraded: review.degraded, files: review.files.map((file) => [file.key, file.degraded, file.fidelity.filter((row) => row.count > 0 || row.status !== 'preserved').length, file.restorationLine, true]) }))`);
+    requireJourney(Array.isArray(packageReview?.files) && packageReview.files.length === packageFiles.length, 'package-export-service-review', packageReview?.files?.length);
+    await assertRenderer(renderer, `(() => {
+      const panel = window.__j07.packageExport();
+      const boxes = Array.from(panel.querySelectorAll('fieldset.package-export-options input[type="checkbox"]'));
+      const files = Array.from(panel.querySelectorAll('ol.package-export-files > li')).map((item) => {
+        const details = item.querySelector('details.package-export-fidelity');
+        const degraded = item.dataset.packageExportDegraded === 'true';
+        return [item.dataset.packageExportFile, degraded, item.querySelectorAll('.export-fidelity-row').length, details?.querySelector('.export-restoration-line')?.textContent ?? null,
+          details?.open === degraded && (details.querySelector('summary')?.textContent ?? '').startsWith('导出保真审阅')];
+      });
+      return JSON.stringify(boxes.map((box) => box.dataset.packageField + ':' + box.checked + ':' + box.closest('label')?.querySelector('strong')?.textContent)) ===
+          '["includeAnnotations:true:含批注","includeSuggestions:true:含修改建议（作为修订）"]' &&
+        JSON.stringify(files) === ${JSON.stringify(JSON.stringify(packageReview.files))} &&
+        (panel.querySelector('.export-degraded-note') !== null) === ${packageReview.degraded === true};
+    })()`, 'package-export-fidelity-and-switches');
+    // Turning 含批注 off reviews the files again under it, focus staying on the switch; turning it on again restores the
+    // review the folder is then bound to.
+    const toggleAnnotations = (name) => assertRenderer(renderer, `(() => { const box = window.__j07.packageExport()?.querySelector('input[data-package-field="includeAnnotations"]');
+      if (!(box instanceof HTMLInputElement) || box.disabled) return false; box.focus(); box.click(); return true; })()`, name);
+    const switchedTo = (checked) => `(() => { const panel = window.__j07.packageExport(); const box = panel?.querySelector('input[data-package-field="includeAnnotations"]');
+      return panel?.dataset.packageExportPhase === 'ready' && box?.checked === ${checked} && document.activeElement === box && window.__j07.status() === '要导出的文件已列出'; })()`;
+    await toggleAnnotations('package-export-annotations-off');
+    await waitFor(renderer, switchedTo(false), 'package-export-reviewed-without-annotations', 60_000);
+    await toggleAnnotations('package-export-annotations-on');
+    await waitFor(renderer, switchedTo(true), 'package-export-reviewed-with-annotations', 60_000);
     await clickSelector(renderer, packageAction('export-choose'), 'package-export-choose');
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'prepared' && window.__j07.status() === '已准备好导出文件，等待你确认。'`, 'package-export-prepared', 60_000);
     await assertRenderer(renderer, `(() => {

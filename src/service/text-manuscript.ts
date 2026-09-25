@@ -1,4 +1,5 @@
 import { strToU8, zipSync } from 'fflate';
+import { fixedArchiveTime } from '../shared/archive-time.js';
 
 /**
  * The local converter that gives a plain-text or Markdown manuscript a DOCX working representation
@@ -43,9 +44,9 @@ export interface ConvertedTextManuscript {
 
 /**
  * A fixed archive timestamp is what makes the conversion reproducible: a ZIP records an mtime per
- * entry, so a clock reading would make the same text convert to different bytes every time.
+ * entry, so a clock reading would make the same text convert to different bytes every time. It is the one
+ * every archive AI7 writes carries, the same on every time zone (`fixedArchiveTime`, Issue #601).
  */
-const ARCHIVE_MTIME = new Date('2026-01-01T00:00:00.000Z');
 const ARCHIVE_LEVEL = 6;
 
 const CONTENT_TYPES_XML =
@@ -277,7 +278,7 @@ export function buildManuscriptPackage(paragraphs: readonly ConvertedParagraph[]
       'docProps/core.xml': strToU8(CORE_PROPERTIES_XML),
       'word/document.xml': strToU8(documentXml),
     },
-    { level: ARCHIVE_LEVEL, mtime: ARCHIVE_MTIME },
+    { level: ARCHIVE_LEVEL, mtime: fixedArchiveTime() },
   );
 }
 

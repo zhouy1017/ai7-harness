@@ -416,12 +416,17 @@ describe('decodeRequest accepts well-formed frames', () => {
   it('accepts a 图书交付包 version\'s export: its review, the folder the dialog returned within its bound, and its approval (Issue #416, S67b)', () => {
     const bookId = randomUUID();
     const folder = resolve('交付包导出');
+    const options = { includeAnnotations: true, includeSuggestions: false };
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
-      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID() } },
-      { op: 'prepareBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), reviewDigest: 'a'.repeat(64), folder } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options: { includeAnnotations: false, includeSuggestions: true } } },
+      { op: 'prepareBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options, reviewDigest: 'a'.repeat(64), folder } },
       {
         op: 'prepareBookDeliveryPackageExport',
-        input: { bookId, packageVersionId: randomUUID(), reviewDigest: 'b'.repeat(64), folder: `${folder}${'径'.repeat(MAX_EXPORT_DESTINATION_CODE_UNITS - folder.length)}` },
+        input: {
+          bookId, packageVersionId: randomUUID(), options, reviewDigest: 'b'.repeat(64),
+          folder: `${folder}${'径'.repeat(MAX_EXPORT_DESTINATION_CODE_UNITS - folder.length)}`,
+        },
       },
       { op: 'approveBookDeliveryPackageExport', input: { bookId, exportId: randomUUID() } },
     ];
@@ -476,19 +481,28 @@ describe('decodeRequest accepts well-formed frames', () => {
     }
   });
 
-  it('rejects a 图书交付包 export whose version, digest, folder or key set is wrong (Issue #416, S67b)', () => {
+  it('rejects a 图书交付包 export whose version, switches, digest, folder or key set is wrong (Issue #416, S67b)', () => {
     const id = randomUUID();
     const bookId = randomUUID();
-    const prepare = { bookId, packageVersionId: randomUUID(), reviewDigest: 'a'.repeat(64), folder: resolve('交付包导出') };
+    const options = { includeAnnotations: true, includeSuggestions: true };
+    const prepare = { bookId, packageVersionId: randomUUID(), options, reviewDigest: 'a'.repeat(64), folder: resolve('交付包导出') };
     const refused: ReadonlyArray<{ op: string; input: unknown }> = [
       { op: 'reviewBookDeliveryPackageExport', input: { bookId } },
-      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: 'v2' } },
-      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), folder: prepare.folder } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID() } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: 'v2', options } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options, folder: prepare.folder } },
+      // 备注 never go with a package, and each switch is a switch.
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options: { ...options, includeEditorNotes: false } } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options: { includeAnnotations: true } } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options: { includeAnnotations: 1, includeSuggestions: true } } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options: null } },
+      { op: 'prepareBookDeliveryPackageExport', input: { bookId, packageVersionId: prepare.packageVersionId, reviewDigest: prepare.reviewDigest, folder: prepare.folder } },
+      { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, options: { includeAnnotations: true, includeSuggestions: 'yes' } } },
       { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, reviewDigest: 'A'.repeat(64) } },
       { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, reviewDigest: 'a'.repeat(63) } },
       { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, folder: '交付包导出' } },
       { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, folder: `${prepare.folder}${'径'.repeat(MAX_EXPORT_DESTINATION_CODE_UNITS)}` } },
-      { op: 'prepareBookDeliveryPackageExport', input: { bookId, packageVersionId: prepare.packageVersionId, reviewDigest: prepare.reviewDigest } },
+      { op: 'prepareBookDeliveryPackageExport', input: { bookId, packageVersionId: prepare.packageVersionId, options, reviewDigest: prepare.reviewDigest } },
       { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, fileNames: ['交付包清单.md'] } },
       { op: 'approveBookDeliveryPackageExport', input: { bookId, exportId: 'last' } },
       { op: 'approveBookDeliveryPackageExport', input: { bookId, exportId: randomUUID(), folder: prepare.folder } },
