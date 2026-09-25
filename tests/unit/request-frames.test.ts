@@ -465,7 +465,8 @@ describe('decodeRequest accepts well-formed frames', () => {
       { op: 'updateBookPeople', input: { ...people, related: [{ roleId: 'Proofreader', name: '王四' }] } },
       { op: 'updateBookPeople', input: { ...people, related: [{ roleId: 'proofreader', name: '王四', note: '' }] } },
       { op: 'updateBookPeople', input: { bookId, expectedVersion: 0, authors: [], editors: [] } },
-      { op: 'listBooks', input: { after: null, filter: { field: 'series', text: '书系' } } },
+      // 书系 is a field since Issue #63 (S28a); a field no Book has is still refused.
+      { op: 'listBooks', input: { after: null, filter: { field: 'publisher', text: '书系' } } },
       { op: 'listBooks', input: { after: null, filter: { field: 'author', text: '' } } },
       { op: 'listBooks', input: { after: null, filter: { field: 'author', text: '一\n吴' } } },
       { op: 'listBooks', input: { after: null, filter: { field: 'author', text: '字'.repeat(41) } } },
@@ -1241,6 +1242,46 @@ describe('decodeRequest rejects malformed frames', () => {
       ['setEvaluationPreferences', { ...preferences, expectedEntries: 1.5 }],
       ['setEvaluationPreferences', { predictionEnabled: false, calibrationEnabled: true }],
       ['setEvaluationPreferences', { ...preferences, threshold: 10 }],
+    ] as const) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
+  it('accepts 书系: the list naming nothing, 新建书系 by two texts, a Series, a membership change and its preview, and a Book\'s side (Issue #63, S28a)', () => {
+    const seriesId = randomUUID();
+    const bookId = randomUUID();
+    const change = { seriesId, bookId, kind: 'add', previewDigest: 'c'.repeat(64) };
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'inspectSeriesList', input: {} },
+      { op: 'createSeries', input: { title: '星河三部曲', note: '' } },
+      { op: 'createSeries', input: { title: '星河三部曲', note: '三部长篇' } },
+      { op: 'inspectSeries', input: { seriesId } },
+      { op: 'previewSeriesMembershipChange', input: { seriesId, bookId, kind: 'add' } },
+      { op: 'previewSeriesMembershipChange', input: { seriesId, bookId, kind: 'remove' } },
+      { op: 'changeSeriesMembership', input: change },
+      { op: 'changeSeriesMembership', input: { ...change, kind: 'remove' } },
+      { op: 'inspectBookSeries', input: { bookId } },
+      { op: 'listBooks', input: { after: null, filter: { field: 'series', text: '星河' } } },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    for (const [op, input] of [
+      ['inspectSeriesList', { seriesId }],
+      ['createSeries', { title: '星河三部曲' }],
+      ['createSeries', { title: '', note: '' }],
+      ['createSeries', { title: 7, note: '' }],
+      ['createSeries', { title: '星河三部曲', note: null }],
+      ['inspectSeries', { seriesId: 'series' }],
+      ['previewSeriesMembershipChange', { seriesId, bookId, kind: 'join' }],
+      ['previewSeriesMembershipChange', { seriesId, kind: 'add' }],
+      ['changeSeriesMembership', { ...change, previewDigest: 'C'.repeat(64) }],
+      ['changeSeriesMembership', { ...change, previewDigest: 'c'.repeat(63) }],
+      ['changeSeriesMembership', { seriesId, bookId, kind: 'add' }],
+      ['changeSeriesMembership', { ...change, bookId: 'book' }],
+      ['inspectBookSeries', { bookId, seriesId }],
+      ['listBooks', { after: null, filter: { field: 'imprint', text: '星河' } }],
     ] as const) {
       expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
     }

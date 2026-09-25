@@ -15,6 +15,7 @@ import {
   type UpdateBookPeopleInput,
 } from '../shared/protocol.js';
 import { UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
+import { SERIES_TITLE_FILTER_SQL } from './series.js';
 
 /**
  * 作者 · 责编 · 相关人 of a Book (Issue #431, plan slice S83; V2-UX-BOOK-006, FDBK-013). Authors and editors may be several
@@ -225,12 +226,12 @@ export class BookPeople {
   }
 
   /**
-   * 书库's search (BOOK-006, IA-008): the SQL that keeps a Book whose 书名, 作者 or 责编 hold the words, over the Book's
-   * newest people version, and its parameters. `null` for a filter that holds no words.
+   * 书库's search (BOOK-006, IA-008): the SQL that keeps a Book whose 书名, 作者, 责编 or 书系 hold the words, over the Book's
+   * newest people version and its Series now, and its parameters. `null` for a filter that holds no words.
    */
   filter(filter: BookSummaryFilter): { where: string; parameters: string[] } {
-    requirePeople(isRecord(filter) && (filter.field === 'all' || filter.field === 'title' || filter.field === 'author' || filter.field === 'editor'),
-      'BOOK_SUMMARY_FILTER_INVALID', '图书查找条件无效。');
+    requirePeople(isRecord(filter) && (filter.field === 'all' || filter.field === 'title' || filter.field === 'author' || filter.field === 'editor' ||
+      filter.field === 'series'), 'BOOK_SUMMARY_FILTER_INVALID', '图书查找条件无效。');
     const text = publicationText(filter.text, MAX_BOOK_SUMMARY_FILTER_CHARACTERS);
     // A Book's names are held one to a line, so words across a line break would find two names as one.
     requirePeople(text !== null && !/[\r\n]/u.test(text), 'BOOK_SUMMARY_FILTER_INVALID', `查找的字词 1–${MAX_BOOK_SUMMARY_FILTER_CHARACTERS} 个字，不含换行。`);
@@ -241,7 +242,9 @@ export class BookPeople {
     if (filter.field === 'title') return { where: title, parameters: [text] };
     if (filter.field === 'author') return { where: newest('authors_text'), parameters: [text] };
     if (filter.field === 'editor') return { where: newest('editors_text'), parameters: [text] };
-    return { where: `(${title} OR ${newest('authors_text')} OR ${newest('editors_text')})`, parameters: [text, text, text] };
+    // 书系 (Issue #63, S28a): a Series the Book is in now, by its name.
+    if (filter.field === 'series') return { where: SERIES_TITLE_FILTER_SQL, parameters: [text] };
+    return { where: `(${title} OR ${newest('authors_text')} OR ${newest('editors_text')} OR ${SERIES_TITLE_FILTER_SQL})`, parameters: [text, text, text, text] };
   }
 
   /** The Book's newest version, its record verified against its digest and its columns. */

@@ -353,9 +353,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         !(after === null || (isRecord(after) && hasExactKeys(after, ['title', 'bookId']) &&
           isBoundedString(after.title, 180) && isBoundedString(after.bookId, 36) && UUID_PATTERN.test(after.bookId)))
       ) throw new ProtocolError(tentativeId);
-      // 书库's search (Issue #431, S83): one field, or all three, and the words within their bound.
+      // 书库's search (Issue #431, S83; 书系 Issue #63, S28a): one field, or all of them, and the words within their bound.
       if (input.filter !== undefined && !(isRecord(input.filter) && hasExactKeys(input.filter, ['field', 'text']) &&
-          (input.filter.field === 'all' || input.filter.field === 'title' || input.filter.field === 'author' || input.filter.field === 'editor') &&
+          (input.filter.field === 'all' || input.filter.field === 'title' || input.filter.field === 'author' || input.filter.field === 'editor' ||
+            input.filter.field === 'series') &&
           validPublicationText(input.filter.text, MAX_BOOK_SUMMARY_FILTER_CHARACTERS) && !/[\r\n]/u.test(String(input.filter.text)))) {
         throw new ProtocolError(tentativeId);
       }
@@ -693,6 +694,39 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           typeof input.predictionEnabled !== 'boolean' || typeof input.calibrationEnabled !== 'boolean') {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    // 书系 (Issue #63, S28a): the list names nothing; 新建书系 names two texts the service reads; a Series, a membership change
+    // and its preview name their Series, Book and kind, and the commit the digest of the preview the editor saw.
+    case 'inspectSeriesList':
+      requireInput(value.input, [], tentativeId);
+      break;
+    case 'createSeries': {
+      const input = requireInput(value.input, ['title', 'note'], tentativeId);
+      if (!isBoundedString(input.title, 400) || !isBoundedString(input.note, 4_000, true)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'inspectSeries': {
+      const input = requireInput(value.input, ['seriesId'], tentativeId);
+      if (!validUuid(input.seriesId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'previewSeriesMembershipChange': {
+      const input = requireInput(value.input, ['seriesId', 'bookId', 'kind'], tentativeId);
+      if (!validUuid(input.seriesId) || !validUuid(input.bookId) || (input.kind !== 'add' && input.kind !== 'remove')) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'changeSeriesMembership': {
+      const input = requireInput(value.input, ['seriesId', 'bookId', 'kind', 'previewDigest'], tentativeId);
+      if (!validUuid(input.seriesId) || !validUuid(input.bookId) || (input.kind !== 'add' && input.kind !== 'remove') ||
+          !isBoundedString(input.previewDigest, 64) || !HEX_DIGEST_PATTERN.test(input.previewDigest)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'inspectBookSeries': {
+      const input = requireInput(value.input, ['bookId'], tentativeId);
+      if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
       break;
     }
     // 质量与学习 › 学习准入 (Issue #61, S26b): every Book's Learning Material, or one Book's.

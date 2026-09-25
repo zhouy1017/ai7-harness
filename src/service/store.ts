@@ -106,6 +106,16 @@ import type {
   DecideLearningMaterialInput,
   FeedbackHistoryEntryProjection,
   EvaluationCalibrationBookProjection,
+  BookSeriesProjection,
+  ChangeSeriesMembershipInput,
+  CreateSeriesInput,
+  PreviewSeriesMembershipChangeInput,
+  SeriesCreationProjection,
+  SeriesListProjection,
+  SeriesMembershipChangeProjection,
+  SeriesMembershipChangeResultProjection,
+  SeriesMembershipPreviewProjection,
+  SeriesProjection,
   EvaluationCalibrationProjection,
   RecordPublicationActualsInput,
   SetEvaluationPreferencesInput,
@@ -325,8 +335,26 @@ import {
 } from './learning-eligibility.js';
 import { reviewCategoryEntry } from './review/category-configuration.js';
 import { EvaluationCalibrationError, EvaluationCalibrationLedger, initializeEvaluationCalibrationSchema } from './evaluation-calibration.js';
+import {
+  SeriesError,
+  SeriesLedger,
+  initializeSeriesSchema,
+  seriesMemberAbsent,
+  seriesMemberAlready,
+  seriesLearningFacts,
+  seriesMembershipImpact,
+  seriesPreviewDigest,
+  type StoredMembershipChange,
+  type StoredSeries,
+} from './series.js';
 import { CALIBRATION_MIN_ADJUSTMENTS, PREDICTION_MIN_BOOKS_WITH_ACTUALS, calibrationActive, predictionAvailable } from '../shared/evaluation-calibration.js';
-import { MAX_FEEDBACK_HISTORY_ENTRIES, PUBLICATION_ACTUALS_RECORDED_STATE } from '../shared/protocol.js';
+import {
+  MAX_FEEDBACK_HISTORY_ENTRIES,
+  MAX_SERIES_CANDIDATES_LISTED,
+  MAX_SERIES_HISTORY_LISTED,
+  MAX_SERIES_MEMBERS_LISTED,
+  PUBLICATION_ACTUALS_RECORDED_STATE,
+} from '../shared/protocol.js';
 import { readExemplars } from './exemplars.js';
 import { readKnowledgeProcedures } from './knowledge-procedures.js';
 import {
@@ -432,6 +460,7 @@ import {
   DECISION_FEEDBACK_SCHEMA_VERSION,
   LEARNING_ELIGIBILITY_SCHEMA_VERSION,
   EVALUATION_CALIBRATION_SCHEMA_VERSION,
+  SERIES_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1659,7 +1688,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
       currentVersion === DECISION_FEEDBACK_SCHEMA_VERSION ||
       currentVersion === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
-      currentVersion === EVALUATION_CALIBRATION_SCHEMA_VERSION,
+      currentVersion === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
+      currentVersion === SERIES_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1706,7 +1736,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
       currentVersion === DECISION_FEEDBACK_SCHEMA_VERSION ||
       currentVersion === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
-      currentVersion === EVALUATION_CALIBRATION_SCHEMA_VERSION
+      currentVersion === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
+      currentVersion === SERIES_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2067,7 +2098,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
       version === DECISION_FEEDBACK_SCHEMA_VERSION ||
       version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
-      version === EVALUATION_CALIBRATION_SCHEMA_VERSION,
+      version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
+      version === SERIES_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2103,7 +2135,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
       version === DECISION_FEEDBACK_SCHEMA_VERSION ||
       version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
-      version === EVALUATION_CALIBRATION_SCHEMA_VERSION) return;
+      version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
+      version === SERIES_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2231,7 +2264,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
       version === DECISION_FEEDBACK_SCHEMA_VERSION ||
       version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
-      version === EVALUATION_CALIBRATION_SCHEMA_VERSION,
+      version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
+      version === SERIES_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2266,7 +2300,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
       version === DECISION_FEEDBACK_SCHEMA_VERSION ||
       version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
-      version === EVALUATION_CALIBRATION_SCHEMA_VERSION) return;
+      version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
+      version === SERIES_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2559,7 +2594,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== EVALUATION_CALIBRATION_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== SERIES_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2597,6 +2632,7 @@ function validateModelServiceSchema(
       version >= DECISION_FEEDBACK_SCHEMA_VERSION,
       version >= LEARNING_ELIGIBILITY_SCHEMA_VERSION,
       version >= EVALUATION_CALIBRATION_SCHEMA_VERSION,
+      version >= SERIES_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2659,7 +2695,8 @@ function initializeModelServiceSchema(
       version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
       version === DECISION_FEEDBACK_SCHEMA_VERSION ||
       version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
-      version === EVALUATION_CALIBRATION_SCHEMA_VERSION,
+      version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
+      version === SERIES_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2694,7 +2731,8 @@ function initializeModelServiceSchema(
       version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
       version === DECISION_FEEDBACK_SCHEMA_VERSION ||
       version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
-      version === EVALUATION_CALIBRATION_SCHEMA_VERSION) {
+      version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
+      version === SERIES_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3515,6 +3553,7 @@ export class EditorialStore {
   readonly #libraryMaterials: LibraryMaterialLedger;
   readonly #learningEligibility: LearningEligibilityLedger;
   readonly #evaluationCalibration: EvaluationCalibrationLedger;
+  readonly #series: SeriesLedger;
   /** ②C 评估 (Issue #429, S81a): each Book's versioned Evaluation Records. */
   readonly #evaluations: EvaluationRecords;
   /** ②A 分析反馈 (Issue #94, S38): the editor's judgments of analysis results. */
@@ -3577,6 +3616,7 @@ export class EditorialStore {
     this.#libraryMaterials = new LibraryMaterialLedger(authority, dataRoot);
     this.#learningEligibility = new LearningEligibilityLedger(authority);
     this.#evaluationCalibration = new EvaluationCalibrationLedger(authority);
+    this.#series = new SeriesLedger(authority);
     this.#evaluations = new EvaluationRecords(authority, { current: (bookId) => this.#evaluationManuscript(bookId) });
     this.#analysisFeedback = new AnalysisFeedbackLedger(authority);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
@@ -3730,7 +3770,7 @@ export class EditorialStore {
       // revision 47 (Issue #429, S81a) each Book's Evaluation Records, revision 48 (Issue #94, S38) the editor's judgments
       // of analysis results, revision 49 (Issue #61, S26a) the 不说明 and later reasons of Proposal Decisions, and revision 50
       // (Issue #61, S26b) the editor's Learning Eligibility decisions, and revision 51 (Issue #430, S82) each Book's 定价与首印
-      // and the house's evaluation preferences.
+      // and the house's evaluation preferences; revision 52 (Issue #63, S28a) the house's Series and their membership changes.
       initializeBookPeopleSchema(authority);
       initializeReviewGuidelineSchema(authority);
       initializeLibraryMaterialSchema(authority);
@@ -3739,6 +3779,7 @@ export class EditorialStore {
       initializeDecisionFeedbackSchema(authority);
       initializeLearningEligibilitySchema(authority);
       initializeEvaluationCalibrationSchema(authority);
+      initializeSeriesSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -10379,6 +10420,178 @@ export class EditorialStore {
       return operation();
     } catch (error) {
       if (error instanceof EvaluationCalibrationError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
+  }
+
+  // ---- 书系 › 成员与共享范围 (Issue #63, plan slice S28a; V2-UX-SER-001 to SER-012) --------------------------------------
+
+  /** 书系: every Series of the house, by name, with how many Books each holds now. A read. */
+  inspectSeriesList(): SeriesListProjection {
+    return this.#seriesCall(() => this.#seriesListProjection());
+  }
+
+  #seriesListProjection(): SeriesListProjection {
+    const counts = this.#series.memberCounts();
+    return { series: this.#series.list().map((entry) => ({ ...entry, memberCount: counts.get(entry.seriesId) ?? 0 })) };
+  }
+
+  /** 新建书系: a name the house has not used, and an optional 说明. It holds no Book until one is added. */
+  createSeries(input: CreateSeriesInput): SeriesCreationProjection {
+    return this.#seriesCall(() => {
+      const created = this.#transaction(this.#authority, () => this.#series.create(input));
+      return { seriesId: created.seriesId, completionLabel: `已新建书系「${created.title}」`, list: this.#seriesListProjection() };
+    });
+  }
+
+  /** One Series' 成员与共享范围 (SER-001): its members, the Books that may join, and every membership change. A read. */
+  inspectSeries(seriesId: string): SeriesProjection {
+    return this.#seriesCall(() => this.#seriesProjection(this.#requireSeries(seriesId)));
+  }
+
+  /**
+   * The Series Membership Impact Preview (SER-003 to SER-007) for 加入书系 or 移出书系 of one exact Book and Series. A read:
+   * nothing is recorded until the editor commits the change against this preview's digest.
+   */
+  previewSeriesMembershipChange(input: PreviewSeriesMembershipChangeInput): SeriesMembershipPreviewProjection {
+    return this.#seriesCall(() => this.#seriesPreview(input));
+  }
+
+  /**
+   * 加入书系 or 移出书系 (SER-008 to SER-010): the preview is recomputed inside the transaction, and a preview the membership
+   * or a governing record has moved past is refused rather than applied; the change record keeps what the preview showed.
+   */
+  changeSeriesMembership(input: ChangeSeriesMembershipInput): SeriesMembershipChangeResultProjection {
+    return this.#seriesCall(() => {
+      const recorded = this.#transaction(this.#authority, () => {
+        const preview = this.#seriesPreview(input);
+        requireStore(preview.previewDigest === input.previewDigest, 'SERIES_PREVIEW_STALE',
+          '预览之后，书系成员或相关记录有了变化；请重新查看影响，再决定。');
+        const change = this.#series.record({
+          seriesId: preview.seriesId,
+          bookId: preview.bookId,
+          kind: preview.kind,
+          previewDigest: preview.previewDigest,
+          impact: preview.groups,
+          names: { book: preview.bookTitle, series: preview.seriesTitle },
+        });
+        return { change, preview };
+      });
+      const { change, preview } = recorded;
+      return {
+        changeId: change.changeId,
+        completionLabel: `${change.kind === 'add' ? '已加入' : '已移出'}书系「${preview.seriesTitle}」：《${preview.bookTitle}》`,
+        series: this.#seriesProjection(this.#requireSeries(preview.seriesId)),
+      };
+    });
+  }
+
+  /** A Book's side of 书系 (SER-009): the Series it is in now, and each change of its membership, newest first. A read. */
+  inspectBookSeries(bookId: string): BookSeriesProjection {
+    return this.#seriesCall(() => {
+      const bookTitle = this.#evaluationBookTitle(bookId);
+      const titles = new Map(this.#series.list().map((entry) => [entry.seriesId, entry.title]));
+      const history = this.#series.history({ bookId });
+      return {
+        bookId,
+        memberships: this.#series.seriesOf(bookId),
+        history: history.slice(0, MAX_SERIES_HISTORY_LISTED).map((change) => this.#seriesChange(change, titles.get(change.seriesId) ?? '', bookTitle)),
+        historyTruncated: history.length > MAX_SERIES_HISTORY_LISTED,
+      };
+    });
+  }
+
+  #requireSeries(seriesId: string): StoredSeries {
+    requireStore(typeof seriesId === 'string' && UUID_PATTERN.test(seriesId), 'SERIES_INVALID', '书系标识无效。');
+    const found = this.#series.find(seriesId);
+    requireStore(found !== null, 'SERIES_NOT_FOUND', '书系不存在。');
+    return found;
+  }
+
+  #seriesPreview(input: PreviewSeriesMembershipChangeInput): SeriesMembershipPreviewProjection {
+    const series = this.#requireSeries(input.seriesId);
+    const bookTitle = this.#evaluationBookTitle(input.bookId);
+    requireStore(input.kind === 'add' || input.kind === 'remove', 'SERIES_CHANGE_INVALID', '书系成员变更只有加入书系和移出书系。');
+    const chain = this.#series.chain(series.seriesId, input.bookId);
+    const member = chain.at(-1)?.kind === 'add';
+    requireStore(input.kind !== 'add' || !member, 'SERIES_MEMBER_ALREADY', seriesMemberAlready(bookTitle, series.title));
+    requireStore(input.kind !== 'remove' || member, 'SERIES_MEMBER_ABSENT', seriesMemberAbsent(bookTitle, series.title));
+    const materials = this.#learningEligibility.project(input.bookId, this.#learningCandidates(input.bookId, false));
+    const groups = seriesMembershipImpact(input.kind, {
+      seriesTitle: series.title,
+      bookTitle,
+      // No Task kind can name a Series in its scope before Series-scope pins (Issue #64, S29): none is authorized or running.
+      seriesScopedRuns: 0,
+      ...seriesLearningFacts(materials),
+    });
+    return {
+      seriesId: series.seriesId,
+      seriesTitle: series.title,
+      bookId: input.bookId,
+      bookTitle,
+      kind: input.kind,
+      actionLabel: input.kind === 'add' ? '加入书系' : '移出书系',
+      groups,
+      previewDigest: seriesPreviewDigest({ seriesId: series.seriesId, bookId: input.bookId, kind: input.kind, chainHead: chain.at(-1)?.changeId ?? null, groups }),
+    };
+  }
+
+  #seriesProjection(series: StoredSeries): SeriesProjection {
+    const joined = this.#series.members(series.seriesId);
+    const memberIds = new Set(joined.map((entry) => entry.bookId));
+    const titles = new Map((this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').all() as SqlRow[])
+      .map((row) => [asString(row.book_id), asString(row.title)]));
+    const members = joined.slice(0, MAX_SERIES_MEMBERS_LISTED).map((entry) => {
+      const people = this.#bookPeople.current(entry.bookId);
+      return {
+        bookId: entry.bookId,
+        title: titles.get(entry.bookId) ?? '',
+        authors: people.authors,
+        editors: people.editors,
+        joinedAt: entry.joinedAt,
+        // 书系一致性 stays unavailable until Series Knowledge reaches review (Issue #64, S29), so no member has had one.
+        seriesConsistencyReview: null,
+      };
+    });
+    const candidates = [...titles].filter(([bookId]) => !memberIds.has(bookId)).map(([bookId, title]) => ({ bookId, title }));
+    const history = this.#series.history({ seriesId: series.seriesId });
+    return {
+      ...series,
+      members,
+      membersTruncated: joined.length > MAX_SERIES_MEMBERS_LISTED,
+      candidates: candidates.slice(0, MAX_SERIES_CANDIDATES_LISTED),
+      candidatesTruncated: candidates.length > MAX_SERIES_CANDIDATES_LISTED,
+      history: history.slice(0, MAX_SERIES_HISTORY_LISTED).map((change) => this.#seriesChange(change, series.title, titles.get(change.bookId) ?? '')),
+      historyTruncated: history.length > MAX_SERIES_HISTORY_LISTED,
+    };
+  }
+
+  #seriesChange(change: StoredMembershipChange, seriesTitle: string, bookTitle: string): SeriesMembershipChangeProjection {
+    return {
+      changeId: change.changeId,
+      seriesId: change.seriesId,
+      seriesTitle,
+      bookId: change.bookId,
+      bookTitle,
+      kind: change.kind,
+      label: change.kind === 'add' ? '加入书系' : '移出书系',
+      priorMember: change.kind === 'remove',
+      newMember: change.kind === 'add',
+      actor: '本机编辑',
+      recordedAt: change.recordedAt,
+      impact: change.impact,
+    };
+  }
+
+  #seriesCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof SeriesError || error instanceof LearningEligibilityError || error instanceof DecisionFeedbackError ||
+          error instanceof AnalysisFeedbackError) {
+        throw new StoreError(error.code, error.message);
+      }
       throw error;
     }
   }

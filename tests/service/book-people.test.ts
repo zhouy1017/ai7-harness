@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BOOK_PEOPLE_TRIGGER_SQL, BUILTIN_BOOK_PEOPLE_ROLES } from '../../src/service/book-people.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { EVALUATION_CALIBRATION_SCHEMA_VERSION, MAINTENANCE_CASE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { SERIES_SCHEMA_VERSION, MAINTENANCE_CASE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, type ComposedManuscriptRequest } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
@@ -105,7 +105,8 @@ describe('作者 · 责编 · 相关人 (S83)', () => {
       expect(titles({ field: 'all', text: '郑' })).toEqual(['人员之书甲']);
       expect(titles({ field: 'all', text: '人员之书' })).toEqual(['人员之书乙', '人员之书甲']);
       expect(code(() => store.listBooks(null, { field: 'author', text: '  ' }))).toBe('BOOK_SUMMARY_FILTER_INVALID');
-      expect(code(() => store.listBooks(null, { field: 'series' as 'all', text: '书系' }))).toBe('BOOK_SUMMARY_FILTER_INVALID');
+      // 书系 is a field since Issue #63 (S28a); a field no Book has is still refused.
+      expect(code(() => store.listBooks(null, { field: 'publisher' as 'all', text: '书系' }))).toBe('BOOK_SUMMARY_FILTER_INVALID');
       // Names are held one to a line: words across a break never find 周一 and 吴二 as one name.
       expect(code(() => store.listBooks(null, { field: 'author', text: '一\n吴' }))).toBe('BOOK_SUMMARY_FILTER_INVALID');
 
@@ -196,6 +197,8 @@ describe('作者 · 责编 · 相关人 (S83)', () => {
     const planted = new DatabaseSync(path);
     try {
       planted.exec(`BEGIN IMMEDIATE;
+        DROP TABLE series_membership_changes;
+        DROP TABLE series;
         DROP TABLE evaluation_preferences;
         DROP TABLE publication_actuals;
         DROP TABLE learning_eligibility_decisions;
@@ -221,7 +224,7 @@ describe('作者 · 责编 · 相关人 (S83)', () => {
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EVALUATION_CALIBRATION_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SERIES_SCHEMA_VERSION);
       expect((after.prepare('SELECT count(*) count FROM book_people_versions').get() as { count: number }).count).toBe(0);
     } finally {
       after.close();

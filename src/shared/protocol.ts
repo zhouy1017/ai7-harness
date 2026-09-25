@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 77 as const;
+export const SERVICE_PROTOCOL_VERSION = 78 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -125,6 +125,12 @@ export const IPC_CHANNELS = {
   inspectEvaluationCalibration: 'ai7:j12:inspect-evaluation-calibration',
   recordPublicationActuals: 'ai7:j12:record-publication-actuals',
   setEvaluationPreferences: 'ai7:j12:set-evaluation-preferences',
+  inspectSeriesList: 'ai7:j13:inspect-series-list',
+  createSeries: 'ai7:j13:create-series',
+  inspectSeries: 'ai7:j13:inspect-series',
+  previewSeriesMembershipChange: 'ai7:j13:preview-series-membership-change',
+  changeSeriesMembership: 'ai7:j13:change-series-membership',
+  inspectBookSeries: 'ai7:j13:inspect-book-series',
   applyChangeSuggestion: 'ai7:j05:apply-change-suggestion',
   applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
   reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
@@ -713,9 +719,10 @@ export interface BookPeopleResultProjection {
   people: BookPeopleProjection;
 }
 
-/** 书库's search (IA-008, BOOK-006): one field — or all of 书名, 作者 and 责编 — holding the words. */
+/** 书库's search (IA-008, BOOK-006): one field — or all of 书名, 作者, 责编 and 书系 — holding the words. */
 export interface BookSummaryFilter {
-  field: 'all' | 'title' | 'author' | 'editor';
+  /** `series` (Issue #63, S28a): the Book is now in a Series whose name holds the words. */
+  field: 'all' | 'title' | 'author' | 'editor' | 'series';
   text: string;
 }
 export const MAX_BOOK_SUMMARY_FILTER_CHARACTERS = 40;
@@ -5203,6 +5210,136 @@ export interface SetEvaluationPreferencesInput {
   readonly calibrationEnabled: boolean;
 }
 
+// ---- 书系 › 成员与共享范围 (Issue #63, plan slice S28a; V2-UX-SER-001 to SER-012; ADR 0002, ADR 0036) ----------------------
+
+/** A Series name, in characters (code points) once NFC-normalized and trimmed; its 说明 likewise. */
+export const MAX_SERIES_TITLE_CHARACTERS = 40;
+export const MAX_SERIES_NOTE_CHARACTERS = 500;
+/** How many members, Books offered for 加入书系, and changes one Series answer lists at most. */
+export const MAX_SERIES_MEMBERS_LISTED = 500;
+export const MAX_SERIES_CANDIDATES_LISTED = 200;
+export const MAX_SERIES_HISTORY_LISTED = 100;
+
+export type SeriesMembershipChangeKind = 'add' | 'remove';
+
+/** One Series as 书系 lists it. */
+export interface SeriesSummaryProjection {
+  readonly seriesId: string;
+  readonly title: string;
+  readonly note: string;
+  readonly memberCount: number;
+  readonly createdAt: string;
+}
+
+export interface SeriesListProjection {
+  readonly series: ReadonlyArray<SeriesSummaryProjection>;
+}
+
+export interface CreateSeriesInput {
+  readonly title: string;
+  readonly note: string;
+}
+
+export interface SeriesCreationProjection {
+  readonly seriesId: string;
+  /** `已新建书系「…」`. */
+  readonly completionLabel: string;
+  readonly list: SeriesListProjection;
+}
+
+/** One of the preview's four consequence groups (SER-003): what changes, and what stays as it is. */
+export interface SeriesImpactGroupProjection {
+  readonly key: 'future-tasks' | 'runs' | 'knowledge-learning' | 'history';
+  readonly title: '未来任务' | '已授权或正在运行' | '书系知识与学习' | '历史记录';
+  readonly changes: ReadonlyArray<string>;
+  readonly unchanged: ReadonlyArray<string>;
+}
+
+/** A Series Membership Change Record (SER-009): the Book, the Series, the change, who, when, and the impact it showed. */
+export interface SeriesMembershipChangeProjection {
+  readonly changeId: string;
+  readonly seriesId: string;
+  readonly seriesTitle: string;
+  readonly bookId: string;
+  readonly bookTitle: string;
+  readonly kind: SeriesMembershipChangeKind;
+  readonly label: '加入书系' | '移出书系';
+  readonly priorMember: boolean;
+  readonly newMember: boolean;
+  readonly actor: '本机编辑';
+  readonly recordedAt: string;
+  readonly impact: ReadonlyArray<SeriesImpactGroupProjection>;
+}
+
+/** One member Book as 成员与共享范围 lists it. */
+export interface SeriesMemberProjection {
+  readonly bookId: string;
+  readonly title: string;
+  readonly authors: ReadonlyArray<string>;
+  readonly editors: ReadonlyArray<string>;
+  readonly joinedAt: string;
+  /** The Book's latest 书系一致性审阅; `null` while it had none — and none can run before Series Knowledge reaches review. */
+  readonly seriesConsistencyReview: { readonly reviewedAt: string } | null;
+}
+
+/**
+ * 书系 › one Series › 成员与共享范围 (SER-001): its member Books, the Books that may be added, and every membership change,
+ * newest first. It is not a reader of the member manuscripts.
+ */
+export interface SeriesProjection {
+  readonly seriesId: string;
+  readonly title: string;
+  readonly note: string;
+  readonly createdAt: string;
+  readonly members: ReadonlyArray<SeriesMemberProjection>;
+  readonly membersTruncated: boolean;
+  readonly candidates: ReadonlyArray<{ readonly bookId: string; readonly title: string }>;
+  readonly candidatesTruncated: boolean;
+  readonly history: ReadonlyArray<SeriesMembershipChangeProjection>;
+  readonly historyTruncated: boolean;
+}
+
+export interface PreviewSeriesMembershipChangeInput {
+  readonly seriesId: string;
+  readonly bookId: string;
+  readonly kind: SeriesMembershipChangeKind;
+}
+
+/** The Series Membership Impact Preview (SER-003 to SER-008): exact identities first, then the four groups, then the one action. */
+export interface SeriesMembershipPreviewProjection {
+  readonly seriesId: string;
+  readonly seriesTitle: string;
+  readonly bookId: string;
+  readonly bookTitle: string;
+  readonly kind: SeriesMembershipChangeKind;
+  readonly actionLabel: '加入书系' | '移出书系';
+  readonly groups: ReadonlyArray<SeriesImpactGroupProjection>;
+  /** What the commit names so a changed membership or governing record refuses it (SER-010). */
+  readonly previewDigest: string;
+}
+
+export interface ChangeSeriesMembershipInput {
+  readonly seriesId: string;
+  readonly bookId: string;
+  readonly kind: SeriesMembershipChangeKind;
+  readonly previewDigest: string;
+}
+
+export interface SeriesMembershipChangeResultProjection {
+  readonly changeId: string;
+  /** `已加入书系「…」：《…》` or `已移出书系「…」：《…》`. */
+  readonly completionLabel: string;
+  readonly series: SeriesProjection;
+}
+
+/** A Book's side of 书系 (SER-009): the Series it is in now and every change of its membership, newest first. */
+export interface BookSeriesProjection {
+  readonly bookId: string;
+  readonly memberships: ReadonlyArray<{ readonly seriesId: string; readonly title: string; readonly joinedAt: string }>;
+  readonly history: ReadonlyArray<SeriesMembershipChangeProjection>;
+  readonly historyTruncated: boolean;
+}
+
 /** The drawer's `设为快速开始默认…` for one plan, and the rule that started its Task, when one did. */
 export interface TaskPlanDefaultRuleProjection {
   canSet: boolean;
@@ -7543,6 +7680,12 @@ export interface ServiceOperationMap {
   inspectEvaluationCalibration: { input: Record<string, never>; output: EvaluationCalibrationProjection };
   recordPublicationActuals: { input: RecordPublicationActualsInput; output: EvaluationCalibrationProjection };
   setEvaluationPreferences: { input: SetEvaluationPreferencesInput; output: EvaluationCalibrationProjection };
+  inspectSeriesList: { input: Record<string, never>; output: SeriesListProjection };
+  createSeries: { input: CreateSeriesInput; output: SeriesCreationProjection };
+  inspectSeries: { input: { seriesId: string }; output: SeriesProjection };
+  previewSeriesMembershipChange: { input: PreviewSeriesMembershipChangeInput; output: SeriesMembershipPreviewProjection };
+  changeSeriesMembership: { input: ChangeSeriesMembershipInput; output: SeriesMembershipChangeResultProjection };
+  inspectBookSeries: { input: { bookId: string }; output: BookSeriesProjection };
   /**
    * AI7 Apply for Change Suggestions (Issue #408). The batch form is 确认应用 on 审阅's confirmation
    * strip (Issue #417): one Effect over exactly the suggestions the strip named, all or none.
@@ -7873,6 +8016,12 @@ export interface RendererApi {
   inspectEvaluationCalibration(): Promise<EvaluationCalibrationProjection>;
   recordPublicationActuals(input: RecordPublicationActualsInput): Promise<EvaluationCalibrationProjection>;
   setEvaluationPreferences(input: SetEvaluationPreferencesInput): Promise<EvaluationCalibrationProjection>;
+  inspectSeriesList(): Promise<SeriesListProjection>;
+  createSeries(input: CreateSeriesInput): Promise<SeriesCreationProjection>;
+  inspectSeries(input: { seriesId: string }): Promise<SeriesProjection>;
+  previewSeriesMembershipChange(input: PreviewSeriesMembershipChangeInput): Promise<SeriesMembershipPreviewProjection>;
+  changeSeriesMembership(input: ChangeSeriesMembershipInput): Promise<SeriesMembershipChangeResultProjection>;
+  inspectBookSeries(input: { bookId: string }): Promise<BookSeriesProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */
   applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): Promise<ManuscriptApplyCommandProjection>;

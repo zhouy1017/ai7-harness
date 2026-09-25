@@ -79,6 +79,8 @@ import { mountLearningMaterials } from './quality-learning.js';
 import type { FeedbackHistoryTarget } from '../shared/protocol.js';
 import { mountFeedbackHistory } from './feedback-history.js';
 import { mountEvaluationCalibration } from './evaluation-calibration.js';
+import { mountBookSeries, mountSeries, mountSeriesList } from './series.js';
+import { SERIES_BACK_TO_LIST, SERIES_LEDE, SERIES_STATUS, SERIES_TITLE } from './series-labels.js';
 import { CALIBRATION_PAGE_GROUP, CALIBRATION_PAGE_LEDE, CALIBRATION_PAGE_TITLE, CALIBRATION_STATUS } from './evaluation-calibration-labels.js';
 import {
   FEEDBACK_HISTORY_HEADING,
@@ -2338,6 +2340,10 @@ function renderBookOverview(
     setStatus,
     errorMessage: rendererErrorMessage,
   });
+  // 书系 (Issue #63, S28a; SER-009): the Series the Book is in, and its membership change records.
+  const seriesSlot = element('section');
+  content.append(seriesSlot);
+  mountBookSeries({ root: seriesSlot, bookId: overview.book.bookId, api: window.ai7 });
 
   const artifactHost = element('div');
   artifactHost.dataset['nativeArtifactBookId'] = overview.book.bookId;
@@ -4849,6 +4855,60 @@ function renderModelServiceSettingsProjection(projection: ModelServiceSettingsPr
  * 设置 › 编辑工作 › 评估校准与预测 (Issue #430, plan slice S82; EVAL-014): a house setting, bound to no Book, opened from the
  * landing or from 交付物's 录入… with that Book's entry open.
  */
+/**
+ * 书系 (Issue #63, plan slice S28a; SER-001): a stable global destination listing the house's Series, with 新建书系. Opening one
+ * shows its 成员与共享范围; nothing here reads a member Book's text.
+ */
+async function renderSeriesList(focusSeriesId: string | null): Promise<void> {
+  const content = panel();
+  content.classList.add('series-list-screen');
+  const host = element('div');
+  const back = element('div', 'button-row');
+  back.append(button('返回', 'quiet', () => void initializeStartup()));
+  content.append(element('p', 'section-label', SERIES_TITLE), element('h2', undefined, SERIES_TITLE), element('p', 'field-note series-lede', SERIES_LEDE), host, back);
+  replaceScreen('series-list', content);
+  setStatus(SERIES_STATUS.loading, 'busy');
+  const surface = mountSeriesList({
+    root: host,
+    api: window.ai7,
+    setStatus,
+    errorMessage: rendererErrorMessage,
+    openSeries: (seriesId) => void renderSeries(seriesId),
+    focusSeriesId,
+  });
+  try {
+    await surface.load();
+    if (content.isConnected) setStatus(SERIES_STATUS.opened);
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, SERIES_STATUS.unavailable), 'error');
+  }
+}
+
+/** One Series' 成员与共享范围 (SER-001 to SER-010): its members, 加入书系 and 移出书系 through the impact preview, and its records. */
+async function renderSeries(seriesId: string): Promise<void> {
+  const content = panel();
+  content.classList.add('series-screen');
+  content.dataset['seriesId'] = seriesId;
+  const heading = element('h2', undefined, SERIES_TITLE);
+  const note = element('p', 'field-note series-note');
+  const host = element('div');
+  const back = element('div', 'button-row');
+  back.append(button(SERIES_BACK_TO_LIST, 'quiet', () => void renderSeriesList(seriesId)));
+  content.append(element('p', 'section-label', SERIES_TITLE), heading, note, host, back);
+  replaceScreen('series', content);
+  setStatus(SERIES_STATUS.loading, 'busy');
+  const surface = mountSeries({ root: host, seriesId, api: window.ai7, setStatus, errorMessage: rendererErrorMessage });
+  try {
+    const series = await surface.load();
+    heading.textContent = `书系「${series.title}」`;
+    note.textContent = series.note;
+    note.hidden = series.note.length === 0;
+    if (content.isConnected) setStatus(SERIES_STATUS.opened);
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, SERIES_STATUS.unavailable), 'error');
+  }
+}
+
 async function renderEvaluationCalibration(focusBookId: string | null): Promise<void> {
   const content = panel();
   content.classList.add('evaluation-calibration-page');
@@ -4898,7 +4958,7 @@ function renderBookFilter(
   const fieldLabel = element('label', undefined, BOOK_FILTER_FIELD_LABEL);
   const field = element('select');
   field.id = 'book-filter-field';
-  for (const key of ['all', 'title', 'author', 'editor'] as const) {
+  for (const key of ['all', 'title', 'author', 'editor', 'series'] as const) {
     const option = element('option', undefined, BOOK_FILTER_FIELDS[key]);
     option.value = key;
     field.append(option);
@@ -4921,7 +4981,10 @@ function renderBookFilter(
     event.preventDefault();
     const words = text.value.trim();
     if (words.length === 0 || find.disabled) return;
-    const next: BookSummaryFilter = { field: field.value === 'title' || field.value === 'author' || field.value === 'editor' ? field.value : 'all', text: words };
+    const next: BookSummaryFilter = {
+      field: field.value === 'title' || field.value === 'author' || field.value === 'editor' || field.value === 'series' ? field.value : 'all',
+      text: words,
+    };
     find.disabled = true;
     setStatus(BOOK_FILTER_STATUS_LINES.finding, 'busy');
     void window.ai7.listBooks({ after: null, filter: next }).then(
@@ -5009,6 +5072,9 @@ function renderLanding(
   // 设置 › 编辑工作 › 评估校准与预测 (Issue #430, S82).
   const evaluationCalibration = button(CALIBRATION_PAGE_TITLE, 'secondary', () => void renderEvaluationCalibration(null));
   evaluationCalibration.dataset['settingsRoute'] = 'evaluation-calibration';
+  // 书系 (Issue #63, S28a): the house's Series, each with its 成员与共享范围.
+  const seriesButton = button(SERIES_TITLE, 'secondary', () => void renderSeriesList(null));
+  seriesButton.dataset['settingsRoute'] = 'series';
   // 知识库 (Issue #427, S79a): its seven classes, opening at 审阅规范文件.
   const knowledgeBase = button('知识库', 'secondary', () => renderKnowledgeBase('guidelines'));
   knowledgeBase.dataset['settingsRoute'] = 'knowledge-base';
@@ -5016,7 +5082,7 @@ function renderLanding(
   const qualityLearning = button(QUALITY_LEARNING_TITLE, 'secondary', () => void renderQualityLearning('feedback', null));
   qualityLearning.dataset['settingsRoute'] = 'quality-learning';
   const landingActions = element('div', 'button-row');
-  landingActions.append(importButton, createBook, dataAndStorage, modelService, evaluationCalibration, knowledgeBase, qualityLearning);
+  landingActions.append(importButton, createBook, dataAndStorage, modelService, evaluationCalibration, seriesButton, knowledgeBase, qualityLearning);
   copy.append(landingActions);
   const note = element('aside', 'hero-note', '所有导入都要求先明确选择图书目标；系统不会自动选择已有图书或稿件关系。');
   content.append(copy, note);
