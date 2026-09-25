@@ -124,6 +124,9 @@ export const DOCUMENT_STATUS_LINES = {
   // A recovery restore of a document (Issue #543 follow-up): its text is the chosen one, which no version holds yet.
   recovered: '文档已恢复为所选的文字，尚未保存为版本。',
   recoveredNotOpened: '文档已恢复为所选的文字，但没能打开；已回到交付物，可以从这里再打开它。',
+  recoveredNothingOpened: '文档已恢复为所选的文字，但文档和交付物都没能打开；可以再打开交付物。',
+  // The retry of 打开交付物 after both failed (Issue #582): the restore still stands, and the line says so.
+  recoveredRetryFailed: '文档已恢复为所选的文字，但交付物还是没能打开：',
 } as const;
 
 /** `已创建「新闻稿」`. */

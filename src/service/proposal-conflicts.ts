@@ -417,6 +417,16 @@ function latestDeferral(db: DatabaseSync, markId: string): { deferralId: string;
 }
 
 /**
+ * Whether the words a new version would replace are gone: a conflict whose range holds nothing now. A pending insertion
+ * (Issue #533; S62 D6) stands at a point, where the text is naturally empty, so nothing of it was deleted: a new version
+ * writes its words at that point. Only a suggestion whose own words were there — a deletion's, a replacement's — or a
+ * reversal whose applied words are gone cannot be written in place.
+ */
+function targetDeleted(read: { conflictKind: 'suggestion' | 'reversal'; base: string; current: string }): boolean {
+  return read.current.length === 0 && !(read.conflictKind === 'suggestion' && read.base.length === 0);
+}
+
+/**
  * 稿件冲突 for one 修改建议 (Issue #57): the conflict read against the working state, the Resolution Draft
  * saved while the editor works, and the three ways it is left — 保留当前稿件, 暂不处理, 保存为新提案版本.
  * Every write is one transaction on the authority connection, and every read verifies what it shows
@@ -464,7 +474,7 @@ export class ProposalConflictStore {
       units: read.units,
       draft: onBasis === null ? null : draftProjection(onBasis, read.units),
       draftOnEarlierBasis: onBasis === null && this.#latestDraft(read.markId, null) !== null,
-      newVersion: read.current.length === 0 ? { available: false, blocker: 'target-deleted' } : { available: true, blocker: null },
+      newVersion: targetDeleted(read) ? { available: false, blocker: 'target-deleted' } : { available: true, blocker: null },
       suggestion: { itemId: read.itemId, rationale: read.rationale, source: read.source },
       navigator: this.#navigator(read.branchId),
     };
@@ -581,7 +591,7 @@ export class ProposalConflictStore {
         this.#appendOutcome(read, 'keep-current', { decisionId, newMarkId: null, draftId: null }, createdAt);
         return { markId: read.markId, outcome: 'keep-current', newMarkId: null, blockId: read.blockId, recordedAt: createdAt };
       }
-      requireConflict(read.current.length > 0, 'PROPOSAL_CONFLICT_TARGET_DELETED', '原文已被删去，不能在原处生成新版本；可选「保留当前稿件」或「暂不处理」。');
+      requireConflict(!targetDeleted(read), 'PROPOSAL_CONFLICT_TARGET_DELETED', '原文已被删去，不能在原处生成新版本；可选「保留当前稿件」或「暂不处理」。');
       const draft = this.#draftAt(read.markId, input.draftOrdinal!);
       requireConflict(draft !== null, 'PROPOSAL_CONFLICT_DRAFT_INVALID', '找不到要保存的解决草稿。');
       requireConflict(draft.basisDigest === read.basisDigest, 'PROPOSAL_CONFLICT_STALE', STALE_BASIS);

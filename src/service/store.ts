@@ -274,6 +274,7 @@ import {
   initializeEditorialMarkSchema,
   followReimportedMarks,
   resolveBranchMarksAfterRewrite,
+  workingBlockDigests,
   type ReimportMarkOutcome,
   type ReimportMarkRow,
   type ProducedEditorialMarkInput,
@@ -3255,6 +3256,23 @@ function closeDatabaseQuietly(db: DatabaseSync | null): void {
   }
 }
 
+/**
+ * Why a Book's own Source Version cannot take the same file again (Issue #532): an earlier parser read it, and AI7 reads
+ * files differently now. Said at the choice, in the editor's words; the way on is a new Book.
+ */
+export const SOURCE_VERSION_PARSER_CHANGED_MESSAGE =
+  '这本书里已有同一个文件的来源版本，但它是用旧版 AI7 的读取方式导入的；AI7 现在读取文件的方式已经不同，不能在原来的来源版本上再次导入这个文件。可以把它作为新建图书导入。';
+
+/**
+ * J-01's `tamper-reimport-proof-before-validation` control (Issue #569): one reimport mapping's staged text altered before the
+ * whole-store validation, which must then refuse the store. Only a mapping that has staged text is chosen — a deletion's is
+ * NULL, and `NULL || '篡改'` is NULL, which would report one change and alter nothing — so the store is tampered every time.
+ */
+export const REIMPORT_PROOF_TAMPER_SQL = `UPDATE manuscript_reimport_mappings SET staged_text = staged_text || '篡改'
+           WHERE mapping_id = (
+             SELECT mapping_id FROM manuscript_reimport_mappings WHERE staged_text IS NOT NULL ORDER BY mapping_id LIMIT 1
+           )`;
+
 export class EditorialStore {
   readonly #dataRoot: string;
   readonly #objectsRoot: string;
@@ -3399,10 +3417,7 @@ export class EditorialStore {
       initializeBoundedSchema(authority, workflowProfile);
       initializeSourceImportSchema(authority, workflowProfile);
       if (control.induceReimportProofTamper) {
-        requireStore(authority.prepare(
-          `UPDATE manuscript_reimport_mappings SET staged_text = staged_text || '篡改'
-           WHERE mapping_id = (SELECT mapping_id FROM manuscript_reimport_mappings ORDER BY mapping_id LIMIT 1)`,
-        ).run().changes === 1, 'E2E_CONTROL_INVALID', '没有可用于启动校验的重新导入证明。');
+        requireStore(authority.prepare(REIMPORT_PROOF_TAMPER_SQL).run().changes === 1, 'E2E_CONTROL_INVALID', '没有可用于启动校验的重新导入证明。');
       }
       initializeManuscriptReimportSchema(authority, workflowProfile);
       // A store already at the terminal version is validated whole exactly twice per open: once above,
@@ -8723,6 +8738,8 @@ export class EditorialStore {
         this.#authority.prepare('DELETE FROM manuscript_outline WHERE branch_id = ?').run(target.branchId);
         this.#authority.prepare('DELETE FROM working_block_search WHERE branch_id = ?').run(target.branchId);
         this.#authority.prepare('DELETE FROM working_offset_nodes WHERE branch_id = ?').run(target.branchId);
+        // Which blocks the rewrite leaves as they were (Issue #533): a point in one stands where it stood.
+        const blocksBefore = workingBlockDigests(this.#authority, target.branchId);
         this.#authority.prepare('DELETE FROM working_blocks WHERE branch_id = ?').run(target.branchId);
         const insertedWorking = this.#authority.prepare(
           `INSERT INTO working_blocks(branch_id, block_id, position, kind, level, text, digest, grapheme_length)
@@ -8774,7 +8791,7 @@ export class EditorialStore {
         // Issue #407: the working state was replaced whole. A mark whose block kept its identity is
         // resolved against the text that block holds now; one whose block was retired stays readable
         // as detached instead of pointing into a block that is no longer there.
-        resolveBranchMarksAfterRewrite(this.#authority, target.branchId);
+        resolveBranchMarksAfterRewrite(this.#authority, target.branchId, blocksBefore);
         // Issue #412 (S63): the marks of every changed row follow the new file to their words, or are set aside and
         // listed — never moved onto words they were not on.
         markOutcomes = followReimportedMarks(this.#authority, target.branchId, this.#reimportMarkRows(comparisonId, work.workId));
@@ -11442,6 +11459,21 @@ export class EditorialStore {
     };
   }
 
+  /**
+   * The same file again onto the Source Version a Book already holds for it is a reuse, and a Source Version keeps the
+   * reading its parser made (Issue #532). One an earlier parser read — a Book imported before this build's parser — cannot
+   * take the file again under this one: the refusal names the parser change at the choice, not at the commit, and never
+   * blames the file. Development stores before the first packaged release are disposable (ADR 0079 §1b).
+   */
+  #requireSameParser(sourceVersionId: string, snapshot: DraftSnapshot): void {
+    const row = one(
+      this.#authority.prepare('SELECT parser_identity FROM source_versions WHERE source_version_id = ?').all(sourceVersionId) as SqlRow[],
+      'SOURCE_VERSION_REUSE_INVALID',
+      '明确选择的来源版本不存在。',
+    );
+    requireStore(nullableString(row.parser_identity) === snapshot.parserIdentity, 'SOURCE_VERSION_PARSER_CHANGED', SOURCE_VERSION_PARSER_CHANGED_MESSAGE);
+  }
+
   #resolveReimportTarget(
     selection: ManuscriptReimportTargetSelection,
     snapshot: DraftSnapshot,
@@ -11467,6 +11499,7 @@ export class EditorialStore {
         'SOURCE_VERSION_REUSE_REQUIRED',
         '同图书已有精确来源版本；必须明确选择后才能复用。',
       );
+      this.#requireSameParser(current.exactSourceVersionId, snapshot);
     }
     let lineage: ResolvedReimportTarget['lineage'];
     if (selection.lineage.kind === 'unconfirmed') {
@@ -11715,6 +11748,7 @@ export class EditorialStore {
         'SOURCE_VERSION_REUSE_REQUIRED',
         '同图书已有精确来源版本；必须明确选择后才能复用。',
       );
+      this.#requireSameParser(target.exactSourceVersionId, snapshot);
     } else {
       requireStore(selection.reuseSourceVersionId === null, 'SOURCE_VERSION_REUSE_INVALID', '所选来源版本不能在该图书中复用。');
     }
@@ -11911,6 +11945,11 @@ export class EditorialStore {
       if (current.bookStateDigest !== snapshot.reviewedBookStateDigest ||
         current.manuscriptId !== snapshot.reviewedManuscriptId || current.branchId !== snapshot.reviewedBranchId ||
         current.exactSourceVersionId !== snapshot.reviewedReuseSourceVersionId) return null;
+      // The Source Version it reuses must have been read the way this draft is (Issue #532). A review made before an update
+      // that changed the parser is caught earlier, by `#revalidateSnapshot`'s parser drift; this catches a review an earlier
+      // build prepared under this same parser over a Source Version an earlier parser read. It does not come back ready, and
+      // preparing it again says why.
+      if (current.exactSourceVersionId !== null) this.#requireSameParser(current.exactSourceVersionId, snapshot);
       const lineage = comparison.lineage_status === 'verified'
         ? {
             status: 'verified' as const,
@@ -12254,12 +12293,13 @@ export class EditorialStore {
       const structureDigest = nullableString(row.structure_digest);
       const parserIdentity = nullableString(row.parser_identity);
       const displayName = asString(row.display_name);
+      // Content and structure digests that agree are the same content whichever parser read each side (Issue #532): a Book
+      // an earlier parser read is still found by it.
       const comparableParse = parserIdentity !== null && snapshot.parserIdentity !== null;
       const identityClass =
         sourceDigest === snapshot.sourceDigest
           ? ({ kind: 'immutable-original', label: '精确原始文件身份' } as const)
           : comparableParse &&
-              parserIdentity === snapshot.parserIdentity &&
               contentDigest === snapshot.contentDigest &&
               structureDigest === snapshot.structureDigest
             ? ({ kind: 'parsed-content-structure', label: '发现相同内容' } as const)
@@ -12681,8 +12721,8 @@ export class EditorialStore {
               sir.source_version_disposition, sir.retained_boundary_json,
               sir.named_non_effects_json, sir.record_digest, sir.imported_at,
               sv.display_name, sv.format, sv.object_digest, sv.source_digest, sv.content_digest,
-              sv.structure_digest, sv.parser_identity, co.byte_length,
-              sp.acquisition_path, sp.locality, sp.sanitized_identity, sp.recorded_at
+              sv.structure_digest, sv.parser_identity, sv.working_object_digest, sv.converter_identity,
+              co.byte_length, sp.acquisition_path, sp.locality, sp.sanitized_identity, sp.recorded_at
        FROM import_commits ic
        JOIN source_import_records sir ON sir.commit_id = ic.commit_id
        JOIN source_versions sv
@@ -12742,6 +12782,7 @@ export class EditorialStore {
       importedAt,
     }));
     requireStore(recordDigest === asString(row.record_digest), 'STORE_CORRUPT', '来源导入记录摘要无效。');
+    const conversion = readConversionColumns(row, requireSourceFormat(asString(row.format)), '来源版本的转换记录不完整。');
     const receiptRecords = this.#sourceImportRecordPresentations(bookId, [sourceImportRecordId]);
     const receiptSource = receiptRecords.find((record) => record.kind === 'source');
     const receiptRecord = receiptRecords.find((record) => record.kind === 'source-import-record');
@@ -12763,9 +12804,10 @@ export class EditorialStore {
         sourceSha256: boundary.sourceSha256,
         sourceBytes: boundary.sourceBytes,
         provenanceLabel: '本机文件选择器 · 本地解析 · 未联网',
-        // A source-only import retained the original whole and read nothing through a converter.
-        conversion: null,
-        workingObjectSha256: null,
+        // A TXT, Markdown or legacy .doc kept as source material was read through its converter, and the
+        // commit recorded that working representation on the Source Version (ADR 0072 §2, #552).
+        conversion,
+        workingObjectSha256: conversion === null ? null : asString(row.working_object_digest),
       },
       retainedBoundary: boundary,
       provenance: {

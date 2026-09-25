@@ -958,17 +958,50 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
     // The restore is committed and its claim released: it is said as done however its window draws, and a document's
     // text, which no version holds yet, in the document's words (Issue #543 follow-up).
     const onDocument = restored.window.deliverable === 'production-document';
+    let unopened: unknown;
     try {
       await openEditorWindow(restored.window, recovery.bookTitle);
       setStatus(onDocument ? DOCUMENT_STATUS_LINES.recovered : `已恢复为新版本 ${restored.descendantRevisionLabel}`, 'success');
+      return;
     } catch (error) {
+      unopened = error;
+    }
+    // The Book's own place for what was restored stands in for its window: 交付物 for a document, the workbench for the
+    // manuscript.
+    const openBook = async (): Promise<void> => {
       if (onDocument) {
         renderBookDeliverables(recovery.bookId, recovery.bookTitle);
         setStatus(DOCUMENT_STATUS_LINES.recoveredNotOpened, 'error');
-      } else {
-        await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId: recovery.bookId, bookTitle: recovery.bookTitle });
-        setStatus(`已恢复为新版本 ${restored.descendantRevisionLabel}，但稿件没能打开：${rendererErrorMessage(error, '请从图书再打开它。')}`, 'error');
+        return;
       }
+      await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId: recovery.bookId, bookTitle: recovery.bookTitle });
+      setStatus(`已恢复为新版本 ${restored.descendantRevisionLabel}，但稿件没能打开：${rendererErrorMessage(unopened, '请从图书再打开它。')}`, 'error');
+    };
+    try {
+      await openBook();
+    } catch (error) {
+      // Neither drew (Issue #551). The restore stands, so the recovery's own choices are no longer the editor's: they close,
+      // the screen stays, no longer busy, and offers again where the restore lives — 交付物 for a document, the Book for the
+      // manuscript — as 打开稿件 does when it fails, with focus on it (Issue #582).
+      choices.disabled = true;
+      consequence.hidden = true;
+      const reopen = button(onDocument ? PUBLICATION_ACTION_LABELS.open : '打开图书', 'primary', async () => {
+        reopen.disabled = true;
+        setStatus(onDocument ? DELIVERABLES_STATUS_LINES.opening : '正在打开图书…', 'busy');
+        try {
+          await openBook();
+        } catch (again) {
+          reopen.disabled = false;
+          setStatus(onDocument
+            ? `${DOCUMENT_STATUS_LINES.recoveredRetryFailed}${rendererErrorMessage(again, DELIVERABLES_STATUS_LINES.openFailed)}`
+            : `已恢复为新版本 ${restored.descendantRevisionLabel}，但图书还是没能打开：${rendererErrorMessage(again, '无法打开图书。')}`, 'error');
+        }
+      });
+      actions.replaceChildren(reopen);
+      reopen.focus();
+      setStatus(onDocument
+        ? DOCUMENT_STATUS_LINES.recoveredNothingOpened
+        : `已恢复为新版本 ${restored.descendantRevisionLabel}，但稿件和图书都没能打开：${rendererErrorMessage(error, '可以再打开图书。')}`, 'error');
     }
   });
   const selected = (

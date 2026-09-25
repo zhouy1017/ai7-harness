@@ -206,6 +206,31 @@ function expectStoreErrorCode(run: () => unknown, code: string): void {
   throw new Error(`Expected a ${code} refusal.`);
 }
 
+/** Opens the store at the test's data root again and closes it cleanly; its open-time truth checks are the proof. */
+async function expectStoreReopens(): Promise<void> {
+  const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  reopened.markCleanShutdown();
+  reopened.close();
+}
+
+/** 导入稿件 → 作为来源材料导入 → 新建图书, committed and acknowledged. */
+async function commitSourceOnlyNewBook(
+  store: EditorialStore,
+  path: string,
+  confirmedTitle: string,
+): Promise<{ bookId: string; sourceVersionId: string; format: SourceFormat }> {
+  const staged = await store.stageSelectedManuscript(randomUUID(), path);
+  const review = store.prepareSourceImportReview(staged.draftId, staged.draftVersion, {
+    kind: 'new-book', choiceId: 'new-book', confirmedTitle, relationship: 'source-only',
+  });
+  const commitId = randomUUID();
+  const commit = await store.commitSourceImport({
+    draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId,
+  });
+  expect(await store.acknowledgeImportCompletion(commitId)).toEqual({ state: 'acknowledged' });
+  return { bookId: commit.bookId, sourceVersionId: commit.sourceVersionId, format: commit.source.format };
+}
+
 /** Synthetic inputs only: bytes with no manuscript content, in every format the router recognises. */
 const SOURCE_ONLY_INPUTS: ReadonlyArray<{ format: SourceFormat; fileName: string; bytes: () => Uint8Array; reason: string }> = [
   {
@@ -306,9 +331,65 @@ describe('multi-format intake over the real store', () => {
       } finally {
         database.close();
       }
+
+      // The store's open-time truth checks read the unparsed original as the store wrote it (#552).
+      await expectStoreReopens();
     },
     120_000,
   );
+
+  it('reopens over a parsed non-DOCX source import and a reviewed reuse of an unparsed original', async () => {
+    const textPath = join(roots.inputRoot, '来源说明.txt');
+    await writeFile(textPath, '第一段说明。\n\n第二段说明。\n');
+    const pdfPath = join(roots.inputRoot, '固定版式样例.pdf');
+    await writeFile(pdfPath, syntheticPdfBytes());
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let pdfBookId: string;
+    let pdfSourceVersionId: string;
+    let reuse: { draftId: string; draftVersion: number; reviewDigest: string };
+    try {
+      const text = await commitSourceOnlyNewBook(store, textPath, '来源材料 TXT');
+      expect(text.format).toBe('TXT');
+      const pdf = await commitSourceOnlyNewBook(store, pdfPath, '来源材料 PDF');
+      expect(pdf.format).toBe('PDF');
+      pdfBookId = pdf.bookId;
+      pdfSourceVersionId = pdf.sourceVersionId;
+
+      // The same file again into its own Book, reusing the unparsed Source Version, reviewed and left uncommitted.
+      const staged = await store.stageSelectedManuscript(randomUUID(), pdfPath);
+      const review = store.prepareSourceImportReview(staged.draftId, staged.draftVersion, {
+        kind: 'existing-book', bookId: pdfBookId, relationship: 'source-only', reuseSourceVersionId: pdfSourceVersionId,
+      });
+      reuse = { draftId: staged.draftId, draftVersion: review.draftVersion, reviewDigest: review.reviewDigest };
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const commitId = randomUUID();
+      const commit = await store.commitSourceImport({
+        draftId: reuse.draftId, expectedDraftVersion: reuse.draftVersion, reviewDigest: reuse.reviewDigest, commitId,
+      });
+      expect(commit.sourceVersionId).toBe(pdfSourceVersionId);
+      expect(await store.acknowledgeImportCompletion(commitId)).toEqual({ state: 'acknowledged' });
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+
+    await expectStoreReopens();
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      expect(tableRows(database, 'source_import_records', 'book_id, source_version_disposition')
+        .filter((row) => row.book_id === pdfBookId)
+        .map((row) => row.source_version_disposition)
+        .sort()).toEqual(['created', 'reused-same-book']);
+    } finally {
+      database.close();
+    }
+  }, 120_000);
 
   it('keeps refusing a hostile archive instead of retaining it', async () => {
     // A traversal entry name is a hostile-input bound, not a "this is not a DOCX" verdict, so it
@@ -472,6 +553,70 @@ describe('conversion to a DOCX working representation over the real store', () =
       second.close();
     }
   }, 120_000);
+
+  it.each(CONVERTED_INPUTS)(
+    'reopens over a staged and then a reviewed reuse of a parsed $format source import before it commits',
+    async ({ format, fileName, text }) => {
+      const selectedPath = join(roots.inputRoot, fileName);
+      await writeFile(selectedPath, concat(text));
+      let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      let source: { bookId: string; sourceVersionId: string; format: SourceFormat };
+      let staged: { draftId: string; draftVersion: number };
+      try {
+        source = await commitSourceOnlyNewBook(store, selectedPath, `来源材料 ${format}`);
+        expect(source.format).toBe(format);
+        // The same file again, read through its converter: a parsed draft, so it holds a snapshot.
+        const draft = await store.stageSelectedManuscript(randomUUID(), selectedPath);
+        expect(draft.source.conversion).toEqual({ converterIdentity: 'ai7-text-to-docx/1', sourceFormat: format });
+        staged = { draftId: draft.draftId, draftVersion: draft.draftVersion };
+        store.markCleanShutdown();
+      } finally {
+        store.close();
+      }
+
+      // Staged and not yet reviewed, the converted draft holds a snapshot as a parsed one does, and the
+      // store opens over it (#552).
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      let reuse: { draftId: string; draftVersion: number; reviewDigest: string };
+      try {
+        const review = store.prepareSourceImportReview(staged.draftId, staged.draftVersion, {
+          kind: 'existing-book', bookId: source.bookId, relationship: 'source-only',
+          reuseSourceVersionId: source.sourceVersionId,
+        });
+        reuse = { draftId: staged.draftId, draftVersion: review.draftVersion, reviewDigest: review.reviewDigest };
+        store.markCleanShutdown();
+      } finally {
+        store.close();
+      }
+
+      // Reviewed and not yet committed, it opens over it again.
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      try {
+        const commitId = randomUUID();
+        const commit = await store.commitSourceImport({
+          draftId: reuse.draftId, expectedDraftVersion: reuse.draftVersion, reviewDigest: reuse.reviewDigest, commitId,
+        });
+        expect(commit.sourceVersionId).toBe(source.sourceVersionId);
+        expect(await store.acknowledgeImportCompletion(commitId)).toEqual({ state: 'acknowledged' });
+        store.markCleanShutdown();
+      } finally {
+        store.close();
+      }
+
+      await expectStoreReopens();
+      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        expect(tableRows(database, 'source_import_records', 'source_version_disposition')
+          .map((row) => row.source_version_disposition)
+          .sort()).toEqual(['created', 'reused-same-book']);
+        // The commit released the snapshot the parsed draft held until then.
+        expect(tableRows(database, 'staged_import_snapshots')).toEqual([]);
+      } finally {
+        database.close();
+      }
+    },
+    120_000,
+  );
 
   it('removes the working representation with the original when a converted draft is abandoned', async () => {
     const selectedPath = join(roots.inputRoot, '放弃转换.txt');
@@ -699,13 +844,18 @@ function downgradeToRevision18(databasePath: string): void {
 const REVISION_18_SOURCE_VERSION_COLUMNS = REVISION_17_SOURCE_VERSION_COLUMNS;
 
 describe('schema revision 19 over the real store', () => {
-  it('migrates a revision-18 store forward with every Source Version row byte for byte', async () => {
+  it('migrates a revision-18 store holding a staged PDF draft forward with every Source Version row byte for byte', async () => {
     await requireExactSample1(roots.codeRoot);
     const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const pdfPath = join(roots.inputRoot, '固定版式样例.pdf');
+    await writeFile(pdfPath, syntheticPdfBytes());
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let bookId: string;
     try {
       bookId = (await importSample1Book(store, roots.codeRoot, '修订版 19 迁移')).bookId;
+      // A PDF staged source-only holds no snapshot, as revision 18 already staged it; the open-time checks
+      // read that draft at revision 18, before the migration, and again after it (#552).
+      expect((await store.stageSelectedManuscript(randomUUID(), pdfPath)).source.format).toBe('PDF');
       store.markCleanShutdown();
     } finally {
       store.close();
@@ -723,7 +873,11 @@ describe('schema revision 19 over the real store', () => {
       sourceVersionsBefore = tableRows(downgraded, 'source_versions', REVISION_18_SOURCE_VERSION_COLUMNS);
       draftsBefore = tableRows(downgraded, 'import_drafts', `${REVISION_17_DRAFT_COLUMNS}, source_format`);
       expect(sourceVersionsBefore).toHaveLength(1);
-      expect(draftsBefore).toHaveLength(1);
+      expect(draftsBefore.map((draft) => ({ state: draft.state, source_format: draft.source_format }))).toEqual([
+        { state: 'committed', source_format: 'DOCX' },
+        { state: 'staged', source_format: 'PDF' },
+      ]);
+      expect(tableRows(downgraded, 'staged_import_snapshots')).toEqual([]);
     } finally {
       downgraded.close();
     }
@@ -745,6 +899,11 @@ describe('schema revision 19 over the real store', () => {
       expect(tableRows(after, 'import_drafts', `${REVISION_17_DRAFT_COLUMNS}, source_format`)).toEqual(draftsBefore);
       expect(tableRows(after, 'source_versions', 'working_object_digest, converter_identity'))
         .toEqual([{ working_object_digest: null, converter_identity: null }]);
+      // Nor does a draft: neither the DOCX nor the PDF was read through a converter.
+      expect(tableRows(after, 'import_drafts', 'working_object_digest, converter_identity')).toEqual([
+        { working_object_digest: null, converter_identity: null },
+        { working_object_digest: null, converter_identity: null },
+      ]);
       expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     } finally {
       after.close();

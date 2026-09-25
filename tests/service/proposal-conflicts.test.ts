@@ -505,6 +505,37 @@ describe('稿件冲突 of a single 修改建议 (ADR 0085)', () => {
     }
   }, 300_000);
 
+  it('offers no Correction Proposal where an edit took the point an applied deletion left, and keeps 保留当前稿件 (Issue #533)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const block = paragraphs(windowOf(store, book))[0]!;
+      const deleted = graphemesOf(block.text).slice(20, 26).join('');
+      const markId = suggest(store, book, block.blockId, 20, 26, '');
+      store.applyChangeSuggestion({
+        ...binding(store, book), markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null,
+      });
+      // The editor deletes a grapheme on each side of the point the deletion left. Its reversal has nothing where it stood
+      // to write the words back over — unlike a pending insertion, whose point has no words of its own — so the words'
+      // place is gone, and only 保留当前稿件 or 暂不处理 remain.
+      typeInto(store, book, block.blockId, 19, 21, '');
+      const conflict = store.inspectProposalConflict({ ...book, markId });
+      expect(conflict).toMatchObject({
+        conflictKind: 'reversal', base: '', current: '', proposed: deleted, fromGrapheme: 19, toGrapheme: 19,
+        newVersion: { available: false, blocker: 'target-deleted' },
+      });
+      store.saveProposalConflictDraft({ ...book, markId, basisDigest: conflict.basisDigest, units: resolveEvery(conflict, { resolution: 'proposed', text: null }) });
+      expect(refusal(() => store.resolveProposalConflict({ ...book, markId, basisDigest: conflict.basisDigest, outcome: 'new-version', draftOrdinal: 1 })))
+        .toBe('PROPOSAL_CONFLICT_TARGET_DELETED');
+      store.resolveProposalConflict({ ...book, markId, basisDigest: conflict.basisDigest, outcome: 'keep-current', draftOrdinal: null });
+      expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId))
+        .toMatchObject({ status: 'applied', conflict: { kind: 'reversal', state: 'resolved', outcome: 'keep-current' } });
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 300_000);
+
   it('routes reversing an Apply whose words were edited through the conflict, where a new version is a Correction Proposal', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {

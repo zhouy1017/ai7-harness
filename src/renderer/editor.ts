@@ -494,6 +494,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     view.setProps({ editable: isEditable });
     view.dom.setAttribute('aria-readonly', isEditable() ? 'false' : 'true');
     view.dom.dataset['operationLocked'] = operationLocked ? 'true' : 'false';
+    // Whether an input method's composition is open in the text: a key command waits on it (#579).
+    view.dom.dataset['composing'] = composing ? 'true' : 'false';
     if (deferredNavigationContinuity) view.dom.setAttribute('tabindex', '0');
     else view.dom.removeAttribute('tabindex');
   };
@@ -821,11 +823,13 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       },
       compositionstart() {
         composing = true;
+        view.dom.dataset['composing'] = 'true';
         queueMicrotask(announceState);
         return false;
       },
       compositionend() {
         composing = false;
+        view.dom.dataset['composing'] = 'false';
         const waiting = compositionWaiters;
         compositionWaiters = [];
         for (const resolve of waiting) resolve();
