@@ -1392,7 +1392,7 @@ async function runJourney(
     // ADR 0086 §2: the text-box row offers 保留为文本框 preselected and 并入正文; the choice goes with the review.
     await assertRenderer(
       renderer,
-      `(() => { const retain = document.querySelector('#text-box-disposition-retain'); const merge = document.querySelector('#text-box-disposition-merge'); if (!(retain instanceof HTMLInputElement) || !(merge instanceof HTMLInputElement) || !retain.checked || merge.checked || retain.disabled || merge.disabled) return false; if (${JSON.stringify(textBoxDisposition)} === 'merge') merge.click(); return ${JSON.stringify(textBoxDisposition)} === 'merge' ? merge.checked && !retain.checked : retain.checked; })()`,
+      `(() => { const retain = document.querySelector('#text-box-disposition-retain'); const merge = document.querySelector('#text-box-disposition-merge'); const summary = () => document.querySelector('[data-fidelity-summary="no-decision"]')?.textContent ?? ''; if (!(retain instanceof HTMLInputElement) || !(merge instanceof HTMLInputElement) || !retain.checked || merge.checked || retain.disabled || merge.disabled || !summary().includes('文本框 · 1 项随文件保留')) return false; if (${JSON.stringify(textBoxDisposition)} === 'merge') merge.click(); return ${JSON.stringify(textBoxDisposition)} === 'merge' ? merge.checked && !retain.checked && summary().includes('文本框 · 1 项并入正文') && !summary().includes('文本框 · 1 项随文件保留') : retain.checked && summary().includes('文本框 · 1 项随文件保留'); })()`,
       'text-box-choice-offered',
     );
   }
@@ -1415,7 +1415,7 @@ async function runJourney(
   if (textBoxDisposition !== null) {
     await assertRenderer(
       renderer,
-      `(() => { const stated = document.querySelector('[data-screen="review"] [data-text-box-choice="stated"]'); const checked = stated?.querySelector('input:checked'); const row = document.querySelector('[data-screen="review"] .fidelity-row[data-fidelity-category="text-boxes"]'); return checked?.value === ${JSON.stringify(textBoxDisposition)} && Array.from(stated.querySelectorAll('input')).every((input) => input.disabled) && row?.querySelector('.fidelity-detail')?.textContent.startsWith(${JSON.stringify(textBoxDisposition === 'merge' ? '并入正文：' : '保留为文本框：')}); })()`,
+      `(() => { const stated = document.querySelector('[data-screen="review"] [data-text-box-choice="stated"]'); const checked = stated?.querySelector('input:checked'); const row = document.querySelector('[data-screen="review"] .fidelity-row[data-fidelity-category="text-boxes"]'); return checked?.value === ${JSON.stringify(textBoxDisposition)} && Array.from(stated.querySelectorAll('input')).every((input) => input.disabled) && row?.querySelector('.fidelity-detail')?.textContent.startsWith(${JSON.stringify(textBoxDisposition === 'merge' ? '并入正文：' : '保留为文本框：')}) && (document.querySelector('[data-screen="review"] [data-fidelity-summary="no-decision"]')?.textContent ?? '').includes(${JSON.stringify(textBoxDisposition === 'merge' ? '文本框 · 1 项并入正文' : '文本框 · 1 项随文件保留')}); })()`,
       'review-text-box-choice-stated',
     );
   }

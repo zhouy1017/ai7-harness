@@ -3256,6 +3256,13 @@ function closeDatabaseQuietly(db: DatabaseSync | null): void {
   }
 }
 
+/**
+ * Why a Book's own Source Version cannot take the same file again (Issue #532): an earlier parser read it, and AI7 reads
+ * files differently now. Said at the choice, in the editor's words; the way on is a new Book.
+ */
+export const SOURCE_VERSION_PARSER_CHANGED_MESSAGE =
+  '这本书里已有同一个文件的来源版本，但它是用旧版 AI7 的读取方式导入的；AI7 现在读取文件的方式已经不同，不能在原来的来源版本上再次导入这个文件。可以把它作为新书导入。';
+
 export class EditorialStore {
   readonly #dataRoot: string;
   readonly #objectsRoot: string;
@@ -11445,6 +11452,21 @@ export class EditorialStore {
     };
   }
 
+  /**
+   * The same file again onto the Source Version a Book already holds for it is a reuse, and a Source Version keeps the
+   * reading its parser made (Issue #532). One an earlier parser read — a Book imported before this build's parser — cannot
+   * take the file again under this one: the refusal names the parser change at the choice, not at the commit, and never
+   * blames the file. Development stores before the first packaged release are disposable (ADR 0079 §1b).
+   */
+  #requireSameParser(sourceVersionId: string, snapshot: DraftSnapshot): void {
+    const row = one(
+      this.#authority.prepare('SELECT parser_identity FROM source_versions WHERE source_version_id = ?').all(sourceVersionId) as SqlRow[],
+      'SOURCE_VERSION_REUSE_INVALID',
+      '明确选择的来源版本不存在。',
+    );
+    requireStore(nullableString(row.parser_identity) === snapshot.parserIdentity, 'SOURCE_VERSION_PARSER_CHANGED', SOURCE_VERSION_PARSER_CHANGED_MESSAGE);
+  }
+
   #resolveReimportTarget(
     selection: ManuscriptReimportTargetSelection,
     snapshot: DraftSnapshot,
@@ -11470,6 +11492,7 @@ export class EditorialStore {
         'SOURCE_VERSION_REUSE_REQUIRED',
         '同图书已有精确来源版本；必须明确选择后才能复用。',
       );
+      this.#requireSameParser(current.exactSourceVersionId, snapshot);
     }
     let lineage: ResolvedReimportTarget['lineage'];
     if (selection.lineage.kind === 'unconfirmed') {
@@ -11718,6 +11741,7 @@ export class EditorialStore {
         'SOURCE_VERSION_REUSE_REQUIRED',
         '同图书已有精确来源版本；必须明确选择后才能复用。',
       );
+      this.#requireSameParser(target.exactSourceVersionId, snapshot);
     } else {
       requireStore(selection.reuseSourceVersionId === null, 'SOURCE_VERSION_REUSE_INVALID', '所选来源版本不能在该图书中复用。');
     }
@@ -11914,6 +11938,9 @@ export class EditorialStore {
       if (current.bookStateDigest !== snapshot.reviewedBookStateDigest ||
         current.manuscriptId !== snapshot.reviewedManuscriptId || current.branchId !== snapshot.reviewedBranchId ||
         current.exactSourceVersionId !== snapshot.reviewedReuseSourceVersionId) return null;
+      // The Source Version it reuses must have been read the way this draft is (Issue #532): a review made before an
+      // update that changed the parser does not come back ready, and preparing it again says why.
+      if (current.exactSourceVersionId !== null) this.#requireSameParser(current.exactSourceVersionId, snapshot);
       const lineage = comparison.lineage_status === 'verified'
         ? {
             status: 'verified' as const,
@@ -12257,12 +12284,13 @@ export class EditorialStore {
       const structureDigest = nullableString(row.structure_digest);
       const parserIdentity = nullableString(row.parser_identity);
       const displayName = asString(row.display_name);
+      // Content and structure digests that agree are the same content whichever parser read each side (Issue #532): a Book
+      // an earlier parser read is still found by it.
       const comparableParse = parserIdentity !== null && snapshot.parserIdentity !== null;
       const identityClass =
         sourceDigest === snapshot.sourceDigest
           ? ({ kind: 'immutable-original', label: '精确原始文件身份' } as const)
           : comparableParse &&
-              parserIdentity === snapshot.parserIdentity &&
               contentDigest === snapshot.contentDigest &&
               structureDigest === snapshot.structureDigest
             ? ({ kind: 'parsed-content-structure', label: '发现相同内容' } as const)
