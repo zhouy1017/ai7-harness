@@ -2937,6 +2937,8 @@ interface ReimportCommitWork {
   readonly legacyResultWithoutPresentation: boolean;
   phase: 'parse' | 'mappings';
   parseBytes: number;
+  /** A converted source's working representation, reproduced from the kept original before the parse (Issue #597). */
+  converted: { digest: string; byteLength: number; fidelity: FidelityCategoryProjection[] } | null;
   parsedIngest: IngestedDocx | null;
   parseFailure: unknown;
   mappingPosition: number;
@@ -5631,8 +5633,18 @@ export class EditorialStore {
   async #convertSelectedManuscript(
     selectedPath: string,
     format: ManuscriptConversionProjection['sourceFormat'],
+    expected?: { digest: string; byteLength: number },
   ): Promise<{ docx: Uint8Array; loss: ConversionLoss } | null> {
     const bytes = await readFile(selectedPath);
+    // A kept original is the digest of record (ADR 0072 §2): the bytes converted are the bytes the digest names, read
+    // once, so a same-size change that converts to the same working representation is still refused (#606's review).
+    if (expected !== undefined) {
+      requireStore(
+        bytes.byteLength === expected.byteLength && sha256(bytes) === expected.digest,
+        'SNAPSHOT_RESELECTION_REQUIRED',
+        '暂存对象摘要无效。',
+      );
+    }
     try {
       return format === 'DOC' ? await convertDocManuscript(bytes) : convertTextManuscript(bytes, { format });
     } catch (error) {
@@ -8234,6 +8246,7 @@ export class EditorialStore {
       legacyResultWithoutPresentation: options.legacyResultWithoutPresentation === true,
       phase: 'parse',
       parseBytes: 0,
+      converted: null,
       parsedIngest: null,
       parseFailure: null,
       mappingPosition: 0,
@@ -8242,14 +8255,26 @@ export class EditorialStore {
       offsetSegments: [],
     };
     this.#reimportCommitWork.set(workId, work);
-    void this.#parseIntoIngest(input.draftId, objectPath, snapshotBeforeAttempt.displayName, {
-      signal: abortController.signal,
-      onArchiveProgress: (bytes) => {
-        if (this.#reimportCommitWork.get(workId) === work) {
-          work.parseBytes = Math.min(bytes, snapshotBeforeAttempt.sourceBytes);
-        }
-      },
-    }).then((ingested) => {
+    // A converted source was read through its working representation (ADR 0072 §2), and the kept original is not a Word
+    // document: the commit re-reads the working representation, after reproducing the conversion from the original, as
+    // revalidation does (Issue #597). Its parse progress still counts against the original's bytes.
+    const parseSource = async (): Promise<IngestedDocx> => {
+      const converted = snapshotBeforeAttempt.conversion === null
+        ? null
+        : await this.#revalidateConversion(snapshotBeforeAttempt, objectPath);
+      work.converted = converted;
+      return this.#parseIntoIngest(input.draftId, converted?.path ?? objectPath, snapshotBeforeAttempt.displayName, {
+        signal: abortController.signal,
+        onArchiveProgress: (bytes) => {
+          if (this.#reimportCommitWork.get(workId) === work) {
+            // The segment is sized by the original's bytes; a working representation's parse is scaled into it.
+            const scaled = converted === null ? bytes : Math.round(bytes * snapshotBeforeAttempt.sourceBytes / converted.byteLength);
+            work.parseBytes = Math.min(scaled, snapshotBeforeAttempt.sourceBytes);
+          }
+        },
+      });
+    };
+    void parseSource().then((ingested) => {
       if (this.#reimportCommitWork.get(workId) === work) work.parsedIngest = ingested;
       else this.#discardIngest(ingested.ingestId);
     }).catch((error: unknown) => {
@@ -8359,14 +8384,18 @@ export class EditorialStore {
         return { done: false, completed: work.parseBytes, total: work.total, result: null };
       }
       const parsed = work.parsedIngest.parsed;
+      // A converted source is checked against its reproduced working representation, and its fidelity is the
+      // conversion's, as revalidation checks it (Issue #597).
+      const converted = work.snapshot.conversion === null ? null : work.converted;
       requireStore(
-        parsed.sourceDigest === work.snapshot.sourceDigest && parsed.archiveBytes === work.snapshot.sourceBytes &&
+        parsed.sourceDigest === (converted?.digest ?? work.snapshot.sourceDigest) &&
+          parsed.archiveBytes === (converted?.byteLength ?? work.snapshot.sourceBytes) &&
           parsed.parserIdentity === work.snapshot.parserIdentity &&
           parsed.contentDigest === work.snapshot.contentDigest &&
           parsed.structureDigest === work.snapshot.structureDigest &&
           parsed.blockCount === work.snapshot.blockCount &&
           parsed.characterCount === work.snapshot.characterCount &&
-          canonicalJson(parsed.fidelity) === canonicalJson(work.snapshot.fidelity) &&
+          canonicalJson(converted?.fidelity ?? parsed.fidelity) === canonicalJson(work.snapshot.fidelity) &&
           parsed.titleSuggestion.value === work.snapshot.titleSuggestion &&
           parsed.titleSuggestion.sourceLabel === work.snapshot.titleSource &&
           this.#retentionCall(() => stagedImportSourcesMatch(this.#authority, work.input.draftId, work.parsedIngest!.sources)),
@@ -10546,7 +10575,10 @@ export class EditorialStore {
     originalPath: string,
   ): Promise<{ digest: string; byteLength: number; path: string; fidelity: FidelityCategoryProjection[] }> {
     const conversion = snapshot.conversion!;
-    const converted = await this.#convertSelectedManuscript(originalPath, conversion.sourceFormat);
+    const converted = await this.#convertSelectedManuscript(originalPath, conversion.sourceFormat, {
+      digest: snapshot.sourceDigest,
+      byteLength: snapshot.sourceBytes,
+    });
     requireStore(converted !== null, 'SNAPSHOT_RESELECTION_REQUIRED', '保留的原始文件无法再次转换。');
     const digest = sha256(converted.docx);
     requireStore(
