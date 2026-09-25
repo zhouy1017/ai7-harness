@@ -3168,8 +3168,18 @@ function registerRendererHandlers(
   };
 }
 
+/**
+ * The startup step main has reached, said on stderr under an E2E Journey (Issue #518), so a Journey that waits past its
+ * budget can name the last step reached. The words are the fixed startup locations, never a path or a payload; stdout
+ * stays the readiness handshake alone.
+ */
+function reachStartup(location: string): string {
+  if (process.env.AI7_E2E_JOURNEY !== undefined) process.stderr.write(`AI7_STARTUP/${location}\n`);
+  return location;
+}
+
 export async function runApplication(): Promise<void> {
-  let startupLocation = 'runtime';
+  let startupLocation = reachStartup('runtime');
   let service: ServiceClient | undefined;
   let serviceInterrupted = false;
   let productReady = false;
@@ -3357,7 +3367,7 @@ export async function runApplication(): Promise<void> {
 
   try {
     validateRuntime();
-    startupLocation = 'arguments';
+    startupLocation = reachStartup('arguments');
     const entryIndex = process.argv.findIndex((value) => resolve(value) === resolve(__filename));
     requireDesktop(entryIndex > 0);
     const launch = parseArguments(process.argv.slice(entryIndex + 1));
@@ -3367,24 +3377,24 @@ export async function runApplication(): Promise<void> {
     }, 1_000);
     launcherLease.unref();
     app.enableSandbox();
-    startupLocation = 'data-root';
+    startupLocation = reachStartup('data-root');
     const codeRoot = resolve(__dirname, '..', '..');
     const dataRoot = await createCanonicalExternalDataRoot(launch.dataRoot, codeRoot);
-    startupLocation = 'shell-root';
+    startupLocation = reachStartup('shell-root');
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const earlyUserDataSwitch = app.commandLine.getSwitchValue('user-data-dir');
     requireDesktop(isAbsolute(earlyUserDataSwitch));
     await requireSameCanonicalDataDirectory(shellRoot, earlyUserDataSwitch, app.getPath('userData'));
     app.setPath('userData', shellRoot);
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
-    startupLocation = 'single-instance';
+    startupLocation = reachStartup('single-instance');
     if (!app.requestSingleInstanceLock()) {
       process.stderr.write('AI7_STARTUP_FAILED/single-instance-lock\n');
       await stop();
       app.exit(0);
       return;
     }
-    startupLocation = 'electron-ready';
+    startupLocation = reachStartup('electron-ready');
     await app.whenReady();
     Menu.setApplicationMenu(null);
 
@@ -3394,7 +3404,7 @@ export async function runApplication(): Promise<void> {
     const exportPrintSession = session.fromPartition('ai7-export-print');
     installChromiumDenial(exportPrintSession);
     const exportStagingRoot = await ensureCanonicalDataDirectory(dataRoot, 'export-staging');
-    startupLocation = 'service-ready';
+    startupLocation = reachStartup('service-ready');
     const serviceEntry = resolve(__dirname, '..', 'service', 'index.mjs');
     service = await ServiceClient.start(
       process.execPath,
@@ -3801,9 +3811,9 @@ export async function runApplication(): Promise<void> {
       })(),
       (pagePath, pdfPath) => printStagedPage(exportStagingRoot, exportPrintSession, pagePath, pdfPath),
     );
-    startupLocation = 'renderer-first-paint';
+    startupLocation = reachStartup('renderer-first-paint');
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);
-    startupLocation = 'readiness-signal';
+    startupLocation = reachStartup('readiness-signal');
     requireDesktop(!serviceInterrupted);
     await announceProductReadiness();
     requireDesktop(!serviceInterrupted);

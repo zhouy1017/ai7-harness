@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  coverSpanEdit,
   deriveSpanEdit,
   followBlockTextChange,
   followSpanEdit,
@@ -133,5 +134,37 @@ describe('the point an applied deletion leaves follows the text around it', () =
     // A combining mark put at the point joins the grapheme in front of it: no point is where the edit's arithmetic puts it.
     expect(followBlockTextChange({ fromGrapheme: 2, toGrapheme: 2, state: 'exact' }, '', 'Xa戊', 'Xá戊', { fromGrapheme: 2, toGrapheme: 2, insertedGraphemes: 1 }).state)
       .toBe('drifted');
+  });
+});
+
+describe('a point that cannot say which side of text written at it it is on covers that text (Issue #533)', () => {
+  // Between 丁 and 戊 of 甲乙丙丁戊己庚辛, as the point above.
+  const point = { fromGrapheme: 4, toGrapheme: 4 };
+  const edit = (fromGrapheme: number, toGrapheme: number, insertedGraphemes: number) => ({ fromGrapheme, toGrapheme, insertedGraphemes });
+
+  it('covers text typed exactly at it, and takes in what is typed into what it covers or at either of its edges', () => {
+    expect(coverSpanEdit(point, edit(4, 4, 2), 10)).toEqual({ fromGrapheme: 4, toGrapheme: 6, state: 'drifted' });
+    const covering = { fromGrapheme: 4, toGrapheme: 6 };
+    expect(coverSpanEdit(covering, edit(4, 4, 1), 11)).toEqual({ fromGrapheme: 4, toGrapheme: 7, state: 'drifted' });
+    expect(coverSpanEdit(covering, edit(5, 5, 1), 11)).toEqual({ fromGrapheme: 4, toGrapheme: 7, state: 'drifted' });
+    expect(coverSpanEdit(covering, edit(6, 6, 1), 11)).toEqual({ fromGrapheme: 4, toGrapheme: 7, state: 'drifted' });
+    expect(coverSpanEdit(covering, edit(5, 6, 0), 9)).toEqual({ fromGrapheme: 4, toGrapheme: 5, state: 'drifted' });
+    // A replacement that ends or starts exactly at it writes text at it too.
+    expect(coverSpanEdit(point, edit(3, 4, 2), 9)).toEqual({ fromGrapheme: 3, toGrapheme: 5, state: 'drifted' });
+    expect(coverSpanEdit(point, edit(4, 5, 2), 9)).toEqual({ fromGrapheme: 4, toGrapheme: 6, state: 'drifted' });
+  });
+
+  it('moves with an edit wholly in front of it, stays for one wholly behind it, and is never exact again', () => {
+    expect(coverSpanEdit(point, edit(1, 2, 0), 7)).toEqual({ fromGrapheme: 3, toGrapheme: 3, state: 'drifted' });
+    expect(coverSpanEdit(point, edit(0, 0, 3), 11)).toEqual({ fromGrapheme: 7, toGrapheme: 7, state: 'drifted' });
+    expect(coverSpanEdit(point, edit(5, 6, 3), 10)).toEqual({ fromGrapheme: 4, toGrapheme: 4, state: 'drifted' });
+    expect(coverSpanEdit({ fromGrapheme: 4, toGrapheme: 6 }, edit(7, 7, 1), 11)).toEqual({ fromGrapheme: 4, toGrapheme: 6, state: 'drifted' });
+  });
+
+  it('covers what replaces a span across it, falls back to a point when what it covers goes, and stays in its block', () => {
+    expect(coverSpanEdit(point, edit(3, 5, 1), 7)).toEqual({ fromGrapheme: 3, toGrapheme: 4, state: 'drifted' });
+    expect(coverSpanEdit({ fromGrapheme: 4, toGrapheme: 6 }, edit(4, 6, 0), 8)).toEqual({ fromGrapheme: 4, toGrapheme: 4, state: 'drifted' });
+    expect(coverSpanEdit({ fromGrapheme: 4, toGrapheme: 6 }, edit(2, 8, 0), 2)).toEqual({ fromGrapheme: 2, toGrapheme: 2, state: 'drifted' });
+    expect(coverSpanEdit({ fromGrapheme: 7, toGrapheme: 9 }, edit(8, 8, 1), 5)).toEqual({ fromGrapheme: 5, toGrapheme: 5, state: 'drifted' });
   });
 });

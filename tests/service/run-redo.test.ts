@@ -239,8 +239,7 @@ describe('改计划重做 over the real store', () => {
 
       // 联网后开始任务: the redo's Run waits for the network, and the launch changes meanwhile, so Reconnect Preflight
       // blocks it before it begins — its plan moved.
-      store.startBaselineAnalysisWhenOnline(bookId, redoIntentId, redo.planEnvelope!.digest);
-      store.baselineAnalysisLedger.bindLaunch({
+      const live = () => store.baselineAnalysisLedger.bindLaunch({
         operationalScope: 'developer-live',
         live: {
           route: 'opencode-go',
@@ -251,19 +250,48 @@ describe('改计划重做 over the real store', () => {
           runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 240_000 },
         },
       });
-      expect(await preflight(store, execution, () => 'online')).toEqual({ admitted: 0, blocked: 1, waiting: 0 });
-      const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: redoIntentId });
-      expect(plan.state.key).toBe('plan-moved');
-      expect(plan.reprepare?.prepare).toEqual({ goal: BASELINE_ANALYSIS_MODE_GOALS['sync-current'], update: SYNC });
+      const offline = () => store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null });
+      const moved = async (taskIntentId: string, digest: string) => {
+        store.startBaselineAnalysisWhenOnline(bookId, taskIntentId, digest);
+        live();
+        expect(await preflight(store, execution, () => 'online')).toEqual({ admitted: 0, blocked: 1, waiting: 0 });
+        const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
+        expect(plan.state.key).toBe('plan-moved');
+        expect(plan.reprepare?.prepare).toEqual({ goal: BASELINE_ANALYSIS_MODE_GOALS['sync-current'], update: SYNC });
+        return plan.reprepare!.prepare.update;
+      };
+      const asBefore = (projection: BaselineAnalysisProjection, previous: string) => {
+        expect(projection.state).toBe('prepared');
+        expect(projection.taskIntent?.taskIntentId).not.toBe(previous);
+        expect(projection.taskIntent?.mode).toBe('sync-current');
+        expect(projection.update?.predecessor?.revisionId).toBe(kept.revisionId);
+        expect(projection.update?.reusePlan?.counts).toEqual({ reused: 3, recomputed: SAMPLE1_UNITS - 3, invalidated: SAMPLE1_UNITS - 3, bypassed: 0 });
+      };
 
       // 重新准备 prepares that redo again — the same 同步 over the kept revision — rather than refusing it because ②A waits.
-      store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null });
-      const again = prepare(store, bookId, plan.reprepare!.prepare.update);
-      expect(again.state).toBe('prepared');
-      expect(again.taskIntent?.taskIntentId).not.toBe(redoIntentId);
-      expect(again.taskIntent?.mode).toBe('sync-current');
-      expect(again.update?.predecessor?.revisionId).toBe(kept.revisionId);
-      expect(again.update?.reusePlan?.counts).toEqual({ reused: 3, recomputed: SAMPLE1_UNITS - 3, invalidated: SAMPLE1_UNITS - 3, bypassed: 0 });
+      const update = await moved(redoIntentId, redo.planEnvelope!.digest);
+      offline();
+      const again = prepare(store, bookId, update);
+      asBefore(again, redoIntentId);
+      // Its plan moves again while it waits (Issue #551): 重新准备 prepares it again the same way, as often as the plan moves,
+      // though that Task is no redo of its own.
+      const againId = again.taskIntent!.taskIntentId;
+      const once = await moved(againId, again.planEnvelope!.digest);
+      offline();
+      const third = prepare(store, bookId, once);
+      asBefore(third, againId);
+      // Prepared and not yet started, its plan drifts with no manuscript edit — the launch binds the live route — and
+      // 重新确认计划 under that launch revises it in place, the next version of the same Task.
+      live();
+      const drifted = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(drifted.planRevision?.state).toBe('pending');
+      expect(drifted.actions.canReconfirmPlan).toBe(true);
+      const livePolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
+      let reconfirmed = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_MODE_GOALS['sync-current'], SYNC, livePolicy, true, null);
+      while (!reconfirmed.done) reconfirmed = store.advanceBaselineAnalysisPreparationWork(reconfirmed.workId!);
+      expect(reconfirmed.projection!.taskIntent?.taskIntentId).toBe(third.taskIntent!.taskIntentId);
+      expect(reconfirmed.projection!.planVersion?.ordinal).toBe(2);
+      expect(reconfirmed.projection!.planRevision).toBeNull();
       // Only that Task as it was: any other way over the kept revision is still ②A's to offer.
       store.markCleanShutdown();
     } finally {

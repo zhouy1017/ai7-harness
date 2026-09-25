@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
+  coverSpanEdit,
   followGraphemeEdit,
   followPoint,
   graphemesOf,
@@ -451,11 +452,13 @@ interface FollowedMarkRow {
   toGrapheme: number;
   state: 'exact' | 'drifted';
   pinned: string[];
+  /** A pending insertion (Issue #411): a point pinned on no text that has not written its words yet. */
+  insertion: boolean;
 }
 
 function liveMarksOfBlock(db: DatabaseSync, branchId: string, blockId: string): FollowedMarkRow[] {
   const rows = db.prepare(
-    `SELECT mark_id, from_grapheme, to_grapheme, anchor_state, pinned_text FROM editorial_marks
+    `SELECT mark_id, from_grapheme, to_grapheme, anchor_state, pinned_text, status FROM editorial_marks
      WHERE branch_id = ? AND block_id = ? AND status IN ${LIVE_STATUSES} AND anchor_state IN ('exact', 'drifted')`,
   ).all(branchId, blockId) as SqlRow[];
   return rows.map((row) => ({
@@ -464,6 +467,7 @@ function liveMarksOfBlock(db: DatabaseSync, branchId: string, blockId: string): 
     toGrapheme: integer(row.to_grapheme),
     state: text(row.anchor_state) as 'exact' | 'drifted',
     pinned: graphemesOf(text(row.pinned_text)),
+    insertion: text(row.pinned_text) === '' && text(row.status) !== 'applied',
   }));
 }
 
@@ -502,15 +506,24 @@ export function followBlockTextChangeForMarks(
     const next = index === spans.length - 1
       ? finalText
       : [...current.slice(0, span.fromGrapheme), ...span.inserted, ...current.slice(span.toGrapheme)];
-    // Points that stand at one place — two deletions applied side by side — have lost the order between
-    // them: text inserted exactly there could belong between them, so none can say which side it is on.
+    // Points that stand at one place cannot say how they are ordered. Two deletions applied side by side, or a pending
+    // insertion just past a deletion's words, lost their order when those words went; two insertions at one place never
+    // had words between them to order them (Issue #533). Text written exactly there could belong before or after any of
+    // them, so each covers it instead of guessing a side: the editor places the point among those words through its
+    // 稿件冲突 — a new version of an insertion, a Correction Proposal that undoes a deletion — and the insertion whose own
+    // Apply wrote them stands on them again at once. A pending insertion whose point already drifted covers whatever is
+    // written at it the same way, so an undo or a retyping there is never passed off as the place it was.
     const crowded = followed.filter((mark) => mark.pinned.length === 0 && mark.state === 'exact' &&
       mark.fromGrapheme === span.fromGrapheme && mark.toGrapheme === span.toGrapheme);
     for (const mark of followed) {
-      const result = mark.pinned.length === 0 ? followPoint(mark, current, next, span) : followGraphemeEdit(mark, mark.pinned, next, span);
+      const inCrowd = crowded.length > 1 && crowded.includes(mark);
+      const covering = mark.pinned.length === 0 && (inCrowd || (mark.insertion && mark.state === 'drifted'));
+      const result = covering
+        ? coverSpanEdit(mark, span, next.length)
+        : mark.pinned.length === 0 ? followPoint(mark, current, next, span) : followGraphemeEdit(mark, mark.pinned, next, span);
       mark.fromGrapheme = result.fromGrapheme;
       mark.toGrapheme = result.toGrapheme;
-      mark.state = crowded.length > 1 && crowded.includes(mark) ? 'drifted' : result.state;
+      mark.state = inCrowd ? 'drifted' : result.state;
     }
     current = next;
   });
@@ -637,6 +650,12 @@ function setAsideByReimport(db: DatabaseSync): string {
     : '0';
 }
 
+/** Each working block's digest, read before a rewrite for `resolveBranchMarksAfterRewrite` to tell the blocks it changed. */
+export function workingBlockDigests(db: DatabaseSync, branchId: string): ReadonlyMap<string, string> {
+  const rows = db.prepare('SELECT block_id, digest FROM working_blocks WHERE branch_id = ?').all(branchId) as SqlRow[];
+  return new Map(rows.map((row) => [text(row.block_id), text(row.digest)]));
+}
+
 /**
  * After the whole working state was replaced — a recovery restoration, a reimport — no spans exist
  * to follow. Every live mark is resolved against what its block holds now: `exact` where its pinned
@@ -645,15 +664,19 @@ function setAsideByReimport(db: DatabaseSync): string {
  * resolved like any other, except one a reimport set aside (`setAsideByReimport`), which stays aside.
  * A point pinned on no text has nothing to be found by, so it resolves
  * `drifted`: rewritten text never proves where an applied suggestion deleted its words, nor where a
- * pending insertion (Issue #411) would write its own.
+ * pending insertion (Issue #411) would write its own. In a block `before` — each block's digest before
+ * the rewrite — shows unchanged, the index it drifts at is still its place. A pending insertion in a
+ * block whose text the rewrite changed covers the whole block instead (Issue #533): its index was
+ * counted in other text, so a new version written there would guess where the editor should place it.
  */
-export function resolveBranchMarksAfterRewrite(db: DatabaseSync, branchId: string): void {
+export function resolveBranchMarksAfterRewrite(db: DatabaseSync, branchId: string, before: ReadonlyMap<string, string>): void {
   if (!marksRelationExists(db)) return;
   const state = db.prepare('SELECT journal_sequence FROM branch_working_state WHERE branch_id = ?').get(branchId) as SqlRow | undefined;
   requireMark(state !== undefined, 'MANUSCRIPT_NOT_FOUND', '稿件工作状态不存在。');
   const journalSequence = integer(state.journal_sequence);
   const rows = db.prepare(
-    `SELECT em.mark_id, em.from_grapheme, em.to_grapheme, em.pinned_text, wb.text block_text
+    `SELECT em.mark_id, em.from_grapheme, em.to_grapheme, em.pinned_text, em.status, em.block_id,
+            wb.text block_text, wb.digest block_digest
      FROM editorial_marks em
      LEFT JOIN working_blocks wb ON wb.branch_id = em.branch_id AND wb.block_id = em.block_id
      WHERE em.branch_id = ? AND em.status IN ${LIVE_STATUSES} AND NOT ${setAsideByReimport(db)}`,
@@ -676,6 +699,10 @@ export function resolveBranchMarksAfterRewrite(db: DatabaseSync, branchId: strin
     if (parts === undefined) {
       parts = graphemesOf(blockText);
       segmented.set(blockText, parts);
+    }
+    if (text(row.pinned_text) === '' && text(row.status) !== 'applied' && before.get(text(row.block_id)) !== text(row.block_digest)) {
+      update.run(0, parts.length, 'drifted', journalSequence, markId);
+      continue;
     }
     const resolved = resolvePinnedRange(parts, graphemesOf(text(row.pinned_text)), { fromGrapheme: from, toGrapheme: to });
     update.run(resolved.fromGrapheme, resolved.toGrapheme, resolved.state, journalSequence, markId);
@@ -1380,7 +1407,8 @@ export class EditorialMarkStore {
     manuscriptId: string; branchId: string; blockId: string; blockDigest: string; fromGrapheme: number; toGrapheme: number;
     currentText: string; proposedText: string; rationale: string; basisJson: string; convertedFrom: string | null; now: string;
   }): string {
-    const pinned = this.#requireRange(input.branchId, input.blockId, input.blockDigest, input.fromGrapheme, input.toGrapheme, input.currentText);
+    // A pending insertion's new version stands at its point (Issue #533): no words, as the insertion it replaces.
+    const pinned = this.#requireRange(input.branchId, input.blockId, input.blockDigest, input.fromGrapheme, input.toGrapheme, input.currentText, input.currentText.length === 0);
     const content = this.#content('change-suggestion', null, '', input.proposedText, input.rationale, pinned);
     const state = this.#branchState(input.manuscriptId, input.branchId);
     const markId = randomUUID();

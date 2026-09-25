@@ -75,19 +75,22 @@ function fidelityClassFound(category: FidelityCategoryProjection): boolean {
  * The concise reading of a review that asks for no decision (interaction-spec, New-Book fidelity review
  * contains only 完整保留): how many classes there are, which are kept with the file and how many, which
  * become marks on the manuscript and how many (Issue #411: a file's comments and tracked changes, which are
- * `完整保留` with a count and are not kept with the file), and how many were not found at all.
+ * `完整保留` with a count and are not kept with the file), and how many were not found at all. Text boxes the review
+ * was formed to merge (Issue #532) are said to go into the text, never to stay with the file.
  */
-export function fidelitySummaryLine(fidelity: ReadonlyArray<FidelityCategoryProjection>): string {
+export function fidelitySummaryLine(fidelity: ReadonlyArray<FidelityCategoryProjection>, textBoxes: TextBoxDisposition | null = null): string {
   const rows = fidelityRows(fidelity);
   const found = rows.filter(fidelityClassFound);
   const absent = rows.length - found.length;
   if (found.length === 0) return `${rows.length} 类内容都未检测到，稿件完整保留，不需要导入降级决定。`;
   const converted = found.filter((category) => category.status === 'preserved' && category.count > 0);
-  const kept = found.filter((category) => !converted.includes(category));
+  const merged = found.filter((category) => textBoxes === 'merge' && category.key === 'text-boxes' && category.count > 0);
+  const kept = found.filter((category) => !converted.includes(category) && !merged.includes(category));
   const counted = (category: FidelityCategoryProjection): string =>
     category.count > 0 ? `${category.label}${fidelityCountText(category.count)}` : category.label;
   const clauses = [
     ...(kept.length > 0 ? [`${kept.map(counted).join('、')}随文件保留`] : []),
+    ...(merged.length > 0 ? [`${merged.map(counted).join('、')}并入正文`] : []),
     ...(converted.length > 0 ? [`${converted.map(counted).join('、')}转为稿件上的批注与修改建议`] : []),
   ];
   return `${rows.length} 类内容都完整保留，不需要导入降级决定：${clauses.join('；')}` +
