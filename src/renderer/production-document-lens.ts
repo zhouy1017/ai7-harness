@@ -17,6 +17,9 @@ import {
 } from './production-document-labels.js';
 import { renderDocumentWorkflow, type DocumentWorkflowActions } from './production-document-workflow.js';
 
+/** How long the lens waits after the last edit or mark change before it reads the document again, as the rail does. */
+const DOCUMENT_READ_DELAY_MS = 1_200;
+
 /** The Production Document a surface shows (Issue #415): its house type and the document as 交付物 read it. */
 export interface ProductionDocumentContext {
   typeId: string;
@@ -64,12 +67,16 @@ export function documentStanding(document: ProductionDocumentProjection, working
  * export came to, and `交付后有修改` once an edit left every version delivered. The gates join it with S66d.
  *
  * `update` paints it again for the working digest the window holds now, so an edit moves `当前` and the notes as it happens
- * rather than when the document is next opened.
+ * rather than when the document is next opened. What the workflow waits on — 有修改尚未保存为版本, N 条修改建议待处理 —
+ * is the service's reading of the document as it stands, so an edit, or a mark change (`refresh`), can change it with no
+ * phase moving: the lens then reads the document again once the editor rests, never per keystroke, and paints what the
+ * service answers. Only the newest read paints, and one that fails leaves the lens as it last read; the next edit or mark
+ * change reads again.
  */
 export function renderDocumentLens(
   context: ProductionDocumentContext,
   workflowActions: DocumentWorkflowActions | null = null,
-): { element: HTMLElement; update(workingDigest: string): void } {
+): { element: HTMLElement; update(workingDigest: string): void; refresh(): void } {
   const aside = el('aside', 'document-lens');
   aside.setAttribute('aria-label', DOCUMENT_LENS_LABEL);
   aside.dataset['documentId'] = context.document.documentId;
@@ -82,16 +89,19 @@ export function renderDocumentLens(
   if (notCarried !== null && notCarried > 0) materials.append(el('p', 'field-note document-origin-marks', documentOriginMarksLine(notCarried)));
   materials.append(el('p', 'field-note document-materials-empty', DOCUMENT_MATERIALS_EMPTY));
   aside.append(el('p', 'section-label', DOCUMENT_LENS_LABEL), workflow.element, versions, materials);
-  let painted: string | null = null;
-  const paint = (workingDigest: string): void => {
-    if (painted === workingDigest) return;
-    painted = workingDigest;
-    const standing = documentStanding(context.document, workingDigest);
+  // The document as the service last answered, and the working digest the window holds now.
+  let shown = context.document;
+  let workingDigest = shown.workingDigest;
+  let painted: { document: ProductionDocumentProjection; workingDigest: string } | null = null;
+  const paint = (): void => {
+    if (painted !== null && painted.document === shown && painted.workingDigest === workingDigest) return;
+    painted = { document: shown, workingDigest };
+    const standing = documentStanding(shown, workingDigest);
     const versionsHeading = el('h3', undefined, DOCUMENT_VERSIONS_HEADING);
-    versionsHeading.id = `document-versions-${context.document.documentId}`;
+    versionsHeading.id = `document-versions-${shown.documentId}`;
     versions.setAttribute('aria-labelledby', versionsHeading.id);
     const list = el('ol', 'document-version-list');
-    for (const version of context.document.versions) {
+    for (const version of shown.versions) {
       const item = el('li');
       item.dataset['revisionId'] = version.revisionId;
       item.dataset['versionOrdinal'] = String(version.ordinal);
@@ -103,12 +113,12 @@ export function renderDocumentLens(
       list.append(item);
     }
     versions.replaceChildren(versionsHeading, list);
-    if (context.document.versionsTruncated) versions.append(el('p', 'field-note', DOCUMENT_VERSIONS_TRUNCATED));
+    if (shown.versionsTruncated) versions.append(el('p', 'field-note', DOCUMENT_VERSIONS_TRUNCATED));
     if (standing.changedSinceVersion) versions.append(el('p', 'field-note document-changed', DOCUMENT_CHANGED_SINCE_VERSION));
-    if (context.document.deliveries.length > 0) {
+    if (shown.deliveries.length > 0) {
       versions.append(el('h4', undefined, DOCUMENT_DELIVERIES_HEADING));
       const deliveries = el('ol', 'document-lens-deliveries');
-      for (const delivery of context.document.deliveries) {
+      for (const delivery of shown.deliveries) {
         const item = el('li');
         item.dataset['deliveryId'] = delivery.deliveryId;
         item.append(
@@ -121,6 +131,33 @@ export function renderDocumentLens(
       if (standing.changedSinceDelivery) versions.append(el('p', 'attention-note document-changed-since-delivery', DOCUMENT_CHANGED_SINCE_DELIVERY));
     }
   };
-  paint(context.document.workingDigest);
-  return { element: aside, update: paint };
+  let readTimer: number | undefined;
+  let reads = 0;
+  const refresh = (): void => {
+    if (workflowActions === null) return;
+    const actions = workflowActions;
+    if (readTimer !== undefined) window.clearTimeout(readTimer);
+    readTimer = window.setTimeout(() => {
+      readTimer = undefined;
+      if (!aside.isConnected) return;
+      const read = ++reads;
+      void actions.read().then((fresh) => {
+        if (read !== reads || fresh === null || fresh.documentId !== shown.documentId || !aside.isConnected) return;
+        shown = fresh;
+        workflow.paint(fresh.workflow);
+        paint();
+      }, () => undefined);
+    }, DOCUMENT_READ_DELAY_MS);
+  };
+  paint();
+  return {
+    element: aside,
+    update(next) {
+      if (next === workingDigest) return;
+      workingDigest = next;
+      paint();
+      refresh();
+    },
+    refresh,
+  };
 }

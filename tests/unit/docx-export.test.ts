@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseDocx, type ParsedDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
+import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import {
   DocxExportError,
   EDITOR_AUTHOR_LABEL,
@@ -155,7 +156,7 @@ async function composeSource(path: string, source: ComposedSource): Promise<Uint
     entries['word/_rels/document.xml.rels'] = strToU8('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
       '<Relationship Id="rIdHeader1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/></Relationships>');
   }
-  const archive = zipSync(entries, { level: 6, mtime: new Date('2026-01-01T00:00:00.000Z') });
+  const archive = zipSync(entries, { level: 6, mtime: fixedArchiveTime() });
   await writeFile(path, archive);
   return archive;
 }

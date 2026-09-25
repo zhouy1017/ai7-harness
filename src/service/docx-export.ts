@@ -1,6 +1,7 @@
 import { posix } from 'node:path';
 import { strToU8, unzipSync, zipSync } from 'fflate';
 import { SaxesParser, type SaxesTagNS } from 'saxes';
+import { fixedArchiveTime } from '../shared/archive-time.js';
 import { graphemesOf } from '../shared/mark-anchor.js';
 import {
   EXPORT_FIDELITY_STATUS_LABELS,
@@ -57,7 +58,6 @@ const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024;
 const MAX_EXPANDED_BYTES = 96 * 1024 * 1024;
 const MAX_ENTRY_COUNT = 256;
 const MAX_XML_NESTING_DEPTH = 128;
-const ARCHIVE_MTIME = new Date('2026-01-01T00:00:00.000Z');
 const ARCHIVE_LEVEL = 6;
 
 const WORD_MAIN = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -451,7 +451,7 @@ function setOverride(types: ContentTypes, part: string, type: string): void {
 function zipPackage(entries: ReadonlyArray<readonly [string, Uint8Array]>): Uint8Array {
   const files: Record<string, Uint8Array> = {};
   for (const [name, data] of entries) files[name] = data;
-  return zipSync(files, { level: ARCHIVE_LEVEL, mtime: ARCHIVE_MTIME });
+  return zipSync(files, { level: ARCHIVE_LEVEL, mtime: fixedArchiveTime() });
 }
 
 // ---- reading a paragraph as the parser reads it ---------------------------------------------------

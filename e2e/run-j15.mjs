@@ -204,6 +204,12 @@ const HOUSE_GUIDELINE = ['本社文字规范（J-15）', '', '1. 指出错字、
   '3. 数字与标点按本社体例手册统一，', '体例手册未写到的，按国家现行规范。', '4. 专名在全书前后写法一致。', '5. 引文与原文核对后再改，不凭记忆改动。'].join('\n');
 const KNOWLEDGE_TABS = ['审阅规范文件', '评估方案', '工序与规则', '社级编辑记忆', '范例', '资料库', '外部来源留存'];
 const GUIDELINE_TITLES = ['文字规范条款', '体例条款', '线索条款', '事实核查契约', '引用与学术规范条款', '出版风险提示条款', '表达改进条款'];
+// 线索条款 and 事实核查契约 are AI7's fixed statements (Issue #427 review): their categories read no clause of theirs, so
+// they say so where the others offer 导入新版本….
+const GUIDELINE_FIXED = new Map([
+  [2, '「情节逻辑与前后一致」把基线分析里的线索变成批注，不按这里的条款找问题。这是 AI7 的固定说明，不能导入新版本。'],
+  [3, '「事实核查」按 AI7 固定的事实核查契约执行，不读取这里的条款。这是 AI7 的固定说明，不能导入新版本。'],
+]);
 /** The 知识库 page as an editor reads it: its tabs, the chosen one, and each guideline card's words. */
 const READ_KNOWLEDGE = `(() => {
   const page = document.querySelector('[data-screen="knowledge-base"] .knowledge-base');
@@ -221,6 +227,8 @@ const READ_KNOWLEDGE = `(() => {
       clauses: Array.from(card.querySelectorAll('.guideline-clauses li'), (item) => [item.dataset.clauseId, item.querySelector('.guideline-citations')?.textContent ?? null]),
       versions: Array.from(card.querySelectorAll('.guideline-version-list li'), (item) => item.textContent),
       older: card.querySelector('.guideline-older')?.textContent ?? null,
+      fixed: card.querySelector('.guideline-fixed')?.textContent ?? null,
+      importable: card.querySelector('[data-guideline-action="import"]') instanceof HTMLButtonElement,
       preview: card.querySelector('.guideline-preview h4')?.textContent ?? null,
       changes: card.querySelector('.guideline-preview-changes')?.textContent ?? null,
       previewClauses: card.querySelectorAll('.guideline-preview li').length,
@@ -709,7 +717,8 @@ async function main() {
       JSON.stringify(opened.cards.map((card) => card.title)) === JSON.stringify(GUIDELINE_TITLES) && opened.cards.every((card) => card.pill === '第 1 版 · AI7 内置默认') &&
       opened.cards[0].applied === '用于：错别字与规范用语' && opened.cards[0].clauses.length === 4 &&
       opened.cards[0].clauses.every(([clauseId, citations], index) => clauseId === `typos-and-usage/${index + 1}` && citations === '未被引用') &&
-      JSON.stringify(opened.cards[0].versions) === JSON.stringify(['第 1 版 · AI7 内置默认 · 内置 · 4 条 · 还没有审阅用过']) && opened.cards.every((card) => card.older === null),
+      JSON.stringify(opened.cards[0].versions) === JSON.stringify(['第 1 版 · AI7 内置默认 · 内置 · 4 条 · 还没有审阅用过']) && opened.cards.every((card) => card.older === null) &&
+      opened.cards.every((card, index) => card.fixed === (GUIDELINE_FIXED.get(index) ?? null) && card.importable === !GUIDELINE_FIXED.has(index)),
     'knowledge-guidelines-cards', opened);
     // A class a later slice brings says what it will hold and that it is not there yet.
     await click(renderer, '资料库', 'knowledge-library-tab');

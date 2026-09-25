@@ -723,6 +723,11 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .package-export-files > li > span { display: block; }
 .package-export-files .status-pill { margin-top: .2rem; }
 .package-export-outcome.is-failed, .package-export-outcome.is-ambiguous, .package-export-outcome.is-not-written { font-weight: 800; }
+.package-export-fidelity { margin-top: .25rem; }
+.package-export-fidelity > summary { cursor: pointer; font-size: .9rem; font-weight: 700; }
+.package-export-files > li[data-package-export-degraded="true"] .package-export-fidelity > summary { font-weight: 800; }
+.package-export-fidelity .export-fidelity { margin-top: .4rem; padding-top: .4rem; }
+.package-export-fidelity .export-format-line { margin: .4rem 0 0; }
 .package-export-folder-choice { margin-top: .8rem; padding-top: .7rem; border-top: 1px solid #d5dcd9; }
 .package-export-folder-line { margin: 0 0 .5rem; }
 .package-export .export-actions { margin-top: .7rem; }
