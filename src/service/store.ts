@@ -6039,7 +6039,10 @@ export class EditorialStore {
 
     const draft = one(
       this.#authority
-        .prepare('SELECT state, draft_version, object_digest FROM import_drafts WHERE draft_id = ?')
+        .prepare(
+          `SELECT state, draft_version, object_digest, source_format, working_object_digest, converter_identity
+           FROM import_drafts WHERE draft_id = ?`,
+        )
         .all(draftId) as SqlRow[],
       'DRAFT_NOT_FOUND',
       '导入草稿不存在。',
@@ -6060,19 +6063,31 @@ export class EditorialStore {
       if (error instanceof StoreFatalError) throw error;
       throw new StoreError('SNAPSHOT_RESELECTION_REQUIRED', '重选文件无法形成完整的本地暂存快照。');
     }
+    // A converted draft was read through its working representation, so reselecting its original reproduces that
+    // representation and restages it (Issue #611): after a converter change the draft is whole again, never only 放弃.
+    // It is routed on its own row, whatever the picked file is named or identified as: the original's digest of record,
+    // checked before any conversion or write, is the whole identity proof, and a draft read through a working
+    // representation never takes the source-only or the DOCX path (#615's review).
+    const recordedConversion = readConversionColumns(
+      draft,
+      draft.source_format === null || draft.source_format === undefined ? 'DOCX' : requireSourceFormat(asString(draft.source_format)),
+      '导入草稿的转换记录不完整。',
+    );
+    if (recordedConversion !== null) {
+      const original = one(
+        this.#authority.prepare('SELECT byte_length FROM content_objects WHERE object_digest = ?').all(expectedDigest) as SqlRow[],
+        'STORE_CORRUPT',
+        '导入草稿的原文件对象不存在。',
+      );
+      return this.#reselectConvertedDraft(
+        { draftId, selectionToken, selectedPath, displayName },
+        { expectedDigest, expectedBytes: asNumber(original.byte_length), expectedDraftVersion, previousState, recovered: attempt !== null },
+        recordedConversion.sourceFormat,
+      );
+    }
     // Reselection identifies the file the same way staging does, so a format the product does not
     // read as a Manuscript comes back as the same source-only draft rather than a bare refusal.
     if (format !== 'DOCX') {
-      // A converted draft was read through its working representation, so reselecting its original reproduces that
-      // representation and restages it (Issue #611): after a converter change the draft is whole again, never only 放弃.
-      const snapshot = this.#loadDraftSnapshot(draftId);
-      if (snapshot.conversion !== null && snapshot.conversion.sourceFormat === format) {
-        return this.#reselectConvertedDraft(
-          { draftId, selectionToken, selectedPath, displayName },
-          { expectedDigest, expectedBytes: snapshot.sourceBytes, expectedDraftVersion, previousState, recovered: attempt !== null },
-          snapshot.conversion,
-        );
-      }
       return this.#reselectSourceOnlyDraft(
         { draftId, selectionToken, selectedPath, displayName, format },
         { expectedDigest, expectedDraftVersion, previousState, recovered: attempt !== null },
@@ -6163,9 +6178,15 @@ export class EditorialStore {
   async #reselectConvertedDraft(
     selection: { draftId: string; selectionToken: string; selectedPath: string; displayName: string },
     draft: { expectedDigest: string; expectedBytes: number; expectedDraftVersion: number; previousState: string; recovered: boolean },
-    conversion: ManuscriptConversionProjection,
+    sourceFormat: ManuscriptConversionProjection['sourceFormat'],
   ): Promise<ContinueImportProjection> {
     const { draftId, selectionToken, selectedPath, displayName } = selection;
+    // The conversion is today's route for the draft's own format, as a first staging's is (#615's review): the working
+    // representation restaged below is this converter's output, so the draft, its review and a later Source Version
+    // name this converter, never the one recorded at the first staging (ADR 0072 §2).
+    const route = editableImport(sourceFormat);
+    requireStore(route.available && route.conversion !== undefined, 'SNAPSHOT_RESELECTION_REQUIRED', '重选文件无法再次转换。');
+    const conversion = route.conversion;
     let converted: { docx: Uint8Array; loss: ConversionLoss } | null;
     try {
       // The bytes converted are the bytes the draft's digest names, read once (#606's review): another file is refused
