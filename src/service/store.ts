@@ -3263,6 +3263,16 @@ function closeDatabaseQuietly(db: DatabaseSync | null): void {
 export const SOURCE_VERSION_PARSER_CHANGED_MESSAGE =
   '这本书里已有同一个文件的来源版本，但它是用旧版 AI7 的读取方式导入的；AI7 现在读取文件的方式已经不同，不能在原来的来源版本上再次导入这个文件。可以把它作为新书导入。';
 
+/**
+ * J-01's `tamper-reimport-proof-before-validation` control (Issue #569): one reimport mapping's staged text altered before the
+ * whole-store validation, which must then refuse the store. Only a mapping that has staged text is chosen — a deletion's is
+ * NULL, and `NULL || '篡改'` is NULL, which would report one change and alter nothing — so the store is tampered every time.
+ */
+export const REIMPORT_PROOF_TAMPER_SQL = `UPDATE manuscript_reimport_mappings SET staged_text = staged_text || '篡改'
+           WHERE mapping_id = (
+             SELECT mapping_id FROM manuscript_reimport_mappings WHERE staged_text IS NOT NULL ORDER BY mapping_id LIMIT 1
+           )`;
+
 export class EditorialStore {
   readonly #dataRoot: string;
   readonly #objectsRoot: string;
@@ -3407,10 +3417,7 @@ export class EditorialStore {
       initializeBoundedSchema(authority, workflowProfile);
       initializeSourceImportSchema(authority, workflowProfile);
       if (control.induceReimportProofTamper) {
-        requireStore(authority.prepare(
-          `UPDATE manuscript_reimport_mappings SET staged_text = staged_text || '篡改'
-           WHERE mapping_id = (SELECT mapping_id FROM manuscript_reimport_mappings ORDER BY mapping_id LIMIT 1)`,
-        ).run().changes === 1, 'E2E_CONTROL_INVALID', '没有可用于启动校验的重新导入证明。');
+        requireStore(authority.prepare(REIMPORT_PROOF_TAMPER_SQL).run().changes === 1, 'E2E_CONTROL_INVALID', '没有可用于启动校验的重新导入证明。');
       }
       initializeManuscriptReimportSchema(authority, workflowProfile);
       // A store already at the terminal version is validated whole exactly twice per open: once above,
