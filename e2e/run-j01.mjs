@@ -10,6 +10,7 @@ import {
   admittedSpanText,
   composeAdmittedDocx,
   composeRevisedAdmittedDocx,
+  fixedArchiveTime,
   ADMITTED_BASELINE_DOCX,
   IMPORTED_MARKS_AUTHOR,
   IMPORTED_MARKS_COUNT,
@@ -204,7 +205,7 @@ async function createSyntheticDocx(path, variant) {
       ? { 'docProps/app.xml': strToU8(`<Properties><Application>AI7 J-01 ${variant}</Application></Properties>`) }
       : {}),
   };
-  await writeFile(path, zipSync(entries, { level: 6, mtime: new Date('2026-01-01T00:00:00.000Z') }));
+  await writeFile(path, zipSync(entries, { level: 6, mtime: fixedArchiveTime() }));
 }
 
 /**
