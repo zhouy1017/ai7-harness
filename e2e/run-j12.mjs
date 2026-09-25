@@ -9,6 +9,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { fixedArchiveTime } from './composed-docx.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -152,6 +153,7 @@ async function createSyntheticDocx(path) {
   });
   const push = async (name, text) => {
     const entry = new ZipPassThrough(name);
+    entry.mtime = fixedArchiveTime();
     zip.add(entry);
     entry.push(strToU8(text), true);
     await drain();

@@ -24,6 +24,7 @@ export const MAINTENANCE_ACTION_LABELS = {
   saveErrata: '保存勘误版本',
   conclude: '记录维护事项结论…',
   confirmConclude: '记录结论',
+  older: '更早的维护事项…',
 } as const;
 export type MaintenanceAction = keyof typeof MAINTENANCE_ACTION_LABELS;
 
@@ -62,7 +63,10 @@ export function maintenanceCaseAccessibleName(summary: Pick<MaintenanceCaseSumma
   return `查看第 ${summary.ordinal} 项维护事项（${summary.classificationLabel}）`;
 }
 
-export const MAINTENANCE_CASES_TRUNCATED = '更早的维护事项保留在记录中。';
+/** How many older cases `更早的维护事项…` has still to show (MAINT-001): every case of the designation can be opened. */
+export function maintenanceOlderLine(count: number): string {
+  return `还有 ${count} 项更早的维护事项`;
+}
 
 export function maintenanceCaseHeading(ordinal: number, classificationLabel: string): string {
   return `第 ${ordinal} 项维护事项 · ${classificationLabel}`;
@@ -111,6 +115,8 @@ export const MAINTENANCE_PUBLICATIONS_LEGEND = '之后另设的发稿版本';
 export const MAINTENANCE_ERRATA_LABEL = '勘误内容';
 export const MAINTENANCE_CONCLUSION_LEGEND = '结论';
 export const MAINTENANCE_CONCLUSION_CHOICES = { unresolved: '仍未解决', complete: '已完成（AI7 内记录）' } as const;
+/** 替代 and 再版 end only with the separately designated version they name (MAINT-007). */
+export const MAINTENANCE_COMPLETE_AFTER_LINK = '关联另行设定的发稿版本之后，才能记为已完成。';
 export const MAINTENANCE_OUTCOME_LABEL = '结论说明';
 
 export const MAINTENANCE_STATUS_LINES = {
@@ -121,6 +127,9 @@ export const MAINTENANCE_STATUS_LINES = {
   stepping: '正在记录这一步…',
   stepFailed: '未能记录这一步。',
   cancelled: '已取消，没有记录维护事项。',
+  loadingOlder: '正在读取更早的维护事项…',
+  olderLoaded: '已列出更早的维护事项',
+  olderFailed: '无法读取更早的维护事项。',
 } as const;
 
 export const MAINTENANCE_TECHNICAL_TERMS = {
