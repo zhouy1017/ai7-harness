@@ -1071,9 +1071,9 @@ async function runAccessibilityJourney(renderer) {
   at('j14-keyboard-search-focus');
   await renderer.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0, replacementStart: 0, replacementEnd: 1 });
   // ⌘F is pressed only once its precondition holds: the composition the step before left open has ended in the editor, the
-  // window has focus and focus is still in the text. A key sent before the composition's end reaches the renderer is
-  // refused by the guard just proven, which is right and is no failure of the command (#579). A failure names the
-  // precondition that was missing, or what the command did instead (#474's pattern).
+  // window has focus and focus is still in the text. #579 suspected a key that reached the renderer before the composition's
+  // end, which the guard just proven refuses; the wait rules that out rather than assuming it. A failure names the
+  // precondition that was missing, or what this key press did instead (#474's pattern).
   const readiness = `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); return { compositionEnded: editor?.dataset.composing === 'false', windowFocused: document.hasFocus(), editorFocused: document.activeElement === editor }; })()`;
   let ready = null;
   const readyBy = Date.now() + 10_000;
@@ -1088,15 +1088,20 @@ async function runAccessibilityJourney(renderer) {
     else at('j14-keyboard-search-focus-editor-unfocused');
     requireJourney(false, 'keyboard-search-focus-precondition', { ready });
   }
+  // What this one press did is recorded as it happens: whether its keydown reached the page, with which modifiers and in
+  // what composition state, and whether the guard announced a refusal after it. The status line still holds the refusal
+  // the step before proved, so its words alone cannot say what this press did; setStatus replaces the line's text, so an
+  // observer sees a refusal even in the same words.
+  await renderer.evaluate(`(() => { const status = document.querySelector('#persistence-status'); const editor = document.querySelector('[data-testid="manuscript-editor"]'); const probe = { keydown: null, guardAnnounced: false }; const onKeydown = (event) => { if (probe.keydown === null && event.key.toLowerCase() === 'f') probe.keydown = { isComposing: event.isComposing, composing: editor?.dataset.composing ?? null, metaKey: event.metaKey, ctrlKey: event.ctrlKey }; }; const observer = new MutationObserver(() => { if (status?.textContent.includes('输入法组合尚未结束')) probe.guardAnnounced = true; }); if (status) observer.observe(status, { childList: true, characterData: true, subtree: true }); window.addEventListener('keydown', onKeydown, true); probe.stop = () => { observer.disconnect(); window.removeEventListener('keydown', onKeydown, true); }; globalThis.__ai7SearchKeyProbe = probe; return true; })()`);
   await press(renderer, 'f', modifier);
   let moved = false;
   const movedBy = Date.now() + 60_000;
   while (Date.now() < movedBy && !moved) {
-    moved = await renderer.evaluate(`document.activeElement?.id === 'manuscript-search'`).catch(() => false) === true;
+    moved = await renderer.evaluate(`document.activeElement?.id === 'manuscript-search'`) === true;
     if (!moved) await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
+  const after = await renderer.evaluate(`(() => { const probe = globalThis.__ai7SearchKeyProbe; probe?.stop(); return { keydown: probe?.keydown ?? null, guardAnnounced: probe?.guardAnnounced === true, active: document.activeElement?.id || document.activeElement?.tagName || null }; })()`);
   if (!moved) {
-    const after = await renderer.evaluate(`({ guardAnnounced: document.querySelector('#persistence-status')?.textContent.includes('输入法组合尚未结束') === true, active: document.activeElement?.id || document.activeElement?.tagName || null })`);
     at(after?.guardAnnounced === true ? 'j14-keyboard-search-focus-guard-announced' : 'j14-keyboard-search-focus-no-focus-move');
     requireJourney(false, 'keyboard-search-focus', { ready, after });
   }
