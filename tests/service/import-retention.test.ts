@@ -462,6 +462,60 @@ describe('schema revision 27 over the real store', () => {
     }
   }, 180_000);
 
+  it('does not bring back ready a reimport review over a Source Version an earlier parser read, and says why when it is prepared again (Issue #580)', async () => {
+    await requireExactSample1(roots.codeRoot);
+    let draftId: string;
+    let draftVersion: number;
+    let bookId: string;
+    let sourceVersionId: string;
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      bookId = (await importSample1Book(store, roots.codeRoot, '旧读取方式')).bookId;
+      sourceVersionId = withDatabase(true, (database) => String((database.prepare('SELECT source_version_id FROM source_versions').get() as Row).source_version_id));
+      // The unchanged file taken again as a reimport that reuses its exact Source Version: a review ready under this parser.
+      const again = await store.stageSelectedManuscript(randomUUID(), sample1Path(roots.codeRoot));
+      const started = store.createManuscriptReimportPreparationWork(again.draftId, again.draftVersion, {
+        kind: 'existing-book', bookId, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId: sourceVersionId,
+      });
+      let prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
+      while (!prepared.done) prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
+      draftId = prepared.review!.draftId;
+      draftVersion = prepared.review!.draftVersion;
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    // The Source Version as an earlier parser left it. sample1 has no comments or revisions, so its /2 and /3 reports are one.
+    withDatabase(false, (database) => {
+      database.prepare("UPDATE source_versions SET parser_identity = 'ai7-docx-fflate-saxes/2' WHERE source_version_id = ?").run(sourceVersionId);
+      database.prepare("UPDATE source_provenance SET parser_identity = 'ai7-docx-fflate-saxes/2' WHERE source_version_id = ?").run(sourceVersionId);
+    });
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const continued = await reopened.continueImportDraft(draftId!, draftVersion!);
+      expect(continued.state === 'target-review-required' && continued.reviewInvalidated).toBe(true);
+      const staged = continued.state === 'target-review-required' ? continued.staged : null;
+      const refused = ((): [string, string] | null => {
+        try {
+          const started = reopened.createManuscriptReimportPreparationWork(staged!.draftId, staged!.draftVersion, {
+            kind: 'existing-book', bookId: bookId!, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId: sourceVersionId!,
+          });
+          let progress = reopened.advanceManuscriptReimportPreparationWork(started.workId);
+          while (!progress.done) progress = reopened.advanceManuscriptReimportPreparationWork(started.workId);
+        } catch (error) {
+          if (error instanceof StoreError) return [error.code, error.message];
+          throw error;
+        }
+        return null;
+      })();
+      expect(refused).toEqual(['SOURCE_VERSION_PARSER_CHANGED', SOURCE_VERSION_PARSER_CHANGED_MESSAGE]);
+      expect(SOURCE_VERSION_PARSER_CHANGED_MESSAGE.endsWith('可以把它作为新建图书导入。')).toBe(true);
+      reopened.markCleanShutdown();
+    } finally {
+      reopened.close();
+    }
+  }, 180_000);
+
   it('finds a Book an earlier parser read by its content when the same content comes in another file (Issue #532)', async () => {
     await requireExactSample1(roots.codeRoot);
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
