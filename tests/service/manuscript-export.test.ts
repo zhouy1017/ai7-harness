@@ -16,7 +16,7 @@ import {
   writeAtomically,
 } from '../../src/service/manuscript-export.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CLARIFICATION_SCHEMA_VERSION, STORE_VERSION_SCHEMA_VERSION, IMPORTED_MARK_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { CLARIFICATION_SCHEMA_VERSION, DATABASE_EXPORT_SCHEMA_VERSION, IMPORTED_MARK_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import {
   DEFAULT_MANUSCRIPT_EXPORT_OPTIONS,
@@ -41,12 +41,19 @@ import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation
 const faults = vi.hoisted(() => ({ unreadable: null as string | null, readsBeforeUnreadable: 0, rivalAtStage: false }));
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
-  const readFile = (async (path: Parameters<typeof actual.readFile>[0], ...rest: unknown[]) => {
-    if (faults.unreadable !== null && String(path) === faults.unreadable) {
-      // The reads the case lets through first — the approval's, say — and every one after them fails.
-      if (faults.readsBeforeUnreadable > 0) faults.readsBeforeUnreadable -= 1;
-      else throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+  // Whether this read of the unreadable file fails: the reads the case lets through first — the approval's, say — pass,
+  // and every one after them fails.
+  const unreadable = (path: unknown): boolean => {
+    if (faults.unreadable === null || String(path) !== faults.unreadable) return false;
+    if (faults.readsBeforeUnreadable > 0) {
+      faults.readsBeforeUnreadable -= 1;
+      return false;
     }
+    return true;
+  };
+  const busy = (): Error => Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+  const readFile = (async (path: Parameters<typeof actual.readFile>[0], ...rest: unknown[]) => {
+    if (unreadable(path)) throw busy();
     return (actual.readFile as (...args: unknown[]) => Promise<unknown>)(path, ...rest);
   }) as typeof actual.readFile;
   const open = (async (path: Parameters<typeof actual.open>[0], flags?: string | number, mode?: number) => {
@@ -55,6 +62,8 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       await actual.writeFile(path, 'another program staged here');
       throw Object.assign(new Error('EEXIST: file already exists'), { code: 'EEXIST' });
     }
+    // A digest opens the file to read it in chunks (Issue #434), and the same disk refuses that open.
+    if ((flags === undefined || flags === 'r') && unreadable(path)) throw busy();
     return actual.open(path, flags, mode);
   }) as typeof actual.open;
   return { ...actual, readFile, open, default: { ...actual, readFile, open } };
@@ -576,7 +585,7 @@ describe('④ 导出: the Export Fidelity Review, the preparation, the approval 
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(STORE_VERSION_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_EXPORT_SCHEMA_VERSION);
       const truthAfter = relationTruth(database);
       expect([...truthAfter.keys()]).toEqual([...truthBefore.keys(), ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER].sort());
       for (const relation of [...MIGRATION_EMPTY_RELATIONS, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER]) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);

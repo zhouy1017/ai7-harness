@@ -105,6 +105,7 @@ import {
   SERIES_SCHEMA_VERSION,
   SERIES_KNOWLEDGE_SCHEMA_VERSION,
   STORE_VERSION_SCHEMA_VERSION,
+  DATABASE_EXPORT_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -180,6 +181,7 @@ import { EVALUATION_CALIBRATION_FOREIGN_KEYS, EVALUATION_CALIBRATION_SCHEMA_SQL,
 import { SERIES_FOREIGN_KEYS, SERIES_SCHEMA_SQL, SERIES_TRIGGER_SQL } from './series.js';
 import { SERIES_KNOWLEDGE_FOREIGN_KEYS, SERIES_KNOWLEDGE_SCHEMA_SQL, SERIES_KNOWLEDGE_TRIGGER_SQL } from './series-knowledge.js';
 import { DATA_VERSION_FOREIGN_KEYS, DATA_VERSION_SCHEMA_SQL, DATA_VERSION_TRIGGER_SQL } from './data-version.js';
+import { DATABASE_EXPORT_FOREIGN_KEYS, DATABASE_EXPORT_SCHEMA_SQL, DATABASE_EXPORT_TRIGGER_SQL } from './database-exports.js';
 import {
   MANUSCRIPT_EFFECT_FOREIGN_KEYS,
   MANUSCRIPT_EFFECT_SCHEMA_SQL,
@@ -1896,6 +1898,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...SERIES_FOREIGN_KEYS,
   ...SERIES_KNOWLEDGE_FOREIGN_KEYS,
   ...DATA_VERSION_FOREIGN_KEYS,
+  ...DATABASE_EXPORT_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2521,6 +2524,7 @@ function requireManuscriptReimportTargetSchema(
   includeSeriesTables = false,
   includeSeriesKnowledgeTables = false,
   includeDataVersionTables = false,
+  includeDatabaseExportTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2619,6 +2623,8 @@ function requireManuscriptReimportTargetSchema(
       ...(includeSeriesKnowledgeTables ? SERIES_KNOWLEDGE_SCHEMA_SQL : {}),
       // Revision 54 (Issue #433, S85a) adds the versions that opened the store.
       ...(includeDataVersionTables ? DATA_VERSION_SCHEMA_SQL : {}),
+      // Revision 55 (Issue #434, S86a) adds the database exports' preparations, approvals and receipts.
+      ...(includeDatabaseExportTables ? DATABASE_EXPORT_SCHEMA_SQL : {}),
     },
     // The partial index that keeps one primary Manuscript per Book stands with the rebuilt relation, whatever the version.
     {
@@ -2661,6 +2667,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeSeriesTables ? SERIES_TRIGGER_SQL : {}),
       ...(includeSeriesKnowledgeTables ? SERIES_KNOWLEDGE_TRIGGER_SQL : {}),
       ...(includeDataVersionTables ? DATA_VERSION_TRIGGER_SQL : {}),
+      ...(includeDatabaseExportTables ? DATABASE_EXPORT_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5356,6 +5363,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeSeriesTables = false,
   includeSeriesKnowledgeTables = false,
   includeDataVersionTables = false,
+  includeDatabaseExportTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5396,6 +5404,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeSeriesTables,
     includeSeriesKnowledgeTables,
     includeDataVersionTables,
+    includeDatabaseExportTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5482,7 +5491,8 @@ export function initializeBoundedSchema(
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
       version === SERIES_SCHEMA_VERSION ||
       version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      version === STORE_VERSION_SCHEMA_VERSION,
+      version === STORE_VERSION_SCHEMA_VERSION ||
+      version === DATABASE_EXPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5519,9 +5529,10 @@ export function initializeBoundedSchema(
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
       version === SERIES_SCHEMA_VERSION ||
       version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      version === STORE_VERSION_SCHEMA_VERSION) {
+      version === STORE_VERSION_SCHEMA_VERSION ||
+      version === DATABASE_EXPORT_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== STORE_VERSION_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== DATABASE_EXPORT_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5562,6 +5573,7 @@ export function initializeBoundedSchema(
           version >= SERIES_SCHEMA_VERSION,
           version >= SERIES_KNOWLEDGE_SCHEMA_VERSION,
           version >= STORE_VERSION_SCHEMA_VERSION,
+          version >= DATABASE_EXPORT_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);

@@ -191,6 +191,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j07-save-path' ||
           key === '--j07-folder-path' ||
           key === '--j04-save-path' ||
+          key === '--j12-save-path' ||
           key === '--j01-import-control' ||
           key === '--j03-foreground-execution-control' ||
           key === '--j08-recovery-control' ||
@@ -292,9 +293,12 @@ function parseArguments(argv: string[]): LaunchArguments {
   // J-07's for its exports, J-04's for the 审阅报告's (Issue #500, S64b part 2).
   const j07SavePath = values.get('--j07-save-path');
   const j04SavePath = values.get('--j04-save-path');
+  // J-12's for 导出数据库 (Issue #434, S86a).
+  const j12SavePath = values.get('--j12-save-path');
   requireDesktop(j07SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-07' && isAbsolute(j07SavePath)));
   requireDesktop(j04SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && isAbsolute(j04SavePath)));
-  const injectedSavePath = j07SavePath ?? j04SavePath;
+  requireDesktop(j12SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-12' && isAbsolute(j12SavePath)));
+  const injectedSavePath = j07SavePath ?? j04SavePath ?? j12SavePath;
   const injectedFolderPath = values.get('--j07-folder-path');
   requireDesktop(injectedFolderPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-07' && isAbsolute(injectedFolderPath)));
   const importControlValue = values.get('--j01-import-control');
@@ -1218,6 +1222,31 @@ function registerRendererHandlers(
       buttonLabel: '选择此位置',
       defaultPath: resolve(app.getPath('documents'), fileName),
       filters: [{ name: format.name, extensions: [format.extension] }],
+      properties: ['createDirectory', 'showOverwriteConfirmation'],
+    });
+    if (chosen.canceled || chosen.filePath === undefined || chosen.filePath.length === 0) return undefined;
+    requireDesktop(isAbsolute(chosen.filePath));
+    return chosen.filePath;
+  };
+
+  /**
+   * 导出数据库… (Issue #434, S86a; DSTO-017): the platform's own Save dialog for the database package, which owns an existing
+   * file's replace-or-rename choice (EXP-019), offering `AI7 数据库 <date>.ai7db` in the documents folder. J-12 alone may answer
+   * it once with a launch control instead; `undefined` is a cancelled dialog.
+   */
+  const chooseDatabaseExportFile = async (owned: OwnedRendererWindow): Promise<string | undefined> => {
+    const injected = consumeInjectedSavePath();
+    if (injected !== undefined) {
+      requireDesktop(isAbsolute(injected));
+      return injected;
+    }
+    const today = new Date();
+    const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const chosen = await dialog.showSaveDialog(owned.window, {
+      title: '选择导出数据库的位置',
+      buttonLabel: '选择此位置',
+      defaultPath: resolve(app.getPath('documents'), `AI7 数据库 ${date}.ai7db`),
+      filters: [{ name: 'AI7 数据库', extensions: ['ai7db'] }],
       properties: ['createDirectory', 'showOverwriteConfirmation'],
     });
     if (chosen.canceled || chosen.filePath === undefined || chosen.filePath.length === 0) return undefined;
@@ -2871,6 +2900,36 @@ function registerRendererHandlers(
       requireSender(event);
       requireAuthority();
       return service.call('inspectDataVersion', {});
+    }),
+  );
+  // 导出数据库 (Issue #434, S86a): house-wide, bound to no Book route; choosing the file prepares, and approving writes, each
+  // serialized with every other effect.
+  ipcMain.handle(IPC_CHANNELS.chooseDatabaseExportDestination, (event) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async (): Promise<Awaited<ReturnType<RendererApi['chooseDatabaseExportDestination']>>> => {
+        requireAuthority();
+        const destination = await chooseDatabaseExportFile(owned);
+        // A cancelled dialog records nothing at all (V2-UX-EXP-020).
+        if (destination === undefined) return { outcome: 'cancelled' };
+        return { outcome: 'prepared', preparation: await service.call('prepareDatabaseExport', { destination }) };
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.approveDatabaseExport, (event, input: Parameters<RendererApi['approveDatabaseExport']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('approveDatabaseExport', { preparationId: input.preparationId });
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectDatabaseExports, (event) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('inspectDatabaseExports', {});
     }),
   );
   // 书系知识 (Issue #63, S28b): house-wide and serialized; a candidate that cites a manuscript span comes from the window that

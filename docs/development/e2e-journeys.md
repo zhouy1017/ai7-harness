@@ -24,6 +24,12 @@ Since #430 (S82), after the final restart, `评估校准与预测` on the landin
 
 Since #433 (S85a), after the restart, 数据与存储 also shows `版本`. It gives `软件版本`, as the checkout's `package.json` names it, and `数据版本 1`, still unfrozen: 「开发阶段：首个正式发布时冻结为数据版本 1；在那之前，开发中的数据可以重建。」. It reads 「这份数据还没有经历过软件更新。」, because the same software reopened the data, and `版本记录（1）`.
 
+Since #434 (S86a), a stage after the credential is replaced relaunches with `--j12-save-path`, opens 数据与存储 and runs 导出数据库…:
+- The prepared card states the file, the place, `新建文件`, the contents and `数据版本 1`.
+- `按上述方式导出` writes the file and reads `已导出到所选位置`.
+- The runner then opens the package and checks its manifest: Data Version 1, schema revision 55, credentials excluded, and the number of Books the card counted.
+- It finds neither synthetic credential in any member, in UTF-8 or UTF-16.
+
 ## J-15 native artifact lifecycle
 
 Uses two synthetic empty Books to exercise the fixed repository-bundled `编辑工作区方案` through the production renderer, Main-owned current-Book route, private stdio service, SQLite, and Agent Data Root. Installation retains the unchanged native carrier and materializes the fixed `ai7.editorial-workspace-profile.authority` Revision 1 and Revision 2 definitions while remaining disabled; fresh enablement pins the Book directly to Revision 2. The Journey then closes the product, constructs a disposable exact schema-v12 predecessor with a canonical future-skewed enablement time, and proves production migration pins the existing enabled Book to Revision 1 until the same action explicitly appends Revision 2. Restart retains the append-only history while a later Book remains disabled and unpinned. Revision 2 adds eligibility only for the current Book's primary Manuscript Revision and Source Version; every Task, Plan, Run, Provider, credential, network, Effect, Enrollment, Apply, export, and release authority remains absent. The predecessor constructor drops every post-v12 table; a new schema layer must add its tables to that list.

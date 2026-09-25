@@ -101,8 +101,9 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 // 导出's four members (Issue #413): the only renderer members named like an export, and none publishes or sends.
 // Issue #416 (S67b): a 图书交付包 version's export adds its own three, and nothing else that exports, publishes or sends.
 const EXPORT_MEMBERS = Object.freeze([
-  'approveBookDeliveryPackageExport', 'approveManuscriptExport', 'chooseBookDeliveryPackageExportFolder', 'chooseManuscriptExportDestination',
-  'revealManuscriptExport', 'reviewBookDeliveryPackageExport', 'reviewManuscriptExport',
+  'approveBookDeliveryPackageExport', 'approveDatabaseExport', 'approveManuscriptExport', 'chooseBookDeliveryPackageExportFolder',
+  'chooseDatabaseExportDestination', 'chooseManuscriptExportDestination', 'inspectDatabaseExports', 'revealManuscriptExport',
+  'reviewBookDeliveryPackageExport', 'reviewManuscriptExport',
 ]);
 // Issue #415 (S66a): a 新闻稿's draft, composed at run time from exact sample1's paragraphs after the manuscript's own,
 // imported as source material and made the Book's 新闻稿; the house's five types in its order; and the document's edit.
@@ -836,7 +837,8 @@ async function main() {
     at('import-and-open');
     let renderer = await launch({ picker: manuscript, save: exportPath });
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true'`, 'product-ready');
-    // The renderer holds the two 交付物 members, 导出's four and the package export's three, and nothing that could publish or send.
+    // The renderer holds the two 交付物 members, 导出's four, the package export's three and 导出数据库's three (Issue #434), and
+    // nothing that could publish or send.
     await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && typeof window.ai7.inspectDeliverables === 'function' && typeof window.ai7.designatePublicationVersion === 'function' && ${EXPORT_MEMBERS_ONLY}`, 'renderer-api-boundary');
     await renderer.send('Page.setBypassCSP', { enabled: true });
     try {

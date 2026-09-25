@@ -357,6 +357,11 @@ const api: RendererApi = Object.freeze({
   inspectBookSeries: (input: ServiceOperationMap['inspectBookSeries']['input']) =>
     invoke<ServiceOperationMap['inspectBookSeries']['output']>(IPC_CHANNELS.inspectBookSeries, input),
   inspectDataVersion: () => invoke<ServiceOperationMap['inspectDataVersion']['output']>(IPC_CHANNELS.inspectDataVersion, {}),
+  chooseDatabaseExportDestination: () =>
+    invoke<Awaited<ReturnType<RendererApi['chooseDatabaseExportDestination']>>>(IPC_CHANNELS.chooseDatabaseExportDestination, {}),
+  approveDatabaseExport: (input: Parameters<RendererApi['approveDatabaseExport']>[0]) =>
+    invoke<ServiceOperationMap['approveDatabaseExport']['output']>(IPC_CHANNELS.approveDatabaseExport, input),
+  inspectDatabaseExports: () => invoke<ServiceOperationMap['inspectDatabaseExports']['output']>(IPC_CHANNELS.inspectDatabaseExports, {}),
   proposeSeriesKnowledge: (input: ServiceOperationMap['proposeSeriesKnowledge']['input']) =>
     invoke<ServiceOperationMap['proposeSeriesKnowledge']['output']>(IPC_CHANNELS.proposeSeriesKnowledge, input),
   inspectSeriesKnowledgeReview: (input: ServiceOperationMap['inspectSeriesKnowledgeReview']['input']) =>

@@ -206,6 +206,17 @@ The Data Version (ADR 0079 §1) is `1`, and it is not frozen: Data Version 1 is 
 
 A version record rewritten by hand stops the store from opening. The backup before a breaking upgrade, its rollback, and the package format they share with 导出数据库 come with S85b and S86 (#434).
 
+导出数据库 (Issue #434, S86a) is service protocol version 81 and schema revision 55. `src/service/database-exports.ts` owns three append-only relations: each export's preparation, approval and receipt. They are ledgers like the export ledger's, and every read verifies them.
+
+The package, `ai7.database-package/1`, is a ZIP of:
+- `store/ai7.sqlite`, a consistent copy of the store made by `VACUUM INTO`;
+- every other file under the Agent Data Root, except the live store, `export-staging/` and `shell/`;
+- `manifest.json`, last: the Data Version, the software version and schema revision, when and why it was made, what it holds, and each member's size and digest.
+
+It is not encrypted (ADR 0079 §1.6). It holds no Model Service credential, because those live in the platform's protected store. fflate writes no ZIP64, so a package over 4 GB or over 65,534 files is refused with the reason.
+
+`导出数据库…` opens the system's Save dialog; J-12 answers it with `--j12-save-path`. Choosing the file stages the package in `export-staging/` and records the preparation. `按上述方式导出` writes exactly that package with the export ledger's atomic writer, which now also copies a staged file, and records the receipt. The export runs through External Export Policy v2 as its own target kind, `database-export-package`. The backups of S86b and S85b will be the same package.
+
 
 
 Delivery Records (Issue #415, S66b) are schema revision 38, on service protocol version 56. `production_document_deliveries` is one more append-only relation in `src/service/production-document-ledger.ts`: each row is `第 N 次交付` of one document, names one saved version by its revision and digest, and records the recipient, from the house's list (宣传部, 编辑部, 外部媒体, 其他) or in the editor's own words, and an optional note. Its canonical record and digest are verified on every read. `交付` names a saved version, or the current text: bound to the working digest the form read, it is saved as the next version (origin `delivery`) in the transaction that records the delivery, and the recipient and note are checked before anything is saved. A delivery sends nothing. The export of a delivered version goes through the same export ledger under target kind `production-document-version`, with the revision columns left empty and the document's identity and version digest in the canonical record. A Delivery Record reads its file from the newest export of its version approved after it and before the document's next delivery that wrote its file, or else from the newest attempt, so a failed or unconfirmed re-export never hides the file handed over. `交付后有修改` is an edit after a delivery: the document was delivered and its working digest is no delivered version's, so delivering an earlier saved version raises nothing. Production Documents moved out of the 交付物 answer into a read of their own, `inspectProductionDocuments`: with their versions and Delivery Records beside the Manuscript's milestones and designations, the widest answer would not fit one service frame. The documents' commands answer with that read, and `recordProductionDocumentDelivery` is the one new command.

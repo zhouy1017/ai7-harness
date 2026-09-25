@@ -565,6 +565,12 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectBookSeries(request.input.bookId) };
     case 'inspectDataVersion':
       return { id: request.id, ok: true, op: request.op, result: store.inspectDataVersion() };
+    case 'prepareDatabaseExport':
+      return { id: request.id, ok: true, op: request.op, result: await store.prepareDatabaseExport(request.input.destination) };
+    case 'approveDatabaseExport':
+      return { id: request.id, ok: true, op: request.op, result: await store.approveDatabaseExport(request.input.preparationId) };
+    case 'inspectDatabaseExports':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectDatabaseExports() };
     case 'proposeSeriesKnowledge':
       return { id: request.id, ok: true, op: request.op, result: store.proposeSeriesKnowledge(request.input) };
     case 'inspectSeriesKnowledgeReview':

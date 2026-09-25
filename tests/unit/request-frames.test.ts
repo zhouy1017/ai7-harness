@@ -1289,6 +1289,31 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
+  it('accepts 导出数据库: an absolute destination, the one preparation it approves, and the records naming nothing (Issue #434, S86a)', () => {
+    const destination = process.platform === 'win32' ? 'C:\\Users\\编辑\\Documents\\AI7 数据库.ai7db' : '/Users/编辑/Documents/AI7 数据库.ai7db';
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'prepareDatabaseExport', input: { destination } },
+      { op: 'approveDatabaseExport', input: { preparationId: randomUUID() } },
+      { op: 'inspectDatabaseExports', input: {} },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    for (const [op, input] of [
+      ['prepareDatabaseExport', { destination: 'AI7 数据库.ai7db' }],
+      ['prepareDatabaseExport', { destination: 'x'.repeat(1025) }],
+      ['prepareDatabaseExport', { destination: 7 }],
+      ['prepareDatabaseExport', {}],
+      ['prepareDatabaseExport', { destination, format: 'docx' }],
+      ['approveDatabaseExport', { preparationId: 'preparation' }],
+      ['approveDatabaseExport', {}],
+      ['inspectDatabaseExports', { total: 1 }],
+    ] as const) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('accepts 书系知识: a candidate of the editor\'s words or a manuscript span, its review, its edit and its promotion (Issue #63, S28b)', () => {
     const seriesId = randomUUID();
     const candidateId = randomUUID();

@@ -9,7 +9,7 @@ import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { REVIEW_GUIDELINE_TRIGGER_SQL } from '../../src/service/review-guidelines.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { BOOK_PEOPLE_SCHEMA_VERSION, STORE_VERSION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { BOOK_PEOPLE_SCHEMA_VERSION, DATABASE_EXPORT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { buildManuscriptPackage } from '../../src/service/text-manuscript.js';
 import type { LaunchPolicyProjection, ReviewGuidelinesProjection, ReviewRunProjection, ReviewRunScopeRequest } from '../../src/shared/protocol.js';
 import { TYPOS_AND_USAGE } from '../support/review-categories.js';
@@ -257,7 +257,7 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
     // A revision-44 store never held the relation: planted by dropping it, it gains it again empty.
     const plant = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      plant.exec(`DROP TABLE store_versions; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; DROP TABLE learning_eligibility_decisions; DROP TABLE proposal_decision_feedback; DROP TABLE analysis_feedback_signals; DROP TABLE evaluation_record_entries; DROP TABLE evaluation_records; DROP TABLE library_material_decisions; DROP TABLE library_materials; DROP TABLE review_guideline_versions; PRAGMA user_version = ${BOOK_PEOPLE_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; DROP TABLE learning_eligibility_decisions; DROP TABLE proposal_decision_feedback; DROP TABLE analysis_feedback_signals; DROP TABLE evaluation_record_entries; DROP TABLE evaluation_records; DROP TABLE library_material_decisions; DROP TABLE library_materials; DROP TABLE review_guideline_versions; PRAGMA user_version = ${BOOK_PEOPLE_SCHEMA_VERSION};`);
     } finally {
       plant.close();
     }
@@ -271,7 +271,7 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
     }
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(STORE_VERSION_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_EXPORT_SCHEMA_VERSION);
       expect(() => database.exec("UPDATE review_guideline_versions SET recorded_at = recorded_at")).toThrowError(/REVIEW_GUIDELINE_LEDGER_IMMUTABLE/u);
       expect(() => database.exec('DELETE FROM review_guideline_versions')).toThrowError(/REVIEW_GUIDELINE_LEDGER_IMMUTABLE/u);
       // Rewritten by hand behind the triggers' back: the chain no longer reads, and the page says so rather than guess.

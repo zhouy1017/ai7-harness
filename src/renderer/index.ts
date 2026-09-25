@@ -94,6 +94,7 @@ import {
   dataVersionUpdateLine,
   storeVersionLine,
 } from './data-version-labels.js';
+import { mountDatabaseExport } from './database-export.js';
 import { SERIES_BACK_TO_LIST, SERIES_LEDE, SERIES_STATUS, SERIES_TITLE } from './series-labels.js';
 import { CALIBRATION_PAGE_GROUP, CALIBRATION_PAGE_LEDE, CALIBRATION_PAGE_TITLE, CALIBRATION_STATUS } from './evaluation-calibration-labels.js';
 import {
@@ -4392,7 +4393,10 @@ async function renderDataAndStorage(): Promise<void> {
     // 版本 (Issue #433, S85a; DSTO-016): the software version and the Data Version apart, read from the store.
     const versions = element('section', 'source-card data-version');
     versions.append(element('h3', undefined, DATA_VERSION_HEADING), element('p', 'field-note', '正在读取版本…'));
-    content.append(summary, credentials, versions, actions);
+    // 导出数据库 (Issue #434, S86a; DSTO-017): the one file, through the system's Save dialog and an approval as stated.
+    const databaseExport = element('section', 'source-card');
+    content.append(summary, credentials, versions, databaseExport, actions);
+    mountDatabaseExport({ root: databaseExport, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
     void window.ai7.inspectDataVersion().then((version) => {
       if (!versions.isConnected) return;
       versions.dataset['dataVersion'] = String(version.dataVersion);

@@ -11,7 +11,7 @@ import { PLAN_EDIT_ADAPTATION_LABELS } from '../../src/service/analysis/plan-edi
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CLARIFICATION_SCHEMA_VERSION, STORE_VERSION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { CLARIFICATION_SCHEMA_VERSION, DATABASE_EXPORT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
   ANSWER_BLOCKED_OFFLINE,
   RESUME_BLOCKED_BINDING,
@@ -184,7 +184,7 @@ describe('schema revision 35 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(STORE_VERSION_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_EXPORT_SCHEMA_VERSION);
       expect(runStatesShapeAt34(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_run_states ORDER BY rowid').all()).toEqual(before.states);
       const after = relationTruth(database);

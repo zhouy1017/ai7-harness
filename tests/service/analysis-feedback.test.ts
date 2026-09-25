@@ -7,7 +7,7 @@ import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execu
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { STORE_VERSION_SCHEMA_VERSION, EVALUATION_RECORD_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { DATABASE_EXPORT_SCHEMA_VERSION, EVALUATION_RECORD_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
   type AnalysisFeedbackProjection,
@@ -170,7 +170,7 @@ describe('②A 分析反馈 over the real store', () => {
     }
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(STORE_VERSION_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_EXPORT_SCHEMA_VERSION);
       expect(() => database.exec('UPDATE analysis_feedback_signals SET judgment = judgment')).toThrowError(/ANALYSIS_FEEDBACK_LEDGER_IMMUTABLE/u);
       expect(() => database.exec('DELETE FROM analysis_feedback_signals')).toThrowError(/ANALYSIS_FEEDBACK_LEDGER_IMMUTABLE/u);
       // Rewritten by hand behind the triggers' back, the signal no longer reads, and the page says so rather than guess.
@@ -197,7 +197,7 @@ describe('②A 分析反馈 over the real store', () => {
     }
     const plant = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      plant.exec(`DROP TABLE store_versions; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; DROP TABLE learning_eligibility_decisions; DROP TABLE proposal_decision_feedback; DROP TABLE analysis_feedback_signals; PRAGMA user_version = ${EVALUATION_RECORD_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; DROP TABLE learning_eligibility_decisions; DROP TABLE proposal_decision_feedback; DROP TABLE analysis_feedback_signals; PRAGMA user_version = ${EVALUATION_RECORD_SCHEMA_VERSION};`);
     } finally {
       plant.close();
     }
@@ -209,7 +209,7 @@ describe('②A 分析反馈 over the real store', () => {
     }
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(STORE_VERSION_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_EXPORT_SCHEMA_VERSION);
       expect((database.prepare('SELECT count(*) count FROM analysis_feedback_signals').get() as { count: number }).count).toBe(0);
     } finally {
       database.close();
