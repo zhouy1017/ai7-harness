@@ -608,15 +608,16 @@ async function main() {
     requireJourney(returned.record.heading === '第 1 版 · 定稿' && returned.start === '重新评估' && returned.versions.length === 1, 'evaluation-from-manuscript-words', returned);
 
     at('evaluation-reevaluate');
-    // 重新评估: version 2 begins from 定稿's scores; one moved item shows against version 1.
+    // 重新评估: version 2 begins from 定稿's scores but not its conclusion, which the editor decides again for this text; one
+    // moved item shows against version 1.
     await clickSelector(renderer, '[data-evaluation-action="start"]', 'evaluation-again');
     const again = await readEvaluation(renderer, (page) => page.record?.heading === '第 2 版 · 编辑评分中', 'evaluation-again-started');
     requireJourney(JSON.stringify(again.record.items.map(([, , score]) => score)) === JSON.stringify(['18', '16.5', '15', '17', '']) &&
-      JSON.stringify(again.record.comparison) === JSON.stringify(['与第 1 版相比', '总分：66.5 / 80 → 66.5 / 80']), 'evaluation-again-seeded', again.record);
+      JSON.stringify(again.record.comparison) === JSON.stringify(['与第 1 版相比', '总分：66.5 / 80 → 66.5 / 80', '结论：修改后再议 → 结论未定']), 'evaluation-again-seeded', again.record);
     await fill(renderer, `${item('literary-quality')} [data-evaluation-field="score"]`, '19', 'evaluation-again-score');
     await clickSelector(renderer, '[data-evaluation-action="save"]', 'evaluation-again-save');
-    const compared = await readEvaluation(renderer, (page) => page.record?.entries === '2' && page.record.comparison?.length === 3, 'evaluation-compared');
-    requireJourney(JSON.stringify(compared.record.comparison) === JSON.stringify(['与第 1 版相比', '文学品质与作者声音：18 → 19', '总分：66.5 / 80 → 67.5 / 80']) &&
+    const compared = await readEvaluation(renderer, (page) => page.record?.entries === '2' && page.record.comparison?.length === 4, 'evaluation-compared');
+    requireJourney(JSON.stringify(compared.record.comparison) === JSON.stringify(['与第 1 版相比', '文学品质与作者声音：18 → 19', '总分：66.5 / 80 → 67.5 / 80', '结论：修改后再议 → 结论未定']) &&
       compared.versions.length === 2 && compared.versions[1] === '第 1 版 · 定稿 · 修订版 r1 · 总分 66.5 / 80 · 优秀（1 项不评） · 修改后再议', 'evaluation-compared-words', compared);
 
     at('j14-evaluation-reflow-forced-colors');
@@ -637,7 +638,7 @@ async function main() {
     at('evaluation-overview-and-profile');
     // 工作概览 names the version on show in one line; 知识库 › 评估方案 names the profile and counts its use.
     await assertRenderer(renderer, `(() => { const open = Array.from(document.querySelectorAll('[data-screen="book-evaluation"] .workbench-actions button')).find((button) => button.textContent === '工作概览'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'evaluation-overview');
-    await waitFor(renderer, `document.querySelector('.book-evaluation-summary')?.dataset.evaluationState === 'editing' && document.querySelector('.book-evaluation-summary p')?.textContent === '第 2 版 · 编辑评分中 · 修订版 r1 · 总分 67.5 / 80 · 优秀（1 项不评） · 修改后再议'`, 'evaluation-overview-line');
+    await waitFor(renderer, `document.querySelector('.book-evaluation-summary')?.dataset.evaluationState === 'editing' && document.querySelector('.book-evaluation-summary p')?.textContent === '第 2 版 · 编辑评分中 · 修订版 r1 · 总分 67.5 / 80 · 优秀（1 项不评） · 结论未定'`, 'evaluation-overview-line');
     await click(renderer, '返回图书列表', 'evaluation-profile-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'evaluation-profile-landing');
     await click(renderer, '知识库', 'evaluation-profile-knowledge');
