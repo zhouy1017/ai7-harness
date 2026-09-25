@@ -527,9 +527,9 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.importReviewGuidelineVersion(request.input.previewId) };
     // 知识库 › 范例 (Issue #427, S79b).
     case 'inspectExemplars':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectExemplars() };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectExemplars(request.input.after) };
     case 'inspectKnowledgeProcedures':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectKnowledgeProcedures() };
+      return { id: request.id, ok: true, op: request.op, result: await store.inspectKnowledgeProcedures() };
     case 'inspectLibraryMaterials':
       return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterials() };
     case 'previewLibraryMaterial':
@@ -900,6 +900,8 @@ async function dispatch(
       };
     case 'inspectMaintenanceCase':
       return { id: request.id, ok: true, op: request.op, result: store.inspectMaintenanceCase(request.input) };
+    case 'listMaintenanceCases':
+      return { id: request.id, ok: true, op: request.op, result: store.listMaintenanceCases(request.input) };
     case 'recordMaintenanceCase':
       return { id: request.id, ok: true, op: request.op, result: store.recordMaintenanceCase(request.input) };
     case 'appendMaintenanceCaseRevision':
@@ -1227,14 +1229,8 @@ async function run(): Promise<void> {
         // It stays 任务等待你的说明 with its answer; the next launch takes it on again.
       }
     }
-    // Starts the governor had not admitted when AI7 closed (Issue #49, S14; CONC-007) wait again, in their order.
-    for (const runRecordId of reconciled.queued) {
-      try {
-        analysisExecution.admitOrQueue(runRecordId, store.baselineAnalysisLedger);
-      } catch {
-        // One this launch cannot admit is blocked before dispatch with the reason; nothing of it ran.
-      }
-    }
+    // Starts the governor had not admitted when AI7 closed were blocked with why by the reconciliation: nothing starts by
+    // itself after a restart (ADR 0034), and the editor starts them again when they choose.
     // A Review Run's categories take a place of the one owner's governor one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);
     // Connectivity Wait (Issue #502). The reading is the device's own unless J-04's control names a file; the

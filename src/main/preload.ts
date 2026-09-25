@@ -255,7 +255,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['previewReviewGuidelineVersion']['output'] | null>(IPC_CHANNELS.previewReviewGuidelineVersion, input),
   importReviewGuidelineVersion: (input: ServiceOperationMap['importReviewGuidelineVersion']['input']) =>
     invoke<ServiceOperationMap['importReviewGuidelineVersion']['output']>(IPC_CHANNELS.importReviewGuidelineVersion, input),
-  inspectExemplars: () => invoke<ServiceOperationMap['inspectExemplars']['output']>(IPC_CHANNELS.inspectExemplars),
+  inspectExemplars: (input?: ServiceOperationMap['inspectExemplars']['input']) =>
+    invoke<ServiceOperationMap['inspectExemplars']['output']>(IPC_CHANNELS.inspectExemplars, input ?? { after: null }),
   inspectKnowledgeProcedures: () => invoke<ServiceOperationMap['inspectKnowledgeProcedures']['output']>(IPC_CHANNELS.inspectKnowledgeProcedures),
   inspectLibraryMaterials: () => invoke<ServiceOperationMap['inspectLibraryMaterials']['output']>(IPC_CHANNELS.inspectLibraryMaterials),
   previewLibraryMaterial: () =>
@@ -386,6 +387,8 @@ const api: RendererApi = Object.freeze({
     invoke<Awaited<ReturnType<RendererApi['approveBookDeliveryPackageExport']>>>(IPC_CHANNELS.approveBookDeliveryPackageExport, input),
   inspectMaintenanceCase: (input: Parameters<RendererApi['inspectMaintenanceCase']>[0]) =>
     invoke<Awaited<ReturnType<RendererApi['inspectMaintenanceCase']>>>(IPC_CHANNELS.inspectMaintenanceCase, input),
+  listMaintenanceCases: (input: Parameters<RendererApi['listMaintenanceCases']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['listMaintenanceCases']>>>(IPC_CHANNELS.listMaintenanceCases, input),
   recordMaintenanceCase: (input: Parameters<RendererApi['recordMaintenanceCase']>[0]) =>
     invoke<Awaited<ReturnType<RendererApi['recordMaintenanceCase']>>>(IPC_CHANNELS.recordMaintenanceCase, input),
   appendMaintenanceCaseRevision: (input: Parameters<RendererApi['appendMaintenanceCaseRevision']>[0]) =>

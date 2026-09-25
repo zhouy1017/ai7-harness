@@ -568,6 +568,9 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .default-rule-heading h3 { margin: 0; overflow-wrap: anywhere; }
 .default-rule-card p { margin: 0; }
 .default-rule-state-deactivated { border-style: dashed; }
+/* 工序与规则's 工序 (S79d): one that can run is drawn solid, one not connected yet dashed — its state in shape as in words. */
+.procedure-state-enabled { border: 1px solid currentColor; }
+.procedure-state-unavailable { border: 1px dashed currentColor; }
 /* 知识库 (Issue #427, S79a): its seven classes as tabs, and 审阅规范文件's cards. */
 .knowledge-tabs { display: flex; flex-wrap: wrap; gap: .4rem; margin: .8rem 0; padding-bottom: .5rem; border-bottom: 1px solid #ded9cd; }
 .knowledge-tabs [role="tab"][aria-selected="true"] { border-bottom: 3px solid #2c463b; font-weight: 800; }
@@ -744,6 +747,11 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .package-export-files > li > span { display: block; }
 .package-export-files .status-pill { margin-top: .2rem; }
 .package-export-outcome.is-failed, .package-export-outcome.is-ambiguous, .package-export-outcome.is-not-written { font-weight: 800; }
+.package-export-fidelity { margin-top: .25rem; }
+.package-export-fidelity > summary { cursor: pointer; font-size: .9rem; font-weight: 700; }
+.package-export-files > li[data-package-export-degraded="true"] .package-export-fidelity > summary { font-weight: 800; }
+.package-export-fidelity .export-fidelity { margin-top: .4rem; padding-top: .4rem; }
+.package-export-fidelity .export-format-line { margin: .4rem 0 0; }
 .package-export-folder-choice { margin-top: .8rem; padding-top: .7rem; border-top: 1px solid #d5dcd9; }
 .package-export-folder-line { margin: 0 0 .5rem; }
 .package-export .export-actions { margin-top: .7rem; }
@@ -1250,6 +1258,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
     border: 1px solid ButtonText;
     forced-color-adjust: auto;
   }
+  .procedure-state-unavailable { border-style: dashed; }
   .analysis-tab { color: ButtonText; background: ButtonFace; border: 1px solid ButtonText; forced-color-adjust: auto; }
   .analysis-tab[aria-selected="true"] { border-bottom: 3px solid Highlight; }
   /* A 审阅 pill's shape is its own drawing, so it is drawn in the pill's text colour, never left to vanish. */

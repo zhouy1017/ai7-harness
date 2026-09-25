@@ -36,6 +36,7 @@ describe('the words of 维护事项', () => {
     expect(labels.MAINTENANCE_ACTION_LABELS).toEqual({
       record: '记录维护事项…', confirmRecord: '记录维护事项', cancel: '取消', openCase: '查看', closeCase: '收起', linkProposal: '关联修改建议…',
       linkPublication: '关联发稿版本…', confirmLink: '关联', writeErrata: '编写勘误…', saveErrata: '保存勘误版本', conclude: '记录维护事项结论…', confirmConclude: '记录结论',
+      older: '更早的维护事项…',
     });
     expect(labels.maintenanceRecordAccessibleName(2)).toBe('为第 2 次设为发稿版本记录维护事项…');
     expect([labels.MAINTENANCE_CLASSIFICATION_LEGEND, labels.MAINTENANCE_REASON_LABEL, labels.MAINTENANCE_EVIDENCE_LABEL, labels.MAINTENANCE_EVIDENCE_HINT])
@@ -48,7 +49,7 @@ describe('the words of 维护事项', () => {
     expect(labels.maintenanceCaseLine({ ordinal: 1, classificationLabel: '勘误', statusLabel: '未解决', nextStep: 'write-errata' })).toBe('第 1 项 · 勘误 · 未解决 · 下一步：编写勘误');
     expect(labels.maintenanceCaseLine({ ordinal: 4, classificationLabel: '撤回', statusLabel: '已完成（AI7 内记录）', nextStep: null })).toBe('第 4 项 · 撤回 · 已完成（AI7 内记录）');
     expect(labels.maintenanceCaseAccessibleName({ ordinal: 1, classificationLabel: '勘误' })).toBe('查看第 1 项维护事项（勘误）');
-    expect(labels.MAINTENANCE_CASES_TRUNCATED).toBe('更早的维护事项保留在记录中。');
+    expect(labels.maintenanceOlderLine(3)).toBe('还有 3 项更早的维护事项');
     expect(labels.maintenanceCaseHeading(1, '勘误')).toBe('第 1 项维护事项 · 勘误');
     expect(labels.maintenanceTargetLine('第 1 次 · 「一审稿」 · r1 · 纸质版首印')).toBe('绑定的发稿版本：第 1 次 · 「一审稿」 · r1 · 纸质版首印');
     expect(labels.maintenanceStatusLine('等待另设发稿版本', 'link-publication')).toBe('状态：等待另设发稿版本 · 下一步：关联发稿版本');
@@ -61,16 +62,18 @@ describe('the words of 维护事项', () => {
     expect(labels.maintenanceLinkLine({ kind: 'proposal', markId: 'm', label: '修改建议 · 「甲」→「乙」', stateLabel: '已应用' })).toBe('关联：修改建议 · 「甲」→「乙」 · 已应用');
     expect(labels.maintenanceLinkLine({ kind: 'publication-version', publicationVersionId: 'p', label: '第 2 次 · 「更正稿」 · r2 · 纸质版二印' }))
       .toBe('关联发稿版本：第 2 次 · 「更正稿」 · r2 · 纸质版二印');
-    expect(labels.maintenanceLinkLine({ kind: 'errata', errataVersionId: 'e', version: 3, body: '…' })).toBe('勘误第 3 版');
+    expect(labels.maintenanceLinkLine({ kind: 'errata', errataVersionId: 'e', version: 3 })).toBe('勘误第 3 版');
     expect(labels.maintenanceErrataHeading(3)).toBe('勘误 · 第 3 版');
     expect(labels.MAINTENANCE_NO_PROPOSALS).toBe('这个发稿版本之后，稿件上还没有修改建议：先在稿件中提出修改建议，再回到这里关联。');
     expect(labels.MAINTENANCE_NO_PUBLICATIONS).toBe('还没有在这个发稿版本之后另设的发稿版本：先保存里程碑版本，再另行设为发稿版本。');
     expect([labels.MAINTENANCE_PROPOSALS_LEGEND, labels.MAINTENANCE_PUBLICATIONS_LEGEND, labels.MAINTENANCE_ERRATA_LABEL, labels.MAINTENANCE_CONCLUSION_LEGEND, labels.MAINTENANCE_OUTCOME_LABEL])
       .toEqual(['这个发稿版本之后提出的修改建议', '之后另设的发稿版本', '勘误内容', '结论', '结论说明']);
     expect(labels.MAINTENANCE_CONCLUSION_CHOICES).toEqual({ unresolved: '仍未解决', complete: '已完成（AI7 内记录）' });
+    expect(labels.MAINTENANCE_COMPLETE_AFTER_LINK).toBe('关联另行设定的发稿版本之后，才能记为已完成。');
     expect(labels.MAINTENANCE_STATUS_LINES).toEqual({
       reading: '正在读取维护事项…', readFailed: '无法读取维护事项。', recording: '正在记录维护事项…', recordFailed: '未能记录维护事项。',
       stepping: '正在记录这一步…', stepFailed: '未能记录这一步。', cancelled: '已取消，没有记录维护事项。',
+      loadingOlder: '正在读取更早的维护事项…', olderLoaded: '已列出更早的维护事项', olderFailed: '无法读取更早的维护事项。',
     });
   });
 
@@ -81,7 +84,7 @@ describe('the words of 维护事项', () => {
       wording.MAINTENANCE_RECORDED, wording.MAINTENANCE_CONCLUDED, wording.maintenanceWithdrawnLine('发稿版本「一审稿」 · r1'), wording.MAINTENANCE_ARCHIVED,
       labels.MAINTENANCE_HEADING, ...Object.values(labels.MAINTENANCE_ACTION_LABELS), labels.maintenanceRecordAccessibleName(1),
       labels.MAINTENANCE_CLASSIFICATION_LEGEND, labels.MAINTENANCE_REASON_LABEL, labels.MAINTENANCE_EVIDENCE_LABEL, labels.MAINTENANCE_EVIDENCE_HINT,
-      ...Object.values(labels.MAINTENANCE_BLOCKERS), labels.MAINTENANCE_CASES_TRUNCATED, labels.MAINTENANCE_TIMELINE_LABEL, labels.MAINTENANCE_REVISIONS_TRUNCATED,
+      ...Object.values(labels.MAINTENANCE_BLOCKERS), labels.maintenanceOlderLine(3), labels.MAINTENANCE_COMPLETE_AFTER_LINK, labels.MAINTENANCE_TIMELINE_LABEL, labels.MAINTENANCE_REVISIONS_TRUNCATED,
       labels.MAINTENANCE_NO_PROPOSALS, labels.MAINTENANCE_NO_PUBLICATIONS, ...Object.values(labels.MAINTENANCE_CONCLUSION_CHOICES),
       ...Object.values(labels.MAINTENANCE_STATUS_LINES),
     ];

@@ -207,6 +207,10 @@ describe('the four groups of 待我处理', () => {
     });
     expect(decisions[0]!.technical.map((row) => row.key)).toEqual(['maintenance-case', 'publication-version', 'state-at']);
     expect(projection.actionableCount).toBe(2);
+    // A 替代 or 再版 that recorded an interim 仍未解决 still waits for its version: it reads as waiting, never as a 更正.
+    const interim = { ...reading('supersession', 'unresolved', 'link-publication', minutesAgo(10)), classification: 'reissue' as const };
+    const later = group(composeGlobalAttention(readings({ maintenance: [interim] }), NOW), 'decisions');
+    expect(later.map((entry) => [entry.state, entry.nextStep])).toEqual([['maintenance-waiting', 'maintenance-link-publication']]);
   });
 
   it('lists a Run waiting to start once online under 运行中与已暂停, in the words of what it waits for (Issue #502, ATTN-004)', () => {

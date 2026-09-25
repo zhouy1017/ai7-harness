@@ -1,5 +1,7 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
@@ -41,10 +43,10 @@ async function compose(name: string, paragraphs: ReadonlyArray<ReturnType<typeof
 
 interface Book { bookId: string; manuscriptId: string; branchId: string }
 
-async function importBook(store: EditorialStore, path: string): Promise<Book> {
+async function importBook(store: EditorialStore, path: string, acceptDegradation = false): Promise<Book> {
   const staged = await store.stageSelectedManuscript(randomUUID(), path);
   const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
-    { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false);
+    { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, acceptDegradation);
   const commitId = randomUUID();
   const commit = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest!, commitId });
   await store.acknowledgeImportCompletion(commitId);
@@ -327,6 +329,105 @@ describe('the chapter-level Reimport Comparison', () => {
       reopened.markCleanShutdown();
     } finally {
       reopened.close();
+    }
+  }, 180_000);
+
+  // Synthetic words authored for this suite: the one Markdown construct is there to be counted as a degradation.
+  const EMPHASIS = '带 *强调* 的一段。';
+  it.each([
+    { format: 'TXT', extension: 'txt', extra: [] as string[], degraded: false },
+    { format: 'MD', extension: 'md', extra: [EMPHASIS], degraded: true },
+  ])('commits a reimport from a converted $format, re-reading the working representation its review read (#597)', async ({ format, extension, extra, degraded }) => {
+    // Three paragraphs of sample1 as plain text, and a new file that replaces the second. Both are read through the DOCX
+    // working representation the converter makes of them; the commit re-reads that, never the kept original, which is
+    // not a Word document. The Markdown pair also keeps an emphasis, so its fidelity is the conversion's, not the parser's.
+    const text = async (name: string, blocks: ReadonlyArray<number>): Promise<string> => {
+      const path = join(roots.inputRoot, `${name}.${extension}`);
+      const paragraphs = await Promise.all(blocks.map((block) => sourceSpanText(SOURCE, span(block))));
+      await writeFile(path, `${[...paragraphs, ...extra].join('\n\n')}\n`, 'utf8');
+      return path;
+    };
+    const first = await text('base', [21, 22, 23]);
+    const second = await text('revised', [21, 24, 23]);
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let book: Book;
+    try {
+      book = await importBook(store, first, degraded);
+      let review = await prepareReimport(store, book, second);
+      if (degraded) review = store.acceptReimportDegradation(review.draftId, review.draftVersion);
+      const page = store.getReimportMappingPage(review.draftId, review.draftVersion, null);
+      expect(page.items.length).toBeGreaterThan(0);
+      for (const row of page.items) review = resolve(store, review, row.groupId, row.verbs[0]!);
+      expect((await commit(store, review)).resultKind).toBe('changed');
+      const view = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      expect(view.blocks.map((block) => block.text))
+        .toEqual([...await Promise.all([21, 24, 23].map((block) => sourceSpanText(SOURCE, span(block)))), ...extra]);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+
+    // The reimport's Source Version is the file's own format, linked to the working representation it was read through,
+    // as the first import's is; and the store opens again.
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      expect(database.prepare(
+        `SELECT format, working_object_digest IS NOT NULL AS converted, converter_identity
+         FROM source_versions WHERE book_id = ? ORDER BY created_at, rowid`,
+      ).all(book!.bookId).map((row) => ({ ...row }))).toEqual([
+        { format, converted: 1, converter_identity: 'ai7-text-to-docx/1' },
+        { format, converted: 1, converter_identity: 'ai7-text-to-docx/1' },
+      ]);
+    } finally {
+      database.close();
+    }
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    reopened.markCleanShutdown();
+    reopened.close();
+  }, 180_000);
+
+  it.each([
+    // Two blank lines become one whitespace-only line: the same size, and the converter reads both as one paragraph
+    // break, so the working representation is byte-identical and only the original's own digest can tell (#606's review).
+    { change: 'converts to the same working representation', tamper: (text: string) => text.replace('\n\n\n', '\n \n') },
+    // A character added before the break in place of one of its line ends: the same size, a different conversion.
+    { change: 'converts to a different working representation', tamper: (text: string) => text.replace('\n\n\n', 'x\n\n') },
+  ])('refuses to commit a converted reimport whose kept original changed and $change (#597)', async ({ tamper }) => {
+    const paragraphs = await Promise.all([21, 22, 23, 24].map((block) => sourceSpanText(SOURCE, span(block))));
+    const first = join(roots.inputRoot, 'base.txt');
+    await writeFile(first, `${paragraphs[0]}\n\n${paragraphs[1]}\n\n${paragraphs[2]}\n`, 'utf8');
+    const second = join(roots.inputRoot, 'revised.txt');
+    await writeFile(second, `${paragraphs[0]}\n\n\n${paragraphs[3]}\n\n${paragraphs[2]}\n`, 'utf8');
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store, first);
+      let review = await prepareReimport(store, book, second);
+      for (const row of store.getReimportMappingPage(review.draftId, review.draftVersion, null).items) {
+        review = resolve(store, review, row.groupId, row.verbs[0]!);
+      }
+      // The kept original is the content object named by the revised file's digest.
+      const bytes = await readFile(second);
+      const digest = createHash('sha256').update(bytes).digest('hex');
+      const kept = join(roots.dataRoot, 'objects', 'sha256', digest.slice(0, 2), `${digest}.txt`);
+      expect((await readFile(kept)).equals(bytes)).toBe(true);
+      const tampered = Buffer.from(tamper(bytes.toString('utf8')), 'utf8');
+      expect(tampered.byteLength).toBe(bytes.byteLength);
+      expect(tampered.equals(bytes)).toBe(false);
+      await writeFile(kept, tampered);
+
+      await expect(commit(store, review)).rejects.toMatchObject({ code: 'SNAPSHOT_RESELECTION_REQUIRED' });
+      // Nothing was committed: the manuscript still reads as the first file, and the Book has one Source Version.
+      expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks.map((block) => block.text))
+        .toEqual(paragraphs.slice(0, 3));
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      expect(database.prepare('SELECT COUNT(*) AS count FROM source_versions').get()).toEqual({ count: 1 });
+    } finally {
+      database.close();
     }
   }, 180_000);
 });
