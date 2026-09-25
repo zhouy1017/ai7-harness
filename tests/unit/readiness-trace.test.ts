@@ -108,6 +108,14 @@ describe('the readiness trace (Issue #518)', () => {
     expect([attach > -1, marked > -1, waits > -1, ready > -1]).toEqual([true, true, true, true]);
     expect(attach < marked && marked < waits && waits < ready).toBe(true);
     expect(body.indexOf('onTarget();', marked + 1)).toBe(-1);
+    // Its one caller hands it the mark itself, and nothing else sets the mark (#592). A mark set once
+    // `attachRendererTarget` returned would keep the order above and J-01's good launch, yet a stall in the readiness
+    // wait would say `target=no` of a target that attached.
+    const calls = [...source.matchAll(/(?<!function )attachRendererTarget\(/gu)].map((match) => match.index);
+    expect(calls).toHaveLength(1);
+    const call = source.slice(calls[0], source.indexOf(');', calls[0]) + 2);
+    expect(call).toMatch(/^attachRendererTarget\(browser, \(\) => \{\s*inFlight\.target = true;\s*\}\);$/u);
+    expect(source.split('inFlight.target = true').length - 1).toBe(1);
   });
 
   it('keeps a Windows exit status whole, and relays it', () => {

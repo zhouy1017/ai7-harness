@@ -2937,6 +2937,8 @@ interface ReimportCommitWork {
   readonly legacyResultWithoutPresentation: boolean;
   phase: 'parse' | 'mappings';
   parseBytes: number;
+  /** A converted source's working representation, reproduced from the kept original before the parse (Issue #597). */
+  converted: { digest: string; byteLength: number; fidelity: FidelityCategoryProjection[] } | null;
   parsedIngest: IngestedDocx | null;
   parseFailure: unknown;
   mappingPosition: number;
@@ -8234,6 +8236,7 @@ export class EditorialStore {
       legacyResultWithoutPresentation: options.legacyResultWithoutPresentation === true,
       phase: 'parse',
       parseBytes: 0,
+      converted: null,
       parsedIngest: null,
       parseFailure: null,
       mappingPosition: 0,
@@ -8242,14 +8245,24 @@ export class EditorialStore {
       offsetSegments: [],
     };
     this.#reimportCommitWork.set(workId, work);
-    void this.#parseIntoIngest(input.draftId, objectPath, snapshotBeforeAttempt.displayName, {
-      signal: abortController.signal,
-      onArchiveProgress: (bytes) => {
-        if (this.#reimportCommitWork.get(workId) === work) {
-          work.parseBytes = Math.min(bytes, snapshotBeforeAttempt.sourceBytes);
-        }
-      },
-    }).then((ingested) => {
+    // A converted source was read through its working representation (ADR 0072 §2), and the kept original is not a Word
+    // document: the commit re-reads the working representation, after reproducing the conversion from the original, as
+    // revalidation does (Issue #597). Its parse progress still counts against the original's bytes.
+    const parseSource = async (): Promise<IngestedDocx> => {
+      const converted = snapshotBeforeAttempt.conversion === null
+        ? null
+        : await this.#revalidateConversion(snapshotBeforeAttempt, objectPath);
+      work.converted = converted;
+      return this.#parseIntoIngest(input.draftId, converted?.path ?? objectPath, snapshotBeforeAttempt.displayName, {
+        signal: abortController.signal,
+        onArchiveProgress: (bytes) => {
+          if (this.#reimportCommitWork.get(workId) === work) {
+            work.parseBytes = Math.min(bytes, snapshotBeforeAttempt.sourceBytes);
+          }
+        },
+      });
+    };
+    void parseSource().then((ingested) => {
       if (this.#reimportCommitWork.get(workId) === work) work.parsedIngest = ingested;
       else this.#discardIngest(ingested.ingestId);
     }).catch((error: unknown) => {
@@ -8359,14 +8372,18 @@ export class EditorialStore {
         return { done: false, completed: work.parseBytes, total: work.total, result: null };
       }
       const parsed = work.parsedIngest.parsed;
+      // A converted source is checked against its reproduced working representation, and its fidelity is the
+      // conversion's, as revalidation checks it (Issue #597).
+      const converted = work.snapshot.conversion === null ? null : work.converted;
       requireStore(
-        parsed.sourceDigest === work.snapshot.sourceDigest && parsed.archiveBytes === work.snapshot.sourceBytes &&
+        parsed.sourceDigest === (converted?.digest ?? work.snapshot.sourceDigest) &&
+          parsed.archiveBytes === (converted?.byteLength ?? work.snapshot.sourceBytes) &&
           parsed.parserIdentity === work.snapshot.parserIdentity &&
           parsed.contentDigest === work.snapshot.contentDigest &&
           parsed.structureDigest === work.snapshot.structureDigest &&
           parsed.blockCount === work.snapshot.blockCount &&
           parsed.characterCount === work.snapshot.characterCount &&
-          canonicalJson(parsed.fidelity) === canonicalJson(work.snapshot.fidelity) &&
+          canonicalJson(converted?.fidelity ?? parsed.fidelity) === canonicalJson(work.snapshot.fidelity) &&
           parsed.titleSuggestion.value === work.snapshot.titleSuggestion &&
           parsed.titleSuggestion.sourceLabel === work.snapshot.titleSource &&
           this.#retentionCall(() => stagedImportSourcesMatch(this.#authority, work.input.draftId, work.parsedIngest!.sources)),
