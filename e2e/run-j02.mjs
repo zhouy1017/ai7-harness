@@ -1102,7 +1102,13 @@ async function runAccessibilityJourney(renderer) {
   }
   const after = await renderer.evaluate(`(() => { const probe = globalThis.__ai7SearchKeyProbe; probe?.stop(); return { keydown: probe?.keydown ?? null, guardAnnounced: probe?.guardAnnounced === true, active: document.activeElement?.id || document.activeElement?.tagName || null }; })()`);
   if (!moved) {
-    at(after?.guardAnnounced === true ? 'j14-keyboard-search-focus-guard-announced' : 'j14-keyboard-search-focus-no-focus-move');
+    // The hosted marker names only the location (#591): whether the keydown reached the page, and with the platform's
+    // modifier, is told apart here rather than in the detail only a local debug run writes.
+    const platformModifier = modifier === 4 ? 'metaKey' : 'ctrlKey';
+    if (after?.guardAnnounced === true) at('j14-keyboard-search-focus-guard-announced');
+    else if ((after?.keydown ?? null) === null) at('j14-keyboard-search-focus-key-not-received');
+    else if (after.keydown[platformModifier] !== true) at('j14-keyboard-search-focus-modifier-missing');
+    else at('j14-keyboard-search-focus-no-focus-move');
     requireJourney(false, 'keyboard-search-focus', { ready, after });
   }
   at('j14-visible-focus');
