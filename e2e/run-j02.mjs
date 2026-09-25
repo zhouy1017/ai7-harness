@@ -1070,8 +1070,36 @@ async function runAccessibilityJourney(renderer) {
   }
   at('j14-keyboard-search-focus');
   await renderer.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0, replacementStart: 0, replacementEnd: 1 });
+  // ⌘F is pressed only once its precondition holds: the composition the step before left open has ended in the editor, the
+  // window has focus and focus is still in the text. A key sent before the composition's end reaches the renderer is
+  // refused by the guard just proven, which is right and is no failure of the command (#579). A failure names the
+  // precondition that was missing, or what the command did instead (#474's pattern).
+  const readiness = `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); return { compositionEnded: editor?.dataset.composing === 'false', windowFocused: document.hasFocus(), editorFocused: document.activeElement === editor }; })()`;
+  let ready = null;
+  const readyBy = Date.now() + 10_000;
+  while (Date.now() < readyBy) {
+    ready = await renderer.evaluate(readiness);
+    if (ready?.compositionEnded === true && ready.windowFocused === true && ready.editorFocused === true) break;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+  }
+  if (ready?.compositionEnded !== true || ready.windowFocused !== true || ready.editorFocused !== true) {
+    if (ready?.compositionEnded !== true) at('j14-keyboard-search-focus-composition-open');
+    else if (ready.windowFocused !== true) at('j14-keyboard-search-focus-window-unfocused');
+    else at('j14-keyboard-search-focus-editor-unfocused');
+    requireJourney(false, 'keyboard-search-focus-precondition', { ready });
+  }
   await press(renderer, 'f', modifier);
-  await waitFor(renderer, `document.activeElement?.id === 'manuscript-search'`, 'keyboard-search-focus');
+  let moved = false;
+  const movedBy = Date.now() + 60_000;
+  while (Date.now() < movedBy && !moved) {
+    moved = await renderer.evaluate(`document.activeElement?.id === 'manuscript-search'`).catch(() => false) === true;
+    if (!moved) await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  if (!moved) {
+    const after = await renderer.evaluate(`({ guardAnnounced: document.querySelector('#persistence-status')?.textContent.includes('输入法组合尚未结束') === true, active: document.activeElement?.id || document.activeElement?.tagName || null })`);
+    at(after?.guardAnnounced === true ? 'j14-keyboard-search-focus-guard-announced' : 'j14-keyboard-search-focus-no-focus-move');
+    requireJourney(false, 'keyboard-search-focus', { ready, after });
+  }
   at('j14-visible-focus');
   await assertRenderer(renderer, `(() => { const input = document.querySelector('#manuscript-search'); return input?.matches(':focus-visible') && getComputedStyle(input).outlineStyle !== 'none'; })()`, 'visible-focus');
   at('j14-keyboard-focus-keeps-window');
