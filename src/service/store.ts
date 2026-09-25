@@ -3399,6 +3399,7 @@ export class EditorialStore {
       checkpointOwner: boundedAuthority,
       // A package export's 交付包清单 (Issue #416, S67b), written by the package's export from the version's own record.
       packageManifest: (bookId, packageVersionId) => this.#packageExports.manifest(bookId, packageVersionId),
+      packageVersion: (bookId, packageVersionId) => this.#packageExports.version(bookId, packageVersionId),
     });
     // 交付物 lists a Book's approved exports beside its 发稿 (Issue #413), read from the export ledger. Its Production
     // Documents (Issue #415) are a read of their own, each Delivery Record with what its export came to.

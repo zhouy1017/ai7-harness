@@ -5420,16 +5420,41 @@ export interface BookDeliveryPackageExportFileProjection {
   format: ManuscriptExportFormat;
 }
 
-/** `导出…` of one package version: the files it writes, and the review they bind (EXP-010). */
+/**
+ * 含批注 and 含修改建议（作为修订） of the files a package export writes from the manuscript and the documents (EXP-023): both
+ * on until the editor turns one off, and bound into the review. 备注 never go with a package.
+ */
+export type BookDeliveryPackageExportOptions = Pick<ManuscriptExportOptions, 'includeAnnotations' | 'includeSuggestions'>;
+
+/**
+ * One file as `导出…` reviews it (EXP-007 to EXP-009): how it is written, what its format keeps and each class's fidelity —
+ * the Export Fidelity Review S64 shows for one file, so no loss in a package's file is silent.
+ */
+export interface BookDeliveryPackageExportReviewFileProjection extends BookDeliveryPackageExportFileProjection {
+  restoration: 'from-original' | 'regenerated';
+  restorationLine: string;
+  formatLine: string;
+  fidelity: ReadonlyArray<ExportFidelityRowProjection>;
+  /** Some class is `降级导出` or `无法导出`: `按上述方式导出` then accepts it for this export (EXP-008). */
+  degraded: boolean;
+}
+
+/** `导出…` of one package version: the files it writes under the options chosen, and the review they bind (EXP-010). */
 export interface BookDeliveryPackageExportReviewProjection {
   bookId: string;
   packageVersionId: string;
   /** `v2`. */
   versionLabel: string;
-  files: ReadonlyArray<BookDeliveryPackageExportFileProjection>;
+  options: BookDeliveryPackageExportOptions;
+  /** At most `MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED`, in the order they are written. */
+  files: ReadonlyArray<BookDeliveryPackageExportReviewFileProjection>;
+  /** More files than the review lists: they are written too. */
+  filesTruncated: boolean;
+  /** Some file is degraded, listed or not. */
+  degraded: boolean;
   /** EXP-014 and EXP-015: the files go to a folder the editor chooses, and nothing is sent anywhere. */
   statement: string;
-  /** Binds the folder's preparation to exactly this review. */
+  /** Binds the folder's preparation to exactly this review, its options included. */
   reviewDigest: string;
 }
 
@@ -5479,16 +5504,18 @@ export interface BookDeliveryPackageExportSummaryProjection {
   revealPreparationId: string | null;
 }
 
-/** `导出…` of one version of the route's Book's package. */
+/** `导出…` of one version of the route's Book's package, under the options chosen. */
 export interface ReviewBookDeliveryPackageExportInput {
   bookId: string;
   packageVersionId: string;
+  options: BookDeliveryPackageExportOptions;
 }
 
-/** `选择位置…`: the folder the system dialog returned, bound to the review the editor read. */
+/** `选择位置…`: the folder the system dialog returned, bound to the review the editor read and its options. */
 export interface PrepareBookDeliveryPackageExportInput {
   bookId: string;
   packageVersionId: string;
+  options: BookDeliveryPackageExportOptions;
   reviewDigest: string;
   folder: string;
 }

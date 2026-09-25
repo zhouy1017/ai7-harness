@@ -1812,6 +1812,36 @@ async function main() {
         panel.querySelector('.package-export-folder-line')?.textContent === ${JSON.stringify(PACKAGE_EXPORT_FOLDER_UNCHOSEN)} &&
         document.activeElement === panel.querySelector('[data-package-action="export-choose"]') && !/%|百分/.test(panel.textContent ?? '');
     })()`, 'package-export-lists-the-files');
+    // 含批注 and 含修改建议（作为修订） are offered on (EXP-023), and each file carries its own Export Fidelity Review
+    // (EXP-007), open by itself when something in it is not written as it was: the classes the service's own review of the
+    // version shows, and its restoration line.
+    const packageVersionId = await renderer.evaluate(`window.__j07.packageVersions()[0].dataset.packageVersionId`);
+    const packageReview = await renderer.evaluate(`window.ai7.reviewBookDeliveryPackageExport({ packageVersionId: ${JSON.stringify(packageVersionId)}, options: { includeAnnotations: true, includeSuggestions: true } })
+      .then((review) => ({ degraded: review.degraded, files: review.files.map((file) => [file.key, file.degraded, file.fidelity.filter((row) => row.count > 0 || row.status !== 'preserved').length, file.restorationLine, true]) }))`);
+    requireJourney(Array.isArray(packageReview?.files) && packageReview.files.length === packageFiles.length, 'package-export-service-review', packageReview?.files?.length);
+    await assertRenderer(renderer, `(() => {
+      const panel = window.__j07.packageExport();
+      const boxes = Array.from(panel.querySelectorAll('fieldset.package-export-options input[type="checkbox"]'));
+      const files = Array.from(panel.querySelectorAll('ol.package-export-files > li')).map((item) => {
+        const details = item.querySelector('details.package-export-fidelity');
+        const degraded = item.dataset.packageExportDegraded === 'true';
+        return [item.dataset.packageExportFile, degraded, item.querySelectorAll('.export-fidelity-row').length, details?.querySelector('.export-restoration-line')?.textContent ?? null,
+          details?.open === degraded && (details.querySelector('summary')?.textContent ?? '').startsWith('导出保真审阅')];
+      });
+      return JSON.stringify(boxes.map((box) => box.dataset.packageField + ':' + box.checked + ':' + box.closest('label')?.querySelector('strong')?.textContent)) ===
+          '["includeAnnotations:true:含批注","includeSuggestions:true:含修改建议（作为修订）"]' &&
+        JSON.stringify(files) === ${JSON.stringify(JSON.stringify(packageReview.files))} &&
+        (panel.querySelector('.export-degraded-note') !== null) === ${packageReview.degraded === true};
+    })()`, 'package-export-fidelity-and-switches');
+    // Turning 含批注 off reviews the files again under it, focus staying on the switch; turning it on again restores the
+    // review the folder is then bound to.
+    const annotationsSwitch = '[data-screen="book-deliverables"] section.package-export input[data-package-field="includeAnnotations"]';
+    const switchedTo = (checked) => `(() => { const panel = window.__j07.packageExport(); const box = panel?.querySelector('input[data-package-field="includeAnnotations"]');
+      return panel?.dataset.packageExportPhase === 'ready' && box?.checked === ${checked} && document.activeElement === box && window.__j07.status() === '要导出的文件已列出'; })()`;
+    await clickSelector(renderer, annotationsSwitch, 'package-export-annotations-off');
+    await waitFor(renderer, switchedTo(false), 'package-export-reviewed-without-annotations', 60_000);
+    await clickSelector(renderer, annotationsSwitch, 'package-export-annotations-on');
+    await waitFor(renderer, switchedTo(true), 'package-export-reviewed-with-annotations', 60_000);
     await clickSelector(renderer, packageAction('export-choose'), 'package-export-choose');
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'prepared' && window.__j07.status() === '已准备好导出文件，等待你确认。'`, 'package-export-prepared', 60_000);
     await assertRenderer(renderer, `(() => {
