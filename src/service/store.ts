@@ -3261,7 +3261,7 @@ function closeDatabaseQuietly(db: DatabaseSync | null): void {
  * files differently now. Said at the choice, in the editor's words; the way on is a new Book.
  */
 export const SOURCE_VERSION_PARSER_CHANGED_MESSAGE =
-  '这本书里已有同一个文件的来源版本，但它是用旧版 AI7 的读取方式导入的；AI7 现在读取文件的方式已经不同，不能在原来的来源版本上再次导入这个文件。可以把它作为新书导入。';
+  '这本书里已有同一个文件的来源版本，但它是用旧版 AI7 的读取方式导入的；AI7 现在读取文件的方式已经不同，不能在原来的来源版本上再次导入这个文件。可以把它作为新建图书导入。';
 
 /**
  * J-01's `tamper-reimport-proof-before-validation` control (Issue #569): one reimport mapping's staged text altered before the
@@ -11945,8 +11945,10 @@ export class EditorialStore {
       if (current.bookStateDigest !== snapshot.reviewedBookStateDigest ||
         current.manuscriptId !== snapshot.reviewedManuscriptId || current.branchId !== snapshot.reviewedBranchId ||
         current.exactSourceVersionId !== snapshot.reviewedReuseSourceVersionId) return null;
-      // The Source Version it reuses must have been read the way this draft is (Issue #532): a review made before an
-      // update that changed the parser does not come back ready, and preparing it again says why.
+      // The Source Version it reuses must have been read the way this draft is (Issue #532). A review made before an update
+      // that changed the parser is caught earlier, by `#revalidateSnapshot`'s parser drift; this catches a review an earlier
+      // build prepared under this same parser over a Source Version an earlier parser read. It does not come back ready, and
+      // preparing it again says why.
       if (current.exactSourceVersionId !== null) this.#requireSameParser(current.exactSourceVersionId, snapshot);
       const lineage = comparison.lineage_status === 'verified'
         ? {
