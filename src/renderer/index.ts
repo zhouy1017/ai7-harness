@@ -7163,7 +7163,11 @@ function renderEditorWindow(
     editor,
     api: window.ai7,
     busy: () => authoritativeMutationBusy() || serviceJobBusy(),
-    marksChanged: () => manuscriptRail?.refresh(),
+    // A mark changes what a Production Document's workflow waits on (N 条修改建议待处理), which its lens reads again.
+    marksChanged: () => {
+      manuscriptRail?.refresh();
+      documentLens?.refresh();
+    },
     openReviewFinding: (target) => void leaveForReview({ reviewRunId: target.reviewRunId, findingId: target.findingId }),
     openConflict: (markId) => void leaveForConflict(markId),
     // An Apply is an authoritative write like a replacement or an undo: the window is reloaded from the
