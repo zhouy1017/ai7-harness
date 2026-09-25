@@ -70,6 +70,7 @@ describe('the words of 交付 · 生产文档', () => {
       labels.DELIVERY_STATEMENT, ...Object.values(labels.DELIVERY_BLOCKERS), labels.DELIVERY_NO_EXPORT,
       labels.documentDeliveryLine({ ordinal: 1, recipient: { kind: 'publicity', label: '宣传部' }, versionLabel: '版本 2' }, '9月24日 11:00'),
       labels.documentDeliveredLine(1, '宣传部'), labels.documentCurrentTextChoice(3),
+      labels.RECOVERY_RESTORED_SECTION_LABEL, labels.RECOVERY_RESTORED_HEADING,
     ];
     expect(labels.DOCUMENT_LENS_LABEL).toBe('工作流程');
     expect(labels.DOCUMENT_VERSIONS_HEADING).toBe('版本与交付');
@@ -79,6 +80,11 @@ describe('the words of 交付 · 生产文档', () => {
       expect(words).not.toMatch(/里程碑|签发|发稿/u);
       for (const forbidden of PUBLICATION_FORBIDDEN_WORDS) expect(words).not.toContain(forbidden);
     }
+  });
+
+  it('stops asking for a decision once a restore stands and nothing it restored could open (Issue #593)', () => {
+    expect([labels.RECOVERY_RESTORED_SECTION_LABEL, labels.RECOVERY_RESTORED_HEADING]).toEqual(['稿件恢复优先 · 已恢复', '已恢复所选的文字']);
+    for (const words of [labels.RECOVERY_RESTORED_SECTION_LABEL, labels.RECOVERY_RESTORED_HEADING]) expect(words).not.toMatch(/待确认|先确认|选择/u);
   });
 
   it('says what 交付 records — which version went to whom — and that AI7 sends nothing (DELIV-003, DELIV-004)', () => {
