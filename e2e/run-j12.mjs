@@ -459,7 +459,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     // Production Documents beside their ledgers, revision 38 adds their Delivery Records and revision 39 the Book's
     // 图书交付包 versions, so this pin moves with the terminal version the service stamps
     // (`BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION`).
-    requireJourney(version?.user_version === 53, 'credential-cleanup-metadata-version');
+    requireJourney(version?.user_version === 54, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, connection_name, provider_id, model_id,
               adapter_revision, configuration_revision, approved_fallback_chain,
@@ -1353,6 +1353,13 @@ async function main() {
     await click(primary, '数据与存储', 'data-storage-open');
     await waitFor(primary, `document.querySelector('[data-screen="data-storage"]')`, 'data-storage-ready');
     await assertRenderer(primary, `(() => { const view=document.querySelector('.data-storage-summary'); return view?.dataset.platform===${JSON.stringify(process.platform === 'win32' ? 'windows' : 'macos')} && view.dataset.runtimeForm==='source-checkout' && view.dataset.footprintMaximumEntries==='128' && document.querySelector('[data-product-data-root]')?.textContent===${JSON.stringify(dataRoot)} && view.textContent.includes('产品数据位置') && view.textContent.includes('凭据与产品数据分开') && view.textContent.includes(${JSON.stringify(process.platform === 'win32' ? 'Windows 凭据管理器' : 'macOS 钥匙串')}) && !Object.keys(window.ai7).some((key)=>key.toLowerCase().includes('path')); })()`, 'truthful-data-location');
+    // 版本 (Issue #433, S85a; DSTO-016): the software version and the Data Version apart. The same software reopened the data
+    // after the restart, so the store keeps its one version record and has seen no software update.
+    const packageVersion = JSON.parse(await readFile(resolve(ROOT, 'package.json'), 'utf8')).version;
+    await waitFor(primary, `document.querySelector('.data-version')?.dataset.dataVersion === '1'`, 'data-version-read');
+    const versionSection = await primary.evaluate(`(() => { const section = document.querySelector('.data-version'); const text = (selector) => section?.querySelector(selector)?.textContent ?? null; return [text('.data-version-software'), text('.data-version-data'), text('.data-version-state'), text('.data-version-update'), text('.data-version-history > summary'), section?.dataset.frozen ?? null]; })()`);
+    requireJourney(JSON.stringify(versionSection) === JSON.stringify([packageVersion, '1', '开发阶段：首个正式发布时冻结为数据版本 1；在那之前，开发中的数据可以重建。',
+      '这份数据还没有经历过软件更新。', '版本记录（1）', 'false']), 'data-version-words', versionSection);
     await primary.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab' });
     await primary.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab' });
     await assertRenderer(primary, `document.activeElement instanceof HTMLButtonElement && document.activeElement.matches(':focus-visible')`, 'j14-keyboard-visible-focus');

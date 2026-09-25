@@ -81,6 +81,19 @@ import type { FeedbackHistoryTarget } from '../shared/protocol.js';
 import { mountFeedbackHistory } from './feedback-history.js';
 import { mountEvaluationCalibration } from './evaluation-calibration.js';
 import { mountBookSeries, mountSeries, mountSeriesList } from './series.js';
+import {
+  DATA_VERSION_DATA,
+  DATA_VERSION_HEADING,
+  DATA_VERSION_MEANING,
+  DATA_VERSION_PROMISE,
+  DATA_VERSION_SOFTWARE,
+  DATA_VERSION_UNAVAILABLE,
+  DATA_VERSION_UPDATE,
+  dataVersionRecordsLabel,
+  dataVersionStateLine,
+  dataVersionUpdateLine,
+  storeVersionLine,
+} from './data-version-labels.js';
 import { SERIES_BACK_TO_LIST, SERIES_LEDE, SERIES_STATUS, SERIES_TITLE } from './series-labels.js';
 import { CALIBRATION_PAGE_GROUP, CALIBRATION_PAGE_LEDE, CALIBRATION_PAGE_TITLE, CALIBRATION_STATUS } from './evaluation-calibration-labels.js';
 import {
@@ -4369,9 +4382,44 @@ async function renderDataAndStorage(): Promise<void> {
       }
     });
     reveal.dataset['action'] = 'reveal-product-data-location';
+    // 查看数据位置 is the location's own action, so it stays with the location — and stays the screen's first keyboard
+    // stop — whatever sections follow the credentials (Issue #433: 版本, DSTO-016).
+    const revealRow = element('div', 'button-row');
+    revealRow.append(reveal);
+    summary.append(revealRow);
     const actions = element('div', 'button-row');
-    actions.append(reveal, button('返回', 'quiet', () => void initializeStartup()));
-    content.append(summary, credentials, actions);
+    actions.append(button('返回', 'quiet', () => void initializeStartup()));
+    // 版本 (Issue #433, S85a; DSTO-016): the software version and the Data Version apart, read from the store.
+    const versions = element('section', 'source-card data-version');
+    versions.append(element('h3', undefined, DATA_VERSION_HEADING), element('p', 'field-note', '正在读取版本…'));
+    content.append(summary, credentials, versions, actions);
+    void window.ai7.inspectDataVersion().then((version) => {
+      if (!versions.isConnected) return;
+      versions.dataset['dataVersion'] = String(version.dataVersion);
+      versions.dataset['softwareVersion'] = version.softwareVersion;
+      versions.dataset['frozen'] = String(version.frozen);
+      const rows = element('dl');
+      rows.append(
+        element('dt', undefined, DATA_VERSION_SOFTWARE), element('dd', 'data-version-software', version.softwareVersion),
+        element('dt', undefined, DATA_VERSION_DATA), element('dd', 'data-version-data', String(version.dataVersion)),
+        element('dt', undefined, DATA_VERSION_MEANING), element('dd', 'data-version-state', dataVersionStateLine(version)),
+        element('dt', undefined, DATA_VERSION_UPDATE), element('dd', 'data-version-update', dataVersionUpdateLine(version.update)),
+      );
+      const history = element('details', 'data-version-history');
+      const list = element('ol');
+      for (const record of version.history) list.append(element('li', undefined, storeVersionLine(record, localInstantLabel)));
+      history.append(element('summary', undefined, dataVersionRecordsLabel(version.history.length, version.historyTruncated)), list);
+      versions.replaceChildren(
+        element('h3', undefined, DATA_VERSION_HEADING),
+        element('p', 'field-note data-version-promise', DATA_VERSION_PROMISE),
+        rows,
+        history,
+        technicalDetails(undefined, element('dt', undefined, '数据库修订'), element('dd', 'technical-identity', String(version.schemaRevision))),
+      );
+    }, (error: unknown) => {
+      if (!versions.isConnected) return;
+      versions.replaceChildren(element('h3', undefined, DATA_VERSION_HEADING), element('p', 'attention-note', rendererErrorMessage(error, DATA_VERSION_UNAVAILABLE)));
+    });
     replaceScreen('data-storage', content);
     setStatus('数据与存储摘要已打开');
   } catch (error) {

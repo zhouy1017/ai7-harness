@@ -1253,6 +1253,7 @@ describe('decodeRequest rejects malformed frames', () => {
     const change = { seriesId, bookId, kind: 'add', previewDigest: 'c'.repeat(64) };
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
       { op: 'inspectSeriesList', input: {} },
+      { op: 'inspectDataVersion', input: {} },
       { op: 'createSeries', input: { title: '星河三部曲', note: '' } },
       { op: 'createSeries', input: { title: '星河三部曲', note: '三部长篇' } },
       { op: 'inspectSeries', input: { seriesId } },
@@ -1269,6 +1270,7 @@ describe('decodeRequest rejects malformed frames', () => {
     }
     for (const [op, input] of [
       ['inspectSeriesList', { seriesId }],
+      ['inspectDataVersion', { dataVersion: 1 }],
       ['createSeries', { title: '星河三部曲' }],
       ['createSeries', { title: '', note: '' }],
       ['createSeries', { title: 7, note: '' }],

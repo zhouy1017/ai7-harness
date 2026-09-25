@@ -194,6 +194,18 @@ Membership creates no Task, Run Authorization, source scope, Learning Eligibilit
 
 A promotion creates the item with its first revision, or appends the next revision. It creates no Run Source Scope, performs no retrieval and permits no transmission. The manuscript's selection menu offers a member Book's words to each Series it is in; a Production Document offers nothing of 书系. 移出书系's preview names the items taken from the Book.
 
+数据版本 (Issue #433, S85a) is service protocol version 80 and schema revision 54. It adds one append-only relation owned by `src/service/data-version.ts`: `store_versions`, which records the software version, the Data Version and the schema revision that opened the store, whenever one of them changes. The software version comes from the `package.json` the product ships in. The built carrier holds no package manifest, so the service entry reads it from the source checkout that contains `dist/` and hands it to the store.
+
+The Data Version (ADR 0079 §1) is `1`, and it is not frozen: Data Version 1 is set at the first packaged release, and until then development stores are disposable. A breaking migration, one older software could not read, would raise it. An additive schema revision stays inside it.
+
+`inspectDataVersion` answers 设置 › 数据与存储's 版本:
+- the software version and the Data Version, apart;
+- whether the Data Version is frozen;
+- the latest software update, and whether it kept the Data Version;
+- the version records, newest first.
+
+A version record rewritten by hand stops the store from opening. The backup before a breaking upgrade, its rollback, and the package format they share with 导出数据库 come with S85b and S86 (#434).
+
 
 
 Delivery Records (Issue #415, S66b) are schema revision 38, on service protocol version 56. `production_document_deliveries` is one more append-only relation in `src/service/production-document-ledger.ts`: each row is `第 N 次交付` of one document, names one saved version by its revision and digest, and records the recipient, from the house's list (宣传部, 编辑部, 外部媒体, 其他) or in the editor's own words, and an optional note. Its canonical record and digest are verified on every read. `交付` names a saved version, or the current text: bound to the working digest the form read, it is saved as the next version (origin `delivery`) in the transaction that records the delivery, and the recipient and note are checked before anything is saved. A delivery sends nothing. The export of a delivered version goes through the same export ledger under target kind `production-document-version`, with the revision columns left empty and the document's identity and version digest in the canonical record. A Delivery Record reads its file from the newest export of its version approved after it and before the document's next delivery that wrote its file, or else from the newest attempt, so a failed or unconfirmed re-export never hides the file handed over. `交付后有修改` is an edit after a delivery: the document was delivered and its working digest is no delivered version's, so delivering an earlier saved version raises nothing. Production Documents moved out of the 交付物 answer into a read of their own, `inspectProductionDocuments`: with their versions and Delivery Records beside the Manuscript's milestones and designations, the widest answer would not fit one service frame. The documents' commands answer with that read, and `recordProductionDocumentDelivery` is the one new command.

@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 79 as const;
+export const SERVICE_PROTOCOL_VERSION = 80 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -135,6 +135,7 @@ export const IPC_CHANNELS = {
   inspectSeriesKnowledgeReview: 'ai7:j13:inspect-series-knowledge-review',
   editSeriesKnowledgeCandidate: 'ai7:j13:edit-series-knowledge-candidate',
   promoteSeriesKnowledge: 'ai7:j13:promote-series-knowledge',
+  inspectDataVersion: 'ai7:j12:inspect-data-version',
   applyChangeSuggestion: 'ai7:j05:apply-change-suggestion',
   applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
   reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
@@ -5478,6 +5479,36 @@ export interface PromoteSeriesKnowledgeInput {
   readonly conflictDisposition: 'none' | 'preserved';
 }
 
+// ---- 设置 › 数据与存储 › 版本 (Issue #433, plan slice S85a; V2-UX-DSTO-016; ADR 0079 §1) ---------------------------------
+
+/** One record of the versions that opened the store. */
+export interface StoreVersionProjection {
+  readonly softwareVersion: string;
+  readonly dataVersion: number;
+  readonly schemaRevision: number;
+  readonly recordedAt: string;
+}
+
+/**
+ * 设置 › 数据与存储's 版本 (DSTO-016): the software version and the Data Version apart, whether the Data Version is frozen yet,
+ * the latest software update and whether it kept the Data Version, and the records of the versions that opened the store.
+ */
+export interface DataVersionProjection {
+  readonly softwareVersion: string;
+  readonly dataVersion: number;
+  readonly frozen: boolean;
+  readonly schemaRevision: number;
+  readonly update: {
+    readonly from: string;
+    readonly to: string;
+    readonly fromDataVersion: number;
+    readonly toDataVersion: number;
+    readonly recordedAt: string;
+  } | null;
+  readonly history: ReadonlyArray<StoreVersionProjection>;
+  readonly historyTruncated: boolean;
+}
+
 export interface SeriesKnowledgePromotionProjection {
   readonly itemId: string;
   readonly revisionId: string;
@@ -7876,6 +7907,7 @@ export interface ServiceOperationMap {
   inspectSeriesKnowledgeReview: { input: { seriesId: string; candidateId: string }; output: SeriesKnowledgeReviewProjection };
   editSeriesKnowledgeCandidate: { input: EditSeriesKnowledgeCandidateInput; output: SeriesKnowledgeReviewProjection };
   promoteSeriesKnowledge: { input: PromoteSeriesKnowledgeInput; output: SeriesKnowledgePromotionProjection };
+  inspectDataVersion: { input: Record<string, never>; output: DataVersionProjection };
   /**
    * AI7 Apply for Change Suggestions (Issue #408). The batch form is 确认应用 on 审阅's confirmation
    * strip (Issue #417): one Effect over exactly the suggestions the strip named, all or none.
@@ -8216,6 +8248,7 @@ export interface RendererApi {
   inspectSeriesKnowledgeReview(input: { seriesId: string; candidateId: string }): Promise<SeriesKnowledgeReviewProjection>;
   editSeriesKnowledgeCandidate(input: EditSeriesKnowledgeCandidateInput): Promise<SeriesKnowledgeReviewProjection>;
   promoteSeriesKnowledge(input: PromoteSeriesKnowledgeInput): Promise<SeriesKnowledgePromotionProjection>;
+  inspectDataVersion(): Promise<DataVersionProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */
   applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): Promise<ManuscriptApplyCommandProjection>;

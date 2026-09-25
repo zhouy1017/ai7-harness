@@ -22,6 +22,7 @@ import {
 import { armSingleHostAllowance, installNodeNetworkDenial } from '../shared/network-denial.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../shared/protected-secret-identity.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, resolveDeveloperLiveLaunch, type DeveloperLiveRuntime } from './launch-policy.js';
+import { readSoftwareVersion } from './data-version.js';
 import { decodeRequest, isSafeInteger, ProtocolError } from './request-frames.js';
 import { controlledConnectivity, hostConnectivity, type TaskPlanConnectivity } from './connectivity.js';
 import type { WaitingFor } from './task-plan.js';
@@ -562,6 +563,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.changeSeriesMembership(request.input) };
     case 'inspectBookSeries':
       return { id: request.id, ok: true, op: request.op, result: store.inspectBookSeries(request.input.bookId) };
+    case 'inspectDataVersion':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectDataVersion() };
     case 'proposeSeriesKnowledge':
       return { id: request.id, ok: true, op: request.op, result: store.proposeSeriesKnowledge(request.input) };
     case 'inspectSeriesKnowledgeReview':
@@ -1214,7 +1217,11 @@ async function run(): Promise<void> {
     const fixture = modelAdapterControl === undefined
       ? null
       : await loadModelFixture(resolve(codeRoot, '..', 'tests', 'fixtures', 'model'), modelAdapterControl);
+    // The software version the store records beside its Data Version (Issue #433, S85a) is the package the product ships
+    // in: the carrier holds no package manifest, so it is read from the source checkout that contains `dist/`.
+    const softwareVersion = await readSoftwareVersion(resolve(codeRoot, '..'));
     store = await EditorialStore.open(dataRoot, codeRoot, {
+      softwareVersion,
       induceUnprovableReconciliation: importControl === 'uncertain-reconciliation',
       persistLegacyReviewedDraft: importControl === 'legacy-reviewed-v2',
       induceReimportProofTamper: importControl === 'tamper-reimport-proof-before-validation',
