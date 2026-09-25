@@ -41,6 +41,7 @@ import type {
   UpdateBookPeopleInput,
   ReviewGuidelinePreviewProjection,
   ReviewGuidelinesProjection,
+  ExemplarBookCursor,
   ExemplarsProjection,
   AppendMaintenanceCaseRevisionInput,
   InspectMaintenanceCaseInput,
@@ -3483,6 +3484,7 @@ export class EditorialStore {
     this.#publicationVersions = new PublicationVersionStore(authority, (bookId) => this.#manuscriptExport.records(bookId), {
       summaries: (bookId, publicationVersionId) => this.#maintenanceCases.summaries(bookId, publicationVersionId),
       withdrawn: (publicationVersionId) => this.#maintenanceCases.withdrawn(publicationVersionId),
+      withdrawnAt: (publicationVersionId) => this.#maintenanceCases.withdrawnAt(publicationVersionId),
     });
     // 图书交付包 (Issue #416) reads the Book's current 发稿版本, each house type's Delivery Records and its Review Runs.
     this.#bookDeliveryPackages = new BookDeliveryPackages(authority, {
@@ -5443,10 +5445,20 @@ export class EditorialStore {
     return this.#guidelineCall(() => this.#reviewGuidelines.projection());
   }
 
-  /** 知识库 › 范例 (Issue #427, S79b; KB-004, KB-006): every published Book's delivered documents, read from their records. */
-  inspectExemplars(): ExemplarsProjection {
-    this.#assertAvailable();
-    return readExemplars(this.#authority, { current: (bookId) => this.#peopleCall(() => this.#bookPeople.current(bookId)) });
+  /**
+   * 知识库 › 范例 (Issue #427, S79b; KB-004, KB-006): one page of the published Books' delivered documents, each record read
+   * through its owner — the designations and their 撤回 through 发稿版本's, the Delivery Records through the documents'.
+   */
+  inspectExemplars(after: ExemplarBookCursor | null): ExemplarsProjection {
+    if (after !== null) {
+      requireStore(UUID_PATTERN.test(after.bookId) && after.title === safeTitle(after.title), 'EXEMPLAR_CURSOR_INVALID', '范例列表位置无效。');
+    }
+    return this.#publicationCall(() => readExemplars({
+      books: (cursor, limit) => this.#publicationVersions.designatedBooks(cursor, limit),
+      designations: (bookId) => this.#publicationVersions.history(bookId),
+      documents: (bookId) => this.#documentCall(() => this.#productionDocuments.deliveryReadings(bookId)),
+      people: (bookId) => this.#peopleCall(() => this.#bookPeople.current(bookId)),
+    }, after));
   }
 
   /** 导入新版本's first step: the picked file's clauses as the next version of one document would read them; nothing is recorded. */

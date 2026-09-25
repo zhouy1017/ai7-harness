@@ -250,8 +250,6 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectDefaultExecutionRules':
     // 知识库 › 审阅规范文件 (Issue #427, S79a) reads across every Book, so it names none.
     case 'inspectReviewGuidelines':
-    // 知识库 › 范例 (Issue #427, S79b) reads every published Book, so it names none.
-    case 'inspectExemplars':
     case 'shutdown': {
       requireInput(value.input, [], tentativeId);
       break;
@@ -293,6 +291,16 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       const input = requireInput(value.input, ['credentialReference', 'credentialOperationState'], tentativeId);
       if (!isBoundedString(input.credentialReference, 36) || !UUID_PATTERN.test(input.credentialReference) ||
           !['ready', 'missing', 'needs-attention'].includes(input.credentialOperationState as string)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // 知识库 › 范例 (Issue #427, S79b) reads the published Books a page at a time, so it names none: only where the page
+    // starts, as 书库's does.
+    case 'inspectExemplars': {
+      const after = requireInput(value.input, ['after'], tentativeId).after;
+      if (!(after === null || (isRecord(after) && hasExactKeys(after, ['title', 'bookId']) &&
+          isBoundedString(after.title, 180) && isBoundedString(after.bookId, 36) && UUID_PATTERN.test(after.bookId)))) {
         throw new ProtocolError(tentativeId);
       }
       break;

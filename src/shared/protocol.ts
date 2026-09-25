@@ -4667,6 +4667,17 @@ export interface ReviewGuidelinePreviewProjection {
 
 // ---- 知识库 › 范例 (Issue #427, plan slice S79b; V2-UX-KB-004, KB-006) --------------------------------------------------
 
+/** The published Books one answer of 范例 carries, by title; `更多已出版的书…` reads the next (Issue #427 review). */
+export const MAX_EXEMPLAR_BOOKS_PAGE = 20;
+/** The earlier delivered versions an exemplar names, the latest of them; the rest are counted. */
+export const MAX_EXEMPLAR_EARLIER_VERSIONS = 10;
+
+/** Where the next page of 范例 starts: after this Book, in title order as 书库 pages. */
+export interface ExemplarBookCursor {
+  readonly title: string;
+  readonly bookId: string;
+}
+
 /** One exemplar: the version of one delivered document of a published Book that stands in 范例. */
 export interface ExemplarProjection {
   readonly documentId: string;
@@ -4678,9 +4689,14 @@ export interface ExemplarProjection {
   readonly revisionDigest: string;
   readonly deliveredTo: string;
   readonly deliveredAt: string;
-  /** When it came into 范例: the designation for a document delivered before it, else its delivery. */
+  /**
+   * When it came into 范例: its delivery, made while a 发稿版本 stood in AI7; or, for one delivered before the first
+   * designation or after a 撤回, the next designation.
+   */
   readonly archivedAt: string;
-  /** Other versions of the document delivered before, oldest first. */
+  /** How many other versions of the document came into 范例 before this one. */
+  readonly earlierVersionCount: number;
+  /** The latest of them, oldest first, at most `MAX_EXEMPLAR_EARLIER_VERSIONS`. */
   readonly earlierVersions: ReadonlyArray<number>;
   /** The Learning Eligibility it came in with: `仅本社`, the default, asked of no one. */
   readonly eligibility: 'house-only';
@@ -4690,15 +4706,24 @@ export interface ExemplarProjection {
 export interface ExemplarBookProjection {
   readonly bookId: string;
   readonly bookTitle: string;
+  /** As the Book's 人员 read now. */
   readonly authors: ReadonlyArray<string>;
   readonly editors: ReadonlyArray<string>;
+  /** Its latest designation: which one, and when. */
   readonly publicationOrdinal: number;
   readonly designatedAt: string;
+  /**
+   * Whether a 撤回 holds that designation (ADR 0040): in AI7 it is no longer used for 发稿, so what the Book delivers
+   * after it comes in only once another 发稿版本 is set. What came in before stays.
+   */
+  readonly withdrawn: boolean;
   readonly exemplars: ReadonlyArray<ExemplarProjection>;
 }
 
 export interface ExemplarsProjection {
   readonly books: ReadonlyArray<ExemplarBookProjection>;
+  /** Where the next page starts; `null` when this is the last. */
+  readonly nextCursor: ExemplarBookCursor | null;
 }
 
 /** The drawer's `设为快速开始默认…` for one plan, and the rule that started its Task, when one did. */
@@ -6892,9 +6917,9 @@ export interface ServiceOperationMap {
     input: { previewId: string };
     output: ReviewGuidelinesProjection;
   };
-  /** 知识库 › 范例 (Issue #427, S79b): every published Book's delivered documents, by Book and type. */
+  /** 知识库 › 范例 (Issue #427, S79b): the published Books' delivered documents, by Book and type, a page at a time. */
   inspectExemplars: {
-    input: Record<string, never>;
+    input: { after: ExemplarBookCursor | null };
     output: ExemplarsProjection;
   };
   /**
@@ -7271,8 +7296,8 @@ export interface RendererApi {
   /** 导入新版本: the native picker, then the file's clauses as the next version would read them; `null` when the picker was cancelled. */
   previewReviewGuidelineVersion(input: { documentId: string }): Promise<ReviewGuidelinePreviewProjection | null>;
   importReviewGuidelineVersion(input: { previewId: string }): Promise<ReviewGuidelinesProjection>;
-  /** 知识库 › 范例 (Issue #427, S79b): names no Book; it reads every published Book's delivered documents. */
-  inspectExemplars(): Promise<ExemplarsProjection>;
+  /** 知识库 › 范例 (Issue #427, S79b): names no Book; it reads the published Books' delivered documents, a page at a time. */
+  inspectExemplars(input?: { after: ExemplarBookCursor | null }): Promise<ExemplarsProjection>;
   /**
    * 审阅 of the Book the window is showing (Issue #417). Inspecting without a Run opens the latest; a
    * running Run is followed by inspecting it again, and its executing category carries its progress.

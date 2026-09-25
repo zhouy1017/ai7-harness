@@ -2105,7 +2105,9 @@ async function main() {
     at('knowledge-exemplars');
     // 知识库 › 范例 (Issue #427, S79b): the Book set as a 发稿版本 brings in the 新闻稿 it delivered — the version its latest
     // delivery named, the earlier one beneath it — attributed to the Book and eligible 仅本社, exactly as
-    // `inspectExemplars()` answers.
+    // `inspectExemplars()` answers. Both deliveries came before `maintenance-cases` withdrew the current designation, so
+    // they stay; the card names that designation by its ordinal and says it is withdrawn, and what the Book delivers from
+    // then on waits for another 发稿版本 (ADR 0040).
     await clickSelector(renderer, '#global-attention-entry', 'exemplars-attention');
     await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]')`, 'exemplars-attention-screen');
     await click(renderer, '返回图书列表', 'exemplars-library');
@@ -2117,11 +2119,15 @@ async function main() {
     const exemplars = await renderer.evaluate(`window.ai7.inspectExemplars()`);
     const exemplarPage = await renderer.evaluate(`Array.from(document.querySelectorAll('.exemplar-book'), (card) => ({
       bookId: card.dataset.bookId, title: card.querySelector('h3')?.textContent ?? null, attribution: card.querySelector('.exemplar-attribution')?.textContent ?? null,
+      designation: card.querySelector('.exemplar-designation')?.textContent ?? null, more: document.querySelector('.exemplars-more')?.hidden ?? null,
       items: Array.from(card.querySelectorAll('.exemplar-items li'), (item) => [item.dataset.exemplarType, item.dataset.exemplarVersion, item.textContent]),
     }))`);
     const exemplarBook = exemplars?.books?.[0];
     const exemplarNews = exemplarBook?.exemplars?.find((exemplar) => exemplar.typeId === 'news-release');
-    requireJourney(exemplars?.books?.length === 1 && exemplarBook.bookId === bookId && exemplarNews?.typeLabel === '新闻稿' && exemplarNews.eligibility === 'house-only' &&
+    requireJourney(exemplars?.books?.length === 1 && exemplars.nextCursor === null && exemplarBook.bookId === bookId && exemplarBook.withdrawn === true &&
+      exemplarPage[0]?.designation?.startsWith(`第 ${exemplarBook.publicationOrdinal} 次设为发稿版本于 `) === true &&
+      exemplarPage[0].designation.endsWith(' · 已在 AI7 内撤回；之后交付的文档，另设发稿版本后才归入') && exemplarPage[0].more === true &&
+      exemplarNews?.typeLabel === '新闻稿' && exemplarNews.eligibility === 'house-only' &&
       exemplarNews.earlierVersions.length === 1 && exemplarPage.length === 1 && exemplarPage[0].bookId === bookId && exemplarPage[0].title === `《${EXCERPT.title}》` &&
       exemplarPage[0].attribution === '作者：未填写 · 责编：未填写' && exemplarPage[0].items.length === exemplarBook.exemplars.length &&
       exemplarPage[0].items[0][0] === 'news-release' && exemplarPage[0].items[0][1] === String(exemplarNews.version) &&

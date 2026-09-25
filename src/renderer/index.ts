@@ -74,7 +74,9 @@ import { mountReviewGuidelines } from './review-guidelines.js';
 import {
   EXEMPLARS_EMPTY,
   EXEMPLARS_LATER,
+  EXEMPLARS_MORE,
   EXEMPLARS_NONE_DELIVERED,
+  EXEMPLARS_STATUS,
   exemplarAttribution,
   exemplarDesignation,
   exemplarLine,
@@ -4273,12 +4275,12 @@ async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocu
   }
   const { content, panelNode } = knowledgeBasePage(tab, tabFocused);
   if (tab === 'exemplars') {
-    setStatus('正在读取范例…', 'busy');
+    setStatus(EXEMPLARS_STATUS.loading, 'busy');
     try {
-      renderExemplars(panelNode, await window.ai7.inspectExemplars());
-      if (content.isConnected) setStatus('范例已打开');
+      renderExemplars(panelNode, await window.ai7.inspectExemplars({ after: null }));
+      if (content.isConnected) setStatus(EXEMPLARS_STATUS.opened);
     } catch (error) {
-      setStatus(rendererErrorMessage(error, '无法读取范例。'), 'error');
+      setStatus(rendererErrorMessage(error, EXEMPLARS_STATUS.unavailable), 'error');
     }
     return;
   }
@@ -4298,34 +4300,69 @@ async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocu
 
 /**
  * 知识库 › 范例 (Issue #427, S79b; KB-004, KB-006): each published Book with who it is attributed to and when it was set as a
- * 发稿版本, and its delivered documents by type — each the version its latest delivery named, with its eligibility.
+ * 发稿版本, and its delivered documents by type — each the version its latest delivery named, with its eligibility. The
+ * Books come a page at a time: `更多已出版的书…` reads the next and focuses the first Book it adds (Issue #427 review).
  */
 function renderExemplars(root: HTMLElement, projection: ExemplarsProjection): void {
-  root.dataset['exemplarBooks'] = String(projection.books.length);
   if (projection.books.length === 0) root.append(element('p', 'field-note exemplars-empty', EXEMPLARS_EMPTY));
   const list = element('div', 'exemplar-list');
-  for (const book of projection.books) {
-    const card = element('article', 'exemplar-book');
-    card.dataset['bookId'] = book.bookId;
-    card.dataset['exemplarCount'] = String(book.exemplars.length);
-    card.append(
-      element('h3', undefined, `《${book.bookTitle}》`),
-      element('p', 'field-note exemplar-attribution', exemplarAttribution(book)),
-      element('p', 'field-note exemplar-designation', exemplarDesignation(book, localInstantLabel)),
-    );
-    if (book.exemplars.length === 0) card.append(element('p', 'field-note', EXEMPLARS_NONE_DELIVERED));
-    const items = element('ul', 'exemplar-items');
-    for (const exemplar of book.exemplars) {
-      const item = element('li', undefined, exemplarLine(exemplar, localInstantLabel));
-      item.dataset['exemplarDocument'] = exemplar.documentId;
-      item.dataset['exemplarType'] = exemplar.typeId;
-      item.dataset['exemplarVersion'] = String(exemplar.version);
-      items.append(item);
+  const append = (books: ExemplarsProjection['books']): HTMLElement | null => {
+    let first: HTMLElement | null = null;
+    for (const book of books) {
+      const card = element('article', 'exemplar-book');
+      card.dataset['bookId'] = book.bookId;
+      card.dataset['exemplarCount'] = String(book.exemplars.length);
+      card.dataset['exemplarWithdrawn'] = String(book.withdrawn);
+      const heading = element('h3', undefined, `《${book.bookTitle}》`);
+      heading.tabIndex = -1;
+      first ??= heading;
+      card.append(
+        heading,
+        element('p', 'field-note exemplar-attribution', exemplarAttribution(book)),
+        element('p', 'field-note exemplar-designation', exemplarDesignation(book, localInstantLabel)),
+      );
+      if (book.exemplars.length === 0) card.append(element('p', 'field-note', EXEMPLARS_NONE_DELIVERED));
+      const items = element('ul', 'exemplar-items');
+      for (const exemplar of book.exemplars) {
+        const item = element('li', undefined, exemplarLine(exemplar, localInstantLabel));
+        item.dataset['exemplarDocument'] = exemplar.documentId;
+        item.dataset['exemplarType'] = exemplar.typeId;
+        item.dataset['exemplarVersion'] = String(exemplar.version);
+        items.append(item);
+      }
+      if (book.exemplars.length > 0) card.append(items);
+      list.append(card);
     }
-    if (book.exemplars.length > 0) card.append(items);
-    list.append(card);
-  }
-  root.append(list, ...EXEMPLARS_LATER.map((line) => element('p', 'field-note exemplars-later', line)));
+    root.dataset['exemplarBooks'] = String(list.children.length);
+    return first;
+  };
+  append(projection.books);
+  let cursor = projection.nextCursor;
+  const more = element('button', 'button secondary', EXEMPLARS_MORE);
+  more.type = 'button';
+  more.dataset['exemplarAction'] = 'more';
+  const moreRow = element('div', 'button-row exemplars-more');
+  moreRow.hidden = cursor === null;
+  moreRow.append(more);
+  more.addEventListener('click', () => void (async () => {
+    if (cursor === null || more.disabled) return;
+    more.disabled = true;
+    setStatus(EXEMPLARS_STATUS.loadingMore, 'busy');
+    try {
+      const next = await window.ai7.inspectExemplars({ after: cursor });
+      if (!root.isConnected) return;
+      const first = append(next.books);
+      cursor = next.nextCursor;
+      moreRow.hidden = cursor === null;
+      setStatus(EXEMPLARS_STATUS.opened);
+      first?.focus();
+    } catch (error) {
+      setStatus(rendererErrorMessage(error, EXEMPLARS_STATUS.unavailable), 'error');
+    } finally {
+      more.disabled = false;
+    }
+  })());
+  root.append(list, moreRow, ...EXEMPLARS_LATER.map((line) => element('p', 'field-note exemplars-later', line)));
 }
 
 /**

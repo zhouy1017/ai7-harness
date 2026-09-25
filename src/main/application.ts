@@ -2572,12 +2572,13 @@ function registerRendererHandlers(
       return service.call('inspectReviewGuidelines', {});
     }),
   );
-  // 知识库 › 范例 (Issue #427, S79b) names no Book either: it reads every published Book's delivered documents.
-  ipcMain.handle(IPC_CHANNELS.inspectExemplars, (event) =>
+  // 知识库 › 范例 (Issue #427, S79b) names no Book either: it reads the published Books' delivered documents, a page at a
+  // time, starting where the renderer's cursor says; the service checks the cursor.
+  ipcMain.handle(IPC_CHANNELS.inspectExemplars, (event, input: ServiceOperationMap['inspectExemplars']['input']) =>
     envelope(async () => {
       requireSender(event);
       requireAuthority();
-      return service.call('inspectExemplars', {});
+      return service.call('inspectExemplars', { after: input?.after ?? null });
     }),
   );
   ipcMain.handle(
