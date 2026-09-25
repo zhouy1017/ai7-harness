@@ -573,9 +573,6 @@ function reviewCompletionItem(reading: ReviewRunAttentionReading): GlobalAttenti
   });
 }
 
-// ---- ordering ------------------------------------------------------------------------------------------
-
-/** Code-point order, the same on every host; a missing title sorts first. */
 const MAINTENANCE_NEXT_STEPS: Readonly<Record<MaintenanceNextStep, GlobalAttentionNextStep>> = {
   'link-proposal': 'maintenance-link-proposal',
   'link-publication': 'maintenance-link-publication',
@@ -585,10 +582,13 @@ const MAINTENANCE_NEXT_STEPS: Readonly<Record<MaintenanceNextStep, GlobalAttenti
 
 /**
  * 维护事项待处理 (MAINT-012): a named decision of the editor's, returning to the case on its 发稿版本. It stops no other
- * work, so it never blocks; 撤回, 归档 and a complete case never come here.
+ * work, so it never blocks; 撤回, 归档 and a complete case never come here. A 替代 or 再版 waits for its separately
+ * designated version until one is linked (MAINT-007), whatever interim 仍未解决 it recorded, so it reads as waiting.
  */
 function maintenanceItem(reading: MaintenanceAttentionReading): GlobalAttentionItemProjection {
-  return item('decisions', reading.status === 'waiting' ? 'maintenance-waiting' : 'maintenance-pending', {
+  const waiting = reading.status === 'waiting' ||
+    ((reading.classification === 'supersession' || reading.classification === 'reissue') && reading.nextStep === 'link-publication');
+  return item('decisions', waiting ? 'maintenance-waiting' : 'maintenance-pending', {
     itemId: `maintenance:${reading.caseId}`,
     blocked: false,
     at: reading.at,
@@ -604,6 +604,9 @@ function maintenanceItem(reading: MaintenanceAttentionReading): GlobalAttentionI
   });
 }
 
+// ---- ordering ------------------------------------------------------------------------------------------
+
+/** Code-point order, the same on every host; a missing title sorts first. */
 function compareText(left: string | null, right: string | null): number {
   const a = left ?? '';
   const b = right ?? '';

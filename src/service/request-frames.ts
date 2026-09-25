@@ -203,6 +203,12 @@ function validExportOptions(value: unknown): boolean {
     typeof value.includeEditorNotes === 'boolean';
 }
 
+/** A package export's 含批注 and 含修改建议, each a switch and nothing else; 备注 never go with a package (Issue #416). */
+function validPackageExportOptions(value: unknown): boolean {
+  return isRecord(value) && hasExactKeys(value, ['includeAnnotations', 'includeSuggestions']) &&
+    typeof value.includeAnnotations === 'boolean' && typeof value.includeSuggestions === 'boolean';
+}
+
 function validRecoverySelection(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return (value.kind === 'journal' && hasExactKeys(value, ['kind'])) ||
@@ -1195,13 +1201,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // Its export (Issue #416, S67b): one version of the route's Book's package, the folder the dialog returned, an export.
     case 'reviewBookDeliveryPackageExport': {
-      const input = requireInput(value.input, ['bookId', 'packageVersionId'], tentativeId);
-      if (!validUuid(input.bookId) || !validUuid(input.packageVersionId)) throw new ProtocolError(tentativeId);
+      const input = requireInput(value.input, ['bookId', 'packageVersionId', 'options'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.packageVersionId) || !validPackageExportOptions(input.options)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'prepareBookDeliveryPackageExport': {
-      const input = requireInput(value.input, ['bookId', 'packageVersionId', 'reviewDigest', 'folder'], tentativeId);
-      if (!validUuid(input.bookId) || !validUuid(input.packageVersionId) || !isBoundedString(input.reviewDigest, 64) ||
+      const input = requireInput(value.input, ['bookId', 'packageVersionId', 'options', 'reviewDigest', 'folder'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.packageVersionId) || !validPackageExportOptions(input.options) ||
+          !isBoundedString(input.reviewDigest, 64) ||
           !HEX_DIGEST_PATTERN.test(input.reviewDigest) || !isBoundedString(input.folder, MAX_EXPORT_DESTINATION_CODE_UNITS) ||
           !isAbsolute(input.folder)) {
         throw new ProtocolError(tentativeId);
@@ -1217,6 +1224,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectMaintenanceCase': {
       const input = requireInput(value.input, ['bookId', 'caseId'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.caseId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'listMaintenanceCases': {
+      const input = requireInput(value.input, ['bookId', 'publicationVersionId', 'beforeOrdinal'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.publicationVersionId) || typeof input.beforeOrdinal !== 'number' ||
+          !Number.isSafeInteger(input.beforeOrdinal) || input.beforeOrdinal < 1) {
+        throw new ProtocolError(tentativeId);
+      }
       break;
     }
     case 'recordMaintenanceCase': {
