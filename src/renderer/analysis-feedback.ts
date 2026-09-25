@@ -65,7 +65,8 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
 function action(label: string, tone: 'primary' | 'secondary' | 'quiet', name: string, run: () => void): HTMLButtonElement {
   const node = el('button', `button ${tone}`, label);
   node.type = 'button';
-  node.dataset['analysisFeedbackAction'] = name;
+  // ②A's own action attribute, so the card's buttons are among the actions the card declares.
+  node.dataset['analysisAction'] = name;
   node.addEventListener('click', run);
   return node;
 }
@@ -121,7 +122,7 @@ export function mountAnalysisFeedback(options: MountAnalysisFeedbackOptions): { 
       return node;
     }
     const label = item.latest === null ? ANALYSIS_FEEDBACK_OPEN : ANALYSIS_FEEDBACK_CHANGE;
-    const toggle = action(label, 'quiet', 'open', () => {
+    const toggle = action(label, 'quiet', 'open-feedback', () => {
       if (busy) return;
       open = { key: draftKey(item.itemKey), draft: { judgment: null, choice: null, other: '', correction: '' } };
       refusal = null;
@@ -158,12 +159,12 @@ export function mountAnalysisFeedback(options: MountAnalysisFeedbackOptions): { 
     correctionText.dataset['analysisFeedbackField'] = 'correction';
     correctionText.addEventListener('input', () => { draft.correction = correctionText.value; });
     correction.append(el('span', undefined, ANALYSIS_FEEDBACK_CORRECTION), correctionText);
-    const record = action(ANALYSIS_FEEDBACK_RECORD, 'primary', 'record', () => void save(item, draft));
-    const cancel = action(ANALYSIS_FEEDBACK_CANCEL, 'secondary', 'cancel', () => {
+    const record = action(ANALYSIS_FEEDBACK_RECORD, 'primary', 'record-feedback', () => void save(item, draft));
+    const cancel = action(ANALYSIS_FEEDBACK_CANCEL, 'secondary', 'cancel-feedback', () => {
       if (busy) return;
       open = null;
       refusal = null;
-      paint(`${itemSelector(item.itemKey)} [data-analysis-feedback-action="open"]`);
+      paint(`${itemSelector(item.itemKey)} [data-analysis-action="open-feedback"]`);
     });
     const drawReasons = (): void => {
       const choices = draft.judgment === null ? [] : analysisFeedbackReasonChoices(item.dimension, draft.judgment);
@@ -224,7 +225,7 @@ export function mountAnalysisFeedback(options: MountAnalysisFeedbackOptions): { 
       });
       busy = false;
       if (open?.key === draftKey(item.itemKey)) open = null;
-      paint(`${itemSelector(item.itemKey)} [data-analysis-feedback-action="open"]`);
+      paint(`${itemSelector(item.itemKey)} [data-analysis-action="open-feedback"]`);
       setStatus(ANALYSIS_FEEDBACK_STATUS.recorded, 'success');
     } catch (error) {
       busy = false;
@@ -232,7 +233,7 @@ export function mountAnalysisFeedback(options: MountAnalysisFeedbackOptions): { 
       refusal = { itemKey: item.itemKey, message };
       // What moved since the card opened is read again, so the next 记录反馈 answers what is there now.
       try { projection = await api.inspectAnalysisFeedback({ revisionId }); } catch { /* the card keeps what it had */ }
-      paint(`${itemSelector(item.itemKey)} [data-analysis-feedback-action="record"]`);
+      paint(`${itemSelector(item.itemKey)} [data-analysis-action="record-feedback"]`);
       setStatus(message, 'error');
     }
   };

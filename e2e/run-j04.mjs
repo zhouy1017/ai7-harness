@@ -46,9 +46,11 @@ const REUSE_PLAN_SCHEMA = 'ai7.baseline-manuscript-analysis.reuse-plan/1';
 // Synchronized delta with Issue #418 (S72 D4): the plan is one line and `查看计划`, which opens the Task Drawer.
 // Synchronized delta with Issue #420 (S74a A4, A5): `查看计划修订` and `重新确认计划` moved into the drawer's
 // authorization bar with the start itself, so the card never carries them again.
+// Synchronized delta with Issue #94 (S38): every item of a revision offers `反馈…`, and its Analysis Feedback Card, when
+// open, `记录反馈` and `取消`; J-11 walks the card, and this Journey never opens it.
 const ANALYSIS_ACTIONS = ['return-to-range', 'sync-current', 'reanalyze-range', 'reanalyze-book', 'open-revision', 'close-revision', 'cancel-preparation',
   'select-tab', 'go-history', 'go-chapters', 'choose-sync-current', 'choose-reanalyze-range', 'choose-reanalyze-book', 'quick-sync-current', 'quick-reanalyze-range', 'quick-reanalyze-book',
-  'open-review', 'view-plan'];
+  'open-review', 'view-plan', 'open-feedback', 'record-feedback', 'cancel-feedback'];
 /** Every button on screen and in the drawer whose words name 授权: AUTH-002 keeps the word off every start (ADR 0077). */
 const AUTHORIZE_LABELED_BUTTONS = `Array.from(document.querySelectorAll('#screen button, #task-drawer button')).filter((button)=>/授权/u.test(button.textContent??'')).length`;
 /** The words the authorization bar says before every start (AUTH-003 as ADR 0077 revised it). */

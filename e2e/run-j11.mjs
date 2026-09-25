@@ -535,7 +535,7 @@ const READ_FEEDBACK = `(() => {
     items: Array.from(card.querySelectorAll('[data-analysis-item-key]'), (item) => [
       item.dataset.analysisItemKey, item.dataset.analysisFeedbackJudgment ?? null, item.dataset.analysisFeedbackSignals ?? null,
       item.querySelector(':scope > .analysis-feedback > .analysis-feedback-line')?.textContent ?? null,
-      item.querySelector(':scope > .analysis-feedback > [data-analysis-feedback-action="open"]')?.textContent ?? null,
+      item.querySelector(':scope > .analysis-feedback > [data-analysis-action="open-feedback"]')?.textContent ?? null,
     ]),
     card: open === null ? null : {
       item: open.closest('[data-analysis-item-key]')?.dataset.analysisItemKey ?? null,
@@ -545,7 +545,7 @@ const READ_FEEDBACK = `(() => {
         : null,
       other: shown(open.querySelector('.analysis-feedback-other')),
       correction: shown(open.querySelector('.analysis-feedback-correction')),
-      record: open.querySelector('[data-analysis-feedback-action="record"]')?.disabled === false ? 'enabled' : 'disabled',
+      record: open.querySelector('[data-analysis-action="record-feedback"]')?.disabled === false ? 'enabled' : 'disabled',
       refusal: open.querySelector('.analysis-feedback-refusal')?.textContent ?? null,
     },
     metric: metric === null || metric.dataset.metricJudged === undefined ? null : {
@@ -556,7 +556,7 @@ const READ_FEEDBACK = `(() => {
       note: metric.querySelector('.analysis-feedback-note')?.textContent ?? null,
     },
     focus: active instanceof HTMLElement && active.closest('[data-analysis-item-key]') !== null
-      ? [active.closest('[data-analysis-item-key]').dataset.analysisItemKey, active.dataset.analysisFeedbackAction ?? active.dataset.analysisFeedbackField ?? (active instanceof HTMLInputElement ? active.value : active.tagName)]
+      ? [active.closest('[data-analysis-item-key]').dataset.analysisItemKey, active.dataset.analysisAction ?? active.dataset.analysisFeedbackField ?? (active instanceof HTMLInputElement ? active.value : active.tagName)]
       : null,
   };
 })()`;
@@ -1124,7 +1124,7 @@ async function main() {
     // 人物与名称's first entry: 反馈… opens its card with nothing chosen and 记录反馈 closed; 不准确 offers three reasons fitted
     // to a name, 其他 beside them, none chosen, and the correction; one reason, the correction and 记录反馈 record it there.
     await clickSelector(renderer, '#analysis-tab-entities', 'feedback-entities-tab');
-    await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-feedback-action="open"]`, 'feedback-entity-open');
+    await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-action="open-feedback"]`, 'feedback-entity-open');
     const entityCard = await readFeedback(renderer, (page) => page.card?.item === 'entities/0', 'feedback-entity-card');
     requireJourney(JSON.stringify(entityCard.card.judgments) === JSON.stringify([['accurate', false], ['inaccurate', false], ['incomplete', false]]) &&
       entityCard.card.reasons === null && entityCard.card.correction === false && entityCard.card.record === 'disabled' &&
@@ -1137,19 +1137,19 @@ async function main() {
     'feedback-entity-reasons-words', reasonsOffered.card);
     await tick(renderer, `${feedbackItem('entities/0')} .analysis-feedback-reasons input[value="merged"]`, 'feedback-entity-reason');
     await fill(renderer, `${feedbackItem('entities/0')} [data-analysis-feedback-field="correction"]`, ENTITY_CORRECTION, 'feedback-entity-correction');
-    await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-feedback-action="record"]`, 'feedback-entity-record');
+    await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-action="record-feedback"]`, 'feedback-entity-record');
     await waitFor(renderer, `${status} === '反馈已记录。'`, 'feedback-entity-recorded-status');
     const entityJudged = await readFeedback(renderer, (page) => page.card === null && page.metric?.judged === '1', 'feedback-entity-recorded');
     const entityRow = rowOf(entityJudged, 'entities/0');
     requireJourney(entityRow[1] === 'inaccurate' && entityRow[2] === '1' && (entityRow[3] ?? '').startsWith(`你的反馈：不准确 · 把不同人物当成一个 · 修正：${ENTITY_CORRECTION} · `) &&
-      entityRow[4] === '改反馈…' && JSON.stringify(entityJudged.focus) === JSON.stringify(['entities/0', 'open']) &&
+      entityRow[4] === '改反馈…' && JSON.stringify(entityJudged.focus) === JSON.stringify(['entities/0', 'open-feedback']) &&
       entityJudged.metric.total === '这本书判断了 1 条：准确 0、不准确 1、不完整 0' &&
       JSON.stringify(entityJudged.metric.dimensions) === JSON.stringify(['人物与名称：1 条，准确 0、不准确 1、不完整 0']), 'feedback-entity-recorded-words', entityJudged);
 
     at('feedback-own-reason');
     // The synopsis 不完整 for the editor's own reason: 其他 / 自行输入 opens their words beside the alternatives, focused.
     await clickSelector(renderer, '#analysis-tab-synopsis', 'feedback-synopsis-tab');
-    await clickSelector(renderer, `${feedbackItem('synopsis')} [data-analysis-feedback-action="open"]`, 'feedback-synopsis-open');
+    await clickSelector(renderer, `${feedbackItem('synopsis')} [data-analysis-action="open-feedback"]`, 'feedback-synopsis-open');
     await readFeedback(renderer, (page) => page.card?.item === 'synopsis', 'feedback-synopsis-card');
     await tick(renderer, `${feedbackItem('synopsis')} .analysis-feedback-judgments input[value="incomplete"]`, 'feedback-synopsis-incomplete');
     const synopsisReasons = await readFeedback(renderer, (page) => Array.isArray(page.card?.reasons), 'feedback-synopsis-reasons');
@@ -1159,7 +1159,7 @@ async function main() {
     const ownWords = await readFeedback(renderer, (page) => page.card?.other === true, 'feedback-synopsis-own-words');
     requireJourney(JSON.stringify(ownWords.focus) === JSON.stringify(['synopsis', 'other']), 'feedback-synopsis-own-words-focused', ownWords.focus);
     await fill(renderer, `${feedbackItem('synopsis')} [data-analysis-feedback-field="other"]`, SYNOPSIS_REASON, 'feedback-synopsis-reason-text');
-    await clickSelector(renderer, `${feedbackItem('synopsis')} [data-analysis-feedback-action="record"]`, 'feedback-synopsis-record');
+    await clickSelector(renderer, `${feedbackItem('synopsis')} [data-analysis-action="record-feedback"]`, 'feedback-synopsis-record');
     const synopsisJudged = await readFeedback(renderer, (page) => page.card === null && page.metric?.judged === '2', 'feedback-synopsis-recorded');
     const synopsisRow = rowOf(synopsisJudged, 'synopsis');
     requireJourney(synopsisRow[1] === 'incomplete' && (synopsisRow[3] ?? '').startsWith(`你的反馈：不完整 · ${SYNOPSIS_REASON} · `) &&
@@ -1171,13 +1171,13 @@ async function main() {
     // 改反馈… records a successor: 准确 asks for no reason and no correction; the earlier judgment stays on record beside it,
     // and the tally counts the entry once, by its latest.
     await clickSelector(renderer, '#analysis-tab-entities', 'feedback-change-tab');
-    await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-feedback-action="open"]`, 'feedback-change-open');
+    await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-action="open-feedback"]`, 'feedback-change-open');
     await readFeedback(renderer, (page) => page.card?.item === 'entities/0', 'feedback-change-card');
     await tick(renderer, `${feedbackItem('entities/0')} .analysis-feedback-judgments input[value="accurate"]`, 'feedback-change-accurate');
     const accurateCard = await readFeedback(renderer, (page) => page.card?.judgments?.[0]?.[1] === true, 'feedback-change-accurate-card');
     requireJourney(accurateCard.card.reasons === null && accurateCard.card.correction === false && accurateCard.card.record === 'enabled',
       'feedback-change-accurate-asks-nothing', accurateCard.card);
-    await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-feedback-action="record"]`, 'feedback-change-record');
+    await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-action="record-feedback"]`, 'feedback-change-record');
     const changed = await readFeedback(renderer, (page) => page.card === null && rowOf(page, 'entities/0')[2] === '2', 'feedback-changed');
     const changedRow = rowOf(changed, 'entities/0');
     requireJourney(changedRow[1] === 'accurate' && (changedRow[3] ?? '').startsWith('你的反馈：准确 · ') && !(changedRow[3] ?? '').includes('修正') &&
@@ -1190,28 +1190,28 @@ async function main() {
 
     at('feedback-unchanged');
     // The same judgment again would change nothing: it is refused in the card, with why, and the entry keeps its two.
-    await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-feedback-action="open"]`, 'feedback-unchanged-open');
+    await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-action="open-feedback"]`, 'feedback-unchanged-open');
     await readFeedback(renderer, (page) => page.card?.item === 'entities/0', 'feedback-unchanged-card');
     await tick(renderer, `${feedbackItem('entities/0')} .analysis-feedback-judgments input[value="accurate"]`, 'feedback-unchanged-accurate');
-    await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-feedback-action="record"]`, 'feedback-unchanged-record');
+    await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-action="record-feedback"]`, 'feedback-unchanged-record');
     const unchanged = await readFeedback(renderer, (page) => typeof page.card?.refusal === 'string', 'feedback-unchanged-refused');
     requireJourney(unchanged.card.refusal === '反馈没有变化。' && rowOf(unchanged, 'entities/0')[2] === '2' &&
       JSON.stringify(unchanged.card.judgments) === JSON.stringify([['accurate', true], ['inaccurate', false], ['incomplete', false]]), 'feedback-unchanged-words', unchanged);
     await waitFor(renderer, `${status} === '反馈没有变化。'`, 'feedback-unchanged-status');
-    await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-feedback-action="cancel"]`, 'feedback-unchanged-cancel');
+    await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-action="cancel-feedback"]`, 'feedback-unchanged-cancel');
     await readFeedback(renderer, (page) => page.card === null, 'feedback-unchanged-closed');
 
     at('j14-feedback-keyboard');
     // Without a pointer: Enter on an event's 反馈… opens its card at the first judgment, nothing chosen, and Escape closes it
     // with nothing recorded and the focus back on 反馈….
     await clickSelector(renderer, '#analysis-tab-events', 'feedback-keyboard-tab');
-    const eventToggle = `${feedbackItem('events/0')} [data-analysis-feedback-action="open"]`;
+    const eventToggle = `${feedbackItem('events/0')} [data-analysis-action="open-feedback"]`;
     await assertRenderer(renderer, `(() => { const open = document.querySelector(${JSON.stringify(eventToggle)}); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.focus(); return document.activeElement === open; })()`, 'feedback-keyboard-focused');
     await pressEnter(renderer);
     const keyboardCard = await readFeedback(renderer, (page) => page.card?.item === 'events/0' && JSON.stringify(page.focus) === JSON.stringify(['events/0', 'accurate']), 'feedback-keyboard-open');
     requireJourney(keyboardCard.card.judgments.every(([, checked]) => checked === false), 'feedback-keyboard-nothing-chosen', keyboardCard.card);
     await pressEscape(renderer);
-    const keyboardClosed = await readFeedback(renderer, (page) => page.card === null && JSON.stringify(page.focus) === JSON.stringify(['events/0', 'open']), 'feedback-keyboard-closed');
+    const keyboardClosed = await readFeedback(renderer, (page) => page.card === null && JSON.stringify(page.focus) === JSON.stringify(['events/0', 'open-feedback']), 'feedback-keyboard-closed');
     requireJourney(rowOf(keyboardClosed, 'events/0')[2] === '0' && keyboardClosed.metric.judged === '2', 'feedback-keyboard-nothing-recorded', keyboardClosed);
 
     at('j14-feedback-reflow-forced-colors');
@@ -1234,7 +1234,7 @@ async function main() {
       return card instanceof HTMLElement && getComputedStyle(card).borderTopStyle === 'solid' && groups.length === 2 && groups.every((group) => getComputedStyle(group).borderTopStyle === 'solid');
     })()`, 'feedback-forced-colors');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
-    await clickSelector(renderer, `${feedbackItem('events/0')} [data-analysis-feedback-action="cancel"]`, 'feedback-reflow-cancel');
+    await clickSelector(renderer, `${feedbackItem('events/0')} [data-analysis-action="cancel-feedback"]`, 'feedback-reflow-cancel');
     await readFeedback(renderer, (page) => page.card === null, 'feedback-reflow-closed');
 
     at('feedback-silence-is-not-approval');
