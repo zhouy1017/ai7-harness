@@ -613,6 +613,8 @@ describe('conversion to a DOCX working representation over the real store', () =
       await writeFile(selectedPath, concat('第一段。\n\n第二段。\n'));
       const otherPath = join(roots.inputRoot, '另一份.txt');
       await writeFile(otherPath, concat('另一段。\n'));
+      const neverStagedPath = join(roots.inputRoot, '从未暂存.txt');
+      await writeFile(neverStagedPath, concat('从未暂存的一段。\n'));
       const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       try {
         const staged = await store.stageSelectedManuscript(randomUUID(), selectedPath);
@@ -627,10 +629,10 @@ describe('conversion to a DOCX working representation over the real store', () =
         const continued = await store.continueImportDraft(staged.draftId, version);
         if (continued.state !== 'reselection-required') throw new Error(`expected reselection-required, got ${continued.state}`);
         version = continued.recovery.draftVersion;
-        // Another file is refused as the reselection's own mismatch, before anything is written.
+        // Another file, never staged, is refused as the reselection's own mismatch, before any copy of it is written.
         const filesBefore = await countObjectFiles(roots.dataRoot);
         const rowBefore = draftRow(staged.draftId);
-        await expect(store.reselectImportDraft(staged.draftId, version, randomUUID(), otherPath)).rejects.toMatchObject({ code: 'RESELECTION_MISMATCH' });
+        await expect(store.reselectImportDraft(staged.draftId, version, randomUUID(), neverStagedPath)).rejects.toMatchObject({ code: 'RESELECTION_MISMATCH' });
         expect(await countObjectFiles(roots.dataRoot)).toBe(filesBefore);
         expect(draftRow(staged.draftId)).toEqual(rowBefore);
         // The exact original is converted again and restaged, where it used to come back needing reselection every time.
@@ -718,8 +720,11 @@ describe('conversion to a DOCX working representation over the real store', () =
       const staged = await store.stageSelectedManuscript(randomUUID(), selectedPath);
       const current = staged.source.conversion!.converterIdentity;
       const other = await store.stageSelectedManuscript(randomUUID(), otherPath);
-      // As a draft staged before the converter's identity moved on.
-      driftConvertedDraft(staged.draftId, other.source.workingObjectSha256!, `${current}-earlier`);
+      // As a draft staged before the converter's identity moved on. The stand-in is an identity the product knows (the
+      // legacy .doc route's), so the review can still be told, and only the assertions below can decide.
+      const earlier = 'ai7-doc-to-docx/1';
+      expect(earlier).not.toBe(current);
+      driftConvertedDraft(staged.draftId, other.source.workingObjectSha256!, earlier);
       const continued = await store.continueImportDraft(staged.draftId, staged.draftVersion);
       if (continued.state !== 'reselection-required') throw new Error(`expected reselection-required, got ${continued.state}`);
       const reselected = await store.reselectImportDraft(staged.draftId, continued.recovery.draftVersion, randomUUID(), selectedPath);
