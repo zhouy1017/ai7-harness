@@ -2531,6 +2531,7 @@ function requireManuscriptReimportTargetSchema(
   includeReviewGuidelineTables ||= committed(REVIEW_GUIDELINE_SCHEMA_SQL);
   includeLibraryMaterialTables ||= committed(LIBRARY_MATERIAL_SCHEMA_SQL);
   includeEvaluationRecordTables ||= committed(EVALUATION_RECORD_SCHEMA_SQL);
+  includeAnalysisFeedbackTables ||= committed(ANALYSIS_FEEDBACK_SCHEMA_SQL);
   requireExactSchema(
     db,
     {
