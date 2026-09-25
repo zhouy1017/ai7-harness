@@ -767,6 +767,9 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .database-import-choice { display: flex; gap: .45rem; align-items: flex-start; overflow-wrap: anywhere; }
 .database-import-consequence[hidden], .database-import-preview[hidden], .database-import-pending[hidden], .database-import-roll-back[hidden] { display: none; }
 .database-import-pending, .database-import-roll-back { margin-top: .6rem; }
+/* 只导入其中的图书 (S86d): each Book of the file as the merge would take it. */
+.database-merge-books { margin: .35rem 0 0; padding-left: 1.2rem; overflow-wrap: anywhere; }
+.database-merge-book.status-present { color: #60685e; }
 .document-delivery input[type="text"], .document-delivery textarea { width: 100%; box-sizing: border-box; margin-top: .35rem; }
 .document-delivery .delivery-note { display: block; margin-top: .5rem; }
 .delivery-statement { margin: .6rem 0 0; padding: .5rem .65rem; border-left: 4px solid #416458; background: #f1f4ec; font-weight: 800; }

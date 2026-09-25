@@ -6,8 +6,12 @@ import {
   DATABASE_IMPORT_HEADING,
   DATABASE_IMPORT_LEDE,
   DATABASE_IMPORT_STATUS_LINES,
+  DATABASE_MERGE_CONSEQUENCE,
+  DATABASE_MERGE_NOTHING,
+  DATABASE_MERGE_NOTICE_LINES,
   DATABASE_REPLACE_CONSEQUENCE,
   DATABASE_REPLACEMENT_NO_RECORDS,
+  databaseImportBookLine,
   databaseImportPreviewRows,
   databaseImportRefusalLine,
   databasePendingLines,
@@ -19,9 +23,11 @@ import {
 /**
  * 导入数据库 in 设置 › 数据与存储 (Issue #434, plan slice S86c; V2-UX-DSTO-017; ADR 0079 §1.3, §1.4): `导入数据库…` opens the
  * system's Open dialog, and the chosen file is read and verified whole before anything else — its file, origin, versions,
- * contents and integrity stated. A file that fits this AI7 offers its choice, never preselected, and `按所选方式导入` does only
- * what was chosen: `替换本机全部数据` backs the data up and waits for AI7's next start, with `现在关闭 AI7` and `取消替换`. Once a
- * replacement has come to pass, `回退到替换前的数据…` offers its backup back, after a confirmation of its own.
+ * contents and integrity stated. A file that fits this AI7 offers two choices, neither preselected, and `按所选方式导入` does
+ * only what was chosen: `替换本机全部数据` backs the data up and waits for AI7's next start, with `现在关闭 AI7` and `取消替换`;
+ * `只导入其中的图书` (S86d) names each Book as the merge would take it and what stays behind, backs the data up, and merges at
+ * the next start. Once a replacement has come to pass, `回退到替换前的数据…` offers its backup back, after a confirmation of its
+ * own.
  */
 
 type Status = (message: string, tone?: 'busy' | 'success' | 'error') => void;
@@ -45,7 +51,7 @@ export interface MountDatabaseImportOptions {
   readonly root: HTMLElement;
   readonly api: Pick<RendererApi,
     'chooseDatabaseImportFile' | 'prepareDatabaseReplacement' | 'cancelDatabaseReplacement' | 'inspectDatabaseReplacements' |
-    'rollBackDatabaseReplacement' | 'quitApplication'>;
+    'rollBackDatabaseReplacement' | 'prepareDatabaseMerge' | 'quitApplication'>;
   readonly setStatus: Status;
   readonly errorMessage: (error: unknown, fallback: string) => string;
   readonly instant: (iso: string) => string;
@@ -109,7 +115,8 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
       const buttons = el('div', 'button-row');
       buttons.append(
         action(DATABASE_IMPORT_ACTIONS.quit, 'primary', 'quit', () => void quit()),
-        action(waiting.kind === 'roll-back' ? DATABASE_IMPORT_ACTIONS.cancelRollBack : DATABASE_IMPORT_ACTIONS.cancelReplacement, 'quiet', 'cancel-replacement',
+        action(waiting.kind === 'roll-back' ? DATABASE_IMPORT_ACTIONS.cancelRollBack : waiting.kind === 'merge' ? DATABASE_IMPORT_ACTIONS.cancelMerge
+          : DATABASE_IMPORT_ACTIONS.cancelReplacement, 'quiet', 'cancel-replacement',
           () => void cancelReplacement(waiting.replacementId)),
       );
       pending.replaceChildren(first, el('p', 'field-note', lines[1]), el('p', 'attention-note', lines[2]), buttons);
@@ -169,29 +176,58 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
       cancel.focus();
       return;
     }
-    // The choice, never preselected (DSTO-017): `按所选方式导入` waits for it, and says what it will do once it is made.
+    // The two choices, neither preselected (DSTO-017): `按所选方式导入` waits for one, and each says what it will do once it is
+    // made — a merge names every Book of the file as it would take it, and what stays behind.
     const choices = el('fieldset', 'database-import-choices');
-    const consequence = el('p', 'attention-note database-import-consequence', DATABASE_REPLACE_CONSEQUENCE);
-    consequence.hidden = true;
-    const confirm = action(DATABASE_IMPORT_ACTIONS.confirm, 'primary', 'confirm', () => void prepare(file.previewId));
-    confirm.disabled = true;
-    const radio = el('input');
-    radio.type = 'radio';
-    radio.name = 'database-import-choice';
-    radio.value = 'replace';
-    radio.checked = false;
-    radio.addEventListener('change', () => {
-      if (!radio.checked) return;
-      consequence.hidden = false;
-      confirm.dataset['chosen'] = 'true';
-      confirm.disabled = busy;
+    const confirm = action(DATABASE_IMPORT_ACTIONS.confirm, 'primary', 'confirm', () => {
+      const chosen = choices.querySelector<HTMLInputElement>('input[name="database-import-choice"]:checked')?.value;
+      if (chosen === 'replace') void prepare(file.previewId);
+      else if (chosen === 'merge') void merge(file.previewId);
     });
-    const label = el('label', 'database-import-choice');
-    label.append(radio, document.createTextNode(DATABASE_IMPORT_CHOICES.replace));
-    choices.append(el('legend', undefined, DATABASE_IMPORT_CHOICES_LEGEND), label, consequence);
+    confirm.disabled = true;
+    const mergeable = file.books.some((book) => book.status !== 'present');
+    const shown: HTMLElement[] = [];
+    const option = (value: 'replace' | 'merge', text: string, details: HTMLElement): HTMLLabelElement => {
+      const radio = el('input');
+      radio.type = 'radio';
+      radio.name = 'database-import-choice';
+      radio.value = value;
+      radio.checked = false;
+      radio.disabled = value === 'merge' && !mergeable;
+      details.hidden = true;
+      shown.push(details);
+      radio.addEventListener('change', () => {
+        if (!radio.checked) return;
+        for (const node of shown) node.hidden = node !== details;
+        confirm.dataset['chosen'] = 'true';
+        confirm.disabled = busy;
+      });
+      const label = el('label', 'database-import-choice');
+      label.append(radio, document.createTextNode(text));
+      return label;
+    };
+    const replaceDetails = el('p', 'attention-note database-import-consequence', DATABASE_REPLACE_CONSEQUENCE);
+    replaceDetails.dataset['choice'] = 'replace';
+    const mergeDetails = el('div', 'database-import-consequence database-merge-plan');
+    mergeDetails.dataset['choice'] = 'merge';
+    const books = el('ul', 'database-merge-books');
+    for (const book of file.books) {
+      const item = el('li', `database-merge-book status-${book.status}`, databaseImportBookLine(book));
+      item.dataset['bookId'] = book.bookId;
+      item.dataset['status'] = book.status;
+      books.append(item);
+    }
+    mergeDetails.append(el('p', 'attention-note', DATABASE_MERGE_CONSEQUENCE), books,
+      ...file.mergeNotices.map((notice) => el('p', 'field-note database-merge-notice', DATABASE_MERGE_NOTICE_LINES[notice])));
+    choices.append(
+      el('legend', undefined, DATABASE_IMPORT_CHOICES_LEGEND),
+      option('replace', DATABASE_IMPORT_CHOICES.replace, replaceDetails), replaceDetails,
+      option('merge', DATABASE_IMPORT_CHOICES.merge, mergeDetails), mergeDetails,
+    );
+    if (!mergeable) choices.append(el('p', 'field-note database-merge-nothing', DATABASE_MERGE_NOTHING));
     buttons.append(confirm, cancel);
     preview.replaceChildren(rows, choices, buttons);
-    radio.focus();
+    choices.querySelector<HTMLInputElement>('input[name="database-import-choice"]')?.focus();
   };
 
   const chooseFile = async (): Promise<void> => {
@@ -247,6 +283,10 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
   const prepare = (previewId: string): Promise<void> =>
     change(() => api.prepareDatabaseReplacement({ previewId }),
       { busy: DATABASE_IMPORT_STATUS_LINES.preparing, done: DATABASE_IMPORT_STATUS_LINES.prepared, failed: DATABASE_IMPORT_STATUS_LINES.prepareFailed }, quitButton);
+
+  const merge = (previewId: string): Promise<void> =>
+    change(() => api.prepareDatabaseMerge({ previewId }),
+      { busy: DATABASE_IMPORT_STATUS_LINES.preparingMerge, done: DATABASE_IMPORT_STATUS_LINES.mergePrepared, failed: DATABASE_IMPORT_STATUS_LINES.mergeFailed }, quitButton);
 
   const cancelReplacement = (replacementId: string): Promise<void> =>
     change(() => api.cancelDatabaseReplacement({ replacementId }),

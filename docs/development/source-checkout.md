@@ -253,7 +253,23 @@ At shutdown the service stops a check under way before the store closes: the wri
 
 `回退到替换前的数据` prepares the same replacement from the latest replacement's backup, and backs the data up first as well. `现在关闭 AI7` closes the application, unless a window holds changes not yet saved.
 
-The backup before a replacement and the 定期自动备份 check write into the same backup location, with the same `.<uuid>.ai7db.partial` files, so they never write at once. The backup waits for a check under way, and no check starts until it is written. A check's sweep therefore never takes a file the backup is making, and still removes one a cut-off backup left.
+The backup before a replacement or a merge and the 定期自动备份 check write into the same backup location, with the same `.<uuid>.ai7db.partial` files, so they never write at once. The backup waits for a check under way, and no check starts until it is written. A check's sweep therefore never takes a file the backup is making, and still removes one a cut-off backup left.
+
+只导入其中的图书 (Issue #434, S86d; ADR 0079 §1.5) is service protocol version 85 and schema revision 58. `src/service/database-merge.ts` merges a Book with every record it owns, read from the store's own foreign keys over a policy that every relation has, and that a test pins against the store's catalogue:
+- `seed`: `books`, fixed to the Books chosen. A reference to another Book is refused.
+- `owned`: a row that references an owned row, or that an owned row references.
+- `dependent`: an import draft a committed import names.
+- `shared`: a house row an owned row references, taken when this store lacks it — a content object, a workflow profile, the service lifetime a journal entry was written in.
+- `excluded`: said as a notice — Series membership and Series knowledge, 资料库 decisions, the 编辑工作区方案's enablement.
+- `transient` and `house`: never taken.
+- `derived`: the search index, filled for the working text taken.
+
+A few references the store keeps by value — each import record's commit, each journal entry's lifetime — are followed as if they were foreign keys. The rows go in one transaction, in any order: foreign keys are checked at commit, and the store's insert triggers look only for a conflicting row, never for a parent. The stored files they name are copied first. A Book whose 内部编号 is another Book's here merges without one.
+
+A merge uses the replacement's staging place:
+- **Prepare:** extract the package, open it there as a store of its own (which brings it to this revision and checks it whole), plan which of its Books are new, already here or same-titled, back up the data as it is (`AI7 合并前备份 …`, origin `pre-merge-backup`), and write an intent of kind `merge`.
+- **Apply,** at the next open, onto the data as it is then: the store's files are copied aside, the Books are merged into the closed store, and the store opens. A merge or an open that fails puts the saved files back, and the data opens as it was. An interruption after the merge's commit finds its Books there and merges nothing twice.
+- **Recording:** `database_merges` records each merge, applied or failed, with its Books and notices. 导入记录 lists merges beside replacements. 回退 reads the replacements alone.
 
 
 

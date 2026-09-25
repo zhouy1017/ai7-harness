@@ -606,6 +606,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: await store.inspectDatabaseReplacements() };
     case 'rollBackDatabaseReplacement':
       return { id: request.id, ok: true, op: request.op, result: await store.rollBackDatabaseReplacement(request.input.replacementId) };
+    case 'prepareDatabaseMerge':
+      return { id: request.id, ok: true, op: request.op, result: await store.prepareDatabaseMerge(request.input.previewId) };
     case 'proposeSeriesKnowledge':
       return { id: request.id, ok: true, op: request.op, result: store.proposeSeriesKnowledge(request.input) };
     case 'inspectSeriesKnowledgeReview':

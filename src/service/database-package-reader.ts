@@ -59,7 +59,7 @@ interface ZipEntry {
   readonly offset: number;
 }
 
-const ORIGINS: ReadonlyArray<string> = ['database-export', 'scheduled-backup', 'pre-replace-backup'];
+const ORIGINS: ReadonlyArray<string> = ['database-export', 'scheduled-backup', 'pre-replace-backup', 'pre-merge-backup'];
 const MAX_MANIFEST_BYTES = 16 * 1024 * 1024;
 const CHUNK_BYTES = 1 << 20;
 /** A member's path: relative segments of ordinary characters, never `.` or `..`. */

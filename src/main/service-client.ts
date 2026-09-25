@@ -58,9 +58,10 @@ export function requestTimeoutMs(operation: ServiceOperation): number {
     // file to the chosen place for its approval: a large store takes minutes, and a timeout would stop the service mid-write.
     operation === 'prepareDatabaseExport' || operation === 'approveDatabaseExport' ||
     // 导入数据库 (Issue #434, S86c) reads and verifies a whole package for its preview; 替换 and 回退 extract one whole and back
-    // the data up as another, and 取消替换 removes the extracted copy: each grows with the data, as 导出数据库 does.
+    // the data up as another, and 取消替换 removes the extracted copy: each grows with the data, as 导出数据库 does. 合并
+    // (S86d) extracts, opens and checks the package as a store of its own, and backs the data up, likewise.
     operation === 'inspectDatabaseImport' || operation === 'prepareDatabaseReplacement' ||
-    operation === 'rollBackDatabaseReplacement' || operation === 'cancelDatabaseReplacement';
+    operation === 'rollBackDatabaseReplacement' || operation === 'cancelDatabaseReplacement' || operation === 'prepareDatabaseMerge';
   return long ? LONG_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
 }
 
@@ -136,7 +137,7 @@ function serviceEnvironment(
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 84 &&
+    value.protocolVersion === 85 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&

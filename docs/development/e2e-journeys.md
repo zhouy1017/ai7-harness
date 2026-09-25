@@ -36,13 +36,20 @@ Since S86b, the same stage checks 定期自动备份:
 - Turning it off keeps that backup.
 - The runner finds the one `AI7 自动备份 …` file there. Its manifest says `scheduled-backup` and the terminal schema revision, and no member holds either synthetic credential.
 
-Since S86c, the stage `database-import-replace-and-roll-back` relaunches with `--j12-picker-path` naming the exported package, and makes one more Book. Then:
+Since S86c, the stage `database-import-replace` relaunches with `--j12-picker-path` naming the exported package, and makes one more Book. Then:
 - 导入数据库 previews the file in five rows: 文件, 来源, 版本, 内容, 完整性. The Book count matches the export.
-- The choice is not preselected, and `按所选方式导入` stays disabled until it is made.
+- Neither choice is preselected, and `按所选方式导入` stays disabled until one is made.
 - 替换本机全部数据 waits for the next start, naming its `AI7 替换前备份 …` file. `现在关闭 AI7` closes AI7 itself, and the runner waits for it to go.
 - After the next start, the Book made after the export is gone, and the replacement is recorded.
-- 回退到替换前的数据 is confirmed on its own, and after another start the Books are exactly those before the replacement.
-- Both `AI7 替换前备份 …` files are packages with origin `pre-replace-backup`. The first counts one more Book than the export. Neither holds a synthetic credential, and the staging place beside the data root is gone.
+
+Since S86d, the stage `database-import-merge` relaunches with the replacement's own backup as the picker's answer:
+- 只导入其中的图书 names every Book of the file: the one the replacement took away `将导入`, the others `本机已有，不导入`.
+- The merge waits for the next start, naming its `AI7 合并前备份 …` file, and `现在关闭 AI7` closes AI7.
+- After the next start, the Books are exactly those before the replacement. 导入记录 lists the merge beside the replacement, and 回退 still offers the replacement's backup.
+
+The stage `database-import-roll-back` then confirms 回退到替换前的数据 on its own, and after another start the Books are again exactly those before the replacement.
+
+The three backups are packages with origins `pre-replace-backup` and `pre-merge-backup`. The merge's counts the export's Books, the other two one more. None holds a synthetic credential, and the staging place beside the data root is gone.
 
 ## J-15 native artifact lifecycle
 

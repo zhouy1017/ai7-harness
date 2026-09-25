@@ -4,7 +4,7 @@ import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { PUBLICATION_VERSION_SCHEMA_SQL } from '../../src/service/publication-versions.js';
-import { EDITORIAL_REVIEW_SCHEMA_VERSION, CLARIFICATION_SCHEMA_VERSION, DATABASE_REPLACEMENT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { EDITORIAL_REVIEW_SCHEMA_VERSION, CLARIFICATION_SCHEMA_VERSION, DATABASE_MERGE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
   PUBLICATION_ACTUALS_PROMPT_LABEL,
   PUBLICATION_ACTUALS_PROMPT_STATE,
@@ -569,7 +569,7 @@ describe('⑥ 发稿: Milestone Versions and 设为发稿版本', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_REPLACEMENT_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_MERGE_SCHEMA_VERSION);
       const truthAfter = relationTruth(database);
       // Exactly the relations revisions 25 and 26 add appear, each empty; no relation the revision-24 store
       // held changed shape, and the only content that moved is the service lifetime every open appends.
