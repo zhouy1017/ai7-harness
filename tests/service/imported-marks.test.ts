@@ -520,7 +520,7 @@ describe('a DOCX\'s comments and tracked changes enter the imported manuscript (
           continue;
         }
         // The editor undoes the deletion. The words come back at the point, and the insertion covers them: standing after
-        // them, it would pass off a place four graphemes on from where the author put it.
+        // them, it would pass off a place two graphemes on from where the author put it.
         store.undoManuscript(commit.manuscriptId, commit.branchId, store.getManuscriptWindow(commit.manuscriptId, commit.branchId, null).workingDigest);
         expect(digest(workingBlocks(store, commit.manuscriptId, commit.branchId)[1]!.text)).toBe(digest(original.join('')));
         expect(anchorOf()).toEqual(['drifted', 18, 22]);
@@ -549,6 +549,56 @@ describe('a DOCX\'s comments and tracked changes enter the imported manuscript (
         });
         expect(digest(workingBlocks(store, commit.manuscriptId, commit.branchId)[1]!.text))
           .toBe(digest([...original.slice(0, 20), words, ...original.slice(20)].join('')));
+      }
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 240_000);
+
+  it('covers restored or retyped words at a drifted point even when they begin with the grapheme after it (Issue #568)', async () => {
+    // ¶2's graphemes 16 to 26 hold the author's point at 20, and the first of them is the same grapheme as the one after them:
+    // the text a span is derived from matches it again, so the span found for words written back at the point starts one
+    // grapheme on. The deletion drifts the insertion to 16; what comes back at 16 is still what it covers.
+    const original = await graphemes(span(10));
+    expect(original[16]).toBe(original[26]);
+    const deleted = original.slice(16, 26).join('');
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      for (const undo of [true, false]) {
+        const { commit } = await importRevised(store, await composeRevised(
+          undo ? REVISED : { ...REVISED, paragraphs: [...REVISED.paragraphs, { runs: [text(span(21))] }] },
+        ));
+        const book = { manuscriptId: commit.manuscriptId, branchId: commit.branchId };
+        const blockId = workingBlocks(store, commit.manuscriptId, commit.branchId)[1]!.blockId;
+        const insertion = windowMarks(store, commit.manuscriptId, commit.branchId)[1]!;
+        expect([insertion.fromGrapheme, insertion.toGrapheme]).toEqual([20, 20]);
+        const anchorOf = () => {
+          const mark = windowMarks(store, commit.manuscriptId, commit.branchId).find((candidate) => candidate.markId === insertion.markId)!;
+          return [mark.anchorState, mark.fromGrapheme, mark.toGrapheme];
+        };
+        const edit = (fromGrapheme: number, toGrapheme: number, insertText: string) => {
+          const window = store.getManuscriptWindow(commit.manuscriptId, commit.branchId, null);
+          store.flushJournalEdit({
+            clientEditId: randomUUID(), ...book, baseRevisionId: window.revisionId, blockId, windowStartBlockId: window.blocks[0]!.blockId,
+            baseBlockDigest: window.blocks.find((block) => block.blockId === blockId)!.digest, expectedJournalSequence: window.journalSequence,
+            fromGrapheme, toGrapheme, insertText,
+          });
+        };
+        edit(16, 26, '');
+        expect(anchorOf()).toEqual(['drifted', 16, 16]);
+        if (undo) {
+          // 撤销: the undo's span is derived from the two texts, and found starting at 17.
+          store.undoManuscript(commit.manuscriptId, commit.branchId, store.getManuscriptWindow(commit.manuscriptId, commit.branchId, null).workingDigest);
+        } else {
+          // The words typed back at the point, flushed as the renderer derives its span: starting at 17, one grapheme on.
+          edit(17, 17, original.slice(17, 27).join(''));
+        }
+        expect(digest(workingBlocks(store, commit.manuscriptId, commit.branchId)[1]!.text)).toBe(digest(original.join('')));
+        expect(anchorOf()).toEqual(['drifted', 16, 26]);
+        const conflict = store.inspectProposalConflict({ ...book, markId: insertion.markId });
+        expect(conflict).toMatchObject({ conflictKind: 'suggestion', fromGrapheme: 16, toGrapheme: 26, base: '', newVersion: { available: true, blocker: null } });
+        expect(digest(conflict.current)).toBe(digest(deleted));
       }
       store.markCleanShutdown();
     } finally {

@@ -512,14 +512,15 @@ export function followBlockTextChangeForMarks(
     // them, so each covers it instead of guessing a side: the editor places the point among those words through its
     // 稿件冲突 — a new version of an insertion, a Correction Proposal that undoes a deletion — and the insertion whose own
     // Apply wrote them stands on them again at once. A pending insertion whose point already drifted covers whatever is
-    // written at it the same way, so an undo or a retyping there is never passed off as the place it was.
+    // written at it the same way, so an undo or a retyping there is never passed off as the place it was — even when those
+    // words begin with the grapheme after the point, which a derived span would place one grapheme on (Issue #568).
     const crowded = followed.filter((mark) => mark.pinned.length === 0 && mark.state === 'exact' &&
       mark.fromGrapheme === span.fromGrapheme && mark.toGrapheme === span.toGrapheme);
     for (const mark of followed) {
       const inCrowd = crowded.length > 1 && crowded.includes(mark);
       const covering = mark.pinned.length === 0 && (inCrowd || (mark.insertion && mark.state === 'drifted'));
       const result = covering
-        ? coverSpanEdit(mark, span, next.length)
+        ? coverSpanEdit(mark, span, next.length, next)
         : mark.pinned.length === 0 ? followPoint(mark, current, next, span) : followGraphemeEdit(mark, mark.pinned, next, span);
       mark.fromGrapheme = result.fromGrapheme;
       mark.toGrapheme = result.toGrapheme;

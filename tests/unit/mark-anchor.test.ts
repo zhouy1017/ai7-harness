@@ -161,6 +161,23 @@ describe('a point that cannot say which side of text written at it it is on cove
     expect(coverSpanEdit({ fromGrapheme: 4, toGrapheme: 6 }, edit(7, 7, 1), 11)).toEqual({ fromGrapheme: 4, toGrapheme: 6, state: 'drifted' });
   });
 
+  it('takes words written back at it as written there when they begin with the grapheme after it (Issue #568)', () => {
+    // 他说|，好吗 after ，我们走吧 was deleted at 2. Written back, the derived span says 我们走吧， at 3: slid left over the equal
+    // ， it reaches the point, so the point covers ，我们走吧 rather than stay bare at 2.
+    const next = graphemesOf('他说，我们走吧，好吗');
+    const derived = deriveSpanEdit(graphemesOf('他说，好吗'), next)!;
+    const at = { fromGrapheme: 2, toGrapheme: 2 };
+    expect(derived).toEqual({ fromGrapheme: 3, toGrapheme: 3, insertedGraphemes: 5 });
+    expect(coverSpanEdit(at, derived, next.length, next)).toEqual({ fromGrapheme: 2, toGrapheme: 7, state: 'drifted' });
+    // Without the text it cannot tell, and words that cannot slide to it stay wholly behind it.
+    expect(coverSpanEdit(at, derived, next.length)).toEqual({ fromGrapheme: 2, toGrapheme: 2, state: 'drifted' });
+    const later = graphemesOf('他说，好我们吗');
+    expect(coverSpanEdit(at, deriveSpanEdit(graphemesOf('他说，好吗'), later)!, later.length, later)).toEqual({ fromGrapheme: 2, toGrapheme: 2, state: 'drifted' });
+    // A replacement is never slid: only pure insertions are ambiguous this way.
+    const replaced = graphemesOf('他说，X们走吧，好吗');
+    expect(coverSpanEdit(at, { fromGrapheme: 3, toGrapheme: 4, insertedGraphemes: 6 }, replaced.length, replaced)).toEqual({ fromGrapheme: 2, toGrapheme: 2, state: 'drifted' });
+  });
+
   it('covers what replaces a span across it, falls back to a point when what it covers goes, and stays in its block', () => {
     expect(coverSpanEdit(point, edit(3, 5, 1), 7)).toEqual({ fromGrapheme: 3, toGrapheme: 4, state: 'drifted' });
     expect(coverSpanEdit({ fromGrapheme: 4, toGrapheme: 6 }, edit(4, 6, 0), 8)).toEqual({ fromGrapheme: 4, toGrapheme: 4, state: 'drifted' });

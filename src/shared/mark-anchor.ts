@@ -83,12 +83,28 @@ export function followSpanEdit(range: GraphemeRange, edit: GraphemeEdit): Graphe
 }
 
 /**
+ * A span derived from two texts matches their longest common prefix first, so words written at a point that begin with the
+ * grapheme after it are found starting to the right of it (Issue #568): an undo that restores `，我们走吧` at the point before
+ * `，好吗` is read as `我们走吧，` written one grapheme on. Slid left over equal graphemes, a pure insertion that reaches the
+ * point was as much written at it as after it, and is taken as written at it; one that cannot reach it stays where it is.
+ */
+function slideToPoint(range: GraphemeRange, edit: GraphemeEdit, next: ReadonlyArray<string>): GraphemeEdit {
+  if (edit.fromGrapheme !== edit.toGrapheme || edit.insertedGraphemes === 0 || edit.fromGrapheme <= range.toGrapheme) return edit;
+  let from = edit.fromGrapheme;
+  while (from > range.toGrapheme && next[from - 1] === next[from - 1 + edit.insertedGraphemes]) from -= 1;
+  return from === range.toGrapheme ? { fromGrapheme: from, toGrapheme: from, insertedGraphemes: edit.insertedGraphemes } : edit;
+}
+
+/**
  * Follow a point that cannot say which side of text written at it it belongs on (Issue #533): a pending insertion whose
  * point already drifted, or any point among several standing at one place. Text written at it or into what it covers
  * joins what it covers, so the editor places the point among those words; text written wholly before it moves it, and
- * text wholly after it leaves it. It is `drifted` from then on, as a point never proves its place again.
+ * text wholly after it leaves it. It is `drifted` from then on, as a point never proves its place again. `next` is the text
+ * after the edit: given it, words the span placed after the point that could as well stand at it are taken as written
+ * there (Issue #568), whichever way the span was found — an undo's derived one or the renderer's flush.
  */
-export function coverSpanEdit(range: GraphemeRange, edit: GraphemeEdit, length: number): FollowedAnchor {
+export function coverSpanEdit(range: GraphemeRange, given: GraphemeEdit, length: number, next?: ReadonlyArray<string>): FollowedAnchor {
+  const edit = next === undefined ? given : slideToPoint(range, given, next);
   const delta = edit.insertedGraphemes - (edit.toGrapheme - edit.fromGrapheme);
   let fromGrapheme: number;
   let toGrapheme: number;
