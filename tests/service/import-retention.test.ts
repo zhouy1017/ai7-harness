@@ -10,7 +10,7 @@ import {
   importFidelityCategoriesShape,
 } from '../../src/service/import-retention.js';
 import { EditorialStore, SOURCE_VERSION_PARSER_CHANGED_MESSAGE, StoreError } from '../../src/service/store.js';
-import { CLARIFICATION_SCHEMA_VERSION, REVIEW_GUIDELINE_SCHEMA_VERSION, PROPOSAL_CONFLICT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { CLARIFICATION_SCHEMA_VERSION, LIBRARY_MATERIAL_SCHEMA_VERSION, PROPOSAL_CONFLICT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import type { ManuscriptBlockProjection, TextBoxDisposition } from '../../src/shared/protocol.js';
 import {
   ADMITTED_BASELINE_DOCX,
@@ -404,7 +404,7 @@ describe('schema revision 27 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(REVIEW_GUIDELINE_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LIBRARY_MATERIAL_SCHEMA_VERSION);
       expect(importFidelityCategoriesShape(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM import_fidelity_categories ORDER BY rowid').all()).toEqual(before);
       for (const relation of [...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER]) {

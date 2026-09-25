@@ -257,6 +257,13 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['importReviewGuidelineVersion']['output']>(IPC_CHANNELS.importReviewGuidelineVersion, input),
   inspectExemplars: () => invoke<ServiceOperationMap['inspectExemplars']['output']>(IPC_CHANNELS.inspectExemplars),
   inspectKnowledgeProcedures: () => invoke<ServiceOperationMap['inspectKnowledgeProcedures']['output']>(IPC_CHANNELS.inspectKnowledgeProcedures),
+  inspectLibraryMaterials: () => invoke<ServiceOperationMap['inspectLibraryMaterials']['output']>(IPC_CHANNELS.inspectLibraryMaterials),
+  previewLibraryMaterial: () =>
+    invoke<ServiceOperationMap['previewLibraryMaterial']['output'] | null>(IPC_CHANNELS.previewLibraryMaterial),
+  addLibraryMaterial: (input: ServiceOperationMap['addLibraryMaterial']['input']) =>
+    invoke<ServiceOperationMap['addLibraryMaterial']['output']>(IPC_CHANNELS.addLibraryMaterial, input),
+  decideLibraryMaterial: (input: ServiceOperationMap['decideLibraryMaterial']['input']) =>
+    invoke<ServiceOperationMap['decideLibraryMaterial']['output']>(IPC_CHANNELS.decideLibraryMaterial, input),
   inspectReviewWorkspace: (input?: Omit<ServiceOperationMap['inspectReviewWorkspace']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['inspectReviewWorkspace']['output']>(IPC_CHANNELS.inspectReviewWorkspace, input ?? { reviewRunId: null }),
   prepareReviewRun: (input: Omit<ServiceOperationMap['prepareReviewRun']['input'], 'bookId'>) =>

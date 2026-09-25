@@ -111,7 +111,7 @@ describe('the 任务 panel of one Book (S77a)', () => {
     // 待我处理 leaves it out: a plan nobody started asks nothing of anyone yet.
     const global = composeGlobalAttention({
       imports: [], recoveries: [], conflicts: [], analysisTasks: [prepared], analysisOutcomes: [], reviewRuns: [], reviewCompletions: [],
-      maintenance: [], busy: false, waitingFor: 'admitting',
+      maintenance: [], libraryMaterials: [], busy: false, waitingFor: 'admitting',
     }, NOW);
     expect(global.groups.every((group) => group.items.length === 0)).toBe(true);
   });
@@ -157,7 +157,7 @@ describe('the 任务 panel of one Book (S77a)', () => {
     // 待我处理 never lists a cancellation.
     const global = composeGlobalAttention({
       imports: [], recoveries: [], conflicts: [], analysisTasks: [], analysisOutcomes: [cancelled], reviewRuns: [], reviewCompletions: [],
-      maintenance: [], busy: false, waitingFor: 'admitting',
+      maintenance: [], libraryMaterials: [], busy: false, waitingFor: 'admitting',
     }, NOW);
     expect(global.groups.every((group) => group.items.length === 0)).toBe(true);
   });

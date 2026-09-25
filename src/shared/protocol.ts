@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 70 as const;
+export const SERVICE_PROTOCOL_VERSION = 71 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -79,6 +79,10 @@ export const IPC_CHANNELS = {
   importReviewGuidelineVersion: 'ai7:j15:import-review-guideline-version',
   inspectExemplars: 'ai7:j07:inspect-exemplars',
   inspectKnowledgeProcedures: 'ai7:j15:inspect-knowledge-procedures',
+  inspectLibraryMaterials: 'ai7:j15:inspect-library-materials',
+  previewLibraryMaterial: 'ai7:j15:preview-library-material',
+  addLibraryMaterial: 'ai7:j15:add-library-material',
+  decideLibraryMaterial: 'ai7:j15:decide-library-material',
   inspectReviewWorkspace: 'ai7:j04:inspect-review-workspace',
   prepareReviewRun: 'ai7:j04:prepare-review-run',
   authorizeReviewRun: 'ai7:j04:authorize-review-run',
@@ -4711,6 +4715,99 @@ export interface KnowledgeProceduresProjection {
   readonly artifacts: ReadonlyArray<KnowledgeArtifactProjection>;
 }
 
+// ---- 知识库 › 资料库 (Issue #427, plan slice S79c; V2-UX-KB-007, KB-002, ATTN-009, LEARN-004 to LEARN-010) --------------
+
+/** The largest file 资料库 takes in, and the bounds of what the editor writes about one. */
+export const MAX_LIBRARY_MATERIAL_BYTES = 1024 * 1024 * 1024;
+export const MAX_LIBRARY_MATERIAL_TITLE_GRAPHEMES = 200;
+export const MAX_LEARNING_ELIGIBILITY_REASON_GRAPHEMES = 500;
+
+/** What an editor collected (KB-007): a book, a paper, a document or a web capture. */
+export type LibraryMaterialKind = 'book' | 'paper' | 'document' | 'web';
+export const LIBRARY_MATERIAL_KINDS: readonly LibraryMaterialKind[] = ['book', 'paper', 'document', 'web'];
+
+/** What a material's content was identified as. The original is kept whole whatever it is; nothing is read from it yet. */
+export type LibraryMaterialFormat = 'DOCX' | 'DOC' | 'PDF' | 'ODT' | 'RTF' | 'TXT' | 'MD' | 'HTML' | 'EPUB' | 'UNKNOWN';
+
+export interface LibraryMaterialSourceProjection {
+  readonly displayName: string;
+  readonly format: LibraryMaterialFormat;
+  readonly bytes: number;
+  readonly sha256: string;
+}
+
+/** 放入资料…'s first step: the chosen file as it will arrive. Nothing is kept until 放入资料库. */
+export interface LibraryMaterialPreviewProjection {
+  readonly previewId: string;
+  readonly source: LibraryMaterialSourceProjection;
+  /** The title it carries unless the editor changes it: the file's name without its extension. */
+  readonly suggestedTitle: string;
+  /** The kind its format names — a web page for HTML, a book for EPUB — or `null` when only the editor can say. */
+  readonly suggestedKind: LibraryMaterialKind | null;
+}
+
+/** Where a material belongs (KB-007): one Book or the house. A Series is named once Series exist (Issue #63, S28). */
+export type LibraryAttribution = { readonly scope: 'book'; readonly bookId: string } | { readonly scope: 'house' };
+
+/**
+ * A Learning Eligibility choice (LEARN-004 to LEARN-006): the one Book it may teach in, the house, excluded, or left for
+ * later. `纳入当前书系` waits for Series as the attribution does.
+ */
+export type LearningEligibilityChoice = 'book' | 'house' | 'excluded' | 'deferred';
+
+/** One decision the editor made, as the chain holds it: a later one supersedes, none is rewritten (LEARN-007). */
+export type LibraryMaterialDecisionInput =
+  | { readonly kind: 'attribution'; readonly attribution: LibraryAttribution }
+  | { readonly kind: 'eligibility'; readonly choice: LearningEligibilityChoice; readonly reason: string | null };
+
+export interface LibraryMaterialDecisionProjection {
+  readonly ordinal: number;
+  readonly recordedAt: string;
+  readonly decision:
+    | { readonly kind: 'attribution'; readonly scope: 'book'; readonly bookId: string; readonly bookTitle: string }
+    | { readonly kind: 'attribution'; readonly scope: 'house' }
+    | { readonly kind: 'eligibility'; readonly choice: LearningEligibilityChoice; readonly bookTitle: string | null; readonly reason: string | null };
+}
+
+/** One 资料库 item: what arrived, where it belongs, whether it may teach, and whose Tasks may list it under 允许参考. */
+export interface LibraryMaterialProjection {
+  readonly materialId: string;
+  readonly title: string;
+  readonly kind: LibraryMaterialKind;
+  readonly source: LibraryMaterialSourceProjection;
+  readonly recordedAt: string;
+  /** The arrival record's digest: the version a Task that lists it would name (KB-002). */
+  readonly digest: string;
+  /** The attribution that stands; `null` while the editor has not decided one. */
+  readonly attribution:
+    | null
+    | { readonly scope: 'book'; readonly bookId: string; readonly bookTitle: string; readonly decidedAt: string }
+    | { readonly scope: 'house'; readonly decidedAt: string };
+  /** The Learning Eligibility decided under that attribution; `null` while none was. */
+  readonly eligibility: null | {
+    readonly choice: LearningEligibilityChoice;
+    readonly bookTitle: string | null;
+    readonly reason: string | null;
+    readonly decidedAt: string;
+  };
+  /** A decision made under an earlier attribution, which changing the attribution set aside: it is decided again. */
+  readonly eligibilityReset: boolean;
+  /** Whether a Task may list it under 允许参考 (KB-007): once both are decided, and eligibility not left for later. */
+  readonly reference:
+    | { readonly state: 'available'; readonly scope: 'book'; readonly bookTitle: string }
+    | { readonly state: 'available'; readonly scope: 'house' }
+    | { readonly state: 'pending' };
+  /** Every decision, oldest first. */
+  readonly decisions: ReadonlyArray<LibraryMaterialDecisionProjection>;
+}
+
+export interface LibraryMaterialsProjection {
+  /** Newest arrival first. */
+  readonly materials: ReadonlyArray<LibraryMaterialProjection>;
+  /** The Books an attribution can name, by title. */
+  readonly books: ReadonlyArray<{ readonly bookId: string; readonly title: string }>;
+}
+
 /** The drawer's `设为快速开始默认…` for one plan, and the rule that started its Task, when one did. */
 export interface TaskPlanDefaultRuleProjection {
   canSet: boolean;
@@ -5971,7 +6068,12 @@ export type GlobalAttentionStateKey =
   | 'analysis-cancelled'
   // 维护事项待处理 (Issue #426, S68b; MAINT-012): a case with a named next step, or one waiting for a later designation.
   | 'maintenance-pending'
-  | 'maintenance-waiting';
+  | 'maintenance-waiting'
+  // A 资料库 item waiting for the editor (Issue #427, S79c; ATTN-009, KB-007): no attribution yet, no Learning Eligibility
+  // decided under the one it has, or eligibility left for later (LEARN-006).
+  | 'library-attribution-pending'
+  | 'learning-eligibility-pending'
+  | 'learning-eligibility-deferred';
 
 /**
  * The closed map of safe next steps (V2-UX-ATTN-007): each is an action the item's own record offers, in
@@ -5998,11 +6100,15 @@ export type GlobalAttentionNextStep =
   | 'maintenance-link-proposal'
   | 'maintenance-link-publication'
   | 'maintenance-write-errata'
-  | 'maintenance-conclude';
+  | 'maintenance-conclude'
+  // A 资料库 item's own two decisions (Issue #427, S79c), in its card's words.
+  | 'set-library-attribution'
+  | 'set-learning-eligibility';
 export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'view-run', 'view-review', 'reconfirm-plan', 'continue-review', 'return-to-recovery', 'retry-abandon-cleanup', 'await-local-check',
   'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'reprepare', 'redo', 'view-plan',
   'maintenance-link-proposal', 'maintenance-link-publication', 'maintenance-write-errata', 'maintenance-conclude',
+  'set-library-attribution', 'set-learning-eligibility',
 ];
 
 /**
@@ -6019,7 +6125,9 @@ export type GlobalAttentionTarget =
   // A prepared Review Run's plan in the Task Drawer (Issue #423, S77a).
   | { kind: 'review-plan'; bookId: string; reviewRunId: string }
   // 交付物 with the case open on its 发稿版本 (Issue #426, S68b).
-  | { kind: 'maintenance'; bookId: string; publicationVersionId: string; caseId: string };
+  | { kind: 'maintenance'; bookId: string; publicationVersionId: string; caseId: string }
+  // 知识库 › 资料库 with the item's card (Issue #427, S79c).
+  | { kind: 'library-material'; materialId: string };
 
 /** The Active Work Object of one item, in its record's own terms (V2-UX-ATTN-007). */
 export type GlobalAttentionObjectProjection =
@@ -6028,7 +6136,9 @@ export type GlobalAttentionObjectProjection =
   | { kind: 'manuscript-conflict'; conflictKind: ProposalConflictKind }
   | { kind: 'analysis'; mode: BaselineAnalysisTaskMode }
   | { kind: 'review'; ordinal: number }
-  | { kind: 'maintenance'; classification: MaintenanceClassification; ordinal: number; publicationOrdinal: number };
+  | { kind: 'maintenance'; classification: MaintenanceClassification; ordinal: number; publicationOrdinal: number }
+  // A 资料库 item (Issue #427, S79c): its title and kind, and where it belongs so far — a Book, the house, or not yet decided.
+  | { kind: 'library-material'; title: string; materialKind: LibraryMaterialKind; scope: 'none' | 'book' | 'house' };
 
 /** The record facts an item's reason is told from: identities, counts and states, never manuscript text. */
 export interface GlobalAttentionFactsProjection {
@@ -6855,6 +6965,26 @@ export interface ServiceOperationMap {
     input: Record<string, never>;
     output: KnowledgeProceduresProjection;
   };
+  /** 知识库 › 资料库 (Issue #427, S79c): every item the editor collected, with its attribution and eligibility. */
+  inspectLibraryMaterials: {
+    input: Record<string, never>;
+    output: LibraryMaterialsProjection;
+  };
+  /** 放入资料…: the absolute path main's picker returned, read as it would arrive; nothing is kept. */
+  previewLibraryMaterial: {
+    input: { path: string };
+    output: LibraryMaterialPreviewProjection;
+  };
+  /** 放入资料库: the previewed file kept whole in the Agent Data Root, with the title and kind the editor gave it. */
+  addLibraryMaterial: {
+    input: { previewId: string; title: string; kind: LibraryMaterialKind };
+    output: LibraryMaterialsProjection;
+  };
+  /** 定归属 or 定学习准入: one decision appended to the item's chain, refused when the chain moved since it was read. */
+  decideLibraryMaterial: {
+    input: { materialId: string; expectedDecisions: number; decision: LibraryMaterialDecisionInput };
+    output: LibraryMaterialsProjection;
+  };
   /**
    * 审阅 (Issue #417, plan slice S69). The workspace is one read; preparing a Review Run is a
    * cooperative job; the one approval records the Run's authorization and starts its drive loop at once,
@@ -7232,6 +7362,12 @@ export interface RendererApi {
   inspectExemplars(): Promise<ExemplarsProjection>;
   /** 知识库 › 工序与规则's expert 工序 (Issue #427, S79d): names no Book. */
   inspectKnowledgeProcedures(): Promise<KnowledgeProceduresProjection>;
+  /** 知识库 › 资料库 (Issue #427, S79c): names no Book; an item names the Book it was attributed to. */
+  inspectLibraryMaterials(): Promise<LibraryMaterialsProjection>;
+  /** 放入资料…: the native picker, then the file as it would arrive; `null` when the picker was cancelled. */
+  previewLibraryMaterial(): Promise<LibraryMaterialPreviewProjection | null>;
+  addLibraryMaterial(input: { previewId: string; title: string; kind: LibraryMaterialKind }): Promise<LibraryMaterialsProjection>;
+  decideLibraryMaterial(input: { materialId: string; expectedDecisions: number; decision: LibraryMaterialDecisionInput }): Promise<LibraryMaterialsProjection>;
   /**
    * 审阅 of the Book the window is showing (Issue #417). Inspecting without a Run opens the latest; a
    * running Run is followed by inspecting it again, and its executing category carries its progress.

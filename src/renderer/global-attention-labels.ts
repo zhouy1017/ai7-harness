@@ -16,6 +16,7 @@ import { TASK_BAR_RECONFIRM, TASK_BAR_REDO, TASK_BAR_REPREPARE, TASK_BAR_RUN_LIN
 import { RESOLVE_CONFLICT_LABEL } from './editorial-mark-labels.js';
 import { PROPOSAL_CONFLICT_CLASSIFICATION, REVERSAL_CONFLICT_LINE } from './proposal-conflict-labels.js';
 import { MAINTENANCE_CLASSIFICATION_LABELS, MAINTENANCE_NEXT_STEP_LABELS } from '../shared/maintenance-wording.js';
+import { LIBRARY_ATTRIBUTE, LIBRARY_ELIGIBILITY, LIBRARY_HOUSE, LIBRARY_KIND_LABELS, LIBRARY_NO_ATTRIBUTION } from './knowledge-base-labels.js';
 
 /**
  * Every word of 待我处理 (Issue #424, plan slice S78; editor-surfaces §8.1, V2-UX-ATTN-001 to 009, IA-007,
@@ -151,6 +152,10 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   // MAINT-012's own name for it (Issue #426, S68b), and the wait 替代 and 再版 are in.
   'maintenance-pending': '维护事项待处理',
   'maintenance-waiting': '维护事项待处理 · 等待另设发稿版本',
+  // A 资料库 item waiting for the editor (Issue #427, S79c; ATTN-009), in the words the material table placed them under.
+  'library-attribution-pending': '资料库归属待定',
+  'learning-eligibility-pending': '学习准入待定',
+  'learning-eligibility-deferred': '学习准入待定 · 稍后决定',
 };
 
 /** The state pill's tone and shape: words and a shape, never colour alone. */
@@ -193,6 +198,9 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
   'analysis-cancelled': { tone: 'neutral', shape: 'square' },
   'maintenance-pending': { tone: 'attention', shape: 'triangle' },
   'maintenance-waiting': { tone: 'neutral', shape: 'ring' },
+  'library-attribution-pending': { tone: 'attention', shape: 'triangle' },
+  'learning-eligibility-pending': { tone: 'attention', shape: 'triangle' },
+  'learning-eligibility-deferred': { tone: 'attention', shape: 'triangle' },
 };
 
 /**
@@ -226,6 +234,9 @@ export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionN
   'maintenance-link-publication': MAINTENANCE_NEXT_STEP_LABELS['link-publication'],
   'maintenance-write-errata': MAINTENANCE_NEXT_STEP_LABELS['write-errata'],
   'maintenance-conclude': MAINTENANCE_NEXT_STEP_LABELS.conclude,
+  // A 资料库 item's own two decisions (Issue #427, S79c), in its card's words.
+  'set-library-attribution': LIBRARY_ATTRIBUTE,
+  'set-learning-eligibility': LIBRARY_ELIGIBILITY,
 };
 /** The two scopes a question can have (CLAR-004), in the card's own words. */
 export const GLOBAL_ATTENTION_CLARIFICATION_WAITING = '任务等待你的说明';
@@ -242,6 +253,17 @@ export const GLOBAL_ATTENTION_NO_BOOK = '尚未选择目标图书';
 
 export function globalAttentionBookLabel(book: GlobalAttentionItemProjection['book']): string {
   return book.title === null ? GLOBAL_ATTENTION_NO_BOOK : `《${book.title}》`;
+}
+
+/**
+ * The Book an item stands under: its Book, or — for a 资料库 item that belongs to no one Book (Issue #427, S79c) — the house,
+ * or that it does not belong anywhere yet.
+ */
+export function globalAttentionItemBookLabel(item: Pick<GlobalAttentionItemProjection, 'book' | 'object'>): string {
+  if (item.object.kind === 'library-material' && item.object.scope !== 'book') {
+    return item.object.scope === 'house' ? LIBRARY_HOUSE : LIBRARY_NO_ATTRIBUTION;
+  }
+  return globalAttentionBookLabel(item.book);
 }
 
 const IMPORT_RELATIONSHIP_LABELS = {
@@ -267,6 +289,8 @@ export function globalAttentionObjectLabel(object: GlobalAttentionObjectProjecti
       return `审阅 · 第 ${object.ordinal} 次`;
     case 'maintenance':
       return `维护事项 · 第 ${object.ordinal} 项 · ${MAINTENANCE_CLASSIFICATION_LABELS[object.classification]} · 第 ${object.publicationOrdinal} 次发稿版本`;
+    case 'library-material':
+      return `资料库 · ${LIBRARY_KIND_LABELS[object.materialKind]}「${object.title}」`;
   }
 }
 
@@ -391,6 +415,13 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
         default:
           return '这个维护事项的步骤已经记录：在这里记录它的结论。';
       }
+    // A 资料库 item (Issue #427, S79c; KB-007, LEARN-006): what it waits for; nothing about it is inferred meanwhile.
+    case 'library-attribution-pending':
+      return '放进资料库以后还没有定归属：定了归属与学习准入，任务才能把它列进「允许参考」。';
+    case 'learning-eligibility-pending':
+      return '归属已定，学习准入还没有定：没有你的决定，它不会用来学习，任务也还不能把它列进「允许参考」。';
+    case 'learning-eligibility-deferred':
+      return '学习准入记为稍后决定：决定之前，它不会用来学习，任务也还不能把它列进「允许参考」。';
   }
 }
 
@@ -442,7 +473,7 @@ export function globalAttentionView(projection: GlobalAttentionProjection): Read
     empty: group.total === 0 ? GLOBAL_ATTENTION_EMPTY_LINES[group.key] : null,
     truncated: globalAttentionTruncatedLine(group.key, group.items.length, group.total),
     items: group.items.map((entry): GlobalAttentionItemView => {
-      const book = globalAttentionBookLabel(entry.book);
+      const book = globalAttentionItemBookLabel(entry);
       const object = globalAttentionObjectLabel(entry.object);
       return {
         itemId: entry.itemId,
@@ -465,9 +496,9 @@ export function globalAttentionView(projection: GlobalAttentionProjection): Read
 /**
  * Where material and knowledge-base items go when their records exist: a failed external source retention
  * to 异常与结果待确认, a pending 资料库 attribution or Learning Eligibility to 等待你的决定, a completed
- * indexing to 最近完成 — the same four groups, and no fifth (ADR 0077). None of these records exists yet
- * (KB-007, SRC-013 and the index arrive with their own slices), so this table places them and no item is
- * invented from it.
+ * indexing to 最近完成 — the same four groups, and no fifth (ADR 0077). The 资料库 decisions have their records
+ * since Issue #427 (S79c), and their items carry these states; the retention (SRC-013) and the index (S80) arrive
+ * with their own slices, so for those this table places them and no item is invented from it.
  */
 export const GLOBAL_ATTENTION_MATERIAL_GROUPS = [
   { material: 'external-source-retention-failed', label: '外部来源留存失败', group: 'exceptions' },

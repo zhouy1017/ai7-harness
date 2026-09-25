@@ -16,6 +16,7 @@ import {
   GLOBAL_ATTENTION_STATE_PILLS,
   GLOBAL_ATTENTION_STATUS_LINES,
   globalAttentionBookLabel,
+  globalAttentionItemBookLabel,
   globalAttentionEntryView,
   globalAttentionGroupCountLine,
   globalAttentionNextStepLine,
@@ -59,6 +60,7 @@ const STATES: ReadonlyArray<GlobalAttentionStateKey> = [
   'analysis-completed', 'analysis-completed-with-gaps', 'review-completed',
   'analysis-prepared', 'review-prepared', 'analysis-cancelled',
   'maintenance-pending', 'maintenance-waiting',
+  'library-attribution-pending', 'learning-eligibility-pending', 'learning-eligibility-deferred',
 ];
 
 function item(state: GlobalAttentionStateKey, overrides: Partial<GlobalAttentionItemProjection> = {}): GlobalAttentionItemProjection {
@@ -180,6 +182,10 @@ describe('each item', () => {
       'analysis-cancelled': '已取消',
       'maintenance-pending': '维护事项待处理',
       'maintenance-waiting': '维护事项待处理 · 等待另设发稿版本',
+      // A 资料库 item waiting for the editor (Issue #427, S79c; ATTN-009): the words the material table placed it under.
+      'library-attribution-pending': '资料库归属待定',
+      'learning-eligibility-pending': '学习准入待定',
+      'learning-eligibility-deferred': '学习准入待定 · 稍后决定',
     });
     for (const state of STATES) {
       expect(GLOBAL_ATTENTION_STATE_PILLS[state].shape).toMatch(/^(circle|ring|half|triangle|square|diamond|check|dash)$/u);
@@ -219,6 +225,9 @@ describe('each item', () => {
       'maintenance-link-publication': '关联发稿版本',
       'maintenance-write-errata': '编写勘误',
       'maintenance-conclude': '记录维护事项结论',
+      // A 资料库 item's own two decisions (Issue #427, S79c): its card's buttons.
+      'set-library-attribution': '定归属…',
+      'set-learning-eligibility': '定学习准入…',
     });
     // The drawer's own words for the way on from a Run the ceiling stopped (Issue #51, S16a).
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['adjust-budget-redo']).toBe(TASK_BAR_ADJUST_BUDGET_REDO);
@@ -265,6 +274,8 @@ describe('each item', () => {
     expect(globalAttentionObjectLabel({ kind: 'import', sourceDisplayName: 'sample1.docx', relationship: null })).toBe('导入 · sample1.docx');
     // Issue #426 (S68b): the case, its classification and the 发稿版本 it is bound to.
     expect(globalAttentionObjectLabel({ kind: 'maintenance', classification: 'supersession', ordinal: 3, publicationOrdinal: 1 })).toBe('维护事项 · 第 3 项 · 替代 · 第 1 次发稿版本');
+    // Issue #427 (S79c): a 资料库 item by its kind and title.
+    expect(globalAttentionObjectLabel({ kind: 'library-material', title: 'sample1', materialKind: 'book', scope: 'none' })).toBe('资料库 · 图书「sample1」');
   });
 
   it('gives each state its reason, from the record\'s own facts', () => {
@@ -313,6 +324,15 @@ describe('each item', () => {
       'maintenance-waiting': globalAttentionReason(item('maintenance-waiting', {
         object: { kind: 'maintenance', classification: 'supersession', ordinal: 3, publicationOrdinal: 1 }, nextStep: 'maintenance-link-publication',
       })),
+      'library-attribution-pending': globalAttentionReason(item('library-attribution-pending', {
+        object: { kind: 'library-material', title: '参考书', materialKind: 'book', scope: 'none' }, nextStep: 'set-library-attribution',
+      })),
+      'learning-eligibility-pending': globalAttentionReason(item('learning-eligibility-pending', {
+        object: { kind: 'library-material', title: '参考书', materialKind: 'book', scope: 'book' }, nextStep: 'set-learning-eligibility',
+      })),
+      'learning-eligibility-deferred': globalAttentionReason(item('learning-eligibility-deferred', {
+        object: { kind: 'library-material', title: '参考书', materialKind: 'book', scope: 'house' }, nextStep: 'set-learning-eligibility',
+      })),
     };
     expect(reasons).toEqual({
       'import-outcome-uncertain': '本地证据目前无法证明这次原子提交已经完成或确定未提交；已阻止重试、放弃和清理。',
@@ -359,6 +379,10 @@ describe('each item', () => {
       // Issue #426 (S68b; MAINT-012): what the case waits on; nothing outside AI7 is claimed.
       'maintenance-pending': '勘误还没有写下内容：在这个维护事项中编写勘误。',
       'maintenance-waiting': '替代等待另设的发稿版本：另行设为发稿版本后，在这个维护事项中关联它。',
+      // Issue #427 (S79c; KB-007, LEARN-006): what a 资料库 item waits for; nothing about it is inferred meanwhile.
+      'library-attribution-pending': '放进资料库以后还没有定归属：定了归属与学习准入，任务才能把它列进「允许参考」。',
+      'learning-eligibility-pending': '归属已定，学习准入还没有定：没有你的决定，它不会用来学习，任务也还不能把它列进「允许参考」。',
+      'learning-eligibility-deferred': '学习准入记为稍后决定：决定之前，它不会用来学习，任务也还不能把它列进「允许参考」。',
     });
     const maintenance = (classification: 'correction' | 'reissue', nextStep: 'maintenance-link-proposal' | 'maintenance-link-publication' | 'maintenance-conclude') =>
       globalAttentionReason(item(classification === 'reissue' ? 'maintenance-waiting' : 'maintenance-pending', {
@@ -404,8 +428,17 @@ describe('material and knowledge-base items (V2-UX-ATTN-009)', () => {
       ['索引完成', 'recent'],
     ]);
     for (const entry of GLOBAL_ATTENTION_MATERIAL_GROUPS) expect(GLOBAL_ATTENTION_GROUP_KEYS).toContain(entry.group);
-    // None of these records exists yet, so no state of 待我处理 speaks of one.
-    for (const label of Object.values(GLOBAL_ATTENTION_STATE_LABELS)) expect(label).not.toMatch(/留存|资料库|学习准入|索引/u);
+    // The 资料库 decisions have their records since Issue #427 (S79c): their states carry the table's own words, each in its
+    // group. The retention and the index have none yet, so no state of 待我处理 speaks of one.
+    const placed = new Map(GLOBAL_ATTENTION_MATERIAL_GROUPS.map((entry) => [entry.material, entry] as const));
+    expect(GLOBAL_ATTENTION_STATE_LABELS['library-attribution-pending']).toBe(placed.get('library-attribution-pending')!.label);
+    expect(GLOBAL_ATTENTION_STATE_LABELS['learning-eligibility-pending']).toBe(placed.get('learning-eligibility-pending')!.label);
+    expect(GLOBAL_ATTENTION_STATE_LABELS['learning-eligibility-deferred'].startsWith(placed.get('learning-eligibility-pending')!.label)).toBe(true);
+    for (const label of Object.values(GLOBAL_ATTENTION_STATE_LABELS)) expect(label).not.toMatch(/留存|索引/u);
+    // An item of 资料库 names where it belongs in the Book's place: a Book, the house, or not yet.
+    const library = (scope: 'none' | 'book' | 'house', title: string | null) =>
+      globalAttentionItemBookLabel({ book: { bookId: title === null ? null : '00000000-0000-4000-8000-000000000000', title }, object: { kind: 'library-material', title: '样书一', materialKind: 'book', scope } });
+    expect([library('none', null), library('house', null), library('book', '甲书')]).toEqual(['尚未定归属', '社级', '《甲书》']);
   });
 });
 

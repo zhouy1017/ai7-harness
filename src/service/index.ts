@@ -530,6 +530,14 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectExemplars() };
     case 'inspectKnowledgeProcedures':
       return { id: request.id, ok: true, op: request.op, result: store.inspectKnowledgeProcedures() };
+    case 'inspectLibraryMaterials':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterials() };
+    case 'previewLibraryMaterial':
+      return { id: request.id, ok: true, op: request.op, result: await store.previewLibraryMaterial(request.input.path) };
+    case 'addLibraryMaterial':
+      return { id: request.id, ok: true, op: request.op, result: await store.addLibraryMaterial(request.input) };
+    case 'decideLibraryMaterial':
+      return { id: request.id, ok: true, op: request.op, result: store.decideLibraryMaterial(request.input) };
     case 'deactivateDefaultExecutionRule':
       return { id: request.id, ok: true, op: request.op, result: store.deactivateDefaultExecutionRule(request.input.ruleId) };
     // 审阅 (Issue #417, plan slice S69). Every answer that shows a Run reads the one owner's progress, so

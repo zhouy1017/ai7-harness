@@ -28,6 +28,7 @@ import {
 } from '../shared/protocol.js';
 import type { ProgressReader, RunProgress } from './analysis/baseline-analysis-store.js';
 import type { WaitingFor } from './task-plan.js';
+import type { LibraryMaterialAttentionReading } from './library-materials.js';
 import { REVIEW_RUN_CATEGORY_STATE_LABELS } from './review/review-run-state.js';
 
 /**
@@ -213,6 +214,8 @@ export interface GlobalAttentionReadings {
   readonly reviewCompletions: ReadonlyArray<ReviewRunAttentionReading>;
   /** Every 维护事项 still waiting on the editor (Issue #426, S68b). */
   readonly maintenance: ReadonlyArray<MaintenanceAttentionReading>;
+  /** Every 资料库 item still waiting for its attribution or Learning Eligibility (Issue #427, S79c; ATTN-009). */
+  readonly libraryMaterials: ReadonlyArray<LibraryMaterialAttentionReading>;
   /** Whether Runs hold every place of the execution owner's governor now (Issue #49, S14). */
   readonly busy: boolean;
   /**
@@ -609,6 +612,28 @@ function maintenanceItem(reading: MaintenanceAttentionReading): GlobalAttentionI
   });
 }
 
+/**
+ * A 资料库 item waiting for the editor (ATTN-009, KB-007): no attribution yet, no Learning Eligibility decided under the one it
+ * has, or eligibility left for later. It stops no other work, so it never blocks; the Book is the one it belongs to, when it
+ * belongs to one.
+ */
+function libraryMaterialItem(reading: LibraryMaterialAttentionReading): GlobalAttentionItemProjection {
+  return item('decisions', reading.state, {
+    itemId: `library-material:${reading.materialId}`,
+    blocked: false,
+    at: reading.at,
+    book: reading.book === null ? { bookId: null, title: null } : { bookId: reading.book.bookId, title: reading.book.title },
+    object: { kind: 'library-material', title: reading.title, materialKind: reading.kind, scope: reading.scope },
+    nextStep: reading.state === 'library-attribution-pending' ? 'set-library-attribution' : 'set-learning-eligibility',
+    target: { kind: 'library-material', materialId: reading.materialId },
+    technical: [
+      { key: 'library-material', label: '资料', value: reading.materialId },
+      { key: 'library-object', label: '文件摘要', value: reading.objectSha256 },
+      { key: 'state-at', label: '状态开始时间', value: reading.at },
+    ],
+  });
+}
+
 function compareText(left: string | null, right: string | null): number {
   const a = left ?? '';
   const b = right ?? '';
@@ -663,6 +688,7 @@ export function composeGlobalAttention(readings: GlobalAttentionReadings, now: D
       .filter((reading) => reading.state === 'settled' && (reading.lastEventAt ?? '') >= since)
       .map(reviewCompletionItem),
     ...readings.maintenance.map(maintenanceItem),
+    ...readings.libraryMaterials.map(libraryMaterialItem),
   ];
   // One record is one item: a Review Run read both as a Book's latest and as a completion is listed once.
   const unique = Array.from(new Map(all.map((entry) => [`${entry.group}\n${entry.itemId}`, entry] as const)).values());

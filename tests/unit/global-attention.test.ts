@@ -43,6 +43,7 @@ const NONE: GlobalAttentionReadings = {
   reviewRuns: [],
   reviewCompletions: [],
   maintenance: [],
+  libraryMaterials: [],
   busy: false,
   waitingFor: 'admitting',
 };

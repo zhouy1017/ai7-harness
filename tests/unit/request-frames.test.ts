@@ -1084,6 +1084,43 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
+  it('accepts 知识库 › 资料库: the read naming nothing, a preview by absolute path, an arrival, and a decision of a closed shape (Issue #427, S79c)', () => {
+    const materialId = randomUUID();
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'inspectLibraryMaterials', input: {} },
+      { op: 'previewLibraryMaterial', input: { path: `${process.cwd()}/资料/样书.pdf` } },
+      { op: 'addLibraryMaterial', input: { previewId: randomUUID(), title: '样书一', kind: 'book' } },
+      { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId: randomUUID() } } } },
+      { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 1, decision: { kind: 'attribution', attribution: { scope: 'house' } } } },
+      { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } } },
+      { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 3, decision: { kind: 'eligibility', choice: 'excluded', reason: '版权未清' } } },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    const house = { kind: 'attribution', attribution: { scope: 'house' } };
+    for (const [op, input] of [
+      ['inspectLibraryMaterials', { bookId: randomUUID() }],
+      ['previewLibraryMaterial', { path: '资料/样书.pdf' }],
+      ['previewLibraryMaterial', {}],
+      ['addLibraryMaterial', { previewId: randomUUID(), title: '样书一', kind: 'magazine' }],
+      ['addLibraryMaterial', { previewId: 'latest', title: '样书一', kind: 'book' }],
+      ['addLibraryMaterial', { previewId: randomUUID(), title: '样书一' }],
+      ['decideLibraryMaterial', { materialId, expectedDecisions: -1, decision: house }],
+      ['decideLibraryMaterial', { materialId, expectedDecisions: 0.5, decision: house }],
+      ['decideLibraryMaterial', { materialId: 'm', expectedDecisions: 0, decision: house }],
+      ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'series', seriesId: randomUUID() } } }],
+      ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'house', bookId: randomUUID() } } }],
+      ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId: 'first' } } }],
+      ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'eligibility', choice: 'series', reason: null } }],
+      ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'eligibility', choice: 'house' } }],
+      ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'eligibility', choice: 'house', reason: null, inferred: true } }],
+    ] as const) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('rejects a 待我处理 read that names a Book, a group, a filter or anything else', () => {
     const id = randomUUID();
     const refused: ReadonlyArray<unknown> = [
