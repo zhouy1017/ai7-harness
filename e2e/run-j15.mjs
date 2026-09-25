@@ -914,9 +914,11 @@ async function main() {
     // unselected, the house's states its consequence where it is chosen, and the Book's own with the editor's note is recorded.
     await clickSelector(renderer, '[data-library-action="attribute"]', 'library-attribute');
     const libraryAttributing = await readLibrary(renderer, (page) => page.cards[0]?.chooser?.kind === 'attribution', 'library-attribution-chooser');
+    // The Books by title as 书库 orders them (乙 before 甲 by code point), a Series not yet there, and the house; the first
+    // choice takes focus and none is chosen.
     requireJourney(JSON.stringify(libraryAttributing.cards[0].chooser.choices) === JSON.stringify([
-      [`book:${bookA}`, false, false, '《J15 空图书甲》'], [`book:${bookB}`, false, false, '《J15 空图书乙》'], ['series', false, true, '书系'], ['house', false, false, '社级'],
-    ]) && libraryAttributing.cards[0].chooser.confirmDisabled === true && libraryAttributing.focus?.choice === `book:${bookA}`, 'library-attribution-choices', libraryAttributing.cards[0].chooser);
+      [`book:${bookB}`, false, false, '《J15 空图书乙》'], [`book:${bookA}`, false, false, '《J15 空图书甲》'], ['series', false, true, '书系'], ['house', false, false, '社级'],
+    ]) && libraryAttributing.cards[0].chooser.confirmDisabled === true && libraryAttributing.focus?.choice === `book:${bookB}`, 'library-attribution-choices', libraryAttributing.cards[0].chooser);
     await clickSelector(renderer, `.library-attribution-chooser [data-library-choice="book:${bookA}"]`, 'library-attribution-book-a');
     await waitFor(renderer, `document.querySelector('[data-library-action="confirm-attribution"]')?.disabled === false`, 'library-attribution-confirm-enabled', 10_000);
     await clickSelector(renderer, '[data-library-action="confirm-attribution"]', 'library-attribution-confirm');
