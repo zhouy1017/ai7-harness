@@ -63,7 +63,7 @@ The storage rows implement ⑤ 设置 › 数据与存储; the storage decision 
 
 | Order | Slice | Issue | Class | Journey | Outcome | Depends on | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| — | S85 | #433 | T3 | J-12 | 数据版本 shown apart from the software version, frozen at release, changed only with backup, disclosure and rollback (B24) | ADR 0079 §1 | planned |
+| — | S85 | #433 | T3 | J-12 | 数据版本 shown apart from the software version, frozen at release, changed only with backup, disclosure and rollback (B24) | ADR 0079 §1 | S85a built in the stack (PR #595); S85b planned |
 | — | S86 | #434 | T3 | J-12 | 导出数据库 / 导入数据库 with preview, 替换 after an automatic backup or 合并; 定期自动备份 off by default (B25) | S85 | planned |
 | — | S87 | #437 | T0 | — | Provider assignment design: every provider-involving task, its Model Role, the capabilities it needs (including the web-search tool), provider and model per scope, the credential slots to enroll (ADR 0079 §6) | ADR 0073, ADR 0079 | integrated as ADR 0080 (PR #449, `dev@ab76db6`); #437 closed as completed on 2026-09-17 |
 | — | S87-f1 | #464 | T1 | J-04 | `toolCalling` and `webSearchTool` declared in every model capability profile with their evidence, inert (ADR 0080 §7.8 step 1) | S87 | integrated (PR #468) |
@@ -91,8 +91,8 @@ Exit criterion: an editor opens a Book into the manuscript at the last position,
 | 2.11 | S64 | #413 | T3 | J-07 | ④ Export to DOCX with 含批注 / 含修改建议, fidelity table, system picker, receipt (B17) | S58, S61, S62 (the External Export Policy v2 bytes are integrated, PR #440, and need no further confirmation) | integrated (PR #501, `dev@fdda1b3`) |
 | 2.11b | S64b | #500 | T3 | J-07 | ④ The same export to PDF and Markdown, and the 审阅报告 export (B17) | S64 | part 1 (PR #526, `dev@936eb5b`) and part 2 (PR #527, `dev@dade758`) integrated |
 | 2.12 | S65 | #414 | T3 | J-07 | ⑥ 发稿: Manuscript-only milestones and 设为发稿版本 (B26) | — | integrated (PR #488, `dev@f169695`), taken ahead of S64; admits J-07 |
-| 2.13 | S66 | #415 | T3 | J-07 | ⑥ Production Documents: types, versions, workflow and gates, Delivery Records, 交付后有修改, 本书不做 (B27) | S64, S58 | S66a (PR #529, `dev@17f0a20`) and S66b (PR #530, `dev@e96a306`) integrated; S66c and S66d follow |
-| 2.14 | S67 | #416 | T3 | J-07 | ⑥ 图书交付包: conditions, frozen manifest, versions, export history (B28) | S64, S65, S66 | S67a integrated (PR #531, `dev@c972758`); S67b follows |
+| 2.13 | S66 | #415 | T3 | J-07 | ⑥ Production Documents: types, versions, workflow and gates, Delivery Records, 交付后有修改, 本书不做 (B27) | S64, S58 | S66a (PR #529, `dev@17f0a20`) and S66b (PR #530, `dev@e96a306`) integrated; S66c built in the stack (PR #556); S66d follows |
+| 2.14 | S67 | #416 | T3 | J-07 | ⑥ 图书交付包: conditions, frozen manifest, versions, export history (B28) | S64, S65, S66 | S67a integrated (PR #531, `dev@c972758`); S67b built in the stack (PR #557) |
 
 Each slice's detail is in its Issue and in the specification's screen section; this table carries only the order and the dependencies. J-05 and J-07 are admitted by S58 and S65, and J-06 by S22's pull request (#491). Under [CI and test boundaries](../agents/ci-test-boundaries.md) admitting one is an explicit Owner routing decision, and on 2026-09-20 the Owner gave it for these and for J-09, J-10, J-11, J-13 and J-16 ("admit as you need"): the first slice of each supplies the real runner in its own pull request and cuts it over atomically into `ADMITTED_JOURNEYS`, `JOURNEY_MODULES`, `JOURNEY_LOCATIONS`, `e2e/run-all.mjs` and the nightly's full set, `GATE_JOURNEYS` unchanged.
 
@@ -110,12 +110,12 @@ Exit criterion: any Task shows its plan in the Task Drawer in 精简 or 完整 m
 | 3.5 | S76 | #422 | T3 | J-10 | ③ Running-Run controls, Clarification Requests, the activity card, 续行 (B12) | S72, S74a | S76a (PR #515, `dev@84058ae`), S76b (PR #516, `dev@6ee4279`), S76c (PR #520, `dev@58331ba`) and S76d (PR #522, `dev@92620e6`) integrated; admits J-10 |
 | 3.6 | S13-f1 | #281 | T2 | J-04 | Every material plan field from durable state; the revert path; the dead `inspect` trigger kind | S13 | integrated (PR #445, `dev@6ecffb9`) |
 | 3.7 | S16 | #51 | T2 | J-10 | Run Budget Ceiling termination, Provider Account Limit recovery, ambiguous outcomes | S76 | S16a (PR #523, `dev@52582dc`) and S16b (PR #524, `dev@d1d633d`) integrated; S16c waits for a route that can produce an ambiguous turn |
-| 3.8 | S77 | #423 | T3 | J-16 | ① The 任务 panel: task list, dialogue tasks, result floating windows, the 回到 chip (B4) | S72, S74a | planned |
+| 3.8 | S77 | #423 | T3 | J-16 | ① The 任务 panel: task list, dialogue tasks, result floating windows, the 回到 chip (B4) | S72, S74a | S77a built in the stack (PR #562) |
 | 3.9 | S78 | #424 | T2 | J-09 | ⑤ 待我处理: four cross-Book groups (B18) | S72 | integrated (PR #513, `dev@10af99e`); admits J-09 |
-| 3.10 | S14 | #49 | T3 | J-09 | Concurrent Book work without focus or scope leakage | S78, S16 | planned |
+| 3.10 | S14 | #49 | T3 | J-09 | Concurrent Book work without focus or scope leakage | S78, S16 | built in the stack (PR #563) |
 | 3.11 | S39 | #95 | T3 | J-09 | Background Analysis Enrollment and revocation | S14 | planned |
 | 3.12 | S70 | #425 | T3 | J-04 | ②B / ⑤ External Evidence Retention Procedure; the live research path of 事实核查 (B13) | S69; ADR 0074 (accepted 2026-09-10, PR #391); S87-f3 (#473) | after S87-f3; the Factual Verification Policy v1 bytes and the egress document it writes are the Owner's byte review at Ready |
-| 3.13 | S68 | #426 | T2 | J-07 | ⑥ 维护事项 (B30) | S65, S59 | planned |
+| 3.13 | S68 | #426 | T2 | J-07 | ⑥ 维护事项 (B30) | S65, S59 | S68a and S68b built in the stack (PRs #559 and #560) |
 
 ## Phase 4 — the knowledge base, evaluation and learning
 
@@ -123,15 +123,15 @@ Exit criterion: 知识库 holds the seven classes with versions and selection sn
 
 | Order | Slice | Issue | Class | Journey | Outcome | Depends on | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 4.1 | S79 | #427 | T3 | J-15 | ⑤ 知识库: seven classes, versions, selection snapshots, attribution, eligibility; 范例 auto-archived at 发稿 (B21) | S75, S65 | planned |
+| 4.1 | S79 | #427 | T3 | J-15 | ⑤ 知识库: seven classes, versions, selection snapshots, attribution, eligibility; 范例 auto-archived at 发稿 (B21) | S75, S65 | S79a, S79b, S79c and S79d's first piece built in the stack (PRs #564 to #567) |
 | 4.2 | S80 | #428 | T3 | J-15 | ⑤ The five-layer Material Index with local similarity vectors (B22) | S79 | planned (a local dependency needs the Owner) |
-| 4.3 | S81 | #429 | T3 | J-11 | ②C 评估 and 审稿意见: Evaluation Records, the 100-point model, risk items, the prediction block, the fixed task (B7) | S79, S72, S65 | planned |
-| 4.4 | S82 | #430 | T2 | J-12 | ⑤ 设置 › 评估校准与预测 (B23) | S81, S65 | planned |
-| 4.5 | S83 | #431 | T2 | J-11 | ⑤ Book People: 作者, 责编, 相关人 and attribution (B19) | — | planned |
-| 4.6 | S38 | #94 | T2 | J-11 | Analysis feedback Quality Signals and the versioned Analysis Quality Metric | S44, S71 | planned |
-| 4.7 | S26 | #61 | T3 | J-11 | Optional feedback capture and Book-first learning eligibility (范例 auto-inclusion excepted, KB-008) | S38, S83 | planned |
+| 4.3 | S81 | #429 | T3 | J-11 | ②C 评估 and 审稿意见: Evaluation Records, the 100-point model, risk items, the prediction block, the fixed task (B7) | S79, S72, S65 | S81a built in the stack (PR #570) |
+| 4.4 | S82 | #430 | T2 | J-12 | ⑤ 设置 › 评估校准与预测 (B23) | S81, S65 | built in the stack (PR #577) |
+| 4.5 | S83 | #431 | T2 | J-11 | ⑤ Book People: 作者, 责编, 相关人 and attribution (B19) | — | built in the stack (PR #561) |
+| 4.6 | S38 | #94 | T2 | J-11 | Analysis feedback Quality Signals and the versioned Analysis Quality Metric | S44, S71 | built in the stack (PR #573) |
+| 4.7 | S26 | #61 | T3 | J-11 | Optional feedback capture and Book-first learning eligibility (范例 auto-inclusion excepted, KB-008) | S38, S83 | S26a to S26c built in the stack (PRs #574 to #576) |
 | 4.8 | S27 | #62 | T3 | J-11 | Learning Lineage, exclusion, remediation | S26 | planned |
-| 4.9 | S28 | #63 | T3 | J-13 | Series membership with impact previews and versioned Series Knowledge (B20) | Phase 2 | planned |
+| 4.9 | S28 | #63 | T3 | J-13 | Series membership with impact previews and versioned Series Knowledge (B20) | Phase 2 | S28a and S28b built in the stack (PRs #578 and #585) |
 | 4.10 | S29 | #64 | T3 | J-13 | Series and Cross-project scope pins and immediate retrieval exclusions (B20) | S28, S69 | planned |
 
 ## Phase 5 — ecosystem, dialogue and writing
