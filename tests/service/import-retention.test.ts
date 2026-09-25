@@ -374,6 +374,62 @@ describe('import retention over the real store (ADR 0086)', () => {
   }, 180_000);
 });
 
+describe('the startup validation J-01 proves (Issue #584)', () => {
+  it('refuses a store whose reimport proof the tamper control altered, as the validator and not as the control', async () => {
+    const first = await composed({ source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 6, title: '篡改证明组稿' });
+    const second = await composed({ source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 7, title: '篡改证明组稿' });
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importComposed(store, first.path);
+      const staged = await store.stageSelectedManuscript(randomUUID(), second.path);
+      const started = store.createManuscriptReimportPreparationWork(staged.draftId, staged.draftVersion, {
+        kind: 'existing-book', bookId: book.bookId, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId: null,
+      });
+      let prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
+      while (!prepared.done) prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
+      let review = prepared.review!;
+      let cursor: number | null = null;
+      do {
+        const page = store.getReimportMappingPage(review.draftId, review.draftVersion, cursor);
+        for (const item of page.items.filter((entry) => entry.verb === null)) {
+          const resolution = store.createReimportResolutionWork(review.draftId, review.draftVersion, item.groupId, 'rewrite');
+          let progress = store.advanceReimportResolutionWork(resolution.workId);
+          while (!progress.done) progress = store.advanceReimportResolutionWork(resolution.workId);
+          review = progress.review!;
+        }
+        cursor = page.nextCursor;
+      } while (cursor !== null);
+      const commit = await store.createManuscriptReimportCommitWork({
+        draftId: review.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId: randomUUID(),
+      });
+      let result = commit.result;
+      while (result === null) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        result = (await store.advanceManuscriptReimportCommitWork(commit.workId!)).result;
+      }
+      expect(result.resultKind).toBe('changed');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    // The control alters one mapping that has staged text, and the store is then refused by what validates it — never by
+    // the control's own E2E_CONTROL_INVALID, nor by a statement that could not be prepared.
+    const opened = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
+      induceUnprovableReconciliation: false,
+      persistLegacyReviewedDraft: false,
+      induceReimportProofTamper: true,
+      induceAbandonObjectRemovalFailure: false,
+      interruptAfterAbandonObjectRemoval: false,
+      baselineAnalysisRoute: null,
+    }).then((store) => {
+      store.close();
+      return null;
+    }, (error: unknown) => error);
+    expect([opened instanceof Error ? opened.name : typeof opened, (opened as { code?: unknown } | null)?.code, opened instanceof Error ? opened.message : null])
+      .toEqual(['BoundedStoreError', 'SCHEMA_INVALID', '稿件重新导入块摘要无效。']);
+  }, 180_000);
+});
+
 describe('schema revision 27 over the real store', () => {
   it('migrates a revision-26 store holding a legacy eight-row review, with every fidelity row byte for byte', async () => {
     await requireExactSample1(roots.codeRoot);
