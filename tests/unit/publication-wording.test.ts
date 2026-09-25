@@ -53,7 +53,8 @@ describe('the words of 发稿', () => {
     expect(PUBLICATION_CHANGE_NOTICE).toBe('自发稿版本后有修改');
     expect(PUBLICATION_NEEDS_MILESTONE).toBe('先保存里程碑版本');
     expect(PUBLICATION_ACTUALS_PROMPT_LABEL).toBe('录入定价与首印');
-    expect(PUBLICATION_ACTUALS_PROMPT_STATE).toBe('随评估功能提供');
+    // Synchronized delta with Issue #430 (S82): the line waits for the editor's entry, not for a later feature.
+    expect(PUBLICATION_ACTUALS_PROMPT_STATE).toBe('尚未录入');
     expect(PUBLICATION_EVENT_KINDS).toEqual(['actuals-prompt', 'exemplar-archive']);
   });
 
@@ -132,7 +133,7 @@ describe('the words of 发稿', () => {
         changeNotice: { label: PUBLICATION_CHANGE_NOTICE, publicationVersionId: identity, revisionLabel: 'r9999999' },
         designate: { available: true, unavailableReason: null },
         statement: PUBLICATION_VERSION_STATEMENT,
-        actualsPrompt: { eventId: identity, publicationVersionId: identity, label: PUBLICATION_ACTUALS_PROMPT_LABEL, stateLabel: PUBLICATION_ACTUALS_PROMPT_STATE, recordedAt: time },
+        actualsPrompt: { eventId: identity, publicationVersionId: identity, label: PUBLICATION_ACTUALS_PROMPT_LABEL, stateLabel: PUBLICATION_ACTUALS_PROMPT_STATE, recordedAt: time, actuals: null },
       },
       // Issue #413: the listed exports, each at its widest — a destination of a BMP character at its bound
       // in code units, a file name of 255, and a longer outcome detail than the ledger writes.

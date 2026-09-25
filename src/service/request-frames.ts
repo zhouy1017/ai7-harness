@@ -672,8 +672,29 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // 质量与学习 › 反馈记录 (Issue #61, S26c): every Book's feedback; it names nothing.
     case 'inspectFeedbackHistory':
+    // 设置 › 评估校准与预测 (Issue #430, S82): the house's page; it names nothing.
+    case 'inspectEvaluationCalibration':
       requireInput(value.input, [], tentativeId);
       break;
+    // 录入定价与首印: the Book, how many entries the editor saw, and two whole positive numbers, the price in 分.
+    case 'recordPublicationActuals': {
+      const input = requireInput(value.input, ['bookId', 'expectedEntries', 'priceFen', 'firstPrint'], tentativeId);
+      if (!validUuid(input.bookId) || !Number.isSafeInteger(input.expectedEntries) || (input.expectedEntries as number) < 0 ||
+          !Number.isSafeInteger(input.priceFen) || (input.priceFen as number) < 1 ||
+          !Number.isSafeInteger(input.firstPrint) || (input.firstPrint as number) < 1) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // The house's two switches, and how many changes of them the editor saw.
+    case 'setEvaluationPreferences': {
+      const input = requireInput(value.input, ['expectedEntries', 'predictionEnabled', 'calibrationEnabled'], tentativeId);
+      if (!Number.isSafeInteger(input.expectedEntries) || (input.expectedEntries as number) < 0 ||
+          typeof input.predictionEnabled !== 'boolean' || typeof input.calibrationEnabled !== 'boolean') {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     // 质量与学习 › 学习准入 (Issue #61, S26b): every Book's Learning Material, or one Book's.
     case 'inspectLearningMaterials': {
       const input = requireInput(value.input, ['bookId'], tentativeId);

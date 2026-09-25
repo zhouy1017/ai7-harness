@@ -105,6 +105,10 @@ import type {
   RecordProposalDecisionFeedbackInput,
   DecideLearningMaterialInput,
   FeedbackHistoryEntryProjection,
+  EvaluationCalibrationBookProjection,
+  EvaluationCalibrationProjection,
+  RecordPublicationActualsInput,
+  SetEvaluationPreferencesInput,
   FeedbackHistoryProjection,
   LearningMaterialsBookProjection,
   LearningMaterialsProjection,
@@ -320,7 +324,9 @@ import {
   type LearningMaterialCandidate,
 } from './learning-eligibility.js';
 import { reviewCategoryEntry } from './review/category-configuration.js';
-import { MAX_FEEDBACK_HISTORY_ENTRIES } from '../shared/protocol.js';
+import { EvaluationCalibrationError, EvaluationCalibrationLedger, initializeEvaluationCalibrationSchema } from './evaluation-calibration.js';
+import { CALIBRATION_MIN_ADJUSTMENTS, PREDICTION_MIN_BOOKS_WITH_ACTUALS, calibrationActive, predictionAvailable } from '../shared/evaluation-calibration.js';
+import { MAX_FEEDBACK_HISTORY_ENTRIES, PUBLICATION_ACTUALS_RECORDED_STATE } from '../shared/protocol.js';
 import { readExemplars } from './exemplars.js';
 import { readKnowledgeProcedures } from './knowledge-procedures.js';
 import {
@@ -425,6 +431,7 @@ import {
   ANALYSIS_FEEDBACK_SCHEMA_VERSION,
   DECISION_FEEDBACK_SCHEMA_VERSION,
   LEARNING_ELIGIBILITY_SCHEMA_VERSION,
+  EVALUATION_CALIBRATION_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1651,7 +1658,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === EVALUATION_RECORD_SCHEMA_VERSION ||
       currentVersion === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
       currentVersion === DECISION_FEEDBACK_SCHEMA_VERSION ||
-      currentVersion === LEARNING_ELIGIBILITY_SCHEMA_VERSION,
+      currentVersion === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
+      currentVersion === EVALUATION_CALIBRATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1697,7 +1705,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === EVALUATION_RECORD_SCHEMA_VERSION ||
       currentVersion === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
       currentVersion === DECISION_FEEDBACK_SCHEMA_VERSION ||
-      currentVersion === LEARNING_ELIGIBILITY_SCHEMA_VERSION
+      currentVersion === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
+      currentVersion === EVALUATION_CALIBRATION_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2057,7 +2066,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === EVALUATION_RECORD_SCHEMA_VERSION ||
       version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
       version === DECISION_FEEDBACK_SCHEMA_VERSION ||
-      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION,
+      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
+      version === EVALUATION_CALIBRATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2092,7 +2102,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === EVALUATION_RECORD_SCHEMA_VERSION ||
       version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
       version === DECISION_FEEDBACK_SCHEMA_VERSION ||
-      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION) return;
+      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
+      version === EVALUATION_CALIBRATION_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2219,7 +2230,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === EVALUATION_RECORD_SCHEMA_VERSION ||
       version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
       version === DECISION_FEEDBACK_SCHEMA_VERSION ||
-      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION,
+      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
+      version === EVALUATION_CALIBRATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2253,7 +2265,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === EVALUATION_RECORD_SCHEMA_VERSION ||
       version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
       version === DECISION_FEEDBACK_SCHEMA_VERSION ||
-      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION) return;
+      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
+      version === EVALUATION_CALIBRATION_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2546,7 +2559,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== LEARNING_ELIGIBILITY_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== EVALUATION_CALIBRATION_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2583,6 +2596,7 @@ function validateModelServiceSchema(
       version >= ANALYSIS_FEEDBACK_SCHEMA_VERSION,
       version >= DECISION_FEEDBACK_SCHEMA_VERSION,
       version >= LEARNING_ELIGIBILITY_SCHEMA_VERSION,
+      version >= EVALUATION_CALIBRATION_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2644,7 +2658,8 @@ function initializeModelServiceSchema(
       version === EVALUATION_RECORD_SCHEMA_VERSION ||
       version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
       version === DECISION_FEEDBACK_SCHEMA_VERSION ||
-      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION,
+      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
+      version === EVALUATION_CALIBRATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2678,7 +2693,8 @@ function initializeModelServiceSchema(
       version === EVALUATION_RECORD_SCHEMA_VERSION ||
       version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
       version === DECISION_FEEDBACK_SCHEMA_VERSION ||
-      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION) {
+      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
+      version === EVALUATION_CALIBRATION_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3498,6 +3514,7 @@ export class EditorialStore {
   /** 知识库 › 资料库 (Issue #427, S79c): the items an editor collected and the decisions about them. */
   readonly #libraryMaterials: LibraryMaterialLedger;
   readonly #learningEligibility: LearningEligibilityLedger;
+  readonly #evaluationCalibration: EvaluationCalibrationLedger;
   /** ②C 评估 (Issue #429, S81a): each Book's versioned Evaluation Records. */
   readonly #evaluations: EvaluationRecords;
   /** ②A 分析反馈 (Issue #94, S38): the editor's judgments of analysis results. */
@@ -3559,6 +3576,7 @@ export class EditorialStore {
     this.#reviewGuidelines = new ReviewGuidelineLedger(authority);
     this.#libraryMaterials = new LibraryMaterialLedger(authority, dataRoot);
     this.#learningEligibility = new LearningEligibilityLedger(authority);
+    this.#evaluationCalibration = new EvaluationCalibrationLedger(authority);
     this.#evaluations = new EvaluationRecords(authority, { current: (bookId) => this.#evaluationManuscript(bookId) });
     this.#analysisFeedback = new AnalysisFeedbackLedger(authority);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
@@ -3711,7 +3729,8 @@ export class EditorialStore {
       // of its review guideline documents, and revision 46 (Issue #427, S79c) the items put into 资料库 and their decisions;
       // revision 47 (Issue #429, S81a) each Book's Evaluation Records, revision 48 (Issue #94, S38) the editor's judgments
       // of analysis results, revision 49 (Issue #61, S26a) the 不说明 and later reasons of Proposal Decisions, and revision 50
-      // (Issue #61, S26b) the editor's Learning Eligibility decisions.
+      // (Issue #61, S26b) the editor's Learning Eligibility decisions, and revision 51 (Issue #430, S82) each Book's 定价与首印
+      // and the house's evaluation preferences.
       initializeBookPeopleSchema(authority);
       initializeReviewGuidelineSchema(authority);
       initializeLibraryMaterialSchema(authority);
@@ -3719,6 +3738,7 @@ export class EditorialStore {
       initializeAnalysisFeedbackSchema(authority);
       initializeDecisionFeedbackSchema(authority);
       initializeLearningEligibilitySchema(authority);
+      initializeEvaluationCalibrationSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -10248,7 +10268,119 @@ export class EditorialStore {
 
   /** The 交付物 of one Book: its Manuscript's milestones, its Publication Versions, and what followed them. */
   inspectDeliverables(bookId: string): DeliverablesProjection {
-    return this.#publicationCall(() => this.#publicationVersions.deliverables(bookId));
+    return this.#publicationCall(() => this.#withActuals(this.#publicationVersions.deliverables(bookId)));
+  }
+
+  /** 交付物's 录入定价与首印 line with what was entered for its 发稿版本 (Issue #430, S82). */
+  #withActuals(deliverables: DeliverablesProjection): DeliverablesProjection {
+    const prompt = deliverables.publication.actualsPrompt;
+    if (prompt === null) return deliverables;
+    const latest = this.#calibrationCall(() => this.#evaluationCalibration.actuals(deliverables.bookId).at(-1) ?? null);
+    if (latest === null || latest.publicationVersionId !== prompt.publicationVersionId) return deliverables;
+    return {
+      ...deliverables,
+      publication: {
+        ...deliverables.publication,
+        actualsPrompt: {
+          ...prompt,
+          stateLabel: PUBLICATION_ACTUALS_RECORDED_STATE,
+          actuals: { priceFen: latest.priceFen, firstPrint: latest.firstPrint, publicationOrdinal: latest.publicationOrdinal, recordedAt: latest.recordedAt },
+        },
+      },
+    };
+  }
+
+  /**
+   * 设置 › 评估校准与预测 (Issue #430, plan slice S82; EVAL-010, EVAL-011, EVAL-014): calibration's progress and switch, the
+   * prediction switch and the published Books it waits on, and every Book with a 发稿版本 with its 定价与首印. A read.
+   */
+  inspectEvaluationCalibration(): EvaluationCalibrationProjection {
+    return this.#calibrationCall(() => this.#evaluationCalibrationProjection());
+  }
+
+  /** 录入定价与首印 for a Book's current 发稿版本 (EVAL-010). */
+  recordPublicationActuals(input: RecordPublicationActualsInput): EvaluationCalibrationProjection {
+    return this.#calibrationCall(() => {
+      requireStore(UUID_PATTERN.test(input.bookId), 'BOOK_INVALID', '图书标识无效。');
+      this.#transaction(this.#authority, () => {
+        one(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').all(input.bookId) as SqlRow[], 'BOOK_NOT_FOUND', '图书不存在。');
+        const current = this.#publicationCall(() => this.#publicationVersions.current(input.bookId));
+        requireStore(current !== null, 'PUBLICATION_REQUIRED', '这本书还没有发稿版本；设为发稿版本后才能录入定价与首印。');
+        this.#evaluationCalibration.recordActuals({
+          bookId: input.bookId,
+          publicationVersionId: current.projection.publicationVersionId,
+          publicationOrdinal: current.projection.ordinal,
+          expectedEntries: input.expectedEntries,
+          priceFen: input.priceFen,
+          firstPrint: input.firstPrint,
+        });
+      });
+      return this.#evaluationCalibrationProjection();
+    });
+  }
+
+  /** The house's calibration and prediction switches (EVAL-010, EVAL-011). */
+  setEvaluationPreferences(input: SetEvaluationPreferencesInput): EvaluationCalibrationProjection {
+    return this.#calibrationCall(() => {
+      this.#transaction(this.#authority, () => this.#evaluationCalibration.setPreferences(input));
+      return this.#evaluationCalibrationProjection();
+    });
+  }
+
+  #evaluationCalibrationProjection(): EvaluationCalibrationProjection {
+    const preferences = this.#evaluationCalibration.preferences();
+    const booksWithActuals = this.#evaluationCalibration.booksWithActuals();
+    // AI7's 初评 arrives with S81b (Issue #429): until then the editor has no AI7 score to adjust, so none is counted.
+    const adjustments = 0;
+    const books: EvaluationCalibrationBookProjection[] = [];
+    for (const row of this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').all() as SqlRow[]) {
+      const bookId = asString(row.book_id);
+      const current = this.#publicationCall(() => this.#publicationVersions.current(bookId));
+      if (current === null) continue;
+      const chain = this.#evaluationCalibration.actuals(bookId);
+      const latest = chain.at(-1) ?? null;
+      books.push({
+        bookId,
+        title: asString(row.title),
+        publicationVersionId: current.projection.publicationVersionId,
+        publicationOrdinal: current.projection.ordinal,
+        designatedAt: current.projection.createdAt,
+        actuals: latest === null ? null : {
+          priceFen: latest.priceFen,
+          firstPrint: latest.firstPrint,
+          publicationOrdinal: latest.publicationOrdinal,
+          recordedAt: latest.recordedAt,
+          current: latest.publicationVersionId === current.projection.publicationVersionId,
+        },
+        entries: chain.length,
+      });
+    }
+    return {
+      calibration: {
+        adjustments,
+        threshold: CALIBRATION_MIN_ADJUSTMENTS,
+        enabled: preferences.calibrationEnabled,
+        active: calibrationActive(adjustments, preferences.calibrationEnabled),
+      },
+      prediction: {
+        booksWithActuals,
+        threshold: PREDICTION_MIN_BOOKS_WITH_ACTUALS,
+        enabled: preferences.predictionEnabled,
+        available: predictionAvailable(booksWithActuals),
+      },
+      preferenceEntries: preferences.entries,
+      books,
+    };
+  }
+
+  #calibrationCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof EvaluationCalibrationError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
   }
 
   /**
@@ -10256,7 +10388,10 @@ export class EditorialStore {
    * Public Release Permission and its two events in one transaction, or no change for an identical repeat.
    */
   designatePublicationVersion(input: DesignatePublicationVersionInput): PublicationDesignationProjection {
-    return this.#publicationCall(() => this.#publicationVersions.designate(input));
+    return this.#publicationCall(() => {
+      const designated = this.#publicationVersions.designate(input);
+      return { ...designated, deliverables: this.#withActuals(designated.deliverables) };
+    });
   }
 
   // ---- ⑥ 维护事项 (Issue #426, plan slice S68a; V2-UX-MAINT-001 to 011) -------------------------------------

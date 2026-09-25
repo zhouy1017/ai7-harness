@@ -544,6 +544,12 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.decideLearningMaterial(request.input) };
     case 'inspectFeedbackHistory':
       return { id: request.id, ok: true, op: request.op, result: store.inspectFeedbackHistory() };
+    case 'inspectEvaluationCalibration':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluationCalibration() };
+    case 'recordPublicationActuals':
+      return { id: request.id, ok: true, op: request.op, result: store.recordPublicationActuals(request.input) };
+    case 'setEvaluationPreferences':
+      return { id: request.id, ok: true, op: request.op, result: store.setEvaluationPreferences(request.input) };
     case 'inspectEvaluationProfiles':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluationProfiles() };
     case 'inspectEvaluation':

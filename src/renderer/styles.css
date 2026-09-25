@@ -626,6 +626,20 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .analysis-feedback-metric { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #d5dcd9; }
 .analysis-feedback-metric h5, .analysis-feedback-metric p { margin: 0 0 .4rem; overflow-wrap: anywhere; }
 .analysis-feedback-total { font-weight: 700; }
+/* 设置 › 评估校准与预测 (S82): two switches with what each waits for, then each published Book's 定价与首印. */
+.evaluation-calibration { display: grid; gap: .8rem; }
+.calibration-section { display: grid; gap: .4rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
+.calibration-section h3, .calibration-section p { margin: 0; overflow-wrap: anywhere; }
+.calibration-progress { font-weight: 700; }
+.calibration-switch { display: inline-flex; align-items: center; gap: .45rem; }
+.calibration-switch input:disabled + span { color: #6f7569; }
+.calibration-actuals-list { display: grid; gap: .5rem; margin: 0; padding: 0; list-style: none; }
+.calibration-book { display: grid; gap: .25rem; min-width: 0; padding: .45rem .7rem; border-left: 3px solid #c9d6d2; }
+.calibration-book p { margin: 0; overflow-wrap: anywhere; }
+.calibration-form { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem .8rem; }
+.calibration-field { display: grid; gap: .25rem; min-width: 0; }
+.calibration-field input { width: 9rem; max-width: 100%; box-sizing: border-box; font: inherit; }
+.publication-actuals-row { align-items: center; }
 /* 质量与学习 › 反馈记录 (S26c): four filters, then each Book's entries, newest first. */
 .feedback-history { display: grid; gap: .8rem; }
 .feedback-filters { display: flex; flex-wrap: wrap; gap: .5rem .9rem; }
@@ -1269,7 +1283,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .library-material, .library-preview, .library-chooser, .library-chooser fieldset, .library-kinds,
   .evaluation-record, .evaluation-item, .evaluation-risk, .evaluation-conclusion, .evaluation-comparison, .evaluation-profile,
   .analysis-feedback-card, .analysis-feedback-card fieldset,
-  .learning-book, .learning-card, .learning-choices, .feedback-book,
+  .learning-book, .learning-card, .learning-choices, .feedback-book, .calibration-section,
   .task-plan-clarification, .task-plan-choice, .task-plan-choice-recommended, .task-plan-clarification-deferred, .task-plan-edit-ask-first,
   .task-plan-budget-form, .task-plan-budget-input {
     color: CanvasText;

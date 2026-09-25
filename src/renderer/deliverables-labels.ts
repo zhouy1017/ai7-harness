@@ -1,3 +1,4 @@
+import { actualsLine } from './evaluation-calibration-labels.js';
 import {
   MAX_PUBLICATION_BASIS_CHARACTERS,
   MAX_PUBLICATION_SCOPE_CHARACTERS,
@@ -196,10 +197,16 @@ export function publicationChangeNoticeDetail(notice: NonNullable<DeliverablesPr
   return `发稿版本定在 ${notice.revisionLabel}，稿件此后有修改。这一版保持不变；需要时先保存新的里程碑版本，再另设发稿版本。`;
 }
 
-/** The pending line a designation leaves (V2-UX-EVAL-010): recorded now, with no action until evaluation takes it up. */
-export function publicationActualsPromptLine(prompt: Pick<PublicationActualsPromptProjection, 'label' | 'stateLabel'>): string {
-  return `${prompt.label} · ${prompt.stateLabel}`;
+/**
+ * The line a designation leaves (V2-UX-EVAL-010): `尚未录入` until the editor enters the 发稿版本's actuals in 设置 ›
+ * 评估校准与预测 (Issue #430, S82), then `已录入` with them.
+ */
+export function publicationActualsPromptLine(prompt: Pick<PublicationActualsPromptProjection, 'label' | 'stateLabel' | 'actuals'>): string {
+  const actuals = prompt.actuals === null ? '' : ` · ${actualsLine(prompt.actuals)}`;
+  return `${prompt.label} · ${prompt.stateLabel}${actuals}`;
 }
+/** 录入… or 修改…: where the prompt sends the editor, to the one central entry (EVAL-014). */
+export const PUBLICATION_ACTUALS_ACTIONS = { enter: '录入…', change: '修改…' } as const;
 
 /** Where a Book's 发稿 stands, as the block and 工作概览's line both name it. */
 export type PublicationState = 'no-manuscript' | 'no-milestone' | 'undesignated' | 'designated';

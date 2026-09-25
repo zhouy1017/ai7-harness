@@ -63,6 +63,7 @@ import {
   MILESTONE_PURPOSE_KINDS,
   PUBLICATION_ACTUALS_PROMPT_LABEL,
   PUBLICATION_ACTUALS_PROMPT_STATE,
+  PUBLICATION_ACTUALS_RECORDED_STATE,
   PUBLICATION_CHANGE_NOTICE,
   PUBLICATION_FORBIDDEN_WORDS,
   PUBLICATION_NEEDS_MILESTONE,
@@ -189,11 +190,16 @@ describe('the words of 交付物', () => {
     expect(publicationEventsLine(designation().technical.events)).toBe('actuals-prompt · e1；exemplar-archive · e2');
   });
 
-  it('state the change notice with its exact relationship, and the pending actuals line with no action', () => {
+  it('state the change notice with its exact relationship, and the actuals line before and after they are entered', () => {
     expect(publicationChangeNoticeDetail({ label: PUBLICATION_CHANGE_NOTICE, publicationVersionId: identity, revisionLabel: 'r2' }))
       .toBe('发稿版本定在 r2，稿件此后有修改。这一版保持不变；需要时先保存新的里程碑版本，再另设发稿版本。');
-    expect(publicationActualsPromptLine({ label: PUBLICATION_ACTUALS_PROMPT_LABEL, stateLabel: PUBLICATION_ACTUALS_PROMPT_STATE }))
-      .toBe('录入定价与首印 · 随评估功能提供');
+    expect(publicationActualsPromptLine({ label: PUBLICATION_ACTUALS_PROMPT_LABEL, stateLabel: PUBLICATION_ACTUALS_PROMPT_STATE, actuals: null }))
+      .toBe('录入定价与首印 · 尚未录入');
+    // Synchronized delta with Issue #430 (S82): once entered in 设置 › 评估校准与预测, the line states them.
+    expect(publicationActualsPromptLine({
+      label: PUBLICATION_ACTUALS_PROMPT_LABEL, stateLabel: PUBLICATION_ACTUALS_RECORDED_STATE,
+      actuals: { priceFen: 4500, firstPrint: 3000, publicationOrdinal: 1, recordedAt: '2026-09-25T06:00:00.000Z' },
+    })).toBe('录入定价与首印 · 已录入 · 定价 ¥45.00 · 首印 3,000 册');
   });
 
   it('read the manuscript and the chosen milestone into the form summary before commitment', () => {
@@ -324,7 +330,7 @@ describe('what 交付物 never says', () => {
     const runner = readFileSync(fileURLToPath(new URL('../../e2e/run-j07.mjs', import.meta.url)), 'utf8');
     const literal = (name: string): string | undefined => new RegExp(`^const ${name} = '([^']*)';\\r?$`, 'mu').exec(runner)?.[1];
     expect(literal('STATEMENT')).toBe(PUBLICATION_VERSION_STATEMENT);
-    expect(literal('ACTUALS_PROMPT')).toBe(publicationActualsPromptLine({ label: PUBLICATION_ACTUALS_PROMPT_LABEL, stateLabel: PUBLICATION_ACTUALS_PROMPT_STATE }));
+    expect(literal('ACTUALS_PROMPT')).toBe(publicationActualsPromptLine({ label: PUBLICATION_ACTUALS_PROMPT_LABEL, stateLabel: PUBLICATION_ACTUALS_PROMPT_STATE, actuals: null }));
     const forbidden = /^const FORBIDDEN_WORDS = Object\.freeze\(\[([^\]]*)\]\);\r?$/mu.exec(runner)?.[1];
     expect(forbidden?.split(',').map((word) => word.trim().replace(/^'|'$/gu, ''))).toEqual([...PUBLICATION_FORBIDDEN_WORDS]);
   });

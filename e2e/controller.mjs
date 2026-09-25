@@ -537,6 +537,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'model-service-first-save',
     'model-service-restart-and-replace',
     'model-service-remove-and-restart',
+    'evaluation-calibration-settings',
   ]),
   'J-15': Object.freeze([
     'entry',
@@ -871,6 +872,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'maintenance-attention',
     'documents-restart',
     'knowledge-exemplars',
+    'publication-actuals',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',

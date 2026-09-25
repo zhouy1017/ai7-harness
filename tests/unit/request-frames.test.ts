@@ -1210,6 +1210,42 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
+  it('accepts 设置 › 评估校准与预测: the read naming nothing, 定价与首印 in whole 分 and copies, and the two switches (Issue #430, S82)', () => {
+    const bookId = randomUUID();
+    const actuals = { bookId, expectedEntries: 0, priceFen: 4500, firstPrint: 3000 };
+    const preferences = { expectedEntries: 2, predictionEnabled: false, calibrationEnabled: true };
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'inspectEvaluationCalibration', input: {} },
+      { op: 'recordPublicationActuals', input: actuals },
+      { op: 'recordPublicationActuals', input: { ...actuals, expectedEntries: 3, priceFen: 1, firstPrint: 1 } },
+      { op: 'setEvaluationPreferences', input: preferences },
+      { op: 'setEvaluationPreferences', input: { ...preferences, expectedEntries: 0, predictionEnabled: true, calibrationEnabled: false } },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    for (const [op, input] of [
+      ['inspectEvaluationCalibration', { bookId }],
+      ['recordPublicationActuals', { ...actuals, bookId: 'book' }],
+      ['recordPublicationActuals', { ...actuals, expectedEntries: -1 }],
+      ['recordPublicationActuals', { ...actuals, priceFen: 0 }],
+      ['recordPublicationActuals', { ...actuals, priceFen: 45.5 }],
+      ['recordPublicationActuals', { ...actuals, priceFen: '4500' }],
+      ['recordPublicationActuals', { ...actuals, firstPrint: 0 }],
+      ['recordPublicationActuals', { ...actuals, firstPrint: 3000.5 }],
+      ['recordPublicationActuals', { ...actuals, publicationVersionId: randomUUID() }],
+      ['recordPublicationActuals', { bookId, expectedEntries: 0, priceFen: 4500 }],
+      ['setEvaluationPreferences', { ...preferences, predictionEnabled: 'on' }],
+      ['setEvaluationPreferences', { ...preferences, calibrationEnabled: 1 }],
+      ['setEvaluationPreferences', { ...preferences, expectedEntries: 1.5 }],
+      ['setEvaluationPreferences', { predictionEnabled: false, calibrationEnabled: true }],
+      ['setEvaluationPreferences', { ...preferences, threshold: 10 }],
+    ] as const) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('accepts 知识库 › 资料库: the read naming nothing, a preview by absolute path, an arrival, and a decision of a closed shape (Issue #427, S79c)', () => {
     const materialId = randomUUID();
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [

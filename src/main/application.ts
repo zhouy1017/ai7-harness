@@ -2767,6 +2767,39 @@ function registerRendererHandlers(
       return service.call('inspectLearningMaterials', { bookId: input.bookId });
     }),
   );
+  // 设置 › 评估校准与预测 (Issue #430, S82): house settings, bound to no Book route; each write is serialized with every other
+  // effect.
+  ipcMain.handle(IPC_CHANNELS.inspectEvaluationCalibration, (event) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('inspectEvaluationCalibration', {});
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.recordPublicationActuals, (event, input: ServiceOperationMap['recordPublicationActuals']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('recordPublicationActuals', {
+          bookId: input.bookId, expectedEntries: input.expectedEntries, priceFen: input.priceFen, firstPrint: input.firstPrint,
+        });
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.setEvaluationPreferences, (event, input: ServiceOperationMap['setEvaluationPreferences']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('setEvaluationPreferences', {
+          expectedEntries: input.expectedEntries, predictionEnabled: input.predictionEnabled, calibrationEnabled: input.calibrationEnabled,
+        });
+      });
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.inspectFeedbackHistory, (event) =>
     envelope(async () => {
       requireSender(event);
