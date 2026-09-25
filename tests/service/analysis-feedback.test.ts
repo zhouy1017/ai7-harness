@@ -119,6 +119,11 @@ describe('②A 分析反馈 over the real store', () => {
       expect(await refusal(() => judge({ reason: { choice: 'chronology-wrong', text: null } }))).toBe('ANALYSIS_FEEDBACK_REASON_INVALID:反馈的原因无效。');
       expect(await refusal(() => judge({ reason: { choice: 'other', text: '  ' } }))).toBe('ANALYSIS_FEEDBACK_REASON_TEXT:选「其他」时请写下原因。');
       expect(await refusal(() => judge({ judgment: 'accurate', correction: '应为另一名称' }))).toBe('ANALYSIS_FEEDBACK_CORRECTION_UNEXPECTED:「准确」不需要修正说明。');
+      // The editor's own words are 300 graphemes at most and never a control character; a revision the Book does not
+      // hold binds nothing.
+      expect(await refusal(() => judge({ correction: '字'.repeat(301) }))).toBe('ANALYSIS_FEEDBACK_TEXT_TOO_LONG:修正说明要在 300 字以内。');
+      expect(await refusal(() => judge({ reason: { choice: 'other', text: '原因\u0007' } }))).toBe('ANALYSIS_FEEDBACK_TEXT_INVALID:原因说明含有不能显示的控制字符。');
+      expect(await refusal(() => judge({ revisionId: '00000000-0000-4000-8000-000000000000' }))).toBe('ANALYSIS_REVISION_NOT_FOUND:本图书没有该结果集修订版。');
 
       // 不准确, with a reason offered for it and the editor's own correction.
       const first = judge({ reason: { choice: 'misnamed', text: null }, correction: '  应为另一名称  ' });
