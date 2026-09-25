@@ -42,9 +42,11 @@ import type {
   ReviewGuidelinePreviewProjection,
   ReviewGuidelinesProjection,
   ExemplarBookCursor,
+  LibraryMaterialCursor,
   LibraryMaterialDecisionInput,
   LibraryMaterialKind,
   LibraryMaterialPreviewProjection,
+  LibraryMaterialProjection,
   LibraryMaterialsProjection,
   ExemplarsProjection,
   KnowledgeProceduresProjection,
@@ -3666,6 +3668,8 @@ export class EditorialStore {
       await store.#sweepUnreferencedContentObjects();
       await recoveryObjects.cleanup((relativeKey) =>
         store.#boundedCall(() => store.#boundedAuthority.isRecoveryObjectReferenced(relativeKey)));
+      // What an interrupted 放入资料库 left beside the kept originals (Issue #427 review).
+      await store.#libraryMaterials.sweep();
       store.#boundedCall(() => store.#boundedAuthority.startServiceLifetime(lifetimeId, new Date().toISOString()));
       return store;
     } catch (error) {
@@ -5511,11 +5515,16 @@ export class EditorialStore {
   }
 
   /**
-   * 知识库 › 资料库 (Issue #427, S79c; KB-007): every item the editor collected — where it belongs, whether it may teach, and
-   * whose Tasks may list it under 允许参考 — with the Books an attribution can name.
+   * 知识库 › 资料库 (Issue #427, S79c; KB-007): one page of the items the editor collected — where each belongs, whether it may
+   * teach, and whose Tasks may list it under 允许参考 — newest first, after the cursor.
    */
-  inspectLibraryMaterials(): LibraryMaterialsProjection {
-    return this.#libraryCall(() => this.#libraryMaterials.projection());
+  inspectLibraryMaterials(after: LibraryMaterialCursor | null): LibraryMaterialsProjection {
+    return this.#libraryCall(() => this.#libraryMaterials.page(after));
+  }
+
+  /** One 资料库 item as its card reads it. */
+  inspectLibraryMaterial(materialId: string): LibraryMaterialProjection {
+    return this.#libraryCall(() => this.#libraryMaterials.item(materialId));
   }
 
   /** 放入资料…'s first step: the picked file identified, measured and digested as it would arrive; nothing is kept. */
@@ -5533,7 +5542,7 @@ export class EditorialStore {
    * 放入资料库: the previewed file kept whole in the Agent Data Root by its digest, then its arrival recorded with the title and
    * kind the editor gave it. A title that cannot stand is refused before anything is copied.
    */
-  async addLibraryMaterial(input: { previewId: string; title: string; kind: LibraryMaterialKind }): Promise<LibraryMaterialsProjection> {
+  async addLibraryMaterial(input: { previewId: string; title: string; kind: LibraryMaterialKind }): Promise<LibraryMaterialProjection> {
     this.#assertAvailable();
     let kept: Awaited<ReturnType<LibraryMaterialLedger['keep']>>;
     try {
@@ -5543,15 +5552,16 @@ export class EditorialStore {
       if (error instanceof LibraryMaterialError) throw new StoreError(error.code, error.message);
       throw error;
     }
-    this.#libraryCall(() => this.#transaction(this.#authority, () => this.#libraryMaterials.record(kept, input.title, input.kind)));
-    return this.inspectLibraryMaterials();
+    const materialId = this.#libraryCall(() => this.#transaction(this.#authority, () => this.#libraryMaterials.record(kept, input.title, input.kind)));
+    // The one item it made: the page it joins is read again by the renderer's own paging, never re-sent whole.
+    return this.inspectLibraryMaterial(materialId);
   }
 
-  /** 定归属 or 定学习准入 (KB-007, LEARN-007): one decision appended to the item's chain, and the page as it now reads. */
-  decideLibraryMaterial(input: { materialId: string; expectedDecisions: number; decision: LibraryMaterialDecisionInput }): LibraryMaterialsProjection {
+  /** 定归属 or 定学习准入 (KB-007, LEARN-007): one decision appended to the item's chain, and the item as it now reads. */
+  decideLibraryMaterial(input: { materialId: string; expectedDecisions: number; decision: LibraryMaterialDecisionInput }): LibraryMaterialProjection {
     this.#libraryCall(() => this.#transaction(this.#authority, () =>
       this.#libraryMaterials.decide(input.materialId, input.expectedDecisions, input.decision)));
-    return this.inspectLibraryMaterials();
+    return this.inspectLibraryMaterial(input.materialId);
   }
 
   #libraryCall<T>(operation: () => T): T {

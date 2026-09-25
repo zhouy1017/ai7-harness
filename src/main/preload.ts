@@ -258,7 +258,10 @@ const api: RendererApi = Object.freeze({
   inspectExemplars: (input?: ServiceOperationMap['inspectExemplars']['input']) =>
     invoke<ServiceOperationMap['inspectExemplars']['output']>(IPC_CHANNELS.inspectExemplars, input ?? { after: null }),
   inspectKnowledgeProcedures: () => invoke<ServiceOperationMap['inspectKnowledgeProcedures']['output']>(IPC_CHANNELS.inspectKnowledgeProcedures),
-  inspectLibraryMaterials: () => invoke<ServiceOperationMap['inspectLibraryMaterials']['output']>(IPC_CHANNELS.inspectLibraryMaterials),
+  inspectLibraryMaterials: (input?: ServiceOperationMap['inspectLibraryMaterials']['input']) =>
+    invoke<ServiceOperationMap['inspectLibraryMaterials']['output']>(IPC_CHANNELS.inspectLibraryMaterials, input ?? { after: null }),
+  inspectLibraryMaterial: (input: ServiceOperationMap['inspectLibraryMaterial']['input']) =>
+    invoke<ServiceOperationMap['inspectLibraryMaterial']['output']>(IPC_CHANNELS.inspectLibraryMaterial, input),
   previewLibraryMaterial: () =>
     invoke<ServiceOperationMap['previewLibraryMaterial']['output'] | null>(IPC_CHANNELS.previewLibraryMaterial),
   addLibraryMaterial: (input: ServiceOperationMap['addLibraryMaterial']['input']) =>

@@ -1125,7 +1125,9 @@ describe('decodeRequest rejects malformed frames', () => {
   it('accepts 知识库 › 资料库: the read naming nothing, a preview by absolute path, an arrival, and a decision of a closed shape (Issue #427, S79c)', () => {
     const materialId = randomUUID();
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
-      { op: 'inspectLibraryMaterials', input: {} },
+      { op: 'inspectLibraryMaterials', input: { after: null } },
+      { op: 'inspectLibraryMaterials', input: { after: { recordedAt: '2026-09-26T01:02:03.004Z', materialId: randomUUID() } } },
+      { op: 'inspectLibraryMaterial', input: { materialId } },
       { op: 'previewLibraryMaterial', input: { path: `${process.cwd()}/资料/样书.pdf` } },
       { op: 'addLibraryMaterial', input: { previewId: randomUUID(), title: '样书一', kind: 'book' } },
       { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId: randomUUID() } } } },
@@ -1140,6 +1142,12 @@ describe('decodeRequest rejects malformed frames', () => {
     const house = { kind: 'attribution', attribution: { scope: 'house' } };
     for (const [op, input] of [
       ['inspectLibraryMaterials', { bookId: randomUUID() }],
+      ['inspectLibraryMaterials', {}],
+      ['inspectLibraryMaterials', { after: { recordedAt: 'yesterday', materialId } }],
+      ['inspectLibraryMaterials', { after: { recordedAt: '2026-09-26T01:02:03.004Z', materialId: 'first' } }],
+      ['inspectLibraryMaterials', { after: { recordedAt: '2026-09-26T01:02:03.004Z' } }],
+      ['inspectLibraryMaterial', { materialId: 'first' }],
+      ['inspectLibraryMaterial', {}],
       ['previewLibraryMaterial', { path: '资料/样书.pdf' }],
       ['previewLibraryMaterial', {}],
       ['addLibraryMaterial', { previewId: randomUUID(), title: '样书一', kind: 'magazine' }],

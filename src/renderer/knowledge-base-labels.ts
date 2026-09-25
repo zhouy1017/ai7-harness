@@ -280,7 +280,13 @@ export const LIBRARY_STATUS = {
   addFailed: '无法放入这个文件。',
   deciding: '正在记录决定…',
   decideFailed: '无法记录这个决定。',
+  loadingMore: '正在读取更多资料…',
+  loadingBooks: '正在读取图书…',
+  booksFailed: '无法读取图书列表。',
 } as const;
+/** Reads the next page of items, and of the Books an attribution can name (Issue #427 review). */
+export const LIBRARY_MORE = '更多资料…';
+export const LIBRARY_BOOKS_MORE = '更多图书…';
 
 export const LIBRARY_KIND_LABELS: Readonly<Record<LibraryMaterialKind, string>> = { book: '图书', paper: '论文', document: '资料', web: '网页' };
 export const LIBRARY_FORMAT_LABELS: Readonly<Record<LibraryMaterialFormat, string>> = {
@@ -356,8 +362,9 @@ export function libraryReferenceLine(material: Pick<LibraryMaterialProjection, '
     : '定了归属与学习准入，任务才能把它列进「允许参考」。';
 }
 
-export function libraryDecisionsSummary(count: number): string {
-  return `决定记录（${count}）`;
+/** The decisions on record: how many, and — past the latest the card names — that only those are listed. */
+export function libraryDecisionsSummary(count: number, shown: number = count): string {
+  return shown < count ? `决定记录（${count}，列出最近 ${shown} 条）` : `决定记录（${count}）`;
 }
 
 /** One decision on record, oldest first: a later one supersedes it and neither is rewritten (LEARN-007). */

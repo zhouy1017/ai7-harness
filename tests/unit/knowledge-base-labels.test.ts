@@ -134,7 +134,7 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
     expect(libraryPreviewFacts({ source })).toBe('Word · 28.9 KB · 原件原样保存在本机，不会改动');
     const pending: LibraryMaterialProjection = {
       materialId: 'm', title: '样书一', kind: 'book', source, recordedAt: '2026-09-25T01:00:00.000Z', digest: 'b'.repeat(64),
-      attribution: null, eligibility: null, eligibilityReset: false, reference: { state: 'pending' }, decisions: [],
+      attribution: null, eligibility: null, eligibilityReset: false, reference: { state: 'pending' }, decisionCount: 0, decisions: [],
     };
     expect(librarySourceLine(pending, instant)).toBe('sample1.docx · Word · 28.9 KB · 放入于 〔2026-09-25〕');
     expect([libraryAttributionLine(pending), libraryEligibilityLine(pending), libraryReferenceLine(pending)])

@@ -246,6 +246,9 @@ function validRecoveryWindowTarget(value: unknown): boolean {
   );
 }
 
+/** The instant a 资料库 page starts after: an arrival's own, as the store writes it. */
+const LIBRARY_CURSOR_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+
 export function decodeRequest(frame: Uint8Array): ServiceRequest {
   let value: unknown;
   try {
@@ -274,7 +277,6 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectReviewGuidelines':
     // 知识库 › 工序与规则's 工序 (Issue #427, S79d) are the house's, so the read names no Book.
     case 'inspectKnowledgeProcedures':
-    case 'inspectLibraryMaterials':
     case 'shutdown': {
       requireInput(value.input, [], tentativeId);
       break;
@@ -597,6 +599,21 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'importReviewGuidelineVersion': {
       const input = requireInput(value.input, ['previewId'], tentativeId);
       if (!validUuid(input.previewId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 知识库 › 资料库 (Issue #427, S79c) names no Book: only where its page starts, after one item, newest first.
+    case 'inspectLibraryMaterials': {
+      const after = requireInput(value.input, ['after'], tentativeId).after;
+      if (!(after === null || (isRecord(after) && hasExactKeys(after, ['recordedAt', 'materialId']) &&
+          isBoundedString(after.recordedAt, 40) && LIBRARY_CURSOR_INSTANT.test(after.recordedAt) && validUuid(after.materialId)))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // One 资料库 item, by its identity.
+    case 'inspectLibraryMaterial': {
+      const input = requireInput(value.input, ['materialId'], tentativeId);
+      if (!validUuid(input.materialId)) throw new ProtocolError(tentativeId);
       break;
     }
     // 放入资料… (Issue #427, S79c): the absolute path main's picker returned.

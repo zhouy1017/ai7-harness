@@ -531,7 +531,9 @@ async function dispatch(
     case 'inspectKnowledgeProcedures':
       return { id: request.id, ok: true, op: request.op, result: await store.inspectKnowledgeProcedures() };
     case 'inspectLibraryMaterials':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterials() };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterials(request.input.after) };
+    case 'inspectLibraryMaterial':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterial(request.input.materialId) };
     case 'previewLibraryMaterial':
       return { id: request.id, ok: true, op: request.op, result: await store.previewLibraryMaterial(request.input.path) };
     case 'addLibraryMaterial':

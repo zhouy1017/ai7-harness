@@ -2614,11 +2614,19 @@ function registerRendererHandlers(
   );
   // 知识库 › 资料库 (Issue #427, S79c): the renderer names no path — main's picker chooses the file — and names an item and a
   // decision only in the closed shapes the service checks again.
-  ipcMain.handle(IPC_CHANNELS.inspectLibraryMaterials, (event) =>
+  ipcMain.handle(IPC_CHANNELS.inspectLibraryMaterials, (event, input: ServiceOperationMap['inspectLibraryMaterials']['input']) =>
     envelope(async () => {
       requireSender(event);
       requireAuthority();
-      return service.call('inspectLibraryMaterials', {});
+      return service.call('inspectLibraryMaterials', { after: input?.after ?? null });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectLibraryMaterial, (event, input: ServiceOperationMap['inspectLibraryMaterial']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectLibraryMaterial', { materialId: input.materialId });
     }),
   );
   ipcMain.handle(IPC_CHANNELS.previewLibraryMaterial, (event) =>
