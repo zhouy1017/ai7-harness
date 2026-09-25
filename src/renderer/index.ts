@@ -56,6 +56,7 @@ import type {
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
   J03_TASK_GOAL,
+  MAX_BOOK_SUMMARY_FILTER_CHARACTERS,
   MAX_REPLACEMENT_EXCLUSIONS,
   MILESTONE_PURPOSE_KINDS,
   MILESTONE_PURPOSE_LABELS,
@@ -4283,6 +4284,8 @@ function renderBookFilter(
   const text = element('input');
   text.id = 'book-filter-text';
   text.type = 'search';
+  // The service reads at most this many characters; a longer paste is cut here rather than refused as a bad request.
+  text.maxLength = MAX_BOOK_SUMMARY_FILTER_CHARACTERS;
   text.value = filter?.text ?? '';
   textLabel.append(text);
   const find = button(BOOK_FILTER_ACTIONS.find, 'secondary', () => undefined);
