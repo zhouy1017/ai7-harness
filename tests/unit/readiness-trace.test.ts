@@ -76,6 +76,11 @@ describe('the readiness trace (Issue #518)', () => {
 
   it('reads only the launch in flight: nothing from before it began, from another process, or without its time', () => {
     const launch = launched([
+      // The launch before, from its start: had lines before this launch began been read, it — the first `<launched>` in
+      // the log — would be the one read, and its good start would stand in for this launch's stall (#581).
+      [-900, '<launched> pid=11'],
+      [-600, '[pid=11][err] AI7_STARTUP/service-ready'],
+      [-300, '[pid=11][out] AI7_READY'],
       // The launch before, still closing: written before this one began, or by its own process after.
       [-5, '[pid=11][err] AI7_STARTUP/readiness-signal'],
       [3, '[pid=11] <process did exit: exitCode=0, signal=null>'],
@@ -87,6 +92,22 @@ describe('the readiness trace (Issue #518)', () => {
     expect(trace.formatReadinessTrace('J-01', undated, 1_000 + 60_000)).toBe(
       'READINESS/J-01/launch=empty-book-first-import;launched=9;last=runtime@50;ready=none;failed=none;exit=none@none;target=no;other=0;age=60000',
     );
+  });
+
+  it('has J-01 mark its target between attaching and waiting for readiness, so a stall there says the target existed (#581)', () => {
+    // J-01 runs as it is imported, so the order is read from its source: in `attachRendererTarget`, `onTarget()` follows
+    // the attach and comes before the first command the readiness wait sends.
+    const source = readFileSync(join(ROOT, 'e2e', 'run-j01.mjs'), 'utf8').replace(/\r\n/gu, '\n');
+    const start = source.indexOf('async function attachRendererTarget(');
+    expect(start).toBeGreaterThan(-1);
+    const body = source.slice(start, source.indexOf('\n}\n', start));
+    const attach = body.indexOf("'Target.attachToTarget'");
+    const marked = body.indexOf('onTarget();');
+    const waits = body.indexOf("await send('Runtime.enable'");
+    const ready = body.indexOf("at('renderer-ready')");
+    expect([attach > -1, marked > -1, waits > -1, ready > -1]).toEqual([true, true, true, true]);
+    expect(attach < marked && marked < waits && waits < ready).toBe(true);
+    expect(body.indexOf('onTarget();', marked + 1)).toBe(-1);
   });
 
   it('keeps a Windows exit status whole, and relays it', () => {
