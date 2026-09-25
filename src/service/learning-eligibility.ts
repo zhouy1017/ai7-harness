@@ -138,7 +138,8 @@ function bounded(text: string): string {
   return graphemes.length <= EXCERPT_GRAPHEMES ? graphemes.join('') : `${graphemes.slice(0, EXCERPT_GRAPHEMES).join('')}…`;
 }
 
-const DISPOSITION_LABELS: Readonly<Record<string, string>> = { accepted: '接受', 'accepted-with-edit': '修改后接受', rejected: '拒绝' };
+/** A 修改建议's decision in the editor's words, as 学习准入 and 反馈记录 both say it. */
+export const DISPOSITION_LABELS: Readonly<Record<string, string>> = { accepted: '接受', 'accepted-with-edit': '修改后接受', rejected: '拒绝' };
 
 /**
  * A 修改建议's current decision that carries the editor's reason or their own wording: what was suggested, what they did,
@@ -182,10 +183,22 @@ export function proposalDecisionCandidate(decision: {
   };
 }
 
-const DIMENSION_LABELS: Readonly<Record<AnalysisFeedbackDimension, string>> = {
+export const DIMENSION_LABELS: Readonly<Record<AnalysisFeedbackDimension, string>> = {
   synopsis: '全书梗概', entities: '人物与名称', events: '事件', relationships: '关系', settings: '设定',
 };
-const JUDGMENT_LABELS: Readonly<Record<AnalysisFeedbackJudgment, string>> = { accurate: '准确', inaccurate: '不准确', incomplete: '不完整' };
+export const JUDGMENT_LABELS: Readonly<Record<AnalysisFeedbackJudgment, string>> = { accurate: '准确', inaccurate: '不准确', incomplete: '不完整' };
+
+/** A judgment's reason in the editor's words: the alternative's own label, or what they wrote under 其他. */
+export function analysisReasonLabel(signal: {
+  readonly dimension: AnalysisFeedbackDimension;
+  readonly judgment: AnalysisFeedbackJudgment;
+  readonly reason: null | { readonly choice: string; readonly text: string | null };
+}): string | null {
+  if (signal.reason === null) return null;
+  if (signal.reason.choice === ANALYSIS_FEEDBACK_OTHER) return signal.reason.text;
+  if (signal.judgment === 'accurate') return signal.reason.choice;
+  return ANALYSIS_FEEDBACK_REASONS[signal.dimension][signal.judgment].find((entry) => entry.choice === signal.reason!.choice)?.label ?? signal.reason.choice;
+}
 
 /**
  * An item of an analysis result the editor judged and said why, as their latest judgment of it stands. It is the item's
@@ -201,13 +214,7 @@ export function analysisFeedbackCandidate(signal: {
   readonly correction: string | null;
   readonly recordedAt: string;
 }, itemLabel: string | null): LearningMaterialCandidate {
-  const reasonLabel = signal.reason === null
-    ? null
-    : signal.reason.choice === ANALYSIS_FEEDBACK_OTHER
-      ? signal.reason.text
-      : signal.judgment === 'accurate'
-        ? signal.reason.choice
-        : ANALYSIS_FEEDBACK_REASONS[signal.dimension][signal.judgment].find((entry) => entry.choice === signal.reason!.choice)?.label ?? signal.reason.choice;
+  const reasonLabel = analysisReasonLabel(signal);
   const excerpt: string[] = [];
   if (itemLabel !== null) {
     excerpt.push(`${DIMENSION_LABELS[signal.dimension]}：${bounded(itemLabel)}`);

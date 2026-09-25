@@ -306,8 +306,12 @@ export class AnalysisFeedbackLedger {
    * about (Issue #61, S26b). A bare verdict, or a judgment an editor has since changed, is not among them.
    */
   latestWithWords(bookId: string): Array<AnalysisFeedbackSignalProjection & { readonly revisionId: string; readonly itemKey: string; readonly dimension: AnalysisFeedbackDimension }> {
+    return this.latest(bookId).filter((signal) => signal.reason !== null || signal.correction !== null);
+  }
+
+  /** Each judged item's latest judgment in one Book, oldest first: 质量与学习's history of it (Issue #61, S26c). */
+  latest(bookId: string): Array<AnalysisFeedbackSignalProjection & { readonly revisionId: string; readonly itemKey: string; readonly dimension: AnalysisFeedbackDimension }> {
     return Array.from(this.#chains('book_id = ?', bookId).values(), (chain) => chain.at(-1)!)
-      .filter((signal) => signal.reason !== null || signal.correction !== null)
       .sort((a, b) => (a.recordedAt < b.recordedAt ? -1 : a.recordedAt > b.recordedAt ? 1 : a.signalId < b.signalId ? -1 : 1))
       .map((signal) => ({
         signalId: signal.signalId, judgment: signal.judgment, reason: signal.reason, correction: signal.correction, recordedAt: signal.recordedAt,

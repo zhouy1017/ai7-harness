@@ -76,7 +76,18 @@ import { mountLibraryMaterials } from './library-materials.js';
 import { mountEvaluation } from './evaluation.js';
 import { mountAnalysisFeedback } from './analysis-feedback.js';
 import { mountLearningMaterials } from './quality-learning.js';
-import { LEARNING_HEADING, LEARNING_STATUS, QUALITY_LEARNING_LEDE, QUALITY_LEARNING_TITLE } from './quality-learning-labels.js';
+import type { FeedbackHistoryTarget } from '../shared/protocol.js';
+import { mountFeedbackHistory } from './feedback-history.js';
+import {
+  FEEDBACK_HISTORY_HEADING,
+  FEEDBACK_HISTORY_STATUS,
+  LEARNING_HEADING,
+  LEARNING_STATUS,
+  QUALITY_LEARNING_LEDE,
+  QUALITY_LEARNING_TABS,
+  QUALITY_LEARNING_TABS_LABEL,
+  QUALITY_LEARNING_TITLE,
+} from './quality-learning-labels.js';
 import {
   EVALUATION_LEDE,
   EVALUATION_STATUS,
@@ -723,7 +734,29 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget): Promise
       await renderKnowledgeBase('library', false, target.materialId);
       return;
     case 'learning-materials':
-      await renderQualityLearning(target.bookId);
+      await renderQualityLearning('learning', target.bookId);
+      return;
+  }
+}
+
+/**
+ * Where a 反馈记录 entry opens (Issue #61, S26c; FDBK-009): the exact record, in its Book — the manuscript with the
+ * 修改建议's card open, ②A on the revision the judgment was made of, or ②B with the finding in view.
+ */
+async function openFeedbackTarget(target: FeedbackHistoryTarget): Promise<void> {
+  switch (target.kind) {
+    case 'mark':
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
+        const opened = await window.ai7.getManuscriptWindowAt({ manuscriptId: target.manuscriptId, branchId: target.branchId, target: { kind: 'block', blockId: target.blockId } });
+        await openEditorWindow(opened, route.bookTitle, undefined, undefined, target.markId);
+      });
+      return;
+    case 'analysis':
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => renderBookAnalysis(route.bookId, route.bookTitle, target.revisionId));
+      return;
+    case 'review':
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>
+        renderBookReview(route.bookId, route.bookTitle, { reviewRunId: target.reviewRunId, findingId: target.findingId }));
       return;
   }
 }
@@ -1915,7 +1948,7 @@ async function renderBookWorkbenchChooser(
  * The way back to the manuscript and to the overview sits in a persistent region, because a settled
  * result set is the longest thing this product renders and its way out must survive it (LAYER-005).
  */
-function renderBookAnalysis(bookId: string, bookTitle: string): void {
+function renderBookAnalysis(bookId: string, bookTitle: string, revisionId?: string): void {
   const content = panel();
   content.classList.add('book-analysis');
   content.dataset['bookId'] = bookId;
@@ -1952,7 +1985,11 @@ function renderBookAnalysis(bookId: string, bookTitle: string): void {
   replaceScreen('book-analysis', content);
   setStatus('分析已打开');
   const inspect = (first: boolean): void => {
-    void window.ai7.inspectBaselineAnalysis().then(
+    // A 反馈记录 entry opens ②A on the revision it judged (Issue #61, S26c): read-only when that is no longer the current one.
+    const read = first && revisionId !== undefined
+      ? window.ai7.inspectBaselineAnalysis().then((current) => current.resultSetRevision?.revisionId === revisionId ? current : window.ai7.inspectBaselineAnalysis({ revisionId }))
+      : window.ai7.inspectBaselineAnalysis();
+    void read.then(
       (projection) => {
         if (host.isConnected && projection.bookId === host.dataset['analysisBookId']) renderBaselineAnalysis(host, projection, bookTitle);
       },
@@ -4463,38 +4500,70 @@ function renderExemplars(root: HTMLElement, projection: ExemplarsProjection): vo
  * class's panel, which says what the class holds and, for a class a later slice brings, why it shows nothing yet.
  */
 /**
- * 质量与学习 (Issue #61, plan slice S26b; LEARN-002, FDBK-010): a house-wide destination beside 知识库, opened from the
- * landing or from a Book's 学习准入待处理 in 待我处理 — then for that Book, with the way to every Book one step away.
+ * 质量与学习 (Issue #61, plan slices S26b and S26c; LEARN-002, FDBK-009, FDBK-010): a house-wide destination beside 知识库 with
+ * two tabs — 反馈记录, the passive history it opens at from the landing, and 学习准入, where a Book's 学习准入待处理 in
+ * 待我处理 opens it, for that Book, with the way to every Book one step away.
  */
-async function renderQualityLearning(bookId: string | null): Promise<void> {
+async function renderQualityLearning(tab: 'feedback' | 'learning', bookId: string | null, tabFocused = false): Promise<void> {
   const content = panel();
   content.classList.add('quality-learning');
+  content.dataset['qualityTab'] = tab;
+  const tabs = element('div', 'knowledge-tabs quality-tabs');
+  tabs.setAttribute('role', 'tablist');
+  tabs.setAttribute('aria-label', QUALITY_LEARNING_TABS_LABEL);
+  QUALITY_LEARNING_TABS.forEach((entry, index) => {
+    const node = button(entry.label, entry.tab === tab ? 'secondary' : 'quiet', () => {
+      if (entry.tab !== tab) void renderQualityLearning(entry.tab, null, true);
+    });
+    node.id = `quality-tab-${entry.tab}`;
+    node.dataset['qualityTab'] = entry.tab;
+    node.setAttribute('role', 'tab');
+    node.setAttribute('aria-selected', String(entry.tab === tab));
+    node.setAttribute('aria-controls', 'quality-panel');
+    node.tabIndex = entry.tab === tab ? 0 : -1;
+    node.addEventListener('keydown', (event) => {
+      const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+      if (step === 0) return;
+      event.preventDefault();
+      const next = QUALITY_LEARNING_TABS[(index + step + QUALITY_LEARNING_TABS.length) % QUALITY_LEARNING_TABS.length]!;
+      void renderQualityLearning(next.tab, null, true);
+    });
+    tabs.append(node);
+  });
   const section = element('section', 'learning-section');
-  section.append(element('h3', undefined, LEARNING_HEADING));
+  section.id = 'quality-panel';
+  section.setAttribute('role', 'tabpanel');
+  section.setAttribute('aria-labelledby', `quality-tab-${tab}`);
+  section.append(element('h3', undefined, tab === 'feedback' ? FEEDBACK_HISTORY_HEADING : LEARNING_HEADING));
   const host = element('div');
   section.append(host);
   const back = element('div', 'button-row');
-  if (bookId !== null) {
-    const all = button('显示全部图书', 'quiet', () => void renderQualityLearning(null));
+  if (tab === 'learning' && bookId !== null) {
+    const all = button('显示全部图书', 'quiet', () => void renderQualityLearning('learning', null));
     all.dataset['learningAction'] = 'all-books';
     back.append(all);
   }
   back.append(button('返回', 'quiet', () => void initializeStartup()));
   content.append(
-    element('p', 'section-label', `${QUALITY_LEARNING_TITLE} · ${LEARNING_HEADING}`),
+    element('p', 'section-label', `${QUALITY_LEARNING_TITLE} · ${tab === 'feedback' ? FEEDBACK_HISTORY_HEADING : LEARNING_HEADING}`),
     element('h2', undefined, QUALITY_LEARNING_TITLE),
     element('p', 'field-note', QUALITY_LEARNING_LEDE),
+    tabs,
     section,
     back,
   );
   replaceScreen('quality-learning', content);
-  setStatus(LEARNING_STATUS.loading, 'busy');
-  const surface = mountLearningMaterials({ root: host, bookId, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, technicalDetails });
+  if (tabFocused) content.querySelector<HTMLElement>(`#quality-tab-${tab}`)?.focus();
+  const status = tab === 'feedback' ? FEEDBACK_HISTORY_STATUS : LEARNING_STATUS;
+  setStatus(status.loading, 'busy');
+  const surface = tab === 'feedback'
+    ? mountFeedbackHistory({ root: host, api: window.ai7, open: openFeedbackTarget, setStatus, errorMessage: rendererErrorMessage })
+    : mountLearningMaterials({ root: host, bookId, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, technicalDetails });
   try {
     await surface.load();
-    if (content.isConnected) setStatus(LEARNING_STATUS.opened);
+    if (content.isConnected) setStatus(status.opened);
   } catch (error) {
-    setStatus(rendererErrorMessage(error, LEARNING_STATUS.unavailable), 'error');
+    setStatus(rendererErrorMessage(error, status.unavailable), 'error');
   }
 }
 
@@ -4909,7 +4978,7 @@ function renderLanding(
   const knowledgeBase = button('知识库', 'secondary', () => renderKnowledgeBase('guidelines'));
   knowledgeBase.dataset['settingsRoute'] = 'knowledge-base';
   // 质量与学习 (Issue #61, S26b): 学习准入, the house's record of what may teach and where.
-  const qualityLearning = button(QUALITY_LEARNING_TITLE, 'secondary', () => void renderQualityLearning(null));
+  const qualityLearning = button(QUALITY_LEARNING_TITLE, 'secondary', () => void renderQualityLearning('feedback', null));
   qualityLearning.dataset['settingsRoute'] = 'quality-learning';
   const landingActions = element('div', 'button-row');
   landingActions.append(importButton, createBook, dataAndStorage, modelService, knowledgeBase, qualityLearning);

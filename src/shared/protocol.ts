@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 75 as const;
+export const SERVICE_PROTOCOL_VERSION = 76 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -121,6 +121,7 @@ export const IPC_CHANNELS = {
   recordProposalDecisionFeedback: 'ai7:j11:record-proposal-decision-feedback',
   inspectLearningMaterials: 'ai7:j11:inspect-learning-materials',
   decideLearningMaterial: 'ai7:j11:decide-learning-material',
+  inspectFeedbackHistory: 'ai7:j11:inspect-feedback-history',
   applyChangeSuggestion: 'ai7:j05:apply-change-suggestion',
   applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
   reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
@@ -5101,6 +5102,44 @@ export interface DecideLearningMaterialInput {
   readonly note: string | null;
 }
 
+// ---- 质量与学习 › 反馈记录 (Issue #61, plan slice S26c; V2-UX-FDBK-009, FDBK-010, FDBK-013) ---------------------------------
+
+export const MAX_FEEDBACK_HISTORY_ENTRIES = 300;
+
+/** Where one entry opens: the exact record it came from (FDBK-009), in its own Book. */
+export type FeedbackHistoryTarget =
+  | { readonly kind: 'mark'; readonly bookId: string; readonly manuscriptId: string; readonly branchId: string; readonly blockId: string; readonly markId: string }
+  | { readonly kind: 'analysis'; readonly bookId: string; readonly revisionId: string }
+  | { readonly kind: 'review'; readonly bookId: string; readonly reviewRunId: string; readonly findingId: string };
+
+/** One piece of the editor's feedback as the history lists it. */
+export interface FeedbackHistoryEntryProjection {
+  readonly entryId: string;
+  readonly origin: LearningMaterialKind;
+  readonly bookId: string;
+  /** The Editorial Dimension it is about, in the editor's words; `null` for a 修改建议, which names none. */
+  readonly dimension: string | null;
+  /** What the editor decided or judged: 拒绝, 修改后接受, 接受, 准确, 不准确, 不完整 or 忽略. */
+  readonly signal: string;
+  /** The optional reason as it stands — the alternative chosen, the editor's own words, a correction; `null` when none. */
+  readonly reason: string | null;
+  /** Whether a reason was given, `不说明` was said, or neither: none of them a judgment in itself (FDBK-007). */
+  readonly reasonState: 'given' | 'dismissed' | 'none';
+  readonly recordedAt: string;
+  readonly target: FeedbackHistoryTarget;
+}
+
+/**
+ * 质量与学习 › 反馈记录: every Book's feedback, newest first, with each Book's 作者 and 责编 to filter by (FDBK-013). A read that
+ * asks nothing: no entry is pending, counted or reminded (FDBK-010).
+ */
+export interface FeedbackHistoryProjection {
+  readonly books: ReadonlyArray<{ readonly bookId: string; readonly title: string; readonly authors: ReadonlyArray<string>; readonly editors: ReadonlyArray<string> }>;
+  readonly entries: ReadonlyArray<FeedbackHistoryEntryProjection>;
+  /** Whether older entries were left out of this read. */
+  readonly truncated: boolean;
+}
+
 /** The drawer's `设为快速开始默认…` for one plan, and the rule that started its Task, when one did. */
 export interface TaskPlanDefaultRuleProjection {
   canSet: boolean;
@@ -7430,6 +7469,7 @@ export interface ServiceOperationMap {
   recordProposalDecisionFeedback: { input: RecordProposalDecisionFeedbackInput; output: EditorialMarkCommandProjection };
   inspectLearningMaterials: { input: { bookId: string | null }; output: LearningMaterialsProjection };
   decideLearningMaterial: { input: DecideLearningMaterialInput; output: LearningMaterialsProjection };
+  inspectFeedbackHistory: { input: Record<string, never>; output: FeedbackHistoryProjection };
   /**
    * AI7 Apply for Change Suggestions (Issue #408). The batch form is 确认应用 on 审阅's confirmation
    * strip (Issue #417): one Effect over exactly the suggestions the strip named, all or none.
@@ -7756,6 +7796,7 @@ export interface RendererApi {
   recordProposalDecisionFeedback(input: RecordProposalDecisionFeedbackInput): Promise<EditorialMarkCommandProjection>;
   inspectLearningMaterials(input: { bookId: string | null }): Promise<LearningMaterialsProjection>;
   decideLearningMaterial(input: DecideLearningMaterialInput): Promise<LearningMaterialsProjection>;
+  inspectFeedbackHistory(): Promise<FeedbackHistoryProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */
   applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): Promise<ManuscriptApplyCommandProjection>;

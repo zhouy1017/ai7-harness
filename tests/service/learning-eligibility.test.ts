@@ -159,6 +159,18 @@ describe('学习准入 over the real store', () => {
       const excluded = choose(deferred, { choice: 'excluded', note: '不代表我的一贯做法' }).books[0]!.materials.find((entry) => entry.materialKey === edited.materialKey)!;
       expect([excluded.state, excluded.decision?.choice]).toEqual(['decided', 'excluded']);
       expect(attention(store)).toEqual([]);
+      // 反馈记录 (Issue #61, S26c) lists every current decision, newest first — the silent and the dismissed ones too, each read
+      // as no more than that — with the Book's people and where each opens; the withdrawn and the material alike are there once.
+      const history = store.inspectFeedbackHistory();
+      expect(history.books).toEqual([{ bookId: book.bookId, title: '学习组稿', authors: ['周一'], editors: ['郑三'] }]);
+      expect(history.truncated).toBe(false);
+      expect(history.entries.map((entry) => [entry.origin, entry.dimension, entry.signal, entry.reason, entry.reasonState])).toEqual([
+        ['proposal-decision', null, '拒绝', null, 'dismissed'],
+        ['proposal-decision', null, '拒绝', null, 'none'],
+        ['proposal-decision', null, '修改后接受', null, 'none'],
+        ['proposal-decision', null, '拒绝', '方向不合适', 'given'],
+      ]);
+      expect(history.entries[3]!.target).toEqual({ kind: 'mark', bookId: book.bookId, manuscriptId: book.manuscriptId, branchId: book.branchId, blockId: expect.stringMatching(/^blk_/u), markId: rejectedMark });
       // Deciding changes nothing it came from: the decision and its reason read as they were.
       expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, rejectedMark).suggestion!.decision).toMatchObject({ disposition: 'rejected', reason: '方向不合适', reasonState: 'given' });
       store.markCleanShutdown();

@@ -1128,6 +1128,7 @@ describe('decodeRequest rejects malformed frames', () => {
     for (const [op, input] of [
       ['inspectLearningMaterials', { bookId: null }],
       ['inspectLearningMaterials', { bookId }],
+      ['inspectFeedbackHistory', {}],
       ['decideLearningMaterial', decision],
       ['decideLearningMaterial', { ...decision, materialKey: `analysis-feedback:${randomUUID()}/entities/12`, expectedDecisions: 3, choice: 'deferred', note: '以后再说' }],
       ['decideLearningMaterial', { ...decision, materialKey: `review-disposition:${randomUUID()}/finding-7`, choice: 'excluded' }],
@@ -1138,6 +1139,7 @@ describe('decodeRequest rejects malformed frames', () => {
     for (const [op, input] of [
       ['inspectLearningMaterials', {}],
       ['inspectLearningMaterials', { bookId: 'book' }],
+      ['inspectFeedbackHistory', { bookId }],
       ['decideLearningMaterial', { ...decision, choice: 'series' }],
       ['decideLearningMaterial', { ...decision, choice: null }],
       ['decideLearningMaterial', { ...decision, materialKey: 'library:x' }],

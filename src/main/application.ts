@@ -2767,6 +2767,13 @@ function registerRendererHandlers(
       return service.call('inspectLearningMaterials', { bookId: input.bookId });
     }),
   );
+  ipcMain.handle(IPC_CHANNELS.inspectFeedbackHistory, (event) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('inspectFeedbackHistory', {});
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.decideLearningMaterial, (event, input: ServiceOperationMap['decideLearningMaterial']['input']) =>
     envelope(async () => {
       requireSender(event);

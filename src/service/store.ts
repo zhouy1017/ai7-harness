@@ -104,6 +104,8 @@ import type {
   RecordChangeSuggestionDecisionInput,
   RecordProposalDecisionFeedbackInput,
   DecideLearningMaterialInput,
+  FeedbackHistoryEntryProjection,
+  FeedbackHistoryProjection,
   LearningMaterialsBookProjection,
   LearningMaterialsProjection,
   RecordProposalDecisionReasonInput,
@@ -303,8 +305,12 @@ import { EvaluationError, EvaluationRecords, initializeEvaluationRecordSchema } 
 import { AnalysisFeedbackError, AnalysisFeedbackLedger, analysisFeedbackItems, initializeAnalysisFeedbackSchema } from './analysis-feedback.js';
 import { DecisionFeedbackError, DecisionFeedbackLedger, initializeDecisionFeedbackSchema } from './decision-feedback.js';
 import {
+  DIMENSION_LABELS,
+  DISPOSITION_LABELS,
+  JUDGMENT_LABELS,
   LEARNING_ELIGIBILITY_BASIS,
   LearningEligibilityError,
+  analysisReasonLabel,
   LearningEligibilityLedger,
   analysisFeedbackCandidate,
   initializeLearningEligibilitySchema,
@@ -314,6 +320,7 @@ import {
   type LearningMaterialCandidate,
 } from './learning-eligibility.js';
 import { reviewCategoryEntry } from './review/category-configuration.js';
+import { MAX_FEEDBACK_HISTORY_ENTRIES } from '../shared/protocol.js';
 import { readExemplars } from './exemplars.js';
 import { readKnowledgeProcedures } from './knowledge-procedures.js';
 import {
@@ -5739,6 +5746,97 @@ export class EditorialStore {
         });
       });
       return { basis: LEARNING_ELIGIBILITY_BASIS, books: [this.#learningBook(input.bookId, true)] };
+    });
+  }
+
+  /**
+   * 质量与学习 › 反馈记录 (Issue #61, plan slice S26c; FDBK-009, FDBK-010, FDBK-013): every piece of the editor's feedback, newest
+   * first — each 修改建议's current decision with its reason as it stands, each analysis item's latest judgment, each 审阅
+   * finding's latest 忽略 — with where it opens and each Book's people. Passive history: a read, asking nothing.
+   */
+  inspectFeedbackHistory(): FeedbackHistoryProjection {
+    return this.#learningCall(() => {
+      const entries: FeedbackHistoryEntryProjection[] = [];
+      const reasons = new DecisionFeedbackLedger(this.#authority);
+      const decisions = this.#authority.prepare(
+        `SELECT m.book_id, m.mark_id, m.manuscript_id, m.branch_id, m.block_id, d.decision_id, d.disposition, d.recorded_at, r.reason, r.reason_source
+         FROM editorial_marks m
+         JOIN proposal_change_items i ON i.mark_id = m.mark_id
+         JOIN proposal_item_decisions d ON d.item_id = i.item_id
+         LEFT JOIN proposal_decision_reasons r ON r.decision_id = d.decision_id
+         WHERE m.status IN ('open', 'resolved', 'applied') AND d.disposition <> 'withdrawn'
+           AND d.ordinal = (SELECT max(latest.ordinal) FROM proposal_item_decisions latest WHERE latest.item_id = i.item_id)`,
+      ).all() as SqlRow[];
+      for (const row of decisions) {
+        const decisionId = asString(row.decision_id);
+        const first = row.reason === null || row.reason === undefined
+          ? null
+          : { reason: asString(row.reason), source: asString(row.reason_source) as 'reason-field' | 'suggested' | 'free-text' };
+        const standing = reasons.standing(decisionId, first);
+        const bookId = asString(row.book_id);
+        entries.push({
+          entryId: `proposal-decision:${decisionId}`,
+          origin: 'proposal-decision',
+          bookId,
+          dimension: null,
+          signal: DISPOSITION_LABELS[asString(row.disposition)] ?? asString(row.disposition),
+          reason: standing.reason,
+          reasonState: standing.reasonState,
+          recordedAt: asString(row.recorded_at),
+          target: { kind: 'mark', bookId, manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id), blockId: asString(row.block_id), markId: asString(row.mark_id) },
+        });
+      }
+      for (const book of this.#authority.prepare('SELECT book_id FROM books').all() as SqlRow[]) {
+        const bookId = asString(book.book_id);
+        for (const signal of this.#analysisFeedback.latest(bookId)) {
+          const reason = [analysisReasonLabel(signal), signal.correction === null ? null : `修正：${signal.correction}`].filter((part) => part !== null).join(' · ');
+          entries.push({
+            entryId: `analysis-feedback:${signal.revisionId}/${signal.itemKey}`,
+            origin: 'analysis-feedback',
+            bookId,
+            dimension: DIMENSION_LABELS[signal.dimension],
+            signal: JUDGMENT_LABELS[signal.judgment],
+            reason: reason.length === 0 ? null : reason,
+            reasonState: reason.length === 0 ? 'none' : 'given',
+            recordedAt: signal.recordedAt,
+            target: { kind: 'analysis', bookId, revisionId: signal.revisionId },
+          });
+        }
+      }
+      const ignored = this.#authority.prepare(
+        `SELECT book_id, review_run_id, finding_id, category_id, reason, recorded_at FROM quality_signals q
+         WHERE kind = 'review-finding-ignored'
+           AND recorded_at = (SELECT max(latest.recorded_at) FROM quality_signals latest
+                              WHERE latest.review_run_id = q.review_run_id AND latest.finding_id = q.finding_id)`,
+      ).all() as SqlRow[];
+      for (const row of ignored) {
+        const bookId = asString(row.book_id);
+        const categoryId = asString(row.category_id);
+        entries.push({
+          entryId: `review-disposition:${asString(row.review_run_id)}/${asString(row.finding_id)}`,
+          origin: 'review-disposition',
+          bookId,
+          dimension: reviewCategoryEntry(categoryId)?.label ?? categoryId,
+          signal: '忽略',
+          reason: asString(row.reason),
+          reasonState: 'given',
+          recordedAt: asString(row.recorded_at),
+          target: { kind: 'review', bookId, reviewRunId: asString(row.review_run_id), findingId: asString(row.finding_id) },
+        });
+      }
+      entries.sort((a, b) => (a.recordedAt > b.recordedAt ? -1 : a.recordedAt < b.recordedAt ? 1 : a.entryId < b.entryId ? -1 : 1));
+      const kept = entries.slice(0, MAX_FEEDBACK_HISTORY_ENTRIES);
+      const bookIds = [...new Set(kept.map((entry) => entry.bookId))];
+      return {
+        books: bookIds
+          .map((bookId) => {
+            const people = this.#bookPeople.current(bookId);
+            return { bookId, title: this.#evaluationBookTitle(bookId), authors: people.authors, editors: people.editors };
+          })
+          .sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : a.bookId < b.bookId ? -1 : 1)),
+        entries: kept,
+        truncated: entries.length > kept.length,
+      };
     });
   }
 
