@@ -107,6 +107,7 @@ import {
   STORE_VERSION_SCHEMA_VERSION,
   DATABASE_EXPORT_SCHEMA_VERSION,
   SCHEDULED_BACKUP_SCHEMA_VERSION,
+  DATABASE_REPLACEMENT_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -184,6 +185,7 @@ import { SERIES_KNOWLEDGE_FOREIGN_KEYS, SERIES_KNOWLEDGE_SCHEMA_SQL, SERIES_KNOW
 import { DATA_VERSION_FOREIGN_KEYS, DATA_VERSION_SCHEMA_SQL, DATA_VERSION_TRIGGER_SQL } from './data-version.js';
 import { DATABASE_EXPORT_FOREIGN_KEYS, DATABASE_EXPORT_SCHEMA_SQL, DATABASE_EXPORT_TRIGGER_SQL } from './database-exports.js';
 import { SCHEDULED_BACKUP_FOREIGN_KEYS, SCHEDULED_BACKUP_SCHEMA_SQL, SCHEDULED_BACKUP_TRIGGER_SQL } from './scheduled-backups.js';
+import { DATABASE_REPLACEMENT_FOREIGN_KEYS, DATABASE_REPLACEMENT_SCHEMA_SQL, DATABASE_REPLACEMENT_TRIGGER_SQL } from './database-replacement.js';
 import {
   MANUSCRIPT_EFFECT_FOREIGN_KEYS,
   MANUSCRIPT_EFFECT_SCHEMA_SQL,
@@ -1902,6 +1904,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...DATA_VERSION_FOREIGN_KEYS,
   ...DATABASE_EXPORT_FOREIGN_KEYS,
   ...SCHEDULED_BACKUP_FOREIGN_KEYS,
+  ...DATABASE_REPLACEMENT_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2529,6 +2532,7 @@ function requireManuscriptReimportTargetSchema(
   includeDataVersionTables = false,
   includeDatabaseExportTables = false,
   includeScheduledBackupTables = false,
+  includeDatabaseReplacementTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2631,6 +2635,8 @@ function requireManuscriptReimportTargetSchema(
       ...(includeDatabaseExportTables ? DATABASE_EXPORT_SCHEMA_SQL : {}),
       // Revision 56 (Issue #434, S86b) adds the 定期自动备份 switch's changes, the backups made and those removed.
       ...(includeScheduledBackupTables ? SCHEDULED_BACKUP_SCHEMA_SQL : {}),
+      // Revision 57 (Issue #434, S86c) adds the replacements of the local data by a database package.
+      ...(includeDatabaseReplacementTables ? DATABASE_REPLACEMENT_SCHEMA_SQL : {}),
     },
     // The partial index that keeps one primary Manuscript per Book stands with the rebuilt relation, whatever the version.
     {
@@ -2675,6 +2681,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeDataVersionTables ? DATA_VERSION_TRIGGER_SQL : {}),
       ...(includeDatabaseExportTables ? DATABASE_EXPORT_TRIGGER_SQL : {}),
       ...(includeScheduledBackupTables ? SCHEDULED_BACKUP_TRIGGER_SQL : {}),
+      ...(includeDatabaseReplacementTables ? DATABASE_REPLACEMENT_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5372,6 +5379,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeDataVersionTables = false,
   includeDatabaseExportTables = false,
   includeScheduledBackupTables = false,
+  includeDatabaseReplacementTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5414,6 +5422,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeDataVersionTables,
     includeDatabaseExportTables,
     includeScheduledBackupTables,
+    includeDatabaseReplacementTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5502,7 +5511,8 @@ export function initializeBoundedSchema(
       version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
       version === STORE_VERSION_SCHEMA_VERSION ||
       version === DATABASE_EXPORT_SCHEMA_VERSION ||
-      version === SCHEDULED_BACKUP_SCHEMA_VERSION,
+      version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
+      version === DATABASE_REPLACEMENT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5541,9 +5551,10 @@ export function initializeBoundedSchema(
       version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
       version === STORE_VERSION_SCHEMA_VERSION ||
       version === DATABASE_EXPORT_SCHEMA_VERSION ||
-      version === SCHEDULED_BACKUP_SCHEMA_VERSION) {
+      version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
+      version === DATABASE_REPLACEMENT_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== SCHEDULED_BACKUP_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== DATABASE_REPLACEMENT_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5586,6 +5597,7 @@ export function initializeBoundedSchema(
           version >= STORE_VERSION_SCHEMA_VERSION,
           version >= DATABASE_EXPORT_SCHEMA_VERSION,
           version >= SCHEDULED_BACKUP_SCHEMA_VERSION,
+          version >= DATABASE_REPLACEMENT_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);

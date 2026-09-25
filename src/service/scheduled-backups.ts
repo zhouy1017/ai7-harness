@@ -125,7 +125,8 @@ export function backupLocationFor(dataRoot: string): string {
   return `${dataRoot}-backups`;
 }
 
-async function ensureBackupLocation(dataRoot: string): Promise<string> {
+/** The backup location, made when it is first needed, and refused unless it is a directory of its own. */
+export async function ensureBackupLocation(dataRoot: string): Promise<string> {
   const location = backupLocationFor(dataRoot);
   await mkdir(location, { recursive: true });
   const info = await lstat(location);

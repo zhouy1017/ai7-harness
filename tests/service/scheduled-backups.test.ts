@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
 import { SCHEDULED_BACKUP_TRIGGER_SQL, backupFileName } from '../../src/service/scheduled-backups.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { DATABASE_EXPORT_SCHEMA_VERSION, SCHEDULED_BACKUP_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { DATABASE_EXPORT_SCHEMA_VERSION, DATABASE_REPLACEMENT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2) for 定期自动备份 (Issue #434, plan slice S86b; V2-UX-DSTO-018; ADR 0079 §1.4, §1.7) over the real
@@ -54,7 +54,7 @@ describe('定期自动备份 over the real store', () => {
       expect(on.backups[0]).toMatchObject({ fileName: backupFileName(T), createdAt: T.toISOString(), expiresAt: at(14 * DAY).toISOString(), present: true });
       const packaged = unzipSync(await readFile(join(location, backupFileName(T))));
       expect(parseCanonicalJson(strFromU8(packaged['manifest.json']!))).toMatchObject({
-        schema: 'ai7.database-package/1', origin: 'scheduled-backup', dataVersion: 1, schemaRevision: SCHEDULED_BACKUP_SCHEMA_VERSION, credentials: 'excluded',
+        schema: 'ai7.database-package/1', origin: 'scheduled-backup', dataVersion: 1, schemaRevision: DATABASE_REPLACEMENT_SCHEMA_VERSION, credentials: 'excluded',
       });
       expect((await readdir(location)).filter((name) => name.endsWith('.partial'))).toEqual([]);
 
@@ -223,7 +223,7 @@ describe('定期自动备份 over the real store', () => {
       first.close();
       const plant = new DatabaseSync(join(other.dataRoot, 'store', 'ai7.sqlite'));
       try {
-        plant.exec(`DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; PRAGMA user_version = ${DATABASE_EXPORT_SCHEMA_VERSION};`);
+        plant.exec(`DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; PRAGMA user_version = ${DATABASE_EXPORT_SCHEMA_VERSION};`);
       } finally {
         plant.close();
       }
@@ -236,7 +236,7 @@ describe('定期自动备份 over the real store', () => {
       }
       const check = new DatabaseSync(join(other.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
       try {
-        expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SCHEDULED_BACKUP_SCHEMA_VERSION);
+        expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_REPLACEMENT_SCHEMA_VERSION);
       } finally {
         check.close();
       }

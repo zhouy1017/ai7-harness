@@ -365,6 +365,17 @@ const api: RendererApi = Object.freeze({
   inspectScheduledBackups: () => invoke<ServiceOperationMap['inspectScheduledBackups']['output']>(IPC_CHANNELS.inspectScheduledBackups, {}),
   setScheduledBackup: (input: Parameters<RendererApi['setScheduledBackup']>[0]) =>
     invoke<ServiceOperationMap['setScheduledBackup']['output']>(IPC_CHANNELS.setScheduledBackup, input),
+  chooseDatabaseImportFile: () =>
+    invoke<Awaited<ReturnType<RendererApi['chooseDatabaseImportFile']>>>(IPC_CHANNELS.chooseDatabaseImportFile, {}),
+  prepareDatabaseReplacement: (input: Parameters<RendererApi['prepareDatabaseReplacement']>[0]) =>
+    invoke<ServiceOperationMap['prepareDatabaseReplacement']['output']>(IPC_CHANNELS.prepareDatabaseReplacement, input),
+  cancelDatabaseReplacement: (input: Parameters<RendererApi['cancelDatabaseReplacement']>[0]) =>
+    invoke<ServiceOperationMap['cancelDatabaseReplacement']['output']>(IPC_CHANNELS.cancelDatabaseReplacement, input),
+  inspectDatabaseReplacements: () =>
+    invoke<ServiceOperationMap['inspectDatabaseReplacements']['output']>(IPC_CHANNELS.inspectDatabaseReplacements, {}),
+  rollBackDatabaseReplacement: (input: Parameters<RendererApi['rollBackDatabaseReplacement']>[0]) =>
+    invoke<ServiceOperationMap['rollBackDatabaseReplacement']['output']>(IPC_CHANNELS.rollBackDatabaseReplacement, input),
+  quitApplication: () => invoke<Awaited<ReturnType<RendererApi['quitApplication']>>>(IPC_CHANNELS.quitApplication, {}),
   proposeSeriesKnowledge: (input: ServiceOperationMap['proposeSeriesKnowledge']['input']) =>
     invoke<ServiceOperationMap['proposeSeriesKnowledge']['output']>(IPC_CHANNELS.proposeSeriesKnowledge, input),
   inspectSeriesKnowledgeReview: (input: ServiceOperationMap['inspectSeriesKnowledgeReview']['input']) =>

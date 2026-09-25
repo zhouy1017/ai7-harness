@@ -576,6 +576,16 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectScheduledBackups() };
     case 'setScheduledBackup':
       return { id: request.id, ok: true, op: request.op, result: await store.setScheduledBackup(request.input) };
+    case 'inspectDatabaseImport':
+      return { id: request.id, ok: true, op: request.op, result: await store.inspectDatabaseImport(request.input.source) };
+    case 'prepareDatabaseReplacement':
+      return { id: request.id, ok: true, op: request.op, result: await store.prepareDatabaseReplacement(request.input.previewId) };
+    case 'cancelDatabaseReplacement':
+      return { id: request.id, ok: true, op: request.op, result: await store.cancelDatabaseReplacement(request.input.replacementId) };
+    case 'inspectDatabaseReplacements':
+      return { id: request.id, ok: true, op: request.op, result: await store.inspectDatabaseReplacements() };
+    case 'rollBackDatabaseReplacement':
+      return { id: request.id, ok: true, op: request.op, result: await store.rollBackDatabaseReplacement(request.input.replacementId) };
     case 'proposeSeriesKnowledge':
       return { id: request.id, ok: true, op: request.op, result: store.proposeSeriesKnowledge(request.input) };
     case 'inspectSeriesKnowledgeReview':
