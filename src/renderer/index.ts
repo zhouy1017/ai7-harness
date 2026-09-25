@@ -75,7 +75,7 @@ import { mountBookPeople } from './book-people.js';
 import { mountReviewGuidelines } from './review-guidelines.js';
 import { mountLibraryMaterials } from './library-materials.js';
 import { mountEvaluation } from './evaluation.js';
-import { mountAnalysisFeedback } from './analysis-feedback.js';
+import { analysisFeedbackEngaged, mountAnalysisFeedback } from './analysis-feedback.js';
 import {
   EVALUATION_LEDE,
   EVALUATION_STATUS,
@@ -3580,6 +3580,8 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
     },
     unchanged: (next) => JSON.stringify(next) === JSON.stringify(projection),
     again: () => analysisFollowDelayMs(projection.state),
+    // An open 分析反馈 card the editor is in stays as it is: the Run's progress is drawn once they leave it (Issue #94 review).
+    held: () => analysisFeedbackEngaged(host),
     draw: (next) => renderBaselineAnalysis(host, next, bookTitle),
     failed: (error) => setStatus(rendererErrorMessage(error, '无法刷新基线稿件分析状态。'), 'error'),
   });

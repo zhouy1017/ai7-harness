@@ -152,10 +152,21 @@ describe('②A 分析反馈 over the real store', () => {
       expect(withEvent.metric).toMatchObject({ judged: 2, accurate: 1, inaccurate: 0, incomplete: 1 });
       // Reading it twice answers the same, and writes nothing.
       expect(store.inspectAnalysisFeedback(bookId, revisionId)).toEqual(withEvent);
-      // Another Book cannot read or judge this Book's revision.
-      const creation = store.prepareBookCreation('另一本书', null);
-      const other = store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
-      expect(await refusal(() => store.inspectAnalysisFeedback(other, revisionId))).toMatch(/^ANALYSIS_|^BOOK_|^TASK_/u);
+      // Another Book cannot read or judge this Book's revision — one analysed as well, so the refusal is the ownership
+      // check's own, never an absent analysis.
+      const other = (await importSample1Book(store, roots.codeRoot, '另一本分析之书')).bookId;
+      await pinEditorialWorkspaceProfileRevision2(store, other);
+      let otherProgress = store.createBaselineAnalysisPreparationWork(other, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy);
+      while (!otherProgress.done) otherProgress = store.advanceBaselineAnalysisPreparationWork(otherProgress.workId!);
+      const otherPrepared = otherProgress.projection!;
+      owner.admitAndDispatch(store.authorizeBaselineAnalysis(other, otherPrepared.taskIntent!.taskIntentId, otherPrepared.planEnvelope!.digest).dispatchRunRecordId!);
+      await owner.whenIdle();
+      expect(store.inspectBaselineAnalysis(other).resultSetRevision).not.toBeNull();
+      expect(await refusal(() => store.inspectAnalysisFeedback(other, revisionId))).toMatch(/^ANALYSIS_REVISION_NOT_FOUND:/u);
+      expect(await refusal(() => store.recordAnalysisFeedback({
+        bookId: other, revisionId, itemKey: 'entities/0', itemDigest: item(withEvent, 'entities/0').digest,
+        expectedLatestSignalId: item(withEvent, 'entities/0').latest?.signalId ?? null, judgment: 'inaccurate', reason: null, correction: null,
+      }))).toMatch(/^ANALYSIS_REVISION_NOT_FOUND:/u);
     } finally {
       await closeSession(session);
     }

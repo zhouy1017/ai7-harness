@@ -1130,6 +1130,9 @@ async function main() {
       offered.metric.total === '还没有给出判断。' && offered.metric.dimensions.length === 0 && offered.metric.note === METRIC_NOTE && offered.card === null,
     'feedback-offered-words', offered);
 
+    // 待我处理 as it reads before any judgment: judging asks nothing of it, so it must read the same after.
+    const attentionBefore = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => projection.groups.map((group) => [group.key, group.items.map((entry) => entry.itemId)]))`);
+
     at('feedback-judge-item');
     // 人物与名称's first entry: 反馈… opens its card with nothing chosen and 记录反馈 closed; 不准确 offers three reasons fitted
     // to a name, 其他 beside them, none chosen, and the correction; one reason, the correction and 记录反馈 record it there.
@@ -1253,8 +1256,8 @@ async function main() {
     const silence = await readFeedback(renderer, (page) => page.card === null, 'feedback-silence');
     requireJourney(silence.items.filter(([, judgment]) => judgment !== 'none').map(([key, judgment]) => `${key}:${judgment}`).join() === 'synopsis:incomplete,entities/0:accurate' &&
       silence.metric.judged === '2', 'feedback-silence-unjudged', silence.items.map(([key, judgment]) => [key, judgment]));
-    const attention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
-    requireJourney(Array.isArray(attention?.groups) && attention.groups.every((group) => group.items.every((entry) => !/feedback/i.test(String(entry.state)))), 'feedback-no-attention');
+    const attentionAfter = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => projection.groups.map((group) => [group.key, group.items.map((entry) => entry.itemId)]))`);
+    requireJourney(Array.isArray(attentionBefore) && JSON.stringify(attentionAfter) === JSON.stringify(attentionBefore), 'feedback-no-attention', { before: attentionBefore, after: attentionAfter });
 
     at('feedback-restart');
     // A restart moves nothing: each judgment and the tally read as before, over the same lineage.
