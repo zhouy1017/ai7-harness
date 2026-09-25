@@ -352,21 +352,28 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
       return facts.categories.length === 0 ? '审阅发现已标到稿件上。' : `已审：${quoted(facts.categories.map((category) => category.label))}；发现已标到稿件上。`;
     // 维护事项待处理 (Issue #426, S68b): what the case waits on, in its own terms; nothing outside AI7 is claimed.
     case 'maintenance-waiting':
-      return item.object.kind === 'maintenance' && item.object.classification === 'reissue'
-        ? '再版等待另设的发稿版本：另行设为发稿版本后，在这个维护事项中关联它。'
-        : '替代等待另设的发稿版本：另行设为发稿版本后，在这个维护事项中关联它。';
+      return maintenanceWaitingReason(item.object.kind === 'maintenance' ? item.object.classification : 'supersession');
     case 'maintenance-pending':
       switch (item.nextStep) {
         case 'maintenance-link-proposal':
           return '更正还没有关联修改建议：先在稿件中提出修改建议，再在这个维护事项中关联它。';
         case 'maintenance-link-publication':
+          // Only a 更正 links a later designation after its 修改建议; a 替代 or 再版 still waits for one.
+          if (item.object.kind === 'maintenance' && item.object.classification !== 'correction') return maintenanceWaitingReason(item.object.classification);
           return '修改建议已关联：更正后的文字另行保存里程碑版本、设为发稿版本后，在这个维护事项中关联它。';
         case 'maintenance-write-errata':
           return '勘误还没有写下内容：在这个维护事项中编写勘误。';
         default:
-          return '这个维护事项的步骤已经记录：在这里记录它的结论。';
+          return '这个维护事项的步骤已经记录：在这个维护事项中记录它的结论。';
       }
   }
+}
+
+/** What a 替代 or 再版 waits for (MAINT-007), in its own words. */
+function maintenanceWaitingReason(classification: string): string {
+  return classification === 'reissue'
+    ? '再版等待另设的发稿版本：另行设为发稿版本后，在这个维护事项中关联它。'
+    : '替代等待另设的发稿版本：另行设为发稿版本后，在这个维护事项中关联它。';
 }
 
 /** A Run in flight: its declared step, and — while it reads range by range — how far it has come (V2-UX-ATTN-004). */
