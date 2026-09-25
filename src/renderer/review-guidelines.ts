@@ -7,6 +7,7 @@ import {
   guidelineAppliedBy,
   guidelineCitations,
   guidelineClausesSummary,
+  guidelineFixedStatement,
   guidelineImported,
   guidelineOlderBooks,
   guidelinePreviewChanges,
@@ -67,6 +68,7 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     const node = el('article', 'guideline-card');
     node.dataset['guidelineDocument'] = document.documentId;
     node.dataset['guidelineVersion'] = String(document.currentOrdinal);
+    node.dataset['guidelineUse'] = document.use;
     const heading = el('div', 'guideline-heading');
     const title = el('h3', undefined, document.title);
     title.tabIndex = -1;
@@ -75,9 +77,12 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     const older = guidelineOlderBooks(document);
     if (older !== null) {
       const note = el('p', 'attention-note guideline-older', older);
-      note.dataset['guidelineOlder'] = String(document.olderVersionBooks.length);
+      note.dataset['guidelineOlder'] = String(document.olderVersionBookCount);
       node.append(note);
     }
+    // A document AI7 fixes says why it takes no house version, where the others offer 导入新版本.
+    const fixed = guidelineFixedStatement(document);
+    if (fixed !== null) node.append(el('p', 'field-note guideline-fixed', fixed));
     // The clauses of the version that applies now, each with how often findings cite it.
     const clauses = el('details', 'guideline-clauses');
     clauses.append(el('summary', undefined, guidelineClausesSummary(document.clauses.length)));
@@ -98,7 +103,7 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     for (const version of document.versions) {
       const row = el('li', undefined, guidelineVersionLine(version, localInstantLabel));
       row.dataset['guidelineVersionRow'] = String(version.ordinal);
-      row.dataset['guidelineUsedBy'] = String(version.usedBy.length);
+      row.dataset['guidelineUsedBy'] = String(version.usedByCount);
       rows.append(row);
     }
     versions.append(rows, technicalDetails('guideline-facts',
@@ -111,7 +116,7 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
       node.append(note);
     }
     if (preview?.documentId === document.documentId) node.append(previewSection(preview));
-    else {
+    else if (fixed === null) {
       const actions = el('div', 'button-row');
       const start = action(GUIDELINE_IMPORT, 'secondary', 'import', () => void choose(document.documentId));
       start.disabled = busy || preview !== null;

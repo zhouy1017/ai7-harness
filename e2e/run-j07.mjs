@@ -153,6 +153,7 @@ const MAINTENANCE_INTERNAL_ONLY = '仅在 AI7 内记录；不代表已撤稿、�
 // Issue #426 (S68b): a 替代 that waits in 待我处理, and the 归档 that closes that designation's maintenance.
 const MAINTENANCE_SUPERSESSION = '拟另设新的发稿版本取代这一版';
 const MAINTENANCE_ARCHIVE = '这一版的维护到此为止';
+const MAINTENANCE_MORE = '读者来信又指出一处需要勘误';
 const DELIVERY_RECIPIENTS = '["publicity:false:宣传部","editorial:false:编辑部","external-media:false:外部媒体","other:false:其他","custom:false:自行输入"]';
 const EXPORT_MEMBERS_ONLY = `JSON.stringify(Object.keys(window.ai7).filter((key) => /export|publish|send/i.test(key)).sort()) === ${JSON.stringify(JSON.stringify(EXPORT_MEMBERS))}`;
 
@@ -627,7 +628,7 @@ async function importDraftAsSource(renderer, bookId) {
 
 /** 交付物 from the manuscript: the 工作 group holds 审阅 and then 交付物, and leaving settles the manuscript first. */
 async function openDeliverables(renderer, name) {
-  await assertRenderer(renderer, `(() => { const group = document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const entries = Array.from(group?.querySelectorAll('button[data-work-destination]') ?? []).map((item) => item.dataset.workDestination + ':' + item.textContent); const open = group?.querySelector('button[data-work-destination="deliverables"]'); if (entries.join('|') !== 'review:审阅|deliverables:交付物' || !(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, `${name}-entry`);
+  await assertRenderer(renderer, `(() => { const group = document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const entries = Array.from(group?.querySelectorAll('button[data-work-destination]') ?? []).map((item) => item.dataset.workDestination + ':' + item.textContent); const open = group?.querySelector('button[data-work-destination="deliverables"]'); if (entries.join('|') !== 'review:审阅|evaluation:评估|deliverables:交付物' || !(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, `${name}-entry`);
   await waitForDeliverables(renderer, name);
 }
 async function waitForDeliverables(renderer, name) {
@@ -1648,6 +1649,9 @@ async function main() {
         records[0].querySelector('.document-delivery-export')?.textContent === ${JSON.stringify(`${EXPORTED_LABEL} · ${DOCUMENT_EXPORT_FILE}`)} &&
         lens.querySelector('.document-changed-since-delivery') === null;
     })()`, 'changed-lens-lists-the-delivery');
+    // 交付 started now reads 进行中: the document stands on the version it delivered.
+    await clickSelector(renderer, 'aside.document-lens li.document-phase[data-phase-id="delivery"] [data-phase-action="start"]', 'changed-delivery-start');
+    await waitFor(renderer, `(() => { const row = document.querySelector('aside.document-lens li.document-phase[data-phase-id="delivery"]'); return row?.dataset.phaseState === 'in-progress' && row.dataset.phaseWaiting === 'false' && row.querySelector('.phase-pill')?.textContent === '进行中' && window.__j07.status() === '「交付」已开始'; })()`, 'changed-delivery-started');
     await assertRenderer(renderer, `(() => { const block = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]'); if (!(block instanceof HTMLElement)) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText', false, ${JSON.stringify(DELIVERY_EDIT)}); return block.textContent?.endsWith(${JSON.stringify(`${DOCUMENT_EDIT}${DELIVERY_EDIT}`)}); })()`, 'changed-edit');
     await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '保存当前编辑' && !button.disabled)`, 'changed-edit-save-ready');
     await click(renderer, '保存当前编辑', 'changed-edit-save');
@@ -1658,6 +1662,16 @@ async function main() {
       return lens?.querySelector('.document-changed-since-delivery')?.textContent === '交付后有修改' &&
         lens.querySelector('[data-version-current]') === null && lens.querySelector('.document-changed')?.textContent === '有修改尚未保存为版本';
     })()`, 'changed-edit-lens-repaints');
+    // And the workflow reads what 交付 now waits on, with no phase moved (WORK-005): the lens reads the document again once
+    // the edit rests, and 下一项需要处理 leads with it.
+    await waitFor(renderer, `(() => {
+      const section = document.querySelector('aside.document-lens section.document-workflow');
+      const row = section?.querySelector('li.document-phase[data-phase-id="delivery"]');
+      return section?.dataset.workflowTransitions === '5' && row?.dataset.phaseWaiting === 'true' && row.querySelector('.phase-pill')?.textContent === '等待你处理' &&
+        row.querySelector('.document-phase-waiting')?.textContent === '有修改尚未保存为版本' &&
+        section.querySelector('.document-workflow-summary')?.textContent === '2 个阶段进行中 · 1 项等待处理' &&
+        JSON.stringify(Array.from(section.querySelectorAll('ol.document-workflow-next > li'), (item) => item.textContent)) === '["交付 · 有修改尚未保存为版本","起草 · 已重新打开"]';
+    })()`, 'changed-edit-workflow-repaints');
     await clickSelector(renderer, '.editor-shell[data-deliverable="production-document"] nav.book-work-group [data-work-destination="deliverables"]', 'changed-back');
     await waitForDeliverables(renderer, 'changed-back');
     await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentChangedSinceDelivery === 'true'`, 'changed-card');
@@ -1821,6 +1835,37 @@ async function main() {
         panel.querySelector('.package-export-folder-line')?.textContent === ${JSON.stringify(PACKAGE_EXPORT_FOLDER_UNCHOSEN)} &&
         document.activeElement === panel.querySelector('[data-package-action="export-choose"]') && !/%|百分/.test(panel.textContent ?? '');
     })()`, 'package-export-lists-the-files');
+    // 含批注 and 含修改建议（作为修订） are offered on (EXP-023), and each file carries its own Export Fidelity Review
+    // (EXP-007), open by itself when something in it is not written as it was: the classes the service's own review of the
+    // version shows, and its restoration line.
+    const packageVersionId = await renderer.evaluate(`window.__j07.packageVersions()[0].dataset.packageVersionId`);
+    const packageReview = await renderer.evaluate(`window.ai7.reviewBookDeliveryPackageExport({ packageVersionId: ${JSON.stringify(packageVersionId)}, options: { includeAnnotations: true, includeSuggestions: true } })
+      .then((review) => ({ degraded: review.degraded, files: review.files.map((file) => [file.key, file.degraded, file.fidelity.filter((row) => row.count > 0 || row.status !== 'preserved').length, file.restorationLine, true]) }))`);
+    requireJourney(Array.isArray(packageReview?.files) && packageReview.files.length === packageFiles.length, 'package-export-service-review', packageReview?.files?.length);
+    await assertRenderer(renderer, `(() => {
+      const panel = window.__j07.packageExport();
+      const boxes = Array.from(panel.querySelectorAll('fieldset.package-export-options input[type="checkbox"]'));
+      const files = Array.from(panel.querySelectorAll('ol.package-export-files > li')).map((item) => {
+        const details = item.querySelector('details.package-export-fidelity');
+        const degraded = item.dataset.packageExportDegraded === 'true';
+        return [item.dataset.packageExportFile, degraded, item.querySelectorAll('.export-fidelity-row').length, details?.querySelector('.export-restoration-line')?.textContent ?? null,
+          details?.open === degraded && (details.querySelector('summary')?.textContent ?? '').startsWith('导出保真审阅')];
+      });
+      return JSON.stringify(boxes.map((box) => box.dataset.packageField + ':' + box.checked + ':' + box.closest('label')?.querySelector('strong')?.textContent)) ===
+          '["includeAnnotations:true:含批注","includeSuggestions:true:含修改建议（作为修订）"]' &&
+        JSON.stringify(files) === ${JSON.stringify(JSON.stringify(packageReview.files))} &&
+        (panel.querySelector('.export-degraded-note') !== null) === ${packageReview.degraded === true};
+    })()`, 'package-export-fidelity-and-switches');
+    // Turning 含批注 off reviews the files again under it, focus staying on the switch; turning it on again restores the
+    // review the folder is then bound to.
+    const toggleAnnotations = (name) => assertRenderer(renderer, `(() => { const box = window.__j07.packageExport()?.querySelector('input[data-package-field="includeAnnotations"]');
+      if (!(box instanceof HTMLInputElement) || box.disabled) return false; box.focus(); box.click(); return true; })()`, name);
+    const switchedTo = (checked) => `(() => { const panel = window.__j07.packageExport(); const box = panel?.querySelector('input[data-package-field="includeAnnotations"]');
+      return panel?.dataset.packageExportPhase === 'ready' && box?.checked === ${checked} && document.activeElement === box && window.__j07.status() === '要导出的文件已列出'; })()`;
+    await toggleAnnotations('package-export-annotations-off');
+    await waitFor(renderer, switchedTo(false), 'package-export-reviewed-without-annotations', 60_000);
+    await toggleAnnotations('package-export-annotations-on');
+    await waitFor(renderer, switchedTo(true), 'package-export-reviewed-with-annotations', 60_000);
     await clickSelector(renderer, packageAction('export-choose'), 'package-export-choose');
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'prepared' && window.__j07.status() === '已准备好导出文件，等待你确认。'`, 'package-export-prepared', 60_000);
     await assertRenderer(renderer, `(() => {
@@ -2007,6 +2052,28 @@ async function main() {
     await clickSelector(renderer, `[data-screen="global-attention"] [data-attention-open="maintenance:${supersessionCase.caseId}"]`, 'maintenance-attention-open');
     await waitFor(renderer, `(() => { const heading = document.querySelector(${JSON.stringify(`${designationItem(1)} li[data-case-id="${supersessionCase.caseId}"] section.maintenance-case .maintenance-case-heading`)}); return heading instanceof HTMLElement && document.activeElement === heading && heading.textContent === '第 3 项维护事项 · 替代'; })()`, 'maintenance-attention-returns-to-the-case', 60_000);
     await assertRenderer(renderer, PAGE_HELPERS, 'maintenance-attention-page-helpers');
+    // However old it grows, the case still opens back from 待我处理 (Issue #426 review): five more 勘误 on the first
+    // designation push the 替代 out of the five 交付物 lists, and opening it draws it open below them, with focus on it, and
+    // one older case left to 更早的维护事项….
+    for (let index = 1; index <= 5; index += 1) {
+      await clickSelector(renderer, maintenanceAction(1, 'record'), `maintenance-more-${index}-open`);
+      await assertRenderer(renderer, `(() => { const radio = document.querySelector(${JSON.stringify(`${designationItem(1)} form.maintenance-draft input[type="radio"][value="errata"]`)}); radio.click(); return radio.checked; })()`, `maintenance-more-${index}-errata`);
+      await fill(renderer, `${designationItem(1)} form.maintenance-draft textarea[data-maintenance-field="reason"]`, `${MAINTENANCE_MORE}（${index}）`, `maintenance-more-${index}-reason`);
+      await clickSelector(renderer, maintenanceAction(1, 'confirmRecord'), `maintenance-more-${index}-record`);
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${designationItem(1)} section.maintenance-case .maintenance-case-heading`)})?.textContent === ${JSON.stringify(`第 ${3 + index} 项维护事项 · 勘误`)}`, `maintenance-more-${index}-recorded`, 60_000);
+    }
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(attentionEntry)})?.dataset.attentionCount === ${JSON.stringify(String(attentionBefore + 6))}`, 'maintenance-attention-more-counted', 30_000);
+    await clickSelector(renderer, attentionEntry, 'maintenance-attention-entry-again');
+    const olderOpen = `[data-screen="global-attention"] [data-attention-open="maintenance:${supersessionCase.caseId}"]`;
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(olderOpen)}) !== null`, 'maintenance-attention-listed-again', 30_000);
+    await clickSelector(renderer, olderOpen, 'maintenance-attention-open-older');
+    await waitFor(renderer, `(() => {
+      const listed = Array.from(document.querySelectorAll(${JSON.stringify(`${designationItem(1)} ol.maintenance-cases > li`)}), (item) => item.dataset.caseId);
+      const heading = document.querySelector(${JSON.stringify(`${designationItem(1)} li[data-case-id="${supersessionCase.caseId}"] section.maintenance-case .maintenance-case-heading`)});
+      return listed.length === 6 && listed[5] === ${JSON.stringify(supersessionCase.caseId)} && heading instanceof HTMLElement && document.activeElement === heading &&
+        heading.textContent === '第 3 项维护事项 · 替代' &&
+        document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-older .field-note`)})?.textContent === '还有 1 项更早的维护事项';
+    })()`, 'maintenance-attention-older-opened', 60_000);
     // 归档 of that designation: its maintenance is closed, and the 替代 leaves 待我处理 without being concluded.
     await clickSelector(renderer, maintenanceAction(1, 'record'), 'maintenance-archive-open');
     await assertRenderer(renderer, `(() => { const radio = document.querySelector(${JSON.stringify(`${designationItem(1)} form.maintenance-draft input[type="radio"][value="archive"]`)}); radio.click(); return radio.checked; })()`, 'maintenance-choose-archive');
@@ -2038,7 +2105,9 @@ async function main() {
     at('knowledge-exemplars');
     // 知识库 › 范例 (Issue #427, S79b): the Book set as a 发稿版本 brings in the 新闻稿 it delivered — the version its latest
     // delivery named, the earlier one beneath it — attributed to the Book and eligible 仅本社, exactly as
-    // `inspectExemplars()` answers.
+    // `inspectExemplars()` answers. Both deliveries came before `maintenance-cases` withdrew the current designation, so
+    // they stay; the card names that designation by its ordinal and says it is withdrawn, and what the Book delivers from
+    // then on waits for another 发稿版本 (ADR 0040).
     await clickSelector(renderer, '#global-attention-entry', 'exemplars-attention');
     await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]')`, 'exemplars-attention-screen');
     await click(renderer, '返回图书列表', 'exemplars-library');
@@ -2050,11 +2119,15 @@ async function main() {
     const exemplars = await renderer.evaluate(`window.ai7.inspectExemplars()`);
     const exemplarPage = await renderer.evaluate(`Array.from(document.querySelectorAll('.exemplar-book'), (card) => ({
       bookId: card.dataset.bookId, title: card.querySelector('h3')?.textContent ?? null, attribution: card.querySelector('.exemplar-attribution')?.textContent ?? null,
+      designation: card.querySelector('.exemplar-designation')?.textContent ?? null, more: document.querySelector('.exemplars-more')?.hidden ?? null,
       items: Array.from(card.querySelectorAll('.exemplar-items li'), (item) => [item.dataset.exemplarType, item.dataset.exemplarVersion, item.textContent]),
     }))`);
     const exemplarBook = exemplars?.books?.[0];
     const exemplarNews = exemplarBook?.exemplars?.find((exemplar) => exemplar.typeId === 'news-release');
-    requireJourney(exemplars?.books?.length === 1 && exemplarBook.bookId === bookId && exemplarNews?.typeLabel === '新闻稿' && exemplarNews.eligibility === 'house-only' &&
+    requireJourney(exemplars?.books?.length === 1 && exemplars.nextCursor === null && exemplarBook.bookId === bookId && exemplarBook.withdrawn === true &&
+      exemplarPage[0]?.designation?.startsWith(`第 ${exemplarBook.publicationOrdinal} 次设为发稿版本于 `) === true &&
+      exemplarPage[0].designation.endsWith(' · 已在 AI7 内撤回；之后交付的文档，另设发稿版本后才归入') && exemplarPage[0].more === true &&
+      exemplarNews?.typeLabel === '新闻稿' && exemplarNews.eligibility === 'house-only' &&
       exemplarNews.earlierVersions.length === 1 && exemplarPage.length === 1 && exemplarPage[0].bookId === bookId && exemplarPage[0].title === `《${EXCERPT.title}》` &&
       exemplarPage[0].attribution === '作者：未填写 · 责编：未填写' && exemplarPage[0].items.length === exemplarBook.exemplars.length &&
       exemplarPage[0].items[0][0] === 'news-release' && exemplarPage[0].items[0][1] === String(exemplarNews.version) &&
