@@ -123,6 +123,8 @@ describe('②C 评估 over the real store', () => {
       expect(finalized).toMatchObject({ state: 'finalized', entries: 3, conclusion: 'recommend', recommendationBlocked: false, finalized: { actor: '本机编辑' } });
       expect(finalized.finalizedAt).toBe(finalized.finalized!.at);
       expect(await refusal(() => save(3, saved.content))).toBe('EVALUATION_FINALIZED:第 1 版已经定稿，不能再改；要改就重新评估。');
+      expect(await refusal(() => save(3, { ...saved.content, risks: RISKS('high', true), conclusion: 'reject' }, true)))
+        .toBe('EVALUATION_FINALIZED:第 1 版已经定稿，不能再改；要改就重新评估。');
 
       // The manuscript moves on in its journal; 重新评估 binds the same revision, says so, and starts from 定稿's content.
       const working = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
