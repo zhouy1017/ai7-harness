@@ -108,12 +108,11 @@ describe('the words of 交付 · 生产文档', () => {
     // The renderer has no DOM test layer, so where it applies them is read from its source: once, in the catch where the
     // restore stands, after the choices close and before the reopen is offered.
     const source = readFileSync(join(ROOT, 'src', 'renderer', 'index.ts'), 'utf8').replace(/\r\n/gu, '\n');
-    const closed = source.indexOf('choices.disabled = true;');
-    const applied = source.indexOf('showRestoreStands({ sectionLabel, heading, lede, legend });');
-    const offered = source.indexOf('actions.replaceChildren(reopen);');
-    expect([closed > -1, applied > -1, offered > -1]).toEqual([true, true, true]);
-    expect(closed < applied && applied < offered).toBe(true);
-    expect(source.split('showRestoreStands(').length - 1).toBe(1);
+    // The call is a statement of the catch itself: on its own line at the catch's indentation, after the choices close and
+    // before the reopen is offered — so neither a guard around it nor a handler it moved into passes, whatever order its
+    // parts are named in (#609). A comment that names the function is not a call.
+    expect(source).toMatch(/^( +)choices\.disabled = true;$[\s\S]*?^\1showRestoreStands\(\{ [^}\n]+ \}\);$[\s\S]*?^\1actions\.replaceChildren\(reopen\);$/mu);
+    expect(source.split('showRestoreStands({').length - 1).toBe(1);
   });
 
   it('says what 交付 records — which version went to whom — and that AI7 sends nothing (DELIV-003, DELIV-004)', () => {

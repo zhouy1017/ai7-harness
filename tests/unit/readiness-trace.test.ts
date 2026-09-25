@@ -114,8 +114,13 @@ describe('the readiness trace (Issue #518)', () => {
     const calls = [...source.matchAll(/(?<!function )attachRendererTarget\(/gu)].map((match) => match.index);
     expect(calls).toHaveLength(1);
     const call = source.slice(calls[0], source.indexOf(');', calls[0]) + 2);
-    expect(call).toMatch(/^attachRendererTarget\(browser, \(\) => \{\s*inFlight\.target = true;\s*\}\);$/u);
-    expect(source.split('inFlight.target = true').length - 1).toBe(1);
+    // Whatever the layout: arguments over several lines, other spacing, a trailing comma (#602).
+    expect(call).toMatch(/^attachRendererTarget\s*\(\s*browser\s*,\s*\(\)\s*=>\s*\{\s*inFlight\.target\s*=\s*true\s*;?\s*\}\s*,?\s*\);$/u);
+    // Every write of the mark, whatever its spacing or the name it goes through, is one of two: the trace's copy of it
+    // and that callback (#602). The record starts without it.
+    expect((source.match(/\.target\s*=(?!=)/gu) ?? []).length).toBe(2);
+    expect(source.match(/\btrace\.target\s*=\s*launchInFlight\.target\s*;/gu)).toHaveLength(1);
+    expect((source.match(/\btarget\s*:\s*(?:true|false)\b/gu) ?? []).map((text) => text.replace(/\s+/gu, ''))).toEqual(['target:false']);
   });
 
   it('keeps a Windows exit status whole, and relays it', () => {
