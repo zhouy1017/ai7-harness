@@ -961,15 +961,14 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.task-result-window')?.dataset.taskResult === 'ready'`, 'leave-result-window', 30_000);
     await assertRenderer(renderer, `(() => {
       const block = document.querySelector(${JSON.stringify(`[data-screen="editor"] .ProseMirror [data-block-id="${chip.blockId}"]`)});
-      const open = document.querySelector('.task-result-window [data-task-result-action="open"]');
-      if (!(block instanceof HTMLElement) || !(open instanceof HTMLButtonElement)) return false;
+      if (!(block instanceof HTMLElement)) return false;
       block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false);
       const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
       document.execCommand('insertText', false, ${JSON.stringify(LEAVE_WORDS)});
-      const typed = block.textContent?.endsWith(${JSON.stringify(LEAVE_WORDS)}) === true;
-      open.click();
-      return typed;
-    })()`, 'leave-typed-then-left');
+      return block.textContent?.endsWith(${JSON.stringify(LEAVE_WORDS)}) === true;
+    })()`, 'leave-typed');
+    // At once, well inside the half second before the words would write themselves.
+    await assertRenderer(renderer, `(() => { const open = document.querySelector('.task-result-window [data-task-result-action="open"]'); if (!(open instanceof HTMLButtonElement)) return false; open.click(); return true; })()`, 'leave-open-analysis');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card')`, 'leave-analysis', 60_000);
     await click(renderer, '打开稿件', 'leave-reopen');
     await waitFor(renderer, `(document.querySelector(${JSON.stringify(`[data-screen="editor"] .ProseMirror [data-block-id="${chip.blockId}"]`)})?.textContent ?? '').endsWith(${JSON.stringify(LEAVE_WORDS)})`, 'leave-words-kept', 60_000);
