@@ -129,6 +129,33 @@ export const DOCUMENT_STATUS_LINES = {
   recoveredRetryFailed: '文档已恢复为所选的文字，但交付物还是没能打开：',
 } as const;
 
+/**
+ * The recovery screen's own words once a restore stands and nothing it restored could open (Issue #593): the restore
+ * committed and released the attention, so its section label and heading stop asking for a decision.
+ */
+export const RECOVERY_RESTORED_SECTION_LABEL = '稿件恢复优先 · 已恢复';
+export const RECOVERY_RESTORED_HEADING = '已恢复所选的文字';
+
+/** The recovery screen's parts whose words ask for a decision. */
+export interface RecoveryDecisionWords {
+  readonly sectionLabel: Pick<HTMLElement, 'textContent'>;
+  readonly heading: Pick<HTMLElement, 'textContent'>;
+  readonly lede: Pick<HTMLElement, 'hidden'>;
+  readonly legend: Pick<HTMLElement, 'hidden'>;
+}
+
+/**
+ * Once a restore stands and nothing it restored could open, nothing waits on the editor's confirmation (Issues #593,
+ * #603). The section label and heading say the restore is done, and the lede and legend, which describe a choice, are
+ * hidden. The snapshot's own disclosure states a fact and stays.
+ */
+export function showRestoreStands(words: RecoveryDecisionWords): void {
+  words.sectionLabel.textContent = RECOVERY_RESTORED_SECTION_LABEL;
+  words.heading.textContent = RECOVERY_RESTORED_HEADING;
+  words.lede.hidden = true;
+  words.legend.hidden = true;
+}
+
 /** `已创建「新闻稿」`. */
 export function documentCreatedLine(typeLabel: string): string {
   return `已创建「${typeLabel}」`;
