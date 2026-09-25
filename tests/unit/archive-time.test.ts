@@ -48,12 +48,39 @@ describe('the fixed archive time', () => {
     expect(new Set(digests).size).toBe(1);
   }, 60_000);
 
-  it('is the only time an archive the product, the suites\' support or the runners write carries', () => {
-    const offenders = [join(ROOT, 'src'), join(ROOT, 'tests', 'support'), join(ROOT, 'e2e')]
-      .flatMap(sources)
-      .flatMap((path) => (readFileSync(path, 'utf8').match(/\bmtime:\s*[^,}\n]+/gu) ?? [])
-        .filter((use) => use.replace(/\s+/gu, ' ').trim() !== 'mtime: fixedArchiveTime()')
-        .map((use) => `${relative(ROOT, path)}: ${use}`));
+  it('is the time every archive writer in the product, the suites, the runners and the tools gives its entries (#611)', () => {
+    // Read structurally, not by the text `mtime:` (#611): a writer that names no time gets fflate's clock reading, and one
+    // that names it another way hides from a text scan. Every one-shot archive passes the fixed time in its options; every
+    // streamed entry is given it before it is added; an entry made any way the guard cannot follow is not allowed.
+    const self = fileURLToPath(import.meta.url);
+    const offenders: string[] = [];
+    for (const path of [join(ROOT, 'src'), join(ROOT, 'tests'), join(ROOT, 'e2e'), join(ROOT, 'tools')].flatMap(sources)) {
+      if (path === self) continue;
+      const source = readFileSync(path, 'utf8').replace(/\r\n/gu, '\n');
+      const at = (index: number): string => `${relative(ROOT, path)}:${source.slice(0, index).split('\n').length}`;
+      for (const match of source.matchAll(/\bzipSync\(/gu)) {
+        const open = match.index + match[0].length - 1;
+        let depth = 0;
+        let close = open;
+        for (; close < source.length; close += 1) {
+          if (source[close] === '(') depth += 1;
+          else if (source[close] === ')' && --depth === 0) break;
+        }
+        if (!/\bmtime:\s*fixedArchiveTime\(\)/u.test(source.slice(open, close))) offenders.push(`${at(match.index)} zipSync without the fixed time`);
+      }
+      for (const match of source.matchAll(/new\s+(?:ZipPassThrough|ZipDeflate|AsyncZipDeflate)\(/gu)) {
+        const named = /\b(?:const|let)\s+(\w+)\s*=\s*$/u.exec(source.slice(Math.max(0, match.index - 80), match.index));
+        if (named === null) {
+          offenders.push(`${at(match.index)} an entry the guard cannot follow`);
+          continue;
+        }
+        const rest = source.slice(match.index);
+        const given = rest.search(new RegExp(`\\b${named[1]}\\.mtime\\s*=\\s*fixedArchiveTime\\(\\);`, 'u'));
+        const added = rest.search(new RegExp(`\\.add\\(\\s*${named[1]}\\s*\\)`, 'u'));
+        if (given < 0 || (added >= 0 && added < given)) offenders.push(`${at(match.index)} ${named[1]} added without the fixed time`);
+      }
+      if (/(?<![.\w])zip\(/u.test(source)) offenders.push(`${relative(ROOT, path)} fflate's zip() is not checked here`);
+    }
     expect(offenders).toEqual([]);
   });
 });

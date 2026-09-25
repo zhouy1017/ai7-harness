@@ -6063,6 +6063,16 @@ export class EditorialStore {
     // Reselection identifies the file the same way staging does, so a format the product does not
     // read as a Manuscript comes back as the same source-only draft rather than a bare refusal.
     if (format !== 'DOCX') {
+      // A converted draft was read through its working representation, so reselecting its original reproduces that
+      // representation and restages it (Issue #611): after a converter change the draft is whole again, never only 放弃.
+      const snapshot = this.#loadDraftSnapshot(draftId);
+      if (snapshot.conversion !== null && snapshot.conversion.sourceFormat === format) {
+        return this.#reselectConvertedDraft(
+          { draftId, selectionToken, selectedPath, displayName },
+          { expectedDigest, expectedBytes: snapshot.sourceBytes, expectedDraftVersion, previousState, recovered: attempt !== null },
+          snapshot.conversion,
+        );
+      }
       return this.#reselectSourceOnlyDraft(
         { draftId, selectionToken, selectedPath, displayName, format },
         { expectedDigest, expectedDraftVersion, previousState, recovered: attempt !== null },
@@ -6142,6 +6152,104 @@ export class EditorialStore {
     } finally {
       this.#discardIngest(ingested.ingestId);
     }
+  }
+
+  /**
+   * Reselect the exact original behind a converted draft (Issue #611). The original's own bytes are the identity check, as
+   * a first staging's are; the working representation is then reproduced from them and restaged — persisted, parsed and
+   * checked exactly as the first staging did — and the draft returns to `staged` with it, so a draft whose representation
+   * could no longer be reproduced, after a converter change, is whole again. The review it had is invalidated.
+   */
+  async #reselectConvertedDraft(
+    selection: { draftId: string; selectionToken: string; selectedPath: string; displayName: string },
+    draft: { expectedDigest: string; expectedBytes: number; expectedDraftVersion: number; previousState: string; recovered: boolean },
+    conversion: ManuscriptConversionProjection,
+  ): Promise<ContinueImportProjection> {
+    const { draftId, selectionToken, selectedPath, displayName } = selection;
+    let converted: { docx: Uint8Array; loss: ConversionLoss } | null;
+    try {
+      // The bytes converted are the bytes the draft's digest names, read once (#606's review): another file is refused
+      // as the reselection's own mismatch.
+      converted = await this.#convertSelectedManuscript(selectedPath, conversion.sourceFormat,
+        { digest: draft.expectedDigest, byteLength: draft.expectedBytes });
+    } catch (error) {
+      if (error instanceof StoreFatalError) throw error;
+      if (error instanceof StoreError && error.code === 'SNAPSHOT_RESELECTION_REQUIRED') {
+        throw new StoreError('RESELECTION_MISMATCH', '重选文件与原暂存来源身份不一致。');
+      }
+      if (error instanceof StoreError) throw error;
+      throw new StoreError('SNAPSHOT_RESELECTION_REQUIRED', '重选文件无法形成完整的本地暂存快照。');
+    }
+    requireStore(converted !== null, 'SNAPSHOT_RESELECTION_REQUIRED', '重选文件无法再次转换。');
+    const fidelity = conversionFidelityReport(conversion, converted.loss);
+    return this.#withContentObjectLifecycle(async () => {
+      this.#requireNoAbandonmentCleanupIntent(draftId);
+      const retained = await this.#persistRetainedOriginal(selectedPath, conversion.sourceFormat);
+      requireStore(retained.digest === draft.expectedDigest, 'RESELECTION_MISMATCH', '重选文件与原暂存来源身份不一致。');
+      const working = await this.#persistWorkingObject(converted.docx);
+      const ingested = await this.#parseIntoIngestedWorkingRepresentation(draftId, working.path, displayName);
+      try {
+        const { parsed } = ingested;
+        requireStore(isCleanTracerFidelity(parsed.fidelity), 'FIDELITY_OUTSIDE_TRACER', '工作表示带有解析器自身的保真信号。');
+        requireStore(
+          parsed.sourceDigest === working.digest && parsed.archiveBytes === working.byteLength,
+          'OBJECT_VERIFY_FAILED',
+          '工作表示对象与解析结果不一致。',
+        );
+        const nextVersion = draft.expectedDraftVersion + 1;
+        const now = new Date().toISOString();
+        this.#transaction(this.#authority, () => {
+          const current = one(
+            this.#authority
+              .prepare('SELECT state, draft_version, object_digest FROM import_drafts WHERE draft_id = ?')
+              .all(draftId) as SqlRow[],
+            'DRAFT_NOT_FOUND',
+            '导入草稿不存在。',
+          );
+          requireStore(
+            (asString(current.state) === 'staged' || asString(current.state) === 'reviewed') &&
+              asNumber(current.draft_version) === draft.expectedDraftVersion &&
+              asString(current.object_digest) === draft.expectedDigest,
+            'DRAFT_VERSION_CHANGED',
+            '导入草稿在重选持久化前已变化。',
+          );
+          this.#insertContentObject(working.digest, working.relativeKey, working.byteLength, now);
+          this.#insertContentObject(retained.digest, retained.relativeKey, retained.byteLength, now);
+          this.#authority.prepare('DELETE FROM manuscript_reimport_comparisons WHERE draft_id = ?').run(draftId);
+          this.#authority.prepare('DELETE FROM staged_import_snapshots WHERE draft_id = ?').run(draftId);
+          // As the first staging: the snapshot is keyed on the original's digest, the working representation is what was read.
+          this.#promoteIngestSnapshot(draftId, ingested, now, { sourceDigest: retained.digest, fidelity });
+          const draftUpdate = this.#authority
+            .prepare(
+              `UPDATE import_drafts
+               SET selection_token = ?, state = 'staged', draft_version = ?, display_name = ?, selected_path = ?,
+                   working_object_digest = ?, converter_identity = ?, reviewed_title = NULL, reviewed_target_choice_id = NULL,
+                   reviewed_target_kind = NULL, reviewed_existing_book_id = NULL,
+                   reviewed_relationship = NULL, reviewed_book_state_digest = NULL,
+                   reviewed_reuse_source_version_id = NULL,
+                   reviewed_lineage_status = NULL, reviewed_lineage_source_version_id = NULL,
+                   reviewed_checkpoint_revision_id = NULL, reviewed_manuscript_id = NULL, reviewed_branch_id = NULL,
+                   review_digest = NULL, reviewed_at = NULL
+               WHERE draft_id = ? AND draft_version = ? AND state IN ('staged', 'reviewed')`,
+            )
+            .run(selectionToken, nextVersion, displayName, selectedPath, working.digest, conversion.converterIdentity,
+              draftId, draft.expectedDraftVersion);
+          requireStore(draftUpdate.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在重选时已变化。');
+          this.#authority.prepare("DELETE FROM import_commit_attempts WHERE draft_id = ? AND state = 'prepared'").run(draftId);
+          this.#boundedCall(() => this.#boundedAuthority.assertStagedDraftIntegrity(draftId));
+          this.#assertForeignKeys(this.#authority);
+        });
+        return {
+          state: 'target-review-required',
+          staged: this.#stagedProjection(this.#loadDraftSnapshot(draftId)),
+          originalFileAccess: { state: 'available-exact', label: '原始所选文件仍可访问且身份一致' },
+          reviewInvalidated: draft.previousState === 'reviewed' || draft.recovered,
+          notice: '已通过原来源摘要精确匹配完成重选，并重新转换、形成完整暂存与预检；请重新确认全部决定。',
+        };
+      } finally {
+        this.#discardIngest(ingested.ingestId);
+      }
+    });
   }
 
   /**

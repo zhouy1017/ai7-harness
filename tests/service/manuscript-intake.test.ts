@@ -579,6 +579,46 @@ describe('conversion to a DOCX working representation over the real store', () =
     }
   }, 120_000);
 
+  it('reconverts a converted draft on reselecting its exact original when its working representation no longer reproduces (#611)', async () => {
+    const selectedPath = join(roots.inputRoot, '重新转换.txt');
+    await writeFile(selectedPath, concat('第一段。\n\n第二段。\n'));
+    const otherPath = join(roots.inputRoot, '另一份.txt');
+    await writeFile(otherPath, concat('另一段。\n'));
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const staged = await store.stageSelectedManuscript(randomUUID(), selectedPath);
+      const other = await store.stageSelectedManuscript(randomUUID(), otherPath);
+      // As after a converter change: the draft names a working representation its original no longer converts to.
+      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        database.prepare('UPDATE import_drafts SET working_object_digest = ? WHERE draft_id = ?').run(other.source.workingObjectSha256, staged.draftId);
+      } finally {
+        database.close();
+      }
+      const continued = await store.continueImportDraft(staged.draftId, staged.draftVersion);
+      if (continued.state !== 'reselection-required') throw new Error(`expected reselection-required, got ${continued.state}`);
+      const version = continued.recovery.draftVersion;
+      // Another file is refused as the reselection's own mismatch, and nothing moves.
+      await expect(store.reselectImportDraft(staged.draftId, version, randomUUID(), otherPath)).rejects.toMatchObject({ code: 'RESELECTION_MISMATCH' });
+      // The exact original is converted again and restaged, where it used to come back needing reselection every time.
+      const reselected = await store.reselectImportDraft(staged.draftId, version, randomUUID(), selectedPath);
+      if (reselected.state !== 'target-review-required') throw new Error(`expected target-review-required, got ${reselected.state}`);
+      expect(reselected.staged.source.workingObjectSha256).toBe(staged.source.workingObjectSha256);
+      expect(reselected.notice).toBe('已通过原来源摘要精确匹配完成重选，并重新转换、形成完整暂存与预检；请重新确认全部决定。');
+      expect((await store.continueImportDraft(staged.draftId, reselected.staged.draftVersion)).state).toBe('target-review-required');
+      // It commits as a new Book, read through its working representation.
+      const review = store.prepareNewBookReview(staged.draftId, reselected.staged.draftVersion,
+        { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '重新转换' }, false);
+      const commitId = randomUUID();
+      const commit = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest!, commitId });
+      expect(commit.completionLabel).toBe('稿件已导入');
+      expect(await store.acknowledgeImportCompletion(commitId)).toEqual({ state: 'acknowledged' });
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 120_000);
+
   it.each(CONVERTED_INPUTS)(
     'reopens over a staged and then a reviewed reuse of a parsed $format source import before it commits',
     async ({ format, fileName, text }) => {
