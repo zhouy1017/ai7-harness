@@ -2752,12 +2752,18 @@ function validateSourceImportRecordTruth(db: DatabaseSync): void {
     '不创建发稿版本、公开发布许可或公开发布事实',
     '不导出、不发送、不交付、不发布',
   ] as const;
+  // A working representation read through a converter exists from revision 19 (ADR 0072 §3); this check also reads stores
+  // at earlier revisions, which have no such column and no such representation.
+  const sourceColumns = new Set(
+    (db.prepare('PRAGMA table_xinfo(source_versions)').all() as SqlRow[]).map((column) => asString(column.name)),
+  );
+  const workingObject = sourceColumns.has('working_object_digest') ? 'sv.working_object_digest' : 'NULL';
   const rows = db.prepare(
     `SELECT sir.source_import_record_id, sir.commit_id, sir.book_id, sir.source_version_id,
             sir.provenance_id, sir.target_kind, sir.source_version_disposition,
             sir.retained_boundary_json, sir.named_non_effects_json, sir.record_digest, sir.imported_at,
             sv.object_digest, sv.source_digest, sv.content_digest, sv.structure_digest,
-            sv.parser_identity, sv.format, co.byte_length,
+            sv.parser_identity, sv.format, ${workingObject} working_object_digest, co.byte_length,
             sp.acquisition_path, sp.locality, sp.sanitized_identity,
             sp.parser_identity provenance_parser_identity, sp.recorded_at,
             ic.operation_kind, ic.committed_at, d.state draft_state,
@@ -2810,6 +2816,14 @@ function validateSourceImportRecordTruth(db: DatabaseSync): void {
     const retainedLabel = parserIdentity === null
       ? '保留完整所选原始文件及其精确身份；未进行本地解析'
       : '保留完整所选 DOCX 文件及本地解析出的完整内容与结构身份';
+    // Parsed exactly when it is a DOCX or was read through its converter, as the store writes a Source Version and as
+    // `validateStagedDraftInventory` holds a draft to (Issue #583): an unparsed DOCX, a parsed PDF, RTF, ODT or unknown
+    // file, or a parsed file with no working representation is none the store wrote.
+    requireBounded(
+      (parserIdentity !== null) === (asString(row.format) === 'DOCX' || row.working_object_digest !== null),
+      'SCHEMA_INVALID',
+      '来源版本的格式与是否解析不一致。',
+    );
     const recordDigest = sha256(canonicalJson({
       schema: 'ai7.source-import-record/1',
       sourceImportRecordId: asString(row.source_import_record_id),
