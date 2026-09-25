@@ -280,6 +280,9 @@ describe('改计划重做 over the real store', () => {
       offline();
       const third = prepare(store, bookId, once);
       asBefore(third, againId);
+      // Only a Task whose plan moved, or one reconfirmed, is let through (Issue #582): the same 同步 asked of ②A while that
+      // Task is merely prepared is still ②A's to offer, and it does not.
+      expect(await refusal(() => prepare(store, bookId, once))).toBe('ANALYSIS_UPDATE_MODE_UNAVAILABLE');
       // Prepared and not yet started, its plan drifts with no manuscript edit — the launch binds the live route — and
       // 重新确认计划 under that launch revises it in place, the next version of the same Task.
       live();
@@ -292,7 +295,13 @@ describe('改计划重做 over the real store', () => {
       expect(reconfirmed.projection!.taskIntent?.taskIntentId).toBe(third.taskIntent!.taskIntentId);
       expect(reconfirmed.projection!.planVersion?.ordinal).toBe(2);
       expect(reconfirmed.projection!.planRevision).toBeNull();
-      // Only that Task as it was: any other way over the kept revision is still ②A's to offer.
+      // Only that Task as it was: any other way over the kept revision is still ②A's to offer — and once its waiting Run is
+      // cancelled, the Task is no longer one whose plan moved, so the same 同步 is refused too (Issue #582).
+      const waiting = store.startBaselineAnalysisWhenOnline(bookId, third.taskIntent!.taskIntentId, reconfirmed.projection!.planEnvelope!.digest);
+      expect(waiting.run?.state).toBe('awaiting-connectivity');
+      expect(store.cancelWaitingBaselineAnalysis(bookId, third.taskIntent!.taskIntentId).run?.state).toBe('cancelled');
+      offline();
+      expect(await refusal(() => prepare(store, bookId, once))).toBe('ANALYSIS_UPDATE_MODE_UNAVAILABLE');
       store.markCleanShutdown();
     } finally {
       await execution.dispose();
@@ -430,7 +439,7 @@ describe('改计划重做 over the real store', () => {
       const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
       // Admitted when the service stopped, it is reconciled 可续行 without having read a range.
       store.baselineAnalysisLedger.recordRunState(runRecordId, 'admitted', { detail: '已进入 AI7 调度器（单槽位）。' });
-      expect(store.reconcileStoppedBaselineAnalysisRuns()).toEqual({ settled: 1, cancelling: [], answered: [], queued: [] });
+      expect(store.reconcileStoppedBaselineAnalysisRuns()).toEqual({ settled: 1, cancelling: [], answered: [] });
       const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
       expect(plan.state.key).toBe('resumable');
       expect(plan.runControl?.redo).toEqual({ reason: RUN_CONTROL_REDO_NOT_BEGUN_REASON });

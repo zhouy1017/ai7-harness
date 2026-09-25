@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner, EXECUTION_RUN_CAPACITY, type UnitHold } from '../../src/service/analysis/execution.js';
-import { RUN_QUEUED_LABEL } from '../../src/service/analysis/baseline-analysis-store.js';
+import { RECONCILED_QUEUED_DETAIL, RUN_QUEUED_LABEL } from '../../src/service/analysis/baseline-analysis-store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
@@ -25,8 +25,9 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 // J-04's deterministic route, and no Provider, socket or credential value. The one execution owner's governor runs
 // two Runs at once under development-ci; a third start waits for a place as 等待运行名额 — recorded, nothing sent — and
 // is admitted in its turn; each Run keeps its own attempt, progress, usage and revision; a queued start is cancelled
-// before it begins; a queue AI7 closed on is taken up again at the next start; and a Controlled Apply Effect the
-// editor committed while a Run read the Book stands after that Run is cancelled.
+// before it begins; a start the launch could never admit is blocked at once, places or none; a start AI7 closed on
+// while it waited is blocked with why at the next start, which starts nothing by itself; and a Controlled Apply Effect
+// the editor committed while a Run read the Book stands after that Run is cancelled.
 
 const FIXTURES_ROOT = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)));
 const PROPOSED = '〔并行建议〕';
@@ -34,12 +35,15 @@ const PROPOSED = '〔并行建议〕';
 let roots: ServiceTestRoots;
 let launchPolicy: LaunchPolicyProjection;
 let fixture: ResolvedModelFixture;
+/** Another fixture of the same Book's first baseline: a launch bound to it cannot execute a plan frozen under `fixture`. */
+let otherFixture: ResolvedModelFixture;
 
 beforeEach(async () => {
   roots = await createServiceTestRoots('ai7-service-concurrent-');
   launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
   expect(launchPolicy.integrityState).toBe('verified');
   fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
+  otherFixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry');
 });
 
 afterEach(async () => {
@@ -54,23 +58,27 @@ interface Book {
   planEnvelopeDigest: string;
 }
 
-function openWithRoute(): Promise<EditorialStore> {
+function openWithRoute(route: ResolvedModelFixture = fixture): Promise<EditorialStore> {
   return EditorialStore.open(roots.dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
     induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false,
     interruptAfterAbandonObjectRemoval: false,
-    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
+    baselineAnalysisRoute: { fixtureIdentity: route.identity, fixtureSha256: route.sha256, fixtureLineage: route.lineage },
   });
 }
 
 /** The owner as the service builds it under development-ci, with J-10's unit hold as a number the suite moves. */
-function ownerOf(store: EditorialStore, hold: UnitHold | null, options: { capacity?: number; route?: boolean } = {}): BaselineAnalysisExecutionOwner {
+function ownerOf(
+  store: EditorialStore,
+  hold: UnitHold | null,
+  options: { capacity?: number; route?: boolean; fixture?: ResolvedModelFixture } = {},
+): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
     ledger: store.baselineAnalysisLedger,
     launchPolicy,
-    fixture: options.route === false ? null : fixture,
+    fixture: options.route === false ? null : options.fixture ?? fixture,
     secretResolver: { resolve: async () => null },
     unitHold: hold,
     ...(options.capacity === undefined ? {} : { capacity: options.capacity }),
@@ -309,7 +317,46 @@ describe('the execution owner\'s concurrency governor over the real store on exa
     }
   }, 300_000);
 
-  it('queues again, in order, the starts a closed AI7 left waiting, and blocks with the reason one a launch cannot admit', async () => {
+  it('blocks at once, with the reason, a start the launch could never admit, though every place is taken', async () => {
+    // 乙 is prepared under the first fixture's launch.
+    const first = await openWithRoute();
+    let yi: Book;
+    try {
+      yi = await preparedBook(first, 'L2 不可执行 乙', true);
+      first.markCleanShutdown();
+    } finally {
+      first.close();
+    }
+    // A launch bound to another fixture: 甲 is prepared under it and runs; 乙's plan still names the first.
+    const gate = sharedHold();
+    const second = await openWithRoute(otherFixture);
+    const owner = ownerOf(second, gate.hold, { capacity: 1, fixture: otherFixture });
+    try {
+      const jia = await preparedBook(second, 'L2 不可执行 甲', false);
+      const runJia = start(second, owner, jia);
+      expect(runJia.admission).toBe('admitted');
+      await until(() => owner.progressFor(runJia.runRecordId)?.currentUnitOrdinal === 1, '甲 at its first range');
+      expect(owner.busy).toBe(true);
+      // 开始任务 on 乙 while the one place is taken: it could never run under this launch, so it is blocked now, never
+      // read as 等待运行名额.
+      const authorized = second.authorizeBaselineAnalysis(yi.bookId, yi.taskIntentId, yi.planEnvelopeDigest);
+      const runYi = authorized.dispatchRunRecordId!;
+      expect(() => owner.admitOrQueue(runYi)).toThrowError(/当前启动的本地路由与冻结计划不一致/u);
+      expect(owner.queuePosition(runYi)).toBeNull();
+      const blocked = second.inspectBaselineAnalysis(yi.bookId);
+      expect(blocked.state).toBe('authorized-blocked');
+      expect(blocked.run).toMatchObject({ state: 'blocked-before-dispatch', blockedBy: 'launch', blockedReasons: ['当前启动的本地路由与冻结计划不一致。'] });
+      gate.allow(SAMPLE1_UNITS);
+      await owner.whenIdle();
+      expect(second.inspectBaselineAnalysis(jia.bookId).state).toBe('settled');
+      second.markCleanShutdown();
+    } finally {
+      await owner.dispose();
+      second.close();
+    }
+  }, 300_000);
+
+  it('blocks with why the starts a closed AI7 left waiting, starting nothing by itself, and one a launch cannot admit', async () => {
     const gate = sharedHold();
     const first = await openWithRoute();
     const firstOwner = ownerOf(first, gate.hold, { capacity: 1 });
@@ -339,15 +386,26 @@ describe('the execution owner\'s concurrency governor over the real store on exa
     const second = await openWithRoute();
     const secondOwner = ownerOf(second, null);
     try {
-      const reconciled = second.reconcileStoppedBaselineAnalysisRuns();
-      expect(reconciled.queued).toEqual([runYi, runBing]);
-      for (const runRecordId of reconciled.queued) secondOwner.admitOrQueue(runRecordId, second.baselineAnalysisLedger);
+      // Nothing starts by itself after a restart (ADR 0034): the two starts never began, and they are blocked with why,
+      // while 甲 waits for 续行. The governor admits nothing.
+      second.reconcileStoppedBaselineAnalysisRuns();
+      for (const [book, runRecordId] of [[yi, runYi], [bing, runBing]] as const) {
+        const blocked = second.inspectBaselineAnalysis(book.bookId);
+        expect(blocked.state).toBe('authorized-blocked');
+        expect(blocked.run).toMatchObject({ runRecordId, state: 'blocked-before-dispatch', blockedReasons: [RECONCILED_QUEUED_DETAIL] });
+        expect(blocked.run!.attempt).toBeNull();
+      }
+      expect(second.inspectBaselineAnalysis(jia.bookId).state).toBe('resumable');
+      expect(secondOwner.busy).toBe(false);
+      // The editor starts one again when they choose: prepared anew, it runs; nothing else moved meanwhile.
+      const again = prepare(second, yi.bookId);
+      const authorized = second.authorizeBaselineAnalysis(yi.bookId, again.taskIntent!.taskIntentId, again.planEnvelope!.digest);
+      expect(secondOwner.admitOrQueue(authorized.dispatchRunRecordId!, second.baselineAnalysisLedger)).toBe('admitted');
       await secondOwner.whenIdle();
       expect(second.inspectBaselineAnalysis(yi.bookId).state).toBe('settled');
-      expect(second.inspectBaselineAnalysis(bing.bookId).state).toBe('settled');
-      expect(second.inspectBaselineAnalysis(jia.bookId).state).toBe('resumable');
-      // Nothing is left waiting.
-      expect(second.reconcileStoppedBaselineAnalysisRuns().queued).toEqual([]);
+      expect(second.inspectBaselineAnalysis(bing.bookId).state).toBe('authorized-blocked');
+      // Reconciled once, nothing is left to reconcile.
+      expect(second.reconcileStoppedBaselineAnalysisRuns().settled).toBe(0);
       second.markCleanShutdown();
     } finally {
       await secondOwner.dispose();
@@ -365,7 +423,7 @@ describe('the execution owner\'s concurrency governor over the real store on exa
       const blocked = third.inspectBaselineAnalysis(yi.bookId);
       expect(blocked.state).toBe('authorized-blocked');
       expect(blocked.run).toMatchObject({ state: 'blocked-before-dispatch', blockedBy: 'launch', blockedReasons: ['没有可执行的本地确定性路由。'] });
-      expect(third.reconcileStoppedBaselineAnalysisRuns().queued).toEqual([]);
+      expect(third.reconcileStoppedBaselineAnalysisRuns().settled).toBe(0);
       third.markCleanShutdown();
     } finally {
       await noRoute.dispose();

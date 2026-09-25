@@ -173,6 +173,12 @@ export const RUN_PAUSING_DETAIL = '编辑暂停了这项任务；正在进行的
 /** What reconciliation records for a Run AI7 stopped under (CONT-014): nothing of it runs, and nothing is sent until 续行. */
 export const RECONCILED_RESUMABLE_DETAIL = 'AI7 上次关闭时这项任务正在运行；已读完的阅读范围都已保存。点「续行」从下一个阅读范围接着读；在此之前不会发送任何内容。' as const;
 export const RECONCILED_PAUSED_DETAIL = 'AI7 上次关闭时这项任务正在暂停；已读完的阅读范围都已保存，任务已暂停。' as const;
+/**
+ * A start AI7 closed on while it waited for a place (Issue #49 review; ADR 0034): it never began, and a restart starts
+ * nothing by itself, so it is blocked before dispatch with why, and the editor starts it again when they choose.
+ */
+export const RECONCILED_QUEUED_DETAIL =
+  'AI7 上次关闭时这项任务还在等待运行名额，没有开始，也没有发送任何内容；重新启动后它不会自己开始。需要时请重新准备并开始。' as const;
 
 /** The schema of one unit's continuation checkpoint (Issue #422, S76b). */
 const UNIT_CHECKPOINT_SCHEMA = 'ai7.analysis.unit-checkpoint/1' as const;
@@ -3257,10 +3263,11 @@ export class BaselineAnalysisStore {
   /**
    * Startup reconciliation (CONT-014): every Run of this kind a stopped service left admitted, executing or pausing has
    * nothing running it. One pausing settles `paused` — the boundary it waited for is reached — and one admitted or
-   * executing `resumable`, 任务已中断 · 可续行, its Run Authorization kept and nothing dispatched until 续行. A Run left
-   * cancelling is named for the execution owner, which finishes the cancellation.
+   * executing `resumable`, 任务已中断 · 可续行, its Run Authorization kept and nothing dispatched until 续行. A start the
+   * governor had not admitted yet is blocked before dispatch with why: nothing starts by itself after a restart (ADR
+   * 0034). A Run left cancelling is named for the execution owner, which finishes the cancellation.
    */
-  reconcileStoppedRuns(): { settled: number; cancelling: ReadonlyArray<string>; answered: ReadonlyArray<string>; queued: ReadonlyArray<string> } {
+  reconcileStoppedRuns(): { settled: number; cancelling: ReadonlyArray<string>; answered: ReadonlyArray<string> } {
     const rows = this.#db.prepare(
       `SELECT r.run_record_id,
               (SELECT s.state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1) last_state
@@ -3274,9 +3281,6 @@ export class BaselineAnalysisStore {
     // A Run that waits for an answer the editor has already given (Issue #422, S76d) — answered while another Run held
     // the slot, before AI7 closed — is named for the owner to take on, as CLAR-006 goes on without being asked again.
     const answered: string[] = [];
-    // A Run the governor had not admitted yet (Issue #49, S14): still `authorized`, named in its order for the owner to
-    // queue again — as a service that stopped between an authorization and its admission leaves one too.
-    const queued: string[] = [];
     for (const row of rows) {
       const runRecordId = asString(row.run_record_id);
       const state = row.last_state === null ? null : asString(row.last_state);
@@ -3291,10 +3295,13 @@ export class BaselineAnalysisStore {
       } else if (state === 'awaiting-clarification' && this.clarificationsOf(runRecordId).every((entry) => entry.answer !== null)) {
         answered.push(runRecordId);
       } else if (state === 'authorized') {
-        queued.push(runRecordId);
+        // A start the governor had not admitted yet (Issue #49, S14) — or one a service stopped on between its
+        // authorization and its admission — never began: blocked with why, it waits for the editor, not for a place.
+        this.recordRunState(runRecordId, 'blocked-before-dispatch', { detail: RECONCILED_QUEUED_DETAIL, reasons: [RECONCILED_QUEUED_DETAIL], reconciled: true });
+        settled += 1;
       }
     }
-    return { settled, cancelling, answered, queued };
+    return { settled, cancelling, answered };
   }
 
   /** Every Run of this kind waiting in Connectivity Wait, oldest first, with its Book. */
