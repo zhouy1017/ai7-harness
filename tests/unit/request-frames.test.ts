@@ -440,6 +440,7 @@ describe('decodeRequest accepts well-formed frames', () => {
     const bookId = randomUUID();
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
       { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID() } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 22 } },
       { op: 'recordMaintenanceCase', input: { bookId, publicationVersionId: randomUUID(), classification: 'errata', reason: '读者来信指出有误', evidence: null } },
       { op: 'recordMaintenanceCase', input: { bookId, publicationVersionId: randomUUID(), classification: 'withdrawal', reason: '𠀀'.repeat(500), evidence: '质检单' } },
       { op: 'appendMaintenanceCaseRevision', input: { bookId, caseId: randomUUID(), expectedRevision: 1, step: { kind: 'link-proposal', markId: randomUUID() } } },
@@ -461,6 +462,12 @@ describe('decodeRequest accepts well-formed frames', () => {
     const refused: ReadonlyArray<{ op: string; input: unknown }> = [
       { op: 'inspectMaintenanceCase', input: { bookId } },
       { op: 'inspectMaintenanceCase', input: { bookId, caseId: 'first' } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID() } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 0 } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 2.5 } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: '22' } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: 'first', beforeOrdinal: 22 } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 22, limit: 100 } },
       { op: 'recordMaintenanceCase', input: { ...record, classification: 'recall' } },
       { op: 'recordMaintenanceCase', input: { ...record, reason: '   ' } },
       { op: 'recordMaintenanceCase', input: { ...record, reason: '由'.repeat(501) } },

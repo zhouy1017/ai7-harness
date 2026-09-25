@@ -1200,6 +1200,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validUuid(input.bookId) || !validUuid(input.caseId)) throw new ProtocolError(tentativeId);
       break;
     }
+    case 'listMaintenanceCases': {
+      const input = requireInput(value.input, ['bookId', 'publicationVersionId', 'beforeOrdinal'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.publicationVersionId) || typeof input.beforeOrdinal !== 'number' ||
+          !Number.isSafeInteger(input.beforeOrdinal) || input.beforeOrdinal < 1) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     case 'recordMaintenanceCase': {
       const input = requireInput(value.input, ['bookId', 'publicationVersionId', 'classification', 'reason', 'evidence'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.publicationVersionId) || typeof input.classification !== 'string' ||

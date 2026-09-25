@@ -37,6 +37,8 @@ import type {
   ApproveBookDeliveryPackageExportInput,
   AppendMaintenanceCaseRevisionInput,
   InspectMaintenanceCaseInput,
+  ListMaintenanceCasesInput,
+  MaintenanceCasePageProjection,
   MaintenanceCaseProjection,
   MaintenanceCaseResultProjection,
   RecordMaintenanceCaseInput,
@@ -9763,6 +9765,11 @@ export class EditorialStore {
   /** One 维护事项 of the Book in its workspace: its target, its timeline and what it offers next. */
   inspectMaintenanceCase(input: InspectMaintenanceCaseInput): MaintenanceCaseProjection {
     return this.#publicationCall(() => this.#maintenanceCases.inspect(input));
+  }
+
+  /** `更早的维护事项…`: a page of one designation's older cases, before the oldest one shown. */
+  listMaintenanceCases(input: ListMaintenanceCasesInput): MaintenanceCasePageProjection {
+    return this.#publicationCall(() => this.#maintenanceCases.page(input));
   }
 
   /** `记录维护事项`: one case and its first revision, bound to one exact designation, in one transaction. */

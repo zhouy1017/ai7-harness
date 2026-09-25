@@ -2746,6 +2746,26 @@ function registerRendererHandlers(
       }),
   );
   ipcMain.handle(
+    IPC_CHANNELS.listMaintenanceCases,
+    (event, input: Parameters<RendererApi['listMaintenanceCases']>[0]) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('listMaintenanceCases', {
+            bookId: route.bookId,
+            publicationVersionId: input.publicationVersionId,
+            beforeOrdinal: input.beforeOrdinal,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          requireMaintenanceOfRoute(route, result.bookId);
+          return result;
+        });
+      }),
+  );
+  ipcMain.handle(
     IPC_CHANNELS.recordMaintenanceCase,
     (event, input: Parameters<RendererApi['recordMaintenanceCase']>[0]) =>
       envelope(async () => {

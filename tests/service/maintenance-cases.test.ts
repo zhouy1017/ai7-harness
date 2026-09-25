@@ -139,6 +139,8 @@ describe('⑥ 维护事项 (S68a)', () => {
       const written = save(1, '第三段「甲」应为「乙」。');
       expect(written.maintenanceCase).toMatchObject({ nextStep: 'conclude', expectedRevision: 2, errata: { version: 1, body: '第三段「甲」应为「乙」。' } });
       expect(written.maintenanceCase.revisions[1]).toMatchObject({ step: 'errata-saved', status: 'unresolved', link: { kind: 'errata', version: 1 } });
+      // A version's link names it by its number; its words are the case's newest 勘误 alone, so the answer stays one frame.
+      expect(Object.keys(written.maintenanceCase.revisions[1]!.link!).sort()).toEqual(['errataVersionId', 'kind', 'version']);
       expect(code(() => save(2, '第三段「甲」应为「乙」。'))).toBe('MAINTENANCE_ERRATA_UNCHANGED');
       expect(code(() => save(1, '第三段「甲」应为「丙」。'))).toBe('MAINTENANCE_CASE_CHANGED');
       expect(save(2, '第三段「甲」应为「丙」。').maintenanceCase.errata).toMatchObject({ version: 2, body: '第三段「甲」应为「丙」。' });
@@ -176,13 +178,19 @@ describe('⑥ 维护事项 (S68a)', () => {
       expect([linked.status, linked.nextStep, linked.revisions[2]!.link]).toEqual(['unresolved', 'conclude', { kind: 'publication-version', publicationVersionId: b, label: '第 2 次 · 「更正稿」 · r2 · 纸质版二印' }]);
 
       // 替代 and 再版 wait for a separately designated version; linking it ends the wait, not the case.
+      // Until then they may be concluded 仍未解决, never 已完成 (MAINT-007).
       const supersession = record('supersession', a).maintenanceCase;
-      expect([supersession.status, supersession.statusLabel, supersession.nextStep]).toEqual(['waiting', '等待另设发稿版本', 'link-publication']);
+      expect([supersession.status, supersession.statusLabel, supersession.nextStep, supersession.conclusions])
+        .toEqual(['waiting', '等待另设发稿版本', 'link-publication', ['unresolved']]);
       expect(code(() => step(supersession.caseId, 1, { kind: 'link-proposal', markId }))).toBe('MAINTENANCE_STEP_INVALID');
+      expect(code(() => step(supersession.caseId, 1, { kind: 'conclude', status: 'complete', outcome: '已另行处理' }))).toBe('MAINTENANCE_STEP_INVALID');
       expect(step(supersession.caseId, 1, { kind: 'link-publication', publicationVersionId: b }).maintenanceCase)
-        .toMatchObject({ status: 'unresolved', nextStep: 'conclude' });
+        .toMatchObject({ status: 'unresolved', nextStep: 'conclude', conclusions: ['unresolved', 'complete'] });
       const reissue = record('reissue', b).maintenanceCase;
       expect([reissue.status, reissue.choices.publications]).toEqual(['waiting', []]);
+      const stillWaiting = step(reissue.caseId, 1, { kind: 'conclude', status: 'unresolved', outcome: '另设版本尚未确定' }).maintenanceCase;
+      expect([stillWaiting.status, stillWaiting.nextStep, stillWaiting.conclusions]).toEqual(['unresolved', 'link-publication', ['unresolved']]);
+      expect(code(() => step(reissue.caseId, 2, { kind: 'conclude', status: 'complete', outcome: '已再版' }))).toBe('MAINTENANCE_STEP_INVALID');
 
       // 撤回 of the current designation: an internal state at once, said as such; 图书交付包 no longer holds it.
       const withdrawal = record('withdrawal', b, '内容有误，AI7 内不再用于发稿');
@@ -213,7 +221,7 @@ describe('⑥ 维护事项 (S68a)', () => {
         [1, '勘误', '已完成（AI7 内记录）', null, 4],
       ]);
       expect(maintenanceOf(b)).toMatchObject({ total: 2, withdrawn: true, archived: false });
-      expect(counts()).toEqual({ maintenance_cases: 6, maintenance_errata_versions: 2, maintenance_case_revisions: 12 });
+      expect(counts()).toEqual({ maintenance_cases: 6, maintenance_errata_versions: 2, maintenance_case_revisions: 13 });
       for (const forbidden of PUBLICATION_FORBIDDEN_WORDS) expect(JSON.stringify(deliverables)).not.toContain(forbidden);
       deliverablesBefore = JSON.stringify(deliverables);
       errataBefore = JSON.stringify(store.inspectMaintenanceCase({ bookId, caseId: errataCaseId }));
@@ -280,4 +288,40 @@ describe('⑥ 维护事项 (S68a)', () => {
       after.close();
     }
   }, 120_000);
+
+  it('opens every case of a 发稿版本, however many came after it', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const { bookId } = book;
+      const milestone = await store.saveMilestone(book.manuscriptId, book.branchId, '一审稿', 'stage-archive', null, '');
+      const a = store.designatePublicationVersion({ bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '三审通过' }).publicationVersionId;
+      const ids = Array.from({ length: 26 }, (_, index) => store.recordMaintenanceCase({
+        bookId, publicationVersionId: a, classification: 'correction', reason: `读者来信第 ${index + 1} 封`, evidence: null,
+      }).maintenanceCase.caseId);
+      // 交付物 lists the newest five; the oldest is still open and waiting.
+      const listed = store.inspectDeliverables(bookId).publication.designations[0]!.maintenance;
+      expect([listed.total, listed.cases.map((entry) => entry.ordinal)]).toEqual([26, [26, 25, 24, 23, 22]]);
+      // 更早的维护事项… reads the rest a page at a time, newest first, and each case opens.
+      const page = store.listMaintenanceCases({ bookId, publicationVersionId: a, beforeOrdinal: 22 });
+      expect([page.cases.map((entry) => entry.ordinal), page.more]).toEqual([Array.from({ length: 20 }, (_, index) => 21 - index), true]);
+      const last = store.listMaintenanceCases({ bookId, publicationVersionId: a, beforeOrdinal: 2 });
+      expect([last.cases.map((entry) => [entry.ordinal, entry.caseId, entry.classificationLabel, entry.statusLabel, entry.nextStep]), last.more])
+        .toEqual([[[1, ids[0], '更正', '未解决', 'link-proposal']], false]);
+      expect(store.inspectMaintenanceCase({ bookId, caseId: last.cases[0]!.caseId }).revisions[0]!.reason).toBe('读者来信第 1 封');
+      expect(store.listMaintenanceCases({ bookId, publicationVersionId: a, beforeOrdinal: 1 })).toEqual({ bookId, publicationVersionId: a, cases: [], more: false });
+      // Only a designation of the route's Book, and only an ordinal the ledger could hold.
+      expect(code(() => store.listMaintenanceCases({ bookId: randomUUID(), publicationVersionId: a, beforeOrdinal: 22 }))).toBe('MAINTENANCE_TARGET_NOT_FOUND');
+      expect(code(() => store.listMaintenanceCases({ bookId, publicationVersionId: a, beforeOrdinal: 0 }))).toBe('MAINTENANCE_INVALID');
+      // 关联发稿版本… offers the thirty nearest later designations, so a case's answer stays one frame.
+      for (let printing = 2; printing <= 32; printing += 1) {
+        store.designatePublicationVersion({ bookId, milestoneId: milestone.milestoneId, scope: `纸质版第 ${printing} 印`, basis: '加印' });
+      }
+      const offered = store.inspectMaintenanceCase({ bookId, caseId: ids[0]! }).choices.publications;
+      expect([offered.length, offered[0]!.label, offered.at(-1)!.label]).toEqual([30, '第 2 次 · 「一审稿」 · r1 · 纸质版第 2 印', '第 31 次 · 「一审稿」 · r1 · 纸质版第 31 印']);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
 });

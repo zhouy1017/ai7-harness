@@ -367,6 +367,8 @@ const api: RendererApi = Object.freeze({
     invoke<Awaited<ReturnType<RendererApi['approveBookDeliveryPackageExport']>>>(IPC_CHANNELS.approveBookDeliveryPackageExport, input),
   inspectMaintenanceCase: (input: Parameters<RendererApi['inspectMaintenanceCase']>[0]) =>
     invoke<Awaited<ReturnType<RendererApi['inspectMaintenanceCase']>>>(IPC_CHANNELS.inspectMaintenanceCase, input),
+  listMaintenanceCases: (input: Parameters<RendererApi['listMaintenanceCases']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['listMaintenanceCases']>>>(IPC_CHANNELS.listMaintenanceCases, input),
   recordMaintenanceCase: (input: Parameters<RendererApi['recordMaintenanceCase']>[0]) =>
     invoke<Awaited<ReturnType<RendererApi['recordMaintenanceCase']>>>(IPC_CHANNELS.recordMaintenanceCase, input),
   appendMaintenanceCaseRevision: (input: Parameters<RendererApi['appendMaintenanceCaseRevision']>[0]) =>
