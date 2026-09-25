@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { BOOK_PEOPLE_TRIGGER_SQL, BUILTIN_BOOK_PEOPLE_ROLES } from '../../src/service/book-people.js';
+import { BOOK_PEOPLE_ROLE_LISTS, BOOK_PEOPLE_TRIGGER_SQL, BUILTIN_BOOK_PEOPLE_ROLES } from '../../src/service/book-people.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { EVALUATION_RECORD_SCHEMA_VERSION, MAINTENANCE_CASE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, type ComposedManuscriptRequest } from '../support/composed-fixture.js';
@@ -79,6 +79,8 @@ describe('作者 · 责编 · 相关人 (S83)', () => {
       expect(code(() => update(first, 0, [], [], [{ roleId: 'proofreader', name: '王四' }, { roleId: 'proofreader', name: '王四' }]))).toBe('BOOK_PEOPLE_DUPLICATE');
       expect(code(() => update(randomUUID(), 0, ['周一'], []))).toBe('BOOK_NOT_FOUND');
       expect(code(() => update(first, 1, ['周一'], []))).toBe('BOOK_PEOPLE_CHANGED');
+      // No one, before anyone was saved, is the set as it stands: nothing is recorded.
+      expect(update(first, 0, [], [], [])).toMatchObject({ outcome: 'unchanged', completionLabel: '人员没有变化', people: { version: 0, recordedAt: null } });
 
       const saved = update(first, 0, [' 周一 ', '吴二'], ['郑三'], [{ roleId: 'proofreader', name: '王四' }, { roleId: 'designer', name: '冯五' }]);
       expect([saved.outcome, saved.completionLabel, saved.people.version]).toEqual(['recorded', '人员已保存', 1]);
@@ -222,4 +224,46 @@ describe('作者 · 责编 · 相关人 (S83)', () => {
       after.close();
     }
   }, 120_000);
+
+  it('reads every version under the role list it was saved with, whatever list a later release ships', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const bookId = await importBook(store, FIRST);
+      store.updateBookPeople({ bookId, expectedVersion: 0, authors: ['周一'], editors: ['郑三'], related: [{ roleId: 'proofreader', name: '王四' }] });
+      const card = JSON.stringify(store.listBooks(null).items.find((item) => item.bookId === bookId)!.people);
+      // A later release ships a second list: a role added, 校对 named otherwise.
+      BOOK_PEOPLE_ROLE_LISTS.push({
+        schema: 'ai7.book-people-roles/1',
+        version: '2',
+        roles: [...BUILTIN_BOOK_PEOPLE_ROLES.roles.map((role) => (role.roleId === 'proofreader' ? { roleId: role.roleId, label: '校对人' } : role)),
+          { roleId: 'indexer', label: '索引编制' }],
+      });
+      try {
+        // The version saved under the first list still reads, in its own list's words, and 书库 still lists the Book.
+        const people = store.getBookOverview(bookId).people;
+        expect([people.version, people.related, people.roles.at(-1)]).toEqual([1, [{ roleId: 'proofreader', roleLabel: '校对', name: '王四' }], { roleId: 'indexer', label: '索引编制' }]);
+        expect(JSON.stringify(store.listBooks(null).items.find((item) => item.bookId === bookId)!.people)).toBe(card);
+        // A save now pins the second list, and the Book reads both versions under their own lists.
+        const saved = store.updateBookPeople({ bookId, expectedVersion: 1, authors: ['周一'], editors: ['郑三'], related: [{ roleId: 'indexer', name: '陈六' }] });
+        expect([saved.outcome, saved.people.version, saved.people.related]).toEqual(['recorded', 2, [{ roleId: 'indexer', roleLabel: '索引编制', name: '陈六' }]]);
+        const pins = (() => {
+          const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+          try {
+            return database.prepare('SELECT role_configuration_version AS version FROM book_people_versions WHERE book_id = ? ORDER BY version').all(bookId);
+          } finally {
+            database.close();
+          }
+        })();
+        expect(pins).toEqual([{ version: '1' }, { version: '2' }]);
+        store.markCleanShutdown();
+      } finally {
+        BOOK_PEOPLE_ROLE_LISTS.pop();
+      }
+      // A list this build never shipped — a store a newer build wrote — still reads, its roles named by their ids.
+      expect(store.getBookOverview(bookId).people.related).toEqual([{ roleId: 'indexer', roleLabel: 'indexer', name: '陈六' }]);
+      expect(store.listBooks(null).items.find((item) => item.bookId === bookId)!.people.related).toEqual([{ roleLabel: 'indexer', name: '陈六' }]);
+    } finally {
+      store.close();
+    }
+  }, 180_000);
 });
