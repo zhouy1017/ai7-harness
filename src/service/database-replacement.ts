@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
-import { lstat, mkdir, open, opendir, readFile, readdir, realpath, rename, rm, type FileHandle } from 'node:fs/promises';
+import { constants, existsSync } from 'node:fs';
+import { lstat, mkdir, open, opendir, readdir, realpath, rename, rm, type FileHandle } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -191,6 +191,42 @@ async function writeAtomic(path: string, text: string): Promise<void> {
   }
 }
 
+/**
+ * A small file's text, read within `maxBytes` through the one handle it is inspected by (Issue #434 review). That handle must
+ * be a regular file, and at most one byte past the smaller of the bound and the size it reports is ever read, into a buffer of
+ * that size: a file that grows, or is replaced by one larger or by something that is not a file, never takes more, and one
+ * that changed as it was read is refused. Where the system has them, a link is not followed and nothing waits on a pipe.
+ * `null` when nothing is there; anything else that is not such a file throws.
+ */
+export async function readSmallFile(path: string, maxBytes: number): Promise<string | null> {
+  let handle: FileHandle;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+  try {
+    const held = await handle.stat();
+    if (!held.isFile()) throw new Error('Not a regular file.');
+    const buffer = Buffer.alloc(Math.min(maxBytes, held.size) + 1);
+    let filled = 0;
+    while (filled < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, filled, buffer.length - filled, filled);
+      if (bytesRead === 0) return buffer.toString('utf8', 0, filled);
+      filled += bytesRead;
+    }
+    throw new Error('Larger than it may be, or changed as it was read.');
+  } finally {
+    await handle.close();
+  }
+}
+
+/** No intent AI7 writes comes near this: its fields are each bounded, a file name the longest. */
+const MAX_INTENT_BYTES = 64 * 1024;
+/** No phase AI7 writes comes near this: the longest is a short quoted word. */
+const MAX_PHASE_BYTES = 64;
+
 /** The staging place as AI7 made it: a directory, never a link. */
 async function stagingPlace(dataRoot: string): Promise<'absent' | 'directory' | 'foreign'> {
   const info = await lstat(replacementStagingFor(dataRoot)).catch(() => null);
@@ -199,9 +235,9 @@ async function stagingPlace(dataRoot: string): Promise<'absent' | 'directory' | 
 }
 
 async function readIntentAt(staging: string): Promise<ReplacementIntent | null> {
-  const path = join(staging, 'intent.json');
-  if (!existsSync(path)) return null;
-  const stored: unknown = JSON.parse(await readFile(path, 'utf8'));
+  const text = await readSmallFile(join(staging, 'intent.json'), MAX_INTENT_BYTES);
+  if (text === null) return null;
+  const stored: unknown = JSON.parse(text);
   requireReplacement(isRecord(stored) && Object.keys(stored).length === 2 && typeof stored.json === 'string' && typeof stored.sha256 === 'string' &&
     sha256Hex(stored.json) === stored.sha256, 'DATABASE_REPLACEMENT_INTENT_INVALID', INVALID);
   const record = parseCanonicalJson(stored.json);
@@ -212,11 +248,11 @@ async function readIntentAt(staging: string): Promise<ReplacementIntent | null> 
 }
 
 async function readPhase(staging: string): Promise<Phase | null> {
-  const path = join(staging, 'phase.json');
-  if (!existsSync(path)) return null;
   let value: unknown;
   try {
-    value = JSON.parse(await readFile(path, 'utf8'));
+    const text = await readSmallFile(join(staging, 'phase.json'), MAX_PHASE_BYTES);
+    if (text === null) return null;
+    value = JSON.parse(text);
   } catch {
     value = null;
   }
@@ -307,11 +343,9 @@ export async function writeReplacementMembers(dataRoot: string, members: Readonl
  */
 async function stagedAsVerified(staging: string, intent: ReplacementIntent, movedInto: string | null = null): Promise<boolean> {
   try {
-    // The list is read only within the bound a package's own manifest has, before anything of it is held (Issue #434 review).
-    const listed = await lstat(join(staging, 'members.json'));
-    if (!listed.isFile() || listed.size > MAX_MANIFEST_BYTES) return false;
-    const text = await readFile(join(staging, 'members.json'), 'utf8');
-    if (sha256Hex(text) !== intent.packageMembersSha256) return false;
+    // The list is read only within the bound a package's own manifest has (Issue #434 review).
+    const text = await readSmallFile(join(staging, 'members.json'), MAX_MANIFEST_BYTES);
+    if (text === null || sha256Hex(text) !== intent.packageMembersSha256) return false;
     const members = parseCanonicalJson(text);
     if (!Array.isArray(members)) return false;
     const expected = new Map<string, { bytes: number; sha256: string }>();
@@ -499,16 +533,15 @@ const REFUSAL_NOTE = 'refused.json';
 
 /** Why a resumed apply put the data back, as its note says; `null` when none was written, or what is there is not one. */
 async function refusalOf(staging: string): Promise<'changed' | 'interrupted' | null> {
-  const path = join(staging, REFUSAL_NOTE);
   try {
-    // Its size is known before any of it is read (Issue #434 review). A note there that is not AI7's — not a file, larger than
-    // any AI7 writes, or saying something else — still tells a refusal from data that would not open: what waited had changed.
-    const found = await lstat(path);
-    if (!found.isFile() || found.size > MAX_REFUSAL_NOTE_BYTES) return 'changed';
-    const noted: unknown = JSON.parse(await readFile(path, 'utf8'));
+    // Read only within its bound (Issue #434 review). A note there that is not AI7's — not a file, larger than any AI7 writes,
+    // or saying something else — still tells a refusal from data that would not open: what waited had changed.
+    const text = await readSmallFile(join(staging, REFUSAL_NOTE), MAX_REFUSAL_NOTE_BYTES);
+    if (text === null) return null;
+    const noted: unknown = JSON.parse(text);
     return noted === 'changed' || noted === 'interrupted' ? noted : 'changed';
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? null : 'changed';
+  } catch {
+    return 'changed';
   }
 }
 

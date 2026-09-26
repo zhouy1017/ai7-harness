@@ -1,8 +1,9 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
+import { open as openFile, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { writeDatabasePackage } from '../../src/service/database-exports.js';
 import { MAX_MANIFEST_BYTES } from '../../src/service/database-package-reader.js';
 import {
@@ -13,6 +14,7 @@ import {
   openWithPendingReplacement,
   preReplaceBackupFileName,
   readPendingReplacement,
+  readSmallFile,
   replacementStagingFor,
   writeReplacementIntent,
   writeReplacementMembers,
@@ -378,5 +380,48 @@ describe('applying a replacement of the local data', () => {
     expect(importCompatibility({ dataVersion: 2, schemaRevision: 12 }, 1, 57)).toBe('newer-data-version');
     expect(importCompatibility({ dataVersion: 1, schemaRevision: 57 }, 2, 60)).toBe('older-data-version');
     expect(preReplaceBackupFileName(new Date(2026, 8, 25, 22, 30, 5))).toBe('AI7 替换前备份 2026-09-25 22-30-05.ai7db');
+  });
+});
+
+describe('reading a small file within its bound (Issue #434 review)', () => {
+  it('reads a file up to its bound, and nothing past it or that is not a file', async () => {
+    const path = join(root, 'note.json');
+    expect(await readSmallFile(path, 8)).toBeNull();
+    writeFileSync(path, '12345678');
+    expect(await readSmallFile(path, 8)).toBe('12345678');
+    writeFileSync(path, '123456789');
+    await expect(readSmallFile(path, 8)).rejects.toThrow();
+    rmSync(path);
+    mkdirSync(path);
+    await expect(readSmallFile(path, 8)).rejects.toThrow();
+  });
+
+  it('never takes more of a file that grows once it was inspected than it had then, and refuses it', async () => {
+    const path = join(root, 'note.json');
+    writeFileSync(path, JSON.stringify('changed'));
+    // The file grows by a mebibyte the moment its handle has been inspected: every read asks for at most one byte more than it
+    // had when it was.
+    const probe = await openFile(path, 'r');
+    const prototype = Object.getPrototypeOf(probe) as FileHandle;
+    await probe.close();
+    const { stat, read } = prototype;
+    const asked: number[] = [];
+    const inspected = vi.spyOn(prototype, 'stat').mockImplementation((async function (this: FileHandle, ...args: never[]) {
+      const held = await (stat as (...rest: never[]) => Promise<unknown>).apply(this, args);
+      appendFileSync(path, Buffer.alloc(1 << 20, 0x20));
+      return held;
+    }) as never);
+    const reading = vi.spyOn(prototype, 'read').mockImplementation((function (this: FileHandle, ...args: never[]) {
+      asked.push((args[0] as unknown as Buffer).length);
+      return (read as (...rest: never[]) => Promise<unknown>).apply(this, args);
+    }) as never);
+    try {
+      await expect(readSmallFile(path, 64)).rejects.toThrow();
+    } finally {
+      inspected.mockRestore();
+      reading.mockRestore();
+    }
+    expect(asked.length).toBeGreaterThan(0);
+    expect(Math.max(...asked)).toBe(JSON.stringify('changed').length + 1);
   });
 });
