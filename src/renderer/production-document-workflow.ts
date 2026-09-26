@@ -212,6 +212,7 @@ export function renderDocumentWorkflow(
     confirm.disabled = working;
     const cancel = el('button', 'quiet', DOCUMENT_PHASE_CANCEL);
     cancel.type = 'button';
+    cancel.dataset['phaseFormCancel'] = 'true';
     cancel.disabled = working;
     cancel.addEventListener('click', () => {
       form = null;
@@ -263,21 +264,60 @@ export function renderDocumentWorkflow(
     focusNext = null;
     if (target === null) return;
     const row = phases.querySelector<HTMLElement>(`li[data-phase-id="${target.phaseId}"]`);
+    // A form asks for what is missing: its own words once 自行输入 is chosen without them, else the chosen reason, else the
+    // first.
     const focusable = target.target === 'form'
-      ? row?.querySelector<HTMLElement>('.document-phase-form input:checked, .document-phase-form input')
+      ? (form?.problem === DOCUMENT_PHASE_CUSTOM_NEEDED ? row?.querySelector<HTMLElement>('.document-phase-form textarea') : null) ??
+        row?.querySelector<HTMLElement>('.document-phase-form input:checked') ?? row?.querySelector<HTMLElement>('.document-phase-form input')
       : target.target === 'action'
         ? row?.querySelector<HTMLElement>('[data-phase-action="skip"], [data-phase-action="reopen"]')
         : row;
     focusable?.focus();
   }
 
+  /** The control focus is on, as a selector within its phase's row; the row itself is the empty one. */
+  function controlOf(active: HTMLElement): string {
+    if (active.dataset['phaseAction'] !== undefined) return `[data-phase-action="${active.dataset['phaseAction']}"]`;
+    if (active instanceof HTMLInputElement) return `.document-phase-form input[value="${CSS.escape(active.value)}"]`;
+    if (active instanceof HTMLTextAreaElement) return '.document-phase-form textarea';
+    if (active.dataset['phaseFormConfirm'] !== undefined) return '[data-phase-form-confirm]';
+    if (active.dataset['phaseFormCancel'] !== undefined) return '[data-phase-form-cancel]';
+    if (active.localName === 'summary') return 'details.document-phase-reason > summary';
+    return '';
+  }
+
+  /**
+   * Draw again from a fresh read with the editor left where they were: on the same control of the same phase — the words of
+   * a reason they are writing where their caret was — and the reasons they opened still open.
+   */
+  function redraw(): void {
+    const active = document.activeElement instanceof HTMLElement && section.contains(document.activeElement) ? document.activeElement : null;
+    const phaseId = active?.closest<HTMLElement>('li[data-phase-id]')?.dataset['phaseId'];
+    const control = active === null ? '' : controlOf(active);
+    const caret = active instanceof HTMLTextAreaElement ? [active.selectionStart, active.selectionEnd] as const : null;
+    const opened = Array.from(section.querySelectorAll('details.document-phase-reason[open]'),
+      (details) => details.closest<HTMLElement>('li[data-phase-id]')?.dataset['phaseId']);
+    draw();
+    for (const phase of opened) {
+      const details = section.querySelector<HTMLDetailsElement>(`li[data-phase-id="${phase}"] details.document-phase-reason`);
+      if (details !== null) details.open = true;
+    }
+    if (phaseId === undefined) return;
+    const row = section.querySelector<HTMLElement>(`li[data-phase-id="${phaseId}"]`);
+    const target = control === '' ? row : row?.querySelector<HTMLElement>(control) ?? row;
+    target?.focus();
+    if (target instanceof HTMLTextAreaElement && caret !== null) target.setSelectionRange(caret[0], caret[1]);
+  }
+
   draw();
   return {
     element: section,
     paint(next) {
+      // A read that set out before a move can answer after it: it knows fewer moves, and the lens keeps the newer.
+      if (next.transitions < workflow.transitions || JSON.stringify(next) === JSON.stringify(workflow)) return;
       workflow = next;
       if (form !== null && !next.phases.some((entry) => entry.phaseId === form!.phaseId && entry.actions.includes(form!.action))) form = null;
-      draw();
+      redraw();
     },
   };
 }

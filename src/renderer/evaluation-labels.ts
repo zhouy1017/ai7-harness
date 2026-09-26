@@ -39,6 +39,9 @@ export const EVALUATION_RECOMMEND_BLOCKED = '有「高」风险还没有经人�
 export const EVALUATION_VERSIONS_HEADING = '版本';
 export const EVALUATION_EMPTY = '这本书还没有评估。开始评估后，按本社评估方案逐项打分，定稿后留作记录。';
 export const EVALUATION_STATUS = {
+  /** Leaving the manuscript for 评估 from its 工作 group (Issue #429 review): its edits are saved first. */
+  leaving: '正在保存稿件并打开评估…',
+  openFailed: '无法打开评估。',
   loading: '正在读取评估…',
   opened: '评估已打开',
   unavailable: '无法读取评估。',

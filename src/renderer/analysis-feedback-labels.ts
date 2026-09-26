@@ -61,10 +61,10 @@ export function analysisFeedbackToggleName(changing: boolean, itemName: string):
   return `${changing ? '改反馈' : '反馈'}：${itemName}`;
 }
 
-/** The revision the judgments bind and how many of its items carry one, for the technical half. */
+/** The revision the judgments bind and how many of its items carry one — never how many do not (FDBK-008) — for the technical half. */
 export function analysisFeedbackRevisionLine(projection: Pick<AnalysisFeedbackProjection, 'revisionOrdinal' | 'revisionId' | 'items'>): string {
   const judged = projection.items.filter((item) => item.latest !== null).length;
-  return `Revision ${projection.revisionOrdinal} · ${projection.revisionId} · 已判断 ${judged} / ${projection.items.length} 条`;
+  return `Revision ${projection.revisionOrdinal} · ${projection.revisionId} · 已判断 ${judged} 条`;
 }
 
 /** The alternatives offered for a judgment of this kind of item, in their fixed order, 其他 last; none for 准确. */

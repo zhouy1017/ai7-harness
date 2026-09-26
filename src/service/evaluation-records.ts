@@ -428,18 +428,27 @@ export class EvaluationRecords {
     return recordId;
   }
 
-  /** The last 定稿's content carried into the next version: what the profile still holds, by identity, the rest empty. */
+  /**
+   * The last 定稿's content carried into the next version: what the profile still holds, by identity, the rest empty. The
+   * conclusion is never carried — it is the editor's, decided for this text — and each risk keeps its level and statement
+   * but not a person's review of the old text, which does not count for the changed one (EVAL-004, EVAL-012; Issue #429
+   * review): 推荐出版 waits until a person reviews this version's 高 risks.
+   */
   #reseed(content: EvaluationContent, to: Pick<Profile, 'items' | 'risks'>): EvaluationContent {
     const empty = emptyEvaluationContent(to);
     const items = new Map(content.items.map((item) => [item.itemId, item] as const));
     const risks = new Map(content.risks.map((risk) => [risk.riskId, risk] as const));
     return {
       ...content,
+      conclusion: null,
       items: empty.items.map((item, index) => {
         const carried = items.get(item.itemId);
         return carried === undefined || (carried.score !== null && !validEvaluationScore(carried.score, to.items[index]!.fullMarks)) ? item : { ...carried };
       }),
-      risks: empty.risks.map((risk) => ({ ...(risks.get(risk.riskId) ?? risk) })),
+      risks: empty.risks.map((risk) => {
+        const carried = risks.get(risk.riskId);
+        return carried === undefined ? { ...risk } : { ...carried, reviewed: false };
+      }),
     };
   }
 

@@ -39,7 +39,7 @@ import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabl
 // 待我处理 then says; Enter and Escape reach the card without a pointer; it reflows at 200% and keeps its borders without
 // colour; and a restart moves nothing.
 //
-// Since #61 (S26c) 质量与学习 opens from the landing at 反馈记录, the passive history of the same Book's feedback: newest
+// Since #61 (S26c) 质量与学习 opens from the landing at 反馈历史, the passive history of the same Book's feedback: newest
 // first, each entry's verdict and reason as it stands and nothing pending; filtered by 来源, and — once the Book's 作者 and
 // 责编 are set on its 工作概览 — by them; each opening the exact record it came from.
 
@@ -64,9 +64,9 @@ const SUGGESTION_APPLIED = '（旅程示例二）';
 const OWN_REASON = '（旅程示例）篇幅所限';
 /** 学习准入's words (Issue #61, S26b): the Journey's note, and what the page says of every decision. */
 const LEARNING_NOTE = '（旅程示例）只在这本书里参考';
-/** 反馈记录's words (Issue #61, S26c), and the stand-in people the Journey gives 评估旅程丙. */
+/** 反馈历史's words (Issue #61, S26c), and the stand-in people the Journey gives 评估旅程丙. */
 const FEEDBACK_HISTORY_NOTE = '这里只是记录你给过的反馈：不会催你补充原因，也不会把没有说明当作认可。';
-const THIRD_PEOPLE = Object.freeze({ authors: '冯五', editors: '郑三' });
+const THIRD_PEOPLE = Object.freeze({ authors: '冯五', editors: '郑三', laterEditors: '王六' });
 const LEARNING_BASIS = '学习准入策略还在「仅建议」阶段：没有批准任何可以自动纳入的材料或范围，所以每一条都由你决定。';
 const LEARNING_INFLUENCE = '纳入以后，它只可能在所选范围内帮 AI7 以后的建议更接近你的判断：不会改动稿件或它来自的记录，不会自动生效为规则，不会启用记忆，也不会被发送出去。';
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
@@ -825,8 +825,9 @@ async function readLearning(renderer, predicate, name) {
 const learningRow = (kind) => `[data-screen="quality-learning"] li.learning-material[data-material-key^="${kind}:"]`;
 
 /**
- * 反馈记录 as the editor reads it (Issue #61, S26c): its note, what it says when nothing matches, each Book's heading and
- * people, each entry's origin, first line and reason, the filters' values and choices, and where focus is.
+ * 反馈历史 as the editor reads it (Issue #61, S26c): its note, what it says when nothing matches, each Book's heading and
+ * people, each entry's origin, first line and reason, the people an entry names as its own, the filters' values and choices,
+ * and where focus is.
  */
 const READ_HISTORY = `(() => {
   const root = document.querySelector('[data-screen="quality-learning"] .feedback-history');
@@ -837,6 +838,7 @@ const READ_HISTORY = `(() => {
     none: root.querySelector('.feedback-history-none')?.textContent ?? null,
     books: Array.from(root.querySelectorAll('.feedback-book'), (book) => [book.querySelector('h3')?.textContent ?? null, book.querySelector('.feedback-people')?.textContent ?? null]),
     entries: Array.from(root.querySelectorAll('li.feedback-entry'), (item) => [item.dataset.feedbackOrigin ?? null, item.querySelector('.feedback-entry-line')?.textContent ?? null, item.querySelector('.feedback-entry-reason')?.textContent ?? null]),
+    people: Array.from(root.querySelectorAll('li.feedback-entry'), (item) => item.querySelector('.feedback-entry-people')?.textContent ?? null),
     filters: Object.fromEntries(Array.from(root.querySelectorAll('select[data-feedback-filter]'), (select) => [select.dataset.feedbackFilter, [select.value, Array.from(select.options, (option) => option.textContent)]])),
     focus: active instanceof HTMLElement && root.contains(active) ? (active.id || active.dataset.feedbackAction || active.tagName) : null,
   };
@@ -1295,16 +1297,26 @@ async function main() {
       finalizedPage.record.allDisabled === true && finalizedPage.record.actions.length === 0 && finalizedPage.start === '重新评估' &&
       finalizedPage.record.total === '总分 66.5 / 80 · 优秀（1 项不评）', 'evaluation-finalized-words', finalizedPage.record);
 
+    at('evaluation-from-manuscript');
+    // 评估 is one of the manuscript's 工作 destinations (IA-012, editor-surfaces §0.3): from 评估's own 打开稿件, the manuscript's
+    // 工作 group reads 审阅 · 评估 · 交付物, and its 评估 opens the version just finalized.
+    await assertRenderer(renderer, `(() => { const open = Array.from(document.querySelectorAll('[data-screen="book-evaluation"] .workbench-actions button')).find((button) => button.textContent === '打开稿件'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'evaluation-open-manuscript');
+    await waitFor(renderer, `document.querySelector('.editor-shell [data-testid="manuscript-editor"] > [data-block-id]') !== null && document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]') !== null`, 'evaluation-manuscript-ready', 60_000);
+    await assertRenderer(renderer, `(() => { const group = document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const entries = Array.from(group?.querySelectorAll('button[data-work-destination]') ?? []).map((item) => item.dataset.workDestination + ':' + item.textContent); const open = group?.querySelector('button[data-work-destination="evaluation"]'); if (entries.join('|') !== 'review:审阅|evaluation:评估|deliverables:交付物' || !(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'evaluation-work-group-entry');
+    const returned = await readEvaluation(renderer, (page) => page.state === 'ready' && page.record?.state === 'finalized', 'evaluation-from-manuscript-ready');
+    requireJourney(returned.record.heading === '第 1 版 · 定稿' && returned.start === '重新评估' && returned.versions.length === 1, 'evaluation-from-manuscript-words', returned);
+
     at('evaluation-reevaluate');
-    // 重新评估: version 2 begins from 定稿's scores; one moved item shows against version 1.
+    // 重新评估: version 2 begins from 定稿's scores but not its conclusion, which the editor decides again for this text; one
+    // moved item shows against version 1.
     await clickSelector(renderer, '[data-evaluation-action="start"]', 'evaluation-again');
     const again = await readEvaluation(renderer, (page) => page.record?.heading === '第 2 版 · 编辑评分中', 'evaluation-again-started');
     requireJourney(JSON.stringify(again.record.items.map(([, , score]) => score)) === JSON.stringify(['18', '16.5', '15', '17', '']) &&
-      JSON.stringify(again.record.comparison) === JSON.stringify(['与第 1 版相比', '总分：66.5 / 80 → 66.5 / 80']), 'evaluation-again-seeded', again.record);
+      JSON.stringify(again.record.comparison) === JSON.stringify(['与第 1 版相比', '总分：66.5 / 80 → 66.5 / 80', '结论：修改后再议 → 结论未定']), 'evaluation-again-seeded', again.record);
     await fill(renderer, `${item('literary-quality')} [data-evaluation-field="score"]`, '19', 'evaluation-again-score');
     await clickSelector(renderer, '[data-evaluation-action="save"]', 'evaluation-again-save');
-    const compared = await readEvaluation(renderer, (page) => page.record?.entries === '2' && page.record.comparison?.length === 3, 'evaluation-compared');
-    requireJourney(JSON.stringify(compared.record.comparison) === JSON.stringify(['与第 1 版相比', '文学品质与作者声音：18 → 19', '总分：66.5 / 80 → 67.5 / 80']) &&
+    const compared = await readEvaluation(renderer, (page) => page.record?.entries === '2' && page.record.comparison?.length === 4, 'evaluation-compared');
+    requireJourney(JSON.stringify(compared.record.comparison) === JSON.stringify(['与第 1 版相比', '文学品质与作者声音：18 → 19', '总分：66.5 / 80 → 67.5 / 80', '结论：修改后再议 → 结论未定']) &&
       compared.versions.length === 2 && compared.versions[1] === '第 1 版 · 定稿 · 修订版 r1 · 总分 66.5 / 80 · 优秀（1 项不评） · 修改后再议', 'evaluation-compared-words', compared);
 
     at('j14-evaluation-reflow-forced-colors');
@@ -1325,7 +1337,7 @@ async function main() {
     at('evaluation-overview-and-profile');
     // 工作概览 names the version on show in one line; 知识库 › 评估方案 names the profile and counts its use.
     await assertRenderer(renderer, `(() => { const open = Array.from(document.querySelectorAll('[data-screen="book-evaluation"] .workbench-actions button')).find((button) => button.textContent === '工作概览'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'evaluation-overview');
-    await waitFor(renderer, `document.querySelector('.book-evaluation-summary')?.dataset.evaluationState === 'editing' && document.querySelector('.book-evaluation-summary p')?.textContent === '第 2 版 · 编辑评分中 · 修订版 r1 · 总分 67.5 / 80 · 优秀（1 项不评） · 修改后再议'`, 'evaluation-overview-line');
+    await waitFor(renderer, `document.querySelector('.book-evaluation-summary')?.dataset.evaluationState === 'editing' && document.querySelector('.book-evaluation-summary p')?.textContent === '第 2 版 · 编辑评分中 · 修订版 r1 · 总分 67.5 / 80 · 优秀（1 项不评）'`, 'evaluation-overview-line');
     await click(renderer, '返回图书列表', 'evaluation-profile-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'evaluation-profile-landing');
     await click(renderer, '知识库', 'evaluation-profile-knowledge');
@@ -1399,6 +1411,9 @@ async function main() {
       offered.items.every(([, judgment, signals, line, toggle]) => judgment === 'none' && signals === '0' && line === null && toggle === '反馈…') &&
       offered.metric.total === '还没有给出判断。' && offered.metric.dimensions.length === 0 && offered.metric.note === METRIC_NOTE && offered.card === null,
     'feedback-offered-words', offered);
+
+    // 待我处理 as it reads before any judgment: judging asks nothing of it, so it must read the same after.
+    const attentionBefore = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => projection.groups.map((group) => [group.key, group.items.map((entry) => entry.itemId)]))`);
 
     at('feedback-judge-item');
     // 人物与名称's first entry: 反馈… opens its card with nothing chosen and 记录反馈 closed; 不准确 offers three reasons fitted
@@ -1519,12 +1534,16 @@ async function main() {
 
     at('feedback-silence-is-not-approval');
     // What nobody judged stays unjudged: every other item reads no judgment, the tally counts the two, and nothing asks for
-    // more — 待我处理 lists no feedback.
+    // more — 待我处理 lists no feedback. The one thing it gains is 学习准入's single item for the Book (Issue #61, S26b): the
+    // synopsis was judged in the editor's own words, which are material for them to decide on, not a call to judge the rest.
     const silence = await readFeedback(renderer, (page) => page.card === null, 'feedback-silence');
     requireJourney(silence.items.filter(([, judgment]) => judgment !== 'none').map(([key, judgment]) => `${key}:${judgment}`).join() === 'synopsis:incomplete,entities/0:accurate' &&
       silence.metric.judged === '2', 'feedback-silence-unjudged', silence.items.map(([key, judgment]) => [key, judgment]));
-    const attention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
-    requireJourney(Array.isArray(attention?.groups) && attention.groups.every((group) => group.items.every((entry) => !/feedback/i.test(String(entry.state)))), 'feedback-no-attention');
+    const attentionAfter = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => projection.groups.map((group) => [group.key, group.items.map((entry) => entry.itemId)]))`);
+    const learningAsk = `learning-materials:${thirdId}`;
+    const attentionBesideLearning = Array.isArray(attentionAfter) ? attentionAfter.map(([key, items]) => [key, items.filter((itemId) => itemId !== learningAsk)]) : null;
+    requireJourney(Array.isArray(attentionBefore) && JSON.stringify(attentionBesideLearning) === JSON.stringify(attentionBefore) &&
+      attentionAfter.some(([key, items]) => key === 'decisions' && items.includes(learningAsk)), 'feedback-no-attention', { before: attentionBefore, after: attentionAfter });
 
     at('feedback-restart');
     // A restart moves nothing: each judgment and the tally read as before, over the same lineage.
@@ -1711,7 +1730,7 @@ async function main() {
     await clickSelector(renderer, '#global-attention-entry', 'learning-deferred-attention');
     await waitFor(renderer, `document.querySelector(${JSON.stringify(learningSelector)})?.dataset.attentionState === 'learning-materials-deferred'`, 'learning-deferred-listed', 30_000);
     const deferredListed = await renderer.evaluate(readAttentionItem(learningSelector));
-    requireJourney(deferredListed?.object === '学习材料 · 0 条待定，1 条稍后决定' && deferredListed.pill === '学习准入待处理 · 稍后决定', 'learning-deferred-attention-words', deferredListed);
+    requireJourney(deferredListed?.object === '学习材料 · 1 条稍后决定' && deferredListed.pill === '学习准入待处理 · 稍后决定', 'learning-deferred-attention-words', deferredListed);
     await clickSelector(renderer, `${learningSelector} button.global-attention-open`, 'learning-deferred-open');
     await readLearning(renderer, (page) => page.books.length === 1 && page.books[0].materials[1]?.[1] === 'deferred', 'learning-deferred-reopened');
 
@@ -1755,7 +1774,7 @@ async function main() {
     await launch();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'learning-restart-ready');
     await click(renderer, '质量与学习', 'learning-restart-open');
-    // Synchronized delta with S26c: the landing opens 质量与学习 at 反馈记录, and 学习准入 is its second tab.
+    // Synchronized delta with S26c: the landing opens 质量与学习 at 反馈历史, and 学习准入 is its second tab.
     await clickSelector(renderer, '#quality-tab-learning', 'learning-restart-tab');
     const learningAfterPage = await readLearning(renderer, (page) => page.books.length === 1, 'learning-restart-page');
     requireJourney(JSON.stringify(learningAfterPage.books[0].materials.map(([kind, state]) => [kind, state])) === JSON.stringify([['proposal-decision', 'decided'], ['analysis-feedback', 'deferred']]),
@@ -1763,9 +1782,9 @@ async function main() {
     const learningAfter = await renderer.evaluate(`window.ai7.inspectLearningMaterials({ bookId: null }).then((projection) => JSON.stringify(projection))`);
     requireJourney(typeof learningBefore === 'string' && learningAfter === learningBefore, 'learning-restart-unmoved');
 
-    // ---- 质量与学习 › 反馈记录 (Issue #61, plan slice S26c; FDBK-009, FDBK-010, FDBK-013) ---------------------------------------
+    // ---- 质量与学习 › 反馈历史 (Issue #61, plan slice S26c; FDBK-009, FDBK-010, FDBK-013) ---------------------------------------
     at('feedback-history');
-    // 反馈记录, where the landing opens 质量与学习: the Book's four pieces of feedback, newest first — the acceptance nobody
+    // 反馈历史, where the landing opens 质量与学习: the Book's four pieces of feedback, newest first — the acceptance nobody
     // explained, the rejection with its reason as it stands, the entity's latest 准确 and the synopsis's own words — each read
     // as no more than it is, with nothing pending or counted.
     await clickSelector(renderer, '#quality-tab-feedback', 'feedback-history-tab');
@@ -1812,9 +1831,32 @@ async function main() {
     const noneLeft = await readHistory(renderer, (page) => page.entries.length === 0, 'attribution-none');
     requireJourney(noneLeft.none === '没有符合的反馈记录。' && noneLeft.books.length === 0, 'attribution-none-words', noneLeft);
 
+    // A later 责编 takes nothing from the one before (FDBK-013, Issue #61 review): all four came before any people were saved,
+    // so they stay with the first — 郑三 is still the 责编 offered and keeps all four, and each entry names whose it is.
+    await click(renderer, '返回', 'later-back');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'later-landing');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(thirdId)}]`, 'later-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(thirdId)}]')`, 'later-manuscript', 120_000);
+    await click(renderer, '返回图书工作概览', 'later-overview');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(peopleSection)})?.dataset.peopleVersion === '1'`, 'later-people');
+    await clickSelector(renderer, `${peopleSection} [data-people-action="edit"]`, 'later-edit');
+    await fill(renderer, `${peopleSection} input[data-people-field="editors"]`, THIRD_PEOPLE.laterEditors, 'later-editors');
+    await clickSelector(renderer, `${peopleSection} [data-people-action="save"]`, 'later-save');
+    await waitFor(renderer, `${status} === '人员已保存' && document.querySelector(${JSON.stringify(peopleSection)})?.dataset.peopleVersion === '2'`, 'later-saved');
+    await click(renderer, '返回图书列表', 'later-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'later-landing-again');
+    await click(renderer, '质量与学习', 'later-quality');
+    const later = await readHistory(renderer, (page) => page.books[0]?.[1] === `作者：${THIRD_PEOPLE.authors} · 责编：${THIRD_PEOPLE.laterEditors}`, 'later-history');
+    const firstPeople = `当时的人员 · 作者：${THIRD_PEOPLE.authors} · 责编：${THIRD_PEOPLE.editors}`;
+    requireJourney(JSON.stringify(later.filters.editor) === JSON.stringify(['', ['全部', THIRD_PEOPLE.editors]]) &&
+      later.people.length === 4 && later.people.every((line) => line === firstPeople), 'later-attribution', { filters: later.filters, people: later.people });
+    await choose(renderer, '#feedback-filter-editor', THIRD_PEOPLE.editors, 'later-editor');
+    await readHistory(renderer, (page) => page.entries.length === 4 && page.filters.editor?.[0] === THIRD_PEOPLE.editors, 'later-editor-keeps');
+
     at('feedback-history-open');
     // Each entry opens its exact record: the rejection, the manuscript with its 修改建议's card and the reason as it stands; the
-    // synopsis's judgment, ②A on the revision it judged — the current one — with that judgment under the synopsis.
+    // entity's judgment, ②A on the revision it judged — the current one — on 人物与名称, not the tab ②A opens at, with the
+    // judged item in view and focused (Issue #61 review).
     await choose(renderer, '#feedback-filter-origin', '', 'open-origin-all');
     await readHistory(renderer, (page) => page.entries.length === 4, 'open-history');
     await clickSelector(renderer, historyEntry('[data-feedback-origin="proposal-decision"][data-reason-state="given"]'), 'open-rejection');
@@ -1826,9 +1868,14 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'open-landing');
     await click(renderer, '质量与学习', 'open-quality');
     await readHistory(renderer, (page) => page.entries.length === 4, 'open-history-again');
-    await clickSelector(renderer, historyEntry('[data-entry-id$="/synopsis"]'), 'open-synopsis');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] [data-analysis-item-key="synopsis"]')?.dataset.analysisFeedbackJudgment === 'incomplete'`, 'open-synopsis-judged', 60_000);
-    await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.inspectedRevisionId === undefined`, 'open-synopsis-current');
+    await clickSelector(renderer, historyEntry('[data-entry-id$="/entities/0"]'), 'open-entity');
+    await waitFor(renderer, `(() => {
+      const item = document.querySelector('[data-screen="book-analysis"] [data-analysis-item-key="entities/0"]');
+      const card = document.querySelector('.baseline-analysis-card');
+      return item instanceof HTMLElement && item.dataset.analysisFeedbackJudgment === 'accurate' && card instanceof HTMLElement && card.dataset.analysisTab === 'entities' &&
+        item.closest('[data-analysis-panel]')?.hidden === false && item.getClientRects().length > 0 && document.activeElement === item;
+    })()`, 'open-entity-in-view', 60_000);
+    await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.inspectedRevisionId === undefined`, 'open-entity-current');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

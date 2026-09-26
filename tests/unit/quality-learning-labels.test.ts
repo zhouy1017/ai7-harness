@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  FEEDBACK_HISTORY_DETACHED,
+  FEEDBACK_HISTORY_HEADING,
   FEEDBACK_HISTORY_NOTE,
+  FEEDBACK_HISTORY_STATUS,
   QUALITY_LEARNING_TABS,
+  feedbackAttributionLine,
   feedbackEntryLine,
   feedbackReasonLine,
   LEARNING_CHOICES,
@@ -47,7 +51,10 @@ describe('学习准入 words', () => {
   });
 
   it('names a Book with its people, a material with its origin, and the decision it has', () => {
-    expect(learningBookHeading({ title: '样书', materials: [{} as never, {} as never] })).toBe('《样书》 · 2 条');
+    // The Book's materials in all, whichever page shows them.
+    expect(learningBookHeading({ title: '样书', materialCount: 2 })).toBe('《样书》 · 2 条');
+    // The Book's count in all, whichever page shows its materials (Issue #61 review).
+    expect(learningBookHeading({ title: '样书', materialCount: 45 })).toBe('《样书》 · 45 条');
     expect(learningPeopleLine({ authors: [], editors: [] })).toBe('作者与责编：尚未填写');
     expect(learningPeopleLine({ authors: ['周一', '吴二'], editors: [] })).toBe('作者：周一、吴二 · 责编：尚未填写');
     expect(learningPeopleLine({ authors: ['周一'], editors: ['郑三'] })).toBe('作者：周一 · 责编：郑三');
@@ -60,9 +67,14 @@ describe('学习准入 words', () => {
   });
 });
 
-describe('反馈记录 words (Issue #61, S26c)', () => {
+describe('反馈历史 words (Issue #61, S26c)', () => {
   it('opens at the history, says what it is not, and reads each entry by origin, dimension, verdict and reason', () => {
-    expect(QUALITY_LEARNING_TABS.map((entry) => [entry.tab, entry.label])).toEqual([['feedback', '反馈记录'], ['learning', '学习准入']]);
+    // The view is named as the spec names it: 反馈历史 (Issue #61, S26c review).
+    expect(QUALITY_LEARNING_TABS.map((entry) => [entry.tab, entry.label])).toEqual([['feedback', '反馈历史'], ['learning', '学习准入']]);
+    expect([FEEDBACK_HISTORY_HEADING, FEEDBACK_HISTORY_STATUS.loading, FEEDBACK_HISTORY_STATUS.opened]).toEqual(['反馈历史', '正在读取反馈历史…', '反馈历史已打开']);
+    // An entry names the people it is attributed to where they are not the Book's now, and a gone paragraph says so.
+    expect(feedbackAttributionLine({ authors: ['周一'], editors: ['郑三'] })).toBe('当时的人员 · 作者：周一 · 责编：郑三');
+    expect(FEEDBACK_HISTORY_DETACHED).toBe('这条修改建议所在的段落已不在稿件中。');
     expect(FEEDBACK_HISTORY_NOTE).toBe('这里只是记录你给过的反馈：不会催你补充原因，也不会把没有说明当作认可。');
     expect(feedbackEntryLine({ origin: 'proposal-decision', dimension: null, signal: '拒绝' })).toBe('修改建议 · 拒绝');
     expect(feedbackEntryLine({ origin: 'analysis-feedback', dimension: '全书梗概', signal: '不完整' })).toBe('分析反馈 · 全书梗概 · 不完整');
@@ -77,7 +89,7 @@ describe('反馈记录 words (Issue #61, S26c)', () => {
 describe('学习准入 candidates', () => {
   const decision = {
     decisionId: '00000000-0000-4000-8000-000000000001', disposition: 'rejected', currentText: '原来的说法', proposedText: '建议的说法',
-    editedText: null, reason: '证据不足', reasonSource: 'suggested', recordedAt: '2026-09-25T06:00:00.000Z',
+    editedText: null, reason: '证据不足', reasonSource: 'suggested', recordedAt: '2026-09-25T06:00:00.000Z', decidedAt: '2026-09-25T05:00:00.000Z',
   } as const;
 
   it('reads a decided 修改建议 as what was suggested, what the editor did, and why', () => {

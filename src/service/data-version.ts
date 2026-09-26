@@ -70,8 +70,46 @@ type SqlRow = Record<string, SQLOutputValue>;
 const RECORD_SCHEMA = 'ai7.store-version/1';
 const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'store_versions'";
 const INVALID = '数据版本记录已损坏。';
-/** A released or development software version: `0.1.0`, or `0.1.0-beta.2`. */
-const SOFTWARE_VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:-[0-9A-Za-z.-]{1,32})?$/u;
+/**
+ * A released or development software version: `0.1.0`, `0.1.0-beta.2`, or either with build metadata, `0.1.0+build.7` —
+ * which SemVer allows and a release may carry (Issue #433 review).
+ */
+const SOFTWARE_VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:-[0-9A-Za-z.-]{1,32})?(?:\+[0-9A-Za-z.-]{1,32})?$/u;
+
+/**
+ * How two software versions order by SemVer precedence (Issue #433 review): by major, minor and patch, a pre-release below
+ * its release, pre-release identifiers numerically where both are numbers, and build metadata never counted.
+ */
+export function compareSoftwareVersions(left: string, right: string): number {
+  const parse = (version: string): { core: number[]; pre: string[] } => {
+    const [withoutBuild] = version.split('+');
+    const dash = withoutBuild!.indexOf('-');
+    const core = (dash < 0 ? withoutBuild! : withoutBuild!.slice(0, dash)).split('.').map(Number);
+    return { core, pre: dash < 0 ? [] : withoutBuild!.slice(dash + 1).split('.') };
+  };
+  const a = parse(left);
+  const b = parse(right);
+  for (let index = 0; index < 3; index += 1) {
+    const difference = (a.core[index] ?? 0) - (b.core[index] ?? 0);
+    if (difference !== 0) return Math.sign(difference);
+  }
+  if (a.pre.length === 0 || b.pre.length === 0) return a.pre.length === b.pre.length ? 0 : a.pre.length === 0 ? 1 : -1;
+  for (let index = 0; index < Math.max(a.pre.length, b.pre.length); index += 1) {
+    const x = a.pre[index];
+    const y = b.pre[index];
+    if (x === undefined || y === undefined) return x === undefined ? -1 : 1;
+    const numeric = /^\d+$/u;
+    if (numeric.test(x) && numeric.test(y)) {
+      const difference = Number(x) - Number(y);
+      if (difference !== 0) return Math.sign(difference);
+    } else if (numeric.test(x) !== numeric.test(y)) {
+      return numeric.test(x) ? -1 : 1;
+    } else if (x !== y) {
+      return x < y ? -1 : 1;
+    }
+  }
+  return 0;
+}
 
 /** Revision 54's relation, created once: a store that predates it gains an empty ledger and nothing existing moves. */
 export function initializeDataVersionSchema(db: DatabaseSync): void {
@@ -186,6 +224,8 @@ export class DataVersionLedger {
 export function latestSoftwareUpdate(history: ReadonlyArray<StoredVersion>): {
   readonly from: string;
   readonly to: string;
+  /** Whether the later software is newer, earlier — an older build opened the store again — or of the same precedence. */
+  readonly direction: 'newer' | 'earlier' | 'same';
   readonly fromDataVersion: number;
   readonly toDataVersion: number;
   readonly recordedAt: string;
@@ -194,7 +234,15 @@ export function latestSoftwareUpdate(history: ReadonlyArray<StoredVersion>): {
     const now = history[index]!;
     const before = history[index - 1]!;
     if (now.softwareVersion !== before.softwareVersion) {
-      return { from: before.softwareVersion, to: now.softwareVersion, fromDataVersion: before.dataVersion, toDataVersion: now.dataVersion, recordedAt: now.recordedAt };
+      const order = compareSoftwareVersions(now.softwareVersion, before.softwareVersion);
+      return {
+        from: before.softwareVersion,
+        to: now.softwareVersion,
+        direction: order > 0 ? 'newer' : order < 0 ? 'earlier' : 'same',
+        fromDataVersion: before.dataVersion,
+        toDataVersion: now.dataVersion,
+        recordedAt: now.recordedAt,
+      };
     }
   }
   return null;

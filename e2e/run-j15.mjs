@@ -204,6 +204,12 @@ const HOUSE_GUIDELINE = ['本社文字规范（J-15）', '', '1. 指出错字、
   '3. 数字与标点按本社体例手册统一，', '体例手册未写到的，按国家现行规范。', '4. 专名在全书前后写法一致。', '5. 引文与原文核对后再改，不凭记忆改动。'].join('\n');
 const KNOWLEDGE_TABS = ['审阅规范文件', '评估方案', '工序与规则', '社级编辑记忆', '范例', '资料库', '外部来源留存'];
 const GUIDELINE_TITLES = ['文字规范条款', '体例条款', '线索条款', '事实核查契约', '引用与学术规范条款', '出版风险提示条款', '表达改进条款'];
+// 线索条款 and 事实核查契约 are AI7's fixed statements (Issue #427 review): their categories read no clause of theirs, so
+// they say so where the others offer 导入新版本….
+const GUIDELINE_FIXED = new Map([
+  [2, '「情节逻辑与前后一致」把基线分析里的线索变成批注，不按这里的条款找问题。这是 AI7 的固定说明，不能导入新版本。'],
+  [3, '「事实核查」按 AI7 固定的事实核查契约执行，不读取这里的条款。这是 AI7 的固定说明，不能导入新版本。'],
+]);
 /** The 知识库 page as an editor reads it: its tabs, the chosen one, and each guideline card's words. */
 const READ_KNOWLEDGE = `(() => {
   const page = document.querySelector('[data-screen="knowledge-base"] .knowledge-base');
@@ -221,6 +227,8 @@ const READ_KNOWLEDGE = `(() => {
       clauses: Array.from(card.querySelectorAll('.guideline-clauses li'), (item) => [item.dataset.clauseId, item.querySelector('.guideline-citations')?.textContent ?? null]),
       versions: Array.from(card.querySelectorAll('.guideline-version-list li'), (item) => item.textContent),
       older: card.querySelector('.guideline-older')?.textContent ?? null,
+      fixed: card.querySelector('.guideline-fixed')?.textContent ?? null,
+      importable: card.querySelector('[data-guideline-action="import"]') instanceof HTMLButtonElement,
       preview: card.querySelector('.guideline-preview h4')?.textContent ?? null,
       changes: card.querySelector('.guideline-preview-changes')?.textContent ?? null,
       previewClauses: card.querySelectorAll('.guideline-preview li').length,
@@ -796,7 +804,8 @@ async function main() {
       JSON.stringify(opened.cards.map((card) => card.title)) === JSON.stringify(GUIDELINE_TITLES) && opened.cards.every((card) => card.pill === '第 1 版 · AI7 内置默认') &&
       opened.cards[0].applied === '用于：错别字与规范用语' && opened.cards[0].clauses.length === 4 &&
       opened.cards[0].clauses.every(([clauseId, citations], index) => clauseId === `typos-and-usage/${index + 1}` && citations === '未被引用') &&
-      JSON.stringify(opened.cards[0].versions) === JSON.stringify(['第 1 版 · AI7 内置默认 · 内置 · 4 条 · 还没有审阅用过']) && opened.cards.every((card) => card.older === null),
+      JSON.stringify(opened.cards[0].versions) === JSON.stringify(['第 1 版 · AI7 内置默认 · 内置 · 4 条 · 还没有审阅用过']) && opened.cards.every((card) => card.older === null) &&
+      opened.cards.every((card, index) => card.fixed === (GUIDELINE_FIXED.get(index) ?? null) && card.importable === !GUIDELINE_FIXED.has(index)),
     'knowledge-guidelines-cards', opened);
     // A class a later slice brings says what it will hold and that it is not there yet.
     await click(renderer, '社级编辑记忆', 'knowledge-memory-tab');
@@ -865,18 +874,41 @@ async function main() {
     requireJourney(restarted.cards[0].pill === '第 2 版 · 本社' && restarted.cards[0].versions.length === 2 && restarted.cards[0].clauses.length === 5, 'knowledge-restart-kept', restarted.cards[0]);
 
     at('knowledge-procedures');
-    // 工序与规则 (Issue #427, S79d): the nine review 工序 by what each does — seven 已启用, the two whose basis does not exist yet
-    // 尚未接通 — none used by a review in this Journey, and 编辑工作区方案 installed and enabled for the one Book that enabled it.
+    // 工序与规则 (Issue #427, S79d): the nine review 工序 by what each does — seven 已启用 drawn solid, the two whose basis does
+    // not exist yet 尚未接通 drawn dashed, with why said of the house — none used by a review in this Journey, and the 方案
+    // in the house's words, 本社方案 v2, installed and enabled for the one Book that enabled it. Both layers (LAYER-008): the
+    // words carry no identifier, and 查看技术详情, closed, holds the carrier's and the 权限侧车's identities and each 工序's id.
     await click(renderer, '工序与规则', 'knowledge-procedures-tab');
     await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='rules' && document.querySelector('.knowledge-procedures')?.dataset.procedureCount==='9'`, 'knowledge-procedures-painted');
-    const procedures = await renderer.evaluate(`({
-      states: Array.from(document.querySelectorAll('.knowledge-procedure-list > li'), (item) => [item.dataset.procedureState, item.querySelector('.status-pill')?.textContent ?? null, item.dataset.procedureRuns]),
-      first: document.querySelector('.knowledge-procedure-list > li')?.textContent ?? null,
-      artifact: document.querySelector('.knowledge-artifact-list > li')?.textContent ?? null,
-    })`);
-    requireJourney(JSON.stringify(procedures?.states) === JSON.stringify([...Array(7).fill(['enabled', '已启用', '0']), ['unavailable', '尚未接通', '0'], ['unavailable', '尚未接通', '0']]) &&
+    const procedures = await renderer.evaluate(`(() => {
+      const section = document.querySelector('.knowledge-procedures');
+      const details = section?.querySelector(':scope > details.technical-details') ?? null;
+      const decision = Array.from(section?.children ?? []).filter((child) => child !== details).map((child) => child.textContent).join('\\n');
+      return {
+        states: Array.from(document.querySelectorAll('.knowledge-procedure-list > li'), (item) => {
+          const pill = item.querySelector('.status-pill');
+          return [item.dataset.procedureState, pill?.textContent ?? null, item.dataset.procedureRuns, pill instanceof HTMLElement ? getComputedStyle(pill).borderTopStyle : null];
+        }),
+        first: document.querySelector('.knowledge-procedure-list > li')?.textContent ?? null,
+        reasons: Array.from(document.querySelectorAll('.knowledge-procedure-list .procedure-reason'), (reason) => reason.textContent),
+        artifact: document.querySelector('.knowledge-artifact-list > li')?.textContent ?? null,
+        identifierInWords: /1\\.0\\.0|@ai7\\/|[0-9a-f]{64}|ai7-review-procedure/u.test(decision),
+        detailsOpen: details === null ? null : details.open,
+        summary: details?.querySelector('summary')?.textContent ?? null,
+        technical: Array.from(details?.querySelectorAll(':scope > dl > dt') ?? [], (term) => [term.textContent, term.nextElementSibling?.textContent ?? null]),
+      };
+    })()`);
+    const technical = new Map(procedures?.technical ?? []);
+    requireJourney(JSON.stringify(procedures?.states) === JSON.stringify([...Array(7).fill(['enabled', '已启用', '0', 'solid']), ['unavailable', '尚未接通', '0', 'dashed'], ['unavailable', '尚未接通', '0', 'dashed']]) &&
       procedures.first === '已启用 错别字与规范用语审阅工序 · 第 1 版 · 内置 · 用于「错别字与规范用语」 · 还没有审阅用过' &&
-      procedures.artifact === '编辑工作区方案 · 1.0.0 · 已安装 · 已为 1 本书启用', 'knowledge-procedures-list', procedures);
+      JSON.stringify(procedures.reasons) === JSON.stringify([' · 书系知识还没有接通。', ' · 生产文档之间的一致性核对还没有接通。']) &&
+      procedures.artifact === '本社方案 v2 · 已安装 · 已为 1 本书启用' && procedures.identifierInWords === false &&
+      procedures.detailsOpen === false && procedures.summary === '查看技术详情' &&
+      technical.get('原生载体身份') === '@ai7/editorial-workspace-profile' && technical.get('原生载体版本') === '1.0.0' &&
+      /^[0-9a-f]{64}$/u.test(technical.get('SHA-256') ?? '') && technical.get('权限侧车') === 'ai7.editorial-workspace-profile.authority' &&
+      /^[0-9a-f]{64}$/u.test(technical.get('权限侧车 SHA-256') ?? '') && procedures.technical.length === 5 + 9 &&
+      procedures.technical.slice(5).every(([, procedureId]) => /^ai7-review-procedure\//u.test(procedureId ?? '')),
+    'knowledge-procedures-list', procedures);
 
     // ---- 知识库 › 资料库 (Issue #427, plan slice S79c; editor-surfaces §8.4, V2-UX-KB-007, ATTN-009, LEARN-004 to LEARN-007) ----
     at('knowledge-library-add');

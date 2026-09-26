@@ -3,7 +3,7 @@ import { closeSync, constants, createReadStream, fstatSync, lstatSync, openSync,
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { J03_TASK_GOAL, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
+import { J03_TASK_GOAL, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
   InspectTaskPlanInput,
   TaskPlanProjection,
@@ -41,9 +41,12 @@ import type {
   UpdateBookPeopleInput,
   ReviewGuidelinePreviewProjection,
   ReviewGuidelinesProjection,
+  ExemplarBookCursor,
+  LibraryMaterialCursor,
   LibraryMaterialDecisionInput,
   LibraryMaterialKind,
   LibraryMaterialPreviewProjection,
+  LibraryMaterialProjection,
   LibraryMaterialsProjection,
   EvaluationProfilesProjection,
   EvaluationWorkspaceProjection,
@@ -53,6 +56,8 @@ import type {
   KnowledgeProceduresProjection,
   AppendMaintenanceCaseRevisionInput,
   InspectMaintenanceCaseInput,
+  ListMaintenanceCasesInput,
+  MaintenanceCasePageProjection,
   MaintenanceCaseProjection,
   MaintenanceCaseResultProjection,
   RecordMaintenanceCaseInput,
@@ -110,8 +115,16 @@ import type {
   ChangeSeriesMembershipInput,
   CreateSeriesInput,
   PreviewSeriesMembershipChangeInput,
+  SeriesCandidatesCursor,
+  SeriesCandidatesProjection,
   SeriesCreationProjection,
+  SeriesHistoryCursor,
+  SeriesHistoryPageProjection,
+  SeriesListCursor,
   SeriesListProjection,
+  SeriesMemberProjection,
+  SeriesMembersCursor,
+  SeriesMembersPageProjection,
   SeriesMembershipChangeProjection,
   SeriesMembershipChangeResultProjection,
   SeriesMembershipPreviewProjection,
@@ -120,7 +133,12 @@ import type {
   PromoteSeriesKnowledgeInput,
   ProposeSeriesKnowledgeInput,
   SeriesKnowledgeCandidateProjection,
+  SeriesKnowledgeCandidatesCursor,
+  SeriesKnowledgeCandidatesPageProjection,
   SeriesKnowledgeItemProjection,
+  SeriesKnowledgeItemsCursor,
+  SeriesKnowledgeItemsPageProjection,
+  SeriesKnowledgeRevisionsProjection,
   SeriesKnowledgePromotionProjection,
   SeriesKnowledgeProposalProjection,
   SeriesKnowledgeProvenanceProjection,
@@ -139,6 +157,8 @@ import type {
   RecordPublicationActualsInput,
   SetEvaluationPreferencesInput,
   FeedbackHistoryProjection,
+  LearningMaterialCursor,
+  LearningMaterialProjection,
   LearningMaterialsBookProjection,
   LearningMaterialsProjection,
   RecordProposalDecisionReasonInput,
@@ -346,8 +366,11 @@ import {
   analysisReasonLabel,
   LearningEligibilityLedger,
   analysisFeedbackCandidate,
+  feedbackHistoryPage,
+  feedbackReasonExcerpt,
   initializeLearningEligibilitySchema,
   learningMaterialDigest,
+  learningMaterialOrder,
   proposalDecisionCandidate,
   reviewDispositionCandidate,
   type LearningMaterialCandidate,
@@ -362,18 +385,28 @@ import {
   seriesMemberAlready,
   seriesLearningFacts,
   seriesMembershipImpact,
+  seriesHistoryOrder,
   seriesPreviewDigest,
+  weighedPage,
   type StoredMembershipChange,
   type StoredSeries,
 } from './series.js';
 import { CALIBRATION_MIN_ADJUSTMENTS, PREDICTION_MIN_BOOKS_WITH_ACTUALS, calibrationActive, predictionAvailable } from '../shared/evaluation-calibration.js';
 import {
   MAX_FEEDBACK_HISTORY_ENTRIES,
-  MAX_SERIES_CANDIDATES_LISTED,
-  MAX_SERIES_HISTORY_LISTED,
-  MAX_SERIES_MEMBERS_LISTED,
+  MAX_BOOK_SERIES_MEMBERSHIPS,
+  MAX_SERIES_CANDIDATE_QUERY_CHARACTERS,
+  MAX_SERIES_CANDIDATES_PAGE,
+  MAX_SERIES_HISTORY_PAGE,
+  MAX_SERIES_LIST_PAGE,
+  MAX_SERIES_MEMBERS_PAGE,
+  MAX_SERIES_TITLE_CHARACTERS,
   MAX_SERIES_KNOWLEDGE_CONTENT_CHARACTERS,
-  MAX_SERIES_KNOWLEDGE_LISTED,
+  MAX_SERIES_KNOWLEDGE_CANDIDATES_PAGE,
+  MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN,
+  MAX_SERIES_KNOWLEDGE_ITEMS_PAGE,
+  MAX_SERIES_KNOWLEDGE_QUERY_CHARACTERS,
+  MAX_SERIES_KNOWLEDGE_REVISIONS_PAGE,
   MAX_SERIES_KNOWLEDGE_SUBJECT_CHARACTERS,
   PUBLICATION_ACTUALS_RECORDED_STATE,
   SERIES_KNOWLEDGE_CLASS_LABELS,
@@ -399,6 +432,8 @@ import {
   initializeSeriesKnowledgeSchema,
   isSeriesKnowledgeClass,
   isSeriesKnowledgeReuseScope,
+  SERIES_KNOWLEDGE_PAGE_BYTES,
+  knowledgeQuoteExcerpt,
   seriesKnowledgeConflicts,
   seriesKnowledgeContent,
   seriesKnowledgeReviewDigest,
@@ -3279,6 +3314,8 @@ interface ReimportCommitWork {
   readonly legacyResultWithoutPresentation: boolean;
   phase: 'parse' | 'mappings';
   parseBytes: number;
+  /** A converted source's working representation, reproduced from the kept original before the parse (Issue #597). */
+  converted: { digest: string; byteLength: number; fidelity: FidelityCategoryProjection[] } | null;
   parsedIngest: IngestedDocx | null;
   parseFailure: unknown;
   mappingPosition: number;
@@ -3603,7 +3640,17 @@ function closeDatabaseQuietly(db: DatabaseSync | null): void {
  * files differently now. Said at the choice, in the editor's words; the way on is a new Book.
  */
 export const SOURCE_VERSION_PARSER_CHANGED_MESSAGE =
-  '这本书里已有同一个文件的来源版本，但它是用旧版 AI7 的读取方式导入的；AI7 现在读取文件的方式已经不同，不能在原来的来源版本上再次导入这个文件。可以把它作为新书导入。';
+  '这本书里已有同一个文件的来源版本，但它是用旧版 AI7 的读取方式导入的；AI7 现在读取文件的方式已经不同，不能在原来的来源版本上再次导入这个文件。可以把它作为新建图书导入。';
+
+/**
+ * J-01's `tamper-reimport-proof-before-validation` control (Issue #569): one reimport mapping's staged text altered before the
+ * whole-store validation, which must then refuse the store. Only a mapping that has staged text is chosen — a deletion's is
+ * NULL, and `NULL || '篡改'` is NULL, which would report one change and alter nothing — so the store is tampered every time.
+ */
+export const REIMPORT_PROOF_TAMPER_SQL = `UPDATE manuscript_reimport_mappings SET staged_text = staged_text || '篡改'
+           WHERE mapping_id = (
+             SELECT mapping_id FROM manuscript_reimport_mappings WHERE staged_text IS NOT NULL ORDER BY mapping_id LIMIT 1
+           )`;
 
 /** The profile a Production Document follows (Issue #415, S66c): the Book's built-in workflow profile's projection. */
 function workflowProfilePin(profile: BuiltInWorkflowProfile): WorkflowProfilePin {
@@ -3748,6 +3795,7 @@ export class EditorialStore {
       checkpointOwner: boundedAuthority,
       // A package export's 交付包清单 (Issue #416, S67b), written by the package's export from the version's own record.
       packageManifest: (bookId, packageVersionId) => this.#packageExports.manifest(bookId, packageVersionId),
+      packageVersion: (bookId, packageVersionId) => this.#packageExports.version(bookId, packageVersionId),
     });
     // 交付物 lists a Book's approved exports beside its 发稿 (Issue #413), read from the export ledger. Its Production
     // Documents (Issue #415) are a read of their own, each Delivery Record with what its export came to.
@@ -3761,6 +3809,7 @@ export class EditorialStore {
     this.#publicationVersions = new PublicationVersionStore(authority, (bookId) => this.#manuscriptExport.records(bookId), {
       summaries: (bookId, publicationVersionId) => this.#maintenanceCases.summaries(bookId, publicationVersionId),
       withdrawn: (publicationVersionId) => this.#maintenanceCases.withdrawn(publicationVersionId),
+      withdrawnAt: (publicationVersionId) => this.#maintenanceCases.withdrawnAt(publicationVersionId),
     });
     // 图书交付包 (Issue #416) reads the Book's current 发稿版本, each house type's Delivery Records and its Review Runs.
     this.#bookDeliveryPackages = new BookDeliveryPackages(authority, {
@@ -3832,10 +3881,7 @@ export class EditorialStore {
       initializeBoundedSchema(authority, workflowProfile);
       initializeSourceImportSchema(authority, workflowProfile);
       if (control.induceReimportProofTamper) {
-        requireStore(authority.prepare(
-          `UPDATE manuscript_reimport_mappings SET staged_text = staged_text || '篡改'
-           WHERE mapping_id = (SELECT mapping_id FROM manuscript_reimport_mappings ORDER BY mapping_id LIMIT 1)`,
-        ).run().changes === 1, 'E2E_CONTROL_INVALID', '没有可用于启动校验的重新导入证明。');
+        requireStore(authority.prepare(REIMPORT_PROOF_TAMPER_SQL).run().changes === 1, 'E2E_CONTROL_INVALID', '没有可用于启动校验的重新导入证明。');
       }
       initializeManuscriptReimportSchema(authority, workflowProfile);
       // A store already at the terminal version is validated whole exactly twice per open: once above,
@@ -3947,6 +3993,10 @@ export class EditorialStore {
       await store.#sweepUnreferencedContentObjects();
       await recoveryObjects.cleanup((relativeKey) =>
         store.#boundedCall(() => store.#boundedAuthority.isRecoveryObjectReferenced(relativeKey)));
+      // What an interrupted 放入资料库 left beside the kept originals (Issue #427 review).
+      await store.#libraryMaterials.sweep();
+      // A database package staged and never approved, or cut off mid-write, is a whole copy of the data (Issue #434 review).
+      await store.#databaseExports.sweep();
       store.#boundedCall(() => store.#boundedAuthority.startServiceLifetime(lifetimeId, new Date().toISOString()));
       // Every store records the versions that open it (Issue #433, S85a; DSTO-016): a new record only when one changed.
       store.#softwareVersion = softwareVersion;
@@ -4539,7 +4589,7 @@ export class EditorialStore {
    * Startup reconciliation (CONT-014): the baseline Runs a stopped service left under way are settled `paused` or
    * `resumable`; the ones left cancelling are named for the execution owner to finish.
    */
-  reconcileStoppedBaselineAnalysisRuns(): { settled: number; cancelling: ReadonlyArray<string>; answered: ReadonlyArray<string>; queued: ReadonlyArray<string> } {
+  reconcileStoppedBaselineAnalysisRuns(): { settled: number; cancelling: ReadonlyArray<string>; answered: ReadonlyArray<string> } {
     this.#assertAvailable();
     return this.#analysisCall(() => this.#baselineAnalysis.reconcileStoppedRuns());
   }
@@ -5754,16 +5804,29 @@ export class EditorialStore {
     return this.#guidelineCall(() => this.#reviewGuidelines.projection());
   }
 
-  /** 知识库 › 范例 (Issue #427, S79b; KB-004, KB-006): every published Book's delivered documents, read from their records. */
-  inspectExemplars(): ExemplarsProjection {
-    this.#assertAvailable();
-    return readExemplars(this.#authority, { current: (bookId) => this.#peopleCall(() => this.#bookPeople.current(bookId)) });
+  /**
+   * 知识库 › 范例 (Issue #427, S79b; KB-004, KB-006): one page of the published Books' delivered documents, each record read
+   * through its owner — the designations and their 撤回 through 发稿版本's, the Delivery Records through the documents'.
+   */
+  inspectExemplars(after: ExemplarBookCursor | null): ExemplarsProjection {
+    if (after !== null) {
+      requireStore(UUID_PATTERN.test(after.bookId) && after.title === safeTitle(after.title), 'EXEMPLAR_CURSOR_INVALID', '范例列表位置无效。');
+    }
+    return this.#publicationCall(() => readExemplars({
+      books: (cursor, limit) => this.#publicationVersions.designatedBooks(cursor, limit),
+      designations: (bookId) => this.#publicationVersions.history(bookId),
+      documents: (bookId) => this.#documentCall(() => this.#productionDocuments.deliveryReadings(bookId)),
+      people: (bookId) => this.#peopleCall(() => this.#bookPeople.current(bookId)),
+    }, after));
   }
 
-  /** 知识库 › 工序与规则 (Issue #427, S79d; KB-010): the review categories' 工序 as they apply now, and the native artifact. */
-  inspectKnowledgeProcedures(): KnowledgeProceduresProjection {
-    this.#assertAvailable();
-    return readKnowledgeProcedures(this.#authority, this.#reviewGuidelines.configuration());
+  /**
+   * 知识库 › 工序与规则 (Issue #427, S79d; KB-010): the review categories' 工序 as they apply now, and the native artifact as
+   * its owner reads it for the house.
+   */
+  async inspectKnowledgeProcedures(): Promise<KnowledgeProceduresProjection> {
+    const profile = await this.#artifactCall(() => this.#editorialWorkspaceProfile.house());
+    return this.#guidelineCall(() => readKnowledgeProcedures(this.#authority, this.#reviewGuidelines.configuration(), profile));
   }
 
   /** 导入新版本's first step: the picked file's clauses as the next version of one document would read them; nothing is recorded. */
@@ -5786,11 +5849,16 @@ export class EditorialStore {
   }
 
   /**
-   * 知识库 › 资料库 (Issue #427, S79c; KB-007): every item the editor collected — where it belongs, whether it may teach, and
-   * whose Tasks may list it under 允许参考 — with the Books an attribution can name.
+   * 知识库 › 资料库 (Issue #427, S79c; KB-007): one page of the items the editor collected — where each belongs, whether it may
+   * teach, and whose Tasks may list it under 允许参考 — newest first, after the cursor.
    */
-  inspectLibraryMaterials(): LibraryMaterialsProjection {
-    return this.#libraryCall(() => this.#libraryMaterials.projection());
+  inspectLibraryMaterials(after: LibraryMaterialCursor | null): LibraryMaterialsProjection {
+    return this.#libraryCall(() => this.#libraryMaterials.page(after));
+  }
+
+  /** One 资料库 item as its card reads it. */
+  inspectLibraryMaterial(materialId: string): LibraryMaterialProjection {
+    return this.#libraryCall(() => this.#libraryMaterials.item(materialId));
   }
 
   /** 放入资料…'s first step: the picked file identified, measured and digested as it would arrive; nothing is kept. */
@@ -5808,7 +5876,7 @@ export class EditorialStore {
    * 放入资料库: the previewed file kept whole in the Agent Data Root by its digest, then its arrival recorded with the title and
    * kind the editor gave it. A title that cannot stand is refused before anything is copied.
    */
-  async addLibraryMaterial(input: { previewId: string; title: string; kind: LibraryMaterialKind }): Promise<LibraryMaterialsProjection> {
+  async addLibraryMaterial(input: { previewId: string; title: string; kind: LibraryMaterialKind }): Promise<LibraryMaterialProjection> {
     this.#assertAvailable();
     let kept: Awaited<ReturnType<LibraryMaterialLedger['keep']>>;
     try {
@@ -5818,15 +5886,16 @@ export class EditorialStore {
       if (error instanceof LibraryMaterialError) throw new StoreError(error.code, error.message);
       throw error;
     }
-    this.#libraryCall(() => this.#transaction(this.#authority, () => this.#libraryMaterials.record(kept, input.title, input.kind)));
-    return this.inspectLibraryMaterials();
+    const materialId = this.#libraryCall(() => this.#transaction(this.#authority, () => this.#libraryMaterials.record(kept, input.title, input.kind)));
+    // The one item it made: the page it joins is read again by the renderer's own paging, never re-sent whole.
+    return this.inspectLibraryMaterial(materialId);
   }
 
-  /** 定归属 or 定学习准入 (KB-007, LEARN-007): one decision appended to the item's chain, and the page as it now reads. */
-  decideLibraryMaterial(input: { materialId: string; expectedDecisions: number; decision: LibraryMaterialDecisionInput }): LibraryMaterialsProjection {
+  /** 定归属 or 定学习准入 (KB-007, LEARN-007): one decision appended to the item's chain, and the item as it now reads. */
+  decideLibraryMaterial(input: { materialId: string; expectedDecisions: number; decision: LibraryMaterialDecisionInput }): LibraryMaterialProjection {
     this.#libraryCall(() => this.#transaction(this.#authority, () =>
       this.#libraryMaterials.decide(input.materialId, input.expectedDecisions, input.decision)));
-    return this.inspectLibraryMaterials();
+    return this.inspectLibraryMaterial(input.materialId);
   }
 
   /** 知识库 › 评估方案 (Issue #429, S81a; KB-001, EVAL-003): the profile a new 评估 version snapshots, and its use. */
@@ -5907,28 +5976,69 @@ export class EditorialStore {
   }
 
   /**
-   * 质量与学习 › 学习准入 (Issue #61, plan slice S26b; LEARN-001 to LEARN-012, FDBK-013): the Learning Material of every Book
-   * that has any, or of the one Book named, each with its Review Card's excerpt and where it stands. A read.
+   * 质量与学习 › 学习准入 (Issue #61, plan slice S26b; LEARN-001 to LEARN-012, FDBK-013): one page of the Learning Material of
+   * every Book that has any, or of the one Book named — Books by title, a Book's materials by kind and then by when — each with
+   * its Review Card's excerpt and where it stands, at most `MAX_LEARNING_MATERIALS_PAGE` materials an answer (Issue #61
+   * review). A read.
    */
-  inspectLearningMaterials(bookId: string | null): LearningMaterialsProjection {
+  inspectLearningMaterials(bookId: string | null, after: LearningMaterialCursor | null = null): LearningMaterialsProjection {
     return this.#learningCall(() => {
       requireStore(bookId === null || UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
-      const books = bookId === null
-        ? (this.#authority.prepare('SELECT book_id FROM books ORDER BY title, book_id').all() as SqlRow[]).map((row) => asString(row.book_id))
-        : [bookId];
+      requireStore(after === null || (UUID_PATTERN.test(after.bookId) && after.bookTitle === safeTitle(after.bookTitle) &&
+        !Number.isNaN(Date.parse(after.orderedAt)) && LEARNING_MATERIAL_KEY_PATTERN.test(after.materialKey)),
+      'LEARNING_CURSOR_INVALID', '学习准入列表位置无效。');
+      const rows = (bookId === null
+        ? after === null
+          ? this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').all()
+          : this.#authority.prepare('SELECT book_id, title FROM books WHERE title > ? OR (title = ? AND book_id >= ?) ORDER BY title, book_id')
+            .all(after.bookTitle, after.bookTitle, after.bookId)
+        : this.#authority.prepare('SELECT book_id, title FROM books WHERE book_id = ?').all(bookId)) as SqlRow[];
+      // Up to one material beyond the page, so the page knows whether another follows.
+      const collected: Array<{ bookId: string; title: string; material: LearningMaterialProjection; orderedAt: string }> = [];
+      for (const row of rows) {
+        const id = asString(row.book_id);
+        const title = asString(row.title);
+        const materials = this.#learningMaterialsOf(id, true)
+          .filter((entry) => after === null || id !== after.bookId || learningMaterialOrder({ materialKey: entry.material.materialKey, orderedAt: entry.orderedAt }, after) > 0);
+        for (const { material, orderedAt } of materials) {
+          collected.push({ bookId: id, title, material, orderedAt });
+          if (collected.length > MAX_LEARNING_MATERIALS_PAGE) break;
+        }
+        if (collected.length > MAX_LEARNING_MATERIALS_PAGE) break;
+      }
+      const shown = collected.slice(0, MAX_LEARNING_MATERIALS_PAGE);
+      const books: LearningMaterialsBookProjection[] = [];
+      for (const entry of shown) {
+        const book = books.at(-1);
+        if (book !== undefined && book.bookId === entry.bookId) (book.materials as LearningMaterialProjection[]).push(entry.material);
+        else books.push({ ...this.#learningBookOf(entry.bookId, entry.title), materials: [entry.material] });
+      }
+      // A Book named by itself is shown even while it has no material.
+      if (bookId !== null && after === null && books.length === 0 && rows.length === 1) books.push({ ...this.#learningBookOf(bookId, asString(rows[0]!.title)), materials: [] });
+      const last = shown.at(-1);
       return {
         basis: LEARNING_ELIGIBILITY_BASIS,
-        books: books.flatMap((id) => {
-          const book = this.#learningBook(id, true);
-          return book.materials.length === 0 && bookId === null ? [] : [book];
-        }),
+        books,
+        nextCursor: collected.length > MAX_LEARNING_MATERIALS_PAGE && last !== undefined
+          ? { bookTitle: last.title, bookId: last.bookId, orderedAt: last.orderedAt, materialKey: last.material.materialKey }
+          : null,
       };
     });
   }
 
-  /** 记录学习准入决定 for the exact version the editor read, attributed to the Book's people as they stand (FDBK-013). */
-  decideLearningMaterial(input: DecideLearningMaterialInput): LearningMaterialsProjection {
+  /** One Learning Material as its Review Card reads it: what a decision answers with, and what a refusal reads again. */
+  inspectLearningMaterial(bookId: string, materialKey: string): LearningMaterialProjection {
     return this.#learningCall(() => {
+      requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+      const found = this.#learningMaterialsOf(bookId, true).find((entry) => entry.material.materialKey === materialKey);
+      requireStore(found !== undefined, 'LEARNING_MATERIAL_NOT_FOUND', '这条材料已经不在学习准入之列。');
+      return found.material;
+    });
+  }
+
+  /** 记录学习准入决定 for the exact version the editor read, attributed to the Book's people as they stand (FDBK-013). */
+  decideLearningMaterial(input: DecideLearningMaterialInput): LearningMaterialProjection {
+    this.#learningCall(() => {
       requireStore(UUID_PATTERN.test(input.bookId), 'BOOK_INVALID', '图书标识无效。');
       this.#transaction(this.#authority, () => {
         const candidate = this.#learningCandidates(input.bookId, false).find((entry) => entry.materialKey === input.materialKey);
@@ -5944,21 +6054,25 @@ export class EditorialStore {
           attribution: { peopleVersion: people.version, authors: people.authors, editors: people.editors },
         });
       });
-      return { basis: LEARNING_ELIGIBILITY_BASIS, books: [this.#learningBook(input.bookId, true)] };
     });
+    // The one material it decided: the page it sits on is never re-sent whole.
+    return this.inspectLearningMaterial(input.bookId, input.materialKey);
   }
 
   /**
-   * 质量与学习 › 反馈记录 (Issue #61, plan slice S26c; FDBK-009, FDBK-010, FDBK-013): every piece of the editor's feedback, newest
-   * first — each 修改建议's current decision with its reason as it stands, each analysis item's latest judgment, each 审阅
-   * finding's latest 忽略 — with where it opens and each Book's people. Passive history: a read, asking nothing.
+   * 质量与学习 › 反馈历史 (Issue #61, plan slice S26c; FDBK-009, FDBK-010, FDBK-013): the editor's feedback, newest first — each
+   * 修改建议's current decision with its reason as it stands, each analysis item's latest judgment, each 审阅 finding's latest
+   * 忽略 — with where it opens and the Book's people it is attributed to: the version in force when it was given, or the first
+   * saved after it (Issue #61 review). One answer holds what `feedbackHistoryPage` admits, each reason bounded. Passive
+   * history: a read, asking nothing.
    */
   inspectFeedbackHistory(): FeedbackHistoryProjection {
     return this.#learningCall(() => {
-      const entries: FeedbackHistoryEntryProjection[] = [];
+      const entries: Array<Omit<FeedbackHistoryEntryProjection, 'peopleVersion'>> = [];
       const reasons = new DecisionFeedbackLedger(this.#authority);
       const decisions = this.#authority.prepare(
-        `SELECT m.book_id, m.mark_id, m.manuscript_id, m.branch_id, m.block_id, d.decision_id, d.disposition, d.recorded_at, r.reason, r.reason_source
+        `SELECT m.book_id, m.mark_id, m.manuscript_id, m.branch_id, m.block_id, m.anchor_state, m.source_origin, m.source_label,
+                d.decision_id, d.disposition, d.recorded_at, r.reason, r.reason_source
          FROM editorial_marks m
          JOIN proposal_change_items i ON i.mark_id = m.mark_id
          JOIN proposal_item_decisions d ON d.item_id = i.item_id
@@ -5977,12 +6091,16 @@ export class EditorialStore {
           entryId: `proposal-decision:${decisionId}`,
           origin: 'proposal-decision',
           bookId,
-          dimension: null,
+          // A 修改建议 a 审阅 category made is about that category (Issue #61 review); one the editor or a Task made names none.
+          dimension: row.source_origin === 'review-category' ? asString(row.source_label) : null,
           signal: DISPOSITION_LABELS[asString(row.disposition)] ?? asString(row.disposition),
-          reason: standing.reason,
+          reason: feedbackReasonExcerpt(standing.reason),
           reasonState: standing.reasonState,
           recordedAt: asString(row.recorded_at),
-          target: { kind: 'mark', bookId, manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id), blockId: asString(row.block_id), markId: asString(row.mark_id) },
+          target: {
+            kind: 'mark', bookId, manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id), blockId: asString(row.block_id),
+            markId: asString(row.mark_id), detached: row.anchor_state === 'detached',
+          },
         });
       }
       for (const book of this.#authority.prepare('SELECT book_id FROM books').all() as SqlRow[]) {
@@ -5995,10 +6113,10 @@ export class EditorialStore {
             bookId,
             dimension: DIMENSION_LABELS[signal.dimension],
             signal: JUDGMENT_LABELS[signal.judgment],
-            reason: reason.length === 0 ? null : reason,
+            reason: feedbackReasonExcerpt(reason.length === 0 ? null : reason),
             reasonState: reason.length === 0 ? 'none' : 'given',
             recordedAt: signal.recordedAt,
-            target: { kind: 'analysis', bookId, revisionId: signal.revisionId },
+            target: { kind: 'analysis', bookId, revisionId: signal.revisionId, itemKey: signal.itemKey, dimension: signal.dimension },
           });
         }
       }
@@ -6017,38 +6135,52 @@ export class EditorialStore {
           bookId,
           dimension: reviewCategoryEntry(categoryId)?.label ?? categoryId,
           signal: '忽略',
-          reason: asString(row.reason),
+          reason: feedbackReasonExcerpt(asString(row.reason)),
           reasonState: 'given',
           recordedAt: asString(row.recorded_at),
           target: { kind: 'review', bookId, reviewRunId: asString(row.review_run_id), findingId: asString(row.finding_id) },
         });
       }
-      entries.sort((a, b) => (a.recordedAt > b.recordedAt ? -1 : a.recordedAt < b.recordedAt ? 1 : a.entryId < b.entryId ? -1 : 1));
-      const kept = entries.slice(0, MAX_FEEDBACK_HISTORY_ENTRIES);
-      const bookIds = [...new Set(kept.map((entry) => entry.bookId))];
-      return {
-        books: bookIds
-          .map((bookId) => {
-            const people = this.#bookPeople.current(bookId);
-            return { bookId, title: this.#evaluationBookTitle(bookId), authors: people.authors, editors: people.editors };
-          })
-          .sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : a.bookId < b.bookId ? -1 : 1)),
-        entries: kept,
-        truncated: entries.length > kept.length,
+      // Each entry is attributed to the Book's people as they stood when it was given, or as first saved after it.
+      const versions = new Map<string, ReturnType<BookPeople['versions']>>();
+      const versionsOf = (bookId: string): ReturnType<BookPeople['versions']> => {
+        let found = versions.get(bookId);
+        if (found === undefined) {
+          found = this.#bookPeople.versions(bookId);
+          versions.set(bookId, found);
+        }
+        return found;
       };
+      const attributed: FeedbackHistoryEntryProjection[] = entries.map((entry) => {
+        const all = versionsOf(entry.bookId);
+        const inForce = all.filter((version) => version.recordedAt <= entry.recordedAt).at(-1) ?? all[0];
+        return { ...entry, peopleVersion: inForce?.version ?? 0 };
+      });
+      attributed.sort((a, b) => (a.recordedAt > b.recordedAt ? -1 : a.recordedAt < b.recordedAt ? 1 : a.entryId < b.entryId ? -1 : 1));
+      return feedbackHistoryPage(
+        attributed,
+        (bookId) => {
+          const people = this.#bookPeople.current(bookId);
+          return { bookId, title: this.#evaluationBookTitle(bookId), authors: people.authors, editors: people.editors };
+        },
+        (bookId, version) => {
+          const found = versionsOf(bookId).find((entry) => entry.version === version);
+          return found === undefined ? null : { version: found.version, authors: found.authors, editors: found.editors };
+        },
+      );
     });
   }
 
-  #learningBook(bookId: string, withExcerpt: boolean): LearningMaterialsBookProjection {
-    const title = this.#evaluationBookTitle(bookId);
+  /** A Book's heading on the page: its title, its people, and how many materials it has in all. */
+  #learningBookOf(bookId: string, title: string): Omit<LearningMaterialsBookProjection, 'materials'> {
     const people = this.#bookPeople.current(bookId);
-    return {
-      bookId,
-      title,
-      authors: people.authors,
-      editors: people.editors,
-      materials: this.#learningEligibility.project(bookId, this.#learningCandidates(bookId, withExcerpt)),
-    };
+    return { bookId, title, authors: people.authors, editors: people.editors, materialCount: this.#learningCandidates(bookId, false).length };
+  }
+
+  /** A Book's Learning Material as the page orders it — by kind, then by when each came to be, then by place — with that time. */
+  #learningMaterialsOf(bookId: string, withExcerpt: boolean): Array<{ material: LearningMaterialProjection; orderedAt: string }> {
+    const candidates = this.#learningCandidates(bookId, withExcerpt).sort((a, b) => learningMaterialOrder(a, b));
+    return this.#learningEligibility.project(bookId, candidates).map((material, index) => ({ material, orderedAt: candidates[index]!.orderedAt }));
   }
 
   /**
@@ -6089,6 +6221,7 @@ export class EditorialStore {
         reason: standing.reason,
         reasonSource: standing.reasonSource,
         recordedAt: standing.reasonRevisedAt ?? asString(row.recorded_at),
+        decidedAt: asString(row.recorded_at),
       }, withExcerpt));
     }
     const labels = new Map<string, BaselineAnalysisResultSetRevisionProjection | null>();
@@ -6583,8 +6716,18 @@ export class EditorialStore {
   async #convertSelectedManuscript(
     selectedPath: string,
     format: ManuscriptConversionProjection['sourceFormat'],
+    expected?: { digest: string; byteLength: number },
   ): Promise<{ docx: Uint8Array; loss: ConversionLoss } | null> {
     const bytes = await readFile(selectedPath);
+    // A kept original is the digest of record (ADR 0072 §2): the bytes converted are the bytes the digest names, read
+    // once, so a same-size change that converts to the same working representation is still refused (#606's review).
+    if (expected !== undefined) {
+      requireStore(
+        bytes.byteLength === expected.byteLength && sha256(bytes) === expected.digest,
+        'SNAPSHOT_RESELECTION_REQUIRED',
+        '暂存对象摘要无效。',
+      );
+    }
     try {
       return format === 'DOC' ? await convertDocManuscript(bytes) : convertTextManuscript(bytes, { format });
     } catch (error) {
@@ -6979,7 +7122,10 @@ export class EditorialStore {
 
     const draft = one(
       this.#authority
-        .prepare('SELECT state, draft_version, object_digest FROM import_drafts WHERE draft_id = ?')
+        .prepare(
+          `SELECT state, draft_version, object_digest, source_format, working_object_digest, converter_identity
+           FROM import_drafts WHERE draft_id = ?`,
+        )
         .all(draftId) as SqlRow[],
       'DRAFT_NOT_FOUND',
       '导入草稿不存在。',
@@ -6999,6 +7145,28 @@ export class EditorialStore {
     } catch (error) {
       if (error instanceof StoreFatalError) throw error;
       throw new StoreError('SNAPSHOT_RESELECTION_REQUIRED', '重选文件无法形成完整的本地暂存快照。');
+    }
+    // A converted draft was read through its working representation, so reselecting its original reproduces that
+    // representation and restages it (Issue #611): after a converter change the draft is whole again, never only 放弃.
+    // It is routed on its own row, whatever the picked file is named or identified as: the original's digest of record,
+    // checked before any conversion or write, is the whole identity proof, and a draft read through a working
+    // representation never takes the source-only or the DOCX path (#615's review).
+    const recordedConversion = readConversionColumns(
+      draft,
+      draft.source_format === null || draft.source_format === undefined ? 'DOCX' : requireSourceFormat(asString(draft.source_format)),
+      '导入草稿的转换记录不完整。',
+    );
+    if (recordedConversion !== null) {
+      const original = one(
+        this.#authority.prepare('SELECT byte_length FROM content_objects WHERE object_digest = ?').all(expectedDigest) as SqlRow[],
+        'STORE_CORRUPT',
+        '导入草稿的原文件对象不存在。',
+      );
+      return this.#reselectConvertedDraft(
+        { draftId, selectionToken, selectedPath, displayName },
+        { expectedDigest, expectedBytes: asNumber(original.byte_length), expectedDraftVersion, previousState, recovered: attempt !== null },
+        recordedConversion.sourceFormat,
+      );
     }
     // Reselection identifies the file the same way staging does, so a format the product does not
     // read as a Manuscript comes back as the same source-only draft rather than a bare refusal.
@@ -7082,6 +7250,110 @@ export class EditorialStore {
     } finally {
       this.#discardIngest(ingested.ingestId);
     }
+  }
+
+  /**
+   * Reselect the exact original behind a converted draft (Issue #611). The original's own bytes are the identity check, as
+   * a first staging's are; the working representation is then reproduced from them and restaged — persisted, parsed and
+   * checked exactly as the first staging did — and the draft returns to `staged` with it, so a draft whose representation
+   * could no longer be reproduced, after a converter change, is whole again. The review it had is invalidated.
+   */
+  async #reselectConvertedDraft(
+    selection: { draftId: string; selectionToken: string; selectedPath: string; displayName: string },
+    draft: { expectedDigest: string; expectedBytes: number; expectedDraftVersion: number; previousState: string; recovered: boolean },
+    sourceFormat: ManuscriptConversionProjection['sourceFormat'],
+  ): Promise<ContinueImportProjection> {
+    const { draftId, selectionToken, selectedPath, displayName } = selection;
+    // The conversion is today's route for the draft's own format, as a first staging's is (#615's review): the working
+    // representation restaged below is this converter's output, so the draft, its review and a later Source Version
+    // name this converter, never the one recorded at the first staging (ADR 0072 §2).
+    const route = editableImport(sourceFormat);
+    requireStore(route.available && route.conversion !== undefined, 'SNAPSHOT_RESELECTION_REQUIRED', '重选文件无法再次转换。');
+    const conversion = route.conversion;
+    let converted: { docx: Uint8Array; loss: ConversionLoss } | null;
+    try {
+      // The bytes converted are the bytes the draft's digest names, read once (#606's review): another file is refused
+      // as the reselection's own mismatch.
+      converted = await this.#convertSelectedManuscript(selectedPath, conversion.sourceFormat,
+        { digest: draft.expectedDigest, byteLength: draft.expectedBytes });
+    } catch (error) {
+      if (error instanceof StoreFatalError) throw error;
+      if (error instanceof StoreError && error.code === 'SNAPSHOT_RESELECTION_REQUIRED') {
+        throw new StoreError('RESELECTION_MISMATCH', '重选文件与原暂存来源身份不一致。');
+      }
+      if (error instanceof StoreError) throw error;
+      throw new StoreError('SNAPSHOT_RESELECTION_REQUIRED', '重选文件无法形成完整的本地暂存快照。');
+    }
+    requireStore(converted !== null, 'SNAPSHOT_RESELECTION_REQUIRED', '重选文件无法再次转换。');
+    const fidelity = conversionFidelityReport(conversion, converted.loss);
+    return this.#withContentObjectLifecycle(async () => {
+      this.#requireNoAbandonmentCleanupIntent(draftId);
+      const retained = await this.#persistRetainedOriginal(selectedPath, conversion.sourceFormat);
+      requireStore(retained.digest === draft.expectedDigest, 'RESELECTION_MISMATCH', '重选文件与原暂存来源身份不一致。');
+      const working = await this.#persistWorkingObject(converted.docx);
+      const ingested = await this.#parseIntoIngestedWorkingRepresentation(draftId, working.path, displayName);
+      try {
+        const { parsed } = ingested;
+        requireStore(isCleanTracerFidelity(parsed.fidelity), 'FIDELITY_OUTSIDE_TRACER', '工作表示带有解析器自身的保真信号。');
+        requireStore(
+          parsed.sourceDigest === working.digest && parsed.archiveBytes === working.byteLength,
+          'OBJECT_VERIFY_FAILED',
+          '工作表示对象与解析结果不一致。',
+        );
+        const nextVersion = draft.expectedDraftVersion + 1;
+        const now = new Date().toISOString();
+        this.#transaction(this.#authority, () => {
+          const current = one(
+            this.#authority
+              .prepare('SELECT state, draft_version, object_digest FROM import_drafts WHERE draft_id = ?')
+              .all(draftId) as SqlRow[],
+            'DRAFT_NOT_FOUND',
+            '导入草稿不存在。',
+          );
+          requireStore(
+            (asString(current.state) === 'staged' || asString(current.state) === 'reviewed') &&
+              asNumber(current.draft_version) === draft.expectedDraftVersion &&
+              asString(current.object_digest) === draft.expectedDigest,
+            'DRAFT_VERSION_CHANGED',
+            '导入草稿在重选持久化前已变化。',
+          );
+          this.#insertContentObject(working.digest, working.relativeKey, working.byteLength, now);
+          this.#insertContentObject(retained.digest, retained.relativeKey, retained.byteLength, now);
+          this.#authority.prepare('DELETE FROM manuscript_reimport_comparisons WHERE draft_id = ?').run(draftId);
+          this.#authority.prepare('DELETE FROM staged_import_snapshots WHERE draft_id = ?').run(draftId);
+          // As the first staging: the snapshot is keyed on the original's digest, the working representation is what was read.
+          this.#promoteIngestSnapshot(draftId, ingested, now, { sourceDigest: retained.digest, fidelity });
+          const draftUpdate = this.#authority
+            .prepare(
+              `UPDATE import_drafts
+               SET selection_token = ?, state = 'staged', draft_version = ?, display_name = ?, selected_path = ?,
+                   working_object_digest = ?, converter_identity = ?, reviewed_title = NULL, reviewed_target_choice_id = NULL,
+                   reviewed_target_kind = NULL, reviewed_existing_book_id = NULL,
+                   reviewed_relationship = NULL, reviewed_book_state_digest = NULL,
+                   reviewed_reuse_source_version_id = NULL,
+                   reviewed_lineage_status = NULL, reviewed_lineage_source_version_id = NULL,
+                   reviewed_checkpoint_revision_id = NULL, reviewed_manuscript_id = NULL, reviewed_branch_id = NULL,
+                   review_digest = NULL, reviewed_at = NULL
+               WHERE draft_id = ? AND draft_version = ? AND state IN ('staged', 'reviewed')`,
+            )
+            .run(selectionToken, nextVersion, displayName, selectedPath, working.digest, conversion.converterIdentity,
+              draftId, draft.expectedDraftVersion);
+          requireStore(draftUpdate.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在重选时已变化。');
+          this.#authority.prepare("DELETE FROM import_commit_attempts WHERE draft_id = ? AND state = 'prepared'").run(draftId);
+          this.#boundedCall(() => this.#boundedAuthority.assertStagedDraftIntegrity(draftId));
+          this.#assertForeignKeys(this.#authority);
+        });
+        return {
+          state: 'target-review-required',
+          staged: this.#stagedProjection(this.#loadDraftSnapshot(draftId)),
+          originalFileAccess: { state: 'available-exact', label: '原始所选文件仍可访问且身份一致' },
+          reviewInvalidated: draft.previousState === 'reviewed' || draft.recovered,
+          notice: '已通过原来源摘要精确匹配完成重选，并重新转换、形成完整暂存与预检；请重新确认全部决定。',
+        };
+      } finally {
+        this.#discardIngest(ingested.ingestId);
+      }
+    });
   }
 
   /**
@@ -9186,6 +9458,7 @@ export class EditorialStore {
       legacyResultWithoutPresentation: options.legacyResultWithoutPresentation === true,
       phase: 'parse',
       parseBytes: 0,
+      converted: null,
       parsedIngest: null,
       parseFailure: null,
       mappingPosition: 0,
@@ -9194,14 +9467,26 @@ export class EditorialStore {
       offsetSegments: [],
     };
     this.#reimportCommitWork.set(workId, work);
-    void this.#parseIntoIngest(input.draftId, objectPath, snapshotBeforeAttempt.displayName, {
-      signal: abortController.signal,
-      onArchiveProgress: (bytes) => {
-        if (this.#reimportCommitWork.get(workId) === work) {
-          work.parseBytes = Math.min(bytes, snapshotBeforeAttempt.sourceBytes);
-        }
-      },
-    }).then((ingested) => {
+    // A converted source was read through its working representation (ADR 0072 §2), and the kept original is not a Word
+    // document: the commit re-reads the working representation, after reproducing the conversion from the original, as
+    // revalidation does (Issue #597). Its parse progress still counts against the original's bytes.
+    const parseSource = async (): Promise<IngestedDocx> => {
+      const converted = snapshotBeforeAttempt.conversion === null
+        ? null
+        : await this.#revalidateConversion(snapshotBeforeAttempt, objectPath);
+      work.converted = converted;
+      return this.#parseIntoIngest(input.draftId, converted?.path ?? objectPath, snapshotBeforeAttempt.displayName, {
+        signal: abortController.signal,
+        onArchiveProgress: (bytes) => {
+          if (this.#reimportCommitWork.get(workId) === work) {
+            // The segment is sized by the original's bytes; a working representation's parse is scaled into it.
+            const scaled = converted === null ? bytes : Math.round(bytes * snapshotBeforeAttempt.sourceBytes / converted.byteLength);
+            work.parseBytes = Math.min(scaled, snapshotBeforeAttempt.sourceBytes);
+          }
+        },
+      });
+    };
+    void parseSource().then((ingested) => {
       if (this.#reimportCommitWork.get(workId) === work) work.parsedIngest = ingested;
       else this.#discardIngest(ingested.ingestId);
     }).catch((error: unknown) => {
@@ -9311,14 +9596,18 @@ export class EditorialStore {
         return { done: false, completed: work.parseBytes, total: work.total, result: null };
       }
       const parsed = work.parsedIngest.parsed;
+      // A converted source is checked against its reproduced working representation, and its fidelity is the
+      // conversion's, as revalidation checks it (Issue #597).
+      const converted = work.snapshot.conversion === null ? null : work.converted;
       requireStore(
-        parsed.sourceDigest === work.snapshot.sourceDigest && parsed.archiveBytes === work.snapshot.sourceBytes &&
+        parsed.sourceDigest === (converted?.digest ?? work.snapshot.sourceDigest) &&
+          parsed.archiveBytes === (converted?.byteLength ?? work.snapshot.sourceBytes) &&
           parsed.parserIdentity === work.snapshot.parserIdentity &&
           parsed.contentDigest === work.snapshot.contentDigest &&
           parsed.structureDigest === work.snapshot.structureDigest &&
           parsed.blockCount === work.snapshot.blockCount &&
           parsed.characterCount === work.snapshot.characterCount &&
-          canonicalJson(parsed.fidelity) === canonicalJson(work.snapshot.fidelity) &&
+          canonicalJson(converted?.fidelity ?? parsed.fidelity) === canonicalJson(work.snapshot.fidelity) &&
           parsed.titleSuggestion.value === work.snapshot.titleSuggestion &&
           parsed.titleSuggestion.sourceLabel === work.snapshot.titleSource &&
           this.#retentionCall(() => stagedImportSourcesMatch(this.#authority, work.input.draftId, work.parsedIngest!.sources)),
@@ -10477,7 +10766,10 @@ export class EditorialStore {
     return this.#calibrationCall(() => this.#evaluationCalibrationProjection());
   }
 
-  /** 录入定价与首印 for a Book's current 发稿版本 (EVAL-010). */
+  /**
+   * 录入定价与首印 for a Book's current 发稿版本 (EVAL-010) — the one the page listed: a 发稿版本 designated since refuses the
+   * save (Issue #430 review), so an open form never puts its numbers on a version the editor did not see.
+   */
   recordPublicationActuals(input: RecordPublicationActualsInput): EvaluationCalibrationProjection {
     return this.#calibrationCall(() => {
       requireStore(UUID_PATTERN.test(input.bookId), 'BOOK_INVALID', '图书标识无效。');
@@ -10485,6 +10777,8 @@ export class EditorialStore {
         one(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').all(input.bookId) as SqlRow[], 'BOOK_NOT_FOUND', '图书不存在。');
         const current = this.#publicationCall(() => this.#publicationVersions.current(input.bookId));
         requireStore(current !== null, 'PUBLICATION_REQUIRED', '这本书还没有发稿版本；设为发稿版本后才能录入定价与首印。');
+        requireStore(current.projection.publicationVersionId === input.publicationVersionId, 'ACTUALS_MOVED',
+          '这本书刚设了新的发稿版本；请看过现在的发稿版本再录入。');
         this.#evaluationCalibration.recordActuals({
           bookId: input.bookId,
           publicationVersionId: current.projection.publicationVersionId,
@@ -10537,6 +10831,7 @@ export class EditorialStore {
     return {
       calibration: {
         adjustments,
+        initialScoresConnected: false,
         threshold: CALIBRATION_MIN_ADJUSTMENTS,
         enabled: preferences.calibrationEnabled,
         active: calibrationActive(adjustments, preferences.calibrationEnabled),
@@ -10564,27 +10859,85 @@ export class EditorialStore {
 
   // ---- 书系 › 成员与共享范围 (Issue #63, plan slice S28a; V2-UX-SER-001 to SER-012) --------------------------------------
 
-  /** 书系: every Series of the house, by name, with how many Books each holds now. A read. */
-  inspectSeriesList(): SeriesListProjection {
-    return this.#seriesCall(() => this.#seriesListProjection());
-  }
-
-  #seriesListProjection(): SeriesListProjection {
-    const counts = this.#series.memberCounts();
-    return { series: this.#series.list().map((entry) => ({ ...entry, memberCount: counts.get(entry.seriesId) ?? 0 })) };
-  }
-
-  /** 新建书系: a name the house has not used, and an optional 说明. It holds no Book until one is added. */
-  createSeries(input: CreateSeriesInput): SeriesCreationProjection {
+  /** 书系: one page of the house's Series, by name, with how many Books each holds now (Issue #63 review). A read. */
+  inspectSeriesList(after: SeriesListCursor | null = null): SeriesListProjection {
     return this.#seriesCall(() => {
-      const created = this.#transaction(this.#authority, () => this.#series.create(input));
-      return { seriesId: created.seriesId, completionLabel: `已新建书系「${created.title}」`, list: this.#seriesListProjection() };
+      requireStore(after === null || (UUID_PATTERN.test(after.seriesId) && typeof after.title === 'string' && after.title.length >= 1 &&
+        after.title.length <= 2 * MAX_SERIES_TITLE_CHARACTERS), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      const counts = this.#series.memberCounts();
+      const rows = this.#series.listAfter(after, MAX_SERIES_LIST_PAGE + 1).map((entry) => ({ ...entry, memberCount: counts.get(entry.seriesId) ?? 0 }));
+      const { page, more } = weighedPage(rows, MAX_SERIES_LIST_PAGE);
+      const last = page.at(-1);
+      return { series: page, nextCursor: more && last !== undefined ? { title: last.title, seriesId: last.seriesId } : null };
     });
   }
 
-  /** One Series' 成员与共享范围 (SER-001): its members, the Books that may join, and every membership change. A read. */
+  /** 新建书系: a name the house has not used, and an optional 说明. It holds no Book until one is added; the answer is it alone. */
+  createSeries(input: CreateSeriesInput): SeriesCreationProjection {
+    return this.#seriesCall(() => {
+      const created = this.#transaction(this.#authority, () => this.#series.create(input));
+      return { seriesId: created.seriesId, completionLabel: `已新建书系「${created.title}」`, series: { ...created, memberCount: 0 } };
+    });
+  }
+
+  /**
+   * One Series' 成员与共享范围 (SER-001): the first page of its members and of its membership changes, and how many Books it
+   * and the house hold. A read.
+   */
   inspectSeries(seriesId: string): SeriesProjection {
     return this.#seriesCall(() => this.#seriesProjection(this.#requireSeries(seriesId)));
+  }
+
+  /** `更多成员…`: the next page of a Series' members, newest joined first (Issue #63 review). A read. */
+  inspectSeriesMembers(seriesId: string, after: SeriesMembersCursor | null): SeriesMembersPageProjection {
+    return this.#seriesCall(() => {
+      const series = this.#requireSeries(seriesId);
+      requireStore(after === null || (UUID_PATTERN.test(after.bookId) && typeof after.joinedAt === 'string' && !Number.isNaN(Date.parse(after.joinedAt))),
+        'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      const { members, nextCursor } = this.#seriesMembersPage(series.seriesId, after);
+      return { members, nextCursor };
+    });
+  }
+
+  /**
+   * 加入书系…'s Books (Issue #63 review): a page of every Book the Series does not hold, by title, narrowed to titles holding
+   * the editor's words when they give any — so every Book can be found and added, however many the house holds. A read.
+   */
+  inspectSeriesCandidates(seriesId: string, text: string, after: SeriesCandidatesCursor | null): SeriesCandidatesProjection {
+    return this.#seriesCall(() => {
+      const series = this.#requireSeries(seriesId);
+      const words = typeof text === 'string' && text.isWellFormed() ? text.normalize('NFC').trim() : null;
+      requireStore(words !== null && [...words].length <= MAX_SERIES_CANDIDATE_QUERY_CHARACTERS && !/[\r\n]/u.test(words), 'SERIES_QUERY_INVALID',
+        `查找的书名字词最多 ${MAX_SERIES_CANDIDATE_QUERY_CHARACTERS} 个字，写在一行里。`);
+      requireStore(after === null || (UUID_PATTERN.test(after.bookId) && typeof after.title === 'string' && after.title.length >= 1 && after.title.length <= 180),
+        'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      const rows = this.#authority.prepare(
+        `SELECT b.book_id, b.title FROM books b
+         WHERE NOT EXISTS (
+             SELECT 1 FROM series_membership_changes c WHERE c.series_id = ? AND c.book_id = b.book_id AND c.kind = 'add'
+               AND c.ordinal = (SELECT max(d.ordinal) FROM series_membership_changes d WHERE d.series_id = c.series_id AND d.book_id = c.book_id))
+           AND (? = '' OR instr(lower(b.title), lower(?)) > 0)
+           AND (? IS NULL OR b.title > ? OR (b.title = ? AND b.book_id > ?))
+         ORDER BY b.title, b.book_id LIMIT ?`,
+      ).all(series.seriesId, words, words, after?.title ?? null, after?.title ?? null, after?.title ?? null, after?.bookId ?? null,
+        MAX_SERIES_CANDIDATES_PAGE + 1) as SqlRow[];
+      const { page, more } = weighedPage(rows.map((row) => ({ bookId: asString(row.book_id), title: asString(row.title) })), MAX_SERIES_CANDIDATES_PAGE);
+      const last = page.at(-1);
+      return { candidates: page, nextCursor: more && last !== undefined ? { title: last.title, bookId: last.bookId } : null };
+    });
+  }
+
+  /** `更早的记录…`: the next page of one Series' or one Book's membership change records, newest first (Issue #63 review). A read. */
+  inspectSeriesHistory(filter: { readonly seriesId: string | null; readonly bookId: string | null }, after: SeriesHistoryCursor | null): SeriesHistoryPageProjection {
+    return this.#seriesCall(() => {
+      requireStore((filter.seriesId === null) !== (filter.bookId === null), 'SERIES_HISTORY_INVALID', '成员变更记录要按一个书系或一本书读取。');
+      requireStore(after === null || (typeof after.recordedAt === 'string' && !Number.isNaN(Date.parse(after.recordedAt)) && UUID_PATTERN.test(after.seriesId) &&
+        UUID_PATTERN.test(after.bookId) && Number.isSafeInteger(after.ordinal) && after.ordinal >= 1), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      const read = filter.seriesId !== null
+        ? this.#seriesHistoryPage({ seriesId: this.#requireSeries(filter.seriesId).seriesId }, after)
+        : this.#seriesHistoryPage({ bookId: filter.bookId! }, after);
+      return { history: read.history, nextCursor: read.nextCursor };
+    });
   }
 
   /**
@@ -10598,6 +10951,7 @@ export class EditorialStore {
   /**
    * 加入书系 or 移出书系 (SER-008 to SER-010): the preview is recomputed inside the transaction, and a preview the membership
    * or a governing record has moved past is refused rather than applied; the change record keeps what the preview showed.
+   * The answer is that record alone (Issue #63 review): the page reads the Series again, each list a page at a time.
    */
   changeSeriesMembership(input: ChangeSeriesMembershipInput): SeriesMembershipChangeResultProjection {
     return this.#seriesCall(() => {
@@ -10619,22 +10973,27 @@ export class EditorialStore {
       return {
         changeId: change.changeId,
         completionLabel: `${change.kind === 'add' ? '已加入' : '已移出'}书系「${preview.seriesTitle}」：《${preview.bookTitle}》`,
-        series: this.#seriesProjection(this.#requireSeries(preview.seriesId)),
+        change: this.#seriesChange(change, preview.seriesTitle, preview.bookTitle),
       };
     });
   }
 
-  /** A Book's side of 书系 (SER-009): the Series it is in now, and each change of its membership, newest first. A read. */
+  /**
+   * A Book's side of 书系 (SER-009): the Series it is in now — at most `MAX_BOOK_SERIES_MEMBERSHIPS`, with how many in all —
+   * and the first page of its membership changes, newest first. A read.
+   */
   inspectBookSeries(bookId: string): BookSeriesProjection {
     return this.#seriesCall(() => {
-      const bookTitle = this.#evaluationBookTitle(bookId);
-      const titles = new Map(this.#series.list().map((entry) => [entry.seriesId, entry.title]));
-      const history = this.#series.history({ bookId });
+      this.#evaluationBookTitle(bookId);
+      const memberships = this.#series.seriesOf(bookId);
+      const history = this.#seriesHistoryPage({ bookId }, null);
       return {
         bookId,
-        memberships: this.#series.seriesOf(bookId),
-        history: history.slice(0, MAX_SERIES_HISTORY_LISTED).map((change) => this.#seriesChange(change, titles.get(change.seriesId) ?? '', bookTitle)),
-        historyTruncated: history.length > MAX_SERIES_HISTORY_LISTED,
+        memberships: memberships.slice(0, MAX_BOOK_SERIES_MEMBERSHIPS),
+        membershipCount: memberships.length,
+        history: history.history,
+        historyCount: history.count,
+        historyNext: history.nextCursor,
       };
     });
   }
@@ -10662,6 +11021,7 @@ export class EditorialStore {
       seriesScopedRuns: 0,
       ...seriesLearningFacts(materials),
       knowledgeFromBook: this.#seriesKnowledge.itemsFromBook(series.seriesId, input.bookId),
+      knowledgeCandidatesFromBook: this.#seriesKnowledge.openFromBook(series.seriesId, input.bookId),
     });
     return {
       seriesId: series.seriesId,
@@ -10676,15 +11036,31 @@ export class EditorialStore {
   }
 
   #seriesProjection(series: StoredSeries): SeriesProjection {
-    const joined = this.#series.members(series.seriesId);
-    const memberIds = new Set(joined.map((entry) => entry.bookId));
-    const titles = new Map((this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').all() as SqlRow[])
-      .map((row) => [asString(row.book_id), asString(row.title)]));
-    const members = joined.slice(0, MAX_SERIES_MEMBERS_LISTED).map((entry) => {
+    const members = this.#seriesMembersPage(series.seriesId, null);
+    const history = this.#seriesHistoryPage({ seriesId: series.seriesId }, null);
+    return {
+      ...series,
+      memberCount: members.count,
+      bookCount: Number((this.#authority.prepare('SELECT count(*) count FROM books').get() as SqlRow).count),
+      members: members.members,
+      membersNext: members.nextCursor,
+      history: history.history,
+      historyCount: history.count,
+      historyNext: history.nextCursor,
+      knowledge: this.#seriesKnowledgeProjection(series.seriesId),
+    };
+  }
+
+  /** One page of a Series' members after the one named, newest joined first, and how many it holds in all. */
+  #seriesMembersPage(seriesId: string, after: SeriesMembersCursor | null): SeriesMembersPageProjection & { count: number } {
+    const joined = this.#series.members(seriesId);
+    const rest = after === null ? joined
+      : joined.filter((entry) => entry.joinedAt < after.joinedAt || (entry.joinedAt === after.joinedAt && entry.bookId < after.bookId));
+    const members: SeriesMemberProjection[] = rest.slice(0, MAX_SERIES_MEMBERS_PAGE + 1).map((entry) => {
       const people = this.#bookPeople.current(entry.bookId);
       return {
         bookId: entry.bookId,
-        title: titles.get(entry.bookId) ?? '',
+        title: this.#evaluationBookTitle(entry.bookId),
         authors: people.authors,
         editors: people.editors,
         joinedAt: entry.joinedAt,
@@ -10692,17 +11068,33 @@ export class EditorialStore {
         seriesConsistencyReview: null,
       };
     });
-    const candidates = [...titles].filter(([bookId]) => !memberIds.has(bookId)).map(([bookId, title]) => ({ bookId, title }));
-    const history = this.#series.history({ seriesId: series.seriesId });
+    const { page, more } = weighedPage(members, MAX_SERIES_MEMBERS_PAGE);
+    const last = page.at(-1);
+    return { members: page, nextCursor: more && last !== undefined ? { joinedAt: last.joinedAt, bookId: last.bookId } : null, count: joined.length };
+  }
+
+  /** One page of one Series' or one Book's membership change records after the one named, newest first, and how many in all. */
+  #seriesHistoryPage(filter: { readonly seriesId: string } | { readonly bookId: string }, after: SeriesHistoryCursor | null):
+  SeriesHistoryPageProjection & { count: number } {
+    const all = this.#series.history(filter);
+    const rest = (after === null ? all : all.filter((change) => seriesHistoryOrder(change, after) > 0)).slice(0, MAX_SERIES_HISTORY_PAGE + 1);
+    const seriesTitles = new Map<string, string>();
+    const bookTitles = new Map<string, string>();
+    const titleOf = (titles: Map<string, string>, key: string, read: () => string): string => {
+      if (!titles.has(key)) titles.set(key, read());
+      return titles.get(key)!;
+    };
+    const projected = rest.map((change) => this.#seriesChange(
+      change,
+      titleOf(seriesTitles, change.seriesId, () => this.#requireSeries(change.seriesId).title),
+      titleOf(bookTitles, change.bookId, () => this.#evaluationBookTitle(change.bookId)),
+    ));
+    const { page, more } = weighedPage(projected, MAX_SERIES_HISTORY_PAGE);
+    const last = rest[page.length - 1];
     return {
-      ...series,
-      members,
-      membersTruncated: joined.length > MAX_SERIES_MEMBERS_LISTED,
-      candidates: candidates.slice(0, MAX_SERIES_CANDIDATES_LISTED),
-      candidatesTruncated: candidates.length > MAX_SERIES_CANDIDATES_LISTED,
-      history: history.slice(0, MAX_SERIES_HISTORY_LISTED).map((change) => this.#seriesChange(change, series.title, titles.get(change.bookId) ?? '')),
-      historyTruncated: history.length > MAX_SERIES_HISTORY_LISTED,
-      knowledge: this.#seriesKnowledgeProjection(series.seriesId, titles),
+      history: page,
+      nextCursor: more && last !== undefined ? { recordedAt: last.recordedAt, seriesId: last.seriesId, bookId: last.bookId, ordinal: last.ordinal } : null,
+      count: all.length,
     };
   }
 
@@ -10740,7 +11132,14 @@ export class EditorialStore {
         return this.#seriesKnowledge.propose({ seriesId: series.seriesId, target, content, provenance });
       });
       const series = this.#requireSeries(input.seriesId);
-      return { candidateId: created.candidateId, completionLabel: `已提议为书系「${series.title}」的知识候选项`, series: this.#seriesProjection(series) };
+      // The answer is the candidate alone (Issue #63 review): the page reads its lists again, each a page at a time.
+      const items = this.#seriesKnowledge.items(series.seriesId);
+      const open = this.#seriesKnowledge.open(series.seriesId);
+      return {
+        candidateId: created.candidateId,
+        completionLabel: `已提议为书系「${series.title}」的知识候选项`,
+        candidate: this.#knowledgeCandidateProjection(created, items, seriesKnowledgeConflicts(created, items, open).length, this.#bookTitles()),
+      };
     });
   }
 
@@ -10790,9 +11189,70 @@ export class EditorialStore {
         itemId: promoted.itemId,
         revisionId: promoted.revisionId,
         completionLabel: promoted.outcome === 'created' ? '书系知识已纳入' as const : '书系知识已更新' as const,
-        series: this.#seriesProjection(this.#requireSeries(input.seriesId)),
+        item: this.#knowledgeItemProjection(this.#seriesKnowledge.item(promoted.itemId)!, this.#bookTitles()),
       };
     });
+  }
+
+  /** `查找条目` and `更多条目…`: a page of a Series' knowledge items by name, narrowed to names holding the words (Issue #63 review). A read. */
+  inspectSeriesKnowledgeItems(seriesId: string, text: string, after: SeriesKnowledgeItemsCursor | null): SeriesKnowledgeItemsPageProjection {
+    return this.#seriesCall(() => {
+      const series = this.#requireSeries(seriesId);
+      const words = typeof text === 'string' && text.isWellFormed() ? text.normalize('NFC').trim() : null;
+      requireStore(words !== null && [...words].length <= MAX_SERIES_KNOWLEDGE_QUERY_CHARACTERS && !/[\r\n]/u.test(words), 'SERIES_KNOWLEDGE_QUERY_INVALID',
+        `查找的条目字词最多 ${MAX_SERIES_KNOWLEDGE_QUERY_CHARACTERS} 个字，写在一行里。`);
+      requireStore(after === null || (typeof after.itemId === 'string' && UUID_PATTERN.test(after.itemId) && typeof after.subject === 'string' &&
+        after.subject.length >= 1 && after.subject.length <= 2 * MAX_SERIES_KNOWLEDGE_SUBJECT_CHARACTERS), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      return this.#knowledgeItemsPage(series.seriesId, words, after);
+    });
+  }
+
+  /** `更多候选项…`: the next page of a Series' open candidates, oldest proposed first (Issue #63 review). A read. */
+  inspectSeriesKnowledgeCandidates(seriesId: string, after: SeriesKnowledgeCandidatesCursor | null): SeriesKnowledgeCandidatesPageProjection {
+    return this.#seriesCall(() => {
+      const series = this.#requireSeries(seriesId);
+      requireStore(after === null || (typeof after.candidateId === 'string' && UUID_PATTERN.test(after.candidateId) && typeof after.firstAt === 'string' &&
+        !Number.isNaN(Date.parse(after.firstAt))), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      const { candidates, nextCursor } = this.#knowledgeCandidatesPage(series.seriesId, after);
+      return { candidates, nextCursor };
+    });
+  }
+
+  /** 历次版本: a page of one item's revisions, newest first, below the ordinal named (Issue #63 review). A read. */
+  inspectSeriesKnowledgeRevisions(seriesId: string, itemId: string, before: number | null): SeriesKnowledgeRevisionsProjection {
+    return this.#seriesCall(() => {
+      const series = this.#requireSeries(seriesId);
+      requireStore(typeof itemId === 'string' && UUID_PATTERN.test(itemId), 'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识条目不存在。');
+      const item = this.#seriesKnowledge.item(itemId);
+      requireStore(item !== null && item.seriesId === series.seriesId, 'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识条目不存在。');
+      requireStore(before === null || (Number.isSafeInteger(before) && before >= 1), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      const titles = this.#bookTitles();
+      const rest = [...item.revisions].reverse().filter((revision) => before === null || revision.ordinal < before);
+      const { page, more } = weighedPage(rest.slice(0, MAX_SERIES_KNOWLEDGE_REVISIONS_PAGE + 1).map((revision) => this.#knowledgeRevisionProjection(revision, titles)),
+        MAX_SERIES_KNOWLEDGE_REVISIONS_PAGE, SERIES_KNOWLEDGE_PAGE_BYTES);
+      return { itemId: item.itemId, revisions: page, nextBefore: more ? page.at(-1)!.ordinal : null };
+    });
+  }
+
+  /** One page of a Series' knowledge items after the one named, each with its current revision only. */
+  #knowledgeItemsPage(seriesId: string, words: string, after: SeriesKnowledgeItemsCursor | null): SeriesKnowledgeItemsPageProjection {
+    const titles = this.#bookTitles();
+    const items = this.#seriesKnowledge.itemsPage(seriesId, words, after, MAX_SERIES_KNOWLEDGE_ITEMS_PAGE + 1).map((item) => this.#knowledgeItemProjection(item, titles));
+    const { page, more } = weighedPage(items, MAX_SERIES_KNOWLEDGE_ITEMS_PAGE, SERIES_KNOWLEDGE_PAGE_BYTES);
+    const last = page.at(-1);
+    return { items: page, nextCursor: more && last !== undefined ? { subject: last.subject, itemId: last.itemId } : null };
+  }
+
+  /** One page of a Series' open candidates after the one named, oldest proposed first, each with how many conflicts it discloses. */
+  #knowledgeCandidatesPage(seriesId: string, after: SeriesKnowledgeCandidatesCursor | null): SeriesKnowledgeCandidatesPageProjection {
+    const titles = this.#bookTitles();
+    const items = this.#seriesKnowledge.items(seriesId);
+    const open = this.#seriesKnowledge.open(seriesId);
+    const read = this.#seriesKnowledge.openPage(seriesId, after, MAX_SERIES_KNOWLEDGE_CANDIDATES_PAGE + 1);
+    const projected = read.map(({ candidate }) => this.#knowledgeCandidateProjection(candidate, items, seriesKnowledgeConflicts(candidate, items, open).length, titles));
+    const { page, more } = weighedPage(projected, MAX_SERIES_KNOWLEDGE_CANDIDATES_PAGE, SERIES_KNOWLEDGE_PAGE_BYTES);
+    const last = read[page.length - 1];
+    return { candidates: page, nextCursor: more && last !== undefined ? { firstAt: last.firstAt, candidateId: last.candidate.candidateId } : null };
   }
 
   /** The item a candidate proposes, resolved against the Series as it stands: a new name and class, or the exact item now. */
@@ -10859,7 +11319,8 @@ export class EditorialStore {
         seriesTitle: series.title,
         candidate: this.#knowledgeCandidateProjection(candidate, items, conflicts.length, titles),
         current: current === null ? null : this.#knowledgeRevisionProjection(current, titles),
-        conflicts: conflicts.map((entry) => ({ kind: entry.kind, line: entry.line })),
+        conflicts: conflicts.slice(0, MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN).map((entry) => ({ kind: entry.kind, line: entry.line })),
+        conflictCount: conflicts.length,
         conflictLabel: conflicts.length === 0 ? null : SERIES_KNOWLEDGE_CONFLICT_LABEL,
         reuseScopes: SERIES_KNOWLEDGE_REUSE_SCOPES.map((scope) => ({ scope, label: SERIES_KNOWLEDGE_REUSE_LABELS[scope] })),
         blocked,
@@ -10869,15 +11330,17 @@ export class EditorialStore {
     };
   }
 
-  #seriesKnowledgeProjection(seriesId: string, titles: ReadonlyMap<string, string>): SeriesProjection['knowledge'] {
-    const items = this.#seriesKnowledge.items(seriesId);
-    const open = this.#seriesKnowledge.open(seriesId);
+  /** A Series' knowledge as its page first shows it (Issue #63 review): the first page of items and of open candidates, and the counts. */
+  #seriesKnowledgeProjection(seriesId: string): SeriesProjection['knowledge'] {
+    const items = this.#knowledgeItemsPage(seriesId, '', null);
+    const candidates = this.#knowledgeCandidatesPage(seriesId, null);
     return {
-      items: items.slice(0, MAX_SERIES_KNOWLEDGE_LISTED).map((item) => this.#knowledgeItemProjection(item, titles)),
-      itemsTruncated: items.length > MAX_SERIES_KNOWLEDGE_LISTED,
-      candidates: open.slice(0, MAX_SERIES_KNOWLEDGE_LISTED)
-        .map((candidate) => this.#knowledgeCandidateProjection(candidate, items, seriesKnowledgeConflicts(candidate, items, open).length, titles)),
-      candidatesTruncated: open.length > MAX_SERIES_KNOWLEDGE_LISTED,
+      items: items.items,
+      itemCount: this.#seriesKnowledge.itemCount(seriesId),
+      itemsNext: items.nextCursor,
+      candidates: candidates.candidates,
+      candidateCount: this.#seriesKnowledge.openCount(seriesId),
+      candidatesNext: candidates.nextCursor,
     };
   }
 
@@ -10898,7 +11361,9 @@ export class EditorialStore {
       blockId: provenance.blockId,
       fromGrapheme: provenance.fromGrapheme,
       toGrapheme: provenance.toGrapheme,
-      quote: provenance.quote,
+      quote: knowledgeQuoteExcerpt(provenance.quote),
+      // Changes waited in the journal beyond the revision when the words were cited (Issue #63 review).
+      uncheckpointed: provenance.journalSequence > 0,
     };
   }
 
@@ -10954,7 +11419,8 @@ export class EditorialStore {
       knowledgeClass: item.knowledgeClass,
       classLabel: SERIES_KNOWLEDGE_CLASS_LABELS[item.knowledgeClass],
       createdAt: item.createdAt,
-      revisions: [...item.revisions].reverse().map((revision) => this.#knowledgeRevisionProjection(revision, titles)),
+      current: this.#knowledgeRevisionProjection(item.revisions.at(-1)!, titles),
+      revisionCount: item.revisions.length,
     };
   }
 
@@ -10980,14 +11446,17 @@ export class EditorialStore {
 
   // ---- 设置 › 数据与存储 › 导出数据库 (Issue #434, plan slice S86a; V2-UX-DSTO-017; ADR 0079 §1.4, §1.6, §1.7) ----------------
 
-  /** The destination the Save dialog answered becomes one preparation of the database package. */
-  async prepareDatabaseExport(destination: string): Promise<DatabaseExportPreparationProjection> {
-    return this.#databaseExportCall(() => this.#databaseExports.prepare(destination));
+  /**
+   * The destination the Save dialog answered becomes one preparation of the database package — only under this launch's
+   * verified External Export Policy (Issue #434, S86a review).
+   */
+  async prepareDatabaseExport(destination: string, available: boolean): Promise<DatabaseExportPreparationProjection> {
+    return this.#databaseExportCall(() => this.#databaseExports.prepare(destination, available));
   }
 
-  /** `按上述方式导出`: the one approval of one unchanged preparation, and the write it permits. */
-  async approveDatabaseExport(preparationId: string): Promise<DatabaseExportReceiptProjection> {
-    return this.#databaseExportCall(() => this.#databaseExports.approve(preparationId));
+  /** `按上述方式导出`: the one approval of one unchanged preparation, and the write it permits, under the same policy. */
+  async approveDatabaseExport(preparationId: string, available: boolean): Promise<DatabaseExportReceiptProjection> {
+    return this.#databaseExportCall(() => this.#databaseExports.approve(preparationId, available));
   }
 
   /** The approved database exports, newest first. A read. */
@@ -11094,6 +11563,11 @@ export class EditorialStore {
   /** One 维护事项 of the Book in its workspace: its target, its timeline and what it offers next. */
   inspectMaintenanceCase(input: InspectMaintenanceCaseInput): MaintenanceCaseProjection {
     return this.#publicationCall(() => this.#maintenanceCases.inspect(input));
+  }
+
+  /** `更早的维护事项…`: a page of one designation's older cases, before the oldest one shown. */
+  listMaintenanceCases(input: ListMaintenanceCasesInput): MaintenanceCasePageProjection {
+    return this.#publicationCall(() => this.#maintenanceCases.page(input));
   }
 
   /** `记录维护事项`: one case and its first revision, bound to one exact designation, in one transaction. */
@@ -12245,7 +12719,10 @@ export class EditorialStore {
     originalPath: string,
   ): Promise<{ digest: string; byteLength: number; path: string; fidelity: FidelityCategoryProjection[] }> {
     const conversion = snapshot.conversion!;
-    const converted = await this.#convertSelectedManuscript(originalPath, conversion.sourceFormat);
+    const converted = await this.#convertSelectedManuscript(originalPath, conversion.sourceFormat, {
+      digest: snapshot.sourceDigest,
+      byteLength: snapshot.sourceBytes,
+    });
     requireStore(converted !== null, 'SNAPSHOT_RESELECTION_REQUIRED', '保留的原始文件无法再次转换。');
     const digest = sha256(converted.docx);
     requireStore(
@@ -13644,8 +14121,10 @@ export class EditorialStore {
       if (current.bookStateDigest !== snapshot.reviewedBookStateDigest ||
         current.manuscriptId !== snapshot.reviewedManuscriptId || current.branchId !== snapshot.reviewedBranchId ||
         current.exactSourceVersionId !== snapshot.reviewedReuseSourceVersionId) return null;
-      // The Source Version it reuses must have been read the way this draft is (Issue #532): a review made before an
-      // update that changed the parser does not come back ready, and preparing it again says why.
+      // The Source Version it reuses must have been read the way this draft is (Issue #532). A review made before an update
+      // that changed the parser is caught earlier, by `#revalidateSnapshot`'s parser drift; this catches a review an earlier
+      // build prepared under this same parser over a Source Version an earlier parser read. It does not come back ready, and
+      // preparing it again says why.
       if (current.exactSourceVersionId !== null) this.#requireSameParser(current.exactSourceVersionId, snapshot);
       const lineage = comparison.lineage_status === 'verified'
         ? {
@@ -14418,8 +14897,8 @@ export class EditorialStore {
               sir.source_version_disposition, sir.retained_boundary_json,
               sir.named_non_effects_json, sir.record_digest, sir.imported_at,
               sv.display_name, sv.format, sv.object_digest, sv.source_digest, sv.content_digest,
-              sv.structure_digest, sv.parser_identity, co.byte_length,
-              sp.acquisition_path, sp.locality, sp.sanitized_identity, sp.recorded_at
+              sv.structure_digest, sv.parser_identity, sv.working_object_digest, sv.converter_identity,
+              co.byte_length, sp.acquisition_path, sp.locality, sp.sanitized_identity, sp.recorded_at
        FROM import_commits ic
        JOIN source_import_records sir ON sir.commit_id = ic.commit_id
        JOIN source_versions sv
@@ -14479,6 +14958,7 @@ export class EditorialStore {
       importedAt,
     }));
     requireStore(recordDigest === asString(row.record_digest), 'STORE_CORRUPT', '来源导入记录摘要无效。');
+    const conversion = readConversionColumns(row, requireSourceFormat(asString(row.format)), '来源版本的转换记录不完整。');
     const receiptRecords = this.#sourceImportRecordPresentations(bookId, [sourceImportRecordId]);
     const receiptSource = receiptRecords.find((record) => record.kind === 'source');
     const receiptRecord = receiptRecords.find((record) => record.kind === 'source-import-record');
@@ -14500,9 +14980,10 @@ export class EditorialStore {
         sourceSha256: boundary.sourceSha256,
         sourceBytes: boundary.sourceBytes,
         provenanceLabel: '本机文件选择器 · 本地解析 · 未联网',
-        // A source-only import retained the original whole and read nothing through a converter.
-        conversion: null,
-        workingObjectSha256: null,
+        // A TXT, Markdown or legacy .doc kept as source material was read through its converter, and the
+        // commit recorded that working representation on the Source Version (ADR 0072 §2, #552).
+        conversion,
+        workingObjectSha256: conversion === null ? null : asString(row.working_object_digest),
       },
       retainedBoundary: boundary,
       provenance: {
@@ -14813,7 +15294,9 @@ export class EditorialStore {
     try {
       return operation();
     } catch (error) {
-      if (error instanceof ReviewRunError || error instanceof AnalysisError || error instanceof EditorialMarkError || error instanceof ProposalConflictError) {
+      // A guideline version that no longer reads refuses the review's configuration in its own words (Issue #427 review).
+      if (error instanceof ReviewRunError || error instanceof AnalysisError || error instanceof EditorialMarkError || error instanceof ProposalConflictError ||
+        error instanceof ReviewGuidelineError) {
         throw new StoreError(error.code, error.message);
       }
       if (error instanceof BoundedStoreFatalError) {

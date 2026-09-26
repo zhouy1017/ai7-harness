@@ -638,6 +638,23 @@ async function exactCarrier(path: string): Promise<Uint8Array> {
   }
 }
 
+/**
+ * The 方案 as the house reads it in 知识库 › 工序与规则 (Issue #427, S79d review; REUSE-030, editor-surfaces §10): its lifecycle
+ * — as the Book card reads it, so a missing or altered carrier needs attention here too — how many Books enabled it, the
+ * newest AI7 权限侧车 revision it offers, and the identities 查看技术详情 holds.
+ */
+export interface EditorialWorkspaceProfileHouseReading {
+  readonly state: 'available-to-install' | 'installed' | 'unavailable-needs-attention';
+  readonly enabledBooks: number;
+  /** The newest sidecar revision the installed 方案 offers — the one a Book's enablement pins; `null` before installation. */
+  readonly revision: 2 | null;
+  readonly identity: string;
+  readonly version: string;
+  readonly sha256: string;
+  readonly sidecarIdentity: string;
+  readonly sidecarSha256: string | null;
+}
+
 export class EditorialWorkspaceProfileStore {
   readonly #db: DatabaseSync;
   readonly #dataRoot: string;
@@ -696,13 +713,33 @@ export class EditorialWorkspaceProfileStore {
     return this.#inspect(bookId);
   }
 
-  async #inspect(bookId: string): Promise<EditorialWorkspaceProfileProjection> {
-    this.#requireBook(bookId);
-    const installation = this.#db.prepare(
-      'SELECT installed_at FROM native_artifact_installations WHERE artifact_id = ?',
-    ).get(EDITORIAL_WORKSPACE_PROFILE_ID) as SqlRow | undefined;
-    let sourceAvailable = installation !== undefined;
-    if (installation === undefined) {
+  /** The 方案 as the house reads it, for 知识库 › 工序与规则; a read. */
+  async house(): Promise<EditorialWorkspaceProfileHouseReading> {
+    await this.#lifecycleTail;
+    const installed = this.#db.prepare('SELECT 1 FROM native_artifact_installations WHERE artifact_id = ?').get(EDITORIAL_WORKSPACE_PROFILE_ID) !== undefined;
+    const needsAttention = await this.#needsAttention(installed);
+    const enabledBooks = installed
+      ? asNumber((this.#db.prepare('SELECT COUNT(*) AS n FROM native_artifact_book_enablements WHERE artifact_id = ?').get(EDITORIAL_WORKSPACE_PROFILE_ID) as SqlRow).n)
+      : 0;
+    return {
+      state: needsAttention ? 'unavailable-needs-attention' : installed ? 'installed' : 'available-to-install',
+      enabledBooks,
+      revision: installed ? 2 : null,
+      identity: EDITORIAL_WORKSPACE_PROFILE_ID,
+      version: EDITORIAL_WORKSPACE_PROFILE_VERSION,
+      sha256: EDITORIAL_WORKSPACE_PROFILE_DIGEST,
+      sidecarIdentity: EDITORIAL_WORKSPACE_PROFILE_SIDECAR_ID,
+      sidecarSha256: installed ? EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_2_DIGEST : null,
+    };
+  }
+
+  /**
+   * Whether the 方案 needs attention: a recovery left it so, the source to install from is missing, or the carrier retained
+   * at installation is missing or altered.
+   */
+  async #needsAttention(installed: boolean): Promise<boolean> {
+    let sourceAvailable = installed;
+    if (!installed) {
       try {
         await this.#requireSource();
         sourceAvailable = true;
@@ -711,6 +748,22 @@ export class EditorialWorkspaceProfileStore {
         sourceAvailable = false;
       }
     }
+    let retainedAvailable = false;
+    try {
+      const retained = await inspectCanonicalDataFile(this.#dataRoot, this.#retainedDirectory, 'package.json');
+      retainedAvailable = retained.exists ? await this.#retainedIsExact() : !installed;
+    } catch {
+      retainedAvailable = false;
+    }
+    return this.#recoveryNeedsAttention || !sourceAvailable || !retainedAvailable;
+  }
+
+  async #inspect(bookId: string): Promise<EditorialWorkspaceProfileProjection> {
+    this.#requireBook(bookId);
+    const installation = this.#db.prepare(
+      'SELECT installed_at FROM native_artifact_installations WHERE artifact_id = ?',
+    ).get(EDITORIAL_WORKSPACE_PROFILE_ID) as SqlRow | undefined;
+    const needsAttention = await this.#needsAttention(installation !== undefined);
     const enabled = installation === undefined ? undefined : this.#db.prepare(
       'SELECT enabled_at FROM native_artifact_book_enablements WHERE artifact_id = ? AND book_id = ?',
     ).get(EDITORIAL_WORKSPACE_PROFILE_ID, bookId) as SqlRow | undefined;
@@ -752,14 +805,6 @@ export class EditorialWorkspaceProfileStore {
       : pinHistory.some((pin) => pin.revision === 1)
         ? 1
         : null;
-    let retainedAvailable = false;
-    try {
-      const retained = await inspectCanonicalDataFile(this.#dataRoot, this.#retainedDirectory, 'package.json');
-      retainedAvailable = retained.exists ? await this.#retainedIsExact() : installation === undefined;
-    } catch {
-      retainedAvailable = false;
-    }
-    const needsAttention = this.#recoveryNeedsAttention || !sourceAvailable || !retainedAvailable;
     const lifecycle: EditorialWorkspaceProfileProjection['lifecycle'] = needsAttention
       ? { state: 'unavailable-needs-attention' as const, label: '不可用 · 需要处理', installed: installation !== undefined, enabledForCurrentBook: false }
       : installation === undefined
