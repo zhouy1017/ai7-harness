@@ -1415,6 +1415,9 @@ async function run(): Promise<void> {
     process.removeListener('SIGTERM', stop);
     process.removeListener('SIGINT', stop);
     try {
+      // A backup under way stops at once and removes what it wrote, so none is left half-made when the store closes (Issue
+      // #434 review).
+      const backupsStopped = store?.stopScheduledBackups();
       jobs?.dispose();
       // The Review Run loop stops first and starts no further category; the owner then interrupts the
       // Run in flight, and the loop records what that Run came to before the store closes.
@@ -1422,6 +1425,7 @@ async function run(): Promise<void> {
       await analysisExecution?.dispose();
       await reviewRunsStopped;
       await harness?.dispose();
+      await backupsStopped;
     } finally {
       store?.close();
     }

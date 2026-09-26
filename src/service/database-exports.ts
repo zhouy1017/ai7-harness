@@ -200,14 +200,17 @@ export async function databasePackageSources(dataRoot: string): Promise<Array<{ 
 
 /**
  * Write the package for `db` and the files under `dataRoot` to `packagePath`, which must not exist yet, streaming each
- * member so no file is held whole. Answers the package's size and digest and its members.
+ * member so no file is held whole. Answers the package's size and digest and its members. A `signal` aborted stops the
+ * write at its next chunk, and neither the package nor the store copy is left (Issue #434 review).
  */
 export async function writeDatabasePackage(
   db: DatabaseSync,
   dataRoot: string,
   packagePath: string,
   facts: DatabasePackageFacts,
+  signal?: AbortSignal,
 ): Promise<{ bytes: number; sha256: string; members: DatabasePackageMember[] }> {
+  signal?.throwIfAborted();
   const snapshotPath = `${packagePath}.store`;
   await rm(snapshotPath, { force: true });
   // A consistent copy of the store, taken between two statements of the one connection that writes it.
@@ -257,6 +260,7 @@ export async function writeDatabasePackage(
       try {
         const buffer = Buffer.allocUnsafe(COPY_CHUNK_BYTES);
         for (;;) {
+          signal?.throwIfAborted();
           const { bytesRead } = await source.read(buffer, 0, buffer.length, null);
           if (bytesRead === 0) break;
           // fflate may keep a pushed chunk until it is written, so each push gets bytes of its own.
@@ -276,6 +280,7 @@ export async function writeDatabasePackage(
     };
     await add(DATABASE_PACKAGE_STORE_MEMBER, snapshotPath, true);
     for (const source of sources) await add(source.member, source.path, false);
+    signal?.throwIfAborted();
     const manifest = canonicalRecord({
       schema: DATABASE_PACKAGE_SCHEMA,
       dataVersion: facts.dataVersion,

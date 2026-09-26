@@ -5872,6 +5872,15 @@ export interface ScheduledBackupProjection {
   readonly present: boolean;
 }
 
+/** Why the service's last check made no backup, as the section states it (Issue #434 review). */
+export type ScheduledBackupFailureReason = 'no-space' | 'not-writable' | 'location-unavailable' | 'too-large' | 'other';
+
+export interface ScheduledBackupFailureProjection {
+  /** When the check that made no backup ran. */
+  readonly at: string;
+  readonly reason: ScheduledBackupFailureReason;
+}
+
 /** 定期自动备份: the switch, off by default; the fixed backup location; and the backups kept, newest first. */
 export interface ScheduledBackupsProjection {
   readonly enabled: boolean;
@@ -5883,6 +5892,13 @@ export interface ScheduledBackupsProjection {
   readonly total: number;
   /** When the next backup is due while the switch is on; `null` while it is off. */
   readonly nextDueAt: string | null;
+  /**
+   * A backup is being made on the service's background check, never inside a request (Issue #434 review): the section
+   * reads again until it is done.
+   */
+  readonly backingUp: boolean;
+  /** The last backup this service could not make, until one is made or the switch is turned off; `null` otherwise. */
+  readonly lastFailure: ScheduledBackupFailureProjection | null;
 }
 
 export interface SetScheduledBackupInput {

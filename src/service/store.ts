@@ -4886,6 +4886,8 @@ export class EditorialStore {
   }
 
   close(): void {
+    // A backup still under way stops at its next chunk rather than write on past the store (Issue #434 review).
+    void this.#scheduledBackups.stop();
     this.#taskAuthorization.prepare({ phase: 'cancel-all' });
     this.#reviewRuns.prepare({ phase: 'cancel-all' });
     this.#baselineAnalysis.prepare({ phase: 'cancel-all' });
@@ -11493,18 +11495,30 @@ export class EditorialStore {
     }
   }
 
-  /** Turn the switch from the state the editor saw; turned on, it backs up at once when none was made in the day before. */
+  /**
+   * Turn the switch from the state the editor saw, and answer at once (Issue #434 review): turned on, the backup it makes
+   * due is written on the service's background check, as the hourly one is, so no request waits on the write. The answer
+   * says whether one is being made, and the section reads again until it is done.
+   */
   async setScheduledBackup(input: SetScheduledBackupInput, now: Date = new Date()): Promise<ScheduledBackupsProjection> {
     return this.#scheduledBackupCall(async () => {
       this.#scheduledBackups.setEnabled(input.enabled, input.expectedOrdinal);
-      await this.#scheduledBackups.runIfDue(now);
+      if (input.enabled) void this.#scheduledBackups.runIfDue(now).catch(() => undefined);
       return this.#scheduledBackups.projection(now);
     });
   }
 
-  /** The running service's check: a backup when one is due, and only fourteen days kept. Answers whether one was made. */
+  /**
+   * The running service's check: a backup when one is due, and only fourteen days kept. Answers whether one was made; asked
+   * while a check runs, it answers with that one.
+   */
   async runScheduledBackupIfDue(now: Date = new Date()): Promise<boolean> {
     return this.#scheduledBackupCall(() => this.#scheduledBackups.runIfDue(now));
+  }
+
+  /** At shutdown, before the store closes (Issue #434 review): the check under way stops and removes what it wrote. */
+  async stopScheduledBackups(): Promise<void> {
+    await this.#scheduledBackups.stop();
   }
 
   async #scheduledBackupCall<T>(operation: () => Promise<T>): Promise<T> {

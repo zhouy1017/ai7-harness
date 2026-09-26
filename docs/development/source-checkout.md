@@ -222,11 +222,21 @@ It is not encrypted (ADR 0079 §1.6). It holds no Model Service credential, beca
 定期自动备份 (Issue #434, S86b) is service protocol version 83 and schema revision 56. `src/service/scheduled-backups.ts` owns three append-only relations: the switch's changes (chained), each backup made (its file's name, size and digest), and each backup removed. The switch is off by default.
 
 While the switch is on, the running service writes the same database package into the fixed backup location beside the Agent Data Root, `<data root>-backups`, once a day:
-- the service asks at start and then hourly, and a backup is due when none was made in the day before;
-- turning the switch on backs up at once;
-- each backup is written as a `.partial` file and renamed into place.
+- the service's background check runs at start, then hourly, and a backup is due when none was made in the day before;
+- turning the switch on starts that check at once: the request only records the switch, and the section reads again until the backup is there;
+- each backup is written as a `.partial` file and renamed into place. If its record cannot then be written, the renamed file is removed;
+- a backup is never written over a file already at its name.
 
-Backups older than fourteen days are removed with their files, and a file found gone is recorded as such. Turning the switch off makes no more backups and removes none. No External Export Policy approval is involved: the switch is the decision (ADR 0079 §1.7), and nothing is written anywhere but that location.
+Each check first removes what a cut-off check left (`.<uuid>.ai7db.partial` and `.partial.store`), then the backups older than fourteen days, each on its own, and only then writes. So a backup that cannot be written never keeps the space of those whose days passed.
+
+A file is removed only while it is still the one AI7 made:
+- its name has the one form `AI7 自动备份 YYYY-MM-DD HH-MM-SS.ai7db`, which the relation checks and every read requires;
+- it is a regular file, not a link;
+- its size and SHA-256 are the recorded ones.
+
+A file found gone is recorded as `missing`. A file at the name that is another is left where it is and recorded as `changed`. Turning the switch off makes no more backups; those kept stay until their fourteen days pass.
+
+At shutdown the service stops a check under way before the store closes: the write stops at its next chunk and removes what it wrote. A backup the check could not make is stated in the section, with its reason by the refusal's code, until one is made or the switch is turned off. No External Export Policy approval is involved: the switch is the decision (ADR 0079 §1.7), and nothing is written anywhere but that location.
 
 
 
