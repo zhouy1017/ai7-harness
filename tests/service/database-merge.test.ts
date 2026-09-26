@@ -486,6 +486,75 @@ describe('what a merge refuses, puts back and brings forward', () => {
     }
   }, 180_000);
 
+  it('verifies what waits again when it resumes a merge before its Books went in, and merges nothing that changed (Issue #434 review)', async () => {
+    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let packagePath: string;
+    try {
+      await importBook(source, await compose(TITLE, [1, 2]));
+      packagePath = await exportedFrom(source, 'AI7 数据库.ai7db');
+    } finally {
+      source.close();
+    }
+    const prepared = async (at: Date): Promise<string> => {
+      const target = await EditorialStore.open(otherRoot, roots.codeRoot);
+      try {
+        await target.prepareDatabaseMerge((await target.inspectDatabaseImport(packagePath)).previewId, at);
+      } finally {
+        target.close();
+      }
+      return replacementStagingFor(otherRoot);
+    };
+    const phase = (staging: string, value: string): Promise<void> => writeFile(join(staging, 'phase.json'), JSON.stringify(value));
+    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      emptyBook(target, '本机之书');
+    } finally {
+      target.close();
+    }
+    // Stopped while the store's files were being saved, then a file put among what waits: nothing is merged.
+    let staging = await prepared(T);
+    await phase(staging, 'saving-store');
+    await writeFile(join(staging, 'incoming', 'extra.bin'), 'extra');
+    target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      expect(titles(target)).toEqual(['本机之书']);
+      expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'failed', failure: 'changed' });
+    } finally {
+      target.close();
+    }
+    // Stopped once they were saved — here even after the merge went in — then a member of the package changed: the saved files
+    // go back, and nothing is merged.
+    staging = await prepared(LATER);
+    saveStoreFiles(otherRoot, join(staging, 'store-before'));
+    await phase(staging, 'merging');
+    const intent = JSON.parse(await readFile(join(staging, 'intent.json'), 'utf8')) as { json: string };
+    const bookIds = (parseCanonicalJson(intent.json) as { mergeBooks: Array<{ bookId: string }> }).mergeBooks.map((entry) => entry.bookId);
+    expect(mergeIntoStoreFile(otherRoot, join(staging, 'incoming'), bookIds)).toBe('merged');
+    const member = join(staging, 'incoming', 'store', 'ai7.sqlite');
+    const bytes = await readFile(member);
+    await writeFile(member, Buffer.concat([bytes, Buffer.from('changed')]));
+    target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      expect(titles(target)).toEqual(['本机之书']);
+      expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'failed', failure: 'changed' });
+    } finally {
+      target.close();
+    }
+    // The journals SQLite keeps beside the package's store while a merge reads it are not the package's: the merge goes on.
+    staging = await prepared(LATEST);
+    saveStoreFiles(otherRoot, join(staging, 'store-before'));
+    await phase(staging, 'merging');
+    for (const suffix of ['-wal', '-shm']) await writeFile(join(staging, 'incoming', 'store', `ai7.sqlite${suffix}`), '');
+    target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      expect(titles(target)).toEqual([TITLE, '本机之书'].sort());
+      expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'applied' });
+      target.markCleanShutdown();
+    } finally {
+      target.close();
+    }
+  }, 180_000);
+
   it('brings a package made at an older revision to this one before it merges', async () => {
     const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {

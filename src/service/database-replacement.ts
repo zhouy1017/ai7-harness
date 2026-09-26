@@ -349,7 +349,12 @@ export async function writeReplacementMembers(dataRoot: string, members: Readonl
  * of it in `incoming/` and part already in the Agent Data Root (`movedInto`, the places kept aside apart), and each member is
  * read where it stands, once.
  */
-async function stagedAsVerified(staging: string, intent: ReplacementIntent, movedInto: string | null = null): Promise<boolean> {
+async function stagedAsVerified(
+  staging: string,
+  intent: ReplacementIntent,
+  movedInto: string | null = null,
+  transient: ReadonlySet<string> = new Set(),
+): Promise<boolean> {
   try {
     // The list is read only within the bound a package's own manifest has, before anything of it is held (Issue #434 review).
     const listed = await lstat(join(staging, 'members.json'));
@@ -373,6 +378,7 @@ async function stagedAsVerified(staging: string, intent: ReplacementIntent, move
           if (!(await visit(path, member, kept))) return false;
           continue;
         }
+        if (transient.has(member) && !expected.has(member)) continue;
         const named = expected.get(member);
         if (!entry.isFile() || named === undefined || found.has(member)) return false;
         const read = await fileDigest(path);
@@ -576,6 +582,14 @@ async function applyPendingMerge<T>(
     return { store: await openStore(), replacement: null };
   }
   const bookIds = intent.mergeBooks.map((book) => book.bookId);
+  // A merge resumed before its Books went in verifies what waits again first (Issue #434 review), as a resumed replacement does:
+  // one no longer what the preparation verified merges nothing, and the store's files go back once they were saved whole. The
+  // journals SQLite keeps beside the package's store while a merge reads it are its own, never the package's.
+  if ((recorded === 'saving-store' || recorded === 'merging') && !(await stagedAsVerified(staging, intent, null, PACKAGE_STORE_JOURNALS))) {
+    await writeAtomic(join(staging, REFUSAL_NOTE), JSON.stringify('changed'));
+    phase = recorded === 'merging' ? 'restoring-store' : 'store-restored';
+    await writePhase(staging, phase);
+  }
   if (phase === null || phase === 'saving-store') {
     await writePhase(staging, 'saving-store');
     saveStoreFiles(dataRoot, saved);
@@ -612,8 +626,12 @@ async function applyPendingMerge<T>(
     phase = 'store-restored';
     await writePhase(staging, phase);
   }
-  return { store: await openStore(), replacement: { intent, outcome: 'failed', failure: 'unopenable' } };
+  const failure: DatabaseReplacementFailure = existsSync(join(staging, REFUSAL_NOTE)) ? 'changed' : 'unopenable';
+  return { store: await openStore(), replacement: { intent, outcome: 'failed', failure } };
 }
+
+/** What SQLite keeps beside the package's store while a merge reads it: never counted among the package's members. */
+const PACKAGE_STORE_JOURNALS: ReadonlySet<string> = new Set(['-journal', '-wal', '-shm'].map((suffix) => `${DATABASE_PACKAGE_STORE_MEMBER}${suffix}`));
 
 /** Written when a resumed apply found what waited changed: the data put back is then recorded as refused for that reason. */
 const REFUSAL_NOTE = 'refused.json';

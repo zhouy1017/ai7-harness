@@ -288,6 +288,7 @@ A merge uses the replacement's staging place:
   - Otherwise the store's files are copied aside, the Books are merged into the closed store, and the store opens.
   - A merge or an open that fails puts the saved files back, and the data opens as it was.
   - An interruption after the merge's commit finds its Books there and merges nothing twice.
+  - A merge resumed before its Books went in (`saving-store` or `merging`) verifies what waits again first, leaving aside the journals SQLite keeps beside the package's store while a merge reads it (Issue #434 review). One that changed merges nothing, and the saved files go back. It is recorded failed with `failure: 'changed'`.
 - **Recording:** `database_merges` records each merge, applied or failed, with its Books and notices, and a failure's reason in its canonical record only. 导入记录 lists merges beside replacements, the two ledgers read as streams merged newest first. 回退 reads the replacements alone.
 - **Bounded (Issue #434 review):**
   - The plan streams the package's Books. The preview lists the first fifty and counts them all as new, already here or same-titled.
