@@ -1,4 +1,4 @@
-import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 import type { KnowledgeProceduresProjection } from '../shared/protocol.js';
 import { isRecord } from './analysis/canonical.js';
 import type { EditorialWorkspaceProfileHouseReading } from './editorial-workspace-profile.js';
@@ -11,8 +11,6 @@ import type { ReviewCategoryConfiguration } from './review/category-configuratio
  * lifecycle its owner reads, with how many Books enabled it and its identities for 查看技术详情. It is a read over the
  * configuration, the Review Runs' snapshots and the 方案's owner; it writes nothing.
  */
-
-type SqlRow = Record<string, SQLOutputValue>;
 
 /** Why a 工序 cannot run yet, said of the house: the category's own reason speaks of one Book (Issue #427 review). */
 const HOUSE_UNAVAILABLE_REASONS: Readonly<Record<string, string>> = {
@@ -30,10 +28,11 @@ export function readKnowledgeProcedures(
 ): KnowledgeProceduresProjection {
   // How many approved Review Runs applied each version of each 工序: every category entry a Run snapshotted names the 工序
   // and version it ran, and a Run only prepared, or superseded before its approval, applied none (Issue #427 review).
-  const applied = new Map<string, number>();
+  // Historical procedure versions need no retained counters: this projection names only the current configuration.
+  const applied = new Map(configuration.categories.map((entry) => [`${entry.procedure.procedureId}\n${entry.procedure.version}`, 0]));
   const runs = db.prepare(
     'SELECT r.canonical_json FROM review_runs r WHERE EXISTS (SELECT 1 FROM review_run_authorizations a WHERE a.review_run_id = r.review_run_id)',
-  ).all() as SqlRow[];
+  ).iterate();
   for (const row of runs) {
     const snapshot = JSON.parse(String(row.canonical_json)) as unknown;
     const seen = new Set<string>();
@@ -41,7 +40,7 @@ export function readKnowledgeProcedures(
       const procedure = isRecord(category) && isRecord(category.entry) && isRecord(category.entry.procedure) ? category.entry.procedure : null;
       if (procedure === null || typeof procedure.procedureId !== 'string' || typeof procedure.version !== 'string') continue;
       const key = `${procedure.procedureId}\n${procedure.version}`;
-      if (seen.has(key)) continue;
+      if (!applied.has(key) || seen.has(key)) continue;
       seen.add(key);
       applied.set(key, (applied.get(key) ?? 0) + 1);
     }
