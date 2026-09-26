@@ -3,9 +3,11 @@ import { existsSync, writeFileSync } from 'node:fs';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BOOK_DELIVERY_PACKAGE_EXPORT_STATEMENT } from '../../src/service/book-delivery-package-exports.js';
-import { BOOK_DELIVERY_PACKAGE_WORDS } from '../../src/service/book-delivery-packages.js';
+import { BookDeliveryPackages, BOOK_DELIVERY_PACKAGE_WORDS } from '../../src/service/book-delivery-packages.js';
+import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
+import { ManuscriptExportStore } from '../../src/service/manuscript-export.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { MAINTENANCE_CASE_SCHEMA_VERSION, PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { PUBLICATION_FORBIDDEN_WORDS, type BookDeliveryPackageExportProjection } from '../../src/shared/protocol.js';
@@ -28,6 +30,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await roots.dispose();
 });
 
@@ -159,8 +162,8 @@ describe('图书交付包 · 导出 (S67b)', () => {
       expect([review.versionLabel, review.statement, review.options, review.filesTruncated, review.degraded])
         .toEqual(['v1', BOOK_DELIVERY_PACKAGE_EXPORT_STATEMENT, ALL, false, false]);
       expect(review.files.map(({ key, label, fileName, format }) => ({ key, label, fileName, format }))).toEqual([
-        { key: 'publication', label: '稿件 · 发稿版本「一审稿」 · r1', fileName: `${title} · 一审稿.docx`, format: 'docx' },
-        { key: 'document:news-release', label: '新闻稿 · 版本 1', fileName: `${title} · 新闻稿 · 版本 1.docx`, format: 'docx' },
+        { key: 'publication', label: '稿件 · 发稿版本「一审稿」 · r1', fileName: `001 ${title} · 一审稿.docx`, format: 'docx' },
+        { key: 'document:news-release', label: '新闻稿 · 版本 1', fileName: `002 ${title} · 新闻稿 · 版本 1.docx`, format: 'docx' },
         { key: 'manifest', label: '交付包清单', fileName: '交付包清单.md', format: 'markdown' },
       ]);
       // Each file carries its own Export Fidelity Review: the DOCX files every class, the 交付包清单 none.
@@ -173,7 +176,7 @@ describe('图书交付包 · 导出 (S67b)', () => {
       const folder = join(roots.inputRoot, '交付包导出');
       await mkdir(folder);
       const prepare = (at: string, reviewDigest = review.reviewDigest) =>
-        store.prepareBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL, reviewDigest, folder: at }, true);
+        store.prepareBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL, memberKeys: ['publication', 'document:news-release', 'manifest'], reviewDigest, folder: at }, true);
       expect(await code(() => prepare(folder, 'f'.repeat(64)))).toBe('BOOK_DELIVERY_PACKAGE_EXPORT_CHANGED');
       expect(await code(() => prepare('交付包导出'))).toBe('BOOK_DELIVERY_PACKAGE_EXPORT_FOLDER_INVALID');
       expect(await code(() => prepare(join(roots.inputRoot, '不存在的文件夹')))).toBe('BOOK_DELIVERY_PACKAGE_EXPORT_FOLDER_INVALID');
@@ -363,7 +366,7 @@ describe('图书交付包 · 导出 (S67b)', () => {
       expect(await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL }, true)).toEqual(review);
       const folder = join(roots.inputRoot, '冻结版本');
       await mkdir(folder);
-      const prepared = await store.prepareBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL, reviewDigest: review.reviewDigest, folder }, true);
+      const prepared = await store.prepareBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL, memberKeys: ['publication', 'document:news-release', 'manifest'], reviewDigest: review.reviewDigest, folder }, true);
       const exported = await store.approveBookDeliveryPackageExport({ bookId, exportId: prepared.exportId }, true);
       expect(exported.export.state).toBe('exported');
       expect(exported.export.files.find((file) => file.key === 'manifest')!.outcome).toBe('created');
@@ -372,6 +375,109 @@ describe('图书交付包 · 导出 (S67b)', () => {
     } finally {
       store.close();
     }
+  }, 180_000);
+
+  it('requires explicit members and writes only the selected subset', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const { bookId, packageVersionId } = await preparedPackage(store);
+      const review = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL }, true);
+      const folder = join(roots.inputRoot, '所选成员');
+      await mkdir(folder);
+      const input = { bookId, packageVersionId, options: ALL, reviewDigest: review.reviewDigest, folder };
+      for (const memberKeys of [undefined, [], ['manifest', 'manifest'], ['missing'], [...review.files.map((file) => file.key), 'unseen']]) {
+        const result = await code(() => store.prepareBookDeliveryPackageExport({ ...input, memberKeys } as never, true));
+        expect(result).not.toBe('no-error');
+      }
+      expect(await count('export_preparations')).toBe(0);
+      const prepared = await store.prepareBookDeliveryPackageExport({ ...input, memberKeys: ['manifest'] }, true);
+      expect(prepared.files.map((file) => file.key)).toEqual(['manifest']);
+      const exported = await store.approveBookDeliveryPackageExport({ bookId, exportId: prepared.exportId }, true);
+      expect(exported.export.files.map((file) => file.key)).toEqual(['manifest']);
+      expect(await readdir(folder)).toEqual(['交付包清单.md']);
+      expect(await count('export_receipts')).toBe(1);
+    } finally { store.close(); }
+  }, 180_000);
+
+  it('reviews only one page and refuses an unseen member even if it belongs to the package', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const { bookId, packageVersionId } = await preparedPackage(store);
+      // Isolate pagination at its verified-record/read boundary: these are report identities and review metadata,
+      // never report payloads. Preparation and approval are exercised with real records in the subset test above.
+      const seedRecord = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      const frozen = JSON.parse(seedRecord.prepare('SELECT canonical_json FROM book_delivery_package_versions WHERE package_version_id = ?').get(packageVersionId)!.canonical_json as string) as import('../../src/service/book-delivery-packages.js').PackageVersionRecord;
+      seedRecord.close();
+      const record = BookDeliveryPackages.prototype.record;
+      const reports = Array.from({ length: 45 }, () => ({ reportId: randomUUID(), version: 1, reviewRunId: randomUUID(), digest: 'a'.repeat(64) }));
+      vi.spyOn(BookDeliveryPackages.prototype, 'record').mockImplementation(function (this: BookDeliveryPackages, ...args) {
+        const found = record.apply(this, args);
+        return found === null ? null : { ...found, record: { ...found.record,
+          content: { ...found.record.content, reviewReports: reports } } };
+      });
+      const read = ManuscriptExportStore.prototype.reviewPackageFile;
+      let reportReads = 0;
+      vi.spyOn(ManuscriptExportStore.prototype, 'reviewPackageFile').mockImplementation(async function (this: ManuscriptExportStore, id, target, format, options, available) {
+        if (target.kind !== 'report' && target.kind !== 'package-manifest') return read.call(this, id, target, format, options, available);
+        if (target.kind === 'report') reportReads += 1;
+        const template = await read.call(this, id, { kind: 'milestone', milestoneId: frozen.content.publication!.milestoneId }, format, options, available);
+        if (target.kind === 'package-manifest') return { ...template, suggestedFileName: '交付包清单.md' };
+        const report = reports.find((entry) => entry.reportId === target.reportId)!;
+        return { ...template, suggestedFileName: '审阅报告.docx', target: { ...template.target, report: { ...report, runLabel: '审阅' } } };
+      });
+      const first = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL }, true);
+      expect([first.files.length, first.offset, first.nextOffset, reportReads]).toEqual([40, 0, 40, 38]);
+      const second = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL, offset: first.nextOffset! }, true);
+      expect([second.files.length, second.nextOffset, reportReads]).toEqual([8, null, 45]);
+      expect(second.files.at(-1)!.key).toBe('manifest');
+      expect(new Set([...first.files, ...second.files].map((file) => file.fileName)).size).toBe(48);
+      const folder = join(roots.inputRoot, '未查看成员');
+      await mkdir(folder);
+      expect(await code(() => store.prepareBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL,
+        reviewDigest: first.reviewDigest, memberKeys: ['manifest'], folder }, true))).toBe('BOOK_DELIVERY_PACKAGE_EXPORT_CHANGED');
+      expect(await count('export_preparations')).toBe(0);
+    } finally { store.close(); }
+  }, 180_000);
+
+  it.each(['preflight', 'first-file-revalidation'] as const)('cancels during %s before any approval or file write', async (boundary) => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const jobs = new CooperativeJobOwner(store);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let arrived!: () => void;
+    const entered = new Promise<void>((resolve) => { arrived = resolve; });
+    try {
+      const { bookId, packageVersionId } = await preparedPackage(store);
+      const review = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL }, true);
+      const folder = join(roots.inputRoot, '取消前检查');
+      await mkdir(folder);
+      const prepared = await store.prepareBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL,
+        reviewDigest: review.reviewDigest, memberKeys: review.files.map((file) => file.key), folder }, true);
+      if (boundary === 'preflight') {
+        const check = ManuscriptExportStore.prototype.checkPrepared;
+        vi.spyOn(ManuscriptExportStore.prototype, 'checkPrepared').mockImplementationOnce(async function (this: ManuscriptExportStore, ...args) {
+          arrived(); await held; return check.apply(this, args);
+        });
+      } else {
+        const approve = ManuscriptExportStore.prototype.approve;
+        vi.spyOn(ManuscriptExportStore.prototype, 'approve').mockImplementationOnce(async function (this: ManuscriptExportStore, ...args) {
+          arrived(); await held; return approve.apply(this, args);
+        });
+      }
+      const job = jobs.startPackageExport({ bookId, exportId: prepared.exportId }, true);
+      await entered;
+      expect(jobs.cancelPackageExport(job.jobId)).toBe(true);
+      release();
+      let state = jobs.poll(job.jobId);
+      for (let i = 0; i < 1_000 && state.state === 'running'; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        state = jobs.poll(job.jobId);
+      }
+      expect(state.state).toBe('cancelled');
+      expect(await readdir(folder)).toEqual([]);
+      expect([await count('export_approvals'), await count('export_receipts')]).toEqual([0, 0]);
+      expect(store.inspectBookDeliveryPackage(bookId).versions[0]!.exports).toEqual([]);
+    } finally { release(); await jobs.dispose(); store.close(); }
   }, 180_000);
 
   it('adds the export relations to a revision-40 store empty', async () => {
@@ -440,9 +546,9 @@ describe('图书交付包 · 导出 (S67b)', () => {
         .toEqual(['excluded', 'excluded']);
       const folder = join(roots.inputRoot, '不含标记');
       await mkdir(folder);
-      expect(await code(() => store.prepareBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL, reviewDigest: bare.reviewDigest, folder }, true)))
+      expect(await code(() => store.prepareBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL, memberKeys: ['publication', 'document:news-release', 'manifest'], reviewDigest: bare.reviewDigest, folder }, true)))
         .toBe('BOOK_DELIVERY_PACKAGE_EXPORT_CHANGED');
-      const prepared = await store.prepareBookDeliveryPackageExport({ bookId, packageVersionId, options: NONE, reviewDigest: bare.reviewDigest, folder }, true);
+      const prepared = await store.prepareBookDeliveryPackageExport({ bookId, packageVersionId, options: NONE, memberKeys: ['publication', 'document:news-release', 'manifest'], reviewDigest: bare.reviewDigest, folder }, true);
       // Every file is prepared under exactly those switches, and never with 备注.
       expect(await preparedOptions(prepared.exportId)).toEqual(Array(3).fill('{"includeAnnotations":false,"includeEditorNotes":false,"includeSuggestions":false}'));
       const exported = await store.approveBookDeliveryPackageExport({ bookId, exportId: prepared.exportId }, true);
@@ -466,7 +572,7 @@ describe('图书交付包 · 导出 (S67b)', () => {
       const review = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL }, true);
       const folder = join(roots.inputRoot, '标记之后');
       await mkdir(folder);
-      const prepared = await store.prepareBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL, reviewDigest: review.reviewDigest, folder }, true);
+      const prepared = await store.prepareBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL, memberKeys: ['publication', 'document:news-release', 'manifest'], reviewDigest: review.reviewDigest, folder }, true);
       // A 批注 made after the folder was chosen changes what the publication's file would carry: nothing is written, not
       // even the files it does not touch, and the refusal names the file.
       annotate(store, book);
@@ -482,7 +588,7 @@ describe('图书交付包 · 导出 (S67b)', () => {
       // Reviewed again, the set is written whole.
       const again = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL }, true);
       expect(again.reviewDigest).not.toBe(review.reviewDigest);
-      const next = await store.prepareBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL, reviewDigest: again.reviewDigest, folder }, true);
+      const next = await store.prepareBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL, memberKeys: ['publication', 'document:news-release', 'manifest'], reviewDigest: again.reviewDigest, folder }, true);
       expect((await store.approveBookDeliveryPackageExport({ bookId, exportId: next.exportId }, true)).export.state).toBe('exported');
       store.markCleanShutdown();
     } finally {
@@ -500,7 +606,7 @@ describe('图书交付包 · 导出 (S67b)', () => {
       const exportTo = async (name: string) => {
         const folder = join(roots.inputRoot, name);
         await mkdir(folder);
-        return store.prepareBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL, reviewDigest: review.reviewDigest, folder }, true);
+        return store.prepareBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL, memberKeys: ['publication', 'document:news-release', 'manifest'], reviewDigest: review.reviewDigest, folder }, true);
       };
       const done = await exportTo('已导出');
       await store.approveBookDeliveryPackageExport({ bookId, exportId: done.exportId }, true);
