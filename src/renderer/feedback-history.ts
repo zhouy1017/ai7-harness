@@ -1,4 +1,4 @@
-import type { FeedbackHistoryEntryProjection, FeedbackHistoryPeopleVersion, FeedbackHistoryProjection, FeedbackHistoryTarget, RendererApi } from '../shared/protocol.js';
+import type { FeedbackHistoryInput, FeedbackHistoryEntryProjection, FeedbackHistoryPeopleVersion, FeedbackHistoryProjection, FeedbackHistoryTarget, RendererApi } from '../shared/protocol.js';
 import {
   FEEDBACK_HISTORY_ALL,
   FEEDBACK_HISTORY_DETACHED,
@@ -50,19 +50,14 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
   root.classList.add('feedback-history');
   let projection: FeedbackHistoryProjection | null = null;
   /** The filters as the editor set them; `''` is 全部. They outlive a repaint, never the page. */
-  const chosen: Record<Filter, string> = { book: '', origin: '', author: '', editor: '' };
+  let chosen: Record<Filter, string> = { book: '', origin: '', author: '', editor: '' };
   let opening = false;
+  let loading = false;
+  let after: FeedbackHistoryInput['after'] = null;
+  let selectedBookLabel = '所选图书';
 
   const peopleOf = (entry: FeedbackHistoryEntryProjection): FeedbackHistoryPeopleVersion | null =>
     projection?.books.find((book) => book.bookId === entry.bookId)?.peopleVersions.find((version) => version.version === entry.peopleVersion) ?? null;
-  const matches = (entry: FeedbackHistoryEntryProjection): boolean => {
-    const people = peopleOf(entry);
-    return (chosen.book === '' || entry.bookId === chosen.book) &&
-      (chosen.origin === '' || entry.origin === chosen.origin) &&
-      (chosen.author === '' || (people?.authors.includes(chosen.author) ?? false)) &&
-      (chosen.editor === '' || (people?.editors.includes(chosen.editor) ?? false));
-  };
-
   const select = (filter: Filter, choices: ReadonlyArray<readonly [string, string]>): HTMLLabelElement => {
     const wrapper = el('label', 'feedback-filter');
     const control = el('select');
@@ -73,10 +68,17 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
       option.value = value;
       control.append(option);
     }
-    control.value = choices.some(([value]) => value === chosen[filter]) ? chosen[filter] : '';
+    if (chosen[filter] !== '' && !choices.some(([value]) => value === chosen[filter])) {
+      const option = el('option', undefined, filter === 'book' ? selectedBookLabel : chosen[filter]);
+      option.value = chosen[filter];
+      control.append(option);
+    }
+    control.value = chosen[filter];
+    control.disabled = loading || opening;
     control.addEventListener('change', () => {
-      chosen[filter] = control.value;
-      paint(`#feedback-filter-${filter}`);
+      if (loading || opening) return;
+      if (filter === 'book') selectedBookLabel = control.selectedOptions[0]?.textContent ?? '所选图书';
+      void request({ ...chosen, [filter]: control.value }, null, `#feedback-filter-${filter}`);
     });
     wrapper.append(el('span', undefined, FEEDBACK_HISTORY_FILTERS[filter]), control);
     return wrapper;
@@ -85,12 +87,6 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
   const paint = (focus: string | null): void => {
     if (projection === null) return;
     const parts: HTMLElement[] = [el('p', 'field-note feedback-history-note', FEEDBACK_HISTORY_NOTE)];
-    if (projection.entries.length === 0) {
-      parts.push(el('p', 'field-note feedback-history-empty', FEEDBACK_HISTORY_EMPTY));
-      root.dataset['feedbackEntries'] = '0';
-      root.replaceChildren(...parts);
-      return;
-    }
     const versions = projection.books.flatMap((book) => book.peopleVersions);
     const authors = [...new Set(versions.flatMap((version) => version.authors))];
     const editors = [...new Set(versions.flatMap((version) => version.editors))];
@@ -102,10 +98,10 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
       select('editor', editors.map((name) => [name, name] as const)),
     );
     parts.push(filters);
-    const shown = projection.entries.filter(matches);
+    const shown = projection.entries;
     root.dataset['feedbackEntries'] = String(shown.length);
     if (shown.length === 0) {
-      const none = el('p', 'field-note feedback-history-none', FEEDBACK_HISTORY_NONE_MATCH);
+      const none = el('p', 'field-note feedback-history-none', Object.values(chosen).every((value) => value === '') && after == null ? FEEDBACK_HISTORY_EMPTY : FEEDBACK_HISTORY_NONE_MATCH);
       none.setAttribute('role', 'status');
       parts.push(none);
     }
@@ -137,7 +133,7 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
           go.type = 'button';
           go.dataset['feedbackAction'] = 'open';
           go.setAttribute('aria-label', `${FEEDBACK_HISTORY_OPEN.replace('…', '')}：${feedbackEntryLine(entry)}`);
-          go.disabled = opening;
+          go.disabled = opening || loading;
           go.addEventListener('click', () => void openEntry(entry));
           item.append(go);
         }
@@ -147,12 +143,52 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
       parts.push(section);
     }
     if (projection.truncated) parts.push(el('p', 'field-note feedback-history-truncated', FEEDBACK_HISTORY_TRUNCATED));
+    const navigation = el('div', 'feedback-history-navigation');
+    const next = el('button', 'button quiet', '更早的记录');
+    next.type = 'button';
+    next.dataset['feedbackAction'] = 'next';
+    next.disabled = loading || opening || !projection.truncated;
+    next.addEventListener('click', () => {
+      const last = projection?.entries.at(-1);
+      if (last !== undefined) void request(chosen, { recordedAt: last.recordedAt, entryId: last.entryId }, '[data-feedback-action="next"]');
+    });
+    const reset = el('button', 'button quiet', '回到最新记录');
+    reset.type = 'button';
+    reset.dataset['feedbackAction'] = 'reset';
+    reset.disabled = loading || opening || after == null;
+    reset.addEventListener('click', () => void request(chosen, null, '[data-feedback-action="reset"]'));
+    navigation.append(next, reset);
+    parts.push(navigation);
     root.replaceChildren(...parts);
-    if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();
+    if (focus !== null) {
+      const target = root.querySelector<HTMLElement>(focus);
+      if (target?.matches(':disabled') === false) target.focus();
+      else root.querySelector<HTMLElement>('[data-feedback-action="reset"]:not(:disabled), [data-feedback-action="next"]:not(:disabled), #feedback-filter-book')?.focus();
+    }
+  };
+
+  const request = async (filters: Record<Filter, string>, cursor: FeedbackHistoryInput['after'], focus: string | null): Promise<void> => {
+    if (loading || opening) return;
+    loading = true;
+    paint(null);
+    try {
+      const result = await api.inspectFeedbackHistory({ bookId: filters.book || null,
+        origin: (filters.origin || null) as FeedbackHistoryInput['origin'], author: filters.author || null,
+        editor: filters.editor || null, after: cursor });
+      if (!root.isConnected) return;
+      projection = result;
+      chosen = { ...filters };
+      after = cursor;
+    } catch (error) {
+      if (root.isConnected) setStatus(errorMessage(error, FEEDBACK_HISTORY_STATUS.openFailed), 'error');
+    } finally {
+      loading = false;
+      if (root.isConnected) paint(focus);
+    }
   };
 
   const openEntry = async (entry: FeedbackHistoryEntryProjection): Promise<void> => {
-    if (opening) return;
+    if (opening || loading) return;
     opening = true;
     setStatus(FEEDBACK_HISTORY_STATUS.opening, 'busy');
     try {
@@ -168,8 +204,7 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
   return {
     async load(): Promise<void> {
       root.replaceChildren(el('p', 'field-note', FEEDBACK_HISTORY_STATUS.loading));
-      projection = await api.inspectFeedbackHistory();
-      paint(null);
+      await request(chosen, null, null);
     },
   };
 }

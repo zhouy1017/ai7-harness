@@ -209,6 +209,7 @@ describe('反馈历史 over the real store (Issue #61, S26c review)', () => {
         store.recordProposalDecisionFeedback({ ...binding, markId: firstMark, decisionId: first.decisionId,
           expectedFeedback: index, action: 'revise', reason: `修订原因${index}`, reasonSource: 'free-text' });
       }
+      store.updateBookPeople({ bookId: book.bookId, expectedVersion: 66, authors: ['周一'], editors: ['接任编辑'], related: [] });
       for (let index = 0; index < MAX_FEEDBACK_HISTORY_ENTRIES + 5; index += 1) {
         const decision = decide(make(), 'rejected', null, `原因${index}`).card!.suggestion!.decision!;
         decisions.push({ entryId: `proposal-decision:${decision.decisionId}`, recordedAt: decision.recordedAt });
@@ -217,7 +218,17 @@ describe('反馈历史 over the real store (Issue #61, S26c review)', () => {
       expected = store.inspectFeedbackHistory();
       expect(expected.entries.map((entry) => entry.entryId)).toEqual(decisions.slice(0, MAX_FEEDBACK_HISTORY_ENTRIES).map((entry) => entry.entryId));
       expect(expected.truncated).toBe(true);
-      expect(expected.entries.every((entry) => entry.peopleVersion === 66)).toBe(true);
+      const last = expected.entries.at(-1)!;
+      const older = store.inspectFeedbackHistory({ after: { recordedAt: last.recordedAt, entryId: last.entryId } });
+      expect(older.entries).toHaveLength(6);
+      expect(older.truncated).toBe(false);
+      expect(new Set([...expected.entries, ...older.entries].map((entry) => entry.entryId)).size).toBe(MAX_FEEDBACK_HISTORY_ENTRIES + 6);
+      const priorEditor = store.inspectFeedbackHistory({ editor: '编辑65' });
+      expect(priorEditor.entries.map((entry) => [entry.reason, entry.peopleVersion])).toEqual([['修订原因65', 66]]);
+      expect(priorEditor.truncated).toBe(false);
+      expect(store.inspectFeedbackHistory({ origin: 'analysis-feedback' }).entries).toEqual([]);
+      expect(store.inspectFeedbackHistory()).toEqual(expected);
+      expect(expected.entries.every((entry) => entry.peopleVersion === 67)).toBe(true);
       expect(wire(expected)).toBeLessThan(MAX_FRAME_BYTES);
       store.markCleanShutdown();
     } finally { store.close(); }

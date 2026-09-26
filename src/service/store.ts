@@ -110,6 +110,7 @@ import type {
   RecordProposalDecisionFeedbackInput,
   DecideLearningMaterialInput,
   FeedbackHistoryEntryProjection,
+  FeedbackHistoryInput,
   FeedbackHistoryProjection,
   LearningMaterialCursor,
   LearningMaterialProjection,
@@ -5840,13 +5841,20 @@ export class EditorialStore {
    * saved after it (Issue #61 review). One answer holds what `feedbackHistoryPage` admits, each reason bounded. Passive
    * history: a read, asking nothing.
    */
-  inspectFeedbackHistory(): FeedbackHistoryProjection {
+  inspectFeedbackHistory(input: FeedbackHistoryInput = {}): FeedbackHistoryProjection {
     return this.#learningCall(() => {
       type Entry = Omit<FeedbackHistoryEntryProjection, 'peopleVersion'>;
       // Keep only the newest response-sized candidates plus one lookahead, regardless of ledger depth or Book count.
       const entries: Entry[] = [];
-      const newest = (a: Entry, b: Entry): number => a.recordedAt > b.recordedAt ? -1 : a.recordedAt < b.recordedAt ? 1 : a.entryId < b.entryId ? -1 : a.entryId > b.entryId ? 1 : 0;
+      const newest = (a: Pick<Entry, 'recordedAt' | 'entryId'>, b: Pick<Entry, 'recordedAt' | 'entryId'>): number => a.recordedAt > b.recordedAt ? -1 : a.recordedAt < b.recordedAt ? 1 : a.entryId < b.entryId ? -1 : a.entryId > b.entryId ? 1 : 0;
       const consider = (entry: Entry): void => {
+        if ((input.bookId != null && entry.bookId !== input.bookId) || (input.origin != null && entry.origin !== input.origin) ||
+            (input.after != null && newest(entry, input.after) <= 0)) return;
+        if (input.author != null || input.editor != null) {
+          const people = this.#bookPeople.at(entry.bookId, entry.recordedAt);
+          if ((input.author != null && !people?.authors.includes(input.author)) ||
+              (input.editor != null && !people?.editors.includes(input.editor))) return;
+        }
         const at = entries.findIndex((held) => newest(entry, held) < 0);
         entries.splice(at < 0 ? entries.length : at, 0, entry);
         if (entries.length > MAX_FEEDBACK_HISTORY_ENTRIES + 1) entries.pop();

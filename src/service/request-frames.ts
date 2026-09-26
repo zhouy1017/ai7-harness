@@ -714,10 +714,19 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
-    // 质量与学习 › 反馈历史 (Issue #61, S26c): every Book's feedback; it names nothing.
-    case 'inspectFeedbackHistory':
-      requireInput(value.input, [], tentativeId);
+    // Filter before the bounded history page, with one exclusive cursor.
+    case 'inspectFeedbackHistory': {
+      const input = requireInputWithOptional(value.input, [], ['bookId', 'origin', 'author', 'editor', 'after'], tentativeId);
+      if (!optionalOrNull(input, 'bookId', validUuid) ||
+          !optionalOrNull(input, 'origin', (origin) => origin === 'proposal-decision' || origin === 'analysis-feedback' || origin === 'review-disposition') ||
+          !optionalOrNull(input, 'author', (name) => isBoundedString(name, 200)) ||
+          !optionalOrNull(input, 'editor', (name) => isBoundedString(name, 200)) ||
+          !optionalOrNull(input, 'after', (after) => isRecord(after) && hasExactKeys(after, ['recordedAt', 'entryId']) &&
+            isBoundedString(after.recordedAt, 40) && LEARNING_CURSOR_INSTANT.test(after.recordedAt) && validLearningMaterialKey(after.entryId))) {
+        throw new ProtocolError(tentativeId);
+      }
       break;
+    }
     // 质量与学习 › 学习准入 (Issue #61, S26b): every Book's Learning Material, or one Book's.
     case 'inspectLearningMaterials': {
       const input = requireInput(value.input, ['bookId', 'after'], tentativeId);

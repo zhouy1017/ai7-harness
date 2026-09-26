@@ -1065,6 +1065,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'feedback-history',
     'feedback-history-attribution',
     'feedback-history-open',
+    'feedback-history-pages',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',

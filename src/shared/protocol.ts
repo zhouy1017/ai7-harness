@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 77 as const;
+export const SERVICE_PROTOCOL_VERSION = 78 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -5237,6 +5237,15 @@ export type FeedbackHistoryTarget =
   }
   | { readonly kind: 'review'; readonly bookId: string; readonly reviewRunId: string; readonly findingId: string };
 
+/** Service-side filters and an exclusive newest-first page cursor. Omitted fields mean all. */
+export interface FeedbackHistoryInput {
+  readonly bookId?: string | null;
+  readonly origin?: LearningMaterialKind | null;
+  readonly author?: string | null;
+  readonly editor?: string | null;
+  readonly after?: { readonly recordedAt: string; readonly entryId: string } | null;
+}
+
 /** One piece of the editor's feedback as the history lists it. */
 export interface FeedbackHistoryEntryProjection {
   readonly entryId: string;
@@ -7686,7 +7695,7 @@ export interface ServiceOperationMap {
   inspectLearningMaterial: { input: { bookId: string; materialKey: string }; output: LearningMaterialProjection };
   /** 记录学习准入决定, answered with the one material it decided. */
   decideLearningMaterial: { input: DecideLearningMaterialInput; output: LearningMaterialProjection };
-  inspectFeedbackHistory: { input: Record<string, never>; output: FeedbackHistoryProjection };
+  inspectFeedbackHistory: { input: FeedbackHistoryInput; output: FeedbackHistoryProjection };
   /**
    * AI7 Apply for Change Suggestions (Issue #408). The batch form is 确认应用 on 审阅's confirmation
    * strip (Issue #417): one Effect over exactly the suggestions the strip named, all or none.
@@ -8017,7 +8026,7 @@ export interface RendererApi {
   inspectLearningMaterials(input: { bookId: string | null; after?: LearningMaterialCursor | null }): Promise<LearningMaterialsProjection>;
   inspectLearningMaterial(input: { bookId: string; materialKey: string }): Promise<LearningMaterialProjection>;
   decideLearningMaterial(input: DecideLearningMaterialInput): Promise<LearningMaterialProjection>;
-  inspectFeedbackHistory(): Promise<FeedbackHistoryProjection>;
+  inspectFeedbackHistory(input?: FeedbackHistoryInput): Promise<FeedbackHistoryProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */
   applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): Promise<ManuscriptApplyCommandProjection>;

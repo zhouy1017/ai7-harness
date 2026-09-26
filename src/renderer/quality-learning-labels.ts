@@ -119,7 +119,7 @@ export const FEEDBACK_HISTORY_HEADING = '反馈历史';
 export const FEEDBACK_HISTORY_NOTE = '这里只是记录你给过的反馈：不会催你补充原因，也不会把没有说明当作认可。';
 export const FEEDBACK_HISTORY_EMPTY = '还没有反馈记录。你对修改建议、分析结果和审阅发现的处理与原因，会记在这里。';
 export const FEEDBACK_HISTORY_NONE_MATCH = '没有符合的反馈记录。';
-export const FEEDBACK_HISTORY_TRUNCATED = '只列出最近的记录。';
+export const FEEDBACK_HISTORY_TRUNCATED = '还有更早的记录，可继续查看。';
 export const FEEDBACK_HISTORY_OPEN = '打开…';
 /** In place of 打开… when the paragraph a 修改建议 was made on is gone from the manuscript (Issue #61 review). */
 export const FEEDBACK_HISTORY_DETACHED = '这条修改建议所在的段落已不在稿件中。';
