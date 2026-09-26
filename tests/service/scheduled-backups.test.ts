@@ -1,5 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { existsSync, readdirSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -7,7 +7,7 @@ import { strFromU8, unzipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
 import { writeDatabasePackage } from '../../src/service/database-exports.js';
-import { SCHEDULED_BACKUP_TRIGGER_SQL, backupFileName } from '../../src/service/scheduled-backups.js';
+import { SCHEDULED_BACKUP_TRIGGER_SQL, backupFailureReason, backupFileName } from '../../src/service/scheduled-backups.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { DATABASE_EXPORT_SCHEMA_VERSION, SCHEDULED_BACKUP_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -452,6 +452,85 @@ describe('定期自动备份 over the real store', () => {
       expect(leftBehind()).toEqual([true, false]);
     } finally {
       db.close();
+    }
+  }, 180_000);
+});
+
+describe('定期自动备份 at its second review (Issue #434 review)', () => {
+  it('never puts a backup over a file that appeared at its name while it was written, and records none', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const location = `${roots.dataRoot}-backups`;
+    try {
+      // Enough data that the package takes many chunks to write.
+      await mkdir(join(roots.dataRoot, 'bulk'), { recursive: true });
+      await writeFile(join(roots.dataRoot, 'bulk', 'filler.bin'), randomBytes(24 << 20));
+      // Turning the switch on starts the check; once it writes, another program puts a file at the backup's name.
+      await store.setScheduledBackup({ enabled: true, expectedOrdinal: 0 }, T);
+      const deadline = Date.now() + 60_000;
+      while (!(existsSync(location) && readdirSync(location).some((name) => /\.ai7db\.partial$/u.test(name)))) {
+        if (Date.now() > deadline) throw new Error('timed out waiting for the backup to be written');
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      await writeFile(join(location, backupFileName(T)), 'another program put this here');
+      const refused = await store.runScheduledBackupIfDue(T).then(() => 'no-error', (error: unknown) => (error as { code?: unknown }).code);
+      expect(refused).toBe('SCHEDULED_BACKUP_EXISTS');
+      expect(await readFile(join(location, backupFileName(T)), 'utf8')).toBe('another program put this here');
+      expect(readdirSync(location).filter((name) => name.includes('.partial'))).toEqual([]);
+      expect(store.inspectScheduledBackups(T)).toMatchObject({ total: 0, backups: [], backingUp: false, lastFailure: { at: T.toISOString(), reason: 'other' } });
+      // A volume that cannot take a name without a hard link is a location that cannot hold a backup.
+      expect(backupFailureReason({ code: 'BACKUP_LOCATION_UNSUPPORTED' })).toBe('location-unavailable');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
+  it('lists the newest backups kept and counts the rest, and removes those whose days passed a turn at a time, however many', async () => {
+    const created = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      created.markCleanShutdown();
+    } finally {
+      created.close();
+    }
+    // Twenty-one backups kept, each older than fourteen days: more than a projection lists and than a check reads at a time.
+    const location = `${roots.dataRoot}-backups`;
+    await mkdir(location, { recursive: true });
+    const database = new DatabaseSync(databasePath());
+    try {
+      for (let index = 0; index < 21; index += 1) {
+        const createdAt = at(-(15 + index) * DAY);
+        const fileName = backupFileName(createdAt);
+        const bytes = Buffer.from(`backup ${index}`);
+        await writeFile(join(location, fileName), bytes);
+        const backupId = randomUUID();
+        const contents = { books: 0, sourceVersions: 0, libraryMaterials: 0, series: 0 };
+        const fileSha256 = createHash('sha256').update(bytes).digest('hex');
+        const record = canonicalRecord({
+          schema: 'ai7.scheduled-backup/1', backupId, fileName, byteLength: bytes.byteLength, fileSha256, dataVersion: 1,
+          schemaRevision: SCHEDULED_BACKUP_SCHEMA_VERSION, softwareVersion: '0.1.0', contents, createdAt: createdAt.toISOString(),
+        });
+        database.prepare(
+          `INSERT INTO scheduled_backups(backup_id, file_name, byte_length, file_sha256, data_version, schema_revision, software_version, contents_json, created_at, canonical_json, sha256)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(backupId, fileName, bytes.byteLength, fileSha256, 1, SCHEDULED_BACKUP_SCHEMA_VERSION, '0.1.0', JSON.stringify(contents),
+          createdAt.toISOString(), record.json, record.digest);
+      }
+    } finally {
+      database.close();
+    }
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const listed = store.inspectScheduledBackups(T);
+      expect([listed.backups.length, listed.total]).toEqual([20, 21]);
+      expect(listed.backups[0]!.createdAt).toBe(at(-15 * DAY).toISOString());
+      // The switch is off, so the check makes no backup, and it still removes every one whose days passed.
+      expect(await store.runScheduledBackupIfDue(T)).toBe(false);
+      expect(removalReasons()).toEqual(Array.from({ length: 21 }, () => 'expired'));
+      expect(readdirSync(location)).toEqual([]);
+      expect(store.inspectScheduledBackups(T)).toMatchObject({ total: 0, backups: [] });
+      store.markCleanShutdown();
+    } finally {
+      store.close();
     }
   }, 180_000);
 });

@@ -224,8 +224,8 @@ It is not encrypted (ADR 0079 §1.6). It holds no Model Service credential, beca
 While the switch is on, the running service writes the same database package into the fixed backup location beside the Agent Data Root, `<data root>-backups`, once a day:
 - the service's background check runs at start, then hourly, and a backup is due when none was made in the day before;
 - turning the switch on starts that check at once: the request only records the switch, and the section reads again until the backup is there;
-- each backup is written as a `.partial` file and renamed into place. If its record cannot then be written, the renamed file is removed;
-- a backup is never written over a file already at its name.
+- each backup is written as a `.partial` file and put in place by the create-only publication every export uses, a hard link that fails when the name is taken. So a file that appeared at the name while the package was written is left as it is, and no backup is recorded (`SCHEDULED_BACKUP_EXISTS`). A volume without hard links cannot hold a backup, and the section says the location is unavailable. If the record cannot then be written, the placed file is removed;
+- what the record says the backup holds is counted with the store's copy it carries.
 
 Each check first removes what a cut-off check left (`.<uuid>.ai7db.partial` and `.partial.store`), then the backups older than fourteen days, each on its own, and only then writes. So a backup that cannot be written never keeps the space of those whose days passed.
 
@@ -235,6 +235,8 @@ A file is removed only while it is still the one AI7 made:
 - its size and SHA-256 are the recorded ones.
 
 A file found gone is recorded as `missing`. A file at the name that is another is left where it is and recorded as `changed`. Turning the switch off makes no more backups; those kept stay until their fourteen days pass.
+
+Every read of the three ledgers is a stream, verified row by row, that holds no more than it answers (Issue #434 review). The section lists the twenty newest backups kept and counts the rest. A check reads the backups whose days passed sixteen at a time, oldest first, each turn after the last one read.
 
 At shutdown the service stops a check under way before the store closes: the write stops at its next chunk and removes what it wrote. A backup the check could not make is stated in the section, with its reason by the refusal's code, until one is made or the switch is turned off. No External Export Policy approval is involved: the switch is the decision (ADR 0079 §1.7), and nothing is written anywhere but that location.
 
