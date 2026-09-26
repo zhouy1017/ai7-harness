@@ -1164,6 +1164,13 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .analysis-tab[aria-selected="true"] { border-bottom: 3px solid Highlight; }
   /* A 审阅 pill's shape is its own drawing, so it is drawn in the pill's text colour, never left to vanish. */
   .review-pill::before { background: ButtonText; forced-color-adjust: none; }
+  /* So is a workflow phase's (§0.3 文字与形状并用; Issue #626): the ring, half, check, dash, triangle and diamond each stay
+     their own shape in the system's text colour, and 进行中 never reads as 未开始. */
+  .phase-pill::before, .phase-chip::before { border-color: ButtonText; background: transparent; forced-color-adjust: none; }
+  .phase-pill[data-phase-state="in-progress"]::before, .phase-chip[data-phase-state="in-progress"]::before { background: linear-gradient(90deg, ButtonText 50%, transparent 50%); }
+  .phase-pill[data-phase-state="skipped"]::before, .phase-chip[data-phase-state="skipped"]::before,
+  .phase-pill[data-phase-state="reopened"]::before, .phase-chip[data-phase-state="reopened"]::before,
+  .phase-pill[data-phase-state="waiting"]::before, .phase-chip[data-phase-state="waiting"]::before { background: ButtonText; }
   .review-pill[data-pill-shape="ring"]::before, .review-pill[data-pill-shape="check"]::before { border-color: ButtonText; background: transparent; }
   .review-pill[data-pill-shape="half"]::before { border-color: ButtonText; background: linear-gradient(90deg, ButtonText 50%, transparent 50%); }
   /* Colour cannot tell a 修改建议 finding from a 批注 one here, so its left line does: solid, or double. */

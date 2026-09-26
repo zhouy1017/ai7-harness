@@ -8,6 +8,7 @@ import {
   type ProductionDocumentProjection,
   type ProductionDocumentWorkflowProjection,
 } from '../shared/protocol.js';
+import { publicationCountLine } from './deliverables-labels.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import {
   DOCUMENT_PHASE_ACTION_LABELS,
@@ -27,6 +28,7 @@ import {
   phaseLatestLine,
   phaseMovedLine,
   phaseMovesLine,
+  phaseReasonTextProblem,
   workflowProfileLine,
 } from './production-document-labels.js';
 
@@ -191,14 +193,29 @@ export function renderDocumentWorkflow(
     const textLabel = el('label', 'field');
     const words = el('textarea');
     words.rows = 2;
-    words.maxLength = MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS * 2;
     words.value = state.text;
     words.disabled = working;
     words.dataset['phaseReasonText'] = 'true';
+    // Counted as the service counts it, and refused here with its reason rather than by the frame (Issue #626), as the 发稿
+    // and 交付 forms do.
+    const count = el('small', 'field-note document-phase-reason-count', publicationCountLine(state.text.trim(), MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS));
+    count.id = uid('document-phase-reason-count');
+    const textProblem = el('p', 'field-error document-phase-reason-problem');
+    textProblem.id = uid('document-phase-reason-problem');
+    const showTextProblem = (): void => {
+      const problem = phaseReasonTextProblem(state.text.trim());
+      textProblem.textContent = problem ?? '';
+      textProblem.hidden = problem === null;
+      words.setAttribute('aria-invalid', problem === null ? 'false' : 'true');
+    };
+    words.setAttribute('aria-describedby', `${count.id} ${textProblem.id}`);
     words.addEventListener('input', () => {
       state.text = words.value;
+      count.textContent = publicationCountLine(state.text.trim(), MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS);
+      showTextProblem();
     });
-    textLabel.append(el('span', undefined, DOCUMENT_PHASE_REASON_TEXT_LABEL), words);
+    showTextProblem();
+    textLabel.append(el('span', undefined, DOCUMENT_PHASE_REASON_TEXT_LABEL), words, count, textProblem);
     node.append(choices, textLabel);
     if (state.problem !== null) {
       const problem = el('p', 'field-error', state.problem);
@@ -224,7 +241,8 @@ export function renderDocumentWorkflow(
     node.addEventListener('submit', (event) => {
       event.preventDefault();
       const text = state.text.trim();
-      const problem = state.choice === null ? DOCUMENT_PHASE_REASON_NEEDED : state.choice === 'custom' && text.length === 0 ? DOCUMENT_PHASE_CUSTOM_NEEDED : null;
+      const problem = state.choice === null ? DOCUMENT_PHASE_REASON_NEEDED
+        : state.choice === 'custom' && text.length === 0 ? DOCUMENT_PHASE_CUSTOM_NEEDED : phaseReasonTextProblem(text);
       if (problem !== null) {
         state.problem = problem;
         focusNext = { phaseId: phase.phaseId, target: 'form' };
@@ -266,8 +284,9 @@ export function renderDocumentWorkflow(
     const row = phases.querySelector<HTMLElement>(`li[data-phase-id="${target.phaseId}"]`);
     // A form asks for what is missing: its own words once 自行输入 is chosen without them, else the chosen reason, else the
     // first.
+    const wordsWrong = form?.problem === DOCUMENT_PHASE_CUSTOM_NEEDED || (form !== null && form.problem !== null && form.problem === phaseReasonTextProblem(form.text.trim()));
     const focusable = target.target === 'form'
-      ? (form?.problem === DOCUMENT_PHASE_CUSTOM_NEEDED ? row?.querySelector<HTMLElement>('.document-phase-form textarea') : null) ??
+      ? (wordsWrong ? row?.querySelector<HTMLElement>('.document-phase-form textarea') : null) ??
         row?.querySelector<HTMLElement>('.document-phase-form input:checked') ?? row?.querySelector<HTMLElement>('.document-phase-form input')
       : target.target === 'action'
         ? row?.querySelector<HTMLElement>('[data-phase-action="skip"], [data-phase-action="reopen"]')

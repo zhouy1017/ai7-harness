@@ -12,6 +12,7 @@ import {
   MAX_MARK_BODY_CODE_UNITS,
   MAX_MILESTONE_PURPOSE_CODE_UNITS,
   MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS,
+  MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS,
   MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS,
   MAX_PROPOSAL_CONFLICT_UNITS,
   MAX_PUBLICATION_BASIS_CHARACTERS,
@@ -320,6 +321,28 @@ describe('decodeRequest accepts well-formed frames', () => {
     for (const { op, input } of inputs) {
       const request = { id: randomUUID(), op, input };
       expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+  });
+
+  it('takes a workflow move\'s reason within the one bound the service holds it to, and refuses one past it (Issue #626)', () => {
+    const move = { bookId: randomUUID(), documentId: randomUUID(), phaseId: 'drafting', action: 'skip', expectedTransitions: 3 };
+    const taken: ReadonlyArray<unknown> = [
+      { ...move, reason: { choice: 'custom', text: '𠀀'.repeat(MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS) } },
+      { ...move, reason: { choice: 'later', text: null } },
+      { ...move, action: 'start', reason: null },
+    ];
+    for (const input of taken) {
+      const request = { id: randomUUID(), op: 'transitionProductionDocumentPhase', input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    const refused: ReadonlyArray<unknown> = [
+      { ...move, reason: { choice: 'custom', text: '字'.repeat(MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS + 1) } },
+      { ...move, reason: { choice: 'Custom Reason', text: null } },
+      { ...move, reason: { choice: 'later' } },
+      { ...move, reason: 'later' },
+    ];
+    for (const input of refused) {
+      expect(() => decodeRequest(frameOf({ id: randomUUID(), op: 'transitionProductionDocumentPhase', input }))).toThrowError(ProtocolError);
     }
   });
 
