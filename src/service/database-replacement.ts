@@ -616,7 +616,7 @@ async function applyPendingMerge<T>(
   }
   if (phase === 'merging') {
     try {
-      mergeIntoStoreFile(dataRoot, join(staging, 'incoming'), books);
+      mergeIntoStoreFile(dataRoot, join(staging, 'incoming'), books, (db) => writeMergeReceipt(db, intent, new Date()));
       phase = 'opening-merge';
     } catch (error) {
       // A list of its Books no longer the one the preparation wrote is what waited having changed, not data that would not open.
@@ -666,13 +666,21 @@ const REFUSAL_NOTE = 'refused.json';
 
 /** Why a resumed apply put the data back, as its note says; `null` when none was written, or what is there is not one. */
 async function refusalOf(staging: string): Promise<'changed' | 'interrupted' | null> {
+  const path = join(staging, REFUSAL_NOTE);
   try {
-    const noted: unknown = JSON.parse(await readFile(join(staging, REFUSAL_NOTE), 'utf8'));
-    return noted === 'changed' || noted === 'interrupted' ? noted : null;
-  } catch {
-    return null;
+    // Its size is known before any of it is read (Issue #434 review). A note there that is not AI7's — not a file, larger than
+    // any AI7 writes, or saying something else — still tells a refusal from data that would not open: what waited had changed.
+    const found = await lstat(path);
+    if (!found.isFile() || found.size > MAX_REFUSAL_NOTE_BYTES) return 'changed';
+    const noted: unknown = JSON.parse(await readFile(path, 'utf8'));
+    return noted === 'changed' || noted === 'interrupted' ? noted : 'changed';
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? null : 'changed';
   }
 }
+
+/** No refusal note AI7 writes comes near this: `"interrupted"` is thirteen bytes. */
+const MAX_REFUSAL_NOTE_BYTES = 64;
 
 /**
  * After the store opened by `openWithPendingReplacement` has recorded the replacement: the staging place goes, with the data
@@ -705,6 +713,8 @@ interface StoredReplacement {
   readonly recordedAt: string;
   /** How many Books a merge took and the digest of their list, whose rows its ledger keeps; none for a replacement. */
   readonly mergeBooks: MergingBooks | null;
+  /** A merge's first titles, read with its rows as they were verified; none for a replacement. */
+  readonly mergedTitles?: ReadonlyArray<string>;
   readonly mergeNotices: ReadonlyArray<DatabaseMergeNotice>;
   /** Why a failed replacement failed, as its record says; named only in the record of one that failed. */
   readonly failure?: DatabaseReplacementFailure;
@@ -948,7 +958,7 @@ export class DatabaseReplacements {
         recordedAt: record.recordedAt,
         backupPresent: existsSync(join(location, record.backupFileName)),
         // A merge names its first titles, read from its own rows, and counts the rest (Issue #434 review).
-        mergedTitles: record.mergeBooks === null ? null : this.#mergedTitles(record.replacementId, record.mergeBooks),
+        mergedTitles: record.mergedTitles ?? null,
         mergedCount: record.mergeBooks === null ? null : record.mergeBooks.count,
         failure: record.failure ?? null,
       })),
@@ -991,49 +1001,18 @@ export class DatabaseReplacements {
   }
 
   #recordMerge(intent: ReplacementIntent, outcome: 'applied' | 'failed', failure: DatabaseReplacementFailure | undefined, now: Date): void {
+    // An applied merge's receipt was committed with its Books, in the merge's own transaction (Issue #434 review): there is
+    // nothing more to write, and never a receipt naming fewer Books than it took.
     if (this.#db.prepare('SELECT 1 FROM database_merges WHERE merge_id = ?').get(intent.replacementId) !== undefined) return;
-    // The Books it names are its staged list's, read a line at a time (Issue #434 review). A list no longer the one its intent
-    // names — a merge refused for it took nothing — leaves the record naming none.
-    const list = intent.mergeBooks === null ? null : { ...intent.mergeBooks, path: join(replacementStagingFor(this.#dataRoot), MERGING_BOOKS_FILE) };
-    const readable = list !== null && (() => {
-      try {
-        for (const _book of readMergingBooks(list.path, list)) { /* read whole, to know it is the one named */ }
-        return true;
-      } catch {
-        return false;
-      }
-    })();
-    const books: MergingBooks = readable ? intent.mergeBooks! : { sha256: sha256Hex(''), count: 0 };
-    const stored = {
-      mergeId: intent.replacementId,
-      outcome,
-      packageFileName: intent.packageFileName,
-      packageSha256: intent.packageSha256,
-      backupFileName: intent.backupFileName,
-      backupSha256: intent.backupSha256,
-      booksCount: books.count,
-      booksSha256: books.sha256,
-      notices: intent.mergeNotices,
-      preparedAt: intent.preparedAt,
-      recordedAt: now.toISOString(),
-      // Named only on a merge that failed.
-      ...(outcome === 'failed' && failure !== undefined ? { failure } : {}),
-    };
+    requireReplacement(outcome === 'failed', 'DATABASE_MERGE_RECEIPT_MISSING', '合并的记录与合并的图书没有一起写下，无法确认合并了哪些图书。');
+    // A merge that failed took nothing: its record names no Book, in one row.
+    const stored = mergeRecordFields(intent, outcome, failure, { sha256: sha256Hex(''), count: 0 }, now);
     const record = canonicalRecord({ schema: MERGE_RECORD_SCHEMA, ...stored });
     this.#db.prepare(
       `INSERT INTO database_merges(merge_id, outcome, package_file_name, package_sha256, backup_file_name, backup_sha256, books_count, books_sha256, notices_json, prepared_at, recorded_at, canonical_json, sha256)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(stored.mergeId, stored.outcome, stored.packageFileName, stored.packageSha256, stored.backupFileName, stored.backupSha256,
       stored.booksCount, stored.booksSha256, canonicalJson(stored.notices), stored.preparedAt, stored.recordedAt, record.json, record.digest);
-    if (!readable) return;
-    const insert = this.#db.prepare(
-      `INSERT INTO database_merge_books(merge_id, ordinal, book_id, title, status, internal_number_cleared) VALUES (?, ?, ?, ?, ?, ?)`,
-    );
-    let ordinal = 0;
-    for (const book of readMergingBooks(list.path, list)) {
-      ordinal += 1;
-      insert.run(stored.mergeId, ordinal, book.bookId, book.title, book.status, book.internalNumberCleared ? 1 : 0);
-    }
   }
 
   /**
@@ -1100,6 +1079,8 @@ export class DatabaseReplacements {
         preparedAt: stored.preparedAt,
         recordedAt: stored.recordedAt,
         mergeBooks: { count: booksCount, sha256: booksSha256 },
+        // Every record's Books are verified as the ledger streams, and only its first titles kept (Issue #434 review).
+        mergedTitles: this.#mergedTitles(stored.mergeId, { count: booksCount, sha256: booksSha256 }),
         mergeNotices: notices as DatabaseMergeNotice[],
         ...(failure === undefined ? {} : { failure }),
       };
@@ -1236,6 +1217,46 @@ function failureOf(record: Record<string, unknown>, outcome: string): DatabaseRe
   requireReplacement(failure === undefined || (outcome === 'failed' && (failure === 'unopenable' || failure === 'changed' || failure === 'interrupted')),
     'DATABASE_REPLACEMENT_RECORD_INVALID', INVALID);
   return failure as DatabaseReplacementFailure | undefined;
+}
+
+/**
+ * The receipt of a merge that took its Books (Issue #434 review): its record, as an applied merge's, and one row for each Book
+ * its list names, copied from the list the merge took them by — written on the merge's own connection, inside its transaction,
+ * so the Books and the receipt that names them commit together or not at all.
+ */
+export function writeMergeReceipt(db: DatabaseSync, intent: ReplacementIntent, now: Date): void {
+  const books = intent.mergeBooks!;
+  const stored = mergeRecordFields(intent, 'applied', undefined, books, now);
+  const record = canonicalRecord({ schema: MERGE_RECORD_SCHEMA, ...stored });
+  db.prepare(
+    `INSERT INTO main.database_merges(merge_id, outcome, package_file_name, package_sha256, backup_file_name, backup_sha256, books_count, books_sha256, notices_json, prepared_at, recorded_at, canonical_json, sha256)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(stored.mergeId, stored.outcome, stored.packageFileName, stored.packageSha256, stored.backupFileName, stored.backupSha256,
+    stored.booksCount, stored.booksSha256, canonicalJson(stored.notices), stored.preparedAt, stored.recordedAt, record.json, record.digest);
+  const copied = Number(db.prepare(
+    `INSERT INTO main.database_merge_books(merge_id, ordinal, book_id, title, status, internal_number_cleared)
+     SELECT ?, ordinal, book_id, title, status, internal_number_cleared FROM temp.merge_books ORDER BY ordinal`,
+  ).run(stored.mergeId).changes);
+  if (copied !== books.count) throw new DatabaseMergeError('DATABASE_MERGE_BOOKS_CHANGED', '准备好的图书清单已不完整或被改动。');
+}
+
+/** A merge record's fields: the intent's facts, what it came to, and the count and digest of the Books it names. */
+function mergeRecordFields(intent: ReplacementIntent, outcome: 'applied' | 'failed', failure: DatabaseReplacementFailure | undefined, books: MergingBooks, now: Date) {
+  return {
+    mergeId: intent.replacementId,
+    outcome,
+    packageFileName: intent.packageFileName,
+    packageSha256: intent.packageSha256,
+    backupFileName: intent.backupFileName,
+    backupSha256: intent.backupSha256,
+    booksCount: books.count,
+    booksSha256: books.sha256,
+    notices: intent.mergeNotices,
+    preparedAt: intent.preparedAt,
+    recordedAt: now.toISOString(),
+    // Named only on a merge that failed.
+    ...(outcome === 'failed' && failure !== undefined ? { failure } : {}),
+  };
 }
 
 /**
