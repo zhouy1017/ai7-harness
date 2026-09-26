@@ -6564,6 +6564,7 @@ function renderEditorWindow(
   let cancellationRequest: Promise<ServiceJobProjection> | undefined;
   let searchReturn: { window: ManuscriptWindowProjection; continuity: EditorContinuity } | undefined;
   let edgeNavigation = false;
+  let navigationIdle: Promise<void> = Promise.resolve();
   let authoritativeMutationStarting = false;
   let authoritativeMutation = false;
   let searchInvalidation: Promise<void> | undefined;
@@ -6886,6 +6887,8 @@ function renderEditorWindow(
   ): Promise<boolean> {
     if (authoritativeMutationBusy() || edgeNavigation || !editor) return false;
     edgeNavigation = true;
+    let resolveNavigationIdle = (): void => {};
+    navigationIdle = new Promise<void>((resolve) => { resolveNavigationIdle = resolve; });
     // Released by this call alone and only once: a later navigation may already hold the guard again
     // by the time this one returns, and must not have it taken away.
     let guardHeld = true;
@@ -6893,6 +6896,7 @@ function renderEditorWindow(
       if (!guardHeld) return;
       guardHeld = false;
       edgeNavigation = false;
+      resolveNavigationIdle();
     };
     try {
       if (!(await settleLocalEdit()) || !editor) return false;
@@ -6997,6 +7001,11 @@ function renderEditorWindow(
     }
     const back = button(returnChipLabel(chip.place), 'secondary', async () => {
       back.disabled = true;
+      // One disabled chip owns one pending return. A paging arrival must not discard that click.
+      while (edgeNavigation) {
+        await navigationIdle;
+        if (!chipHost.isConnected) return;
+      }
       if (!(await navigate({ kind: 'block', blockId: chip.blockId }))) {
         back.disabled = false;
         return;

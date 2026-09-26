@@ -971,7 +971,22 @@ async function main() {
 
     at('chip-return');
     // 回到<位置>: the manuscript is back where the editor was reading before the jump, and the chip is gone.
+    await renderer.evaluate(`(() => {
+      const original = window.requestAnimationFrame;
+      const held = [];
+      globalThis.__j16ReleaseFrames = () => {
+        window.requestAnimationFrame = original;
+        for (const callback of held) original.call(window, callback);
+        delete globalThis.__j16ReleaseFrames;
+      };
+      window.requestAnimationFrame = (callback) => { held.push(callback); return 1; };
+      const rail = document.querySelector('#manuscript-position');
+      rail.value = '500000';
+      rail.dispatchEvent(new Event('change'));
+    })()`);
+    // The real navigation sets its guard synchronously, before awaiting the window read.
     await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'chip-use');
+    await renderer.evaluate(`globalThis.__j16ReleaseFrames()`);
     try {
       await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)} && (document.querySelector('#persistence-status')?.textContent ?? '').startsWith('已回到')`, 'chip-returned', 60_000);
     } catch (error) {
