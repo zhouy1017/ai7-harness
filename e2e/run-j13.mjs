@@ -669,29 +669,18 @@ async function main() {
     await backToLibrary(renderer, 'history-pages');
     // Empty runner-authored Books and Series through the real service; no fixture database or mocked page response.
     at('series-bounded-seed');
-    const seeded = await renderer.evaluate(`(async () => {
-      const books = [];
-      let phase = 'series';
-      try {
-        for (let index = 0; index < 51; index += 1) {
-          const suffix = String(index).padStart(3, '0');
-          phase = 'series';
-          await window.ai7.createSeries({ title: '分页书系' + suffix, note: '' });
-          phase = 'prepare';
-          const review = await window.ai7.prepareBookCreation({ title: '分页图书' + suffix, internalNumber: null });
-          phase = 'commit';
-          const created = await window.ai7.commitBookCreation({ ...review.proposed, reviewDigest: review.reviewDigest });
-          phase = 'shape';
-          books.push(created.overview.book.bookId);
-        }
-        return { books, failure: null };
-      } catch (error) {
-        const codes = ['AI7_RENDERER_BOUNDARY_INVALID', 'AI7_AUTHORITY_UNAVAILABLE', 'BOOK_CREATION_INVALID', 'BOOK_CREATION_FAILED', 'SERIES_TITLE_TAKEN', 'AI7_WORKBENCH_ROUTE_INVALID'];
-        return { books: [], failure: phase, code: codes.includes(error?.code) ? error.code : error instanceof TypeError ? 'type-error' : 'other' };
+    await assertRenderer(renderer, `(async () => {
+      for (let index = 0; index < 51; index += 1) {
+        await window.ai7.createSeries({ title: '分页书系' + String(index).padStart(3, '0'), note: '' });
       }
-    })()`);
-    if (seeded.failure !== null) throw new Error('J-13/seed-' + seeded.failure + '-' + seeded.code);
-    const pageBooks = seeded.books;
+      return true;
+    })()`, 'page-series-created');
+    const pageBooks = [];
+    for (let index = 0; index < 51; index += 1) {
+      // Creation binds this window to that Book. The real return action releases the route before the next creation.
+      pageBooks.push(await createEmptyBook(renderer, '分页图书' + String(index).padStart(3, '0')));
+      await backToLibrary(renderer, 'page-book-created');
+    }
     requireJourney(pageBooks.length === 51 && pageBooks.every((id) => UUID_PATTERN.test(id)), 'page-books-created');
     at('series-bounded-navigation');
     await click(renderer, '书系', 'paged-series-list');
