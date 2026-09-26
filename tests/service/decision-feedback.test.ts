@@ -138,6 +138,18 @@ describe('the reason after a Proposal Decision', () => {
         ...binding, markId: second, decisionId: edited.decisionId, expectedFeedback: 1, action: 'revise', reason: '语言更准确', reasonSource: 'suggested',
       }));
       expect(editedThird).toMatchObject({ reason: '语言更准确', reasonSource: 'suggested', reasonState: 'given', feedbackEntries: 2 });
+      let latest = editedThird;
+      for (let index = 0; index < 64; index += 1) {
+        latest = decisionOf(store.recordProposalDecisionFeedback({
+          ...binding, markId: second, decisionId: edited.decisionId, expectedFeedback: latest.feedbackEntries,
+          action: 'revise', reason: index % 2 === 0 ? '保持作者风格' : '语言更准确', reasonSource: 'suggested',
+        }));
+      }
+      expect(latest).toMatchObject({ reason: '语言更准确', reasonState: 'given', feedbackEntries: 66 });
+      expect(refusal(() => store.recordProposalDecisionFeedback({
+        ...binding, markId: second, decisionId: edited.decisionId, expectedFeedback: 2,
+        action: 'revise', reason: '保持作者风格', reasonSource: 'suggested',
+      }))).toBe('DECISION_FEEDBACK_MOVED:这次处理的原因刚被改过；请看过现在的原因再改。');
 
       // A decision withdrawn and made again is a new decision, asked for itself.
       expect(decide(first, 'withdrawn', null, null).card!.suggestion!.decision).toBeNull();
@@ -155,7 +167,7 @@ describe('the reason after a Proposal Decision', () => {
     const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       const card = (markId: string) => reopened.getEditorialMarkCard(book!.manuscriptId, book!.branchId, markId);
-      expect(card(second!).suggestion!.decision).toMatchObject({ reason: '语言更准确', reasonState: 'given', feedbackEntries: 2 });
+      expect(card(second!).suggestion!.decision).toMatchObject({ reason: '语言更准确', reasonState: 'given', feedbackEntries: 66 });
       expect(card(first!).suggestion!.decision).toMatchObject({ reasonState: 'none', feedbackEntries: 0 });
       reopened.markCleanShutdown();
     } finally {
@@ -164,7 +176,7 @@ describe('the reason after a Proposal Decision', () => {
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DECISION_FEEDBACK_SCHEMA_VERSION);
-      expect((database.prepare('SELECT count(*) count FROM proposal_decision_feedback').get() as { count: number }).count).toBe(4);
+      expect((database.prepare('SELECT count(*) count FROM proposal_decision_feedback').get() as { count: number }).count).toBe(68);
       expect((database.prepare("SELECT group_concat(reason, '|') reasons FROM (SELECT reason FROM proposal_decision_reasons ORDER BY reason)").get() as { reasons: string }).reasons)
         .toBe('更贴近作者的语气|证据不足');
       expect(() => database.exec("UPDATE proposal_decision_feedback SET kind = 'dismissed'")).toThrowError(/DECISION_FEEDBACK_LEDGER_IMMUTABLE/u);
