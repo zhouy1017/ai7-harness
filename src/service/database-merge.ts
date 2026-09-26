@@ -605,7 +605,9 @@ function copyStoredFile(sourceRoot: string, targetRoot: string, place: string, k
  * schema revision.
  */
 export function mergeBooks(db: DatabaseSync, bookIds: Iterable<string>, roots: { readonly source: string; readonly target: string }): MergeCounts {
-  const count = listBooks(db, bookIds);
+  const count = listBooks(db, (function* books(): Generator<MergeBookPlan> {
+    for (const bookId of bookIds) yield { bookId, title: '', status: 'new', internalNumberCleared: false };
+  })());
   try {
     return mergeListedBooks(db, count, roots);
   } finally {
@@ -613,17 +615,22 @@ export function mergeBooks(db: DatabaseSync, bookIds: Iterable<string>, roots: {
   }
 }
 
-/** The Books a merge takes, into a table of the connection's own (`temp.merge_books`), one row each: how many. */
-function listBooks(db: DatabaseSync, bookIds: Iterable<string>): number {
+/**
+ * The Books a merge takes, into a table of the connection's own (`temp.merge_books`), one row each and in their order, as the
+ * merge's receipt names them: how many.
+ */
+function listBooks(db: DatabaseSync, books: Iterable<MergeBookPlan>): number {
   db.exec('DROP TABLE IF EXISTS temp.merge_books');
-  db.exec('CREATE TEMP TABLE merge_books (book_id TEXT PRIMARY KEY) WITHOUT ROWID');
-  const insert = db.prepare('INSERT INTO temp.merge_books (book_id) VALUES (?)');
+  db.exec(`CREATE TEMP TABLE merge_books (
+    book_id TEXT PRIMARY KEY, ordinal INTEGER NOT NULL UNIQUE, title TEXT NOT NULL, status TEXT NOT NULL, internal_number_cleared INTEGER NOT NULL
+  ) WITHOUT ROWID`);
+  const insert = db.prepare('INSERT INTO temp.merge_books (book_id, ordinal, title, status, internal_number_cleared) VALUES (?, ?, ?, ?, ?)');
   let count = 0;
   db.exec('BEGIN');
   try {
-    for (const bookId of bookIds) {
-      insert.run(bookId);
+    for (const book of books) {
       count += 1;
+      insert.run(book.bookId, count, book.title, book.status, book.internalNumberCleared ? 1 : 0);
     }
     db.exec('COMMIT');
   } catch (error) {
@@ -635,8 +642,16 @@ function listBooks(db: DatabaseSync, bookIds: Iterable<string>): number {
   return count;
 }
 
-/** Merge the `count` Books listed in `temp.merge_books`, as `mergeBooks` describes. */
-function mergeListedBooks(db: DatabaseSync, count: number, roots: { readonly source: string; readonly target: string }): MergeCounts {
+/**
+ * Merge the `count` Books listed in `temp.merge_books`, as `mergeBooks` describes; `receipt`, when given, writes what the merge
+ * took in the same transaction, so the record and the Books it names commit together or not at all.
+ */
+function mergeListedBooks(
+  db: DatabaseSync,
+  count: number,
+  roots: { readonly source: string; readonly target: string },
+  receipt?: (db: DatabaseSync) => void,
+): MergeCounts {
   const version = (schema: 'main' | 'src'): number => Number((db.prepare(`PRAGMA ${schema}.user_version`).get() as SqlRow).user_version);
   requireMerge(version('main') === version('src'), 'DATABASE_MERGE_REVISION_MISMATCH', '本机数据与数据库文件的结构版本不同，不能合并。');
   const tables = catalogue(db);
@@ -740,6 +755,7 @@ function mergeListedBooks(db: DatabaseSync, count: number, roots: { readonly sou
        SELECT x.branch_id, x.block_id, x.text FROM src.working_blocks x ${owned('working_blocks', 'x')}`,
     ).run();
     db.exec('DROP TABLE temp.merge_rows');
+    receipt?.(db);
     db.exec('COMMIT');
     return { books: count, rows, files };
   } catch (error) {
@@ -792,19 +808,22 @@ export const STORE_JOURNALS: ReadonlyArray<string> = ['-journal', '-wal', '-shm'
  * whatever journal lies beside it, an interrupted merge's or one put there, is removed first, so no page SQLite would read from
  * a journal reaches the merge (Issue #434 review).
  */
-export function mergeIntoStoreFile(dataRoot: string, packageRoot: string, books: MergingBooks & { readonly path: string }): 'merged' | 'already' {
+export function mergeIntoStoreFile(
+  dataRoot: string,
+  packageRoot: string,
+  books: MergingBooks & { readonly path: string },
+  receipt?: (db: DatabaseSync) => void,
+): 'merged' | 'already' {
   for (const suffix of STORE_JOURNALS) rmSync(join(packageRoot, 'store', `ai7.sqlite${suffix}`), { force: true });
   const db = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'));
   try {
-    const count = listBooks(db, (function* ids(): Generator<string> {
-      for (const book of readMergingBooks(books.path, books)) yield book.bookId;
-    })());
+    const count = listBooks(db, readMergingBooks(books.path, books));
     const present = Number((db.prepare('SELECT count(*) AS n FROM main.books WHERE book_id IN (SELECT book_id FROM temp.merge_books)').get() as SqlRow).n);
     if (present === count) return 'already';
     requireMerge(present === 0, 'DATABASE_MERGE_BOOK_PRESENT', '要合并的图书已有一部分在本机。');
     db.prepare('ATTACH DATABASE ? AS src').run(join(packageRoot, 'store', 'ai7.sqlite'));
     try {
-      mergeListedBooks(db, count, { source: packageRoot, target: dataRoot });
+      mergeListedBooks(db, count, { source: packageRoot, target: dataRoot }, receipt);
     } finally {
       db.exec('DETACH DATABASE src');
     }

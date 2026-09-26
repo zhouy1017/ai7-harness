@@ -20,8 +20,9 @@ import {
 import { writeDatabasePackage } from '../../src/service/database-exports.js';
 import { EDITORIAL_WORKSPACE_PROFILE_DIGEST } from '../../src/service/editorial-workspace-profile.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { preMergeBackupFileName, replacementStagingFor } from '../../src/service/database-replacement.js';
+import { preMergeBackupFileName, replacementStagingFor, writeMergeReceipt, type ReplacementIntent } from '../../src/service/database-replacement.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
+import { MAX_DATABASE_REPLACEMENTS_LISTED } from '../../src/shared/protocol.js';
 import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import { J03_TASK_GOAL } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
@@ -412,7 +413,8 @@ describe('只导入其中的图书 over the store', () => {
     target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
       expect(titles(target)).toEqual(['本机之书']);
-      expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'failed', mergedTitles: [TITLE] });
+      // A merge that failed took nothing, and its record names no Book (Issue #434 review).
+      expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'failed', mergedTitles: [], mergedCount: 0 });
       expect(existsSync(replacementStagingFor(otherRoot))).toBe(false);
       // Prepared again, and interrupted after its transaction committed: the next open finds the Book there and merges nothing twice.
       await target.prepareDatabaseMerge((await target.inspectDatabaseImport(packagePath)).previewId, LATER);
@@ -421,12 +423,14 @@ describe('只导入其中的图书 over the store', () => {
     }
     const staging = replacementStagingFor(otherRoot);
     const intent = JSON.parse(await readFile(join(staging, 'intent.json'), 'utf8')) as { json: string };
-    const listed = { ...(parseCanonicalJson(intent.json) as { mergeBooks: { sha256: string; count: number } }).mergeBooks, path: join(staging, MERGING_BOOKS_FILE) };
+    const prepared = parseCanonicalJson(intent.json) as ReplacementIntent & { schema: string };
+    const listed = { ...prepared.mergeBooks!, path: join(staging, MERGING_BOOKS_FILE) };
     saveStoreFiles(otherRoot, join(staging, 'store-before'));
     // Journals beside the package's store are not the package: they are gone before the merge reads it (Issue #434 review).
     const journals = ['-journal', '-wal', '-shm'].map((suffix) => join(staging, 'incoming', 'store', `ai7.sqlite${suffix}`));
     for (const journal of journals) await writeFile(journal, 'not the verified store');
-    expect(mergeIntoStoreFile(otherRoot, join(staging, 'incoming'), listed)).toBe('merged');
+    // The merge commits its receipt with its Books, as the apply's own merge does.
+    expect(mergeIntoStoreFile(otherRoot, join(staging, 'incoming'), listed, (db) => writeMergeReceipt(db, prepared, LATER))).toBe('merged');
     expect(journals.filter((journal) => existsSync(journal))).toEqual([]);
     await writeFile(join(staging, 'phase.json'), JSON.stringify('merging'));
     target = await EditorialStore.open(otherRoot, roots.codeRoot);
@@ -847,6 +851,21 @@ describe('what a merge refuses, puts back and brings forward', () => {
       ledger.exec('DROP TRIGGER database_merge_books_no_update');
       ledger.prepare("UPDATE database_merge_books SET title = '丁书' WHERE title = '乙书'").run();
       ledger.exec(DATABASE_MERGE_TRIGGER_SQL.database_merge_books_no_update!);
+      // Twenty newer replacement records push it off the page 导入记录 lists: it is verified all the same.
+      for (let index = 0; index < MAX_DATABASE_REPLACEMENTS_LISTED; index += 1) {
+        const at = new Date(Date.now() + (index + 1) * 60 * 60 * 1000).toISOString();
+        const stored = {
+          replacementId: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`, kind: 'replace', outcome: 'failed',
+          packageFileName: `AI7 数据库 ${index}.ai7db`, packageSha256: 'a'.repeat(64), backupFileName: `AI7 替换前备份 ${index}.ai7db`,
+          backupSha256: 'b'.repeat(64), preparedAt: at, recordedAt: at, failure: 'changed',
+        };
+        const record = canonicalRecord({ schema: 'ai7.database-replacement/1', ...stored });
+        ledger.prepare(
+          `INSERT INTO database_replacements(replacement_id, kind, outcome, package_file_name, package_sha256, backup_file_name, backup_sha256, prepared_at, recorded_at, canonical_json, sha256)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(stored.replacementId, stored.kind, stored.outcome, stored.packageFileName, stored.packageSha256, stored.backupFileName,
+          stored.backupSha256, stored.preparedAt, stored.recordedAt, record.json, record.digest);
+      }
     } finally {
       ledger.close();
     }
@@ -892,5 +911,47 @@ describe('what a merge refuses, puts back and brings forward', () => {
     } finally {
       target.close();
     }
+  }, 180_000);
+
+  it('commits a merge and its receipt together, or neither (Issue #434 review)', async () => {
+    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let packagePath: string;
+    try {
+      emptyBook(source, '甲书');
+      packagePath = await exportedFrom(source, 'AI7 数据库.ai7db');
+    } finally {
+      source.close();
+    }
+    const target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      await target.prepareDatabaseMerge((await target.inspectDatabaseImport(packagePath)).previewId, T);
+    } finally {
+      target.close();
+    }
+    const staging = replacementStagingFor(otherRoot);
+    const intent = parseCanonicalJson((JSON.parse(await readFile(join(staging, 'intent.json'), 'utf8')) as { json: string }).json) as ReplacementIntent;
+    const listed = { ...intent.mergeBooks!, path: join(staging, MERGING_BOOKS_FILE) };
+    // The receipt is written and then something stops the merge before it commits: neither the Book nor the receipt stays.
+    expect(() => mergeIntoStoreFile(otherRoot, join(staging, 'incoming'), listed, (db) => {
+      writeMergeReceipt(db, intent, LATER);
+      throw new Error('stopped before the merge committed');
+    })).toThrowError(DatabaseMergeError);
+    const ledger = new DatabaseSync(storeOf(otherRoot), { readOnly: true });
+    try {
+      const count = (sql: string): number => (ledger.prepare(sql).get() as { n: number }).n;
+      expect([count('SELECT count(*) AS n FROM books'), count('SELECT count(*) AS n FROM database_merges'), count('SELECT count(*) AS n FROM database_merge_books')])
+        .toEqual([0, 0, 0]);
+    } finally {
+      ledger.close();
+    }
+    // Books merged with no receipt, as only something other than AI7 could leave them: the open is refused rather than a record
+    // naming fewer Books than came in.
+    saveStoreFiles(otherRoot, join(staging, 'store-before'));
+    expect(mergeIntoStoreFile(otherRoot, join(staging, 'incoming'), listed)).toBe('merged');
+    await writeFile(join(staging, 'phase.json'), JSON.stringify('merging'));
+    expect(code(await EditorialStore.open(otherRoot, roots.codeRoot).then((opened) => {
+      opened.close();
+      return null;
+    }, (error: unknown) => error))).toBe('DATABASE_MERGE_RECEIPT_MISSING');
   }, 180_000);
 });
