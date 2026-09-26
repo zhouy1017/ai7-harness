@@ -795,6 +795,15 @@ async function main() {
     })()`, name);
     for (let version = 3; version <= 8; version += 1) {
       await writeFile(guidelinePath, Array.from({ length: 9 }, (_, index) => `${index + 1}. 检查第 ${version} 版的第 ${index + 1} 项规范。`).join('\n'), 'utf8');
+      // The existing picker control supplies one choice per window; restart rather than adding a repeatable bypass.
+      if (version > 3) {
+        await closeBrowser();
+        manager = await launch();
+        renderer = await waitForRenderer(manager, 'knowledge-page-window');
+        await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'knowledge-page-ready');
+        await click(renderer, '知识库', 'knowledge-page-open');
+        await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-page-loaded');
+      }
       await activateGuideline('[data-guideline-action="import"]', 'knowledge-page-import-start');
       await waitFor(renderer, `document.querySelector(${JSON.stringify(`${cardSelector} .guideline-preview`)})?.dataset.guidelinePreview==='${version}'`, 'knowledge-page-preview');
       if (version === 8) {
