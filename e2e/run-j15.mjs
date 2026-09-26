@@ -1054,6 +1054,7 @@ async function main() {
     for (let index = 0; index < 19; index += 1) {
       await createEmptyBook(renderer, `J15 分页图书${String(index).padStart(2, '0')}`);
       await click(renderer, '返回图书列表', 'library-books-return');
+      await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'library-books-returned');
     }
     await click(renderer, '知识库', 'library-books-knowledge');
     await click(renderer, '资料库', 'library-books-tab');
