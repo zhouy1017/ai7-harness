@@ -222,6 +222,12 @@ describe('反馈历史 over the real store (Issue #61, S26c review)', () => {
       const older = store.inspectFeedbackHistory({ after: { recordedAt: last.recordedAt, entryId: last.entryId } });
       expect(older.entries).toHaveLength(6);
       expect(older.truncated).toBe(false);
+      const oldRoute = store.resolveBookWorkbenchRoute({ kind: 'book', bookId: book.bookId,
+        feedbackEntryId: `proposal-decision:${first.decisionId}` });
+      expect(oldRoute).toMatchObject({ kind: 'book', bookId: book.bookId,
+        feedbackTarget: { kind: 'mark', markId: firstMark, detached: false } });
+      expect(() => store.resolveBookWorkbenchRoute({ kind: 'book', bookId: book.bookId,
+        feedbackEntryId: `proposal-decision:${randomUUID()}` })).toThrow();
       expect(new Set([...expected.entries, ...older.entries].map((entry) => entry.entryId)).size).toBe(MAX_FEEDBACK_HISTORY_ENTRIES + 6);
       const priorEditor = store.inspectFeedbackHistory({ editor: '编辑65' });
       expect(priorEditor.entries.map((entry) => [entry.reason, entry.peopleVersion])).toEqual([['修订原因65', 66]]);

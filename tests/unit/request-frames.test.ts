@@ -73,6 +73,14 @@ describe('decodeRequest accepts well-formed frames', () => {
       input: { kind: 'revision', revisionId: randomUUID() },
     };
     expect(decodeRequest(frameOf(bookRoute))).toEqual(bookRoute);
+    const feedbackRoute = { ...bookRoute, input: { ...bookRoute.input, feedbackEntryId: `proposal-decision:${randomUUID()}` } };
+    expect(decodeRequest(frameOf(feedbackRoute))).toEqual(feedbackRoute);
+    for (const input of [
+      { ...feedbackRoute.input, feedbackEntryId: 'x'.repeat(161) },
+      { ...feedbackRoute.input, feedbackEntryId: null },
+      { ...feedbackRoute.input, target: { kind: 'mark' } },
+      { ...revisionRoute.input, feedbackEntryId: feedbackRoute.input.feedbackEntryId },
+    ]) expect(() => decodeRequest(frameOf({ ...bookRoute, input }))).toThrow(ProtocolError);
     expect(decodeRequest(frameOf(revisionRoute))).toEqual(revisionRoute);
   });
 

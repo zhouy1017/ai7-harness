@@ -783,21 +783,23 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget): Promise
  * Where a 反馈历史 entry opens (Issue #61, S26c; FDBK-009): the exact record, in its Book — the manuscript with the
  * 修改建议's card open, ②A on the revision the judgment was made of, or ②B with the finding in view.
  */
-async function openFeedbackTarget(target: FeedbackHistoryTarget): Promise<void> {
+async function openFeedbackTarget(target: FeedbackHistoryTarget, entryId: string): Promise<void> {
+  await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId, feedbackEntryId: entryId });
+}
+
+/** The exact feedback source travels with its resolved Book route across windows. */
+async function renderFeedbackTarget(target: FeedbackHistoryTarget, bookTitle: string): Promise<void> {
   switch (target.kind) {
-    case 'mark':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
-        const opened = await window.ai7.getManuscriptWindowAt({ manuscriptId: target.manuscriptId, branchId: target.branchId, target: { kind: 'block', blockId: target.blockId } });
-        await openEditorWindow(opened, route.bookTitle, undefined, undefined, target.markId);
-      });
+    case 'mark': {
+      const opened = await window.ai7.getManuscriptWindowAt({ manuscriptId: target.manuscriptId, branchId: target.branchId, target: { kind: 'block', blockId: target.blockId } });
+      await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId);
       return;
+    }
     case 'analysis':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>
-        renderBookAnalysis(route.bookId, route.bookTitle, { revisionId: target.revisionId, itemKey: target.itemKey, dimension: target.dimension }));
+      renderBookAnalysis(target.bookId, bookTitle, { revisionId: target.revisionId, itemKey: target.itemKey, dimension: target.dimension });
       return;
     case 'review':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>
-        renderBookReview(route.bookId, route.bookTitle, { reviewRunId: target.reviewRunId, findingId: target.findingId }));
+      renderBookReview(target.bookId, bookTitle, { reviewRunId: target.reviewRunId, findingId: target.findingId });
       return;
   }
 }
@@ -859,6 +861,10 @@ async function renderResolvedBookWorkbenchRoute(
   recoveryReturn?: RecoveryReturnContext,
 ): Promise<void> {
   if (route.kind === 'book') {
+    if (route.feedbackTarget !== undefined) {
+      await renderFeedbackTarget(route.feedbackTarget, route.bookTitle);
+      return;
+    }
     const overview = await window.ai7.getBookOverview({ bookId: route.bookId, historyCursor: null });
     const anchor = overview.manuscriptAnchor;
     if (anchor === null) {

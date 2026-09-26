@@ -5842,12 +5842,17 @@ export class EditorialStore {
    * history: a read, asking nothing.
    */
   inspectFeedbackHistory(input: FeedbackHistoryInput = {}): FeedbackHistoryProjection {
+    return this.#readFeedbackHistory(input);
+  }
+
+  #readFeedbackHistory(input: FeedbackHistoryInput, exactEntryId: string | null = null): FeedbackHistoryProjection {
     return this.#learningCall(() => {
       type Entry = Omit<FeedbackHistoryEntryProjection, 'peopleVersion'>;
       // Keep only the newest response-sized candidates plus one lookahead, regardless of ledger depth or Book count.
       const entries: Entry[] = [];
       const newest = (a: Pick<Entry, 'recordedAt' | 'entryId'>, b: Pick<Entry, 'recordedAt' | 'entryId'>): number => a.recordedAt > b.recordedAt ? -1 : a.recordedAt < b.recordedAt ? 1 : a.entryId < b.entryId ? -1 : a.entryId > b.entryId ? 1 : 0;
       const consider = (entry: Entry): void => {
+        if (exactEntryId !== null && entry.entryId !== exactEntryId) return;
         if ((input.bookId != null && entry.bookId !== input.bookId) || (input.origin != null && entry.origin !== input.origin) ||
             (input.after != null && newest(entry, input.after) <= 0)) return;
         if (input.author != null || input.editor != null) {
@@ -10278,7 +10283,15 @@ export class EditorialStore {
   }
 
   resolveBookWorkbenchRoute(route: BookWorkbenchRoute): ResolvedBookWorkbenchRoute {
-    return this.#boundedCall(() => this.#bounded.resolveBookWorkbenchRoute(route));
+    return this.#boundedCall(() => {
+      const resolved = this.#bounded.resolveBookWorkbenchRoute(route);
+      if (route.kind !== 'book' || route.feedbackEntryId === undefined) return resolved;
+      const entry = this.#readFeedbackHistory({ bookId: route.bookId }, route.feedbackEntryId).entries[0];
+      requireStore(resolved.kind === 'book' && entry !== undefined, 'FEEDBACK_SOURCE_NOT_FOUND', '这条反馈的来源记录不存在。');
+      requireStore(entry.target.kind !== 'mark' || !entry.target.detached,
+        'FEEDBACK_SOURCE_DETACHED', '这条修改建议所在的段落已不在稿件中。');
+      return { ...resolved, feedbackTarget: entry.target };
+    });
   }
 
   getHistoricalRevision(revisionId: string, cursor: string | null): HistoricalRevisionProjection {

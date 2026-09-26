@@ -31,7 +31,7 @@ export interface MountFeedbackHistoryOptions {
   readonly root: HTMLElement;
   readonly api: Pick<RendererApi, 'inspectFeedbackHistory'>;
   /** Open the record an entry came from, in its Book. */
-  readonly open: (target: FeedbackHistoryTarget) => Promise<void>;
+  readonly open: (target: FeedbackHistoryTarget, entryId: string) => Promise<void>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
 }
@@ -199,12 +199,12 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
     opening = true;
     setStatus(FEEDBACK_HISTORY_STATUS.opening, 'busy');
     try {
-      await open(entry.target);
+      await open(entry.target, entry.entryId);
     } catch (error) {
       setStatus(errorMessage(error, FEEDBACK_HISTORY_STATUS.openFailed), 'error');
     } finally {
       opening = false;
-      if (root.isConnected) paint(null);
+      if (root.isConnected) paint(`[data-entry-id="${CSS.escape(entry.entryId)}"] [data-feedback-action="open"]`);
     }
   };
 

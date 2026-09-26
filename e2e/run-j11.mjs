@@ -321,13 +321,13 @@ async function createLoopbackSentinel() {
   };
 }
 
-async function attachRenderer(browser) {
+async function attachRenderer(browser, excludedTargetId = null) {
   const guard = (request) => settleOnBrowserDisconnect(browser, request);
   const root = await guard(browser.newBrowserCDPSession());
   const deadline = Date.now() + 60_000;
   let target;
   while (Date.now() < deadline) {
-    const pages = (await guard(root.send('Target.getTargets'))).targetInfos.filter((item) => item.type === 'page');
+    const pages = (await guard(root.send('Target.getTargets'))).targetInfos.filter((item) => item.type === 'page' && item.targetId !== excludedTargetId);
     if (pages.length === 1) { target = pages[0]; break; }
     requireJourney(pages.length === 0, 'renderer-target-count');
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
@@ -362,6 +362,7 @@ async function attachRenderer(browser) {
   };
   await send('Runtime.enable');
   return {
+    targetId: target.targetId,
     send,
     evaluate: async (expression) => {
       const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
@@ -1936,6 +1937,31 @@ async function main() {
       await clickSelector(renderer, '[data-feedback-action="reset"]', 'history-pages-reset');
       await readHistory(renderer, (page) => page.entries.length === 300 && page.focus === 'next', 'history-pages-reset-ready');
     }
+
+    at('feedback-source-windows');
+    // Bind the current workbench to the source Book, then request an exact feedback item from another window.
+    await clickSelector(renderer, '.feedback-entry [data-feedback-action="open"]', 'history-window-mark');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(thirdId)}]') && document.querySelector('.editorial-mark-card')`, 'history-window-mark-ready', 120_000);
+    const otherOpened = await renderer.evaluate(`window.ai7.openBookWorkbench({ kind: 'book', bookId: ${JSON.stringify(firstId)} }).then((opened) => opened.target === 'new-window')`);
+    requireJourney(otherOpened === true, 'history-other-window');
+    const otherRenderer = await attachRenderer(browser, renderer.targetId);
+    await waitFor(otherRenderer, `document.querySelector('[data-screen="book-overview"]')`, 'history-other-ready', 120_000);
+    await click(otherRenderer, '返回图书列表', 'history-other-books');
+    await waitFor(otherRenderer, `document.querySelector('[data-screen="landing"]')`, 'history-other-landing');
+    await click(otherRenderer, '质量与学习', 'history-other-quality');
+    await readHistory(otherRenderer, (page) => page.entries.length === 300, 'history-other-page');
+    await choose(otherRenderer, '#feedback-filter-origin', 'analysis-feedback', 'history-other-analysis');
+    await readHistory(otherRenderer, (page) => page.entries.length === 2, 'history-other-analysis-ready');
+    await clickSelector(otherRenderer, historyEntry('[data-entry-id$="/entities/0"]'), 'history-other-open-entity');
+    await waitFor(renderer, `(() => {
+      const item = document.querySelector('[data-screen="book-analysis"] [data-analysis-item-key="entities/0"]');
+      const card = document.querySelector('.baseline-analysis-card');
+      return item instanceof HTMLElement && item.dataset.analysisFeedbackJudgment === 'accurate' &&
+        card?.dataset.analysisTab === 'entities' && item.getClientRects().length > 0 && document.activeElement === item;
+    })()`, 'history-existing-window-exact', 60_000);
+    await waitFor(otherRenderer, `document.querySelector('#feedback-filter-origin')?.value === 'analysis-feedback' &&
+      document.querySelector('#feedback-filter-origin')?.disabled === false &&
+      document.activeElement === document.querySelector('[data-entry-id$="/entities/0"] [data-feedback-action="open"]')`, 'history-requester-focus-restored');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
