@@ -629,7 +629,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .analysis-feedback-metric { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #d5dcd9; }
 .analysis-feedback-metric h5, .analysis-feedback-metric p { margin: 0 0 .4rem; overflow-wrap: anywhere; }
 .analysis-feedback-total { font-weight: 700; }
-/* 质量与学习 › 反馈记录 (S26c): four filters, then each Book's entries, newest first. */
+/* 质量与学习 › 反馈历史 (S26c): four filters, then each Book's entries, newest first. */
 .feedback-history { display: grid; gap: .8rem; }
 .feedback-filters { display: flex; flex-wrap: wrap; gap: .5rem .9rem; }
 .feedback-filter { display: grid; gap: .25rem; min-width: 0; }

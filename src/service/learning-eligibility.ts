@@ -7,11 +7,18 @@ import {
   type AnalysisFeedbackJudgment,
 } from '../shared/analysis-feedback.js';
 import {
+  MAX_FEEDBACK_HISTORY_ENTRIES,
+  MAX_FEEDBACK_HISTORY_REASON_GRAPHEMES,
   MAX_LEARNING_ELIGIBILITY_REASON_GRAPHEMES,
+  type FeedbackHistoryBookProjection,
+  type FeedbackHistoryEntryProjection,
+  type FeedbackHistoryPeopleVersion,
+  type FeedbackHistoryProjection,
   type LearningEligibilityChoice,
   type LearningMaterialKind,
   type LearningMaterialProjection,
 } from '../shared/protocol.js';
+import { graphemesOf } from '../shared/mark-anchor.js';
 import { canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
 import { graphemeCount } from './analysis/factual-review-contract.js';
 
@@ -164,6 +171,56 @@ export function learningMaterialOrder(a: { readonly materialKey: string; readonl
     (a.materialKey < b.materialKey ? -1 : a.materialKey > b.materialKey ? 1 : 0);
 }
 
+/** The most one answer of 反馈历史 weighs on the wire, with the Books and people it brings (Issue #61 review). */
+export const FEEDBACK_HISTORY_PAGE_BYTES = 256 * 1024;
+
+function wireBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+/** A reason as 反馈历史 shows it: whole up to `MAX_FEEDBACK_HISTORY_REASON_GRAPHEMES`, beyond that its opening and `…`. */
+export function feedbackReasonExcerpt(reason: string | null): string | null {
+  if (reason === null) return null;
+  const graphemes = graphemesOf(reason);
+  return graphemes.length <= MAX_FEEDBACK_HISTORY_REASON_GRAPHEMES ? reason : `${graphemes.slice(0, MAX_FEEDBACK_HISTORY_REASON_GRAPHEMES).join('')}…`;
+}
+
+/**
+ * One answer of 反馈历史 (Issue #61 review): its entries, newest first as given, at most `MAX_FEEDBACK_HISTORY_ENTRIES` and no
+ * more than `budget` bytes once each Book and each version of its people an entry brings are weighed with it — but always
+ * the newest while there is one — its Books by title, and whether older entries were left out.
+ */
+export function feedbackHistoryPage(
+  entries: ReadonlyArray<FeedbackHistoryEntryProjection>,
+  bookOf: (bookId: string) => Omit<FeedbackHistoryBookProjection, 'peopleVersions'>,
+  peopleOf: (bookId: string, version: number) => FeedbackHistoryPeopleVersion | null,
+  budget: number = FEEDBACK_HISTORY_PAGE_BYTES,
+): FeedbackHistoryProjection {
+  const kept: FeedbackHistoryEntryProjection[] = [];
+  const books = new Map<string, { book: Omit<FeedbackHistoryBookProjection, 'peopleVersions'>; versions: Map<number, FeedbackHistoryPeopleVersion> }>();
+  let spent = 0;
+  for (const entry of entries) {
+    if (kept.length >= MAX_FEEDBACK_HISTORY_ENTRIES) break;
+    const known = books.get(entry.bookId);
+    const book = known?.book ?? bookOf(entry.bookId);
+    const people = entry.peopleVersion === 0 || known?.versions.has(entry.peopleVersion) === true ? null : peopleOf(entry.bookId, entry.peopleVersion);
+    const weight = wireBytes(entry) + 1 + (known === undefined ? wireBytes(book) + 1 : 0) + (people === null ? 0 : wireBytes(people) + 1);
+    if (kept.length > 0 && spent + weight > budget) break;
+    kept.push(entry);
+    spent += weight;
+    const held = known ?? { book, versions: new Map<number, FeedbackHistoryPeopleVersion>() };
+    if (people !== null) held.versions.set(people.version, people);
+    books.set(entry.bookId, held);
+  }
+  return {
+    books: [...books.values()]
+      .map(({ book, versions }) => ({ ...book, peopleVersions: [...versions.values()].sort((a, b) => a.version - b.version) }))
+      .sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : a.bookId < b.bookId ? -1 : 1)),
+    entries: kept,
+    truncated: kept.length < entries.length,
+  };
+}
+
 /** The exact version a decision binds. */
 export function learningMaterialDigest(candidate: Pick<LearningMaterialCandidate, 'materialKey' | 'kind' | 'content'>): string {
   return sha256Hex(canonicalJson({ schema: MATERIAL_SCHEMA, materialKey: candidate.materialKey, kind: candidate.kind, content: candidate.content }));
@@ -174,7 +231,7 @@ function bounded(text: string): string {
   return graphemes.length <= EXCERPT_GRAPHEMES ? graphemes.join('') : `${graphemes.slice(0, EXCERPT_GRAPHEMES).join('')}…`;
 }
 
-/** A 修改建议's decision in the editor's words, as 学习准入 and 反馈记录 both say it. */
+/** A 修改建议's decision in the editor's words, as 学习准入 and 反馈历史 both say it. */
 export const DISPOSITION_LABELS: Readonly<Record<string, string>> = { accepted: '接受', 'accepted-with-edit': '修改后接受', rejected: '拒绝' };
 
 /**

@@ -320,6 +320,8 @@ import {
   analysisReasonLabel,
   LearningEligibilityLedger,
   analysisFeedbackCandidate,
+  feedbackHistoryPage,
+  feedbackReasonExcerpt,
   initializeLearningEligibilitySchema,
   learningMaterialDigest,
   learningMaterialOrder,
@@ -5832,16 +5834,19 @@ export class EditorialStore {
   }
 
   /**
-   * 质量与学习 › 反馈记录 (Issue #61, plan slice S26c; FDBK-009, FDBK-010, FDBK-013): every piece of the editor's feedback, newest
-   * first — each 修改建议's current decision with its reason as it stands, each analysis item's latest judgment, each 审阅
-   * finding's latest 忽略 — with where it opens and each Book's people. Passive history: a read, asking nothing.
+   * 质量与学习 › 反馈历史 (Issue #61, plan slice S26c; FDBK-009, FDBK-010, FDBK-013): the editor's feedback, newest first — each
+   * 修改建议's current decision with its reason as it stands, each analysis item's latest judgment, each 审阅 finding's latest
+   * 忽略 — with where it opens and the Book's people it is attributed to: the version in force when it was given, or the first
+   * saved after it (Issue #61 review). One answer holds what `feedbackHistoryPage` admits, each reason bounded. Passive
+   * history: a read, asking nothing.
    */
   inspectFeedbackHistory(): FeedbackHistoryProjection {
     return this.#learningCall(() => {
-      const entries: FeedbackHistoryEntryProjection[] = [];
+      const entries: Array<Omit<FeedbackHistoryEntryProjection, 'peopleVersion'>> = [];
       const reasons = new DecisionFeedbackLedger(this.#authority);
       const decisions = this.#authority.prepare(
-        `SELECT m.book_id, m.mark_id, m.manuscript_id, m.branch_id, m.block_id, d.decision_id, d.disposition, d.recorded_at, r.reason, r.reason_source
+        `SELECT m.book_id, m.mark_id, m.manuscript_id, m.branch_id, m.block_id, m.anchor_state, m.source_origin, m.source_label,
+                d.decision_id, d.disposition, d.recorded_at, r.reason, r.reason_source
          FROM editorial_marks m
          JOIN proposal_change_items i ON i.mark_id = m.mark_id
          JOIN proposal_item_decisions d ON d.item_id = i.item_id
@@ -5860,12 +5865,16 @@ export class EditorialStore {
           entryId: `proposal-decision:${decisionId}`,
           origin: 'proposal-decision',
           bookId,
-          dimension: null,
+          // A 修改建议 a 审阅 category made is about that category (Issue #61 review); one the editor or a Task made names none.
+          dimension: row.source_origin === 'review-category' ? asString(row.source_label) : null,
           signal: DISPOSITION_LABELS[asString(row.disposition)] ?? asString(row.disposition),
-          reason: standing.reason,
+          reason: feedbackReasonExcerpt(standing.reason),
           reasonState: standing.reasonState,
           recordedAt: asString(row.recorded_at),
-          target: { kind: 'mark', bookId, manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id), blockId: asString(row.block_id), markId: asString(row.mark_id) },
+          target: {
+            kind: 'mark', bookId, manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id), blockId: asString(row.block_id),
+            markId: asString(row.mark_id), detached: row.anchor_state === 'detached',
+          },
         });
       }
       for (const book of this.#authority.prepare('SELECT book_id FROM books').all() as SqlRow[]) {
@@ -5878,10 +5887,10 @@ export class EditorialStore {
             bookId,
             dimension: DIMENSION_LABELS[signal.dimension],
             signal: JUDGMENT_LABELS[signal.judgment],
-            reason: reason.length === 0 ? null : reason,
+            reason: feedbackReasonExcerpt(reason.length === 0 ? null : reason),
             reasonState: reason.length === 0 ? 'none' : 'given',
             recordedAt: signal.recordedAt,
-            target: { kind: 'analysis', bookId, revisionId: signal.revisionId },
+            target: { kind: 'analysis', bookId, revisionId: signal.revisionId, itemKey: signal.itemKey, dimension: signal.dimension },
           });
         }
       }
@@ -5900,25 +5909,39 @@ export class EditorialStore {
           bookId,
           dimension: reviewCategoryEntry(categoryId)?.label ?? categoryId,
           signal: '忽略',
-          reason: asString(row.reason),
+          reason: feedbackReasonExcerpt(asString(row.reason)),
           reasonState: 'given',
           recordedAt: asString(row.recorded_at),
           target: { kind: 'review', bookId, reviewRunId: asString(row.review_run_id), findingId: asString(row.finding_id) },
         });
       }
-      entries.sort((a, b) => (a.recordedAt > b.recordedAt ? -1 : a.recordedAt < b.recordedAt ? 1 : a.entryId < b.entryId ? -1 : 1));
-      const kept = entries.slice(0, MAX_FEEDBACK_HISTORY_ENTRIES);
-      const bookIds = [...new Set(kept.map((entry) => entry.bookId))];
-      return {
-        books: bookIds
-          .map((bookId) => {
-            const people = this.#bookPeople.current(bookId);
-            return { bookId, title: this.#evaluationBookTitle(bookId), authors: people.authors, editors: people.editors };
-          })
-          .sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : a.bookId < b.bookId ? -1 : 1)),
-        entries: kept,
-        truncated: entries.length > kept.length,
+      // Each entry is attributed to the Book's people as they stood when it was given, or as first saved after it.
+      const versions = new Map<string, ReturnType<BookPeople['versions']>>();
+      const versionsOf = (bookId: string): ReturnType<BookPeople['versions']> => {
+        let found = versions.get(bookId);
+        if (found === undefined) {
+          found = this.#bookPeople.versions(bookId);
+          versions.set(bookId, found);
+        }
+        return found;
       };
+      const attributed: FeedbackHistoryEntryProjection[] = entries.map((entry) => {
+        const all = versionsOf(entry.bookId);
+        const inForce = all.filter((version) => version.recordedAt <= entry.recordedAt).at(-1) ?? all[0];
+        return { ...entry, peopleVersion: inForce?.version ?? 0 };
+      });
+      attributed.sort((a, b) => (a.recordedAt > b.recordedAt ? -1 : a.recordedAt < b.recordedAt ? 1 : a.entryId < b.entryId ? -1 : 1));
+      return feedbackHistoryPage(
+        attributed,
+        (bookId) => {
+          const people = this.#bookPeople.current(bookId);
+          return { bookId, title: this.#evaluationBookTitle(bookId), authors: people.authors, editors: people.editors };
+        },
+        (bookId, version) => {
+          const found = versionsOf(bookId).find((entry) => entry.version === version);
+          return found === undefined ? null : { version: found.version, authors: found.authors, editors: found.editors };
+        },
+      );
     });
   }
 

@@ -714,7 +714,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
-    // 质量与学习 › 反馈记录 (Issue #61, S26c): every Book's feedback; it names nothing.
+    // 质量与学习 › 反馈历史 (Issue #61, S26c): every Book's feedback; it names nothing.
     case 'inspectFeedbackHistory':
       requireInput(value.input, [], tentativeId);
       break;

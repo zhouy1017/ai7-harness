@@ -78,6 +78,7 @@ import { mountEvaluation } from './evaluation.js';
 import { analysisFeedbackEngaged, mountAnalysisFeedback } from './analysis-feedback.js';
 import { mountLearningMaterials } from './quality-learning.js';
 import type { FeedbackHistoryTarget } from '../shared/protocol.js';
+import type { AnalysisFeedbackDimension } from '../shared/analysis-feedback.js';
 import { mountFeedbackHistory } from './feedback-history.js';
 import {
   FEEDBACK_HISTORY_HEADING,
@@ -779,7 +780,7 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget): Promise
 }
 
 /**
- * Where a 反馈记录 entry opens (Issue #61, S26c; FDBK-009): the exact record, in its Book — the manuscript with the
+ * Where a 反馈历史 entry opens (Issue #61, S26c; FDBK-009): the exact record, in its Book — the manuscript with the
  * 修改建议's card open, ②A on the revision the judgment was made of, or ②B with the finding in view.
  */
 async function openFeedbackTarget(target: FeedbackHistoryTarget): Promise<void> {
@@ -791,7 +792,8 @@ async function openFeedbackTarget(target: FeedbackHistoryTarget): Promise<void> 
       });
       return;
     case 'analysis':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => renderBookAnalysis(route.bookId, route.bookTitle, target.revisionId));
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>
+        renderBookAnalysis(route.bookId, route.bookTitle, { revisionId: target.revisionId, itemKey: target.itemKey, dimension: target.dimension }));
       return;
     case 'review':
       await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>
@@ -1996,7 +1998,7 @@ async function renderBookWorkbenchChooser(
  * The way back to the manuscript and to the overview sits in a persistent region, because a settled
  * result set is the longest thing this product renders and its way out must survive it (LAYER-005).
  */
-function renderBookAnalysis(bookId: string, bookTitle: string, revisionId?: string): void {
+function renderBookAnalysis(bookId: string, bookTitle: string, judged?: JudgedAnalysisItem): void {
   const content = panel();
   content.classList.add('book-analysis');
   content.dataset['bookId'] = bookId;
@@ -2033,13 +2035,15 @@ function renderBookAnalysis(bookId: string, bookTitle: string, revisionId?: stri
   replaceScreen('book-analysis', content);
   setStatus('分析已打开');
   const inspect = (first: boolean): void => {
-    // A 反馈记录 entry opens ②A on the revision it judged (Issue #61, S26c): read-only when that is no longer the current one.
-    const read = first && revisionId !== undefined
-      ? window.ai7.inspectBaselineAnalysis().then((current) => current.resultSetRevision?.revisionId === revisionId ? current : window.ai7.inspectBaselineAnalysis({ revisionId }))
+    // A 反馈历史 entry opens ②A on the revision it judged (Issue #61, S26c): read-only when that is no longer the current one.
+    const read = first && judged !== undefined
+      ? window.ai7.inspectBaselineAnalysis().then((current) => current.resultSetRevision?.revisionId === judged.revisionId ? current : window.ai7.inspectBaselineAnalysis({ revisionId: judged.revisionId }))
       : window.ai7.inspectBaselineAnalysis();
     void read.then(
       (projection) => {
-        if (host.isConnected && projection.bookId === host.dataset['analysisBookId']) renderBaselineAnalysis(host, projection, bookTitle);
+        if (!host.isConnected || projection.bookId !== host.dataset['analysisBookId']) return;
+        renderBaselineAnalysis(host, projection, bookTitle);
+        if (first && judged !== undefined) showJudgedAnalysisItem(host, judged.itemKey);
       },
       (error) => {
         if (!host.isConnected) return;
@@ -2059,7 +2063,28 @@ function renderBookAnalysis(bookId: string, bookTitle: string, revisionId?: stri
   };
   // The drawer's bar started this Task or reconfirmed its plan (Issue #420): ②A reads it again.
   taskSurfaceRefresh = { 'baseline-analysis': () => inspect(false) };
+  // The item a 反馈历史 entry judged opens on its own tab (Issue #61 review), the tab the card is drawn with.
+  if (judged !== undefined) analysisTabChoice.set(bookId, judged.dimension);
   inspect(true);
+}
+
+/** The item of ②A a 反馈历史 entry judged: its revision, its place, and the tab it sits on. */
+interface JudgedAnalysisItem {
+  readonly revisionId: string;
+  readonly itemKey: string;
+  readonly dimension: AnalysisFeedbackDimension;
+}
+
+/**
+ * The judged item in view (Issue #61 review): its tab already chosen, the item is scrolled to and takes focus, so the
+ * judgment 打开… led to is what the editor sees and a screen reader reads first.
+ */
+function showJudgedAnalysisItem(host: HTMLElement, itemKey: string): void {
+  const item = host.querySelector<HTMLElement>(`[data-analysis-item-key="${CSS.escape(itemKey)}"]`);
+  if (item === null) return;
+  item.tabIndex = -1;
+  item.scrollIntoView({ block: 'center' });
+  item.focus({ preventScroll: true });
 }
 
 /**
@@ -4582,7 +4607,7 @@ function renderExemplars(root: HTMLElement, projection: ExemplarsProjection): vo
 
 /**
  * 质量与学习 (Issue #61, plan slices S26b and S26c; LEARN-002, FDBK-009, FDBK-010): a house-wide destination beside 知识库 with
- * two tabs — 反馈记录, the passive history it opens at from the landing, and 学习准入, where a Book's 学习准入待处理 in
+ * two tabs — 反馈历史, the passive history it opens at from the landing, and 学习准入, where a Book's 学习准入待处理 in
  * 待我处理 opens it, for that Book, with the way to every Book one step away.
  */
 async function renderQualityLearning(tab: 'feedback' | 'learning', bookId: string | null, tabFocused = false): Promise<void> {
