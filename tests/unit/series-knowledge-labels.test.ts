@@ -40,11 +40,11 @@ import { SERIES_KNOWLEDGE_CLASSES, SERIES_KNOWLEDGE_CLASS_LABELS, SERIES_KNOWLED
 // take, the conflicts found by identity alone — the same item or the same name, never what the words mean — the review's
 // digest, and every line the Series page and the manuscript's menu state. Every word is the suite's own.
 
-const revision = (ordinal: number, content: string): StoredItem['revisions'][number] => ({
+const revision = (ordinal: number, content: string): StoredItem['current'] => ({
   revisionId: `revision-${ordinal}`, itemId: 'item', ordinal, content, authoring: 'editor', provenance: null, conflicts: [], reuseScope: 'series-tasks',
   candidateVersionId: `version-${ordinal}`, decisionId: `decision-${ordinal}`, outcome: ordinal === 1 ? 'created' : 'updated', recordedAt: '2026-09-25T00:00:00.000Z',
 });
-const item: StoredItem = { itemId: 'item', seriesId: 'series', subject: '林默', knowledgeClass: 'characters', createdAt: '2026-09-25T00:00:00.000Z', revisions: [revision(1, '初版'), revision(2, '二版')] };
+const item: StoredItem = { itemId: 'item', seriesId: 'series', subject: '林默', knowledgeClass: 'characters', createdAt: '2026-09-25T00:00:00.000Z', current: revision(2, '二版'), revisionCount: 2 };
 const candidate = (candidateId: string, target: StoredCandidate['target'], content = '候选的话'): StoredCandidate => ({
   versionId: `${candidateId}-v1`, candidateId, version: 1, seriesId: 'series', target, content, authoring: 'editor', provenance: null, recordedAt: '2026-09-25T00:00:00.000Z', promoted: false,
 });

@@ -434,4 +434,62 @@ describe('书系知识 over the real store', () => {
       store.close();
     }
   }, 300_000);
+  it('streams deep candidate and revision chains while retaining exact historical targets and pages across restart', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let seriesId = '';
+    let itemId = '';
+    let pendingId = '';
+    let sourceId = '';
+    try {
+      seriesId = store.createSeries({ title: '深层版本书系', note: '' }).seriesId;
+      const first = store.proposeSeriesKnowledge({ seriesId, target: { kind: 'new', subject: '沿革', knowledgeClass: 'canon' }, content: '初始候选', span: null });
+      sourceId = first.candidateId;
+      for (let version = 1; version < 66; version += 1) {
+        store.editSeriesKnowledgeCandidate({ seriesId, candidateId: sourceId, expectedVersion: version,
+          target: { kind: 'new', subject: '沿革', knowledgeClass: 'canon' }, content: '候选版本' + (version + 1) });
+      }
+      const firstReview = store.inspectSeriesKnowledgeReview({ seriesId, candidateId: sourceId });
+      expect(firstReview.candidate.version).toBe(66);
+      itemId = store.promoteSeriesKnowledge({ seriesId, candidateId: sourceId, candidateVersion: 66,
+        reviewDigest: firstReview.reviewDigest, reuseScope: 'series-tasks', conflictDisposition: 'none' }).itemId;
+      pendingId = store.proposeSeriesKnowledge({ seriesId, target: { kind: 'existing', itemId }, content: '基于第一版的待审候选', span: null }).candidateId;
+      for (let ordinal = 2; ordinal <= 66; ordinal += 1) {
+        const next = store.proposeSeriesKnowledge({ seriesId, target: { kind: 'existing', itemId }, content: '条目版本' + ordinal, span: null });
+        const review = store.inspectSeriesKnowledgeReview({ seriesId, candidateId: next.candidateId });
+        store.promoteSeriesKnowledge({ seriesId, candidateId: next.candidateId, candidateVersion: 1,
+          reviewDigest: review.reviewDigest, reuseScope: 'series-tasks', conflictDisposition: 'preserved' });
+      }
+      expect(store.inspectSeriesKnowledgeReview({ seriesId, candidateId: pendingId }).candidate.target.baseRevisionOrdinal).toBe(1);
+      const ordinals: number[] = [];
+      let before: number | null = null;
+      do {
+        const page = store.inspectSeriesKnowledgeRevisions(seriesId, itemId, before);
+        expect(page.revisions.length).toBeLessThanOrEqual(MAX_SERIES_KNOWLEDGE_REVISIONS_PAGE);
+        ordinals.push(...page.revisions.map((revision) => revision.ordinal));
+        before = page.nextBefore;
+      } while (before !== null);
+      expect(ordinals).toEqual(Array.from({ length: 66 }, (_, index) => 66 - index));
+      store.markCleanShutdown();
+    } finally { store.close(); }
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const item = reopened.inspectSeriesKnowledgeItems(seriesId, '', null).items[0]!;
+      expect([item.current.ordinal, item.revisionCount]).toEqual([66, 66]);
+      const review = reopened.inspectSeriesKnowledgeReview({ seriesId, candidateId: pendingId });
+      expect([review.candidate.target.baseRevisionOrdinal, review.current?.ordinal]).toEqual([1, 66]);
+      reopened.markCleanShutdown();
+    } finally { reopened.close(); }
+    const database = new DatabaseSync(databasePath());
+    try {
+      database.exec('DROP TRIGGER series_knowledge_candidates_no_update');
+      database.prepare('UPDATE series_knowledge_candidates SET content = ? WHERE candidate_id = ? AND version = 2').run('旧版本损坏', sourceId);
+      database.exec(SERIES_KNOWLEDGE_TRIGGER_SQL.series_knowledge_candidates_no_update!);
+    } finally { database.close(); }
+    const tampered = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(refusal(() => tampered.inspectSeriesKnowledgeReview({ seriesId, candidateId: sourceId }))).toBe('SERIES_KNOWLEDGE_RECORD_INVALID:书系知识记录已损坏。');
+      tampered.markCleanShutdown();
+    } finally { tampered.close(); }
+  }, 300_000);
+
 });

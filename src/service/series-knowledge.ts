@@ -251,8 +251,9 @@ export interface StoredItem {
   readonly subject: string;
   readonly knowledgeClass: SeriesKnowledgeClass;
   readonly createdAt: string;
-  /** Oldest first; the last is the item's current revision. */
-  readonly revisions: ReadonlyArray<StoredRevision>;
+  /** Current revision after complete history validation, with its exact total. */
+  readonly current: StoredRevision;
+  readonly revisionCount: number;
 }
 
 /** A disclosed conflict with what it points at, so a review can tell when it moved. */
@@ -288,7 +289,7 @@ export function seriesKnowledgeConflicts(
   if (candidate.target.kind === 'new') {
     for (const item of items) {
       if (seriesKnowledgeSubjectKey(item.subject) !== key) continue;
-      const current = item.revisions.at(-1)!;
+      const current = item.current;
       found.push({
         kind: 'existing-item',
         ref: current.revisionId,
@@ -298,7 +299,7 @@ export function seriesKnowledgeConflicts(
   } else {
     const target = candidate.target;
     const item = items.find((entry) => entry.itemId === target.itemId);
-    const current = item?.revisions.at(-1);
+    const current = item?.current;
     if (item !== undefined && current !== undefined && current.revisionId !== target.baseRevisionId) {
       found.push({ kind: 'item-updated', ref: current.revisionId, line: `「${item.subject}」在提议之后已更新为第 ${current.ordinal} 版。` });
     }
@@ -375,27 +376,29 @@ export class SeriesKnowledgeLedger {
       record.subject === row.subject && record.knowledgeClass === row.knowledge_class && isSeriesKnowledgeClass(record.knowledgeClass) &&
       record.createdAt === row.created_at && record.actor === ACTOR, 'SERIES_KNOWLEDGE_RECORD_INVALID', INVALID);
     const itemId = String(row.item_id);
-    const revisions = this.#revisions(itemId);
-    requireKnowledge(revisions.length > 0, 'SERIES_KNOWLEDGE_RECORD_INVALID', INVALID);
+    let current: StoredRevision | null = null;
+    for (const revision of this.#revisions(itemId)) current = revision;
+    requireKnowledge(current !== null, 'SERIES_KNOWLEDGE_RECORD_INVALID', INVALID);
     return {
       itemId,
       seriesId: String(row.series_id),
       subject: String(row.subject),
       knowledgeClass: record.knowledgeClass as SeriesKnowledgeClass,
       createdAt: String(row.created_at),
-      revisions,
+      current,
+      revisionCount: current.ordinal,
     };
   }
 
-  #revisions(itemId: string): StoredRevision[] {
+  *#revisions(itemId: string): IterableIterator<StoredRevision> {
     const rows = this.#db.prepare(`SELECT r.*, p.decision_id, p.canonical_json decision_json, p.sha256 decision_sha256, p.outcome, p.conflict_disposition,
         p.reuse_scope, p.review_digest, p.candidate_id, p.recorded_at decision_recorded_at, p.candidate_version_id decision_version_id
       FROM series_knowledge_revisions r JOIN series_knowledge_promotions p ON p.revision_id = r.revision_id
-      WHERE r.item_id = ? ORDER BY r.ordinal`).all(itemId) as SqlRow[];
-    requireKnowledge(rows.length === (this.#db.prepare('SELECT count(*) count FROM series_knowledge_revisions WHERE item_id = ?').get(itemId) as SqlRow).count,
-      'SERIES_KNOWLEDGE_RECORD_INVALID', INVALID);
+      WHERE r.item_id = ? ORDER BY r.ordinal`).iterate(itemId) as IterableIterator<SqlRow>;
+    const expected = Number((this.#db.prepare('SELECT count(*) count FROM series_knowledge_revisions WHERE item_id = ?').get(itemId) as SqlRow).count);
+    let count = 0;
     let before: StoredRevision | null = null;
-    return rows.map((row) => {
+    for (const row of rows) {
       const json = String(row.canonical_json);
       requireKnowledge(sha256Hex(json) === String(row.sha256) && sha256Hex(String(row.decision_json)) === String(row.decision_sha256),
         'SERIES_KNOWLEDGE_RECORD_INVALID', INVALID);
@@ -435,14 +438,33 @@ export class SeriesKnowledgeLedger {
         recordedAt: String(row.recorded_at),
       };
       before = entry;
-      return entry;
-    });
+      count += 1;
+      yield entry;
+    }
+    requireKnowledge(count === expected, 'SERIES_KNOWLEDGE_RECORD_INVALID', INVALID);
+  }
+
+  /** Exact immutable revision, with all predecessors and successors still validated. */
+  revision(itemId: string, revisionId: string): StoredRevision | null {
+    let found: StoredRevision | null = null;
+    for (const revision of this.#revisions(itemId)) if (revision.revisionId === revisionId) found = revision;
+    return found;
+  }
+
+  /** Newest-first bounded history page; validation always reaches the end of the ledger. */
+  revisionsPage(itemId: string, before: number | null, limit: number): StoredRevision[] {
+    const page: StoredRevision[] = [];
+    for (const revision of this.#revisions(itemId)) {
+      if (before !== null && revision.ordinal >= before) continue;
+      page.unshift(revision);
+      if (page.length > limit) page.pop();
+    }
+    return page;
   }
 
   /** One candidate's newest version, verified with its whole chain, and whether it was taken in; `null` when there is none. */
   candidate(candidateId: string): StoredCandidate | null {
-    const rows = this.#db.prepare('SELECT * FROM series_knowledge_candidates WHERE candidate_id = ? ORDER BY version').all(candidateId) as SqlRow[];
-    if (rows.length === 0) return null;
+    const rows = this.#db.prepare('SELECT * FROM series_knowledge_candidates WHERE candidate_id = ? ORDER BY version').iterate(candidateId) as IterableIterator<SqlRow>;
     let before: StoredCandidate | null = null;
     for (const row of rows) before = this.#candidate(row, before);
     return before;
@@ -611,7 +633,7 @@ export class SeriesKnowledgeLedger {
       const existing = this.item(candidate.target.itemId);
       requireKnowledge(existing !== null && existing.seriesId === candidate.seriesId, 'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识条目不存在。');
       itemId = existing.itemId;
-      before = existing.revisions.at(-1)!;
+      before = existing.current;
     }
     const revisionId = randomUUID();
     const ordinal = (before?.ordinal ?? 0) + 1;
