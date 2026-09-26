@@ -4113,9 +4113,9 @@ export class EditorialStore {
       // The open that raised the Data Version records the upgrade it made with the backup (S85b), and only then clears the note
       // that let an open stopped before this record it (Issue #433 review).
       store.#dataVersionCall(() => store.#transaction(authority, () => {
-        // Another software's upgrade whose migration committed before it was recorded goes first, as that open would have
-        // recorded it (Issue #433 review).
-        if (earlier !== null) store.#dataVersions.recordOpen(earlier);
+        // Upgrades other opens made and never recorded go first, oldest first, as those opens would have recorded them; one a
+        // record already holds is not recorded again (Issue #433 review).
+        for (const carried of earlier) store.#dataVersions.recordCarried(carried);
         store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION, upgrade });
       }));
       if (control.interruptUpgradeAt === 'after-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在清除升级记录之前停止。');

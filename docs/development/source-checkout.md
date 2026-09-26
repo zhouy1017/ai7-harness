@@ -312,9 +312,15 @@ When an open finds the store at a lower Data Version than this software's:
   - Once the backup is in place, and before anything migrates the store, the upgrade is noted beside the store in `store/upgrade-pending.json`, written whole or not at all. `store/` moves with the store it belongs to, and no database package carries it.
   - An open stopped after its migration and before the store recorded the upgrade finds the note at the next open. That open records the upgrade then, with the backup already made, and makes no second one.
   - An open stopped before migrating anything backs the data up again, since the data could have changed since.
-  - The note also names what it was for: the software, Data Version and schema revision the open was bringing the store to. A note left by another software, whose migration had committed, never stands in for this software's backup (Issue #433 review). Its upgrade is recorded first, as that software's, and this open makes the backup its own upgrade needs. Its own note carries that earlier upgrade on until both are recorded.
-  - An upgrade already recorded is never recorded twice: the whole upgrade is compared with the latest record. The note is cleared once the record is written.
-  - A note that does not read as AI7's, or is larger than 64 KiB (its size is read before any of it), refuses the open with `UPGRADE_NOTE_UNREADABLE`: its upgrade's backup could no longer be named.
+  - The note also names what it was for: the software, Data Version and schema revision the open was bringing the store to. Only a note of the same software bringing the store to the same revision and Data Version is this open's own. Any other note never stands in for this software's backup (Issue #433 review):
+    - When that note's migration raised the Data Version, its upgrade is recorded first, as that software's. The record states how far the migration took the data: the Data Version reached, and the changes up to there.
+    - This open still makes the backup its own upgrade needs.
+  - **Carried upgrades (Issue #433 review):**
+    - Every upgrade no open has recorded yet is carried on in the note, oldest first, whether or not the open that finds it migrates anything, until the store records them all.
+    - A note carries at most sixteen. An open that would carry one more upgrades nothing and refuses with `UPGRADE_NOTE_FULL`.
+    - A new store carries nothing on.
+  - An upgrade already recorded is never recorded twice: the ledger is searched for the whole upgrade, as a stream. A carried one already recorded adds no record at all. The note is cleared once the records are written.
+  - A note that does not read as AI7's refuses the open with `UPGRADE_NOTE_UNREADABLE`, since its upgrade's backup could no longer be named. So does one carrying more than sixteen, or one larger than 1 MiB (its size is read before any of it); the largest note AI7 writes stays well under that.
 - The version record of that open carries the upgrade: the Data Version and schema revision it came from, the software that last opened it, the classified changes, and the backup's name, size and digest. Every read checks it.
 
 数据与存储's 版本 states the latest upgrade, the backup and how to go back. Going back restores the data only, through the earlier software's `导入数据库 › 替换本机全部数据`; this software previews such a backup as an older Data Version and does not take it. The earlier software cannot open the upgraded data, so the steps move that data aside first (Issue #433 review):

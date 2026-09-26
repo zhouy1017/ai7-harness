@@ -305,6 +305,32 @@ export class DataVersionLedger {
   }
 
   /**
+   * Whether a record already holds exactly `upgrade`, the ledger read as a stream: the whole upgrade is compared, never its
+   * backup's digest alone, so no other upgrade is ever taken for it.
+   */
+  #holds(upgrade: DataVersionUpgrade): boolean {
+    const wanted = canonicalJson(upgrade);
+    for (const entry of this.history()) {
+      if (entry.upgrade !== null && canonicalJson(entry.upgrade) === wanted) return true;
+    }
+    return false;
+  }
+
+  /**
+   * An upgrade another open made and never recorded, inside the caller's transaction: appended as the record that open would
+   * have written. When a record already holds it, nothing is appended at all: that record is the open's that made it, and this
+   * open is recorded by its own (Issue #433 review). Answers whether it appended.
+   */
+  recordCarried(input: {
+    readonly softwareVersion: string;
+    readonly dataVersion: number;
+    readonly schemaRevision: number;
+    readonly upgrade: DataVersionUpgrade;
+  }): boolean {
+    return !this.#holds(input.upgrade) && this.recordOpen(input);
+  }
+
+  /**
    * The versions that opened the store now, inside the caller's transaction: appended when the software, the Data Version or
    * the schema revision differs from the last record, and nothing otherwise. An open that raised the Data Version names the
    * upgrade it made (S85b). Answers whether it appended.
@@ -317,12 +343,11 @@ export class DataVersionLedger {
   }): boolean {
     requireDataVersion(SOFTWARE_VERSION.test(input.softwareVersion) && Number.isSafeInteger(input.dataVersion) && input.dataVersion >= 1 &&
       Number.isSafeInteger(input.schemaRevision) && input.schemaRevision >= 1, 'STORE_VERSION_INVALID', '数据版本记录无效。');
-    const { latest, count } = this.standing();
     // An upgrade already recorded is not recorded twice: an open stopped after recording it and before clearing its note brings
-    // the same upgrade again, and the record that holds it is the latest (Issue #433 review). The whole upgrade is compared,
-    // never its backup's digest alone, so no other upgrade is ever taken for it.
+    // the same upgrade again, perhaps with earlier ones it recorded before it (Issue #433 review).
     const given = input.upgrade ?? null;
-    const upgrade = given !== null && latest?.upgrade != null && canonicalJson(latest.upgrade) === canonicalJson(given) ? null : given;
+    const upgrade = given !== null && this.#holds(given) ? null : given;
+    const { latest, count } = this.standing();
     if (upgrade !== null) readUpgrade(upgrade, input.dataVersion);
     if (upgrade === null && latest !== null && latest.softwareVersion === input.softwareVersion && latest.dataVersion === input.dataVersion &&
       latest.schemaRevision === input.schemaRevision) return false;
