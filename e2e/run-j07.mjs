@@ -150,6 +150,10 @@ const MAINTENANCE_ERRATA = '第三段所记年份应为另一年，其余不变�
 const MAINTENANCE_OUTCOME = '勘误已写入 AI7 的记录';
 const MAINTENANCE_WITHDRAWAL = '这一版在 AI7 中不再用于发稿';
 const MAINTENANCE_INTERNAL_ONLY = '仅在 AI7 内记录；不代表已撤稿、下架、召回、通知接收方或删除外部文件';
+// Issue #426 (S68b): a 替代 that waits in 待我处理, and the 归档 that closes that designation's maintenance.
+const MAINTENANCE_SUPERSESSION = '拟另设新的发稿版本取代这一版';
+const MAINTENANCE_ARCHIVE = '这一版的维护到此为止';
+const MAINTENANCE_MORE = '读者来信又指出一处需要勘误';
 const DELIVERY_RECIPIENTS = '["publicity:false:宣传部","editorial:false:编辑部","external-media:false:外部媒体","other:false:其他","custom:false:自行输入"]';
 const EXPORT_MEMBERS_ONLY = `JSON.stringify(Object.keys(window.ai7).filter((key) => /export|publish|send/i.test(key)).sort()) === ${JSON.stringify(JSON.stringify(EXPORT_MEMBERS))}`;
 
@@ -2083,6 +2087,104 @@ async function main() {
     requireJourney(JSON.stringify(maintained) === JSON.stringify([[2, 1, true, ['withdrawal:complete:1']], [1, 1, false, ['errata:complete:4']]]), 'maintenance-service-agrees', maintained);
     await assertRenderer(renderer, `(() => { const text = (document.querySelector('[data-screen="book-deliverables"]')?.textContent ?? '').replaceAll(${JSON.stringify(MAINTENANCE_INTERNAL_ONLY)}, ''); return !/已更正发布|已撤稿|已下架|已召回|已再版/.test(text); })()`, 'maintenance-only-internal-words');
     await assertNoForbiddenWords(renderer, 'maintenance-without-forbidden-words');
+
+    at('maintenance-attention');
+    // 维护事项待处理 (Issue #426, S68b; MAINT-012). A 替代 on the first designation waits for a later one: 待我处理 counts it
+    // under 等待你的决定, names it by the case and its 发稿版本, and opening it returns to 交付物 with the case open. The
+    // concluded 勘误 and the 撤回 never come there, and an 归档 of that designation closes the 替代's wait for good.
+    const attentionEntry = '#global-attention-entry';
+    // Whatever else this Book's records ask of the editor stays as it is; only the 替代 comes and goes.
+    const attentionBefore = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((attention) => attention.actionableCount)`);
+    requireJourney(Number.isSafeInteger(attentionBefore) && attentionBefore >= 0, 'maintenance-attention-before', attentionBefore);
+    await clickSelector(renderer, maintenanceAction(1, 'record'), 'maintenance-supersession-open');
+    await assertRenderer(renderer, `(() => { const radio = document.querySelector(${JSON.stringify(`${designationItem(1)} form.maintenance-draft input[type="radio"][value="supersession"]`)}); radio.click(); return radio.checked; })()`, 'maintenance-choose-supersession');
+    await fill(renderer, `${designationItem(1)} form.maintenance-draft textarea[data-maintenance-field="reason"]`, MAINTENANCE_SUPERSESSION, 'maintenance-supersession-reason');
+    await clickSelector(renderer, maintenanceAction(1, 'confirmRecord'), 'maintenance-supersession-record');
+    await waitFor(renderer, `window.__j07.status() === '维护事项已记录' && document.querySelector(${JSON.stringify(`${designationItem(1)} section.maintenance-case[data-maintenance-status="waiting"]`)}) !== null`, 'maintenance-supersession-waiting', 60_000);
+    const supersessionCase = await renderer.evaluate(`window.ai7.inspectDeliverables().then((answer) => answer.publication.designations.find((designation) => designation.ordinal === 1).maintenance.cases[0])`);
+    requireJourney(supersessionCase?.classification === 'supersession' && supersessionCase.status === 'waiting' && supersessionCase.ordinal === 3, 'maintenance-supersession-recorded', supersessionCase);
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(attentionEntry)})?.dataset.attentionCount === ${JSON.stringify(String(attentionBefore + 1))} && document.querySelector(${JSON.stringify(`${attentionEntry} .global-attention-badge`)})?.textContent === ${JSON.stringify(String(attentionBefore + 1))}`, 'maintenance-attention-count', 30_000);
+    await clickSelector(renderer, attentionEntry, 'maintenance-attention-entry');
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"] li.global-attention-item[data-attention-state="maintenance-waiting"]') !== null`, 'maintenance-attention-listed', 30_000);
+    await assertRenderer(renderer, `(() => {
+      const items = Array.from(document.querySelectorAll('[data-screen="global-attention"] li.global-attention-item[data-attention-target="maintenance"]'));
+      const item = items[0];
+      return items.length === 1 && item.closest('section.global-attention-group')?.dataset.attentionGroup === 'decisions' &&
+        item.dataset.attentionItem === ${JSON.stringify(`maintenance:${supersessionCase.caseId}`)} && item.dataset.attentionTarget === 'maintenance' &&
+        item.dataset.attentionBlocked === 'false' && item.querySelector('.global-attention-book')?.textContent === ${JSON.stringify(`《${EXCERPT.title}》`)} &&
+        item.querySelector('.global-attention-open')?.textContent === '维护事项 · 第 3 项 · 替代 · 第 1 次发稿版本' &&
+        item.querySelector('.global-attention-pill')?.textContent === '维护事项待处理 · 等待另设发稿版本' &&
+        item.querySelector('.global-attention-reason')?.textContent === '替代等待另设的发稿版本：另行设为发稿版本后，在这个维护事项中关联它。' &&
+        item.querySelector('.global-attention-next')?.textContent === '安全的下一步：关联发稿版本';
+    })()`, 'maintenance-attention-item');
+    await clickSelector(renderer, `[data-screen="global-attention"] [data-attention-open="maintenance:${supersessionCase.caseId}"]`, 'maintenance-attention-open');
+    await waitFor(renderer, `(() => { const heading = document.querySelector(${JSON.stringify(`${designationItem(1)} li[data-case-id="${supersessionCase.caseId}"] section.maintenance-case .maintenance-case-heading`)}); return heading instanceof HTMLElement && document.activeElement === heading && heading.textContent === '第 3 项维护事项 · 替代'; })()`, 'maintenance-attention-returns-to-the-case', 60_000);
+    await assertRenderer(renderer, PAGE_HELPERS, 'maintenance-attention-page-helpers');
+    // However old it grows, the case still opens back from 待我处理 (Issue #426 review): five more 勘误 on the first
+    // designation push the 替代 out of the five 交付物 lists, and opening it draws it open below them, with focus on it, and
+    // one older case left to 更早的维护事项….
+    for (let index = 1; index <= 5; index += 1) {
+      await clickSelector(renderer, maintenanceAction(1, 'record'), `maintenance-more-${index}-open`);
+      await assertRenderer(renderer, `(() => { const radio = document.querySelector(${JSON.stringify(`${designationItem(1)} form.maintenance-draft input[type="radio"][value="errata"]`)}); radio.click(); return radio.checked; })()`, `maintenance-more-${index}-errata`);
+      await fill(renderer, `${designationItem(1)} form.maintenance-draft textarea[data-maintenance-field="reason"]`, `${MAINTENANCE_MORE}（${index}）`, `maintenance-more-${index}-reason`);
+      await clickSelector(renderer, maintenanceAction(1, 'confirmRecord'), `maintenance-more-${index}-record`);
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${designationItem(1)} section.maintenance-case .maintenance-case-heading`)})?.textContent === ${JSON.stringify(`第 ${3 + index} 项维护事项 · 勘误`)}`, `maintenance-more-${index}-recorded`, 60_000);
+    }
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(attentionEntry)})?.dataset.attentionCount === ${JSON.stringify(String(attentionBefore + 6))}`, 'maintenance-attention-more-counted', 30_000);
+    await clickSelector(renderer, attentionEntry, 'maintenance-attention-entry-again');
+    const olderOpen = `[data-screen="global-attention"] [data-attention-open="maintenance:${supersessionCase.caseId}"]`;
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(olderOpen)}) !== null`, 'maintenance-attention-listed-again', 30_000);
+    await clickSelector(renderer, olderOpen, 'maintenance-attention-open-older');
+    await waitFor(renderer, `(() => {
+      const listed = Array.from(document.querySelectorAll(${JSON.stringify(`${designationItem(1)} ol.maintenance-cases > li`)}), (item) => item.dataset.caseId);
+      const heading = document.querySelector(${JSON.stringify(`${designationItem(1)} li[data-case-id="${supersessionCase.caseId}"] section.maintenance-case .maintenance-case-heading`)});
+      return listed.length === 6 && listed[5] === ${JSON.stringify(supersessionCase.caseId)} && heading instanceof HTMLElement && document.activeElement === heading &&
+        heading.textContent === '第 3 项维护事项 · 替代' &&
+        document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-older .field-note`)})?.textContent === '还有 1 项更早的维护事项';
+    })()`, 'maintenance-attention-older-opened', 60_000);
+    // 归档 of that designation: its maintenance is closed, and the 替代 leaves 待我处理 without being concluded.
+    await clickSelector(renderer, maintenanceAction(1, 'record'), 'maintenance-archive-open');
+    await assertRenderer(renderer, `(() => { const radio = document.querySelector(${JSON.stringify(`${designationItem(1)} form.maintenance-draft input[type="radio"][value="archive"]`)}); radio.click(); return radio.checked; })()`, 'maintenance-choose-archive');
+    await fill(renderer, `${designationItem(1)} form.maintenance-draft textarea[data-maintenance-field="reason"]`, MAINTENANCE_ARCHIVE, 'maintenance-archive-reason');
+    await clickSelector(renderer, maintenanceAction(1, 'confirmRecord'), 'maintenance-archive-record');
+    await waitFor(renderer, `window.__j07.status() === '维护事项已记录' && document.querySelector(${JSON.stringify(`${designationItem(1)} section.maintenance`)})?.dataset.maintenanceArchived === 'true'`, 'maintenance-archived', 60_000);
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(attentionEntry)})?.dataset.attentionCount === ${JSON.stringify(String(attentionBefore))}`, 'maintenance-attention-cleared', 30_000);
+    const leftOver = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((attention) => attention.groups.flatMap((group) => group.items).filter((entry) => entry.target.kind === 'maintenance').length)`);
+    requireJourney(leftOver === 0, 'maintenance-attention-none-left', leftOver);
+
+    // A bounded publication list must not hide the exact target selected in attention.
+    const outsideCase = await renderer.evaluate(`(async () => {
+      const before = await window.ai7.inspectDeliverables();
+      const target = before.publication.designations.find((item) => item.ordinal === 2);
+      const result = await window.ai7.recordMaintenanceCase({ publicationVersionId: target.publicationVersionId,
+        classification: 'errata', reason: ${JSON.stringify(MAINTENANCE_MORE)}, evidence: null });
+      for (let index = 0; index < 31; index += 1) {
+        await window.ai7.designatePublicationVersion({ milestoneId: ${JSON.stringify(first)},
+          scope: ${JSON.stringify(EBOOK.scope)} + '（' + index + '）', basis: ${JSON.stringify(EBOOK.basis)} });
+      }
+      const after = await window.ai7.inspectDeliverables();
+      return { caseId: result.maintenanceCase.caseId, publicationVersionId: target.publicationVersionId,
+        hidden: !after.publication.designations.some((item) => item.publicationVersionId === target.publicationVersionId),
+        count: after.publication.designations.length };
+    })()`);
+    requireJourney(outsideCase.hidden && outsideCase.count === 30, 'maintenance-attention-designation-outside-page');
+    await clickSelector(renderer, attentionEntry, 'maintenance-attention-outside-entry');
+    const outsideOpen = `[data-screen="global-attention"] [data-attention-open="maintenance:${outsideCase.caseId}"]`;
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(outsideOpen)}) !== null`, 'maintenance-attention-outside-listed', 30_000);
+    await clickSelector(renderer, outsideOpen, 'maintenance-attention-outside-open');
+    const outsideSection = `[data-screen="book-deliverables"] .maintenance-outside-history[data-publication-version-id="${outsideCase.publicationVersionId}"]`;
+    const outsideHeading = `${outsideSection} section.maintenance-case .maintenance-case-heading`;
+    await waitFor(renderer, `(() => { const heading = document.querySelector(${JSON.stringify(outsideHeading)});
+      return heading instanceof HTMLElement && document.activeElement === heading &&
+        document.querySelector(${JSON.stringify(`${outsideSection} section.maintenance-case`)})?.dataset.caseId === ${JSON.stringify(outsideCase.caseId)} &&
+        document.querySelector(${JSON.stringify(`${outsideSection} .maintenance-target`)})?.textContent.includes('第 2 次') &&
+        document.querySelectorAll('ol.publication-versions > li').length === 30; })()`, 'maintenance-attention-outside-focused', 60_000);
+    const outsideToggle = `${outsideSection} [data-maintenance-action="toggle-case"]`;
+    await clickSelector(renderer, outsideToggle, 'maintenance-attention-outside-close');
+    await waitFor(renderer, `(() => { const toggle = document.querySelector(${JSON.stringify(outsideToggle)});
+      return toggle instanceof HTMLElement && document.activeElement === toggle && toggle.getAttribute('aria-expanded') === 'false'; })()`, 'maintenance-attention-outside-close-focused');
+    await clickSelector(renderer, outsideToggle, 'maintenance-attention-outside-reopen');
+    await waitFor(renderer, `document.activeElement === document.querySelector(${JSON.stringify(outsideHeading)})`, 'maintenance-attention-outside-reopened');
 
     at('documents-restart');
     // A restart moves nothing: 交付物, 交付 · 生产文档 and 图书交付包 answer byte for byte as before — 维护事项 included — the

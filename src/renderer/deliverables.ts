@@ -137,6 +137,10 @@ export interface MountDeliverablesOptions {
   bookId: string;
   bookTitle: string;
   api: DeliverablesApi;
+  /** A 维护事项 to open in place once 交付物 is read (Issue #426, S68b): 待我处理's way back to it. */
+  openCase?: { caseId: string; publicationVersionId: string };
+  /** A 维护事项 step moved what 待我处理 lists: the header's number is read again (Issue #426, S68b). */
+  attentionChanged?(): void;
   technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
@@ -262,6 +266,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       bundle.refresh();
     },
     redraw: () => render('keep'),
+    ...(options.openCase === undefined ? {} : { initialCase: options.openCase }),
+    ...(options.attentionChanged === undefined ? {} : { attentionChanged: options.attentionChanged }),
   });
   const exporter = mountManuscriptExport({
     root: exportSlot,
@@ -505,6 +511,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     for (const designation of designations) list.append(renderDesignation(designation));
     section.append(list);
     if (next.publication.designationsTruncated) section.append(el('p', 'field-note', publicationsTruncatedLine(designations.length)));
+    const outside = maintenance.renderOutsideHistory(designations);
+    if (outside !== null) section.append(outside);
     return section;
   }
 

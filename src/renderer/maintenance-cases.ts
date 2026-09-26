@@ -69,6 +69,8 @@ import { localInstantLabel } from './plan-preview-labels.js';
 export interface MaintenanceSurface {
   /** The 维护事项 part of one designation item, from its summaries and the surface's own state. */
   render(designation: PublicationVersionProjection): HTMLElement;
+  /** Keep one exact attention target reachable when its designation is outside the bounded history. */
+  renderOutsideHistory(listed: ReadonlyArray<PublicationVersionProjection>): HTMLElement | null;
   busy(): boolean;
   destroy(): void;
 }
@@ -84,6 +86,10 @@ export interface MountMaintenanceOptions {
   refresh(): void;
   /** Draw 交付物 again from its last read: only the surface's own state moved. */
   redraw(): void;
+  /** A case to open as the surface mounts (Issue #426, S68b): 待我处理's item, back at its record. */
+  initialCase?: { caseId: string; publicationVersionId: string };
+  /** A step moved what 待我处理 lists (Issue #426, S68b): its number is read again at once. */
+  attentionChanged?(): void;
 }
 
 type Panel = 'link-proposal' | 'link-publication' | 'errata' | 'conclude';
@@ -127,6 +133,22 @@ function fact(term: string, value: string): HTMLElement[] {
 }
 
 /** How a designation names itself on a case: the same words the service's target line uses. */
+/** A case as its designation would list it, from the case's own answer. */
+function summaryOf(projection: MaintenanceCaseProjection): MaintenanceCaseSummaryProjection {
+  return {
+    caseId: projection.caseId,
+    ordinal: projection.ordinal,
+    classification: projection.classification,
+    classificationLabel: projection.classificationLabel,
+    status: projection.status,
+    statusLabel: projection.statusLabel,
+    nextStep: projection.nextStep,
+    revisions: projection.revisionsTotal,
+    recordedAt: projection.revisions[0]?.recordedAt ?? '',
+    latestAt: projection.revisions.at(-1)?.recordedAt ?? '',
+  };
+}
+
 function designationLabel(designation: PublicationVersionProjection): string {
   return `第 ${designation.ordinal} 次 · 「${designation.milestoneLabel}」 · ${designation.revisionLabel} · ${designation.scope}`;
 }
@@ -138,6 +160,8 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
   let ticket = 0;
   let draft: Draft | null = null;
   let open: OpenCase | null = null;
+  // One closed target remains as its own reopen control, preserving keyboard focus after close.
+  let outside: MaintenanceCaseProjection | null = null;
   /**
    * One bounded older page from `更早的维护事项…`, below the cases 交付物 lists (MAINT-001). A step on one of
    * them updates its line from the step's answer; 交付物's own read refreshes the rest.
@@ -184,15 +208,21 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     // Keep one older page beside the newest cases; return to the start to revisit earlier pages.
     const listed = new Set(maintenance.cases.map((summary) => summary.caseId));
     const shown = [...maintenance.cases, ...(older.get(designation.publicationVersionId) ?? []).filter((summary) => !listed.has(summary.caseId))];
-    if (shown.length > 0) {
+    // The case 待我处理 opened stays in reach however old it is (MAINT-012): drawn open below the listed ones until a page
+    // lists it, and gone once closed.
+    const pinned = open !== null && open.publicationVersionId === designation.publicationVersionId && open.projection !== null &&
+      !shown.some((summary) => summary.caseId === open!.caseId) ? summaryOf(open.projection) : null;
+    if (shown.length > 0 || pinned !== null) {
       const list = el('ol', 'maintenance-cases');
       for (const summary of shown) list.append(renderSummary(summary, designation.publicationVersionId));
+      if (pinned !== null) list.append(renderSummary(pinned, designation.publicationVersionId));
       section.append(list);
     }
     const olderPage = older.get(designation.publicationVersionId);
-    if (olderPage === undefined ? maintenance.total > shown.length : olderHasMore) {
+    const remaining = maintenance.total - shown.length - (pinned === null ? 0 : 1);
+    if (olderPage === undefined ? remaining > 0 : olderHasMore) {
       const more = el('div', 'maintenance-older');
-      more.append(el('p', 'field-note', olderPage === undefined ? maintenanceOlderLine(maintenance.total - shown.length) : '还有更早的维护事项。'));
+      more.append(el('p', 'field-note', olderPage === undefined ? maintenanceOlderLine(remaining) : '还有更早的维护事项。'));
       const read = actionButton('older', 'quiet', () => void loadOlder(designation.publicationVersionId, shown));
       read.disabled = working;
       more.append(read);
@@ -220,6 +250,30 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     section.append(row);
     if (drafting) section.append(renderDraft(draft!, designation));
     focusAfterDraw(section, designation.publicationVersionId);
+    return section;
+  }
+
+  function renderOutsideHistory(listed: ReadonlyArray<PublicationVersionProjection>): HTMLElement | null {
+    const publicationVersionId = open?.publicationVersionId ?? outside?.target.publicationVersionId;
+    if (publicationVersionId === undefined || listed.some((item) => item.publicationVersionId === publicationVersionId)) {
+      outside = null;
+      return null;
+    }
+    if (open?.projection !== null && open?.projection !== undefined) outside = open.projection;
+    const section = el('section', 'maintenance maintenance-outside-history');
+    section.dataset['publicationVersionId'] = publicationVersionId;
+    const heading = el('h5', undefined, MAINTENANCE_HEADING);
+    heading.id = uid('heading');
+    section.setAttribute('aria-labelledby', heading.id);
+    section.append(heading);
+    if (outside !== null) {
+      const list = el('ol', 'maintenance-cases');
+      list.append(renderSummary(summaryOf(outside), publicationVersionId));
+      section.append(list);
+    } else if (open !== null) {
+      section.append(renderCase(open));
+    }
+    focusAfterDraw(section, publicationVersionId);
     return section;
   }
 
@@ -617,7 +671,8 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     try {
       const projection = await api.inspectMaintenanceCase({ ...current.inspection, caseId: current.caseId });
       if (destroyed || open !== current || request !== ticket) return;
-      if (projection.bookId !== bookId || projection.caseId !== current.caseId) throw new Error(MAINTENANCE_STATUS_LINES.readFailed);
+      if (projection.bookId !== bookId || projection.caseId !== current.caseId ||
+          projection.target.publicationVersionId !== current.publicationVersionId) throw new Error(MAINTENANCE_STATUS_LINES.readFailed);
       current.projection = projection;
       pendingFocus = focus === null ? null : { publicationVersionId: current.publicationVersionId, selector: focus };
       options.redraw();
@@ -736,10 +791,20 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     };
     options.setStatus(result.completion, 'success');
     options.refresh();
+    options.attentionChanged?.();
+  }
+
+  // 待我处理 opened this case (MAINT-012): it is read and drawn open, with focus on its heading, once 交付物 shows it.
+  if (options.initialCase !== undefined) {
+    const { caseId, publicationVersionId } = options.initialCase;
+    const current: OpenCase = { caseId, publicationVersionId, projection: null, panel: null, choice: null, text: '', conclusion: null, problem: null };
+    open = current;
+    void read(current, caseSelector(caseId, '.maintenance-case-heading'));
   }
 
   return {
     render,
+    renderOutsideHistory,
     busy: () => working,
     destroy() {
       destroyed = true;

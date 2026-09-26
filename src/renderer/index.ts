@@ -491,6 +491,11 @@ async function openGlobalAttentionItem(item: GlobalAttentionItemProjection): Pro
       await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>
         renderBookReview(route.bookId, route.bookTitle, { reviewRunId: target.reviewRunId, findingId: null }));
       return;
+    // 维护事项待处理 (Issue #426, S68b): 交付物, with the case open on its 发稿版本 where its next step is.
+    case 'maintenance':
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>
+        renderBookDeliverables(route.bookId, route.bookTitle, { caseId: target.caseId, publicationVersionId: target.publicationVersionId }));
+      return;
   }
 }
 
@@ -1881,7 +1886,7 @@ function renderProposalConflict(target: { bookId: string; manuscriptId: string; 
   surface.start();
 }
 
-function renderBookDeliverables(bookId: string, bookTitle: string): void {
+function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { caseId: string; publicationVersionId: string }): void {
   const content = panel();
   content.classList.add('book-deliverables');
   content.dataset['bookId'] = bookId;
@@ -1890,6 +1895,9 @@ function renderBookDeliverables(bookId: string, bookTitle: string): void {
     bookId,
     bookTitle,
     api: window.ai7,
+    // 维护事项待处理 opens its case in place (Issue #426, S68b), and a step of a case reads the header's number again.
+    ...(openCase === undefined ? {} : { openCase }),
+    attentionChanged: () => globalAttentionReader.refresh(),
     technicalDetails,
     setStatus,
     errorMessage: rendererErrorMessage,

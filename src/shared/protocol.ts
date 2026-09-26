@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 64 as const;
+export const SERVICE_PROTOCOL_VERSION = 65 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -5830,7 +5830,10 @@ export type GlobalAttentionStateKey =
   | 'review-continuable'
   | 'analysis-completed'
   | 'analysis-completed-with-gaps'
-  | 'review-completed';
+  | 'review-completed'
+  // 维护事项待处理 (Issue #426, S68b; MAINT-012): a case with a named next step, or one waiting for a later designation.
+  | 'maintenance-pending'
+  | 'maintenance-waiting';
 
 /**
  * The closed map of safe next steps (V2-UX-ATTN-007): each is an action the item's own record offers, in
@@ -5850,10 +5853,16 @@ export type GlobalAttentionNextStep =
   | 'resolve-model-service'
   | 'reprepare'
   // 改计划重做 for a Run the launch's ceiling stopped under developer-live (Issue #541): the plan cannot raise it.
-  | 'redo';
+  | 'redo'
+  // A 维护事项's own next step (Issue #426, S68b), in the case's own words.
+  | 'maintenance-link-proposal'
+  | 'maintenance-link-publication'
+  | 'maintenance-write-errata'
+  | 'maintenance-conclude';
 export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'view-run', 'view-review', 'reconfirm-plan', 'continue-review', 'return-to-recovery', 'retry-abandon-cleanup', 'await-local-check',
   'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'reprepare', 'redo',
+  'maintenance-link-proposal', 'maintenance-link-publication', 'maintenance-write-errata', 'maintenance-conclude',
 ];
 
 /**
@@ -5866,7 +5875,9 @@ export type GlobalAttentionTarget =
   | { kind: 'manuscript-conflict'; bookId: string; manuscriptId: string; branchId: string; markId: string }
   | { kind: 'analysis'; bookId: string; taskIntentId: string }
   | { kind: 'analysis-plan'; bookId: string; taskIntentId: string }
-  | { kind: 'review'; bookId: string; reviewRunId: string };
+  | { kind: 'review'; bookId: string; reviewRunId: string }
+  // 交付物 with the case open on its 发稿版本 (Issue #426, S68b).
+  | { kind: 'maintenance'; bookId: string; publicationVersionId: string; caseId: string };
 
 /** The Active Work Object of one item, in its record's own terms (V2-UX-ATTN-007). */
 export type GlobalAttentionObjectProjection =
@@ -5874,7 +5885,8 @@ export type GlobalAttentionObjectProjection =
   | { kind: 'recovery'; branchName: string }
   | { kind: 'manuscript-conflict'; conflictKind: ProposalConflictKind }
   | { kind: 'analysis'; mode: BaselineAnalysisTaskMode }
-  | { kind: 'review'; ordinal: number };
+  | { kind: 'review'; ordinal: number }
+  | { kind: 'maintenance'; classification: MaintenanceClassification; ordinal: number; publicationOrdinal: number };
 
 /** The record facts an item's reason is told from: identities, counts and states, never manuscript text. */
 export interface GlobalAttentionFactsProjection {
