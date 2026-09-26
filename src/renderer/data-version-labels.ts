@@ -60,8 +60,22 @@ export function dataVersionUpgradeBackupLine(upgrade: Pick<DataVersionUpgradePro
     : `升级前备份「${upgrade.backupFileName}」已不在备份位置。`;
 }
 
-/** How to go back (ADR 0079 §1.3): the data only, through the earlier software, which AI7 neither keeps nor runs. */
-export function dataVersionRollbackLine(upgrade: Pick<DataVersionUpgradeProjection, 'fromSoftwareVersion'>): string {
+/**
+ * How to go back (ADR 0079 §1.3; Issue #433 review): the data only, through the earlier software, which AI7 neither keeps nor
+ * runs. The earlier AI7 cannot open data a later one upgraded, so the steps move that data aside first: the earlier AI7 then
+ * starts with empty data, and its 导入数据库 replaces that with the backup.
+ */
+export function dataVersionRollbackSteps(
+  upgrade: Pick<DataVersionUpgradeProjection, 'fromSoftwareVersion' | 'backupFileName'>,
+  places: { readonly dataRoot: string; readonly backupLocation: string },
+): { readonly lead: string; readonly steps: ReadonlyArray<string> } {
   const earlier = upgrade.fromSoftwareVersion === null ? '升级前的 AI7' : `升级前的 AI7（${upgrade.fromSoftwareVersion}）`;
-  return `回退只恢复升级前的数据：先安装${earlier}，再用它的「导入数据库 › 替换本机全部数据」选这份备份。AI7 不保留、也不运行旧版软件。`;
+  return {
+    lead: `回退只恢复升级前的数据，AI7 不保留、也不运行旧版软件。${earlier}打不开升级后的数据，所以先把它挪开：`,
+    steps: [
+      `关闭 AI7，把数据文件夹「${places.dataRoot}」改名，例如在名字后面加上「-升级后」。不要删除它，升级后的数据都在里面。`,
+      `安装并启动${earlier}：它以空白数据启动。`,
+      `在它的「设置 › 数据与存储」里选「导入数据库…」，选「${places.backupLocation}」里的「${upgrade.backupFileName}」，再选「替换本机全部数据」。`,
+    ],
+  };
 }

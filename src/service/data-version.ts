@@ -207,8 +207,11 @@ const DIGEST = /^[0-9a-f]{64}$/u;
 const MAX_UPGRADE_CHANGES = 20;
 const MAX_UPGRADE_CHANGE_CHARACTERS = 200;
 
-/** An upgrade as a record carries it, whole: its fields and no others, each of its kind, and below the record's Data Version. */
-function readUpgrade(value: unknown, dataVersion: number): DataVersionUpgrade {
+/**
+ * An upgrade as a record carries it, whole: its fields and no others, each of its kind, and below the record's Data Version. The
+ * note an open leaves beside the store is read the same way (`upgrade-backup.ts`).
+ */
+export function readUpgrade(value: unknown, dataVersion: number): DataVersionUpgrade {
   const keys = ['backup', 'changes', 'fromDataVersion', 'fromSchemaRevision', 'fromSoftwareVersion'];
   requireDataVersion(isRecord(value) && Object.keys(value).sort().join(',') === keys.join(','), 'STORE_VERSION_RECORD_INVALID', INVALID);
   const { fromDataVersion, fromSchemaRevision, fromSoftwareVersion, changes, backup } = value;
@@ -286,9 +289,12 @@ export class DataVersionLedger {
   }): boolean {
     requireDataVersion(SOFTWARE_VERSION.test(input.softwareVersion) && Number.isSafeInteger(input.dataVersion) && input.dataVersion >= 1 &&
       Number.isSafeInteger(input.schemaRevision) && input.schemaRevision >= 1, 'STORE_VERSION_INVALID', '数据版本记录无效。');
-    const upgrade = input.upgrade ?? null;
-    if (upgrade !== null) readUpgrade(upgrade, input.dataVersion);
     const history = this.history();
+    // An upgrade already recorded is not recorded twice: an open stopped after recording it and before clearing its note brings
+    // the same upgrade again (Issue #433 review).
+    const given = input.upgrade ?? null;
+    const upgrade = given !== null && history.some((entry) => entry.upgrade?.backup.sha256 === given.backup.sha256) ? null : given;
+    if (upgrade !== null) readUpgrade(upgrade, input.dataVersion);
     const latest = history.at(-1) ?? null;
     if (upgrade === null && latest !== null && latest.softwareVersion === input.softwareVersion && latest.dataVersion === input.dataVersion &&
       latest.schemaRevision === input.schemaRevision) return false;

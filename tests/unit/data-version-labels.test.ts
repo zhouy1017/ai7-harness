@@ -6,7 +6,7 @@ import {
   DATA_VERSION_PROMISE,
   DATA_VERSION_UPGRADE,
   dataVersionRecordsLabel,
-  dataVersionRollbackLine,
+  dataVersionRollbackSteps,
   dataVersionStateLine,
   dataVersionUpdateLine,
   dataVersionUpgradeBackupLine,
@@ -122,10 +122,17 @@ describe('数据版本 words', () => {
       '升级前的数据已备份为「AI7 升级前备份 2026-09-26 10-00-05.ai7db」，在备份位置保留到你删除。',
       '升级前备份「AI7 升级前备份 2026-09-26 10-00-05.ai7db」已不在备份位置。',
     ]);
-    expect([dataVersionRollbackLine(upgrade), dataVersionRollbackLine({ fromSoftwareVersion: null })]).toEqual([
-      '回退只恢复升级前的数据：先安装升级前的 AI7（0.1.0），再用它的「导入数据库 › 替换本机全部数据」选这份备份。AI7 不保留、也不运行旧版软件。',
-      '回退只恢复升级前的数据：先安装升级前的 AI7，再用它的「导入数据库 › 替换本机全部数据」选这份备份。AI7 不保留、也不运行旧版软件。',
-    ]);
+    // Going back is the earlier AI7's, which cannot open the upgraded data: the steps move it aside first (Issue #433 review).
+    const places = { dataRoot: 'C:\\Users\\编辑\\AppData\\Roaming\\AI7', backupLocation: 'C:\\Users\\编辑\\AppData\\Roaming\\AI7-backups' };
+    expect(dataVersionRollbackSteps(upgrade, places)).toEqual({
+      lead: '回退只恢复升级前的数据，AI7 不保留、也不运行旧版软件。升级前的 AI7（0.1.0）打不开升级后的数据，所以先把它挪开：',
+      steps: [
+        '关闭 AI7，把数据文件夹「C:\\Users\\编辑\\AppData\\Roaming\\AI7」改名，例如在名字后面加上「-升级后」。不要删除它，升级后的数据都在里面。',
+        '安装并启动升级前的 AI7（0.1.0）：它以空白数据启动。',
+        '在它的「设置 › 数据与存储」里选「导入数据库…」，选「C:\\Users\\编辑\\AppData\\Roaming\\AI7-backups」里的「AI7 升级前备份 2026-09-26 10-00-05.ai7db」，再选「替换本机全部数据」。',
+      ],
+    });
+    expect(dataVersionRollbackSteps({ ...upgrade, fromSoftwareVersion: null }, places).steps[1]).toBe('安装并启动升级前的 AI7：它以空白数据启动。');
   });
 
   it('says what the latest software update did to the Data Version, and writes each record', () => {

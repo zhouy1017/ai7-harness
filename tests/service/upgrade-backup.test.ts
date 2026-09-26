@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -8,6 +8,7 @@ import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/
 import { DATA_VERSION_TRIGGER_SQL, PRE_UPGRADE_BACKUP_NAME, type ClassifiedSchemaRevision } from '../../src/service/data-version.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { DATABASE_MERGE_SCHEMA_VERSION, DATABASE_REPLACEMENT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { backUpBeforeUpgrade, preUpgradeBackupFileName } from '../../src/service/upgrade-backup.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2) for 升级前备份 (Issue #433, plan slice S85b; V2-UX-DSTO-016; ADR 0079 §1.1, §1.3, §1.4) over the
@@ -33,17 +34,21 @@ const BREAKING: ReadonlyArray<ClassifiedSchemaRevision> = [{ revision: DATABASE_
 
 const storePath = (): string => join(roots.dataRoot, 'store', 'ai7.sqlite');
 const backups = (): string => `${roots.dataRoot}-backups`;
+/** The note an open leaves beside the store between its backup and its record of the upgrade (Issue #433 review). */
+const note = (): string => join(roots.dataRoot, 'store', 'upgrade-pending.json');
+const upgradeBackups = async (): Promise<string[]> => (await readdir(backups())).filter((name) => name.startsWith('AI7 升级前备份 ')).sort();
+const T = new Date(2026, 8, 26, 10, 0, 0);
 
 function code(error: unknown): unknown {
-  return error instanceof StoreError ? error.code : error;
+  return error instanceof StoreError || (error instanceof Error && 'code' in error) ? (error as { code: unknown }).code : error;
 }
 
 async function packageVersion(): Promise<string> {
   return (JSON.parse(await readFile(join(roots.codeRoot, 'package.json'), 'utf8')) as { version: string }).version;
 }
 
-/** Open as the service entry does, under the suite's classification when one is given. */
-function open(classes?: ReadonlyArray<ClassifiedSchemaRevision>): Promise<EditorialStore> {
+/** Open as the service entry does, under the suite's classification when one is given, stopped where the suite asks. */
+function open(classes?: ReadonlyArray<ClassifiedSchemaRevision>, interruptUpgradeAt?: 'before-record' | 'after-record'): Promise<EditorialStore> {
   return EditorialStore.open(roots.dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
@@ -52,7 +57,16 @@ function open(classes?: ReadonlyArray<ClassifiedSchemaRevision>): Promise<Editor
     interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: null,
     ...(classes === undefined ? {} : { schemaRevisionClasses: classes }),
+    ...(interruptUpgradeAt === undefined ? {} : { interruptUpgradeAt }),
   });
+}
+
+/** An open that fails: what it failed with. */
+async function refusal(opening: Promise<EditorialStore>): Promise<unknown> {
+  return opening.then((store) => {
+    store.close();
+    return null;
+  }, (error: unknown) => error);
 }
 
 /** A store with one Book, then as the revision before the terminal one left it. */
@@ -199,5 +213,106 @@ describe('升级前备份 over the real store', () => {
       return null;
     }, (error: unknown) => error);
     expect(code(refused)).toBe('STORE_VERSION_RECORD_INVALID');
+  }, 180_000);
+
+  it('never puts the backup before an upgrade over a file that appeared at its name, and upgrades nothing (Issue #433 review)', async () => {
+    await storeBeforeUpgrade();
+    // Enough data that the backup takes many chunks to write.
+    mkdirSync(join(roots.dataRoot, 'bulk'), { recursive: true });
+    await writeFile(join(roots.dataRoot, 'bulk', 'filler.bin'), Buffer.alloc(24 << 20, 7));
+    const db = new DatabaseSync(storePath());
+    try {
+      const backingUp = backUpBeforeUpgrade(db, roots.dataRoot, {
+        terminalRevision: DATABASE_MERGE_SCHEMA_VERSION, classes: BREAKING, softwareVersion: await packageVersion(), now: T,
+      });
+      const deadline = Date.now() + 60_000;
+      while (!(existsSync(backups()) && readdirSync(backups()).some((name) => /\.ai7db\.partial$/u.test(name)))) {
+        if (Date.now() > deadline) throw new Error('timed out waiting for the backup to be written');
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      await writeFile(join(backups(), preUpgradeBackupFileName(T)), 'another program put this here');
+      expect(code(await backingUp.catch((error: unknown) => error))).toBe('UPGRADE_BACKUP_EXISTS');
+    } finally {
+      db.close();
+    }
+    expect(await readFile(join(backups(), preUpgradeBackupFileName(T)), 'utf8')).toBe('another program put this here');
+    expect(readdirSync(backups()).filter((name) => name.includes('.partial'))).toEqual([]);
+    expect([existsSync(note()), userVersion(storePath())]).toEqual([false, DATABASE_REPLACEMENT_SCHEMA_VERSION]);
+  }, 180_000);
+
+  it('records the upgrade an open stopped before recording, with the one backup it made (Issue #433 review)', async () => {
+    await storeBeforeUpgrade();
+    // Stopped after every migration and before the versions that opened the store were recorded.
+    expect(code(await refusal(open(BREAKING, 'before-record')))).toBe('E2E_CONTROL_INTERRUPTED');
+    expect([userVersion(storePath()), existsSync(note())]).toEqual([DATABASE_MERGE_SCHEMA_VERSION, true]);
+    const made = await upgradeBackups();
+    expect(made).toHaveLength(1);
+    // The next open records that upgrade with that backup, makes no second one, and clears the note.
+    const store = await open(BREAKING);
+    try {
+      const version = store.inspectDataVersion();
+      expect([version.dataVersion, version.upgrades.map((upgrade) => [upgrade.fromDataVersion, upgrade.toDataVersion, upgrade.changes, upgrade.backupFileName])])
+        .toEqual([2, [[1, 2, [CHANGE], made[0]]]]);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    expect([await upgradeBackups(), existsSync(note())]).toEqual([made, false]);
+  }, 180_000);
+
+  it('records an upgrade once when its open stopped after recording it and before clearing its note (Issue #433 review)', async () => {
+    await storeBeforeUpgrade();
+    expect(code(await refusal(open(BREAKING, 'after-record')))).toBe('E2E_CONTROL_INTERRUPTED');
+    expect(existsSync(note())).toBe(true);
+    const store = await open(BREAKING);
+    try {
+      const version = store.inspectDataVersion();
+      expect([version.upgrades.length, version.history.map((entry) => entry.dataVersion)]).toEqual([1, [2, 1]]);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    expect([(await upgradeBackups()).length, existsSync(note())]).toEqual([1, false]);
+  }, 180_000);
+
+  it('backs up again when the open that noted an upgrade migrated nothing, and takes a note that is not AI7\'s as none (Issue #433 review)', async () => {
+    await storeBeforeUpgrade();
+    // Backed up and noted, then stopped before anything migrated the store.
+    const db = new DatabaseSync(storePath());
+    try {
+      await backUpBeforeUpgrade(db, roots.dataRoot, { terminalRevision: DATABASE_MERGE_SCHEMA_VERSION, classes: BREAKING, softwareVersion: await packageVersion(), now: T });
+    } finally {
+      db.close();
+    }
+    expect([await upgradeBackups(), existsSync(note()), userVersion(storePath())]).toEqual([[preUpgradeBackupFileName(T)], true, DATABASE_REPLACEMENT_SCHEMA_VERSION]);
+    let store = await open(BREAKING);
+    try {
+      // The data could have changed since that backup: the upgrade names the one made now.
+      const [upgrade] = store.inspectDataVersion().upgrades;
+      expect(upgrade!.backupFileName).not.toBe(preUpgradeBackupFileName(T));
+      expect(await upgradeBackups()).toEqual([preUpgradeBackupFileName(T), upgrade!.backupFileName].sort());
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    expect(existsSync(note())).toBe(false);
+    // A note that does not read as AI7's — here a whole upgrade whose digest does not agree — names no upgrade: nothing more is
+    // recorded, and it is cleared.
+    const forged = canonicalRecord({
+      schema: 'ai7.upgrade-pending/1',
+      upgrade: {
+        fromDataVersion: 1, fromSchemaRevision: DATABASE_REPLACEMENT_SCHEMA_VERSION, fromSoftwareVersion: null, changes: [CHANGE],
+        backup: { fileName: preUpgradeBackupFileName(T), byteLength: 1, sha256: 'a'.repeat(64) },
+      },
+    });
+    await writeFile(note(), JSON.stringify({ json: forged.json, sha256: '0'.repeat(64) }));
+    store = await open(BREAKING);
+    try {
+      expect(store.inspectDataVersion().upgrades).toHaveLength(1);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    expect(existsSync(note())).toBe(false);
   }, 180_000);
 });

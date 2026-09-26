@@ -93,7 +93,7 @@ import {
   DATA_VERSION_UPDATE,
   DATA_VERSION_UPGRADE,
   dataVersionRecordsLabel,
-  dataVersionRollbackLine,
+  dataVersionRollbackSteps,
   dataVersionStateLine,
   dataVersionUpdateLine,
   dataVersionUpgradeBackupLine,
@@ -4505,7 +4505,12 @@ async function renderDataAndStorage(): Promise<void> {
           element('p', undefined, dataVersionUpgradeLine(upgraded, localInstantLabel)),
           element('p', 'field-note', dataVersionUpgradeBackupLine(upgraded)),
         );
-        if (upgraded.backupPresent) lines.append(element('p', 'field-note', dataVersionRollbackLine(upgraded)));
+        if (upgraded.backupPresent) {
+          const rollback = dataVersionRollbackSteps(upgraded, { dataRoot: projection.canonicalRoot, backupLocation: version.backupLocation });
+          const steps = element('ol', 'data-version-rollback');
+          for (const step of rollback.steps) steps.append(element('li', 'field-note', step));
+          lines.append(element('p', 'field-note', rollback.lead), steps);
+        }
         rows.append(element('dt', undefined, DATA_VERSION_UPGRADE), lines);
       }
       const history = element('details', 'data-version-history');

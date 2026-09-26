@@ -295,10 +295,21 @@ A merge uses the replacement's staging place:
 
 When an open finds the store at a lower Data Version than this software's:
 - `src/service/upgrade-backup.ts` writes the store and every file beside it as the database package, origin `pre-upgrade-backup`, into the backup location as `AI7 升级前备份 <date time>.ai7db`, before anything migrates the store. It is kept until the editor deletes it.
+- The backup is put in place by the create-only publication every export uses, so a file that appeared at its name while the package was written is left as it is (`UPGRADE_BACKUP_EXISTS`, Issue #433 review).
 - A backup that cannot be made refuses the open with `UPGRADE_BACKUP_FAILED`, and nothing is migrated.
+- **The pending note (Issue #433 review):**
+  - Once the backup is in place, and before anything migrates the store, the upgrade is noted beside the store in `store/upgrade-pending.json`, written whole or not at all. `store/` moves with the store it belongs to, and no database package carries it.
+  - An open stopped after its migration and before the store recorded the upgrade finds the note at the next open. That open records the upgrade then, with the backup already made, and makes no second one.
+  - An open stopped before migrating anything backs the data up again, since the data could have changed since.
+  - An upgrade already recorded is never recorded twice. The note is cleared once the record is written, and a note that does not read as AI7's is taken as none.
 - The version record of that open carries the upgrade: the Data Version and schema revision it came from, the software that last opened it, the classified changes, and the backup's name, size and digest. Every read checks it.
 
-数据与存储's 版本 states the latest upgrade, the backup and how to go back. Going back restores the data only, through the earlier software's `导入数据库 › 替换本机全部数据`; this software previews such a backup as an older Data Version and does not take it. The suites open stores with their own classification (`StoreControl.schemaRevisionClasses`), which the service entry never sets.
+数据与存储's 版本 states the latest upgrade, the backup and how to go back. Going back restores the data only, through the earlier software's `导入数据库 › 替换本机全部数据`; this software previews such a backup as an older Data Version and does not take it. The earlier software cannot open the upgraded data, so the steps move that data aside first (Issue #433 review):
+1. Close AI7 and rename the data folder, keeping it.
+2. Install and start the earlier AI7, which starts with empty data.
+3. In its 导入数据库, choose the backup from the backup location, which stays beside the renamed folder's original name, and replace.
+
+The suites open stores with their own classification (`StoreControl.schemaRevisionClasses`) and stop an open just before or after its version record (`StoreControl.interruptUpgradeAt`); the service entry sets neither.
 
 
 

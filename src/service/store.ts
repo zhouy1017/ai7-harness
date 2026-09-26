@@ -432,7 +432,7 @@ import {
 } from './data-version.js';
 import { DatabaseExportError, DatabaseExports, initializeDatabaseExportSchema } from './database-exports.js';
 import { ScheduledBackupError, ScheduledBackups, backupLocationFor, initializeScheduledBackupSchema } from './scheduled-backups.js';
-import { backUpBeforeUpgrade } from './upgrade-backup.js';
+import { backUpBeforeUpgrade, completeUpgrade } from './upgrade-backup.js';
 import { DatabasePackageError } from './database-package-reader.js';
 import {
   DatabaseReplacementError,
@@ -3021,6 +3021,11 @@ interface StoreControl {
    * opened before the first packaged release classifies one. The service entry never sets it.
    */
   schemaRevisionClasses?: ReadonlyArray<ClassifiedSchemaRevision>;
+  /**
+   * The suites stop an open here (Issue #433 review): after every migration and just before the versions that opened the store
+   * are recorded, or just after, before the upgrade's note is cleared. The service entry never sets it.
+   */
+  interruptUpgradeAt?: 'before-record' | 'after-record';
 }
 
 function continuationNotice(access: OriginalFileAccessProjection): string {
@@ -4108,13 +4113,17 @@ export class EditorialStore {
       store.#softwareVersion = softwareVersion;
       store.#codeRoot = codeRoot;
       store.#dataVersion = dataVersionAt(DATABASE_MERGE_SCHEMA_VERSION, classes);
-      // The open that raised the Data Version records the upgrade it made with the backup (S85b).
+      if (control.interruptUpgradeAt === 'before-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在记录版本之前停止。');
+      // The open that raised the Data Version records the upgrade it made with the backup (S85b), and only then clears the note
+      // that let an open stopped before this record it (Issue #433 review).
       store.#dataVersionCall(() => store.#transaction(authority, () => store.#dataVersions.recordOpen({
         softwareVersion,
         dataVersion: store.#dataVersion,
         schemaRevision: DATABASE_MERGE_SCHEMA_VERSION,
         upgrade,
       })));
+      if (control.interruptUpgradeAt === 'after-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在清除升级记录之前停止。');
+      await completeUpgrade(dataRoot).catch(() => undefined);
       return store;
     } catch (error) {
       // A refused open leaves no handle behind, so the caller can remove the Agent Data Root

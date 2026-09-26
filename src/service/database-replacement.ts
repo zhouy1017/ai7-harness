@@ -219,7 +219,8 @@ function isIntent(value: unknown): value is ReplacementIntent {
 }
 
 /** Write `text` to `path` whole or not at all: a partial file, synced, then renamed into place. */
-async function writeAtomic(path: string, text: string): Promise<void> {
+/** A small file written whole or not at all: to a partial beside it, synced, then renamed over it. */
+export async function writeAtomic(path: string, text: string): Promise<void> {
   const partial = `${path}.${randomUUID()}.partial`;
   let handle: FileHandle | undefined;
   try {
