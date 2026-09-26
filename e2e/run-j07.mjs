@@ -101,7 +101,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 // 导出's four members (Issue #413): the only renderer members named like an export, and none publishes or sends.
 // Issue #416 (S67b): a 图书交付包 version's export adds its own three, and nothing else that exports, publishes or sends.
 const EXPORT_MEMBERS = Object.freeze([
-  'approveBookDeliveryPackageExport', 'approveManuscriptExport', 'chooseBookDeliveryPackageExportFolder', 'chooseManuscriptExportDestination',
+  'approveBookDeliveryPackageExport', 'approveManuscriptExport', 'cancelBookDeliveryPackageExport', 'chooseBookDeliveryPackageExportFolder', 'chooseManuscriptExportDestination',
   'revealManuscriptExport', 'reviewBookDeliveryPackageExport', 'reviewManuscriptExport',
 ]);
 // Issue #415 (S66a): a 新闻稿's draft, composed at run time from exact sample1's paragraphs after the manuscript's own,
