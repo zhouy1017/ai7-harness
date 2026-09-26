@@ -49,7 +49,7 @@ function scored(scores: ReadonlyArray<number | string | null>, overrides: Partia
 }
 
 const RISKS = (legal: 'low' | 'medium' | 'high', reviewed = false): EvaluationContent['risks'] => [
-  { riskId: 'facts-and-sources', level: 'low', statement: null, reviewed: false },
+  { riskId: 'facts-and-sources', level: 'low', statement: '已核对事实和来源，未发现未解决问题。', reviewed: false },
   { riskId: 'law-rights-ethics-policy', level: legal, statement: '书中写到真实人物，需要法务看过。', reviewed },
 ];
 
@@ -108,14 +108,18 @@ describe('②C 评估 over the real store', () => {
       expect(await refusal(() => store.saveEvaluation({ bookId: empty, recordId: first.recordId, expectedEntries: 2, content: saved.content, finalize: false })))
         .toBe('EVALUATION_NOT_FOUND:这个评估版本不属于当前图书。');
 
-      // 定稿 asks for every item, every risk, the statements of 中 and 高, and a conclusion.
+      // Every rating needs its explanation at finalization, including low; incomplete drafts remain permitted.
       expect(await refusal(() => save(2, scored([18, 16.5, 15, 17, null], { risks: RISKS('high'), conclusion: 'revise' }), true)))
         .toBe('EVALUATION_ITEM_UNSCORED:定稿前，「读者与市场潜力」要打分或写明不评的理由。');
       expect(await refusal(() => save(2, scored([18, 16.5, 15, 17, 12], { conclusion: 'revise' }), true)))
         .toBe('EVALUATION_RISK_UNRATED:定稿前，要给「事实与来源」定风险等级。');
-      expect(await refusal(() => save(2, scored([18, 16.5, 15, 17, 12], {
-        risks: [{ riskId: 'facts-and-sources', level: 'medium', statement: null, reviewed: false }, RISKS('low')[1]!], conclusion: 'revise',
-      }), true))).toBe('EVALUATION_RISK_STATEMENT:「事实与来源」为中或高时，要写明风险说明。');
+      for (const level of ['low', 'medium', 'high'] as const) {
+        for (const missingIndex of [0, 1]) {
+          const risks = RISKS('low').map((risk, index) => index === missingIndex ? { ...risk, level, statement: null } : risk);
+          expect(await refusal(() => save(2, scored([18, 16.5, 15, 17, 12], { risks, conclusion: 'revise' }), true)))
+            .toContain('EVALUATION_RISK_STATEMENT:');
+        }
+      }
       expect(await refusal(() => save(2, scored([18, 16.5, 15, 17, 12], { risks: RISKS('low') }), true))).toBe('EVALUATION_CONCLUSION_REQUIRED:定稿前要选定结论。');
 
       // Reviewed by a person, 推荐出版 is open; 定稿 closes the version with the actor and the time.

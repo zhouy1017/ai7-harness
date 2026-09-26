@@ -575,6 +575,7 @@ async function main() {
     await tick(renderer, `${risk('facts-and-sources')} input[value="low"]`, 'evaluation-risk-facts');
     await tick(renderer, `${risk('law-rights-ethics-policy')} input[value="high"]`, 'evaluation-risk-legal');
     await fill(renderer, `${risk('law-rights-ethics-policy')} [data-evaluation-field="statement"]`, '书中写到真实人物，需要法务看过。', 'evaluation-risk-statement');
+    await fill(renderer, `${risk('facts-and-sources')} [data-evaluation-field="statement"]`, '已核对事实和来源，未发现未解决问题。', 'evaluation-low-risk-statement');
     const capped = await readEvaluation(renderer, (page) => page.record?.blocked === true, 'evaluation-capped');
     requireJourney(JSON.stringify(capped.record.conclusions) === JSON.stringify([['recommend', false, true], ['revise', false, false], ['defer', false, false], ['reject', false, false]]),
       'evaluation-recommend-waits', capped.record.conclusions);

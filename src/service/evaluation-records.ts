@@ -202,7 +202,7 @@ function lines(value: unknown, what: string): string[] {
 /**
  * The editor's content held to the profile it scores under: exactly its items and risks, each score a whole or half point
  * within its 满分, `不评` only with a reason, `推荐出版` never while a `高` risk is unreviewed — and, to finalize, every item
- * scored or `不评`, every risk rated with a statement for `中` and `高`, and a conclusion chosen.
+ * scored or `不评`, every risk rated with a statement, and a conclusion chosen.
  */
 export function evaluationContent(input: unknown, profile: Pick<Profile, 'items' | 'risks'>, finalize: boolean): EvaluationContent {
   requireEvaluation(isRecord(input) && Array.isArray(input.items) && Array.isArray(input.risks), 'EVALUATION_CONTENT_INVALID', '评估内容无效。');
@@ -233,8 +233,8 @@ export function evaluationContent(input: unknown, profile: Pick<Profile, 'items'
       `风险说明要在 ${MAX_EVALUATION_RISK_STATEMENT_GRAPHEMES} 字以内。`, true);
     const level = given.level as EvaluationContent['risks'][number]['level'];
     requireEvaluation(!finalize || level !== null, 'EVALUATION_RISK_UNRATED', `定稿前，要给「${risk.label}」定风险等级。`);
-    requireEvaluation(!finalize || level === null || level === 'low' || statement !== null, 'EVALUATION_RISK_STATEMENT',
-      `「${risk.label}」为中或高时，要写明风险说明。`);
+    requireEvaluation(!finalize || statement !== null, 'EVALUATION_RISK_STATEMENT',
+      `定稿前，要写明「${risk.label}」的风险说明。`);
     // Only a `高` risk is reviewed by a person; the mark means nothing on a lower one, so it is not kept there.
     return { riskId: risk.riskId, level, statement, reviewed: level === 'high' && given.reviewed === true };
   });
