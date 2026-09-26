@@ -229,10 +229,9 @@ function requireStored(json: SQLOutputValue | undefined, digest: SQLOutputValue 
   }
 }
 
-/** What the store knows that a backup records: the versions and what the package holds. */
+/** What the store knows that a backup records: its versions. What the package holds is counted from its own copy. */
 export interface ScheduledBackupSources {
   facts(): { dataVersion: number; softwareVersion: string; schemaRevision: number };
-  contents(): DatabaseExportContentsProjection;
 }
 
 interface KeptBackup {
@@ -421,7 +420,6 @@ export class ScheduledBackups {
         ...this.#sources.facts(),
         createdAt,
         origin: 'scheduled-backup',
-        contents: this.#sources.contents(),
       }), { signal });
       const { facts } = written;
       const contents = facts.contents;

@@ -3778,11 +3778,9 @@ export class EditorialStore {
     this.#dataVersions = new DataVersionLedger(authority);
     this.#databaseExports = new DatabaseExports(authority, dataRoot, {
       facts: () => ({ dataVersion: DATA_VERSION, softwareVersion: this.#softwareVersion, schemaRevision: SCHEDULED_BACKUP_SCHEMA_VERSION }),
-      contents: () => this.#databaseContents(),
     });
     this.#scheduledBackups = new ScheduledBackups(authority, dataRoot, {
       facts: () => ({ dataVersion: DATA_VERSION, softwareVersion: this.#softwareVersion, schemaRevision: SCHEDULED_BACKUP_SCHEMA_VERSION }),
-      contents: () => this.#databaseContents(),
     });
     this.#evaluations = new EvaluationRecords(authority, { current: (bookId) => this.#evaluationManuscript(bookId) });
     this.#analysisFeedback = new AnalysisFeedbackLedger(authority);
@@ -11562,13 +11560,6 @@ export class EditorialStore {
       if (error instanceof ScheduledBackupError || error instanceof DatabaseExportError) throw new StoreError(error.code, error.message);
       throw error;
     }
-  }
-
-  /** What a database package holds, counted as it is made: the Books, their Source Versions, the 资料库's items and the Series. */
-  #databaseContents(): DatabaseExportContentsProjection {
-    const count = (table: 'books' | 'source_versions' | 'library_materials' | 'series'): number =>
-      Number((this.#authority.prepare(`SELECT count(*) count FROM ${table}`).get() as { count: number | bigint }).count);
-    return { books: count('books'), sourceVersions: count('source_versions'), libraryMaterials: count('library_materials'), series: count('series') };
   }
 
   #dataVersionCall<T>(operation: () => T): T {

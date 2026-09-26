@@ -695,6 +695,12 @@ export async function writeAtomically(
       return { outcome: 'failed', code: 'EXPORT_TARGET_CHANGED' };
     }
   }
+  // A stop asked for while the destination was checked is honoured here, the last point before the file is put in place, with
+  // nothing awaited between this and the commit (Issue #434 review).
+  if (cancelled()) {
+    await discard();
+    return { outcome: 'failed', code: 'EXPORT_CANCELLED' };
+  }
   // From here the write puts the file in place, and nothing stops it.
   options.onCommit?.();
   if (disposition === 'create') {
