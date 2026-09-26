@@ -648,14 +648,14 @@ async function main() {
 
     at('series-bounded-pages');
     // Real membership changes beyond one Book's history page, followed through the visible controls.
-    await assertRenderer(renderer, `(async () => {
+    requireJourney(await renderer.evaluate(`(async () => {
       for (let index = 0; index < 10; index += 1) for (const kind of ['add', 'remove']) {
         const input = { seriesId: ${JSON.stringify(seriesId)}, bookId: ${JSON.stringify(first)}, kind };
         const preview = await window.ai7.previewSeriesMembershipChange(input);
         await window.ai7.changeSeriesMembership({ ...input, previewDigest: preview.previewDigest });
       }
       return true;
-    })()`, 'history-seed');
+    })()`), 'history-seed');
     await leaveSeries(renderer, 'history-pages');
     await bookSide(renderer, first, 'history-pages');
     await readBookSeries(renderer, (page) => page.history.length === 20, 'history-page-ready');
@@ -669,19 +669,19 @@ async function main() {
     await backToLibrary(renderer, 'history-pages');
     // Empty runner-authored Books and Series through the real service; no fixture database or mocked page response.
     at('series-bounded-seed');
-    await assertRenderer(renderer, `(async () => {
+    requireJourney(await renderer.evaluate(`(async () => {
       for (let index = 0; index < 51; index += 1) {
         await window.ai7.createSeries({ title: '分页书系' + String(index).padStart(3, '0'), note: '' });
       }
       return true;
-    })()`, 'page-series-created');
+    })()`), 'page-series-created');
     const pageBooks = [];
     for (let index = 0; index < 51; index += 1) {
       // Creation binds this window to that Book. The real return action releases the route before the next creation.
       pageBooks.push(await createEmptyBook(renderer, '分页图书' + String(index).padStart(3, '0')));
       await backToLibrary(renderer, 'page-book-created');
     }
-    requireJourney(pageBooks.length === 51 && pageBooks.every((id) => UUID_PATTERN.test(id)), 'page-books-created');
+    requireJourney(pageBooks.length === 51 && new Set(pageBooks).size === 51 && pageBooks.every((id) => UUID_PATTERN.test(id)), 'page-books-created');
     at('series-bounded-navigation');
     await click(renderer, '书系', 'paged-series-list');
     await readSeriesList(renderer, (page) => page.items.length === 50, 'list-first-page');
@@ -705,14 +705,14 @@ async function main() {
     await clickSelector(renderer, '[data-series-action="add-more"]', 'chooser-next-again');
     await readSeries(renderer, (page) => page.chooser?.length === 3, 'chooser-last-page');
     await clickSelector(renderer, '[data-series-action="add-cancel"]', 'chooser-close');
-    await assertRenderer(renderer, `(async () => {
+    requireJourney(await renderer.evaluate(`(async () => {
       for (const bookId of ${JSON.stringify(pageBooks)}) {
         const input = { seriesId: ${JSON.stringify(seriesId)}, bookId, kind: 'add' };
         const preview = await window.ai7.previewSeriesMembershipChange(input);
         await window.ai7.changeSeriesMembership({ ...input, previewDigest: preview.previewDigest });
       }
       return true;
-    })()`, 'member-pages-seed');
+    })()`), 'member-pages-seed');
     await click(renderer, '返回书系', 'members-reload-list');
     await readSeriesList(renderer, (page) => page.items.length === 50, 'members-reload-first');
     await clickSelector(renderer, '[data-series-action="list-more"]', 'members-reload-target');
