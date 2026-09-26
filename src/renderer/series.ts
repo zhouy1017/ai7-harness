@@ -648,7 +648,7 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       busy = false;
       preview = null;
       refusal = { message: errorMessage(error, SERIES_STATUS.failed), stale: false };
-      try { membersLater = false; historyLater = false; projection = await api.inspectSeries({ seriesId: projection.seriesId }); } catch { /* the page keeps what it had */ }
+      try { projection = await api.inspectSeries({ seriesId: projection.seriesId }); membersLater = false; historyLater = false; } catch { /* the page keeps what it had */ }
       paint('[data-series-action="preview-cancel"]');
       setStatus(refusal.message, 'error');
     }
@@ -665,7 +665,7 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       const result = await api.changeSeriesMembership({ seriesId: shown.seriesId, bookId: shown.bookId, kind: shown.kind, previewDigest: shown.previewDigest });
       // The answer is the record alone (Issue #63 review): the Series is read again, its first pages newest first, so a Book
       // just added heads the member table. The change stands whatever that read meets.
-      try { membersLater = false; historyLater = false; projection = await api.inspectSeries({ seriesId: shown.seriesId }); } catch { /* the page keeps what it had */ }
+      try { projection = await api.inspectSeries({ seriesId: shown.seriesId }); membersLater = false; historyLater = false; } catch { /* the page keeps what it had */ }
       busy = false;
       preview = null;
       asked = null;
@@ -677,7 +677,7 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       refusal = { message: errorMessage(error, SERIES_STATUS.failed), stale };
       // A stale preview is withdrawn: the editor reads the consequence again before any commit (SER-010).
       preview = null;
-      try { membersLater = false; historyLater = false; projection = await api.inspectSeries({ seriesId: shown.seriesId }); } catch { /* the page keeps what it had */ }
+      try { projection = await api.inspectSeries({ seriesId: shown.seriesId }); membersLater = false; historyLater = false; } catch { /* the page keeps what it had */ }
       paint(stale ? '[data-series-action="refresh"]' : '[data-series-action="preview-cancel"]');
       setStatus(refusal.message, 'error');
     }
@@ -741,7 +741,7 @@ export function mountBookSeries(options: MountBookSeriesOptions): void {
             reset.hidden = fresh;
             (list.querySelector('summary') ?? details.querySelector('summary'))?.focus();
           } catch {
-            if (root.isConnected) (fresh ? reset : more).focus();
+            if (root.isConnected) details.querySelector('summary')?.focus();
           } finally {
             loading = false;
             more.disabled = false;
