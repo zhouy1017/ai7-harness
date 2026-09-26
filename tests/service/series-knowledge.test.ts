@@ -115,6 +115,50 @@ const wire = (value: unknown): number => Buffer.byteLength(JSON.stringify(value)
 const later = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 3));
 
 describe('书系知识 over the real store', () => {
+  it('keeps saved-revision provenance checkpoint-relative across later edits, saves and restart', async () => {
+    let seriesId: string;
+    let savedId: string;
+    let dirtyId: string;
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const member = await importBook(store, MEMBER);
+      seriesId = store.createSeries('来源边界').seriesId;
+      join2(store, seriesId, member.bookId, 'add');
+      const edit = () => {
+        const window = store.getManuscriptWindow(member.manuscriptId, member.branchId, null);
+        const block = window.blocks.find((entry) => entry.kind === 'paragraph')!;
+        store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: member.manuscriptId, branchId: member.branchId,
+          baseRevisionId: window.revisionId, expectedJournalSequence: window.journalSequence,
+          windowStartBlockId: window.blocks[0]!.blockId, blockId: block.blockId, baseBlockDigest: block.digest,
+          fromGrapheme: 0, toGrapheme: 0, insertText: '〔修改〕' });
+      };
+      edit();
+      const dirty = store.proposeSeriesKnowledge({ seriesId, target: { kind: 'new', subject: '日志来源', knowledgeClass: 'canon' },
+        content: '日志时提议', span: span(store, member) });
+      dirtyId = dirty.candidate.candidateId;
+      expect(dirty.candidate.provenance?.uncheckpointed).toBe(true);
+      await store.saveMilestone(member.manuscriptId, member.branchId, '来源修订', 'stage-archive', null, '');
+      const saved = store.proposeSeriesKnowledge({ seriesId, target: { kind: 'new', subject: '已存来源', knowledgeClass: 'canon' },
+        content: '保存后提议', span: span(store, member) });
+      savedId = saved.candidate.candidateId;
+      expect(saved.candidate.provenance!.journalSequence).toBeGreaterThan(0);
+      expect(saved.candidate.provenance!.uncheckpointed).toBe(false);
+      edit();
+      // An edit after the citation does not make the already saved citation unsaved.
+      expect(store.inspectSeriesKnowledgeReview({ seriesId, candidateId: savedId }).candidate.provenance?.uncheckpointed).toBe(false);
+      await store.saveMilestone(member.manuscriptId, member.branchId, '再存修订', 'stage-archive', null, '');
+      // A later save does not erase the journal suffix the older dirty citation actually named.
+      expect(store.inspectSeriesKnowledgeReview({ seriesId, candidateId: dirtyId }).candidate.provenance?.uncheckpointed).toBe(true);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(reopened.inspectSeriesKnowledgeReview({ seriesId: seriesId!, candidateId: savedId! }).candidate.provenance?.uncheckpointed).toBe(false);
+      expect(reopened.inspectSeriesKnowledgeReview({ seriesId: seriesId!, candidateId: dirtyId! }).candidate.provenance?.uncheckpointed).toBe(true);
+      reopened.markCleanShutdown();
+    } finally { reopened.close(); }
+  }, 180_000);
+
   it('takes in candidates from the editor\'s words and a member\'s manuscript through review, conflicts disclosed and kept or resolved', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {

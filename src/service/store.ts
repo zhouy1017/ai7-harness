@@ -11273,7 +11273,12 @@ export class EditorialStore {
       toGrapheme: provenance.toGrapheme,
       quote: knowledgeQuoteExcerpt(provenance.quote),
       // Changes waited in the journal beyond the revision when the words were cited (Issue #63 review).
-      uncheckpointed: provenance.journalSequence > 0,
+      // The counter is cumulative across checkpoints. Only entries based on this exact cited revision and present
+      // by the cited position belong to its unsaved suffix; later checkpoints or edits cannot relabel this provenance.
+      uncheckpointed: this.#authority.prepare(
+        `SELECT 1 FROM edit_journal_entries WHERE manuscript_id = ? AND branch_id = ?
+         AND base_revision_id = ? AND sequence <= ? LIMIT 1`,
+      ).get(provenance.manuscriptId, provenance.branchId, provenance.revisionId, provenance.journalSequence) !== undefined,
     };
   }
 
