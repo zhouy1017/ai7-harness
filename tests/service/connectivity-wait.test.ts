@@ -265,6 +265,11 @@ describe('联网后开始任务 and Connectivity Wait over the real store', () =
       expect(cancelled.run).toMatchObject({ state: 'cancelled', stateLabel: '已取消 · 未启动', attempt: null });
       expect(cancelled.run?.transitions.map((transition) => transition.state)).toEqual(['authorized', 'awaiting-connectivity', 'cancelled']);
       expect(cancelled.taskOutcome).toBeNull();
+      // The 任务 panel keeps it, in 最近完成 as 已取消 with nothing formed, though no Task Outcome names it (Issue #423 review).
+      const panel = store.inspectBookTasks(bookId, () => null);
+      expect(panel.groups.map((group) => [group.key, group.items.map((entry) => [entry.item.itemId, entry.item.state, entry.item.facts.revisionOrdinal ?? null, entry.result])]))
+        .toEqual([['waiting', []], ['running', []], ['recent', [[`analysis:${taskIntentId}`, 'analysis-cancelled', null, null]]]]);
+      expect(panel.running).toBe(false);
       // The Book still holds no revision, so the first baseline is offered again.
       expect(cancelled.actions.canPrepare).toBe(true);
       expect(store.cancelWaitingBaselineAnalysis(bookId, taskIntentId).run?.transitions).toHaveLength(3);

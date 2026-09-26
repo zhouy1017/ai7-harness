@@ -93,7 +93,7 @@ if (isJourneyRunner) {
   }
 }
 
-export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15', 'J-03', 'J-04', 'J-05', 'J-06', 'J-07', 'J-09', 'J-10', 'J-11']);
+export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15', 'J-03', 'J-04', 'J-05', 'J-06', 'J-07', 'J-09', 'J-10', 'J-11', 'J-16']);
 
 // The bounded pull-request subset of ADMITTED_JOURNEYS under ADR 0075. Every member launches the
 // same production-shaped subject, so a broken build, launch, IPC, data root, or service still fails
@@ -188,6 +188,7 @@ const JOURNEY_MODULES = Object.freeze({
   'J-09': new URL('./run-j09.mjs', import.meta.url),
   'J-10': new URL('./run-j10.mjs', import.meta.url),
   'J-11': new URL('./run-j11.mjs', import.meta.url),
+  'J-16': new URL('./run-j16.mjs', import.meta.url),
 });
 
 const J01_LAUNCH_SCENARIOS = Object.freeze([
@@ -1013,6 +1014,44 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'library-cards',
     'library-search',
     'restart-keeps-people',
+    'zero-loopback-requests',
+    'completion-browser-close',
+    'completion-cleanup',
+  ]),
+  // J-16 (Issue #423, plan slice S77a): the 任务 panel — the Book's Tasks beside the manuscript, controlled from their cards,
+  // a finished Task's result in a window beside the text, and the 回到<位置> chip a jump leaves.
+  'J-16': Object.freeze([
+    'entry',
+    'controller-loopback-sentinel',
+    'controller-imports',
+    'exact-sample1',
+    'renderer-api-boundary',
+    'book-import',
+    'book-prerequisites',
+    'model-credential-saved',
+    'model-credential-removed',
+    'panel-open',
+    'panel-prepare',
+    'panel-start',
+    'panel-pause',
+    'panel-resume',
+    'panel-compose-update',
+    'panel-cancel',
+    'result-window',
+    'result-jump',
+    'chip-persists',
+    'chip-return',
+    'chip-return-state-unavailable',
+    'chip-return-retained-busy',
+    'chip-return-retained-ready',
+    'chip-return-target-missing',
+    'chip-return-status-replaced',
+    'chip-return-late-completion',
+    'analysis-jump-chip',
+    'j14-panel-keyboard',
+    'j14-panel-zoom-200-reflow',
+    'j14-panel-forced-colors',
+    'restart-keeps-tasks',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',

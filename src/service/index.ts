@@ -26,7 +26,7 @@ import { decodeRequest, isSafeInteger, ProtocolError } from './request-frames.js
 import { controlledConnectivity, hostConnectivity, type TaskPlanConnectivity } from './connectivity.js';
 import type { WaitingFor } from './task-plan.js';
 import { controlledUnitHold } from './unit-hold.js';
-import { readGlobalAttention } from './global-attention.js';
+import { readBookTasks, readGlobalAttention } from './global-attention.js';
 import { reconnectPreflight } from './reconnect-preflight.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from './provider/egress-gate.js';
 import type { DormantHarnessRuntime } from './runtime.js';
@@ -902,6 +902,12 @@ async function dispatch(
         id: request.id, ok: true, op: request.op,
         result: await readGlobalAttention(store, analysisProgress, analysisExecution.busy, () => connectivity.waitingFor()),
       };
+    // ① 任务面 (Issue #423, plan slice S77a): the Book's Tasks, read as 待我处理 reads them.
+    case 'inspectBookTasks':
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: await readBookTasks(store, request.input.bookId, analysisProgress, () => connectivity.waitingFor()),
+      };
     // ④ 导出 (Issue #413, plan slice S64): local only, and only under this launch's verified External Export Policy.
     case 'reviewManuscriptExport':
       return {
@@ -1034,13 +1040,14 @@ function parseArguments(argv: string[]): {
       (foregroundExecutionControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-03')) ||
     (recoveryControlValue !== undefined &&
       (recoveryControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-08')) ||
-    // The model adapter binds a Journey whose Runs execute: J-04's analysis, J-09's 运行中 and 最近完成, and J-10's
-    // cancelled Run (Issue #422).
+    // The model adapter binds a Journey whose Runs execute: J-04's analysis, J-09's 运行中 and 最近完成, J-10's
+    // cancelled Run (Issue #422) and J-16's 任务 panel (Issue #423).
     (modelAdapterControlValue !== undefined &&
       (modelAdapterControl === undefined ||
-        (process.env.AI7_E2E_JOURNEY !== 'J-04' && process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10'))) ||
+        (process.env.AI7_E2E_JOURNEY !== 'J-04' && process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' &&
+          process.env.AI7_E2E_JOURNEY !== 'J-16'))) ||
     (connectivityPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-04' || !isAbsolute(connectivityPath))) ||
-    (unitHoldPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-10' || !isAbsolute(unitHoldPath))) ||
+    (unitHoldPath !== undefined && ((process.env.AI7_E2E_JOURNEY !== 'J-10' && process.env.AI7_E2E_JOURNEY !== 'J-16') || !isAbsolute(unitHoldPath))) ||
     [importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length > 1 ||
     // developer-live is a human-attended developer-host launch: never a Journey launch, never with a Journey control.
     (launchForm.trustedOperationalScope !== 'development-ci' &&
