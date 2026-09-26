@@ -90,6 +90,7 @@ import {
   DOCUMENTS_LEDE,
   documentActionName,
   documentCardLine,
+  documentOriginMarksLine,
   documentCreatedLine,
   documentCurrentTextChoice,
   documentDeliveredLine,
@@ -100,6 +101,8 @@ import {
   type DocumentAction,
 } from './production-document-labels.js';
 import { mountBookDeliveryPackage } from './book-delivery-package.js';
+import { mountMaintenance } from './maintenance-cases.js';
+import { renderWorkflowCardSummary } from './production-document-workflow.js';
 
 /**
  * ⑥ 交付物 as far as plan slice S65 reaches (Issue #414; editor-surfaces §9, V2-UX-MILE-008, PUB-002 to
@@ -122,7 +125,9 @@ export interface DeliverablesSurface {
 }
 
 type DeliverablesApi = Pick<RendererApi, 'inspectDeliverables' | 'inspectProductionDocuments' | 'inspectBookDeliveryPackage' |
-  'prepareBookDeliveryPackage' | 'designatePublicationVersion' | 'reviewManuscriptExport' |
+  'prepareBookDeliveryPackage' | 'reviewBookDeliveryPackageExport' | 'chooseBookDeliveryPackageExportFolder' |
+  'approveBookDeliveryPackageExport' | 'cancelBookDeliveryPackageExport' | 'designatePublicationVersion' | 'reviewManuscriptExport' |
+  'inspectMaintenanceCase' | 'listMaintenanceCases' | 'recordMaintenanceCase' | 'appendMaintenanceCaseRevision' | 'saveMaintenanceErrata' |
   'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
   'createProductionDocument' | 'decideProductionDocumentType' | 'recordProductionDocumentDelivery'>;
 
@@ -132,6 +137,10 @@ export interface MountDeliverablesOptions {
   bookId: string;
   bookTitle: string;
   api: DeliverablesApi;
+  /** A 维护事项 to open in place once 交付物 is read (Issue #426, S68b): 待我处理's way back to it. */
+  openCase?: { caseId: string; publicationVersionId: string };
+  /** A 维护事项 step moved what 待我处理 lists: the header's number is read again (Issue #426, S68b). */
+  attentionChanged?(): void;
   technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
@@ -206,6 +215,10 @@ function focusKeyOf(node: HTMLElement): string {
     node instanceof HTMLInputElement && node.type === 'radio' ? node.value : '',
     node.closest<HTMLElement>('ol.milestone-list > li')?.dataset['milestoneId'] ?? '',
     node.closest<HTMLElement>('ol.publication-versions > li')?.dataset['publicationVersionId'] ?? '',
+    // 维护事项 (Issue #426, S68a): a case's own controls and fields.
+    node.dataset['maintenanceAction'] ?? '',
+    node.dataset['maintenanceField'] ?? '',
+    node.closest<HTMLElement>('ol.maintenance-cases > li')?.dataset['caseId'] ?? '',
   ].join('|');
 }
 
@@ -241,6 +254,21 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     el('p', 'lede', DELIVERABLES_LEDE),
     host,
   );
+  // Each designation's 维护事项 (Issue #426, S68a) are drawn inside its item from the surface's own state.
+  const maintenance = mountMaintenance({
+    bookId,
+    api,
+    technicalDetails: options.technicalDetails,
+    setStatus: options.setStatus,
+    errorMessage: options.errorMessage,
+    refresh: () => {
+      refresh();
+      bundle.refresh();
+    },
+    redraw: () => render('keep'),
+    ...(options.openCase === undefined ? {} : { initialCase: options.openCase }),
+    ...(options.attentionChanged === undefined ? {} : { attentionChanged: options.attentionChanged }),
+  });
   const exporter = mountManuscriptExport({
     root: exportSlot,
     bookId,
@@ -483,6 +511,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     for (const designation of designations) list.append(renderDesignation(designation));
     section.append(list);
     if (next.publication.designationsTruncated) section.append(el('p', 'field-note', publicationsTruncatedLine(designations.length)));
+    const outside = maintenance.renderOutsideHistory(designations);
+    if (outside !== null) section.append(outside);
     return section;
   }
 
@@ -492,6 +522,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     item.dataset['publicationOrdinal'] = String(designation.ordinal);
     item.dataset['publicationCurrent'] = String(designation.current);
     item.dataset['designatedMilestoneId'] = designation.milestoneId;
+    item.dataset['publicationWithdrawn'] = String(designation.maintenance.withdrawn);
     const heading = el('div', 'publication-version-heading');
     heading.append(el('strong', 'publication-version-title', publicationVersionHeading(designation)));
     if (designation.current) heading.append(el('span', 'publication-current-mark', PUBLICATION_CURRENT_MARK));
@@ -511,6 +542,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
         ...fact(DELIVERABLES_TECHNICAL_TERMS.events, publicationEventsLine(designation.technical.events)),
         ...fact(DELIVERABLES_TECHNICAL_TERMS.recordedAt, designation.createdAt),
       ),
+      maintenance.render(designation),
     );
     return item;
   }
@@ -835,6 +867,9 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       item.dataset['documentVersion'] = String(documentNow.versions[0]?.ordinal ?? 0);
       item.dataset['documentChanged'] = String(documentNow.changedSinceVersion);
       item.append(el('p', 'document-card-line', documentCardLine(documentNow)));
+      // What the material's reading left behind, said as long as the document exists (Issue #547).
+      const notCarried = documentNow.origin.marksNotCarried;
+      if (notCarried !== null && notCarried > 0) item.append(el('p', 'field-note document-origin-marks', documentOriginMarksLine(notCarried)));
       if (documentNow.changedSinceVersion) item.append(el('p', 'field-note document-changed', DOCUMENT_CHANGED_SINCE_VERSION));
     }
     if (type.notForThisBook) {
@@ -858,6 +893,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       item.dataset['documentChangedSinceDelivery'] = String(documentNow.changedSinceDelivery);
       item.append(el('p', 'document-delivery-line', latest === undefined ? DOCUMENT_NOT_DELIVERED : documentDeliveryLine(latest, localInstantLabel(latest.recordedAt))));
       if (documentNow.changedSinceDelivery) item.append(el('p', 'attention-note document-changed-since-delivery', DOCUMENT_CHANGED_SINCE_DELIVERY));
+      // Its Deliverable Workflow at a glance (Issue #415, S66c; WORK-005): the summary, the first 下一项 and the seven phases.
+      item.append(renderWorkflowCardSummary(documentNow.workflow));
       const deliver = documentButton(latest === undefined ? 'deliver' : 'redeliver', type, 'secondary');
       const deliveryOpen = deliveryForm?.typeId === type.typeId;
       deliver.setAttribute('aria-expanded', String(deliveryOpen));
@@ -1275,6 +1312,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       documentsGeneration += 1;
       exporter.destroy();
       bundle.destroy();
+      maintenance.destroy();
     },
   };
 }

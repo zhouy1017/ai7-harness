@@ -15,7 +15,7 @@ const document: ProductionDocumentProjection = {
   documentId: identity,
   branchId: identity,
   createdAt: '2026-09-24T02:00:00.000Z',
-  origin: { sourceVersionId: identity, displayName: '新闻稿初稿.docx' },
+  origin: { sourceVersionId: identity, displayName: '新闻稿初稿.docx', marksNotCarried: 2 },
   versions: [
     { revisionId: identity, label: '版本 2', ordinal: 2, createdAt: '2026-09-24T03:00:00.000Z', revisionDigest: 'a'.repeat(64) },
     { revisionId: identity, label: '版本 1', ordinal: 1, createdAt: '2026-09-24T02:00:00.000Z', revisionDigest: 'b'.repeat(64) },
@@ -27,6 +27,13 @@ const document: ProductionDocumentProjection = {
   deliveries: [],
   deliveriesTruncated: false,
   changedSinceDelivery: false,
+  workflow: {
+    profile: { id: 'ai7.manuscript.editorial.zh-CN', name: '基础书稿编辑流程', version: '2.0.0', activatedAt: '2026-09-24T02:00:00.000Z' },
+    summary: '七个阶段都未开始',
+    next: [],
+    phases: [],
+    transitions: 0,
+  },
 };
 
 describe('the words of 交付 · 生产文档', () => {
@@ -56,6 +63,8 @@ describe('the words of 交付 · 生产文档', () => {
 
   it('says what a card holds: the latest version and the material, and a material by its name, format and time', () => {
     expect(labels.documentCardLine(document)).toBe('版本 2 · 由「新闻稿初稿.docx」创建');
+    // Issue #547: how the material was read, beside the card line and in the lens for as long as the document exists.
+    expect(labels.documentOriginMarksLine(2)).toBe('创建时，来源材料里的 2 处批注与修订没有带入：文字按全部修订被拒绝时的样子读出，批注不带入。');
     expect(labels.documentSourceLine({ sourceVersionId: identity, displayName: '新闻稿初稿.docx', format: 'DOCX', createdAt: '' }, '9月24日 10:00'))
       .toBe('新闻稿初稿.docx · DOCX · 导入于 9月24日 10:00');
     expect(labels.documentCreatedLine('新闻稿')).toBe('已创建「新闻稿」');
@@ -73,7 +82,7 @@ describe('the words of 交付 · 生产文档', () => {
       labels.DELIVERY_RECIPIENT_LEGEND, labels.DELIVERY_CUSTOM_RECIPIENT, labels.DELIVERY_CUSTOM_LABEL, labels.DELIVERY_NOTE_LABEL,
       labels.DELIVERY_STATEMENT, ...Object.values(labels.DELIVERY_BLOCKERS), labels.DELIVERY_NO_EXPORT,
       labels.documentDeliveryLine({ ordinal: 1, recipient: { kind: 'publicity', label: '宣传部' }, versionLabel: '版本 2' }, '9月24日 11:00'),
-      labels.documentDeliveredLine(1, '宣传部'), labels.documentCurrentTextChoice(3),
+      labels.documentDeliveredLine(1, '宣传部'), labels.documentCurrentTextChoice(3), labels.documentOriginMarksLine(2),
       labels.RECOVERY_RESTORED_SECTION_LABEL, labels.RECOVERY_RESTORED_HEADING,
     ];
     expect(labels.DOCUMENT_LENS_LABEL).toBe('工作流程');
@@ -109,9 +118,11 @@ describe('the words of 交付 · 生产文档', () => {
     // restore stands, after the choices close and before the reopen is offered.
     const source = readFileSync(join(ROOT, 'src', 'renderer', 'index.ts'), 'utf8').replace(/\r\n/gu, '\n');
     // The call is a statement of the catch itself: on its own line at the catch's indentation, after the choices close and
-    // before the reopen is offered — so neither a guard around it nor a handler it moved into passes, whatever order its
-    // parts are named in (#609). A comment that names the function is not a call.
-    expect(source).toMatch(/^( +)choices\.disabled = true;$[\s\S]*?^\1showRestoreStands\(\{ [^}\n]+ \}\);$[\s\S]*?^\1actions\.replaceChildren\(reopen\);$/mu);
+    // before the reopen is offered — so neither a guard around it nor a handler it moved into passes (#609). A comment that
+    // names the function is not a call. It passes the four parts by their own names, in whatever order: a part given in
+    // another's place is typed alike and compiles, and would leave the choice's words on screen (#616).
+    const call = /^( +)choices\.disabled = true;$[\s\S]*?^\1showRestoreStands\(\{ ([^}\n]+) \}\);$[\s\S]*?^\1actions\.replaceChildren\(reopen\);$/mu.exec(source);
+    expect(call?.[2]?.split(', ').sort()).toEqual(['heading', 'lede', 'legend', 'sectionLabel']);
     expect(source.split('showRestoreStands({').length - 1).toBe(1);
   });
 
@@ -139,6 +150,41 @@ describe('the words of 交付 · 生产文档', () => {
       export: { preparationId: identity, outcome: 'created', outcomeLabel: '已导出到所选位置', fileName: '新闻稿 · 版本 2.docx' },
     })).toBe('已导出到所选位置 · 新闻稿 · 版本 2.docx');
     expect(labels.documentExportLabel('新闻稿', '版本 2')).toBe('新闻稿 · 版本 2');
+  });
+});
+
+// Issue #415 (S66c): the Deliverable Workflow Lens's own words; the phases, pills, summary and reasons come from the service.
+describe('the words of a document\'s workflow', () => {
+  it('names the profile, the lists and a phase\'s four moves, and asks for a reason before 跳过 and 重新打开', () => {
+    expect(labels.workflowProfileLine('基础书稿编辑流程', '2.0.0', '2026年9月24日 10:30')).toBe('基础书稿编辑流程 2.0.0 · 启用于 2026年9月24日 10:30');
+    expect([labels.DOCUMENT_WORKFLOW_NEXT_HEADING, labels.DOCUMENT_WORKFLOW_NEXT_EMPTY, labels.DOCUMENT_WORKFLOW_PHASES_HEADING])
+      .toEqual(['下一项需要处理', '目前没有需要处理的事项', '阶段']);
+    expect(labels.DOCUMENT_PHASE_ACTION_LABELS).toEqual({ start: '开始', complete: '完成', skip: '跳过…', reopen: '重新打开…' });
+    expect(['start', 'complete', 'skip', 'reopen'].map((action) => labels.phaseActionName(action as 'start', '起草')))
+      .toEqual(['开始「起草」', '完成「起草」', '跳过「起草」', '重新打开「起草」']);
+    expect([labels.DOCUMENT_PHASE_REASON_LEGENDS, labels.DOCUMENT_PHASE_CONFIRM_LABELS])
+      .toEqual([{ skip: '跳过的原因', reopen: '重新打开的原因' }, { skip: '确认跳过', reopen: '确认重新打开' }]);
+    expect([labels.DOCUMENT_PHASE_REASON_NEEDED, labels.DOCUMENT_PHASE_CUSTOM_NEEDED, labels.DOCUMENT_PHASE_SHOW_REASON])
+      .toEqual(['请先选一个原因。', '选了「自行输入」，请写下原因。', '查看原因']);
+  });
+
+  it('says a phase\'s latest move with its reason in the editor\'s words, how often it moved, and each move once made', () => {
+    const at = '2026年9月24日 10:30';
+    const move = (action: 'start' | 'complete' | 'skip' | 'reopen', reason: { choice: string; label: string; text: string | null } | null) =>
+      ({ action, fromState: 'not-started' as const, toState: 'in-progress' as const, reason, recordedAt: '2026-09-24T02:30:00.000Z' });
+    expect(labels.phaseLatestLine(move('start', null), at)).toBe(`开始于 ${at}`);
+    expect(labels.phaseLatestLine(move('complete', null), at)).toBe(`完成于 ${at}`);
+    expect(labels.phaseLatestLine(move('skip', { choice: 'done-elsewhere', label: '这一阶段已在别处完成', text: null }), at))
+      .toBe(`跳过于 ${at} · 这一阶段已在别处完成`);
+    expect(labels.phaseLatestLine(move('reopen', { choice: 'needs-change', label: '发现需要再改的地方', text: '开头' }), at))
+      .toBe(`重新打开于 ${at} · 发现需要再改的地方：开头`);
+    expect(labels.phaseLatestLine(move('reopen', { choice: 'custom', label: '自行输入', text: '读者反馈后要改开头' }), at))
+      .toBe(`重新打开于 ${at} · 读者反馈后要改开头`);
+    expect(labels.phaseMovesLine(3)).toBe('共 3 次变动');
+    expect(['start', 'complete', 'skip', 'reopen'].map((action) => labels.phaseMovedLine(action as 'start', '交付')))
+      .toEqual(['「交付」已开始', '「交付」已完成', '「交付」已跳过', '「交付」已重新打开']);
+    // Completing 交付 never reads as a document 已交付.
+    expect(labels.phaseMovedLine('complete', '交付')).not.toContain('已交付');
   });
 });
 

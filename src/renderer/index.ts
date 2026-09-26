@@ -13,6 +13,7 @@ import type {
   BookCreationReviewProjection,
   BookManuscriptAnchorProjection,
   BookRecordPresentation,
+  BookSummaryFilter,
   BookSummaryPageProjection,
   BookWorkbenchRoute,
   BookWorkOverviewProjection,
@@ -55,6 +56,7 @@ import type {
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
   J03_TASK_GOAL,
+  MAX_BOOK_SUMMARY_FILTER_CHARACTERS,
   MAX_REPLACEMENT_EXCLUSIONS,
   MILESTONE_PURPOSE_KINDS,
   MILESTONE_PURPOSE_LABELS,
@@ -63,6 +65,19 @@ import {
 } from '../shared/protocol.js';
 import { MARK_KIND_LABELS } from './editorial-mark-labels.js';
 import { mountDeliverables, type DeliverablesSurface } from './deliverables.js';
+import { mountBookPeople } from './book-people.js';
+import {
+  BOOK_FILTER_ACTIONS,
+  BOOK_FILTER_FIELD_LABEL,
+  BOOK_FILTER_FIELDS,
+  BOOK_FILTER_LEGEND,
+  BOOK_FILTER_NONE,
+  BOOK_FILTER_STATUS_LINES,
+  BOOK_FILTER_TEXT_LABEL,
+  bookCardPeopleLine,
+  bookCardRelatedLine,
+  bookFilterLine,
+} from './book-people-labels.js';
 import {
   DOCUMENT_ACTION_LABELS,
   DOCUMENT_CHANGED_SINCE_VERSION,
@@ -490,6 +505,11 @@ async function openGlobalAttentionItem(item: GlobalAttentionItemProjection): Pro
     case 'review':
       await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>
         renderBookReview(route.bookId, route.bookTitle, { reviewRunId: target.reviewRunId, findingId: null }));
+      return;
+    // 维护事项待处理 (Issue #426, S68b): 交付物, with the case open on its 发稿版本 where its next step is.
+    case 'maintenance':
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>
+        renderBookDeliverables(route.bookId, route.bookTitle, { caseId: target.caseId, publicationVersionId: target.publicationVersionId }));
       return;
   }
 }
@@ -1881,7 +1901,7 @@ function renderProposalConflict(target: { bookId: string; manuscriptId: string; 
   surface.start();
 }
 
-function renderBookDeliverables(bookId: string, bookTitle: string): void {
+function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { caseId: string; publicationVersionId: string }): void {
   const content = panel();
   content.classList.add('book-deliverables');
   content.dataset['bookId'] = bookId;
@@ -1890,6 +1910,9 @@ function renderBookDeliverables(bookId: string, bookTitle: string): void {
     bookId,
     bookTitle,
     api: window.ai7,
+    // 维护事项待处理 opens its case in place (Issue #426, S68b), and a step of a case reads the header's number again.
+    ...(openCase === undefined ? {} : { openCase }),
+    attentionChanged: () => globalAttentionReader.refresh(),
     technicalDetails,
     setStatus,
     errorMessage: rendererErrorMessage,
@@ -2006,6 +2029,17 @@ function renderBookOverview(
     element('dt', undefined, '稳定标识'), element('dd', 'technical-identity', overview.book.stableIdentity),
   ));
   content.append(identity);
+  // 人员 (Issue #431, S83; BOOK-006): the Book's 作者, 责编 and 相关人, and 编辑人员….
+  const peopleSlot = element('div', 'book-people-slot');
+  content.append(peopleSlot);
+  mountBookPeople({
+    root: peopleSlot,
+    bookId: overview.book.bookId,
+    people: overview.people,
+    api: window.ai7,
+    setStatus,
+    errorMessage: rendererErrorMessage,
+  });
 
   const artifactHost = element('div');
   artifactHost.dataset['nativeArtifactBookId'] = overview.book.bookId;
@@ -4224,10 +4258,104 @@ async function renderModelServiceSettings(): Promise<void> {
   }
 }
 
+/**
+ * 书库's search (Issue #431, S83; IA-008, BOOK-006): one field — or 书名, 作者 and 责编 together — and the words, read by
+ * the service over every Book, paged as the list is. 显示全部图书 goes back to the whole list.
+ */
+function renderBookFilter(
+  priorWork: ReadonlyArray<PriorWorkItemProjection>,
+  recoveryReturn: RecoveryReturnContext | undefined,
+  filter: BookSummaryFilter | null,
+): HTMLElement {
+  const form = element('form', 'book-filter');
+  let request = 0;
+  form.noValidate = true;
+  const legend = element('p', 'book-filter-legend', BOOK_FILTER_LEGEND);
+  const fieldLabel = element('label', undefined, BOOK_FILTER_FIELD_LABEL);
+  const field = element('select');
+  field.id = 'book-filter-field';
+  for (const key of ['all', 'title', 'author', 'editor'] as const) {
+    const option = element('option', undefined, BOOK_FILTER_FIELDS[key]);
+    option.value = key;
+    field.append(option);
+  }
+  field.value = filter?.field ?? 'all';
+  fieldLabel.append(field);
+  const textLabel = element('label', undefined, BOOK_FILTER_TEXT_LABEL);
+  const text = element('input');
+  text.id = 'book-filter-text';
+  text.type = 'search';
+  // The service reads at most this many characters; a longer paste is cut here rather than refused as a bad request.
+  text.maxLength = MAX_BOOK_SUMMARY_FILTER_CHARACTERS;
+  text.value = filter?.text ?? '';
+  textLabel.append(text);
+  const find = button(BOOK_FILTER_ACTIONS.find, 'secondary', () => undefined);
+  find.type = 'submit';
+  find.dataset['bookFilterAction'] = 'find';
+  let clearControl: HTMLButtonElement | null = null;
+  const sync = (): void => { find.disabled = text.value.trim().length === 0; };
+  const restoreControls = (): void => {
+    sync();
+    if (clearControl !== null) clearControl.disabled = false;
+  };
+  text.addEventListener('input', sync);
+  sync();
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const words = text.value.trim();
+    if (words.length === 0 || find.disabled) return;
+    const next: BookSummaryFilter = { field: field.value === 'title' || field.value === 'author' || field.value === 'editor' ? field.value : 'all', text: words };
+    find.disabled = true;
+    const current = ++request;
+    setStatus(BOOK_FILTER_STATUS_LINES.finding, 'busy');
+    void window.ai7.listBooks({ after: null, filter: next }).then(
+      (page) => {
+        if (!form.isConnected || current !== request) return;
+        renderLanding(priorWork, recoveryReturn, page, next);
+        setStatus(BOOK_FILTER_STATUS_LINES.found, 'success');
+        document.querySelector<HTMLElement>('#book-filter-text')?.focus();
+      },
+      (error) => {
+        if (!form.isConnected || current !== request) return;
+        restoreControls();
+        setStatus(rendererErrorMessage(error, BOOK_FILTER_STATUS_LINES.findFailed), 'error');
+      },
+    );
+  });
+  const row = element('div', 'button-row compact-actions');
+  row.append(find);
+  if (filter !== null) {
+    const clear = button(BOOK_FILTER_ACTIONS.clear, 'quiet', () => {
+      clear.disabled = true;
+      const current = ++request;
+      void window.ai7.listBooks({ after: null }).then(
+        (page) => {
+          if (!form.isConnected || current !== request) return;
+          renderLanding(priorWork, recoveryReturn, page, null);
+          setStatus(BOOK_FILTER_STATUS_LINES.cleared, 'success');
+          document.querySelector<HTMLElement>('#book-filter-text')?.focus();
+        },
+        (error) => {
+          if (!form.isConnected || current !== request) return;
+          restoreControls();
+          setStatus(rendererErrorMessage(error, BOOK_FILTER_STATUS_LINES.findFailed), 'error');
+        },
+      );
+    });
+    clear.dataset['bookFilterAction'] = 'clear';
+    clearControl = clear;
+    row.append(clear);
+  }
+  form.append(legend, fieldLabel, textLabel, row);
+  return form;
+}
+
 function renderLanding(
   priorWork: ReadonlyArray<PriorWorkItemProjection>,
   recoveryReturn: RecoveryReturnContext | undefined,
   books: BookSummaryPageProjection,
+  // 书库's search (Issue #431, S83): the list shows only the Books it found, until 显示全部图书.
+  filter: BookSummaryFilter | null = null,
 ): void {
   const recoveryWork = priorWork.find((item) => item.recoveryAttention !== null);
   const recoveryAttention = recoveryWork?.recoveryAttention;
@@ -4276,9 +4404,13 @@ function renderLanding(
   copy.append(landingActions);
   const note = element('aside', 'hero-note', '所有导入都要求先明确选择图书目标；系统不会自动选择已有图书或稿件关系。');
   content.append(copy, note);
-  if (books.items.length > 0) {
+  if (books.items.length > 0 || filter !== null) {
     const library = element('section', 'recent-work');
+    library.dataset['bookFilter'] = filter === null ? 'none' : filter.field;
     library.append(element('p', 'section-label', '图书'), element('h3', undefined, '图书工作概览'));
+    library.append(renderBookFilter(priorWork, activeRecoveryReturn, filter));
+    if (filter !== null) library.append(element('p', 'field-note book-filter-line', bookFilterLine(filter)));
+    if (books.items.length === 0) library.append(element('p', 'field-note book-filter-none', BOOK_FILTER_NONE));
     const list = element('div', 'recent-work-list');
     for (const summary of books.items) {
       const open = button(`${summary.title} · ${summary.manuscriptStateLabel}`, 'secondary', async () => {
@@ -4293,8 +4425,13 @@ function renderLanding(
       });
       open.dataset['bookId'] = summary.bookId;
       const row = element('article', 'book-summary-item');
+      row.append(open);
+      // 作者, 责编 and 相关人 on the card (Issue #431, S83; BOOK-006).
+      const peopleLine = bookCardPeopleLine(summary.people);
+      if (peopleLine !== null) row.append(element('p', 'book-people-line', peopleLine));
+      const relatedLine = bookCardRelatedLine(summary.people);
+      if (relatedLine !== null) row.append(element('p', 'field-note book-related-line', relatedLine));
       row.append(
-        open,
         element(
           'p',
           'field-note',
@@ -4309,11 +4446,12 @@ function renderLanding(
         loadMore.disabled = true;
         setStatus('正在读取下一页图书摘要…', 'busy');
         try {
-          const page = await window.ai7.listBooks({ after: books.nextCursor });
+          const page = await window.ai7.listBooks({ after: books.nextCursor, ...(filter === null ? {} : { filter }) });
           renderLanding(
             priorWork,
             activeRecoveryReturn,
             { items: [...books.items, ...page.items], nextCursor: page.nextCursor },
+            filter,
           );
           setStatus('已加载更多图书摘要', 'success');
         } catch (error) {
@@ -6141,7 +6279,13 @@ function renderEditorWindow(
   const railColumn = element('div', 'rail-column');
   railColumn.append(positionRailLabel, railTrack);
   edge.append(edgeEntries, railColumn);
-  const documentLens = productionDocument === undefined ? undefined : renderDocumentLens(productionDocument);
+  // The document's workflow moves by the editor's commands in its lens (Issue #415, S66c); a refused move reads it again.
+  const documentLens = productionDocument === undefined ? undefined : renderDocumentLens(productionDocument, {
+    move: async (input) => (await window.ai7.transitionProductionDocumentPhase({ documentId: productionDocument.document.documentId, ...input })).document,
+    read: async () => (await window.ai7.inspectProductionDocuments()).types.find((type) => type.typeId === productionDocument.typeId)?.document ?? null,
+    setStatus,
+    errorMessage: rendererErrorMessage,
+  });
   if (documentLens !== undefined) workspace.classList.add('document-workspace');
   workspace.append(manuscript, ...(documentLens === undefined ? [] : [documentLens.element]), navigator, edge);
 
@@ -7157,7 +7301,11 @@ function renderEditorWindow(
     editor,
     api: window.ai7,
     busy: () => authoritativeMutationBusy() || serviceJobBusy(),
-    marksChanged: () => manuscriptRail?.refresh(),
+    // A mark changes what a Production Document's workflow waits on (N 条修改建议待处理), which its lens reads again.
+    marksChanged: () => {
+      manuscriptRail?.refresh();
+      documentLens?.refresh();
+    },
     openReviewFinding: (target) => void leaveForReview({ reviewRunId: target.reviewRunId, findingId: target.findingId }),
     openConflict: (markId) => void leaveForConflict(markId),
     // An Apply is an authoritative write like a replacement or an undo: the window is reloaded from the

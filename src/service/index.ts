@@ -591,7 +591,9 @@ async function dispatch(
       };
     }
     case 'listBooks':
-      return { id: request.id, ok: true, op: request.op, result: store.listBooks(request.input.after) };
+      return { id: request.id, ok: true, op: request.op, result: store.listBooks(request.input.after, request.input.filter ?? null) };
+    case 'updateBookPeople':
+      return { id: request.id, ok: true, op: request.op, result: store.updateBookPeople(request.input) };
     case 'prepareNewBookReview':
       return {
         id: request.id,
@@ -854,6 +856,34 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectBookDeliveryPackage(request.input.bookId) };
     case 'prepareBookDeliveryPackage':
       return { id: request.id, ok: true, op: request.op, result: store.prepareBookDeliveryPackage(request.input) };
+    // Its export (Issue #416, S67b): local only, and only under this launch's verified External Export Policy, as ④ 导出.
+    case 'reviewBookDeliveryPackageExport':
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: await store.reviewBookDeliveryPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
+      };
+    case 'prepareBookDeliveryPackageExport':
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: await store.prepareBookDeliveryPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
+      };
+    case 'cancelBookDeliveryPackageExport':
+      return { id: request.id, ok: true, op: request.op, result: jobs.cancelPackageExport(request.input.jobId) };
+    case 'approveBookDeliveryPackageExport':
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: jobs.startPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
+      };
+    case 'inspectMaintenanceCase':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectMaintenanceCase(request.input) };
+    case 'listMaintenanceCases':
+      return { id: request.id, ok: true, op: request.op, result: store.listMaintenanceCases(request.input) };
+    case 'recordMaintenanceCase':
+      return { id: request.id, ok: true, op: request.op, result: store.recordMaintenanceCase(request.input) };
+    case 'appendMaintenanceCaseRevision':
+      return { id: request.id, ok: true, op: request.op, result: store.appendMaintenanceCaseRevision(request.input) };
+    case 'saveMaintenanceErrata':
+      return { id: request.id, ok: true, op: request.op, result: store.saveMaintenanceErrata(request.input) };
     case 'createProductionDocument':
       return { id: request.id, ok: true, op: request.op, result: await store.createProductionDocument(request.input) };
     case 'decideProductionDocumentType':
@@ -862,6 +892,9 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: await store.saveProductionDocumentVersion(request.input) };
     case 'recordProductionDocumentDelivery':
       return { id: request.id, ok: true, op: request.op, result: await store.recordProductionDocumentDelivery(request.input) };
+    // A document's workflow phase (Issue #415, S66c): one deterministic move.
+    case 'transitionProductionDocumentPhase':
+      return { id: request.id, ok: true, op: request.op, result: store.transitionProductionDocumentPhase(request.input) };
     // 待我处理 (Issue #424, plan slice S78): a read across every Book. The one owner's progress reader and its
     // slot say which Run is in flight, exactly as the analysis inspections read them; nothing is written.
     case 'inspectGlobalAttention':
@@ -1251,7 +1284,7 @@ async function run(): Promise<void> {
     process.removeListener('SIGTERM', stop);
     process.removeListener('SIGINT', stop);
     try {
-      jobs?.dispose();
+      await jobs?.dispose();
       // The Review Run loop stops first and starts no further category; the owner then interrupts the
       // Run in flight, and the loop records what that Run came to before the store closes.
       const reviewRunsStopped = reviewRuns?.dispose();

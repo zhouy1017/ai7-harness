@@ -283,6 +283,14 @@ const RECEIPT_SCHEMA = 'ai7.export.receipt/1' as const;
 const REVIEW_SCHEMA = 'ai7.export.review/1' as const;
 const INPUT_SCHEMA = 'ai7.export.input/1' as const;
 const REPORT_INPUT_SCHEMA = 'ai7.export.report-input/1' as const;
+const MANIFEST_INPUT_SCHEMA = 'ai7.export.package-manifest-input/1' as const;
+/** The writer of a package export's 交付包清单 (Issue #416, S67b): its owner's Markdown, written as it stands. */
+const MANIFEST_WRITER_IDENTITY = 'ai7-package-manifest/1';
+export const PACKAGE_MANIFEST_FILE_NAME = '交付包清单.md';
+const PACKAGE_MANIFEST_LINES = {
+  restoration: '交付包清单按这一版交付包冻结的内容写出。',
+  format: '交付包清单是 Markdown 文字文件：列出这一版交付包的文件、交付记录、不包含的内容和说明。',
+} as const;
 const REVIEW_REPORT_SCHEMA = 'ai7.review.report/1' as const;
 const POLICY = { id: 'external-export-policy', version: 'v2' } as const;
 const INVALID_FILE_NAME_CHARACTERS = /[\\/:*?"<>|\u0000-\u001F]/gu;
@@ -305,12 +313,33 @@ export interface ManuscriptExportEnvironment {
   /** The Agent Data Root, canonical: no export is ever written inside it (V2-UX-EXP-014). */
   dataRoot: string;
   checkpointOwner: ExportCheckpointOwner;
+  /** One frozen package version's 交付包清单, as the package's owner writes it (Issue #416, S67b); `null` when it is none of the Book's. */
+  packageManifest?(bookId: string, packageVersionId: string): PackageManifest | null;
+  /** One frozen package version's label and the revision it binds, from its record alone; `null` when it is none of the Book's. */
+  packageVersion?(bookId: string, packageVersionId: string): { versionLabel: string; revisionId: string } | null;
+}
+
+/** A target only the service names (Issue #416, S67b): the 交付包清单 of one frozen 图书交付包 version. */
+export interface PackageManifestTargetInput {
+  kind: 'package-manifest';
+  packageVersionId: string;
+}
+
+/** Any target a file of an export can be written from: the renderer's own, or a package's manifest. */
+export type ExportTargetInput = ManuscriptExportTargetInput | PackageManifestTargetInput;
+
+/** A package version's 交付包清单: its words, their digest, and the Publication Version revision the package binds. */
+export interface PackageManifest {
+  versionLabel: string;
+  markdown: string;
+  digest: string;
+  revisionId: string;
 }
 
 /** One exact version to export, resolved against the Book's primary Manuscript. */
 interface ResolvedTarget {
-  kind: 'current' | 'milestone' | 'report' | 'document';
-  targetKind: 'manuscript-revision' | 'milestone-version' | 'report' | 'production-document-version';
+  kind: 'current' | 'milestone' | 'report' | 'document' | 'manifest';
+  targetKind: 'manuscript-revision' | 'milestone-version' | 'report' | 'production-document-version' | 'book-delivery-package-version';
   targetId: string;
   milestoneId: string | null;
   milestoneLabel: string | null;
@@ -327,6 +356,8 @@ interface ResolvedTarget {
   report: ResolvedReport | null;
   /** One version of a Production Document (Issue #415, S66b); `null` for any other target. */
   document: { documentId: string; typeId: string; typeLabel: string; versionLabel: string } | null;
+  /** One package version's 交付包清单 (Issue #416, S67b); `null` for any other target. */
+  manifest: { packageVersionId: string; versionLabel: string; markdown: string } | null;
 }
 
 interface ResolvedReport {
@@ -341,7 +372,8 @@ interface ResolvedReport {
 
 type ExportPlan =
   | { kind: 'manuscript'; input: DocxExportInput; inputDigest: string; sourceVersionId: string }
-  | { kind: 'report'; input: ReportExportInput; inputDigest: string; sourceVersionId: null };
+  | { kind: 'report'; input: ReportExportInput; inputDigest: string; sourceVersionId: null }
+  | { kind: 'manifest'; markdown: string; inputDigest: string; sourceVersionId: null };
 
 function text(value: SQLOutputValue | undefined): string {
   requireExport(typeof value === 'string' && value.isWellFormed(), 'EXPORT_RECORD_INVALID', '导出记录无效。');
@@ -397,7 +429,8 @@ function requireOptions(value: unknown): ManuscriptExportOptions {
 }
 
 /** The writer of one target in one format: a report's own, or the manuscript's. */
-function writerOf(target: { report: unknown }, format: ManuscriptExportFormat): string {
+function writerOf(target: { report: unknown; manifest: unknown }, format: ManuscriptExportFormat): string {
+  if (target.manifest !== null) return MANIFEST_WRITER_IDENTITY;
   return target.report === null ? FORMAT_WRITERS[format] : REPORT_EXPORT_WRITER_IDENTITIES[format];
 }
 
@@ -669,6 +702,93 @@ export class ManuscriptExportStore {
     const options = requireOptions(input.options);
     const format = requireFormat(input.format);
     const destination = await this.#requireDestination(input.destination, format);
+    return this.#prepare(input.bookId, target, options, format, input.revisionId, input.reviewDigest, destination);
+  }
+
+  /**
+   * The review of one file of a 图书交付包 export (Issue #416, S67b): a version the package froze, or the package's own
+   * 交付包清单, under the options the package export chose — a package never names the working text, so nothing is saved
+   * first.
+   */
+  async reviewPackageFile(
+    bookId: string,
+    target: ExportTargetInput,
+    format: ManuscriptExportFormat,
+    options: ManuscriptExportOptions,
+    available: boolean,
+  ): Promise<ManuscriptExportReviewProjection> {
+    this.#requireAvailable(available);
+    const resolved = await this.#resolve(bookId, target, false);
+    const plan = await this.#plan(bookId, resolved, options, format);
+    const rendered = this.#render(plan, format, false);
+    return this.#reviewOf(bookId, resolved, options, format, plan, rendered);
+  }
+
+  /**
+   * One file of a 图书交付包 export frozen at its place in the chosen folder (Issue #416, S67b): exactly as `prepare`
+   * freezes the renderer's, and always a new file — a package export never replaces one.
+   */
+  async preparePackageFile(
+    input: {
+      bookId: string;
+      target: ExportTargetInput;
+      format: ManuscriptExportFormat;
+      options: ManuscriptExportOptions;
+      revisionId: string;
+      reviewDigest: string;
+      destination: string;
+    },
+    available: boolean,
+  ): Promise<ManuscriptExportPreparationProjection> {
+    this.#requireAvailable(available);
+    const destination = await this.#requireDestination(input.destination, input.format);
+    requireExport(destination.disposition === 'create', 'EXPORT_DESTINATION_INVALID', `所选文件夹里已有「${destination.fileName}」，请选择别的文件夹。`);
+    return this.#prepare(input.bookId, input.target, requireOptions(input.options), input.format, input.revisionId, input.reviewDigest, destination);
+  }
+
+  /**
+   * What `按上述方式导出` checks before it records anything, alone (Issue #416 review): the payload written again is the
+   * prepared one, and the destination is still what the dialog resolved. A package export checks every file so before it
+   * writes the first, so a set that drifted is refused whole and writes nothing.
+   */
+  async checkPrepared(bookId: string, preparationId: string, available: boolean): Promise<void> {
+    this.#requireAvailable(available);
+    const row = this.#preparationRow(bookId, preparationId);
+    const preparation = this.#preparationProjection(row);
+    requireExport(this.#outcomeRow(preparationId) === undefined, 'EXPORT_ALREADY_APPROVED', '这次导出已经批准过。');
+    await this.#requireAsPrepared(bookId, row, preparation);
+  }
+
+  /** The payload written again is exactly the prepared one, and the destination still what the dialog resolved. */
+  async #requireAsPrepared(bookId: string, row: SqlRow, preparation: ManuscriptExportPreparationProjection): Promise<Uint8Array> {
+    const resolved = this.#preparedTarget(bookId, row);
+    const plan = await this.#plan(bookId, resolved, preparation.options, preparation.format);
+    const rendered = this.#render(plan, preparation.format, true);
+    requireExport(sha256Hex(rendered.bytes!) === preparation.technical.payloadDigest, 'EXPORT_PAYLOAD_CHANGED',
+      '稿件或标记在准备导出后有了变化，请重新准备导出。');
+    const state = await targetState(preparation.destination);
+    const replaces = this.#replacedFileOf(row);
+    const standing = preparation.disposition === 'replace' ? await fileDigest(preparation.destination) : null;
+    requireExport(preparation.disposition !== 'replace' || state !== 'file' || standing !== null, 'EXPORT_TARGET_UNREADABLE', EXPORT_TARGET_UNREADABLE_DETAIL);
+    requireExport(
+      (preparation.disposition === 'create' && state === 'absent') ||
+        (preparation.disposition === 'replace' && state === 'file' && standing?.bytes === replaces?.bytes && standing?.sha256 === replaces?.sha256),
+      'EXPORT_TARGET_CHANGED',
+      '所选位置在准备后发生了变化，请重新选择保存位置。',
+    );
+    return rendered.bytes!;
+  }
+
+  async #prepare(
+    bookId: string,
+    target: ExportTargetInput,
+    options: ManuscriptExportOptions,
+    format: ManuscriptExportFormat,
+    revisionId: string,
+    reviewDigest: string,
+    destination: { path: string; fileName: string; disposition: ManuscriptExportDisposition; replaces: ReplacedFileIdentity | null },
+  ): Promise<ManuscriptExportPreparationProjection> {
+    const input = { bookId, revisionId, reviewDigest };
     const resolved = await this.#resolve(input.bookId, target, false);
     requireExport(resolved.revisionId === input.revisionId, 'EXPORT_REVIEW_CHANGED', '稿件在查看导出后有了新的修订版，请重新查看导出。');
     const plan = await this.#plan(input.bookId, resolved, options, format);
@@ -690,12 +810,13 @@ export class ManuscriptExportStore {
       targetId: resolved.targetId,
       // A report binds its recorded version instead of a revision, and a document's version its own digest (the ledger's
       // revision columns stay empty for both).
-      revisionId: resolved.report === null && resolved.document === null ? resolved.revisionId : null,
-      revisionDigest: resolved.report === null && resolved.document === null ? resolved.revisionDigest : null,
+      revisionId: resolved.report === null && resolved.document === null && resolved.manifest === null ? resolved.revisionId : null,
+      revisionDigest: resolved.report === null && resolved.document === null && resolved.manifest === null ? resolved.revisionDigest : null,
       revisionLabel: resolved.revisionLabel,
       milestoneLabel: resolved.milestoneLabel,
       ...(resolved.report === null ? {} : { reportDigest: resolved.report.digest }),
       ...(resolved.document === null ? {} : { documentId: resolved.document.documentId, documentVersionDigest: resolved.revisionDigest }),
+      ...(resolved.manifest === null ? {} : { packageVersionId: resolved.manifest.packageVersionId, manifestDigest: resolved.revisionDigest }),
       format,
       options,
       fidelitySha256: sha256Hex(fidelityJson),
@@ -722,8 +843,8 @@ export class ManuscriptExportStore {
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         preparationId, effectIntentId, input.bookId, resolved.targetKind, resolved.targetId,
-        resolved.report === null && resolved.document === null ? resolved.revisionId : null,
-        resolved.report === null && resolved.document === null ? resolved.revisionDigest : null, format, canonicalJson(options), fidelityJson, review.degraded ? 1 : 0, review.reviewDigest,
+        resolved.report === null && resolved.document === null && resolved.manifest === null ? resolved.revisionId : null,
+        resolved.report === null && resolved.document === null && resolved.manifest === null ? resolved.revisionDigest : null, format, canonicalJson(options), fidelityJson, review.degraded ? 1 : 0, review.reviewDigest,
         destination.fileName, destination.path, destination.disposition, payloadSha256, payload.byteLength, POLICY.id,
         POLICY.version, createdAt, record.json, record.digest,
       );
@@ -737,7 +858,7 @@ export class ManuscriptExportStore {
    * recorded and the file written atomically, with its receipt or its classified outcome. An approval already
    * given answers with what it came to — never a second write.
    */
-  async approve(input: ApproveManuscriptExportInput, available: boolean): Promise<ManuscriptExportReceiptProjection> {
+  async approve(input: ApproveManuscriptExportInput, available: boolean, beforeWrite?: () => void): Promise<ManuscriptExportReceiptProjection> {
     this.#requireAvailable(available);
     requireExport(
       isRecord(input) && typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) &&
@@ -749,25 +870,12 @@ export class ManuscriptExportStore {
     const preparation = this.#preparationProjection(row);
     const prior = this.#outcomeRow(input.preparationId);
     if (prior !== undefined) return this.#receiptProjection(row, prior);
-    const resolved = this.#preparedTarget(input.bookId, row);
-    const plan = await this.#plan(input.bookId, resolved, preparation.options, preparation.format);
-    const rendered = this.#render(plan, preparation.format, true);
-    requireExport(sha256Hex(rendered.bytes!) === preparation.technical.payloadDigest, 'EXPORT_PAYLOAD_CHANGED',
-      '稿件或标记在准备导出后有了变化，请重新准备导出。');
+    const page = await this.#requireAsPrepared(input.bookId, row, preparation);
     // A PDF is the page the main process printed (Issue #500, S64b): the page is what the preparation bound, and the
     // printed file is what is written and receipted. Nothing is approved before it exists.
-    const payload = preparation.format === 'pdf' ? await this.#printed(preparation) : rendered.bytes!;
+    const payload = preparation.format === 'pdf' ? await this.#printed(preparation) : page;
     const payloadSha256 = sha256Hex(payload);
-    const state = await targetState(preparation.destination);
     const replaces = this.#replacedFileOf(row);
-    const standing = preparation.disposition === 'replace' ? await fileDigest(preparation.destination) : null;
-    requireExport(preparation.disposition !== 'replace' || state !== 'file' || standing !== null, 'EXPORT_TARGET_UNREADABLE', EXPORT_TARGET_UNREADABLE_DETAIL);
-    requireExport(
-      (preparation.disposition === 'create' && state === 'absent') ||
-        (preparation.disposition === 'replace' && state === 'file' && standing?.bytes === replaces?.bytes && standing?.sha256 === replaces?.sha256),
-      'EXPORT_TARGET_CHANGED',
-      '所选位置在准备后发生了变化，请重新选择保存位置。',
-    );
     const approvalId = randomUUID();
     const approvedAt = new Date().toISOString();
     const approval = canonicalRecord({
@@ -780,6 +888,8 @@ export class ManuscriptExportStore {
       interaction: 'export-as-stated',
       approvedAt,
     });
+    // Package cancellation remains possible through payload/destination revalidation, up to this first write boundary.
+    beforeWrite?.();
     transact(this.#db, () => {
       requireExport(this.#outcomeRow(input.preparationId) === undefined, 'EXPORT_ALREADY_APPROVED', '这次导出已经批准过。');
       this.#db.prepare(
@@ -890,6 +1000,18 @@ export class ManuscriptExportStore {
     return this.#receiptProjection(row, outcome);
   }
 
+  /** One preparation of this Book as it was frozen (Issue #416, S67b): a package export's file, read back. */
+  preparationOf(bookId: string, preparationId: string): ManuscriptExportPreparationProjection {
+    return this.#preparationProjection(this.#preparationRow(bookId, preparationId));
+  }
+
+  /** What an approved preparation came to, or `null` while it is only prepared (Issue #416, S67b). */
+  approvedReceipt(bookId: string, preparationId: string): ManuscriptExportReceiptProjection | null {
+    const row = this.#preparationRow(bookId, preparationId);
+    const outcome = this.#outcomeRow(preparationId);
+    return outcome === undefined ? null : this.#receiptProjection(row, outcome);
+  }
+
   /**
    * A Delivery Record's file (Issue #415): the newest approved export of one target between two instants that wrote its
    * file, else the newest attempt, or `null`. A later attempt that wrote nothing — a failed or unconfirmed re-export — never
@@ -899,7 +1021,7 @@ export class ManuscriptExportStore {
     const row = this.#db.prepare(
       `SELECT p.preparation_id FROM export_preparations p JOIN export_approvals a ON a.preparation_id = p.preparation_id
        LEFT JOIN export_receipts r ON r.preparation_id = p.preparation_id
-       WHERE p.book_id = ? AND p.target_kind = ? AND p.target_id = ? AND a.approved_at >= ? AND (? IS NULL OR a.approved_at < ?)
+       WHERE p.book_id = ? AND p.target_kind = ? AND p.target_id = ? AND a.approved_at >= ? AND (? IS NULL OR a.approved_at < ?)${this.#notOfAPackage()}
        ORDER BY coalesce(r.outcome IN ('created', 'replaced'), 0) DESC, a.approved_at DESC, a.rowid DESC LIMIT 1`,
     ).get(bookId, targetKind, targetId, from, until, until) as SqlRow | undefined;
     if (row === undefined) return null;
@@ -912,12 +1034,21 @@ export class ManuscriptExportStore {
     const rows = this.#db.prepare(
       `SELECT p.preparation_id FROM export_preparations p
        JOIN export_approvals a ON a.preparation_id = p.preparation_id
-       WHERE p.book_id = ? ORDER BY a.approved_at DESC, a.rowid DESC LIMIT ?`,
+       WHERE p.book_id = ?${this.#notOfAPackage()} ORDER BY a.approved_at DESC, a.rowid DESC LIMIT ?`,
     ).all(bookId, MAX_EXPORT_RECORDS_LISTED) as SqlRow[];
     return rows.map((entry) => {
       const preparationId = text(entry.preparation_id);
       return this.#receiptProjection(this.#preparationRow(bookId, preparationId), this.#outcomeRow(preparationId)!);
     });
+  }
+
+  /**
+   * The files of a 图书交付包 export (Issue #416, S67b) belong to its Package Export History: 交付物's export records and a
+   * Delivery Record's file read everything else.
+   */
+  #notOfAPackage(): string {
+    const linked = this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'book_delivery_package_export_files'").get() !== undefined;
+    return linked ? ' AND NOT EXISTS (SELECT 1 FROM book_delivery_package_export_files f WHERE f.preparation_id = p.preparation_id)' : '';
   }
 
   // ---- resolving ------------------------------------------------------------------------------------
@@ -1009,7 +1140,8 @@ export class ManuscriptExportStore {
    * holds edits no revision has, the review saves them as one (`save`) and a preparation refuses, because the
    * review the editor read was of another version.
    */
-  async #resolve(bookId: string, target: ManuscriptExportTargetInput, save: boolean): Promise<ResolvedTarget> {
+  async #resolve(bookId: string, target: ExportTargetInput, save: boolean): Promise<ResolvedTarget> {
+    if (target.kind === 'package-manifest') return this.#manifestTarget(bookId, target.packageVersionId);
     if (target.kind === 'report') return this.#reportTarget(bookId, target.reportId);
     if (target.kind === 'document') return this.#documentTarget(bookId, target.documentId, target.revisionId);
     let head = this.#head(bookId);
@@ -1025,7 +1157,7 @@ export class ManuscriptExportStore {
         kind: 'milestone', targetKind: 'milestone-version', targetId: text(row.milestone_id), milestoneId: text(row.milestone_id),
         milestoneLabel: text(row.label), revisionId, revisionLabel: revision.revisionLabel, revisionDigest: revision.revisionDigest,
         manuscriptId: head.manuscriptId, branchId: head.branchId, bookTitle: head.bookTitle, savedForExport: false, report: null,
-        document: null,
+        document: null, manifest: null,
       };
     }
     let savedForExport = false;
@@ -1040,7 +1172,7 @@ export class ManuscriptExportStore {
       kind: 'current', targetKind: 'manuscript-revision', targetId: head.revisionId, milestoneId: null, milestoneLabel: null,
       revisionId: head.revisionId, revisionLabel: revision.revisionLabel, revisionDigest: revision.revisionDigest,
       manuscriptId: head.manuscriptId, branchId: head.branchId, bookTitle: head.bookTitle, savedForExport, report: null,
-      document: null,
+      document: null, manifest: null,
     };
   }
 
@@ -1071,6 +1203,7 @@ export class ManuscriptExportStore {
       manuscriptId: head.manuscriptId, branchId: head.branchId, bookTitle: head.bookTitle, savedForExport: false,
       report: { reportId, version, reviewRunId: record.reviewRunId, runLabel: record.run.label, generatedAt: text(row.generated_at), digest, record },
       document: null,
+      manifest: null,
     };
   }
 
@@ -1100,6 +1233,25 @@ export class ManuscriptExportStore {
       revisionId, revisionLabel: text(row.revision_label), revisionDigest, manuscriptId: documentId, branchId: text(row.branch_id),
       bookTitle: `${text(row.title)} · ${typeLabel}`, savedForExport: false, report: null,
       document: { documentId, typeId, typeLabel, versionLabel },
+      manifest: null,
+    };
+  }
+
+  /**
+   * One frozen package version's 交付包清单 (Issue #416, S67b), as the package's owner writes it from the version's own
+   * record. A version is never rewritten, so the words and their digest stay exact; the ledger's revision columns stay
+   * empty for it, and the package version travels as the target itself.
+   */
+  #manifestTarget(bookId: string, packageVersionId: string): ResolvedTarget {
+    const manifest = this.#environment.packageManifest?.(bookId, packageVersionId) ?? null;
+    requireExport(manifest !== null, 'EXPORT_TARGET_NOT_FOUND', '所选交付包版本不属于这本书。');
+    requireExport(sha256Hex(manifest.markdown) === manifest.digest && DIGEST_PATTERN.test(manifest.digest), 'EXPORT_RECORD_INVALID', '交付包清单与其摘要不一致。');
+    const head = this.#head(bookId);
+    return {
+      kind: 'manifest', targetKind: 'book-delivery-package-version', targetId: packageVersionId, milestoneId: null, milestoneLabel: null,
+      revisionId: manifest.revisionId, revisionLabel: manifest.versionLabel, revisionDigest: manifest.digest,
+      manuscriptId: head.manuscriptId, branchId: head.branchId, bookTitle: head.bookTitle, savedForExport: false, report: null,
+      document: null, manifest: { packageVersionId, versionLabel: manifest.versionLabel, markdown: manifest.markdown },
     };
   }
 
@@ -1125,6 +1277,7 @@ export class ManuscriptExportStore {
 
   /** The version a preparation froze, read again exactly: a current revision stays that revision. */
   #preparedTarget(bookId: string, row: SqlRow): ResolvedTarget {
+    if (text(row.target_kind) === 'book-delivery-package-version') return this.#manifestTarget(bookId, text(row.target_id));
     if (text(row.target_kind) === 'report') return this.#reportTarget(bookId, text(row.target_id));
     if (text(row.target_kind) === 'production-document-version') return this.#documentOfRevision(bookId, text(row.target_id));
     const head = this.#head(bookId);
@@ -1151,6 +1304,7 @@ export class ManuscriptExportStore {
       savedForExport: false,
       report: null,
       document: null,
+      manifest: null,
     };
   }
 
@@ -1165,6 +1319,17 @@ export class ManuscriptExportStore {
 
   /** Everything the file is written from: the version's blocks, its source, the mapping and the marks on it. */
   async #plan(bookId: string, target: ResolvedTarget, options: ManuscriptExportOptions, format: ManuscriptExportFormat): Promise<ExportPlan> {
+    if (target.manifest !== null) {
+      // A package's 交付包清单 is its owner's Markdown, written as it stands: no block, no mark, no file of the manuscript.
+      requireExport(format === 'markdown', 'EXPORT_FORMAT_INVALID', '交付包清单只写成 Markdown 文件。');
+      const inputDigest = canonicalRecord({
+        schema: MANIFEST_INPUT_SCHEMA,
+        writer: MANIFEST_WRITER_IDENTITY,
+        packageVersionId: target.manifest.packageVersionId,
+        digest: target.revisionDigest,
+      }).digest;
+      return { kind: 'manifest', markdown: target.manifest.markdown, inputDigest, sourceVersionId: null };
+    }
     if (target.report !== null) {
       // A report is written from its recorded version alone: no block, no mark and no file of the manuscript.
       const report = target.report;
@@ -1336,6 +1501,17 @@ export class ManuscriptExportStore {
    * not; a report is laid out from its recorded version in any of them.
    */
   #render(plan: ExportPlan, format: ManuscriptExportFormat, emit: boolean): DocxExportResult {
+    if (plan.kind === 'manifest') {
+      return {
+        bytes: emit ? new TextEncoder().encode(plan.markdown) : null,
+        fidelity: [],
+        degraded: false,
+        restoration: 'regenerated',
+        restoredBlocks: 0,
+        regeneratedBlocks: 0,
+        written: { annotations: 0, suggestions: 0, editorNotes: 0, replies: 0 },
+      };
+    }
     if (plan.kind === 'report') {
       const laid = renderReportExport(plan.input, format, { emit });
       return { ...laid, restoration: 'regenerated', restoredBlocks: 0, regeneratedBlocks: 0, written: { annotations: 0, suggestions: 0, editorNotes: 0, replies: 0 } };
@@ -1384,13 +1560,15 @@ export class ManuscriptExportStore {
     // A 审阅报告 says how its own file is written; a PDF or a Markdown file is written from the manuscript's text (Issue
     // #500, S64b); only a DOCX restores from the original, or says why it cannot.
     const report = target.report;
-    const restorationLine = report !== null
+    const restorationLine = target.manifest !== null
+      ? PACKAGE_MANIFEST_LINES.restoration
+      : report !== null
       ? reportRestorationLine(report.version)
       : format !== 'docx'
         ? EXPORT_TEXT_RESTORATION_LINES[format]
         : rendered.restoration === 'from-original'
           ? `未改过、也没有带出标记的 ${rendered.restoredBlocks} 段从原文件恢复；其余 ${rendered.regeneratedBlocks} 段按稿件文字重新写出。`
-          : 'source' in plan.input && (plan.input.source.kind === 'mapped' || (plan.input.source.kind === 'fresh' && plan.input.source.reason === 'unprefixed'))
+          : plan.kind === 'manuscript' && (plan.input.source.kind === 'mapped' || (plan.input.source.kind === 'fresh' && plan.input.source.reason === 'unprefixed'))
             ? EXPORT_UNPREFIXED_RESTORATION_LINE
             : '这份稿件没有可以对应的原文件段落，导出按稿件文字重新生成 DOCX。';
     return {
@@ -1403,10 +1581,10 @@ export class ManuscriptExportStore {
       options,
       restoration: rendered.restoration,
       restorationLine,
-      formatLine: report === null ? FORMAT_LINES[format] : REPORT_FORMAT_LINES[format],
+      formatLine: target.manifest !== null ? PACKAGE_MANIFEST_LINES.format : report === null ? FORMAT_LINES[format] : REPORT_FORMAT_LINES[format],
       fidelity,
       degraded: rendered.degraded,
-      suggestedFileName: suggestedExportFileName(
+      suggestedFileName: target.manifest !== null ? PACKAGE_MANIFEST_FILE_NAME : suggestedExportFileName(
         target.bookTitle,
         report !== null ? reportExportLabel(report.runLabel, report.version)
           : target.document !== null ? target.document.versionLabel : target.milestoneLabel ?? target.revisionLabel,
@@ -1424,7 +1602,7 @@ export class ManuscriptExportStore {
 
   #targetProjection(target: ResolvedTarget): ManuscriptExportTargetProjection {
     return {
-      kind: target.kind,
+      kind: target.kind === 'manifest' ? 'package-manifest' : target.kind,
       milestoneId: target.milestoneId,
       milestoneLabel: target.milestoneLabel,
       revisionId: target.revisionId,
@@ -1433,6 +1611,7 @@ export class ManuscriptExportStore {
         ? null
         : { reportId: target.report.reportId, version: target.report.version, reviewRunId: target.report.reviewRunId, runLabel: target.report.runLabel },
       document: target.document,
+      packageVersion: target.manifest === null ? null : { packageVersionId: target.manifest.packageVersionId, versionLabel: target.manifest.versionLabel },
     };
   }
 
@@ -1463,10 +1642,12 @@ export class ManuscriptExportStore {
     requireExport(Array.isArray(fidelity), 'EXPORT_RECORD_INVALID', '导出保真审阅记录无效。');
     const targetKind = text(row.target_kind);
     // A report's preparation names its recorded version, a document's its version; a manuscript version's, its revision.
+    // A 交付包清单's is read from its own record, never written again to be read (Issue #416 review).
+    const manifest = targetKind === 'book-delivery-package-version' ? this.#storedManifest(row) : null;
     const report = targetKind === 'report' ? this.#reportTarget(text(row.book_id), text(row.target_id))
       : targetKind === 'production-document-version' ? this.#documentOfRevision(text(row.book_id), text(row.target_id)) : null;
-    const revisionId = report === null ? text(row.revision_id) : report.revisionId;
-    const revisionLabel = report === null ? this.#revision(revisionId).revisionLabel : report.revisionLabel;
+    const revisionId = manifest !== null ? manifest.revisionId : report === null ? text(row.revision_id) : report.revisionId;
+    const revisionLabel = manifest !== null ? manifest.versionLabel : report === null ? this.#revision(revisionId).revisionLabel : report.revisionLabel;
     const milestoneLabel = targetKind === 'milestone-version'
       ? text((this.#db.prepare('SELECT label FROM milestone_versions WHERE milestone_id = ?').get(text(row.target_id)) as SqlRow | undefined)?.label)
       : null;
@@ -1478,12 +1659,13 @@ export class ManuscriptExportStore {
       bookId: text(row.book_id),
       targetKind,
       targetId: text(row.target_id),
-      revisionId: report === null ? revisionId : null,
-      revisionDigest: report === null ? text(row.revision_digest) : null,
+      revisionId: report === null && manifest === null ? revisionId : null,
+      revisionDigest: report === null && manifest === null ? text(row.revision_digest) : null,
       revisionLabel,
       milestoneLabel,
       ...(report?.report == null ? {} : { reportDigest: report.revisionDigest }),
       ...(report?.document == null ? {} : { documentId: report.document.documentId, documentVersionDigest: report.revisionDigest }),
+      ...(manifest === null ? {} : { packageVersionId: manifest.packageVersionId, manifestDigest: manifest.digest }),
       format: text(row.format),
       options,
       fidelitySha256: sha256Hex(fidelityJson),
@@ -1501,7 +1683,16 @@ export class ManuscriptExportStore {
     return {
       bookId: text(row.book_id),
       preparationId,
-      target: report !== null ? this.#targetProjection(report) : {
+      target: manifest !== null ? {
+        kind: 'package-manifest',
+        milestoneId: null,
+        milestoneLabel: null,
+        revisionId,
+        revisionLabel,
+        report: null,
+        document: null,
+        packageVersion: { packageVersionId: manifest.packageVersionId, versionLabel: manifest.versionLabel },
+      } : report !== null ? this.#targetProjection(report) : {
         kind: targetKind === 'milestone-version' ? 'milestone' : 'current',
         milestoneId: targetKind === 'milestone-version' ? text(row.target_id) : null,
         milestoneLabel,
@@ -1509,6 +1700,7 @@ export class ManuscriptExportStore {
         revisionLabel,
         report: null,
         document: null,
+        packageVersion: null,
       },
       format: requireFormat(text(row.format)),
       options,
@@ -1527,6 +1719,24 @@ export class ManuscriptExportStore {
         policy: `${text(row.policy_id)} ${text(row.policy_version)}`,
       },
     };
+  }
+
+  /**
+   * The 交付包清单 a preparation froze, from its own record (Issue #416 review): its package version, the version's label and
+   * the revision it binds from the version's frozen record, and the digest of the list as it was written then. Reading it
+   * never writes the list again — the words a later release writes it in may differ, and a record never changes for them;
+   * only an approval writes it again, where a difference is a changed payload. The record's own digest is checked with the
+   * rest of it.
+   */
+  #storedManifest(row: SqlRow): { packageVersionId: string; versionLabel: string; revisionId: string; digest: string } {
+    const packageVersionId = text(row.target_id);
+    const record = parseCanonicalJson(text(row.canonical_json));
+    const digest = isRecord(record) ? record.manifestDigest : undefined;
+    requireExport(isRecord(record) && record.packageVersionId === packageVersionId && typeof digest === 'string' && DIGEST_PATTERN.test(digest),
+      'EXPORT_RECORD_INVALID', '交付包清单的导出准备无效。');
+    const version = this.#environment.packageVersion?.(text(row.book_id), packageVersionId) ?? null;
+    requireExport(version !== null, 'EXPORT_RECORD_INVALID', '导出所属的交付包版本不存在。');
+    return { packageVersionId, versionLabel: version.versionLabel, revisionId: version.revisionId, digest };
   }
 
   #receiptProjection(preparationRow: SqlRow, outcome: SqlRow): ManuscriptExportReceiptProjection {

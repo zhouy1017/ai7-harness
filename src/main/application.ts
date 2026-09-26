@@ -71,6 +71,8 @@ interface LaunchArguments {
   injectedPickerPath: string | undefined;
   /** J-07 only (Issue #413): the one answer the Save dialog gives, once, in place of the platform's own. */
   injectedSavePath: string | undefined;
+  /** J-07's answer to the folder dialog of a 图书交付包 export (Issue #416, S67b): single-use, like the Save dialog's. */
+  injectedFolderPath: string | undefined;
   importControl: J01ImportControl | undefined;
   foregroundExecutionControl: J03ForegroundExecutionControl | undefined;
   recoveryControl: J08RecoveryControl | undefined;
@@ -183,6 +185,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j09-picker-path' ||
           key === '--j10-picker-path' ||
           key === '--j07-save-path' ||
+          key === '--j07-folder-path' ||
           key === '--j04-save-path' ||
           key === '--j01-import-control' ||
           key === '--j03-foreground-execution-control' ||
@@ -269,6 +272,8 @@ function parseArguments(argv: string[]): LaunchArguments {
   requireDesktop(j07SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-07' && isAbsolute(j07SavePath)));
   requireDesktop(j04SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && isAbsolute(j04SavePath)));
   const injectedSavePath = j07SavePath ?? j04SavePath;
+  const injectedFolderPath = values.get('--j07-folder-path');
+  requireDesktop(injectedFolderPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-07' && isAbsolute(injectedFolderPath)));
   const importControlValue = values.get('--j01-import-control');
   const importControl =
     importControlValue === 'before-commit' ||
@@ -335,13 +340,15 @@ function parseArguments(argv: string[]): LaunchArguments {
     launchForm.trustedOperationalScope === 'development-ci' ||
       (process.env.AI7_E2E_JOURNEY === undefined && injectedPickerPath === undefined && observeJ12RevealValue === undefined &&
         importControlValue === undefined && foregroundExecutionControlValue === undefined && recoveryControlValue === undefined && modelAdapterControlValue === undefined &&
-        applyControlValue === undefined && injectedSavePath === undefined && connectivityPath === undefined && unitHoldPath === undefined),
+        applyControlValue === undefined && injectedSavePath === undefined && injectedFolderPath === undefined && connectivityPath === undefined &&
+        unitHoldPath === undefined),
   );
   return {
     dataRoot,
     launchForm,
     injectedPickerPath,
     injectedSavePath,
+    injectedFolderPath,
     importControl,
     foregroundExecutionControl,
     recoveryControl,
@@ -468,6 +475,7 @@ function registerRendererHandlers(
   consumeLostApplyAcknowledgement: () => boolean,
   consumeInjectedSavePath: () => string | undefined,
   printExportPage: (pagePath: string, pdfPath: string) => Promise<void>,
+  consumeInjectedFolderPath: () => string | undefined,
 ): () => void {
   const AMBIGUOUS_SERVICE_FAILURES = new Set([
     'COMMIT_PROOF_INCONCLUSIVE',
@@ -1142,6 +1150,30 @@ function registerRendererHandlers(
     if (chosen.canceled || chosen.filePath === undefined || chosen.filePath.length === 0) return undefined;
     requireDesktop(isAbsolute(chosen.filePath));
     return chosen.filePath;
+  };
+
+  /**
+   * The system's own folder dialog for a 图书交付包 export (Issue #416, S67b; EXP-019, EXP-020): the editor chooses a folder,
+   * or makes a new one in the dialog. J-07 answers it once with a launch control instead; `undefined` is a cancelled dialog.
+   */
+  const chooseExportFolder = async (owned: OwnedRendererWindow): Promise<string | undefined> => {
+    const injected = consumeInjectedFolderPath();
+    if (injected !== undefined) {
+      requireDesktop(isAbsolute(injected));
+      return injected;
+    }
+    const chosen = await dialog.showOpenDialog(owned.window, {
+      title: '选择导出图书交付包的文件夹',
+      buttonLabel: '导出到此文件夹',
+      defaultPath: app.getPath('documents'),
+      // `createDirectory` makes a new folder inside the dialog on macOS; Windows' dialog makes one by itself. Windows'
+      // `promptToCreate` would answer with a folder that does not exist yet, which AI7 never creates, so it is not asked.
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    const folder = chosen.canceled ? undefined : chosen.filePaths[0];
+    if (folder === undefined || folder.length === 0) return undefined;
+    requireDesktop(isAbsolute(folder));
+    return folder;
   };
 
   ipcMain.on(MAIN_EVENTS.closeRiskChanged, closeRiskListener);
@@ -2692,6 +2724,95 @@ function registerRendererHandlers(
         });
       }),
   );
+  // 维护事项 (Issue #426, S68a): one case of the route's Book, and each of its steps, serialized like every other command.
+  // The service checks the designation, the case and the step; main only names the route's Book.
+  const requireMaintenanceOfRoute = (route: { bookId: string }, bookId: string): void => {
+    if (bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '维护事项不属于当前图书工作台。');
+  };
+  ipcMain.handle(
+    IPC_CHANNELS.inspectMaintenanceCase,
+    (event, input: Parameters<RendererApi['inspectMaintenanceCase']>[0]) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('inspectMaintenanceCase', { ...input, bookId: route.bookId });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          requireMaintenanceOfRoute(route, result.bookId);
+          return result;
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.listMaintenanceCases,
+    (event, input: Parameters<RendererApi['listMaintenanceCases']>[0]) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('listMaintenanceCases', {
+            bookId: route.bookId,
+            publicationVersionId: input.publicationVersionId,
+            beforeOrdinal: input.beforeOrdinal,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          requireMaintenanceOfRoute(route, result.bookId);
+          return result;
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.recordMaintenanceCase,
+    (event, input: Parameters<RendererApi['recordMaintenanceCase']>[0]) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('recordMaintenanceCase', { bookId: route.bookId, publicationVersionId: input.publicationVersionId, classification: input.classification, reason: input.reason, evidence: input.evidence });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          requireMaintenanceOfRoute(route, result.bookId);
+          return result;
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.appendMaintenanceCaseRevision,
+    (event, input: Parameters<RendererApi['appendMaintenanceCaseRevision']>[0]) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('appendMaintenanceCaseRevision', { bookId: route.bookId, caseId: input.caseId, expectedRevision: input.expectedRevision, step: input.step });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          requireMaintenanceOfRoute(route, result.bookId);
+          return result;
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.saveMaintenanceErrata,
+    (event, input: Parameters<RendererApi['saveMaintenanceErrata']>[0]) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('saveMaintenanceErrata', { bookId: route.bookId, caseId: input.caseId, expectedRevision: input.expectedRevision, body: input.body });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          requireMaintenanceOfRoute(route, result.bookId);
+          return result;
+        });
+      }),
+  );
   // 交付 · 生产文档 (Issue #415, plan slice S66): three deterministic commands of the route's Book, serialized with
   // every other effect of this window's authority and held to its route generation. 从来源材料创建 and 本书不做 name
   // a house type and a material by identity, and the service decides whether they are this Book's; 保存为版本 names
@@ -2758,6 +2879,111 @@ function registerRendererHandlers(
         });
       }),
   );
+  // Its export (Issue #416, S67b): the review is a read of the route's Book; choosing the folder prepares and 按上述方式导出
+  // writes, each serialized like every other command. The service checks the files and the folder; main only asks the
+  // platform's dialog.
+  ipcMain.handle(
+    IPC_CHANNELS.reviewBookDeliveryPackageExport,
+    (event, input: Parameters<RendererApi['reviewBookDeliveryPackageExport']>[0]) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('reviewBookDeliveryPackageExport', {
+            bookId: route.bookId,
+            packageVersionId: input.packageVersionId,
+            options: input.options,
+            ...(input.offset === undefined ? {} : { offset: input.offset }),
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          requireBookDeliveryPackageOfRoute(route, result.bookId);
+          return result;
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.chooseBookDeliveryPackageExportFolder,
+    (event, input: Parameters<RendererApi['chooseBookDeliveryPackageExportFolder']>[0]) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async (): Promise<Awaited<ReturnType<RendererApi['chooseBookDeliveryPackageExportFolder']>>> => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const folder = await chooseExportFolder(owned);
+          // A cancelled dialog records nothing at all (V2-UX-EXP-020).
+          if (folder === undefined) return { outcome: 'cancelled' };
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          const prepared = await service.call('prepareBookDeliveryPackageExport', {
+            bookId: route.bookId,
+            packageVersionId: input.packageVersionId,
+            options: input.options,
+            ...(input.offset === undefined ? {} : { offset: input.offset }),
+            reviewDigest: input.reviewDigest,
+            memberKeys: input.memberKeys,
+            folder,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          return { outcome: 'prepared', export: prepared };
+        });
+      }),
+  );
+  // The effect lock stays held while a package job runs. Only its owning window's cancellation bypasses it.
+  let packageExportInFlight: { owned: OwnedRendererWindow; bookId: string; exportId: string; job: Promise<ServiceJobProjection> } | null = null;
+  ipcMain.handle(
+    IPC_CHANNELS.approveBookDeliveryPackageExport,
+    (event, input: Parameters<RendererApi['approveBookDeliveryPackageExport']>[0]) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const active = { owned, bookId: route.bookId, exportId: input.exportId,
+            job: service.call('approveBookDeliveryPackageExport', { bookId: route.bookId, exportId: input.exportId }) };
+          packageExportInFlight = active;
+          try {
+            let job = await active.job;
+            while (job.state === 'queued' || job.state === 'running') {
+              await new Promise<void>((resolve) => setTimeout(resolve, 50));
+              job = await service.call('pollServiceJob', { jobId: job.jobId });
+            }
+            if (job.state === 'cancelled') throw new ServiceCallError('EXPORT_CANCELLED', '已取消导出，没有写入任何文件。');
+            if (job.state === 'failed') throw new ServiceCallError(job.failure?.code ?? 'EXPORT_FAILED', job.failure?.message ?? '交付包导出未完成。');
+            const result = job.result;
+            if (job.kind !== 'package-export' || result === null || !('export' in result) || result.export.exportId !== input.exportId) {
+              throw new ServiceCallError('AI7_EXPORT_INVALID', '交付包导出结果不一致。');
+            }
+            requireCurrentRouteGeneration(owned, routeGeneration);
+            requireBookDeliveryPackageOfRoute(route, result.bookId);
+            requireBookDeliveryPackageOfRoute(route, result.package.bookId);
+            return result;
+          } finally {
+            if (packageExportInFlight === active) packageExportInFlight = null;
+          }
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.cancelBookDeliveryPackageExport,
+    (event, input: Parameters<RendererApi['cancelBookDeliveryPackageExport']>[0]) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const active = packageExportInFlight;
+        if (active === null || active.owned !== owned || active.bookId !== route.bookId || active.exportId !== input.exportId) return false;
+        const job = await active.job;
+        if (packageExportInFlight !== active) return false;
+        try { return await service.call('cancelBookDeliveryPackageExport', { jobId: job.jobId }); }
+        catch (error) {
+          if (error instanceof ServiceCallError && error.code === 'JOB_NOT_FOUND') return false;
+          throw error;
+        }
+      }),
+  );
   ipcMain.handle(
     IPC_CHANNELS.createProductionDocument,
     (event, input: Omit<ServiceOperationMap['createProductionDocument']['input'], 'bookId'>) =>
@@ -2790,6 +3016,30 @@ function registerRendererHandlers(
             bookId: route.bookId,
             typeId: input.typeId,
             notForThisBook: input.notForThisBook,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          return requireProductionDocumentResultOfRoute(route, result);
+        });
+      }),
+  );
+  // A document's workflow phase (Issue #415, S66c): one deterministic move of a document of the route's Book, serialized
+  // like every other command; the service decides whether the move is open to the phase and still what the editor saw.
+  ipcMain.handle(
+    IPC_CHANNELS.transitionProductionDocumentPhase,
+    (event, input: Omit<ServiceOperationMap['transitionProductionDocumentPhase']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('transitionProductionDocumentPhase', {
+            bookId: route.bookId,
+            documentId: input.documentId,
+            phaseId: input.phaseId,
+            action: input.action,
+            expectedTransitions: input.expectedTransitions,
+            reason: input.reason,
           });
           requireCurrentRouteGeneration(owned, routeGeneration);
           return requireProductionDocumentResultOfRoute(route, result);
@@ -3132,6 +3382,22 @@ function registerRendererHandlers(
         if (result.branchId !== input.branchId) {
           throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '重做结果不属于当前稿件分支。');
         }
+        return result;
+      });
+    }),
+  );
+  // 保存人员 (Issue #431, S83): a Book's 作者, 责编 and 相关人 on its 工作概览 — the Book this window shows, or none yet.
+  ipcMain.handle(IPC_CHANNELS.updateBookPeople, (event, input: Parameters<RendererApi['updateBookPeople']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = owned.route;
+        requireDesktop(route === null || (route.kind === 'book' && route.bookId === input.bookId), 'AI7_RENDERER_BOUNDARY_INVALID');
+        const result = await service.call('updateBookPeople', {
+          bookId: input.bookId, expectedVersion: input.expectedVersion, authors: input.authors, editors: input.editors, related: input.related,
+        });
+        requireDesktop(result.bookId === input.bookId, 'AI7_SERVICE_ROUTE_INVALID');
         return result;
       });
     }),
@@ -3810,6 +4076,15 @@ export async function runApplication(): Promise<void> {
         };
       })(),
       (pagePath, pdfPath) => printStagedPage(exportStagingRoot, exportPrintSession, pagePath, pdfPath),
+      // J-07's folder-dialog answer for a package export (Issue #416, S67b) is single-use too.
+      (() => {
+        let pending = launch.injectedFolderPath;
+        return (): string | undefined => {
+          const path = pending;
+          pending = undefined;
+          return path;
+        };
+      })(),
     );
     startupLocation = reachStartup('renderer-first-paint');
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);

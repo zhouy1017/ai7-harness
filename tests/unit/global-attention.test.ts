@@ -42,6 +42,7 @@ const NONE: GlobalAttentionReadings = {
   analysisOutcomes: [],
   reviewRuns: [],
   reviewCompletions: [],
+  maintenance: [],
   busy: false,
   waitingFor: 'admitting',
 };
@@ -183,6 +184,32 @@ describe('the four groups of 待我处理', () => {
     });
     expect(exceptions[0]!.technical.map((row) => row.key)).toEqual(['mark', 'conflict-kind', 'manuscript', 'branch', 'state-at']);
     expect(projection.actionableCount).toBe(2);
+  });
+
+  it('lists a 维护事项 still waiting on the editor under 等待你的决定, never blocking, opening the case on its 发稿版本 (Issue #426, S68b)', () => {
+    const reading = (classification: 'errata' | 'supersession', status: 'unresolved' | 'waiting', nextStep: 'write-errata' | 'link-publication', at: string) => ({
+      caseId: randomUUID(), ordinal: classification === 'errata' ? 1 : 3, classification, status, nextStep, at,
+      bookId: randomUUID(), bookTitle: '维护之书', publicationVersionId: randomUUID(), publicationOrdinal: 1,
+    });
+    const errata = reading('errata', 'unresolved', 'write-errata', minutesAgo(40));
+    const supersession = reading('supersession', 'waiting', 'link-publication', minutesAgo(20));
+    const projection = composeGlobalAttention(readings({ maintenance: [supersession, errata] }), NOW);
+    const decisions = group(projection, 'decisions');
+    expect(decisions.map((entry) => [entry.itemId, entry.state, entry.blocked, entry.nextStep, entry.at])).toEqual([
+      [`maintenance:${errata.caseId}`, 'maintenance-pending', false, 'maintenance-write-errata', errata.at],
+      [`maintenance:${supersession.caseId}`, 'maintenance-waiting', false, 'maintenance-link-publication', supersession.at],
+    ]);
+    expect(decisions[1]).toMatchObject({
+      book: { bookId: supersession.bookId, title: '维护之书' },
+      object: { kind: 'maintenance', classification: 'supersession', ordinal: 3, publicationOrdinal: 1 },
+      target: { kind: 'maintenance', bookId: supersession.bookId, publicationVersionId: supersession.publicationVersionId, caseId: supersession.caseId },
+    });
+    expect(decisions[0]!.technical.map((row) => row.key)).toEqual(['maintenance-case', 'publication-version', 'state-at']);
+    expect(projection.actionableCount).toBe(2);
+    // A 替代 or 再版 that recorded an interim 仍未解决 still waits for its version: it reads as waiting, never as a 更正.
+    const interim = { ...reading('supersession', 'unresolved', 'link-publication', minutesAgo(10)), classification: 'reissue' as const };
+    const later = group(composeGlobalAttention(readings({ maintenance: [interim] }), NOW), 'decisions');
+    expect(later.map((entry) => [entry.state, entry.nextStep])).toEqual([['maintenance-waiting', 'maintenance-link-publication']]);
   });
 
   it('lists a Run waiting to start once online under 运行中与已暂停, in the words of what it waits for (Issue #502, ATTN-004)', () => {

@@ -62,7 +62,12 @@ const BAR_STATEMENT = '只是让 AI7 按这份计划做这一次；接受修改�
 const CHANGE_SUGGESTION_APPLY_MEMBERS = ['applyChangeSuggestion', 'applyChangeSuggestionBatch', 'getManuscriptApplyOutcome'];
 // Synchronized delta with Issue #413: 交付物's four 导出 members, the only ones named like an export. They reach
 // no Provider, session or scheduler: a local file the system dialog chose, approved per file.
-const EXPORT_MEMBERS = ['reviewManuscriptExport', 'chooseManuscriptExportDestination', 'approveManuscriptExport', 'revealManuscriptExport'];
+// Synchronized delta with Issue #416 (S67b): a 图书交付包 version's export adds three — the same ledger's files in a folder
+// the system dialog chose, approved per file.
+const EXPORT_MEMBERS = [
+  'reviewManuscriptExport', 'chooseManuscriptExportDestination', 'approveManuscriptExport', 'revealManuscriptExport',
+  'reviewBookDeliveryPackageExport', 'chooseBookDeliveryPackageExportFolder', 'approveBookDeliveryPackageExport', 'cancelBookDeliveryPackageExport',
+];
 // Synchronized delta with Issue #417: 审阅's seven members. None is named like an execution, effect,
 // apply or export member, so the two pins below hold them without an exception.
 const REVIEW_MEMBERS = ['inspectReviewWorkspace', 'prepareReviewRun', 'authorizeReviewRun', 'continueReviewRun',
@@ -339,7 +344,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     // read, so the pin moves with the terminal version the service stamps
     // (`BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION` since Issue #416, S67a). It read 19 until #467 — one revision
     // behind, because only a failed product cleanup reaches this fallback, so revision 20 never met it.
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 39, 'credential-cleanup-metadata-version');
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 44, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
               approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
