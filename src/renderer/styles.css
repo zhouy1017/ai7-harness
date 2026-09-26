@@ -703,6 +703,8 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .document-phase-form fieldset { display: grid; gap: .3rem; margin: 0; padding: .5rem; border: 1px solid #ddd8cc; border-radius: 8px; }
 .document-phase-form .field { display: grid; gap: .25rem; margin-top: .45rem; }
 .document-phase-form textarea { width: 100%; box-sizing: border-box; }
+.document-phase-reason-problem { margin: .35rem 0 0; color: #842f28; font-weight: 700; }
+.document-phase-reason-problem[hidden] { display: none; }
 .document-workflow-card { margin-top: .45rem; }
 .document-phase-chips { display: flex; flex-wrap: wrap; gap: .3rem; margin: .4rem 0 0; padding: 0; list-style: none; }
 .export-open-row { margin-top: .6rem; }

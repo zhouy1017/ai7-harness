@@ -200,7 +200,8 @@ export function renderDocumentWorkflow(
     // and 交付 forms do.
     const count = el('small', 'field-note document-phase-reason-count', publicationCountLine(state.text.trim(), MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS));
     count.id = uid('document-phase-reason-count');
-    const textProblem = el('p', 'field-error document-phase-reason-problem');
+    // Its own class, as the 发稿 fields' problems have theirs: the form's one `field-error` stays the form's own ask.
+    const textProblem = el('p', 'document-phase-reason-problem');
     textProblem.id = uid('document-phase-reason-problem');
     const showTextProblem = (): void => {
       const problem = phaseReasonTextProblem(state.text.trim());
