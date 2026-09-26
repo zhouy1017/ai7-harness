@@ -4292,7 +4292,12 @@ function renderBookFilter(
   const find = button(BOOK_FILTER_ACTIONS.find, 'secondary', () => undefined);
   find.type = 'submit';
   find.dataset['bookFilterAction'] = 'find';
+  let clearControl: HTMLButtonElement | null = null;
   const sync = (): void => { find.disabled = text.value.trim().length === 0; };
+  const restoreControls = (): void => {
+    sync();
+    if (clearControl !== null) clearControl.disabled = false;
+  };
   text.addEventListener('input', sync);
   sync();
   form.addEventListener('submit', (event) => {
@@ -4312,7 +4317,7 @@ function renderBookFilter(
       },
       (error) => {
         if (!form.isConnected || current !== request) return;
-        find.disabled = false;
+        restoreControls();
         setStatus(rendererErrorMessage(error, BOOK_FILTER_STATUS_LINES.findFailed), 'error');
       },
     );
@@ -4332,12 +4337,13 @@ function renderBookFilter(
         },
         (error) => {
           if (!form.isConnected || current !== request) return;
-          clear.disabled = false;
+          restoreControls();
           setStatus(rendererErrorMessage(error, BOOK_FILTER_STATUS_LINES.findFailed), 'error');
         },
       );
     });
     clear.dataset['bookFilterAction'] = 'clear';
+    clearControl = clear;
     row.append(clear);
   }
   form.append(legend, fieldLabel, textLabel, row);
