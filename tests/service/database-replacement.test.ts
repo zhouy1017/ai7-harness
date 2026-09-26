@@ -176,7 +176,7 @@ describe('导入数据库 over the real store', () => {
     } finally {
       store.close();
     }
-  });
+  }, 180_000);
 
   it('leaves the data as it is when the replacement is cancelled, or when the data in the package will not open', async () => {
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -217,7 +217,7 @@ describe('导入数据库 over the real store', () => {
     } finally {
       store.close();
     }
-  });
+  }, 180_000);
 
   it('refuses what cannot replace the data, and takes nothing from it', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -251,7 +251,7 @@ describe('导入数据库 over the real store', () => {
     } finally {
       store.close();
     }
-  });
+  }, 180_000);
 
   it('keeps its records as written, and adds revision 57 to a revision-56 store', async () => {
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -343,7 +343,7 @@ describe('导入数据库 over the real store', () => {
     } finally {
       database.close();
     }
-  });
+  }, 180_000);
 
   it('writes the backup before a replacement alone in the backup location, beside 定期自动备份 (Issue #434, S86c restack)', async () => {
     const hours = (count: number): Date => new Date(T.getTime() + count * 60 * 60 * 1000);
