@@ -183,6 +183,13 @@ describe('设置 › 评估校准与预测 over the real store', () => {
         for (const word of PUBLICATION_FORBIDDEN_WORDS) expect(JSON.stringify(value).includes(word)).toBe(false);
       }
       expect(counts()).toEqual({ publication_actuals: 3, evaluation_preferences: 0 });
+      for (let index = 0; index < 64; index += 1) {
+        const updated = store.recordPublicationActuals({ ...entry, publicationVersionId: newer.publicationVersionId, expectedEntries: 3 + index, priceFen: 4000 + index });
+        expect(updated.books[0]!.entries).toBe(4 + index);
+      }
+      expect(refusal(() => store.recordPublicationActuals({ ...entry, publicationVersionId: newer.publicationVersionId, expectedEntries: 3 })))
+        .toBe('ACTUALS_MOVED:这本书的定价与首印刚被改过；请看过现在的数据再改。');
+      expect(store.inspectDeliverables(bookId).publication.actualsPrompt?.actuals?.priceFen).toBe(4063);
       store.markCleanShutdown();
     } finally {
       store.close();
@@ -191,7 +198,7 @@ describe('设置 › 评估校准与预测 over the real store', () => {
     // A restart keeps every entry; the ledgers refuse to be rewritten, and an entry rewritten by hand no longer reads.
     const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
-      expect(booksOf(reopened.inspectEvaluationCalibration())).toEqual([['校准组稿', 2, [3990, 3000, 2, true], 3]]);
+      expect(booksOf(reopened.inspectEvaluationCalibration())).toEqual([['校准组稿', 2, [4063, 3000, 2, true], 67]]);
       reopened.markCleanShutdown();
     } finally {
       reopened.close();
@@ -201,7 +208,8 @@ describe('设置 › 评估校准与预测 over the real store', () => {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EVALUATION_CALIBRATION_SCHEMA_VERSION);
       const records = (database.prepare('SELECT canonical_json FROM publication_actuals ORDER BY ordinal').all() as Array<{ canonical_json: string }>)
         .map((row) => JSON.parse(row.canonical_json) as { schema: string; priceFen: number; publicationOrdinal: number; supersedes: string | null; actor: string });
-      expect(records.map((record) => [record.schema, record.priceFen, record.publicationOrdinal, record.supersedes === null, record.actor])).toEqual([
+      expect(records).toHaveLength(67);
+      expect(records.slice(0, 3).map((record) => [record.schema, record.priceFen, record.publicationOrdinal, record.supersedes === null, record.actor])).toEqual([
         ['ai7.publication-actuals/1', 4500, 1, true, '本机编辑'],
         ['ai7.publication-actuals/1', 3990, 1, false, '本机编辑'],
         ['ai7.publication-actuals/1', 3990, 2, false, '本机编辑'],
@@ -243,6 +251,12 @@ describe('设置 › 评估校准与预测 over the real store', () => {
       const on = store.setEvaluationPreferences({ expectedEntries: 1, predictionEnabled: false, calibrationEnabled: true });
       expect([on.calibration.enabled, on.prediction.enabled, on.preferenceEntries]).toEqual([true, false, 2]);
       expect(counts()).toEqual({ publication_actuals: 0, evaluation_preferences: 2 });
+      for (let index = 0; index < 64; index += 1) {
+        const updated = store.setEvaluationPreferences({ expectedEntries: 2 + index, predictionEnabled: false, calibrationEnabled: index % 2 === 1 });
+        expect(updated.preferenceEntries).toBe(3 + index);
+      }
+      expect(refusal(() => store.setEvaluationPreferences({ expectedEntries: 2, predictionEnabled: false, calibrationEnabled: false })))
+        .toBe('PREFERENCES_MOVED:评估设置刚被改过；请看过现在的设置再改。');
       store.markCleanShutdown();
     } finally {
       store.close();
@@ -251,7 +265,7 @@ describe('设置 › 评估校准与预测 over the real store', () => {
     const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       const kept = reopened.inspectEvaluationCalibration();
-      expect([kept.calibration.enabled, kept.prediction.enabled, kept.preferenceEntries]).toEqual([true, false, 2]);
+      expect([kept.calibration.enabled, kept.prediction.enabled, kept.preferenceEntries]).toEqual([true, false, 66]);
       reopened.markCleanShutdown();
     } finally {
       reopened.close();
@@ -260,7 +274,8 @@ describe('设置 › 评估校准与预测 over the real store', () => {
     try {
       const records = (database.prepare('SELECT canonical_json FROM evaluation_preferences ORDER BY ordinal').all() as Array<{ canonical_json: string }>)
         .map((row) => JSON.parse(row.canonical_json) as { calibrationEnabled: boolean; predictionEnabled: boolean; thresholds: unknown });
-      expect(records.map((record) => [record.calibrationEnabled, record.predictionEnabled, record.thresholds])).toEqual([
+      expect(records).toHaveLength(66);
+      expect(records.slice(0, 2).map((record) => [record.calibrationEnabled, record.predictionEnabled, record.thresholds])).toEqual([
         [false, false, { calibrationAdjustments: 10, predictionBooks: 30 }],
         [true, false, { calibrationAdjustments: 10, predictionBooks: 30 }],
       ]);

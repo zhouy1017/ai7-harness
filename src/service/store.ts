@@ -10537,7 +10537,7 @@ export class EditorialStore {
   #withActuals(deliverables: DeliverablesProjection): DeliverablesProjection {
     const prompt = deliverables.publication.actualsPrompt;
     if (prompt === null) return deliverables;
-    const latest = this.#calibrationCall(() => this.#evaluationCalibration.actuals(deliverables.bookId).at(-1) ?? null);
+    const latest = this.#calibrationCall(() => this.#evaluationCalibration.latestActuals(deliverables.bookId));
     if (latest === null || latest.publicationVersionId !== prompt.publicationVersionId) return deliverables;
     return {
       ...deliverables,
@@ -10604,8 +10604,7 @@ export class EditorialStore {
       const bookId = asString(row.book_id);
       const current = this.#publicationCall(() => this.#publicationVersions.current(bookId));
       if (current === null) continue;
-      const chain = this.#evaluationCalibration.actuals(bookId);
-      const latest = chain.at(-1) ?? null;
+      const latest = this.#evaluationCalibration.latestActuals(bookId);
       books.push({
         bookId,
         title: asString(row.title),
@@ -10619,7 +10618,7 @@ export class EditorialStore {
           recordedAt: latest.recordedAt,
           current: latest.publicationVersionId === current.projection.publicationVersionId,
         },
-        entries: chain.length,
+        entries: latest?.ordinal ?? 0,
       });
     }
     return {
