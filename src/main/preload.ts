@@ -365,6 +365,8 @@ const api: RendererApi = Object.freeze({
     invoke<Awaited<ReturnType<RendererApi['reviewBookDeliveryPackageExport']>>>(IPC_CHANNELS.reviewBookDeliveryPackageExport, input),
   chooseBookDeliveryPackageExportFolder: (input: Parameters<RendererApi['chooseBookDeliveryPackageExportFolder']>[0]) =>
     invoke<Awaited<ReturnType<RendererApi['chooseBookDeliveryPackageExportFolder']>>>(IPC_CHANNELS.chooseBookDeliveryPackageExportFolder, input),
+  cancelBookDeliveryPackageExport: (input: Parameters<RendererApi['cancelBookDeliveryPackageExport']>[0]) =>
+    invoke<boolean>(IPC_CHANNELS.cancelBookDeliveryPackageExport, input),
   approveBookDeliveryPackageExport: (input: Parameters<RendererApi['approveBookDeliveryPackageExport']>[0]) =>
     invoke<Awaited<ReturnType<RendererApi['approveBookDeliveryPackageExport']>>>(IPC_CHANNELS.approveBookDeliveryPackageExport, input),
   inspectMaintenanceCase: (input: Parameters<RendererApi['inspectMaintenanceCase']>[0]) =>

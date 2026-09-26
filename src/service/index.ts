@@ -867,10 +867,12 @@ async function dispatch(
         id: request.id, ok: true, op: request.op,
         result: await store.prepareBookDeliveryPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
       };
+    case 'cancelBookDeliveryPackageExport':
+      return { id: request.id, ok: true, op: request.op, result: jobs.cancelPackageExport(request.input.jobId) };
     case 'approveBookDeliveryPackageExport':
       return {
         id: request.id, ok: true, op: request.op,
-        result: await store.approveBookDeliveryPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
+        result: jobs.startPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
       };
     case 'inspectMaintenanceCase':
       return { id: request.id, ok: true, op: request.op, result: store.inspectMaintenanceCase(request.input) };
@@ -1282,7 +1284,7 @@ async function run(): Promise<void> {
     process.removeListener('SIGTERM', stop);
     process.removeListener('SIGINT', stop);
     try {
-      jobs?.dispose();
+      await jobs?.dispose();
       // The Review Run loop stops first and starts no further category; the owner then interrupts the
       // Run in flight, and the loop records what that Run came to before the store closes.
       const reviewRunsStopped = reviewRuns?.dispose();
