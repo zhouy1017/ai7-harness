@@ -601,7 +601,7 @@ async function main() {
     await click(renderer, '书系', 'series-destination');
     const empty = await readSeriesList(renderer, () => true, 'series-empty-page');
     requireJourney(empty.lede === SERIES_LEDE && empty.empty === '还没有书系。' && empty.items.length === 0 && !empty.form, 'series-empty-words', empty);
-    requireJourney(JSON.stringify(await renderer.evaluate('window.ai7.inspectSeriesList()')) === JSON.stringify({ series: [] }), 'series-empty-service');
+    requireJourney(JSON.stringify(await renderer.evaluate('window.ai7.inspectSeriesList()')) === JSON.stringify({ series: [], nextCursor: null }), 'series-empty-service');
 
     at('series-create');
     // 新建书系: the form opens at its name with the action unavailable until there is one; a name past its bound is refused in
@@ -681,7 +681,9 @@ async function main() {
       const add = await window.ai7.previewSeriesMembershipChange({ seriesId, bookId, kind: 'add' });
       await window.ai7.changeSeriesMembership({ seriesId, bookId, kind: 'add', previewDigest: add.previewDigest });
       const remove = await window.ai7.previewSeriesMembershipChange({ seriesId, bookId, kind: 'remove' });
-      return (await window.ai7.changeSeriesMembership({ seriesId, bookId, kind: 'remove', previewDigest: remove.previewDigest })).series.history.length;
+      await window.ai7.changeSeriesMembership({ seriesId, bookId, kind: 'remove', previewDigest: remove.previewDigest });
+      // A change answers with its record alone (Issue #63 review): the Series is read again for its records.
+      return (await window.ai7.inspectSeries({ seriesId })).history.length;
     })()`);
     requireJourney(elsewhere === 3, 'stale-elsewhere', elsewhere);
     await clickSelector(renderer, '[data-series-action="commit"]', 'stale-commit');
@@ -696,7 +698,8 @@ async function main() {
     await clickSelector(renderer, '[data-series-action="commit"]', 'stale-commit-again');
     await waitFor(renderer, `${status} === ${JSON.stringify(`已加入书系「${SERIES}」：《${SECOND}》`)}`, 'stale-added-status');
     const both = await readSeries(renderer, (read) => read.members.length === 2 && read.preview === null, 'stale-added');
-    requireJourney(JSON.stringify(both.members.map(([id]) => id)) === JSON.stringify([first, second]) &&
+    // Members newest joined first (Issue #63 review): the Book just added heads the table.
+    requireJourney(JSON.stringify(both.members.map(([id]) => id)) === JSON.stringify([second, first]) &&
       JSON.stringify(both.history.map(([kind, bookId]) => [kind, bookId])) === JSON.stringify([['add', second], ['remove', second], ['add', second], ['add', first]]),
     'stale-added-words', both);
 

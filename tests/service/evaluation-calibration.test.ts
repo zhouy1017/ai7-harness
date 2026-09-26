@@ -112,19 +112,19 @@ describe('设置 › 评估校准与预测 over the real store', () => {
     try {
       // Before any Book: calibration waits on adjustments the editor cannot make yet, the prediction is closed, nothing listed.
       expect(store.inspectEvaluationCalibration()).toEqual({
-        calibration: { adjustments: 0, threshold: 10, enabled: true, active: false },
+        calibration: { adjustments: 0, initialScoresConnected: false, threshold: 10, enabled: true, active: false },
         prediction: { booksWithActuals: 0, threshold: 30, enabled: false, available: false },
         preferenceEntries: 0,
         books: [],
       });
       const book = await importBook(store);
       bookId = book.bookId;
-      const entry = { bookId, expectedEntries: 0, priceFen: 4500, firstPrint: 3000 };
+      const unpublished = { bookId, publicationVersionId: randomUUID(), expectedEntries: 0, priceFen: 4500, firstPrint: 3000 };
 
       // A Book with no 发稿版本 has nothing to enter them for, and is not listed.
-      expect(refusal(() => store.recordPublicationActuals(entry))).toBe('PUBLICATION_REQUIRED:这本书还没有发稿版本；设为发稿版本后才能录入定价与首印。');
-      expect(refusal(() => store.recordPublicationActuals({ ...entry, bookId: 'not-a-uuid' }))).toBe('BOOK_INVALID:图书标识无效。');
-      expect(refusal(() => store.recordPublicationActuals({ ...entry, bookId: randomUUID() }))).toBe('BOOK_NOT_FOUND:图书不存在。');
+      expect(refusal(() => store.recordPublicationActuals(unpublished))).toBe('PUBLICATION_REQUIRED:这本书还没有发稿版本；设为发稿版本后才能录入定价与首印。');
+      expect(refusal(() => store.recordPublicationActuals({ ...unpublished, bookId: 'not-a-uuid' }))).toBe('BOOK_INVALID:图书标识无效。');
+      expect(refusal(() => store.recordPublicationActuals({ ...unpublished, bookId: randomUUID() }))).toBe('BOOK_NOT_FOUND:图书不存在。');
       expect(store.inspectEvaluationCalibration().books).toEqual([]);
 
       const designation = await publish(store, book, '二审稿', '纸质版首印');
@@ -133,6 +133,8 @@ describe('设置 › 评估校准与预测 over the real store', () => {
       const listed = store.inspectEvaluationCalibration();
       expect(booksOf(listed)).toEqual([['校准组稿', 1, null, 0]]);
       expect(listed.books[0]!.publicationVersionId).toBe(pending.publicationVersionId);
+      // Each save names the 发稿版本 the page listed.
+      const entry = { ...unpublished, publicationVersionId: listed.books[0]!.publicationVersionId };
 
       // Numbers that are not a price or a print run, and a count the editor did not see, are refused by name.
       for (const [change, expected] of [
@@ -169,8 +171,12 @@ describe('设置 › 评估校准与预测 over the real store', () => {
       const newer = store.inspectDeliverables(bookId).publication.actualsPrompt!;
       expect([newer.stateLabel, newer.actuals]).toEqual(['尚未录入', null]);
       expect(booksOf(store.inspectEvaluationCalibration())).toEqual([['校准组稿', 2, [3990, 3000, 1, false], 2]]);
+      // A form still open on 第 1 次 — its count unmoved by the designation — puts nothing on 第 2 次 (Issue #430 review).
+      expect(refusal(() => store.recordPublicationActuals({ ...entry, expectedEntries: 2, priceFen: 4200 })))
+        .toBe('ACTUALS_MOVED:这本书刚设了新的发稿版本；请看过现在的发稿版本再录入。');
+      expect(counts()).toEqual({ publication_actuals: 2, evaluation_preferences: 0 });
       // The same numbers are no repeat for another 发稿版本.
-      const again = store.recordPublicationActuals({ ...entry, expectedEntries: 2, priceFen: 3990 });
+      const again = store.recordPublicationActuals({ ...entry, publicationVersionId: newer.publicationVersionId, expectedEntries: 2, priceFen: 3990 });
       expect(booksOf(again)).toEqual([['校准组稿', 2, [3990, 3000, 2, true], 3]]);
       expect(again.prediction.booksWithActuals).toBe(1);
       for (const value of [again, store.inspectDeliverables(bookId)]) {
@@ -227,7 +233,7 @@ describe('设置 › 评估校准与预测 over the real store', () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       const off = store.setEvaluationPreferences({ expectedEntries: 0, predictionEnabled: false, calibrationEnabled: false });
-      expect([off.calibration, off.preferenceEntries]).toEqual([{ adjustments: 0, threshold: 10, enabled: false, active: false }, 1]);
+      expect([off.calibration, off.preferenceEntries]).toEqual([{ adjustments: 0, initialScoresConnected: false, threshold: 10, enabled: false, active: false }, 1]);
       expect(refusal(() => store.setEvaluationPreferences({ expectedEntries: 0, predictionEnabled: false, calibrationEnabled: true })))
         .toBe('PREFERENCES_MOVED:评估设置刚被改过；请看过现在的设置再改。');
       expect(refusal(() => store.setEvaluationPreferences({ expectedEntries: 1, predictionEnabled: false, calibrationEnabled: false })))

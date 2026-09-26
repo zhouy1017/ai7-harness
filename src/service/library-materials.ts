@@ -1,14 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants, createReadStream } from 'node:fs';
-import { copyFile, open, rename, rm, stat } from 'node:fs/promises';
+import { copyFile, open, opendir, rename, rm, stat } from 'node:fs/promises';
 import { basename, extname, posix, resolve } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   LIBRARY_MATERIAL_KINDS,
   MAX_LEARNING_ELIGIBILITY_REASON_GRAPHEMES,
   MAX_LIBRARY_MATERIAL_BYTES,
+  MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN,
   MAX_LIBRARY_MATERIAL_TITLE_GRAPHEMES,
+  MAX_LIBRARY_MATERIALS_PAGE,
   type LearningEligibilityChoice,
+  type LibraryMaterialCursor,
   type LibraryMaterialDecisionInput,
   type LibraryMaterialDecisionProjection,
   type LibraryMaterialFormat,
@@ -121,9 +124,20 @@ const OBJECT_EXTENSIONS: Readonly<Record<LibraryMaterialFormat, string>> = {
   UNKNOWN: '.bin',
 };
 const ZIP_LOCAL_HEADER = Uint8Array.of(0x50, 0x4b, 0x03, 0x04);
+/** Where a ZIP local file header's name length and name sit, from the header's start. */
+const ZIP_NAME_LENGTH_OFFSET = 26;
+const ZIP_NAME_OFFSET = 30;
 const EPUB_MIMETYPE = new TextEncoder().encode('mimetypeapplication/epub+zip');
 const WORD_PART = new TextEncoder().encode('word/');
-const HTML_START = /^(?:\s|<!--[\s\S]*?-->)*<(?:!doctype\s+html|html)[\s>]/iu;
+/**
+ * A web page saved as HTML: leading whitespace and comments, then `<html` or `<!doctype html`. A comment ends at its first
+ * `-->`, never past it, so a file of many comments is read in one pass (Issue #427 review; ADR 0072's hostile input).
+ */
+const HTML_START = /^(?:\s|<!--(?:(?!-->)[\s\S])*-->)*<(?:!doctype\s+html|html)[\s>]/iu;
+/** What 放入资料库 leaves beside the kept originals: a copy written aside, and an original under its digest. */
+const PARTIAL_NAME = /^\.partial-[0-9a-f-]{36}$/u;
+const OBJECT_NAME = /^([0-9a-f]{64})\.[a-z]+$/u;
+const PREFIX_NAME = /^[0-9a-f]{2}$/u;
 
 /** Revision 46's relations, created once: a store that predates them gains two empty relations and nothing existing moves. */
 export function initializeLibraryMaterialSchema(db: DatabaseSync): void {
@@ -147,10 +161,15 @@ function startsWith(head: Uint8Array, expected: Uint8Array, offset = 0): boolean
   return true;
 }
 
-function contains(head: Uint8Array, expected: Uint8Array): boolean {
-  outer: for (let start = 0; start + expected.length <= head.length; start += 1) {
-    for (let index = 0; index < expected.length; index += 1) if (head[start + index] !== expected[index]) continue outer;
-    return true;
+/**
+ * Whether the window holds a ZIP entry named under `word/`: a local file header whose own name starts with it (Issue #427
+ * review). A `foreword/` entry, or stored text that mentions `/word/`, is no Word part.
+ */
+function hasWordEntry(head: Uint8Array): boolean {
+  for (let at = 0; at + ZIP_NAME_OFFSET <= head.length; at += 1) {
+    if (!startsWith(head, ZIP_LOCAL_HEADER, at)) continue;
+    const nameLength = head[at + ZIP_NAME_LENGTH_OFFSET]! | (head[at + ZIP_NAME_LENGTH_OFFSET + 1]! << 8);
+    if (nameLength >= WORD_PART.length && startsWith(head, WORD_PART, at + ZIP_NAME_OFFSET)) return true;
   }
   return false;
 }
@@ -164,7 +183,7 @@ export function identifyLibraryMaterialFormat(head: Uint8Array, displayName: str
   if (startsWith(head, ZIP_LOCAL_HEADER)) {
     if (startsWith(head, EPUB_MIMETYPE, 30)) return 'EPUB';
     const format = identifyManuscriptFormat(head, displayName);
-    return format === 'ODT' ? 'ODT' : contains(head, WORD_PART) ? 'DOCX' : 'UNKNOWN';
+    return format === 'ODT' ? 'ODT' : hasWordEntry(head) ? 'DOCX' : 'UNKNOWN';
   }
   const format = identifyManuscriptFormat(head, displayName);
   if (format === 'TXT' || format === 'MD') {
@@ -449,9 +468,37 @@ export class LibraryMaterialLedger {
       await rm(partial, { force: true });
       throw error;
     }
+    // The partial was verified before it took its name, and a rename moves those exact bytes: it is not read a fourth time.
     const kept = await inspectCanonicalDataFile(this.#dataRoot, directory, fileName);
-    requireLibrary(kept.exists && (await digestFile(kept.path)) === digest, 'LIBRARY_MATERIAL_CHANGED', '所选文件在预览之后变了；请重新选择。');
+    requireLibrary(kept.exists, 'LIBRARY_MATERIAL_CHANGED', '所选文件在预览之后变了；请重新选择。');
     return { preview, objectKey };
+  }
+
+  /**
+   * At open (Issue #427 review): what an interrupted 放入资料库 left in the Agent Data Root — a copy written aside, or an
+   * original kept under its digest whose arrival was never recorded — is removed, so a stopped service leaves no file behind.
+   */
+  async sweep(): Promise<void> {
+    if (this.#db.prepare(TABLE_PRESENT).get() === undefined) return;
+    const recorded = new Set((this.#db.prepare('SELECT object_sha256 FROM library_materials').all() as SqlRow[]).map((row) => String(row.object_sha256)));
+    let prefixes: Awaited<ReturnType<typeof opendir>>;
+    try {
+      prefixes = await opendir(resolve(this.#dataRoot, LIBRARY_OBJECT_DIRECTORY, 'sha256'));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+    for await (const prefix of prefixes) {
+      if (!prefix.isDirectory() || !PREFIX_NAME.test(prefix.name)) continue;
+      const directory = await ensureCanonicalDataDirectory(this.#dataRoot, LIBRARY_OBJECT_DIRECTORY, 'sha256', prefix.name);
+      for await (const entry of await opendir(directory)) {
+        if (!entry.isFile()) continue;
+        const object = OBJECT_NAME.exec(entry.name);
+        if (PARTIAL_NAME.test(entry.name) || (object !== null && !recorded.has(object[1]!))) {
+          await rm((await inspectCanonicalDataFile(this.#dataRoot, directory, entry.name)).path, { force: true });
+        }
+      }
+    }
   }
 
   /**
@@ -546,56 +593,86 @@ export class LibraryMaterialLedger {
     ).run(decisionId, materialId, ordinal, decision.kind, bookId, previousSha256, recordedAt, record.json, record.digest);
   }
 
-  /** 知识库 › 资料库 (KB-007): every item, newest first, with where it stands and every decision made about it. */
-  projection(): LibraryMaterialsProjection {
-    const books = (this.#db.prepare('SELECT book_id, title FROM books ORDER BY title COLLATE BINARY, book_id').all() as SqlRow[])
-      .map((row) => ({ bookId: String(row.book_id), title: String(row.title) }));
-    const titles = new Map(books.map((book) => [book.bookId, book.title] as const));
-    const title = (bookId: string): string => titles.get(bookId) ?? this.#bookTitle(bookId);
-    const materials = this.#materials().reverse().map((material): LibraryMaterialProjection => {
-      const decisions = this.#decisions(material);
-      const now = standing(decisions);
-      const attribution: LibraryMaterialProjection['attribution'] = now.attribution === null
-        ? null
-        : now.attribution.scope === 'book'
-          ? { scope: 'book', bookId: now.attribution.bookId, bookTitle: title(now.attribution.bookId), decidedAt: now.attribution.recordedAt }
-          : { scope: 'house', decidedAt: now.attribution.recordedAt };
-      const eligibility: LibraryMaterialProjection['eligibility'] = now.eligibility === null
-        ? null
-        : {
-          choice: now.eligibility.choice,
-          bookTitle: now.eligibility.bookId === null ? null : title(now.eligibility.bookId),
-          reason: now.eligibility.reason,
-          decidedAt: now.eligibility.recordedAt,
-        };
-      const reference: LibraryMaterialProjection['reference'] = attribution === null || eligibility === null || eligibility.choice === 'deferred'
-        ? { state: 'pending' }
-        : attribution.scope === 'book'
-          ? { state: 'available', scope: 'book', bookTitle: attribution.bookTitle }
-          : { state: 'available', scope: 'house' };
-      return {
-        materialId: material.materialId,
-        title: material.title,
-        kind: material.kind,
-        source: material.source,
-        recordedAt: material.recordedAt,
-        digest: material.sha256,
-        attribution,
-        eligibility,
-        eligibilityReset: now.eligibilityReset,
-        reference,
-        decisions: decisions.map((entry): LibraryMaterialDecisionProjection => ({
-          ordinal: entry.ordinal,
-          recordedAt: entry.recordedAt,
-          decision: entry.kind === 'attribution'
-            ? entry.scope === 'book'
-              ? { kind: 'attribution', scope: 'book', bookId: entry.bookId, bookTitle: title(entry.bookId) }
-              : { kind: 'attribution', scope: 'house' }
-            : { kind: 'eligibility', choice: entry.choice, bookTitle: entry.bookId === null ? null : title(entry.bookId), reason: entry.reason },
-        })),
+  /**
+   * 知识库 › 资料库 (KB-007): one page of items, newest first, after `after` — each with where it stands and its latest
+   * decisions — so one answer always fits a service frame however many items the house collects (Issue #427 review).
+   */
+  page(after: LibraryMaterialCursor | null): LibraryMaterialsProjection {
+    requireLibrary(after === null || (UUID_PATTERN.test(after.materialId) && typeof after.recordedAt === 'string' && !Number.isNaN(Date.parse(after.recordedAt))),
+      'LIBRARY_MATERIAL_CURSOR_INVALID', '资料库列表位置无效。');
+    const limit = MAX_LIBRARY_MATERIALS_PAGE + 1;
+    const rows = (after === null
+      ? this.#db.prepare('SELECT * FROM library_materials ORDER BY recorded_at DESC, material_id DESC LIMIT ?').all(limit)
+      : this.#db.prepare(
+        `SELECT * FROM library_materials WHERE recorded_at < ? OR (recorded_at = ? AND material_id < ?)
+         ORDER BY recorded_at DESC, material_id DESC LIMIT ?`,
+      ).all(after.recordedAt, after.recordedAt, after.materialId, limit)) as SqlRow[];
+    const titles = new Map<string, string>();
+    const materials = rows.slice(0, MAX_LIBRARY_MATERIALS_PAGE).map((row) => this.#view(this.#material(row), titles));
+    const last = materials.at(-1);
+    return {
+      materials,
+      nextCursor: rows.length > MAX_LIBRARY_MATERIALS_PAGE && last !== undefined ? { recordedAt: last.recordedAt, materialId: last.materialId } : null,
+    };
+  }
+
+  /** One item as its card reads it: what 放入资料库 and a decision answer with, and what 待我处理 opens beyond the first page. */
+  item(materialId: string): LibraryMaterialProjection {
+    requireLibrary(UUID_PATTERN.test(materialId), 'LIBRARY_MATERIAL_INVALID', '资料标识无效。');
+    const row = this.#db.prepare('SELECT * FROM library_materials WHERE material_id = ?').get(materialId) as SqlRow | undefined;
+    requireLibrary(row !== undefined, 'LIBRARY_MATERIAL_NOT_FOUND', '资料库里没有这份资料。');
+    return this.#view(this.#material(row), new Map());
+  }
+
+  /** An item's card: where it stands, whether a Task may list it, and its decisions — how many, and the latest of them. */
+  #view(material: StoredMaterial, titles: Map<string, string>): LibraryMaterialProjection {
+    const title = (bookId: string): string => {
+      const known = titles.get(bookId) ?? this.#bookTitle(bookId);
+      titles.set(bookId, known);
+      return known;
+    };
+    const decisions = this.#decisions(material);
+    const now = standing(decisions);
+    const attribution: LibraryMaterialProjection['attribution'] = now.attribution === null
+      ? null
+      : now.attribution.scope === 'book'
+        ? { scope: 'book', bookId: now.attribution.bookId, bookTitle: title(now.attribution.bookId), decidedAt: now.attribution.recordedAt }
+        : { scope: 'house', decidedAt: now.attribution.recordedAt };
+    const eligibility: LibraryMaterialProjection['eligibility'] = now.eligibility === null
+      ? null
+      : {
+        choice: now.eligibility.choice,
+        bookTitle: now.eligibility.bookId === null ? null : title(now.eligibility.bookId),
+        reason: now.eligibility.reason,
+        decidedAt: now.eligibility.recordedAt,
       };
-    });
-    return { materials, books };
+    const reference: LibraryMaterialProjection['reference'] = attribution === null || eligibility === null || eligibility.choice === 'deferred'
+      ? { state: 'pending' }
+      : attribution.scope === 'book'
+        ? { state: 'available', scope: 'book', bookTitle: attribution.bookTitle }
+        : { state: 'available', scope: 'house' };
+    return {
+      materialId: material.materialId,
+      title: material.title,
+      kind: material.kind,
+      source: material.source,
+      recordedAt: material.recordedAt,
+      digest: material.sha256,
+      attribution,
+      eligibility,
+      eligibilityReset: now.eligibilityReset,
+      reference,
+      decisionCount: decisions.length,
+      decisions: decisions.slice(-MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN).map((entry): LibraryMaterialDecisionProjection => ({
+        ordinal: entry.ordinal,
+        recordedAt: entry.recordedAt,
+        decision: entry.kind === 'attribution'
+          ? entry.scope === 'book'
+            ? { kind: 'attribution', scope: 'book', bookId: entry.bookId, bookTitle: title(entry.bookId) }
+            : { kind: 'attribution', scope: 'house' }
+          : { kind: 'eligibility', choice: entry.choice, bookTitle: entry.bookId === null ? null : title(entry.bookId), reason: entry.reason },
+      })),
+    };
   }
 
   /**

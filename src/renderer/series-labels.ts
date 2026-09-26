@@ -27,6 +27,17 @@ export const SERIES_MEMBER_COLUMNS = ['图书', '作者', '责编', '加入时�
 export const SERIES_ADD_OPEN = '加入书系…';
 export const SERIES_REMOVE_OPEN = '移出书系…';
 export const SERIES_ADD_NONE = '所有图书都已在这个书系中。';
+/** In place of that when the house holds no Book at all (Issue #63 review): a fresh install may create a 书系 first. */
+export const SERIES_ADD_NO_BOOKS = '书库里还没有图书；导入或新建图书后，才能加入书系。';
+/** 加入书系…'s search over titles, and what it says when nothing matches (Issue #63 review). */
+export const SERIES_ADD_SEARCH_LABEL = '查找书名';
+export const SERIES_ADD_SEARCH = '查找';
+export const SERIES_ADD_NO_MATCH = '没有书名含这些字词、可以加入的图书。';
+/** Each list's next page (Issue #63 review): every Series, member, Book and record is reachable, however many there are. */
+export const SERIES_LIST_MORE = '更多书系…';
+export const SERIES_MEMBERS_MORE = '更多成员…';
+export const SERIES_ADD_MORE = '更多图书…';
+export const SERIES_HISTORY_MORE = '更早的记录…';
 export const SERIES_ADD_LEGEND = '选择要加入的图书';
 export const SERIES_PREVIEW_ACTION = '查看影响';
 export const SERIES_REFRESH = '重新查看影响';
@@ -47,6 +58,7 @@ export const SERIES_STATUS = {
   creating: '正在新建书系…',
   previewing: '正在计算影响…',
   committing: '正在记录成员变更…',
+  loadingMore: '正在读取更多…',
   failed: '无法完成。',
 } as const;
 
@@ -94,6 +106,11 @@ export function bookSeriesChangeLine(change: Pick<SeriesMembershipChangeProjecti
 /** Who made a change and when. */
 export function seriesChangeByline(change: Pick<SeriesMembershipChangeProjection, 'actor' | 'recordedAt'>, instant: (iso: string) => string): string {
   return `${change.actor} · ${instant(change.recordedAt)}`;
+}
+
+/** What a Book's 工作概览 says of the Series beyond those it names: each is reached from 书系. */
+export function bookSeriesMoreLine(count: number): string {
+  return `还在另外 ${count} 个书系中，可以在「书系」里查看。`;
 }
 
 /** A Series the Book is in now, and since when. */

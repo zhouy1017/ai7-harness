@@ -208,7 +208,7 @@ export const BUILTIN_REVIEW_CATEGORY_CONFIGURATION: ReviewCategoryConfiguration 
       batchApply: false,
       searchEngine: false,
       executor: 'unavailable',
-      unavailableReason: '这本书不在任何书系中，也还没有书系知识；加入书系后才能选。',
+      unavailableReason: '这本书不在任何书系中，也还没有书系知识；加入书系、且书系知识接入审阅后才能选。',
       guidelineDocuments: [],
       procedure: { procedureId: 'ai7-review-procedure/series-consistency', title: '书系一致性检查', version: '1' },
     },
@@ -255,6 +255,14 @@ export function reviewCategoryContractInput(entry: ReviewCategoryConfigurationEn
     clauses: entry.guidelineDocuments.flatMap((document) => document.clauses.map((clause) => ({ clauseId: clause.clauseId, text: clause.text }))),
     procedure: { procedureId: entry.procedure.procedureId, title: entry.procedure.title, version: entry.procedure.version },
   };
+}
+
+/**
+ * The guideline documents of a category that the house issued rather than AI7 (Issue #427, S79a review): their clauses are
+ * the house's own text, which the category's prompt would carry to the model.
+ */
+export function houseGuidelineDocuments(entry: ReviewCategoryConfigurationEntry): ReviewGuidelineDocument[] {
+  return entry.guidelineDocuments.filter((document) => document.issuer !== BUILTIN_GUIDELINE_ISSUER);
 }
 
 /**

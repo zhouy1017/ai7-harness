@@ -596,9 +596,6 @@ function reviewCompletionItem(reading: ReviewRunAttentionReading): GlobalAttenti
   });
 }
 
-// ---- ordering ------------------------------------------------------------------------------------------
-
-/** Code-point order, the same on every host; a missing title sorts first. */
 const MAINTENANCE_NEXT_STEPS: Readonly<Record<MaintenanceNextStep, GlobalAttentionNextStep>> = {
   'link-proposal': 'maintenance-link-proposal',
   'link-publication': 'maintenance-link-publication',
@@ -608,10 +605,13 @@ const MAINTENANCE_NEXT_STEPS: Readonly<Record<MaintenanceNextStep, GlobalAttenti
 
 /**
  * 维护事项待处理 (MAINT-012): a named decision of the editor's, returning to the case on its 发稿版本. It stops no other
- * work, so it never blocks; 撤回, 归档 and a complete case never come here.
+ * work, so it never blocks; 撤回, 归档 and a complete case never come here. A 替代 or 再版 waits for its separately
+ * designated version until one is linked (MAINT-007), whatever interim 仍未解决 it recorded, so it reads as waiting.
  */
 function maintenanceItem(reading: MaintenanceAttentionReading): GlobalAttentionItemProjection {
-  return item('decisions', reading.status === 'waiting' ? 'maintenance-waiting' : 'maintenance-pending', {
+  const waiting = reading.status === 'waiting' ||
+    ((reading.classification === 'supersession' || reading.classification === 'reissue') && reading.nextStep === 'link-publication');
+  return item('decisions', waiting ? 'maintenance-waiting' : 'maintenance-pending', {
     itemId: `maintenance:${reading.caseId}`,
     blocked: false,
     at: reading.at,
@@ -670,6 +670,9 @@ function learningMaterialsItem(reading: LearningMaterialsAttentionReading): Glob
   });
 }
 
+// ---- ordering ------------------------------------------------------------------------------------------
+
+/** Code-point order, the same on every host; a missing title sorts first. */
 function compareText(left: string | null, right: string | null): number {
   const a = left ?? '';
   const b = right ?? '';
@@ -802,11 +805,34 @@ function preparedReviewItem(reading: ReviewRunAttentionReading): GlobalAttention
 
 /**
  * Whether a reader follows a Run until it ends: one the execution owner holds — in flight, stopping, or stopped with its
- * cancellation waiting for a place — one waiting on the governor for a place (Issue #49, S14), and one waiting to start
- * once online. A Run left executing that nothing holds is an exception's to name, and nothing moves it.
+ * cancellation waiting for a place — one waiting on the governor for a place (Issue #49, S14), one waiting to start
+ * once online, and one answered and waiting its turn to go on (Issue #423 review). A Run left executing that nothing
+ * holds is an exception's to name, and nothing moves it.
  */
 function followedRun(run: NonNullable<AnalysisTaskAttentionReading['run']>): boolean {
-  return run.progress !== null || run.state === 'authorized' || run.state === 'awaiting-connectivity';
+  return run.progress !== null || run.state === 'authorized' || run.state === 'awaiting-connectivity' || run.state === 'awaiting-clarification';
+}
+
+/**
+ * A Task the editor cancelled while it waited to start (Issue #423 review): its Run never ran, so no Task Outcome names it,
+ * and it stands in 最近完成 as 已取消 with nothing formed, as a cancelled Run's outcome does.
+ */
+function cancelledBeforeStartItem(reading: AnalysisTaskAttentionReading, run: NonNullable<AnalysisTaskAttentionReading['run']>): GlobalAttentionItemProjection {
+  return item('recent', 'analysis-cancelled', {
+    itemId: `analysis:${reading.taskIntentId}`,
+    blocked: false,
+    at: run.stateAt,
+    book: { bookId: reading.bookId, title: reading.bookTitle },
+    object: { kind: 'analysis', mode: reading.mode },
+    facts: { revisionOrdinal: null },
+    nextStep: 'view-run',
+    target: { kind: 'analysis', bookId: reading.bookId, taskIntentId: reading.taskIntentId },
+    technical: [
+      { key: 'task-intent', label: '任务意图', value: reading.taskIntentId },
+      { key: 'run-record', label: '运行记录', value: `${run.runRecordId} · ${run.state}` },
+      { key: 'state-at', label: '状态记录时间', value: run.stateAt },
+    ],
+  });
 }
 
 /**
@@ -819,9 +845,13 @@ function followedRun(run: NonNullable<AnalysisTaskAttentionReading['run']>): boo
 export function composeBookTasks(readings: BookTaskReadings): BookTasksProjection {
   const own = <T extends { readonly bookId: string }>(list: ReadonlyArray<T>): T[] => list.filter((reading) => reading.bookId === readings.bookId);
   const entries: BookTaskItemProjection[] = [];
+  const outcomeRuns = new Set(own(readings.analysisOutcomes).map((reading) => reading.runRecordId));
   for (const reading of own(readings.analysisTasks)) {
     const built = reading.run === null && reading.planRevision === null ? preparedAnalysisItem(reading) : analysisTaskItem(reading, readings.waitingFor);
     if (built !== null) entries.push({ item: built, result: null });
+    else if (reading.run !== null && reading.run.state === 'cancelled' && !outcomeRuns.has(reading.run.runRecordId)) {
+      entries.push({ item: cancelledBeforeStartItem(reading, reading.run), result: null });
+    }
   }
   for (const reading of own(readings.analysisOutcomes)) {
     entries.push({
