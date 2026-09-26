@@ -147,6 +147,7 @@ import type {
   SeriesKnowledgeSpanInput,
   SeriesKnowledgeTarget,
   DataVersionProjection,
+  DatabaseExportActivityProjection,
   DatabaseExportContentsProjection,
   DatabaseExportPreparationProjection,
   DatabaseExportReceiptProjection,
@@ -4888,6 +4889,8 @@ export class EditorialStore {
   close(): void {
     // A backup still under way stops at its next chunk rather than write on past the store (Issue #434 review).
     void this.#scheduledBackups.stop();
+    // A database export still under way stops as 取消导出 stops it (Issue #434 review).
+    void this.#databaseExports.stop();
     this.#taskAuthorization.prepare({ phase: 'cancel-all' });
     this.#reviewRuns.prepare({ phase: 'cancel-all' });
     this.#baselineAnalysis.prepare({ phase: 'cancel-all' });
@@ -11450,22 +11453,52 @@ export class EditorialStore {
 
   /**
    * The destination the Save dialog answered becomes one preparation of the database package — only under this launch's
-   * verified External Export Policy (Issue #434, S86a review).
+   * verified External Export Policy (Issue #434, S86a review) — packed off the request: answers at once with the export's
+   * activity, which 取消导出 stops (V2-UX-EXP-011).
    */
+  startDatabaseExportPreparation(destination: string, available: boolean): DatabaseExportActivityProjection {
+    return this.#databaseExportRead(() => this.#databaseExports.startPreparation(destination, available));
+  }
+
+  /** `按上述方式导出`: the one approval of one unchanged preparation, and the write it permits, under the same policy and the same way. */
+  startDatabaseExportApproval(preparationId: string, available: boolean): DatabaseExportActivityProjection {
+    return this.#databaseExportRead(() => this.#databaseExports.startApproval(preparationId, available));
+  }
+
+  /** 取消导出: the export under way stops until it begins putting the file in place. */
+  cancelDatabaseExport(activityId: string): DatabaseExportActivityProjection {
+    return this.#databaseExportRead(() => this.#databaseExports.cancel(activityId));
+  }
+
+  /** Prepare, and wait for the preparation: what a caller that follows no activity uses. */
   async prepareDatabaseExport(destination: string, available: boolean): Promise<DatabaseExportPreparationProjection> {
     return this.#databaseExportCall(() => this.#databaseExports.prepare(destination, available));
   }
 
-  /** `按上述方式导出`: the one approval of one unchanged preparation, and the write it permits, under the same policy. */
+  /** Approve, and wait for the receipt: what a caller that follows no activity uses. */
   async approveDatabaseExport(preparationId: string, available: boolean): Promise<DatabaseExportReceiptProjection> {
     return this.#databaseExportCall(() => this.#databaseExports.approve(preparationId, available));
   }
 
-  /** The approved database exports, newest first. A read. */
+  /** Resolves once the database export under way, if any, has ended. */
+  async databaseExportSettled(): Promise<void> {
+    await this.#databaseExports.settled();
+  }
+
+  /** At shutdown: the database export under way stops, leaving no package it was writing, before the store closes. */
+  stopDatabaseExports(): Promise<void> {
+    return this.#databaseExports.stop();
+  }
+
+  /** The approved database exports, newest first, and the export under way. A read. */
   inspectDatabaseExports(): DatabaseExportsProjection {
+    return this.#databaseExportRead(() => this.#databaseExports.history());
+  }
+
+  #databaseExportRead<T>(operation: () => T): T {
     this.#assertAvailable();
     try {
-      return this.#databaseExports.history();
+      return operation();
     } catch (error) {
       if (error instanceof DatabaseExportError) throw new StoreError(error.code, error.message);
       throw error;

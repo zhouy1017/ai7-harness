@@ -439,16 +439,16 @@ describe('定期自动备份 over the real store', () => {
       closed.close();
       const before = new AbortController();
       before.abort();
-      await expect(writeDatabasePackage(closed, dataRoot, packagePath, facts, before.signal)).rejects.toThrowError(/aborted/u);
+      await expect(writeDatabasePackage(closed, dataRoot, packagePath, () => facts, { signal: before.signal })).rejects.toThrowError(/aborted/u);
       expect(leftBehind()).toEqual([false, false]);
       // Asked once it is under way, it stops at its next chunk and removes what it wrote.
       const during = new AbortController();
-      const writing = writeDatabasePackage(db, dataRoot, packagePath, facts, during.signal);
+      const writing = writeDatabasePackage(db, dataRoot, packagePath, () => facts, { signal: during.signal });
       during.abort();
       await expect(writing).rejects.toThrowError(/aborted/u);
       expect(leftBehind()).toEqual([false, false]);
       // Not asked, it writes the package whole.
-      expect((await writeDatabasePackage(db, dataRoot, packagePath, facts)).members.map((member) => member.path)).toEqual(['store/ai7.sqlite', 'object.bin']);
+      expect((await writeDatabasePackage(db, dataRoot, packagePath, () => facts)).members.map((member) => member.path)).toEqual(['store/ai7.sqlite', 'object.bin']);
       expect(leftBehind()).toEqual([true, false]);
     } finally {
       db.close();

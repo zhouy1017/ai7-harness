@@ -2943,8 +2943,9 @@ function registerRendererHandlers(
       return service.call('inspectSeriesHistory', { seriesId: input.seriesId ?? null, bookId: input.bookId ?? null, after: input.after ?? null });
     }),
   );
-  // 导出数据库 (Issue #434, S86a): house-wide, bound to no Book route; choosing the file prepares, and approving writes, each
-  // serialized with every other effect.
+  // 导出数据库 (Issue #434, S86a): house-wide, bound to no Book route; choosing the file begins the preparation, and approving
+  // begins the write, each begun in turn with every other effect and followed by the window, which may stop it (Issue #434
+  // review, V2-UX-EXP-011).
   ipcMain.handle(IPC_CHANNELS.chooseDatabaseExportDestination, (event) =>
     envelope(async () => {
       const owned = requireSender(event);
@@ -2953,7 +2954,7 @@ function registerRendererHandlers(
         const destination = await chooseDatabaseExportFile(owned);
         // A cancelled dialog records nothing at all (V2-UX-EXP-020).
         if (destination === undefined) return { outcome: 'cancelled' };
-        return { outcome: 'prepared', preparation: await service.call('prepareDatabaseExport', { destination }) };
+        return { outcome: 'preparing', activity: await service.call('prepareDatabaseExport', { destination }) };
       });
     }),
   );
@@ -2971,6 +2972,16 @@ function registerRendererHandlers(
       requireSender(event);
       requireAuthority();
       return service.call('inspectDatabaseExports', {});
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.cancelDatabaseExport, (event, input: Parameters<RendererApi['cancelDatabaseExport']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('cancelDatabaseExport', { activityId: input.activityId });
+      });
     }),
   );
   // 定期自动备份 (Issue #434, S86b): house-wide; turning the switch is serialized with every other effect.

@@ -412,7 +412,7 @@ export class ScheduledBackups {
     const createdAt = now.toISOString();
     let placed = false;
     try {
-      const written = await writeDatabasePackage(this.#db, this.#dataRoot, partial, { ...facts, createdAt, origin: 'scheduled-backup', contents }, signal);
+      const written = await writeDatabasePackage(this.#db, this.#dataRoot, partial, () => ({ ...facts, createdAt, origin: 'scheduled-backup', contents }), { signal });
       signal.throwIfAborted();
       await rename(partial, target);
       placed = true;
