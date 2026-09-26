@@ -1485,6 +1485,22 @@ async function main() {
     await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '保存当前编辑' && !button.disabled)`, 'document-edit-save-ready');
     await click(renderer, '保存当前编辑', 'document-edit-save');
     await waitFor(renderer, `window.__j07.status().includes('已写入修订日志')`, 'document-edit-durable');
+    // Hold the new version's first animation frame until the next explicit command has taken focus. This reproduces
+    // a slow frame on macOS: an arrival's pending editor restore must not steal focus back from the workflow row.
+    await assertRenderer(renderer, `(() => {
+      const request = window.requestAnimationFrame.bind(window);
+      const cancel = window.cancelAnimationFrame.bind(window);
+      const held = new Map(); let id = 0;
+      window.requestAnimationFrame = (callback) => { const key = --id; held.set(key, callback); return key; };
+      window.cancelAnimationFrame = (key) => { if (!held.delete(key)) cancel(key); };
+      window.__j07.releaseVersionFrame = () => {
+        window.requestAnimationFrame = request; window.cancelAnimationFrame = cancel;
+        for (const callback of held.values()) callback(performance.now());
+        held.clear(); delete window.__j07.releaseVersionFrame;
+        return new Promise((resolve) => request(() => resolve(true)));
+      };
+      return true;
+    })()`, 'document-version-hold-frame');
     await clickSelector(renderer, '.editor-shell[data-deliverable="production-document"] [data-document-action="saveVersion"]', 'document-save-version');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] .editor-toolbar h2')?.textContent === '新闻稿 · 版本 2' && window.__j07.status() === '已保存为版本 2'`, 'document-version-saved', 120_000);
     await assertRenderer(renderer, `(() => { const versions = Array.from(document.querySelectorAll('aside.document-lens ol.document-version-list > li')).map((item) => item.dataset.versionOrdinal + ':' + (item.dataset.versionCurrent ?? '')); return JSON.stringify(versions) === '["2:true","1:"]' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.textContent?.endsWith(${JSON.stringify(DOCUMENT_EDIT)}); })()`, 'document-two-versions');
@@ -1496,24 +1512,43 @@ async function main() {
     const phaseRow = (id) => `document.querySelector('aside.document-lens li.document-phase[data-phase-id="${id}"]')`;
     const phaseState = (id, state) => `${phaseRow(id)}?.dataset.phaseState === ${JSON.stringify(state)}`;
     await assertRenderer(renderer, `(() => { const section = document.querySelector('aside.document-lens section.document-workflow'); const rows = Array.from(section?.querySelectorAll('li.document-phase') ?? []); return (section?.querySelector('.document-workflow-profile')?.textContent ?? '').startsWith('基础书稿编辑流程 2.0.0 · 启用于 ') && section.querySelector('.document-workflow-summary')?.textContent === '七个阶段都未开始' && section.querySelector('.document-workflow-next-empty')?.textContent === '目前没有需要处理的事项' && JSON.stringify(rows.map((row) => row.dataset.phaseId + ':' + row.dataset.phaseState)) === JSON.stringify(['intake', 'source-development', 'drafting', 'review-verification', 'finalization', 'delivery', 'maintenance'].map((id) => id + ':not-started')) && rows.every((row) => JSON.stringify(Array.from(row.querySelectorAll('[data-phase-action]'), (button) => button.textContent)) === '["开始","跳过…"]'); })()`, 'document-workflow-fresh');
+    at('document-workflow-start');
     await clickSelector(renderer, `aside.document-lens li.document-phase[data-phase-id="drafting"] [data-phase-action="start"]`, 'document-workflow-start');
-    await waitFor(renderer, `${phaseState('drafting', 'in-progress')} && window.__j07.status() === '「起草」已开始' && document.activeElement === ${phaseRow('drafting')}`, 'document-workflow-started');
+    await waitFor(renderer, `${phaseState('drafting', 'in-progress')} && window.__j07.status() === '「起草」已开始' && document.activeElement === ${phaseRow('drafting')}`, 'document-workflow-before-version-frame');
+    await assertRenderer(renderer, `window.__j07.releaseVersionFrame()`, 'document-version-release-frame');
+    try {
+      await waitFor(renderer, `${phaseState('drafting', 'in-progress')} && window.__j07.status() === '「起草」已开始' && document.activeElement === ${phaseRow('drafting')}`, 'document-workflow-started');
+    } catch (error) {
+      // Read extra diagnostic state only on failure: successful runs keep the original sequence of renderer calls.
+      at(await renderer.evaluate(`${phaseState('drafting', 'in-progress')} && window.__j07.status() === '「起草」已开始'`) ? 'document-workflow-start-focus' : 'document-workflow-start');
+      throw error;
+    }
+    at('document-workflow-complete');
     await clickSelector(renderer, `aside.document-lens li.document-phase[data-phase-id="drafting"] [data-phase-action="complete"]`, 'document-workflow-complete');
     await waitFor(renderer, `${phaseState('drafting', 'completed')} && window.__j07.status() === '「起草」已完成'`, 'document-workflow-completed');
     // 跳过… opens the phase's reason form with nothing chosen; confirming without a reason asks for one.
+    at('document-workflow-skip-open');
     await clickSelector(renderer, `aside.document-lens li.document-phase[data-phase-id="source-development"] [data-phase-action="skip"]`, 'document-workflow-skip-open');
+    at('document-workflow-skip-focus');
     await waitFor(renderer, `(() => { const form = ${phaseRow('source-development')}?.querySelector('form.document-phase-form[data-phase-form="skip"]'); return form !== null && form !== undefined && document.activeElement === form.querySelector('input[type="radio"]') && Array.from(form.querySelectorAll('input[type="radio"]')).every((radio) => !radio.checked) && form.querySelector('legend')?.textContent === '跳过的原因'; })()`, 'document-workflow-skip-form');
+    at('document-workflow-skip-unreasoned');
     await clickSelector(renderer, `aside.document-lens li.document-phase[data-phase-id="source-development"] [data-phase-form-confirm]`, 'document-workflow-skip-unreasoned');
     await waitFor(renderer, `${phaseRow('source-development')}?.querySelector('.document-phase-form .field-error')?.textContent === '请先选一个原因。' && ${phaseState('source-development', 'not-started')}`, 'document-workflow-skip-asks');
+    at('document-workflow-skip-reason');
     await assertRenderer(renderer, `(() => { const radio = ${phaseRow('source-development')}?.querySelector('input[type="radio"][value="done-elsewhere"]'); radio?.click(); return radio?.checked === true; })()`, 'document-workflow-skip-reason');
+    at('document-workflow-skip-confirm');
     await clickSelector(renderer, `aside.document-lens li.document-phase[data-phase-id="source-development"] [data-phase-form-confirm]`, 'document-workflow-skip-confirm');
     await waitFor(renderer, `${phaseState('source-development', 'skipped')} && window.__j07.status() === '「来源建设」已跳过' && ${phaseRow('source-development')}?.querySelector('details.document-phase-reason summary')?.textContent === '查看原因' && (${phaseRow('source-development')}?.querySelector('details.document-phase-reason .document-phase-latest')?.textContent ?? '').endsWith(' · 这一阶段已在别处完成')`, 'document-workflow-skipped');
     // 重新打开… 起草 in the editor's own words.
+    at('document-workflow-reopen-open');
     await clickSelector(renderer, `aside.document-lens li.document-phase[data-phase-id="drafting"] [data-phase-action="reopen"]`, 'document-workflow-reopen-open');
     await waitFor(renderer, `${phaseRow('drafting')}?.querySelector('form.document-phase-form[data-phase-form="reopen"] legend')?.textContent === '重新打开的原因'`, 'document-workflow-reopen-form');
+    at('document-workflow-reopen-words');
     await assertRenderer(renderer, `(() => { const row = ${phaseRow('drafting')}; const radio = row?.querySelector('input[type="radio"][value="custom"]'); const words = row?.querySelector('textarea[data-phase-reason-text]'); if (!(radio instanceof HTMLInputElement) || !(words instanceof HTMLTextAreaElement)) return false; radio.click(); words.value = ${JSON.stringify(WORKFLOW_REOPEN_WORDS)}; words.dispatchEvent(new Event('input', { bubbles: true })); return radio.checked; })()`, 'document-workflow-reopen-words');
+    at('document-workflow-reopen-confirm');
     await clickSelector(renderer, `aside.document-lens li.document-phase[data-phase-id="drafting"] [data-phase-form-confirm]`, 'document-workflow-reopen-confirm');
     await waitFor(renderer, `${phaseState('drafting', 'reopened')} && window.__j07.status() === '「起草」已重新打开' && (${phaseRow('drafting')}?.querySelector('details.document-phase-reason .document-phase-latest')?.textContent ?? '').endsWith(${JSON.stringify(` · ${WORKFLOW_REOPEN_WORDS}`)}) && ${phaseRow('drafting')}?.querySelector('.document-phase-moves')?.textContent === '共 3 次变动'`, 'document-workflow-reopened');
+    at('document-workflow-summary');
     await assertRenderer(renderer, `(() => { const section = document.querySelector('aside.document-lens section.document-workflow'); return section?.dataset.workflowTransitions === '4' && section.querySelector('.document-workflow-summary')?.textContent === '1 个阶段进行中 · 0 项等待处理' && JSON.stringify(Array.from(section.querySelectorAll('ol.document-workflow-next > li'), (item) => item.textContent)) === '["起草 · 已重新打开"]'; })()`, 'document-workflow-summary');
 
     at('document-card-after-version');
