@@ -15,7 +15,7 @@ const document: ProductionDocumentProjection = {
   documentId: identity,
   branchId: identity,
   createdAt: '2026-09-24T02:00:00.000Z',
-  origin: { sourceVersionId: identity, displayName: '新闻稿初稿.docx' },
+  origin: { sourceVersionId: identity, displayName: '新闻稿初稿.docx', marksNotCarried: 2 },
   versions: [
     { revisionId: identity, label: '版本 2', ordinal: 2, createdAt: '2026-09-24T03:00:00.000Z', revisionDigest: 'a'.repeat(64) },
     { revisionId: identity, label: '版本 1', ordinal: 1, createdAt: '2026-09-24T02:00:00.000Z', revisionDigest: 'b'.repeat(64) },
@@ -63,6 +63,8 @@ describe('the words of 交付 · 生产文档', () => {
 
   it('says what a card holds: the latest version and the material, and a material by its name, format and time', () => {
     expect(labels.documentCardLine(document)).toBe('版本 2 · 由「新闻稿初稿.docx」创建');
+    // Issue #547: how the material was read, beside the card line and in the lens for as long as the document exists.
+    expect(labels.documentOriginMarksLine(2)).toBe('创建时，来源材料里的 2 处批注与修订没有带入：文字按全部修订被拒绝时的样子读出，批注不带入。');
     expect(labels.documentSourceLine({ sourceVersionId: identity, displayName: '新闻稿初稿.docx', format: 'DOCX', createdAt: '' }, '9月24日 10:00'))
       .toBe('新闻稿初稿.docx · DOCX · 导入于 9月24日 10:00');
     expect(labels.documentCreatedLine('新闻稿')).toBe('已创建「新闻稿」');
@@ -80,7 +82,7 @@ describe('the words of 交付 · 生产文档', () => {
       labels.DELIVERY_RECIPIENT_LEGEND, labels.DELIVERY_CUSTOM_RECIPIENT, labels.DELIVERY_CUSTOM_LABEL, labels.DELIVERY_NOTE_LABEL,
       labels.DELIVERY_STATEMENT, ...Object.values(labels.DELIVERY_BLOCKERS), labels.DELIVERY_NO_EXPORT,
       labels.documentDeliveryLine({ ordinal: 1, recipient: { kind: 'publicity', label: '宣传部' }, versionLabel: '版本 2' }, '9月24日 11:00'),
-      labels.documentDeliveredLine(1, '宣传部'), labels.documentCurrentTextChoice(3),
+      labels.documentDeliveredLine(1, '宣传部'), labels.documentCurrentTextChoice(3), labels.documentOriginMarksLine(2),
       labels.RECOVERY_RESTORED_SECTION_LABEL, labels.RECOVERY_RESTORED_HEADING,
     ];
     expect(labels.DOCUMENT_LENS_LABEL).toBe('工作流程');

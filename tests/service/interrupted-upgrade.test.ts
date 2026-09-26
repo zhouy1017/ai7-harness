@@ -21,6 +21,7 @@ import {
   initializeProductionDocumentSchema,
   PRODUCTION_DOCUMENT_SCHEMA_SQL,
 } from '../../src/service/production-document-ledger.js';
+import { initializeProductionDocumentOriginSchema, PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_SQL } from '../../src/service/production-document-origins.js';
 import {
   initializeProductionDocumentWorkflowSchema,
   PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_SQL,
@@ -31,7 +32,7 @@ import { initializePublicationVersionSchema } from '../../src/service/publicatio
 import { initializeReimportGroupSchema } from '../../src/service/reimport-group-ledger.js';
 import { initializeReviewRunSchema } from '../../src/service/review/review-runs.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { downgradeKindCoupledRelationsToRevision23 } from '../support/analysis-ledger-revisions.js';
 import { plantRevision34Relations } from '../support/clarifications.js';
 import { downgradeAnalysisRunStatesToRevision29 } from '../support/connectivity-wait.js';
@@ -126,6 +127,11 @@ interface Revision {
 // Newest first: a store is walked down one revision at a time.
 const REVISIONS: ReadonlyArray<Revision> = [
   {
+    revision: 42,
+    step: initializeProductionDocumentOriginSchema,
+    undo: (database) => drop(database, Object.keys(PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_SQL).reverse()),
+  },
+  {
     revision: 41,
     step: initializeBookDeliveryPackageExportSchema,
     undo: (database) => drop(database, Object.keys(BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_SQL).reverse()),
@@ -209,11 +215,11 @@ describe('an upgrade interrupted before its version stamp', () => {
   for (const { revision, step } of REVISIONS) {
     if (step === null) continue;
     it(`is finished by the next open when revision ${revision}'s relations committed and its stamp did not`, async () => {
-      expect(await opened()).toBe(BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION);
+      expect(await opened()).toBe(PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION);
       const terminal = tables();
       // The plant is a store at the revision before, which opens and upgrades as one.
       plant(revision - 1);
-      expect(await opened()).toBe(BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION);
+      expect(await opened()).toBe(PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION);
       expect(tables()).toEqual(terminal);
       // The step commits the revision's relations, and the process stops before the stamp.
       plant(revision - 1);
@@ -221,15 +227,15 @@ describe('an upgrade interrupted before its version stamp', () => {
         step(database);
         expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(revision - 1);
       });
-      expect(await opened()).toBe(BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION);
+      expect(await opened()).toBe(PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION);
       expect(tables()).toEqual(terminal);
       // Once finished it opens as any store does.
-      expect(await opened()).toBe(BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION);
+      expect(await opened()).toBe(PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION);
     }, 120_000);
   }
 
   it('still refuses a store holding only some of a revision\'s relations', async () => {
-    expect(await opened()).toBe(BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION);
+    expect(await opened()).toBe(PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION);
     plant(36);
     withDatabase((database) => database.exec(PRODUCTION_DOCUMENT_SCHEMA_SQL.production_documents));
     const refused = await EditorialStore.open(roots.dataRoot, roots.codeRoot).then((store) => {

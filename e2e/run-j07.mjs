@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeAdmittedDocx, composeExportAdmittedDocx, readExportedDocx } from './composed-docx.mjs';
+import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx } from './composed-docx.mjs';
 import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 // J-07 (Issue #414, plan slice S65): ⑥ 发稿. An editor saves Milestone Versions of the manuscript — each
@@ -107,6 +107,16 @@ const EXPORT_MEMBERS = Object.freeze([
 // Issue #415 (S66a): a 新闻稿's draft, composed at run time from exact sample1's paragraphs after the manuscript's own,
 // imported as source material and made the Book's 新闻稿; the house's five types in its order; and the document's edit.
 const DRAFT = Object.freeze({ source: ADMITTED_BASELINE_DOCX, startBlock: 31, blocks: 3, title: '新闻稿初稿' });
+// Issue #547: the draft also carries one comment and one tracked replacement by the file's author, every word of them
+// sample1's own. 从来源材料创建 reads its text with every revision rejected and leaves both with the material — its text
+// is still the draft's paragraphs — and the document says so for as long as it exists.
+const DRAFT_MARKS = Object.freeze({
+  header: { sourceBlock: 20 },
+  styledRun: { block: 3 },
+  comment: { block: 1, from: 2, to: 8, author: IMPORTED_MARKS_AUTHOR, text: { block: 14, from: 20, to: 30 } },
+  replacement: { block: 2, from: 3, to: 6, author: IMPORTED_MARKS_AUTHOR, date: '2026-09-01T10:04:00Z', insert: { block: 14, from: 40, to: 44 } },
+});
+const DRAFT_MARKS_LINE = '创建时，来源材料里的 2 处批注与修订没有带入：文字按全部修订被拒绝时的样子读出，批注不带入。';
 const DRAFT_FILE = '新闻稿初稿.docx';
 const DOCUMENT_TYPES = Object.freeze([
   ['news-release', '新闻稿'], ['promotion-article', '宣传文章'], ['review-article', '评论文章'], ['launch-materials', '发布会材料'], ['marketing-points', '营销要点'],
@@ -741,7 +751,7 @@ async function main() {
     const manuscript = resolve(inputs, 'publication.docx');
     await composeExportAdmittedDocx(manuscript, { ...EXCERPT, ...EXPORT_INPUT });
     const draftPath = resolve(inputs, DRAFT_FILE);
-    await composeAdmittedDocx(draftPath, DRAFT);
+    await composeExportAdmittedDocx(draftPath, { ...DRAFT, ...DRAFT_MARKS });
     // Issue #413: the folder the Save dialog's launch control names, beside the data and outside it.
     const exportsRoot = resolve(runRoot, 'exports');
     await mkdir(exportsRoot);
@@ -1459,7 +1469,9 @@ async function main() {
         // Since S66c (Issue #415) the workflow opens the column: 下一项需要处理 and 阶段, then 版本与交付 and the materials.
         sections: JSON.stringify(Array.from(lens?.querySelectorAll('h3') ?? []).map((item) => item.textContent)) === '["下一项需要处理","阶段","版本与交付","这份文档的材料"]',
         versions: JSON.stringify(versions) === '["1:true"]',
-        materials: lens?.querySelector('.document-materials .field-note')?.textContent === '暂无材料。任务简报、引语台账、事实核查记录与参考的范例会列在这里。',
+        materials: lens?.querySelector('.document-materials .document-materials-empty')?.textContent === '暂无材料。任务简报、引语台账、事实核查记录与参考的范例会列在这里。',
+        // Issue #547: how its material was read, standing in the column rather than only in the notice that opened it.
+        originMarks: lens?.querySelector('.document-materials .document-origin-marks')?.textContent === ${JSON.stringify(DRAFT_MARKS_LINE)},
         work: JSON.stringify(work) === '["deliverables:返回交付物"]',
         noAnalysis: shell?.querySelector('[data-records-destination="analysis"]') === null,
         edge: JSON.stringify(edge) === '["navigation"]',
@@ -1558,7 +1570,7 @@ async function main() {
     await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentState === 'document'`, 'document-card-ready');
     // Its workflow at a glance (WORK-005): the summary, the first 下一项 and a chip per phase in its state.
     await assertRenderer(renderer, `(() => { const workflow = window.__j07.card('news-release').querySelector('.document-workflow-card'); return workflow?.querySelector('.document-workflow-summary')?.textContent === '1 个阶段进行中 · 0 项等待处理' && workflow.querySelector('.document-workflow-next-line')?.textContent === '下一项需要处理：起草 · 已重新打开' && JSON.stringify(Array.from(workflow.querySelectorAll('li.phase-chip'), (chip) => chip.dataset.phaseId + ':' + chip.dataset.phaseState)) === JSON.stringify(['intake:not-started', 'source-development:skipped', 'drafting:reopened', 'review-verification:not-started', 'finalization:not-started', 'delivery:not-started', 'maintenance:not-started']); })()`, 'document-card-workflow');
-    await assertRenderer(renderer, `(() => { const card = window.__j07.card('news-release'); return card.dataset.documentVersion === '2' && card.dataset.documentChanged === 'false' && card.querySelector('.document-card-line')?.textContent === ${JSON.stringify(`版本 2 · 由「${DRAFT_FILE}」创建`)} && window.__j07.cardAction('news-release', 'open')?.textContent === '打开' && window.__j07.cardAction('news-release', 'create') === null; })()`, 'document-card-names-the-version');
+    await assertRenderer(renderer, `(() => { const card = window.__j07.card('news-release'); return card.dataset.documentVersion === '2' && card.dataset.documentChanged === 'false' && card.querySelector('.document-card-line')?.textContent === ${JSON.stringify(`版本 2 · 由「${DRAFT_FILE}」创建`)} && card.querySelector('.document-origin-marks')?.textContent === ${JSON.stringify(DRAFT_MARKS_LINE)} && window.__j07.cardAction('news-release', 'open')?.textContent === '打开' && window.__j07.cardAction('news-release', 'create') === null; })()`, 'document-card-names-the-version');
 
     at('document-not-for-this-book');
     // 本书不做 is one record, and 恢复 another; focus stays with the card's own next action.
@@ -1980,6 +1992,8 @@ async function main() {
     await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentState === 'document' && window.__j07.card('news-release').dataset.documentDeliveries === '2' && window.__j07.card('news-release').dataset.documentChangedSinceDelivery === 'false' && window.__j07.packageVersions().length === 2 && (window.__j07.packageVersions()[0].querySelector('ol.package-export-list > li .package-export-line')?.textContent ?? '').startsWith('已导出到所选位置 · 1 个文件 · ')`, 'documents-restart-card');
     await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="open"]', 'documents-restart-open');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] .editor-toolbar h2')?.textContent === '新闻稿 · 版本 3' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.textContent?.endsWith(${JSON.stringify(`${DOCUMENT_EDIT}${DELIVERY_EDIT}`)})`, 'documents-restart-document');
+    // Reopened from 交付物 after the restart, the document still says how its material was read (Issue #547).
+    await assertRenderer(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] aside.document-lens .document-materials .document-origin-marks')?.textContent === ${JSON.stringify(DRAFT_MARKS_LINE)}`, 'documents-restart-origin-marks');
     await assertNoForbiddenWords(renderer, 'documents-without-forbidden-words');
 
     at('zero-loopback-requests');
