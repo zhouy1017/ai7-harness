@@ -117,9 +117,13 @@ export { ExecutionAdmissionError };
  * flight, so a launch there holds one.
  */
 export const EXECUTION_RUN_CAPACITY = 2;
+/** A bounded waiting set; excess starts are recorded as refused before dispatch, never silently dropped. */
+export const EXECUTION_WAITING_CAPACITY = 64;
 export { remapReusedResult } from './reused-result.js';
 
 export interface ExecutionOwnerDependencies {
+  /** Trusted composition may lower, but never exceed, the fixed waiting-memory bound. */
+  readonly waitingCapacity?: number;
   /** The baseline kind's ledger: the one a dispatch that names no ledger runs against. */
   readonly ledger: BaselineAnalysisStore;
   /** How many Runs execute at once; `EXECUTION_RUN_CAPACITY` under development-ci and one under developer-live when absent. */
@@ -372,6 +376,7 @@ export class BaselineAnalysisExecutionOwner {
   readonly #deps: ExecutionOwnerDependencies;
   readonly #broker: CredentialBroker;
   readonly #capacity: number;
+  readonly #waitingCapacity: number;
   /** The Runs executing now, by Run Record (Issue #49, S14): never more than `#capacity`. */
   readonly #active = new Map<string, ActiveRun>();
   /**
@@ -404,6 +409,11 @@ export class BaselineAnalysisExecutionOwner {
       throw new ExecutionAdmissionError('EXECUTION_CAPACITY_INVALID', '运行名额设置无效。');
     }
     this.#capacity = capacity;
+    const waitingCapacity = deps.waitingCapacity ?? EXECUTION_WAITING_CAPACITY;
+    if (!Number.isSafeInteger(waitingCapacity) || waitingCapacity < 1 || waitingCapacity > EXECUTION_WAITING_CAPACITY) {
+      throw new ExecutionAdmissionError('EXECUTION_CAPACITY_INVALID', '等待运行的名额设置无效。');
+    }
+    this.#waitingCapacity = waitingCapacity;
   }
 
   progressFor(runRecordId: string): RunProgress | null {
@@ -448,7 +458,12 @@ export class BaselineAnalysisExecutionOwner {
     }
     // A start this launch could never admit — no route for it, a plan frozen under another route, a Book it may not
     // transmit — is blocked now with the reason, never left reading 等待运行名额 for a turn it cannot take (Issue #49 review).
-    this.#blockOnRefusal(runRecordId, ledger, () => this.#requireStartable(runRecordId, ledger));
+    this.#blockOnRefusal(runRecordId, ledger, () => {
+      this.#requireStartable(runRecordId, ledger);
+      if (this.#queued.length >= this.#waitingCapacity) {
+        throw new ExecutionAdmissionError('EXECUTION_WAITING_QUEUE_FULL', `等待运行的队列已满（最多 ${this.#waitingCapacity} 项）；没有开始这项任务。请等已有任务开始或取消后，再重新准备并开始。`);
+      }
+    });
     this.#queued.push({ runRecordId, ledger });
     return 'queued';
   }
