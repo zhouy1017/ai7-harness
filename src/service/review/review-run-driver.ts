@@ -101,6 +101,11 @@ export class ReviewRunDriver {
     return this.#loops.has(reviewRunId);
   }
 
+  /** Whether any Review Run is being driven now. */
+  get driving(): boolean {
+    return this.#loops.size > 0;
+  }
+
   /** Start no further category or step; resolves once every loop has ended. */
   async dispose(): Promise<void> {
     this.#stopping = true;

@@ -800,6 +800,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validUuid(input.preparationId)) throw new ProtocolError(tentativeId);
       break;
     }
+    // 取消导出: the one export under way it stops.
+    case 'cancelDatabaseExport': {
+      const input = requireInput(value.input, ['activityId'], tentativeId);
+      if (!validUuid(input.activityId)) throw new ProtocolError(tentativeId);
+      break;
+    }
     // 录入定价与首印: the Book, how many entries the editor saw, and two whole positive numbers, the price in 分.
     case 'recordPublicationActuals': {
       const input = requireInput(value.input, ['bookId', 'publicationVersionId', 'expectedEntries', 'priceFen', 'firstPrint'], tentativeId);

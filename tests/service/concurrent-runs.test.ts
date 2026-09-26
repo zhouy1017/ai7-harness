@@ -167,16 +167,20 @@ describe('the execution owner\'s concurrency governor over the real store on exa
       const yi = await preparedBook(store, 'L2 并行 乙', false);
       const bing = await preparedBook(store, 'L2 并行 丙', false);
       gate.allow(1);
+      // Nothing runs yet (Issue #434 review: a replacement waits for this).
+      expect(owner.idle).toBe(true);
 
       const runJia = start(store, owner, jia);
       expect(runJia.admission).toBe('admitted');
       expect(owner.busy).toBe(false);
+      expect(owner.idle).toBe(false);
       const runYi = start(store, owner, yi);
       expect(runYi.admission).toBe('admitted');
       expect(owner.busy).toBe(true);
       // The third start is recorded and waits for a place, first in the queue; a second hand-off of it takes no second place.
       const runBing = start(store, owner, bing);
       expect(runBing.admission).toBe('queued');
+      expect(owner.idle).toBe(false);
       expect(owner.queuePosition(runBing.runRecordId)).toBe(1);
       expect(owner.admitOrQueue(runBing.runRecordId)).toBe('queued');
       expect(owner.queuePosition(runBing.runRecordId)).toBe(1);
@@ -264,6 +268,8 @@ describe('the execution owner\'s concurrency governor over the real store on exa
         expect(projection.resultSetRevision!.provenance.attemptId).toBe(projection.run!.attempt!.attemptId);
       }
       expect(owner.busy).toBe(false);
+      // A paused Run holds no place and writes nothing more until it is continued.
+      expect(owner.idle).toBe(true);
       const settled = store.inspectGlobalAttention(progress, owner.busy);
       expect(active(settled)).toEqual([['L2 并行 甲', 'analysis-paused']]);
       store.markCleanShutdown();

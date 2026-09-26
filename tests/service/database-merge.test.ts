@@ -372,7 +372,8 @@ describe('只导入其中的图书 over the store', () => {
       const preparing = target.prepareDatabaseMerge(preview.previewId, LATER);
       expect(await target.runScheduledBackupIfDue(tomorrow)).toBe(false);
       expect((await preparing).pending).toMatchObject({ kind: 'merge', backupFileName: preMergeBackupFileName(LATER) });
-      // Once it is written, the check runs as ever.
+      // Once it is written, the check runs as ever: a merge keeps what is saved before AI7 starts again, so nothing waits on it.
+      expect(target.replacementWaiting()).toBe(false);
       expect(await target.runScheduledBackupIfDue(tomorrow)).toBe(true);
       const names = await readdir(`${otherRoot}-backups`);
       expect([names.includes(preMergeBackupFileName(LATER)), names.filter((name) => name.includes('.partial'))]).toEqual([true, []]);
@@ -494,10 +495,10 @@ describe('what a merge refuses, puts back and brings forward', () => {
     const db = new DatabaseSync(older);
     try {
       db.exec('DROP TABLE database_merges; PRAGMA user_version = 57;');
-      await writeDatabasePackage(db, roots.dataRoot, packagePath, {
+      await writeDatabasePackage(db, roots.dataRoot, packagePath, () => ({
         dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 57, createdAt: T.toISOString(), origin: 'database-export',
         contents: { books: 1, sourceVersions: 1, libraryMaterials: 0, series: 0 },
-      });
+      }));
     } finally {
       db.close();
     }

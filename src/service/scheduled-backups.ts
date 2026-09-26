@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { lstat, mkdir, readdir, realpath, rename, rm } from 'node:fs/promises';
+import { lstat, mkdir, readdir, realpath, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -13,7 +13,7 @@ import {
 } from '../shared/protocol.js';
 import { canonicalJson, canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
 import { DATABASE_PACKAGE_EXTENSION, writeDatabasePackage } from './database-exports.js';
-import { fileDigest } from './manuscript-export.js';
+import { fileDigest, takeFreeName } from './manuscript-export.js';
 
 /**
  * 定期自动备份 (Issue #434, plan slice S86b; V2-UX-DSTO-018; ADR 0079 §1.4, §1.7): a switch, off by default. On, AI7 writes the
@@ -29,7 +29,8 @@ import { fileDigest } from './manuscript-export.js';
  *
  * Schema revision 56 owns three relations, ledgers like the others: the switch's changes, chained; each backup made, with
  * its file's name, size and digest; and each backup removed — its fourteen days passed, its file was found gone, or the
- * file at its name was found to be another, which is left where it is.
+ * file at its name was found to be another, which is left where it is. Every read of them is a stream, verified row by row
+ * and holding no more than it answers (Issue #434 review): fourteen days of files is not fourteen days of records.
  */
 
 export const BACKUP_KEPT_DAYS = 14;
@@ -41,6 +42,8 @@ export const BACKUP_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 const PREFERENCE_SCHEMA = 'ai7.scheduled-backup.preference/1' as const;
 const BACKUP_SCHEMA = 'ai7.scheduled-backup/1' as const;
 const REMOVAL_SCHEMA = 'ai7.scheduled-backup.removal/1' as const;
+/** How many backups whose days passed a check reads at a time: it removes them in turns of this many. */
+const EXPIRY_BATCH = 16;
 
 /**
  * The one form a backup's name takes, and the only one a record may name (Issue #434 review): a name that leaves the
@@ -185,6 +188,7 @@ export function backupFailureReason(error: unknown): ScheduledBackupFailureReaso
     case 'EROFS':
       return 'not-writable';
     case 'BACKUP_LOCATION_INVALID':
+    case 'BACKUP_LOCATION_UNSUPPORTED':
     case 'EEXIST':
     case 'ENOTDIR':
       return 'location-unavailable';
@@ -262,12 +266,12 @@ export class ScheduledBackups {
     this.#sources = sources;
   }
 
-  /** The switch as its last change left it, the chain verified; off until the editor turns it on. */
+  /** The switch as its last change left it, the chain verified as it is read; off until the editor turns it on. */
   preference(): { enabled: boolean; ordinal: number } {
-    const rows = this.#db.prepare('SELECT * FROM backup_preferences ORDER BY ordinal').all() as SqlRow[];
     let before: string | null = null;
     let enabled = false;
-    rows.forEach((row, index) => {
+    let count = 0;
+    for (const row of this.#db.prepare('SELECT * FROM backup_preferences ORDER BY ordinal').iterate() as Iterable<SqlRow>) {
       const preferenceId = text(row.preference_id);
       const supersedes = row.supersedes_preference_id === null ? null : text(row.supersedes_preference_id);
       enabled = integer(row.enabled) === 1;
@@ -280,10 +284,11 @@ export class ScheduledBackups {
         supersedes,
         recordedAt: text(row.recorded_at),
       });
-      requireBackup(integer(row.ordinal) === index + 1 && supersedes === before, 'SCHEDULED_BACKUP_RECORD_INVALID', INVALID);
+      requireBackup(integer(row.ordinal) === count + 1 && supersedes === before, 'SCHEDULED_BACKUP_RECORD_INVALID', INVALID);
       before = preferenceId;
-    });
-    return { enabled, ordinal: rows.length };
+      count += 1;
+    }
+    return { enabled, ordinal: count };
   }
 
   /** Turn the switch, from exactly the state the editor saw. It records the switch only: the backup is the check's. */
@@ -373,11 +378,12 @@ export class ScheduledBackups {
   }
 
   #due(now: Date): boolean {
-    return this.preference().enabled && !this.#madeWithinDay(this.#kept(), now);
+    return this.preference().enabled && !this.#madeWithinDay(this.#scan(1).kept[0] ?? null, now);
   }
 
-  #madeWithinDay(kept: ReadonlyArray<KeptBackup>, now: Date): boolean {
-    return kept.some((backup) => now.getTime() - Date.parse(backup.createdAt) < BACKUP_INTERVAL_MS);
+  /** Whether the newest backup kept was made in the day before `now`. */
+  #madeWithinDay(newest: KeptBackup | null, now: Date): boolean {
+    return newest !== null && now.getTime() - Date.parse(newest.createdAt) < BACKUP_INTERVAL_MS;
   }
 
   #enabled(): boolean {
@@ -391,8 +397,8 @@ export class ScheduledBackups {
   projection(now: Date): ScheduledBackupsProjection {
     const preference = this.preference();
     const location = backupLocationFor(this.#dataRoot);
-    const kept = this.#kept();
-    const backups: ScheduledBackupProjection[] = kept.slice(0, MAX_SCHEDULED_BACKUPS_LISTED).map((backup) => ({
+    const { kept, total } = this.#scan(MAX_SCHEDULED_BACKUPS_LISTED);
+    const backups: ScheduledBackupProjection[] = kept.map((backup) => ({
       backupId: backup.backupId,
       fileName: backup.fileName,
       byteLength: backup.byteLength,
@@ -407,12 +413,12 @@ export class ScheduledBackups {
       location,
       keptDays: BACKUP_KEPT_DAYS,
       backups,
-      total: kept.length,
+      total,
       nextDueAt: !preference.enabled ? null
         : latest === null ? now.toISOString()
           : new Date(Math.max(now.getTime(), Date.parse(latest.createdAt) + BACKUP_INTERVAL_MS)).toISOString(),
       // The check under way is writing the backup, or will once it has removed those whose days passed.
-      backingUp: this.#inFlight !== null && (this.#writing || (preference.enabled && !this.#madeWithinDay(kept, now))),
+      backingUp: this.#inFlight !== null && (this.#writing || (preference.enabled && !this.#madeWithinDay(latest, now))),
       lastFailure: this.#lastFailure,
     };
   }
@@ -425,14 +431,25 @@ export class ScheduledBackups {
     requireBackup(this.#db.prepare('SELECT 1 FROM scheduled_backups WHERE file_name = ?').get(fileName) === undefined && !(await present(target)),
       'SCHEDULED_BACKUP_EXISTS', '这一刻的备份已经有了。');
     const partial = join(location, `.${randomUUID()}${DATABASE_PACKAGE_EXTENSION}.partial`);
-    const facts = this.#sources.facts();
-    const contents = this.#sources.contents();
     const createdAt = now.toISOString();
     let placed = false;
     try {
-      const written = await writeDatabasePackage(this.#db, this.#dataRoot, partial, { ...facts, createdAt, origin: 'scheduled-backup', contents }, signal);
+      // What the backup holds is counted with its copy of the store, so the record says what the file holds (Issue #434 review).
+      const written = await writeDatabasePackage(this.#db, this.#dataRoot, partial, () => ({
+        ...this.#sources.facts(),
+        createdAt,
+        origin: 'scheduled-backup',
+        contents: this.#sources.contents(),
+      }), { signal });
+      const { facts } = written;
+      const contents = facts.contents;
       signal.throwIfAborted();
-      await rename(partial, target);
+      // Only ever a new file (Issue #434 review): the name is taken at the instant the backup is put there, so a file that
+      // appeared at it while the package was written is left as it is, as every export leaves one.
+      const taken = await takeFreeName(partial, target);
+      requireBackup(taken !== 'exists', 'SCHEDULED_BACKUP_EXISTS', '这一刻的备份已经有了。');
+      requireBackup(taken !== 'unsupported', 'BACKUP_LOCATION_UNSUPPORTED', '备份位置所在的磁盘不能安全地新建文件。');
+      requireBackup(taken === 'taken', 'SCHEDULED_BACKUP_PLACE_FAILED', '无法把备份放到备份位置。');
       placed = true;
       signal.throwIfAborted();
       const backupId = randomUUID();
@@ -489,21 +506,40 @@ export class ScheduledBackups {
    * cannot be dealt with now stays kept, the others go on, and the next check tries it again.
    */
   async #removeExpired(now: Date, signal: AbortSignal): Promise<void> {
-    const expired = this.#kept().filter((backup) => now.getTime() - Date.parse(backup.createdAt) >= BACKUP_KEPT_DAYS * DAY_MS);
-    if (expired.length === 0) return;
-    const location = await existingBackupLocation(this.#dataRoot);
-    for (const backup of expired) {
-      signal.throwIfAborted();
-      try {
-        const path = location === null ? null : join(location, backup.fileName);
-        const state = path === null ? 'missing' : await this.#fileState(path, backup);
-        if (state === 'unreadable') continue;
-        if (state === 'ours') await rm(path!);
-        this.#recordRemoval(backup.backupId, state === 'ours' ? 'expired' : state, now);
-      } catch {
-        // This one stays kept until the next check.
+    const cutoff = new Date(now.getTime() - BACKUP_KEPT_DAYS * DAY_MS).toISOString();
+    // A few at a time, oldest first, each turn after the last one read: one that stays kept is not read again this check.
+    let after: { createdAt: string; rowid: number } | null = null;
+    let location: string | null | undefined;
+    for (;;) {
+      const batch = this.#expiredAfter(cutoff, after);
+      if (batch.length === 0) return;
+      location ??= await existingBackupLocation(this.#dataRoot);
+      for (const { backup } of batch) {
+        signal.throwIfAborted();
+        try {
+          const path = location === null ? null : join(location, backup.fileName);
+          const state = path === null ? 'missing' : await this.#fileState(path, backup);
+          if (state === 'unreadable') continue;
+          if (state === 'ours') await rm(path!);
+          this.#recordRemoval(backup.backupId, state === 'ours' ? 'expired' : state, now);
+        } catch {
+          // This one stays kept until the next check.
+        }
       }
+      const last = batch[batch.length - 1]!;
+      after = { createdAt: last.backup.createdAt, rowid: last.rowid };
     }
+  }
+
+  /** The next backups kept whose fourteen days had passed at `cutoff`, oldest first, after `after`: a turn's worth, verified. */
+  #expiredAfter(cutoff: string, after: { createdAt: string; rowid: number } | null): Array<{ backup: KeptBackup; rowid: number }> {
+    const rows = this.#db.prepare(
+      `SELECT b.rowid backup_rowid, b.*, NULL removal_id FROM scheduled_backups b
+       WHERE NOT EXISTS (SELECT 1 FROM scheduled_backup_removals r WHERE r.backup_id = b.backup_id)
+         AND b.created_at <= ? AND (? IS NULL OR (b.created_at, b.rowid) > (?, ?))
+       ORDER BY b.created_at, b.rowid LIMIT ${EXPIRY_BATCH}`,
+    ).all(cutoff, after?.createdAt ?? null, after?.createdAt ?? null, after?.rowid ?? null) as SqlRow[];
+    return rows.map((row) => ({ backup: this.#verified(row).backup, rowid: integer(row.backup_rowid) }));
   }
 
   /** Whether the file at a backup's name is still the one AI7 made, gone, another, or cannot be read now. */
@@ -530,49 +566,63 @@ export class ScheduledBackups {
     ).run(removalId, backupId, reason, removedAt, record.json, record.digest);
   }
 
-  /** The backups not yet removed, newest first, each record verified. */
-  #kept(): KeptBackup[] {
+  /**
+   * One pass over every backup record, newest first, each verified with its removal's as it is read (Issue #434 review),
+   * holding only the newest backups still kept, up to `listed`, and how many are kept.
+   */
+  #scan(listed: number): { kept: KeptBackup[]; total: number } {
+    const kept: KeptBackup[] = [];
+    let total = 0;
     const rows = this.#db.prepare(
       `SELECT b.*, r.removal_id, r.reason, r.removed_at, r.canonical_json removal_json, r.sha256 removal_sha256
        FROM scheduled_backups b LEFT JOIN scheduled_backup_removals r ON r.backup_id = b.backup_id
        ORDER BY b.created_at DESC, b.rowid DESC`,
-    ).all() as SqlRow[];
-    const kept: KeptBackup[] = [];
+    ).iterate() as Iterable<SqlRow>;
     for (const row of rows) {
-      const backupId = text(row.backup_id);
-      // Only a name of the one form a backup is given: a record naming anything else is not AI7's (Issue #434 review).
-      requireBackup(BACKUP_FILE_NAME.test(text(row.file_name)), 'SCHEDULED_BACKUP_RECORD_INVALID', INVALID);
-      const contents: unknown = JSON.parse(text(row.contents_json));
-      requireStored(row.canonical_json, row.sha256, {
-        schema: BACKUP_SCHEMA,
+      const { backup, removed } = this.#verified(row);
+      if (removed) continue;
+      total += 1;
+      if (kept.length < listed) kept.push(backup);
+    }
+    return { kept, total };
+  }
+
+  /** One backup record, and its removal's when it has one, verified against their digests and their rows. */
+  #verified(row: SqlRow): { backup: KeptBackup; removed: boolean } {
+    const backupId = text(row.backup_id);
+    // Only a name of the one form a backup is given: a record naming anything else is not AI7's (Issue #434 review).
+    requireBackup(BACKUP_FILE_NAME.test(text(row.file_name)), 'SCHEDULED_BACKUP_RECORD_INVALID', INVALID);
+    const contents: unknown = JSON.parse(text(row.contents_json));
+    requireStored(row.canonical_json, row.sha256, {
+      schema: BACKUP_SCHEMA,
+      backupId,
+      fileName: text(row.file_name),
+      byteLength: integer(row.byte_length),
+      fileSha256: text(row.file_sha256),
+      dataVersion: integer(row.data_version),
+      schemaRevision: integer(row.schema_revision),
+      softwareVersion: text(row.software_version),
+      contents,
+      createdAt: text(row.created_at),
+    });
+    if (row.removal_id !== null) {
+      requireStored(row.removal_json, row.removal_sha256, {
+        schema: REMOVAL_SCHEMA,
+        removalId: text(row.removal_id),
         backupId,
-        fileName: text(row.file_name),
-        byteLength: integer(row.byte_length),
-        fileSha256: text(row.file_sha256),
-        dataVersion: integer(row.data_version),
-        schemaRevision: integer(row.schema_revision),
-        softwareVersion: text(row.software_version),
-        contents,
-        createdAt: text(row.created_at),
-      });
-      if (row.removal_id !== null) {
-        requireStored(row.removal_json, row.removal_sha256, {
-          schema: REMOVAL_SCHEMA,
-          removalId: text(row.removal_id),
-          backupId,
-          reason: text(row.reason),
-          removedAt: text(row.removed_at),
-        });
-        continue;
-      }
-      kept.push({
-        backupId,
-        fileName: text(row.file_name),
-        byteLength: integer(row.byte_length),
-        fileSha256: text(row.file_sha256),
-        createdAt: text(row.created_at),
+        reason: text(row.reason),
+        removedAt: text(row.removed_at),
       });
     }
-    return kept;
+    return {
+      backup: {
+        backupId,
+        fileName: text(row.file_name),
+        byteLength: integer(row.byte_length),
+        fileSha256: text(row.file_sha256),
+        createdAt: text(row.created_at),
+      },
+      removed: row.removal_id !== null,
+    };
   }
 }

@@ -1,10 +1,10 @@
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { copyFile, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { strFromU8, unzipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { parseCanonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { canonicalRecord, parseCanonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { writeDatabasePackage } from '../../src/service/database-exports.js';
 import {
   DATABASE_REPLACEMENT_TRIGGER_SQL,
@@ -17,6 +17,7 @@ import {
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { DATABASE_MERGE_SCHEMA_VERSION, SCHEDULED_BACKUP_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { MAX_DATABASE_REPLACEMENTS_LISTED } from '../../src/shared/protocol.js';
 
 // Service-integration suite (L2) for 导入数据库 and 替换本机全部数据 (Issue #434, plan slice S86c; V2-UX-DSTO-017; ADR 0079 §1.3,
 // §1.4) over the real store: the preview of a package the store exported — origin, versions, contents, every member verified —
@@ -68,9 +69,9 @@ async function handmade(name: string, dataVersion: number, schemaRevision: numbe
   try {
     database.exec(`CREATE TABLE marker (value TEXT) STRICT; PRAGMA user_version = ${schemaRevision};`);
     const path = join(roots.inputRoot, name);
-    await writeDatabasePackage(database, other, path, {
+    await writeDatabasePackage(database, other, path, () => ({
       dataVersion, softwareVersion: '0.1.0', schemaRevision, createdAt: T.toISOString(), origin: 'database-export', contents,
-    });
+    }));
     return path;
   } finally {
     database.close();
@@ -358,11 +359,12 @@ describe('导入数据库 over the real store', () => {
       const preparing = store.prepareDatabaseReplacement(preview.previewId, LATER);
       expect(await store.runScheduledBackupIfDue(hours(25))).toBe(false);
       expect((await preparing).pending).toMatchObject({ backupFileName: preReplaceBackupFileName(LATER) });
-      // Once it is written, the check runs as ever.
-      expect(await store.runScheduledBackupIfDue(hours(25))).toBe(true);
+      // Once it is written the replacement waits, and until AI7's next start the check makes no backup, whose record the
+      // replacement would lose (Issue #434 review).
+      expect(await store.runScheduledBackupIfDue(hours(25))).toBe(false);
       const names = await readdir(backups());
       expect([names.includes(preReplaceBackupFileName(LATER)), names.filter((name) => name.includes('.partial'))]).toEqual([true, []]);
-      expect(store.inspectScheduledBackups(hours(25)).total).toBe(2);
+      expect(store.inspectScheduledBackups(hours(25)).total).toBe(1);
       store.markCleanShutdown();
     } finally {
       store.close();
@@ -376,7 +378,125 @@ describe('导入数据库 over the real store', () => {
       const rollingBack = store.rollBackDatabaseReplacement(replaced.rollBackOf!, hours(50));
       expect(await store.runScheduledBackupIfDue(hours(74))).toBe(false);
       expect((await rollingBack).pending).toMatchObject({ kind: 'roll-back', backupFileName: preReplaceBackupFileName(hours(50)) });
-      expect(await store.runScheduledBackupIfDue(hours(74))).toBe(true);
+      expect(await store.runScheduledBackupIfDue(hours(74))).toBe(false);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+});
+
+describe('替换本机全部数据 at its second review (Issue #434 review)', () => {
+  it('writes nothing more while a replacement waits, and 取消替换 lets the data be written again', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      createBook(store, '甲书');
+      const packagePath = await exported(store, 'AI7 数据库.ai7db');
+      await store.setScheduledBackup({ enabled: true, expectedOrdinal: 0 }, T);
+      await store.runScheduledBackupIfDue(T);
+      expect(store.replacementWaiting()).toBe(false);
+      const waiting = await store.prepareDatabaseReplacement((await store.inspectDatabaseImport(packagePath)).previewId, LATER);
+      expect(store.replacementWaiting()).toBe(true);
+      // A day on, a backup is due; it is not made while the replacement waits, since its record would be lost with the data.
+      const dayOn = new Date(T.getTime() + 25 * 60 * 60 * 1000);
+      expect(await store.runScheduledBackupIfDue(dayOn)).toBe(false);
+      expect(store.inspectScheduledBackups(dayOn).total).toBe(1);
+      // 取消替换: the data is written again, and the backup that was due is made.
+      await store.cancelDatabaseReplacement(waiting.pending!.replacementId);
+      expect(store.replacementWaiting()).toBe(false);
+      expect(await store.runScheduledBackupIfDue(dayOn)).toBe(true);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
+  it('replaces nothing at the next open when what waits has changed since it was prepared, and records why', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      createBook(store, '甲书');
+      const packagePath = await exported(store, 'AI7 数据库.ai7db');
+      createBook(store, '乙书');
+      await store.prepareDatabaseReplacement((await store.inspectDatabaseImport(packagePath)).previewId, T);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    // What waits is changed before AI7 starts again: its copy of the store is emptied.
+    await writeFile(join(replacementStagingFor(roots.dataRoot), 'incoming', 'store', 'ai7.sqlite'), '');
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(titles(store)).toEqual(['乙书', '甲书']);
+      const read = await store.inspectDatabaseReplacements();
+      expect(read.replacements).toHaveLength(1);
+      expect(read.replacements[0]).toMatchObject({ kind: 'replace', outcome: 'failed', failure: 'changed', packageFileName: 'AI7 数据库.ai7db' });
+      expect([read.pending, read.rollBackOf]).toEqual([null, null]);
+      expect(existsSync(replacementStagingFor(roots.dataRoot))).toBe(false);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
+  it('never puts the backup before a replacement over a file that appeared at its name, and prepares nothing', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      createBook(store, '甲书');
+      const packagePath = await exported(store, 'AI7 数据库.ai7db');
+      // Enough data that the backup takes many chunks to write.
+      mkdirSync(join(roots.dataRoot, 'bulk'), { recursive: true });
+      await writeFile(join(roots.dataRoot, 'bulk', 'filler.bin'), Buffer.alloc(24 << 20, 7));
+      const preview = await store.inspectDatabaseImport(packagePath);
+      const preparing = store.prepareDatabaseReplacement(preview.previewId, T);
+      const deadline = Date.now() + 60_000;
+      while (!(existsSync(backups()) && readdirSync(backups()).some((name) => /\.ai7db\.partial$/u.test(name)))) {
+        if (Date.now() > deadline) throw new Error('timed out waiting for the backup to be written');
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      await writeFile(join(backups(), preReplaceBackupFileName(T)), 'another program put this here');
+      expect(code(await preparing.catch((error: unknown) => error))).toBe('DATABASE_REPLACEMENT_BACKUP_EXISTS');
+      expect(await readFile(join(backups(), preReplaceBackupFileName(T)), 'utf8')).toBe('another program put this here');
+      expect(readdirSync(backups()).filter((name) => name.includes('.partial'))).toEqual([]);
+      expect(store.replacementWaiting()).toBe(false);
+      expect(existsSync(replacementStagingFor(roots.dataRoot))).toBe(false);
+      expect((await store.inspectDatabaseReplacements()).pending).toBeNull();
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
+  it('lists the newest replacements and counts the rest, each verified as it is read', async () => {
+    const created = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      created.markCleanShutdown();
+    } finally {
+      created.close();
+    }
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      for (let index = 0; index <= MAX_DATABASE_REPLACEMENTS_LISTED; index += 1) {
+        const at = new Date(T.getTime() + index * 60_000).toISOString();
+        const stored = {
+          replacementId: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`, kind: 'replace', outcome: 'failed',
+          packageFileName: `AI7 数据库 ${index}.ai7db`, packageSha256: 'a'.repeat(64), backupFileName: `AI7 替换前备份 ${index}.ai7db`,
+          backupSha256: 'b'.repeat(64), preparedAt: at, recordedAt: at, failure: 'changed',
+        };
+        const record = canonicalRecord({ schema: 'ai7.database-replacement/1', ...stored });
+        database.prepare(
+          `INSERT INTO database_replacements(replacement_id, kind, outcome, package_file_name, package_sha256, backup_file_name, backup_sha256, prepared_at, recorded_at, canonical_json, sha256)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(stored.replacementId, stored.kind, stored.outcome, stored.packageFileName, stored.packageSha256, stored.backupFileName,
+          stored.backupSha256, stored.preparedAt, stored.recordedAt, record.json, record.digest);
+      }
+    } finally {
+      database.close();
+    }
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const read = await store.inspectDatabaseReplacements();
+      expect([read.replacements.length, read.total]).toEqual([MAX_DATABASE_REPLACEMENTS_LISTED, MAX_DATABASE_REPLACEMENTS_LISTED + 1]);
+      expect(read.replacements[0]).toMatchObject({ packageFileName: `AI7 数据库 ${MAX_DATABASE_REPLACEMENTS_LISTED}.ai7db`, outcome: 'failed', failure: 'changed' });
       store.markCleanShutdown();
     } finally {
       store.close();

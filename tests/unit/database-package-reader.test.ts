@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { strToU8, zipSync } from 'fflate';
+import { strToU8, unzipSync, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { writeDatabasePackage } from '../../src/service/database-exports.js';
@@ -36,9 +36,9 @@ async function writtenPackage(): Promise<string> {
   try {
     database.exec('CREATE TABLE books (book_id TEXT PRIMARY KEY) STRICT; INSERT INTO books VALUES (\'b\'); PRAGMA user_version = 55;');
     const path = join(root, 'written.ai7db');
-    await writeDatabasePackage(database, dataRoot, path, {
+    await writeDatabasePackage(database, dataRoot, path, () => ({
       dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 55, createdAt: '2026-09-25T02:00:00.000Z', origin: 'database-export', contents,
-    });
+    }));
     return path;
   } finally {
     database.close();
@@ -55,6 +55,23 @@ function craftedPackage(members: Record<string, Uint8Array>, named?: Array<{ pat
   const path = join(root, `crafted-${Object.keys(members).length}-${Math.random().toString(16).slice(2)}.ai7db`);
   writeFileSync(path, zipSync({ ...members, 'manifest.json': strToU8(manifest.json) }, { mtime: fixedArchiveTime() }));
   return path;
+}
+
+/** Rewrite, in the central directory, the size `path` inflates to: what the reader holds the entry to. */
+function declaring(file: string, path: string, size: number): void {
+  const bytes = readFileSync(file);
+  const name = Buffer.from(path, 'utf8');
+  let patched = 0;
+  for (let at = 0; at + 46 <= bytes.length; at += 1) {
+    if (bytes.readUInt32LE(at) !== 0x02014b50) continue;
+    const length = bytes.readUInt16LE(at + 28);
+    if (bytes.subarray(at + 46, at + 46 + length).equals(name)) {
+      bytes.writeUInt32LE(size, at + 24);
+      patched += 1;
+    }
+  }
+  expect(patched).toBe(1);
+  writeFileSync(file, bytes);
 }
 
 async function refusal(path: string): Promise<unknown> {
@@ -116,6 +133,49 @@ describe('reading a database package', () => {
       .toBe('DATABASE_PACKAGE_INVALID');
     // A crafted package that is whole is read.
     expect((await verifyDatabasePackage(craftedPackage({ 'store/ai7.sqlite': store }))).manifest.members).toHaveLength(1);
+  });
+
+  it('holds every entry to the size it declares, and takes nothing past it (Issue #434 review)', async () => {
+    const store = strToU8('a store');
+    const large = new Uint8Array(256 * 1024).fill(0x61);
+    const named = (bytes: number) => [
+      { path: 'store/ai7.sqlite', bytes: store.byteLength, sha256: digest(store) },
+      { path: 'objects/large.bin', bytes, sha256: digest(large) },
+    ];
+    // An entry that inflates to more than it declares is damage, and nothing past the declared size is handed on.
+    const over = craftedPackage({ 'store/ai7.sqlite': store, 'objects/large.bin': large }, named(100));
+    declaring(over, 'objects/large.bin', 100);
+    let handed = 0;
+    let member = '';
+    const visit = {
+      begin: async (next: { path: string }) => { member = next.path; },
+      data: async (chunk: Uint8Array) => { if (member === 'objects/large.bin') handed += chunk.byteLength; },
+      end: async () => undefined,
+    };
+    expect(await verifyDatabasePackage(over, visit).then(() => null, (error: unknown) => (error as { code?: string }).code)).toBe('DATABASE_PACKAGE_DAMAGED');
+    expect(handed).toBeLessThanOrEqual(100);
+    // One that ends short of what it declares is damage too.
+    const under = craftedPackage({ 'store/ai7.sqlite': store, 'objects/large.bin': large }, named(large.byteLength + 1));
+    declaring(under, 'objects/large.bin', large.byteLength + 1);
+    expect(await refusal(under)).toBe('DATABASE_PACKAGE_DAMAGED');
+    // A manifest that inflates past its declared size is refused, never read whole.
+    const manifest = craftedPackage({ 'store/ai7.sqlite': store });
+    declaring(manifest, 'manifest.json', 16);
+    expect(await refusal(manifest)).toBe('DATABASE_PACKAGE_DAMAGED');
+    // And one that ends short of its declared size is not read as whole.
+    const shortManifest = craftedPackage({ 'store/ai7.sqlite': store });
+    const manifestBytes = unzipSync(readFileSync(shortManifest))['manifest.json']!.byteLength;
+    declaring(shortManifest, 'manifest.json', manifestBytes + 10);
+    expect(await refusal(shortManifest)).toBe('DATABASE_PACKAGE_DAMAGED');
+    // A stored entry whose two sizes differ is not one a package holds.
+    const stored = join(root, 'stored.ai7db');
+    const storedManifest = canonicalRecord({
+      schema: 'ai7.database-package/1', dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 55, createdAt: '2026-09-25T02:00:00.000Z',
+      origin: 'database-export', contents, credentials: 'excluded', members: [{ path: 'store/ai7.sqlite', bytes: 3, sha256: digest(store) }],
+    });
+    writeFileSync(stored, zipSync({ 'store/ai7.sqlite': [store, { level: 0 }], 'manifest.json': strToU8(storedManifest.json) }, { mtime: fixedArchiveTime() }));
+    declaring(stored, 'store/ai7.sqlite', 3);
+    expect(await refusal(stored)).toBe('DATABASE_PACKAGE_INVALID');
   });
 
   it('names the member paths a package may carry', () => {
