@@ -661,8 +661,8 @@ async function main() {
     await click(renderer, '返回', 'evaluation-pages-return');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'evaluation-pages-library');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id="${thirdId}"]`, 'evaluation-pages-book');
-    await waitFor(renderer, `document.querySelector('.book-evaluation-summary [data-evaluation-action="open"]')`, 'evaluation-pages-overview');
-    await clickSelector(renderer, '.book-evaluation-summary [data-evaluation-action="open"]', 'evaluation-pages-open');
+    await waitFor(renderer, `document.querySelector('.editor-shell [data-work-destination="evaluation"]')`, 'evaluation-pages-manuscript');
+    await clickSelector(renderer, '.editor-shell [data-work-destination="evaluation"]', 'evaluation-pages-open');
     await readEvaluation(renderer, (page) => page.record?.heading === '第 2 版 · 编辑评分中', 'evaluation-pages-second');
     for (let ordinal = 2; ordinal <= 12; ordinal += 1) {
       await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', 'evaluation-pages-conclusion');
