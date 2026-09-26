@@ -361,7 +361,6 @@ import {
   seriesMemberAlready,
   seriesLearningFacts,
   seriesMembershipImpact,
-  seriesHistoryOrder,
   seriesPreviewDigest,
   weighedPage,
   type StoredMembershipChange,
@@ -10858,8 +10857,8 @@ export class EditorialStore {
     const series = this.#requireSeries(input.seriesId);
     const bookTitle = this.#evaluationBookTitle(input.bookId);
     requireStore(input.kind === 'add' || input.kind === 'remove', 'SERIES_CHANGE_INVALID', '书系成员变更只有加入书系和移出书系。');
-    const chain = this.#series.chain(series.seriesId, input.bookId);
-    const member = chain.at(-1)?.kind === 'add';
+    const latest = this.#series.latest(series.seriesId, input.bookId);
+    const member = latest?.kind === 'add';
     requireStore(input.kind !== 'add' || !member, 'SERIES_MEMBER_ALREADY', seriesMemberAlready(bookTitle, series.title));
     requireStore(input.kind !== 'remove' || member, 'SERIES_MEMBER_ABSENT', seriesMemberAbsent(bookTitle, series.title));
     const materials = this.#learningEligibility.project(input.bookId, this.#learningCandidates(input.bookId, false));
@@ -10878,7 +10877,7 @@ export class EditorialStore {
       kind: input.kind,
       actionLabel: input.kind === 'add' ? '加入书系' : '移出书系',
       groups,
-      previewDigest: seriesPreviewDigest({ seriesId: series.seriesId, bookId: input.bookId, kind: input.kind, chainHead: chain.at(-1)?.changeId ?? null, groups }),
+      previewDigest: seriesPreviewDigest({ seriesId: series.seriesId, bookId: input.bookId, kind: input.kind, chainHead: latest?.changeId ?? null, groups }),
     };
   }
 
@@ -10922,8 +10921,7 @@ export class EditorialStore {
   /** One page of one Series' or one Book's membership change records after the one named, newest first, and how many in all. */
   #seriesHistoryPage(filter: { readonly seriesId: string } | { readonly bookId: string }, after: SeriesHistoryCursor | null):
   SeriesHistoryPageProjection & { count: number } {
-    const all = this.#series.history(filter);
-    const rest = (after === null ? all : all.filter((change) => seriesHistoryOrder(change, after) > 0)).slice(0, MAX_SERIES_HISTORY_PAGE + 1);
+    const { entries: rest, count } = this.#series.historyPage(filter, after, MAX_SERIES_HISTORY_PAGE + 1);
     const seriesTitles = new Map<string, string>();
     const bookTitles = new Map<string, string>();
     const titleOf = (titles: Map<string, string>, key: string, read: () => string): string => {
@@ -10940,7 +10938,7 @@ export class EditorialStore {
     return {
       history: page,
       nextCursor: more && last !== undefined ? { recordedAt: last.recordedAt, seriesId: last.seriesId, bookId: last.bookId, ordinal: last.ordinal } : null,
-      count: all.length,
+      count,
     };
   }
 

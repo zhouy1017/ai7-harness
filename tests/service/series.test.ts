@@ -273,8 +273,29 @@ describe('书系 over the real store', () => {
       expect(change('add')).toBe('recorded');
       expect(change('add')).toBe('SERIES_MEMBER_ALREADY:《晨光之书》已经在书系「晨光文丛」中。');
       expect(change('remove')).toBe('recorded');
-      expect(ledger.chain(series.seriesId, bookId).map((entry) => [entry.ordinal, entry.kind])).toEqual([[1, 'add'], [2, 'remove']]);
+      expect(ledger.latest(series.seriesId, bookId)).toMatchObject({ ordinal: 2, kind: 'remove' });
       expect(ledger.members(series.seriesId)).toEqual([]);
+      // The current membership and every history page still validate records far behind the visible page.
+      for (let index = 0; index < 32; index += 1) {
+        expect(change('add')).toBe('recorded');
+        expect(change('remove')).toBe('recorded');
+      }
+      expect(ledger.latest(series.seriesId, bookId)).toMatchObject({ ordinal: 66, kind: 'remove' });
+      const ordinals: number[] = [];
+      let cursor: { recordedAt: string; seriesId: string; bookId: string; ordinal: number } | null = null;
+      for (let guard = 0; guard < 4; guard += 1) {
+        const page = ledger.historyPage({ seriesId: series.seriesId }, cursor, 20);
+        expect(page.count).toBe(66);
+        expect(page.entries.length).toBeLessThanOrEqual(20);
+        ordinals.push(...page.entries.map((entry) => entry.ordinal));
+        cursor = page.entries.at(-1) ?? null;
+      }
+      expect(ordinals).toEqual(Array.from({ length: 66 }, (_, index) => 66 - index));
+      database.exec('DROP TRIGGER series_membership_changes_no_update');
+      database.prepare("UPDATE series_membership_changes SET sha256 = ? WHERE series_id = ? AND book_id = ? AND ordinal = 1")
+        .run('0'.repeat(64), series.seriesId, bookId);
+      expect(() => ledger.latest(series.seriesId, bookId)).toThrowError('书系记录已损坏。');
+      expect(() => ledger.historyPage({ bookId }, null, 20)).toThrowError('书系记录已损坏。');
     } finally {
       database.close();
     }

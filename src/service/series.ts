@@ -6,6 +6,7 @@ import {
   publicationText,
   type SeriesImpactGroupProjection,
   type SeriesMembershipChangeKind,
+  type SeriesHistoryCursor,
 } from '../shared/protocol.js';
 import { canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
 
@@ -328,30 +329,39 @@ export class SeriesLedger {
     return { seriesId, title, note, createdAt };
   }
 
-  /** One Series and Book's chain of changes in order, each verified: its digest, its record against its row, its place. */
-  chain(seriesId: string, bookId: string): StoredMembershipChange[] {
+  /** Validate a pair's complete chain while retaining only its latest change. */
+  latest(seriesId: string, bookId: string): StoredMembershipChange | null {
     const rows = this.#db.prepare('SELECT * FROM series_membership_changes WHERE series_id = ? AND book_id = ? ORDER BY ordinal')
-      .all(seriesId, bookId) as SqlRow[];
-    return this.#verified(rows);
+      .iterate(seriesId, bookId);
+    let latest: StoredMembershipChange | null = null;
+    for (const entry of this.#verified(rows)) latest = entry;
+    return latest;
   }
 
-  /** Every change of one Series, or of one Book across Series: each pair's chain verified, the whole newest first. */
-  history(filter: { readonly seriesId: string } | { readonly bookId: string }): StoredMembershipChange[] {
+  /** Validate every pair in order, keeping only the requested newest-first page and an exact total. */
+  historyPage(filter: { readonly seriesId: string } | { readonly bookId: string }, after: SeriesHistoryCursor | null,
+    limit: number): { entries: StoredMembershipChange[]; count: number } {
     const rows = 'seriesId' in filter
-      ? this.#db.prepare('SELECT * FROM series_membership_changes WHERE series_id = ? ORDER BY book_id, ordinal').all(filter.seriesId) as SqlRow[]
-      : this.#db.prepare('SELECT * FROM series_membership_changes WHERE book_id = ? ORDER BY series_id, ordinal').all(filter.bookId) as SqlRow[];
-    const pairs = new Map<string, SqlRow[]>();
-    for (const row of rows) {
-      const key = `${String(row.series_id)}/${String(row.book_id)}`;
-      pairs.set(key, [...(pairs.get(key) ?? []), row]);
+      ? this.#db.prepare('SELECT * FROM series_membership_changes WHERE series_id = ? ORDER BY book_id, ordinal').iterate(filter.seriesId)
+      : this.#db.prepare('SELECT * FROM series_membership_changes WHERE book_id = ? ORDER BY series_id, ordinal').iterate(filter.bookId);
+    const entries: StoredMembershipChange[] = [];
+    let count = 0;
+    for (const entry of this.#verified(rows)) {
+      count += 1;
+      if (after !== null && seriesHistoryOrder(entry, after) <= 0) continue;
+      const insertion = entries.findIndex((kept) => seriesHistoryOrder(entry, kept) < 0);
+      if (insertion >= 0) entries.splice(insertion, 0, entry);
+      else if (entries.length < limit) entries.push(entry);
+      if (entries.length > limit) entries.pop();
     }
-    // Newest first, each record in one place (`seriesHistoryOrder`), so a page can start after any of them.
-    return [...pairs.values()].flatMap((pair) => this.#verified(pair)).sort(seriesHistoryOrder);
+    return { entries, count };
   }
 
-  #verified(rows: SqlRow[]): StoredMembershipChange[] {
+  /** Rows are contiguous by Series/Book and ascending ordinal; never retain earlier chains. */
+  *#verified(rows: Iterable<SqlRow>): Generator<StoredMembershipChange> {
     let before: StoredMembershipChange | null = null;
-    return rows.map((row) => {
+    for (const row of rows) {
+      if (before?.seriesId !== row.series_id || before?.bookId !== row.book_id) before = null;
       const json = String(row.canonical_json);
       requireSeries(sha256Hex(json) === String(row.sha256), 'SERIES_RECORD_INVALID', INVALID);
       const record = JSON.parse(json) as unknown;
@@ -375,8 +385,8 @@ export class SeriesLedger {
         recordedAt: String(row.recorded_at),
       };
       before = entry;
-      return entry;
-    });
+      yield entry;
+    }
   }
 
   /**
@@ -424,13 +434,12 @@ export class SeriesLedger {
   }): StoredMembershipChange {
     requireSeries((input.kind === 'add' || input.kind === 'remove') && /^[0-9a-f]{64}$/u.test(input.previewDigest) && isImpact(input.impact),
       'SERIES_CHANGE_INVALID', '书系成员变更无效。');
-    const chain = this.chain(input.seriesId, input.bookId);
-    const latest = chain.at(-1) ?? null;
+    const latest = this.latest(input.seriesId, input.bookId);
     const member = latest?.kind === 'add';
     requireSeries(input.kind !== 'add' || !member, 'SERIES_MEMBER_ALREADY', seriesMemberAlready(input.names.book, input.names.series));
     requireSeries(input.kind !== 'remove' || member, 'SERIES_MEMBER_ABSENT', seriesMemberAbsent(input.names.book, input.names.series));
     const changeId = randomUUID();
-    const ordinal = chain.length + 1;
+    const ordinal = (latest?.ordinal ?? 0) + 1;
     const recordedAt = new Date().toISOString();
     const record = canonicalRecord({
       schema: CHANGE_SCHEMA,
