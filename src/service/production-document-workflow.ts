@@ -16,7 +16,7 @@ import {
   type ProductionDocumentWorkflowProjection,
   type TransitionProductionDocumentPhaseInput,
 } from '../shared/protocol.js';
-import { canonicalRecord } from './analysis/canonical.js';
+import { canonicalRecord, isRecord, parseCanonicalJson } from './analysis/canonical.js';
 
 /**
  * A Production Document's Deliverable Workflow (Issue #415, plan slice S66c; V2-UX-WORK-001 to 009, WORK-011; editor-surfaces
@@ -214,9 +214,14 @@ interface TransitionFacts {
   fromState: ProductionDocumentPhaseState;
   toState: ProductionDocumentPhaseState;
   reasonChoice: string | null;
+  /** The reason's words as the move recorded them, or, for a move recorded before its words were, the key's words now. */
+  reasonLabel: string | null;
   reasonText: string | null;
   recordedAt: string;
 }
+
+/** The longest words a recorded reason may carry: its choice's label, never the editor's own text. */
+const MAX_REASON_LABEL_CHARACTERS = 40;
 
 export class ProductionDocumentWorkflow {
   readonly #db: DatabaseSync;
@@ -245,7 +250,7 @@ export class ProductionDocumentWorkflow {
         action: last.action,
         fromState: last.fromState,
         toState: last.toState,
-        reason: last.reasonChoice === null ? null : { choice: last.reasonChoice, label: reasonLabel(last.action, last.reasonChoice)!, text: last.reasonText },
+        reason: last.reasonChoice === null ? null : { choice: last.reasonChoice, label: last.reasonLabel!, text: last.reasonText },
         recordedAt: last.recordedAt,
       };
       return {
@@ -316,8 +321,11 @@ export class ProductionDocumentWorkflow {
       reason?.choice ?? null, reason?.text ?? null, ACTOR, recordedAt, record.json, record.digest);
   }
 
-  /** A skip's or a reopen's reason as it will be recorded, or `null` for 开始 and 完成 — which take none. */
-  #reason(input: TransitionProductionDocumentPhaseInput): { choice: string; text: string | null } | null {
+  /**
+   * A skip's or a reopen's reason as it will be recorded, or `null` for 开始 and 完成 — which take none. The move records the
+   * choice's words as the editor read them (WORK-009; Issue #626), so a later relabel never rewrites what a past move says.
+   */
+  #reason(input: TransitionProductionDocumentPhaseInput): { choice: string; label: string; text: string | null } | null {
     if (input.action !== 'skip' && input.action !== 'reopen') {
       requireWorkflow(input.reason === null, 'PRODUCTION_DOCUMENT_PHASE_INVALID', '开始和完成不需要原因。');
       return null;
@@ -330,7 +338,7 @@ export class ProductionDocumentWorkflow {
       'PRODUCTION_DOCUMENT_PHASE_REASON_INVALID', `原因最多 ${MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS} 个字。`);
     const kept = words === null || words.length === 0 ? null : words;
     requireWorkflow(input.reason.choice !== 'custom' || kept !== null, 'PRODUCTION_DOCUMENT_PHASE_REASON_REQUIRED', '选了「自行输入」，请写下原因。');
-    return { choice: input.reason.choice, text: kept };
+    return { choice: input.reason.choice, label: reasonLabel(input.action, input.reason.choice)!, text: kept };
   }
 
   #instance(documentId: string): { profile: WorkflowProfilePin; activatedAt: string } {
@@ -357,9 +365,18 @@ export class ProductionDocumentWorkflow {
         fromState: text(row.from_state) as ProductionDocumentPhaseState,
         toState: text(row.to_state) as ProductionDocumentPhaseState,
         reasonChoice: nullableText(row.reason_choice),
+        reasonLabel: null,
         reasonText: nullableText(row.reason_text),
         recordedAt: text(row.recorded_at),
       };
+      // The words a move recorded with its reason are read back from its own record, which its digest covers (Issue #626).
+      const stored = parseCanonicalJson(text(row.canonical_json));
+      const storedReason = isRecord(stored) && isRecord(stored.reason) ? stored.reason : null;
+      const recordedLabel = storedReason !== null && 'label' in storedReason ? storedReason.label : undefined;
+      requireWorkflow(recordedLabel === undefined || (typeof recordedLabel === 'string' && recordedLabel.length >= 1 &&
+        [...recordedLabel].length <= MAX_REASON_LABEL_CHARACTERS), 'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档的工作流程记录与其内容不一致。');
+      facts.reasonLabel = facts.reasonChoice === null ? null
+        : typeof recordedLabel === 'string' ? recordedLabel : reasonLabel(facts.action, facts.reasonChoice) ?? null;
       const record = canonicalRecord({
         schema: TRANSITION_SCHEMA,
         transitionId: text(row.transition_id),
@@ -369,13 +386,17 @@ export class ProductionDocumentWorkflow {
         action: facts.action,
         fromState: facts.fromState,
         toState: facts.toState,
-        reason: facts.reasonChoice === null ? null : { choice: facts.reasonChoice, text: facts.reasonText },
+        reason: facts.reasonChoice === null ? null
+          : typeof recordedLabel === 'string' ? { choice: facts.reasonChoice, label: recordedLabel, text: facts.reasonText }
+            : { choice: facts.reasonChoice, text: facts.reasonText },
         actor: text(row.actor),
         recordedAt: facts.recordedAt,
       });
+      // A reason reads when its words were recorded with it, or, for a move recorded before they were, when its key still
+      // names a reason — which is why no shipped key is ever removed (the unit suite holds them).
       requireWorkflow(PRODUCTION_DOCUMENT_PHASE_IDS.includes(facts.phaseId) && facts.ordinal === count + 1 &&
         record.json === text(row.canonical_json) && record.digest === text(row.sha256) &&
-        (facts.reasonChoice === null || reasonLabel(facts.action, facts.reasonChoice) !== undefined),
+        (facts.reasonChoice === null || facts.reasonLabel !== null),
       'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档的工作流程记录与其内容不一致。');
       phases.set(facts.phaseId, { moves: (phases.get(facts.phaseId)?.moves ?? 0) + 1, latest: facts });
       count += 1;
