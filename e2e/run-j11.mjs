@@ -1745,8 +1745,8 @@ async function main() {
     await clickSelector(renderer, `${learningRow('proposal-decision')} [data-learning-action="open"]`, 'learning-source-proposal-card');
     await readLearning(renderer, (page) => page.card?.material === 'proposal-decision', 'learning-source-proposal-ready');
     await clickSelector(renderer, '[data-learning-action="source"]', 'learning-source-proposal');
-    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(thirdId)}]') && document.querySelector('.mark-card')`, 'learning-source-mark-open', 120_000);
-    await assertRenderer(renderer, `document.querySelector('.mark-card')?.textContent.includes(${JSON.stringify('证据不足')}) === true`, 'learning-source-mark-reason');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(thirdId)}]') && document.querySelector('.editorial-mark-card')`, 'learning-source-mark-open', 120_000);
+    await assertRenderer(renderer, `document.querySelector('.editorial-mark-card')?.textContent.includes(${JSON.stringify('证据不足')}) === true`, 'learning-source-mark-reason');
     await click(renderer, '返回图书工作概览', 'learning-source-overview');
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'learning-source-overview-ready');
     await click(renderer, '返回图书列表', 'learning-source-books');
@@ -1780,7 +1780,7 @@ async function main() {
       document.querySelector('[data-learning-action="source"]').click();
       return Array.from(document.querySelectorAll('.learning-card input, .learning-card textarea, .learning-card button')).every((control) => control.disabled);
     })()`, 'learning-source-pending-disabled');
-    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(thirdId)}]') && document.querySelector('.mark-card')?.textContent.includes('证据不足')`, 'learning-source-existing-window-exact', 120_000);
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(thirdId)}]') && document.querySelector('.editorial-mark-card')?.textContent.includes('证据不足')`, 'learning-source-existing-window-exact', 120_000);
     await waitFor(otherRenderer, `document.querySelector('.learning-choices input[value="house"]')?.checked === true &&
       document.querySelector('[data-learning-field="note"]')?.value === '保留未提交说明' &&
       document.querySelector('[data-learning-action="record"]')?.disabled === false &&
