@@ -2187,6 +2187,23 @@ async function main() {
     await clickSelector(renderer, outsideToggle, 'maintenance-attention-outside-reopen');
     await waitFor(renderer, `document.activeElement === document.querySelector(${JSON.stringify(outsideHeading)})`, 'maintenance-attention-outside-reopened');
 
+    // The outside-history case added 31 newer designations after withdrawing designation 2. Restore a genuinely
+    // withdrawn current designation for the exemplar retention check, without changing the older-target assertions.
+    const exemplarDesignation = await renderer.evaluate(`window.ai7.inspectDeliverables().then((answer) => {
+      const latest = answer.publication.designations[0];
+      return { id: latest.publicationVersionId, ordinal: latest.ordinal, withdrawn: latest.maintenance.withdrawn };
+    })`);
+    requireJourney(exemplarDesignation.ordinal === 33 && exemplarDesignation.withdrawn === false, 'exemplars-current-designation-active');
+    await clickSelector(renderer, maintenanceAction(exemplarDesignation.ordinal, 'record'), 'exemplars-withdrawal-open');
+    await assertRenderer(renderer, `(() => { const radio = document.querySelector(${JSON.stringify(`${designationItem(exemplarDesignation.ordinal)} form.maintenance-draft input[type="radio"][value="withdrawal"]`)}); radio.click(); return radio.checked; })()`, 'exemplars-choose-withdrawal');
+    await fill(renderer, `${designationItem(exemplarDesignation.ordinal)} form.maintenance-draft textarea[data-maintenance-field="reason"]`, MAINTENANCE_WITHDRAWAL, 'exemplars-withdrawal-reason');
+    await clickSelector(renderer, maintenanceAction(exemplarDesignation.ordinal, 'confirmRecord'), 'exemplars-withdrawal-record');
+    await waitFor(renderer, `window.__j07.status() === '维护事项已记录' && document.querySelector(${JSON.stringify(designationItem(exemplarDesignation.ordinal))})?.dataset.publicationWithdrawn === 'true'`, 'exemplars-current-withdrawn', 60_000);
+    await assertRenderer(renderer, `window.ai7.inspectDeliverables().then((answer) => {
+      const latest = answer.publication.designations[0];
+      return latest.publicationVersionId === ${JSON.stringify(exemplarDesignation.id)} && latest.maintenance.withdrawn;
+    })`, 'exemplars-current-withdrawal-committed');
+
     at('documents-restart');
     // A restart moves nothing: 交付物, 交付 · 生产文档 and 图书交付包 answer byte for byte as before — 维护事项 included — the
     // card still names its second delivery, the package lists its two versions and v2's export, and the 新闻稿 opens at 版本 3
@@ -2208,7 +2225,7 @@ async function main() {
     at('knowledge-exemplars');
     // 知识库 › 范例 (Issue #427, S79b): the Book set as a 发稿版本 brings in the 新闻稿 it delivered — the version its latest
     // delivery named, the earlier one beneath it — attributed to the Book and eligible 仅本社, exactly as
-    // `inspectExemplars()` answers. Both deliveries came before `maintenance-cases` withdrew the current designation, so
+    // `inspectExemplars()` answers. Both deliveries came before the current designation's withdrawal above, so
     // they stay; the card names that designation by its ordinal and says it is withdrawn, and what the Book delivers from
     // then on waits for another 发稿版本 (ADR 0040).
     await clickSelector(renderer, '#global-attention-entry', 'exemplars-attention');
@@ -2228,6 +2245,7 @@ async function main() {
     const exemplarBook = exemplars?.books?.[0];
     const exemplarNews = exemplarBook?.exemplars?.find((exemplar) => exemplar.typeId === 'news-release');
     requireJourney(exemplars?.books?.length === 1 && exemplars.nextCursor === null && exemplarBook.bookId === bookId && exemplarBook.withdrawn === true &&
+      exemplarBook.publicationOrdinal === exemplarDesignation.ordinal &&
       exemplarPage[0]?.designation?.startsWith(`第 ${exemplarBook.publicationOrdinal} 次设为发稿版本于 `) === true &&
       exemplarPage[0].designation.endsWith(' · 已在 AI7 内撤回；之后交付的文档，另设发稿版本后才归入') && exemplarPage[0].more === true &&
       exemplarNews?.typeLabel === '新闻稿' && exemplarNews.eligibility === 'house-only' &&
