@@ -250,6 +250,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectDefaultExecutionRules':
     // 知识库 › 审阅规范文件 (Issue #427, S79a) reads across every Book, so it names none.
     case 'inspectReviewGuidelines':
+    // 知识库 › 工序与规则's 工序 (Issue #427, S79d) are the house's, so the read names no Book.
+    case 'inspectKnowledgeProcedures':
     case 'shutdown': {
       requireInput(value.input, [], tentativeId);
       break;

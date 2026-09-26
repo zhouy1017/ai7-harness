@@ -43,6 +43,7 @@ import type {
   ReviewGuidelinesProjection,
   ExemplarBookCursor,
   ExemplarsProjection,
+  KnowledgeProceduresProjection,
   AppendMaintenanceCaseRevisionInput,
   InspectMaintenanceCaseInput,
   ListMaintenanceCasesInput,
@@ -287,6 +288,7 @@ import { MaintenanceCaseError, MaintenanceCases, initializeMaintenanceCaseSchema
 import { BookPeople, BookPeopleError, initializeBookPeopleSchema } from './book-people.js';
 import { ReviewGuidelineError, ReviewGuidelineLedger, initializeReviewGuidelineSchema, readGuidelineFile } from './review-guidelines.js';
 import { readExemplars } from './exemplars.js';
+import { readKnowledgeProcedures } from './knowledge-procedures.js';
 import {
   ProductionDocumentOriginError,
   initializeProductionDocumentOriginSchema,
@@ -5459,6 +5461,15 @@ export class EditorialStore {
       documents: (bookId) => this.#documentCall(() => this.#productionDocuments.deliveryReadings(bookId)),
       people: (bookId) => this.#peopleCall(() => this.#bookPeople.current(bookId)),
     }, after));
+  }
+
+  /**
+   * 知识库 › 工序与规则 (Issue #427, S79d; KB-010): the review categories' 工序 as they apply now, and the native artifact as
+   * its owner reads it for the house.
+   */
+  async inspectKnowledgeProcedures(): Promise<KnowledgeProceduresProjection> {
+    const profile = await this.#artifactCall(() => this.#editorialWorkspaceProfile.house());
+    return this.#guidelineCall(() => readKnowledgeProcedures(this.#authority, this.#reviewGuidelines.configuration(), profile));
   }
 
   /** 导入新版本's first step: the picked file's clauses as the next version of one document would read them; nothing is recorded. */

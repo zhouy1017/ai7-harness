@@ -1,4 +1,6 @@
 import type {
+  KnowledgeArtifactProjection,
+  KnowledgeProcedureProjection,
   ExemplarBookProjection,
   ExemplarProjection,
   ReviewGuidelineDocumentProjection,
@@ -206,4 +208,28 @@ export function exemplarLine(exemplar: ExemplarProjection, instant: (iso: string
       : ` · 此前还交付过版本 ${named}`;
   return `${exemplar.typeLabel} · 版本 ${exemplar.version} · 交付给${exemplar.deliveredTo}于 ${instant(exemplar.deliveredAt)} · 归入于 ${instant(exemplar.archivedAt)}` +
     ` · 学习准入：${EXEMPLAR_ELIGIBILITY_LABELS[exemplar.eligibility]}${earlier}`;
+}
+
+// ---- 工序与规则's expert 工序 (Issue #427, plan slice S79d; KB-010, REUSE-029, REUSE-030) --------------------------------
+
+export const PROCEDURES_HEADING = '专家经验工序';
+export const RULES_HEADING = '快速开始 · 默认执行规则';
+export const PROCEDURE_STATE_LABELS: Readonly<Record<KnowledgeProcedureProjection['state'], string>> = { enabled: '已启用', unavailable: '尚未接通' };
+
+/** One 工序: what it does, its version and origin, the category it serves, and how often a review applied it. */
+export function procedureLine(procedure: KnowledgeProcedureProjection): string {
+  const used = procedure.reviewRuns === 0 ? '还没有审阅用过' : `已用于 ${procedure.reviewRuns} 次审阅`;
+  return `${procedure.title} · 第 ${procedure.version} 版 · 内置 · 用于「${procedure.categoryLabel}」 · ${used}`;
+}
+
+/**
+ * The native artifact in the house's words (editor-surfaces §10): 本社方案 vN in its lifecycle — as the Book card reads it —
+ * and how many Books enabled it. Its identity and version identifiers stay in 查看技术详情 (ADR 0071 §1).
+ */
+export function artifactLine(artifact: Pick<KnowledgeArtifactProjection, 'title' | 'revision' | 'state' | 'enabledBooks'>): string {
+  const named = artifact.revision === null ? artifact.title : `${artifact.title} v${artifact.revision}`;
+  if (artifact.state === 'unavailable-needs-attention') return `${named} · 不可用 · 需要处理`;
+  if (artifact.state === 'available-to-install') return `${named} · 可获取 · 尚未安装`;
+  const enabled = artifact.enabledBooks === 0 ? '还没有图书启用' : `已为 ${artifact.enabledBooks} 本书启用`;
+  return `${named} · 已安装 · ${enabled}`;
 }
