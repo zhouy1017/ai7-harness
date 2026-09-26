@@ -240,6 +240,29 @@ describe('applying a replacement of the local data', () => {
     }
   });
 
+  it("reads a refusal note only within a note's bound, and takes one that is not AI7's as a refusal still (Issue #434 review)", async () => {
+    // A resumed apply put the data back and wrote why; the note it finds at the end is read only as a small file.
+    const restoredWith = async (note: (() => void) | null): Promise<unknown> => {
+      rmSync(staging(), { recursive: true, force: true });
+      const intent = await prepared();
+      setPhase('restored');
+      note?.();
+      return { intent, applied: await openWithPendingReplacement(dataRoot, open) };
+    };
+    const reasons: unknown[] = [];
+    for (const note of [
+      null,
+      () => writeFileSync(join(staging(), 'refused.json'), JSON.stringify('interrupted')),
+      () => writeFileSync(join(staging(), 'refused.json'), ' '.repeat(65)),
+      () => mkdirSync(join(staging(), 'refused.json')),
+      () => writeFileSync(join(staging(), 'refused.json'), JSON.stringify('sideways')),
+    ]) {
+      const { applied } = await restoredWith(note) as { applied: Awaited<ReturnType<typeof openWithPendingReplacement<string>>> };
+      reasons.push(applied.replacement?.failure);
+    }
+    expect(reasons).toEqual(['unopenable', 'interrupted', 'changed', 'changed', 'changed']);
+  });
+
   it('reads the list of what waits only within the bound a package manifest has (Issue #434 review)', async () => {
     const intent = await prepared();
     truncateSync(join(staging(), 'members.json'), MAX_MANIFEST_BYTES + 1);
