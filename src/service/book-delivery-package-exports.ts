@@ -8,11 +8,13 @@ import {
   MAX_EXPORT_DESTINATION_CODE_UNITS,
   type ApproveBookDeliveryPackageExportInput,
   type BookDeliveryPackageExportFileOutcomeProjection,
-  type BookDeliveryPackageExportFileProjection,
+  type BookDeliveryPackageExportOptions,
   type BookDeliveryPackageExportProjection,
+  type BookDeliveryPackageExportReviewFileProjection,
   type BookDeliveryPackageExportReviewProjection,
   type BookDeliveryPackageExportSummaryProjection,
   type ManuscriptExportFormat,
+  type ManuscriptExportOptions,
   type ManuscriptExportReceiptProjection,
   type PrepareBookDeliveryPackageExportInput,
   type ReviewBookDeliveryPackageExportInput,
@@ -31,10 +33,12 @@ import { productionDocumentType } from './production-document-types.js';
  * atomic on its own, receipted on its own, and never retried by itself. The package never changes: an export is linked to
  * the exact version it wrote, and a changed folder or a second export is a new export, never a new package version.
  *
- * Choosing the folder prepares: one preparation per file at its place in the folder, recorded with the export that links
- * them. A folder already holding any of the file names is refused, so an export never replaces a file and never asks the
- * platform's conflict dialog. `按上述方式导出` then approves and writes each file in turn; a file that fails or cannot be
- * confirmed stops the rest, which stay unwritten.
+ * `导出…` reviews every file as S64 reviews one — how it is written, what its format keeps, each class's fidelity — under
+ * 含批注 and 含修改建议 as the editor leaves them, and 备注 never go. Choosing the folder prepares: one preparation per file
+ * at its place in the folder, recorded with the export that links them. A folder already holding any of the file names is
+ * refused, so an export never replaces a file and never asks the platform's conflict dialog. `按上述方式导出` checks every
+ * file before it writes the first — a set that drifted is refused whole and writes nothing — then approves and writes each
+ * in turn; a file that fails or cannot be confirmed during the writes stops the rest, which stay unwritten.
  *
  * Schema revision 41 owns two relations, ledgers like the others: a row is appended once and never rewritten or removed.
  */
@@ -163,11 +167,28 @@ export interface BookDeliveryPackageExportSources {
 }
 
 /** One file of a version's export as the review planned it. */
-interface PlannedFile extends BookDeliveryPackageExportFileProjection {
+interface PlannedFile extends BookDeliveryPackageExportReviewFileProjection {
   target: ExportTargetInput;
   revisionId: string;
   reviewDigest: string;
 }
+
+/** The options each file is written under: the editor's two switches, and never 备注 (the package leaves them out). */
+function requirePackageOptions(value: unknown): ManuscriptExportOptions {
+  requirePackageExport(isRecord(value) && Object.keys(value).length === 2 && typeof value.includeAnnotations === 'boolean' &&
+    typeof value.includeSuggestions === 'boolean', 'BOOK_DELIVERY_PACKAGE_EXPORT_INVALID', '图书交付包导出请求无效。');
+  return { includeAnnotations: value.includeAnnotations, includeSuggestions: value.includeSuggestions, includeEditorNotes: false };
+}
+
+/** A refusal before anything was written names the file that drifted, and says nothing was written. */
+function driftLine(fileName: string, code: string, message: string): string {
+  if (code === 'EXPORT_PAYLOAD_CHANGED') return `「${fileName}」的内容在准备导出后有了变化，没有写入任何文件。请重新查看导出。`;
+  if (code === 'EXPORT_TARGET_CHANGED' || code === 'EXPORT_TARGET_UNREADABLE') {
+    return `所选文件夹在准备导出后有了变化，「${fileName}」已不能按准备的方式写入，没有写入任何文件。请重新选择位置。`;
+  }
+  return message;
+}
+const DRIFT_CODES: ReadonlySet<string> = new Set(['EXPORT_PAYLOAD_CHANGED', 'EXPORT_TARGET_CHANGED', 'EXPORT_TARGET_UNREADABLE']);
 
 export class BookDeliveryPackageExports {
   readonly #db: DatabaseSync;
@@ -180,17 +201,31 @@ export class BookDeliveryPackageExports {
     this.#sources = sources;
   }
 
-  /** `导出…` of one package version: the files it writes, each reviewed as S64 reviews a file (EXP-010). */
+  /** `导出…` of one package version: the files it writes, each reviewed as S64 reviews a file (EXP-007 to EXP-010). */
   async review(input: ReviewBookDeliveryPackageExportInput, available: boolean): Promise<BookDeliveryPackageExportReviewProjection> {
     requirePackageExport(isRecord(input) && typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) &&
       typeof input.packageVersionId === 'string' && UUID_PATTERN.test(input.packageVersionId),
     'BOOK_DELIVERY_PACKAGE_EXPORT_INVALID', '图书交付包导出请求无效。');
-    const { versionLabel, files, reviewDigest } = await this.#plan(input.bookId, input.packageVersionId, available);
+    const options = requirePackageOptions(input.options);
+    const { versionLabel, files, reviewDigest } = await this.#plan(input.bookId, input.packageVersionId, options, available);
     return {
       bookId: input.bookId,
       packageVersionId: input.packageVersionId,
       versionLabel,
-      files: files.map(({ key, label, fileName, format }) => ({ key, label, fileName, format })),
+      options: { includeAnnotations: options.includeAnnotations, includeSuggestions: options.includeSuggestions },
+      files: files.slice(0, MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED).map((file) => ({
+        key: file.key,
+        label: file.label,
+        fileName: file.fileName,
+        format: file.format,
+        restoration: file.restoration,
+        restorationLine: file.restorationLine,
+        formatLine: file.formatLine,
+        fidelity: file.fidelity,
+        degraded: file.degraded,
+      })),
+      filesTruncated: files.length > MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED,
+      degraded: files.some((file) => file.degraded),
       statement: BOOK_DELIVERY_PACKAGE_EXPORT_STATEMENT,
       reviewDigest,
     };
@@ -205,8 +240,9 @@ export class BookDeliveryPackageExports {
       typeof input.packageVersionId === 'string' && UUID_PATTERN.test(input.packageVersionId) &&
       typeof input.reviewDigest === 'string' && DIGEST_PATTERN.test(input.reviewDigest),
     'BOOK_DELIVERY_PACKAGE_EXPORT_INVALID', '图书交付包导出请求无效。');
+    const options = requirePackageOptions(input.options);
     const folder = await requireFolder(input.folder);
-    const plan = await this.#plan(input.bookId, input.packageVersionId, available);
+    const plan = await this.#plan(input.bookId, input.packageVersionId, options, available);
     requirePackageExport(plan.reviewDigest === input.reviewDigest, 'BOOK_DELIVERY_PACKAGE_EXPORT_CHANGED',
       '要导出的文件在查看后有了变化，请重新查看导出。');
     for (const file of plan.files) {
@@ -219,6 +255,7 @@ export class BookDeliveryPackageExports {
         bookId: input.bookId,
         target: file.target,
         format: file.format,
+        options,
         revisionId: file.revisionId,
         reviewDigest: file.reviewDigest,
         destination: join(folder, file.fileName),
@@ -271,6 +308,18 @@ export class BookDeliveryPackageExports {
     if (files.some((file) => this.#exports.approvedReceipt(input.bookId, file.preparationId) !== null)) {
       return this.#projection(input.bookId, input.exportId);
     }
+    // Every file is checked before the first is written (External Export Policy v2, multi-file): a set that drifted since
+    // the folder was chosen — a file whose content moved, a name taken in the folder — is refused whole, nothing is
+    // written, and the export stays as prepared. Only a failure during the writes stops the rest.
+    for (const file of files) {
+      try {
+        await this.#exports.checkPrepared(input.bookId, file.preparationId, available);
+      } catch (error) {
+        if (!(error instanceof ExportLedgerError) || !DRIFT_CODES.has(error.code)) throw error;
+        const { fileName } = this.#exports.preparationOf(input.bookId, file.preparationId);
+        throw new BookDeliveryPackageExportError(error.code, driftLine(fileName, error.code, error.message));
+      }
+    }
     let written = 0;
     let stopped: BookDeliveryPackageExportProjection['stopped'] = null;
     for (const file of files) {
@@ -284,8 +333,8 @@ export class BookDeliveryPackageExports {
         written += 1;
       } catch (error) {
         // Refused before anything was written: the export stays prepared, and the refusal is the answer. Refused after
-        // files were written — a file put in the folder since, say — the written ones stand, and the answer says which
-        // file stopped the rest and why.
+        // files were written — a file put in the folder while the others were written, say — the written ones stand, and
+        // the answer says which file stopped the rest and why.
         if (!(error instanceof ExportLedgerError) || written === 0) throw error;
         stopped = { fileName: this.#exports.preparationOf(input.bookId, file.preparationId).fileName, reason: error.message };
         break;
@@ -334,6 +383,7 @@ export class BookDeliveryPackageExports {
     const found = this.#sources.record(bookId, packageVersionId);
     if (found === null) return null;
     const { record } = found;
+    const { versionLabel, revisionId } = versionOf(record);
     const book = this.#db.prepare('SELECT title FROM books WHERE book_id = ?').get(bookId) as SqlRow | undefined;
     requirePackageExport(book !== undefined, 'BOOK_NOT_FOUND', '图书不存在。');
     const lines: string[] = [
@@ -388,18 +438,24 @@ export class BookDeliveryPackageExports {
       '',
     );
     const markdown = lines.join('\n');
-    return {
-      versionLabel: `v${record.version}`,
-      markdown,
-      digest: sha256Hex(markdown),
-      revisionId: publication?.revisionId ?? '',
-    };
+    return { versionLabel, markdown, digest: sha256Hex(markdown), revisionId };
+  }
+
+  /** One version's label and the revision its 发稿版本 names, from its frozen record alone: an export's files read by it. */
+  version(bookId: string, packageVersionId: string): { versionLabel: string; revisionId: string } | null {
+    const found = this.#sources.record(bookId, packageVersionId);
+    return found === null ? null : versionOf(found.record);
   }
 
   // ---- reading ------------------------------------------------------------------------------------------------
 
-  /** The files a version writes, in order, each reviewed; and the digest that binds them. */
-  async #plan(bookId: string, packageVersionId: string, available: boolean): Promise<{ versionLabel: string; files: PlannedFile[]; reviewDigest: string }> {
+  /** The files a version writes, in order, each reviewed under the options chosen; and the digest that binds them. */
+  async #plan(
+    bookId: string,
+    packageVersionId: string,
+    options: ManuscriptExportOptions,
+    available: boolean,
+  ): Promise<{ versionLabel: string; files: PlannedFile[]; reviewDigest: string }> {
     const found = this.#sources.record(bookId, packageVersionId);
     requirePackageExport(found !== null, 'BOOK_DELIVERY_PACKAGE_EXPORT_NOT_FOUND', '所选交付包版本不属于这本书。');
     const { record } = found;
@@ -415,7 +471,7 @@ export class BookDeliveryPackageExports {
     const taken = new Set<string>();
     const files: PlannedFile[] = [];
     for (const item of planned) {
-      const review = await this.#exports.reviewPackageFile(bookId, item.target, item.format, available);
+      const review = await this.#exports.reviewPackageFile(bookId, item.target, item.format, options, available);
       // A report is written from the version the package froze: another version of it is another package.
       if (review.target.report !== null) {
         const frozen = record.content.reviewReports.find((report) => report.reportId === review.target.report!.reportId);
@@ -427,6 +483,11 @@ export class BookDeliveryPackageExports {
         label: labelOf(review.target, item.key),
         fileName: uniqueName(review.suggestedFileName, taken),
         format: item.format,
+        restoration: review.restoration,
+        restorationLine: review.restorationLine,
+        formatLine: review.formatLine,
+        fidelity: review.fidelity,
+        degraded: review.degraded,
         target: item.target,
         revisionId: review.target.revisionId,
         reviewDigest: review.reviewDigest,
@@ -436,6 +497,7 @@ export class BookDeliveryPackageExports {
       schema: REVIEW_SCHEMA,
       bookId,
       packageVersionId,
+      options,
       files: files.map((file) => ({ key: file.key, fileName: file.fileName, format: file.format, revisionId: file.revisionId, reviewDigest: file.reviewDigest })),
     }).digest;
     return { versionLabel: `v${record.version}`, files, reviewDigest };
@@ -522,6 +584,11 @@ export class BookDeliveryPackageExports {
       throw error;
     }
   }
+}
+
+/** A version's label and the revision its 发稿版本 names. */
+function versionOf(record: PackageVersionRecord): { versionLabel: string; revisionId: string } {
+  return { versionLabel: `v${record.version}`, revisionId: record.content.publication?.revisionId ?? '' };
 }
 
 /** What a file holds, in the editor's words, from the target its review resolved. */

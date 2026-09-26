@@ -252,12 +252,23 @@ function requireRecord(json: SQLOutputValue | undefined, digest: SQLOutputValue 
 export interface PublicationMaintenanceSource {
   summaries(bookId: string, publicationVersionId: string): PublicationMaintenanceProjection;
   withdrawn(publicationVersionId: string): boolean;
+  /** When a 撤回 came to hold the designation, or `null` while none holds it. */
+  withdrawnAt(publicationVersionId: string): string | null;
 }
 
 const NO_MAINTENANCE: PublicationMaintenanceSource = {
   summaries: () => ({ cases: [], total: 0, withdrawn: false, archived: false }),
   withdrawn: () => false,
+  withdrawnAt: () => null,
 };
+
+/** One designation as 范例 reads it (Issue #427, S79b review): which one, when, and when a 撤回 came to hold it. */
+export interface PublicationHistoryEntry {
+  readonly publicationVersionId: string;
+  readonly ordinal: number;
+  readonly createdAt: string;
+  readonly withdrawnAt: string | null;
+}
 
 export class PublicationVersionStore {
   readonly #db: DatabaseSync;
@@ -335,6 +346,35 @@ export class PublicationVersionStore {
       // A 撤回 case holds it (Issue #426, S68a): in AI7 it is no longer used for 发稿 (ADR 0040).
       withdrawn: current.projection.maintenance.withdrawn,
     };
+  }
+
+  /**
+   * The Books that have a 发稿版本, by title as 书库 pages them, after `after` and at most `limit` of them (Issue #427, S79b:
+   * 范例 holds exactly these Books).
+   */
+  designatedBooks(after: { title: string; bookId: string } | null, limit: number): Array<{ bookId: string; title: string }> {
+    const rows = this.#db.prepare(
+      `SELECT b.book_id, b.title FROM books b
+       WHERE EXISTS (SELECT 1 FROM publication_versions p WHERE p.book_id = b.book_id)
+         ${after === null ? '' : 'AND (b.title COLLATE BINARY > ? COLLATE BINARY OR (b.title = ? COLLATE BINARY AND b.book_id > ?))'}
+       ORDER BY b.title COLLATE BINARY, b.book_id
+       LIMIT ?`,
+    ).all(...(after === null ? [] : [after.title, after.title, after.bookId]), limit) as SqlRow[];
+    return rows.map((row) => ({ bookId: text(row.book_id), title: text(row.title) }));
+  }
+
+  /**
+   * Every designation of a Book, oldest first, each read and verified exactly as 交付物 reads it, with when a 撤回 came to
+   * hold it (Issue #427, S79b review): 范例 takes in what the Book delivered while a designation stood in AI7.
+   */
+  history(bookId: string): PublicationHistoryEntry[] {
+    requirePublication(typeof bookId === 'string' && UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+    return this.#designations(bookId, this.#head(bookId), Number.MAX_SAFE_INTEGER).reverse().map(({ projection }) => ({
+      publicationVersionId: projection.publicationVersionId,
+      ordinal: projection.ordinal,
+      createdAt: projection.createdAt,
+      withdrawnAt: this.#maintenance.withdrawnAt(projection.publicationVersionId),
+    }));
   }
 
   /**

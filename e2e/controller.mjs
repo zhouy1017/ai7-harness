@@ -470,10 +470,23 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-ime-command-guard-command-ran',
     'j14-ime-command-guard-status-missing',
     'j14-keyboard-search-focus',
+    // Issue #579: which precondition of ⌘F was missing, or what the command did instead.
+    'j14-keyboard-search-focus-composition-open',
+    'j14-keyboard-search-focus-window-unfocused',
+    'j14-keyboard-search-focus-editor-unfocused',
+    'j14-keyboard-search-focus-guard-announced',
+    // Issue #591: the ⌘F keydown never reached the page, or reached it without the platform's modifier.
+    'j14-keyboard-search-focus-key-not-received',
+    'j14-keyboard-search-focus-modifier-missing',
+    'j14-keyboard-search-focus-no-focus-move',
     'j14-visible-focus',
     'j14-keyboard-focus-keeps-window',
     'j14-keyboard-focus-keeps-window-precondition',
     'j14-keyboard-focus-keeps-window-paged',
+    // Issue #604: what the focus found when nothing was revealed.
+    'j14-keyboard-focus-keeps-window-no-reveal-window-unfocused',
+    'j14-keyboard-focus-keeps-window-no-reveal-caret-not-at-start',
+    'j14-keyboard-focus-keeps-window-no-reveal-moved-back',
     'j14-keyboard-focus-keeps-window-no-reveal',
     'j14-top-edge-pages-back-once',
     'j14-top-edge-pages-back-once-bounced',
@@ -1018,6 +1031,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'evaluation-start',
     'evaluation-score',
     'evaluation-finalize',
+    // Issue #429 review: 评估 is reached from the manuscript's 工作 group, between 审阅 and 交付物.
+    'evaluation-from-manuscript',
     'evaluation-reevaluate',
     'j14-evaluation-reflow-forced-colors',
     'evaluation-overview-and-profile',

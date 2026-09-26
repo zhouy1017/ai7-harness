@@ -54,6 +54,28 @@ interface Draft {
  * Book's analysis changes, and the card and its words outlive that.
  */
 let open: { readonly key: string; readonly draft: Draft } | null = null;
+/** Whether text is being composed in an input method inside an open card. */
+let composing = false;
+
+/**
+ * Whether the editor is inside an open 分析反馈 card of `root` — its focus there, or text still being composed — so ②A
+ * holds a follow-up draw that would replace the card under them (Issue #94 review; FDBK-005).
+ */
+export function analysisFeedbackEngaged(root: HTMLElement): boolean {
+  if (composing) return true;
+  const active = document.activeElement;
+  return active instanceof HTMLElement && root.contains(active) && active.closest('.analysis-feedback-card') !== null;
+}
+
+/** Text an input method is still composing is not the editor's yet: the draft takes what is committed, at its end. */
+function keepCommitted(field: HTMLInputElement | HTMLTextAreaElement, keep: (value: string) => void): void {
+  field.addEventListener('input', (event) => { if (!(event as InputEvent).isComposing) keep(field.value); });
+  field.addEventListener('compositionstart', () => { composing = true; });
+  field.addEventListener('compositionend', () => {
+    composing = false;
+    keep(field.value);
+  });
+}
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -134,9 +156,11 @@ export function mountAnalysisFeedback(options: MountAnalysisFeedbackOptions): { 
     return node;
   };
 
-  // The card is drawn once while it is open and changes in place, so a choice never moves the editor's focus and text
-  // being composed in an input method is never redrawn under them.
+  // The card is drawn once while it is open and changes in place, so a choice never moves the editor's focus; and ②A
+  // holds its own follow-up draws while the editor is inside it (`analysisFeedbackEngaged`), so text being composed in
+  // an input method is never redrawn under them either.
   const cardNode = (item: AnalysisFeedbackItemProjection, draft: Draft, name: string): HTMLElement => {
+    composing = false;
     const box = el('div', 'analysis-feedback-card');
     box.setAttribute('role', 'group');
     box.setAttribute('aria-label', `${ANALYSIS_FEEDBACK_HEADING}：${name}`);
@@ -157,7 +181,7 @@ export function mountAnalysisFeedback(options: MountAnalysisFeedbackOptions): { 
     correctionText.rows = 2;
     correctionText.value = draft.correction;
     correctionText.dataset['analysisFeedbackField'] = 'correction';
-    correctionText.addEventListener('input', () => { draft.correction = correctionText.value; });
+    keepCommitted(correctionText, (value) => { draft.correction = value; });
     correction.append(el('span', undefined, ANALYSIS_FEEDBACK_CORRECTION), correctionText);
     const record = action(ANALYSIS_FEEDBACK_RECORD, 'primary', 'record-feedback', () => void save(item, draft));
     const cancel = action(ANALYSIS_FEEDBACK_CANCEL, 'secondary', 'cancel-feedback', () => {
@@ -178,7 +202,7 @@ export function mountAnalysisFeedback(options: MountAnalysisFeedbackOptions): { 
       other.setAttribute('aria-label', ANALYSIS_FEEDBACK_OTHER_TEXT);
       other.placeholder = ANALYSIS_FEEDBACK_OTHER_TEXT;
       other.hidden = draft.choice !== ANALYSIS_FEEDBACK_OTHER;
-      other.addEventListener('input', () => { draft.other = other.value; });
+      keepCommitted(other, (value) => { draft.other = value; });
       reasons.replaceChildren(el('legend', undefined, ANALYSIS_FEEDBACK_REASON_LEGEND), ...choices.map((entry) =>
         radio(`analysis-feedback-reason-${item.itemKey}`, entry.choice, entry.label, draft.choice === entry.choice, () => {
           draft.choice = entry.choice;
