@@ -3,6 +3,7 @@ import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   MAX_SERIES_NOTE_CHARACTERS,
   MAX_SERIES_TITLE_CHARACTERS,
+  MAX_BOOK_SERIES_MEMBERSHIPS,
   publicationText,
   type SeriesImpactGroupProjection,
   type SeriesMembershipChangeKind,
@@ -262,7 +263,8 @@ function isImpact(value: unknown): value is SeriesImpactGroupProjection[] {
 }
 
 /** 书系一致性 for a Book already in a Series (Issue #63, S28a): the category still waits for Series Knowledge to reach review. */
-export function seriesConsistencyWaitingReason(titles: ReadonlyArray<string>): string {
+export function seriesConsistencyWaitingReason(titles: ReadonlyArray<string>, total: number = titles.length): string {
+  if (total > titles.length) return `这本书已加入 ${total} 个书系，包括${titles.map((title) => `「${title}」`).join('、')}；书系知识接入审阅后才能选。`;
   return `这本书已在书系${titles.map((title) => `「${title}」`).join('、')}中；书系知识接入审阅后才能选。`;
 }
 
@@ -281,11 +283,6 @@ export class SeriesLedger {
 
   constructor(db: DatabaseSync) {
     this.#db = db;
-  }
-
-  /** Every Series, by name, each verified against its digest and its row. */
-  list(): StoredSeries[] {
-    return (this.#db.prepare('SELECT * FROM series ORDER BY title, series_id').all() as SqlRow[]).map((row) => this.#series(row));
   }
 
   /** Up to `limit` Series by name after the one named, each verified: a page of 书系, in the database's own order. */
@@ -393,30 +390,37 @@ export class SeriesLedger {
    * The Books a Series holds now: each pair whose newest change is `加入书系`, with when it was — newest joined first, so a
    * Book just added heads the first page (Issue #63 review).
    */
-  members(seriesId: string): Array<{ readonly bookId: string; readonly joinedAt: string }> {
-    return (this.#db.prepare(`SELECT c.book_id, c.recorded_at FROM series_membership_changes c
+  *members(seriesId: string): Generator<{ readonly bookId: string; readonly joinedAt: string }> {
+    for (const row of this.#db.prepare(`SELECT c.book_id, c.recorded_at FROM series_membership_changes c
       WHERE c.series_id = ? AND c.kind = 'add' AND c.ordinal = (
         SELECT max(d.ordinal) FROM series_membership_changes d WHERE d.series_id = c.series_id AND d.book_id = c.book_id)
-      ORDER BY c.recorded_at DESC, c.book_id DESC`).all(seriesId) as SqlRow[]).map((row) => ({ bookId: String(row.book_id), joinedAt: String(row.recorded_at) }));
+      ORDER BY c.recorded_at DESC, c.book_id DESC`).iterate(seriesId)) {
+      yield { bookId: String(row.book_id), joinedAt: String(row.recorded_at) };
+    }
   }
 
   /** The Series a Book is in now, by name, with when it joined each. */
-  seriesOf(bookId: string): Array<{ readonly seriesId: string; readonly title: string; readonly joinedAt: string }> {
-    if (this.#db.prepare(TABLE_PRESENT).get() === undefined) return [];
-    return (this.#db.prepare(`SELECT s.series_id, s.title, c.recorded_at FROM series_membership_changes c JOIN series s ON s.series_id = c.series_id
+  seriesOf(bookId: string): { memberships: Array<{ readonly seriesId: string; readonly title: string; readonly joinedAt: string }>; count: number } {
+    const memberships: Array<{ seriesId: string; title: string; joinedAt: string }> = [];
+    let count = 0;
+    if (this.#db.prepare(TABLE_PRESENT).get() === undefined) return { memberships, count };
+    for (const row of this.#db.prepare(`SELECT s.series_id, s.title, c.recorded_at FROM series_membership_changes c JOIN series s ON s.series_id = c.series_id
       WHERE c.book_id = ? AND c.kind = 'add' AND c.ordinal = (
         SELECT max(d.ordinal) FROM series_membership_changes d WHERE d.series_id = c.series_id AND d.book_id = c.book_id)
-      ORDER BY s.title, s.series_id`).all(bookId) as SqlRow[])
-      .map((row) => ({ seriesId: String(row.series_id), title: String(row.title), joinedAt: String(row.recorded_at) }));
+      ORDER BY s.title, s.series_id`).iterate(bookId)) {
+      count += 1;
+      if (memberships.length < MAX_BOOK_SERIES_MEMBERSHIPS) memberships.push({ seriesId: String(row.series_id), title: String(row.title), joinedAt: String(row.recorded_at) });
+    }
+    return { memberships, count };
   }
 
-  /** How many Books each Series holds now. */
-  memberCounts(): Map<string, number> {
-    const rows = this.#db.prepare(`SELECT c.series_id, count(*) count FROM series_membership_changes c
-      WHERE c.kind = 'add' AND c.ordinal = (
+  /** How many Books this exact Series holds now, without building a house-wide map. */
+  memberCount(seriesId: string): number {
+    const row = this.#db.prepare(`SELECT count(*) count FROM series_membership_changes c
+      WHERE c.series_id = ? AND c.kind = 'add' AND c.ordinal = (
         SELECT max(d.ordinal) FROM series_membership_changes d WHERE d.series_id = c.series_id AND d.book_id = c.book_id)
-      GROUP BY c.series_id`).all() as SqlRow[];
-    return new Map(rows.map((row) => [String(row.series_id), Number(row.count)]));
+      `).get(seriesId)!;
+    return Number(row.count);
   }
 
   /**

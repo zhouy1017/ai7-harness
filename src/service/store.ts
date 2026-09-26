@@ -369,7 +369,6 @@ import {
 import { CALIBRATION_MIN_ADJUSTMENTS, PREDICTION_MIN_BOOKS_WITH_ACTUALS, calibrationActive, predictionAvailable } from '../shared/evaluation-calibration.js';
 import {
   MAX_FEEDBACK_HISTORY_ENTRIES,
-  MAX_BOOK_SERIES_MEMBERSHIPS,
   MAX_SERIES_CANDIDATE_QUERY_CHARACTERS,
   MAX_SERIES_CANDIDATES_PAGE,
   MAX_SERIES_HISTORY_PAGE,
@@ -10712,8 +10711,7 @@ export class EditorialStore {
     return this.#seriesCall(() => {
       requireStore(after === null || (UUID_PATTERN.test(after.seriesId) && typeof after.title === 'string' && after.title.length >= 1 &&
         after.title.length <= 2 * MAX_SERIES_TITLE_CHARACTERS), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      const counts = this.#series.memberCounts();
-      const rows = this.#series.listAfter(after, MAX_SERIES_LIST_PAGE + 1).map((entry) => ({ ...entry, memberCount: counts.get(entry.seriesId) ?? 0 }));
+      const rows = this.#series.listAfter(after, MAX_SERIES_LIST_PAGE + 1).map((entry) => ({ ...entry, memberCount: this.#series.memberCount(entry.seriesId) }));
       const { page, more } = weighedPage(rows, MAX_SERIES_LIST_PAGE);
       const last = page.at(-1);
       return { series: page, nextCursor: more && last !== undefined ? { title: last.title, seriesId: last.seriesId } : null };
@@ -10837,8 +10835,8 @@ export class EditorialStore {
       const history = this.#seriesHistoryPage({ bookId }, null);
       return {
         bookId,
-        memberships: memberships.slice(0, MAX_BOOK_SERIES_MEMBERSHIPS),
-        membershipCount: memberships.length,
+        memberships: memberships.memberships,
+        membershipCount: memberships.count,
         history: history.history,
         historyCount: history.count,
         historyNext: history.nextCursor,
@@ -10898,12 +10896,14 @@ export class EditorialStore {
 
   /** One page of a Series' members after the one named, newest joined first, and how many it holds in all. */
   #seriesMembersPage(seriesId: string, after: SeriesMembersCursor | null): SeriesMembersPageProjection & { count: number } {
-    const joined = this.#series.members(seriesId);
-    const rest = after === null ? joined
-      : joined.filter((entry) => entry.joinedAt < after.joinedAt || (entry.joinedAt === after.joinedAt && entry.bookId < after.bookId));
-    const members: SeriesMemberProjection[] = rest.slice(0, MAX_SERIES_MEMBERS_PAGE + 1).map((entry) => {
+    const members: SeriesMemberProjection[] = [];
+    let count = 0;
+    for (const entry of this.#series.members(seriesId)) {
+      count += 1;
+      if (members.length >= MAX_SERIES_MEMBERS_PAGE + 1 || (after !== null &&
+        (entry.joinedAt > after.joinedAt || (entry.joinedAt === after.joinedAt && entry.bookId >= after.bookId)))) continue;
       const people = this.#bookPeople.current(entry.bookId);
-      return {
+      members.push({
         bookId: entry.bookId,
         title: this.#evaluationBookTitle(entry.bookId),
         authors: people.authors,
@@ -10911,11 +10911,11 @@ export class EditorialStore {
         joinedAt: entry.joinedAt,
         // 书系一致性 stays unavailable until Series Knowledge reaches review (Issue #64, S29), so no member has had one.
         seriesConsistencyReview: null,
-      };
-    });
+      });
+    }
     const { page, more } = weighedPage(members, MAX_SERIES_MEMBERS_PAGE);
     const last = page.at(-1);
-    return { members: page, nextCursor: more && last !== undefined ? { joinedAt: last.joinedAt, bookId: last.bookId } : null, count: joined.length };
+    return { members: page, nextCursor: more && last !== undefined ? { joinedAt: last.joinedAt, bookId: last.bookId } : null, count };
   }
 
   /** One page of one Series' or one Book's membership change records after the one named, newest first, and how many in all. */

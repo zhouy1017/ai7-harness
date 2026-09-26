@@ -7,6 +7,7 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { EVALUATION_CALIBRATION_SCHEMA_VERSION, SERIES_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
   MAX_FRAME_BYTES,
+  MAX_BOOK_SERIES_MEMBERSHIPS,
   MAX_SERIES_CANDIDATES_PAGE,
   MAX_SERIES_HISTORY_PAGE,
   MAX_SERIES_LIST_PAGE,
@@ -274,7 +275,7 @@ describe('书系 over the real store', () => {
       expect(change('add')).toBe('SERIES_MEMBER_ALREADY:《晨光之书》已经在书系「晨光文丛」中。');
       expect(change('remove')).toBe('recorded');
       expect(ledger.latest(series.seriesId, bookId)).toMatchObject({ ordinal: 2, kind: 'remove' });
-      expect(ledger.members(series.seriesId)).toEqual([]);
+      expect([...ledger.members(series.seriesId)]).toEqual([]);
       // The current membership and every history page still validate records far behind the visible page.
       for (let index = 0; index < 32; index += 1) {
         expect(change('add')).toBe('recorded');
@@ -415,6 +416,13 @@ describe('书系 over the real store', () => {
       // A Book's own side counts its records, and pages them the same way.
       const side = store.inspectBookSeries(books[0]!);
       expect([side.membershipCount, side.historyCount, side.historyNext]).toEqual([1, 1, null]);
+      // One Book in more Series than its bounded summary can name: exact total, bounded names and an honest review reason.
+      for (const entry of [...firstList.series, ...secondList.series].slice(1)) add(store, entry.seriesId, books[0]!);
+      const many = store.inspectBookSeries(books[0]!);
+      expect([many.memberships.length, many.membershipCount, many.historyCount]).toEqual([MAX_BOOK_SERIES_MEMBERSHIPS, 52, 52]);
+      const reason = store.inspectReviewWorkspace(books[0]!, null).categories.find((entry) => entry.categoryId === 'series-consistency')!.unavailableReason;
+      expect(reason).toContain('已加入 52 个书系，包括');
+      expect(reason).not.toContain('书系051');
       store.markCleanShutdown();
     } finally {
       store.close();
