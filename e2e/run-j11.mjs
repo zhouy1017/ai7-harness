@@ -671,10 +671,24 @@ async function main() {
       await clickSelector(renderer, '[data-evaluation-action="start"]', 'evaluation-pages-next');
       await readEvaluation(renderer, (page) => page.record?.heading === `第 ${ordinal + 1} 版 · 编辑评分中`, 'evaluation-pages-started');
     }
+    await tick(renderer, `${risk('law-rights-ethics-policy')} input[value="low"]`, 'evaluation-pages-low-risk');
+    await assertRenderer(renderer, `(() => {
+      const original=Promise.prototype.then;
+      const held={release:null}; window.__j11HeldEvaluationPage=held;
+      try {
+        Promise.prototype.then=function(success,failure) {
+          Promise.prototype.then=original;
+          return original.call(this,(value)=>{held.release=()=>success(value);},(error)=>{held.release=()=>failure(error);});
+        };
+        document.querySelector('[data-evaluation-action="versions-older"]').click();
+      } finally { Promise.prototype.then=original; }
+      return true;
+    })()`, 'evaluation-pages-hold-completion');
+    await waitFor(renderer, `typeof window.__j11HeldEvaluationPage?.release==='function'`, 'evaluation-pages-completion-held');
     await fill(renderer, `${item('literary-quality')} [data-evaluation-field="score"]`, '17.5', 'evaluation-pages-unsaved');
-    await clickSelector(renderer, '[data-evaluation-action="versions-older"]', 'evaluation-pages-older');
+    await assertRenderer(renderer, `(() => { window.__j11HeldEvaluationPage.release(); delete window.__j11HeldEvaluationPage; return true; })()`, 'evaluation-pages-release');
     await waitFor(renderer, `document.querySelectorAll('.evaluation-version-list li').length===3 && document.querySelector('.evaluation-version-list button')?.textContent.startsWith('第 3 版') && document.activeElement===document.querySelector('.evaluation-versions h3')`, 'evaluation-pages-oldest');
-    await assertRenderer(renderer, `document.querySelector(${JSON.stringify(`${item('literary-quality')} [data-evaluation-field="score"]`)})?.value==='17.5' && document.querySelector('.evaluation-record')?.dataset.entries==='1'`, 'evaluation-pages-kept-input');
+    await assertRenderer(renderer, `document.querySelector(${JSON.stringify(`${item('literary-quality')} [data-evaluation-field="score"]`)})?.value==='17.5' && document.querySelector('.evaluation-record')?.dataset.entries==='1' && document.querySelector('.evaluation-conclusion [data-conclusion="recommend"] input')?.disabled===false`, 'evaluation-pages-kept-input');
     await clickSelector(renderer, '[data-evaluation-action="versions-latest"]', 'evaluation-pages-latest');
     await waitFor(renderer, `document.querySelectorAll('.evaluation-version-list li').length===10 && document.querySelector('.evaluation-version-list button')?.textContent.startsWith('第 13 版') && document.activeElement===document.querySelector('.evaluation-versions h3')`, 'evaluation-pages-latest-focus');
     await clickSelector(renderer, '[data-evaluation-action="save"]', 'evaluation-pages-save-input');

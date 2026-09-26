@@ -157,6 +157,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     }
     if (workspace.record !== null) parts.push(keptForm ?? recordNode(workspace.record));
     root.replaceChildren(...parts);
+    if (keptForm !== null && workspace.record !== null) refresh(keptForm, workspace.record);
     if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();
   };
 
