@@ -191,12 +191,12 @@ describe('学习准入 over the real store', () => {
       }]);
       expect(history.truncated).toBe(false);
       expect(history.entries.map((entry) => [entry.origin, entry.dimension, entry.signal, entry.reason, entry.reasonState, entry.peopleVersion])).toEqual([
+        ['proposal-decision', null, '拒绝', '方向不合适', 'given', 1],
         ['proposal-decision', null, '拒绝', null, 'dismissed', 1],
         ['proposal-decision', null, '拒绝', null, 'none', 1],
         ['proposal-decision', null, '修改后接受', null, 'none', 1],
-        ['proposal-decision', null, '拒绝', '方向不合适', 'given', 1],
       ]);
-      expect(history.entries[3]!.target).toEqual({
+      expect(history.entries[0]!.target).toEqual({
         kind: 'mark', bookId: book.bookId, manuscriptId: book.manuscriptId, branchId: book.branchId, blockId: expect.stringMatching(/^blk_/u), markId: rejectedMark, detached: false,
       });
       // Deciding changes nothing it came from: the decision and its reason read as they were.

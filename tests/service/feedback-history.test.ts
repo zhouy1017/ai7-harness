@@ -6,6 +6,7 @@ import { EditorialStore } from '../../src/service/store.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import {
   MAX_FEEDBACK_HISTORY_REASON_GRAPHEMES,
+  MAX_FEEDBACK_HISTORY_ENTRIES,
   MAX_FRAME_BYTES,
   MAX_MARK_BODY_CODE_UNITS,
   type CreateEditorialMarkInput,
@@ -71,7 +72,7 @@ function decider(store: EditorialStore, book: Imported) {
   const binding = { manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId };
   let at = 0;
   return {
-    make: (): string => store.createEditorialMark(suggestion(book, window, at++, `改${at}`)).markId,
+    make: (): string => store.createEditorialMark(suggestion(book, window, at++ % 60, `改${at}`)).markId,
     decide: (markId: string, disposition: 'rejected' | 'accepted-with-edit' | 'withdrawn', editedText: string | null, reason: string | null) =>
       store.recordChangeSuggestionDecision({ ...binding, markId, clientDecisionId: randomUUID(), disposition, editedText, reason }),
   };
@@ -190,6 +191,52 @@ describe('反馈历史 over the real store (Issue #61, S26c review)', () => {
       expect(reopened.inspectFeedbackHistory()).toEqual(before!);
       reopened.markCleanShutdown();
     } finally { reopened.close(); }
+  }, 180_000);
+
+  it('keeps the newest bounded entries across deep validated feedback and People histories', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let expected: ReturnType<EditorialStore['inspectFeedbackHistory']>;
+    try {
+      const book = await importBook(store);
+      const { make, decide } = decider(store, book);
+      const decisions: Array<{ entryId: string; recordedAt: string }> = [];
+      const firstMark = make();
+      const first = decide(firstMark, 'rejected', null, '初次原因').card!.suggestion!.decision!;
+      const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const binding = { manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId };
+      for (let index = 0; index < 66; index += 1) {
+        store.updateBookPeople({ bookId: book.bookId, expectedVersion: index, authors: ['周一'], editors: [`编辑${index}`], related: [] });
+        store.recordProposalDecisionFeedback({ ...binding, markId: firstMark, decisionId: first.decisionId,
+          expectedFeedback: index, action: 'revise', reason: `修订原因${index}`, reasonSource: 'free-text' });
+      }
+      for (let index = 0; index < MAX_FEEDBACK_HISTORY_ENTRIES + 5; index += 1) {
+        const decision = decide(make(), 'rejected', null, `原因${index}`).card!.suggestion!.decision!;
+        decisions.push({ entryId: `proposal-decision:${decision.decisionId}`, recordedAt: decision.recordedAt });
+      }
+      decisions.sort((a, b) => a.recordedAt > b.recordedAt ? -1 : a.recordedAt < b.recordedAt ? 1 : a.entryId < b.entryId ? -1 : 1);
+      expected = store.inspectFeedbackHistory();
+      expect(expected.entries.map((entry) => entry.entryId)).toEqual(decisions.slice(0, MAX_FEEDBACK_HISTORY_ENTRIES).map((entry) => entry.entryId));
+      expect(expected.truncated).toBe(true);
+      expect(expected.entries.every((entry) => entry.peopleVersion === 66)).toBe(true);
+      expect(wire(expected)).toBeLessThan(MAX_FRAME_BYTES);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(reopened.inspectFeedbackHistory()).toEqual(expected!);
+      reopened.markCleanShutdown();
+    } finally { reopened.close(); }
+    // A corrupted old, undisplayed predecessor must still fail the read rather than hide behind the response bound.
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      db.exec('DROP TRIGGER proposal_decision_feedback_no_update');
+      db.exec("UPDATE proposal_decision_feedback SET canonical_json = '{}' WHERE ordinal = 1");
+    } finally { db.close(); }
+    const damaged = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(() => damaged.inspectFeedbackHistory()).toThrow('处理原因的记录已损坏');
+      damaged.markCleanShutdown();
+    } finally { damaged.close(); }
   }, 180_000);
 
   it('answers well inside a frame however long the reasons are', async () => {

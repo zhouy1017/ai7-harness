@@ -200,15 +200,15 @@ export class AnalysisFeedbackLedger {
   }
 
   /** Signals by row, each verified: its digest, its record against its row, and its place in its item's chain. */
-  #signals(where: string, ...values: string[]): StoredSignal[] {
-    const rows = this.#db.prepare(`SELECT * FROM analysis_feedback_signals WHERE ${where} ORDER BY revision_id, item_key, ordinal`).all(...values) as SqlRow[];
-    const last = new Map<string, { signalId: string; ordinal: number }>();
-    return rows.map((row) => {
+  *#signals(where: string, ...values: string[]): IterableIterator<StoredSignal> {
+    const rows = this.#db.prepare(`SELECT * FROM analysis_feedback_signals WHERE ${where} ORDER BY revision_id, item_key, ordinal`).iterate(...values) as IterableIterator<SqlRow>;
+    let last: { signalId: string; ordinal: number; chain: string } | null = null;
+    for (const row of rows) {
       const json = String(row.canonical_json);
       requireFeedback(sha256Hex(json) === String(row.sha256), 'ANALYSIS_FEEDBACK_RECORD_INVALID', '分析反馈记录已损坏。');
       const record = JSON.parse(json) as unknown;
       const chain = `${String(row.revision_id)}\n${String(row.item_key)}`;
-      const before = last.get(chain) ?? null;
+      const before: { signalId: string; ordinal: number } | null = last?.chain === chain ? last : null;
       const dimension = dimensionOf(String(row.item_key));
       const ordinal = integer(row.ordinal);
       requireFeedback(isRecord(record) && record.schema === RECORD_SCHEMA && record.signalId === row.signal_id && record.bookId === row.book_id &&
@@ -218,8 +218,8 @@ export class AnalysisFeedbackLedger {
         dimension !== null && record.dimension === dimension && (record.supersedes ?? null) === (row.supersedes_signal_id ?? null) &&
         (record.supersedes ?? null) === (before?.signalId ?? null) && ordinal === (before?.ordinal ?? 0) + 1,
       'ANALYSIS_FEEDBACK_RECORD_INVALID', '分析反馈记录已损坏。');
-      last.set(chain, { signalId: String(row.signal_id), ordinal });
-      return {
+      last = { chain, signalId: String(row.signal_id), ordinal };
+      yield {
         signalId: String(row.signal_id),
         bookId: String(row.book_id),
         revisionId: String(row.revision_id),
@@ -233,7 +233,7 @@ export class AnalysisFeedbackLedger {
         supersedes: before?.signalId ?? null,
         sha256: String(row.sha256),
       };
-    });
+    }
   }
 
   #chains(where: string, ...values: string[]): Map<string, StoredSignal[]> {
@@ -310,6 +310,16 @@ export class AnalysisFeedbackLedger {
    */
   latestWithWords(bookId: string): Array<AnalysisFeedbackSignalProjection & { readonly revisionId: string; readonly itemKey: string; readonly dimension: AnalysisFeedbackDimension }> {
     return this.latest(bookId).filter((signal) => signal.reason !== null || signal.correction !== null);
+  }
+
+  /** Stream one latest judgment per item, validating every predecessor without retaining the history. */
+  *latestEntries(bookId: string): IterableIterator<StoredSignal> {
+    let last: StoredSignal | null = null;
+    for (const signal of this.#signals('book_id = ?', bookId)) {
+      if (last !== null && (last.revisionId !== signal.revisionId || last.itemKey !== signal.itemKey)) yield last;
+      last = signal;
+    }
+    if (last !== null) yield last;
   }
 
   /** Each judged item's latest judgment in one Book, oldest first: 质量与学习's history of it (Issue #61, S26c). */
