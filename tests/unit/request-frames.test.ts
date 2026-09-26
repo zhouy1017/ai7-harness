@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ProtocolError, decodeRequest } from '../../src/service/request-frames.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION } from '../../src/service/review/category-configuration.js';
@@ -406,6 +407,159 @@ describe('decodeRequest accepts well-formed frames', () => {
       { op: 'prepareBookDeliveryPackage', input: { ...prepare, expectedContentDigest: 'a'.repeat(63) } },
       { op: 'prepareBookDeliveryPackage', input: { bookId, purpose: '交出版社存档' } },
       { op: 'prepareBookDeliveryPackage', input: { ...prepare, destination: 'C:/导出' } },
+    ];
+    for (const { op, input } of refused) {
+      expect(rejectionFor(frameOf({ id, op, input })).requestId).toBe(id);
+    }
+  });
+
+  it('accepts a 图书交付包 version\'s export: its review, the folder the dialog returned within its bound, and its approval (Issue #416, S67b)', () => {
+    const bookId = randomUUID();
+    const folder = resolve('交付包导出');
+    const options = { includeAnnotations: true, includeSuggestions: false };
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options: { includeAnnotations: false, includeSuggestions: true } } },
+      { op: 'prepareBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options, memberKeys: ['manifest'], reviewDigest: 'a'.repeat(64), folder } },
+      {
+        op: 'prepareBookDeliveryPackageExport',
+        input: {
+          bookId, packageVersionId: randomUUID(), options, memberKeys: ['manifest'], reviewDigest: 'b'.repeat(64),
+          folder: `${folder}${'径'.repeat(MAX_EXPORT_DESTINATION_CODE_UNITS - folder.length)}`,
+        },
+      },
+      { op: 'approveBookDeliveryPackageExport', input: { bookId, exportId: randomUUID() } },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+  });
+
+  it('accepts a Book\'s people and 书库\'s search within their bounds (Issue #431, S83)', () => {
+    const bookId = randomUUID();
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'updateBookPeople', input: { bookId, expectedVersion: 0, authors: ['周一', '吴二'], editors: ['郑三'], related: [{ roleId: 'proofreader', name: '王四' }] } },
+      { op: 'updateBookPeople', input: { bookId, expectedVersion: 3, authors: [], editors: [], related: [] } },
+      { op: 'updateBookPeople', input: { bookId, expectedVersion: 1, authors: ['𠀀'.repeat(40)], editors: [], related: [] } },
+      { op: 'listBooks', input: { after: null } },
+      { op: 'listBooks', input: { after: null, filter: { field: 'author', text: '吴二' } } },
+      { op: 'listBooks', input: { after: { title: '人员之书甲', bookId }, filter: { field: 'all', text: '郑' } } },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+  });
+
+  it('rejects a people frame or a search whose names, bounds, role or key set is wrong (Issue #431, S83)', () => {
+    const id = randomUUID();
+    const bookId = randomUUID();
+    const people = { bookId, expectedVersion: 0, authors: ['周一'], editors: [], related: [] };
+    const refused: ReadonlyArray<{ op: string; input: unknown }> = [
+      { op: 'updateBookPeople', input: { ...people, expectedVersion: -1 } },
+      { op: 'updateBookPeople', input: { ...people, authors: ['   '] } },
+      { op: 'updateBookPeople', input: { ...people, authors: ['名'.repeat(41)] } },
+      { op: 'updateBookPeople', input: { ...people, authors: Array.from({ length: 11 }, (_, index) => `作者${index}`) } },
+      { op: 'updateBookPeople', input: { ...people, editors: 'Zheng San' } },
+      { op: 'updateBookPeople', input: { ...people, related: [{ roleId: 'Proofreader', name: '王四' }] } },
+      { op: 'updateBookPeople', input: { ...people, related: [{ roleId: 'proofreader', name: '王四', note: '' }] } },
+      { op: 'updateBookPeople', input: { bookId, expectedVersion: 0, authors: [], editors: [] } },
+      { op: 'listBooks', input: { after: null, filter: { field: 'series', text: '书系' } } },
+      { op: 'listBooks', input: { after: null, filter: { field: 'author', text: '' } } },
+      { op: 'listBooks', input: { after: null, filter: { field: 'author', text: '一\n吴' } } },
+      { op: 'listBooks', input: { after: null, filter: { field: 'author', text: '字'.repeat(41) } } },
+      { op: 'listBooks', input: { after: null, filter: { field: 'author' } } },
+      { op: 'listBooks', input: { after: null, page: 2 } },
+    ];
+    for (const { op, input } of refused) {
+      expect(rejectionFor(frameOf({ id, op, input })).requestId).toBe(id);
+    }
+  });
+
+  it('accepts 维护事项: a case read, recorded on a designation, its steps and its 勘误 (Issue #426, S68a)', () => {
+    const bookId = randomUUID();
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID() } },
+      { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID(), beforeRevision: 61, afterPublicationOrdinal: 30, errataVersionId: randomUUID() } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 22 } },
+      { op: 'recordMaintenanceCase', input: { bookId, publicationVersionId: randomUUID(), classification: 'errata', reason: '读者来信指出有误', evidence: null } },
+      { op: 'recordMaintenanceCase', input: { bookId, publicationVersionId: randomUUID(), classification: 'withdrawal', reason: '𠀀'.repeat(500), evidence: '质检单' } },
+      { op: 'appendMaintenanceCaseRevision', input: { bookId, caseId: randomUUID(), expectedRevision: 1, step: { kind: 'link-proposal', markId: randomUUID() } } },
+      { op: 'appendMaintenanceCaseRevision', input: { bookId, caseId: randomUUID(), expectedRevision: 2, step: { kind: 'link-publication', publicationVersionId: randomUUID() } } },
+      { op: 'appendMaintenanceCaseRevision', input: { bookId, caseId: randomUUID(), expectedRevision: 3, step: { kind: 'conclude', status: 'complete', outcome: '已记录' } } },
+      { op: 'saveMaintenanceErrata', input: { bookId, caseId: randomUUID(), expectedRevision: 1, body: '第三段「甲」应为「乙」。' } },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+  });
+
+  it('rejects a 维护事项 frame whose classification, words, revision, step or key set is wrong (Issue #426, S68a)', () => {
+    const id = randomUUID();
+    const bookId = randomUUID();
+    const record = { bookId, publicationVersionId: randomUUID(), classification: 'errata', reason: '有误', evidence: null };
+    const append = { bookId, caseId: randomUUID(), expectedRevision: 1, step: { kind: 'conclude', status: 'complete', outcome: '已记录' } };
+    const refused: ReadonlyArray<{ op: string; input: unknown }> = [
+      { op: 'inspectMaintenanceCase', input: { bookId } },
+      { op: 'inspectMaintenanceCase', input: { bookId, caseId: 'first' } },
+      ...[0, -1, 1.5, '2'].map((beforeRevision) => ({ op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID(), beforeRevision } })),
+      { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID(), afterPublicationOrdinal: -1 } },
+      { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID(), errataVersionId: 'first' } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID() } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 0 } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 2.5 } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: '22' } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: 'first', beforeOrdinal: 22 } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 22, limit: 100 } },
+      { op: 'recordMaintenanceCase', input: { ...record, classification: 'recall' } },
+      { op: 'recordMaintenanceCase', input: { ...record, reason: '   ' } },
+      { op: 'recordMaintenanceCase', input: { ...record, reason: '由'.repeat(501) } },
+      { op: 'recordMaintenanceCase', input: { ...record, evidence: '据'.repeat(501) } },
+      { op: 'recordMaintenanceCase', input: { bookId, publicationVersionId: record.publicationVersionId, classification: 'errata', reason: '有误' } },
+      { op: 'recordMaintenanceCase', input: { ...record, status: 'complete' } },
+      { op: 'appendMaintenanceCaseRevision', input: { ...append, expectedRevision: 0 } },
+      { op: 'appendMaintenanceCaseRevision', input: { ...append, step: { kind: 'conclude', status: 'waiting', outcome: '已记录' } } },
+      { op: 'appendMaintenanceCaseRevision', input: { ...append, step: { kind: 'conclude', status: 'complete', outcome: '' } } },
+      { op: 'appendMaintenanceCaseRevision', input: { ...append, step: { kind: 'link-proposal', markId: 'mark' } } },
+      { op: 'appendMaintenanceCaseRevision', input: { ...append, step: { kind: 'link-publication', publicationVersionId: randomUUID(), markId: randomUUID() } } },
+      { op: 'appendMaintenanceCaseRevision', input: { ...append, step: { kind: 'recorded' } } },
+      { op: 'saveMaintenanceErrata', input: { bookId, caseId: randomUUID(), expectedRevision: 1, body: '误'.repeat(4001) } },
+      { op: 'saveMaintenanceErrata', input: { bookId, caseId: randomUUID(), expectedRevision: 1 } },
+    ];
+    for (const { op, input } of refused) {
+      expect(rejectionFor(frameOf({ id, op, input })).requestId).toBe(id);
+    }
+  });
+
+  it('rejects a 图书交付包 export whose version, switches, digest, folder or key set is wrong (Issue #416, S67b)', () => {
+    const id = randomUUID();
+    const bookId = randomUUID();
+    const options = { includeAnnotations: true, includeSuggestions: true };
+    const prepare = { bookId, packageVersionId: randomUUID(), options, memberKeys: ['manifest'], reviewDigest: 'a'.repeat(64), folder: resolve('交付包导出') };
+    const refused: ReadonlyArray<{ op: string; input: unknown }> = [
+      ...[-1, 0.5, Number.MAX_SAFE_INTEGER, null].map((offset) => ({ op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: prepare.packageVersionId, options, offset } })),
+      ...[undefined, [], ['manifest', 'manifest'], Array(41).fill('manifest'), ['x'.repeat(81)], [false]].map((memberKeys) => ({ op: 'prepareBookDeliveryPackageExport', input: { ...prepare, memberKeys } })),
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID() } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: 'v2', options } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options, folder: prepare.folder } },
+      // 备注 never go with a package, and each switch is a switch.
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options: { ...options, includeEditorNotes: false } } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options: { includeAnnotations: true } } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options: { includeAnnotations: 1, includeSuggestions: true } } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options: null } },
+      { op: 'prepareBookDeliveryPackageExport', input: { bookId, packageVersionId: prepare.packageVersionId, reviewDigest: prepare.reviewDigest, folder: prepare.folder } },
+      { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, options: { includeAnnotations: true, includeSuggestions: 'yes' } } },
+      { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, reviewDigest: 'A'.repeat(64) } },
+      { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, reviewDigest: 'a'.repeat(63) } },
+      { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, folder: '交付包导出' } },
+      { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, folder: `${prepare.folder}${'径'.repeat(MAX_EXPORT_DESTINATION_CODE_UNITS)}` } },
+      { op: 'prepareBookDeliveryPackageExport', input: { bookId, packageVersionId: prepare.packageVersionId, options, memberKeys: ['manifest'], reviewDigest: prepare.reviewDigest } },
+      { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, fileNames: ['交付包清单.md'] } },
+      { op: 'approveBookDeliveryPackageExport', input: { bookId, exportId: 'last' } },
+      { op: 'approveBookDeliveryPackageExport', input: { bookId, exportId: randomUUID(), folder: prepare.folder } },
     ];
     for (const { op, input } of refused) {
       expect(rejectionFor(frameOf({ id, op, input })).requestId).toBe(id);

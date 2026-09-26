@@ -99,7 +99,7 @@ function serviceEnvironment(
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 60 &&
+    value.protocolVersion === 66 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&
@@ -235,7 +235,10 @@ export class ServiceClient {
             // An export renders the whole file for its review, its staging, its preparation and its approval; a timeout
             // would stop the service mid-write and leave its stage behind.
             operation === 'reviewManuscriptExport' || operation === 'stageManuscriptExport' ||
-            operation === 'prepareManuscriptExport' || operation === 'approveManuscriptExport'
+            operation === 'prepareManuscriptExport' || operation === 'approveManuscriptExport' ||
+            // A 图书交付包 export (Issue #416, S67b) does the same for every file of the version, one after another.
+            operation === 'reviewBookDeliveryPackageExport' || operation === 'prepareBookDeliveryPackageExport' ||
+            operation === 'approveBookDeliveryPackageExport'
           ? LONG_REQUEST_TIMEOUT_MS
           : REQUEST_TIMEOUT_MS);
       timeout.unref();

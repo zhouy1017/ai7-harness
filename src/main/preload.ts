@@ -265,6 +265,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectReviewFindingOfMark']['output']>(IPC_CHANNELS.inspectReviewFindingOfMark, input),
   listBooks: (input: ServiceOperationMap['listBooks']['input']) =>
     invoke<ServiceOperationMap['listBooks']['output']>(IPC_CHANNELS.listBooks, input),
+  updateBookPeople: (input: Parameters<RendererApi['updateBookPeople']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['updateBookPeople']>>>(IPC_CHANNELS.updateBookPeople, input),
   prepareNewBookReview: (input: ServiceOperationMap['prepareNewBookReview']['input']) =>
     invoke<ServiceOperationMap['prepareNewBookReview']['output']>(IPC_CHANNELS.prepareNewBookReview, input),
   commitNewBookImport: (input: CommitNewBookRendererInput) =>
@@ -359,8 +361,28 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectBookDeliveryPackage']['output']>(IPC_CHANNELS.inspectBookDeliveryPackage),
   prepareBookDeliveryPackage: (input: Omit<ServiceOperationMap['prepareBookDeliveryPackage']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['prepareBookDeliveryPackage']['output']>(IPC_CHANNELS.prepareBookDeliveryPackage, input),
+  reviewBookDeliveryPackageExport: (input: Parameters<RendererApi['reviewBookDeliveryPackageExport']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['reviewBookDeliveryPackageExport']>>>(IPC_CHANNELS.reviewBookDeliveryPackageExport, input),
+  chooseBookDeliveryPackageExportFolder: (input: Parameters<RendererApi['chooseBookDeliveryPackageExportFolder']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['chooseBookDeliveryPackageExportFolder']>>>(IPC_CHANNELS.chooseBookDeliveryPackageExportFolder, input),
+  cancelBookDeliveryPackageExport: (input: Parameters<RendererApi['cancelBookDeliveryPackageExport']>[0]) =>
+    invoke<boolean>(IPC_CHANNELS.cancelBookDeliveryPackageExport, input),
+  approveBookDeliveryPackageExport: (input: Parameters<RendererApi['approveBookDeliveryPackageExport']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['approveBookDeliveryPackageExport']>>>(IPC_CHANNELS.approveBookDeliveryPackageExport, input),
+  inspectMaintenanceCase: (input: Parameters<RendererApi['inspectMaintenanceCase']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['inspectMaintenanceCase']>>>(IPC_CHANNELS.inspectMaintenanceCase, input),
+  listMaintenanceCases: (input: Parameters<RendererApi['listMaintenanceCases']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['listMaintenanceCases']>>>(IPC_CHANNELS.listMaintenanceCases, input),
+  recordMaintenanceCase: (input: Parameters<RendererApi['recordMaintenanceCase']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['recordMaintenanceCase']>>>(IPC_CHANNELS.recordMaintenanceCase, input),
+  appendMaintenanceCaseRevision: (input: Parameters<RendererApi['appendMaintenanceCaseRevision']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['appendMaintenanceCaseRevision']>>>(IPC_CHANNELS.appendMaintenanceCaseRevision, input),
+  saveMaintenanceErrata: (input: Parameters<RendererApi['saveMaintenanceErrata']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['saveMaintenanceErrata']>>>(IPC_CHANNELS.saveMaintenanceErrata, input),
   createProductionDocument: (input: Omit<ServiceOperationMap['createProductionDocument']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['createProductionDocument']['output']>(IPC_CHANNELS.createProductionDocument, input),
+  transitionProductionDocumentPhase: (input: Omit<ServiceOperationMap['transitionProductionDocumentPhase']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['transitionProductionDocumentPhase']['output']>(IPC_CHANNELS.transitionProductionDocumentPhase, input),
   decideProductionDocumentType: (input: Omit<ServiceOperationMap['decideProductionDocumentType']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['decideProductionDocumentType']['output']>(IPC_CHANNELS.decideProductionDocumentType, input),
   saveProductionDocumentVersion: (input: Omit<ServiceOperationMap['saveProductionDocumentVersion']['input'], 'bookId'>) =>

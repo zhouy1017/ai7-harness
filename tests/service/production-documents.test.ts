@@ -7,7 +7,7 @@ import { parseDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
 import { productionDocumentMarksNotCarried } from '../../src/service/production-documents.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
-  BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION,
+  BOOK_PEOPLE_SCHEMA_VERSION,
   PRODUCTION_DOCUMENT_SCHEMA_VERSION,
   REIMPORT_GROUP_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
@@ -131,7 +131,8 @@ describe('Production Documents', () => {
       documentId = created.document!.documentId;
       expect(created.document!.versions.map((version) => [version.ordinal, version.label])).toEqual([[1, '版本 1']]);
       expect(created.document!.changedSinceVersion).toBe(false);
-      expect(created.document!.origin).toEqual({ sourceVersionId, displayName: '新闻稿初稿.docx' });
+      // Issue #547: how the material was read is kept with the document; this one left nothing behind.
+      expect(created.document!.origin).toEqual({ sourceVersionId, displayName: '新闻稿初稿.docx', marksNotCarried: 0 });
       // At most one document per type.
       expect(await asyncCode(() => store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', sourceVersionId })))
         .toBe('PRODUCTION_DOCUMENT_EXISTS');
@@ -218,7 +219,7 @@ describe('Production Documents', () => {
     }
   }, 180_000);
 
-  it('says what it did not carry from a material with comments and tracked changes, and every window of a document says it is one', async () => {
+  it('says what it did not carry from a material with comments and tracked changes, for as long as the document exists, and every window of a document says it is one', async () => {
     const manuscriptPath = await compose('标记组稿', [1, 2, 3]);
     const draftPath = join(roots.inputRoot, '带批注的新闻稿.docx');
     await composeRevisedDocx(draftPath, {
@@ -231,18 +232,39 @@ describe('Production Documents', () => {
       comments: [{ id: 1, author: '编辑甲', text: [{ block: 24, from: 0, to: 6 }] }],
     });
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let bookId: string;
     try {
       const book = await importBook(store, manuscriptPath);
+      bookId = book.bookId;
       const sourceVersionId = await importSource(store, book.bookId, draftPath);
       const created = await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', sourceVersionId });
       // The comment and the insertion stay with the material, and the result says so for the window that opens.
       expect(created.notice).toBe(productionDocumentMarksNotCarried(2));
       const document = created.document!;
+      // And the document keeps saying so (Issue #547): the count is recorded with it, not only said once.
+      expect(document.origin).toEqual({ sourceVersionId, displayName: '带批注的新闻稿.docx', marksNotCarried: 2 });
+      expect(store.inspectProductionDocuments(book.bookId).types[0]!.document!.origin.marksNotCarried).toBe(2);
       expect(store.getManuscriptWindow(document.documentId, document.branchId, null).deliverable).toBe('production-document');
       expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null)).not.toHaveProperty('deliverable');
       store.markCleanShutdown();
     } finally {
       store.close();
+    }
+    // The reading is recorded once and never rewritten, and a restart reads it as it was.
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      expect(() => database.prepare('UPDATE production_document_origin_readings SET marks_not_carried = 0').run()).toThrow(/PRODUCTION_DOCUMENT_ORIGIN_LEDGER_IMMUTABLE/);
+      expect(() => database.prepare('DELETE FROM production_document_origin_readings').run()).toThrow(/PRODUCTION_DOCUMENT_ORIGIN_LEDGER_IMMUTABLE/);
+      expect((database.prepare('SELECT count(*) count FROM production_document_origin_readings').get() as { count: number }).count).toBe(1);
+    } finally {
+      database.close();
+    }
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(reopened.inspectProductionDocuments(bookId!).types[0]!.document!.origin.marksNotCarried).toBe(2);
+      reopened.markCleanShutdown();
+    } finally {
+      reopened.close();
     }
   }, 180_000);
 
@@ -353,7 +375,7 @@ describe('Production Documents', () => {
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BOOK_PEOPLE_SCHEMA_VERSION);
       expect(after.prepare('SELECT rowid, * FROM manuscripts ORDER BY rowid').all()).toEqual(rows!);
       expect((after.prepare("SELECT sql FROM sqlite_schema WHERE name = 'manuscripts'").get() as { sql: string }).sql).toContain("'production-document'");
       expect(after.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'index' AND name = 'manuscripts_one_primary_per_book'").get()).toBeDefined();
@@ -551,9 +573,19 @@ describe('交付 of a Production Document (S66b)', () => {
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const planted = new DatabaseSync(path);
     try {
-      // Revision 37: everything as it is, but no Delivery Records and no package versions (revision 39).
+      // Revision 37: everything as it is, but no Delivery Records, no package versions (revision 39) and no workflow
+      // (revision 40).
       planted.exec('PRAGMA foreign_keys = OFF');
       planted.exec(`BEGIN IMMEDIATE;
+        DROP TABLE book_people_versions;
+        DROP TABLE maintenance_case_revisions;
+        DROP TABLE maintenance_errata_versions;
+        DROP TABLE maintenance_cases;
+        DROP TABLE production_document_origin_readings;
+        DROP TABLE book_delivery_package_export_files;
+        DROP TABLE book_delivery_package_exports;
+        DROP TABLE production_document_phase_transitions;
+        DROP TABLE production_document_workflow_instances;
         DROP TABLE book_delivery_package_versions;
         DROP TABLE production_document_deliveries;
         PRAGMA user_version = ${PRODUCTION_DOCUMENT_SCHEMA_VERSION};
@@ -564,14 +596,15 @@ describe('交付 of a Production Document (S66b)', () => {
     }
     const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
-      expect(JSON.stringify(migrated.inspectProductionDocuments(bookId!))).toBe(before!);
+      // A store that old never counted what a document's material held (Issue #547): that one fact reads as unknown.
+      expect(JSON.stringify(migrated.inspectProductionDocuments(bookId!))).toBe(before!.replaceAll('"marksNotCarried":0', '"marksNotCarried":null'));
       migrated.markCleanShutdown();
     } finally {
       migrated.close();
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BOOK_PEOPLE_SCHEMA_VERSION);
       expect((after.prepare('SELECT count(*) count FROM production_document_deliveries').get() as { count: number }).count).toBe(0);
     } finally {
       after.close();

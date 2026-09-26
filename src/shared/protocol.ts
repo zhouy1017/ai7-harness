@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 60 as const;
+export const SERVICE_PROTOCOL_VERSION = 66 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -82,6 +82,7 @@ export const IPC_CHANNELS = {
   generateReviewReport: 'ai7:j04:generate-review-report',
   inspectReviewFindingOfMark: 'ai7:j04:inspect-review-finding-of-mark',
   listBooks: 'ai7:j01:list-books',
+  updateBookPeople: 'ai7:j11:update-book-people',
   prepareNewBookReview: 'ai7:j01:prepare-new-book-review',
   commitNewBookImport: 'ai7:j01:commit-new-book-import',
   prepareSourceImportReview: 'ai7:j01:prepare-source-import-review',
@@ -128,10 +129,20 @@ export const IPC_CHANNELS = {
   inspectProductionDocuments: 'ai7:j07:inspect-production-documents',
   inspectBookDeliveryPackage: 'ai7:j07:inspect-book-delivery-package',
   prepareBookDeliveryPackage: 'ai7:j07:prepare-book-delivery-package',
+  reviewBookDeliveryPackageExport: 'ai7:j07:review-book-delivery-package-export',
+  chooseBookDeliveryPackageExportFolder: 'ai7:j07:choose-book-delivery-package-export-folder',
+  approveBookDeliveryPackageExport: 'ai7:j07:approve-book-delivery-package-export',
+  inspectMaintenanceCase: 'ai7:j07:inspect-maintenance-case',
+  listMaintenanceCases: 'ai7:j07:list-maintenance-cases',
+  recordMaintenanceCase: 'ai7:j07:record-maintenance-case',
+  appendMaintenanceCaseRevision: 'ai7:j07:append-maintenance-case-revision',
+  saveMaintenanceErrata: 'ai7:j07:save-maintenance-errata',
+  cancelBookDeliveryPackageExport: 'ai7:j07:cancel-book-delivery-package-export',
   createProductionDocument: 'ai7:j07:create-production-document',
   decideProductionDocumentType: 'ai7:j07:decide-production-document-type',
   saveProductionDocumentVersion: 'ai7:j07:save-production-document-version',
   recordProductionDocumentDelivery: 'ai7:j07:record-production-document-delivery',
+  transitionProductionDocumentPhase: 'ai7:j07:transition-production-document-phase',
   inspectGlobalAttention: 'ai7:j09:inspect-global-attention',
   reviewManuscriptExport: 'ai7:j07:review-manuscript-export',
   chooseManuscriptExportDestination: 'ai7:j07:choose-manuscript-export-destination',
@@ -515,6 +526,8 @@ export interface BookWorkOverviewProjection {
     internalNumber: string | null;
     createdAt: string;
   };
+  /** 作者, 责编 and 相关人 (Issue #431, S83; BOOK-006). */
+  people: BookPeopleProjection;
   manuscriptState:
     | { state: 'empty'; label: '尚无稿件' }
     | { state: 'populated'; label: '已有主稿件'; manuscriptId: string };
@@ -620,6 +633,8 @@ export interface BookSummaryProjection {
   stableIdentity: string;
   title: string;
   internalNumber: string | null;
+  /** 作者, 责编 and 相关人 for the card (Issue #431, S83). */
+  people: { authors: ReadonlyArray<string>; editors: ReadonlyArray<string>; related: ReadonlyArray<{ roleLabel: string; name: string }> };
   manuscriptState: 'empty' | 'populated';
   manuscriptStateLabel: '尚无稿件' | '已有主稿件';
   reimportLineageSourceVersionIds: ReadonlyArray<string>;
@@ -630,6 +645,58 @@ export interface BookSummaryCursor {
   title: string;
   bookId: string;
 }
+
+// ---- 作者 · 责编 · 相关人 (Issue #431, plan slice S83; V2-UX-BOOK-006, FDBK-013) -------------------------------------------
+
+/** One name, in characters (code points) once NFC-normalized and trimmed. */
+export const MAX_BOOK_PERSON_NAME_CHARACTERS = 40;
+export const MAX_BOOK_AUTHORS = 10;
+export const MAX_BOOK_EDITORS = 10;
+export const MAX_BOOK_RELATED_PEOPLE = 30;
+/** Separates several names in one field: 「张三、李四」. A name never holds one. */
+export const BOOK_PEOPLE_NAME_SEPARATOR = '、';
+
+/** One 相关人: a role of the house list, and a name. */
+export interface BookRelatedPersonProjection {
+  roleId: string;
+  roleLabel: string;
+  name: string;
+}
+
+/** A Book's 作者, 责编 and 相关人 as its newest version records them; attribution dimensions, never accounts. */
+export interface BookPeopleProjection {
+  /** 0 before the first save. */
+  version: number;
+  authors: ReadonlyArray<string>;
+  editors: ReadonlyArray<string>;
+  related: ReadonlyArray<BookRelatedPersonProjection>;
+  /** The house's role list the form offers, in its order. */
+  roles: ReadonlyArray<{ roleId: string; label: string }>;
+  recordedAt: string | null;
+}
+
+/** `保存人员`: the whole set, against the version the editor read. */
+export interface UpdateBookPeopleInput {
+  bookId: string;
+  expectedVersion: number;
+  authors: ReadonlyArray<string>;
+  editors: ReadonlyArray<string>;
+  related: ReadonlyArray<{ roleId: string; name: string }>;
+}
+
+export interface BookPeopleResultProjection {
+  bookId: string;
+  outcome: 'recorded' | 'unchanged';
+  completionLabel: '人员已保存' | '人员没有变化';
+  people: BookPeopleProjection;
+}
+
+/** 书库's search (IA-008, BOOK-006): one field — or all of 书名, 作者 and 责编 — holding the words. */
+export interface BookSummaryFilter {
+  field: 'all' | 'title' | 'author' | 'editor';
+  text: string;
+}
+export const MAX_BOOK_SUMMARY_FILTER_CHARACTERS = 40;
 
 export interface BookSummaryPageProjection {
   items: ReadonlyArray<BookSummaryProjection>;
@@ -4968,6 +5035,189 @@ export interface PublicationVersionProjection {
     permissionId: string;
     events: ReadonlyArray<{ eventId: string; kind: PublicationEventKind }>;
   };
+  /** Its 维护事项 (Issue #426, S68a; MAINT-001): the cases bound to this exact designation, and the internal states they set. */
+  maintenance: PublicationMaintenanceProjection;
+}
+
+// ---- 维护事项 (Issue #426, plan slice S68a; V2-UX-MAINT-001 to 011, ADR 0040) ----------------------------------------
+
+/** The six classifications (MAINT-002), in the order the form shows them, none preselected. */
+export type MaintenanceClassification = 'correction' | 'errata' | 'supersession' | 'withdrawal' | 'reissue' | 'archive';
+export const MAINTENANCE_CLASSIFICATIONS: readonly MaintenanceClassification[] = [
+  'correction', 'errata', 'supersession', 'withdrawal', 'reissue', 'archive',
+];
+/** A case's status as its newest revision records it (MAINT-007, MAINT-011). */
+export type MaintenanceCaseStatus = 'unresolved' | 'waiting' | 'complete';
+/** What one revision of a case recorded (MAINT-003): the case itself, a link, a 勘误 version, or a conclusion. */
+export type MaintenanceCaseStep = 'recorded' | 'proposal-linked' | 'publication-linked' | 'errata-saved' | 'concluded';
+/** The step a case offers next, named by the action the case shows for it. */
+export type MaintenanceNextStep = 'link-proposal' | 'link-publication' | 'write-errata' | 'conclude';
+
+/** 原因, 依据 and a conclusion's 结论说明, in characters (code points) once NFC-normalized and trimmed. */
+export const MAX_MAINTENANCE_REASON_CHARACTERS = 500;
+export const MAX_MAINTENANCE_EVIDENCE_CHARACTERS = 500;
+/** One 勘误 version's words. */
+export const MAX_MAINTENANCE_ERRATA_CHARACTERS = 4000;
+/** At most this many cases of one designation are listed on 交付物, newest first; the count says how many there are. */
+export const MAX_MAINTENANCE_CASES_LISTED = 5;
+/** At most this many revisions of one case are read; the count says how many there are. */
+export const MAX_MAINTENANCE_REVISIONS_LISTED = 60;
+/** At most this many 修改建议 are offered to 关联. */
+export const MAX_MAINTENANCE_PROPOSALS_OFFERED = 20;
+/** At most this many later designations are offered to 关联发稿版本, the nearest first. */
+export const MAX_MAINTENANCE_PUBLICATIONS_OFFERED = 30;
+/** `更早的维护事项…` reads this many older cases of one designation at a time. */
+export const MAX_MAINTENANCE_CASES_PAGE = 20;
+
+/** One case as its designation lists it: what it is, where it stands and what it asks next. */
+export interface MaintenanceCaseSummaryProjection {
+  caseId: string;
+  /** 第 N 项维护事项 of the Book. */
+  ordinal: number;
+  classification: MaintenanceClassification;
+  classificationLabel: string;
+  status: MaintenanceCaseStatus;
+  statusLabel: string;
+  nextStep: MaintenanceNextStep | null;
+  revisions: number;
+  recordedAt: string;
+  latestAt: string;
+}
+
+/** A designation's 维护事项, as far as 交付物's one read carries them. */
+export interface PublicationMaintenanceProjection {
+  cases: ReadonlyArray<MaintenanceCaseSummaryProjection>;
+  total: number;
+  /** A 撤回 case holds it: in AI7 it is no longer used for 发稿 (ADR 0040), and it stays readable. */
+  withdrawn: boolean;
+  /** An 归档 case holds it: its maintenance is closed; its use and its history are unchanged. */
+  archived: boolean;
+}
+
+/**
+ * What one revision links (MAINT-010), in the linked record's own words; linking grants the case nothing. A 勘误 version is
+ * named by its number: its words are the case's newest `errata`, so a case's answer stays within one frame however many
+ * versions it saved.
+ */
+export type MaintenanceCaseLinkProjection =
+  | { kind: 'proposal'; markId: string; label: string; stateLabel: string }
+  | { kind: 'publication-version'; publicationVersionId: string; label: string }
+  | { kind: 'errata'; errataVersionId: string; version: number };
+
+/** One immutable revision of a case, on its timeline (MAINT-003, MAINT-010). */
+export interface MaintenanceCaseRevisionProjection {
+  revision: number;
+  step: MaintenanceCaseStep;
+  stepLabel: string;
+  status: MaintenanceCaseStatus;
+  statusLabel: string;
+  reason: string | null;
+  evidence: string | null;
+  link: MaintenanceCaseLinkProjection | null;
+  actor: '本机编辑';
+  recordedAt: string;
+  /** 查看技术详情 only. */
+  digest: string;
+}
+
+/** One 维护事项 in its workspace: its target, its timeline oldest first, and what it offers next. */
+export interface MaintenanceCaseProjection {
+  bookId: string;
+  caseId: string;
+  ordinal: number;
+  classification: MaintenanceClassification;
+  classificationLabel: string;
+  /** What the classification does, in the editor's words (ADR 0040). */
+  consequence: string;
+  /** 撤回 and 归档 only: MAINT-008's sentence, standing with the case. */
+  internalOnly: string | null;
+  /** The exact designation it is bound to, never retargeted. */
+  target: { publicationVersionId: string; ordinal: number; label: string; revisionId: string; revisionLabel: string };
+  status: MaintenanceCaseStatus;
+  statusLabel: string;
+  nextStep: MaintenanceNextStep | null;
+  revisions: ReadonlyArray<MaintenanceCaseRevisionProjection>;
+  revisionsTotal: number;
+  revisionsBefore: number | null;
+  inspectedErrata: null | { errataVersionId: string; version: number; body: string; recordedAt: string };
+  /** The newest 勘误 version, with how many there are; `null` before the first. */
+  errata: null | { errataVersionId: string; version: number; body: string; recordedAt: string };
+  /**
+   * The conclusions 记录维护事项结论… may record now: both while the case is open, and only 仍未解决 while a 替代 or 再版
+   * still waits for its separately designated version (MAINT-007); none once complete.
+   */
+  conclusions: ReadonlyArray<'unresolved' | 'complete'>;
+  /** What 关联… offers: the manuscript's 修改建议 made after the designation, and the designations after it. */
+  choices: {
+    proposals: ReadonlyArray<{ markId: string; label: string; stateLabel: string; createdAt: string }>;
+    publications: ReadonlyArray<{ publicationVersionId: string; label: string }>;
+    publicationsAfter: number | null;
+  };
+  /** The revision the editor read: the next step names it, and a step against another is refused. */
+  expectedRevision: number;
+  technical: { caseDigest: string };
+}
+
+/** `记录维护事项` (MAINT-002, MAINT-003): one case and its first revision, bound to one exact designation. */
+export interface RecordMaintenanceCaseInput {
+  bookId: string;
+  publicationVersionId: string;
+  classification: MaintenanceClassification;
+  reason: string;
+  evidence: string | null;
+}
+
+export interface InspectMaintenanceCaseInput {
+  bookId: string;
+  caseId: string;
+  beforeRevision?: number;
+  afterPublicationOrdinal?: number;
+  errataVersionId?: string;
+}
+
+/** `更早的维护事项…`: the older cases of one designation of the route's Book, before the oldest one shown. */
+export interface ListMaintenanceCasesInput {
+  bookId: string;
+  publicationVersionId: string;
+  /** The ordinal of the oldest case shown: the page holds the cases before it, newest first. */
+  beforeOrdinal: number;
+}
+
+/** One page of a designation's older cases (MAINT-001): every case it holds can be opened, however old. */
+export interface MaintenanceCasePageProjection {
+  bookId: string;
+  publicationVersionId: string;
+  cases: ReadonlyArray<MaintenanceCaseSummaryProjection>;
+  /** Cases older still. */
+  more: boolean;
+}
+
+/** One later step of a case, appended as its next revision against the one the editor read. */
+export type MaintenanceCaseStepInput =
+  | { kind: 'link-proposal'; markId: string }
+  | { kind: 'link-publication'; publicationVersionId: string }
+  | { kind: 'conclude'; status: 'unresolved' | 'complete'; outcome: string };
+
+export interface AppendMaintenanceCaseRevisionInput {
+  bookId: string;
+  caseId: string;
+  expectedRevision: number;
+  step: MaintenanceCaseStepInput;
+}
+
+/** `保存勘误版本` (MAINT-005): the 勘误's next version, linked by the case's next revision. */
+export interface SaveMaintenanceErrataInput {
+  bookId: string;
+  caseId: string;
+  expectedRevision: number;
+  body: string;
+}
+
+/** What a step came to: the case as it stands and the completion words (`维护事项已记录` or `维护事项结论已记录`). */
+export interface MaintenanceCaseResultProjection {
+  bookId: string;
+  maintenanceCase: MaintenanceCaseProjection;
+  completion: string;
 }
 
 /** The pending 录入定价与首印 line the current designation leaves; it offers no action yet. */
@@ -5033,8 +5283,12 @@ export interface ProductionDocumentProjection {
   documentId: string;
   branchId: string;
   createdAt: string;
-  /** The Book's source material it was made from. */
-  origin: { sourceVersionId: string; displayName: string };
+  /**
+   * The Book's source material it was made from, and how many of its 批注与修订 the document did not carry (Issue #547):
+   * its text was read with every tracked change rejected and its comments left out. `null` for a document made before
+   * the count was recorded.
+   */
+  origin: { sourceVersionId: string; displayName: string; marksNotCarried: number | null };
   /** Newest first, at most `MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED`. */
   versions: ReadonlyArray<ProductionDocumentVersionProjection>;
   versionsTruncated: boolean;
@@ -5047,6 +5301,124 @@ export interface ProductionDocumentProjection {
   deliveriesTruncated: boolean;
   /** `交付后有修改` (DELIV-004): an edit after a delivery — the document was delivered, and its text is no version it was delivered at. */
   changedSinceDelivery: boolean;
+  /** Its Deliverable Workflow Lens (Issue #415, S66c; V2-UX-WORK-001 to 009): the pinned profile and its seven phases. */
+  workflow: ProductionDocumentWorkflowProjection;
+}
+
+/** The seven shared phases of a Deliverable Workflow (V2-UX-WORK-003), in the profile's order. */
+export type ProductionDocumentPhaseId =
+  | 'intake'
+  | 'source-development'
+  | 'drafting'
+  | 'review-verification'
+  | 'finalization'
+  | 'delivery'
+  | 'maintenance';
+export const PRODUCTION_DOCUMENT_PHASE_IDS: readonly ProductionDocumentPhaseId[] = [
+  'intake', 'source-development', 'drafting', 'review-verification', 'finalization', 'delivery', 'maintenance',
+];
+export const PRODUCTION_DOCUMENT_PHASE_LABELS: Readonly<Record<ProductionDocumentPhaseId, string>> = {
+  intake: '接收与准备',
+  'source-development': '来源建设',
+  drafting: '起草',
+  'review-verification': '审阅与核查',
+  finalization: '定稿',
+  delivery: '交付',
+  maintenance: '维护',
+};
+
+/**
+ * A phase's recorded state (WORK-004): only the editor's deterministic commands move it (WORK-008). `等待你处理` is read
+ * beside it from the document's own facts, never recorded.
+ */
+export type ProductionDocumentPhaseState = 'not-started' | 'in-progress' | 'completed' | 'skipped' | 'reopened';
+export const PRODUCTION_DOCUMENT_PHASE_STATE_LABELS: Readonly<Record<ProductionDocumentPhaseState, string>> = {
+  'not-started': '未开始',
+  'in-progress': '进行中',
+  completed: '已完成',
+  skipped: '已跳过',
+  reopened: '已重新打开',
+};
+/** The pill of a phase that is open and has something the editor must handle (WORK-004). */
+export const PRODUCTION_DOCUMENT_PHASE_WAITING_LABEL = '等待你处理';
+
+export type ProductionDocumentPhaseAction = 'start' | 'complete' | 'skip' | 'reopen';
+export const PRODUCTION_DOCUMENT_PHASE_ACTIONS: readonly ProductionDocumentPhaseAction[] = ['start', 'complete', 'skip', 'reopen'];
+
+/** Why a phase is skipped (WORK-009): choices shown unselected, and 自行输入, which needs the editor's words. */
+export type ProductionDocumentSkipReason = 'not-needed' | 'done-elsewhere' | 'later' | 'custom';
+export const PRODUCTION_DOCUMENT_SKIP_REASONS: Readonly<Record<ProductionDocumentSkipReason, string>> = {
+  'not-needed': '这份文档不需要这一阶段',
+  'done-elsewhere': '这一阶段已在别处完成',
+  later: '暂时跳过，之后再补',
+  custom: '自行输入',
+};
+/** Why a completed or skipped phase is reopened (WORK-009), the same way. */
+export type ProductionDocumentReopenReason = 'needs-change' | 'sources-changed' | 'redo-after-delivery' | 'custom';
+export const PRODUCTION_DOCUMENT_REOPEN_REASONS: Readonly<Record<ProductionDocumentReopenReason, string>> = {
+  'needs-change': '发现需要再改的地方',
+  'sources-changed': '来源或事实有变化',
+  'redo-after-delivery': '交付后需要重做',
+  custom: '自行输入',
+};
+/** The editor's own words beside a reason, in characters once NFC-normalized and trimmed. */
+export const MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS = 200;
+
+/** One recorded move of a phase (WORK-009): what it did, from which state to which, why, and when. */
+export interface ProductionDocumentPhaseTransitionProjection {
+  action: ProductionDocumentPhaseAction;
+  fromState: ProductionDocumentPhaseState;
+  toState: ProductionDocumentPhaseState;
+  /** A skip's or a reopen's reason: the choice, its words, and the editor's own; `null` for 开始 and 完成. */
+  reason: null | { choice: string; label: string; text: string | null };
+  recordedAt: string;
+}
+
+export interface ProductionDocumentPhaseProjection {
+  phaseId: ProductionDocumentPhaseId;
+  label: string;
+  state: ProductionDocumentPhaseState;
+  /** The state's words, or `等待你处理` for an open phase with something to handle. */
+  stateLabel: string;
+  /** What the open phase waits for the editor on, read from the document now; `null` when nothing. */
+  waiting: string | null;
+  /** What the editor may do to it now, in the order the lens offers them. */
+  actions: ReadonlyArray<ProductionDocumentPhaseAction>;
+  /**
+   * The move that brought the phase to its state — a skip's or a reopen's with its reason — or `null` before any. Every
+   * earlier move stays recorded (WORK-009); 交付物's one read carries only this one for each phase, to stay one frame.
+   */
+  latest: ProductionDocumentPhaseTransitionProjection | null;
+  /** How many moves the phase has had. */
+  moves: number;
+}
+
+/**
+ * A Production Document's Deliverable Workflow Lens (Issue #415, S66c; V2-UX-WORK-001 to 009): the profile it follows,
+ * pinned when the document began (WORK-002), a factual summary with no percentage (WORK-007), 下一项需要处理
+ * (WORK-005), and its seven phases, several of which may be open at once (WORK-004).
+ */
+export interface ProductionDocumentWorkflowProjection {
+  profile: { id: string; name: string; version: string; activatedAt: string };
+  summary: string;
+  /** Waiting items first, then the open phases, in phase order; empty when nothing needs the editor. */
+  next: ReadonlyArray<{ phaseId: ProductionDocumentPhaseId; text: string }>;
+  phases: ReadonlyArray<ProductionDocumentPhaseProjection>;
+  /** How many moves the document's phases have had: a move names it, so one made since the editor looked is refused. */
+  transitions: number;
+}
+
+/**
+ * One deterministic move of one phase of a document of the route's Book (WORK-008, WORK-009): 开始, 完成, 跳过 or 重新打开,
+ * the last two with a reason. `expectedTransitions` is the count the editor saw.
+ */
+export interface TransitionProductionDocumentPhaseInput {
+  bookId: string;
+  documentId: string;
+  phaseId: ProductionDocumentPhaseId;
+  action: ProductionDocumentPhaseAction;
+  expectedTransitions: number;
+  reason: null | { choice: string; text: string | null };
 }
 
 /** Who a delivery is for: the house's list, or the editor's own words (DELIV-003). */
@@ -5236,8 +5608,11 @@ export interface BookDeliveryPackageVersionProjection {
   current: boolean;
   /** What the version holds, in one line. */
   summary: string;
-  /** The derived Package Export History (DPKG-011): `暂无导出记录` until a file is exported. */
+  /** The derived Package Export History (DPKG-011): `暂无导出记录`, or how many exports wrote files and when the latest did. */
   exportHistoryLabel: string;
+  /** The version's exports newest first (Issue #416, S67b), at most `MAX_BOOK_DELIVERY_PACKAGE_EXPORTS_LISTED`, each in one line. */
+  exports: ReadonlyArray<BookDeliveryPackageExportSummaryProjection>;
+  exportsTruncated: boolean;
   /** 查看技术详情 only. */
   technical: { contentDigest: string; digest: string; priorVersionId: string | null };
 }
@@ -5275,6 +5650,146 @@ export interface BookDeliveryPackageResultProjection {
   bookId: string;
   outcome: 'prepared' | 'unchanged';
   version: number;
+  package: BookDeliveryPackageProjection;
+}
+
+// ---- 图书交付包's export (Issue #416, plan slice S67b; BUNDLE-004, DPKG-011, DPKG-013, DPKG-014, EXP-010 to EXP-022) --------
+
+/** At most this many exports of one package version are listed, newest first; the count says how many there were. */
+export const MAX_BOOK_DELIVERY_PACKAGE_EXPORTS_LISTED = 2;
+/** A review page and one explicitly selected export batch contain at most this many files. */
+export const MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED = 40;
+
+/** One file a package export writes: what it holds, its file name and its format. */
+export interface BookDeliveryPackageExportFileProjection {
+  /** `publication`, `document:<typeId>`, `report:<reportId>` or `manifest`. */
+  key: string;
+  /** What the file holds, in the editor's words: `稿件 · 发稿版本「一审稿」 · r1`. */
+  label: string;
+  fileName: string;
+  format: ManuscriptExportFormat;
+}
+
+/**
+ * 含批注 and 含修改建议（作为修订） of the files a package export writes from the manuscript and the documents (EXP-023): both
+ * on until the editor turns one off, and bound into the review. 备注 never go with a package.
+ */
+export type BookDeliveryPackageExportOptions = Pick<ManuscriptExportOptions, 'includeAnnotations' | 'includeSuggestions'>;
+
+/**
+ * One file as `导出…` reviews it (EXP-007 to EXP-009): how it is written, what its format keeps and each class's fidelity —
+ * the Export Fidelity Review S64 shows for one file, so no loss in a package's file is silent.
+ */
+export interface BookDeliveryPackageExportReviewFileProjection extends BookDeliveryPackageExportFileProjection {
+  restoration: 'from-original' | 'regenerated';
+  restorationLine: string;
+  formatLine: string;
+  fidelity: ReadonlyArray<ExportFidelityRowProjection>;
+  /** Some class is `降级导出` or `无法导出`: `按上述方式导出` then accepts it for this export (EXP-008). */
+  degraded: boolean;
+}
+
+/** `导出…` of one package version: the files it writes under the options chosen, and the review they bind (EXP-010). */
+export interface BookDeliveryPackageExportReviewProjection {
+  bookId: string;
+  packageVersionId: string;
+  /** `v2`. */
+  versionLabel: string;
+  options: BookDeliveryPackageExportOptions;
+  /** At most `MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED`, in the order they are written. */
+  files: ReadonlyArray<BookDeliveryPackageExportReviewFileProjection>;
+  /** More candidate files can be reviewed on the next page; none are implicitly selected. */
+  filesTruncated: boolean;
+  offset: number;
+  nextOffset: number | null;
+  /** Some file on this page is degraded. */
+  degraded: boolean;
+  /** EXP-014 and EXP-015: the files go to a folder the editor chooses, and nothing is sent anywhere. */
+  statement: string;
+  /** Binds the folder's preparation to exactly this review, its options included. */
+  reviewDigest: string;
+}
+
+/** What one file of a package export came to (EXP-013, EXP-021). */
+export interface BookDeliveryPackageExportFileOutcomeProjection extends BookDeliveryPackageExportFileProjection {
+  preparationId: string;
+  /** `prepared` until `按上述方式导出`; then the receipt's own outcome, or `not-written` for a file after one that stopped. */
+  outcome: 'prepared' | 'created' | 'failed' | 'ambiguous' | 'not-written';
+  outcomeLabel: string;
+  /** Whether 在文件夹中显示 can be offered: only for a verified file. */
+  revealAvailable: boolean;
+}
+
+/** One export of one package version (DPKG-014): its folder, its files and what each came to. It never changes the package. */
+export interface BookDeliveryPackageExportProjection {
+  exportId: string;
+  packageVersionId: string;
+  versionLabel: string;
+  /** The folder as the system dialog returned it. */
+  folder: string;
+  /** `prepared` before `按上述方式导出`; `exported` once every file was written; `incomplete` when a file stopped it. */
+  state: 'prepared' | 'exported' | 'incomplete';
+  /** `已导出到所选位置 · 4 个文件`, `已准备，尚未导出 · 4 个文件`, or how many files were written and how many were not. */
+  summary: string;
+  createdAt: string;
+  files: ReadonlyArray<BookDeliveryPackageExportFileOutcomeProjection>;
+  /** More files than the answer lists. */
+  filesTruncated: boolean;
+  /** In `按上述方式导出`'s own answer: the file that stopped the rest, and why; `null` otherwise. */
+  stopped: { fileName: string; reason: string } | null;
+}
+
+/**
+ * One export of a version as its history lists it (DPKG-011): what it came to, where and when, in one line. What each
+ * file came to is the export's own answer; 交付物's one read of every version stays one frame. A folder chosen and never
+ * approved is no export, and the history never lists one.
+ */
+export interface BookDeliveryPackageExportSummaryProjection {
+  exportId: string;
+  folder: string;
+  state: Exclude<BookDeliveryPackageExportProjection['state'], 'prepared'>;
+  summary: string;
+  /** When its last file's outcome was recorded. */
+  exportedAt: string;
+  fileCount: number;
+  /** A file it wrote and verified, for 在文件夹中显示 to show the folder by; `null` when it wrote none. */
+  revealPreparationId: string | null;
+}
+
+/** `导出…` of one version of the route's Book's package, under the options chosen. */
+export interface ReviewBookDeliveryPackageExportInput {
+  offset?: number;
+  bookId: string;
+  packageVersionId: string;
+  options: BookDeliveryPackageExportOptions;
+}
+
+/** `选择位置…`: the folder the system dialog returned, bound to the review the editor read and its options. */
+export interface PrepareBookDeliveryPackageExportInput {
+  offset?: number;
+  memberKeys: ReadonlyArray<string>;
+  bookId: string;
+  packageVersionId: string;
+  options: BookDeliveryPackageExportOptions;
+  reviewDigest: string;
+  folder: string;
+}
+
+/** `按上述方式导出` of one prepared package export. */
+export interface ApproveBookDeliveryPackageExportInput {
+  bookId: string;
+  exportId: string;
+}
+
+/** What the folder dialog came to: nothing is recorded when it was cancelled (EXP-020), else the prepared export. */
+export type ChooseBookDeliveryPackageExportFolderResult =
+  | { outcome: 'cancelled' }
+  | { outcome: 'prepared'; export: BookDeliveryPackageExportProjection };
+
+/** What `按上述方式导出` came to, and the package as it stands, its export history included. */
+export interface BookDeliveryPackageExportResultProjection {
+  bookId: string;
+  export: BookDeliveryPackageExportProjection;
   package: BookDeliveryPackageProjection;
 }
 
@@ -5372,7 +5887,10 @@ export type GlobalAttentionStateKey =
   | 'review-continuable'
   | 'analysis-completed'
   | 'analysis-completed-with-gaps'
-  | 'review-completed';
+  | 'review-completed'
+  // 维护事项待处理 (Issue #426, S68b; MAINT-012): a case with a named next step, or one waiting for a later designation.
+  | 'maintenance-pending'
+  | 'maintenance-waiting';
 
 /**
  * The closed map of safe next steps (V2-UX-ATTN-007): each is an action the item's own record offers, in
@@ -5392,10 +5910,16 @@ export type GlobalAttentionNextStep =
   | 'resolve-model-service'
   | 'reprepare'
   // 改计划重做 for a Run the launch's ceiling stopped under developer-live (Issue #541): the plan cannot raise it.
-  | 'redo';
+  | 'redo'
+  // A 维护事项's own next step (Issue #426, S68b), in the case's own words.
+  | 'maintenance-link-proposal'
+  | 'maintenance-link-publication'
+  | 'maintenance-write-errata'
+  | 'maintenance-conclude';
 export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'view-run', 'view-review', 'reconfirm-plan', 'continue-review', 'return-to-recovery', 'retry-abandon-cleanup', 'await-local-check',
   'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'reprepare', 'redo',
+  'maintenance-link-proposal', 'maintenance-link-publication', 'maintenance-write-errata', 'maintenance-conclude',
 ];
 
 /**
@@ -5408,7 +5932,9 @@ export type GlobalAttentionTarget =
   | { kind: 'manuscript-conflict'; bookId: string; manuscriptId: string; branchId: string; markId: string }
   | { kind: 'analysis'; bookId: string; taskIntentId: string }
   | { kind: 'analysis-plan'; bookId: string; taskIntentId: string }
-  | { kind: 'review'; bookId: string; reviewRunId: string };
+  | { kind: 'review'; bookId: string; reviewRunId: string }
+  // 交付物 with the case open on its 发稿版本 (Issue #426, S68b).
+  | { kind: 'maintenance'; bookId: string; publicationVersionId: string; caseId: string };
 
 /** The Active Work Object of one item, in its record's own terms (V2-UX-ATTN-007). */
 export type GlobalAttentionObjectProjection =
@@ -5416,7 +5942,8 @@ export type GlobalAttentionObjectProjection =
   | { kind: 'recovery'; branchName: string }
   | { kind: 'manuscript-conflict'; conflictKind: ProposalConflictKind }
   | { kind: 'analysis'; mode: BaselineAnalysisTaskMode }
-  | { kind: 'review'; ordinal: number };
+  | { kind: 'review'; ordinal: number }
+  | { kind: 'maintenance'; classification: MaintenanceClassification; ordinal: number; publicationOrdinal: number };
 
 /** The record facts an item's reason is told from: identities, counts and states, never manuscript text. */
 export interface GlobalAttentionFactsProjection {
@@ -5564,7 +6091,8 @@ export interface ExportFidelityRowProjection {
  * version of a 审阅报告 and the revision its Review Run read.
  */
 export interface ManuscriptExportTargetProjection {
-  kind: 'current' | 'milestone' | 'report' | 'document';
+  /** `package-manifest` is the service's own target (Issue #416, S67b): a package export's 交付包清单, never the renderer's. */
+  kind: 'current' | 'milestone' | 'report' | 'document' | 'package-manifest';
   milestoneId: string | null;
   milestoneLabel: string | null;
   revisionId: string;
@@ -5573,6 +6101,8 @@ export interface ManuscriptExportTargetProjection {
   report: { reportId: string; version: number; reviewRunId: string; runLabel: string } | null;
   /** The Production Document version exported (Issue #415, S66b): its type and `版本 N`; `null` for any other target. */
   document: { documentId: string; typeId: string; typeLabel: string; versionLabel: string } | null;
+  /** The package version whose 交付包清单 is exported (Issue #416, S67b); `null` for any other target. */
+  packageVersion: { packageVersionId: string; versionLabel: string } | null;
 }
 
 /** One format as the export card offers it: DOCX, the optional PDF, and the Markdown 备用格式 (Issue #500, S64b). */
@@ -5754,11 +6284,11 @@ export interface ServiceJobProjection {
    * job's result is the 审阅 workspace with the prepared Run open.
    */
   kind: 'search' | 'replacement' | 'reimport-preparation' | 'reimport-resolution' | 'reimport-commit' |
-    'task-authorization-preparation' | 'baseline-analysis-preparation' | 'review-run-preparation';
+    'task-authorization-preparation' | 'baseline-analysis-preparation' | 'review-run-preparation' | 'package-export';
   state: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   progress: { completed: number; total: number; label: string };
   result: SearchSummaryProjection | ReplacementPreviewProjection | ReviewBeforeManuscriptReimportProjection |
-    ManuscriptReimportCommitProjection | TaskAuthorizationProjection | BaselineAnalysisProjection | ReviewWorkspaceProjection | null;
+    ManuscriptReimportCommitProjection | TaskAuthorizationProjection | BaselineAnalysisProjection | ReviewWorkspaceProjection | BookDeliveryPackageExportResultProjection | null;
   failure: null | { code: string; message: string };
 }
 
@@ -6186,9 +6716,11 @@ export interface ServiceOperationMap {
   generateReviewReport: { input: GenerateReviewReportInput; output: ReviewWorkspaceProjection };
   inspectReviewFindingOfMark: { input: InspectReviewFindingOfMarkInput; output: ReviewFindingOfMarkProjection | null };
   listBooks: {
-    input: { after: BookSummaryCursor | null };
+    /** `filter` narrows the list to the Books whose 书名, 作者 or 责编 hold the words (Issue #431, S83). */
+    input: { after: BookSummaryCursor | null; filter?: BookSummaryFilter };
     output: BookSummaryPageProjection;
   };
+  updateBookPeople: { input: UpdateBookPeopleInput; output: BookPeopleResultProjection };
   prepareNewBookReview: {
     input: {
       draftId: string;
@@ -6362,6 +6894,18 @@ export interface ServiceOperationMap {
   inspectBookDeliveryPackage: { input: InspectBookDeliveryPackageInput; output: BookDeliveryPackageProjection };
   /** `准备图书交付包`: freeze the content the editor saw as the package's next version, or say it is unchanged. */
   prepareBookDeliveryPackage: { input: PrepareBookDeliveryPackageInput; output: BookDeliveryPackageResultProjection };
+  /** `导出…` of one package version (Issue #416, S67b): the files it writes. A read. */
+  reviewBookDeliveryPackageExport: { input: ReviewBookDeliveryPackageExportInput; output: BookDeliveryPackageExportReviewProjection };
+  /** The folder the main process's dialog returned: one preparation per file, recorded together; nothing is written. */
+  prepareBookDeliveryPackageExport: { input: PrepareBookDeliveryPackageExportInput; output: BookDeliveryPackageExportProjection };
+  /** `按上述方式导出`: each file approved and written in turn, with its receipt; a file that stops it stops the rest. */
+  approveBookDeliveryPackageExport: { input: ApproveBookDeliveryPackageExportInput; output: ServiceJobProjection };
+  cancelBookDeliveryPackageExport: { input: { jobId: string }; output: boolean };
+  inspectMaintenanceCase: { input: InspectMaintenanceCaseInput; output: MaintenanceCaseProjection };
+  listMaintenanceCases: { input: ListMaintenanceCasesInput; output: MaintenanceCasePageProjection };
+  recordMaintenanceCase: { input: RecordMaintenanceCaseInput; output: MaintenanceCaseResultProjection };
+  appendMaintenanceCaseRevision: { input: AppendMaintenanceCaseRevisionInput; output: MaintenanceCaseResultProjection };
+  saveMaintenanceErrata: { input: SaveMaintenanceErrataInput; output: MaintenanceCaseResultProjection };
   createProductionDocument: { input: CreateProductionDocumentInput; output: ProductionDocumentResultProjection };
   decideProductionDocumentType: { input: DecideProductionDocumentTypeInput; output: ProductionDocumentResultProjection };
   saveProductionDocumentVersion: { input: SaveProductionDocumentVersionInput; output: ProductionDocumentResultProjection };
@@ -6370,6 +6914,7 @@ export interface ServiceOperationMap {
    * when it is none yet; the export follows on the export card.
    */
   recordProductionDocumentDelivery: { input: RecordProductionDocumentDeliveryInput; output: ProductionDocumentResultProjection };
+  transitionProductionDocumentPhase: { input: TransitionProductionDocumentPhaseInput; output: ProductionDocumentResultProjection };
   /**
    * 待我处理 (Issue #424, plan slice S78): every Book's items in the four groups. It takes no input and names
    * no Book, because it reads across them; it is a read and records nothing.
@@ -6545,6 +7090,8 @@ export interface RendererApi {
   /** 查看任务 on a Mark Card: the Run a `review-category` mark came from, `null` for any other mark. */
   inspectReviewFindingOfMark(input: InspectReviewFindingOfMarkRendererInput): Promise<ReviewFindingOfMarkProjection | null>;
   listBooks(input: ServiceOperationMap['listBooks']['input']): Promise<BookSummaryPageProjection>;
+  /** `保存人员` on a Book's 工作概览 (Issue #431, S83): the Book the window shows or is about to. */
+  updateBookPeople(input: UpdateBookPeopleInput): Promise<BookPeopleResultProjection>;
   prepareNewBookReview(input: ServiceOperationMap['prepareNewBookReview']['input']): Promise<ReviewBeforeImportProjection>;
   commitNewBookImport(input: CommitNewBookRendererInput): Promise<ManuscriptImportCommitProjection>;
   prepareSourceImportReview(input: ServiceOperationMap['prepareSourceImportReview']['input']): Promise<ReviewBeforeSourceImportProjection>;
@@ -6603,6 +7150,23 @@ export interface RendererApi {
   inspectBookDeliveryPackage(): Promise<BookDeliveryPackageProjection>;
   /** `准备图书交付包`: freeze exactly the content read, with its purpose; it creates no file and sends nothing. */
   prepareBookDeliveryPackage(input: Omit<PrepareBookDeliveryPackageInput, 'bookId'>): Promise<BookDeliveryPackageResultProjection>;
+  /** `导出…` of one version of that Book's package (Issue #416, S67b): the files it would write. */
+  reviewBookDeliveryPackageExport(input: Omit<ReviewBookDeliveryPackageExportInput, 'bookId'>): Promise<BookDeliveryPackageExportReviewProjection>;
+  /** `选择位置…`: the system's own folder dialog, then the export prepared there; a cancelled dialog records nothing. */
+  chooseBookDeliveryPackageExportFolder(input: Omit<PrepareBookDeliveryPackageExportInput, 'bookId' | 'folder'>): Promise<ChooseBookDeliveryPackageExportFolderResult>;
+  /** `按上述方式导出` of a prepared package export: its files written, each with its receipt. */
+  approveBookDeliveryPackageExport(input: Omit<ApproveBookDeliveryPackageExportInput, 'bookId'>): Promise<BookDeliveryPackageExportResultProjection>;
+  /** 维护事项 (Issue #426, S68a): one case of that Book in its workspace. */
+  inspectMaintenanceCase(input: Omit<InspectMaintenanceCaseInput, 'bookId'>): Promise<MaintenanceCaseProjection>;
+  /** `更早的维护事项…`: a page of one designation's older cases. */
+  listMaintenanceCases(input: Omit<ListMaintenanceCasesInput, 'bookId'>): Promise<MaintenanceCasePageProjection>;
+  /** `记录维护事项` on one of that Book's designations. */
+  recordMaintenanceCase(input: Omit<RecordMaintenanceCaseInput, 'bookId'>): Promise<MaintenanceCaseResultProjection>;
+  /** 关联修改建议, 关联发稿版本 or 记录维护事项结论: the case's next revision. */
+  appendMaintenanceCaseRevision(input: Omit<AppendMaintenanceCaseRevisionInput, 'bookId'>): Promise<MaintenanceCaseResultProjection>;
+  /** `保存勘误版本`. */
+  saveMaintenanceErrata(input: Omit<SaveMaintenanceErrataInput, 'bookId'>): Promise<MaintenanceCaseResultProjection>;
+  cancelBookDeliveryPackageExport(input: Omit<ApproveBookDeliveryPackageExportInput, 'bookId'>): Promise<boolean>;
   /** 从来源材料创建 (Issue #415): a document of one house type of that Book, from one of its source-only materials. */
   createProductionDocument(input: Omit<CreateProductionDocumentInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 本书不做 or 恢复 for one house type of that Book. */
@@ -6611,6 +7175,7 @@ export interface RendererApi {
   saveProductionDocumentVersion(input: Omit<SaveProductionDocumentVersionInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 交付: a Delivery Record of one exact version of a document of that Book; nothing is sent. */
   recordProductionDocumentDelivery(input: Omit<RecordProductionDocumentDeliveryInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
+  transitionProductionDocumentPhase(input: Omit<TransitionProductionDocumentPhaseInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 待我处理 across every Book (Issue #424): a read in any window, whatever it shows; it holds and grants nothing. */
   inspectGlobalAttention(): Promise<GlobalAttentionProjection>;
   /**

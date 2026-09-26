@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeAdmittedDocx, composeExportAdmittedDocx, readExportedDocx } from './composed-docx.mjs';
+import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx } from './composed-docx.mjs';
 import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 // J-07 (Issue #414, plan slice S65): ⑥ 发稿. An editor saves Milestone Versions of the manuscript — each
@@ -99,15 +99,31 @@ const EXPORTED_PARTS = Object.freeze(['[Content_Types].xml', '_rels/.rels', 'doc
 const ACTUALS_PROMPT = '录入定价与首印 · 随评估功能提供';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 // 导出's four members (Issue #413): the only renderer members named like an export, and none publishes or sends.
-const EXPORT_MEMBERS = Object.freeze(['approveManuscriptExport', 'chooseManuscriptExportDestination', 'revealManuscriptExport', 'reviewManuscriptExport']);
+// Issue #416 (S67b): a 图书交付包 version's export adds its own three, and nothing else that exports, publishes or sends.
+const EXPORT_MEMBERS = Object.freeze([
+  'approveBookDeliveryPackageExport', 'approveManuscriptExport', 'cancelBookDeliveryPackageExport', 'chooseBookDeliveryPackageExportFolder', 'chooseManuscriptExportDestination',
+  'revealManuscriptExport', 'reviewBookDeliveryPackageExport', 'reviewManuscriptExport',
+]);
 // Issue #415 (S66a): a 新闻稿's draft, composed at run time from exact sample1's paragraphs after the manuscript's own,
 // imported as source material and made the Book's 新闻稿; the house's five types in its order; and the document's edit.
 const DRAFT = Object.freeze({ source: ADMITTED_BASELINE_DOCX, startBlock: 31, blocks: 3, title: '新闻稿初稿' });
+// Issue #547: the draft also carries one comment and one tracked replacement by the file's author, every word of them
+// sample1's own. 从来源材料创建 reads its text with every revision rejected and leaves both with the material — its text
+// is still the draft's paragraphs — and the document says so for as long as it exists.
+const DRAFT_MARKS = Object.freeze({
+  header: { sourceBlock: 20 },
+  styledRun: { block: 3 },
+  comment: { block: 1, from: 2, to: 8, author: IMPORTED_MARKS_AUTHOR, text: { block: 14, from: 20, to: 30 } },
+  replacement: { block: 2, from: 3, to: 6, author: IMPORTED_MARKS_AUTHOR, date: '2026-09-01T10:04:00Z', insert: { block: 14, from: 40, to: 44 } },
+});
+const DRAFT_MARKS_LINE = '创建时，来源材料里的 2 处批注与修订没有带入：文字按全部修订被拒绝时的样子读出，批注不带入。';
 const DRAFT_FILE = '新闻稿初稿.docx';
 const DOCUMENT_TYPES = Object.freeze([
   ['news-release', '新闻稿'], ['promotion-article', '宣传文章'], ['review-article', '评论文章'], ['launch-materials', '发布会材料'], ['marketing-points', '营销要点'],
 ]);
 const DOCUMENT_EDIT = '〔文档修订〕';
+// Issue #415 (S66c): the editor's own words for 重新打开 起草.
+const WORKFLOW_REOPEN_WORDS = '读者反馈后要改开头';
 // Issue #415 (S66b): 交付 — 版本 2 to 宣传部 with a note and its file exported under the Save dialog's answer, then an edit
 // the card reads as 交付后有修改, and 再交付… of the current text — saved as 版本 3 first — in the editor's own words, its
 // export cancelled.
@@ -123,6 +139,21 @@ const PACKAGE_PURPOSE = '交出版社存档';
 const PACKAGE_PURPOSE_2 = '交印厂付印';
 const PACKAGE_STATEMENT = '图书交付包把已完成的工作放在一起：它不是发稿，也不是交付；准备它不改变任何记录，也不生成文件。';
 const OTHER_TYPES = Object.freeze(['promotion-article', 'review-article', 'launch-materials', 'marketing-points']);
+// Issue #416 (S67b): a version's export — what it says, the folder it asks for, and the files v2 writes, in order.
+const PACKAGE_EXPORT_STATEMENT = '导出只把这些文件写到你选择的文件夹：每个文件都有自己的导出记录，交付包本身不变；AI7 不会发送任何文件。';
+const PACKAGE_EXPORT_FOLDER_UNCHOSEN = '还没有选择文件夹。请选择一个空文件夹，或在系统的对话框里新建一个：已有同名文件的文件夹不能使用，导出不会替换任何文件。';
+const PACKAGE_MANIFEST_FILE = '交付包清单.md';
+// Issue #426 (S68a): 维护事项 — the six classifications in order, the words a case is recorded with, and MAINT-008's sentence.
+const MAINTENANCE_CLASSIFICATIONS = Object.freeze(['correction:更正', 'errata:勘误', 'supersession:替代', 'withdrawal:撤回', 'reissue:再版', 'archive:归档']);
+const MAINTENANCE_REASON = '读者来信指出第三段的年份有误';
+const MAINTENANCE_ERRATA = '第三段所记年份应为另一年，其余不变。';
+const MAINTENANCE_OUTCOME = '勘误已写入 AI7 的记录';
+const MAINTENANCE_WITHDRAWAL = '这一版在 AI7 中不再用于发稿';
+const MAINTENANCE_INTERNAL_ONLY = '仅在 AI7 内记录；不代表已撤稿、下架、召回、通知接收方或删除外部文件';
+// Issue #426 (S68b): a 替代 that waits in 待我处理, and the 归档 that closes that designation's maintenance.
+const MAINTENANCE_SUPERSESSION = '拟另设新的发稿版本取代这一版';
+const MAINTENANCE_ARCHIVE = '这一版的维护到此为止';
+const MAINTENANCE_MORE = '读者来信又指出一处需要勘误';
 const DELIVERY_RECIPIENTS = '["publicity:false:宣传部","editorial:false:编辑部","external-media:false:外部媒体","other:false:其他","custom:false:自行输入"]';
 const EXPORT_MEMBERS_ONLY = `JSON.stringify(Object.keys(window.ai7).filter((key) => /export|publish|send/i.test(key)).sort()) === ${JSON.stringify(JSON.stringify(EXPORT_MEMBERS))}`;
 
@@ -354,6 +385,11 @@ const PAGE_HELPERS = `(() => {
     condition: (id) => window.__j07.pkg()?.querySelector('ol.package-condition-list > li[data-condition-id="' + id + '"]') ?? null,
     packageVersions: () => Array.from(window.__j07.pkg()?.querySelectorAll('ol.package-version-list > li') ?? []),
     packageReason: () => document.getElementById(window.__j07.pkg()?.querySelector('[data-package-action="prepare"]')?.getAttribute('aria-describedby') ?? '')?.textContent ?? null,
+    // Its export (Issue #416, S67b): the card below a version, and each file's key, format, words and outcome.
+    packageExport: () => window.__j07.pkg()?.querySelector('ol.package-version-list > li > section.package-export') ?? null,
+    packageExportFiles: () => Array.from(window.__j07.packageExport()?.querySelectorAll('ol.package-export-files > li') ?? [])
+      .map((item) => [item.dataset.packageExportFile, item.dataset.packageExportFormat, item.querySelector('.package-export-file-label')?.textContent ?? '',
+        item.querySelector('.package-export-file-name')?.textContent ?? '', item.dataset.packageExportOutcome ?? '', item.querySelector('.package-export-outcome')?.textContent ?? ''].join('|')),
   };
   return true;
 })()`;
@@ -726,7 +762,7 @@ async function main() {
     const manuscript = resolve(inputs, 'publication.docx');
     await composeExportAdmittedDocx(manuscript, { ...EXCERPT, ...EXPORT_INPUT });
     const draftPath = resolve(inputs, DRAFT_FILE);
-    await composeAdmittedDocx(draftPath, DRAFT);
+    await composeExportAdmittedDocx(draftPath, { ...DRAFT, ...DRAFT_MARKS });
     // Issue #413: the folder the Save dialog's launch control names, beside the data and outside it.
     const exportsRoot = resolve(runRoot, 'exports');
     await mkdir(exportsRoot);
@@ -736,12 +772,15 @@ async function main() {
     const markdownPath = resolve(exportsRoot, MARKDOWN_FILE);
     // Issue #415 (S66b): the file of the 新闻稿's delivered version.
     const documentExportPath = resolve(exportsRoot, DOCUMENT_EXPORT_FILE);
+    // Issue #416 (S67b): the empty folder the folder dialog's launch control names for the package's export.
+    const packageFolder = resolve(runRoot, 'package-export');
+    await mkdir(packageFolder);
     const metadata = await lstat(manuscript);
     requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size > 1_000, 'fixture-composed');
     const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
-    const launch = async ({ picker, save } = {}) => {
+    const launch = async ({ picker, save, folder } = {}) => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
         '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
@@ -750,6 +789,8 @@ async function main() {
       if (picker) args.push('--j07-picker-path', picker);
       // Issue #413: the Save dialog's one answer for this launch, in place of the platform's own.
       if (save) args.push('--j07-save-path', save);
+      // Issue #416 (S67b): the folder dialog's one answer for this launch.
+      if (folder) args.push('--j07-folder-path', folder);
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       cancellation.throwIfRequested();
       browserAcquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args, env: productEnvironment(executable), timeout: 60_000 });
@@ -763,7 +804,7 @@ async function main() {
     at('import-and-open');
     let renderer = await launch({ picker: manuscript, save: exportPath });
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true'`, 'product-ready');
-    // The renderer holds the two 交付物 members and 导出's four, and nothing that could publish or send.
+    // The renderer holds the two 交付物 members, 导出's four and the package export's three, and nothing that could publish or send.
     await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && typeof window.ai7.inspectDeliverables === 'function' && typeof window.ai7.designatePublicationVersion === 'function' && ${EXPORT_MEMBERS_ONLY}`, 'renderer-api-boundary');
     await renderer.send('Page.setBypassCSP', { enabled: true });
     try {
@@ -1394,7 +1435,7 @@ async function main() {
     // what a Production Document starts from until the writing task drafts one.
     await close();
     // This launch also answers the Save dialog, for the export of the version delivered below (S66b).
-    renderer = await launch({ picker: draftPath, save: documentExportPath });
+    renderer = await launch({ picker: draftPath, save: documentExportPath, folder: packageFolder });
     await importDraftAsSource(renderer, bookId);
 
     at('documents-cards');
@@ -1436,9 +1477,12 @@ async function main() {
         heading: shell?.querySelector('.editor-toolbar h2')?.textContent === '新闻稿 · 版本 1',
         meta: Array.from(shell?.querySelectorAll('.editor-meta > span') ?? []).some((item) => item.textContent === '当前版本 版本 1'),
         lens: lens?.querySelector(':scope > .section-label')?.textContent === '工作流程',
-        sections: JSON.stringify(Array.from(lens?.querySelectorAll('h3') ?? []).map((item) => item.textContent)) === '["版本与交付","这份文档的材料"]',
+        // Since S66c (Issue #415) the workflow opens the column: 下一项需要处理 and 阶段, then 版本与交付 and the materials.
+        sections: JSON.stringify(Array.from(lens?.querySelectorAll('h3') ?? []).map((item) => item.textContent)) === '["下一项需要处理","阶段","版本与交付","这份文档的材料"]',
         versions: JSON.stringify(versions) === '["1:true"]',
-        materials: lens?.querySelector('.document-materials .field-note')?.textContent === '暂无材料。任务简报、引语台账、事实核查记录与参考的范例会列在这里。',
+        materials: lens?.querySelector('.document-materials .document-materials-empty')?.textContent === '暂无材料。任务简报、引语台账、事实核查记录与参考的范例会列在这里。',
+        // Issue #547: how its material was read, standing in the column rather than only in the notice that opened it.
+        originMarks: lens?.querySelector('.document-materials .document-origin-marks')?.textContent === ${JSON.stringify(DRAFT_MARKS_LINE)},
         work: JSON.stringify(work) === '["deliverables:返回交付物"]',
         noAnalysis: shell?.querySelector('[data-records-destination="analysis"]') === null,
         edge: JSON.stringify(edge) === '["navigation"]',
@@ -1464,16 +1508,80 @@ async function main() {
     await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '保存当前编辑' && !button.disabled)`, 'document-edit-save-ready');
     await click(renderer, '保存当前编辑', 'document-edit-save');
     await waitFor(renderer, `window.__j07.status().includes('已写入修订日志')`, 'document-edit-durable');
+    // Hold the new version's first animation frame until the next explicit command has taken focus. This reproduces
+    // a slow frame on macOS: an arrival's pending editor restore must not steal focus back from the workflow row.
+    await assertRenderer(renderer, `(() => {
+      const request = window.requestAnimationFrame.bind(window);
+      const cancel = window.cancelAnimationFrame.bind(window);
+      const held = new Map(); let id = 0;
+      window.requestAnimationFrame = (callback) => { const key = --id; held.set(key, callback); return key; };
+      window.cancelAnimationFrame = (key) => { if (!held.delete(key)) cancel(key); };
+      window.__j07.releaseVersionFrame = () => {
+        window.requestAnimationFrame = request; window.cancelAnimationFrame = cancel;
+        for (const callback of held.values()) callback(performance.now());
+        held.clear(); delete window.__j07.releaseVersionFrame;
+        return new Promise((resolve) => request(() => resolve(true)));
+      };
+      return true;
+    })()`, 'document-version-hold-frame');
     await clickSelector(renderer, '.editor-shell[data-deliverable="production-document"] [data-document-action="saveVersion"]', 'document-save-version');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] .editor-toolbar h2')?.textContent === '新闻稿 · 版本 2' && window.__j07.status() === '已保存为版本 2'`, 'document-version-saved', 120_000);
     await assertRenderer(renderer, `(() => { const versions = Array.from(document.querySelectorAll('aside.document-lens ol.document-version-list > li')).map((item) => item.dataset.versionOrdinal + ':' + (item.dataset.versionCurrent ?? '')); return JSON.stringify(versions) === '["2:true","1:"]' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.textContent?.endsWith(${JSON.stringify(DOCUMENT_EDIT)}); })()`, 'document-two-versions');
+
+    at('document-workflow');
+    // Issue #415 (S66c; WORK-002 to 009): the document follows the built-in profile's seven phases, none started, and
+    // only the editor's commands move one. 开始 and 完成 起草; 跳过… 来源建设, which asks for a reason first; and
+    // 重新打开… 起草 in the editor's own words. Each move is said, and the column paints what the service recorded.
+    const phaseRow = (id) => `document.querySelector('aside.document-lens li.document-phase[data-phase-id="${id}"]')`;
+    const phaseState = (id, state) => `${phaseRow(id)}?.dataset.phaseState === ${JSON.stringify(state)}`;
+    await assertRenderer(renderer, `(() => { const section = document.querySelector('aside.document-lens section.document-workflow'); const rows = Array.from(section?.querySelectorAll('li.document-phase') ?? []); return (section?.querySelector('.document-workflow-profile')?.textContent ?? '').startsWith('基础书稿编辑流程 2.0.0 · 启用于 ') && section.querySelector('.document-workflow-summary')?.textContent === '七个阶段都未开始' && section.querySelector('.document-workflow-next-empty')?.textContent === '目前没有需要处理的事项' && JSON.stringify(rows.map((row) => row.dataset.phaseId + ':' + row.dataset.phaseState)) === JSON.stringify(['intake', 'source-development', 'drafting', 'review-verification', 'finalization', 'delivery', 'maintenance'].map((id) => id + ':not-started')) && rows.every((row) => JSON.stringify(Array.from(row.querySelectorAll('[data-phase-action]'), (button) => button.textContent)) === '["开始","跳过…"]'); })()`, 'document-workflow-fresh');
+    at('document-workflow-start');
+    await clickSelector(renderer, `aside.document-lens li.document-phase[data-phase-id="drafting"] [data-phase-action="start"]`, 'document-workflow-start');
+    await waitFor(renderer, `${phaseState('drafting', 'in-progress')} && window.__j07.status() === '「起草」已开始' && document.activeElement === ${phaseRow('drafting')}`, 'document-workflow-before-version-frame');
+    await assertRenderer(renderer, `window.__j07.releaseVersionFrame()`, 'document-version-release-frame');
+    try {
+      await waitFor(renderer, `${phaseState('drafting', 'in-progress')} && window.__j07.status() === '「起草」已开始' && document.activeElement === ${phaseRow('drafting')}`, 'document-workflow-started');
+    } catch (error) {
+      // Read extra diagnostic state only on failure: successful runs keep the original sequence of renderer calls.
+      at(await renderer.evaluate(`${phaseState('drafting', 'in-progress')} && window.__j07.status() === '「起草」已开始'`) ? 'document-workflow-start-focus' : 'document-workflow-start');
+      throw error;
+    }
+    at('document-workflow-complete');
+    await clickSelector(renderer, `aside.document-lens li.document-phase[data-phase-id="drafting"] [data-phase-action="complete"]`, 'document-workflow-complete');
+    await waitFor(renderer, `${phaseState('drafting', 'completed')} && window.__j07.status() === '「起草」已完成'`, 'document-workflow-completed');
+    // 跳过… opens the phase's reason form with nothing chosen; confirming without a reason asks for one.
+    at('document-workflow-skip-open');
+    await clickSelector(renderer, `aside.document-lens li.document-phase[data-phase-id="source-development"] [data-phase-action="skip"]`, 'document-workflow-skip-open');
+    at('document-workflow-skip-focus');
+    await waitFor(renderer, `(() => { const form = ${phaseRow('source-development')}?.querySelector('form.document-phase-form[data-phase-form="skip"]'); return form !== null && form !== undefined && document.activeElement === form.querySelector('input[type="radio"]') && Array.from(form.querySelectorAll('input[type="radio"]')).every((radio) => !radio.checked) && form.querySelector('legend')?.textContent === '跳过的原因'; })()`, 'document-workflow-skip-form');
+    at('document-workflow-skip-unreasoned');
+    await clickSelector(renderer, `aside.document-lens li.document-phase[data-phase-id="source-development"] [data-phase-form-confirm]`, 'document-workflow-skip-unreasoned');
+    await waitFor(renderer, `${phaseRow('source-development')}?.querySelector('.document-phase-form .field-error')?.textContent === '请先选一个原因。' && ${phaseState('source-development', 'not-started')}`, 'document-workflow-skip-asks');
+    at('document-workflow-skip-reason');
+    await assertRenderer(renderer, `(() => { const radio = ${phaseRow('source-development')}?.querySelector('input[type="radio"][value="done-elsewhere"]'); radio?.click(); return radio?.checked === true; })()`, 'document-workflow-skip-reason');
+    at('document-workflow-skip-confirm');
+    await clickSelector(renderer, `aside.document-lens li.document-phase[data-phase-id="source-development"] [data-phase-form-confirm]`, 'document-workflow-skip-confirm');
+    await waitFor(renderer, `${phaseState('source-development', 'skipped')} && window.__j07.status() === '「来源建设」已跳过' && ${phaseRow('source-development')}?.querySelector('details.document-phase-reason summary')?.textContent === '查看原因' && (${phaseRow('source-development')}?.querySelector('details.document-phase-reason .document-phase-latest')?.textContent ?? '').endsWith(' · 这一阶段已在别处完成')`, 'document-workflow-skipped');
+    // 重新打开… 起草 in the editor's own words.
+    at('document-workflow-reopen-open');
+    await clickSelector(renderer, `aside.document-lens li.document-phase[data-phase-id="drafting"] [data-phase-action="reopen"]`, 'document-workflow-reopen-open');
+    await waitFor(renderer, `${phaseRow('drafting')}?.querySelector('form.document-phase-form[data-phase-form="reopen"] legend')?.textContent === '重新打开的原因'`, 'document-workflow-reopen-form');
+    at('document-workflow-reopen-words');
+    await assertRenderer(renderer, `(() => { const row = ${phaseRow('drafting')}; const radio = row?.querySelector('input[type="radio"][value="custom"]'); const words = row?.querySelector('textarea[data-phase-reason-text]'); if (!(radio instanceof HTMLInputElement) || !(words instanceof HTMLTextAreaElement)) return false; radio.click(); words.value = ${JSON.stringify(WORKFLOW_REOPEN_WORDS)}; words.dispatchEvent(new Event('input', { bubbles: true })); return radio.checked; })()`, 'document-workflow-reopen-words');
+    at('document-workflow-reopen-confirm');
+    await clickSelector(renderer, `aside.document-lens li.document-phase[data-phase-id="drafting"] [data-phase-form-confirm]`, 'document-workflow-reopen-confirm');
+    await waitFor(renderer, `${phaseState('drafting', 'reopened')} && window.__j07.status() === '「起草」已重新打开' && (${phaseRow('drafting')}?.querySelector('details.document-phase-reason .document-phase-latest')?.textContent ?? '').endsWith(${JSON.stringify(` · ${WORKFLOW_REOPEN_WORDS}`)}) && ${phaseRow('drafting')}?.querySelector('.document-phase-moves')?.textContent === '共 3 次变动'`, 'document-workflow-reopened');
+    at('document-workflow-summary');
+    await assertRenderer(renderer, `(() => { const section = document.querySelector('aside.document-lens section.document-workflow'); return section?.dataset.workflowTransitions === '4' && section.querySelector('.document-workflow-summary')?.textContent === '1 个阶段进行中 · 0 项等待处理' && JSON.stringify(Array.from(section.querySelectorAll('ol.document-workflow-next > li'), (item) => item.textContent)) === '["起草 · 已重新打开"]'; })()`, 'document-workflow-summary');
 
     at('document-card-after-version');
     // 返回交付物: the 新闻稿's card names its latest version and the material it came from, and offers 打开.
     await clickSelector(renderer, '.editor-shell[data-deliverable="production-document"] nav.book-work-group [data-work-destination="deliverables"]', 'document-back');
     await waitForDeliverables(renderer, 'document-back');
     await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentState === 'document'`, 'document-card-ready');
-    await assertRenderer(renderer, `(() => { const card = window.__j07.card('news-release'); return card.dataset.documentVersion === '2' && card.dataset.documentChanged === 'false' && card.querySelector('.document-card-line')?.textContent === ${JSON.stringify(`版本 2 · 由「${DRAFT_FILE}」创建`)} && window.__j07.cardAction('news-release', 'open')?.textContent === '打开' && window.__j07.cardAction('news-release', 'create') === null; })()`, 'document-card-names-the-version');
+    // Its workflow at a glance (WORK-005): the summary, the first 下一项 and a chip per phase in its state.
+    await assertRenderer(renderer, `(() => { const workflow = window.__j07.card('news-release').querySelector('.document-workflow-card'); return workflow?.querySelector('.document-workflow-summary')?.textContent === '1 个阶段进行中 · 0 项等待处理' && workflow.querySelector('.document-workflow-next-line')?.textContent === '下一项需要处理：起草 · 已重新打开' && JSON.stringify(Array.from(workflow.querySelectorAll('li.phase-chip'), (chip) => chip.dataset.phaseId + ':' + chip.dataset.phaseState)) === JSON.stringify(['intake:not-started', 'source-development:skipped', 'drafting:reopened', 'review-verification:not-started', 'finalization:not-started', 'delivery:not-started', 'maintenance:not-started']); })()`, 'document-card-workflow');
+    await assertRenderer(renderer, `(() => { const card = window.__j07.card('news-release'); return card.dataset.documentVersion === '2' && card.dataset.documentChanged === 'false' && card.querySelector('.document-card-line')?.textContent === ${JSON.stringify(`版本 2 · 由「${DRAFT_FILE}」创建`)} && card.querySelector('.document-origin-marks')?.textContent === ${JSON.stringify(DRAFT_MARKS_LINE)} && window.__j07.cardAction('news-release', 'open')?.textContent === '打开' && window.__j07.cardAction('news-release', 'create') === null; })()`, 'document-card-names-the-version');
 
     at('document-not-for-this-book');
     // 本书不做 is one record, and 恢复 another; focus stays with the card's own next action.
@@ -1576,6 +1684,9 @@ async function main() {
         records[0].querySelector('.document-delivery-export')?.textContent === ${JSON.stringify(`${EXPORTED_LABEL} · ${DOCUMENT_EXPORT_FILE}`)} &&
         lens.querySelector('.document-changed-since-delivery') === null;
     })()`, 'changed-lens-lists-the-delivery');
+    // 交付 started now reads 进行中: the document stands on the version it delivered.
+    await clickSelector(renderer, 'aside.document-lens li.document-phase[data-phase-id="delivery"] [data-phase-action="start"]', 'changed-delivery-start');
+    await waitFor(renderer, `(() => { const row = document.querySelector('aside.document-lens li.document-phase[data-phase-id="delivery"]'); return row?.dataset.phaseState === 'in-progress' && row.dataset.phaseWaiting === 'false' && row.querySelector('.phase-pill')?.textContent === '进行中' && window.__j07.status() === '「交付」已开始'; })()`, 'changed-delivery-started');
     await assertRenderer(renderer, `(() => { const block = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]'); if (!(block instanceof HTMLElement)) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText', false, ${JSON.stringify(DELIVERY_EDIT)}); return block.textContent?.endsWith(${JSON.stringify(`${DOCUMENT_EDIT}${DELIVERY_EDIT}`)}); })()`, 'changed-edit');
     await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '保存当前编辑' && !button.disabled)`, 'changed-edit-save-ready');
     await click(renderer, '保存当前编辑', 'changed-edit-save');
@@ -1586,6 +1697,16 @@ async function main() {
       return lens?.querySelector('.document-changed-since-delivery')?.textContent === '交付后有修改' &&
         lens.querySelector('[data-version-current]') === null && lens.querySelector('.document-changed')?.textContent === '有修改尚未保存为版本';
     })()`, 'changed-edit-lens-repaints');
+    // And the workflow reads what 交付 now waits on, with no phase moved (WORK-005): the lens reads the document again once
+    // the edit rests, and 下一项需要处理 leads with it.
+    await waitFor(renderer, `(() => {
+      const section = document.querySelector('aside.document-lens section.document-workflow');
+      const row = section?.querySelector('li.document-phase[data-phase-id="delivery"]');
+      return section?.dataset.workflowTransitions === '5' && row?.dataset.phaseWaiting === 'true' && row.querySelector('.phase-pill')?.textContent === '等待你处理' &&
+        row.querySelector('.document-phase-waiting')?.textContent === '有修改尚未保存为版本' &&
+        section.querySelector('.document-workflow-summary')?.textContent === '2 个阶段进行中 · 1 项等待处理' &&
+        JSON.stringify(Array.from(section.querySelectorAll('ol.document-workflow-next > li'), (item) => item.textContent)) === '["交付 · 有修改尚未保存为版本","起草 · 已重新打开"]';
+    })()`, 'changed-edit-workflow-repaints');
     await clickSelector(renderer, '.editor-shell[data-deliverable="production-document"] nav.book-work-group [data-work-destination="deliverables"]', 'changed-back');
     await waitForDeliverables(renderer, 'changed-back');
     await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentChangedSinceDelivery === 'true'`, 'changed-card');
@@ -1721,9 +1842,354 @@ async function main() {
       secondPackage.v1 === v1Before && secondPackage.prior === true && secondPackage.stable === true, 'package-v2-names-v1', secondPackage?.labels);
     await assertRenderer(renderer, `JSON.stringify(window.__j07.packageVersions().map((item) => item.dataset.packageVersion + ':' + item.dataset.packageCurrent)) === '["2:true","1:false"]'`, 'package-v2-above-v1');
 
+    at('package-export');
+    // 导出… of v2 (Issue #416, S67b; BUNDLE-004, EXP-010 to EXP-022) lists the files it writes and binds nothing until a
+    // folder is chosen; 选择位置… answers the folder dialog with the run's own empty folder and prepares every file there,
+    // writing none; 按上述方式导出 writes them one by one, each with its receipt. The folder then holds exactly the three
+    // files — the 发稿版本's revision and the 新闻稿's delivered 版本 3 as DOCX, and the 交付包清单 in the package's own
+    // words — v2's history says so, and 交付物's export records and the package itself stay as they were.
+    const packageFiles = [
+      ['publication', 'docx', `稿件 · 发稿版本「${FIRST.label}」 · r1`, `001 ${EXCERPT.title} · ${FIRST.label}.docx`],
+      ['document:news-release', 'docx', '新闻稿 · 版本 3', `002 ${EXCERPT.title} · 新闻稿 · 版本 3.docx`],
+      ['manifest', 'markdown', '交付包清单', PACKAGE_MANIFEST_FILE],
+    ];
+    const firstMembers = packageFiles.filter(([key]) => key !== 'document:news-release');
+    const packageFileLines = (outcome, words, members = packageFiles) => members.map(([key, format, label, fileName]) =>
+      [key, format, label, `「${fileName}」 · ${format === 'docx' ? 'DOCX' : 'Markdown'}`, outcome, words].join('|'));
+    const recordsBefore = await renderer.evaluate(`window.ai7.inspectDeliverables().then((answer) => JSON.stringify(answer.exports))`);
+    const packageAction = (action) => `[data-screen="book-deliverables"] ol.package-version-list > li[data-package-current="true"] [data-package-action="${action}"]`;
+    await clickSelector(renderer, packageAction('export'), 'package-export-open');
+    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'ready' && window.__j07.status() === '要导出的文件已列出'`, 'package-export-reviewed', 60_000);
+    await assertRenderer(renderer, `(() => {
+      const panel = window.__j07.packageExport();
+      const approve = panel.querySelector('[data-package-action="export-approve"]');
+      const reason = document.getElementById(approve?.getAttribute('aria-describedby') ?? '');
+      return panel.closest('li')?.dataset.packageVersion === '2' && panel.querySelector('h5')?.textContent === '导出 · 图书交付包 v2' &&
+        panel.querySelector('.export-local-line')?.textContent === ${JSON.stringify(PACKAGE_EXPORT_STATEMENT)} &&
+        JSON.stringify(window.__j07.packageExportFiles()) === ${JSON.stringify(JSON.stringify(packageFileLines('', '')))} &&
+        approve instanceof HTMLButtonElement && approve.disabled && reason?.textContent === '先选择位置。' &&
+        panel.querySelector('.package-export-folder-line')?.textContent === ${JSON.stringify(PACKAGE_EXPORT_FOLDER_UNCHOSEN)} &&
+        document.activeElement === panel.querySelector('h5') && panel.querySelector('[data-package-action="export-choose"]')?.disabled === true &&
+        Array.from(panel.querySelectorAll('input[data-package-member]')).every((box) => !box.checked) && !/%|百分/.test(panel.textContent ?? '');
+    })()`, 'package-export-lists-the-files');
+    // 含批注 and 含修改建议（作为修订） are offered on (EXP-023), and each file carries its own Export Fidelity Review
+    // (EXP-007), open by itself when something in it is not written as it was: the classes the service's own review of the
+    // version shows, and its restoration line.
+    const packageVersionId = await renderer.evaluate(`window.__j07.packageVersions()[0].dataset.packageVersionId`);
+    const packageReview = await renderer.evaluate(`window.ai7.reviewBookDeliveryPackageExport({ packageVersionId: ${JSON.stringify(packageVersionId)}, options: { includeAnnotations: true, includeSuggestions: true } })
+      .then((review) => ({ degraded: review.degraded, files: review.files.map((file) => [file.key, file.degraded, file.fidelity.filter((row) => row.count > 0 || row.status !== 'preserved').length, file.restorationLine, true]) }))`);
+    requireJourney(Array.isArray(packageReview?.files) && packageReview.files.length === packageFiles.length, 'package-export-service-review', packageReview?.files?.length);
+    await assertRenderer(renderer, `(() => {
+      const panel = window.__j07.packageExport();
+      const boxes = Array.from(panel.querySelectorAll('fieldset.package-export-options input[type="checkbox"]'));
+      const files = Array.from(panel.querySelectorAll('ol.package-export-files > li')).map((item) => {
+        const details = item.querySelector('details.package-export-fidelity');
+        const degraded = item.dataset.packageExportDegraded === 'true';
+        return [item.dataset.packageExportFile, degraded, item.querySelectorAll('.export-fidelity-row').length, details?.querySelector('.export-restoration-line')?.textContent ?? null,
+          details?.open === degraded && (details.querySelector('summary')?.textContent ?? '').startsWith('导出保真审阅')];
+      });
+      return JSON.stringify(boxes.map((box) => box.dataset.packageField + ':' + box.checked + ':' + box.closest('label')?.querySelector('strong')?.textContent)) ===
+          '["includeAnnotations:true:含批注","includeSuggestions:true:含修改建议（作为修订）"]' &&
+        JSON.stringify(files) === ${JSON.stringify(JSON.stringify(packageReview.files))} &&
+        (panel.querySelector('.export-degraded-note') !== null) === ${packageReview.degraded === true};
+    })()`, 'package-export-fidelity-and-switches');
+    // Turning 含批注 off reviews the files again under it, focus staying on the switch; turning it on again restores the
+    // review the folder is then bound to.
+    const toggleAnnotations = (name) => assertRenderer(renderer, `(() => { const box = window.__j07.packageExport()?.querySelector('input[data-package-field="includeAnnotations"]');
+      if (!(box instanceof HTMLInputElement) || box.disabled) return false; box.focus(); box.click(); return true; })()`, name);
+    const switchedTo = (checked) => `(() => { const panel = window.__j07.packageExport(); const box = panel?.querySelector('input[data-package-field="includeAnnotations"]');
+      return panel?.dataset.packageExportPhase === 'ready' && box?.checked === ${checked} && document.activeElement === box && window.__j07.status() === '要导出的文件已列出'; })()`;
+    await toggleAnnotations('package-export-annotations-off');
+    await waitFor(renderer, switchedTo(false), 'package-export-reviewed-without-annotations', 60_000);
+    await toggleAnnotations('package-export-annotations-on');
+    await waitFor(renderer, switchedTo(true), 'package-export-reviewed-with-annotations', 60_000);
+    const selectPackageMember = (key) => assertRenderer(renderer, `(() => {
+      const box = window.__j07.packageExport()?.querySelector('input[data-package-member=' + CSS.escape(${JSON.stringify(key)}) + ']');
+      if (!(box instanceof HTMLInputElement) || box.type !== 'checkbox' || box.disabled || box.checked) return false;
+      box.focus(); box.click(); return true;
+    })()`, 'package-export-select-member');
+    for (const [key] of firstMembers) await selectPackageMember(key);
+    await clickSelector(renderer, packageAction('export-choose'), 'package-export-choose');
+    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'prepared' && window.__j07.status() === '已准备好导出文件，等待你确认。'`, 'package-export-prepared', 60_000);
+    await assertRenderer(renderer, `(() => {
+      const panel = window.__j07.packageExport();
+      const approve = panel.querySelector('[data-package-action="export-approve"]');
+      return panel.querySelector('.package-export-folder-line')?.textContent === ${JSON.stringify(`导出到：${packageFolder}`)} &&
+        JSON.stringify(window.__j07.packageExportFiles()) === ${JSON.stringify(JSON.stringify(packageFileLines('prepared', '已准备', firstMembers)))} &&
+        approve instanceof HTMLButtonElement && !approve.disabled && document.activeElement === approve &&
+        panel.querySelector('[data-package-action="export-choose"]')?.textContent === '重新选择位置…' &&
+        (window.__j07.packageVersions()[0].querySelector('.package-version-line')?.textContent ?? '').startsWith('v2 · 图书交付包已准备 · 暂无导出记录');
+    })()`, 'package-export-bound-to-the-folder');
+    requireJourney((await readdir(packageFolder)).length === 0, 'package-export-prepared-writes-nothing');
+    await clickSelector(renderer, packageAction('export-approve'), 'package-export-approve');
+    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'done' && window.__j07.status() === '已导出到所选位置 · 2 个文件'`, 'package-export-written', 60_000);
+    await assertRenderer(renderer, `(() => {
+      const panel = window.__j07.packageExport();
+      const result = panel.querySelector('.package-export-result');
+      const [v2, v1] = window.__j07.packageVersions();
+      const history = Array.from(v2.querySelectorAll('ol.package-export-list > li'));
+      return result?.dataset.packageExportState === 'exported' && result.querySelector('.package-export-summary')?.textContent === '已导出到所选位置 · 2 个文件' &&
+        result.querySelector('.package-export-stopped') === null &&
+        JSON.stringify(window.__j07.packageExportFiles()) === ${JSON.stringify(JSON.stringify(packageFileLines('created', '已导出到所选位置', firstMembers)))} &&
+        document.activeElement === result.querySelector('[data-package-action="export-reveal"]') && panel.querySelector('[data-package-action="export-choose"]') === null &&
+        (v2.querySelector('.package-version-line')?.textContent ?? '').startsWith('v2 · 图书交付包已准备 · 已导出 1 次') &&
+        history.length === 1 && history[0].dataset.packageExportState === 'exported' &&
+        (history[0].querySelector('.package-export-line')?.textContent ?? '').startsWith('已导出到所选位置 · 2 个文件 · ') &&
+        history[0].querySelector('.package-export-folder')?.textContent === ${JSON.stringify(packageFolder)} &&
+        history[0].querySelector('[data-package-action="reveal-export"]')?.textContent === '在文件夹中显示' &&
+        v1.querySelector('ol.package-export-list') === null && (v1.querySelector('.package-version-line')?.textContent ?? '').startsWith('v1 · 图书交付包已准备 · 暂无导出记录') &&
+        window.__j07.pkg().dataset.packageVersions === '2' && window.__j07.pkg().dataset.packageChanged === 'false';
+    })()`, 'package-export-history');
+    requireJourney(JSON.stringify((await readdir(packageFolder)).sort()) === JSON.stringify(firstMembers.map(([, , , fileName]) => fileName).sort()), 'package-export-selected-subset-only');
+    await clickSelector(renderer, packageAction('export-close'), 'package-export-subset-close');
+    // Each native dialog control is single-use. Restart with a fresh answer for the second explicit batch.
+    await close();
+    renderer = await launch({ folder: packageFolder });
+    await reopenDeliverables(renderer, 'package-export-second-batch');
+    await clickSelector(renderer, packageAction('export'), 'package-export-remaining-open');
+    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'ready'`, 'package-export-remaining-reviewed', 60_000);
+    await selectPackageMember('document:news-release');
+    await clickSelector(renderer, packageAction('export-choose'), 'package-export-remaining-choose');
+    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'prepared'`, 'package-export-remaining-prepared', 60_000);
+    await assertRenderer(renderer, `window.__j07.packageExport().querySelectorAll('ol.package-export-files > li').length === 1`, 'package-export-one-prepared-member');
+    await clickSelector(renderer, packageAction('export-approve'), 'package-export-remaining-approve');
+    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'done' && window.__j07.status() === '已导出到所选位置 · 1 个文件'`, 'package-export-remaining-written', 60_000);
+    await assertRenderer(renderer, `window.__j07.packageVersions()[0].querySelectorAll('ol.package-export-list > li').length === 2`, 'package-export-two-subset-receipts');
+    // The folder holds exactly the three files; each DOCX is a package, and the 交付包清单 is the version's own words, byte
+    // for byte, as the package and its Delivery Records answer them.
+    requireJourney(JSON.stringify((await readdir(packageFolder)).sort()) === JSON.stringify(packageFiles.map(([, , , fileName]) => fileName).sort()), 'package-export-folder-files');
+    for (const [key, format, , fileName] of packageFiles) {
+      if (format !== 'docx') continue;
+      const bytes = await readFile(resolve(packageFolder, fileName));
+      requireJourney(bytes.byteLength > 1_000 && bytes.subarray(0, 2).toString('latin1') === 'PK', `package-export-docx-${key}`);
+    }
+    const manifestInputs = await renderer.evaluate(`Promise.all([window.ai7.inspectBookDeliveryPackage(), window.ai7.inspectProductionDocuments()]).then(([bundle, documents]) => ({
+      version: bundle.versions[0], included: bundle.content.included, limitations: bundle.content.limitations, statement: bundle.statement,
+      deliveries: documents.types.find((type) => type.typeId === 'news-release').document.deliveries,
+    }))`);
+    const expectedManifest = [
+      `# ${EXCERPT.title} · 图书交付包 v2`, '',
+      `- 用途：${PACKAGE_PURPOSE_2}`, `- 准备于：${manifestInputs.version.preparedAt}`, `- 内容摘要：${manifestInputs.version.technical.contentDigest}`, '',
+      '## 包含', '',
+      `- 稿件 · ${manifestInputs.included[0].label}（${manifestInputs.included[0].detail}）`, `- ${manifestInputs.included[1].label}`, '',
+      '## 交付记录', '', '### 新闻稿', '',
+      ...manifestInputs.deliveries.map((delivery) =>
+        `- 第 ${delivery.ordinal} 次交付 · ${delivery.recipient.label} · ${delivery.versionLabel} · ${delivery.recordedAt}${delivery.note === null ? '' : `（备注：${delivery.note}）`}`),
+      '',
+      '## 不包含', '',
+      '- 备注：稿件与文档上的备注只供编辑自己参考', '- 资料库原件', '- 中间修订版：稿件只含发稿版本，文档只含交付过的版本', '- 本书不做：宣传文章、评论文章、发布会材料、营销要点', '',
+      '## 说明', '',
+      ...manifestInputs.limitations.map((line) => `- ${line}`), `- ${manifestInputs.statement}`, '',
+    ].join('\n');
+    const manifest = await readFile(resolve(packageFolder, PACKAGE_MANIFEST_FILE));
+    requireJourney(manifestInputs.included.length === 2 && manifestInputs.deliveries.length === 2 &&
+      createHash('sha256').update(manifest).digest('hex') === createHash('sha256').update(expectedManifest, 'utf8').digest('hex'), 'package-export-manifest-words');
+    requireJourney(await renderer.evaluate(`window.ai7.inspectDeliverables().then((answer) => JSON.stringify(answer.exports))`) === recordsBefore, 'package-export-not-in-export-records');
+    // 完成 closes the card; focus returns to v2's 导出….
+    await clickSelector(renderer, packageAction('export-close'), 'package-export-close');
+    await waitFor(renderer, `window.__j07.packageExport() === null && document.activeElement === window.__j07.packageVersions()[0].querySelector('[data-package-action="export"]')`, 'package-export-closed');
+    await assertNoForbiddenWords(renderer, 'package-export-without-forbidden-words');
+
+    at('maintenance-cases');
+    // 维护事项 (Issue #426, S68a; MAINT-001 to 011). On the first designation `记录维护事项…` opens a draft bound to it: the six
+    // classifications unselected, each with what it does, and `记录维护事项` waiting with its reason in words. A 勘误 is
+    // recorded, its 勘误 written as a version, and its conclusion recorded, each one more line on the case's timeline. Then
+    // 撤回 of the current designation says it is recorded inside AI7 only, and 图书交付包 no longer holds it.
+    const designationItem = (ordinal) => `[data-screen="book-deliverables"] ol.publication-versions > li[data-publication-ordinal="${ordinal}"]`;
+    const maintenanceAction = (ordinal, action) => `${designationItem(ordinal)} [data-maintenance-action="${action}"]`;
+    await clickSelector(renderer, maintenanceAction(1, 'record'), 'maintenance-draft-open');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${designationItem(1)} form.maintenance-draft`)}) !== null && document.activeElement?.matches(${JSON.stringify(`${designationItem(1)} form.maintenance-draft input[type="radio"]`)})`, 'maintenance-draft');
+    await assertRenderer(renderer, `(() => {
+      const form = document.querySelector(${JSON.stringify(`${designationItem(1)} form.maintenance-draft`)});
+      const radios = Array.from(form.querySelectorAll('input[type="radio"]'));
+      const options = radios.map((radio) => radio.value + ':' + radio.closest('label')?.querySelector('strong')?.textContent);
+      const confirm = form.querySelector('[data-maintenance-action="confirmRecord"]');
+      const reason = document.getElementById(confirm?.getAttribute('aria-describedby') ?? '');
+      return form.querySelector('.maintenance-draft-target')?.textContent === ${JSON.stringify(`维护事项绑定到：第 1 次 · 「${SECOND.label}」 · r2 · ${PRINT.scope}`)} &&
+        JSON.stringify(options) === ${JSON.stringify(JSON.stringify(MAINTENANCE_CLASSIFICATIONS))} && radios.every((radio) => !radio.checked) &&
+        confirm instanceof HTMLButtonElement && confirm.disabled && reason?.textContent === '先选择维护类型。' &&
+        form.querySelector('.maintenance-internal-only') === null;
+    })()`, 'maintenance-draft-nothing-preselected');
+    await assertRenderer(renderer, `(() => { const radio = document.querySelector(${JSON.stringify(`${designationItem(1)} form.maintenance-draft input[type="radio"][value="errata"]`)}); radio.click(); return radio.checked; })()`, 'maintenance-choose-errata');
+    await waitFor(renderer, `document.getElementById(document.querySelector(${JSON.stringify(maintenanceAction(1, 'confirmRecord'))})?.getAttribute('aria-describedby') ?? '')?.textContent === '请写明原因（1–500 个字）。'`, 'maintenance-draft-needs-a-reason');
+    await fill(renderer, `${designationItem(1)} form.maintenance-draft textarea[data-maintenance-field="reason"]`, MAINTENANCE_REASON, 'maintenance-reason');
+    await clickSelector(renderer, maintenanceAction(1, 'confirmRecord'), 'maintenance-record');
+    await waitFor(renderer, `window.__j07.status() === '维护事项已记录' && document.querySelector(${JSON.stringify(`${designationItem(1)} ol.maintenance-cases > li section.maintenance-case[data-maintenance-status="unresolved"]`)}) !== null`, 'maintenance-recorded', 60_000);
+    await assertRenderer(renderer, `(() => {
+      const item = document.querySelector(${JSON.stringify(`${designationItem(1)} ol.maintenance-cases > li`)});
+      const lines = Array.from(item.querySelectorAll('ol.maintenance-timeline > li'));
+      return document.querySelector(${JSON.stringify(`${designationItem(1)} form.maintenance-draft`)}) === null &&
+        item.querySelector('.maintenance-case-line')?.textContent === '第 1 项 · 勘误 · 未解决 · 下一步：编写勘误' &&
+        item.querySelector('.maintenance-case-heading')?.textContent === '第 1 项维护事项 · 勘误' &&
+        item.querySelector('.maintenance-target')?.textContent === ${JSON.stringify(`绑定的发稿版本：第 1 次 · 「${SECOND.label}」 · r2 · ${PRINT.scope}`)} &&
+        item.querySelector('.maintenance-status-line')?.textContent === '状态：未解决 · 下一步：编写勘误' && item.querySelector('.maintenance-internal-only') === null &&
+        lines.length === 1 && (lines[0].querySelector('.maintenance-revision-line')?.textContent ?? '').startsWith('第 1 条 · 记录维护事项 · 未解决 · ') &&
+        lines[0].querySelector('.maintenance-revision-reason')?.textContent === ${JSON.stringify(`原因：${MAINTENANCE_REASON}`)} &&
+        document.activeElement === lines[0].querySelector('.maintenance-revision-line') &&
+        JSON.stringify(Array.from(item.querySelectorAll('.maintenance-steps > .button-row button'), (button) => button.dataset.maintenanceAction)) === '["writeErrata","conclude"]';
+    })()`, 'maintenance-case-in-place');
+    // 编写勘误…: the 勘误 is its own version, linked by the case's second line.
+    await clickSelector(renderer, maintenanceAction(1, 'writeErrata'), 'maintenance-errata-open');
+    await fill(renderer, `${designationItem(1)} form.maintenance-step[data-maintenance-step="errata"] textarea`, MAINTENANCE_ERRATA, 'maintenance-errata-text');
+    await clickSelector(renderer, maintenanceAction(1, 'saveErrata'), 'maintenance-errata-save');
+    await waitFor(renderer, `window.__j07.status() === '维护事项已记录' && document.querySelectorAll(${JSON.stringify(`${designationItem(1)} ol.maintenance-timeline > li`)}).length === 2`, 'maintenance-errata-saved', 60_000);
+    await assertRenderer(renderer, `(() => {
+      const item = document.querySelector(${JSON.stringify(`${designationItem(1)} ol.maintenance-cases > li`)});
+      const second = item.querySelector('ol.maintenance-timeline > li[data-revision="2"]');
+      return item.querySelector('.maintenance-errata-heading')?.textContent === '勘误 · 第 1 版' &&
+        item.querySelector('.maintenance-errata-body')?.textContent === ${JSON.stringify(MAINTENANCE_ERRATA)} &&
+        (second?.querySelector('.maintenance-revision-line')?.textContent ?? '').startsWith('第 2 条 · 保存勘误版本 · 未解决 · ') &&
+        second.querySelector('.maintenance-revision-link')?.textContent === '查看勘误第 1 版' &&
+        item.querySelector('.maintenance-status-line')?.textContent === '状态：未解决 · 下一步：记录维护事项结论';
+    })()`, 'maintenance-errata-version');
+    // 记录维护事项结论…: 已完成 is an internal record, and the case takes no more steps.
+    await clickSelector(renderer, maintenanceAction(1, 'writeErrata'), 'maintenance-errata-second-open');
+    await fill(renderer, `${designationItem(1)} form.maintenance-step[data-maintenance-step="errata"] textarea`, `${MAINTENANCE_ERRATA}（第二版）`, 'maintenance-errata-second-text');
+    await clickSelector(renderer, maintenanceAction(1, 'saveErrata'), 'maintenance-errata-second-save');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-errata-heading`)})?.textContent === '勘误 · 第 2 版'`, 'maintenance-errata-second-saved', 60_000);
+    await clickSelector(renderer, `${designationItem(1)} .maintenance-timeline > li[data-revision="2"] button.maintenance-revision-link`, 'maintenance-errata-history-open');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-inspected-errata-body`)})?.textContent === ${JSON.stringify(MAINTENANCE_ERRATA)}`, 'maintenance-errata-history-exact');
+    await assertRenderer(renderer, `document.activeElement === document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-case-heading`)})`, 'maintenance-history-reader-focus');
+    await clickSelector(renderer, `${designationItem(1)} [data-maintenance-inspect="errataVersionId"]`, 'maintenance-errata-history-close');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-inspected-errata`)}) === null`, 'maintenance-errata-history-closed');
+    await assertRenderer(renderer, `document.activeElement === document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-case-heading`)})`, 'maintenance-history-close-focus');
+    await clickSelector(renderer, maintenanceAction(1, 'conclude'), 'maintenance-conclude-open');
+    await assertRenderer(renderer, `(() => { const radio = document.querySelector(${JSON.stringify(`${designationItem(1)} form.maintenance-step[data-maintenance-step="conclude"] input[type="radio"][value="complete"]`)}); radio.click(); return radio.checked; })()`, 'maintenance-conclude-complete');
+    await fill(renderer, `${designationItem(1)} form.maintenance-step[data-maintenance-step="conclude"] textarea`, MAINTENANCE_OUTCOME, 'maintenance-outcome');
+    await clickSelector(renderer, maintenanceAction(1, 'confirmConclude'), 'maintenance-conclude');
+    await waitFor(renderer, `window.__j07.status() === '维护事项结论已记录' && document.querySelector(${JSON.stringify(`${designationItem(1)} section.maintenance-case[data-maintenance-status="complete"]`)}) !== null`, 'maintenance-concluded', 60_000);
+    await assertRenderer(renderer, `(() => {
+      const item = document.querySelector(${JSON.stringify(`${designationItem(1)} ol.maintenance-cases > li`)});
+      const third = item.querySelector('ol.maintenance-timeline > li[data-revision="4"]');
+      return item.querySelector('.maintenance-case-line')?.textContent === '第 1 项 · 勘误 · 已完成（AI7 内记录）' &&
+        item.querySelector('.maintenance-status-line')?.textContent === '状态：已完成（AI7 内记录）' && item.querySelector('.maintenance-steps') === null &&
+        (third?.querySelector('.maintenance-revision-line')?.textContent ?? '').startsWith('第 4 条 · 记录维护事项结论 · 已完成（AI7 内记录） · ') &&
+        third.querySelector('.maintenance-revision-reason')?.textContent === ${JSON.stringify(`结论：${MAINTENANCE_OUTCOME}`)};
+    })()`, 'maintenance-case-complete');
+    // 撤回 of the current designation: MAINT-008's sentence in the draft, on the case and on the designation.
+    await clickSelector(renderer, maintenanceAction(2, 'record'), 'maintenance-withdrawal-open');
+    await assertRenderer(renderer, `(() => { const radio = document.querySelector(${JSON.stringify(`${designationItem(2)} form.maintenance-draft input[type="radio"][value="withdrawal"]`)}); radio.click(); return radio.checked; })()`, 'maintenance-choose-withdrawal');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${designationItem(2)} form.maintenance-draft .maintenance-internal-only`)})?.textContent === ${JSON.stringify(MAINTENANCE_INTERNAL_ONLY)}`, 'maintenance-withdrawal-says-internal');
+    await fill(renderer, `${designationItem(2)} form.maintenance-draft textarea[data-maintenance-field="reason"]`, MAINTENANCE_WITHDRAWAL, 'maintenance-withdrawal-reason');
+    await clickSelector(renderer, maintenanceAction(2, 'confirmRecord'), 'maintenance-withdrawal-record');
+    await waitFor(renderer, `window.__j07.status() === '维护事项已记录' && document.querySelector(${JSON.stringify(designationItem(2))})?.dataset.publicationWithdrawn === 'true' && window.__j07.condition('publication')?.dataset.conditionMet === 'false'`, 'maintenance-withdrawn', 60_000);
+    await assertRenderer(renderer, `(() => {
+      const item = document.querySelector(${JSON.stringify(designationItem(2))});
+      return item.querySelector('section.maintenance > .maintenance-withdrawn')?.textContent === ${JSON.stringify(`已在 AI7 内撤回：${MAINTENANCE_INTERNAL_ONLY}`)} &&
+        item.querySelector('.maintenance-case-line')?.textContent === '第 2 项 · 撤回 · 已完成（AI7 内记录）' &&
+        item.querySelector('section.maintenance-case .maintenance-internal-only')?.textContent === ${JSON.stringify(MAINTENANCE_INTERNAL_ONLY)} &&
+        window.__j07.condition('publication').querySelector('.package-condition-detail')?.textContent === ${JSON.stringify(`发稿版本「${FIRST.label}」 · r1 · 已在 AI7 内撤回`)} &&
+        window.__j07.pkg().dataset.packageReady === 'false' &&
+        document.querySelector(${JSON.stringify(`${designationItem(1)} section.maintenance`)})?.dataset.maintenanceWithdrawn === 'false';
+    })()`, 'maintenance-withdrawal-in-force');
+    // The service agrees: two cases, each on its own designation, and nothing else of either moved.
+    const maintained = await renderer.evaluate(`window.ai7.inspectDeliverables().then((answer) => answer.publication.designations.map((designation) => [designation.ordinal, designation.maintenance.total, designation.maintenance.withdrawn, designation.maintenance.cases.map((entry) => entry.classification + ':' + entry.status + ':' + entry.revisions)]))`);
+    requireJourney(JSON.stringify(maintained) === JSON.stringify([[2, 1, true, ['withdrawal:complete:1']], [1, 1, false, ['errata:complete:4']]]), 'maintenance-service-agrees', maintained);
+    await assertRenderer(renderer, `(() => { const text = (document.querySelector('[data-screen="book-deliverables"]')?.textContent ?? '').replaceAll(${JSON.stringify(MAINTENANCE_INTERNAL_ONLY)}, ''); return !/已更正发布|已撤稿|已下架|已召回|已再版/.test(text); })()`, 'maintenance-only-internal-words');
+    await assertNoForbiddenWords(renderer, 'maintenance-without-forbidden-words');
+
+    at('maintenance-attention');
+    // 维护事项待处理 (Issue #426, S68b; MAINT-012). A 替代 on the first designation waits for a later one: 待我处理 counts it
+    // under 等待你的决定, names it by the case and its 发稿版本, and opening it returns to 交付物 with the case open. The
+    // concluded 勘误 and the 撤回 never come there, and an 归档 of that designation closes the 替代's wait for good.
+    const attentionEntry = '#global-attention-entry';
+    // Whatever else this Book's records ask of the editor stays as it is; only the 替代 comes and goes.
+    const attentionBefore = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((attention) => attention.actionableCount)`);
+    requireJourney(Number.isSafeInteger(attentionBefore) && attentionBefore >= 0, 'maintenance-attention-before', attentionBefore);
+    await clickSelector(renderer, maintenanceAction(1, 'record'), 'maintenance-supersession-open');
+    await assertRenderer(renderer, `(() => { const radio = document.querySelector(${JSON.stringify(`${designationItem(1)} form.maintenance-draft input[type="radio"][value="supersession"]`)}); radio.click(); return radio.checked; })()`, 'maintenance-choose-supersession');
+    await fill(renderer, `${designationItem(1)} form.maintenance-draft textarea[data-maintenance-field="reason"]`, MAINTENANCE_SUPERSESSION, 'maintenance-supersession-reason');
+    await clickSelector(renderer, maintenanceAction(1, 'confirmRecord'), 'maintenance-supersession-record');
+    await waitFor(renderer, `window.__j07.status() === '维护事项已记录' && document.querySelector(${JSON.stringify(`${designationItem(1)} section.maintenance-case[data-maintenance-status="waiting"]`)}) !== null`, 'maintenance-supersession-waiting', 60_000);
+    const supersessionCase = await renderer.evaluate(`window.ai7.inspectDeliverables().then((answer) => answer.publication.designations.find((designation) => designation.ordinal === 1).maintenance.cases[0])`);
+    requireJourney(supersessionCase?.classification === 'supersession' && supersessionCase.status === 'waiting' && supersessionCase.ordinal === 3, 'maintenance-supersession-recorded', supersessionCase);
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(attentionEntry)})?.dataset.attentionCount === ${JSON.stringify(String(attentionBefore + 1))} && document.querySelector(${JSON.stringify(`${attentionEntry} .global-attention-badge`)})?.textContent === ${JSON.stringify(String(attentionBefore + 1))}`, 'maintenance-attention-count', 30_000);
+    await clickSelector(renderer, attentionEntry, 'maintenance-attention-entry');
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"] li.global-attention-item[data-attention-state="maintenance-waiting"]') !== null`, 'maintenance-attention-listed', 30_000);
+    await assertRenderer(renderer, `(() => {
+      const items = Array.from(document.querySelectorAll('[data-screen="global-attention"] li.global-attention-item[data-attention-target="maintenance"]'));
+      const item = items[0];
+      return items.length === 1 && item.closest('section.global-attention-group')?.dataset.attentionGroup === 'decisions' &&
+        item.dataset.attentionItem === ${JSON.stringify(`maintenance:${supersessionCase.caseId}`)} && item.dataset.attentionTarget === 'maintenance' &&
+        item.dataset.attentionBlocked === 'false' && item.querySelector('.global-attention-book')?.textContent === ${JSON.stringify(`《${EXCERPT.title}》`)} &&
+        item.querySelector('.global-attention-open')?.textContent === '维护事项 · 第 3 项 · 替代 · 第 1 次发稿版本' &&
+        item.querySelector('.global-attention-pill')?.textContent === '维护事项待处理 · 等待另设发稿版本' &&
+        item.querySelector('.global-attention-reason')?.textContent === '替代等待另设的发稿版本：另行设为发稿版本后，在这个维护事项中关联它。' &&
+        item.querySelector('.global-attention-next')?.textContent === '安全的下一步：关联发稿版本';
+    })()`, 'maintenance-attention-item');
+    await clickSelector(renderer, `[data-screen="global-attention"] [data-attention-open="maintenance:${supersessionCase.caseId}"]`, 'maintenance-attention-open');
+    await waitFor(renderer, `(() => { const heading = document.querySelector(${JSON.stringify(`${designationItem(1)} li[data-case-id="${supersessionCase.caseId}"] section.maintenance-case .maintenance-case-heading`)}); return heading instanceof HTMLElement && document.activeElement === heading && heading.textContent === '第 3 项维护事项 · 替代'; })()`, 'maintenance-attention-returns-to-the-case', 60_000);
+    await assertRenderer(renderer, PAGE_HELPERS, 'maintenance-attention-page-helpers');
+    // However old it grows, the case still opens back from 待我处理 (Issue #426 review): five more 勘误 on the first
+    // designation push the 替代 out of the five 交付物 lists, and opening it draws it open below them, with focus on it, and
+    // one older case left to 更早的维护事项….
+    for (let index = 1; index <= 5; index += 1) {
+      await clickSelector(renderer, maintenanceAction(1, 'record'), `maintenance-more-${index}-open`);
+      await assertRenderer(renderer, `(() => { const radio = document.querySelector(${JSON.stringify(`${designationItem(1)} form.maintenance-draft input[type="radio"][value="errata"]`)}); radio.click(); return radio.checked; })()`, `maintenance-more-${index}-errata`);
+      await fill(renderer, `${designationItem(1)} form.maintenance-draft textarea[data-maintenance-field="reason"]`, `${MAINTENANCE_MORE}（${index}）`, `maintenance-more-${index}-reason`);
+      await clickSelector(renderer, maintenanceAction(1, 'confirmRecord'), `maintenance-more-${index}-record`);
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${designationItem(1)} section.maintenance-case .maintenance-case-heading`)})?.textContent === ${JSON.stringify(`第 ${3 + index} 项维护事项 · 勘误`)}`, `maintenance-more-${index}-recorded`, 60_000);
+    }
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(attentionEntry)})?.dataset.attentionCount === ${JSON.stringify(String(attentionBefore + 6))}`, 'maintenance-attention-more-counted', 30_000);
+    await clickSelector(renderer, attentionEntry, 'maintenance-attention-entry-again');
+    const olderOpen = `[data-screen="global-attention"] [data-attention-open="maintenance:${supersessionCase.caseId}"]`;
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(olderOpen)}) !== null`, 'maintenance-attention-listed-again', 30_000);
+    await clickSelector(renderer, olderOpen, 'maintenance-attention-open-older');
+    await waitFor(renderer, `(() => {
+      const listed = Array.from(document.querySelectorAll(${JSON.stringify(`${designationItem(1)} ol.maintenance-cases > li`)}), (item) => item.dataset.caseId);
+      const heading = document.querySelector(${JSON.stringify(`${designationItem(1)} li[data-case-id="${supersessionCase.caseId}"] section.maintenance-case .maintenance-case-heading`)});
+      return listed.length === 6 && listed[5] === ${JSON.stringify(supersessionCase.caseId)} && heading instanceof HTMLElement && document.activeElement === heading &&
+        heading.textContent === '第 3 项维护事项 · 替代' &&
+        document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-older .field-note`)})?.textContent === '还有 1 项更早的维护事项';
+    })()`, 'maintenance-attention-older-opened', 60_000);
+    // 归档 of that designation: its maintenance is closed, and the 替代 leaves 待我处理 without being concluded.
+    await clickSelector(renderer, maintenanceAction(1, 'record'), 'maintenance-archive-open');
+    await assertRenderer(renderer, `(() => { const radio = document.querySelector(${JSON.stringify(`${designationItem(1)} form.maintenance-draft input[type="radio"][value="archive"]`)}); radio.click(); return radio.checked; })()`, 'maintenance-choose-archive');
+    await fill(renderer, `${designationItem(1)} form.maintenance-draft textarea[data-maintenance-field="reason"]`, MAINTENANCE_ARCHIVE, 'maintenance-archive-reason');
+    await clickSelector(renderer, maintenanceAction(1, 'confirmRecord'), 'maintenance-archive-record');
+    await waitFor(renderer, `window.__j07.status() === '维护事项已记录' && document.querySelector(${JSON.stringify(`${designationItem(1)} section.maintenance`)})?.dataset.maintenanceArchived === 'true'`, 'maintenance-archived', 60_000);
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(attentionEntry)})?.dataset.attentionCount === ${JSON.stringify(String(attentionBefore))}`, 'maintenance-attention-cleared', 30_000);
+    const leftOver = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((attention) => attention.groups.flatMap((group) => group.items).filter((entry) => entry.target.kind === 'maintenance').length)`);
+    requireJourney(leftOver === 0, 'maintenance-attention-none-left', leftOver);
+
+    // A bounded publication list must not hide the exact target selected in attention.
+    const outsideCase = await renderer.evaluate(`(async () => {
+      const before = await window.ai7.inspectDeliverables();
+      const target = before.publication.designations.find((item) => item.ordinal === 2);
+      const result = await window.ai7.recordMaintenanceCase({ publicationVersionId: target.publicationVersionId,
+        classification: 'errata', reason: ${JSON.stringify(MAINTENANCE_MORE)}, evidence: null });
+      for (let index = 0; index < 31; index += 1) {
+        await window.ai7.designatePublicationVersion({ milestoneId: ${JSON.stringify(first)},
+          scope: ${JSON.stringify(EBOOK.scope)} + '（' + index + '）', basis: ${JSON.stringify(EBOOK.basis)} });
+      }
+      const after = await window.ai7.inspectDeliverables();
+      return { caseId: result.maintenanceCase.caseId, publicationVersionId: target.publicationVersionId,
+        hidden: !after.publication.designations.some((item) => item.publicationVersionId === target.publicationVersionId),
+        count: after.publication.designations.length };
+    })()`);
+    requireJourney(outsideCase.hidden && outsideCase.count === 30, 'maintenance-attention-designation-outside-page');
+    await clickSelector(renderer, attentionEntry, 'maintenance-attention-outside-entry');
+    const outsideOpen = `[data-screen="global-attention"] [data-attention-open="maintenance:${outsideCase.caseId}"]`;
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(outsideOpen)}) !== null`, 'maintenance-attention-outside-listed', 30_000);
+    await clickSelector(renderer, outsideOpen, 'maintenance-attention-outside-open');
+    const outsideSection = `[data-screen="book-deliverables"] .maintenance-outside-history[data-publication-version-id="${outsideCase.publicationVersionId}"]`;
+    const outsideHeading = `${outsideSection} section.maintenance-case .maintenance-case-heading`;
+    await waitFor(renderer, `(() => { const heading = document.querySelector(${JSON.stringify(outsideHeading)});
+      return heading instanceof HTMLElement && document.activeElement === heading &&
+        document.querySelector(${JSON.stringify(`${outsideSection} section.maintenance-case`)})?.dataset.caseId === ${JSON.stringify(outsideCase.caseId)} &&
+        document.querySelector(${JSON.stringify(`${outsideSection} .maintenance-target`)})?.textContent.includes('第 2 次') &&
+        document.querySelectorAll('ol.publication-versions > li').length === 30; })()`, 'maintenance-attention-outside-focused', 60_000);
+    const outsideToggle = `${outsideSection} [data-maintenance-action="toggle-case"]`;
+    await clickSelector(renderer, outsideToggle, 'maintenance-attention-outside-close');
+    await waitFor(renderer, `(() => { const toggle = document.querySelector(${JSON.stringify(outsideToggle)});
+      return toggle instanceof HTMLElement && document.activeElement === toggle && toggle.getAttribute('aria-expanded') === 'false'; })()`, 'maintenance-attention-outside-close-focused');
+    await clickSelector(renderer, outsideToggle, 'maintenance-attention-outside-reopen');
+    await waitFor(renderer, `document.activeElement === document.querySelector(${JSON.stringify(outsideHeading)})`, 'maintenance-attention-outside-reopened');
+
     at('documents-restart');
-    // A restart moves nothing: 交付物, 交付 · 生产文档 and 图书交付包 answer byte for byte as before, the card still names
-    // its second delivery, the package lists its two versions, and the 新闻稿 opens at 版本 3 with both its edits.
+    // A restart moves nothing: 交付物, 交付 · 生产文档 and 图书交付包 answer byte for byte as before — 维护事项 included — the
+    // card still names its second delivery, the package lists its two versions and v2's export, and the 新闻稿 opens at 版本 3
+    // with both its edits.
     const readBoth = `Promise.all([window.ai7.inspectDeliverables(), window.ai7.inspectProductionDocuments(), window.ai7.inspectBookDeliveryPackage()]).then((answers) => JSON.stringify(answers))`;
     const documentsBefore = await renderer.evaluate(readBoth);
     await close();
@@ -1731,9 +2197,11 @@ async function main() {
     await reopenDeliverables(renderer, 'documents-restart');
     const documentsAfter = await renderer.evaluate(readBoth);
     requireJourney(typeof documentsBefore === 'string' && documentsAfter === documentsBefore, 'documents-restart-moved-nothing');
-    await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentState === 'document' && window.__j07.card('news-release').dataset.documentDeliveries === '2' && window.__j07.card('news-release').dataset.documentChangedSinceDelivery === 'false' && window.__j07.packageVersions().length === 2`, 'documents-restart-card');
+    await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentState === 'document' && window.__j07.card('news-release').dataset.documentDeliveries === '2' && window.__j07.card('news-release').dataset.documentChangedSinceDelivery === 'false' && window.__j07.packageVersions().length === 2 && (window.__j07.packageVersions()[0].querySelector('ol.package-export-list > li .package-export-line')?.textContent ?? '').startsWith('已导出到所选位置 · 1 个文件 · ')`, 'documents-restart-card');
     await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="open"]', 'documents-restart-open');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] .editor-toolbar h2')?.textContent === '新闻稿 · 版本 3' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.textContent?.endsWith(${JSON.stringify(`${DOCUMENT_EDIT}${DELIVERY_EDIT}`)})`, 'documents-restart-document');
+    // Reopened from 交付物 after the restart, the document still says how its material was read (Issue #547).
+    await assertRenderer(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] aside.document-lens .document-materials .document-origin-marks')?.textContent === ${JSON.stringify(DRAFT_MARKS_LINE)}`, 'documents-restart-origin-marks');
     await assertNoForbiddenWords(renderer, 'documents-without-forbidden-words');
 
     at('zero-loopback-requests');
