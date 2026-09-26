@@ -959,6 +959,57 @@ async function main() {
     const restarted = await readKnowledge(renderer, (read) => read.items.length === 1, 'knowledge-restarted');
     requireJourney(restarted.items[0][1] === `「${PLACE}」 · 地点 · 第 2 版` && restarted.items[0][6] === '历次版本（2）' && restarted.candidatesEmpty === '没有待审阅的候选项。', 'knowledge-restarted-words', restarted);
 
+    at('knowledge-bounded-pages');
+    const pagesSeeded = await renderer.evaluate(`(async () => {
+      const seriesId = ${JSON.stringify(seriesId)};
+      const itemId = ${JSON.stringify(itemId)};
+      for (let index = 0; index < 30; index += 1) {
+        const candidate = await window.ai7.proposeSeriesKnowledge({ seriesId,
+          target: { kind: 'new', subject: '分页条目' + String(index).padStart(2, '0'), knowledgeClass: 'canon' }, content: '分页内容' + index, span: null });
+        const review = await window.ai7.inspectSeriesKnowledgeReview({ seriesId, candidateId: candidate.candidateId });
+        await window.ai7.promoteSeriesKnowledge({ seriesId, candidateId: candidate.candidateId, candidateVersion: 1,
+          reviewDigest: review.reviewDigest, reuseScope: 'series-tasks', conflictDisposition: 'none' });
+      }
+      for (let index = 0; index < 10; index += 1) {
+        const candidate = await window.ai7.proposeSeriesKnowledge({ seriesId, target: { kind: 'existing', itemId }, content: '历次分页内容' + index, span: null });
+        const review = await window.ai7.inspectSeriesKnowledgeReview({ seriesId, candidateId: candidate.candidateId });
+        await window.ai7.promoteSeriesKnowledge({ seriesId, candidateId: candidate.candidateId, candidateVersion: 1,
+          reviewDigest: review.reviewDigest, reuseScope: 'series-tasks', conflictDisposition: 'none' });
+      }
+      for (let index = 0; index < 31; index += 1) {
+        await window.ai7.proposeSeriesKnowledge({ seriesId, target: { kind: 'new', subject: '待审分页' + index, knowledgeClass: 'canon' }, content: '待审内容' + index, span: null });
+      }
+      return true;
+    })()`);
+    requireJourney(pagesSeeded === true, 'knowledge-pages-seeded');
+    await leaveSeries(renderer, 'knowledge-pages-leave');
+    await openSeries(renderer, seriesId, 'knowledge-pages-reopen');
+    await waitFor(renderer, `document.querySelectorAll('.knowledge-item').length === 30 && document.querySelectorAll('.knowledge-candidate').length === 30`, 'knowledge-pages-first');
+    const selectedTarget = await renderer.evaluate(`document.querySelector('.knowledge-item').dataset.itemId`);
+    await clickSelector(renderer, '.knowledge-item [data-knowledge-action="propose-item"]', 'knowledge-pages-propose');
+    await fill(renderer, '#knowledge-content-propose', '保留翻页中的草稿', 'knowledge-pages-draft');
+    for (let pass = 0; pass < 2; pass += 1) {
+      await clickSelector(renderer, '[data-knowledge-action="items-more"]', 'knowledge-pages-items-next');
+      await waitFor(renderer, `document.querySelectorAll('.knowledge-item').length === 1 && document.querySelector('[data-knowledge-action="items-reset"]')?.disabled === false && document.querySelector('input[name="knowledge-target"]:checked')?.value === ${JSON.stringify(selectedTarget)} && document.querySelector('#knowledge-content-propose')?.value === '保留翻页中的草稿' && document.activeElement === document.querySelector('.knowledge-item-title')`, 'knowledge-pages-items-last');
+      await clickSelector(renderer, '[data-knowledge-action="items-reset"]', 'knowledge-pages-items-reset');
+      await waitFor(renderer, `document.querySelectorAll('.knowledge-item').length === 30 && document.querySelector('[data-knowledge-action="items-reset"]') === null && document.querySelector('#knowledge-content-propose')?.value === '保留翻页中的草稿'`, 'knowledge-pages-items-first');
+      await clickSelector(renderer, '[data-knowledge-action="candidates-more"]', 'knowledge-pages-candidates-next');
+      await waitFor(renderer, `document.querySelectorAll('.knowledge-candidate').length === 1 && document.querySelector('[data-knowledge-action="candidates-reset"]')?.disabled === false && document.activeElement === document.querySelector('.knowledge-candidate [data-knowledge-action="review"]')`, 'knowledge-pages-candidates-last');
+      await clickSelector(renderer, '[data-knowledge-action="candidates-reset"]', 'knowledge-pages-candidates-reset');
+      await waitFor(renderer, `document.querySelectorAll('.knowledge-candidate').length === 30 && document.querySelector('[data-knowledge-action="candidates-reset"]') === null`, 'knowledge-pages-candidates-first');
+    }
+    await clickSelector(renderer, '[data-knowledge-action="propose-cancel"]', 'knowledge-pages-cancel-draft');
+    await clickSelector(renderer, '[data-knowledge-action="items-more"]', 'knowledge-pages-history-item');
+    await waitFor(renderer, `document.querySelectorAll('.knowledge-item').length === 1`, 'knowledge-pages-history-item-ready');
+    await clickSelector(renderer, '.knowledge-item-history summary', 'knowledge-pages-history-open');
+    await waitFor(renderer, `document.querySelectorAll('.knowledge-item-history ol li').length === 10 && document.querySelector('[data-knowledge-action="revisions-more"]')?.disabled === false`, 'knowledge-pages-history-first');
+    for (let pass = 0; pass < 2; pass += 1) {
+      await clickSelector(renderer, '[data-knowledge-action="revisions-more"]', 'knowledge-pages-history-next');
+      await waitFor(renderer, `document.querySelectorAll('.knowledge-item-history ol li').length === 2 && document.querySelector('[data-knowledge-action="revisions-reset"]')?.disabled === false && document.activeElement === document.querySelector('.knowledge-item-history summary')`, 'knowledge-pages-history-last');
+      await clickSelector(renderer, '[data-knowledge-action="revisions-reset"]', 'knowledge-pages-history-reset');
+      await waitFor(renderer, `document.querySelectorAll('.knowledge-item-history ol li').length === 10 && document.querySelector('[data-knowledge-action="revisions-reset"]') === null`, 'knowledge-pages-history-reset-ready');
+    }
+
     at('zero-activity');
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key))`, 'exact-service-readiness-remained-zero');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-network-provider-session');

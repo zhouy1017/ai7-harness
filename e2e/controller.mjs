@@ -1132,6 +1132,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'knowledge-review-edit',
     'j14-knowledge-keyboard',
     'knowledge-restart',
+    'knowledge-bounded-pages',
     'zero-activity',
   ]),
 });

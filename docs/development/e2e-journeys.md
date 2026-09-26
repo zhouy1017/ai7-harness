@@ -146,6 +146,8 @@ Not proven here: a Review Run's cards — prepared, under way and on the manuscr
 
 J-13 covers two slices of Issue #63: S28a, Series membership, and S28b, Series Knowledge. Series-scope pins and retrieval exclusions come with S29 (#64).
 
+The `knowledge-bounded-pages` stage adds thirty promoted items, thirty-one open candidates and ten revisions through real service calls. Repeated 30 → 1 → 30 item/candidate pages and 10 → 2 → 10 revision pages replace previous pages, preserve selected off-page targets and typed drafts, and restore keyboard focus.
+
 The runner creates three empty Books, 星河之一, 星河之二 and 书系之外. It uses no manuscript, credential or Provider; every name is the runner's own. Each Book's 工作概览 reads `不在任何书系中。`.
 
 **Creating a Series.** `书系` on the landing opens the house's Series. The page says membership only lets later Tasks explicitly choose the Series' scope, reads `还没有书系。`, and offers `新建书系…`. The form opens with focus on `书系名称`, and `新建书系` stays unavailable until there is a name. A 41-character name is refused in place with `书系名称要 1–40 个字，写在一行里。`. 星河三部曲, with a 说明, is created and answers `已新建书系「星河三部曲」`. Its entry reads `书系「星河三部曲」 · 成员 0 本` and takes focus, and `inspectSeriesList()` agrees.
