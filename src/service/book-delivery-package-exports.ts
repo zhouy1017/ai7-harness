@@ -350,7 +350,7 @@ export class BookDeliveryPackageExports {
   history(bookId: string, packageVersionId: string): { exports: BookDeliveryPackageExportSummaryProjection[]; total: number } {
     const rows = this.#db.prepare(
       'SELECT export_id FROM book_delivery_package_exports WHERE book_id = ? AND package_version_id = ? ORDER BY created_at DESC, rowid DESC',
-    ).all(bookId, packageVersionId) as SqlRow[];
+    ).iterate(bookId, packageVersionId);
     let total = 0;
     const exports: BookDeliveryPackageExportSummaryProjection[] = [];
     for (const row of rows) {
