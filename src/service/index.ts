@@ -520,9 +520,11 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectDefaultExecutionRules() };
     // 知识库 › 审阅规范文件 (Issue #427, S79a).
     case 'inspectReviewGuidelines':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectReviewGuidelines() };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectReviewGuidelines(request.input.page) };
     case 'previewReviewGuidelineVersion':
-      return { id: request.id, ok: true, op: request.op, result: await store.previewReviewGuidelineVersion(request.input.documentId, request.input.path) };
+      return { id: request.id, ok: true, op: request.op, result: request.input.previewId !== undefined
+        ? store.readReviewGuidelinePreview(request.input.documentId, request.input.previewId, request.input.clausePage)
+        : await store.previewReviewGuidelineVersion(request.input.documentId, request.input.path) };
     case 'importReviewGuidelineVersion':
       return { id: request.id, ok: true, op: request.op, result: store.importReviewGuidelineVersion(request.input.previewId) };
     case 'deactivateDefaultExecutionRule':

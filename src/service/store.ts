@@ -41,6 +41,7 @@ import type {
   UpdateBookPeopleInput,
   ReviewGuidelinePreviewProjection,
   ReviewGuidelinesProjection,
+  ReviewGuidelinesPage,
   AppendMaintenanceCaseRevisionInput,
   InspectMaintenanceCaseInput,
   ListMaintenanceCasesInput,
@@ -5437,13 +5438,18 @@ export class EditorialStore {
   }
 
   /** 知识库 › 审阅规范文件 (Issue #427, S79a; KB-001 to KB-003): every guideline document with its versions and their use. */
-  inspectReviewGuidelines(): ReviewGuidelinesProjection {
-    return this.#guidelineCall(() => this.#reviewGuidelines.projection());
+  inspectReviewGuidelines(page?: ReviewGuidelinesPage): ReviewGuidelinesProjection {
+    return this.#guidelineCall(() => this.#reviewGuidelines.projection(page));
+  }
+
+  readReviewGuidelinePreview(documentId: string, previewId: string, page?: number): ReviewGuidelinePreviewProjection {
+    return this.#guidelineCall(() => this.#reviewGuidelines.readPreview(documentId, previewId, page));
   }
 
   /** 导入新版本's first step: the picked file's clauses as the next version of one document would read them; nothing is recorded. */
-  async previewReviewGuidelineVersion(documentId: string, path: string): Promise<ReviewGuidelinePreviewProjection> {
+  async previewReviewGuidelineVersion(documentId: string, path: string | undefined): Promise<ReviewGuidelinePreviewProjection> {
     this.#assertAvailable();
+    if (typeof path !== 'string' || path.length === 0) throw new StoreError('REVIEW_GUIDELINE_FILE_UNREADABLE', '请重新选择文件。');
     let read: Awaited<ReturnType<typeof readGuidelineFile>>;
     try {
       read = await readGuidelineFile(path);

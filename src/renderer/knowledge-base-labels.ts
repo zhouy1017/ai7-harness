@@ -142,9 +142,9 @@ export function guidelinePreviewHeading(preview: Pick<ReviewGuidelinePreviewProj
 }
 
 /** How the file's clauses differ from the version that applies now. */
-export function guidelinePreviewChanges(preview: Pick<ReviewGuidelinePreviewProjection, 'source' | 'currentOrdinal' | 'changes' | 'clauses'>): string {
+export function guidelinePreviewChanges(preview: Pick<ReviewGuidelinePreviewProjection, 'source' | 'currentOrdinal' | 'changes' | 'clauseCount'>): string {
   const { changed, added, removed } = preview.changes;
-  return `${preview.source.displayName} · ${preview.clauses.length} 条 · 与第 ${preview.currentOrdinal} 版相比：改动 ${changed} 条，新增 ${added} 条，删去 ${removed} 条`;
+  return `${preview.source.displayName} · ${preview.clauseCount} 条 · 与第 ${preview.currentOrdinal} 版相比：改动 ${changed} 条，新增 ${added} 条，删去 ${removed} 条`;
 }
 
 export function guidelineImported(title: string, ordinal: number): string {

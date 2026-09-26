@@ -2565,22 +2565,26 @@ function registerRendererHandlers(
   );
   // 知识库 › 审阅规范文件 (Issue #427, S79a) names no Book: it reads every Book's Review Runs. 导入新版本 opens the picker and
   // hands the service the path it returned; confirming records the version, serialized with every other effect.
-  ipcMain.handle(IPC_CHANNELS.inspectReviewGuidelines, (event) =>
+  ipcMain.handle(IPC_CHANNELS.inspectReviewGuidelines, (event, input?: ServiceOperationMap['inspectReviewGuidelines']['input']) =>
     envelope(async () => {
       requireSender(event);
       requireAuthority();
-      return service.call('inspectReviewGuidelines', {});
+      return service.call('inspectReviewGuidelines', { page: input?.page });
     }),
   );
   ipcMain.handle(
     IPC_CHANNELS.previewReviewGuidelineVersion,
-    (event, input: { documentId: string }) =>
+    (event, input: { documentId: string; previewId?: string; clausePage?: number }) =>
       envelope(async () => {
         const owned = requireSender(event);
         requireDesktop(input !== null && typeof input === 'object' && typeof input.documentId === 'string' && input.documentId.length > 0 && input.documentId.length <= 64,
           'AI7_RENDERER_BOUNDARY_INVALID');
         return serializeEffect(async () => {
           requireAuthority();
+          if (input.previewId !== undefined) {
+            requireDesktop(typeof input.previewId === 'string' && input.previewId.length <= 64, 'AI7_RENDERER_BOUNDARY_INVALID');
+            return service.call('previewReviewGuidelineVersion', { documentId: input.documentId, previewId: input.previewId, clausePage: input.clausePage });
+          }
           const path = await chooseGuidelineFile(owned);
           if (path === undefined) return null;
           return service.call('previewReviewGuidelineVersion', { documentId: input.documentId, path });

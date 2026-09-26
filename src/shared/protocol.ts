@@ -4638,8 +4638,14 @@ export interface ReviewGuidelineDocumentProjection {
   readonly appliedBy: ReadonlyArray<{ readonly categoryId: string; readonly label: string }>;
   /** The clauses of the version that applies now. */
   readonly clauses: ReadonlyArray<ReviewGuidelineClauseProjection>;
+  readonly clauseCount: number;
+  readonly clausePage: number;
+  readonly clausePages: number;
   /** Every version, newest first. */
   readonly versions: ReadonlyArray<ReviewGuidelineVersionProjection>;
+  readonly versionCount: number;
+  readonly versionsBefore: number | null;
+  readonly versionsNext: number | null;
   /** How many Books' latest Review Run that used this document used an older version than the current one. */
   readonly olderVersionBookCount: number;
   /** Those Books by title, at most `MAX_GUIDELINE_OLDER_BOOKS_SHOWN`. */
@@ -4648,6 +4654,12 @@ export interface ReviewGuidelineDocumentProjection {
 
 export interface ReviewGuidelinesProjection {
   readonly documents: ReadonlyArray<ReviewGuidelineDocumentProjection>;
+}
+
+export interface ReviewGuidelinesPage {
+  readonly documentId: string;
+  readonly versionsBefore?: number | null;
+  readonly clausePage?: number;
 }
 
 /** 导入新版本 before it is confirmed: the clauses the file holds, as the document's next version would read them. */
@@ -4660,6 +4672,9 @@ export interface ReviewGuidelinePreviewProjection {
   readonly currentOrdinal: number;
   readonly source: ReviewGuidelineSourceProjection;
   readonly clauses: ReadonlyArray<{ readonly clauseId: string; readonly number: number; readonly text: string }>;
+  readonly clauseCount: number;
+  readonly clausePage: number;
+  readonly clausePages: number;
   /** How the clauses differ from the current version's, by number. */
   readonly changes: { readonly changed: number; readonly added: number; readonly removed: number };
 }
@@ -6842,12 +6857,12 @@ export interface ServiceOperationMap {
   };
   /** 知识库 › 审阅规范文件 (Issue #427, S79a): every guideline document the review categories apply, with its versions. */
   inspectReviewGuidelines: {
-    input: Record<string, never>;
+    input: { page?: ReviewGuidelinesPage };
     output: ReviewGuidelinesProjection;
   };
   /** 导入新版本's reading of the file main's picker returned: nothing is recorded until it is confirmed. */
   previewReviewGuidelineVersion: {
-    input: { documentId: string; path: string };
+    input: { documentId: string; path?: string; previewId?: string; clausePage?: number };
     output: ReviewGuidelinePreviewProjection;
   };
   /** 确认导入: the previewed clauses become the document's next version, issued by the house. */
@@ -7225,9 +7240,9 @@ export interface RendererApi {
   inspectDefaultExecutionRules(): Promise<DefaultExecutionRulesProjection>;
   deactivateDefaultExecutionRule(input: { ruleId: string }): Promise<DefaultExecutionRuleProjection>;
   /** 知识库 › 审阅规范文件 (Issue #427, S79a): names no Book; it reads every Book's Review Runs to say who used which version. */
-  inspectReviewGuidelines(): Promise<ReviewGuidelinesProjection>;
+  inspectReviewGuidelines(input?: { page?: ReviewGuidelinesPage }): Promise<ReviewGuidelinesProjection>;
   /** 导入新版本: the native picker, then the file's clauses as the next version would read them; `null` when the picker was cancelled. */
-  previewReviewGuidelineVersion(input: { documentId: string }): Promise<ReviewGuidelinePreviewProjection | null>;
+  previewReviewGuidelineVersion(input: { documentId: string; previewId?: string; clausePage?: number }): Promise<ReviewGuidelinePreviewProjection | null>;
   importReviewGuidelineVersion(input: { previewId: string }): Promise<ReviewGuidelinesProjection>;
   /**
    * 审阅 of the Book the window is showing (Issue #417). Inspecting without a Run opens the latest; a

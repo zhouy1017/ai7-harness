@@ -69,7 +69,7 @@ describe('知识库', () => {
     expect(guidelinePreviewHeading({ ordinal: 2, title: '文字规范条款' })).toBe('将导入为《文字规范条款》第 2 版');
     expect(guidelinePreviewChanges({
       source: { displayName: '规范.txt', format: 'text', sha256: 'c'.repeat(64), bytes: 3 }, currentOrdinal: 1,
-      changes: { changed: 2, added: 1, removed: 0 }, clauses: [{ clauseId: 'a/1', number: 1, text: '一' }],
+      changes: { changed: 2, added: 1, removed: 0 }, clauseCount: 1,
     })).toBe('规范.txt · 1 条 · 与第 1 版相比：改动 2 条，新增 1 条，删去 0 条');
     expect(guidelineImported('文字规范条款', 2)).toBe('已导入《文字规范条款》第 2 版；新准备的审阅按第 2 版；已准备的审阅仍用原版本。');
   });
