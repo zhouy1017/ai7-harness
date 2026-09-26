@@ -41,6 +41,32 @@ export const BUILTIN_BOOK_PEOPLE_ROLES = Object.freeze({
 });
 export const BUILTIN_BOOK_PEOPLE_ROLES_DIGEST = sha256Hex(canonicalJson(BUILTIN_BOOK_PEOPLE_ROLES));
 
+/** One 相关人 role list a release shipped, as a version pins it. */
+export interface BookPeopleRoleList {
+  readonly schema: 'ai7.book-people-roles/1';
+  readonly version: string;
+  readonly roles: ReadonlyArray<{ readonly roleId: string; readonly label: string }>;
+}
+
+/**
+ * Every role list a release has shipped, oldest first; the last is the one a save pins now. A version is read under the
+ * list it was saved under (Issue #431 review), so a later list — a role added, a label changed — never makes an earlier
+ * version unreadable. A list is never removed from here once shipped; a version pinned to a list this build never shipped
+ * (a store a newer build wrote) still reads, its roles named by their ids.
+ */
+export const BOOK_PEOPLE_ROLE_LISTS: BookPeopleRoleList[] = [BUILTIN_BOOK_PEOPLE_ROLES];
+
+/** The list a save pins now, and its digest. */
+function currentRoleList(): { list: BookPeopleRoleList; pin: { version: string; digest: string } } {
+  const list = BOOK_PEOPLE_ROLE_LISTS.at(-1)!;
+  return { list, pin: { version: list.version, digest: sha256Hex(canonicalJson(list)) } };
+}
+
+/** The shipped list a version pinned, by its version and digest; `undefined` for one this build does not know. */
+function roleListOf(pin: { version: string; digest: string }): BookPeopleRoleList | undefined {
+  return BOOK_PEOPLE_ROLE_LISTS.find((list) => list.version === pin.version && sha256Hex(canonicalJson(list)) === pin.digest);
+}
+
 export const BOOK_PEOPLE_SCHEMA_SQL = {
   book_people_versions: `CREATE TABLE book_people_versions (
   version_id TEXT PRIMARY KEY,
@@ -120,15 +146,31 @@ interface PeopleSet {
   related: Array<{ roleId: string; name: string }>;
 }
 
-const roleLabel = (roleId: string): string | undefined => BUILTIN_BOOK_PEOPLE_ROLES.roles.find((role) => role.roleId === roleId)?.label;
+interface VerifiedPeopleVersion {
+  version: number;
+  people: PeopleSet;
+  roles: BookPeopleRoleList | null;
+  recordedAt: string;
+  digest: string;
+}
 
-function peopleRecord(versionId: string, bookId: string, version: number, people: PeopleSet, recordedAt: string, prior: string | null) {
+const roleLabel = (list: BookPeopleRoleList | null, roleId: string): string | undefined => list?.roles.find((role) => role.roleId === roleId)?.label;
+
+function peopleRecord(
+  versionId: string,
+  bookId: string,
+  version: number,
+  roles: { version: string; digest: string },
+  people: PeopleSet,
+  recordedAt: string,
+  prior: string | null,
+) {
   return canonicalRecord({
     schema: RECORD_SCHEMA,
     versionId,
     bookId,
     version,
-    roles: { version: BUILTIN_BOOK_PEOPLE_ROLES.version, digest: BUILTIN_BOOK_PEOPLE_ROLES_DIGEST },
+    roles: { version: roles.version, digest: roles.digest },
     authors: people.authors,
     editors: people.editors,
     related: people.related,
@@ -160,17 +202,30 @@ export class BookPeople {
     this.#db = db;
   }
 
-  /** The Book's people as its newest version records them; none yet is version 0 with nothing listed. */
+  /**
+   * The Book's people as its newest version records them, each 相关人 named in the role list that version pinned; none yet
+   * is version 0 with nothing listed. The roles offered are the list a save pins now.
+   */
   current(bookId: string): BookPeopleProjection {
     const latest = this.#latest(bookId);
     return {
       version: latest?.version ?? 0,
       authors: latest?.people.authors ?? [],
       editors: latest?.people.editors ?? [],
-      related: (latest?.people.related ?? []).map((person) => ({ roleId: person.roleId, roleLabel: roleLabel(person.roleId) ?? person.roleId, name: person.name })),
-      roles: BUILTIN_BOOK_PEOPLE_ROLES.roles.map((role) => ({ roleId: role.roleId, label: role.label })),
+      related: (latest?.people.related ?? []).map((person) => ({
+        roleId: person.roleId, roleLabel: roleLabel(latest!.roles, person.roleId) ?? person.roleId, name: person.name,
+      })),
+      roles: currentRoleList().list.roles.map((role) => ({ roleId: role.roleId, label: role.label })),
       recordedAt: latest?.recordedAt ?? null,
     };
+  }
+
+  /**
+   * Every version of the Book's people, oldest first, each verified as `current` verifies the newest: what 反馈历史
+   * attributes each piece of feedback by — the version in force when it was given (Issue #61 review).
+   */
+  versions(bookId: string): Array<{ readonly version: number; readonly authors: ReadonlyArray<string>; readonly editors: ReadonlyArray<string>; readonly recordedAt: string }> {
+    return this.#verified(bookId).map((entry) => ({ version: entry.version, authors: entry.people.authors, editors: entry.people.editors, recordedAt: entry.recordedAt }));
   }
 
   /** The card's lines in 书库. */
@@ -195,8 +250,9 @@ export class BookPeople {
     };
     requirePeople(Array.isArray(input.related) && input.related.length <= MAX_BOOK_RELATED_PEOPLE, 'BOOK_PEOPLE_INVALID',
       `相关人最多 ${MAX_BOOK_RELATED_PEOPLE} 人。`);
+    const roles = currentRoleList();
     for (const entry of input.related) {
-      requirePeople(isRecord(entry) && typeof entry.roleId === 'string' && roleLabel(entry.roleId) !== undefined, 'BOOK_PEOPLE_ROLE_INVALID',
+      requirePeople(isRecord(entry) && typeof entry.roleId === 'string' && roleLabel(roles.list, entry.roleId) !== undefined, 'BOOK_PEOPLE_ROLE_INVALID',
         '相关人的角色不在本社的角色清单中。');
       const name = nameOf(entry.name);
       requirePeople(name !== null, 'BOOK_PEOPLE_NAME_INVALID',
@@ -207,19 +263,20 @@ export class BookPeople {
     }
     const latest = this.#latest(input.bookId);
     requirePeople((latest?.version ?? 0) === input.expectedVersion, 'BOOK_PEOPLE_CHANGED', '这本书的人员在查看后有了新的记录，请看过再保存。');
-    if (latest !== undefined && canonicalJson(latest.people) === canonicalJson(people)) {
+    // The same set as the newest version, or no one at all before any version, records nothing.
+    if (canonicalJson(latest?.people ?? { authors: [], editors: [], related: [] }) === canonicalJson(people)) {
       return { bookId: input.bookId, outcome: 'unchanged', completionLabel: '人员没有变化', people: this.current(input.bookId) };
     }
     const versionId = randomUUID();
     const version = (latest?.version ?? 0) + 1;
     const recordedAt = new Date().toISOString();
-    const record = peopleRecord(versionId, input.bookId, version, people, recordedAt, latest?.digest ?? null);
+    const record = peopleRecord(versionId, input.bookId, version, roles.pin, people, recordedAt, latest?.digest ?? null);
     this.#db.prepare(
       `INSERT INTO book_people_versions(
          version_id, book_id, version, role_configuration_version, role_configuration_digest, authors_text, editors_text, related_json,
          actor, recorded_at, canonical_json, sha256
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '本机编辑', ?, ?, ?)`,
-    ).run(versionId, input.bookId, version, BUILTIN_BOOK_PEOPLE_ROLES.version, BUILTIN_BOOK_PEOPLE_ROLES_DIGEST,
+    ).run(versionId, input.bookId, version, roles.pin.version, roles.pin.digest,
       people.authors.join('\n'), people.editors.join('\n'), canonicalJson(people.related), recordedAt, record.json, record.digest);
     return { bookId: input.bookId, outcome: 'recorded', completionLabel: '人员已保存', people: this.current(input.bookId) };
   }
@@ -244,17 +301,28 @@ export class BookPeople {
     return { where: `(${title} OR ${newest('authors_text')} OR ${newest('editors_text')})`, parameters: [text, text, text] };
   }
 
-  /** The Book's newest version, its record verified against its digest and its columns. */
-  #latest(bookId: string): { version: number; people: PeopleSet; recordedAt: string; digest: string } | undefined {
-    if (this.#db.prepare(TABLE_PRESENT).get() === undefined) return undefined;
+  /** The Book's newest version. */
+  #latest(bookId: string): VerifiedPeopleVersion | undefined {
+    return this.#verified(bookId).at(-1);
+  }
+
+  /**
+   * The Book's versions, oldest first, each version's record verified against its digest, its columns and the role list it
+   * pinned — whichever shipped list that was, never only today's.
+   */
+  #verified(bookId: string): VerifiedPeopleVersion[] {
+    if (this.#db.prepare(TABLE_PRESENT).get() === undefined) return [];
     const rows = this.#db.prepare('SELECT * FROM book_people_versions WHERE book_id = ? ORDER BY version').all(bookId) as SqlRow[];
     let prior: string | null = null;
-    let latest: { version: number; people: PeopleSet; recordedAt: string; digest: string } | undefined;
+    const verified: VerifiedPeopleVersion[] = [];
     for (const [index, row] of rows.entries()) {
       requirePeople(typeof row.version_id === 'string' && typeof row.version === 'number' && row.version === index + 1 &&
         typeof row.recorded_at === 'string' && typeof row.canonical_json === 'string' && typeof row.sha256 === 'string' &&
-        typeof row.authors_text === 'string' && typeof row.editors_text === 'string' && typeof row.related_json === 'string',
+        typeof row.authors_text === 'string' && typeof row.editors_text === 'string' && typeof row.related_json === 'string' &&
+        typeof row.role_configuration_version === 'string' && typeof row.role_configuration_digest === 'string',
       'BOOK_PEOPLE_RECORD_INVALID', '图书人员记录无效。');
+      const pin = { version: row.role_configuration_version, digest: row.role_configuration_digest };
+      const roles = roleListOf(pin) ?? null;
       let parsed: unknown;
       try { parsed = JSON.parse(row.canonical_json); } catch { parsed = null; }
       requirePeople(isRecord(parsed) && Array.isArray(parsed.authors) && Array.isArray(parsed.editors) && Array.isArray(parsed.related),
@@ -264,14 +332,14 @@ export class BookPeople {
         editors: parsed.editors as string[],
         related: parsed.related as Array<{ roleId: string; name: string }>,
       };
-      const expected = peopleRecord(row.version_id, bookId, row.version, people, row.recorded_at, prior);
+      const expected = peopleRecord(row.version_id, bookId, row.version, pin, people, row.recorded_at, prior);
       requirePeople(expected.json === row.canonical_json && expected.digest === row.sha256 && sha256Hex(row.canonical_json) === row.sha256 &&
         row.authors_text === people.authors.join('\n') && row.editors_text === people.editors.join('\n') &&
-        row.related_json === canonicalJson(people.related),
+        row.related_json === canonicalJson(people.related) && (roles === null || people.related.every((person) => roleLabel(roles, person.roleId) !== undefined)),
       'BOOK_PEOPLE_RECORD_INVALID', '图书人员记录与其摘要不一致。');
       prior = row.sha256;
-      latest = { version: row.version, people, recordedAt: row.recorded_at, digest: row.sha256 };
+      verified.push({ version: row.version, people, roles, recordedAt: row.recorded_at, digest: row.sha256 });
     }
-    return latest;
+    return verified;
   }
 }

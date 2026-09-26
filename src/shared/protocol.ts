@@ -84,6 +84,7 @@ export const IPC_CHANNELS = {
   previewLibraryMaterial: 'ai7:j15:preview-library-material',
   addLibraryMaterial: 'ai7:j15:add-library-material',
   decideLibraryMaterial: 'ai7:j15:decide-library-material',
+  inspectLibraryMaterial: 'ai7:j15:inspect-library-material',
   inspectEvaluationProfiles: 'ai7:j11:inspect-evaluation-profiles',
   inspectEvaluation: 'ai7:j11:inspect-evaluation',
   startEvaluation: 'ai7:j11:start-evaluation',
@@ -121,6 +122,7 @@ export const IPC_CHANNELS = {
   recordProposalDecisionFeedback: 'ai7:j11:record-proposal-decision-feedback',
   inspectLearningMaterials: 'ai7:j11:inspect-learning-materials',
   decideLearningMaterial: 'ai7:j11:decide-learning-material',
+  inspectLearningMaterial: 'ai7:j11:inspect-learning-material',
   inspectFeedbackHistory: 'ai7:j11:inspect-feedback-history',
   inspectEvaluationCalibration: 'ai7:j12:inspect-evaluation-calibration',
   recordPublicationActuals: 'ai7:j12:record-publication-actuals',
@@ -156,6 +158,7 @@ export const IPC_CHANNELS = {
   chooseBookDeliveryPackageExportFolder: 'ai7:j07:choose-book-delivery-package-export-folder',
   approveBookDeliveryPackageExport: 'ai7:j07:approve-book-delivery-package-export',
   inspectMaintenanceCase: 'ai7:j07:inspect-maintenance-case',
+  listMaintenanceCases: 'ai7:j07:list-maintenance-cases',
   recordMaintenanceCase: 'ai7:j07:record-maintenance-case',
   appendMaintenanceCaseRevision: 'ai7:j07:append-maintenance-case-revision',
   saveMaintenanceErrata: 'ai7:j07:save-maintenance-errata',
@@ -4622,6 +4625,10 @@ export interface DefaultExecutionRulesProjection {
 
 /** The largest guideline file 导入新版本 reads: a Word document or plain text of numbered clauses. */
 export const MAX_REVIEW_GUIDELINE_FILE_BYTES = 2 * 1024 * 1024;
+/** The Review Runs a guideline version names, the latest first; the page counts the rest (Issue #427 review). */
+export const MAX_GUIDELINE_VERSION_RUNS_SHOWN = 5;
+/** The Books 还在用旧版 names, by title; the page counts the rest (Issue #427 review). */
+export const MAX_GUIDELINE_OLDER_BOOKS_SHOWN = 10;
 
 /** The file one imported version was read from: its name as picked, how it was read, and its exact bytes. */
 export interface ReviewGuidelineSourceProjection {
@@ -4648,9 +4655,22 @@ export interface ReviewGuidelineVersionProjection {
   readonly source: ReviewGuidelineSourceProjection | null;
   readonly clauseCount: number;
   readonly digest: string;
-  /** The Review Runs that applied exactly this version, oldest first. */
+  /**
+   * How many Review Runs used exactly this version: a category of the Run that applies the document formed its findings
+   * under it. A Run only prepared, refused or failed has used nothing yet.
+   */
+  readonly usedByCount: number;
+  /** The latest of those Runs, newest first, at most `MAX_GUIDELINE_VERSION_RUNS_SHOWN`. */
   readonly usedBy: ReadonlyArray<{ readonly bookId: string; readonly bookTitle: string; readonly reviewRunId: string; readonly reviewOrdinal: number; readonly createdAt: string }>;
 }
+
+/**
+ * How the review categories that apply a guideline document read it (Issue #427 review). `clauses`: the Editorial Review
+ * Contract hands its numbered clauses to the model, so the house may import its own next version. `leads`: the category
+ * turns the baseline analysis's leads into annotations and reads no clause. `factual-kind`: the category runs AI7's own
+ * fixed factual-review contract. The last two are AI7's fixed statements of what the category does, never imported.
+ */
+export type ReviewGuidelineDocumentUse = 'clauses' | 'leads' | 'factual-kind';
 
 export interface ReviewGuidelineDocumentProjection {
   readonly documentId: string;
@@ -4658,13 +4678,16 @@ export interface ReviewGuidelineDocumentProjection {
   /** Who issued the version that applies now: `AI7 内置默认`, or `本社` once the house imported its own. */
   readonly issuer: string;
   readonly currentOrdinal: number;
+  readonly use: ReviewGuidelineDocumentUse;
   /** The review categories that apply this document. */
   readonly appliedBy: ReadonlyArray<{ readonly categoryId: string; readonly label: string }>;
   /** The clauses of the version that applies now. */
   readonly clauses: ReadonlyArray<ReviewGuidelineClauseProjection>;
   /** Every version, newest first. */
   readonly versions: ReadonlyArray<ReviewGuidelineVersionProjection>;
-  /** The Books whose latest Review Run applying this document used an older version than the current one. */
+  /** How many Books' latest Review Run that used this document used an older version than the current one. */
+  readonly olderVersionBookCount: number;
+  /** Those Books by title, at most `MAX_GUIDELINE_OLDER_BOOKS_SHOWN`. */
   readonly olderVersionBooks: ReadonlyArray<{ readonly bookId: string; readonly bookTitle: string; readonly ordinal: number }>;
 }
 
@@ -4688,6 +4711,17 @@ export interface ReviewGuidelinePreviewProjection {
 
 // ---- 知识库 › 范例 (Issue #427, plan slice S79b; V2-UX-KB-004, KB-006) --------------------------------------------------
 
+/** The published Books one answer of 范例 carries, by title; `更多已出版的书…` reads the next (Issue #427 review). */
+export const MAX_EXEMPLAR_BOOKS_PAGE = 20;
+/** The earlier delivered versions an exemplar names, the latest of them; the rest are counted. */
+export const MAX_EXEMPLAR_EARLIER_VERSIONS = 10;
+
+/** Where the next page of 范例 starts: after this Book, in title order as 书库 pages. */
+export interface ExemplarBookCursor {
+  readonly title: string;
+  readonly bookId: string;
+}
+
 /** One exemplar: the version of one delivered document of a published Book that stands in 范例. */
 export interface ExemplarProjection {
   readonly documentId: string;
@@ -4699,9 +4733,14 @@ export interface ExemplarProjection {
   readonly revisionDigest: string;
   readonly deliveredTo: string;
   readonly deliveredAt: string;
-  /** When it came into 范例: the designation for a document delivered before it, else its delivery. */
+  /**
+   * When it came into 范例: its delivery, made while a 发稿版本 stood in AI7; or, for one delivered before the first
+   * designation or after a 撤回, the next designation.
+   */
   readonly archivedAt: string;
-  /** Other versions of the document delivered before, oldest first. */
+  /** How many other versions of the document came into 范例 before this one. */
+  readonly earlierVersionCount: number;
+  /** The latest of them, oldest first, at most `MAX_EXEMPLAR_EARLIER_VERSIONS`. */
   readonly earlierVersions: ReadonlyArray<number>;
   /** The Learning Eligibility it came in with: `仅本社`, the default, asked of no one. */
   readonly eligibility: 'house-only';
@@ -4711,15 +4750,24 @@ export interface ExemplarProjection {
 export interface ExemplarBookProjection {
   readonly bookId: string;
   readonly bookTitle: string;
+  /** As the Book's 人员 read now. */
   readonly authors: ReadonlyArray<string>;
   readonly editors: ReadonlyArray<string>;
+  /** Its latest designation: which one, and when. */
   readonly publicationOrdinal: number;
   readonly designatedAt: string;
+  /**
+   * Whether a 撤回 holds that designation (ADR 0040): in AI7 it is no longer used for 发稿, so what the Book delivers
+   * after it comes in only once another 发稿版本 is set. What came in before stays.
+   */
+  readonly withdrawn: boolean;
   readonly exemplars: ReadonlyArray<ExemplarProjection>;
 }
 
 export interface ExemplarsProjection {
   readonly books: ReadonlyArray<ExemplarBookProjection>;
+  /** Where the next page starts; `null` when this is the last. */
+  readonly nextCursor: ExemplarBookCursor | null;
 }
 
 // ---- 知识库 › 工序与规则's expert 工序 (Issue #427, plan slice S79d; V2-UX-KB-010, REUSE-029, REUSE-030) ---------------
@@ -4733,18 +4781,31 @@ export interface KnowledgeProcedureProjection {
   readonly categoryLabel: string;
   /** `enabled` when its category can run; `unavailable` when the category's basis does not exist yet. */
   readonly state: 'enabled' | 'unavailable';
+  /** Why it cannot run yet, said of the house rather than of one Book; `null` while it can. */
   readonly unavailableReason: string | null;
-  /** How many Review Runs applied it. */
+  /** How many approved Review Runs applied this version of it; a Run only prepared applied nothing. */
   readonly reviewRuns: number;
 }
 
-/** A native artifact AI7 carries, in its own lifecycle words (REUSE-030). */
+/**
+ * A native artifact AI7 carries, in the house's words (editor-surfaces §10; REUSE-030): the 编辑工作区方案 with its AI7 权限侧车
+ * reads 本社方案 vN, in its lifecycle as the Book card reads it. Its identities are the Technical Identity Layer's (ADR 0071
+ * §1, LAYER-001), for 查看技术详情 only.
+ */
 export interface KnowledgeArtifactProjection {
-  readonly artifactId: string;
+  /** The house's word for it: 本社方案. */
   readonly title: string;
-  readonly version: string | null;
-  readonly state: 'not-installed' | 'installed';
+  /** The newest AI7 权限侧车 revision the installed 方案 offers — the N of 本社方案 vN; `null` before it is installed. */
+  readonly revision: number | null;
+  readonly state: 'available-to-install' | 'installed' | 'unavailable-needs-attention';
   readonly enabledBooks: number;
+  readonly technical: {
+    readonly artifactId: string;
+    readonly version: string;
+    readonly sha256: string;
+    readonly sidecarId: string;
+    readonly sidecarSha256: string | null;
+  };
 }
 
 export interface KnowledgeProceduresProjection {
@@ -4758,6 +4819,16 @@ export interface KnowledgeProceduresProjection {
 export const MAX_LIBRARY_MATERIAL_BYTES = 1024 * 1024 * 1024;
 export const MAX_LIBRARY_MATERIAL_TITLE_GRAPHEMES = 200;
 export const MAX_LEARNING_ELIGIBILITY_REASON_GRAPHEMES = 500;
+/** The items one answer of 资料库 carries, newest first; `更多资料…` reads the next (Issue #427 review). */
+export const MAX_LIBRARY_MATERIALS_PAGE = 20;
+/** The decisions an item's card names, the latest of them; the rest are counted. */
+export const MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN = 10;
+
+/** Where the next page of 资料库 starts: after this item, newest first. */
+export interface LibraryMaterialCursor {
+  readonly recordedAt: string;
+  readonly materialId: string;
+}
 
 /** What an editor collected (KB-007): a book, a paper, a document or a web capture. */
 export type LibraryMaterialKind = 'book' | 'paper' | 'document' | 'web';
@@ -4834,15 +4905,18 @@ export interface LibraryMaterialProjection {
     | { readonly state: 'available'; readonly scope: 'book'; readonly bookTitle: string }
     | { readonly state: 'available'; readonly scope: 'house' }
     | { readonly state: 'pending' };
-  /** Every decision, oldest first. */
+  /** How many decisions the item's chain holds. */
+  readonly decisionCount: number;
+  /** The latest of them, oldest first, at most `MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN`. */
   readonly decisions: ReadonlyArray<LibraryMaterialDecisionProjection>;
 }
 
+/** One page of 资料库. An attribution names its Book from 书库's own pages (`listBooks`), never from this answer. */
 export interface LibraryMaterialsProjection {
   /** Newest arrival first. */
   readonly materials: ReadonlyArray<LibraryMaterialProjection>;
-  /** The Books an attribution can name, by title. */
-  readonly books: ReadonlyArray<{ readonly bookId: string; readonly title: string }>;
+  /** Where the next page starts; `null` when this is the last. */
+  readonly nextCursor: LibraryMaterialCursor | null;
 }
 
 // ---- ②C 评估 (Issue #429, plan slice S81a; editor-surfaces §5, V2-UX-EVAL-001 to EVAL-005, EVAL-007, EVAL-012) ----------
@@ -5048,6 +5122,31 @@ export interface RecordAnalysisFeedbackInput {
 export type LearningMaterialKind = 'proposal-decision' | 'analysis-feedback' | 'review-disposition';
 export const LEARNING_MATERIAL_KINDS: readonly LearningMaterialKind[] = ['proposal-decision', 'analysis-feedback', 'review-disposition'];
 
+const LEARNING_UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
+/**
+ * A material's place, by its kind (Issue #61 review): a 修改建议's decision, an analysis item of a Result Set Revision, or a
+ * 审阅 finding of a Review Run — each exactly as the store names it, a finding's `rvf_` identity included.
+ */
+export const LEARNING_MATERIAL_KEY_PATTERN = new RegExp(
+  `^(?:proposal-decision:${LEARNING_UUID}|analysis-feedback:${LEARNING_UUID}/(?:synopsis|(?:entities|events|relationships|settings)/\\d{1,6})` +
+  `|review-disposition:${LEARNING_UUID}/rvf_[0-9a-f]{24})$`,
+  'u',
+);
+
+/** The materials one answer of 学习准入 carries, Book by Book; `更多学习材料…` reads the next (Issue #61 review). */
+export const MAX_LEARNING_MATERIALS_PAGE = 40;
+
+/**
+ * Where the next page of 学习准入 starts: after this material of this Book — Books by title, a Book's materials by kind, then
+ * by when each came to be (a later reason never moves one), then by place.
+ */
+export interface LearningMaterialCursor {
+  readonly bookTitle: string;
+  readonly bookId: string;
+  readonly orderedAt: string;
+  readonly materialKey: string;
+}
+
 /**
  * Where a material stands (LEARN-006, LEARN-007): waiting for a decision; changed since the decision it had, which no longer
  * binds it; left for later; or decided.
@@ -5082,14 +5181,22 @@ export interface LearningMaterialsBookProjection {
   readonly title: string;
   readonly authors: ReadonlyArray<string>;
   readonly editors: ReadonlyArray<string>;
+  /** How many materials the Book has in all, whichever page shows them. */
+  readonly materialCount: number;
+  /** Those this page shows. */
   readonly materials: ReadonlyArray<LearningMaterialProjection>;
 }
 
-/** 质量与学习 › 学习准入: the Books with Learning Material, one Book at a time when a Book is named. */
+/**
+ * 质量与学习 › 学习准入: one page of the Books with Learning Material, one Book when a Book is named — at most
+ * `MAX_LEARNING_MATERIALS_PAGE` materials, a Book whose materials run on repeated at the top of the next page.
+ */
 export interface LearningMaterialsProjection {
   /** The governing basis every decision here records, in plain words (LEARN-003, LEARN-008). */
   readonly basis: string;
   readonly books: ReadonlyArray<LearningMaterialsBookProjection>;
+  /** Where the next page starts; `null` when this is the last. */
+  readonly nextCursor: LearningMaterialCursor | null;
 }
 
 /**
@@ -5105,14 +5212,32 @@ export interface DecideLearningMaterialInput {
   readonly note: string | null;
 }
 
-// ---- 质量与学习 › 反馈记录 (Issue #61, plan slice S26c; V2-UX-FDBK-009, FDBK-010, FDBK-013) ---------------------------------
+// ---- 质量与学习 › 反馈历史 (Issue #61, plan slice S26c; V2-UX-FDBK-009, FDBK-010, FDBK-013) ---------------------------------
 
 export const MAX_FEEDBACK_HISTORY_ENTRIES = 300;
+/** A reason stands in the history whole up to this many graphemes, and beyond them as its opening; 打开… shows all of it. */
+export const MAX_FEEDBACK_HISTORY_REASON_GRAPHEMES = 200;
 
 /** Where one entry opens: the exact record it came from (FDBK-009), in its own Book. */
 export type FeedbackHistoryTarget =
-  | { readonly kind: 'mark'; readonly bookId: string; readonly manuscriptId: string; readonly branchId: string; readonly blockId: string; readonly markId: string }
-  | { readonly kind: 'analysis'; readonly bookId: string; readonly revisionId: string }
+  | {
+    readonly kind: 'mark';
+    readonly bookId: string;
+    readonly manuscriptId: string;
+    readonly branchId: string;
+    readonly blockId: string;
+    readonly markId: string;
+    /** Whether the paragraph it was made on is gone from the manuscript, so there is nowhere to open it (Issue #61 review). */
+    readonly detached: boolean;
+  }
+  | {
+    readonly kind: 'analysis';
+    readonly bookId: string;
+    readonly revisionId: string;
+    /** The item judged, and the tab of ②A it sits on (Issue #61 review). */
+    readonly itemKey: string;
+    readonly dimension: AnalysisFeedbackDimension;
+  }
   | { readonly kind: 'review'; readonly bookId: string; readonly reviewRunId: string; readonly findingId: string };
 
 /** One piece of the editor's feedback as the history lists it. */
@@ -5120,26 +5245,53 @@ export interface FeedbackHistoryEntryProjection {
   readonly entryId: string;
   readonly origin: LearningMaterialKind;
   readonly bookId: string;
-  /** The Editorial Dimension it is about, in the editor's words; `null` for a 修改建议, which names none. */
+  /**
+   * The Editorial Dimension it is about, in the editor's words: an analysis dimension, a 审阅 category — a 修改建议 a 审阅
+   * category made names its category — or `null` for a 修改建议 that names none.
+   */
   readonly dimension: string | null;
   /** What the editor decided or judged: 拒绝, 修改后接受, 接受, 准确, 不准确, 不完整 or 忽略. */
   readonly signal: string;
-  /** The optional reason as it stands — the alternative chosen, the editor's own words, a correction; `null` when none. */
+  /**
+   * The optional reason as it stands — the alternative chosen, the editor's own words, a correction; `null` when none — whole
+   * up to `MAX_FEEDBACK_HISTORY_REASON_GRAPHEMES`, beyond that its opening and `…`.
+   */
   readonly reason: string | null;
   /** Whether a reason was given, `不说明` was said, or neither: none of them a judgment in itself (FDBK-007). */
   readonly reasonState: 'given' | 'dismissed' | 'none';
   readonly recordedAt: string;
+  /**
+   * The version of the Book's people it is attributed to (FDBK-013, Issue #61 review): the one in force when it was recorded,
+   * or the first saved after it when none was yet; `0` while the Book has never had its people saved.
+   */
+  readonly peopleVersion: number;
   readonly target: FeedbackHistoryTarget;
 }
 
+/** One version of a Book's 作者 and 责编, as the entries attributed to it name them. */
+export interface FeedbackHistoryPeopleVersion {
+  readonly version: number;
+  readonly authors: ReadonlyArray<string>;
+  readonly editors: ReadonlyArray<string>;
+}
+
+/** A Book of the history: its title, its people as they stand now, and each version of them an entry here is attributed to. */
+export interface FeedbackHistoryBookProjection {
+  readonly bookId: string;
+  readonly title: string;
+  readonly authors: ReadonlyArray<string>;
+  readonly editors: ReadonlyArray<string>;
+  readonly peopleVersions: ReadonlyArray<FeedbackHistoryPeopleVersion>;
+}
+
 /**
- * 质量与学习 › 反馈记录: every Book's feedback, newest first, with each Book's 作者 and 责编 to filter by (FDBK-013). A read that
- * asks nothing: no entry is pending, counted or reminded (FDBK-010).
+ * 质量与学习 › 反馈历史: every Book's feedback, newest first, with the people each entry is attributed to, to filter by
+ * (FDBK-013). A read that asks nothing: no entry is pending, counted or reminded (FDBK-010).
  */
 export interface FeedbackHistoryProjection {
-  readonly books: ReadonlyArray<{ readonly bookId: string; readonly title: string; readonly authors: ReadonlyArray<string>; readonly editors: ReadonlyArray<string> }>;
+  readonly books: ReadonlyArray<FeedbackHistoryBookProjection>;
   readonly entries: ReadonlyArray<FeedbackHistoryEntryProjection>;
-  /** Whether older entries were left out of this read. */
+  /** Whether older entries were left out of this read, by count or by weight. */
   readonly truncated: boolean;
 }
 
@@ -5700,6 +5852,10 @@ export const MAX_MAINTENANCE_CASES_LISTED = 5;
 export const MAX_MAINTENANCE_REVISIONS_LISTED = 60;
 /** At most this many 修改建议 are offered to 关联. */
 export const MAX_MAINTENANCE_PROPOSALS_OFFERED = 20;
+/** At most this many later designations are offered to 关联发稿版本, the nearest first. */
+export const MAX_MAINTENANCE_PUBLICATIONS_OFFERED = 30;
+/** `更早的维护事项…` reads this many older cases of one designation at a time. */
+export const MAX_MAINTENANCE_CASES_PAGE = 20;
 
 /** One case as its designation lists it: what it is, where it stands and what it asks next. */
 export interface MaintenanceCaseSummaryProjection {
@@ -5726,11 +5882,15 @@ export interface PublicationMaintenanceProjection {
   archived: boolean;
 }
 
-/** What one revision links (MAINT-010), in the linked record's own words; linking grants the case nothing. */
+/**
+ * What one revision links (MAINT-010), in the linked record's own words; linking grants the case nothing. A 勘误 version is
+ * named by its number: its words are the case's newest `errata`, so a case's answer stays within one frame however many
+ * versions it saved.
+ */
 export type MaintenanceCaseLinkProjection =
   | { kind: 'proposal'; markId: string; label: string; stateLabel: string }
   | { kind: 'publication-version'; publicationVersionId: string; label: string }
-  | { kind: 'errata'; errataVersionId: string; version: number; body: string };
+  | { kind: 'errata'; errataVersionId: string; version: number };
 
 /** One immutable revision of a case, on its timeline (MAINT-003, MAINT-010). */
 export interface MaintenanceCaseRevisionProjection {
@@ -5768,6 +5928,11 @@ export interface MaintenanceCaseProjection {
   revisionsTotal: number;
   /** The newest 勘误 version, with how many there are; `null` before the first. */
   errata: null | { errataVersionId: string; version: number; body: string; recordedAt: string };
+  /**
+   * The conclusions 记录维护事项结论… may record now: both while the case is open, and only 仍未解决 while a 替代 or 再版
+   * still waits for its separately designated version (MAINT-007); none once complete.
+   */
+  conclusions: ReadonlyArray<'unresolved' | 'complete'>;
   /** What 关联… offers: the manuscript's 修改建议 made after the designation, and the designations after it. */
   choices: {
     proposals: ReadonlyArray<{ markId: string; label: string; stateLabel: string; createdAt: string }>;
@@ -5790,6 +5955,23 @@ export interface RecordMaintenanceCaseInput {
 export interface InspectMaintenanceCaseInput {
   bookId: string;
   caseId: string;
+}
+
+/** `更早的维护事项…`: the older cases of one designation of the route's Book, before the oldest one shown. */
+export interface ListMaintenanceCasesInput {
+  bookId: string;
+  publicationVersionId: string;
+  /** The ordinal of the oldest case shown: the page holds the cases before it, newest first. */
+  beforeOrdinal: number;
+}
+
+/** One page of a designation's older cases (MAINT-001): every case it holds can be opened, however old. */
+export interface MaintenanceCasePageProjection {
+  bookId: string;
+  publicationVersionId: string;
+  cases: ReadonlyArray<MaintenanceCaseSummaryProjection>;
+  /** Cases older still. */
+  more: boolean;
 }
 
 /** One later step of a case, appended as its next revision against the one the editor read. */
@@ -6275,16 +6457,41 @@ export interface BookDeliveryPackageExportFileProjection {
   format: ManuscriptExportFormat;
 }
 
-/** `导出…` of one package version: the files it writes, and the review they bind (EXP-010). */
+/**
+ * 含批注 and 含修改建议（作为修订） of the files a package export writes from the manuscript and the documents (EXP-023): both
+ * on until the editor turns one off, and bound into the review. 备注 never go with a package.
+ */
+export type BookDeliveryPackageExportOptions = Pick<ManuscriptExportOptions, 'includeAnnotations' | 'includeSuggestions'>;
+
+/**
+ * One file as `导出…` reviews it (EXP-007 to EXP-009): how it is written, what its format keeps and each class's fidelity —
+ * the Export Fidelity Review S64 shows for one file, so no loss in a package's file is silent.
+ */
+export interface BookDeliveryPackageExportReviewFileProjection extends BookDeliveryPackageExportFileProjection {
+  restoration: 'from-original' | 'regenerated';
+  restorationLine: string;
+  formatLine: string;
+  fidelity: ReadonlyArray<ExportFidelityRowProjection>;
+  /** Some class is `降级导出` or `无法导出`: `按上述方式导出` then accepts it for this export (EXP-008). */
+  degraded: boolean;
+}
+
+/** `导出…` of one package version: the files it writes under the options chosen, and the review they bind (EXP-010). */
 export interface BookDeliveryPackageExportReviewProjection {
   bookId: string;
   packageVersionId: string;
   /** `v2`. */
   versionLabel: string;
-  files: ReadonlyArray<BookDeliveryPackageExportFileProjection>;
+  options: BookDeliveryPackageExportOptions;
+  /** At most `MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED`, in the order they are written. */
+  files: ReadonlyArray<BookDeliveryPackageExportReviewFileProjection>;
+  /** More files than the review lists: they are written too. */
+  filesTruncated: boolean;
+  /** Some file is degraded, listed or not. */
+  degraded: boolean;
   /** EXP-014 and EXP-015: the files go to a folder the editor chooses, and nothing is sent anywhere. */
   statement: string;
-  /** Binds the folder's preparation to exactly this review. */
+  /** Binds the folder's preparation to exactly this review, its options included. */
   reviewDigest: string;
 }
 
@@ -6334,16 +6541,18 @@ export interface BookDeliveryPackageExportSummaryProjection {
   revealPreparationId: string | null;
 }
 
-/** `导出…` of one version of the route's Book's package. */
+/** `导出…` of one version of the route's Book's package, under the options chosen. */
 export interface ReviewBookDeliveryPackageExportInput {
   bookId: string;
   packageVersionId: string;
+  options: BookDeliveryPackageExportOptions;
 }
 
-/** `选择位置…`: the folder the system dialog returned, bound to the review the editor read. */
+/** `选择位置…`: the folder the system dialog returned, bound to the review the editor read and its options. */
 export interface PrepareBookDeliveryPackageExportInput {
   bookId: string;
   packageVersionId: string;
+  options: BookDeliveryPackageExportOptions;
   reviewDigest: string;
   folder: string;
 }
@@ -7367,9 +7576,9 @@ export interface ServiceOperationMap {
     input: { previewId: string };
     output: ReviewGuidelinesProjection;
   };
-  /** 知识库 › 范例 (Issue #427, S79b): every published Book's delivered documents, by Book and type. */
+  /** 知识库 › 范例 (Issue #427, S79b): the published Books' delivered documents, by Book and type, a page at a time. */
   inspectExemplars: {
-    input: Record<string, never>;
+    input: { after: ExemplarBookCursor | null };
     output: ExemplarsProjection;
   };
   /** 知识库 › 工序与规则 (Issue #427, S79d): the review categories' 工序 and the native artifact, with their use. */
@@ -7377,25 +7586,30 @@ export interface ServiceOperationMap {
     input: Record<string, never>;
     output: KnowledgeProceduresProjection;
   };
-  /** 知识库 › 资料库 (Issue #427, S79c): every item the editor collected, with its attribution and eligibility. */
+  /** 知识库 › 资料库 (Issue #427, S79c): the items the editor collected, a page at a time, with their attribution and eligibility. */
   inspectLibraryMaterials: {
-    input: Record<string, never>;
+    input: { after: LibraryMaterialCursor | null };
     output: LibraryMaterialsProjection;
+  };
+  /** One 资料库 item as its card reads it: the one 待我处理 opens, beyond the first page too. */
+  inspectLibraryMaterial: {
+    input: { materialId: string };
+    output: LibraryMaterialProjection;
   };
   /** 放入资料…: the absolute path main's picker returned, read as it would arrive; nothing is kept. */
   previewLibraryMaterial: {
     input: { path: string };
     output: LibraryMaterialPreviewProjection;
   };
-  /** 放入资料库: the previewed file kept whole in the Agent Data Root, with the title and kind the editor gave it. */
+  /** 放入资料库: the previewed file kept whole in the Agent Data Root, with the title and kind the editor gave it; the new item. */
   addLibraryMaterial: {
     input: { previewId: string; title: string; kind: LibraryMaterialKind };
-    output: LibraryMaterialsProjection;
+    output: LibraryMaterialProjection;
   };
-  /** 定归属 or 定学习准入: one decision appended to the item's chain, refused when the chain moved since it was read. */
+  /** 定归属 or 定学习准入: one decision appended to the item's chain, refused when the chain moved since it was read; the item. */
   decideLibraryMaterial: {
     input: { materialId: string; expectedDecisions: number; decision: LibraryMaterialDecisionInput };
-    output: LibraryMaterialsProjection;
+    output: LibraryMaterialProjection;
   };
   /** 知识库 › 评估方案 (Issue #429, S81a): the house Evaluation Profile and its use. */
   inspectEvaluationProfiles: {
@@ -7537,8 +7751,11 @@ export interface ServiceOperationMap {
   recordChangeSuggestionDecision: { input: RecordChangeSuggestionDecisionInput; output: EditorialMarkCommandProjection };
   recordProposalDecisionReason: { input: RecordProposalDecisionReasonInput; output: EditorialMarkCommandProjection };
   recordProposalDecisionFeedback: { input: RecordProposalDecisionFeedbackInput; output: EditorialMarkCommandProjection };
-  inspectLearningMaterials: { input: { bookId: string | null }; output: LearningMaterialsProjection };
-  decideLearningMaterial: { input: DecideLearningMaterialInput; output: LearningMaterialsProjection };
+  inspectLearningMaterials: { input: { bookId: string | null; after: LearningMaterialCursor | null }; output: LearningMaterialsProjection };
+  /** One material as its Review Card reads it, by its Book and place. */
+  inspectLearningMaterial: { input: { bookId: string; materialKey: string }; output: LearningMaterialProjection };
+  /** 记录学习准入决定, answered with the one material it decided. */
+  decideLearningMaterial: { input: DecideLearningMaterialInput; output: LearningMaterialProjection };
   inspectFeedbackHistory: { input: Record<string, never>; output: FeedbackHistoryProjection };
   inspectEvaluationCalibration: { input: Record<string, never>; output: EvaluationCalibrationProjection };
   recordPublicationActuals: { input: RecordPublicationActualsInput; output: EvaluationCalibrationProjection };
@@ -7633,6 +7850,7 @@ export interface ServiceOperationMap {
   /** `按上述方式导出`: each file approved and written in turn, with its receipt; a file that stops it stops the rest. */
   approveBookDeliveryPackageExport: { input: ApproveBookDeliveryPackageExportInput; output: BookDeliveryPackageExportResultProjection };
   inspectMaintenanceCase: { input: InspectMaintenanceCaseInput; output: MaintenanceCaseProjection };
+  listMaintenanceCases: { input: ListMaintenanceCasesInput; output: MaintenanceCasePageProjection };
   recordMaintenanceCase: { input: RecordMaintenanceCaseInput; output: MaintenanceCaseResultProjection };
   appendMaintenanceCaseRevision: { input: AppendMaintenanceCaseRevisionInput; output: MaintenanceCaseResultProjection };
   saveMaintenanceErrata: { input: SaveMaintenanceErrataInput; output: MaintenanceCaseResultProjection };
@@ -7807,16 +8025,18 @@ export interface RendererApi {
   /** 导入新版本: the native picker, then the file's clauses as the next version would read them; `null` when the picker was cancelled. */
   previewReviewGuidelineVersion(input: { documentId: string }): Promise<ReviewGuidelinePreviewProjection | null>;
   importReviewGuidelineVersion(input: { previewId: string }): Promise<ReviewGuidelinesProjection>;
-  /** 知识库 › 范例 (Issue #427, S79b): names no Book; it reads every published Book's delivered documents. */
-  inspectExemplars(): Promise<ExemplarsProjection>;
+  /** 知识库 › 范例 (Issue #427, S79b): names no Book; it reads the published Books' delivered documents, a page at a time. */
+  inspectExemplars(input?: { after: ExemplarBookCursor | null }): Promise<ExemplarsProjection>;
   /** 知识库 › 工序与规则's expert 工序 (Issue #427, S79d): names no Book. */
   inspectKnowledgeProcedures(): Promise<KnowledgeProceduresProjection>;
-  /** 知识库 › 资料库 (Issue #427, S79c): names no Book; an item names the Book it was attributed to. */
-  inspectLibraryMaterials(): Promise<LibraryMaterialsProjection>;
+  /** 知识库 › 资料库 (Issue #427, S79c): names no Book; an item names the Book it was attributed to. A page at a time. */
+  inspectLibraryMaterials(input?: { after: LibraryMaterialCursor | null }): Promise<LibraryMaterialsProjection>;
+  /** One 资料库 item, by its identity. */
+  inspectLibraryMaterial(input: { materialId: string }): Promise<LibraryMaterialProjection>;
   /** 放入资料…: the native picker, then the file as it would arrive; `null` when the picker was cancelled. */
   previewLibraryMaterial(): Promise<LibraryMaterialPreviewProjection | null>;
-  addLibraryMaterial(input: { previewId: string; title: string; kind: LibraryMaterialKind }): Promise<LibraryMaterialsProjection>;
-  decideLibraryMaterial(input: { materialId: string; expectedDecisions: number; decision: LibraryMaterialDecisionInput }): Promise<LibraryMaterialsProjection>;
+  addLibraryMaterial(input: { previewId: string; title: string; kind: LibraryMaterialKind }): Promise<LibraryMaterialProjection>;
+  decideLibraryMaterial(input: { materialId: string; expectedDecisions: number; decision: LibraryMaterialDecisionInput }): Promise<LibraryMaterialProjection>;
   /** 知识库 › 评估方案 (Issue #429, S81a): names no Book. */
   inspectEvaluationProfiles(): Promise<EvaluationProfilesProjection>;
   /** ②C 评估 of the Book the window is showing (Issue #429, S81a); the renderer never names the Book. */
@@ -7867,8 +8087,9 @@ export interface RendererApi {
   recordChangeSuggestionDecision(input: RecordChangeSuggestionDecisionInput): Promise<EditorialMarkCommandProjection>;
   recordProposalDecisionReason(input: RecordProposalDecisionReasonInput): Promise<EditorialMarkCommandProjection>;
   recordProposalDecisionFeedback(input: RecordProposalDecisionFeedbackInput): Promise<EditorialMarkCommandProjection>;
-  inspectLearningMaterials(input: { bookId: string | null }): Promise<LearningMaterialsProjection>;
-  decideLearningMaterial(input: DecideLearningMaterialInput): Promise<LearningMaterialsProjection>;
+  inspectLearningMaterials(input: { bookId: string | null; after?: LearningMaterialCursor | null }): Promise<LearningMaterialsProjection>;
+  inspectLearningMaterial(input: { bookId: string; materialKey: string }): Promise<LearningMaterialProjection>;
+  decideLearningMaterial(input: DecideLearningMaterialInput): Promise<LearningMaterialProjection>;
   inspectFeedbackHistory(): Promise<FeedbackHistoryProjection>;
   inspectEvaluationCalibration(): Promise<EvaluationCalibrationProjection>;
   recordPublicationActuals(input: RecordPublicationActualsInput): Promise<EvaluationCalibrationProjection>;
@@ -7921,6 +8142,8 @@ export interface RendererApi {
   approveBookDeliveryPackageExport(input: Omit<ApproveBookDeliveryPackageExportInput, 'bookId'>): Promise<BookDeliveryPackageExportResultProjection>;
   /** 维护事项 (Issue #426, S68a): one case of that Book in its workspace. */
   inspectMaintenanceCase(input: Omit<InspectMaintenanceCaseInput, 'bookId'>): Promise<MaintenanceCaseProjection>;
+  /** `更早的维护事项…`: a page of one designation's older cases. */
+  listMaintenanceCases(input: Omit<ListMaintenanceCasesInput, 'bookId'>): Promise<MaintenanceCasePageProjection>;
   /** `记录维护事项` on one of that Book's designations. */
   recordMaintenanceCase(input: Omit<RecordMaintenanceCaseInput, 'bookId'>): Promise<MaintenanceCaseResultProjection>;
   /** 关联修改建议, 关联发稿版本 or 记录维护事项结论: the case's next revision. */

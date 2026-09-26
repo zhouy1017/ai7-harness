@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { PUBLICATION_FORBIDDEN_WORDS, type ProductionDocumentProjection } from '../../src/shared/protocol.js';
 import * as labels from '../../src/renderer/production-document-labels.js';
@@ -6,6 +9,7 @@ import { documentStanding } from '../../src/renderer/production-document-lens.js
 // The words of 交付 · 生产文档 (Issue #415, plan slices S66a and S66b; V2-UX-DELIV-001 to DELIV-004, WORK-013, MILE-014),
 // byte for byte.
 
+const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const identity = '00000000-0000-4000-8000-000000000000';
 const document: ProductionDocumentProjection = {
   documentId: identity,
@@ -79,6 +83,7 @@ describe('the words of 交付 · 生产文档', () => {
       labels.DELIVERY_STATEMENT, ...Object.values(labels.DELIVERY_BLOCKERS), labels.DELIVERY_NO_EXPORT,
       labels.documentDeliveryLine({ ordinal: 1, recipient: { kind: 'publicity', label: '宣传部' }, versionLabel: '版本 2' }, '9月24日 11:00'),
       labels.documentDeliveredLine(1, '宣传部'), labels.documentCurrentTextChoice(3), labels.documentOriginMarksLine(2),
+      labels.RECOVERY_RESTORED_SECTION_LABEL, labels.RECOVERY_RESTORED_HEADING,
     ];
     expect(labels.DOCUMENT_LENS_LABEL).toBe('工作流程');
     expect(labels.DOCUMENT_VERSIONS_HEADING).toBe('版本与交付');
@@ -88,6 +93,35 @@ describe('the words of 交付 · 生产文档', () => {
       expect(words).not.toMatch(/里程碑|签发|发稿/u);
       for (const forbidden of PUBLICATION_FORBIDDEN_WORDS) expect(words).not.toContain(forbidden);
     }
+  });
+
+  it('stops asking for a decision once a restore stands and nothing it restored could open (Issue #593)', () => {
+    expect([labels.RECOVERY_RESTORED_SECTION_LABEL, labels.RECOVERY_RESTORED_HEADING]).toEqual(['稿件恢复优先 · 已恢复', '已恢复所选的文字']);
+    for (const words of [labels.RECOVERY_RESTORED_SECTION_LABEL, labels.RECOVERY_RESTORED_HEADING]) expect(words).not.toMatch(/待确认|先确认|选择/u);
+  });
+
+  it('puts those words on the recovery screen and hides its lede and legend, from the catch that closes its choices (Issue #603)', () => {
+    const words = {
+      sectionLabel: { textContent: '稿件恢复优先 · 1 项待确认' },
+      heading: { textContent: '先确认中断后的稿件状态' },
+      lede: { hidden: false },
+      legend: { hidden: false },
+    };
+    labels.showRestoreStands(words);
+    expect(words).toEqual({
+      sectionLabel: { textContent: '稿件恢复优先 · 已恢复' },
+      heading: { textContent: '已恢复所选的文字' },
+      lede: { hidden: true },
+      legend: { hidden: true },
+    });
+    // The renderer has no DOM test layer, so where it applies them is read from its source: once, in the catch where the
+    // restore stands, after the choices close and before the reopen is offered.
+    const source = readFileSync(join(ROOT, 'src', 'renderer', 'index.ts'), 'utf8').replace(/\r\n/gu, '\n');
+    // The call is a statement of the catch itself: on its own line at the catch's indentation, after the choices close and
+    // before the reopen is offered — so neither a guard around it nor a handler it moved into passes, whatever order its
+    // parts are named in (#609). A comment that names the function is not a call.
+    expect(source).toMatch(/^( +)choices\.disabled = true;$[\s\S]*?^\1showRestoreStands\(\{ [^}\n]+ \}\);$[\s\S]*?^\1actions\.replaceChildren\(reopen\);$/mu);
+    expect(source.split('showRestoreStands({').length - 1).toBe(1);
   });
 
   it('says what 交付 records — which version went to whom — and that AI7 sends nothing (DELIV-003, DELIV-004)', () => {

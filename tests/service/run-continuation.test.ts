@@ -291,7 +291,7 @@ describe('暂停 and 续行 over the real store', () => {
     try {
       writeFileSync(holdPath, 'release');
       // Nothing to reconcile: the Run was left 可续行 already, and nothing is sent until 续行 (CONT-014).
-      expect(second.reconcileStoppedBaselineAnalysisRuns()).toEqual({ settled: 0, cancelling: [], answered: [], queued: [] });
+      expect(second.reconcileStoppedBaselineAnalysisRuns()).toEqual({ settled: 0, cancelling: [], answered: [] });
       const plan = await second.inspectTaskPlanWithConnection({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, async () => null, ONLINE, () => null);
       expect(plan).toMatchObject({ state: { key: 'resumable' }, runControl: { resume: { reason: null }, continuation: { unitsSettled: 2 } } });
       secondOwner.admitAndDispatch(runRecordId, second.baselineAnalysisLedger, { resume: true });
@@ -320,11 +320,11 @@ describe('暂停 and 续行 over the real store', () => {
       const executing = await run('L2 sample1 遗留执行', ['admitted', 'executing']);
       const pausing = await run('L2 sample1 遗留暂停', ['admitted', 'executing', 'pausing']);
       const cancelling = await run('L2 sample1 遗留取消', ['admitted', 'executing', 'cancelling']);
-      expect(store.reconcileStoppedBaselineAnalysisRuns()).toEqual({ settled: 2, cancelling: [cancelling.runRecordId], answered: [], queued: [] });
+      expect(store.reconcileStoppedBaselineAnalysisRuns()).toEqual({ settled: 2, cancelling: [cancelling.runRecordId], answered: [] });
       expect(store.inspectBaselineAnalysis(executing.bookId, () => null).run!.transitions.at(-1)).toMatchObject({ state: 'resumable', detail: RECONCILED_RESUMABLE_DETAIL });
       expect(store.inspectBaselineAnalysis(pausing.bookId, () => null).run!.transitions.at(-1)).toMatchObject({ state: 'paused', detail: RECONCILED_PAUSED_DETAIL });
       // A second look finds nothing left to settle.
-      expect(store.reconcileStoppedBaselineAnalysisRuns()).toEqual({ settled: 0, cancelling: [cancelling.runRecordId], answered: [], queued: [] });
+      expect(store.reconcileStoppedBaselineAnalysisRuns()).toEqual({ settled: 0, cancelling: [cancelling.runRecordId], answered: [] });
       // The Run left executing never persisted an attempt: 续行 starts its first one.
       const execution = owner(store);
       try {

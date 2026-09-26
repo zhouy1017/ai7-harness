@@ -13,6 +13,7 @@ import {
   LEARNING_CHOICES,
   LEARNING_EMPTY,
   LEARNING_INFLUENCE,
+  LEARNING_MORE,
   LEARNING_NOTE_LABEL,
   LEARNING_OPEN,
   LEARNING_RECOMMENDED,
@@ -35,12 +36,15 @@ import { localInstantLabel } from './plan-preview-labels.js';
  * material, where it came from, why it is one, the basis, what it could later influence, and the decision it has — with the
  * choice unselected and `仅纳入当前图书` marked recommended; a wider choice says its consequence beside it before
  * `记录学习准入决定`. Nothing here counts or reminds.
+ *
+ * Nothing is read whole (Issue #61 review): the materials come forty at a time, `更多学习材料…` reading the next and a Book
+ * that runs on continuing its section; a decision answers with its one material, and a refusal reads that material again.
  */
 export interface MountLearningMaterialsOptions {
   readonly root: HTMLElement;
   /** The one Book to show, when the page was opened for it; `null` lists every Book with material. */
   readonly bookId: string | null;
-  readonly api: Pick<RendererApi, 'inspectLearningMaterials' | 'decideLearningMaterial'>;
+  readonly api: Pick<RendererApi, 'inspectLearningMaterials' | 'inspectLearningMaterial' | 'decideLearningMaterial'>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
   readonly technicalDetails: (key: string, ...rows: HTMLElement[]) => HTMLElement;
@@ -77,6 +81,53 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
 
   const materialSelector = (key: string): string => `[data-material-key="${CSS.escape(key)}"]`;
 
+  /** A page read after the first: a Book that runs on continues its section, and the next Book begins its own. */
+  const merge = (page: LearningMaterialsProjection): void => {
+    if (projection === null) {
+      projection = page;
+      return;
+    }
+    const books = [...projection.books];
+    for (const book of page.books) {
+      const last = books.at(-1);
+      if (last !== undefined && last.bookId === book.bookId) books[books.length - 1] = { ...last, materials: [...last.materials, ...book.materials] };
+      else books.push(book);
+    }
+    projection = { basis: page.basis, books, nextCursor: page.nextCursor };
+  };
+
+  /** One material as it now reads, wherever its Book's section shows it. */
+  const replace = (bookKey: string, next: LearningMaterialProjection): void => {
+    if (projection === null) return;
+    projection = {
+      ...projection,
+      books: projection.books.map((book) => (book.bookId !== bookKey ? book : {
+        ...book,
+        materials: book.materials.map((material) => (material.materialKey === next.materialKey ? next : material)),
+      })),
+    };
+  };
+
+  const loadMore = async (): Promise<void> => {
+    if (busy || projection?.nextCursor == null) return;
+    busy = true;
+    const known = new Set(projection.books.flatMap((book) => book.materials.map((material) => material.materialKey)));
+    setStatus(LEARNING_STATUS.loadingMore, 'busy');
+    try {
+      const page = await api.inspectLearningMaterials({ bookId, after: projection.nextCursor });
+      if (!root.isConnected) return;
+      merge(page);
+      busy = false;
+      setStatus(LEARNING_STATUS.opened);
+      const first = page.books.flatMap((book) => book.materials).find((material) => !known.has(material.materialKey));
+      paint(first === undefined ? null : `${materialSelector(first.materialKey)} [data-learning-action="open"]`);
+    } catch (error) {
+      busy = false;
+      setStatus(errorMessage(error, LEARNING_STATUS.unavailable), 'error');
+      paint('[data-learning-action="more"]');
+    }
+  };
+
   const paint = (focus: string | null): void => {
     if (projection === null) return;
     root.dataset['learningBooks'] = String(projection.books.length);
@@ -84,6 +135,13 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
     const books = projection.books.filter((book) => book.materials.length > 0);
     if (books.length === 0) parts.push(el('p', 'field-note learning-empty', LEARNING_EMPTY));
     for (const book of books) parts.push(bookNode(book));
+    if (projection.nextCursor !== null) {
+      const row = el('div', 'button-row learning-more');
+      const more = action(LEARNING_MORE, 'secondary', 'more', () => void loadMore());
+      more.disabled = busy;
+      row.append(more);
+      parts.push(row);
+    }
     root.replaceChildren(...parts);
     if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();
   };
@@ -226,7 +284,7 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
     paint(null);
     setStatus(LEARNING_STATUS.recording, 'busy');
     try {
-      const answer = await api.decideLearningMaterial({
+      const decided = await api.decideLearningMaterial({
         bookId: book.bookId,
         materialKey: material.materialKey,
         materialDigest: material.digest,
@@ -234,10 +292,7 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
         choice: draft.choice,
         note: draft.note.trim().length === 0 ? null : draft.note,
       });
-      const updated = answer.books.find((entry) => entry.bookId === book.bookId);
-      if (projection !== null && updated !== undefined) {
-        projection = { basis: answer.basis, books: projection.books.map((entry) => (entry.bookId === book.bookId ? updated : entry)) };
-      }
+      replace(book.bookId, decided);
       busy = false;
       open = null;
       paint(`${materialSelector(material.materialKey)} [data-learning-action="open"]`);
@@ -245,8 +300,13 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
     } catch (error) {
       busy = false;
       refusal = errorMessage(error, LEARNING_STATUS.failed);
-      // What moved since the card opened is read again, so the next 记录 answers what is there now.
-      try { projection = await api.inspectLearningMaterials({ bookId }); } catch { /* the page keeps what it had */ }
+      // What moved since the card opened is read again, so the next 记录 answers what is there now; a material that changed
+      // meanwhile is a new version, and a choice made on the old one never carries over to it (Issue #61 review).
+      try {
+        const fresh = await api.inspectLearningMaterial({ bookId: book.bookId, materialKey: material.materialKey });
+        if (fresh.digest !== material.digest) draft.choice = null;
+        replace(book.bookId, fresh);
+      } catch { /* the page keeps what it had */ }
       paint(`${materialSelector(material.materialKey)} [data-learning-action="record"]`);
       setStatus(refusal, 'error');
     }
@@ -255,7 +315,8 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
   return {
     async load(): Promise<void> {
       root.replaceChildren(el('p', 'field-note', LEARNING_STATUS.loading));
-      projection = await api.inspectLearningMaterials({ bookId });
+      projection = null;
+      merge(await api.inspectLearningMaterials({ bookId, after: null }));
       paint(null);
     },
   };
