@@ -2572,6 +2572,15 @@ function registerRendererHandlers(
       return service.call('inspectReviewGuidelines', input?.page === undefined ? {} : { page: input.page });
     }),
   );
+  // 知识库 › 范例 (Issue #427, S79b) names no Book either: it reads the published Books' delivered documents, a page at a
+  // time, starting where the renderer's cursor says; the service checks the cursor.
+  ipcMain.handle(IPC_CHANNELS.inspectExemplars, (event, input: ServiceOperationMap['inspectExemplars']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('inspectExemplars', { after: input?.after ?? null });
+    }),
+  );
   ipcMain.handle(
     IPC_CHANNELS.previewReviewGuidelineVersion,
     (event, input: { documentId: string; previewId?: string; clausePage?: number }) =>

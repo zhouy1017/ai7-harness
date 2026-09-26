@@ -321,22 +321,7 @@ export class ProductionDocuments {
       const row = rows.find((candidate) => candidate.typeId === type.typeId);
       const notForThisBook = decisions.get(type.typeId) === 'not-for-this-book';
       if (row === undefined) return { typeId: type.typeId, typeLabel: type.label, notForThisBook, document: null };
-      const deliveries = (this.#db.prepare(
-        `SELECT d.delivery_id, d.ordinal, d.version, d.revision_id, d.revision_digest, d.recipient_label, d.recorded_at, d.canonical_json, d.sha256
-         FROM production_document_deliveries d WHERE d.document_id = ? ORDER BY d.ordinal DESC`,
-      ).all(row.documentId) as SqlRow[]).map((delivery): PackageDeliveryReading => {
-        requireDocument(sha256Hex(text(delivery.canonical_json)) === text(delivery.sha256), 'PRODUCTION_DOCUMENT_RECORD_INVALID', '交付记录与其摘要不一致。');
-        return {
-          deliveryId: text(delivery.delivery_id),
-          ordinal: integer(delivery.ordinal),
-          version: integer(delivery.version),
-          versionLabel: productionDocumentVersionLabel(integer(delivery.version)),
-          revisionId: text(delivery.revision_id),
-          revisionDigest: text(delivery.revision_digest),
-          recipientLabel: text(delivery.recipient_label),
-          recordedAt: text(delivery.recorded_at),
-        };
-      });
+      const deliveries = Array.from(this.#deliveryReadings(row.documentId));
       const working = this.workingDigest(row);
       return {
         typeId: type.typeId,
@@ -346,6 +331,39 @@ export class ProductionDocuments {
         document: { documentId: row.documentId, changedSinceDelivery: this.changedSinceDelivery(row.documentId, working), deliveries },
       };
     });
+  }
+
+  /**
+   * What 范例 reads of the Book's Production Documents (Issue #427, S79b review): each house type's document in the house's
+   * order, with its every Delivery Record newest first, each verified exactly as 图书交付包 reads it. A read.
+   */
+  deliveryReadings(bookId: string): Array<{ typeId: string; typeLabel: string; documentId: string; deliveries: (order: 'latest' | 'version') => Iterable<PackageDeliveryReading> }> {
+    const rows = this.#documentRows(bookId);
+    return BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.flatMap((type) => {
+      const row = rows.find((candidate) => candidate.typeId === type.typeId);
+      return row === undefined ? [] : [{ typeId: type.typeId, typeLabel: type.label, documentId: row.documentId, deliveries: (order: 'latest' | 'version') => this.#deliveryReadings(row.documentId, order) }];
+    });
+  }
+
+  /** A document's every Delivery Record, newest first, each verified against its digest. */
+  *#deliveryReadings(documentId: string, order: 'latest' | 'version' = 'latest'): IterableIterator<PackageDeliveryReading> {
+    const rows = this.#db.prepare(
+      `SELECT d.delivery_id, d.ordinal, d.version, d.revision_id, d.revision_digest, d.recipient_label, d.recorded_at, d.canonical_json, d.sha256
+       FROM production_document_deliveries d WHERE d.document_id = ? ORDER BY ${order === 'version' ? 'd.version, ' : ''}d.ordinal DESC`,
+    ).iterate(documentId) as IterableIterator<SqlRow>;
+    for (const delivery of rows) {
+      requireDocument(sha256Hex(text(delivery.canonical_json)) === text(delivery.sha256), 'PRODUCTION_DOCUMENT_RECORD_INVALID', '交付记录与其摘要不一致。');
+      yield {
+        deliveryId: text(delivery.delivery_id),
+        ordinal: integer(delivery.ordinal),
+        version: integer(delivery.version),
+        versionLabel: productionDocumentVersionLabel(integer(delivery.version)),
+        revisionId: text(delivery.revision_id),
+        revisionDigest: text(delivery.revision_digest),
+        recipientLabel: text(delivery.recipient_label),
+        recordedAt: text(delivery.recorded_at),
+      };
+    }
   }
 
   /** The document of one type of a Book, or `undefined`. */

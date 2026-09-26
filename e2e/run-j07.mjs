@@ -590,11 +590,11 @@ const READ_PUBLICATION = `window.ai7.inspectDeliverables().then((deliverables) =
   prompt: deliverables.publication.actualsPrompt === null ? null : deliverables.publication.actualsPrompt.label + ' · ' + deliverables.publication.actualsPrompt.stateLabel,
 }))`;
 
-async function importAndOpen(renderer, title) {
+async function importAndOpen(renderer, title, distinct = false) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'import-landing');
   await click(renderer, '导入稿件', 'import-start');
   await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'import-target');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'import-target-select');
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector(${JSON.stringify(`input[aria-label="${distinct ? '新建图书（作为不同作品）' : '新建图书'}"]`)}); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'import-target-select');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!(radio instanceof HTMLInputElement) || radio.checked) return false; radio.click(); return radio.checked; })()`, 'import-relationship-select');
   await fill(renderer, '#book-title', title, 'import-title');
   await click(renderer, '确认书名并复核', 'import-review');
@@ -2204,6 +2204,67 @@ async function main() {
     // Reopened from 交付物 after the restart, the document still says how its material was read (Issue #547).
     await assertRenderer(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] aside.document-lens .document-materials .document-origin-marks')?.textContent === ${JSON.stringify(DRAFT_MARKS_LINE)}`, 'documents-restart-origin-marks');
     await assertNoForbiddenWords(renderer, 'documents-without-forbidden-words');
+
+    at('knowledge-exemplars');
+    // 知识库 › 范例 (Issue #427, S79b): the Book set as a 发稿版本 brings in the 新闻稿 it delivered — the version its latest
+    // delivery named, the earlier one beneath it — attributed to the Book and eligible 仅本社, exactly as
+    // `inspectExemplars()` answers. Both deliveries came before `maintenance-cases` withdrew the current designation, so
+    // they stay; the card names that designation by its ordinal and says it is withdrawn, and what the Book delivers from
+    // then on waits for another 发稿版本 (ADR 0040).
+    await clickSelector(renderer, '#global-attention-entry', 'exemplars-attention');
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]')`, 'exemplars-attention-screen');
+    await click(renderer, '返回图书列表', 'exemplars-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'exemplars-landing');
+    await click(renderer, '知识库', 'exemplars-knowledge');
+    await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"] .knowledge-base')`, 'exemplars-knowledge-page');
+    await click(renderer, '范例', 'exemplars-tab');
+    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab === 'exemplars' && document.querySelector('.knowledge-panel')?.dataset.exemplarBooks === '1'`, 'exemplars-painted');
+    const exemplars = await renderer.evaluate(`window.ai7.inspectExemplars()`);
+    const exemplarPage = await renderer.evaluate(`Array.from(document.querySelectorAll('.exemplar-book'), (card) => ({
+      bookId: card.dataset.bookId, title: card.querySelector('h3')?.textContent ?? null, attribution: card.querySelector('.exemplar-attribution')?.textContent ?? null,
+      designation: card.querySelector('.exemplar-designation')?.textContent ?? null, more: document.querySelector('.exemplars-more')?.hidden ?? null,
+      items: Array.from(card.querySelectorAll('.exemplar-items li'), (item) => [item.dataset.exemplarType, item.dataset.exemplarVersion, item.textContent]),
+    }))`);
+    const exemplarBook = exemplars?.books?.[0];
+    const exemplarNews = exemplarBook?.exemplars?.find((exemplar) => exemplar.typeId === 'news-release');
+    requireJourney(exemplars?.books?.length === 1 && exemplars.nextCursor === null && exemplarBook.bookId === bookId && exemplarBook.withdrawn === true &&
+      exemplarPage[0]?.designation?.startsWith(`第 ${exemplarBook.publicationOrdinal} 次设为发稿版本于 `) === true &&
+      exemplarPage[0].designation.endsWith(' · 已在 AI7 内撤回；之后交付的文档，另设发稿版本后才归入') && exemplarPage[0].more === true &&
+      exemplarNews?.typeLabel === '新闻稿' && exemplarNews.eligibility === 'house-only' &&
+      exemplarNews.earlierVersions.length === 1 && exemplarPage.length === 1 && exemplarPage[0].bookId === bookId && exemplarPage[0].title === `《${EXCERPT.title}》` &&
+      exemplarPage[0].attribution === '作者：未填写 · 责编：未填写' && exemplarPage[0].items.length === exemplarBook.exemplars.length &&
+      exemplarPage[0].items[0][0] === 'news-release' && exemplarPage[0].items[0][1] === String(exemplarNews.version) &&
+      exemplarPage[0].items[0][2].startsWith(`新闻稿 · 版本 ${exemplarNews.version} · 交付给`) &&
+      exemplarPage[0].items[0][2].includes(` · 学习准入：仅本社 · 此前还交付过版本 ${exemplarNews.earlierVersions[0]}`),
+    'exemplars-news-release', { service: exemplars?.books?.map((entry) => entry.exemplars.map((exemplar) => [exemplar.typeId, exemplar.version, exemplar.earlierVersions])), page: exemplarPage });
+
+    // Exercise real catalogue paging after importing and designating twenty additional Books through the product.
+    // Each launch owns one picker answer; the same admitted excerpt is explicitly a distinct intended work.
+    for (let index = 0; index < 20; index += 1) {
+      await close();
+      renderer = await launch({ picker: manuscript });
+      await importAndOpen(renderer, `范例分页 ${String(index + 1).padStart(2, '0')}`, true);
+      await assertRenderer(renderer, PAGE_HELPERS, 'exemplars-page-helpers');
+      await openMilestoneForm(renderer, 'exemplars-page-milestone');
+      await fill(renderer, '#milestone-label', '分页留档', 'exemplars-page-label');
+      await choosePurpose(renderer, 'stage-archive', 'exemplars-page-purpose');
+      await saveMilestone(renderer, { label: '分页留档' }, 'r1', 'exemplars-page-saved');
+      await openDeliverables(renderer, 'exemplars-page-deliverables');
+      const milestoneId = await renderer.evaluate(`window.ai7.inspectDeliverables().then((value) => value.publication.milestones[0].milestoneId)`);
+      await designate(renderer, { milestoneId, scope: '分页归档', basis: '范例分页检查' }, '已设为发稿版本 · 「分页留档」 · r1 · 分页归档', 'exemplars-page-designated');
+    }
+    await close();
+    renderer = await launch();
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'exemplars-pages-landing');
+    await click(renderer, '知识库', 'exemplars-pages-knowledge');
+    await click(renderer, '范例', 'exemplars-pages-tab');
+    await waitFor(renderer, `document.querySelectorAll('.exemplar-book').length === 20`, 'exemplars-first-page');
+    for (let repetition = 0; repetition < 2; repetition += 1) {
+      await clickSelector(renderer, '[data-exemplar-action="more"]', 'exemplars-next-page');
+      await waitFor(renderer, `document.querySelectorAll('.exemplar-book').length === 1 && document.activeElement === document.querySelector('.exemplar-book h3') && document.querySelector('[data-exemplar-action="more"]').hidden`, 'exemplars-last-page-bounded');
+      await clickSelector(renderer, '[data-exemplar-action="first"]', 'exemplars-return-first');
+      await waitFor(renderer, `document.querySelectorAll('.exemplar-book').length === 20 && document.activeElement === document.querySelector('.exemplar-book h3') && document.querySelector('[data-exemplar-action="first"]').hidden`, 'exemplars-first-page-replaced');
+    }
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

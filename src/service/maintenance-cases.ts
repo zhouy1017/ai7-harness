@@ -363,9 +363,19 @@ export class MaintenanceCases {
 
   /** Whether a 撤回 case holds the designation: in AI7 it is no longer used for 发稿 (ADR 0040). */
   withdrawn(publicationVersionId: string): boolean {
-    if (!this.#present()) return false;
-    return this.#db.prepare("SELECT 1 FROM maintenance_cases WHERE publication_version_id = ? AND classification = 'withdrawal'")
-      .get(publicationVersionId) !== undefined;
+    return this.withdrawnAt(publicationVersionId) !== null;
+  }
+
+  /**
+   * When a 撤回 case came to hold the designation — the time the case was recorded — or `null` while none holds it
+   * (Issue #427, S79b review: 范例 takes in nothing the Book delivers after it).
+   */
+  withdrawnAt(publicationVersionId: string): string | null {
+    if (!this.#present()) return null;
+    const row = this.#db.prepare(
+      "SELECT created_at FROM maintenance_cases WHERE publication_version_id = ? AND classification = 'withdrawal' ORDER BY created_at LIMIT 1",
+    ).get(publicationVersionId) as SqlRow | undefined;
+    return row === undefined ? null : text(row.created_at);
   }
 
   inspect(input: InspectMaintenanceCaseInput): MaintenanceCaseProjection {

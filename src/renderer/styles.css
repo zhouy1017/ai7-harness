@@ -584,6 +584,11 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .guideline-version-list { display: grid; gap: .3rem; margin: .4rem 0 0; padding-left: 1.2rem; overflow-wrap: anywhere; }
 .guideline-preview { display: grid; gap: .5rem; padding: .8rem; border: 2px solid #2c463b; border-radius: 10px; background: #f6f8f2; }
 .guideline-preview h4 { margin: 0; }
+/* 知识库 › 范例 (S79b): one card per published Book. */
+.exemplar-list { display: grid; gap: .8rem; }
+.exemplar-book { display: grid; gap: .4rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
+.exemplar-book h3, .exemplar-book p { margin: 0; overflow-wrap: anywhere; }
+.exemplar-items { display: grid; gap: .3rem; margin: 0; padding-left: 1.2rem; overflow-wrap: anywhere; }
 /* On a surface that raises a Task, the plan is one line and 查看计划 (S72 D4). */
 .task-plan-summary { margin-top: 1rem; }
 .task-plan-summary h4 { margin: 0; }
@@ -1178,7 +1183,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal,
   .global-attention-group, .global-attention-item,
   .manuscript-export, .export-format-option, .export-option, .export-fidelity-row, .export-receipt, .export-records > li,
-  .task-plan-default-rule-confirm, .default-rule-card, .guideline-card, .guideline-preview, .task-plan-activity, .task-bar-cancel-impact,
+  .task-plan-default-rule-confirm, .default-rule-card, .guideline-card, .guideline-preview, .exemplar-book, .task-plan-activity, .task-bar-cancel-impact,
   .task-plan-clarification, .task-plan-choice, .task-plan-choice-recommended, .task-plan-clarification-deferred, .task-plan-edit-ask-first,
   .task-plan-budget-form, .task-plan-budget-input {
     color: CanvasText;
