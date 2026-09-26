@@ -1,6 +1,5 @@
 import type {
   AnalysisReusePlanCounts,
-  AnalysisFeedbackDimension,
   AnalysisReusePlanProjection,
   BaselineAnalysisPlanRevisionProjection,
   BaselineAnalysisGoal,
@@ -76,6 +75,7 @@ import { mountBookPeople } from './book-people.js';
 import { mountReviewGuidelines } from './review-guidelines.js';
 import { mountLibraryMaterials } from './library-materials.js';
 import { mountEvaluation } from './evaluation.js';
+import type { AnalysisFeedbackDimension } from '../shared/analysis-feedback.js';
 import { analysisFeedbackEngaged, mountAnalysisFeedback } from './analysis-feedback.js';
 import type { LearningMaterialTarget } from '../shared/protocol.js';
 import { mountLearningMaterials } from './quality-learning.js';

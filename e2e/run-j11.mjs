@@ -314,13 +314,13 @@ async function createLoopbackSentinel() {
   };
 }
 
-async function attachRenderer(browser) {
+async function attachRenderer(browser, excludedTargetId = null) {
   const guard = (request) => settleOnBrowserDisconnect(browser, request);
   const root = await guard(browser.newBrowserCDPSession());
   const deadline = Date.now() + 60_000;
   let target;
   while (Date.now() < deadline) {
-    const pages = (await guard(root.send('Target.getTargets'))).targetInfos.filter((item) => item.type === 'page');
+    const pages = (await guard(root.send('Target.getTargets'))).targetInfos.filter((item) => item.type === 'page' && item.targetId !== excludedTargetId);
     if (pages.length === 1) { target = pages[0]; break; }
     requireJourney(pages.length === 0, 'renderer-target-count');
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
@@ -355,6 +355,7 @@ async function attachRenderer(browser) {
   };
   await send('Runtime.enable');
   return {
+    targetId: target.targetId,
     send,
     evaluate: async (expression) => {
       const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
@@ -1761,6 +1762,29 @@ async function main() {
       return card?.dataset.resultRevisionId === ${JSON.stringify(revisionId)} && card.dataset.analysisTab === 'synopsis' &&
         item instanceof HTMLElement && item.getClientRects().length > 0 && document.activeElement === item;
     })()`, 'learning-source-analysis-exact', 60_000);
+
+    // A separate workbench opens the same exact source in the window that already owns its Book.
+    const otherOpened = await renderer.evaluate(`window.ai7.openBookWorkbench({ kind: 'book', bookId: ${JSON.stringify(firstId)} }).then((opened) => opened.target === 'new-window')`);
+    requireJourney(otherOpened === true, 'learning-source-other-window');
+    const otherRenderer = await attachRenderer(browser, renderer.targetId);
+    await waitFor(otherRenderer, `document.querySelector('[data-screen="book-overview"]')`, 'learning-source-other-ready', 120_000);
+    await click(otherRenderer, '返回图书列表', 'learning-source-other-books');
+    await waitFor(otherRenderer, `document.querySelector('[data-screen="landing"]')`, 'learning-source-other-landing');
+    await click(otherRenderer, '质量与学习', 'learning-source-other-learning');
+    await readLearning(otherRenderer, (page) => page.books.length === 1, 'learning-source-other-page');
+    await clickSelector(otherRenderer, `${learningRow('proposal-decision')} [data-learning-action="open"]`, 'learning-source-other-card');
+    await readLearning(otherRenderer, (page) => page.card?.material === 'proposal-decision', 'learning-source-other-card-ready');
+    await tick(otherRenderer, '.learning-choices input[value="house"]', 'learning-source-draft-choice');
+    await fill(otherRenderer, '[data-learning-field="note"]', '保留未提交说明', 'learning-source-draft-note');
+    await assertRenderer(otherRenderer, `(() => {
+      document.querySelector('[data-learning-action="source"]').click();
+      return Array.from(document.querySelectorAll('.learning-card input, .learning-card textarea, .learning-card button')).every((control) => control.disabled);
+    })()`, 'learning-source-pending-disabled');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(thirdId)}]') && document.querySelector('.mark-card')?.textContent.includes('证据不足')`, 'learning-source-existing-window-exact', 120_000);
+    await waitFor(otherRenderer, `document.querySelector('.learning-choices input[value="house"]')?.checked === true &&
+      document.querySelector('[data-learning-field="note"]')?.value === '保留未提交说明' &&
+      document.querySelector('[data-learning-action="record"]')?.disabled === false &&
+      document.activeElement === document.querySelector('[data-learning-action="source"]')`, 'learning-source-draft-restored');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
