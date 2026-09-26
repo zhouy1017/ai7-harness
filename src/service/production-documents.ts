@@ -189,6 +189,7 @@ export class ProductionDocuments {
       changedSinceDelivery,
       workflow: this.#workflow.projection(row.documentId, {
         changedSinceVersion, delivered: deliveries.length > 0, changedSinceDelivery, openSuggestions,
+        deliveryExported: deliveries[0]?.export?.outcome === 'created' || deliveries[0]?.export?.outcome === 'replaced',
       }),
     };
   }

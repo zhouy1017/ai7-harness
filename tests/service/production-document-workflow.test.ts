@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
+import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION, BOOK_PEOPLE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
+  DEFAULT_MANUSCRIPT_EXPORT_OPTIONS,
   MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS,
   PRODUCTION_DOCUMENT_PHASE_IDS,
   type ProductionDocumentPhaseAction,
@@ -196,6 +198,25 @@ describe('the Deliverable Workflow of a Production Document (Issue #415, S66c)',
         bookId, documentId: document.documentId, version: { kind: 'saved', revisionId: saved.document!.versions[0]!.revisionId },
         recipient: { kind: 'publicity', custom: null }, note: null,
       });
+      // Cancelling the export surface leaves only the Delivery Record, not its required file.
+      expect(delivery()).toEqual(['in-progress', '等待你处理', '交付文件尚未导出']);
+      const revisionId = saved.document!.versions[0]!.revisionId;
+      const target = { kind: 'document', documentId: document.documentId, revisionId } as const;
+      const options = { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS };
+      const reviewed = await store.reviewManuscriptExport({ bookId, target, options }, true);
+      const gone = join(roots.inputRoot, 'removed-export-folder');
+      await mkdir(gone);
+      const failed = await store.prepareManuscriptExport({
+        bookId, revisionId, target, options, reviewDigest: reviewed.reviewDigest, destination: join(gone, 'delivery.docx'),
+      }, true);
+      await rm(gone, { recursive: true });
+      expect((await store.approveManuscriptExport({ bookId, preparationId: failed.preparationId }, true)).outcome).toBe('failed');
+      expect(delivery()).toEqual(['in-progress', '等待你处理', '交付文件尚未导出']);
+      const prepared = await store.prepareManuscriptExport({
+        bookId, revisionId, target, options, reviewDigest: reviewed.reviewDigest,
+        destination: join(roots.inputRoot, 'delivery.docx'),
+      }, true);
+      expect((await store.approveManuscriptExport({ bookId, preparationId: prepared.preparationId }, true)).outcome).toBe('created');
       expect(delivery()).toEqual(['in-progress', '进行中', null]);
       // 审阅与核查 waits on the document's open 修改建议.
       move('review-verification', 'start');

@@ -4472,6 +4472,7 @@ function renderBookFilter(
   filter: BookSummaryFilter | null,
 ): HTMLElement {
   const form = element('form', 'book-filter');
+  let request = 0;
   form.noValidate = true;
   const legend = element('p', 'book-filter-legend', BOOK_FILTER_LEGEND);
   const fieldLabel = element('label', undefined, BOOK_FILTER_FIELD_LABEL);
@@ -4495,7 +4496,12 @@ function renderBookFilter(
   const find = button(BOOK_FILTER_ACTIONS.find, 'secondary', () => undefined);
   find.type = 'submit';
   find.dataset['bookFilterAction'] = 'find';
+  let clearControl: HTMLButtonElement | null = null;
   const sync = (): void => { find.disabled = text.value.trim().length === 0; };
+  const restoreControls = (): void => {
+    sync();
+    if (clearControl !== null) clearControl.disabled = false;
+  };
   text.addEventListener('input', sync);
   sync();
   form.addEventListener('submit', (event) => {
@@ -4504,15 +4510,18 @@ function renderBookFilter(
     if (words.length === 0 || find.disabled) return;
     const next: BookSummaryFilter = { field: field.value === 'title' || field.value === 'author' || field.value === 'editor' ? field.value : 'all', text: words };
     find.disabled = true;
+    const current = ++request;
     setStatus(BOOK_FILTER_STATUS_LINES.finding, 'busy');
     void window.ai7.listBooks({ after: null, filter: next }).then(
       (page) => {
+        if (!form.isConnected || current !== request) return;
         renderLanding(priorWork, recoveryReturn, page, next);
         setStatus(BOOK_FILTER_STATUS_LINES.found, 'success');
         document.querySelector<HTMLElement>('#book-filter-text')?.focus();
       },
       (error) => {
-        find.disabled = false;
+        if (!form.isConnected || current !== request) return;
+        restoreControls();
         setStatus(rendererErrorMessage(error, BOOK_FILTER_STATUS_LINES.findFailed), 'error');
       },
     );
@@ -4522,19 +4531,23 @@ function renderBookFilter(
   if (filter !== null) {
     const clear = button(BOOK_FILTER_ACTIONS.clear, 'quiet', () => {
       clear.disabled = true;
+      const current = ++request;
       void window.ai7.listBooks({ after: null }).then(
         (page) => {
+          if (!form.isConnected || current !== request) return;
           renderLanding(priorWork, recoveryReturn, page, null);
           setStatus(BOOK_FILTER_STATUS_LINES.cleared, 'success');
           document.querySelector<HTMLElement>('#book-filter-text')?.focus();
         },
         (error) => {
-          clear.disabled = false;
+          if (!form.isConnected || current !== request) return;
+          restoreControls();
           setStatus(rendererErrorMessage(error, BOOK_FILTER_STATUS_LINES.findFailed), 'error');
         },
       );
     });
     clear.dataset['bookFilterAction'] = 'clear';
+    clearControl = clear;
     row.append(clear);
   }
   form.append(legend, fieldLabel, textLabel, row);

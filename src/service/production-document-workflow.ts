@@ -161,7 +161,7 @@ export function initializeProductionDocumentWorkflowSchema(db: DatabaseSync, pro
   try {
     for (const sql of Object.values(PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_SQL)) db.exec(sql);
     for (const sql of Object.values(PRODUCTION_DOCUMENT_WORKFLOW_TRIGGER_SQL)) db.exec(sql);
-    const documents = db.prepare('SELECT document_id, created_at FROM production_documents ORDER BY created_at, rowid').all() as SqlRow[];
+    const documents = db.prepare('SELECT document_id, created_at FROM production_documents ORDER BY created_at, rowid').iterate();
     for (const row of documents) insertInstance(db, text(row.document_id), profile, text(row.created_at));
     db.exec('COMMIT');
   } catch (error) {
@@ -191,6 +191,7 @@ function reasonLabel(action: ProductionDocumentPhaseAction, choice: string): str
 export interface ProductionDocumentWorkflowFacts {
   readonly changedSinceVersion: boolean;
   readonly delivered: boolean;
+  readonly deliveryExported: boolean;
   readonly changedSinceDelivery: boolean;
   readonly openSuggestions: number;
 }
@@ -201,6 +202,7 @@ function waitingOn(phaseId: ProductionDocumentPhaseId, facts: ProductionDocument
     if (facts.changedSinceVersion) return '有修改尚未保存为版本';
     if (!facts.delivered) return '尚未交付';
     if (facts.changedSinceDelivery) return '交付后有修改';
+    if (!facts.deliveryExported) return '交付文件尚未导出';
   }
   return null;
 }
@@ -235,10 +237,10 @@ export class ProductionDocumentWorkflow {
     const instance = this.#instance(documentId);
     const transitions = this.#transitions(documentId);
     const phases = PRODUCTION_DOCUMENT_PHASE_IDS.map((phaseId): ProductionDocumentPhaseProjection => {
-      const own = transitions.filter((move) => move.phaseId === phaseId);
-      const state: ProductionDocumentPhaseState = own.at(-1)?.toState ?? 'not-started';
+      const own = transitions.phases.get(phaseId);
+      const state: ProductionDocumentPhaseState = own?.latest.toState ?? 'not-started';
       const waiting = OPEN_STATES.has(state) ? waitingOn(phaseId, facts) : null;
-      const last = own.at(-1);
+      const last = own?.latest;
       const latest: ProductionDocumentPhaseTransitionProjection | null = last === undefined ? null : {
         action: last.action,
         fromState: last.fromState,
@@ -254,7 +256,7 @@ export class ProductionDocumentWorkflow {
         waiting,
         actions: (Object.keys(MOVES) as ProductionDocumentPhaseAction[]).filter((action) => MOVES[action].from.includes(state)),
         latest,
-        moves: own.length,
+        moves: own?.moves ?? 0,
       };
     });
     const open = phases.filter((phase) => OPEN_STATES.has(phase.state));
@@ -269,7 +271,7 @@ export class ProductionDocumentWorkflow {
         ...open.filter((phase) => phase.waiting === null).map((phase) => ({ phaseId: phase.phaseId, text: `${phase.label} · ${phase.stateLabel}` })),
       ],
       phases,
-      transitions: transitions.length,
+      transitions: transitions.count,
     };
   }
 
@@ -283,15 +285,15 @@ export class ProductionDocumentWorkflow {
     'PRODUCTION_DOCUMENT_PHASE_INVALID', '工作流程操作无效。');
     this.#instance(input.documentId);
     const transitions = this.#transitions(input.documentId);
-    requireWorkflow(transitions.length === input.expectedTransitions, 'PRODUCTION_DOCUMENT_WORKFLOW_CHANGED',
+    requireWorkflow(transitions.count === input.expectedTransitions, 'PRODUCTION_DOCUMENT_WORKFLOW_CHANGED',
       '工作流程在你查看后有了变化，请看过新的状态再操作。');
-    const fromState: ProductionDocumentPhaseState = transitions.filter((move) => move.phaseId === input.phaseId).at(-1)?.toState ?? 'not-started';
+    const fromState: ProductionDocumentPhaseState = transitions.phases.get(input.phaseId)?.latest.toState ?? 'not-started';
     const move = MOVES[input.action];
     requireWorkflow(move.from.includes(fromState), 'PRODUCTION_DOCUMENT_PHASE_INVALID',
       `「${PRODUCTION_DOCUMENT_PHASE_LABELS[input.phaseId]}」现在是${PRODUCTION_DOCUMENT_PHASE_STATE_LABELS[fromState]}，不能这样操作。`);
     const reason = this.#reason(input);
     const transitionId = randomUUID();
-    const ordinal = transitions.length + 1;
+    const ordinal = transitions.count + 1;
     const record = canonicalRecord({
       schema: TRANSITION_SCHEMA,
       transitionId,
@@ -342,9 +344,12 @@ export class ProductionDocumentWorkflow {
     return { profile, activatedAt };
   }
 
-  #transitions(documentId: string): TransitionFacts[] {
-    const rows = this.#db.prepare('SELECT * FROM production_document_phase_transitions WHERE document_id = ? ORDER BY ordinal').all(documentId) as SqlRow[];
-    return rows.map((row, index) => {
+  /** Validate the ledger as a stream, retaining only one latest move and count per phase. */
+  #transitions(documentId: string): { count: number; phases: Map<ProductionDocumentPhaseId, { moves: number; latest: TransitionFacts }> } {
+    const rows = this.#db.prepare('SELECT * FROM production_document_phase_transitions WHERE document_id = ? ORDER BY ordinal').iterate(documentId);
+    const phases = new Map<ProductionDocumentPhaseId, { moves: number; latest: TransitionFacts }>();
+    let count = 0;
+    for (const row of rows) {
       const facts: TransitionFacts = {
         ordinal: integer(row.ordinal),
         phaseId: text(row.phase_id) as ProductionDocumentPhaseId,
@@ -368,10 +373,13 @@ export class ProductionDocumentWorkflow {
         actor: text(row.actor),
         recordedAt: facts.recordedAt,
       });
-      requireWorkflow(facts.ordinal === index + 1 && record.json === text(row.canonical_json) && record.digest === text(row.sha256) &&
+      requireWorkflow(PRODUCTION_DOCUMENT_PHASE_IDS.includes(facts.phaseId) && facts.ordinal === count + 1 &&
+        record.json === text(row.canonical_json) && record.digest === text(row.sha256) &&
         (facts.reasonChoice === null || reasonLabel(facts.action, facts.reasonChoice) !== undefined),
       'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档的工作流程记录与其内容不一致。');
-      return facts;
-    });
+      phases.set(facts.phaseId, { moves: (phases.get(facts.phaseId)?.moves ?? 0) + 1, latest: facts });
+      count += 1;
+    }
+    return { count, phases };
   }
 }

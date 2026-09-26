@@ -144,6 +144,11 @@ describe('⑥ 维护事项 (S68a)', () => {
       expect(code(() => save(2, '第三段「甲」应为「乙」。'))).toBe('MAINTENANCE_ERRATA_UNCHANGED');
       expect(code(() => save(1, '第三段「甲」应为「丙」。'))).toBe('MAINTENANCE_CASE_CHANGED');
       expect(save(2, '第三段「甲」应为「丙」。').maintenanceCase.errata).toMatchObject({ version: 2, body: '第三段「甲」应为「丙」。' });
+      const historical = store.inspectMaintenanceCase({ bookId, caseId: errataCaseId,
+        errataVersionId: written.maintenanceCase.errata!.errataVersionId });
+      expect(historical.inspectedErrata).toMatchObject({ version: 1, body: '第三段「甲」应为「乙」。' });
+      expect(historical.errata).toMatchObject({ version: 2, body: '第三段「甲」应为「丙」。' });
+      expect(code(() => store.inspectMaintenanceCase({ bookId, caseId: errataCaseId, errataVersionId: randomUUID() }))).toBe('MAINTENANCE_NOT_FOUND');
       expect(code(() => step(errataCaseId, 3, { kind: 'conclude', status: 'complete', outcome: '   ' }))).toBe('MAINTENANCE_REASON_INVALID');
       const concluded = step(errataCaseId, 3, { kind: 'conclude', status: 'complete', outcome: '勘误已写入 AI7 的记录' });
       expectOnlyInternalWords(concluded);
@@ -366,6 +371,37 @@ describe('⑥ 维护事项 (S68a)', () => {
       }
       const offered = store.inspectMaintenanceCase({ bookId, caseId: ids[0]! }).choices.publications;
       expect([offered.length, offered[0]!.label, offered.at(-1)!.label]).toEqual([30, '第 2 次 · 「一审稿」 · r1 · 纸质版第 2 印', '第 31 次 · 「一审稿」 · r1 · 纸质版第 31 印']);
+      const choices = store.inspectMaintenanceCase({ bookId, caseId: ids[0]! });
+      const later = store.inspectMaintenanceCase({ bookId, caseId: ids[0]!, afterPublicationOrdinal: choices.choices.publicationsAfter! });
+      expect(later.choices.publications.map((entry) => entry.label)).toEqual(['第 32 次 · 「一审稿」 · r1 · 纸质版第 32 印']);
+      expect(later.choices.publicationsAfter).toBeNull();
+      expect(store.appendMaintenanceCaseRevision({ bookId, caseId: ids[0]!, expectedRevision: 1,
+        step: { kind: 'link-publication', publicationVersionId: later.choices.publications[0]!.publicationVersionId } }).maintenanceCase.revisions[1]!.link)
+        .toMatchObject({ kind: 'publication-version', publicationVersionId: later.choices.publications[0]!.publicationVersionId });
+      // A link older than the bounded timeline still governs completion and duplicate refusal.
+      let maintained = store.recordMaintenanceCase({ bookId, publicationVersionId: a,
+        classification: 'supersession', reason: '等待替代版本', evidence: null }).maintenanceCase;
+      const linkedId = offered[0]!.publicationVersionId;
+      maintained = store.appendMaintenanceCaseRevision({ bookId, caseId: maintained.caseId, expectedRevision: maintained.expectedRevision,
+        step: { kind: 'link-publication', publicationVersionId: linkedId } }).maintenanceCase;
+      for (let index = 0; index < 65; index += 1) {
+        maintained = store.appendMaintenanceCaseRevision({ bookId, caseId: maintained.caseId, expectedRevision: maintained.expectedRevision,
+          step: { kind: 'conclude', status: 'unresolved', outcome: `仍待确认 ${index}` } }).maintenanceCase;
+      }
+      expect(maintained.revisions).toHaveLength(60);
+      expect(maintained.revisionsTotal).toBe(67);
+      const olderTimeline = store.inspectMaintenanceCase({ bookId, caseId: maintained.caseId, beforeRevision: maintained.revisionsBefore! });
+      expect(olderTimeline.revisions.map((revision) => revision.revision)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+      expect(olderTimeline.revisions[0]!.reason).toBe('等待替代版本');
+      expect(olderTimeline.revisionsBefore).toBeNull();
+      expect(olderTimeline.expectedRevision).toBe(67);
+      expect(code(() => store.inspectMaintenanceCase({ bookId, caseId: maintained.caseId, beforeRevision: 0 }))).toBe('MAINTENANCE_INVALID');
+      expect(maintained.nextStep).toBe('conclude');
+      expect(maintained.choices.publications.some((entry) => entry.publicationVersionId === linkedId)).toBe(false);
+      expect(code(() => store.appendMaintenanceCaseRevision({ bookId, caseId: maintained.caseId, expectedRevision: maintained.expectedRevision,
+        step: { kind: 'link-publication', publicationVersionId: linkedId } }))).toBe('MAINTENANCE_LINK_INVALID');
+      expect(store.appendMaintenanceCaseRevision({ bookId, caseId: maintained.caseId, expectedRevision: maintained.expectedRevision,
+        step: { kind: 'conclude', status: 'complete', outcome: '替代已经确认' } }).maintenanceCase.status).toBe('complete');
       store.markCleanShutdown();
     } finally {
       store.close();
