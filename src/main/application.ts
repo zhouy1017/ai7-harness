@@ -507,7 +507,11 @@ function registerRendererHandlers(
   printExportPage: (pagePath: string, pdfPath: string) => Promise<void>,
   consumeInjectedFolderPath: () => string | undefined,
   quitApplication: () => 'quitting' | 'blocked',
+  unsavedWindows: () => boolean,
 ): () => void {
+  const requireNothingUnsaved = (): void => {
+    if (unsavedWindows()) throw new ServiceCallError('DATABASE_REPLACEMENT_UNSAVED', '还有窗口里的修改没有保存；请先保存或关闭那个窗口，再替换本机数据。');
+  };
   const AMBIGUOUS_SERVICE_FAILURES = new Set([
     'COMMIT_PROOF_INCONCLUSIVE',
     'IMPORT_COMMIT_OUTCOME_UNCERTAIN',
@@ -2970,8 +2974,9 @@ function registerRendererHandlers(
       return service.call('inspectSeriesHistory', { seriesId: input.seriesId ?? null, bookId: input.bookId ?? null, after: input.after ?? null });
     }),
   );
-  // 导出数据库 (Issue #434, S86a): house-wide, bound to no Book route; choosing the file prepares, and approving writes, each
-  // serialized with every other effect.
+  // 导出数据库 (Issue #434, S86a): house-wide, bound to no Book route; choosing the file begins the preparation, and approving
+  // begins the write, each begun in turn with every other effect and followed by the window, which may stop it (Issue #434
+  // review, V2-UX-EXP-011).
   ipcMain.handle(IPC_CHANNELS.chooseDatabaseExportDestination, (event) =>
     envelope(async () => {
       const owned = requireSender(event);
@@ -2980,7 +2985,7 @@ function registerRendererHandlers(
         const destination = await chooseDatabaseExportFile(owned);
         // A cancelled dialog records nothing at all (V2-UX-EXP-020).
         if (destination === undefined) return { outcome: 'cancelled' };
-        return { outcome: 'prepared', preparation: await service.call('prepareDatabaseExport', { destination }) };
+        return { outcome: 'preparing', activity: await service.call('prepareDatabaseExport', { destination }) };
       });
     }),
   );
@@ -2998,6 +3003,16 @@ function registerRendererHandlers(
       requireSender(event);
       requireAuthority();
       return service.call('inspectDatabaseExports', {});
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.cancelDatabaseExport, (event, input: Parameters<RendererApi['cancelDatabaseExport']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('cancelDatabaseExport', { activityId: input.activityId });
+      });
     }),
   );
   // 定期自动备份 (Issue #434, S86b): house-wide; turning the switch is serialized with every other effect.
@@ -3035,6 +3050,8 @@ function registerRendererHandlers(
       requireSender(event);
       return serializeEffect(async () => {
         requireAuthority();
+        // Once a replacement waits nothing more is saved (Issue #434 review), so no window may still hold changes not yet saved.
+        requireNothingUnsaved();
         return service.call('prepareDatabaseReplacement', { previewId: input.previewId });
       });
     }),
@@ -3060,6 +3077,7 @@ function registerRendererHandlers(
       requireSender(event);
       return serializeEffect(async () => {
         requireAuthority();
+        requireNothingUnsaved();
         return service.call('rollBackDatabaseReplacement', { replacementId: input.replacementId });
       });
     }),
@@ -4776,6 +4794,7 @@ export async function runApplication(): Promise<void> {
         setImmediate(() => app.quit());
         return 'quitting';
       },
+      () => [...ownedWindows.values()].some((owned) => owned.closeRisk && !owned.window.isDestroyed()),
     );
     startupLocation = reachStartup('renderer-first-paint');
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);

@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { lstat, open, readdir, rm } from 'node:fs/promises';
+import { lstat, open, opendir, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { Zip, ZipDeflate, ZipPassThrough, strToU8 } from 'fflate';
 import {
   MAX_DATABASE_EXPORTS_LISTED,
+  type DatabaseExportActivityProjection,
   type DatabaseExportContentsProjection,
   type DatabaseExportPreparationProjection,
   type DatabaseExportReceiptProjection,
@@ -19,6 +20,7 @@ import {
   EXPORT_FAILURE_DETAILS,
   EXPORT_OUTCOME_LABELS,
   EXPORT_STAGING_DIRECTORY,
+  ExportLedgerError,
   fileDigest,
   resolveExportDestination,
   writeAtomically,
@@ -43,6 +45,9 @@ import {
  * Choosing the file prepares: the package is written into the export staging area, and the preparation records its digest
  * and size. `按上述方式导出` then approves that exact package and writes it at the chosen place atomically, as every export
  * is written. Schema revision 55 owns three relations, ledgers like the export ledger's.
+ *
+ * Both run off the request, one export at a time, as the export's activity (V2-UX-EXP-011; Issue #434 review): the bytes
+ * read of how many, and 取消导出 until the file is being put at the chosen place — never after.
  */
 
 export const DATABASE_PACKAGE_SCHEMA = 'ai7.database-package/1' as const;
@@ -53,6 +58,8 @@ export const DATABASE_PACKAGE_MANIFEST_MEMBER = 'manifest.json' as const;
 export const DATABASE_PACKAGE_EXCLUDED_ROOTS: ReadonlySet<string> = new Set(['store', EXPORT_STAGING_DIRECTORY, 'shell']);
 /** A ZIP without ZIP64 holds at most this many members, each and all below 4 GiB. */
 const MAX_PACKAGE_MEMBERS = 65_534;
+/** The most directories a package's walk visits: a data root with more is refused as too large (Issue #434 review). */
+const MAX_PACKAGE_DIRECTORIES = 65_534;
 const MAX_ZIP_BYTES = 0xffff_ffff;
 const COPY_CHUNK_BYTES = 1 << 20;
 
@@ -183,46 +190,98 @@ export interface DatabasePackageMember {
   readonly sha256: string;
 }
 
-/** Every file under the Agent Data Root a package carries, by its path inside the package, in a stable order. */
-export async function databasePackageSources(dataRoot: string): Promise<Array<{ member: string; path: string }>> {
-  const found: Array<{ member: string; path: string }> = [];
+/** One file a package carries: its path inside the package, where it is, and its size when the walk found it. */
+export interface DatabasePackageSource {
+  readonly member: string;
+  readonly path: string;
+  readonly bytes: number;
+}
+
+/** How much a walk may find before the data root is refused as too large to package. */
+export interface DatabasePackageBounds {
+  readonly members: number;
+  readonly directories: number;
+}
+
+const PACKAGE_BOUNDS: DatabasePackageBounds = { members: MAX_PACKAGE_MEMBERS, directories: MAX_PACKAGE_DIRECTORIES };
+
+/**
+ * Every file under the Agent Data Root a package carries, by its path inside the package, in a stable order, with its size.
+ * The walk reads one directory at a time and holds no more names than a package can carry — the store and the manifest
+ * count among them — so a data root too large to package is refused the moment that is known, before its listing is ever
+ * held whole (Issue #434 review).
+ */
+export async function databasePackageSources(dataRoot: string, bounds: DatabasePackageBounds = PACKAGE_BOUNDS): Promise<DatabasePackageSource[]> {
+  const found: DatabasePackageSource[] = [];
+  // Names listed and not yet walked, across every directory the walk is inside.
+  let held = 0;
+  let directories = 0;
+  const refuse = (): never => {
+    throw new DatabaseExportError('DATABASE_PACKAGE_TOO_LARGE', '数据文件过多，暂时无法打包成一个文件。');
+  };
   const visit = async (directory: string, prefix: string): Promise<void> => {
-    const entries = await readdir(directory, { withFileTypes: true });
-    for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    directories += 1;
+    if (directories > bounds.directories) refuse();
+    const entries: Array<{ name: string; directory: boolean }> = [];
+    for await (const entry of await opendir(directory)) {
       if (prefix === '' && DATABASE_PACKAGE_EXCLUDED_ROOTS.has(entry.name)) continue;
+      // The Agent Data Root holds no link; a link found there is not followed and not carried.
+      if (entry.isSymbolicLink() || !(entry.isDirectory() || entry.isFile())) continue;
+      entries.push({ name: entry.name, directory: entry.isDirectory() });
+      held += 1;
+      if (found.length + held + 2 > bounds.members) refuse();
+    }
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const entry of entries) {
+      held -= 1;
       const path = join(directory, entry.name);
       const member = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
-      // The Agent Data Root holds no link; a link found there is not followed and not carried.
-      if (entry.isSymbolicLink()) continue;
-      if (entry.isDirectory()) await visit(path, member);
-      else if (entry.isFile()) found.push({ member, path });
+      if (entry.directory) await visit(path, member);
+      else found.push({ member, path, bytes: (await lstat(path)).size });
     }
   };
   await visit(dataRoot, '');
   return found;
 }
 
+/** How far writing a package has come: the bytes read of the files it carries, the store's copy among them. */
+export interface DatabasePackageProgress {
+  readonly completedBytes: number;
+  readonly totalBytes: number;
+}
+
+export interface DatabasePackageOptions {
+  /** Aborted, the write stops at its next chunk, and neither the package nor the store's copy is left (Issue #434 review). */
+  readonly signal?: AbortSignal;
+  readonly onProgress?: (progress: DatabasePackageProgress) => void;
+}
+
 /**
  * Write the package for `db` and the files under `dataRoot` to `packagePath`, which must not exist yet, streaming each
- * member so no file is held whole. Answers the package's size and digest and its members. A `signal` aborted stops the
- * write at its next chunk, and neither the package nor the store copy is left (Issue #434 review).
+ * member so no file is held whole. `facts` is read in the same step as the store's copy is made, with nothing awaited
+ * between them, so no other request can write in between: what the manifest says the package holds is what its copy of
+ * the store holds (Issue #434 review). Answers the package's size and digest, its members, and those facts.
  */
 export async function writeDatabasePackage(
   db: DatabaseSync,
   dataRoot: string,
   packagePath: string,
-  facts: DatabasePackageFacts,
-  signal?: AbortSignal,
-): Promise<{ bytes: number; sha256: string; members: DatabasePackageMember[] }> {
+  facts: () => DatabasePackageFacts,
+  options: DatabasePackageOptions = {},
+): Promise<{ bytes: number; sha256: string; members: DatabasePackageMember[]; facts: DatabasePackageFacts }> {
+  const { signal, onProgress } = options;
   signal?.throwIfAborted();
   const snapshotPath = `${packagePath}.store`;
   await rm(snapshotPath, { force: true });
+  signal?.throwIfAborted();
   // A consistent copy of the store, taken between two statements of the one connection that writes it.
+  const packageFacts = facts();
   db.prepare('VACUUM INTO ?').run(snapshotPath);
   let output;
   try {
     const sources = await databasePackageSources(dataRoot);
-    requireDatabaseExport(sources.length + 2 <= MAX_PACKAGE_MEMBERS, 'DATABASE_PACKAGE_TOO_LARGE', '数据文件过多，暂时无法打包成一个文件。');
+    const totalBytes = sources.reduce((sum, source) => sum + source.bytes, (await lstat(snapshotPath)).size);
+    let completedBytes = 0;
     output = await open(packagePath, 'wx');
     const file = output;
     const hash = createHash('sha256');
@@ -274,6 +333,9 @@ export async function writeDatabasePackage(
           requireDatabaseExport(memberBytes <= MAX_ZIP_BYTES, 'DATABASE_PACKAGE_TOO_LARGE', '有文件超过 4 GB，暂时无法打包成一个文件。');
           entry.push(chunk, false);
           await flush();
+          completedBytes += bytesRead;
+          // A file that grew since the walk found it raises the total rather than reading past it.
+          onProgress?.({ completedBytes, totalBytes: Math.max(totalBytes, completedBytes) });
         }
       } finally {
         await source.close();
@@ -287,12 +349,12 @@ export async function writeDatabasePackage(
     signal?.throwIfAborted();
     const manifest = canonicalRecord({
       schema: DATABASE_PACKAGE_SCHEMA,
-      dataVersion: facts.dataVersion,
-      softwareVersion: facts.softwareVersion,
-      schemaRevision: facts.schemaRevision,
-      createdAt: facts.createdAt,
-      origin: facts.origin,
-      contents: facts.contents,
+      dataVersion: packageFacts.dataVersion,
+      softwareVersion: packageFacts.softwareVersion,
+      schemaRevision: packageFacts.schemaRevision,
+      createdAt: packageFacts.createdAt,
+      origin: packageFacts.origin,
+      contents: packageFacts.contents,
       credentials: 'excluded',
       members,
     });
@@ -303,7 +365,7 @@ export async function writeDatabasePackage(
     zip.end();
     await flush();
     await file.sync();
-    return { bytes, sha256: hash.digest('hex'), members };
+    return { bytes, sha256: hash.digest('hex'), members, facts: packageFacts };
   } catch (error) {
     await output?.close().catch(() => undefined);
     output = undefined;
@@ -361,10 +423,38 @@ function requireStored(json: SQLOutputValue | undefined, digest: SQLOutputValue 
   return record;
 }
 
+/** The export under way, or how the last one ended (V2-UX-EXP-011). */
+interface ExportActivity {
+  readonly activityId: string;
+  readonly kind: DatabaseExportActivityProjection['kind'];
+  readonly controller: AbortController;
+  state: DatabaseExportActivityProjection['state'];
+  step: NonNullable<DatabaseExportActivityProjection['step']>;
+  completedBytes: number;
+  totalBytes: number;
+  /** The preparation it made, or the one it approves. */
+  preparationId: string | null;
+  failure: { code: string; message: string } | null;
+  done: Promise<void>;
+}
+
+/** What an export that could not finish says when the cause is not one of the export's own refusals. */
+const PREPARE_FAILED = { code: 'DATABASE_EXPORT_PREPARE_FAILED', message: '未能打包数据库。' } as const;
+const APPROVE_FAILED = { code: 'DATABASE_EXPORT_WRITE_FAILED', message: '未能导出数据库。' } as const;
+
+/** 取消导出 stops an export until it begins putting the file in place, and never after (V2-UX-EXP-011). */
+function cancellable(activity: ExportActivity): boolean {
+  return activity.state === 'running' && activity.step !== 'committing' && !activity.controller.signal.aborted;
+}
+
 export class DatabaseExports {
   readonly #db: DatabaseSync;
   readonly #dataRoot: string;
   readonly #sources: DatabaseExportSources;
+  /** The export under way, or how the last one ended: one at a time. */
+  #activity: ExportActivity | null = null;
+  /** Set once the service stops: no export starts after it. */
+  #stopped = false;
 
   constructor(db: DatabaseSync, dataRoot: string, sources: DatabaseExportSources) {
     this.#db = db;
@@ -373,119 +463,272 @@ export class DatabaseExports {
   }
 
   /**
-   * The destination the Save dialog answered becomes one preparation: the package is written into the export staging
-   * area and recorded with its digest and size, what it holds, and the file it would create or replace. Nothing is
-   * written at the destination; a preparation never approved is only its record (V2-UX-EXP-020).
+   * The destination the Save dialog answered becomes one preparation, packed off the request (V2-UX-EXP-011): the package
+   * is written into the export staging area and recorded with its digest and size, what it holds, and the file it would
+   * create or replace. Nothing is written at the destination; a preparation never approved is only its record
+   * (V2-UX-EXP-020). Answers at once with the activity, which 取消导出 stops until the preparation is recorded.
    */
-  async prepare(destinationInput: unknown, available: boolean): Promise<DatabaseExportPreparationProjection> {
+  startPreparation(destinationInput: unknown, available: boolean): DatabaseExportActivityProjection {
     requireDatabaseExport(available, 'EXPORT_POLICY_UNAVAILABLE', '对外导出策略未通过本次启动的校验，导出不可用。');
-    const destination = await resolveExportDestination(destinationInput, DATABASE_PACKAGE_EXTENSION, this.#dataRoot);
-    // One package is staged at a time: an earlier preparation's that was never approved is not kept.
-    await this.sweep();
-    const staging = await this.#stagingDirectory();
-    const preparationId = randomUUID();
-    const effectIntentId = randomUUID();
-    const createdAt = new Date().toISOString();
-    const facts = this.#sources.facts();
-    const contents = this.#sources.contents();
-    const written = await writeDatabasePackage(this.#db, this.#dataRoot, this.#stagedPath(staging, effectIntentId), {
-      ...facts,
-      createdAt,
-      origin: 'database-export',
-      contents,
-    });
-    const record = canonicalRecord({
-      schema: PREPARATION_SCHEMA,
-      preparationId,
-      effectIntentId,
-      targetKind: 'database-export-package',
-      packageSchema: DATABASE_PACKAGE_SCHEMA,
-      dataVersion: facts.dataVersion,
-      schemaRevision: facts.schemaRevision,
-      softwareVersion: facts.softwareVersion,
-      contents,
-      fileName: destination.fileName,
-      destination: destination.path,
-      disposition: destination.disposition,
-      replaces: destination.replaces,
-      payloadSha256: written.sha256,
-      payloadBytes: written.bytes,
-      policy: 'external-export-policy/v2',
-      createdAt,
-    });
-    this.#db.prepare(
-      `INSERT INTO database_export_preparations(
-         preparation_id, effect_intent_id, target_kind, package_schema, data_version, schema_revision, software_version,
-         contents_json, file_name, destination, disposition, payload_sha256, payload_bytes, policy_id, policy_version,
-         created_at, canonical_json, sha256
-       ) VALUES (?, ?, 'database-export-package', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'external-export-policy', 'v2', ?, ?, ?)`,
-    ).run(preparationId, effectIntentId, DATABASE_PACKAGE_SCHEMA, facts.dataVersion, facts.schemaRevision, facts.softwareVersion,
-      canonicalJson(contents), destination.fileName, destination.path, destination.disposition, written.sha256, written.bytes,
-      createdAt, record.json, record.digest);
-    return this.#preparation(preparationId);
+    const activity = this.#begin('prepare', 'packing');
+    activity.done = this.#prepare(activity, destinationInput);
+    return this.#projection(activity);
   }
 
   /**
-   * `按上述方式导出`: the editor's one approval of one unchanged preparation. The staged package must still be exactly the one
-   * prepared; the approval is recorded, the package is written at the destination atomically, and the outcome is receipted.
-   * Nothing retries by itself (V2-UX-EXP-021).
+   * `按上述方式导出`: the editor's one approval of one unchanged preparation, carried out off the request (V2-UX-EXP-011). The
+   * staged package is read whole first and must still be exactly the one prepared; 取消导出 then leaves the preparation as
+   * it was, and only after that read is the approval recorded. The package is written at the destination atomically and the
+   * outcome receipted: 取消导出 while it is written ends it with the receipt `EXPORT_CANCELLED` and the destination as it
+   * was, and once the file is being put in place nothing stops it. Nothing retries by itself (V2-UX-EXP-021).
    */
-  async approve(preparationId: unknown, available: boolean): Promise<DatabaseExportReceiptProjection> {
+  startApproval(preparationId: unknown, available: boolean): DatabaseExportActivityProjection {
     requireDatabaseExport(available, 'EXPORT_POLICY_UNAVAILABLE', '对外导出策略未通过本次启动的校验，导出不可用。');
     requireDatabaseExport(typeof preparationId === 'string' && UUID_PATTERN.test(preparationId), 'DATABASE_EXPORT_NOT_FOUND', '这次数据库导出不存在。');
     const { row: preparation } = this.#verifiedPreparation(preparationId);
     requireDatabaseExport(this.#db.prepare('SELECT 1 FROM database_export_approvals WHERE preparation_id = ?').get(preparationId) === undefined,
       'DATABASE_EXPORT_ALREADY_APPROVED', '这次数据库导出已经批准过。');
+    const activity = this.#begin('approve', 'verifying');
+    activity.preparationId = preparationId;
+    // The staged package is read before the approval, then written, then read back where it was written and where it lands.
+    activity.totalBytes = integer(preparation.payload_bytes) * 4;
+    activity.done = this.#approve(activity, preparation);
+    return this.#projection(activity);
+  }
+
+  /**
+   * 取消导出 (V2-UX-EXP-011): the export under way stops at its next step, until it begins putting the file in place — never
+   * after, and never claiming to undo what is there. Answers the activity as it now stands.
+   */
+  cancel(activityId: unknown): DatabaseExportActivityProjection {
+    const activity = this.#activity;
+    requireDatabaseExport(activity !== null && activity.activityId === activityId, 'DATABASE_EXPORT_ACTIVITY_NOT_FOUND', '这次数据库导出已经不在进行。');
+    if (cancellable(activity)) activity.controller.abort();
+    return this.#projection(activity);
+  }
+
+  /** The export under way, or how the last one ended; `null` before any in this launch. A read. */
+  activity(): DatabaseExportActivityProjection | null {
+    return this.#activity === null ? null : this.#projection(this.#activity);
+  }
+
+  /** Resolves once the export under way, if any, has ended. */
+  async settled(): Promise<void> {
+    await this.#activity?.done;
+  }
+
+  /**
+   * At shutdown, before the store closes (Issue #434 review): no export starts after it, and one under way stops as
+   * 取消导出 stops it, leaving no package it was writing.
+   */
+  async stop(): Promise<void> {
+    this.#stopped = true;
+    const activity = this.#activity;
+    if (activity !== null && cancellable(activity)) activity.controller.abort();
+    await activity?.done;
+  }
+
+  /** Prepare, and wait for the preparation: what a caller that follows no activity uses. A failure is thrown. */
+  async prepare(destinationInput: unknown, available: boolean): Promise<DatabaseExportPreparationProjection> {
+    this.startPreparation(destinationInput, available);
+    return this.#outcome((activity) => this.#preparation(activity.preparationId!));
+  }
+
+  /** Approve, and wait for the receipt: what a caller that follows no activity uses. A failure is thrown. */
+  async approve(preparationId: unknown, available: boolean): Promise<DatabaseExportReceiptProjection> {
+    this.startApproval(preparationId, available);
+    return this.#outcome((activity) => this.#receipt(activity.preparationId!)!);
+  }
+
+  async #outcome<T>(result: (activity: ExportActivity) => T): Promise<T> {
+    const activity = this.#activity!;
+    await activity.done;
+    if (activity.state === 'failed') throw new DatabaseExportError(activity.failure!.code, activity.failure!.message);
+    requireDatabaseExport(activity.state !== 'cancelled', 'DATABASE_EXPORT_CANCELLED', '数据库导出已取消。');
+    return result(activity);
+  }
+
+  #begin(kind: ExportActivity['kind'], step: ExportActivity['step']): ExportActivity {
+    requireDatabaseExport(!this.#stopped, 'SERVICE_STOPPING', '本地业务服务正在停止。');
+    requireDatabaseExport(this.#activity?.state !== 'running', 'DATABASE_EXPORT_BUSY', '上一次数据库导出还没有结束。');
+    const activity: ExportActivity = {
+      activityId: randomUUID(),
+      kind,
+      controller: new AbortController(),
+      state: 'running',
+      step,
+      completedBytes: 0,
+      totalBytes: 0,
+      preparationId: null,
+      failure: null,
+      done: Promise.resolve(),
+    };
+    this.#activity = activity;
+    return activity;
+  }
+
+  /** An export that stopped: 取消导出's, or a failure in the export's own words, or in general ones. */
+  #fail(activity: ExportActivity, error: unknown, fallback: { code: string; message: string }): void {
+    if (activity.controller.signal.aborted) {
+      activity.state = 'cancelled';
+      return;
+    }
+    activity.state = 'failed';
+    activity.failure = error instanceof DatabaseExportError || error instanceof ExportLedgerError
+      ? { code: error.code, message: error.message }
+      : { ...fallback };
+  }
+
+  async #prepare(activity: ExportActivity, destinationInput: unknown): Promise<void> {
+    const { signal } = activity.controller;
+    let staged: string | null = null;
+    try {
+      const destination = await resolveExportDestination(destinationInput, DATABASE_PACKAGE_EXTENSION, this.#dataRoot);
+      // One package is staged at a time: an earlier preparation's that was never approved is not kept.
+      await this.sweep();
+      const staging = await this.#stagingDirectory();
+      const preparationId = randomUUID();
+      const effectIntentId = randomUUID();
+      staged = this.#stagedPath(staging, effectIntentId);
+      const written = await writeDatabasePackage(this.#db, this.#dataRoot, staged, () => ({
+        ...this.#sources.facts(),
+        createdAt: new Date().toISOString(),
+        origin: 'database-export',
+        contents: this.#sources.contents(),
+      }), {
+        signal,
+        onProgress: (progress) => {
+          activity.completedBytes = progress.completedBytes;
+          activity.totalBytes = progress.totalBytes;
+        },
+      });
+      signal.throwIfAborted();
+      const { facts } = written;
+      const record = canonicalRecord({
+        schema: PREPARATION_SCHEMA,
+        preparationId,
+        effectIntentId,
+        targetKind: 'database-export-package',
+        packageSchema: DATABASE_PACKAGE_SCHEMA,
+        dataVersion: facts.dataVersion,
+        schemaRevision: facts.schemaRevision,
+        softwareVersion: facts.softwareVersion,
+        contents: facts.contents,
+        fileName: destination.fileName,
+        destination: destination.path,
+        disposition: destination.disposition,
+        replaces: destination.replaces,
+        payloadSha256: written.sha256,
+        payloadBytes: written.bytes,
+        policy: 'external-export-policy/v2',
+        createdAt: facts.createdAt,
+      });
+      this.#db.prepare(
+        `INSERT INTO database_export_preparations(
+           preparation_id, effect_intent_id, target_kind, package_schema, data_version, schema_revision, software_version,
+           contents_json, file_name, destination, disposition, payload_sha256, payload_bytes, policy_id, policy_version,
+           created_at, canonical_json, sha256
+         ) VALUES (?, ?, 'database-export-package', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'external-export-policy', 'v2', ?, ?, ?)`,
+      ).run(preparationId, effectIntentId, DATABASE_PACKAGE_SCHEMA, facts.dataVersion, facts.schemaRevision, facts.softwareVersion,
+        canonicalJson(facts.contents), destination.fileName, destination.path, destination.disposition, written.sha256, written.bytes,
+        facts.createdAt, record.json, record.digest);
+      activity.preparationId = preparationId;
+      activity.state = 'prepared';
+    } catch (error) {
+      // A package no preparation records is not kept.
+      if (staged !== null) await rm(staged, { force: true }).catch(() => undefined);
+      this.#fail(activity, error, PREPARE_FAILED);
+    }
+  }
+
+  async #approve(activity: ExportActivity, preparation: SqlRow): Promise<void> {
+    const { signal } = activity.controller;
+    const preparationId = activity.preparationId!;
     const effectIntentId = text(preparation.effect_intent_id);
     const payloadSha256 = text(preparation.payload_sha256);
     const payloadBytes = integer(preparation.payload_bytes);
-    const staged = this.#stagedPath(await this.#stagingDirectory(), effectIntentId);
-    const standing = await fileDigest(staged);
-    requireDatabaseExport(standing?.sha256 === payloadSha256 && standing.bytes === payloadBytes, 'DATABASE_EXPORT_STALE',
-      '准备好的数据库文件已不在或已变化，请重新导出数据库。');
-    const approvalId = randomUUID();
-    const approvedAt = new Date().toISOString();
-    const approval = canonicalRecord({
-      schema: APPROVAL_SCHEMA,
-      approvalId,
-      preparationId,
-      effectIntentId,
-      payloadSha256,
-      actor: ACTOR,
-      interaction: 'export-as-stated',
-      approvedAt,
-    });
-    this.#db.prepare(
-      `INSERT INTO database_export_approvals(approval_id, preparation_id, effect_intent_id, payload_sha256, actor, interaction, approved_at, canonical_json, sha256)
-       VALUES (?, ?, ?, ?, ?, 'export-as-stated', ?, ?, ?)`,
-    ).run(approvalId, preparationId, effectIntentId, payloadSha256, ACTOR, approvedAt, approval.json, approval.digest);
-    const destination = text(preparation.destination);
-    const written = await writeAtomically(destination, { path: staged, bytes: payloadBytes }, payloadSha256,
-      text(preparation.disposition) as 'create' | 'replace', effectIntentId, this.#replacedFileOf(preparation));
-    const receiptId = randomUUID();
-    const recordedAt = new Date().toISOString();
-    const { byteLength, fileSha256, failureCode } = 'code' in written
-      ? { byteLength: null, fileSha256: null, failureCode: written.code }
-      : { byteLength: written.bytes, fileSha256: written.sha256, failureCode: null };
-    const receipt = canonicalRecord({
-      schema: RECEIPT_SCHEMA,
-      receiptId,
-      preparationId,
-      approvalId,
-      effectIntentId,
-      outcome: written.outcome,
-      finalPath: destination,
-      byteLength,
-      fileSha256,
-      failureCode,
-      recordedAt,
-    });
-    this.#db.prepare(
-      `INSERT INTO database_export_receipts(receipt_id, preparation_id, approval_id, outcome, final_path, byte_length, file_sha256, failure_code, recorded_at, canonical_json, sha256)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(receiptId, preparationId, approvalId, written.outcome, destination, byteLength, fileSha256, failureCode, recordedAt, receipt.json, receipt.digest);
-    await rm(staged, { force: true }).catch(() => undefined);
-    return this.#receipt(preparationId)!;
+    const read = (bytes: number): void => {
+      activity.completedBytes = Math.min(activity.totalBytes, activity.completedBytes + bytes);
+    };
+    try {
+      const staged = this.#stagedPath(await this.#stagingDirectory(), effectIntentId);
+      const standing = await fileDigest(staged, { signal, onBytes: read });
+      // 取消导出 before the approval leaves the preparation and its package as they were.
+      signal.throwIfAborted();
+      requireDatabaseExport(standing?.sha256 === payloadSha256 && standing.bytes === payloadBytes, 'DATABASE_EXPORT_STALE',
+        '准备好的数据库文件已不在或已变化，请重新导出数据库。');
+      const approvalId = randomUUID();
+      const approvedAt = new Date().toISOString();
+      const approval = canonicalRecord({
+        schema: APPROVAL_SCHEMA,
+        approvalId,
+        preparationId,
+        effectIntentId,
+        payloadSha256,
+        actor: ACTOR,
+        interaction: 'export-as-stated',
+        approvedAt,
+      });
+      this.#db.prepare(
+        `INSERT INTO database_export_approvals(approval_id, preparation_id, effect_intent_id, payload_sha256, actor, interaction, approved_at, canonical_json, sha256)
+         VALUES (?, ?, ?, ?, ?, 'export-as-stated', ?, ?, ?)`,
+      ).run(approvalId, preparationId, effectIntentId, payloadSha256, ACTOR, approvedAt, approval.json, approval.digest);
+      activity.step = 'writing';
+      const destination = text(preparation.destination);
+      const written = await writeAtomically(destination, { path: staged, bytes: payloadBytes }, payloadSha256,
+        text(preparation.disposition) as 'create' | 'replace', effectIntentId, this.#replacedFileOf(preparation), {
+          signal,
+          onBytes: read,
+          onCommit: () => {
+            activity.step = 'committing';
+          },
+        });
+      const receiptId = randomUUID();
+      const recordedAt = new Date().toISOString();
+      const { byteLength, fileSha256, failureCode } = 'code' in written
+        ? { byteLength: null, fileSha256: null, failureCode: written.code }
+        : { byteLength: written.bytes, fileSha256: written.sha256, failureCode: null };
+      const receipt = canonicalRecord({
+        schema: RECEIPT_SCHEMA,
+        receiptId,
+        preparationId,
+        approvalId,
+        effectIntentId,
+        outcome: written.outcome,
+        finalPath: destination,
+        byteLength,
+        fileSha256,
+        failureCode,
+        recordedAt,
+      });
+      this.#db.prepare(
+        `INSERT INTO database_export_receipts(receipt_id, preparation_id, approval_id, outcome, final_path, byte_length, file_sha256, failure_code, recorded_at, canonical_json, sha256)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(receiptId, preparationId, approvalId, written.outcome, destination, byteLength, fileSha256, failureCode, recordedAt, receipt.json, receipt.digest);
+      await rm(staged, { force: true }).catch(() => undefined);
+      // A written file was read back whole; one stopped or refused stays where it stopped.
+      if (!('code' in written)) activity.completedBytes = activity.totalBytes;
+      activity.state = 'finished';
+    } catch (error) {
+      // Before the approval nothing is recorded, and the prepared package stays; after it, an approval with no receipt reads
+      // as the interrupted write it is.
+      this.#fail(activity, error, APPROVE_FAILED);
+    }
+  }
+
+  #projection(activity: ExportActivity): DatabaseExportActivityProjection {
+    return {
+      activityId: activity.activityId,
+      kind: activity.kind,
+      state: activity.state,
+      step: activity.state === 'running' ? activity.step : null,
+      completedBytes: activity.completedBytes,
+      totalBytes: activity.totalBytes,
+      cancellable: cancellable(activity),
+      preparation: activity.preparationId === null ? null : this.#preparation(activity.preparationId),
+      receipt: activity.kind === 'approve' && activity.state === 'finished' ? this.#receipt(activity.preparationId!) : null,
+      failure: activity.failure,
+    };
   }
 
   /** The approved exports, newest first: what each came to. */
@@ -494,7 +737,7 @@ export class DatabaseExports {
     const rows = this.#db.prepare(
       `SELECT preparation_id FROM database_export_approvals ORDER BY approved_at DESC, rowid DESC LIMIT ${MAX_DATABASE_EXPORTS_LISTED}`,
     ).all() as SqlRow[];
-    return { exports: rows.map((row) => this.#receipt(text(row.preparation_id))!), total };
+    return { exports: rows.map((row) => this.#receipt(text(row.preparation_id))!), total, activity: this.activity() };
   }
 
   preparationOf(preparationId: string): DatabaseExportPreparationProjection {

@@ -61,7 +61,14 @@ interface ZipEntry {
 
 const ORIGINS: ReadonlyArray<string> = ['database-export', 'scheduled-backup', 'pre-replace-backup', 'pre-merge-backup', 'pre-upgrade-backup'];
 const MAX_MANIFEST_BYTES = 16 * 1024 * 1024;
+/**
+ * The most a package's central directory may take, checked before it is read (Issue #434 review): 65,534 entries with names of
+ * two hundred bytes on average, far past any package AI7 writes.
+ */
+export const MAX_DIRECTORY_BYTES = 16 * 1024 * 1024;
 const CHUNK_BYTES = 1 << 20;
+/** How much deflated input is inflated at once, so what one step can produce stays bounded however far the data expands. */
+const INFLATE_INPUT_BYTES = 16 * 1024;
 /** A member's path: relative segments of ordinary characters, never `.` or `..`. */
 const MEMBER_PATH = /^[^/\\:*?"<>|\u0000-\u001f]+(?:\/[^/\\:*?"<>|\u0000-\u001f]+)*$/u;
 
@@ -152,6 +159,8 @@ async function readDirectory(handle: FileHandle, fileSize: number): Promise<ZipE
   const directorySize = tail.readUInt32LE(end + 12);
   const directoryOffset = tail.readUInt32LE(end + 16);
   requireShape(count > 0 && directoryOffset + directorySize <= fileSize);
+  // Bounded before it is read: a directory the archive claims is larger is not one of a package's.
+  requireShape(directorySize <= MAX_DIRECTORY_BYTES && count * 46 <= directorySize);
   const directory = await readAt(handle, directorySize, directoryOffset);
   const entries: ZipEntry[] = [];
   let position = 0;
@@ -168,6 +177,8 @@ async function readDirectory(handle: FileHandle, fileSize: number): Promise<ZipE
     requireShape(position + 46 + nameLength <= directory.length);
     const name = directory.subarray(position + 46, position + 46 + nameLength).toString('utf8');
     requireShape((flags & 1) === 0 && (method === 0 || method === 8) && compressedSize !== 0xffffffff && size !== 0xffffffff && offset !== 0xffffffff);
+    // A stored entry is its own bytes: its two sizes are one.
+    requireShape(method === 8 || compressedSize === size);
     requireShape(offset + 30 + compressedSize <= fileSize);
     entries.push({ name, method, compressedSize, size, offset });
     position += 46 + nameLength + extraLength + commentLength;
@@ -176,35 +187,58 @@ async function readDirectory(handle: FileHandle, fileSize: number): Promise<ZipE
   return entries;
 }
 
-/** Stream one entry's uncompressed bytes, from its local header on. */
+/**
+ * Stream one entry's uncompressed bytes, from its local header on, never past the size its entry declares (Issue #434
+ * review): deflated data is inflated a little at a time, and an entry that would come to more than it declares — or ends
+ * short of it — is damage, refused before any byte past the declared size is kept or handed on.
+ */
 async function streamEntry(handle: FileHandle, entry: ZipEntry, onData: (chunk: Uint8Array) => Promise<void>): Promise<void> {
   const header = await readAt(handle, 30, entry.offset);
   requireIntact(header.readUInt32LE(0) === 0x04034b50);
   let position = entry.offset + 30 + header.readUInt16LE(26) + header.readUInt16LE(28);
   let remaining = entry.compressedSize;
+  let produced = 0;
+  let overflow = false;
   const out: Uint8Array[] = [];
+  // What comes past the declared size is not kept: the entry is damage, whatever else it holds.
+  const take = (chunk: Uint8Array): void => {
+    if (overflow || produced + chunk.byteLength > entry.size) {
+      overflow = true;
+      return;
+    }
+    produced += chunk.byteLength;
+    out.push(chunk);
+  };
+  const deliver = async (): Promise<void> => {
+    requireIntact(!overflow);
+    while (out.length > 0) await onData(out.shift()!);
+  };
   let failure: unknown = null;
-  const inflater = entry.method === 8 ? new Inflate((chunk) => { out.push(chunk); }) : null;
+  const inflater = entry.method === 8 ? new Inflate((chunk) => take(chunk)) : null;
   const buffer = Buffer.allocUnsafe(CHUNK_BYTES);
   if (inflater !== null && remaining === 0) inflater.push(new Uint8Array(0), true);
   while (remaining > 0) {
     const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, remaining), position);
     requireIntact(bytesRead > 0);
-    const chunk = Uint8Array.from(buffer.subarray(0, bytesRead));
     position += bytesRead;
     remaining -= bytesRead;
     if (inflater === null) {
-      await onData(chunk);
+      take(Uint8Array.from(buffer.subarray(0, bytesRead)));
+      await deliver();
       continue;
     }
-    try {
-      inflater.push(chunk, remaining === 0);
-    } catch (error) {
-      failure = error;
+    for (let start = 0; start < bytesRead; start += INFLATE_INPUT_BYTES) {
+      const end = Math.min(bytesRead, start + INFLATE_INPUT_BYTES);
+      try {
+        inflater.push(Uint8Array.from(buffer.subarray(start, end)), remaining === 0 && end === bytesRead);
+      } catch (error) {
+        failure = error;
+      }
+      requireIntact(failure === null);
+      await deliver();
     }
-    requireIntact(failure === null);
-    while (out.length > 0) await onData(out.shift()!);
   }
+  requireIntact(!overflow && produced === entry.size);
 }
 
 /** A package verified whole: its own size and digest, and what it says of itself. */

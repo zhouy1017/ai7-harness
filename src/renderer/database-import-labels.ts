@@ -48,7 +48,6 @@ export const DATABASE_MERGE_NOTHING = '这个文件里的图书本机都已经�
 export const DATABASE_MERGE_NOTICE_LINES: Readonly<Record<DatabaseMergeNotice, string>> = {
   series: '书系关系与书系知识不随图书合并。',
   'library-materials': '资料库的条目不随图书合并。',
-  'workspace-profile': '编辑工作区方案的启用不随图书合并；需要时在本机为这本书重新启用。',
   'internal-number': '内部编号已被本机其他图书使用的，合并后不带内部编号。',
 };
 export const DATABASE_IMPORT_STATUS_LINES = {
@@ -115,6 +114,11 @@ export function databaseImportRefusalLine(preview: Pick<DatabaseImportPreviewPro
   return preview.compatibility === 'compatible' ? null : '这个文件的数据版本与本机 AI7 不兼容，不能导入。';
 }
 
+/** What a preview lists past its first Books: `…以及另外 N 本`. */
+export function databaseImportMoreBooksLine(listed: number, total: number): string | null {
+  return total > listed ? `…以及另外 ${total - listed} 本` : null;
+}
+
 /** One Book of the file, as a merge would take it. */
 export function databaseImportBookLine(book: DatabaseImportBookProjection): string {
   const how = { new: '将导入', 'same-title': '与本机的一本同名，另存为另一本', present: '本机已有，不导入' }[book.status];
@@ -123,11 +127,11 @@ export function databaseImportBookLine(book: DatabaseImportBookProjection): stri
 
 /** The replacement or merge waiting for AI7's next start, in three lines: what changes, the backup made, and when it completes. */
 export function databasePendingLines(
-  pending: Pick<DatabasePendingReplacementProjection, 'kind' | 'packageFileName' | 'backupFileName' | 'mergeBooks'>,
+  pending: Pick<DatabasePendingReplacementProjection, 'kind' | 'packageFileName' | 'backupFileName' | 'mergeBooksTotal'>,
 ): readonly [string, string, string] {
   if (pending.kind === 'merge') {
     return [
-      `已准备好把「${pending.packageFileName}」里的 ${pending.mergeBooks?.length ?? 0} 本图书合并到本机。`,
+      `已准备好把「${pending.packageFileName}」里的 ${pending.mergeBooksTotal ?? 0} 本图书合并到本机。`,
       `本机现在的数据已备份为「${pending.backupFileName}」，放在备份位置。`,
       'AI7 下次启动时完成合并；在此之前做的修改都会保留。',
     ];
@@ -136,22 +140,27 @@ export function databasePendingLines(
   return [
     rollBack ? `已准备好回退到「${pending.packageFileName}」。` : `已准备好用「${pending.packageFileName}」替换本机全部数据。`,
     `本机现在的数据已备份为「${pending.backupFileName}」，放在备份位置。`,
-    `AI7 下次启动时完成${rollBack ? '回退' : '替换'}；在此之前再做的修改不会保留。`,
+    `AI7 下次启动时完成${rollBack ? '回退' : '替换'}；在此之前不能再做修改，要继续修改请先${rollBack ? DATABASE_IMPORT_ACTIONS.cancelRollBack : DATABASE_IMPORT_ACTIONS.cancelReplacement}。`,
   ];
 }
 
 /** One replacement or merge as 导入记录 lists it: when, what it came to, and the backup it made. */
 export function databaseReplacementRecordLine(record: DatabaseReplacementRecordProjection, instant: (iso: string) => string): string {
+  // Why one failed (Issue #434 review): what waited had changed since it was prepared, or its data would not open.
+  const why = record.failure === 'changed' ? '准备好的文件已不完整或被改动' : '它无法打开';
   if (record.kind === 'merge') {
-    const titles = (record.mergedTitles ?? []).map((title) => `《${title}》`).join('、');
+    const named = record.mergedTitles ?? [];
+    const count = record.mergedCount ?? named.length;
+    // The first titles, and 等 when there were more (Issue #434 review).
+    const titles = `${named.map((title) => `《${title}》`).join('、')}${count > named.length ? ' 等' : ''}`;
     const what = record.outcome === 'applied'
-      ? `已从「${record.packageFileName}」合并 ${record.mergedTitles?.length ?? 0} 本图书：${titles}`
-      : `未能从「${record.packageFileName}」合并图书：本机数据保持原样`;
+      ? `已从「${record.packageFileName}」合并 ${count} 本图书：${titles}`
+      : `未能从「${record.packageFileName}」合并图书：${record.failure === 'changed' ? `${why}，` : ''}本机数据保持原样`;
     return `${instant(record.recordedAt)} · ${what} · 合并前备份「${record.backupFileName}」${record.backupPresent ? '' : '（文件不在备份位置）'}`;
   }
   const what = record.kind === 'roll-back'
-    ? record.outcome === 'applied' ? `已回退到「${record.packageFileName}」` : `未能回退到「${record.packageFileName}」：它无法打开，本机数据保持原样`
-    : record.outcome === 'applied' ? `已用「${record.packageFileName}」替换本机全部数据` : `未能用「${record.packageFileName}」替换：它无法打开，本机数据保持原样`;
+    ? record.outcome === 'applied' ? `已回退到「${record.packageFileName}」` : `未能回退到「${record.packageFileName}」：${why}，本机数据保持原样`
+    : record.outcome === 'applied' ? `已用「${record.packageFileName}」替换本机全部数据` : `未能用「${record.packageFileName}」替换：${why}，本机数据保持原样`;
   return `${instant(record.recordedAt)} · ${what} · ${record.kind === 'roll-back' ? '回退前备份' : '替换前备份'}「${record.backupFileName}」${record.backupPresent ? '' : '（文件不在备份位置）'}`;
 }
 

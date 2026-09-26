@@ -215,17 +215,17 @@ The package, `ai7.database-package/1`, is a ZIP of:
 - every other file under the Agent Data Root, except the live store, `export-staging/` and `shell/`;
 - `manifest.json`, last: the Data Version, the software version and schema revision, when and why it was made, what it holds, and each member's size and digest.
 
-It is not encrypted (ADR 0079 §1.6). It holds no Model Service credential, because those live in the platform's protected store. fflate writes no ZIP64, so a package over 4 GB or over 65,534 files is refused with the reason.
+It is not encrypted (ADR 0079 §1.6). It holds no Model Service credential, because those live in the platform's protected store. fflate writes no ZIP64, so a package over 4 GB or over 65,534 files is refused with the reason. The walk of the Agent Data Root reads one directory at a time, and refuses as soon as the names it holds could not fit, or it has visited more than 65,534 directories. What the manifest says the package holds is counted in the same step as the store's copy is made, so no other request writes in between.
 
-`导出数据库…` opens the system's Save dialog; J-12 answers it with `--j12-save-path`. Choosing the file stages the package in `export-staging/` and records the preparation. `按上述方式导出` writes exactly that package with the export ledger's atomic writer, which now also copies a staged file, and records the receipt. The export runs through External Export Policy v2 as its own target kind, `database-export-package`, and both steps are refused (`EXPORT_POLICY_UNAVAILABLE`) at a launch whose policy was not verified, before anything is staged (Issue #434 review). Both take main's long request budget, since a large store takes minutes. A staged package no approval takes is swept when the store next opens, and every entry of the package carries the one fixed archive time, the export's own time being the manifest's `createdAt`. The backups of S86b and S85b will be the same package.
+`导出数据库…` opens the system's Save dialog; J-12 answers it with `--j12-save-path`. Choosing the file stages the package in `export-staging/` and records the preparation. `按上述方式导出` writes exactly that package with the export ledger's atomic writer, which now also copies a staged file, and records the receipt. The export runs through External Export Policy v2 as its own target kind, `database-export-package`, and both steps are refused (`EXPORT_POLICY_UNAVAILABLE`) at a launch whose policy was not verified, before anything is staged (Issue #434 review). Neither runs inside a request (Issue #434 review, V2-UX-EXP-011). Each starts the export's one house-wide activity and answers at once. `inspectDatabaseExports` then reads it: the step (`packing`, `verifying`, `writing` or `committing`) and the bytes read of how many. `cancelDatabaseExport`, 取消导出, stops it until the file is being put in place. A preparation stopped leaves no package, copy or record. An approval reads the prepared file whole before it records the approval, so a stop there leaves the preparation as it was. A stop while the file is written ends with the receipt `EXPORT_CANCELLED` and the destination as it was. Only one export runs at a time (`DATABASE_EXPORT_BUSY`), and the service stops the one under way at shutdown. A staged package no approval takes is swept when the store next opens, and every entry of the package carries the one fixed archive time, the export's own time being the manifest's `createdAt`. The backups of S86b and S85b will be the same package.
 
 定期自动备份 (Issue #434, S86b) is service protocol version 83 and schema revision 56. `src/service/scheduled-backups.ts` owns three append-only relations: the switch's changes (chained), each backup made (its file's name, size and digest), and each backup removed. The switch is off by default.
 
 While the switch is on, the running service writes the same database package into the fixed backup location beside the Agent Data Root, `<data root>-backups`, once a day:
 - the service's background check runs at start, then hourly, and a backup is due when none was made in the day before;
 - turning the switch on starts that check at once: the request only records the switch, and the section reads again until the backup is there;
-- each backup is written as a `.partial` file and renamed into place. If its record cannot then be written, the renamed file is removed;
-- a backup is never written over a file already at its name.
+- each backup is written as a `.partial` file and put in place by the create-only publication every export uses, a hard link that fails when the name is taken. So a file that appeared at the name while the package was written is left as it is, and no backup is recorded (`SCHEDULED_BACKUP_EXISTS`). A volume without hard links cannot hold a backup, and the section says the location is unavailable. If the record cannot then be written, the placed file is removed;
+- what the record says the backup holds is counted with the store's copy it carries.
 
 Each check first removes what a cut-off check left (`.<uuid>.ai7db.partial` and `.partial.store`), then the backups older than fourteen days, each on its own, and only then writes. So a backup that cannot be written never keeps the space of those whose days passed.
 
@@ -236,6 +236,8 @@ A file is removed only while it is still the one AI7 made:
 
 A file found gone is recorded as `missing`. A file at the name that is another is left where it is and recorded as `changed`. Turning the switch off makes no more backups; those kept stay until their fourteen days pass.
 
+Every read of the three ledgers is a stream, verified row by row, that holds no more than it answers (Issue #434 review). The section lists the twenty newest backups kept and counts the rest. A check reads the backups whose days passed sixteen at a time, oldest first, each turn after the last one read.
+
 At shutdown the service stops a check under way before the store closes: the write stops at its next chunk and removes what it wrote. A backup the check could not make is stated in the section, with its reason by the refusal's code, until one is made or the switch is turned off. No External Export Policy approval is involved: the switch is the decision (ADR 0079 §1.7), and nothing is written anywhere but that location.
 
 导入数据库 and 替换本机全部数据 (Issue #434, S86c) are service protocol version 84 and schema revision 57. `src/service/database-package-reader.ts` reads a package through its ZIP central directory, member by member, and refuses it before anything is taken unless:
@@ -243,13 +245,20 @@ At shutdown the service stops a check under way before the store closes: the wri
 - every member path is relative, inside the Agent Data Root, outside `store/` (but for the store's copy), `shell/` and `export-staging/`, compared without regard to case, and a name Windows writes as named;
 - the members are exactly the ZIP's entries, and each one's size and SHA-256 match.
 
+The reader holds every entry to the size its central directory declares (Issue #434 review). Deflated data is inflated 16 KiB of input at a time. An entry that would come to more than it declares, or ends short of it, is damage, refused before any byte past the declared size is kept or handed on. A stored entry's two sizes must be one. A central directory over 16 MiB is refused before it is read.
+
 `导入数据库…` opens the system's Open dialog; J-12 answers it with `--j12-picker-path`. The preview states the file, its origin, its Data Version against this AI7's, what it holds and that every member was verified. A package from a newer Data Version, or of a schema revision this AI7 does not know, is previewed and refused.
 
 `src/service/database-replacement.ts` owns the replacement. The running service cannot replace the files its store holds open, so a replacement is prepared while it runs and applied when the store next opens:
-- **Prepare** extracts the package again, verified, into `<data root>-replacing/incoming`. It then writes the data as it is into the backup location as the same package, origin `pre-replace-backup`, named `AI7 替换前备份 <date time>.ai7db` and kept until the editor deletes it. It writes `intent.json` last.
-- **Apply**, in `EditorialStore.open`, moves the data root's entries into `previous/`, moves the package's in, and opens the store. `shell/` and `export-staging/` stay where they are. Each step's phase is written before the step, and each step can be repeated, so an interrupted apply resumes where it stopped.
+- **Prepare** extracts the package again, verified, into `<data root>-replacing/incoming`, and writes the members it verified to `members.json`. It then writes the data as it is into the backup location as the same package, origin `pre-replace-backup`, named `AI7 替换前备份 <date time>.ai7db` and kept until the editor deletes it. The backup is put in place by the create-only publication every export uses, so a file that appeared at its name is left as it is and nothing is prepared. It writes `intent.json` last, naming the digest of `members.json`.
+- **Prepared only while nothing else writes (Issue #434 review):**
+  - Preparing is refused (`DATABASE_REPLACEMENT_BUSY`) while a Run executes, waits for a place or finishes its cancellation, a Review Run is driven, a job is under way, or a database export writes.
+  - Main refuses it (`DATABASE_REPLACEMENT_UNSAVED`) while any window holds changes not yet saved.
+  - Once it waits, the service takes nothing that writes until AI7 starts again: reads, a search, the way to a Book and `取消替换` only. Every other operation is refused as `DATABASE_REPLACEMENT_WAITING`, one added later included, because `replacement-gate.ts` names what is taken.
+  - Reconnect Preflight admits no waiting Run and 定期自动备份 makes no backup meanwhile. So nothing is changed that the replacement would lose, and `取消替换` lets the data be written again.
+- **Apply**, in `EditorialStore.open`, first verifies `incoming/` again against `members.json`: every member it names, of its size and SHA-256, and nothing else. When what waits was emptied or changed since, nothing moves: the phase is `refused`, and the replacement is recorded as failed with `failure: 'changed'` (「准备好的文件已不完整或被改动」). Otherwise it moves the data root's entries into `previous/`, moves the package's in, and opens the store. `shell/` and `export-staging/` stay where they are. Each step's phase is written before the step, and each step can be repeated, so an interrupted apply resumes where it stopped.
 - **Failure:** a store that will not open is moved into `discarded/`, and the data from `previous/` is moved back.
-- **Recording:** `database_replacements` records the replacement in the data that opened: applied, in the data it brought in, or failed, in the data it spared. Only then is the staging place removed.
+- **Recording:** `database_replacements` records the replacement in the data that opened: applied, in the data it brought in, or failed, in the data it spared, the failure's reason (`unopenable` or `changed`) in its canonical record only. Only then is the staging place removed. The ledger is read as a stream, verified row by row, holding the twenty newest and counting the rest.
 
 `回退到替换前的数据` prepares the same replacement from the latest replacement's backup, and backs the data up first as well. `现在关闭 AI7` closes the application, unless a window holds changes not yet saved.
 
@@ -259,17 +268,28 @@ The backup before a replacement or a merge and the 定期自动备份 check writ
 - `seed`: `books`, fixed to the Books chosen. A reference to another Book is refused.
 - `owned`: a row that references an owned row, or that an owned row references.
 - `dependent`: an import draft a committed import names.
-- `shared`: a house row an owned row references, taken when this store lacks it — a content object, a workflow profile, the service lifetime a journal entry was written in.
-- `excluded`: said as a notice — Series membership and Series knowledge, 资料库 decisions, the 编辑工作区方案's enablement.
+- `shared`: a house row an owned row references, taken when this store lacks it — a content object, a workflow profile, the service lifetime a journal entry was written in, the 编辑工作区方案 a Book enabled.
+- `excluded`: said as a notice — Series membership and Series knowledge, 资料库 decisions.
 - `transient` and `house`: never taken.
 - `derived`: the search index, filled for the working text taken.
 
-A few references the store keeps by value — each import record's commit, each journal entry's lifetime — are followed as if they were foreign keys. The rows go in one transaction, in any order: foreign keys are checked at commit, and the store's insert triggers look only for a conflicting row, never for a parent. The stored files they name are copied first. A Book whose 内部编号 is another Book's here merges without one.
+A few references the store keeps by value — each import record's commit, each journal entry's lifetime — are followed as if they were foreign keys. The relations go in one transaction, in any order: foreign keys are checked at commit, and the store's insert triggers look only for a conflicting row, never for a parent. The rows of each relation go in the order they were written, which is what the one trigger comparing rows of its own relation asks for: a Book's 方案 pins, Revision 1 before Revision 2. The stored files they name are copied first. A Book whose 内部编号 is another Book's here merges without one.
+
+A Book's enablement of the 编辑工作区方案 and the 权限侧车 revisions it pinned are its own, because its prepared Tasks name them (Issue #434 review). The 方案 itself is the one every AI7 carries, fixed to its bytes. Data that has not installed it gains it whole from a Book that enabled it: its installation, both sidecar revisions as installing writes them, and the carrier it retains. Data that has installed it keeps its own. A J-03 Task's plan is read against the credential reference that plan froze, as against its pin, never against this computer's connection. So a Book from another computer opens with its Tasks as recorded, and any new Run still needs this computer's own connection.
 
 A merge uses the replacement's staging place:
-- **Prepare:** extract the package, open it there as a store of its own (which brings it to this revision and checks it whole), plan which of its Books are new, already here or same-titled, back up the data as it is (`AI7 合并前备份 …`, origin `pre-merge-backup`), and write an intent of kind `merge`.
-- **Apply,** at the next open, onto the data as it is then: the store's files are copied aside, the Books are merged into the closed store, and the store opens. A merge or an open that fails puts the saved files back, and the data opens as it was. An interruption after the merge's commit finds its Books there and merges nothing twice.
-- **Recording:** `database_merges` records each merge, applied or failed, with its Books and notices. 导入记录 lists merges beside replacements. 回退 reads the replacements alone.
+- **Prepare:** extract the package, open it there as a store of its own (which brings it to this revision and checks it whole), and write the members as they then stand to `members.json`. Then plan which of its Books are new, already here or same-titled, back up the data as it is (`AI7 合并前备份 …`, origin `pre-merge-backup`), and write an intent of kind `merge` naming the digest of `members.json`. Unlike a replacement, a waiting merge refuses nothing: it applies onto the data as it is at the next open, so a change made meanwhile stays.
+- **Apply,** at the next open, onto the data as it is then:
+  - `incoming/` is first verified against `members.json`, as for a replacement. A staging place changed since is `refused`, and the merge is recorded failed with `failure: 'changed'`.
+  - Otherwise the store's files are copied aside, the Books are merged into the closed store, and the store opens.
+  - A merge or an open that fails puts the saved files back, and the data opens as it was.
+  - An interruption after the merge's commit finds its Books there and merges nothing twice.
+- **Recording:** `database_merges` records each merge, applied or failed, with its Books and notices, and a failure's reason in its canonical record only. 导入记录 lists merges beside replacements, the two ledgers read as streams merged newest first. 回退 reads the replacements alone.
+- **Bounded (Issue #434 review):**
+  - The plan streams the package's Books. The preview lists the first fifty and counts them all as new, already here or same-titled.
+  - A waiting merge lists fifty and counts every Book it takes.
+  - A record names ten titles and counts the rest.
+  - The file references a merge copies are read as streams.
 
 升级前备份 (Issue #433, S85b; ADR 0079 §1.1, §1.3, §1.4) is service protocol version 86 and adds no schema revision. `src/service/data-version.ts` classifies every schema revision after the one the first packaged release freezes as Data Version 1: additive stays inside the Data Version, and breaking raises it by one. `dataVersionAt` counts the breaking revisions, and the unit suite holds `DATA_VERSION` to it. Nothing is frozen before that release, so the list is empty and every revision reads as Data Version 1.
 

@@ -12,6 +12,7 @@ import {
   DATABASE_REPLACE_CONSEQUENCE,
   DATABASE_REPLACEMENT_NO_RECORDS,
   databaseImportBookLine,
+  databaseImportMoreBooksLine,
   databaseImportPreviewRows,
   databaseImportRefusalLine,
   databasePendingLines,
@@ -185,7 +186,7 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
       else if (chosen === 'merge') void merge(file.previewId);
     });
     confirm.disabled = true;
-    const mergeable = file.books.some((book) => book.status !== 'present');
+    const mergeable = file.bookCounts.new + file.bookCounts.sameTitle > 0;
     const shown: HTMLElement[] = [];
     const option = (value: 'replace' | 'merge', text: string, details: HTMLElement): HTMLLabelElement => {
       const radio = el('input');
@@ -217,6 +218,9 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
       item.dataset['status'] = book.status;
       books.append(item);
     }
+    // A package of many Books lists its first ones and counts the rest (Issue #434 review).
+    const more = databaseImportMoreBooksLine(file.books.length, file.bookCounts.new + file.bookCounts.present + file.bookCounts.sameTitle);
+    if (more !== null) books.append(el('li', 'database-merge-books-more', more));
     mergeDetails.append(el('p', 'attention-note', DATABASE_MERGE_CONSEQUENCE), books,
       ...file.mergeNotices.map((notice) => el('p', 'field-note database-merge-notice', DATABASE_MERGE_NOTICE_LINES[notice])));
     choices.append(

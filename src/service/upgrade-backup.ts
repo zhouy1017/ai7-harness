@@ -82,14 +82,14 @@ export async function backUpBeforeUpgrade(db: DatabaseSync, dataRoot: string, op
     // Never over a file already at that name: the backup is only ever a new file.
     if (!(await absent(target))) throw new Error('The backup name is taken.');
     partial = join(location, `.${randomUUID()}${DATABASE_PACKAGE_EXTENSION}.partial`);
-    const written = await writeDatabasePackage(db, dataRoot, partial, {
+    const written = await writeDatabasePackage(db, dataRoot, partial, () => ({
       dataVersion: fromDataVersion,
       softwareVersion: fromSoftwareVersion ?? options.softwareVersion,
       schemaRevision: revision,
       createdAt: options.now.toISOString(),
       origin: 'pre-upgrade-backup',
       contents: contentsOf(db),
-    });
+    }));
     await rename(partial, target);
     return {
       fromDataVersion,

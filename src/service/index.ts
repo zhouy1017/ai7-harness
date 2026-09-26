@@ -34,6 +34,7 @@ import { LOCAL_DETERMINISTIC_ROUTE } from './provider/egress-gate.js';
 import type { DormantHarnessRuntime } from './runtime.js';
 import type { EditorialStore } from './store.js';
 import type { CooperativeJobOwner } from './cooperative-jobs.js';
+import { REPLACEMENT_WAITING_MESSAGE, replacementBlockedBy, takenWhileReplacementWaits } from './replacement-gate.js';
 import type { BaselineAnalysisExecutionOwner } from './analysis/execution.js';
 import type { LaunchBinding } from './analysis/baseline-analysis-store.js';
 import type { ReviewRunDriver } from './review/review-run-driver.js';
@@ -133,6 +134,23 @@ interface ConnectivityContext {
   waitingFor(): Promise<WaitingFor>;
 }
 
+/**
+ * A replacement is prepared only while nothing else would write (Issue #434 review): no Run executing, queued or finishing
+ * its cancellation, no Review Run driven, no job under way and no database export writing. What any of them wrote after the
+ * backup would be lost with the data the replacement replaces.
+ */
+function requireNothingRunning(
+  store: EditorialStore,
+  jobs: CooperativeJobOwner,
+  analysisExecution: BaselineAnalysisExecutionOwner,
+  reviewRuns: ReviewRunDriver,
+): void {
+  const blocked = replacementBlockedBy({
+    runsIdle: analysisExecution.idle, reviewRunsDriving: reviewRuns.driving, jobsBusy: jobs.busy, exportRunning: store.databaseExportRunning(),
+  });
+  if (blocked !== null) throw new StoreErrorClass('DATABASE_REPLACEMENT_BUSY', blocked);
+}
+
 async function dispatch(
   store: EditorialStore,
   harness: DormantHarnessRuntime,
@@ -145,6 +163,11 @@ async function dispatch(
   connectivity: ConnectivityContext,
 ): Promise<ServiceSuccessResponse> {
   const analysisProgress = (runRecordId: string) => analysisExecution.progressFor(runRecordId);
+  // 替换本机全部数据 waits for AI7's next start (Issue #434 review): until then nothing is written, so no change made meanwhile
+  // is lost with the data the replacement replaces — only reads, a search, and 取消替换 are taken.
+  if (store.replacementWaiting() && !takenWhileReplacementWaits(request.op)) {
+    throw new StoreErrorClass('DATABASE_REPLACEMENT_WAITING', REPLACEMENT_WAITING_MESSAGE);
+  }
   switch (request.op) {
     case 'ready':
       return { id: request.id, ok: true, op: request.op, result: harness.readiness };
@@ -579,16 +602,17 @@ async function dispatch(
       };
     case 'inspectDataVersion':
       return { id: request.id, ok: true, op: request.op, result: store.inspectDataVersion() };
-    // Only under this launch's verified External Export Policy, as every other export (Issue #434, S86a review).
+    // Only under this launch's verified External Export Policy, as every other export (Issue #434, S86a review), and off the
+    // request: each answers at once with the export's activity, which the window follows (Issue #434 review, V2-UX-EXP-011).
     case 'prepareDatabaseExport':
       return {
         id: request.id, ok: true, op: request.op,
-        result: await store.prepareDatabaseExport(request.input.destination, launchPolicy.externalExport.currentExportEffectAvailable),
+        result: store.startDatabaseExportPreparation(request.input.destination, launchPolicy.externalExport.currentExportEffectAvailable),
       };
     case 'approveDatabaseExport':
       return {
         id: request.id, ok: true, op: request.op,
-        result: await store.approveDatabaseExport(request.input.preparationId, launchPolicy.externalExport.currentExportEffectAvailable),
+        result: store.startDatabaseExportApproval(request.input.preparationId, launchPolicy.externalExport.currentExportEffectAvailable),
       };
     case 'inspectDatabaseExports':
       return { id: request.id, ok: true, op: request.op, result: store.inspectDatabaseExports() };
@@ -599,15 +623,19 @@ async function dispatch(
     case 'inspectDatabaseImport':
       return { id: request.id, ok: true, op: request.op, result: await store.inspectDatabaseImport(request.input.source) };
     case 'prepareDatabaseReplacement':
+      requireNothingRunning(store, jobs, analysisExecution, reviewRuns);
       return { id: request.id, ok: true, op: request.op, result: await store.prepareDatabaseReplacement(request.input.previewId) };
     case 'cancelDatabaseReplacement':
       return { id: request.id, ok: true, op: request.op, result: await store.cancelDatabaseReplacement(request.input.replacementId) };
     case 'inspectDatabaseReplacements':
       return { id: request.id, ok: true, op: request.op, result: await store.inspectDatabaseReplacements() };
     case 'rollBackDatabaseReplacement':
+      requireNothingRunning(store, jobs, analysisExecution, reviewRuns);
       return { id: request.id, ok: true, op: request.op, result: await store.rollBackDatabaseReplacement(request.input.replacementId) };
     case 'prepareDatabaseMerge':
       return { id: request.id, ok: true, op: request.op, result: await store.prepareDatabaseMerge(request.input.previewId) };
+    case 'cancelDatabaseExport':
+      return { id: request.id, ok: true, op: request.op, result: store.cancelDatabaseExport(request.input.activityId) };
     case 'proposeSeriesKnowledge':
       return { id: request.id, ok: true, op: request.op, result: store.proposeSeriesKnowledge(request.input) };
     case 'inspectSeriesKnowledgeReview':
@@ -1372,7 +1400,10 @@ async function run(): Promise<void> {
     // OFF-013: a Run left waiting when AI7 last closed is looked at once the service is active again, and then
     // periodically while it runs — never by a launch of its own, which connectivity returning cannot cause.
     void connectivity.preflight().catch(() => undefined);
-    preflightTimer = setInterval(() => void connectivity.preflight().catch(() => undefined), RECONNECT_PREFLIGHT_INTERVAL_MS);
+    // A waiting Run is not admitted while a replacement waits: it would write what the replacement then loses (Issue #434 review).
+    preflightTimer = setInterval(() => {
+      if (!openStore.replacementWaiting()) void connectivity.preflight().catch(() => undefined);
+    }, RECONNECT_PREFLIGHT_INTERVAL_MS);
     preflightTimer.unref();
     // 定期自动备份 (Issue #434, S86b): asked at start, then hourly while the service runs; a backup is made only when one is due.
     void openStore.runScheduledBackupIfDue().catch(() => undefined);
@@ -1430,6 +1461,8 @@ async function run(): Promise<void> {
       // A backup under way stops at once and removes what it wrote, so none is left half-made when the store closes (Issue
       // #434 review).
       const backupsStopped = store?.stopScheduledBackups();
+      // A database export under way stops as 取消导出 stops it, and leaves no package it was writing (Issue #434 review).
+      const exportsStopped = store?.stopDatabaseExports();
       jobs?.dispose();
       // The Review Run loop stops first and starts no further category; the owner then interrupts the
       // Run in flight, and the loop records what that Run came to before the store closes.
@@ -1438,6 +1471,7 @@ async function run(): Promise<void> {
       await reviewRunsStopped;
       await harness?.dispose();
       await backupsStopped;
+      await exportsStopped;
     } finally {
       store?.close();
     }

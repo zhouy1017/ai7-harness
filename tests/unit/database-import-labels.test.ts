@@ -13,6 +13,7 @@ import {
   DATABASE_REPLACE_CONSEQUENCE,
   DATABASE_REPLACEMENT_NO_RECORDS,
   databaseImportBookLine,
+  databaseImportMoreBooksLine,
   databaseImportPreviewRows,
   databaseImportRefusalLine,
   databaseImportVersionLine,
@@ -44,6 +45,7 @@ const preview: DatabaseImportPreviewProjection = {
   contents: { books: 3, sourceVersions: 5, libraryMaterials: 2, series: 1 },
   members: 12,
   books: [],
+  bookCounts: { new: 0, present: 0, sameTitle: 0 },
   mergeNotices: [],
 };
 
@@ -57,6 +59,8 @@ const record: DatabaseReplacementRecordProjection = {
   recordedAt: '2026-09-25T02:05:00.000Z',
   backupPresent: true,
   mergedTitles: null,
+  mergedCount: null,
+  failure: null,
 };
 
 describe('导入数据库\'s words', () => {
@@ -118,15 +122,15 @@ describe('导入数据库\'s words', () => {
   });
 
   it('states the replacement waiting, each replacement recorded, and the roll-back', () => {
-    expect(databasePendingLines({ kind: 'replace', packageFileName: 'AI7 数据库.ai7db', backupFileName: 'AI7 替换前备份 1.ai7db', mergeBooks: null })).toEqual([
+    expect(databasePendingLines({ kind: 'replace', packageFileName: 'AI7 数据库.ai7db', backupFileName: 'AI7 替换前备份 1.ai7db', mergeBooksTotal: null })).toEqual([
       '已准备好用「AI7 数据库.ai7db」替换本机全部数据。',
       '本机现在的数据已备份为「AI7 替换前备份 1.ai7db」，放在备份位置。',
-      'AI7 下次启动时完成替换；在此之前再做的修改不会保留。',
+      'AI7 下次启动时完成替换；在此之前不能再做修改，要继续修改请先取消替换。',
     ]);
-    expect(databasePendingLines({ kind: 'roll-back', packageFileName: 'AI7 替换前备份 1.ai7db', backupFileName: 'AI7 替换前备份 2.ai7db', mergeBooks: null })).toEqual([
+    expect(databasePendingLines({ kind: 'roll-back', packageFileName: 'AI7 替换前备份 1.ai7db', backupFileName: 'AI7 替换前备份 2.ai7db', mergeBooksTotal: null })).toEqual([
       '已准备好回退到「AI7 替换前备份 1.ai7db」。',
       '本机现在的数据已备份为「AI7 替换前备份 2.ai7db」，放在备份位置。',
-      'AI7 下次启动时完成回退；在此之前再做的修改不会保留。',
+      'AI7 下次启动时完成回退；在此之前不能再做修改，要继续修改请先取消回退。',
     ]);
     expect([
       databaseReplacementRecordLine(record, instant),
@@ -138,6 +142,14 @@ describe('导入数据库\'s words', () => {
       '〔09-25T02:05〕 · 未能用「AI7 数据库.ai7db」替换：它无法打开，本机数据保持原样 · 替换前备份「AI7 替换前备份 2026-09-25 10-00-00.ai7db」（文件不在备份位置）',
       '〔09-25T02:05〕 · 已回退到「AI7 替换前备份 1.ai7db」 · 回退前备份「AI7 替换前备份 2026-09-25 10-00-00.ai7db」',
       '〔09-25T02:05〕 · 未能回退到「AI7 替换前备份 1.ai7db」：它无法打开，本机数据保持原样 · 回退前备份「AI7 替换前备份 2026-09-25 10-00-00.ai7db」',
+    ]);
+    // One refused because what waited had changed since it was prepared says so (Issue #434 review).
+    expect([
+      databaseReplacementRecordLine({ ...record, outcome: 'failed', failure: 'changed' }, instant),
+      databaseReplacementRecordLine({ ...record, kind: 'roll-back', outcome: 'failed', failure: 'changed', packageFileName: 'AI7 替换前备份 1.ai7db' }, instant),
+    ]).toEqual([
+      '〔09-25T02:05〕 · 未能用「AI7 数据库.ai7db」替换：准备好的文件已不完整或被改动，本机数据保持原样 · 替换前备份「AI7 替换前备份 2026-09-25 10-00-00.ai7db」',
+      '〔09-25T02:05〕 · 未能回退到「AI7 替换前备份 1.ai7db」：准备好的文件已不完整或被改动，本机数据保持原样 · 回退前备份「AI7 替换前备份 2026-09-25 10-00-00.ai7db」',
     ]);
     expect([databaseReplacementRecordsLabel(0, 0), databaseReplacementRecordsLabel(2, 2), databaseReplacementRecordsLabel(20, 23)])
       .toEqual(['导入记录（0）', '导入记录（2）', '导入记录（最近 20 次，共 23 次）']);
@@ -163,22 +175,28 @@ describe('导入数据库\'s words', () => {
     expect(DATABASE_MERGE_NOTICE_LINES).toEqual({
       series: '书系关系与书系知识不随图书合并。',
       'library-materials': '资料库的条目不随图书合并。',
-      'workspace-profile': '编辑工作区方案的启用不随图书合并；需要时在本机为这本书重新启用。',
       'internal-number': '内部编号已被本机其他图书使用的，合并后不带内部编号。',
     });
-    expect(databasePendingLines({ kind: 'merge', packageFileName: 'AI7 数据库.ai7db', backupFileName: 'AI7 合并前备份 1.ai7db', mergeBooks: [book, { ...book, bookId: 'c' }] })).toEqual([
-      '已准备好把「AI7 数据库.ai7db」里的 2 本图书合并到本机。',
+    // The count is every Book the merge takes, however few it lists (Issue #434 review).
+    expect(databasePendingLines({ kind: 'merge', packageFileName: 'AI7 数据库.ai7db', backupFileName: 'AI7 合并前备份 1.ai7db', mergeBooksTotal: 73 })).toEqual([
+      '已准备好把「AI7 数据库.ai7db」里的 73 本图书合并到本机。',
       '本机现在的数据已备份为「AI7 合并前备份 1.ai7db」，放在备份位置。',
       'AI7 下次启动时完成合并；在此之前做的修改都会保留。',
     ]);
-    const merged = { ...record, kind: 'merge' as const, backupFileName: 'AI7 合并前备份 1.ai7db', mergedTitles: ['山河故人', '空白之书'] };
+    const merged = { ...record, kind: 'merge' as const, backupFileName: 'AI7 合并前备份 1.ai7db', mergedTitles: ['山河故人', '空白之书'], mergedCount: 2 };
     expect([
       databaseReplacementRecordLine(merged, instant),
       databaseReplacementRecordLine({ ...merged, outcome: 'failed', backupPresent: false }, instant),
+      // A merge of more Books than its record names says 等; one refused because what waited had changed says so.
+      databaseReplacementRecordLine({ ...merged, mergedCount: 12 }, instant),
+      databaseReplacementRecordLine({ ...merged, outcome: 'failed', failure: 'changed' }, instant),
     ]).toEqual([
       '〔09-25T02:05〕 · 已从「AI7 数据库.ai7db」合并 2 本图书：《山河故人》、《空白之书》 · 合并前备份「AI7 合并前备份 1.ai7db」',
       '〔09-25T02:05〕 · 未能从「AI7 数据库.ai7db」合并图书：本机数据保持原样 · 合并前备份「AI7 合并前备份 1.ai7db」（文件不在备份位置）',
+      '〔09-25T02:05〕 · 已从「AI7 数据库.ai7db」合并 12 本图书：《山河故人》、《空白之书》 等 · 合并前备份「AI7 合并前备份 1.ai7db」',
+      '〔09-25T02:05〕 · 未能从「AI7 数据库.ai7db」合并图书：准备好的文件已不完整或被改动，本机数据保持原样 · 合并前备份「AI7 合并前备份 1.ai7db」',
     ]);
+    expect([databaseImportMoreBooksLine(50, 50), databaseImportMoreBooksLine(50, 73)]).toEqual([null, '…以及另外 23 本']);
     expect([DATABASE_IMPORT_STATUS_LINES.preparingMerge, DATABASE_IMPORT_STATUS_LINES.mergePrepared, DATABASE_IMPORT_STATUS_LINES.mergeFailed])
       .toEqual(['正在备份本机数据并准备合并…', '已准备好合并，AI7 下次启动时完成。', '未能准备合并。']);
   });

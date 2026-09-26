@@ -156,6 +156,7 @@ export const IPC_CHANNELS = {
   rollBackDatabaseReplacement: 'ai7:j12:roll-back-database-replacement',
   prepareDatabaseMerge: 'ai7:j12:prepare-database-merge',
   quitApplication: 'ai7:j12:quit-application',
+  cancelDatabaseExport: 'ai7:j12:cancel-database-export',
   applyChangeSuggestion: 'ai7:j05:apply-change-suggestion',
   applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
   reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
@@ -5875,10 +5876,33 @@ export interface DatabaseExportReceiptProjection {
   readonly recordedAt: string | null;
 }
 
-/** The approved database exports, newest first, and how many there are. */
+/**
+ * The database export under way, or how the last one in this launch ended (Issue #434 review; V2-UX-EXP-011). A preparation
+ * packs the store; an approval reads the prepared file, writes it, and reads it back — `completedBytes` of `totalBytes` —
+ * and `cancellable` says whether 取消导出 still stops it, which it does until the file is being put in place. Once it ends:
+ * `prepared` with the preparation, `finished` with the approval's receipt, `cancelled` with nothing recorded, or `failed`
+ * with why.
+ */
+export interface DatabaseExportActivityProjection {
+  readonly activityId: string;
+  readonly kind: 'prepare' | 'approve';
+  readonly state: 'running' | 'prepared' | 'finished' | 'cancelled' | 'failed';
+  readonly step: 'packing' | 'verifying' | 'writing' | 'committing' | null;
+  readonly completedBytes: number;
+  readonly totalBytes: number;
+  readonly cancellable: boolean;
+  /** What a preparation made once it has, and what an approval writes. */
+  readonly preparation: DatabaseExportPreparationProjection | null;
+  /** What an approval came to, once it did. */
+  readonly receipt: DatabaseExportReceiptProjection | null;
+  readonly failure: { readonly code: string; readonly message: string } | null;
+}
+
+/** The approved database exports, newest first, how many there are, and the export under way. */
 export interface DatabaseExportsProjection {
   readonly exports: ReadonlyArray<DatabaseExportReceiptProjection>;
   readonly total: number;
+  readonly activity: DatabaseExportActivityProjection | null;
 }
 
 // ---- 设置 › 数据与存储 › 定期自动备份 (Issue #434, plan slice S86b; V2-UX-DSTO-018; ADR 0079 §1.4, §1.7) ---------------
@@ -5950,7 +5974,7 @@ export interface DatabaseImportBookProjection {
 }
 
 /** What stays behind when a package's Books merge: Series, 资料库 items, the 编辑工作区方案's enablement, a 内部编号 taken here. */
-export type DatabaseMergeNotice = 'series' | 'library-materials' | 'workspace-profile' | 'internal-number';
+export type DatabaseMergeNotice = 'series' | 'library-materials' | 'internal-number';
 
 /**
  * Whether this AI7 can take a package's data: the same Data Version, and a schema revision it knows. A package from a newer
@@ -5981,8 +6005,10 @@ export interface DatabaseImportPreviewProjection {
   readonly contents: DatabaseExportContentsProjection;
   /** How many files the package holds, each verified. */
   readonly members: number;
-  /** Its Books, as merging would take them (S86d). */
+  /** Its first Books, as merging would take them (S86d), at most fifty; the rest are counted (Issue #434 review). */
   readonly books: ReadonlyArray<DatabaseImportBookProjection>;
+  /** How many of its Books merging would take as new, leave as already here, or take beside one of the same title. */
+  readonly bookCounts: { readonly new: number; readonly present: number; readonly sameTitle: number };
   readonly mergeNotices: ReadonlyArray<DatabaseMergeNotice>;
 }
 
@@ -5996,8 +6022,10 @@ export interface DatabasePendingReplacementProjection {
   readonly contents: DatabaseExportContentsProjection;
   readonly backupFileName: string;
   readonly preparedAt: string;
-  /** A merge's Books: the ones it takes, each with how (S86d); `null` for a replacement. */
+  /** A merge's first Books: the ones it takes, each with how (S86d), at most fifty; `null` for a replacement. */
   readonly mergeBooks: ReadonlyArray<DatabaseImportBookProjection> | null;
+  /** How many Books the merge takes; `null` for a replacement. */
+  readonly mergeBooksTotal: number | null;
   readonly mergeNotices: ReadonlyArray<DatabaseMergeNotice>;
 }
 
@@ -6015,9 +6043,19 @@ export interface DatabaseReplacementRecordProjection {
   readonly recordedAt: string;
   /** Whether its backup is still in the backup location. */
   readonly backupPresent: boolean;
-  /** The titles of the Books a merge took; `null` for a replacement. */
+  /** The first titles of the Books a merge took, at most ten; `null` for a replacement. */
   readonly mergedTitles: ReadonlyArray<string> | null;
+  /** How many Books a merge took; `null` for a replacement. */
+  readonly mergedCount: number | null;
+  /**
+   * Why one that failed failed: its data would not open, or what waited was no longer the package the preparation verified
+   * (Issue #434 review). `null` for one applied, and for one that failed before this was recorded.
+   */
+  readonly failure: DatabaseReplacementFailure | null;
 }
+
+/** Why a replacement failed, as its record says. */
+export type DatabaseReplacementFailure = 'unopenable' | 'changed';
 
 /** 替换本机全部数据: the replacement waiting for AI7's next start, if any, and the replacements this data records. */
 export interface DatabaseReplacementsProjection {
@@ -8507,10 +8545,13 @@ export interface ServiceOperationMap {
   inspectSeriesKnowledgeCandidates: { input: { seriesId: string; after: SeriesKnowledgeCandidatesCursor | null }; output: SeriesKnowledgeCandidatesPageProjection };
   inspectSeriesKnowledgeRevisions: { input: { seriesId: string; itemId: string; before: number | null }; output: SeriesKnowledgeRevisionsProjection };
   inspectDataVersion: { input: Record<string, never>; output: DataVersionProjection };
-  /** 导出数据库 (Issue #434, S86a): the destination the Save dialog answered becomes one preparation of the package. */
-  prepareDatabaseExport: { input: { destination: string }; output: DatabaseExportPreparationProjection };
-  /** `按上述方式导出`: the one approval of one unchanged preparation, and the write it permits. */
-  approveDatabaseExport: { input: { preparationId: string }; output: DatabaseExportReceiptProjection };
+  /**
+   * 导出数据库 (Issue #434, S86a): the destination the Save dialog answered becomes one preparation of the package, packed off
+   * the request; answers at once with the export's activity (V2-UX-EXP-011).
+   */
+  prepareDatabaseExport: { input: { destination: string }; output: DatabaseExportActivityProjection };
+  /** `按上述方式导出`: the one approval of one unchanged preparation, and the write it permits, carried out the same way. */
+  approveDatabaseExport: { input: { preparationId: string }; output: DatabaseExportActivityProjection };
   inspectDatabaseExports: { input: Record<string, never>; output: DatabaseExportsProjection };
   /** 定期自动备份 (Issue #434, S86b): the switch and the backups kept. */
   inspectScheduledBackups: { input: Record<string, never>; output: ScheduledBackupsProjection };
@@ -8526,6 +8567,8 @@ export interface ServiceOperationMap {
   rollBackDatabaseReplacement: { input: { replacementId: string }; output: DatabaseReplacementsProjection };
   /** `只导入其中的图书` (Issue #434, S86d): the local data backed up, and the previewed package's new Books merging at the next start. */
   prepareDatabaseMerge: { input: { previewId: string }; output: DatabaseReplacementsProjection };
+  /** 取消导出: stops the export under way until it begins putting the file in place. */
+  cancelDatabaseExport: { input: { activityId: string }; output: DatabaseExportActivityProjection };
   /**
    * AI7 Apply for Change Suggestions (Issue #408). The batch form is 确认应用 on 审阅's confirmation
    * strip (Issue #417): one Effect over exactly the suggestions the strip named, all or none.
@@ -8877,9 +8920,12 @@ export interface RendererApi {
   inspectSeriesKnowledgeCandidates(input: { seriesId: string; after: SeriesKnowledgeCandidatesCursor | null }): Promise<SeriesKnowledgeCandidatesPageProjection>;
   inspectSeriesKnowledgeRevisions(input: { seriesId: string; itemId: string; before: number | null }): Promise<SeriesKnowledgeRevisionsProjection>;
   inspectDataVersion(): Promise<DataVersionProjection>;
-  /** 导出数据库… (Issue #434, S86a): the platform's Save dialog, then the preparation of the package for the chosen file. */
-  chooseDatabaseExportDestination(): Promise<{ outcome: 'cancelled' } | { outcome: 'prepared'; preparation: DatabaseExportPreparationProjection }>;
-  approveDatabaseExport(input: { preparationId: string }): Promise<DatabaseExportReceiptProjection>;
+  /**
+   * 导出数据库… (Issue #434, S86a): the platform's Save dialog, then the preparation of the package for the chosen file — begun,
+   * and followed through `inspectDatabaseExports` (V2-UX-EXP-011).
+   */
+  chooseDatabaseExportDestination(): Promise<{ outcome: 'cancelled' } | { outcome: 'preparing'; activity: DatabaseExportActivityProjection }>;
+  approveDatabaseExport(input: { preparationId: string }): Promise<DatabaseExportActivityProjection>;
   inspectDatabaseExports(): Promise<DatabaseExportsProjection>;
   inspectScheduledBackups(): Promise<ScheduledBackupsProjection>;
   setScheduledBackup(input: SetScheduledBackupInput): Promise<ScheduledBackupsProjection>;
@@ -8892,6 +8938,7 @@ export interface RendererApi {
   prepareDatabaseMerge(input: { previewId: string }): Promise<DatabaseReplacementsProjection>;
   /** `现在关闭 AI7`: AI7 closes, unless a window holds changes not yet saved; a prepared replacement completes at the next start. */
   quitApplication(): Promise<{ outcome: 'quitting' } | { outcome: 'blocked' }>;
+  cancelDatabaseExport(input: { activityId: string }): Promise<DatabaseExportActivityProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */
   applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): Promise<ManuscriptApplyCommandProjection>;
