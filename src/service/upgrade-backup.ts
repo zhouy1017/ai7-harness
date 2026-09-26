@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, readFile, rm } from 'node:fs/promises';
+import { lstat, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
 import { DataVersionError, SOFTWARE_VERSION, breakingChanges, dataVersionAt, readUpgrade, type ClassifiedSchemaRevision, type DataVersionUpgrade } from './data-version.js';
 import { DATABASE_PACKAGE_EXTENSION, writeDatabasePackage } from './database-exports.js';
-import { writeAtomic } from './database-replacement.js';
+import { readSmallFile, writeAtomic } from './database-replacement.js';
 import { takeFreeName } from './manuscript-export.js';
 import { ensureBackupLocation } from './scheduled-backups.js';
 
@@ -113,23 +113,19 @@ function pendingPath(dataRoot: string): string {
 
 /**
  * What an earlier open noted and did not record: `null` only when there is no note at all. A note that does not read as AI7's,
- * or is larger than any AI7 writes, is refused, never taken as none (Issue #433 review): its size is known before any of it is
- * read.
+ * or is larger than any AI7 writes, is refused, never taken as none (Issue #433 review). It is read through the one handle it
+ * is inspected by, never more of it than that bound, so a note that grows or is replaced as it is read takes no more.
  */
 async function readPendingUpgrade(dataRoot: string): Promise<PendingUpgrade | null> {
-  const path = pendingPath(dataRoot);
-  let size: number;
+  let text: string | null;
   try {
-    const found = await lstat(path);
-    if (!found.isFile()) throw unreadableNote();
-    size = found.size;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    text = await readSmallFile(pendingPath(dataRoot), MAX_NOTE_BYTES);
+  } catch {
     throw unreadableNote();
   }
-  if (size > MAX_NOTE_BYTES) throw unreadableNote();
+  if (text === null) return null;
   try {
-    const stored: unknown = JSON.parse(await readFile(path, 'utf8'));
+    const stored: unknown = JSON.parse(text);
     if (!isRecord(stored) || Object.keys(stored).length !== 2 || typeof stored.json !== 'string' || typeof stored.sha256 !== 'string' ||
       sha256Hex(stored.json) !== stored.sha256) throw unreadableNote();
     const record = parseCanonicalJson(stored.json);

@@ -324,7 +324,7 @@ When an open finds the store at a lower Data Version than this software's:
     - A note carries at most sixteen. An open that would carry one more upgrades nothing and refuses with `UPGRADE_NOTE_FULL`.
     - A new store carries nothing on.
   - An upgrade already recorded is never recorded twice: the ledger is searched for the whole upgrade, as a stream. A carried one already recorded adds no record at all. The note is cleared once the records are written.
-  - A note that does not read as AI7's refuses the open with `UPGRADE_NOTE_UNREADABLE`, since its upgrade's backup could no longer be named. So does one carrying more than sixteen, or one larger than 1 MiB (its size is read before any of it); the largest note AI7 writes stays well under that.
+  - A note that does not read as AI7's refuses the open with `UPGRADE_NOTE_UNREADABLE`, since its upgrade's backup could no longer be named. So does one carrying more than sixteen, or one larger than 1 MiB; the largest note AI7 writes stays well under that. The note is read by `readSmallFile` through the one handle it is inspected by, never more of it than that bound.
 - The version record of that open carries the upgrade: the Data Version and schema revision it came from, the software that last opened it, the classified changes, and the backup's name, size and digest. Every read checks it.
 
 数据与存储's 版本 states the latest upgrade, the backup and how to go back. Going back restores the data only, through the earlier software's `导入数据库 › 替换本机全部数据`; this software previews such a backup as an older Data Version and does not take it. The earlier software cannot open the upgraded data, so the steps move that data aside first (Issue #433 review):
