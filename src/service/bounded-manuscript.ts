@@ -2541,6 +2541,7 @@ function requireManuscriptReimportTargetSchema(
   includeEvaluationRecordTables ||= committed(EVALUATION_RECORD_SCHEMA_SQL);
   includeAnalysisFeedbackTables ||= committed(ANALYSIS_FEEDBACK_SCHEMA_SQL);
   includeDecisionFeedbackTables ||= committed(DECISION_FEEDBACK_SCHEMA_SQL);
+  includeLearningEligibilityTables ||= committed(LEARNING_ELIGIBILITY_SCHEMA_SQL);
   requireExactSchema(
     db,
     {
