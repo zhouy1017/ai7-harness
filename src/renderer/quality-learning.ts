@@ -109,7 +109,7 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
       busy = false;
       setStatus(LEARNING_STATUS.opened);
       const first = page.books.find((book) => book.materials.length > 0)?.materials[0];
-      paint(first === undefined ? '[data-learning-action="reset"]' : `${materialSelector(first.materialKey)} [data-learning-action="open"]`);
+      paint(first === undefined ? (laterPage ? '[data-learning-action="reset"]' : '.learning-empty') : `${materialSelector(first.materialKey)} [data-learning-action="open"]`);
     } catch (error) {
       busy = false;
       if (!root.isConnected) return;
@@ -123,7 +123,11 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
     root.dataset['learningBooks'] = String(projection.books.length);
     const parts: HTMLElement[] = [el('p', 'field-note learning-basis', projection.basis)];
     const books = projection.books.filter((book) => book.materials.length > 0);
-    if (books.length === 0) parts.push(el('p', 'field-note learning-empty', LEARNING_EMPTY));
+    if (books.length === 0) {
+      const empty = el('p', 'field-note learning-empty', LEARNING_EMPTY);
+      empty.tabIndex = -1;
+      parts.push(empty);
+    }
     for (const book of books) parts.push(bookNode(book));
     if (projection.nextCursor !== null || laterPage) {
       const row = el('div', 'button-row learning-more');
