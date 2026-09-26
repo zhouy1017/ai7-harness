@@ -170,7 +170,7 @@ The runner creates three empty Books, 星河之一, 星河之二 and 书系之�
 
 **After a restart** everything reads as before, and 星河之一 is in no Series, with both of its records.
 
-The lists' further pages and 加入书系…'s search (Issue #63 review) — `更多书系…`, `更多成员…`, `更多图书…`, `更早的记录…` and `查找书名` — are pressed in no Journey: J-13's lists fit their first pages. The service's paging is proven below the Journey.
+J-13 additionally records twenty real membership changes, creates 51 empty Books and 51 Series through the real service, and exercises the visible next/reset controls repeatedly: Book history 20→2→20, Series list 50→2→50, candidates 50→3 with at most one explicitly selected Book retained, members 50→2→50, and Series history 20→20→20→16→20. Each screen retains one page; arrival focus remains on a visible item or history heading. The candidate reset starts a fresh choice. `查找书名` remains covered below the Journey.
 
 **Keyboard and display (J-14).** From the keyboard:
 - Enter on `加入书系…` opens the chooser at its first Book, and Escape closes it back onto the opener.

@@ -1121,6 +1121,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'book-series-records',
     'membership-remove',
     'series-restart',
+    'series-bounded-pages',
     'j14-series-keyboard',
     'j14-series-reflow-forced-colors',
     'zero-activity',
