@@ -8,6 +8,7 @@ import type {
   InspectTaskPlanInput,
   TaskPlanProjection,
   GlobalAttentionProjection,
+  BookTasksProjection,
   ApproveManuscriptExportInput,
   InspectManuscriptExportReceiptInput,
   StageManuscriptExportInput,
@@ -194,6 +195,7 @@ import { initializePublicationVersionSchema, PublicationVersionError, Publicatio
 import {
   GLOBAL_ATTENTION_READ_LIMIT,
   GlobalAttentionError,
+  composeBookTasks,
   composeGlobalAttention,
   readImportAttention,
   readRecoveryAttention,
@@ -10271,6 +10273,36 @@ export class EditorialStore {
         }, now);
       } catch (error) {
         if (error instanceof GlobalAttentionError || error instanceof MaintenanceCaseError) throw new StoreError(error.code, error.message);
+        throw error;
+      }
+    });
+  }
+
+  /**
+   * The Book's 任务 panel (Issue #423, plan slice S77a; editor-surfaces §1 任务面, V2-UX-TASK-044): 待我处理's readings of this
+   * Book's Tasks alone — its latest baseline Task and Review Run, prepared ones included, and every finished one, the
+   * cancelled included — composed into 等你处理, 进行中 and 最近完成 by `global-attention.ts`. A read: nothing is written,
+   * claimed or terminalized.
+   */
+  inspectBookTasks(bookId: string, progress: ProgressReader, waitingFor: WaitingFor = 'admitting'): BookTasksProjection {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+    one(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').all(bookId) as SqlRow[], 'BOOK_NOT_FOUND', '图书不存在。');
+    return this.#reviewCall(() => {
+      const limit = GLOBAL_ATTENTION_READ_LIMIT;
+      try {
+        const baseline = this.#baselineAnalysis.attentionReadings(progress, '', limit, { bookId, cancelled: true });
+        const review = this.#reviewRuns.attentionReadings(progress, '', limit, { bookId, prepared: true });
+        return composeBookTasks({
+          bookId,
+          analysisTasks: baseline.tasks,
+          analysisOutcomes: baseline.outcomes,
+          reviewRuns: review.latest,
+          reviewCompletions: review.completed,
+          waitingFor,
+        });
+      } catch (error) {
+        if (error instanceof GlobalAttentionError) throw new StoreError(error.code, error.message);
         throw error;
       }
     });

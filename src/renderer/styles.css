@@ -634,6 +634,41 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .book-filter label { display: grid; gap: .2rem; min-width: 0; }
 .book-filter-legend { flex-basis: 100%; margin: 0; font-weight: 700; }
 .book-people-line { margin: .25rem 0 0; }
+/* ① 任务面 (Issue #423, S77a; TASK-044, TASK-045): the Book's Tasks in the drawer's slot, 查看结果's floating window, 回到<位置>. */
+.task-panel { display: grid; gap: .9rem; min-width: 0; }
+.task-panel-scope { margin: 0; }
+.task-panel-compose { min-width: 0; padding: .7rem .8rem; border: 1px solid #b9c2cc; border-radius: 10px; background: #fff; }
+.task-panel-compose h3, .task-panel-group h3 { margin: 0 0 .4rem; font-size: 1rem; }
+.task-panel-modes { display: grid; gap: .35rem; min-width: 0; margin: .5rem 0; padding: 0; border: 0; }
+.task-panel-modes legend { margin-bottom: .2rem; font-weight: 700; }
+.task-panel-mode { display: flex; gap: .5rem; align-items: flex-start; min-width: 0; }
+.task-panel-mode-words { display: grid; gap: .1rem; min-width: 0; overflow-wrap: anywhere; }
+.task-panel-compose-why[hidden] { display: none; }
+.task-panel-group { min-width: 0; }
+.task-panel-count { display: inline-block; min-width: 1.4rem; padding: 0 .35rem; border: 1px solid #b9c2cc; border-radius: 999px; font-size: .8rem; font-weight: 700; text-align: center; }
+.task-panel-list { display: grid; gap: .55rem; margin: 0; padding: 0; list-style: none; }
+.task-card { display: grid; gap: .3rem; min-width: 0; padding: .6rem .7rem; border: 1px solid #d8dee5; border-left: 3px solid #b9c2cc; border-radius: 8px; background: #fbf9f4; }
+.task-card[data-task-blocked="true"] { border-left: 5px solid #a8701a; }
+.task-card-kind { margin: 0; color: #5d6772; font-size: .75rem; }
+.task-card-head { display: flex; flex-wrap: wrap; gap: .3rem .5rem; align-items: center; justify-content: space-between; min-width: 0; }
+.task-card-title { min-width: 0; margin: 0; font-size: .95rem; overflow-wrap: anywhere; }
+.task-card-reason, .task-card-time { margin: 0; overflow-wrap: anywhere; }
+.task-result-window { position: fixed; z-index: 40; left: 50%; top: 4rem; transform: translateX(-50%); width: min(44rem, calc(100vw - 2rem)); max-height: calc(100vh - 6rem); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; border: 1px solid #d8dee5; border-radius: 12px; background: #fff; box-shadow: 0 2px 6px rgba(31, 36, 41, .1), 0 16px 40px rgba(31, 36, 41, .16); }
+.task-result-window[data-task-result-aligned="column"] { transform: none; }
+.task-result-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; padding: .55rem .8rem; border-bottom: 1px solid #d8dee5; border-radius: 12px 12px 0 0; background: #f2f4f7; }
+.task-result-kind { color: #5d6772; font-size: .72rem; font-weight: 700; }
+.task-result-title { flex: 1; min-width: 0; margin: 0; font-size: .95rem; overflow-wrap: anywhere; }
+.task-result-body { display: grid; gap: .6rem; align-content: start; min-height: 0; overflow: auto; padding: .8rem .9rem; }
+.task-result-meta { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .2rem .8rem; margin: 0; }
+.task-result-meta dt { color: #5d6772; }
+.task-result-meta dd { margin: 0; overflow-wrap: anywhere; }
+.task-result-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.task-result-table th, .task-result-table td { padding: .35rem .4rem; border-bottom: 1px solid #d8dee5; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.task-result-table th:first-child, .task-result-table td:first-child { width: 2.4rem; }
+.task-result-foot { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; padding: .55rem .8rem; border-top: 1px solid #d8dee5; border-radius: 0 0 12px 12px; background: #fbf9f4; }
+.return-chip-host { margin-top: .35rem; }
+.return-chip-host[hidden] { display: none; }
+.return-chip { border-radius: 999px; }
 /* 维护事项 (Issue #426, S68a): each designation's cases, the draft bound to it, and a case with its timeline in place. */
 .maintenance { margin-top: .6rem; padding-top: .55rem; border-top: 1px dashed #d5dcd9; }
 .maintenance h5 { margin: 0; font-size: .95rem; }
@@ -715,6 +750,8 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .document-phase-form fieldset { display: grid; gap: .3rem; margin: 0; padding: .5rem; border: 1px solid #ddd8cc; border-radius: 8px; }
 .document-phase-form .field { display: grid; gap: .25rem; margin-top: .45rem; }
 .document-phase-form textarea { width: 100%; box-sizing: border-box; }
+.document-phase-reason-problem { margin: .35rem 0 0; color: #842f28; font-weight: 700; }
+.document-phase-reason-problem[hidden] { display: none; }
 .document-workflow-card { margin-top: .45rem; }
 .document-phase-chips { display: flex; flex-wrap: wrap; gap: .3rem; margin: .4rem 0 0; padding: 0; list-style: none; }
 .export-open-row { margin-top: .6rem; }
@@ -1119,6 +1156,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .deliverables-package, .package-current-mark, .package-export, .package-export-result, .package-export-list > li,
   .maintenance-draft, .maintenance-case, .maintenance-classifications, .maintenance-choices, .maintenance-errata,
   .book-people-related,
+  .task-panel-compose, .task-panel-count, .task-card, .task-result-window, .task-result-bar, .task-result-foot, .return-chip,
   .task-drawer, .task-drawer-head, .task-drawer-footer, .task-drawer-modes, .task-plan-goal, .task-plan-compact,
   .task-plan-chip, .task-plan-boundary, .task-plan-lock, .task-plan-section-number, .task-plan-edit-remove, .task-plan-edit-tag,
   .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal,
@@ -1138,6 +1176,9 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .global-attention-badge { color: CanvasText; background: Canvas; border: 2px solid CanvasText; forced-color-adjust: none; }
   .global-attention-item { border-left: 2px solid CanvasText; }
   .global-attention-item[data-attention-blocked="true"] { border-left: 6px solid CanvasText; }
+  /* A 任务 card that holds other work keeps its heavier left rule without colour (Issue #423, S77a). */
+  .task-card { border-left: 2px solid CanvasText; }
+  .task-card[data-task-blocked="true"] { border-left: 6px solid CanvasText; }
   .global-attention-open { color: LinkText; }
   .global-attention-title:focus-visible, .global-attention-open:focus-visible { outline-color: Highlight; }
   /* Without colour the chosen mode keeps a heavier outline of its own, and the drawer its edge; the bar keeps
@@ -1177,6 +1218,13 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .analysis-tab[aria-selected="true"] { border-bottom: 3px solid Highlight; }
   /* A 审阅 pill's shape is its own drawing, so it is drawn in the pill's text colour, never left to vanish. */
   .review-pill::before { background: ButtonText; forced-color-adjust: none; }
+  /* So is a workflow phase's (§0.3 文字与形状并用; Issue #626): the ring, half, check, dash, triangle and diamond each stay
+     their own shape in the system's text colour, and 进行中 never reads as 未开始. */
+  .phase-pill::before, .phase-chip::before { border-color: ButtonText; background: transparent; forced-color-adjust: none; }
+  .phase-pill[data-phase-state="in-progress"]::before, .phase-chip[data-phase-state="in-progress"]::before { background: linear-gradient(90deg, ButtonText 50%, transparent 50%); }
+  .phase-pill[data-phase-state="skipped"]::before, .phase-chip[data-phase-state="skipped"]::before,
+  .phase-pill[data-phase-state="reopened"]::before, .phase-chip[data-phase-state="reopened"]::before,
+  .phase-pill[data-phase-state="waiting"]::before, .phase-chip[data-phase-state="waiting"]::before { background: ButtonText; }
   .review-pill[data-pill-shape="ring"]::before, .review-pill[data-pill-shape="check"]::before { border-color: ButtonText; background: transparent; }
   .review-pill[data-pill-shape="half"]::before { border-color: ButtonText; background: linear-gradient(90deg, ButtonText 50%, transparent 50%); }
   /* Colour cannot tell a 修改建议 finding from a 批注 one here, so its left line does: solid, or double. */

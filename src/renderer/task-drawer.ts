@@ -1,5 +1,10 @@
 import type {
+  BaselineAnalysisGoal,
+  BaselineAnalysisUpdateRequest,
+  BookTaskItemProjection,
   ClarificationOptionId,
+  DefaultExecutionRuleReference,
+  GlobalAttentionTarget,
   RendererApi,
   RunBudgetCeilingState,
   ServiceJobProjection,
@@ -9,6 +14,8 @@ import type {
   TaskPlanRunControlProjection,
 } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
+import { mountTaskPanel } from './task-panel.js';
+import { TASK_PANEL_TITLE } from './task-panel-labels.js';
 import {
   parseBudgetCeiling,
   TASK_PLAN_BUDGET_APPLY,
@@ -41,7 +48,7 @@ import {
   TASK_BAR_START_FAILED,
   TASK_BAR_SAVED,
   TASK_DRAWER_BACK,
-  TASK_DRAWER_BACK_REASON,
+  TASK_DRAWER_BACK_TITLE,
   TASK_DRAWER_CLOSE,
   TASK_DRAWER_FOOTER,
   TASK_DRAWER_LOADING,
@@ -150,7 +157,14 @@ export interface TaskDrawerSurface {
    * Show one Task's plan; `returnFocus` finds the control focus goes back to when the drawer closes. `note` is said
    * beside the bar's actions until the next one — why a quick start stopped at this plan (Issue #421).
    */
-  open(request: TaskPlanRequest, returnFocus: () => HTMLElement | null, note?: string): void;
+  open(request: TaskPlanRequest, returnFocus: () => HTMLElement | null, note?: string, how?: { readonly cancel?: boolean }): void;
+  /**
+   * The Book's 任务 panel in the same slot (Issue #423, S77a; TASK-044): its Tasks in three groups. A plan opened from it
+   * keeps `← 任务`, which comes back here.
+   */
+  openPanel(bookId: string, returnFocus: () => HTMLElement | null): void;
+  /** What the drawer shows now: one Task's plan, a Book's 任务 panel, or nothing. */
+  view(): { readonly kind: 'plan' | 'panel'; readonly bookId: string } | null;
   /** Read the plan on show again when it is one of `kind`'s: the surface that raised it just recorded something. */
   refresh(kind: TaskPlanKind): void;
   close(restoreFocus: boolean): void;
@@ -163,6 +177,8 @@ export interface TaskDrawerSurface {
 
 type DrawerApi = Pick<
   RendererApi,
+  | 'inspectBookTasks'
+  | 'inspectBaselineAnalysis'
   | 'inspectTaskPlan'
   | 'authorizeTaskAuthorization'
   | 'authorizeBaselineAnalysis'
@@ -200,6 +216,18 @@ export interface MountTaskDrawerOptions {
   openConnectionSettings(): void;
   /** 查看规则: 知识库 › 工序与规则, where every 默认执行规则 is listed and turned off (Issue #421). */
   openRules(): void;
+  /** A 任务 panel card's own record (Issue #423, S77a): ②A for an analysis, ②B for a 审阅. */
+  openTaskTarget(target: GlobalAttentionTarget): void;
+  /** 查看结果 (TASK-045): the finished Task's result beside the text; `backToPanel` opens the panel again when it closes. */
+  openTaskResult(entry: BookTaskItemProjection, backToPanel: () => void): void;
+  /**
+   * 发起全书任务 (TASK-044): prepare the procedure's Task — and start it under its rule when `quick` names one. It answers the
+   * Task whose plan the drawer shows next, with why a quick start stopped there; `null` keeps the panel.
+   */
+  startWholeBookTask(
+    bookId: string,
+    input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; quick: DefaultExecutionRuleReference | null },
+  ): Promise<{ ref: string; note?: string } | null>;
 }
 
 /** How often the drawer reads a running Task's plan again, so the bar follows the Run to its end. */
@@ -308,6 +336,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   /** Said beside the bar's actions once the plan the drawer was opened on is painted (`open`'s `note`). */
   let pendingNote: string | null = null;
   let pollTimer: number | undefined;
+  /** What the slot shows (Issue #423, S77a): one Task's plan, or the Book's 任务 panel. */
+  let view: 'plan' | 'panel' = 'plan';
+  let panelBookId: string | null = null;
+  /** The plan was opened from a card's 取消任务: its Cancellation Impact Summary opens once the plan is painted. */
+  let cancelOnOpen = false;
 
   root.classList.add('task-drawer');
   root.setAttribute('aria-labelledby', 'task-drawer-title');
@@ -317,12 +350,13 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   shell.dataset['taskDrawer'] = 'closed';
 
   const header = el('header', 'task-drawer-head');
+  // `← 任务` goes back to the Book's 任务 panel (Issue #423, S77a; TASK-044), in the same slot.
   const back = control(TASK_DRAWER_BACK, 'quiet task-drawer-back', 'tasks');
-  back.disabled = true;
-  back.title = TASK_DRAWER_BACK_REASON;
-  const backReason = el('span', 'task-drawer-hidden-reason', TASK_DRAWER_BACK_REASON);
-  backReason.id = uid('back-reason');
-  back.setAttribute('aria-describedby', backReason.id);
+  back.title = TASK_DRAWER_BACK_TITLE;
+  back.addEventListener('click', () => {
+    const book = request?.bookId ?? panelBookId;
+    if (book !== null) surface.openPanel(book, returnFocus);
+  });
   const title = el('h2', 'task-drawer-title', TASK_DRAWER_TITLE);
   title.id = 'task-drawer-title';
   title.tabIndex = -1;
@@ -339,7 +373,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   modes.append(...modeButtons);
   const close = control(TASK_DRAWER_CLOSE, 'quiet task-drawer-close', 'close');
   close.addEventListener('click', () => surface.close(true));
-  header.append(back, title, pill, modes, close, backReason);
+  header.append(back, title, pill, modes, close);
   const body = el('div', 'task-drawer-body');
   // The open questions stand first in the body, and a repaint of the plan below them never removes them: a note being
   // written keeps its focus and its composition while the Run reads on (Issue #422, S76d).
@@ -353,6 +387,49 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   bar.hidden = true;
   foot.append(footer, bar);
   root.replaceChildren(header, body, foot);
+
+  const panel = mountTaskPanel({
+    api,
+    setStatus: options.setStatus,
+    errorMessage: options.errorMessage,
+    openPlan: (kind, ref, cancel) => {
+      if (panelBookId !== null) surface.open({ bookId: panelBookId, kind, ref }, returnFocus, undefined, { cancel });
+    },
+    openTarget: (target) => options.openTaskTarget(target),
+    openResult: (entry) => {
+      const book = panelBookId;
+      const finder = returnFocus;
+      surface.close(false);
+      options.openTaskResult(entry, () => {
+        if (book !== null && !interrupted) surface.openPanel(book, finder);
+      });
+    },
+    startWholeBook: async (input) => {
+      const book = panelBookId;
+      if (book === null) return;
+      const next = await options.startWholeBookTask(book, input);
+      if (next === null || root.hidden || view !== 'panel' || panelBookId !== book) return;
+      surface.open({ bookId: book, kind: 'baseline-analysis', ref: next.ref }, returnFocus, next.note);
+    },
+    onRecorded: (book) => options.onRecorded('baseline-analysis', book),
+  });
+
+  /** The header and the footer of what the slot shows: the panel has no mode, no plan state and no bar. */
+  function showView(): void {
+    root.dataset['taskDrawerView'] = view;
+    back.hidden = view === 'panel';
+    title.textContent = view === 'panel' ? TASK_PANEL_TITLE : TASK_DRAWER_TITLE;
+    modes.hidden = view === 'panel';
+    foot.hidden = view === 'panel';
+    if (view === 'panel') {
+      pill.hidden = true;
+      delete root.dataset['taskPlanKind'];
+      delete root.dataset['taskPlanRef'];
+      delete root.dataset['taskPlanVersion'];
+      delete root.dataset['taskPlanStart'];
+      delete root.dataset['taskPlanState'];
+    }
+  }
   root.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape' || event.defaultPrevented || root.hidden) return;
     event.preventDefault();
@@ -457,6 +534,16 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     // The summary stays open only while there is still a Run 取消任务 can name.
     if (next.runControl === null || next.runControl.cancel.reason !== null) cancelConfirmShown = false;
+    // A card's 取消任务 (Issue #423, S77a) opens the summary here, where the cancellation is confirmed; a Run that can no
+    // longer be cancelled shows its bar instead, which says why.
+    let focusCancelImpact = false;
+    if (cancelOnOpen) {
+      cancelOnOpen = false;
+      if (next.runControl !== null && next.runControl.cancel.reason === null) {
+        cancelConfirmShown = true;
+        focusCancelImpact = true;
+      }
+    }
     if (next.redo === null || next.redo.summary.length === 0) redoConfirmShown = false;
     if (pendingNote !== null) {
       refusal = pendingNote;
@@ -495,7 +582,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     paintBar(next);
     if (interrupted) disableAll();
-    if (focusTitle) {
+    if (focusCancelImpact && bar.querySelector<HTMLElement>(`#${CANCEL_IMPACT_ID} h4`) !== null) {
+      focusTitle = false;
+      bar.querySelector<HTMLElement>(`#${CANCEL_IMPACT_ID} h4`)!.focus();
+    } else if (focusTitle) {
       focusTitle = false;
       title.focus();
     } else if (restore !== null && root.querySelector<HTMLElement>(`[data-task-drawer-control="${restore}"]:not(:disabled)`) !== null) {
@@ -1912,7 +2002,13 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   // ---- the surface --------------------------------------------------------------------------------------
 
   const surface: TaskDrawerSurface = {
-    open(next, finder, note) {
+    open(next, finder, note, how) {
+      ticket += 1;
+      panel.stop();
+      view = 'plan';
+      panelBookId = null;
+      cancelOnOpen = how?.cancel === true;
+      showView();
       request = next;
       returnFocus = finder;
       plan = null;
@@ -1942,14 +2038,53 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       if (interrupted) disableAll();
       read();
     },
+    openPanel(bookId, finder) {
+      ticket += 1;
+      clearPoll();
+      view = 'panel';
+      panelBookId = bookId;
+      request = null;
+      plan = null;
+      painted = '';
+      refusal = null;
+      pendingNote = null;
+      cancelOnOpen = false;
+      returnFocus = finder;
+      root.hidden = false;
+      root.dataset['taskDrawer'] = 'open';
+      shell.dataset['taskDrawer'] = 'open';
+      showView();
+      questions.replaceChildren();
+      questionsPainted = '';
+      bar.hidden = true;
+      bar.replaceChildren();
+      body.replaceChildren(panel.element);
+      options.onOpen();
+      panel.show(bookId);
+      title.focus();
+      if (interrupted) disableAll();
+    },
+    view() {
+      if (root.hidden) return null;
+      if (view === 'panel') return panelBookId === null ? null : { kind: 'panel', bookId: panelBookId };
+      return request === null ? null : { kind: 'plan', bookId: request.bookId };
+    },
     refresh(kind) {
-      if (request === null || root.hidden || request.kind !== kind || interrupted) return;
+      if (root.hidden || interrupted) return;
+      if (view === 'panel') {
+        panel.refresh();
+        return;
+      }
+      if (request === null || request.kind !== kind) return;
       read();
     },
     close(restoreFocus) {
       if (root.hidden) return;
       ticket += 1;
       clearPoll();
+      panel.stop();
+      panelBookId = null;
+      cancelOnOpen = false;
       request = null;
       plan = null;
       painted = '';
@@ -1966,7 +2101,16 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       return !root.hidden;
     },
     followScreen(state, bookId) {
-      if (request === null || root.hidden) return;
+      if (root.hidden) return;
+      if (view === 'panel') {
+        if (bookId === null || bookId !== panelBookId || !TASK_DRAWER_SCREENS.includes(state)) {
+          surface.close(false);
+          return;
+        }
+        panel.refresh();
+        return;
+      }
+      if (request === null) return;
       if (bookId === null || bookId !== request.bookId || !TASK_DRAWER_SCREENS.includes(state)) {
         surface.close(false);
         return;
@@ -1977,6 +2121,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       interrupted = true;
       ticket += 1;
       clearPoll();
+      panel.stop();
       disableAll();
     },
   };

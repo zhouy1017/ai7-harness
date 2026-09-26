@@ -54,8 +54,8 @@ export const CONFLICT_PATH_LABELS: Readonly<Record<ConflictPath, string>> = {
   regenerate: '基于当前稿件重新生成建议',
   defer: '暂不处理',
 };
-/** 基于当前稿件重新生成建议 waits for the Task surface, as every AI7 task entry on the manuscript does. */
-export const CONFLICT_REGENERATE_REASON = '任务面接通后可用';
+/** 基于当前稿件重新生成建议 waits for a Task started on a selection, as every AI7 task entry on the manuscript does. */
+export const CONFLICT_REGENERATE_REASON = '重新生成建议尚未接通';
 
 /** What choosing a path will do, said before the button that does it. */
 export function conflictPathNote(path: ConflictPath, kind: ProposalConflictKind): string {

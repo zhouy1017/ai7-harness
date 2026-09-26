@@ -487,6 +487,9 @@ export function followBlockTextChangeForMarks(
   afterText: string,
   journalSequence: number,
   edits?: ReadonlyArray<GraphemeEdit & { readonly inserted: ReadonlyArray<string> }>,
+  // Whether the spans were derived from the block's two texts, as an undo's and a redo's are here and the renderer's flush is
+  // (Issue #568 review): an Apply's or a replacement's span says where its words go.
+  derived: boolean = edits === undefined,
 ): void {
   if (!marksRelationExists(db)) return;
   const marks = liveMarksOfBlock(db, branchId, blockId);
@@ -512,14 +515,17 @@ export function followBlockTextChangeForMarks(
     // them, so each covers it instead of guessing a side: the editor places the point among those words through its
     // 稿件冲突 — a new version of an insertion, a Correction Proposal that undoes a deletion — and the insertion whose own
     // Apply wrote them stands on them again at once. A pending insertion whose point already drifted covers whatever is
-    // written at it the same way, so an undo or a retyping there is never passed off as the place it was.
+    // written at it the same way, so an undo or a retyping there is never passed off as the place it was — even when those
+    // words begin with the grapheme after the point, which a derived span would place one grapheme on, and a redo or a
+    // deletion of them leaves the point bare again (Issue #568). A crowd is found where the span was derived, so words
+    // written at a crowd that begin with the grapheme after it still leave its points where they stood, as before #568.
     const crowded = followed.filter((mark) => mark.pinned.length === 0 && mark.state === 'exact' &&
       mark.fromGrapheme === span.fromGrapheme && mark.toGrapheme === span.toGrapheme);
     for (const mark of followed) {
       const inCrowd = crowded.length > 1 && crowded.includes(mark);
       const covering = mark.pinned.length === 0 && (inCrowd || (mark.insertion && mark.state === 'drifted'));
       const result = covering
-        ? coverSpanEdit(mark, span, next.length)
+        ? coverSpanEdit(mark, span, next.length, derived ? { current, next } : undefined)
         : mark.pinned.length === 0 ? followPoint(mark, current, next, span) : followGraphemeEdit(mark, mark.pinned, next, span);
       mark.fromGrapheme = result.fromGrapheme;
       mark.toGrapheme = result.toGrapheme;

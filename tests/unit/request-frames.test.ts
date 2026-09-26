@@ -12,6 +12,7 @@ import {
   MAX_MARK_BODY_CODE_UNITS,
   MAX_MILESTONE_PURPOSE_CODE_UNITS,
   MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS,
+  MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS,
   MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS,
   MAX_PROPOSAL_CONFLICT_UNITS,
   MAX_PUBLICATION_BASIS_CHARACTERS,
@@ -299,6 +300,8 @@ describe('decodeRequest accepts well-formed frames', () => {
     const delivery = { bookId, documentId: randomUUID(), version: { kind: 'saved', revisionId: randomUUID() } };
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
       { op: 'inspectProductionDocuments', input: { bookId } },
+      // The Book's 任务 panel (Issue #423, S77a).
+      { op: 'inspectBookTasks', input: { bookId } },
       { op: 'createProductionDocument', input: { bookId, typeId: 'news-release', sourceVersionId: randomUUID() } },
       { op: 'decideProductionDocumentType', input: { bookId, typeId: 'marketing-points', notForThisBook: true } },
       { op: 'decideProductionDocumentType', input: { bookId, typeId: 'promotion-article', notForThisBook: false } },
@@ -323,6 +326,28 @@ describe('decodeRequest accepts well-formed frames', () => {
     }
   });
 
+  it('takes a workflow move\'s reason within the one bound the service holds it to, and refuses one past it (Issue #626)', () => {
+    const move = { bookId: randomUUID(), documentId: randomUUID(), phaseId: 'drafting', action: 'skip', expectedTransitions: 3 };
+    const taken: ReadonlyArray<unknown> = [
+      { ...move, reason: { choice: 'custom', text: '𠀀'.repeat(MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS) } },
+      { ...move, reason: { choice: 'later', text: null } },
+      { ...move, action: 'start', reason: null },
+    ];
+    for (const input of taken) {
+      const request = { id: randomUUID(), op: 'transitionProductionDocumentPhase', input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    const refused: ReadonlyArray<unknown> = [
+      { ...move, reason: { choice: 'custom', text: '字'.repeat(MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS + 1) } },
+      { ...move, reason: { choice: 'Custom Reason', text: null } },
+      { ...move, reason: { choice: 'later' } },
+      { ...move, reason: 'later' },
+    ];
+    for (const input of refused) {
+      expect(() => decodeRequest(frameOf({ id: randomUUID(), op: 'transitionProductionDocumentPhase', input }))).toThrowError(ProtocolError);
+    }
+  });
+
   it('rejects a 生产文档 read or command whose type, identities, decision, recipient, note or key set is wrong', () => {
     const id = randomUUID();
     const bookId = randomUUID();
@@ -342,6 +367,9 @@ describe('decodeRequest accepts well-formed frames', () => {
       { op: 'inspectProductionDocuments', input: {} },
       { op: 'inspectProductionDocuments', input: { bookId: 'current' } },
       { op: 'inspectProductionDocuments', input: { bookId, typeId: 'news-release' } },
+      { op: 'inspectBookTasks', input: {} },
+      { op: 'inspectBookTasks', input: { bookId: 'current' } },
+      { op: 'inspectBookTasks', input: { bookId, group: 'waiting' } },
       // A delivery names one recipient kind; only 自行输入 carries words, within their bound, and a note stays in its own.
       { op: 'recordProductionDocumentDelivery', input: { ...delivery, recipient: { kind: 'press', custom: null }, note: null } },
       { op: 'recordProductionDocumentDelivery', input: { ...delivery, recipient: { kind: 'publicity', custom: '宣传部' }, note: null } },

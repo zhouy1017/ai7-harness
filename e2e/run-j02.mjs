@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
 import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 
@@ -470,7 +471,28 @@ async function choosePurpose(renderer, kind, location) {
   );
 }
 
-async function importAndOpen(renderer) {
+/**
+ * Where staging stood when its bound passed (#621), read from the store the service writes: still reading the archive
+ * (no block parsed yet), parsing it into blocks (the parse commits them in batches, so their count shows how far it had
+ * come), recording the draft (every block parsed, the draft not yet written), or done with the target screen not shown.
+ * `unreadable` when the store could not be read at that moment.
+ */
+function importStagePhase(dataRoot) {
+  let database;
+  try {
+    database = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    const count = (sql) => Number(database.prepare(sql).get()?.total ?? 0);
+    if (count('SELECT count(*) AS total FROM import_drafts') > 0) return { phase: 'screen', blocks: BLOCK_COUNT };
+    const blocks = count('SELECT count(*) AS total FROM import_ingest_blocks');
+    return { phase: blocks >= BLOCK_COUNT ? 'recording' : blocks > 0 ? 'parsing' : 'reading', blocks };
+  } catch {
+    return { phase: 'unreadable', blocks: null };
+  } finally {
+    database?.close();
+  }
+}
+
+async function importAndOpen(renderer, dataRoot) {
   at('renderer-ready');
   await waitForRendererReady(renderer);
   await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined'`, 'renderer-isolation');
@@ -480,7 +502,16 @@ async function importAndOpen(renderer) {
   // (the queue run of 2026-09-19 lost 240 s here on Windows). Each wait now has its own stage (#474).
   at('import-stage');
   await clickButton(renderer, '导入稿件', 'stage-click');
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'stage-target', IMPORT_STAGE_TIMEOUT);
+  try {
+    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'stage-target', IMPORT_STAGE_TIMEOUT);
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== 'J-02/stage-target') throw error;
+    // A hosted run prints only the location (#621), so the stage names where staging stood when its bound passed.
+    const stood = importStagePhase(dataRoot);
+    if (localDebugEnabled()) recordDebugDetail('J-02', `import stage at the bound ${JSON.stringify(stood)}`);
+    at(`import-stage-${stood.phase}`);
+    throw error;
+  }
   await assertRenderer(renderer, `document.querySelector('.source-card')?.textContent.includes('${BLOCK_COUNT} 个可编辑内容块')`, 'exact-block-count');
   await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="新建图书"]'); if (!radio) return false; radio.click(); return true; })()`, 'target-select');
   await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!radio || radio.checked) return false; radio.click(); return true; })()`, 'relationship-select');
@@ -1291,7 +1322,7 @@ async function main() {
       return attachRendererTarget(browser, launchScenario);
     };
     let renderer = await launch('initial');
-    await importAndOpen(renderer);
+    await importAndOpen(renderer, dataRoot);
     await runWorkspaceJourney(renderer, dataRoot);
     at('restart-browser-close');
     await browser.close();
