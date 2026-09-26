@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SERIES_KNOWLEDGE_PAGE_BYTES, SERIES_KNOWLEDGE_SCHEMA_SQL, SERIES_KNOWLEDGE_TRIGGER_SQL } from '../../src/service/series-knowledge.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { SERIES_KNOWLEDGE_SCHEMA_VERSION, SERIES_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { STORE_VERSION_SCHEMA_VERSION, SERIES_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import {
   MAX_FRAME_BYTES,
@@ -247,7 +247,7 @@ describe('书系知识 over the real store', () => {
     }
     const database = new DatabaseSync(databasePath());
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SERIES_KNOWLEDGE_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(STORE_VERSION_SCHEMA_VERSION);
       for (const table of TABLES) expect(() => database.exec(`DELETE FROM ${table}`)).toThrowError(/SERIES_KNOWLEDGE_LEDGER_IMMUTABLE/u);
       expect(() => database.exec("UPDATE series_knowledge_revisions SET content = '改过'")).toThrowError(/SERIES_KNOWLEDGE_LEDGER_IMMUTABLE/u);
       database.exec('DROP TRIGGER series_knowledge_revisions_no_update');
@@ -282,7 +282,7 @@ describe('书系知识 over the real store', () => {
     const plant = new DatabaseSync(databasePath());
     let before: Array<{ name: string; sql: string }>;
     try {
-      plant.exec(`${TABLES.slice().reverse().map((table) => `DROP TABLE ${table};`).join(' ')} PRAGMA user_version = ${SERIES_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE store_versions; ${TABLES.slice().reverse().map((table) => `DROP TABLE ${table};`).join(' ')} PRAGMA user_version = ${SERIES_SCHEMA_VERSION};`);
       before = schemaOf(plant);
     } finally {
       plant.close();
@@ -297,9 +297,10 @@ describe('书系知识 over the real store', () => {
     }
     const database = new DatabaseSync(databasePath(), { readOnly: true });
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SERIES_KNOWLEDGE_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(STORE_VERSION_SCHEMA_VERSION);
       const after = schemaOf(database);
-      expect(after.filter((entry) => !/^series_knowledge/u.test(entry.name))).toEqual(before!);
+      // Revision 54's version ledger (Issue #433, S85a) returns with it, as the planted store lacked it too.
+      expect(after.filter((entry) => !/^(series_knowledge|store_versions)/u.test(entry.name))).toEqual(before!);
       expect(after.filter((entry) => TABLES.includes(entry.name)).map((entry) => entry.sql))
         .toEqual(TABLES.slice().sort().map((table) => SERIES_KNOWLEDGE_SCHEMA_SQL[table as keyof typeof SERIES_KNOWLEDGE_SCHEMA_SQL]));
       expect(counts()).toEqual({ series_knowledge_items: 0, series_knowledge_candidates: 0, series_knowledge_revisions: 0, series_knowledge_promotions: 0 });

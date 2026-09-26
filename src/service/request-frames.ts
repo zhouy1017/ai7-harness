@@ -746,6 +746,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectFeedbackHistory':
     // 设置 › 评估校准与预测 (Issue #430, S82): the house's page; it names nothing.
     case 'inspectEvaluationCalibration':
+    // 设置 › 数据与存储 › 版本 (Issue #433, S85a): the store's versions; it names nothing.
+    case 'inspectDataVersion':
       requireInput(value.input, [], tentativeId);
       break;
     // 录入定价与首印: the Book, how many entries the editor saw, and two whole positive numbers, the price in 分.

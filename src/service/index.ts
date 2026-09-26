@@ -22,6 +22,7 @@ import {
 import { armSingleHostAllowance, installNodeNetworkDenial } from '../shared/network-denial.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../shared/protected-secret-identity.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, resolveDeveloperLiveLaunch, type DeveloperLiveRuntime } from './launch-policy.js';
+import { readSoftwareVersion } from './data-version.js';
 import { decodeRequest, isSafeInteger, ProtocolError } from './request-frames.js';
 import { controlledConnectivity, hostConnectivity, type TaskPlanConnectivity } from './connectivity.js';
 import type { WaitingFor } from './task-plan.js';
@@ -575,6 +576,8 @@ async function dispatch(
         id: request.id, ok: true, op: request.op,
         result: store.inspectSeriesHistory({ seriesId: request.input.seriesId, bookId: request.input.bookId }, request.input.after),
       };
+    case 'inspectDataVersion':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectDataVersion() };
     case 'proposeSeriesKnowledge':
       return { id: request.id, ok: true, op: request.op, result: store.proposeSeriesKnowledge(request.input) };
     case 'inspectSeriesKnowledgeReview':
@@ -1235,7 +1238,11 @@ async function run(): Promise<void> {
     const fixture = modelAdapterControl === undefined
       ? null
       : await loadModelFixture(resolve(codeRoot, '..', 'tests', 'fixtures', 'model'), modelAdapterControl);
+    // The software version the store records beside its Data Version (Issue #433, S85a) is the package the product ships
+    // in: the carrier holds no package manifest, so it is read from the source checkout that contains `dist/`.
+    const softwareVersion = await readSoftwareVersion(resolve(codeRoot, '..'));
     store = await EditorialStore.open(dataRoot, codeRoot, {
+      softwareVersion,
       induceUnprovableReconciliation: importControl === 'uncertain-reconciliation',
       persistLegacyReviewedDraft: importControl === 'legacy-reviewed-v2',
       induceReimportProofTamper: importControl === 'tamper-reimport-proof-before-validation',
@@ -1397,6 +1404,11 @@ async function run(): Promise<void> {
   }
 }
 
-await run().catch(() => {
+await run().catch((error: unknown) => {
+  // A service that stops before it is ready says which refusal stopped it (Issue #433 review): its code alone, never its
+  // words or anything it read.
+  const code = typeof error === 'object' && error !== null && typeof (error as { code?: unknown }).code === 'string' &&
+    /^[A-Z][A-Z0-9_]{0,63}$/u.test((error as { code: string }).code) ? (error as { code: string }).code : 'UNEXPECTED';
+  process.stderr.write(`AI7_SERVICE_STOPPED/${code}\n`);
   process.exitCode = 1;
 });

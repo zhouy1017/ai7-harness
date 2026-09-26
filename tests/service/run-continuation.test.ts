@@ -10,13 +10,13 @@ import type { TaskPlanConnectivity } from '../../src/service/connectivity.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CLARIFICATION_SCHEMA_VERSION, SERIES_KNOWLEDGE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { CLARIFICATION_SCHEMA_VERSION, STORE_VERSION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { RESUME_BLOCKED_OFFLINE, RESUME_BLOCKED_SLOT, RUN_CONTROL_CANCELLING_REASON } from '../../src/service/task-plan.js';
 import { controlledUnitHold } from '../../src/service/unit-hold.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, type BaselineAnalysisProjection, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js';
 import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
-import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
+import { MIGRATION_EMPTY_RELATIONS, PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
 import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER, plantRevision32Relations, runStatesShapeAt32 } from '../support/run-continuation.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -174,12 +174,12 @@ describe('schema revision 33 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SERIES_KNOWLEDGE_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(STORE_VERSION_SCHEMA_VERSION);
       expect(runStatesShapeAt32(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_run_states ORDER BY rowid').all()).toEqual(before.states);
       const after = relationTruth(database);
       expect([...after.keys()]).toEqual([...before.truth.keys(), ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER].sort());
-      for (const relation of [...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER]) expect(after.get(relation)?.content).toMatch(/^0:/);
+      for (const relation of [...MIGRATION_EMPTY_RELATIONS, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER]) expect(after.get(relation)?.content).toMatch(/^0:/);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name)).toEqual(['analysis_run_states']);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['service_lifetimes']);
       // The checkpoints are a ledger too: nothing rewrites or removes one.

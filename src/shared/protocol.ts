@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 80 as const;
+export const SERVICE_PROTOCOL_VERSION = 81 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -143,6 +143,7 @@ export const IPC_CHANNELS = {
   inspectSeriesKnowledgeItems: 'ai7:j13:inspect-series-knowledge-items',
   inspectSeriesKnowledgeCandidates: 'ai7:j13:inspect-series-knowledge-candidates',
   inspectSeriesKnowledgeRevisions: 'ai7:j13:inspect-series-knowledge-revisions',
+  inspectDataVersion: 'ai7:j12:inspect-data-version',
   applyChangeSuggestion: 'ai7:j05:apply-change-suggestion',
   applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
   reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
@@ -5765,6 +5766,38 @@ export interface PromoteSeriesKnowledgeInput {
   readonly conflictDisposition: 'none' | 'preserved';
 }
 
+// ---- 设置 › 数据与存储 › 版本 (Issue #433, plan slice S85a; V2-UX-DSTO-016; ADR 0079 §1) ---------------------------------
+
+/** One record of the versions that opened the store. */
+export interface StoreVersionProjection {
+  readonly softwareVersion: string;
+  readonly dataVersion: number;
+  readonly schemaRevision: number;
+  readonly recordedAt: string;
+}
+
+/**
+ * 设置 › 数据与存储's 版本 (DSTO-016): the software version and the Data Version apart, whether the Data Version is frozen yet,
+ * the latest software update and whether it kept the Data Version, and the records of the versions that opened the store.
+ */
+export interface DataVersionProjection {
+  readonly softwareVersion: string;
+  readonly dataVersion: number;
+  readonly frozen: boolean;
+  readonly schemaRevision: number;
+  readonly update: {
+    readonly from: string;
+    readonly to: string;
+    /** Newer, earlier (an older build opened the store again), or the same precedence (Issue #433 review). */
+    readonly direction: 'newer' | 'earlier' | 'same';
+    readonly fromDataVersion: number;
+    readonly toDataVersion: number;
+    readonly recordedAt: string;
+  } | null;
+  readonly history: ReadonlyArray<StoreVersionProjection>;
+  readonly historyTruncated: boolean;
+}
+
 export interface SeriesKnowledgePromotionProjection {
   readonly itemId: string;
   readonly revisionId: string;
@@ -8242,6 +8275,7 @@ export interface ServiceOperationMap {
   inspectSeriesKnowledgeItems: { input: { seriesId: string; text: string; after: SeriesKnowledgeItemsCursor | null }; output: SeriesKnowledgeItemsPageProjection };
   inspectSeriesKnowledgeCandidates: { input: { seriesId: string; after: SeriesKnowledgeCandidatesCursor | null }; output: SeriesKnowledgeCandidatesPageProjection };
   inspectSeriesKnowledgeRevisions: { input: { seriesId: string; itemId: string; before: number | null }; output: SeriesKnowledgeRevisionsProjection };
+  inspectDataVersion: { input: Record<string, never>; output: DataVersionProjection };
   /**
    * AI7 Apply for Change Suggestions (Issue #408). The batch form is 确认应用 on 审阅's confirmation
    * strip (Issue #417): one Effect over exactly the suggestions the strip named, all or none.
@@ -8592,6 +8626,7 @@ export interface RendererApi {
   inspectSeriesKnowledgeItems(input: { seriesId: string; text: string; after: SeriesKnowledgeItemsCursor | null }): Promise<SeriesKnowledgeItemsPageProjection>;
   inspectSeriesKnowledgeCandidates(input: { seriesId: string; after: SeriesKnowledgeCandidatesCursor | null }): Promise<SeriesKnowledgeCandidatesPageProjection>;
   inspectSeriesKnowledgeRevisions(input: { seriesId: string; itemId: string; before: number | null }): Promise<SeriesKnowledgeRevisionsProjection>;
+  inspectDataVersion(): Promise<DataVersionProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */
   applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): Promise<ManuscriptApplyCommandProjection>;

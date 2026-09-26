@@ -146,6 +146,7 @@ import type {
   SeriesKnowledgeRevisionProjection,
   SeriesKnowledgeSpanInput,
   SeriesKnowledgeTarget,
+  DataVersionProjection,
   EvaluationCalibrationProjection,
   RecordPublicationActualsInput,
   SetEvaluationPreferencesInput,
@@ -408,6 +409,15 @@ import {
   SERIES_KNOWLEDGE_REUSE_SCOPES,
 } from '../shared/protocol.js';
 import {
+  DATA_VERSION,
+  DATA_VERSION_FROZEN,
+  DataVersionError,
+  DataVersionLedger,
+  MAX_STORE_VERSIONS_LISTED,
+  initializeDataVersionSchema,
+  readSoftwareVersion,
+} from './data-version.js';
+import {
   SeriesKnowledgeError,
   SeriesKnowledgeLedger,
   initializeSeriesKnowledgeSchema,
@@ -533,6 +543,7 @@ import {
   EVALUATION_CALIBRATION_SCHEMA_VERSION,
   SERIES_SCHEMA_VERSION,
   SERIES_KNOWLEDGE_SCHEMA_VERSION,
+  STORE_VERSION_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1762,7 +1773,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
       currentVersion === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
       currentVersion === SERIES_SCHEMA_VERSION ||
-      currentVersion === SERIES_KNOWLEDGE_SCHEMA_VERSION,
+      currentVersion === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
+      currentVersion === STORE_VERSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1811,7 +1823,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
       currentVersion === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
       currentVersion === SERIES_SCHEMA_VERSION ||
-      currentVersion === SERIES_KNOWLEDGE_SCHEMA_VERSION
+      currentVersion === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
+      currentVersion === STORE_VERSION_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2174,7 +2187,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
       version === SERIES_SCHEMA_VERSION ||
-      version === SERIES_KNOWLEDGE_SCHEMA_VERSION,
+      version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
+      version === STORE_VERSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2212,7 +2226,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
       version === SERIES_SCHEMA_VERSION ||
-      version === SERIES_KNOWLEDGE_SCHEMA_VERSION) return;
+      version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
+      version === STORE_VERSION_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2342,7 +2357,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
       version === SERIES_SCHEMA_VERSION ||
-      version === SERIES_KNOWLEDGE_SCHEMA_VERSION,
+      version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
+      version === STORE_VERSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2379,7 +2395,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
       version === SERIES_SCHEMA_VERSION ||
-      version === SERIES_KNOWLEDGE_SCHEMA_VERSION) return;
+      version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
+      version === STORE_VERSION_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2672,7 +2689,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== SERIES_KNOWLEDGE_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== STORE_VERSION_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2712,6 +2729,7 @@ function validateModelServiceSchema(
       version >= EVALUATION_CALIBRATION_SCHEMA_VERSION,
       version >= SERIES_SCHEMA_VERSION,
       version >= SERIES_KNOWLEDGE_SCHEMA_VERSION,
+      version >= STORE_VERSION_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2776,7 +2794,8 @@ function initializeModelServiceSchema(
       version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
       version === SERIES_SCHEMA_VERSION ||
-      version === SERIES_KNOWLEDGE_SCHEMA_VERSION,
+      version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
+      version === STORE_VERSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2813,7 +2832,8 @@ function initializeModelServiceSchema(
       version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
       version === SERIES_SCHEMA_VERSION ||
-      version === SERIES_KNOWLEDGE_SCHEMA_VERSION) {
+      version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
+      version === STORE_VERSION_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -2925,6 +2945,12 @@ interface StoreControl {
   interruptAfterAbandonObjectRemoval: boolean;
   /** The J-04-only local deterministic route resolved at service startup; `null` in every other launch. */
   baselineAnalysisRoute: BaselineAnalysisRouteFacts | null;
+  /**
+   * The software version the service entry read from the package the product ships in (Issue #433, S85a): the built
+   * carrier holds no package manifest. Absent, the store reads the one at its code root — the source tree's, as the
+   * service suites open it.
+   */
+  softwareVersion?: string;
 }
 
 function continuationNotice(access: OriginalFileAccessProjection): string {
@@ -3648,6 +3674,9 @@ export class EditorialStore {
   readonly #evaluationCalibration: EvaluationCalibrationLedger;
   readonly #series: SeriesLedger;
   readonly #seriesKnowledge: SeriesKnowledgeLedger;
+  readonly #dataVersions: DataVersionLedger;
+  /** The software this store was opened by (Issue #433, S85a): read once from the package it ships in. */
+  #softwareVersion = '';
   /** ②C 评估 (Issue #429, S81a): each Book's versioned Evaluation Records. */
   readonly #evaluations: EvaluationRecords;
   /** ②A 分析反馈 (Issue #94, S38): the editor's judgments of analysis results. */
@@ -3712,6 +3741,7 @@ export class EditorialStore {
     this.#evaluationCalibration = new EvaluationCalibrationLedger(authority);
     this.#series = new SeriesLedger(authority);
     this.#seriesKnowledge = new SeriesKnowledgeLedger(authority);
+    this.#dataVersions = new DataVersionLedger(authority);
     this.#evaluations = new EvaluationRecords(authority, { current: (bookId) => this.#evaluationManuscript(bookId) });
     this.#analysisFeedback = new AnalysisFeedbackLedger(authority);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
@@ -3788,6 +3818,11 @@ export class EditorialStore {
   ): Promise<EditorialStore> {
     requireStore(isAbsolute(dataRootInput), 'DATA_ROOT_INVALID', 'Agent Data Root 必须是绝对路径。');
     const workflowProfile = await loadBuiltInManuscriptProfile(codeRoot);
+    // The software version the store records beside its Data Version (Issue #433, S85a).
+    const softwareVersion = control.softwareVersion ?? await readSoftwareVersion(codeRoot).catch((error: unknown) => {
+      if (error instanceof DataVersionError) throw new StoreError(error.code, error.message);
+      throw error;
+    });
     const dataRoot = await createCanonicalExternalDataRoot(dataRootInput, codeRoot);
     const objectsRoot = await ensureCanonicalDataDirectory(dataRoot, 'objects');
     const recoveryObjects = await RecoveryObjectStore.open(dataRoot);
@@ -3865,7 +3900,8 @@ export class EditorialStore {
       // of analysis results, revision 49 (Issue #61, S26a) the 不说明 and later reasons of Proposal Decisions, and revision 50
       // (Issue #61, S26b) the editor's Learning Eligibility decisions, and revision 51 (Issue #430, S82) each Book's 定价与首印
       // and the house's evaluation preferences; revision 52 (Issue #63, S28a) the house's Series and their membership changes,
-      // and revision 53 (Issue #63, S28b) Series Knowledge: candidates, items, revisions and promotion decisions.
+      // and revision 53 (Issue #63, S28b) Series Knowledge: candidates, items, revisions and promotion decisions; revision 54
+      // (Issue #433, S85a) the versions that opened the store.
       initializeBookPeopleSchema(authority);
       initializeReviewGuidelineSchema(authority);
       initializeLibraryMaterialSchema(authority);
@@ -3876,6 +3912,7 @@ export class EditorialStore {
       initializeEvaluationCalibrationSchema(authority);
       initializeSeriesSchema(authority);
       initializeSeriesKnowledgeSchema(authority);
+      initializeDataVersionSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -3915,6 +3952,13 @@ export class EditorialStore {
       // What an interrupted 放入资料库 left beside the kept originals (Issue #427 review).
       await store.#libraryMaterials.sweep();
       store.#boundedCall(() => store.#boundedAuthority.startServiceLifetime(lifetimeId, new Date().toISOString()));
+      // Every store records the versions that open it (Issue #433, S85a; DSTO-016): a new record only when one changed.
+      store.#softwareVersion = softwareVersion;
+      store.#dataVersionCall(() => store.#transaction(authority, () => store.#dataVersions.recordOpen({
+        softwareVersion,
+        dataVersion: DATA_VERSION,
+        schemaRevision: STORE_VERSION_SCHEMA_VERSION,
+      })));
       return store;
     } catch (error) {
       // A refused open leaves no handle behind, so the caller can remove the Agent Data Root
@@ -11332,6 +11376,35 @@ export class EditorialStore {
       current: this.#knowledgeRevisionProjection(item.revisions.at(-1)!, titles),
       revisionCount: item.revisions.length,
     };
+  }
+
+  // ---- 设置 › 数据与存储 › 版本 (Issue #433, plan slice S85a; V2-UX-DSTO-016; ADR 0079 §1) --------------------------------
+
+  /** The software version and the Data Version apart, the latest software update, and the store's version records. A read. */
+  inspectDataVersion(): DataVersionProjection {
+    return this.#dataVersionCall(() => {
+      const { latest, recent, update, count } = this.#dataVersions.standing();
+      return {
+        softwareVersion: this.#softwareVersion,
+        dataVersion: DATA_VERSION,
+        frozen: DATA_VERSION_FROZEN,
+        schemaRevision: latest!.schemaRevision,
+        update,
+        history: recent
+          .map((entry) => ({ softwareVersion: entry.softwareVersion, dataVersion: entry.dataVersion, schemaRevision: entry.schemaRevision, recordedAt: entry.recordedAt })),
+        historyTruncated: count > MAX_STORE_VERSIONS_LISTED,
+      };
+    });
+  }
+
+  #dataVersionCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof DataVersionError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
   }
 
   #seriesCall<T>(operation: () => T): T {

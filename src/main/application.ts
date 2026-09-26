@@ -2988,6 +2988,16 @@ function registerRendererHandlers(
       return service.call('inspectSeriesKnowledgeRevisions', { seriesId: input.seriesId, itemId: input.itemId, before: input.before ?? null });
     }),
   );
+  // 设置 › 数据与存储 › 版本 (Issue #433, S85a): a house read, bound to no Book route.
+  ipcMain.handle(IPC_CHANNELS.inspectDataVersion, (event) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('inspectDataVersion', {});
+    }),
+  );
+  // 书系知识 (Issue #63, S28b): house-wide and serialized; a candidate that cites a manuscript span comes from the window that
+  // holds that manuscript's capability, exactly as a mark does.
   ipcMain.handle(IPC_CHANNELS.inspectFeedbackHistory, (event) =>
     envelope(async () => {
       requireSender(event);
