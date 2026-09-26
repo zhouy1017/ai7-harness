@@ -2551,6 +2551,7 @@ function requireManuscriptReimportTargetSchema(
   includeDecisionFeedbackTables ||= committed(DECISION_FEEDBACK_SCHEMA_SQL);
   includeLearningEligibilityTables ||= committed(LEARNING_ELIGIBILITY_SCHEMA_SQL);
   includeEvaluationCalibrationTables ||= committed(EVALUATION_CALIBRATION_SCHEMA_SQL);
+  includeSeriesTables ||= committed(SERIES_SCHEMA_SQL);
   requireExactSchema(
     db,
     {
