@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SERIES_SCHEMA_SQL, SERIES_TRIGGER_SQL, SeriesError, SeriesLedger, initializeSeriesSchema, seriesMembershipImpact } from '../../src/service/series.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { EVALUATION_CALIBRATION_SCHEMA_VERSION, SERIES_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { EVALUATION_CALIBRATION_SCHEMA_VERSION, SERIES_KNOWLEDGE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
   MAX_FRAME_BYTES,
   MAX_SERIES_CANDIDATES_PAGE,
@@ -171,9 +171,9 @@ describe('书系 over the real store', () => {
       // 书系一致性 still waits, and says the Book is in the Series.
       const category = (bookId: string): unknown => store.inspectReviewWorkspace(bookId, null).categories
         .filter((entry) => entry.categoryId === 'series-consistency').map((entry) => [entry.available, entry.unavailableReason]);
-      expect(category(first)).toEqual([[false, '这本书已在书系「星河三部曲」中；书系知识接入审阅后才能选。']]);
+      expect(category(first)).toEqual([[false, '这本书已在书系「星河三部曲」中；书系一致性审阅还没有接入书系知识，暂不能选。']]);
       const outside = emptyBook(store, '书系之外');
-      expect(category(outside)).toEqual([[false, '这本书不在任何书系中，也还没有书系知识；加入书系、且书系知识接入审阅后才能选。']]);
+      expect(category(outside)).toEqual([[false, '这本书不在任何书系中；书系一致性审阅还没有接入书系知识，暂不能选。']]);
 
       // 移出书系: prospective, its own four groups, and the record on both sides; the Book's own history keeps both.
       const leave = store.previewSeriesMembershipChange({ seriesId, bookId: first, kind: 'remove' });
@@ -194,7 +194,7 @@ describe('书系 over the real store', () => {
       expect(store.inspectBookSeries(first).history.map((change) => change.label)).toEqual(['移出书系', '加入书系']);
       expect(store.inspectBookSeries(first).memberships).toEqual([]);
       expect(found('series', '星河')).toEqual(['星河之二']);
-      expect(category(first)).toEqual([[false, '这本书不在任何书系中，也还没有书系知识；加入书系、且书系知识接入审阅后才能选。']]);
+      expect(category(first)).toEqual([[false, '这本书不在任何书系中；书系一致性审阅还没有接入书系知识，暂不能选。']]);
       store.markCleanShutdown();
     } finally {
       store.close();
@@ -213,7 +213,7 @@ describe('书系 over the real store', () => {
     }
     const database = new DatabaseSync(databasePath());
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SERIES_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SERIES_KNOWLEDGE_SCHEMA_VERSION);
       for (const table of SERIES_TABLES) {
         expect(() => database.exec(`UPDATE ${table} SET recorded_at = recorded_at`)).toThrowError(/SERIES_LEDGER_IMMUTABLE|no such column/u);
         expect(() => database.exec(`DELETE FROM ${table}`)).toThrowError(/SERIES_LEDGER_IMMUTABLE/u);
@@ -318,7 +318,7 @@ describe('书系 over the real store', () => {
     const plant = new DatabaseSync(databasePath());
     let before: Array<{ name: string; sql: string }>;
     try {
-      plant.exec(`DROP TABLE series_membership_changes; DROP TABLE series; PRAGMA user_version = ${EVALUATION_CALIBRATION_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; PRAGMA user_version = ${EVALUATION_CALIBRATION_SCHEMA_VERSION};`);
       before = schemaOf(plant);
     } finally {
       plant.close();
@@ -332,7 +332,7 @@ describe('书系 over the real store', () => {
     }
     const database = new DatabaseSync(databasePath(), { readOnly: true });
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SERIES_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SERIES_KNOWLEDGE_SCHEMA_VERSION);
       const after = schemaOf(database);
       expect(after.filter((entry) => !/^series/u.test(entry.name))).toEqual(before!);
       expect(after.filter((entry) => SERIES_TABLES.includes(entry.name)).map((entry) => entry.sql))

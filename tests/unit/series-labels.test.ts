@@ -108,8 +108,8 @@ describe('the Series Membership Impact Preview', () => {
   it('refuses by name when the Book already is, or is not, a member, and tells a member Book why 书系一致性 still waits', () => {
     expect(seriesMemberAlready('星河之一', '星河三部曲')).toBe('《星河之一》已经在书系「星河三部曲」中。');
     expect(seriesMemberAbsent('星河之一', '星河三部曲')).toBe('《星河之一》不在书系「星河三部曲」中。');
-    expect(seriesConsistencyWaitingReason(['星河三部曲'])).toBe('这本书已在书系「星河三部曲」中；书系知识接入审阅后才能选。');
-    expect(seriesConsistencyWaitingReason(['甲', '乙'])).toBe('这本书已在书系「甲」、「乙」中；书系知识接入审阅后才能选。');
+    expect(seriesConsistencyWaitingReason(['星河三部曲'])).toBe('这本书已在书系「星河三部曲」中；书系一致性审阅还没有接入书系知识，暂不能选。');
+    expect(seriesConsistencyWaitingReason(['甲', '乙'])).toBe('这本书已在书系「甲」、「乙」中；书系一致性审阅还没有接入书系知识，暂不能选。');
   });
 });
 

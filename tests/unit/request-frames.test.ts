@@ -1364,6 +1364,59 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
+  it('accepts 书系知识: a candidate of the editor\'s words or a manuscript span, its review, its edit and its promotion (Issue #63, S28b)', () => {
+    const seriesId = randomUUID();
+    const candidateId = randomUUID();
+    const span = {
+      manuscriptId: randomUUID(), branchId: randomUUID(), windowStartBlockId: `blk_${'a'.repeat(24)}`, baseRevisionId: randomUUID(), expectedJournalSequence: 3,
+      blockId: `blk_${'b'.repeat(24)}`, baseBlockDigest: 'c'.repeat(64), fromGrapheme: 0, toGrapheme: 4, selectedText: '海边小城',
+    };
+    const newItem = { kind: 'new', subject: '林默', knowledgeClass: 'characters' };
+    const promote = { seriesId, candidateId, candidateVersion: 2, reviewDigest: 'd'.repeat(64), reuseScope: 'series-tasks', conflictDisposition: 'none' };
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'proposeSeriesKnowledge', input: { seriesId, target: newItem, content: '三部曲里的年龄以第一部为准。', span: null } },
+      { op: 'proposeSeriesKnowledge', input: { seriesId, target: newItem, content: '海边小城', span } },
+      { op: 'proposeSeriesKnowledge', input: { seriesId, target: { kind: 'existing', itemId: randomUUID() }, content: '改', span: null } },
+      { op: 'inspectSeriesKnowledgeReview', input: { seriesId, candidateId } },
+      { op: 'editSeriesKnowledgeCandidate', input: { seriesId, candidateId, expectedVersion: 1, target: newItem, content: '改过' } },
+      { op: 'promoteSeriesKnowledge', input: promote },
+      { op: 'promoteSeriesKnowledge', input: { ...promote, reuseScope: 'consistency-review', conflictDisposition: 'preserved' } },
+      // Its further pages (Issue #63 review): items by name or 查找条目, open candidates, and one item's 历次版本.
+      { op: 'inspectSeriesKnowledgeItems', input: { seriesId, text: '', after: null } },
+      { op: 'inspectSeriesKnowledgeItems', input: { seriesId, text: '林', after: { subject: '林默', itemId: randomUUID() } } },
+      { op: 'inspectSeriesKnowledgeCandidates', input: { seriesId, after: null } },
+      { op: 'inspectSeriesKnowledgeCandidates', input: { seriesId, after: { firstAt: '2026-09-26T01:02:03.004Z', candidateId } } },
+      { op: 'inspectSeriesKnowledgeRevisions', input: { seriesId, itemId: randomUUID(), before: null } },
+      { op: 'inspectSeriesKnowledgeRevisions', input: { seriesId, itemId: randomUUID(), before: 3 } },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    for (const [op, input] of [
+      ['proposeSeriesKnowledge', { seriesId, target: newItem, content: '话' }],
+      ['proposeSeriesKnowledge', { seriesId, target: { ...newItem, knowledgeClass: 'people' }, content: '话', span: null }],
+      ['proposeSeriesKnowledge', { seriesId, target: { kind: 'existing', itemId: 'item' }, content: '话', span: null }],
+      ['proposeSeriesKnowledge', { seriesId, target: { kind: 'existing', itemId: randomUUID(), subject: '林默' }, content: '话', span: null }],
+      ['proposeSeriesKnowledge', { seriesId, target: newItem, content: '', span: null }],
+      ['proposeSeriesKnowledge', { seriesId, target: newItem, content: '话', span: { ...span, blockId: 'block' } }],
+      ['proposeSeriesKnowledge', { seriesId, target: newItem, content: '话', span: { ...span, extra: true } }],
+      ['inspectSeriesKnowledgeReview', { seriesId }],
+      ['editSeriesKnowledgeCandidate', { seriesId, candidateId, expectedVersion: 0, target: newItem, content: '改' }],
+      ['promoteSeriesKnowledge', { ...promote, reuseScope: 'everywhere' }],
+      ['promoteSeriesKnowledge', { ...promote, conflictDisposition: 'resolved' }],
+      ['promoteSeriesKnowledge', { ...promote, reviewDigest: 'D'.repeat(64) }],
+      ['inspectSeriesKnowledgeItems', { seriesId, text: '林\n默', after: null }],
+      ['inspectSeriesKnowledgeItems', { seriesId, after: null }],
+      ['inspectSeriesKnowledgeItems', { seriesId, text: '', after: { subject: '', itemId: randomUUID() } }],
+      ['inspectSeriesKnowledgeCandidates', { seriesId, after: { firstAt: 'yesterday', candidateId } }],
+      ['inspectSeriesKnowledgeRevisions', { seriesId, itemId: randomUUID(), before: 0 }],
+      ['inspectSeriesKnowledgeRevisions', { seriesId, itemId: 'item', before: null }],
+    ] as const) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('accepts 知识库 › 资料库: the read naming nothing, a preview by absolute path, an arrival, and a decision of a closed shape (Issue #427, S79c)', () => {
     const materialId = randomUUID();
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [

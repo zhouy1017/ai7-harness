@@ -199,6 +199,10 @@ export interface SeriesImpactFacts {
   readonly seriesScopedRuns: number;
   readonly learningMaterials: number;
   readonly learningDecided: number;
+  /** Items of the Series' knowledge holding a revision taken from the Book (Issue #63, S28b). */
+  readonly knowledgeFromBook?: number;
+  /** Open knowledge candidates citing the Book's manuscript (Issue #63 review): held back while it is not a member. */
+  readonly knowledgeCandidatesFromBook?: number;
 }
 
 /** The Book's Learning Material as the preview names it (SER-007): how many, and how many the editor has decided. */
@@ -222,6 +226,8 @@ export function seriesMembershipImpact(kind: SeriesMembershipChangeKind, facts: 
   const runs = facts.seriesScopedRuns === 0
     ? `现在没有使用${series}范围、已授权或正在运行的任务。`
     : `${facts.seriesScopedRuns} 个使用${series}范围的任务已授权或正在运行。`;
+  const knowledge = (facts.knowledgeFromBook ?? 0) === 0 ? [] : [`${series}的书系知识里有 ${facts.knowledgeFromBook} 个条目取自${book}的稿件；它们留在书系知识中不变。`];
+  const candidates = facts.knowledgeCandidatesFromBook ?? 0;
   const learning = facts.learningMaterials === 0
     ? `${book}还没有学习材料。`
     : `${book}有 ${facts.learningMaterials} 项学习材料，其中 ${facts.learningDecided} 项已决定学习准入。`;
@@ -230,14 +236,17 @@ export function seriesMembershipImpact(kind: SeriesMembershipChangeKind, facts: 
       impactGroup('future-tasks', [`以后新建任务时，可以明确选用${series}的范围，其中会包括${book}。`],
         [`不会把${book}自动加进任何任务，也不会因此授权运行、让其他图书读到它的原文或发给模型服务。`]),
       impactGroup('runs', [], [runs, '已授权或正在运行的任务按各自冻结的范围继续，计划不会被改动。']),
-      impactGroup('knowledge-learning', [], [learning, '书系知识、学习准入和学习记录各有自己的决定；加入书系不会纳入、启用或删除它们。']),
+      impactGroup('knowledge-learning', candidates === 0 ? [] : [`来自${book}稿件、尚未纳入的 ${candidates} 个书系知识候选项重新可以审阅纳入。`],
+        [...knowledge, learning, '书系知识、学习准入和学习记录各有自己的决定；加入书系不会纳入、启用或删除它们。']),
       impactGroup('history', ['追加一条书系成员变更记录，书系和图书两边都能查看。'], ['已完成的任务、结果、决定和以前的记录都保持原样。']),
     ];
   }
   return [
     impactGroup('future-tasks', [`以后新建任务时，${series}的范围不再包括${book}。`], [`${book}自己的任务照旧。`]),
     impactGroup('runs', [], [runs, '已经冻结的任务范围不会因移出而改变，任务也不会被取消。']),
-    impactGroup('knowledge-learning', [], [learning, '书系知识、学习准入和学习记录各有自己的决定；移出书系不会删除或改动它们。']),
+    // What it holds back says so (SER-003, SER-007; Issue #63 review): candidates citing the Book wait until it rejoins.
+    impactGroup('knowledge-learning', candidates === 0 ? [] : [`来自${book}稿件、尚未纳入的 ${candidates} 个书系知识候选项在它重新加入书系前不能纳入。`],
+      [...knowledge, learning, '书系知识、学习准入和学习记录各有自己的决定；移出书系不会删除或改动它们。']),
     impactGroup('history', ['追加一条书系成员变更记录，书系和图书两边都能查看。'], [`${book}和书系以前的记录都不会删除。`]),
   ];
 }
@@ -260,9 +269,12 @@ function isImpact(value: unknown): value is SeriesImpactGroupProjection[] {
     Array.isArray(group.unchanged) && group.unchanged.every((line) => typeof line === 'string'));
 }
 
-/** 书系一致性 for a Book already in a Series (Issue #63, S28a): the category still waits for Series Knowledge to reach review. */
+/**
+ * 书系一致性 for a Book already in a Series (Issue #63, S28a): the category itself has not yet taken Series Knowledge in, which
+ * no step of the editor's opens (Issue #63 review) — 纳入书系知识 does not.
+ */
 export function seriesConsistencyWaitingReason(titles: ReadonlyArray<string>): string {
-  return `这本书已在书系${titles.map((title) => `「${title}」`).join('、')}中；书系知识接入审阅后才能选。`;
+  return `这本书已在书系${titles.map((title) => `「${title}」`).join('、')}中；书系一致性审阅还没有接入书系知识，暂不能选。`;
 }
 
 /** Why 加入书系 cannot go on: the Book already is a member. */

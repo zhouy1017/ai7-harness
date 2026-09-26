@@ -174,6 +174,29 @@ The reason a Proposal Decision is asked for (Issue #61, S26a) is service protoco
 
 Membership creates no Task, Run Authorization, source scope, Learning Eligibility, Provider transmission or cross-Book mutation. `inspectSeriesList`, `inspectSeries` and `inspectBookSeries` read the Series and each Book's side of it, every list a page at a time (Issue #63 review): 书系 by name, 50 to a page; a Series' members newest joined first, 50 to a page, so a Book just added heads the first; its change records newest first, 20 to a page; and 加入书系…'s Books — every Book the Series does not hold — by title, 50 to a page, narrowed by `查找书名`. `inspectSeriesMembers`, `inspectSeriesCandidates` and `inspectSeriesHistory` read the pages after the first, each starting after one item of its own list. No page weighs more than 96 KiB, and every page carries its first item. `createSeries` answers the new Series alone and `changeSeriesMembership` the record it made; a Book's side names at most 50 of its Series, with how many in all. 书库's search gains the field `series`. For a member Book, the 书系一致性 category names its Series while it waits for Series Knowledge to reach review; for a Book in no Series it names both conditions, a Series and Series Knowledge in review.
 
+书系知识 (Issue #63, S28b) is service protocol version 80 and schema revision 53. It adds four append-only relations owned by `src/service/series-knowledge.ts`:
+- `series_knowledge_candidates`: each candidate's versions;
+- `series_knowledge_items`: the items, each with its name and one of eight knowledge classes;
+- `series_knowledge_revisions`: their immutable revisions, each keeping its words, authorship or provenance, any conflicts kept, and its use;
+- `series_knowledge_promotions`: the promotion decisions.
+
+`proposeSeriesKnowledge` records a candidate for a new or an exact existing item. It is either in the editor's own words, or the exact span of a member Book's working manuscript, verified as a mark's range is: from the window that holds that manuscript's capability, and refused for a Book the Series does not hold.
+
+`inspectSeriesKnowledgeReview` answers 书系知识纳入审阅. Conflicts are found by identity only, and each line names the item or candidate and its version, never its words (Issue #63 review); a review lists at most 50 and says how many there are:
+- an item of the same name;
+- a revision appended since an existing item was read;
+- another open candidate for the same item or name.
+
+`editSeriesKnowledgeCandidate` appends the next version, re-reading an existing item at its current revision. `promoteSeriesKnowledge` names the review's digest. It is refused:
+- when the candidate, the item, a conflict or the source Book's membership moved;
+- while a conflict is not kept by `保留已披露冲突`;
+- without a use.
+
+A promotion creates the item with its first revision, or appends the next revision. It creates no Run Source Scope, performs no retrieval and permits no transmission. The manuscript's selection menu offers a member Book's words to each Series it is in; a Production Document offers nothing of 书系. 移出书系's preview names the items taken from the Book, and the Book's open candidates it holds back until the Book rejoins; 加入书系's says they can be reviewed again.
+
+Nothing of 书系知识 is read whole (Issue #63 review). The Series answer carries the first page of items, by name, each with its current revision only and how many revisions it holds, and the first page of open candidates, oldest proposed first, with the counts. `inspectSeriesKnowledgeItems` reads further pages of items, narrowed to names holding the words `查找条目` gives; `inspectSeriesKnowledgeCandidates` further candidates; and `inspectSeriesKnowledgeRevisions` an item's 历次版本, ten at a time, newest first. Each page is bounded by count and by 64 KiB. A cited passage is shown whole up to 200 graphemes and beyond that as its opening, the record keeping all of it; one cited while changes waited in the journal beyond its revision says so. `proposeSeriesKnowledge` answers with the candidate alone and `promoteSeriesKnowledge` with the item alone, and the page reads the Series again.
+
+
 
 Delivery Records (Issue #415, S66b) are schema revision 38, on service protocol version 56. `production_document_deliveries` is one more append-only relation in `src/service/production-document-ledger.ts`: each row is `第 N 次交付` of one document, names one saved version by its revision and digest, and records the recipient, from the house's list (宣传部, 编辑部, 外部媒体, 其他) or in the editor's own words, and an optional note. Its canonical record and digest are verified on every read. `交付` names a saved version, or the current text: bound to the working digest the form read, it is saved as the next version (origin `delivery`) in the transaction that records the delivery, and the recipient and note are checked before anything is saved. A delivery sends nothing. The export of a delivered version goes through the same export ledger under target kind `production-document-version`, with the revision columns left empty and the document's identity and version digest in the canonical record. A Delivery Record reads its file from the newest export of its version approved after it and before the document's next delivery that wrote its file, or else from the newest attempt, so a failed or unconfirmed re-export never hides the file handed over. `交付后有修改` is an edit after a delivery: the document was delivered and its working digest is no delivered version's, so delivering an earlier saved version raises nothing. Production Documents moved out of the 交付物 answer into a read of their own, `inspectProductionDocuments`: with their versions and Delivery Records beside the Manuscript's milestones and designations, the widest answer would not fit one service frame. The documents' commands answer with that read, and `recordProductionDocumentDelivery` is the one new command.
 

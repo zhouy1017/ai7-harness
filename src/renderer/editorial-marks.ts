@@ -1,3 +1,14 @@
+import { SERIES_KNOWLEDGE_CLASSES, SERIES_KNOWLEDGE_CLASS_LABELS } from '../shared/protocol.js';
+import type { ProposeSeriesKnowledgeInput, SeriesKnowledgeClass, SeriesKnowledgeProposalProjection } from '../shared/protocol.js';
+import {
+  KNOWLEDGE_CLASS_LABEL,
+  KNOWLEDGE_CONTENT_LABEL,
+  KNOWLEDGE_MENU_GROUP,
+  KNOWLEDGE_MENU_NOTE,
+  KNOWLEDGE_PROPOSE,
+  KNOWLEDGE_SUBJECT_LABEL,
+  knowledgeMenuLabel,
+} from './series-knowledge-labels.js';
 import type { BoundedEditor } from './editor.js';
 import type {
   EditorClipboardCommand,
@@ -80,6 +91,12 @@ interface MountOptions {
    * Without it, the entry is not offered.
    */
   openConflict?(markId: string): void;
+  /**
+   * The Series the Book is in now (Issue #63, S28b): for each, the selection menu offers 提议为书系「…」的知识… on the selected
+   * words. Without it — a Production Document, or a Book in no Series — the menu offers nothing of 书系.
+   */
+  seriesOf?(): Promise<ReadonlyArray<{ readonly seriesId: string; readonly title: string }>>;
+  proposeSeriesKnowledge?(input: ProposeSeriesKnowledgeInput): Promise<SeriesKnowledgeProposalProjection>;
   busy(): boolean;
   /** The set of marks changed: whatever counts them elsewhere on the surface reads again. */
   marksChanged?(): void;
@@ -94,11 +111,13 @@ interface MountOptions {
 }
 
 interface FormField {
-  name: 'body' | 'proposedText' | 'rationale' | 'reason';
+  name: 'body' | 'proposedText' | 'rationale' | 'reason' | 'subject' | 'knowledgeClass';
   label: string;
   value: string;
   required: boolean;
   hint?: string;
+  /** A closed choice, drawn as a select with none chosen (Issue #63, S28b). */
+  options?: ReadonlyArray<{ readonly value: string; readonly label: string }>;
 }
 
 interface FormConfig {
@@ -185,6 +204,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   let promptFor: { readonly markId: string; readonly decisionId: string; readonly mode: 'prompt' | 'add' | 'revise' } | null = null;
   let collapsedBeforeContextClick = true;
   let working = false;
+  /** The Series the Book is in, as last read: the next menu offers each (Issue #63, S28b). */
+  let inSeries: ReadonlyArray<{ readonly seriesId: string; readonly title: string }> = [];
+  const readSeries = (): void => {
+    void options.seriesOf?.().then((list) => { inSeries = list; }, () => undefined);
+  };
+  readSeries();
   let closedAt: { top: number } | undefined;
 
   const binding = (): { manuscriptId: string; branchId: string; windowStartBlockId: string } => {
@@ -271,13 +296,27 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       quote.dataset['markQuote'] = 'pinned';
       form.append(quote);
     }
-    const inputs = new Map<FormField['name'], HTMLTextAreaElement>();
+    const inputs = new Map<FormField['name'], HTMLTextAreaElement | HTMLSelectElement>();
     for (const field of config.fields) {
       const label = el('label', 'editorial-mark-field');
       label.append(el('span', undefined, field.label));
-      const input = el('textarea');
+      let input: HTMLTextAreaElement | HTMLSelectElement;
+      if (field.options !== undefined) {
+        const select = el('select');
+        const none = el('option', undefined, '请选择');
+        none.value = '';
+        select.append(none, ...field.options.map((option) => {
+          const node = el('option', undefined, option.label);
+          node.value = option.value;
+          return node;
+        }));
+        input = select;
+      } else {
+        const area = el('textarea');
+        area.rows = field.name === 'subject' ? 1 : field.name === 'rationale' || field.name === 'reason' ? 2 : 3;
+        input = area;
+      }
       input.name = field.name;
-      input.rows = field.name === 'rationale' || field.name === 'reason' ? 2 : 3;
       input.value = field.value;
       input.required = field.required;
       input.dataset['markField'] = field.name;
@@ -307,7 +346,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     form.append(problem, row);
     form.addEventListener('submit', (event) => {
       event.preventDefault();
-      const values = { body: '', proposedText: '', rationale: '', reason: '' };
+      const values = { body: '', proposedText: '', rationale: '', reason: '', subject: '', knowledgeClass: '' };
       for (const [name, input] of inputs) values[name] = input.value;
       const missing = config.fields.find((field) => field.required && values[field.name].trim().length === 0);
       if (missing) {
@@ -372,6 +411,66 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (range.kind === 'range') return range;
     options.setStatus(selectionMenuReason(range.kind), 'error');
     return null;
+  };
+
+  /**
+   * 提议为书系「…」的知识… (Issue #63, S28b; SER-013): the selected words of this member Book's manuscript become a candidate
+   * for a new item of the Series, citing the exact span at the revision and journal position they stand at now. The manuscript
+   * is not changed, and nothing is Series Knowledge until the candidate is taken in by review on the Series' page.
+   */
+  const composeKnowledge = async (series: { readonly seriesId: string; readonly title: string }): Promise<void> => {
+    if (refuseWhileBusy() || options.proposeSeriesKnowledge === undefined) return;
+    const propose = options.proposeSeriesKnowledge;
+    const range = await settledRange();
+    if (range === null) return;
+    openComposer(range.blockId, {
+      id: 'propose-series-knowledge',
+      title: knowledgeMenuLabel(series.title).replace('…', ''),
+      quote: range.text,
+      fields: [
+        { name: 'subject', label: KNOWLEDGE_SUBJECT_LABEL, value: '', required: true },
+        {
+          name: 'knowledgeClass',
+          label: KNOWLEDGE_CLASS_LABEL,
+          value: '',
+          required: true,
+          options: SERIES_KNOWLEDGE_CLASSES.map((knowledgeClass) => ({ value: knowledgeClass, label: SERIES_KNOWLEDGE_CLASS_LABELS[knowledgeClass] })),
+        },
+        { name: 'body', label: KNOWLEDGE_CONTENT_LABEL, value: range.text, required: true },
+      ],
+      submitLabel: KNOWLEDGE_PROPOSE,
+      note: KNOWLEDGE_MENU_NOTE,
+      submit: async (values) => {
+        try {
+          await editor.flush();
+          const current = editor.currentWindow();
+          const result = await propose({
+            seriesId: series.seriesId,
+            target: { kind: 'new', subject: values.subject, knowledgeClass: values.knowledgeClass as SeriesKnowledgeClass },
+            content: values.body,
+            span: {
+              ...binding(),
+              baseRevisionId: current.revisionId,
+              expectedJournalSequence: current.journalSequence,
+              blockId: range.blockId,
+              baseBlockDigest: range.blockDigest,
+              fromGrapheme: range.fromGrapheme,
+              toGrapheme: range.toGrapheme,
+              selectedText: range.text,
+            },
+          });
+          options.setStatus(result.completionLabel, 'success');
+          closeFloating();
+          editor.focus();
+        } catch (error) {
+          options.setStatus(options.errorMessage(error, '无法提议为书系知识。'), 'error');
+        }
+      },
+      cancel: () => {
+        closeFloating();
+        editor.focus();
+      },
+    });
   };
 
   const composeNewMark = async (kind: 'annotation' | 'editor-note' | 'change-suggestion'): Promise<void> => {
@@ -1158,7 +1257,18 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         ],
       },
       aiTaskGroup(),
+      // 书系 (Issue #63, S28b): only for a Book in a Series, one entry per Series.
+      ...(inSeries.length === 0 || options.proposeSeriesKnowledge === undefined ? [] : [{
+        label: KNOWLEDGE_MENU_GROUP,
+        note: why ?? KNOWLEDGE_MENU_NOTE,
+        items: inSeries.map((series): MenuItem => ({
+          action: 'propose-series-knowledge',
+          label: knowledgeMenuLabel(series.title),
+          ...(why ? { disabledReason: why } : { run: () => void composeKnowledge(series) }),
+        })),
+      }]),
     ], at);
+    readSeries();
   };
 
   const showMarkMenu = (mark: EditorialMarkAnchorProjection, at: { x: number; y: number }): void => {

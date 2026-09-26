@@ -208,7 +208,7 @@ export const BUILTIN_REVIEW_CATEGORY_CONFIGURATION: ReviewCategoryConfiguration 
       batchApply: false,
       searchEngine: false,
       executor: 'unavailable',
-      unavailableReason: '这本书不在任何书系中，也还没有书系知识；加入书系、且书系知识接入审阅后才能选。',
+      unavailableReason: '这本书不在任何书系中；书系一致性审阅还没有接入书系知识，暂不能选。',
       guidelineDocuments: [],
       procedure: { procedureId: 'ai7-review-procedure/series-consistency', title: '书系一致性检查', version: '1' },
     },

@@ -187,6 +187,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j16-picker-path' ||
           key === '--j15-picker-path' ||
           key === '--j11-picker-path' ||
+          key === '--j13-picker-path' ||
           key === '--j07-save-path' ||
           key === '--j07-folder-path' ||
           key === '--j04-save-path' ||
@@ -231,9 +232,11 @@ function parseArguments(argv: string[]): LaunchArguments {
   const j15PickerPath = values.get('--j15-picker-path');
   // J-11's picker imports the manuscript its 评估 evaluates (Issue #429, S81a).
   const j11PickerPath = values.get('--j11-picker-path');
+  // J-13's picker imports the member Book whose words become a Series Knowledge Candidate (Issue #63, S28b).
+  const j13PickerPath = values.get('--j13-picker-path');
   requireDesktop(
     [j01PickerPath, j02PickerPath, j08PickerPath, j12PickerPath, j03PickerPath, j04PickerPath, j05PickerPath, j06PickerPath, j07PickerPath, j09PickerPath,
-      j10PickerPath, j16PickerPath, j15PickerPath, j11PickerPath].filter(Boolean).length <= 1,
+      j10PickerPath, j16PickerPath, j15PickerPath, j11PickerPath, j13PickerPath].filter(Boolean).length <= 1,
   );
   // The picker-path launch controls carry whatever their Journey selects, in any recognised format
   // or none, so each one asks only that it is its own Journey's absolute path.
@@ -279,9 +282,12 @@ function parseArguments(argv: string[]): LaunchArguments {
   requireDesktop(
     j11PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-11' && isAbsolute(j11PickerPath)),
   );
+  requireDesktop(
+    j13PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-13' && isAbsolute(j13PickerPath)),
+  );
   const injectedPickerPath =
     j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath ?? j04PickerPath ?? j05PickerPath ?? j06PickerPath ??
-      j07PickerPath ?? j09PickerPath ?? j10PickerPath ?? j16PickerPath ?? j15PickerPath ?? j11PickerPath;
+      j07PickerPath ?? j09PickerPath ?? j10PickerPath ?? j16PickerPath ?? j15PickerPath ?? j11PickerPath ?? j13PickerPath;
   // The Save dialog's launch control is guarded exactly as the picker controls are: each Journey's own, and absolute —
   // J-07's for its exports, J-04's for the 审阅报告's (Issue #500, S64b part 2).
   const j07SavePath = values.get('--j07-save-path');
@@ -2906,6 +2912,80 @@ function registerRendererHandlers(
       const route = owned.route;
       requireDesktop(input.bookId === null || route === null || (route.kind === 'book' && route.bookId === input.bookId), 'AI7_RENDERER_BOUNDARY_INVALID');
       return service.call('inspectSeriesHistory', { seriesId: input.seriesId ?? null, bookId: input.bookId ?? null, after: input.after ?? null });
+    }),
+  );
+  // 书系知识 (Issue #63, S28b): house-wide and serialized; a candidate that cites a manuscript span comes from the window that
+  // holds that manuscript's capability, exactly as a mark does.
+  ipcMain.handle(IPC_CHANNELS.proposeSeriesKnowledge, (event, input: ServiceOperationMap['proposeSeriesKnowledge']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        if (input.span !== null) {
+          requireDesktop(typeof input.span === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+          requireManuscriptCapability(owned, input.span);
+        }
+        return service.call('proposeSeriesKnowledge', { seriesId: input.seriesId, target: input.target, content: input.content, span: input.span });
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectSeriesKnowledgeReview, (event, input: ServiceOperationMap['inspectSeriesKnowledgeReview']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectSeriesKnowledgeReview', { seriesId: input.seriesId, candidateId: input.candidateId });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.editSeriesKnowledgeCandidate, (event, input: ServiceOperationMap['editSeriesKnowledgeCandidate']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('editSeriesKnowledgeCandidate', {
+          seriesId: input.seriesId, candidateId: input.candidateId, expectedVersion: input.expectedVersion, target: input.target, content: input.content,
+        });
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.promoteSeriesKnowledge, (event, input: ServiceOperationMap['promoteSeriesKnowledge']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('promoteSeriesKnowledge', {
+          seriesId: input.seriesId, candidateId: input.candidateId, candidateVersion: input.candidateVersion, reviewDigest: input.reviewDigest,
+          reuseScope: input.reuseScope, conflictDisposition: input.conflictDisposition,
+        });
+      });
+    }),
+  );
+  // 书系知识's further pages (Issue #63 review): items by name or 查找条目, open candidates, and one item's 历次版本.
+  ipcMain.handle(IPC_CHANNELS.inspectSeriesKnowledgeItems, (event, input: ServiceOperationMap['inspectSeriesKnowledgeItems']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectSeriesKnowledgeItems', { seriesId: input.seriesId, text: input.text, after: input.after ?? null });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectSeriesKnowledgeCandidates, (event, input: ServiceOperationMap['inspectSeriesKnowledgeCandidates']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectSeriesKnowledgeCandidates', { seriesId: input.seriesId, after: input.after ?? null });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectSeriesKnowledgeRevisions, (event, input: ServiceOperationMap['inspectSeriesKnowledgeRevisions']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectSeriesKnowledgeRevisions', { seriesId: input.seriesId, itemId: input.itemId, before: input.before ?? null });
     }),
   );
   ipcMain.handle(IPC_CHANNELS.inspectFeedbackHistory, (event) =>

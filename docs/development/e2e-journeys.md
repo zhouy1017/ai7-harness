@@ -144,7 +144,7 @@ Not proven here: a Review Run's cards — prepared, under way and on the manuscr
 
 ## J-13 书系: Series membership
 
-J-13's first slice (Issue #63, plan slice S28a). Series Knowledge, its candidates and promotion, come with S28b. Series-scope pins and retrieval exclusions come with S29 (#64).
+J-13 covers two slices of Issue #63: S28a, Series membership, and S28b, Series Knowledge. Series-scope pins and retrieval exclusions come with S29 (#64).
 
 The runner creates three empty Books, 星河之一, 星河之二 and 书系之外. It uses no manuscript, credential or Provider; every name is the runner's own. Each Book's 工作概览 reads `不在任何书系中。`.
 
@@ -179,8 +179,41 @@ The lists' further pages and 加入书系…'s search (Issue #63 review) — `�
 
 At 200% the member table stacks, each cell naming its column, and the preview and records wrap within the width. Under forced colours the preview keeps its border.
 
+### Series Knowledge (S28b)
+
+After the restart, J-13 brings a fourth Book, 星河之三, in from exact `sample1` through the launch control `--j13-picker-path`, and adds it to the Series like the others. The 书系知识 section says a candidate is read by no Task and that taking it in authorizes nothing, and reads `还没有书系知识。` and `没有待审阅的候选项。`.
+
+**A candidate from the manuscript.** In 星河之三's manuscript the selection menu ends with a `书系` group offering `提议为书系「星河三部曲」的知识…`. The composer:
+- quotes the selected words;
+- asks for `条目名称`, and for `类别` among the eight classes with none chosen;
+- keeps the words as the content.
+
+Named 海边小城 with class 地点, it answers `已提议为书系「星河三部曲」的知识候选项`. On the Series page the candidate reads `新条目「海边小城」（地点）` and `来自《星河之三》r1 的原文：「…」`.
+
+**A second candidate, in conflict.** `提议为书系知识…` offers `新条目` with none chosen. The editor's own candidate for `海边 小城`, spaced differently, now discloses a conflict on both.
+
+**Review, keeping the conflict.** `纳入审阅…` on the first candidate opens 书系知识纳入审阅 with focus on its heading. It shows:
+- the exact Series and item, the words and where they came from;
+- `存在书系知识冲突 · 需要处理` with 「另一个候选项也在提议「海边 小城」（第 1 版）。」 — the other candidate named with its version, not its words;
+- `编辑候选项`, `保留已披露冲突` and `取消`, none chosen;
+- the two uses, none chosen.
+
+`纳入书系知识` stays unavailable, and says why, even after a use is chosen, until `保留已披露冲突` is pressed and states that it records the conflict without verifying it. It then answers `书系知识已纳入`. The item reads `「海边小城」 · 地点 · 第 1 版` with its provenance, `以后的用途：只用于书系一致性审阅` and `保留了 1 处已披露冲突，未作核实。`, and takes focus.
+
+**Review, editing the candidate.** The editor's candidate now discloses the existing item. `编辑候选项` offers the new item, as it stood, or that item, and saving the change answers `候选项已更新，请重新审阅。`. Read again, the review:
+- names `条目「海边小城」（地点）`;
+- discloses nothing;
+- states `将被取代的当前版本：第 1 版 · …`;
+- waits only for its use.
+
+It answers `书系知识已更新`, and the item reads `第 2 版`, in the editor's words, with `历次版本（2）` and no candidate left. The service agrees: `inspectSeries()` names the item with its current revision, and `inspectSeriesKnowledgeRevisions()` reads both revisions, newest first.
+
+**Keyboard, and after another restart.** From the keyboard, Enter on `提议为书系知识…` opens the form at its first choice, and Escape closes it back onto the opener. After another restart, the item keeps both revisions.
+
 Not proven here:
 - Learning Material counted in the preview, proven over the real store in `tests/service/series.test.ts` and by the unit suites;
-- the 书系一致性 category's reason for a member Book, proven over the real store.
+- the 书系一致性 category's reason for a member Book, proven over the real store;
+- a review the knowledge moved past, and a candidate from a Book that left the Series, both proven over the real store in `tests/service/series-knowledge.test.ts`;
+- the knowledge lists' further pages, `查找条目`, `提议修改…` and the opening of `历次版本`, and a passage cited while changes waited in the journal (Issue #63 review), proven over the real store and by the unit suites; J-13's lists fit their first pages.
 
-J-14 has no runner of its own. Its keyboard, IME, focus, 200% reflow, and forced-colors obligations are asserted inside the Journeys above where they apply; the Mark surface's are J-05's `j14-marks-*` and `marks-keyboard-menu-*` stages, 稿件冲突's are J-06's `j14-conflict-keyboard`, `j14-conflict-zoom-200-reflow` and `j14-conflict-forced-colors`, 交付物's are J-07's `j14-designate-keyboard`, `j14-deliverables-zoom-200-reflow` and `j14-deliverables-forced-colors`, with the export card's `j14-export-keyboard`, `j14-export-zoom-200-reflow` and `j14-export-forced-colors`, 待我处理's are J-09's `j14-attention-keyboard`, `j14-attention-zoom-200-reflow` and `j14-attention-forced-colors`, `等待运行名额`'s is J-09's `j14-queued-forced-colors`, 取消任务's are J-10's `j14-cancel-keyboard` and `j14-cancelling-forced-colors`, 改计划重做's is J-10's `j14-redo-keyboard`, the question card's is J-10's `j14-clarification-keyboard`, `设置上限…`'s is J-10's `j14-budget-keyboard`, the editable plan's is J-04's `j14-plan-edit-keyboard`, 人员's are J-11's `j14-people-keyboard`, `j14-people-zoom-200-reflow` and `j14-people-forced-colors`, 评估's is J-11's `j14-evaluation-reflow-forced-colors`, 分析反馈's are J-11's `j14-feedback-keyboard` and `j14-feedback-reflow-forced-colors`, a decision's reason row's is J-11's `j14-decision-feedback-keyboard`, 学习准入's are J-11's `j14-learning-keyboard` and `j14-learning-reflow-forced-colors`, 知识库's are J-15's `j14-knowledge-keyboard` and `j14-knowledge-reflow-forced-colors`, with 资料库's `j14-library-reflow-forced-colors`, the 任务 panel's are J-16's `j14-panel-keyboard`, `j14-panel-zoom-200-reflow` and `j14-panel-forced-colors`, 书系's are J-13's `j14-series-keyboard` and `j14-series-reflow-forced-colors`, and the Task Drawer's are J-03's `drawer-keyboard`, `drawer-push-overlay` and `drawer-reflow-forced-colors`.
+J-14 has no runner of its own. Its keyboard, IME, focus, 200% reflow, and forced-colors obligations are asserted inside the Journeys above where they apply; the Mark surface's are J-05's `j14-marks-*` and `marks-keyboard-menu-*` stages, 稿件冲突's are J-06's `j14-conflict-keyboard`, `j14-conflict-zoom-200-reflow` and `j14-conflict-forced-colors`, 交付物's are J-07's `j14-designate-keyboard`, `j14-deliverables-zoom-200-reflow` and `j14-deliverables-forced-colors`, with the export card's `j14-export-keyboard`, `j14-export-zoom-200-reflow` and `j14-export-forced-colors`, 待我处理's are J-09's `j14-attention-keyboard`, `j14-attention-zoom-200-reflow` and `j14-attention-forced-colors`, `等待运行名额`'s is J-09's `j14-queued-forced-colors`, 取消任务's are J-10's `j14-cancel-keyboard` and `j14-cancelling-forced-colors`, 改计划重做's is J-10's `j14-redo-keyboard`, the question card's is J-10's `j14-clarification-keyboard`, `设置上限…`'s is J-10's `j14-budget-keyboard`, the editable plan's is J-04's `j14-plan-edit-keyboard`, 人员's are J-11's `j14-people-keyboard`, `j14-people-zoom-200-reflow` and `j14-people-forced-colors`, 评估's is J-11's `j14-evaluation-reflow-forced-colors`, 分析反馈's are J-11's `j14-feedback-keyboard` and `j14-feedback-reflow-forced-colors`, a decision's reason row's is J-11's `j14-decision-feedback-keyboard`, 学习准入's are J-11's `j14-learning-keyboard` and `j14-learning-reflow-forced-colors`, 知识库's are J-15's `j14-knowledge-keyboard` and `j14-knowledge-reflow-forced-colors`, with 资料库's `j14-library-reflow-forced-colors`, the 任务 panel's are J-16's `j14-panel-keyboard`, `j14-panel-zoom-200-reflow` and `j14-panel-forced-colors`, 书系's are J-13's `j14-series-keyboard` and `j14-series-reflow-forced-colors`, with 书系知识's `j14-knowledge-keyboard`, and the Task Drawer's are J-03's `drawer-keyboard`, `drawer-push-overlay` and `drawer-reflow-forced-colors`.

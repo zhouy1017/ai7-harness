@@ -11,6 +11,7 @@ import type {
   SeriesProjection,
 } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
+import { mountSeriesKnowledge } from './series-knowledge.js';
 import {
   BOOK_SERIES_HEADING,
   BOOK_SERIES_HISTORY,
@@ -288,7 +289,9 @@ export interface MountSeriesOptions {
   readonly root: HTMLElement;
   readonly seriesId: string;
   readonly api: Pick<RendererApi, 'inspectSeries' | 'inspectSeriesMembers' | 'inspectSeriesCandidates' | 'inspectSeriesHistory' |
-    'previewSeriesMembershipChange' | 'changeSeriesMembership'>;
+    'previewSeriesMembershipChange' | 'changeSeriesMembership' | 'proposeSeriesKnowledge' | 'inspectSeriesKnowledgeReview' |
+    'editSeriesKnowledgeCandidate' | 'promoteSeriesKnowledge' | 'inspectSeriesKnowledgeItems' | 'inspectSeriesKnowledgeCandidates' |
+    'inspectSeriesKnowledgeRevisions'>;
   readonly setStatus: Status;
   readonly errorMessage: (error: unknown, fallback: string) => string;
 }
@@ -320,8 +323,23 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
   let asked: { bookId: string; kind: SeriesMembershipChangeKind } | null = null;
   let refusal: { message: string; stale: boolean } | null = null;
   let busy = false;
+  // Three stable parts, so a membership repaint never moves focus inside 书系知识 (Issue #63, S28b), which paints itself.
+  const membersBox = el('div', 'series-members-box');
+  const knowledgeHost = el('section');
+  const historyBox = el('div', 'series-history-box');
+  const knowledge = mountSeriesKnowledge({
+    root: knowledgeHost,
+    seriesId: options.seriesId,
+    api,
+    setStatus,
+    errorMessage,
+    seriesChanged: (series) => {
+      projection = series;
+      paint(null, false);
+    },
+  });
 
-  const paint = (focus: string | null): void => {
+  const paint = (focus: string | null, withKnowledge = true): void => {
     if (projection === null) return;
     root.dataset['seriesId'] = projection.seriesId;
     root.dataset['memberCount'] = String(projection.members.length);
@@ -368,7 +386,10 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       row.append(more);
       history.append(row);
     }
-    root.replaceChildren(members, history);
+    membersBox.replaceChildren(members);
+    historyBox.replaceChildren(history);
+    if (membersBox.parentElement !== root) root.replaceChildren(membersBox, knowledgeHost, historyBox);
+    if (withKnowledge) knowledge.update(projection.knowledge);
     if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();
   };
 

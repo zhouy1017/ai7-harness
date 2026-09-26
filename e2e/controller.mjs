@@ -1123,6 +1123,15 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'series-restart',
     'j14-series-keyboard',
     'j14-series-reflow-forced-colors',
+    // Issue #63 (S28b): 书系知识 — a candidate from a member Book's manuscript and one of the editor's own words, a conflict
+    // kept, 编辑候选项 onto the item, two revisions, and a restart.
+    'knowledge-member-book',
+    'knowledge-from-manuscript',
+    'knowledge-editor-authored',
+    'knowledge-review-conflict',
+    'knowledge-review-edit',
+    'j14-knowledge-keyboard',
+    'knowledge-restart',
     'zero-activity',
   ]),
 });
