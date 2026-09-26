@@ -12,7 +12,7 @@ import { LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gat
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { reconnectPreflight } from '../../src/service/reconnect-preflight.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CLARIFICATION_SCHEMA_VERSION, BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION, EXPORT_LEDGER_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { CLARIFICATION_SCHEMA_VERSION, BOOK_PEOPLE_SCHEMA_VERSION, EXPORT_LEDGER_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
   type BaselineAnalysisProjection,
@@ -171,7 +171,7 @@ describe('schema revision 30 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BOOK_PEOPLE_SCHEMA_VERSION);
       expect(analysisRunStatesShape(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_run_states ORDER BY rowid').all()).toEqual(before.states);
       const after = relationTruth(database);
@@ -265,6 +265,11 @@ describe('联网后开始任务 and Connectivity Wait over the real store', () =
       expect(cancelled.run).toMatchObject({ state: 'cancelled', stateLabel: '已取消 · 未启动', attempt: null });
       expect(cancelled.run?.transitions.map((transition) => transition.state)).toEqual(['authorized', 'awaiting-connectivity', 'cancelled']);
       expect(cancelled.taskOutcome).toBeNull();
+      // The 任务 panel keeps it, in 最近完成 as 已取消 with nothing formed, though no Task Outcome names it (Issue #423 review).
+      const panel = store.inspectBookTasks(bookId, () => null);
+      expect(panel.groups.map((group) => [group.key, group.items.map((entry) => [entry.item.itemId, entry.item.state, entry.item.facts.revisionOrdinal ?? null, entry.result])]))
+        .toEqual([['waiting', []], ['running', []], ['recent', [[`analysis:${taskIntentId}`, 'analysis-cancelled', null, null]]]]);
+      expect(panel.running).toBe(false);
       // The Book still holds no revision, so the first baseline is offered again.
       expect(cancelled.actions.canPrepare).toBe(true);
       expect(store.cancelWaitingBaselineAnalysis(bookId, taskIntentId).run?.transitions).toHaveLength(3);

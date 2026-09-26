@@ -24,6 +24,7 @@ import {
   type PublicationActualsPromptProjection,
   type PublicationDesignationProjection,
   type PublicationEventKind,
+  type PublicationMaintenanceProjection,
   type PublicationVersionProjection,
 } from '../shared/protocol.js';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
@@ -247,17 +248,34 @@ function requireRecord(json: SQLOutputValue | undefined, digest: SQLOutputValue 
  * 设为发稿版本 and the 交付物 read (Issue #414). Every write is one transaction on the authority
  * connection, and every read verifies what it shows against the digests it was written with.
  */
+/** What 维护事项 (Issue #426, S68a) tell the designations: each one's cases, and whether a 撤回 holds it. */
+export interface PublicationMaintenanceSource {
+  summaries(bookId: string, publicationVersionId: string): PublicationMaintenanceProjection;
+  withdrawn(publicationVersionId: string): boolean;
+}
+
+const NO_MAINTENANCE: PublicationMaintenanceSource = {
+  summaries: () => ({ cases: [], total: 0, withdrawn: false, archived: false }),
+  withdrawn: () => false,
+};
+
 export class PublicationVersionStore {
   readonly #db: DatabaseSync;
   readonly #exportsOf: (bookId: string) => DeliverablesProjection['exports'];
+  readonly #maintenance: PublicationMaintenanceSource;
 
-  /** `exportsOf` reads a Book's approved exports from the export ledger (Issue #413), which 交付物 lists too. */
+  /**
+   * `exportsOf` reads a Book's approved exports from the export ledger (Issue #413), which 交付物 lists too; `maintenance`
+   * reads each designation's 维护事项 (Issue #426).
+   */
   constructor(
     db: DatabaseSync,
     exportsOf: (bookId: string) => DeliverablesProjection['exports'] = () => [],
+    maintenance: PublicationMaintenanceSource = NO_MAINTENANCE,
   ) {
     this.#db = db;
     this.#exportsOf = exportsOf;
+    this.#maintenance = maintenance;
   }
 
   /**
@@ -306,12 +324,17 @@ export class PublicationVersionStore {
    * The Book's current 发稿版本 — its newest designation, read and verified exactly as 交付物 reads it — and whether
    * the manuscript moved past it (Issue #416: 图书交付包's first condition). `null` when the Book has none.
    */
-  current(bookId: string): { projection: PublicationVersionProjection; changedSince: boolean } | null {
+  current(bookId: string): { projection: PublicationVersionProjection; changedSince: boolean; withdrawn: boolean } | null {
     requirePublication(typeof bookId === 'string' && UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
     const head = this.#head(bookId);
     const current = this.#designations(bookId, head, 1)[0];
     if (current === undefined) return null;
-    return { projection: current.projection, changedSince: head!.workingDigest !== current.projection.technical.revisionDigest };
+    return {
+      projection: current.projection,
+      changedSince: head!.workingDigest !== current.projection.technical.revisionDigest,
+      // A 撤回 case holds it (Issue #426, S68a): in AI7 it is no longer used for 发稿 (ADR 0040).
+      withdrawn: current.projection.maintenance.withdrawn,
+    };
   }
 
   /**
@@ -343,7 +366,10 @@ export class PublicationVersionStore {
       // The current designation is read verified, so neither a repeat nor the next ordinal is ever decided
       // against a record that no longer matches what was written.
       const current = this.#designations(bookId, head, 1)[0]?.projection ?? null;
-      if (current !== null && current.milestoneId === milestoneId && current.scope === scope && current.basis === basis) {
+      // A current designation withdrawn in AI7 (Issue #426, S68a) is no longer used for 发稿: the same milestone, scope and
+      // basis again is a new designation, never the withdrawn one repeated.
+      if (current !== null && current.milestoneId === milestoneId && current.scope === scope && current.basis === basis &&
+          !this.#maintenance.withdrawn(current.publicationVersionId)) {
         return { outcome: 'unchanged' as const, publicationVersionId: current.publicationVersionId, milestone };
       }
       const ordinal = current === null ? 1 : current.ordinal + 1;
@@ -624,6 +650,7 @@ export class PublicationVersionStore {
           permissionId,
           events: events.map((event) => ({ eventId: event.eventId, kind: event.kind })),
         },
+        maintenance: this.#maintenance.summaries(bookId, publicationVersionId),
       },
       actualsPrompt: {
         eventId: prompt.eventId,

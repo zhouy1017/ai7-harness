@@ -520,7 +520,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     return lookup;
   };
 
-  const TASK_CARD_REASON = '任务面接通后可以从这里打开。';
+  const TASK_CARD_REASON = '这条标记的来源任务还不能从这里打开。';
   /**
    * 查看任务 on a card (V2-UX-MARK-008). A mark a Review Run produced opens 审阅 on that Run with the
    * finding in view, once the Run is found; every other AI7 mark keeps the reason it waits for the Task
@@ -1031,7 +1031,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     controls.find((control) => !control.disabled)?.focus({ preventScroll: true });
   };
 
-  const AI7_TASK_REASON = '任务面接通后可用';
+  // The 任务 panel is connected (Issue #423, S77a); a Task started on a selection is not yet.
+  const AI7_TASK_REASON = '就选区发起的任务尚未接通';
+  const VIEW_TASK_REASON = '这条标记的来源任务还不能从这里打开';
   const aiTaskGroup = (): MenuGroup => ({
     label: 'AI7 任务',
     note: AI7_TASK_REASON,
@@ -1144,7 +1146,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           : { action: 'reopen', label: '重新打开', run: () => void change(mark.markId, 'set-status', { status: 'open' }, '已重新打开。') },
         convert('change-suggestion'),
         ...(mark.sourceKind === 'ai7' ? [
-          { action: 'view-task', label: '查看任务', disabledReason: AI7_TASK_REASON, ...viewTaskMenuResolver(mark.markId) },
+          { action: 'view-task', label: '查看任务', disabledReason: VIEW_TASK_REASON, ...viewTaskMenuResolver(mark.markId) },
           { action: 'view-basis', label: '看依据', run: () => void openCard(mark.markId) },
         ] : []),
         { action: 'remove', label: '删除', run: () => void change(mark.markId, 'remove', {}, '已删除批注。') },
@@ -1175,7 +1177,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           : []),
         ...(mark.disposition === null && mark.status !== 'applied' ? [convert('annotation')] : []),
         ...(mark.sourceKind === 'ai7' ? [
-          { action: 'view-task', label: '查看任务', disabledReason: AI7_TASK_REASON, ...viewTaskMenuResolver(mark.markId) },
+          { action: 'view-task', label: '查看任务', disabledReason: VIEW_TASK_REASON, ...viewTaskMenuResolver(mark.markId) },
           { action: 'view-basis', label: '看依据', run: () => void openCard(mark.markId) },
         ] : []),
       ];

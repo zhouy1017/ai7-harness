@@ -1,8 +1,11 @@
+import { consumeReturnPlace, preserveReturnPlace, readReturnPlace, type ReadingPlace } from './reading-return.js';
 import type {
   AnalysisReusePlanCounts,
   AnalysisReusePlanProjection,
   BaselineAnalysisPlanRevisionProjection,
+  BaselineAnalysisGoal,
   BaselineAnalysisProjection,
+  BookTaskItemProjection,
   DefaultExecutionRuleReference,
   DefaultExecutionRulesProjection,
   QuickStartBaselineAnalysisResult,
@@ -13,6 +16,7 @@ import type {
   BookCreationReviewProjection,
   BookManuscriptAnchorProjection,
   BookRecordPresentation,
+  BookSummaryFilter,
   BookSummaryPageProjection,
   BookWorkbenchRoute,
   BookWorkOverviewProjection,
@@ -21,6 +25,7 @@ import type {
   EditorialWorkspaceProfileProjection,
   ForegroundExecutionBoundaryProjection,
   GlobalAttentionItemProjection,
+  GlobalAttentionTarget,
   ImportCommitProjection,
   ManuscriptReimportCommitProjection,
   ReimportGroupProjection,
@@ -55,6 +60,7 @@ import type {
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
   J03_TASK_GOAL,
+  MAX_BOOK_SUMMARY_FILTER_CHARACTERS,
   MAX_REPLACEMENT_EXCLUSIONS,
   MILESTONE_PURPOSE_KINDS,
   MILESTONE_PURPOSE_LABELS,
@@ -63,6 +69,28 @@ import {
 } from '../shared/protocol.js';
 import { MARK_KIND_LABELS } from './editorial-mark-labels.js';
 import { mountDeliverables, type DeliverablesSurface } from './deliverables.js';
+import { mountBookPeople } from './book-people.js';
+import { openTaskResultWindow, type TaskResultWindow } from './task-result-window.js';
+import {
+  RETURN_CHIP_TITLE,
+  TASK_PANEL_COMPOSE_STATUS,
+  TASK_PANEL_LEAVE_STATUS,
+  returnChipArrived,
+  returnChipLabel,
+  returnChipPlace,
+} from './task-panel-labels.js';
+import {
+  BOOK_FILTER_ACTIONS,
+  BOOK_FILTER_FIELD_LABEL,
+  BOOK_FILTER_FIELDS,
+  BOOK_FILTER_LEGEND,
+  BOOK_FILTER_NONE,
+  BOOK_FILTER_STATUS_LINES,
+  BOOK_FILTER_TEXT_LABEL,
+  bookCardPeopleLine,
+  bookCardRelatedLine,
+  bookFilterLine,
+} from './book-people-labels.js';
 import {
   DOCUMENT_ACTION_LABELS,
   DOCUMENT_CHANGED_SINCE_VERSION,
@@ -188,10 +216,157 @@ const taskDrawer = mountTaskDrawer({
   awaitServiceJob,
   onOpen: () => closeNavigation?.(),
   onRecorded: (kind) => taskSurfaceRefresh[kind]?.(),
-  openRunSurface: (plan) => void openTaskRunSurface(plan),
+  openRunSurface: (plan) => void leaveThen(() => openTaskRunSurface(plan)),
   openConnectionSettings: () => void renderModelServiceSettings(),
   openRules: () => void renderKnowledgeBase(),
+  // ① 任务面 (Issue #423, S77a): a card's own record, 查看结果's floating window and 发起全书任务.
+  openTaskTarget: (target) => void leaveThen(() => openGlobalAttentionTarget(target)),
+  openTaskResult: (entry, backToPanel) => openTaskResult(entry, backToPanel),
+  startWholeBookTask: (bookId, input) => startWholeBookTask(bookId, input),
 });
+
+/** 查看结果's floating window while it is open (Issue #423, S77a); any change of screen closes it. */
+let taskResultWindow: TaskResultWindow | undefined;
+
+/**
+ * 查看结果 (TASK-045): the finished Task's result beside the text — level with the manuscript's text column while the
+ * manuscript is on screen. Its jumps land in the manuscript and leave 回到<位置>; closing it opens the panel again.
+ */
+function openTaskResult(entry: BookTaskItemProjection, backToPanel: () => void): void {
+  taskResultWindow?.close(false);
+  const bookId = entry.item.book.bookId;
+  taskResultWindow = openTaskResultWindow({
+    entry,
+    api: window.ai7,
+    column: () => {
+      const text = screen.querySelector<HTMLElement>('[data-screen="editor"] .editor-window .ProseMirror');
+      const pane = text?.closest<HTMLElement>('.editor-window') ?? null;
+      return text === null || pane === null ? null : { text, pane };
+    },
+    jump: (target) => {
+      if (bookId !== null) void jumpToManuscript(bookId, target);
+    },
+    openSurface: (target, revisionId) => void leaveThen(() => openGlobalAttentionTarget(target, revisionId)),
+    onClose: (back) => {
+      taskResultWindow = undefined;
+      if (back) backToPanel();
+    },
+    errorMessage: rendererErrorMessage,
+  });
+}
+
+/**
+ * 发起全书任务 (TASK-044): the procedure's Task is prepared exactly as ②A's 先看计划 prepares it; with a rule, it is
+ * then started exactly as ②A's quick start starts it. It answers the Task whose plan the drawer shows next — the
+ * prepared plan, or the one a quick start stopped at with why — and `null` when the panel stays, the Task started.
+ */
+async function startWholeBookTask(
+  bookId: string,
+  input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; quick: DefaultExecutionRuleReference | null },
+): Promise<{ ref: string; note?: string } | null> {
+  // The Task Input is frozen from the journal: the words typed just now, and any held after a failed write, are
+  // settled first, or nothing is prepared.
+  if (!(await settleScreen())) return null;
+  setStatus(TASK_PANEL_COMPOSE_STATUS.preparing, 'busy');
+  try {
+    const initial = await window.ai7.prepareBaselineAnalysis({ goal: input.goal, update: input.update, reconfirm: false });
+    const completed = await awaitServiceJob(initial, (job) => setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy'));
+    if (completed.state === 'cancelled') {
+      setStatus(TASK_PANEL_COMPOSE_STATUS.cancelled, 'success');
+      return null;
+    }
+    if (completed.kind !== 'baseline-analysis-preparation' || completed.result === null ||
+        !('coverageManifest' in completed.result) || completed.result.bookId !== bookId) throw new Error('基线稿件分析准备未返回计划。');
+    const prepared = completed.result;
+    taskSurfaceRefresh['baseline-analysis']?.();
+    const taskIntentId = prepared.taskIntent?.taskIntentId ?? null;
+    const planEnvelopeDigest = prepared.planEnvelope?.digest ?? null;
+    if (taskIntentId === null) throw new Error('基线稿件分析准备未返回计划。');
+    if (input.quick === null || planEnvelopeDigest === null) {
+      setStatus(prepared.planRevision !== null ? '计划的关键内容已变化：请在任务计划里查看计划修订并重新确认计划。' : TASK_PANEL_COMPOSE_STATUS.prepared, 'success');
+      return { ref: taskIntentId };
+    }
+    const rule = input.quick;
+    setStatus(`正在按默认执行规则「${rule.name}」开始…`, 'busy');
+    let result: QuickStartBaselineAnalysisResult;
+    try {
+      result = await window.ai7.quickStartBaselineAnalysis({ taskIntentId, planEnvelopeDigest, ruleVersionId: rule.ruleVersionId });
+    } catch (error) {
+      setStatus(rendererErrorMessage(error, '快速开始没有开始任务；计划已准备，可在任务计划里开始。'), 'error');
+      return { ref: taskIntentId };
+    }
+    taskSurfaceRefresh['baseline-analysis']?.();
+    if (result.outcome === 'started') {
+      setStatus(quickStartStartedLine(rule, result.projection), 'success');
+      return null;
+    }
+    const note = taskPlanQuickStartFellBack(result.reasons);
+    setStatus(note);
+    return { ref: taskIntentId, note };
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, TASK_PANEL_COMPOSE_STATUS.failed), 'error');
+    return null;
+  }
+}
+
+/** What a quick start that started its Task says: a start the launch has no route for is recorded and blocked before dispatch. */
+function quickStartStartedLine(rule: DefaultExecutionRuleReference, projection: BaselineAnalysisProjection): string {
+  return projection.state === 'authorized-blocked'
+    ? `已按默认执行规则「${rule.name}」记下这项任务；当前启动没有可执行的路由，派发前已阻止。`
+    : `已按默认执行规则「${rule.name}」开始任务。`;
+}
+
+// ---- 回到<位置> (Issue #423, plan slice S77a; V2-UX-TASK-045) ------------------------------------------------
+
+/** Only the last screen is cached. Other positions already have a bounded service-owned reader. */
+let lastReadingPlace: ReadingPlace | null = null;
+/** The manuscript on screen now: where it is read and how it jumps within itself. Set by the editor, cleared with it. */
+let manuscriptOnScreen: null | {
+  readonly bookId: string;
+  readonly manuscriptId: string;
+  readonly branchId: string;
+  readingPlace(): ReadingPlace | null;
+  jump(target: { blockId: string; markId: string | null }): Promise<void>;
+} = null;
+
+/** A jump from another screen — 审阅's 回到原文, ②A's 回到稿件范围, a result's 跳到 — leaves the way back to where the editor last read. */
+async function leaveReturnChip(bookId: string, manuscriptId: string, branchId: string): Promise<void> {
+  if (await readReturnPlace(manuscriptId, branchId) !== null) return;
+  const known = lastReadingPlace;
+  if (known?.manuscriptId === manuscriptId && known.branchId === branchId) {
+    await preserveReturnPlace(known);
+    return;
+  }
+  const overview = await window.ai7.getBookOverview({ bookId, historyCursor: null });
+  const anchor = overview.manuscriptAnchor;
+  if (anchor?.manuscriptId !== manuscriptId || anchor.branchId !== branchId || anchor.entry === null) return;
+  const remembered = await window.ai7.getManuscriptWindowAt({ manuscriptId, branchId, target: { kind: 'block', blockId: anchor.entry.blockId } });
+  const block = remembered.blocks.find((item) => item.blockId === anchor.entry?.blockId);
+  if (block !== undefined) await preserveReturnPlace({ manuscriptId, branchId, blockId: block.blockId, place: returnChipPlace(remembered.position.structureLabel, block.position) });
+}
+
+/** 跳到 (TASK-045): the manuscript at that paragraph — moved in place while it is on screen — leaving 回到<位置>. */
+async function jumpToManuscript(bookId: string, target: { manuscriptId: string | null; blockId: string; markId: string | null }): Promise<void> {
+  const origin = screen.firstElementChild;
+  const showing = manuscriptOnScreen;
+  if (showing !== null && showing.bookId === bookId && (target.manuscriptId === null || target.manuscriptId === showing.manuscriptId)) {
+    await showing.jump(target);
+    return;
+  }
+  setStatus('正在打开对应稿件位置…', 'busy');
+  try {
+    const overview = await window.ai7.getBookOverview({ bookId, historyCursor: null });
+    const anchor = overview.manuscriptAnchor;
+    if (anchor === null || (target.manuscriptId !== null && target.manuscriptId !== anchor.manuscriptId)) throw new Error('这项结果所在的稿件已不在这本书中。');
+    const opened = await window.ai7.getManuscriptWindowAt({ manuscriptId: anchor.manuscriptId, branchId: anchor.branchId, target: { kind: 'block', blockId: target.blockId } });
+    await leaveReturnChip(bookId, anchor.manuscriptId, anchor.branchId);
+    if (screen.firstElementChild !== origin) return;
+    await openEditorWindow(opened, overview.book.title, undefined, undefined, target.markId ?? undefined);
+  } catch (error) {
+    if (screen.firstElementChild !== origin) return;
+    setStatus(rendererErrorMessage(error, '无法打开对应稿件位置。'), 'error');
+  }
+}
 
 /**
  * Open one Task's plan in the drawer (S72 D4); closing it returns focus to the surface's 查看计划. `note` is said
@@ -245,6 +420,31 @@ let globalAttentionSurface: GlobalAttentionSurface | undefined;
  */
 let leaveGuard: (() => Promise<boolean>) | null = null;
 let authorityInterrupted = false;
+
+/**
+ * A way out that is not the surface's own — a 任务 card, 查看结果's window, the drawer's 查看运行 — and 发起全书任务 settle
+ * the surface on screen as its own ways out do (Issue #423 review): the manuscript's local edits are written and its
+ * position taken first, and a refusal keeps it on screen. `true` once it may go on; with nothing to settle, at once.
+ */
+async function settleScreen(): Promise<boolean> {
+  const guard = leaveGuard;
+  if (guard === null) return true;
+  setStatus(TASK_PANEL_LEAVE_STATUS.settling, 'busy');
+  try {
+    if (await guard()) return true;
+    // The surface's own refusal stands; only a silent one is named here.
+    if (persistenceStatus.textContent === TASK_PANEL_LEAVE_STATUS.settling) setStatus(TASK_PANEL_LEAVE_STATUS.stayed, 'error');
+    return false;
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, TASK_PANEL_LEAVE_STATUS.stayed), 'error');
+    return false;
+  }
+}
+
+/** Open another page once the surface on screen has settled; a refusal keeps it. */
+async function leaveThen(open: () => Promise<void>): Promise<void> {
+  if (await settleScreen()) await open();
+}
 
 /**
  * 待我处理 (Issue #424, plan slice S78): one reader for the whole window, read on every screen change and
@@ -375,6 +575,11 @@ function applyAuthorityInterruption(): void {
 }
 
 function replaceScreen(state: string, content: HTMLElement): void {
+  // Where the manuscript was read as it is left (Issue #423, S77a): a jump back into it from another screen returns there.
+  const reading = manuscriptOnScreen?.readingPlace() ?? null;
+  if (reading !== null) lastReadingPlace = reading;
+  manuscriptOnScreen = null;
+  taskResultWindow?.close(false);
   editorialMarks?.destroy();
   editorialMarks = undefined;
   manuscriptRail?.destroy();
@@ -461,7 +666,11 @@ function renderGlobalAttention(): void {
  * nothing; a Recovery Attention State is claimed for this window only while no other window holds it.
  */
 async function openGlobalAttentionItem(item: GlobalAttentionItemProjection): Promise<void> {
-  const target = item.target;
+  await openGlobalAttentionTarget(item.target);
+}
+
+/** One record, opened in this window — 待我处理's items and the 任务 panel's cards (Issue #423, S77a) alike. */
+async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysisRevisionId?: string): Promise<void> {
   switch (target.kind) {
     case 'manuscript-recovery':
       await returnToRecoveryComparison(target.attentionId);
@@ -479,7 +688,7 @@ async function openGlobalAttentionItem(item: GlobalAttentionItemProjection): Pro
       await renderStartupProjection(await window.ai7.getImportStartup());
       return;
     case 'analysis':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => renderBookAnalysis(route.bookId, route.bookTitle));
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => renderBookAnalysis(route.bookId, route.bookTitle, analysisRevisionId));
       return;
     case 'analysis-plan':
       await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
@@ -490,6 +699,18 @@ async function openGlobalAttentionItem(item: GlobalAttentionItemProjection): Pro
     case 'review':
       await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>
         renderBookReview(route.bookId, route.bookTitle, { reviewRunId: target.reviewRunId, findingId: null }));
+      return;
+    // A prepared Review Run's plan (Issue #423, S77a): ②B with the plan in the Task Drawer, whose bar starts it.
+    case 'review-plan':
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
+        renderBookReview(route.bookId, route.bookTitle, { reviewRunId: target.reviewRunId, findingId: null });
+        openTaskPlan(route.bookId, 'review-run', target.reviewRunId);
+      });
+      return;
+    // 维护事项待处理 (Issue #426, S68b): 交付物, with the case open on its 发稿版本 where its next step is.
+    case 'maintenance':
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>
+        renderBookDeliverables(route.bookId, route.bookTitle, { caseId: target.caseId, publicationVersionId: target.publicationVersionId }));
       return;
   }
 }
@@ -1690,7 +1911,7 @@ async function renderBookWorkbenchChooser(
  * The way back to the manuscript and to the overview sits in a persistent region, because a settled
  * result set is the longest thing this product renders and its way out must survive it (LAYER-005).
  */
-function renderBookAnalysis(bookId: string, bookTitle: string): void {
+function renderBookAnalysis(bookId: string, bookTitle: string, revisionId?: string): void {
   const content = panel();
   content.classList.add('book-analysis');
   content.dataset['bookId'] = bookId;
@@ -1727,7 +1948,7 @@ function renderBookAnalysis(bookId: string, bookTitle: string): void {
   replaceScreen('book-analysis', content);
   setStatus('分析已打开');
   const inspect = (first: boolean): void => {
-    void window.ai7.inspectBaselineAnalysis().then(
+    void window.ai7.inspectBaselineAnalysis(revisionId === undefined ? undefined : { revisionId }).then(
       (projection) => {
         if (host.isConnected && projection.bookId === host.dataset['analysisBookId']) renderBaselineAnalysis(host, projection, bookTitle);
       },
@@ -1785,11 +2006,14 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
       }
     },
     goToText: async (target) => {
+      const origin = screen.firstElementChild;
       const opened = await window.ai7.getManuscriptWindowAt({
         manuscriptId: target.manuscriptId,
         branchId: target.branchId,
         target: { kind: 'block', blockId: target.blockId },
       });
+      await leaveReturnChip(bookId, target.manuscriptId, target.branchId);
+      if (screen.firstElementChild !== origin) return;
       await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId ?? undefined);
     },
     openPlan: (reviewRunId) => openTaskPlan(bookId, 'review-run', reviewRunId),
@@ -1881,7 +2105,7 @@ function renderProposalConflict(target: { bookId: string; manuscriptId: string; 
   surface.start();
 }
 
-function renderBookDeliverables(bookId: string, bookTitle: string): void {
+function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { caseId: string; publicationVersionId: string }): void {
   const content = panel();
   content.classList.add('book-deliverables');
   content.dataset['bookId'] = bookId;
@@ -1890,6 +2114,9 @@ function renderBookDeliverables(bookId: string, bookTitle: string): void {
     bookId,
     bookTitle,
     api: window.ai7,
+    // 维护事项待处理 opens its case in place (Issue #426, S68b), and a step of a case reads the header's number again.
+    ...(openCase === undefined ? {} : { openCase }),
+    attentionChanged: () => globalAttentionReader.refresh(),
     technicalDetails,
     setStatus,
     errorMessage: rendererErrorMessage,
@@ -2006,6 +2233,17 @@ function renderBookOverview(
     element('dt', undefined, '稳定标识'), element('dd', 'technical-identity', overview.book.stableIdentity),
   ));
   content.append(identity);
+  // 人员 (Issue #431, S83; BOOK-006): the Book's 作者, 责编 and 相关人, and 编辑人员….
+  const peopleSlot = element('div', 'book-people-slot');
+  content.append(peopleSlot);
+  mountBookPeople({
+    root: peopleSlot,
+    bookId: overview.book.bookId,
+    people: overview.people,
+    api: window.ai7,
+    setStatus,
+    errorMessage: rendererErrorMessage,
+  });
 
   const artifactHost = element('div');
   artifactHost.dataset['nativeArtifactBookId'] = overview.book.bookId;
@@ -2317,10 +2555,14 @@ function analysisReturnButton(
   bookTitle: string,
 ): HTMLButtonElement {
   const returnToRange = button('回到稿件范围', 'quiet', async () => {
+    const origin = screen.firstElementChild;
     returnToRange.disabled = true;
     setStatus('正在打开对应稿件范围…', 'busy');
     try {
-      await openEditorWindow(await window.ai7.getManuscriptWindowAt({ manuscriptId, branchId, target: { kind: 'block', blockId } }), bookTitle);
+      const opened = await window.ai7.getManuscriptWindowAt({ manuscriptId, branchId, target: { kind: 'block', blockId } });
+      await leaveReturnChip(opened.bookId, manuscriptId, branchId);
+      if (screen.firstElementChild !== origin) return;
+      await openEditorWindow(opened, bookTitle);
     } catch (error) {
       returnToRange.disabled = false;
       setStatus(rendererErrorMessage(error, '无法打开对应稿件范围。'), 'error');
@@ -2908,9 +3150,7 @@ async function quickStartPrepared(host: HTMLElement, bookTitle: string, prepared
   renderBaselineAnalysis(host, result.projection, bookTitle);
   if (result.outcome === 'started') {
     // A start the launch has no route for is recorded and blocked before dispatch: it never began.
-    setStatus(result.projection.state === 'authorized-blocked'
-      ? `已按默认执行规则「${rule.name}」记下这项任务；当前启动没有可执行的路由，派发前已阻止。`
-      : `已按默认执行规则「${rule.name}」开始任务。`, 'success');
+    setStatus(quickStartStartedLine(rule, result.projection), 'success');
     openTaskPlan(result.projection.bookId, 'baseline-analysis', taskIntentId);
     return;
   }
@@ -4224,10 +4464,104 @@ async function renderModelServiceSettings(): Promise<void> {
   }
 }
 
+/**
+ * 书库's search (Issue #431, S83; IA-008, BOOK-006): one field — or 书名, 作者 and 责编 together — and the words, read by
+ * the service over every Book, paged as the list is. 显示全部图书 goes back to the whole list.
+ */
+function renderBookFilter(
+  priorWork: ReadonlyArray<PriorWorkItemProjection>,
+  recoveryReturn: RecoveryReturnContext | undefined,
+  filter: BookSummaryFilter | null,
+): HTMLElement {
+  const form = element('form', 'book-filter');
+  let request = 0;
+  form.noValidate = true;
+  const legend = element('p', 'book-filter-legend', BOOK_FILTER_LEGEND);
+  const fieldLabel = element('label', undefined, BOOK_FILTER_FIELD_LABEL);
+  const field = element('select');
+  field.id = 'book-filter-field';
+  for (const key of ['all', 'title', 'author', 'editor'] as const) {
+    const option = element('option', undefined, BOOK_FILTER_FIELDS[key]);
+    option.value = key;
+    field.append(option);
+  }
+  field.value = filter?.field ?? 'all';
+  fieldLabel.append(field);
+  const textLabel = element('label', undefined, BOOK_FILTER_TEXT_LABEL);
+  const text = element('input');
+  text.id = 'book-filter-text';
+  text.type = 'search';
+  // The service reads at most this many characters; a longer paste is cut here rather than refused as a bad request.
+  text.maxLength = MAX_BOOK_SUMMARY_FILTER_CHARACTERS;
+  text.value = filter?.text ?? '';
+  textLabel.append(text);
+  const find = button(BOOK_FILTER_ACTIONS.find, 'secondary', () => undefined);
+  find.type = 'submit';
+  find.dataset['bookFilterAction'] = 'find';
+  let clearControl: HTMLButtonElement | null = null;
+  const sync = (): void => { find.disabled = text.value.trim().length === 0; };
+  const restoreControls = (): void => {
+    sync();
+    if (clearControl !== null) clearControl.disabled = false;
+  };
+  text.addEventListener('input', sync);
+  sync();
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const words = text.value.trim();
+    if (words.length === 0 || find.disabled) return;
+    const next: BookSummaryFilter = { field: field.value === 'title' || field.value === 'author' || field.value === 'editor' ? field.value : 'all', text: words };
+    find.disabled = true;
+    const current = ++request;
+    setStatus(BOOK_FILTER_STATUS_LINES.finding, 'busy');
+    void window.ai7.listBooks({ after: null, filter: next }).then(
+      (page) => {
+        if (!form.isConnected || current !== request) return;
+        renderLanding(priorWork, recoveryReturn, page, next);
+        setStatus(BOOK_FILTER_STATUS_LINES.found, 'success');
+        document.querySelector<HTMLElement>('#book-filter-text')?.focus();
+      },
+      (error) => {
+        if (!form.isConnected || current !== request) return;
+        restoreControls();
+        setStatus(rendererErrorMessage(error, BOOK_FILTER_STATUS_LINES.findFailed), 'error');
+      },
+    );
+  });
+  const row = element('div', 'button-row compact-actions');
+  row.append(find);
+  if (filter !== null) {
+    const clear = button(BOOK_FILTER_ACTIONS.clear, 'quiet', () => {
+      clear.disabled = true;
+      const current = ++request;
+      void window.ai7.listBooks({ after: null }).then(
+        (page) => {
+          if (!form.isConnected || current !== request) return;
+          renderLanding(priorWork, recoveryReturn, page, null);
+          setStatus(BOOK_FILTER_STATUS_LINES.cleared, 'success');
+          document.querySelector<HTMLElement>('#book-filter-text')?.focus();
+        },
+        (error) => {
+          if (!form.isConnected || current !== request) return;
+          restoreControls();
+          setStatus(rendererErrorMessage(error, BOOK_FILTER_STATUS_LINES.findFailed), 'error');
+        },
+      );
+    });
+    clear.dataset['bookFilterAction'] = 'clear';
+    clearControl = clear;
+    row.append(clear);
+  }
+  form.append(legend, fieldLabel, textLabel, row);
+  return form;
+}
+
 function renderLanding(
   priorWork: ReadonlyArray<PriorWorkItemProjection>,
   recoveryReturn: RecoveryReturnContext | undefined,
   books: BookSummaryPageProjection,
+  // 书库's search (Issue #431, S83): the list shows only the Books it found, until 显示全部图书.
+  filter: BookSummaryFilter | null = null,
 ): void {
   const recoveryWork = priorWork.find((item) => item.recoveryAttention !== null);
   const recoveryAttention = recoveryWork?.recoveryAttention;
@@ -4276,9 +4610,13 @@ function renderLanding(
   copy.append(landingActions);
   const note = element('aside', 'hero-note', '所有导入都要求先明确选择图书目标；系统不会自动选择已有图书或稿件关系。');
   content.append(copy, note);
-  if (books.items.length > 0) {
+  if (books.items.length > 0 || filter !== null) {
     const library = element('section', 'recent-work');
+    library.dataset['bookFilter'] = filter === null ? 'none' : filter.field;
     library.append(element('p', 'section-label', '图书'), element('h3', undefined, '图书工作概览'));
+    library.append(renderBookFilter(priorWork, activeRecoveryReturn, filter));
+    if (filter !== null) library.append(element('p', 'field-note book-filter-line', bookFilterLine(filter)));
+    if (books.items.length === 0) library.append(element('p', 'field-note book-filter-none', BOOK_FILTER_NONE));
     const list = element('div', 'recent-work-list');
     for (const summary of books.items) {
       const open = button(`${summary.title} · ${summary.manuscriptStateLabel}`, 'secondary', async () => {
@@ -4293,8 +4631,13 @@ function renderLanding(
       });
       open.dataset['bookId'] = summary.bookId;
       const row = element('article', 'book-summary-item');
+      row.append(open);
+      // 作者, 责编 and 相关人 on the card (Issue #431, S83; BOOK-006).
+      const peopleLine = bookCardPeopleLine(summary.people);
+      if (peopleLine !== null) row.append(element('p', 'book-people-line', peopleLine));
+      const relatedLine = bookCardRelatedLine(summary.people);
+      if (relatedLine !== null) row.append(element('p', 'field-note book-related-line', relatedLine));
       row.append(
-        open,
         element(
           'p',
           'field-note',
@@ -4309,11 +4652,12 @@ function renderLanding(
         loadMore.disabled = true;
         setStatus('正在读取下一页图书摘要…', 'busy');
         try {
-          const page = await window.ai7.listBooks({ after: books.nextCursor });
+          const page = await window.ai7.listBooks({ after: books.nextCursor, ...(filter === null ? {} : { filter }) });
           renderLanding(
             priorWork,
             activeRecoveryReturn,
             { items: [...books.items, ...page.items], nextCursor: page.nextCursor },
+            filter,
           );
           setStatus('已加载更多图书摘要', 'success');
         } catch (error) {
@@ -5825,7 +6169,10 @@ function renderEditorWindow(
   const recoveredState = element('strong', 'recovered-state-marker', '当前为恢复的工作状态');
   recoveredState.hidden = initialWindow.recoveredStateReview === null;
   meta.append(position, revision, journal, recoveredState);
-  title.append(meta);
+  // 回到<位置> (Issue #423, S77a; TASK-045): the way back a jump left, in the context header until it is used.
+  const chipHost = element('div', 'return-chip-host');
+  chipHost.hidden = true;
+  title.append(meta, chipHost);
   const save = button('保存当前编辑', 'primary', () => editor?.flush());
   save.disabled = true;
   save.title = window.ai7.platform === 'darwin' ? '快捷键 Command+S' : '快捷键 Ctrl+S';
@@ -6130,10 +6477,18 @@ function renderEditorWindow(
   const analysisEntry = button('分析', 'quiet', () => openAnalysis.click());
   analysisEntry.dataset['edgeEntry'] = 'analysis';
   analysisEntry.title = '打开这本书的分析';
-  const tasksEntry = button('任务', 'quiet', () => undefined);
+  // 任务 (Issue #423, S77a; TASK-044): the Book's 任务 panel in the side slot, and closed again from here.
+  const tasksEntry = button('任务', 'quiet', () => {
+    const showing = taskDrawer.view();
+    if (showing?.kind === 'panel' && showing.bookId === initialWindow.bookId) {
+      taskDrawer.close(true);
+      return;
+    }
+    taskDrawer.openPanel(initialWindow.bookId, () => tasksEntry);
+  });
   tasksEntry.dataset['edgeEntry'] = 'tasks';
-  tasksEntry.disabled = true;
-  tasksEntry.title = '任务面接通后可用';
+  tasksEntry.setAttribute('aria-controls', 'task-drawer');
+  tasksEntry.title = '这本书的任务';
   const edgeEntries = element('div', 'edge-entries');
   edgeEntries.append(navigationEntry, ...(isDocument ? [] : [analysisEntry, tasksEntry]));
   const railTrack = element('div', 'rail-track');
@@ -6209,6 +6564,7 @@ function renderEditorWindow(
   let cancellationRequest: Promise<ServiceJobProjection> | undefined;
   let searchReturn: { window: ManuscriptWindowProjection; continuity: EditorContinuity } | undefined;
   let edgeNavigation = false;
+  let navigationIdle: Promise<void> = Promise.resolve();
   let authoritativeMutationStarting = false;
   let authoritativeMutation = false;
   let searchInvalidation: Promise<void> | undefined;
@@ -6531,6 +6887,8 @@ function renderEditorWindow(
   ): Promise<boolean> {
     if (authoritativeMutationBusy() || edgeNavigation || !editor) return false;
     edgeNavigation = true;
+    let resolveNavigationIdle = (): void => {};
+    navigationIdle = new Promise<void>((resolve) => { resolveNavigationIdle = resolve; });
     // Released by this call alone and only once: a later navigation may already hold the guard again
     // by the time this one returns, and must not have it taken away.
     let guardHeld = true;
@@ -6538,6 +6896,7 @@ function renderEditorWindow(
       if (!guardHeld) return;
       guardHeld = false;
       edgeNavigation = false;
+      resolveNavigationIdle();
     };
     try {
       if (!(await settleLocalEdit()) || !editor) return false;
@@ -6580,6 +6939,128 @@ function renderEditorWindow(
       releaseGuard();
     }
   }
+
+  // 回到<位置> (Issue #423, S77a; TASK-045): where this manuscript is read, the chip that goes back, and a result's jump.
+  let returnPlace: ReadingPlace | null = null;
+  let returnReadFailed = false;
+  let returnRequest = 0;
+  const loadReturnPlace = async (): Promise<void> => {
+    const request = ++returnRequest;
+    try {
+      const retained = await readReturnPlace(initialWindow.manuscriptId, initialWindow.branchId);
+      if (!chipHost.isConnected || request !== returnRequest) return;
+      returnPlace = retained;
+      returnReadFailed = false;
+    } catch (error) {
+      if (!chipHost.isConnected || request !== returnRequest) return;
+      returnReadFailed = true;
+      setStatus(rendererErrorMessage(error, '无法读取返回位置。'), 'error');
+    }
+  };
+  const readingPlace = (): ReadingPlace | null => {
+    if (!editor) return null;
+    const windowNow = editor.currentWindow();
+    const blocks = windowNow.blocks;
+    const anchorId = editor.captureContinuity().anchor.blockId;
+    const index = Math.max(0, blocks.findIndex((block) => block.blockId === anchorId));
+    const block = blocks[index];
+    if (block === undefined) return null;
+    let heading: string | null = null;
+    for (let at = index; at >= 0; at -= 1) {
+      const candidate = blocks[at]!;
+      if (candidate.kind !== 'paragraph') {
+        heading = candidate.text;
+        break;
+      }
+    }
+    return {
+      manuscriptId: windowNow.manuscriptId,
+      branchId: windowNow.branchId,
+      blockId: block.blockId,
+      place: returnChipPlace(heading ?? windowNow.position.structureLabel, block.position),
+    };
+  };
+  const landAt = (blockId: string): void => {
+    if (editor?.selectRange(blockId, 0, 0) === true) editor.focus();
+  };
+  function paintReturnChip(): void {
+    const chip = returnPlace;
+    chipHost.hidden = chip === null && !returnReadFailed;
+    if (returnReadFailed) {
+      const retry = button('重新读取返回位置', 'secondary', async () => {
+        retry.disabled = true;
+        await loadReturnPlace();
+        if (chipHost.isConnected) paintReturnChip();
+      });
+      chipHost.replaceChildren(retry);
+      return;
+    }
+    if (chip === null) {
+      chipHost.replaceChildren();
+      return;
+    }
+    const back = button(returnChipLabel(chip.place), 'secondary', async () => {
+      back.disabled = true;
+      // One disabled chip owns one pending return. A paging arrival must not discard that click.
+      while (edgeNavigation) {
+        await navigationIdle;
+        if (!chipHost.isConnected) return;
+      }
+      if (!(await navigate({ kind: 'block', blockId: chip.blockId }))) {
+        back.disabled = false;
+        return;
+      }
+      const request = ++returnRequest;
+      try {
+        const retained = await consumeReturnPlace(chip);
+        if (!chipHost.isConnected || request !== returnRequest) return;
+        returnPlace = retained;
+      } catch (error) {
+        if (!chipHost.isConnected || request !== returnRequest) return;
+        back.disabled = false;
+        setStatus(rendererErrorMessage(error, '已到达原位置，但未能清除返回位置；可以重试。'), 'error');
+        return;
+      }
+      if (!chipHost.isConnected) return;
+      paintReturnChip();
+      setStatus(returnChipArrived(chip.place), 'success');
+      landAt(chip.blockId);
+    });
+    back.classList.add('return-chip');
+    back.dataset['returnChip'] = chip.blockId;
+    back.title = RETURN_CHIP_TITLE;
+    chipHost.replaceChildren(back);
+  }
+  void loadReturnPlace().then(() => { if (chipHost.isConnected) paintReturnChip(); });
+  manuscriptOnScreen = {
+    bookId: initialWindow.bookId,
+    manuscriptId: initialWindow.manuscriptId,
+    branchId: initialWindow.branchId,
+    readingPlace,
+    jump: async (target) => {
+      const here = readingPlace();
+      if (here !== null && here.blockId !== target.blockId) {
+        const request = ++returnRequest;
+        try {
+          const retained = await preserveReturnPlace(here);
+          if (!chipHost.isConnected || request !== returnRequest) return;
+          returnPlace = retained;
+          returnReadFailed = false;
+        } catch (error) {
+          if (!chipHost.isConnected || request !== returnRequest) return;
+          returnReadFailed = true;
+          paintReturnChip();
+          setStatus(rendererErrorMessage(error, '无法保存返回位置，尚未跳转。'), 'error');
+          return;
+        }
+      }
+      if (!(await navigate({ kind: 'block', blockId: target.blockId }))) { paintReturnChip(); return; }
+      if (!chipHost.isConnected) return;
+      paintReturnChip();
+      if (target.markId !== null && editorialMarks !== undefined) await editorialMarks.openMark(target.markId);
+      else landAt(target.blockId);
+    },
+  };
 
   async function navigateCursor(direction: 'previous' | 'next'): Promise<void> {
     await navigate(() => {
@@ -7152,7 +7633,7 @@ function renderEditorWindow(
     track: railTrack,
     api: window.ai7,
     binding: () => ({ manuscriptId: currentWindow.manuscriptId, branchId: currentWindow.branchId }),
-    jumpToBlock: (blockId) => void navigate({ kind: 'block', blockId }),
+    jumpToBlock: (blockId) => void manuscriptOnScreen?.jump({ blockId, markId: null }),
     onError: (error) => setStatus(rendererErrorMessage(error, '全稿位置轨未能更新。'), 'error'),
   });
   manuscriptRail.setPosition(initialWindow.position.proportion);

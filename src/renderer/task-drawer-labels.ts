@@ -24,9 +24,9 @@ import type { ReviewPill } from './review-labels.js';
 // ---- the drawer ---------------------------------------------------------------------------------------
 
 export const TASK_DRAWER_TITLE = '任务计划';
-/** `← 任务` returns to the 任务 panel (TASK-044), which arrives with S77; until then it says so. */
+/** `← 任务` returns to the Book's 任务 panel (Issue #423, S77a; TASK-044). */
 export const TASK_DRAWER_BACK = '← 任务';
-export const TASK_DRAWER_BACK_REASON = '任务面接通后可用';
+export const TASK_DRAWER_BACK_TITLE = '回到这本书的任务';
 export const TASK_DRAWER_CLOSE = '关闭';
 export const TASK_DRAWER_MODE_GROUP = '计划显示方式';
 export const TASK_DRAWER_LOADING = '正在读取任务计划…';
@@ -104,7 +104,7 @@ export const TASK_PLAN_STATE_PILLS: Readonly<Record<TaskPlanStateKey, ReviewPill
  * plan itself is edited in 完整 (Issue #419), which 返回修改 opens.
  */
 export const TASK_PLAN_EDIT = '修改';
-export const TASK_PLAN_EDIT_REASON = '回到撰写随任务面板提供';
+export const TASK_PLAN_EDIT_REASON = '修改任务说法随撰写框提供';
 
 /** The context chips in their order: 书 · 位置 · 已选字数 · 任务输入修订版 · 工序. */
 export function taskPlanChips(chips: TaskPlanProjection['goal']['chips']): ReadonlyArray<{ key: string; text: string }> {

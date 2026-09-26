@@ -14,6 +14,7 @@ import {
   type BookDeliveryPackageVersionProjection,
   type ReviewRunState,
 } from '../shared/protocol.js';
+import { maintenanceWithdrawnLine } from '../shared/maintenance-wording.js';
 import { reportExportLabel } from '../shared/report-wording.js';
 import { UUID_PATTERN, canonicalRecord, sha256Hex } from './analysis/canonical.js';
 import { BUILTIN_PRODUCTION_DOCUMENT_TYPES, BUILTIN_PRODUCTION_DOCUMENT_TYPES_DIGEST } from './production-document-types.js';
@@ -157,6 +158,8 @@ export interface PackagePublicationReading {
   scope: string;
   basis: string;
   changedSince: boolean;
+  /** A 撤回 case holds it (Issue #426, S68a): in AI7 it is no longer used for 发稿, so it holds no condition. */
+  withdrawn: boolean;
 }
 
 /** One Delivery Record, as the package names it. */
@@ -222,7 +225,7 @@ const integer = (value: SQLOutputValue | undefined): number => {
 export interface PackageContent {
   schema: 'ai7.book-delivery-package-content/1';
   bookId: string;
-  publication: null | Omit<PackagePublicationReading, 'changedSince'>;
+  publication: null | Omit<PackagePublicationReading, 'changedSince' | 'withdrawn'>;
   documents: ReadonlyArray<
     | { typeId: string; disposition: 'included'; documentId: string; version: number; revisionId: string; revisionDigest: string; deliveryId: string; deliveryIds: ReadonlyArray<string> }
     | { typeId: string; disposition: 'not-for-this-book' }
@@ -340,14 +343,21 @@ export class BookDeliveryPackages {
     const excluded: BookDeliveryPackageItemProjection[] = [];
     const limitations: string[] = [];
 
-    // 发稿版本: the Book's current designation.
-    const publication = this.#sources.publication(bookId);
+    // 发稿版本: the Book's current designation — unless a 撤回 holds it (Issue #426, S68a): in AI7 it is no longer used for
+    // 发稿, so the package neither holds it nor names it as included until another is designated.
+    const designated = this.#sources.publication(bookId);
+    const withdrawn = designated?.withdrawn === true;
+    const publication = withdrawn ? null : designated;
     conditions.push({
       key: 'publication',
       typeId: null,
       label: BOOK_DELIVERY_PACKAGE_CONDITION_LABELS.publication,
       met: publication !== null,
-      stateLabel: publication === null ? BOOK_DELIVERY_PACKAGE_WORDS.publicationMissing : publicationLabel(publication.milestoneLabel, publication.revisionLabel),
+      stateLabel: designated === null
+        ? BOOK_DELIVERY_PACKAGE_WORDS.publicationMissing
+        : withdrawn
+          ? maintenanceWithdrawnLine(publicationLabel(designated.milestoneLabel, designated.revisionLabel))
+          : publicationLabel(designated.milestoneLabel, designated.revisionLabel),
       notice: publication?.changedSince === true ? BOOK_DELIVERY_PACKAGE_WORDS.publicationNotice : null,
       route: publication === null || publication.changedSince ? 'publication' : null,
       routeLabel: publication === null || publication.changedSince ? BOOK_DELIVERY_PACKAGE_WORDS.publicationRoute : null,

@@ -121,6 +121,7 @@ function designation(overrides: Partial<PublicationVersionProjection> = {}): Pub
       permissionId: identity,
       events: [{ eventId: 'e1', kind: 'actuals-prompt' }, { eventId: 'e2', kind: 'exemplar-archive' }],
     },
+    maintenance: { cases: [], total: 0, withdrawn: false, archived: false },
     ...overrides,
   };
 }

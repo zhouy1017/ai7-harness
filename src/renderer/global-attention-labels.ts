@@ -12,9 +12,10 @@ import {
 import { RUN_LIVENESS_STAGE_LABELS, localInstantLabel } from './plan-preview-labels.js';
 import type { ReviewPill } from './review-labels.js';
 import { REVIEW_ACTION_LABELS } from './review-labels.js';
-import { TASK_BAR_RECONFIRM, TASK_BAR_REDO, TASK_BAR_REPREPARE, TASK_BAR_RUN_LINKS } from './task-drawer-labels.js';
+import { TASK_BAR_RECONFIRM, TASK_BAR_REDO, TASK_BAR_REPREPARE, TASK_BAR_RUN_LINKS, TASK_PLAN_OPEN_START } from './task-drawer-labels.js';
 import { RESOLVE_CONFLICT_LABEL } from './editorial-mark-labels.js';
 import { PROPOSAL_CONFLICT_CLASSIFICATION, REVERSAL_CONFLICT_LINE } from './proposal-conflict-labels.js';
+import { MAINTENANCE_CLASSIFICATION_LABELS, MAINTENANCE_NEXT_STEP_LABELS } from '../shared/maintenance-wording.js';
 
 /**
  * Every word of 待我处理 (Issue #424, plan slice S78; editor-surfaces §8.1, V2-UX-ATTN-001 to 009, IA-007,
@@ -141,6 +142,13 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   'analysis-completed': '已完成',
   'analysis-completed-with-gaps': '已完成 · 保留缺口',
   'review-completed': '已完成',
+  // The 任务 panel's own three (Issue #423, S77a): a plan nobody started, and a Task the editor cancelled (CTRL-005).
+  'analysis-prepared': '计划已准备 · 等你开始',
+  'review-prepared': '计划已准备 · 等你开始',
+  'analysis-cancelled': '已取消',
+  // MAINT-012's own name for it (Issue #426, S68b), and the wait 替代 and 再版 are in.
+  'maintenance-pending': '维护事项待处理',
+  'maintenance-waiting': '维护事项待处理 · 等待另设发稿版本',
 };
 
 /** The state pill's tone and shape: words and a shape, never colour alone. */
@@ -177,6 +185,11 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
   'analysis-completed': { tone: 'good', shape: 'check' },
   'analysis-completed-with-gaps': { tone: 'good', shape: 'circle' },
   'review-completed': { tone: 'good', shape: 'check' },
+  'analysis-prepared': { tone: 'neutral', shape: 'ring' },
+  'review-prepared': { tone: 'neutral', shape: 'ring' },
+  'analysis-cancelled': { tone: 'neutral', shape: 'square' },
+  'maintenance-pending': { tone: 'attention', shape: 'triangle' },
+  'maintenance-waiting': { tone: 'neutral', shape: 'ring' },
 };
 
 /**
@@ -203,6 +216,13 @@ export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionN
   reprepare: TASK_BAR_REPREPARE,
   // The drawer's own action for a Run the launch's ceiling stopped under developer-live (Issue #541).
   redo: TASK_BAR_REDO,
+  // A prepared plan nobody started (Issue #423, S77a): the drawer's own entry to it.
+  'view-plan': TASK_PLAN_OPEN_START,
+  // A 维护事项's own next step (Issue #426, S68b), in the case's words.
+  'maintenance-link-proposal': MAINTENANCE_NEXT_STEP_LABELS['link-proposal'],
+  'maintenance-link-publication': MAINTENANCE_NEXT_STEP_LABELS['link-publication'],
+  'maintenance-write-errata': MAINTENANCE_NEXT_STEP_LABELS['write-errata'],
+  'maintenance-conclude': MAINTENANCE_NEXT_STEP_LABELS.conclude,
 };
 /** The two scopes a question can have (CLAR-004), in the card's own words. */
 export const GLOBAL_ATTENTION_CLARIFICATION_WAITING = '任务等待你的说明';
@@ -242,6 +262,8 @@ export function globalAttentionObjectLabel(object: GlobalAttentionObjectProjecti
       return `基线分析 · ${BASELINE_ANALYSIS_MODE_LABELS[object.mode]}`;
     case 'review':
       return `审阅 · 第 ${object.ordinal} 次`;
+    case 'maintenance':
+      return `维护事项 · 第 ${object.ordinal} 项 · ${MAINTENANCE_CLASSIFICATION_LABELS[object.classification]} · 第 ${object.publicationOrdinal} 次发稿版本`;
   }
 }
 
@@ -337,7 +359,41 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
       return facts.revisionOrdinal === null ? '已形成结果集修订版 · 有缺口单元。' : `已形成第 ${facts.revisionOrdinal} 份基线分析，保留缺口单元。`;
     case 'review-completed':
       return facts.categories.length === 0 ? '审阅发现已标到稿件上。' : `已审：${quoted(facts.categories.map((category) => category.label))}；发现已标到稿件上。`;
+    // The 任务 panel's own three (Issue #423, S77a): nothing starts by itself, and a cancellation keeps what was read.
+    case 'analysis-prepared':
+      return '计划已准备好，还没有开始；查看计划后开始任务。它不会自己开始。';
+    case 'review-prepared':
+      return facts.categories.length === 0
+        ? '审阅计划已准备好，还没有开始；查看计划后开始审阅。它不会自己开始。'
+        : `审阅计划已准备好，还没有开始：${quoted(facts.categories.map((category) => category.label))}；查看计划后开始审阅。它不会自己开始。`;
+    case 'analysis-cancelled':
+      return facts.revisionOrdinal === null
+        ? '你取消了这项任务；它还没有读完任何阅读范围，没有形成结果。'
+        : `你取消了这项任务；读完的阅读范围已形成第 ${facts.revisionOrdinal} 份基线分析。`;
+    // 维护事项待处理 (Issue #426, S68b): what the case waits on, in its own terms; nothing outside AI7 is claimed.
+    case 'maintenance-waiting':
+      return maintenanceWaitingReason(item.object.kind === 'maintenance' ? item.object.classification : 'supersession');
+    case 'maintenance-pending':
+      switch (item.nextStep) {
+        case 'maintenance-link-proposal':
+          return '更正还没有关联修改建议：先在稿件中提出修改建议，再在这个维护事项中关联它。';
+        case 'maintenance-link-publication':
+          // Only a 更正 links a later designation after its 修改建议; a 替代 or 再版 still waits for one.
+          if (item.object.kind === 'maintenance' && item.object.classification !== 'correction') return maintenanceWaitingReason(item.object.classification);
+          return '修改建议已关联：更正后的文字另行保存里程碑版本、设为发稿版本后，在这个维护事项中关联它。';
+        case 'maintenance-write-errata':
+          return '勘误还没有写下内容：在这个维护事项中编写勘误。';
+        default:
+          return '这个维护事项的步骤已经记录：在这个维护事项中记录它的结论。';
+      }
   }
+}
+
+/** What a 替代 or 再版 waits for (MAINT-007), in its own words. */
+function maintenanceWaitingReason(classification: string): string {
+  return classification === 'reissue'
+    ? '再版等待另设的发稿版本：另行设为发稿版本后，在这个维护事项中关联它。'
+    : '替代等待另设的发稿版本：另行设为发稿版本后，在这个维护事项中关联它。';
 }
 
 /** A Run in flight: its declared step, and — while it reads range by range — how far it has come (V2-UX-ATTN-004). */

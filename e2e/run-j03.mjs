@@ -218,7 +218,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     // Production Documents beside their ledgers, revision 38 adds their Delivery Records and revision 39 the Book's
     // 图书交付包 versions, so this pin moves with the terminal version the service stamps
     // (`BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION`).
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 41, 'credential-cleanup-metadata-version');
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 44, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
               approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
@@ -908,7 +908,8 @@ async function main() {
         中途: '预计无需中途参与',
       }) &&
       compact.sections.length === 0 && Object.keys(compact.technical).length === 0 &&
-      compact.controls.tasks?.text === '← 任务' && compact.controls.tasks.disabled === true &&
+      // Synchronized delta with Issue #423 (S77a): `← 任务` leads to the Book's 任务 panel.
+      compact.controls.tasks?.text === '← 任务' && compact.controls.tasks.disabled === false &&
       compact.controls.edit?.text === '修改' && compact.controls.edit.disabled === true &&
       compact.controls['mode-compact']?.text === '精简' && compact.controls['mode-compact'].pressed === 'true' &&
       compact.controls['mode-full']?.text === '完整' && compact.controls['mode-full'].pressed === 'false' &&
@@ -1036,7 +1037,12 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"]') && document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('#task-drawer')?.dataset.taskPlanKind==='fixed-task' && document.querySelector('#task-drawer')?.dataset.taskPlanState==='ready' && document.querySelector('#manuscript-navigation-panel')?.hidden===true`, 'drawer-beside-manuscript');
     await clickSelector(renderer, '[data-edge-entry="navigation"]', 'drawer-navigation-open');
     await waitFor(renderer, `document.querySelector('#manuscript-navigation-panel')?.hidden===false && document.querySelector('#task-drawer')?.hidden===true && document.body.dataset.taskDrawer==='closed'`, 'drawer-one-slot');
-    await assertRenderer(renderer, `document.querySelector('[data-edge-entry="tasks"]')?.disabled===true`, 'drawer-tasks-entry-waits');
+    // Synchronized delta with Issue #423 (S77a): the 任务 entry opens the Book's 任务 panel in the same slot, which closes
+    // 导航, and pressed again closes it.
+    await clickSelector(renderer, '[data-edge-entry="tasks"]', 'drawer-tasks-entry-open');
+    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.hidden === false && drawer.dataset.taskDrawerView === 'panel' && drawer.querySelector('.task-panel')?.dataset.taskPanel === 'ready' && document.querySelector('#manuscript-navigation-panel')?.hidden === true; })()`, 'drawer-tasks-panel-one-slot');
+    await clickSelector(renderer, '[data-edge-entry="tasks"]', 'drawer-tasks-entry-close');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true && document.body.dataset.taskDrawer === 'closed'`, 'drawer-tasks-panel-closed');
     await click(renderer, '返回图书工作概览', 'drawer-manuscript-return');
     await waitFor(renderer, `document.querySelector('.task-authorization-card')?.dataset.taskAuthorizationState==='prepared' && document.querySelector('#task-drawer')?.hidden===true`, 'drawer-manuscript-returned');
 
@@ -1094,7 +1100,7 @@ async function main() {
       recordedDrawer.bar.note === null && recordedDrawer.bar.summary === '《J-03 sample1 任务授权》 · 全书 · 主编辑角色 · 未设置任务预算上限 · 产出：一条运行记录（不派发） · 不改稿' &&
       JSON.stringify(recordedDrawer.bar.actions) === JSON.stringify([{ name: 'run-link', text: '查看运行记录', disabled: false, reason: null }]),
     'drawer-recorded-plan', recordedDrawer);
-    await assertRenderer(renderer, `!document.querySelector('#task-drawer [data-task-authorization-action]') && Array.from(document.querySelectorAll('#task-drawer button')).filter((button)=>!button.disabled).map((button)=>button.dataset.taskDrawerControl).sort().join(',')==='close,mode-compact,mode-full,run-link' && document.activeElement?.dataset.taskDrawerControl==='run-link' && ${AUTHORIZE_LABELED_BUTTONS}===0`, 'drawer-records-nothing');
+    await assertRenderer(renderer, `!document.querySelector('#task-drawer [data-task-authorization-action]') && Array.from(document.querySelectorAll('#task-drawer button')).filter((button)=>!button.disabled).map((button)=>button.dataset.taskDrawerControl).sort().join(',')==='close,mode-compact,mode-full,run-link,tasks' && document.activeElement?.dataset.taskDrawerControl==='run-link' && ${AUTHORIZE_LABELED_BUTTONS}===0`, 'drawer-records-nothing');
 
     at('drawer-run-link');
     // 查看运行记录 leads to the record's own surface — 工作概览's card — and the drawer stays beside it. The
@@ -1188,7 +1194,7 @@ async function main() {
       document.querySelector('[data-foreground-execution-state="blocked-before-dispatch"]')?.textContent.includes('前台执行已拒绝 · 未启动') &&
       !Array.from(document.querySelectorAll('.task-authorization-card button')).some((button)=>!['inspect-foreground-boundary','view-plan'].includes(button.dataset.taskAuthorizationAction)) &&
       document.querySelector('.task-authorization-card [data-task-authorization-action="view-plan"]')?.textContent==='查看计划' &&
-      Array.from(document.querySelectorAll('#task-drawer button')).filter((button)=>!button.disabled).map((button)=>button.dataset.taskDrawerControl).sort().join(',')==='close,mode-compact,mode-full,run-link' &&
+      Array.from(document.querySelectorAll('#task-drawer button')).filter((button)=>!button.disabled).map((button)=>button.dataset.taskDrawerControl).sort().join(',')==='close,mode-compact,mode-full,run-link,tasks' &&
       !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress/i.test(key))`, 'no-execution-surface');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-network-provider-session');
 

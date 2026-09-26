@@ -1,5 +1,7 @@
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
+  BOOK_TASK_GROUP_KEYS,
+  BOOK_TASK_RECENT_LIMIT,
   GLOBAL_ATTENTION_COUNTED_GROUPS,
   GLOBAL_ATTENTION_GROUP_KEYS,
   GLOBAL_ATTENTION_GROUP_LIMIT,
@@ -7,6 +9,9 @@ import {
   GLOBAL_ATTENTION_RECENT_LIMIT,
   type BaselineAnalysisRunState,
   type BaselineAnalysisTaskMode,
+  type BookTaskGroupKey,
+  type BookTaskItemProjection,
+  type BookTasksProjection,
   type GlobalAttentionFactsProjection,
   type GlobalAttentionGroupKey,
   type GlobalAttentionItemProjection,
@@ -15,6 +20,8 @@ import {
   type GlobalAttentionProjection,
   type GlobalAttentionStateKey,
   type GlobalAttentionTarget,
+  type MaintenanceClassification,
+  type MaintenanceNextStep,
   type ProposalConflictKind,
   type ReviewRunCategoryState,
   type ReviewRunState,
@@ -145,7 +152,8 @@ export interface AnalysisOutcomeAttentionReading {
   readonly mode: BaselineAnalysisTaskMode;
   readonly outcomeId: string;
   readonly runRecordId: string;
-  readonly classification: 'completed' | 'completed-with-gaps';
+  /** `cancelled` is read for a Book's 任务 panel alone (Issue #423, S77a); 待我处理 never lists one. */
+  readonly classification: 'completed' | 'completed-with-gaps' | 'cancelled';
   readonly recordedAt: string;
   readonly revisionId: string | null;
   readonly revisionOrdinal: number | null;
@@ -175,6 +183,24 @@ export interface ReviewRunAttentionReading {
   readonly lastEventAt: string | null;
 }
 
+/**
+ * A 维护事项 whose next step is the editor's (Issue #426, S68b; MAINT-012), read by `maintenance-cases.ts`: not complete,
+ * and its designation's maintenance not closed by an 归档.
+ */
+export interface MaintenanceAttentionReading {
+  readonly caseId: string;
+  readonly ordinal: number;
+  readonly classification: MaintenanceClassification;
+  readonly status: 'unresolved' | 'waiting';
+  readonly nextStep: MaintenanceNextStep;
+  /** When its newest revision was recorded. */
+  readonly at: string;
+  readonly bookId: string;
+  readonly bookTitle: string;
+  readonly publicationVersionId: string;
+  readonly publicationOrdinal: number;
+}
+
 export interface GlobalAttentionReadings {
   readonly imports: ReadonlyArray<ImportAttentionReading>;
   readonly recoveries: ReadonlyArray<RecoveryAttentionReading>;
@@ -185,6 +211,8 @@ export interface GlobalAttentionReadings {
   readonly reviewRuns: ReadonlyArray<ReviewRunAttentionReading>;
   /** The Review Runs that reached the manuscript in every category within the recent window. */
   readonly reviewCompletions: ReadonlyArray<ReviewRunAttentionReading>;
+  /** Every 维护事项 still waiting on the editor (Issue #426, S68b). */
+  readonly maintenance: ReadonlyArray<MaintenanceAttentionReading>;
   /** Whether a Run holds the execution owner's one slot now. */
   readonly busy: boolean;
   /**
@@ -457,7 +485,9 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading, waitingFor: Wai
 }
 
 function analysisOutcomeItem(reading: AnalysisOutcomeAttentionReading): GlobalAttentionItemProjection {
-  return item('recent', reading.classification === 'completed' ? 'analysis-completed' : 'analysis-completed-with-gaps', {
+  const state = reading.classification === 'completed' ? 'analysis-completed'
+    : reading.classification === 'cancelled' ? 'analysis-cancelled' : 'analysis-completed-with-gaps';
+  return item('recent', state, {
     itemId: `analysis-outcome:${reading.outcomeId}`,
     blocked: false,
     at: reading.recordedAt,
@@ -543,6 +573,37 @@ function reviewCompletionItem(reading: ReviewRunAttentionReading): GlobalAttenti
   });
 }
 
+const MAINTENANCE_NEXT_STEPS: Readonly<Record<MaintenanceNextStep, GlobalAttentionNextStep>> = {
+  'link-proposal': 'maintenance-link-proposal',
+  'link-publication': 'maintenance-link-publication',
+  'write-errata': 'maintenance-write-errata',
+  conclude: 'maintenance-conclude',
+};
+
+/**
+ * 维护事项待处理 (MAINT-012): a named decision of the editor's, returning to the case on its 发稿版本. It stops no other
+ * work, so it never blocks; 撤回, 归档 and a complete case never come here. A 替代 or 再版 waits for its separately
+ * designated version until one is linked (MAINT-007), whatever interim 仍未解决 it recorded, so it reads as waiting.
+ */
+function maintenanceItem(reading: MaintenanceAttentionReading): GlobalAttentionItemProjection {
+  const waiting = reading.status === 'waiting' ||
+    ((reading.classification === 'supersession' || reading.classification === 'reissue') && reading.nextStep === 'link-publication');
+  return item('decisions', waiting ? 'maintenance-waiting' : 'maintenance-pending', {
+    itemId: `maintenance:${reading.caseId}`,
+    blocked: false,
+    at: reading.at,
+    book: { bookId: reading.bookId, title: reading.bookTitle },
+    object: { kind: 'maintenance', classification: reading.classification, ordinal: reading.ordinal, publicationOrdinal: reading.publicationOrdinal },
+    nextStep: MAINTENANCE_NEXT_STEPS[reading.nextStep],
+    target: { kind: 'maintenance', bookId: reading.bookId, publicationVersionId: reading.publicationVersionId, caseId: reading.caseId },
+    technical: [
+      { key: 'maintenance-case', label: '维护事项', value: reading.caseId },
+      { key: 'publication-version', label: '发稿版本', value: reading.publicationVersionId },
+      { key: 'state-at', label: '状态开始时间', value: reading.at },
+    ],
+  });
+}
+
 // ---- ordering ------------------------------------------------------------------------------------------
 
 /** Code-point order, the same on every host; a missing title sorts first. */
@@ -594,11 +655,12 @@ export function composeGlobalAttention(readings: GlobalAttentionReadings, now: D
     ...readings.recoveries.map(recoveryItem),
     ...readings.conflicts.map(conflictItem),
     ...readings.analysisTasks.flatMap((reading) => analysisTaskItem(reading, readings.waitingFor) ?? []),
-    ...readings.analysisOutcomes.filter((reading) => reading.recordedAt >= since).map(analysisOutcomeItem),
+    ...readings.analysisOutcomes.filter((reading) => reading.recordedAt >= since && reading.classification !== 'cancelled').map(analysisOutcomeItem),
     ...readings.reviewRuns.flatMap((reading) => reviewRunItem(reading) ?? []),
     ...readings.reviewCompletions
       .filter((reading) => reading.state === 'settled' && (reading.lastEventAt ?? '') >= since)
       .map(reviewCompletionItem),
+    ...readings.maintenance.map(maintenanceItem),
   ];
   // One record is one item: a Review Run read both as a Book's latest and as a completion is listed once.
   const unique = Array.from(new Map(all.map((entry) => [`${entry.group}\n${entry.itemId}`, entry] as const)).values());
@@ -615,6 +677,153 @@ export function composeGlobalAttention(readings: GlobalAttentionReadings, now: D
     running: readings.busy || readings.reviewRuns.some((reading) => reading.state === 'running') ||
       readings.analysisTasks.some((reading) => reading.run?.state === 'awaiting-connectivity'),
   };
+}
+
+// ---- ① 任务面: one Book's Tasks (Issue #423, plan slice S77a; V2-UX-TASK-044) -----------------------------------
+
+/**
+ * What the 任务 panel reads of one Book (TASK-044): the owners' readings 待我处理 takes, of this Book alone, with what the
+ * panel adds — a baseline Task prepared and not started, a Review Run prepared and not started, and the Tasks the editor
+ * cancelled — and 最近完成 without an age limit.
+ */
+export interface BookTaskReadings {
+  readonly bookId: string;
+  readonly analysisTasks: ReadonlyArray<AnalysisTaskAttentionReading>;
+  readonly analysisOutcomes: ReadonlyArray<AnalysisOutcomeAttentionReading>;
+  readonly reviewRuns: ReadonlyArray<ReviewRunAttentionReading>;
+  readonly reviewCompletions: ReadonlyArray<ReviewRunAttentionReading>;
+  readonly waitingFor: WaitingFor;
+}
+
+/** 等你处理 holds 待我处理's two counted groups for the Book's Tasks; 进行中 its 运行中与已暂停; 最近完成 its own. */
+const BOOK_TASK_GROUP_OF: Readonly<Record<GlobalAttentionGroupKey, BookTaskGroupKey>> = {
+  exceptions: 'waiting',
+  decisions: 'waiting',
+  active: 'running',
+  recent: 'recent',
+};
+
+/** A baseline Task whose plan is prepared and not started: the drawer's 查看计划并开始 is the way on (TASK-044). */
+function preparedAnalysisItem(reading: AnalysisTaskAttentionReading): GlobalAttentionItemProjection {
+  return item('decisions', 'analysis-prepared', {
+    itemId: `analysis:${reading.taskIntentId}`,
+    blocked: false,
+    at: reading.createdAt,
+    book: { bookId: reading.bookId, title: reading.bookTitle },
+    object: { kind: 'analysis', mode: reading.mode },
+    nextStep: 'view-plan',
+    target: { kind: 'analysis-plan', bookId: reading.bookId, taskIntentId: reading.taskIntentId },
+    technical: [
+      { key: 'task-intent', label: '任务意图', value: reading.taskIntentId },
+      { key: 'prepared-at', label: '准备时间', value: reading.createdAt },
+    ],
+  });
+}
+
+/** A Review Run prepared and not started: its plan in the drawer, whose bar starts it. */
+function preparedReviewItem(reading: ReviewRunAttentionReading): GlobalAttentionItemProjection {
+  return item('decisions', 'review-prepared', {
+    itemId: `review:${reading.reviewRunId}`,
+    blocked: false,
+    at: reading.createdAt,
+    book: { bookId: reading.bookId, title: reading.bookTitle },
+    object: { kind: 'review', ordinal: reading.ordinal },
+    facts: { categories: reading.categories.map(categoryFact) },
+    nextStep: 'view-plan',
+    target: { kind: 'review-plan', bookId: reading.bookId, reviewRunId: reading.reviewRunId },
+    technical: reviewTechnical(reading, reading.createdAt),
+  });
+}
+
+/**
+ * The Run states the panel follows until they end: in flight, stopping, waiting to start once online, or answered and
+ * waiting its turn to go on.
+ */
+const FOLLOWED_RUN_STATES: ReadonlySet<BaselineAnalysisRunState> = new Set([...ACTIVE_RUN_STATES, 'awaiting-connectivity', 'awaiting-clarification']);
+
+/**
+ * A Task the editor cancelled while it waited to start (Issue #423 review): its Run never ran, so no Task Outcome names it,
+ * and it stands in 最近完成 as 已取消 with nothing formed, as a cancelled Run's outcome does.
+ */
+function cancelledBeforeStartItem(reading: AnalysisTaskAttentionReading, run: NonNullable<AnalysisTaskAttentionReading['run']>): GlobalAttentionItemProjection {
+  return item('recent', 'analysis-cancelled', {
+    itemId: `analysis:${reading.taskIntentId}`,
+    blocked: false,
+    at: run.stateAt,
+    book: { bookId: reading.bookId, title: reading.bookTitle },
+    object: { kind: 'analysis', mode: reading.mode },
+    facts: { revisionOrdinal: null },
+    nextStep: 'view-run',
+    target: { kind: 'analysis', bookId: reading.bookId, taskIntentId: reading.taskIntentId },
+    technical: [
+      { key: 'task-intent', label: '任务意图', value: reading.taskIntentId },
+      { key: 'run-record', label: '运行记录', value: `${run.runRecordId} · ${run.state}` },
+      { key: 'state-at', label: '状态记录时间', value: run.stateAt },
+    ],
+  });
+}
+
+/**
+ * The Book's 任务 panel from its readings (TASK-044): each Task is 待我处理's item for it, or the panel's own for the three
+ * states 待我处理 does not list, placed in the group its item's group maps to. 等你处理 orders blocked work first and then
+ * the oldest; 进行中 as 运行中与已暂停 does; 最近完成 the newest first, `BOOK_TASK_RECENT_LIMIT` of them. A finished Task
+ * names the result `查看结果` opens: the revision an analysis formed — a cancelled one's partial revision too — or the
+ * Review Run itself.
+ */
+export function composeBookTasks(readings: BookTaskReadings): BookTasksProjection {
+  const own = <T extends { readonly bookId: string }>(list: ReadonlyArray<T>): T[] => list.filter((reading) => reading.bookId === readings.bookId);
+  const entries: BookTaskItemProjection[] = [];
+  const outcomeRuns = new Set(own(readings.analysisOutcomes).map((reading) => reading.runRecordId));
+  for (const reading of own(readings.analysisTasks)) {
+    const built = reading.run === null && reading.planRevision === null ? preparedAnalysisItem(reading) : analysisTaskItem(reading, readings.waitingFor);
+    if (built !== null) entries.push({ item: built, result: null });
+    else if (reading.run !== null && reading.run.state === 'cancelled' && !outcomeRuns.has(reading.run.runRecordId)) {
+      entries.push({ item: cancelledBeforeStartItem(reading, reading.run), result: null });
+    }
+  }
+  for (const reading of own(readings.analysisOutcomes)) {
+    entries.push({
+      item: analysisOutcomeItem(reading),
+      result: reading.revisionId === null ? null : { kind: 'analysis-revision', revisionId: reading.revisionId },
+    });
+  }
+  for (const reading of own(readings.reviewRuns)) {
+    const built = reading.state === 'prepared' && reading.authorizedAt === null ? preparedReviewItem(reading) : reviewRunItem(reading);
+    if (built !== null) entries.push({ item: built, result: null });
+  }
+  for (const reading of own(readings.reviewCompletions).filter((reading) => reading.state === 'settled')) {
+    entries.push({ item: reviewCompletionItem(reading), result: { kind: 'review-run', reviewRunId: reading.reviewRunId } });
+  }
+  // One record is one entry: a Review Run read both as the Book's latest and as a completion is listed once.
+  const unique = Array.from(new Map(entries.map((entry) => [`${entry.item.group}\n${entry.item.itemId}`, entry] as const)).values());
+  const groups = BOOK_TASK_GROUP_KEYS.map((key) => {
+    const members = unique.filter((entry) => BOOK_TASK_GROUP_OF[entry.item.group] === key);
+    // 等你处理 is ordered as 待我处理's counted groups are, 进行中 as its 运行中与已暂停, 最近完成 as its own.
+    const order: GlobalAttentionGroupKey = key === 'waiting' ? 'decisions' : key === 'running' ? 'active' : 'recent';
+    const byItem = new Map(members.map((entry) => [entry.item, entry] as const));
+    const ordered = orderGlobalAttentionItems(order, members.map((entry) => entry.item)).map((entry) => byItem.get(entry)!);
+    const limit = key === 'recent' ? BOOK_TASK_RECENT_LIMIT : GLOBAL_ATTENTION_GROUP_LIMIT;
+    return { key, items: ordered.slice(0, limit), total: ordered.length };
+  });
+  return {
+    bookId: readings.bookId,
+    groups,
+    running: own(readings.analysisTasks).some((reading) => reading.run !== null && FOLLOWED_RUN_STATES.has(reading.run.state)) ||
+      own(readings.reviewRuns).some((reading) => reading.state === 'running'),
+  };
+}
+
+/** The 任务 panel as the service answers it: what a waiting Run of the Book waits for is checked only while one waits. */
+export async function readBookTasks(
+  store: {
+    waitingBaselineAnalysisRuns(bookId: string | null): ReadonlyArray<unknown>;
+    inspectBookTasks(bookId: string, progress: ProgressReader, waitingFor: WaitingFor): BookTasksProjection;
+  },
+  bookId: string,
+  progress: ProgressReader,
+  read: () => Promise<WaitingFor>,
+): Promise<BookTasksProjection> {
+  return store.inspectBookTasks(bookId, progress, await attentionWaitingFor(store.waitingBaselineAnalysisRuns(bookId).length > 0, read));
 }
 
 // ---- the import and recovery relations, read as they stand -----------------------------------------------
