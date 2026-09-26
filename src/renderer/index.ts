@@ -7039,6 +7039,8 @@ function renderEditorWindow(
           returnReadFailed = false;
         } catch (error) {
           if (!chipHost.isConnected || request !== returnRequest) return;
+          returnReadFailed = true;
+          paintReturnChip();
           setStatus(rendererErrorMessage(error, '无法保存返回位置，尚未跳转。'), 'error');
           return;
         }
