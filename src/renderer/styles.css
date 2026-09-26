@@ -622,6 +622,18 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .package-version-list p { margin: .3rem 0 0; }
 .package-version-line { font-weight: 800; }
 .package-current-mark { margin-left: .5rem; padding: 0 .4rem; border: 1px solid currentColor; border-radius: 999px; font-size: .85rem; }
+/* 人员 on 工作概览 and 书库's search (Issue #431, S83): the Book's 作者, 责编 and 相关人, and finding a Book by them. */
+.book-people-form { margin-top: .6rem; }
+.book-people-field { display: block; margin-top: .5rem; }
+.book-people-field input { display: block; width: 100%; box-sizing: border-box; margin-top: .3rem; }
+.book-people-related { display: grid; gap: .45rem; margin: .6rem 0 0; padding: .5rem .6rem; border: 1px solid #ddd8cc; border-radius: 8px; }
+.book-people-related-row { display: flex; flex-wrap: wrap; gap: .4rem .6rem; align-items: flex-end; min-width: 0; }
+.book-people-related-row label { display: grid; gap: .2rem; min-width: 0; }
+.book-people-reason[hidden] { display: none; }
+.book-filter { display: flex; flex-wrap: wrap; gap: .4rem .8rem; align-items: flex-end; margin: .6rem 0; }
+.book-filter label { display: grid; gap: .2rem; min-width: 0; }
+.book-filter-legend { flex-basis: 100%; margin: 0; font-weight: 700; }
+.book-people-line { margin: .25rem 0 0; }
 /* 维护事项 (Issue #426, S68a): each designation's cases, the draft bound to it, and a case with its timeline in place. */
 .maintenance { margin-top: .6rem; padding-top: .55rem; border-top: 1px dashed #d5dcd9; }
 .maintenance h5 { margin: 0; font-size: .95rem; }
@@ -1106,6 +1118,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .document-delivery fieldset, .delivery-statement,
   .deliverables-package, .package-current-mark, .package-export, .package-export-result, .package-export-list > li,
   .maintenance-draft, .maintenance-case, .maintenance-classifications, .maintenance-choices, .maintenance-errata,
+  .book-people-related,
   .task-drawer, .task-drawer-head, .task-drawer-footer, .task-drawer-modes, .task-plan-goal, .task-plan-compact,
   .task-plan-chip, .task-plan-boundary, .task-plan-lock, .task-plan-section-number, .task-plan-edit-remove, .task-plan-edit-tag,
   .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal,

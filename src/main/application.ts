@@ -3386,6 +3386,22 @@ function registerRendererHandlers(
       });
     }),
   );
+  // 保存人员 (Issue #431, S83): a Book's 作者, 责编 and 相关人 on its 工作概览 — the Book this window shows, or none yet.
+  ipcMain.handle(IPC_CHANNELS.updateBookPeople, (event, input: Parameters<RendererApi['updateBookPeople']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = owned.route;
+        requireDesktop(route === null || (route.kind === 'book' && route.bookId === input.bookId), 'AI7_RENDERER_BOUNDARY_INVALID');
+        const result = await service.call('updateBookPeople', {
+          bookId: input.bookId, expectedVersion: input.expectedVersion, authors: input.authors, editors: input.editors, related: input.related,
+        });
+        requireDesktop(result.bookId === input.bookId, 'AI7_SERVICE_ROUTE_INVALID');
+        return result;
+      });
+    }),
+  );
   const serviceHandlers = [
     ['prepareBookCreation', IPC_CHANNELS.prepareBookCreation],
     ['listBooks', IPC_CHANNELS.listBooks],

@@ -591,7 +591,9 @@ async function dispatch(
       };
     }
     case 'listBooks':
-      return { id: request.id, ok: true, op: request.op, result: store.listBooks(request.input.after) };
+      return { id: request.id, ok: true, op: request.op, result: store.listBooks(request.input.after, request.input.filter ?? null) };
+    case 'updateBookPeople':
+      return { id: request.id, ok: true, op: request.op, result: store.updateBookPeople(request.input) };
     case 'prepareNewBookReview':
       return {
         id: request.id,

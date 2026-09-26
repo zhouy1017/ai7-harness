@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 65 as const;
+export const SERVICE_PROTOCOL_VERSION = 66 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -82,6 +82,7 @@ export const IPC_CHANNELS = {
   generateReviewReport: 'ai7:j04:generate-review-report',
   inspectReviewFindingOfMark: 'ai7:j04:inspect-review-finding-of-mark',
   listBooks: 'ai7:j01:list-books',
+  updateBookPeople: 'ai7:j11:update-book-people',
   prepareNewBookReview: 'ai7:j01:prepare-new-book-review',
   commitNewBookImport: 'ai7:j01:commit-new-book-import',
   prepareSourceImportReview: 'ai7:j01:prepare-source-import-review',
@@ -525,6 +526,8 @@ export interface BookWorkOverviewProjection {
     internalNumber: string | null;
     createdAt: string;
   };
+  /** 作者, 责编 and 相关人 (Issue #431, S83; BOOK-006). */
+  people: BookPeopleProjection;
   manuscriptState:
     | { state: 'empty'; label: '尚无稿件' }
     | { state: 'populated'; label: '已有主稿件'; manuscriptId: string };
@@ -630,6 +633,8 @@ export interface BookSummaryProjection {
   stableIdentity: string;
   title: string;
   internalNumber: string | null;
+  /** 作者, 责编 and 相关人 for the card (Issue #431, S83). */
+  people: { authors: ReadonlyArray<string>; editors: ReadonlyArray<string>; related: ReadonlyArray<{ roleLabel: string; name: string }> };
   manuscriptState: 'empty' | 'populated';
   manuscriptStateLabel: '尚无稿件' | '已有主稿件';
   reimportLineageSourceVersionIds: ReadonlyArray<string>;
@@ -640,6 +645,58 @@ export interface BookSummaryCursor {
   title: string;
   bookId: string;
 }
+
+// ---- 作者 · 责编 · 相关人 (Issue #431, plan slice S83; V2-UX-BOOK-006, FDBK-013) -------------------------------------------
+
+/** One name, in characters (code points) once NFC-normalized and trimmed. */
+export const MAX_BOOK_PERSON_NAME_CHARACTERS = 40;
+export const MAX_BOOK_AUTHORS = 10;
+export const MAX_BOOK_EDITORS = 10;
+export const MAX_BOOK_RELATED_PEOPLE = 30;
+/** Separates several names in one field: 「张三、李四」. A name never holds one. */
+export const BOOK_PEOPLE_NAME_SEPARATOR = '、';
+
+/** One 相关人: a role of the house list, and a name. */
+export interface BookRelatedPersonProjection {
+  roleId: string;
+  roleLabel: string;
+  name: string;
+}
+
+/** A Book's 作者, 责编 and 相关人 as its newest version records them; attribution dimensions, never accounts. */
+export interface BookPeopleProjection {
+  /** 0 before the first save. */
+  version: number;
+  authors: ReadonlyArray<string>;
+  editors: ReadonlyArray<string>;
+  related: ReadonlyArray<BookRelatedPersonProjection>;
+  /** The house's role list the form offers, in its order. */
+  roles: ReadonlyArray<{ roleId: string; label: string }>;
+  recordedAt: string | null;
+}
+
+/** `保存人员`: the whole set, against the version the editor read. */
+export interface UpdateBookPeopleInput {
+  bookId: string;
+  expectedVersion: number;
+  authors: ReadonlyArray<string>;
+  editors: ReadonlyArray<string>;
+  related: ReadonlyArray<{ roleId: string; name: string }>;
+}
+
+export interface BookPeopleResultProjection {
+  bookId: string;
+  outcome: 'recorded' | 'unchanged';
+  completionLabel: '人员已保存' | '人员没有变化';
+  people: BookPeopleProjection;
+}
+
+/** 书库's search (IA-008, BOOK-006): one field — or all of 书名, 作者 and 责编 — holding the words. */
+export interface BookSummaryFilter {
+  field: 'all' | 'title' | 'author' | 'editor';
+  text: string;
+}
+export const MAX_BOOK_SUMMARY_FILTER_CHARACTERS = 40;
 
 export interface BookSummaryPageProjection {
   items: ReadonlyArray<BookSummaryProjection>;
@@ -6659,9 +6716,11 @@ export interface ServiceOperationMap {
   generateReviewReport: { input: GenerateReviewReportInput; output: ReviewWorkspaceProjection };
   inspectReviewFindingOfMark: { input: InspectReviewFindingOfMarkInput; output: ReviewFindingOfMarkProjection | null };
   listBooks: {
-    input: { after: BookSummaryCursor | null };
+    /** `filter` narrows the list to the Books whose 书名, 作者 or 责编 hold the words (Issue #431, S83). */
+    input: { after: BookSummaryCursor | null; filter?: BookSummaryFilter };
     output: BookSummaryPageProjection;
   };
+  updateBookPeople: { input: UpdateBookPeopleInput; output: BookPeopleResultProjection };
   prepareNewBookReview: {
     input: {
       draftId: string;
@@ -7031,6 +7090,8 @@ export interface RendererApi {
   /** 查看任务 on a Mark Card: the Run a `review-category` mark came from, `null` for any other mark. */
   inspectReviewFindingOfMark(input: InspectReviewFindingOfMarkRendererInput): Promise<ReviewFindingOfMarkProjection | null>;
   listBooks(input: ServiceOperationMap['listBooks']['input']): Promise<BookSummaryPageProjection>;
+  /** `保存人员` on a Book's 工作概览 (Issue #431, S83): the Book the window shows or is about to. */
+  updateBookPeople(input: UpdateBookPeopleInput): Promise<BookPeopleResultProjection>;
   prepareNewBookReview(input: ServiceOperationMap['prepareNewBookReview']['input']): Promise<ReviewBeforeImportProjection>;
   commitNewBookImport(input: CommitNewBookRendererInput): Promise<ManuscriptImportCommitProjection>;
   prepareSourceImportReview(input: ServiceOperationMap['prepareSourceImportReview']['input']): Promise<ReviewBeforeSourceImportProjection>;

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { EDITORIAL_MARK_SCHEMA_VERSION, CLARIFICATION_SCHEMA_VERSION, MAINTENANCE_CASE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { EDITORIAL_MARK_SCHEMA_VERSION, CLARIFICATION_SCHEMA_VERSION, BOOK_PEOPLE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type { ManuscriptWindowProjection } from '../../src/shared/protocol.js';
 import {
@@ -509,7 +509,7 @@ describe('AI7 Apply on a Change Suggestion', () => {
     try {
       // Through revisions 23 to 25 to the terminal 26: the widened text, every row of the five relations exactly
       // as revision 22 held it, and the Effect relations beside them.
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MAINTENANCE_CASE_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BOOK_PEOPLE_SCHEMA_VERSION);
       expect(markText(after)).toEqual({ sql: EDITORIAL_MARK_SCHEMA_SQL.editorial_marks });
       expect(rowsOf(after)).toEqual(planted);
       expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
@@ -610,7 +610,7 @@ describe('AI7 Apply on a Change Suggestion', () => {
     }
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MAINTENANCE_CASE_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BOOK_PEOPLE_SCHEMA_VERSION);
       expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     } finally {
       after.close();

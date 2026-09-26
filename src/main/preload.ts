@@ -265,6 +265,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectReviewFindingOfMark']['output']>(IPC_CHANNELS.inspectReviewFindingOfMark, input),
   listBooks: (input: ServiceOperationMap['listBooks']['input']) =>
     invoke<ServiceOperationMap['listBooks']['output']>(IPC_CHANNELS.listBooks, input),
+  updateBookPeople: (input: Parameters<RendererApi['updateBookPeople']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['updateBookPeople']>>>(IPC_CHANNELS.updateBookPeople, input),
   prepareNewBookReview: (input: ServiceOperationMap['prepareNewBookReview']['input']) =>
     invoke<ServiceOperationMap['prepareNewBookReview']['output']>(IPC_CHANNELS.prepareNewBookReview, input),
   commitNewBookImport: (input: CommitNewBookRendererInput) =>
