@@ -678,7 +678,9 @@ async function main() {
       try {
         Promise.prototype.then=function(success,failure) {
           Promise.prototype.then=original;
-          return original.call(this,(value)=>{held.release=()=>success(value);},(error)=>{held.release=()=>failure(error);});
+          return original.call(this,
+            (value)=>new Promise((resolve)=>{held.release=()=>resolve(success(value));}),
+            (error)=>new Promise((_resolve,reject)=>{held.release=()=>reject(error);}));
         };
         document.querySelector('[data-evaluation-action="versions-older"]').click();
       } finally { Promise.prototype.then=original; }

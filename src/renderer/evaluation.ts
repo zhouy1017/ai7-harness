@@ -164,20 +164,19 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
   const turn = async (recordsBefore: number | null): Promise<void> => {
     if (busy || workspace === null) return;
     busy = true;
-    try {
-      const page = await api.inspectEvaluation({ recordId: workspace.record?.recordId ?? null, recordsBefore });
-      if (!root.isConnected) return;
-      // Browsing version summaries must not replace unsaved input or advance its optimistic save version.
+    // The completion owns only the summary page; the current form and its save version remain pinned.
+    await api.inspectEvaluation({ recordId: workspace.record?.recordId ?? null, recordsBefore }).then((page) => {
+      if (!root.isConnected || workspace === null) return;
       workspace = { ...page, record: workspace.record };
       refusal = null;
-    } catch (error) {
+    }).catch((error: unknown) => {
       if (!root.isConnected) return;
       refusal = errorMessage(error, EVALUATION_STATUS.unavailable);
       setStatus(refusal, 'error');
-    } finally {
+    }).finally(() => {
       busy = false;
       if (root.isConnected) paint('.evaluation-versions h3', true);
-    }
+    });
   };
 
   const recordNode = (record: EvaluationRecordProjection): HTMLElement => {
