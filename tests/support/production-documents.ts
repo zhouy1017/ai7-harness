@@ -15,6 +15,7 @@ import type { DatabaseSync } from 'node:sqlite';
  * validation accepts, exactly as a store an earlier build planted after this one would hold them.
  */
 export const PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER: ReadonlyArray<string> = [
+  'series_knowledge_conflicts',
   'series_knowledge_promotions',
   'series_knowledge_revisions',
   'series_knowledge_candidates',

@@ -387,7 +387,7 @@ describe('图书交付包 · 导出 (S67b)', () => {
     try {
       planted.exec('PRAGMA foreign_keys = OFF');
       planted.exec(`BEGIN IMMEDIATE;
-        DROP TABLE series_knowledge_promotions;
+        DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions;
         DROP TABLE series_knowledge_revisions;
         DROP TABLE series_knowledge_candidates;
         DROP TABLE series_knowledge_items;
