@@ -207,7 +207,8 @@ export class BookDeliveryPackageExports {
       typeof input.packageVersionId === 'string' && UUID_PATTERN.test(input.packageVersionId),
     'BOOK_DELIVERY_PACKAGE_EXPORT_INVALID', '图书交付包导出请求无效。');
     const options = requirePackageOptions(input.options);
-    const { versionLabel, files, reviewDigest } = await this.#plan(input.bookId, input.packageVersionId, options, available);
+    const offset = requireOffset(input.offset);
+    const { versionLabel, files, reviewDigest, nextOffset } = await this.#plan(input.bookId, input.packageVersionId, options, available, offset);
     return {
       bookId: input.bookId,
       packageVersionId: input.packageVersionId,
@@ -224,7 +225,9 @@ export class BookDeliveryPackageExports {
         fidelity: file.fidelity,
         degraded: file.degraded,
       })),
-      filesTruncated: files.length > MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED,
+      filesTruncated: nextOffset !== null,
+      offset,
+      nextOffset,
       degraded: files.some((file) => file.degraded),
       statement: BOOK_DELIVERY_PACKAGE_EXPORT_STATEMENT,
       reviewDigest,
@@ -242,15 +245,23 @@ export class BookDeliveryPackageExports {
     'BOOK_DELIVERY_PACKAGE_EXPORT_INVALID', '图书交付包导出请求无效。');
     const options = requirePackageOptions(input.options);
     const folder = await requireFolder(input.folder);
-    const plan = await this.#plan(input.bookId, input.packageVersionId, options, available);
+    requirePackageExport(Array.isArray(input.memberKeys) && input.memberKeys.length > 0 &&
+      input.memberKeys.length <= MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED &&
+      input.memberKeys.every((key) => typeof key === 'string' && key.length > 0 && key.length <= 80) &&
+      new Set(input.memberKeys).size === input.memberKeys.length,
+    'BOOK_DELIVERY_PACKAGE_EXPORT_INVALID', '请明确选择本次要导出的文件。');
+    const plan = await this.#plan(input.bookId, input.packageVersionId, options, available, requireOffset(input.offset));
     requirePackageExport(plan.reviewDigest === input.reviewDigest, 'BOOK_DELIVERY_PACKAGE_EXPORT_CHANGED',
       '要导出的文件在查看后有了变化，请重新查看导出。');
-    for (const file of plan.files) {
+    const selected = plan.files.filter((file) => input.memberKeys.includes(file.key));
+    requirePackageExport(selected.length === input.memberKeys.length, 'BOOK_DELIVERY_PACKAGE_EXPORT_CHANGED',
+      '只能导出本页已查看并明确选择的文件，请重新查看导出。');
+    for (const file of selected) {
       requirePackageExport(!(await exists(join(folder, file.fileName))), 'BOOK_DELIVERY_PACKAGE_EXPORT_FOLDER_TAKEN',
         `所选文件夹里已有「${file.fileName}」。请选择一个空文件夹，或在对话框里新建一个。`);
     }
     const preparations: string[] = [];
-    for (const file of plan.files) {
+    for (const file of selected) {
       const preparation = await this.#exports.preparePackageFile({
         bookId: input.bookId,
         target: file.target,
@@ -270,7 +281,7 @@ export class BookDeliveryPackageExports {
       packageVersionId: input.packageVersionId,
       bookId: input.bookId,
       folder,
-      fileCount: plan.files.length,
+      fileCount: selected.length,
       reviewDigest: plan.reviewDigest,
       actor: '本机编辑',
       createdAt,
@@ -280,12 +291,12 @@ export class BookDeliveryPackageExports {
         `INSERT INTO book_delivery_package_exports(
            export_id, package_version_id, book_id, folder, file_count, review_digest, actor, created_at, canonical_json, sha256
          ) VALUES (?, ?, ?, ?, ?, ?, '本机编辑', ?, ?, ?)`,
-      ).run(exportId, input.packageVersionId, input.bookId, folder, plan.files.length, plan.reviewDigest, createdAt, record.json, record.digest);
+      ).run(exportId, input.packageVersionId, input.bookId, folder, selected.length, plan.reviewDigest, createdAt, record.json, record.digest);
       const insert = this.#db.prepare(
         `INSERT INTO book_delivery_package_export_files(export_id, position, item_key, label, preparation_id, canonical_json, sha256)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       );
-      plan.files.forEach((file, index) => {
+      selected.forEach((file, index) => {
         const fileRecord = canonicalRecord({
           schema: FILE_SCHEMA, exportId, position: index + 1, key: file.key, label: file.label, preparationId: preparations[index]!,
         });
@@ -300,11 +311,13 @@ export class BookDeliveryPackageExports {
    * file that fails or cannot be confirmed stops the rest (EXP-021): they stay unwritten, and nothing retries by itself. An
    * export already approved answers with what it came to — never a second write.
    */
-  async approve(input: ApproveBookDeliveryPackageExportInput, available: boolean): Promise<BookDeliveryPackageExportProjection> {
+  async approve(input: ApproveBookDeliveryPackageExportInput, available: boolean, beforeWrite?: () => void): Promise<BookDeliveryPackageExportProjection> {
     requirePackageExport(isRecord(input) && typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) &&
       typeof input.exportId === 'string' && UUID_PATTERN.test(input.exportId),
     'BOOK_DELIVERY_PACKAGE_EXPORT_INVALID', '图书交付包导出请求无效。');
     const files = this.#files(input.bookId, input.exportId);
+    requirePackageExport(files.length <= MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED,
+      'BOOK_DELIVERY_PACKAGE_EXPORT_CHANGED', '请重新查看并选择本次要导出的文件。');
     if (files.some((file) => this.#exports.approvedReceipt(input.bookId, file.preparationId) !== null)) {
       return this.#projection(input.bookId, input.exportId);
     }
@@ -324,7 +337,7 @@ export class BookDeliveryPackageExports {
     let stopped: BookDeliveryPackageExportProjection['stopped'] = null;
     for (const file of files) {
       try {
-        const receipt = await this.#exports.approve({ bookId: input.bookId, preparationId: file.preparationId }, available);
+        const receipt = await this.#exports.approve({ bookId: input.bookId, preparationId: file.preparationId }, available, beforeWrite);
         if (receipt.outcome !== 'created') {
           // Failed, or written with no confirmation: the receipt says which, and nothing after it is tried (EXP-021).
           stopped = { fileName: receipt.fileName, reason: receipt.detail };
@@ -455,22 +468,29 @@ export class BookDeliveryPackageExports {
     packageVersionId: string,
     options: ManuscriptExportOptions,
     available: boolean,
-  ): Promise<{ versionLabel: string; files: PlannedFile[]; reviewDigest: string }> {
+    offset: number,
+  ): Promise<{ versionLabel: string; files: PlannedFile[]; reviewDigest: string; nextOffset: number | null }> {
     const found = this.#sources.record(bookId, packageVersionId);
     requirePackageExport(found !== null, 'BOOK_DELIVERY_PACKAGE_EXPORT_NOT_FOUND', '所选交付包版本不属于这本书。');
     const { record } = found;
     requirePackageExport(record.content.publication !== null, 'BOOK_DELIVERY_PACKAGE_EXPORT_NOT_FOUND', '这一版交付包没有发稿版本。');
-    const planned: Array<{ key: string; target: ExportTargetInput; format: ManuscriptExportFormat }> = [
-      { key: 'publication', target: { kind: 'milestone', milestoneId: record.content.publication.milestoneId }, format: 'docx' },
-      ...record.content.documents.flatMap((entry) => (entry.disposition === 'included'
-        ? [{ key: `document:${entry.typeId}`, target: { kind: 'document' as const, documentId: entry.documentId, revisionId: entry.revisionId }, format: 'docx' as const }]
-        : [])),
-      ...record.content.reviewReports.map((report) => ({ key: `report:${report.reportId}`, target: { kind: 'report' as const, reportId: report.reportId }, format: 'docx' as const })),
-      { key: 'manifest', target: { kind: 'package-manifest', packageVersionId }, format: 'markdown' },
-    ];
-    const taken = new Set<string>();
+    function* members(): Generator<{ key: string; target: ExportTargetInput; format: ManuscriptExportFormat }> {
+      yield { key: 'publication', target: { kind: 'milestone', milestoneId: record.content.publication!.milestoneId }, format: 'docx' };
+      for (const entry of record.content.documents) {
+        if (entry.disposition === 'included') yield { key: `document:${entry.typeId}`, target: { kind: 'document', documentId: entry.documentId, revisionId: entry.revisionId }, format: 'docx' };
+      }
+      for (const report of record.content.reviewReports) {
+        yield { key: `report:${report.reportId}`, target: { kind: 'report', reportId: report.reportId }, format: 'docx' };
+      }
+      yield { key: 'manifest', target: { kind: 'package-manifest', packageVersionId }, format: 'markdown' };
+    }
     const files: PlannedFile[] = [];
-    for (const item of planned) {
+    let position = 0;
+    let nextOffset: number | null = null;
+    for (const item of members()) {
+      const ordinal = ++position;
+      if (ordinal <= offset) continue;
+      if (files.length === MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED) { nextOffset = ordinal - 1; break; }
       const review = await this.#exports.reviewPackageFile(bookId, item.target, item.format, options, available);
       // A report is written from the version the package froze: another version of it is another package.
       if (review.target.report !== null) {
@@ -481,7 +501,7 @@ export class BookDeliveryPackageExports {
       files.push({
         key: item.key,
         label: labelOf(review.target, item.key),
-        fileName: uniqueName(review.suggestedFileName, taken),
+        fileName: memberFileName(review.suggestedFileName, item.format === 'markdown' ? null : ordinal),
         format: item.format,
         restoration: review.restoration,
         restorationLine: review.restorationLine,
@@ -495,12 +515,13 @@ export class BookDeliveryPackageExports {
     }
     const reviewDigest = canonicalRecord({
       schema: REVIEW_SCHEMA,
+      offset,
       bookId,
       packageVersionId,
       options,
       files: files.map((file) => ({ key: file.key, fileName: file.fileName, format: file.format, revisionId: file.revisionId, reviewDigest: file.reviewDigest })),
     }).digest;
-    return { versionLabel: `v${record.version}`, files, reviewDigest };
+    return { versionLabel: `v${record.version}`, files, reviewDigest, nextOffset };
   }
 
   #files(bookId: string, exportId: string): Array<{ position: number; key: string; label: string; preparationId: string }> {
@@ -601,16 +622,18 @@ function labelOf(target: BookDeliveryPackageExportReviewTarget, key: string): st
 
 type BookDeliveryPackageExportReviewTarget = Awaited<ReturnType<ManuscriptExportStore['reviewPackageFile']>>['target'];
 
-/** A file name no other file of the export has, however a platform folds case: ` (2)` before its extension when it would. */
-function uniqueName(name: string, taken: Set<string>): string {
+/** Stable across pages without retaining the names of every earlier member. The sole Markdown manifest keeps its name. */
+function memberFileName(name: string, ordinal: number | null): string {
   const safe = name.normalize('NFC').replace(INVALID_FILE_NAME_CHARACTERS, '_');
-  const dot = safe.lastIndexOf('.');
-  const stem = dot > 0 ? safe.slice(0, dot) : safe;
-  const extension = dot > 0 ? safe.slice(dot) : '';
-  let candidate = safe;
-  for (let copy = 2; taken.has(candidate.toLowerCase()); copy += 1) candidate = `${stem} (${copy})${extension}`;
-  taken.add(candidate.toLowerCase());
-  return candidate;
+  return ordinal === null ? safe : `${String(ordinal).padStart(3, '0')} ${safe}`;
+}
+
+function requireOffset(value: unknown): number {
+  const offset = value === undefined ? 0 : value;
+  requirePackageExport(typeof offset === 'number' && Number.isSafeInteger(offset) && offset >= 0 &&
+    offset <= Number.MAX_SAFE_INTEGER - MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED,
+  'BOOK_DELIVERY_PACKAGE_EXPORT_INVALID', '导出文件页无效。');
+  return offset;
 }
 
 function outcomeOf(receipt: ManuscriptExportReceiptProjection): BookDeliveryPackageExportFileOutcomeProjection['outcome'] {

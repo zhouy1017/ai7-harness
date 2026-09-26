@@ -1826,8 +1826,8 @@ async function main() {
     // files — the 发稿版本's revision and the 新闻稿's delivered 版本 3 as DOCX, and the 交付包清单 in the package's own
     // words — v2's history says so, and 交付物's export records and the package itself stay as they were.
     const packageFiles = [
-      ['publication', 'docx', `稿件 · 发稿版本「${FIRST.label}」 · r1`, `${EXCERPT.title} · ${FIRST.label}.docx`],
-      ['document:news-release', 'docx', '新闻稿 · 版本 3', `${EXCERPT.title} · 新闻稿 · 版本 3.docx`],
+      ['publication', 'docx', `稿件 · 发稿版本「${FIRST.label}」 · r1`, `001 ${EXCERPT.title} · ${FIRST.label}.docx`],
+      ['document:news-release', 'docx', '新闻稿 · 版本 3', `002 ${EXCERPT.title} · 新闻稿 · 版本 3.docx`],
       ['manifest', 'markdown', '交付包清单', PACKAGE_MANIFEST_FILE],
     ];
     const packageFileLines = (outcome, words) => packageFiles.map(([key, format, label, fileName]) =>
@@ -1845,7 +1845,8 @@ async function main() {
         JSON.stringify(window.__j07.packageExportFiles()) === ${JSON.stringify(JSON.stringify(packageFileLines('', '')))} &&
         approve instanceof HTMLButtonElement && approve.disabled && reason?.textContent === '先选择位置。' &&
         panel.querySelector('.package-export-folder-line')?.textContent === ${JSON.stringify(PACKAGE_EXPORT_FOLDER_UNCHOSEN)} &&
-        document.activeElement === panel.querySelector('[data-package-action="export-choose"]') && !/%|百分/.test(panel.textContent ?? '');
+        document.activeElement === panel.querySelector('h5') && panel.querySelector('[data-package-action="export-choose"]')?.disabled === true &&
+        Array.from(panel.querySelectorAll('input[data-package-member]')).every((box) => !box.checked) && !/%|百分/.test(panel.textContent ?? '');
     })()`, 'package-export-lists-the-files');
     // 含批注 and 含修改建议（作为修订） are offered on (EXP-023), and each file carries its own Export Fidelity Review
     // (EXP-007), open by itself when something in it is not written as it was: the classes the service's own review of the
@@ -1878,6 +1879,9 @@ async function main() {
     await waitFor(renderer, switchedTo(false), 'package-export-reviewed-without-annotations', 60_000);
     await toggleAnnotations('package-export-annotations-on');
     await waitFor(renderer, switchedTo(true), 'package-export-reviewed-with-annotations', 60_000);
+    for (const [key] of packageFiles) {
+      await clickSelector(renderer, `input[data-package-member="${key}"]`, 'package-export-select-member');
+    }
     await clickSelector(renderer, packageAction('export-choose'), 'package-export-choose');
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'prepared' && window.__j07.status() === '已准备好导出文件，等待你确认。'`, 'package-export-prepared', 60_000);
     await assertRenderer(renderer, `(() => {
