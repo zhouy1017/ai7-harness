@@ -3975,7 +3975,7 @@ export class EditorialStore {
       // 升级前备份 (Issue #433, S85b; DSTO-016): a store this software must move to a later Data Version is written whole into
       // the backup location before anything migrates it, and a backup that cannot be made opens nothing.
       const classes = control.schemaRevisionClasses ?? SCHEMA_REVISION_CLASSES;
-      const upgrade = await backUpBeforeUpgrade(authority, dataRoot, {
+      const { upgrade, earlier } = await backUpBeforeUpgrade(authority, dataRoot, {
         terminalRevision: DATABASE_MERGE_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
       }).catch((error: unknown) => {
         if (error instanceof DataVersionError) throw new StoreError(error.code, error.message);
@@ -4112,12 +4112,12 @@ export class EditorialStore {
       if (control.interruptUpgradeAt === 'before-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在记录版本之前停止。');
       // The open that raised the Data Version records the upgrade it made with the backup (S85b), and only then clears the note
       // that let an open stopped before this record it (Issue #433 review).
-      store.#dataVersionCall(() => store.#transaction(authority, () => store.#dataVersions.recordOpen({
-        softwareVersion,
-        dataVersion: store.#dataVersion,
-        schemaRevision: DATABASE_MERGE_SCHEMA_VERSION,
-        upgrade,
-      })));
+      store.#dataVersionCall(() => store.#transaction(authority, () => {
+        // Another software's upgrade whose migration committed before it was recorded goes first, as that open would have
+        // recorded it (Issue #433 review).
+        if (earlier !== null) store.#dataVersions.recordOpen(earlier);
+        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION, upgrade });
+      }));
       if (control.interruptUpgradeAt === 'after-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在清除升级记录之前停止。');
       await completeUpgrade(dataRoot).catch(() => undefined);
       return store;

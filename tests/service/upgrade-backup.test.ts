@@ -8,7 +8,7 @@ import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/
 import { DATA_VERSION_TRIGGER_SQL, PRE_UPGRADE_BACKUP_NAME, type ClassifiedSchemaRevision } from '../../src/service/data-version.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { DATABASE_MERGE_SCHEMA_VERSION, DATABASE_REPLACEMENT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
-import { backUpBeforeUpgrade, preUpgradeBackupFileName } from '../../src/service/upgrade-backup.js';
+import { backUpBeforeUpgrade, preUpgradeBackupFileName, writePendingUpgrade } from '../../src/service/upgrade-backup.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2) for 升级前备份 (Issue #433, plan slice S85b; V2-UX-DSTO-016; ADR 0079 §1.1, §1.3, §1.4) over the
@@ -275,7 +275,7 @@ describe('升级前备份 over the real store', () => {
     expect([(await upgradeBackups()).length, existsSync(note())]).toEqual([1, false]);
   }, 180_000);
 
-  it('backs up again when the open that noted an upgrade migrated nothing, and takes a note that is not AI7\'s as none (Issue #433 review)', async () => {
+  it("backs up again when the open that noted an upgrade migrated nothing, and refuses a note that is not AI7's (Issue #433 review)", async () => {
     await storeBeforeUpgrade();
     // Backed up and noted, then stopped before anything migrated the store.
     const db = new DatabaseSync(storePath());
@@ -296,19 +296,48 @@ describe('升级前备份 over the real store', () => {
       store.close();
     }
     expect(existsSync(note())).toBe(false);
-    // A note that does not read as AI7's — here a whole upgrade whose digest does not agree — names no upgrade: nothing more is
-    // recorded, and it is cleared.
+    // A note that does not read as AI7's — here a whole upgrade whose digest does not agree — or one larger than any AI7 writes
+    // is never taken as none: its upgrade's backup could no longer be named, so the open is refused and the note stays.
     const forged = canonicalRecord({
       schema: 'ai7.upgrade-pending/1',
       upgrade: {
         fromDataVersion: 1, fromSchemaRevision: DATABASE_REPLACEMENT_SCHEMA_VERSION, fromSoftwareVersion: null, changes: [CHANGE],
         backup: { fileName: preUpgradeBackupFileName(T), byteLength: 1, sha256: 'a'.repeat(64) },
       },
+      target: { softwareVersion: '0.1.0', dataVersion: 2, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION },
     });
-    await writeFile(note(), JSON.stringify({ json: forged.json, sha256: '0'.repeat(64) }));
-    store = await open(BREAKING);
+    for (const text of [JSON.stringify({ json: forged.json, sha256: '0'.repeat(64) }), ' '.repeat(64 * 1024 + 1)]) {
+      await writeFile(note(), text);
+      expect(code(await refusal(open(BREAKING)))).toBe('UPGRADE_NOTE_UNREADABLE');
+      expect(existsSync(note())).toBe(true);
+    }
+  }, 180_000);
+
+  it('records an upgrade another software noted and never recorded before its own, and still makes the backup its own needs (Issue #433 review)', async () => {
+    // Revisions 57 and 58 both breaking: an earlier software brought the data from revision 56 to 57, backed up, and stopped
+    // before it recorded that upgrade.
+    const BOTH: ReadonlyArray<ClassifiedSchemaRevision> = [
+      { revision: DATABASE_REPLACEMENT_SCHEMA_VERSION, class: 'breaking', change: '替换记录' },
+      { revision: DATABASE_MERGE_SCHEMA_VERSION, class: 'breaking', change: CHANGE },
+    ];
+    await storeBeforeUpgrade();
+    const theirs = {
+      fromDataVersion: 1, fromSchemaRevision: DATABASE_REPLACEMENT_SCHEMA_VERSION - 1, fromSoftwareVersion: '0.0.9', changes: ['替换记录'],
+      backup: { fileName: 'AI7 升级前备份 2026-09-26 09-00-00.ai7db', byteLength: 1, sha256: 'a'.repeat(64) },
+    };
+    await writePendingUpgrade(roots.dataRoot, theirs, { softwareVersion: '0.0.10', dataVersion: 2, schemaRevision: DATABASE_REPLACEMENT_SCHEMA_VERSION });
+    // This software's own open stops too, after its migration: its note carries their upgrade on with its own.
+    expect(code(await refusal(open(BOTH, 'before-record')))).toBe('E2E_CONTROL_INTERRUPTED');
+    const store = await open(BOTH);
     try {
-      expect(store.inspectDataVersion().upgrades).toHaveLength(1);
+      // Their upgrade is recorded as theirs, and this software's own, from Data Version 2 to 3, with the backup it made now.
+      const version = store.inspectDataVersion();
+      expect(version.upgrades.map((upgrade) => [upgrade.softwareVersion, upgrade.fromDataVersion, upgrade.toDataVersion, upgrade.changes])).toEqual([
+        [await packageVersion(), 2, 3, [CHANGE]],
+        ['0.0.10', 1, 2, ['替换记录']],
+      ]);
+      expect(version.upgrades[0]!.backupFileName).toMatch(PRE_UPGRADE_BACKUP_NAME);
+      expect(await upgradeBackups()).toEqual([version.upgrades[0]!.backupFileName]);
       store.markCleanShutdown();
     } finally {
       store.close();

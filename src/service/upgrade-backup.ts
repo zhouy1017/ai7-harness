@@ -1,10 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
 import { lstat, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
-import { DataVersionError, breakingChanges, dataVersionAt, readUpgrade, type ClassifiedSchemaRevision, type DataVersionUpgrade } from './data-version.js';
+import { DataVersionError, SOFTWARE_VERSION, breakingChanges, dataVersionAt, readUpgrade, type ClassifiedSchemaRevision, type DataVersionUpgrade } from './data-version.js';
 import { DATABASE_PACKAGE_EXTENSION, writeDatabasePackage } from './database-exports.js';
 import { writeAtomic } from './database-replacement.js';
 import { takeFreeName } from './manuscript-export.js';
@@ -20,9 +19,12 @@ import { ensureBackupLocation } from './scheduled-backups.js';
  * packaged release (§1.2), so no store is upgraded this way yet; the classification is what makes one do so from then on.
  *
  * The upgrade is noted beside the store before anything migrates it (Issue #433 review): `store/upgrade-pending.json` names the
- * backup and what changes. An open stopped after its migration and before the store recorded the upgrade finds the note at the
- * next open, records the upgrade then with the backup it made, and makes no second one. The store clears the note once the
- * record is written; a note that does not read as AI7's is taken as none.
+ * backup, what changes, and the software, Data Version and schema revision it was bringing the store to. An open of that same
+ * software stopped after its migration and before the store recorded the upgrade finds the note at the next open, records the
+ * upgrade then with the backup it made, and makes no second one. A note another software left, whose migration had committed,
+ * is recorded as that software's upgrade before this open's own, and never stands in for a backup this open must make. The
+ * store clears the note once the record is written. A note that does not read as AI7's — or is larger than any note AI7 writes
+ * — refuses the open: its upgrade's backup could no longer be named.
  */
 
 type SqlRow = Record<string, SQLOutputValue>;
@@ -55,31 +57,91 @@ async function absent(path: string): Promise<boolean> {
 }
 
 const PENDING_SCHEMA = 'ai7.upgrade-pending/1';
+/** No note AI7 writes comes near this: one larger is not read at all (Issue #433 review). */
+const MAX_NOTE_BYTES = 64 * 1024;
+
+/** The versions an open was bringing the store to: the version record the store writes for it. */
+export interface UpgradeTarget {
+  readonly softwareVersion: string;
+  readonly dataVersion: number;
+  readonly schemaRevision: number;
+}
+
+/** What an open noted before anything migrated the store: the upgrade, what it was for, and an earlier one it carried on. */
+interface PendingUpgrade {
+  readonly upgrade: DataVersionUpgrade;
+  readonly target: UpgradeTarget;
+  readonly earlier: EarlierUpgrade | null;
+}
+
+/** Another software's upgrade whose migration committed before it was recorded: recorded before this open's own. */
+export interface EarlierUpgrade extends UpgradeTarget {
+  readonly upgrade: DataVersionUpgrade;
+}
+
+function unreadableNote(): DataVersionError {
+  return new DataVersionError('UPGRADE_NOTE_UNREADABLE', '上次数据升级留下的记录无法读取：AI7 没有打开这份数据，因为那次升级前的备份已说不清是哪一个。升级前的数据仍在备份位置。');
+}
+
+function readTarget(value: unknown): UpgradeTarget {
+  if (!isRecord(value) || Object.keys(value).sort().join(',') !== 'dataVersion,schemaRevision,softwareVersion' ||
+    typeof value.softwareVersion !== 'string' || !SOFTWARE_VERSION.test(value.softwareVersion) ||
+    typeof value.dataVersion !== 'number' || !Number.isSafeInteger(value.dataVersion) || value.dataVersion < 1 ||
+    typeof value.schemaRevision !== 'number' || !Number.isSafeInteger(value.schemaRevision) || value.schemaRevision < 1) throw unreadableNote();
+  return { softwareVersion: value.softwareVersion, dataVersion: value.dataVersion, schemaRevision: value.schemaRevision };
+}
 
 /** Inside `store/`, which moves with the store it belongs to and which no database package carries. */
 function pendingPath(dataRoot: string): string {
   return join(dataRoot, 'store', 'upgrade-pending.json');
 }
 
-/** The upgrade an earlier open backed the data up for and did not record; `null` when none waits, or what waits is not AI7's. */
-async function readPendingUpgrade(dataRoot: string, dataVersion: number): Promise<DataVersionUpgrade | null> {
+/**
+ * What an earlier open noted and did not record: `null` only when there is no note at all. A note that does not read as AI7's,
+ * or is larger than any AI7 writes, is refused, never taken as none (Issue #433 review): its size is known before any of it is
+ * read.
+ */
+async function readPendingUpgrade(dataRoot: string): Promise<PendingUpgrade | null> {
   const path = pendingPath(dataRoot);
-  if (!existsSync(path)) return null;
+  let size: number;
+  try {
+    const found = await lstat(path);
+    if (!found.isFile()) throw unreadableNote();
+    size = found.size;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw unreadableNote();
+  }
+  if (size > MAX_NOTE_BYTES) throw unreadableNote();
   try {
     const stored: unknown = JSON.parse(await readFile(path, 'utf8'));
     if (!isRecord(stored) || Object.keys(stored).length !== 2 || typeof stored.json !== 'string' || typeof stored.sha256 !== 'string' ||
-      sha256Hex(stored.json) !== stored.sha256) return null;
+      sha256Hex(stored.json) !== stored.sha256) throw unreadableNote();
     const record = parseCanonicalJson(stored.json);
-    if (!isRecord(record) || Object.keys(record).length !== 2 || record.schema !== PENDING_SCHEMA) return null;
-    return readUpgrade(record.upgrade, dataVersion);
+    if (!isRecord(record) || record.schema !== PENDING_SCHEMA || Object.keys(record).length !== ('earlier' in record ? 4 : 3)) throw unreadableNote();
+    const target = readTarget(record.target);
+    const earlier = 'earlier' in record ? readEarlier(record.earlier) : null;
+    return { upgrade: readUpgrade(record.upgrade, target.dataVersion), target, earlier };
   } catch {
-    return null;
+    throw unreadableNote();
   }
 }
 
+function readEarlier(value: unknown): EarlierUpgrade {
+  if (!isRecord(value) || Object.keys(value).length !== 4) throw unreadableNote();
+  const { upgrade, ...target } = value;
+  const read = readTarget(target);
+  return { ...read, upgrade: readUpgrade(upgrade, read.dataVersion) };
+}
+
 /** The note an open writes once its backup is in place and before anything migrates the store: written whole or not at all. */
-export async function writePendingUpgrade(dataRoot: string, upgrade: DataVersionUpgrade): Promise<void> {
-  const record = canonicalRecord({ schema: PENDING_SCHEMA, upgrade });
+export async function writePendingUpgrade(
+  dataRoot: string,
+  upgrade: DataVersionUpgrade,
+  target: UpgradeTarget,
+  earlier: EarlierUpgrade | null = null,
+): Promise<void> {
+  const record = canonicalRecord({ schema: PENDING_SCHEMA, upgrade, target, ...(earlier === null ? {} : { earlier }) });
   await writeAtomic(pendingPath(dataRoot), JSON.stringify({ json: record.json, sha256: record.digest }));
 }
 
@@ -100,20 +162,32 @@ export interface UpgradeBackupOptions {
 
 /**
  * Before any migration of the store open on `db`: when this software must move it to a later Data Version, write the data as it
- * is into the backup location, note the upgrade beside the store, and answer it, for the store to record once it has opened.
- * `null` when none is due — a new store, or one already at this software's Data Version. Refused, and nothing migrated, when the
- * backup cannot be made or noted. An open stopped after an earlier one's migration answers that upgrade, backed up once.
+ * is into the backup location, note the upgrade beside the store, and answer it, for the store to record once it has opened —
+ * `upgrade` is `null` when none is due, a new store or one already at this software's Data Version. `earlier` is another
+ * software's upgrade whose migration committed before it was recorded, for the store to record first. Refused, and nothing
+ * migrated, when the backup cannot be made or noted, or an earlier note cannot be read.
  */
-export async function backUpBeforeUpgrade(db: DatabaseSync, dataRoot: string, options: UpgradeBackupOptions): Promise<DataVersionUpgrade | null> {
+export async function backUpBeforeUpgrade(
+  db: DatabaseSync,
+  dataRoot: string,
+  options: UpgradeBackupOptions,
+): Promise<{ upgrade: DataVersionUpgrade | null; earlier: EarlierUpgrade | null }> {
   const revision = Number((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
   const toDataVersion = dataVersionAt(options.terminalRevision, options.classes);
-  // An earlier open backed the data up and began its migration, then stopped before the store recorded the upgrade: the upgrade
-  // is that open's, with the backup it made (Issue #433 review). One that stopped before migrating anything backs up again.
-  const pending = await readPendingUpgrade(dataRoot, toDataVersion);
-  if (pending !== null && revision > pending.fromSchemaRevision) return pending;
-  if (revision === 0) return null;
+  // An earlier open backed the data up and began its migration, then stopped before the store recorded the upgrade (Issue #433
+  // review). This software's own is answered as it was noted, with the backup it made; another software's is recorded first,
+  // and this open still makes the backup its own upgrade needs. One that stopped before migrating anything backs up again.
+  const pending = await readPendingUpgrade(dataRoot);
+  let earlier: EarlierUpgrade | null = null;
+  if (pending !== null && revision > pending.upgrade.fromSchemaRevision) {
+    if (pending.target.schemaRevision === options.terminalRevision && pending.target.dataVersion === toDataVersion) {
+      return { upgrade: pending.upgrade, earlier: pending.earlier };
+    }
+    earlier = { ...pending.target, schemaRevision: revision, upgrade: pending.upgrade };
+  }
+  if (revision === 0) return { upgrade: null, earlier };
   const fromDataVersion = dataVersionAt(revision, options.classes);
-  if (fromDataVersion >= toDataVersion) return null;
+  if (fromDataVersion >= toDataVersion) return { upgrade: null, earlier };
   const fromSoftwareVersion = lastSoftwareVersion(db);
   const fileName = preUpgradeBackupFileName(options.now);
   let partial: string | null = null;
@@ -144,9 +218,10 @@ export async function backUpBeforeUpgrade(db: DatabaseSync, dataRoot: string, op
       changes: breakingChanges(revision, options.terminalRevision, options.classes),
       backup: { fileName, byteLength: written.bytes, sha256: written.sha256 },
     };
-    // Noted before anything migrates the store: from here on, an open that stops still records this upgrade the next time.
-    await writePendingUpgrade(dataRoot, upgrade);
-    return upgrade;
+    // Noted before anything migrates the store, with what it is for and any earlier upgrade it carries on: from here on, an open
+    // that stops still records them the next time.
+    await writePendingUpgrade(dataRoot, upgrade, { softwareVersion: options.softwareVersion, dataVersion: toDataVersion, schemaRevision: options.terminalRevision }, earlier);
+    return { upgrade, earlier };
   } catch (error) {
     if (error instanceof DataVersionError) throw error;
     throw new DataVersionError('UPGRADE_BACKUP_FAILED', '升级前备份没有完成：AI7 没有升级这份数据，也没有打开它。请确认备份位置可以写入、空间足够，再启动 AI7。');

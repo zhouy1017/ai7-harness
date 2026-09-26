@@ -125,7 +125,7 @@ const INVALID = '数据版本记录已损坏。';
  * A released or development software version: `0.1.0`, `0.1.0-beta.2`, or either with build metadata, `0.1.0+build.7` —
  * which SemVer allows and a release may carry (Issue #433 review).
  */
-const SOFTWARE_VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:-[0-9A-Za-z.-]{1,32})?(?:\+[0-9A-Za-z.-]{1,32})?$/u;
+export const SOFTWARE_VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:-[0-9A-Za-z.-]{1,32})?(?:\+[0-9A-Za-z.-]{1,32})?$/u;
 
 /**
  * How two software versions order by SemVer precedence (Issue #433 review): by major, minor and patch, a pre-release below
