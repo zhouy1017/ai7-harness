@@ -143,6 +143,13 @@ const OTHER_TYPES = Object.freeze(['promotion-article', 'review-article', 'launc
 const PACKAGE_EXPORT_STATEMENT = '导出只把这些文件写到你选择的文件夹：每个文件都有自己的导出记录，交付包本身不变；AI7 不会发送任何文件。';
 const PACKAGE_EXPORT_FOLDER_UNCHOSEN = '还没有选择文件夹。请选择一个空文件夹，或在系统的对话框里新建一个：已有同名文件的文件夹不能使用，导出不会替换任何文件。';
 const PACKAGE_MANIFEST_FILE = '交付包清单.md';
+// Issue #426 (S68a): 维护事项 — the six classifications in order, the words a case is recorded with, and MAINT-008's sentence.
+const MAINTENANCE_CLASSIFICATIONS = Object.freeze(['correction:更正', 'errata:勘误', 'supersession:替代', 'withdrawal:撤回', 'reissue:再版', 'archive:归档']);
+const MAINTENANCE_REASON = '读者来信指出第三段的年份有误';
+const MAINTENANCE_ERRATA = '第三段所记年份应为另一年，其余不变。';
+const MAINTENANCE_OUTCOME = '勘误已写入 AI7 的记录';
+const MAINTENANCE_WITHDRAWAL = '这一版在 AI7 中不再用于发稿';
+const MAINTENANCE_INTERNAL_ONLY = '仅在 AI7 内记录；不代表已撤稿、下架、召回、通知接收方或删除外部文件';
 const DELIVERY_RECIPIENTS = '["publicity:false:宣传部","editorial:false:编辑部","external-media:false:外部媒体","other:false:其他","custom:false:自行输入"]';
 const EXPORT_MEMBERS_ONLY = `JSON.stringify(Object.keys(window.ai7).filter((key) => /export|publish|send/i.test(key)).sort()) === ${JSON.stringify(JSON.stringify(EXPORT_MEMBERS))}`;
 
@@ -1979,9 +1986,108 @@ async function main() {
     await waitFor(renderer, `window.__j07.packageExport() === null && document.activeElement === window.__j07.packageVersions()[0].querySelector('[data-package-action="export"]')`, 'package-export-closed');
     await assertNoForbiddenWords(renderer, 'package-export-without-forbidden-words');
 
+    at('maintenance-cases');
+    // 维护事项 (Issue #426, S68a; MAINT-001 to 011). On the first designation `记录维护事项…` opens a draft bound to it: the six
+    // classifications unselected, each with what it does, and `记录维护事项` waiting with its reason in words. A 勘误 is
+    // recorded, its 勘误 written as a version, and its conclusion recorded, each one more line on the case's timeline. Then
+    // 撤回 of the current designation says it is recorded inside AI7 only, and 图书交付包 no longer holds it.
+    const designationItem = (ordinal) => `[data-screen="book-deliverables"] ol.publication-versions > li[data-publication-ordinal="${ordinal}"]`;
+    const maintenanceAction = (ordinal, action) => `${designationItem(ordinal)} [data-maintenance-action="${action}"]`;
+    await clickSelector(renderer, maintenanceAction(1, 'record'), 'maintenance-draft-open');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${designationItem(1)} form.maintenance-draft`)}) !== null && document.activeElement?.matches(${JSON.stringify(`${designationItem(1)} form.maintenance-draft input[type="radio"]`)})`, 'maintenance-draft');
+    await assertRenderer(renderer, `(() => {
+      const form = document.querySelector(${JSON.stringify(`${designationItem(1)} form.maintenance-draft`)});
+      const radios = Array.from(form.querySelectorAll('input[type="radio"]'));
+      const options = radios.map((radio) => radio.value + ':' + radio.closest('label')?.querySelector('strong')?.textContent);
+      const confirm = form.querySelector('[data-maintenance-action="confirmRecord"]');
+      const reason = document.getElementById(confirm?.getAttribute('aria-describedby') ?? '');
+      return form.querySelector('.maintenance-draft-target')?.textContent === ${JSON.stringify(`维护事项绑定到：第 1 次 · 「${SECOND.label}」 · r2 · ${PRINT.scope}`)} &&
+        JSON.stringify(options) === ${JSON.stringify(JSON.stringify(MAINTENANCE_CLASSIFICATIONS))} && radios.every((radio) => !radio.checked) &&
+        confirm instanceof HTMLButtonElement && confirm.disabled && reason?.textContent === '先选择维护类型。' &&
+        form.querySelector('.maintenance-internal-only') === null;
+    })()`, 'maintenance-draft-nothing-preselected');
+    await assertRenderer(renderer, `(() => { const radio = document.querySelector(${JSON.stringify(`${designationItem(1)} form.maintenance-draft input[type="radio"][value="errata"]`)}); radio.click(); return radio.checked; })()`, 'maintenance-choose-errata');
+    await waitFor(renderer, `document.getElementById(document.querySelector(${JSON.stringify(maintenanceAction(1, 'confirmRecord'))})?.getAttribute('aria-describedby') ?? '')?.textContent === '请写明原因（1–500 个字）。'`, 'maintenance-draft-needs-a-reason');
+    await fill(renderer, `${designationItem(1)} form.maintenance-draft textarea[data-maintenance-field="reason"]`, MAINTENANCE_REASON, 'maintenance-reason');
+    await clickSelector(renderer, maintenanceAction(1, 'confirmRecord'), 'maintenance-record');
+    await waitFor(renderer, `window.__j07.status() === '维护事项已记录' && document.querySelector(${JSON.stringify(`${designationItem(1)} ol.maintenance-cases > li section.maintenance-case[data-maintenance-status="unresolved"]`)}) !== null`, 'maintenance-recorded', 60_000);
+    await assertRenderer(renderer, `(() => {
+      const item = document.querySelector(${JSON.stringify(`${designationItem(1)} ol.maintenance-cases > li`)});
+      const lines = Array.from(item.querySelectorAll('ol.maintenance-timeline > li'));
+      return document.querySelector(${JSON.stringify(`${designationItem(1)} form.maintenance-draft`)}) === null &&
+        item.querySelector('.maintenance-case-line')?.textContent === '第 1 项 · 勘误 · 未解决 · 下一步：编写勘误' &&
+        item.querySelector('.maintenance-case-heading')?.textContent === '第 1 项维护事项 · 勘误' &&
+        item.querySelector('.maintenance-target')?.textContent === ${JSON.stringify(`绑定的发稿版本：第 1 次 · 「${SECOND.label}」 · r2 · ${PRINT.scope}`)} &&
+        item.querySelector('.maintenance-status-line')?.textContent === '状态：未解决 · 下一步：编写勘误' && item.querySelector('.maintenance-internal-only') === null &&
+        lines.length === 1 && (lines[0].querySelector('.maintenance-revision-line')?.textContent ?? '').startsWith('第 1 条 · 记录维护事项 · 未解决 · ') &&
+        lines[0].querySelector('.maintenance-revision-reason')?.textContent === ${JSON.stringify(`原因：${MAINTENANCE_REASON}`)} &&
+        document.activeElement === lines[0].querySelector('.maintenance-revision-line') &&
+        JSON.stringify(Array.from(item.querySelectorAll('.maintenance-steps > .button-row button'), (button) => button.dataset.maintenanceAction)) === '["writeErrata","conclude"]';
+    })()`, 'maintenance-case-in-place');
+    // 编写勘误…: the 勘误 is its own version, linked by the case's second line.
+    await clickSelector(renderer, maintenanceAction(1, 'writeErrata'), 'maintenance-errata-open');
+    await fill(renderer, `${designationItem(1)} form.maintenance-step[data-maintenance-step="errata"] textarea`, MAINTENANCE_ERRATA, 'maintenance-errata-text');
+    await clickSelector(renderer, maintenanceAction(1, 'saveErrata'), 'maintenance-errata-save');
+    await waitFor(renderer, `window.__j07.status() === '维护事项已记录' && document.querySelectorAll(${JSON.stringify(`${designationItem(1)} ol.maintenance-timeline > li`)}).length === 2`, 'maintenance-errata-saved', 60_000);
+    await assertRenderer(renderer, `(() => {
+      const item = document.querySelector(${JSON.stringify(`${designationItem(1)} ol.maintenance-cases > li`)});
+      const second = item.querySelector('ol.maintenance-timeline > li[data-revision="2"]');
+      return item.querySelector('.maintenance-errata-heading')?.textContent === '勘误 · 第 1 版' &&
+        item.querySelector('.maintenance-errata-body')?.textContent === ${JSON.stringify(MAINTENANCE_ERRATA)} &&
+        (second?.querySelector('.maintenance-revision-line')?.textContent ?? '').startsWith('第 2 条 · 保存勘误版本 · 未解决 · ') &&
+        second.querySelector('.maintenance-revision-link')?.textContent === '查看勘误第 1 版' &&
+        item.querySelector('.maintenance-status-line')?.textContent === '状态：未解决 · 下一步：记录维护事项结论';
+    })()`, 'maintenance-errata-version');
+    // 记录维护事项结论…: 已完成 is an internal record, and the case takes no more steps.
+    await clickSelector(renderer, maintenanceAction(1, 'writeErrata'), 'maintenance-errata-second-open');
+    await fill(renderer, `${designationItem(1)} form.maintenance-step[data-maintenance-step="errata"] textarea`, `${MAINTENANCE_ERRATA}（第二版）`, 'maintenance-errata-second-text');
+    await clickSelector(renderer, maintenanceAction(1, 'saveErrata'), 'maintenance-errata-second-save');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-errata-heading`)})?.textContent === '勘误 · 第 2 版'`, 'maintenance-errata-second-saved', 60_000);
+    await clickSelector(renderer, `${designationItem(1)} .maintenance-timeline > li[data-revision="2"] button.maintenance-revision-link`, 'maintenance-errata-history-open');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-inspected-errata-body`)})?.textContent === ${JSON.stringify(MAINTENANCE_ERRATA)}`, 'maintenance-errata-history-exact');
+    await assertRenderer(renderer, `document.activeElement === document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-case-heading`)})`, 'maintenance-history-reader-focus');
+    await clickSelector(renderer, `${designationItem(1)} [data-maintenance-inspect="errataVersionId"]`, 'maintenance-errata-history-close');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-inspected-errata`)}) === null`, 'maintenance-errata-history-closed');
+    await assertRenderer(renderer, `document.activeElement === document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-case-heading`)})`, 'maintenance-history-close-focus');
+    await clickSelector(renderer, maintenanceAction(1, 'conclude'), 'maintenance-conclude-open');
+    await assertRenderer(renderer, `(() => { const radio = document.querySelector(${JSON.stringify(`${designationItem(1)} form.maintenance-step[data-maintenance-step="conclude"] input[type="radio"][value="complete"]`)}); radio.click(); return radio.checked; })()`, 'maintenance-conclude-complete');
+    await fill(renderer, `${designationItem(1)} form.maintenance-step[data-maintenance-step="conclude"] textarea`, MAINTENANCE_OUTCOME, 'maintenance-outcome');
+    await clickSelector(renderer, maintenanceAction(1, 'confirmConclude'), 'maintenance-conclude');
+    await waitFor(renderer, `window.__j07.status() === '维护事项结论已记录' && document.querySelector(${JSON.stringify(`${designationItem(1)} section.maintenance-case[data-maintenance-status="complete"]`)}) !== null`, 'maintenance-concluded', 60_000);
+    await assertRenderer(renderer, `(() => {
+      const item = document.querySelector(${JSON.stringify(`${designationItem(1)} ol.maintenance-cases > li`)});
+      const third = item.querySelector('ol.maintenance-timeline > li[data-revision="4"]');
+      return item.querySelector('.maintenance-case-line')?.textContent === '第 1 项 · 勘误 · 已完成（AI7 内记录）' &&
+        item.querySelector('.maintenance-status-line')?.textContent === '状态：已完成（AI7 内记录）' && item.querySelector('.maintenance-steps') === null &&
+        (third?.querySelector('.maintenance-revision-line')?.textContent ?? '').startsWith('第 4 条 · 记录维护事项结论 · 已完成（AI7 内记录） · ') &&
+        third.querySelector('.maintenance-revision-reason')?.textContent === ${JSON.stringify(`结论：${MAINTENANCE_OUTCOME}`)};
+    })()`, 'maintenance-case-complete');
+    // 撤回 of the current designation: MAINT-008's sentence in the draft, on the case and on the designation.
+    await clickSelector(renderer, maintenanceAction(2, 'record'), 'maintenance-withdrawal-open');
+    await assertRenderer(renderer, `(() => { const radio = document.querySelector(${JSON.stringify(`${designationItem(2)} form.maintenance-draft input[type="radio"][value="withdrawal"]`)}); radio.click(); return radio.checked; })()`, 'maintenance-choose-withdrawal');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${designationItem(2)} form.maintenance-draft .maintenance-internal-only`)})?.textContent === ${JSON.stringify(MAINTENANCE_INTERNAL_ONLY)}`, 'maintenance-withdrawal-says-internal');
+    await fill(renderer, `${designationItem(2)} form.maintenance-draft textarea[data-maintenance-field="reason"]`, MAINTENANCE_WITHDRAWAL, 'maintenance-withdrawal-reason');
+    await clickSelector(renderer, maintenanceAction(2, 'confirmRecord'), 'maintenance-withdrawal-record');
+    await waitFor(renderer, `window.__j07.status() === '维护事项已记录' && document.querySelector(${JSON.stringify(designationItem(2))})?.dataset.publicationWithdrawn === 'true' && window.__j07.condition('publication')?.dataset.conditionMet === 'false'`, 'maintenance-withdrawn', 60_000);
+    await assertRenderer(renderer, `(() => {
+      const item = document.querySelector(${JSON.stringify(designationItem(2))});
+      return item.querySelector('section.maintenance > .maintenance-withdrawn')?.textContent === ${JSON.stringify(`已在 AI7 内撤回：${MAINTENANCE_INTERNAL_ONLY}`)} &&
+        item.querySelector('.maintenance-case-line')?.textContent === '第 2 项 · 撤回 · 已完成（AI7 内记录）' &&
+        item.querySelector('section.maintenance-case .maintenance-internal-only')?.textContent === ${JSON.stringify(MAINTENANCE_INTERNAL_ONLY)} &&
+        window.__j07.condition('publication').querySelector('.package-condition-detail')?.textContent === ${JSON.stringify(`发稿版本「${FIRST.label}」 · r1 · 已在 AI7 内撤回`)} &&
+        window.__j07.pkg().dataset.packageReady === 'false' &&
+        document.querySelector(${JSON.stringify(`${designationItem(1)} section.maintenance`)})?.dataset.maintenanceWithdrawn === 'false';
+    })()`, 'maintenance-withdrawal-in-force');
+    // The service agrees: two cases, each on its own designation, and nothing else of either moved.
+    const maintained = await renderer.evaluate(`window.ai7.inspectDeliverables().then((answer) => answer.publication.designations.map((designation) => [designation.ordinal, designation.maintenance.total, designation.maintenance.withdrawn, designation.maintenance.cases.map((entry) => entry.classification + ':' + entry.status + ':' + entry.revisions)]))`);
+    requireJourney(JSON.stringify(maintained) === JSON.stringify([[2, 1, true, ['withdrawal:complete:1']], [1, 1, false, ['errata:complete:4']]]), 'maintenance-service-agrees', maintained);
+    await assertRenderer(renderer, `(() => { const text = (document.querySelector('[data-screen="book-deliverables"]')?.textContent ?? '').replaceAll(${JSON.stringify(MAINTENANCE_INTERNAL_ONLY)}, ''); return !/已更正发布|已撤稿|已下架|已召回|已再版/.test(text); })()`, 'maintenance-only-internal-words');
+    await assertNoForbiddenWords(renderer, 'maintenance-without-forbidden-words');
+
     at('documents-restart');
-    // A restart moves nothing: 交付物, 交付 · 生产文档 and 图书交付包 answer byte for byte as before, the card still names
-    // its second delivery, the package lists its two versions and v2's export, and the 新闻稿 opens at 版本 3 with both its edits.
+    // A restart moves nothing: 交付物, 交付 · 生产文档 and 图书交付包 answer byte for byte as before — 维护事项 included — the
+    // card still names its second delivery, the package lists its two versions and v2's export, and the 新闻稿 opens at 版本 3
+    // with both its edits.
     const readBoth = `Promise.all([window.ai7.inspectDeliverables(), window.ai7.inspectProductionDocuments(), window.ai7.inspectBookDeliveryPackage()]).then((answers) => JSON.stringify(answers))`;
     const documentsBefore = await renderer.evaluate(readBoth);
     await close();

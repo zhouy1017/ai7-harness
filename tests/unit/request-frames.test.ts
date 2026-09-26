@@ -436,6 +436,62 @@ describe('decodeRequest accepts well-formed frames', () => {
     }
   });
 
+  it('accepts 维护事项: a case read, recorded on a designation, its steps and its 勘误 (Issue #426, S68a)', () => {
+    const bookId = randomUUID();
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID() } },
+      { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID(), beforeRevision: 61, afterPublicationOrdinal: 30, errataVersionId: randomUUID() } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 22 } },
+      { op: 'recordMaintenanceCase', input: { bookId, publicationVersionId: randomUUID(), classification: 'errata', reason: '读者来信指出有误', evidence: null } },
+      { op: 'recordMaintenanceCase', input: { bookId, publicationVersionId: randomUUID(), classification: 'withdrawal', reason: '𠀀'.repeat(500), evidence: '质检单' } },
+      { op: 'appendMaintenanceCaseRevision', input: { bookId, caseId: randomUUID(), expectedRevision: 1, step: { kind: 'link-proposal', markId: randomUUID() } } },
+      { op: 'appendMaintenanceCaseRevision', input: { bookId, caseId: randomUUID(), expectedRevision: 2, step: { kind: 'link-publication', publicationVersionId: randomUUID() } } },
+      { op: 'appendMaintenanceCaseRevision', input: { bookId, caseId: randomUUID(), expectedRevision: 3, step: { kind: 'conclude', status: 'complete', outcome: '已记录' } } },
+      { op: 'saveMaintenanceErrata', input: { bookId, caseId: randomUUID(), expectedRevision: 1, body: '第三段「甲」应为「乙」。' } },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+  });
+
+  it('rejects a 维护事项 frame whose classification, words, revision, step or key set is wrong (Issue #426, S68a)', () => {
+    const id = randomUUID();
+    const bookId = randomUUID();
+    const record = { bookId, publicationVersionId: randomUUID(), classification: 'errata', reason: '有误', evidence: null };
+    const append = { bookId, caseId: randomUUID(), expectedRevision: 1, step: { kind: 'conclude', status: 'complete', outcome: '已记录' } };
+    const refused: ReadonlyArray<{ op: string; input: unknown }> = [
+      { op: 'inspectMaintenanceCase', input: { bookId } },
+      { op: 'inspectMaintenanceCase', input: { bookId, caseId: 'first' } },
+      ...[0, -1, 1.5, '2'].map((beforeRevision) => ({ op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID(), beforeRevision } })),
+      { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID(), afterPublicationOrdinal: -1 } },
+      { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID(), errataVersionId: 'first' } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID() } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 0 } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 2.5 } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: '22' } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: 'first', beforeOrdinal: 22 } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 22, limit: 100 } },
+      { op: 'recordMaintenanceCase', input: { ...record, classification: 'recall' } },
+      { op: 'recordMaintenanceCase', input: { ...record, reason: '   ' } },
+      { op: 'recordMaintenanceCase', input: { ...record, reason: '由'.repeat(501) } },
+      { op: 'recordMaintenanceCase', input: { ...record, evidence: '据'.repeat(501) } },
+      { op: 'recordMaintenanceCase', input: { bookId, publicationVersionId: record.publicationVersionId, classification: 'errata', reason: '有误' } },
+      { op: 'recordMaintenanceCase', input: { ...record, status: 'complete' } },
+      { op: 'appendMaintenanceCaseRevision', input: { ...append, expectedRevision: 0 } },
+      { op: 'appendMaintenanceCaseRevision', input: { ...append, step: { kind: 'conclude', status: 'waiting', outcome: '已记录' } } },
+      { op: 'appendMaintenanceCaseRevision', input: { ...append, step: { kind: 'conclude', status: 'complete', outcome: '' } } },
+      { op: 'appendMaintenanceCaseRevision', input: { ...append, step: { kind: 'link-proposal', markId: 'mark' } } },
+      { op: 'appendMaintenanceCaseRevision', input: { ...append, step: { kind: 'link-publication', publicationVersionId: randomUUID(), markId: randomUUID() } } },
+      { op: 'appendMaintenanceCaseRevision', input: { ...append, step: { kind: 'recorded' } } },
+      { op: 'saveMaintenanceErrata', input: { bookId, caseId: randomUUID(), expectedRevision: 1, body: '误'.repeat(4001) } },
+      { op: 'saveMaintenanceErrata', input: { bookId, caseId: randomUUID(), expectedRevision: 1 } },
+    ];
+    for (const { op, input } of refused) {
+      expect(rejectionFor(frameOf({ id, op, input })).requestId).toBe(id);
+    }
+  });
+
   it('rejects a 图书交付包 export whose version, switches, digest, folder or key set is wrong (Issue #416, S67b)', () => {
     const id = randomUUID();
     const bookId = randomUUID();

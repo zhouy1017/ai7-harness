@@ -35,6 +35,14 @@ import type {
   BookDeliveryPackageResultProjection,
   PrepareBookDeliveryPackageInput,
   ApproveBookDeliveryPackageExportInput,
+  AppendMaintenanceCaseRevisionInput,
+  InspectMaintenanceCaseInput,
+  ListMaintenanceCasesInput,
+  MaintenanceCasePageProjection,
+  MaintenanceCaseProjection,
+  MaintenanceCaseResultProjection,
+  RecordMaintenanceCaseInput,
+  SaveMaintenanceErrataInput,
   BookDeliveryPackageExportProjection,
   BookDeliveryPackageExportResultProjection,
   BookDeliveryPackageExportReviewProjection,
@@ -266,6 +274,7 @@ import { initializeClarificationSchema } from './analysis/clarifications.js';
 import { initializeReimportGroupSchema } from './reimport-group-ledger.js';
 import { initializeProductionDocumentDeliverySchema, initializeProductionDocumentSchema } from './production-document-ledger.js';
 import { BookDeliveryPackageError, BookDeliveryPackages, initializeBookDeliveryPackageSchema } from './book-delivery-packages.js';
+import { MaintenanceCaseError, MaintenanceCases, initializeMaintenanceCaseSchema } from './maintenance-cases.js';
 import {
   ProductionDocumentOriginError,
   initializeProductionDocumentOriginSchema,
@@ -360,6 +369,7 @@ import {
   PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION,
   BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
   PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
+  MAINTENANCE_CASE_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1578,7 +1588,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
       currentVersion === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
       currentVersion === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
-      currentVersion === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
+      currentVersion === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
+      currentVersion === MAINTENANCE_CASE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1616,7 +1627,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
       currentVersion === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
       currentVersion === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
-      currentVersion === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION
+      currentVersion === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
+      currentVersion === MAINTENANCE_CASE_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1968,7 +1980,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
+      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
+      version === MAINTENANCE_CASE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1995,7 +2008,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION) return;
+      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
+      version === MAINTENANCE_CASE_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2114,7 +2128,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
+      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
+      version === MAINTENANCE_CASE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2140,7 +2155,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION) return;
+      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
+      version === MAINTENANCE_CASE_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2433,7 +2449,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== MAINTENANCE_CASE_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2462,6 +2478,7 @@ function validateModelServiceSchema(
       version >= PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION,
       version >= BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
       version >= PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
+      version >= MAINTENANCE_CASE_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2515,7 +2532,8 @@ function initializeModelServiceSchema(
       version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
+      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
+      version === MAINTENANCE_CASE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2541,7 +2559,8 @@ function initializeModelServiceSchema(
       version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION) {
+      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
+      version === MAINTENANCE_CASE_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3351,6 +3370,7 @@ export class EditorialStore {
   readonly #manuscriptApply: ManuscriptApplyStore;
   readonly #reviewRuns: ReviewRunStore;
   readonly #publicationVersions: PublicationVersionStore;
+  readonly #maintenanceCases: MaintenanceCases;
   readonly #productionDocuments: ProductionDocuments;
   /** Each Production Document's Deliverable Workflow (Issue #415, S66c). */
   readonly #documentWorkflow: ProductionDocumentWorkflow;
@@ -3421,7 +3441,12 @@ export class EditorialStore {
     this.#documentWorkflow = new ProductionDocumentWorkflow(authority, workflowProfilePin(workflowProfile));
     this.#productionDocuments = new ProductionDocuments(authority, (bookId, revisionId, from, until) =>
       this.#manuscriptExport.latestExport(bookId, 'production-document-version', revisionId, from, until), this.#documentWorkflow);
-    this.#publicationVersions = new PublicationVersionStore(authority, (bookId) => this.#manuscriptExport.records(bookId));
+    // Each designation carries its 维护事项 (Issue #426, S68a), and a 撤回 one is no longer used for 发稿.
+    this.#maintenanceCases = new MaintenanceCases(authority);
+    this.#publicationVersions = new PublicationVersionStore(authority, (bookId) => this.#manuscriptExport.records(bookId), {
+      summaries: (bookId, publicationVersionId) => this.#maintenanceCases.summaries(bookId, publicationVersionId),
+      withdrawn: (publicationVersionId) => this.#maintenanceCases.withdrawn(publicationVersionId),
+    });
     // 图书交付包 (Issue #416) reads the Book's current 发稿版本, each house type's Delivery Records and its Review Runs.
     this.#bookDeliveryPackages = new BookDeliveryPackages(authority, {
       publication: (bookId) => {
@@ -3439,6 +3464,7 @@ export class EditorialStore {
           scope: projection.scope,
           basis: projection.basis,
           changedSince: current.changedSince,
+          withdrawn: current.withdrawn,
         };
       },
       documents: (bookId) => this.#productionDocuments.packageReadings(bookId),
@@ -3536,8 +3562,10 @@ export class EditorialStore {
       // S67b) each package export and the files it links.
       initializeProductionDocumentWorkflowSchema(authority, workflowProfilePin(workflowProfile));
       initializeBookDeliveryPackageExportSchema(authority);
-      // Revision 42 (Issue #547) adds how each document's origin material was read.
+      // Revision 42 (Issue #547) adds how each document's origin material was read, and revision 43 (Issue #426, S68a) the
+      // 维护事项 of each 发稿版本.
       initializeProductionDocumentOriginSchema(authority);
+      initializeMaintenanceCaseSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -9732,6 +9760,33 @@ export class EditorialStore {
     return this.#publicationCall(() => this.#publicationVersions.designate(input));
   }
 
+  // ---- ⑥ 维护事项 (Issue #426, plan slice S68a; V2-UX-MAINT-001 to 011) -------------------------------------
+
+  /** One 维护事项 of the Book in its workspace: its target, its timeline and what it offers next. */
+  inspectMaintenanceCase(input: InspectMaintenanceCaseInput): MaintenanceCaseProjection {
+    return this.#publicationCall(() => this.#maintenanceCases.inspect(input));
+  }
+
+  /** `更早的维护事项…`: a page of one designation's older cases, before the oldest one shown. */
+  listMaintenanceCases(input: ListMaintenanceCasesInput): MaintenanceCasePageProjection {
+    return this.#publicationCall(() => this.#maintenanceCases.page(input));
+  }
+
+  /** `记录维护事项`: one case and its first revision, bound to one exact designation, in one transaction. */
+  recordMaintenanceCase(input: RecordMaintenanceCaseInput): MaintenanceCaseResultProjection {
+    return this.#publicationCall(() => this.#transaction(this.#authority, () => this.#maintenanceCases.record(input)));
+  }
+
+  /** 关联修改建议, 关联发稿版本 or 记录维护事项结论: the case's next revision, against the one the editor read. */
+  appendMaintenanceCaseRevision(input: AppendMaintenanceCaseRevisionInput): MaintenanceCaseResultProjection {
+    return this.#publicationCall(() => this.#transaction(this.#authority, () => this.#maintenanceCases.append(input)));
+  }
+
+  /** `保存勘误版本`: the 勘误's next version and the revision that links it, in one transaction. */
+  saveMaintenanceErrata(input: SaveMaintenanceErrataInput): MaintenanceCaseResultProjection {
+    return this.#publicationCall(() => this.#transaction(this.#authority, () => this.#maintenanceCases.saveErrata(input)));
+  }
+
   // ---- ⑥ 交付物 · 生产文档 (Issue #415, plan slice S66) -----------------------------------------------
 
   /**
@@ -13424,7 +13479,9 @@ export class EditorialStore {
     try {
       return operation();
     } catch (error) {
-      if (error instanceof PublicationVersionError || error instanceof AnalysisError) throw new StoreError(error.code, error.message);
+      if (error instanceof PublicationVersionError || error instanceof AnalysisError || error instanceof MaintenanceCaseError) {
+        throw new StoreError(error.code, error.message);
+      }
       if (error instanceof AggregateError) {
         this.#poisoned = true;
         throw new StoreFatalError(error);
