@@ -399,6 +399,12 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'renderer-ready-flag',
     'renderer-ready-landing',
     'import-stage',
+    // Where staging stood when its bound passed (#621).
+    'import-stage-reading',
+    'import-stage-parsing',
+    'import-stage-recording',
+    'import-stage-screen',
+    'import-stage-unreadable',
     'import-review',
     'import-commit',
     'import-editor-open',
