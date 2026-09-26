@@ -1124,9 +1124,15 @@ async function runAccessibilityJourney(renderer) {
   // without moving anything, so the one Tab below is the only thing that can move the pane. The document's
   // selection is cleared first: a selection the steps before left inside the text is restored on focus
   // without a reveal, and where they leave it varies from run to run, which left this step with nothing
-  // to prove (#493). With none, the focus that enters the text puts the caret at the window's start.
+  // to prove (#493). The editor keeps a selection of its own, too, and writes it back into the page when it
+  // takes focus whatever the page's selection says, so one left mid-text by the steps before could still
+  // meet the focus there (#619). The caret is therefore put at the window's start through the editor itself
+  // first: the text takes focus without scrolling, the page's caret is set at its start, and the editor
+  // reads it as it reads a caret the reader places. ProseMirror treats a DOM caret at the start within 200 ms
+  // of focus as a browser reset and restores its old selection, so wait past that pinned guard first. Blur,
+  // clear and refocus then prove that the editor itself restores the start before the Tab being tested.
   const windowProbe = `(() => { const pane = document.querySelector('.editor-window'); const editor = document.querySelector('[data-testid="manuscript-editor"]'); return { top: Math.round(pane.scrollTop), first: editor?.firstElementChild?.dataset.blockId ?? null, position: Number(document.querySelector('#manuscript-position')?.value), inText: document.activeElement === editor }; })()`;
-  const stopBeforeText = await renderer.evaluate(`(async () => { const pane = document.querySelector('.editor-window'); const editor = document.querySelector('[data-testid="manuscript-editor"]'); const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); document.getSelection().removeAllRanges(); await frames(); pane.scrollTop = Math.floor((pane.scrollHeight - pane.clientHeight) / 2); await frames(); const stops = Array.from(document.querySelectorAll('button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]')).filter((stop) => stop === editor || (!stop.disabled && stop.tabIndex >= 0 && stop.offsetParent !== null)); const index = stops.indexOf(editor); for (let before = index - 1; before >= 0; before -= 1) { stops[before].focus({ preventScroll: true }); if (document.activeElement === stops[before]) return true; } return { index, stops: stops.length }; })()`);
+  const stopBeforeText = await renderer.evaluate(`(async () => { const pane = document.querySelector('.editor-window'); const editor = document.querySelector('[data-testid="manuscript-editor"]'); const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); editor.focus({ preventScroll: true }); await new Promise((resolve) => setTimeout(resolve, 250)); const start = document.createRange(); start.setStart(document.createTreeWalker(editor, NodeFilter.SHOW_TEXT).nextNode() ?? editor, 0); start.collapse(true); document.getSelection().removeAllRanges(); document.getSelection().addRange(start); await frames(); editor.blur(); document.getSelection().removeAllRanges(); editor.focus({ preventScroll: true }); await frames(); const restored = document.getSelection(); const before = document.createRange(); before.setStart(editor, 0); if (!restored?.isCollapsed || !editor.contains(restored.anchorNode)) return { caretAtStart: false }; before.setEnd(restored.anchorNode, restored.anchorOffset); if (before.toString().length !== 0) return { caretAtStart: false }; document.getSelection().removeAllRanges(); await frames(); pane.scrollTop = Math.floor((pane.scrollHeight - pane.clientHeight) / 2); await frames(); const stops = Array.from(document.querySelectorAll('button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]')).filter((stop) => stop === editor || (!stop.disabled && stop.tabIndex >= 0 && stop.offsetParent !== null)); const index = stops.indexOf(editor); for (let before = index - 1; before >= 0; before -= 1) { stops[before].focus({ preventScroll: true }); if (document.activeElement === stops[before]) return true; } return { index, stops: stops.length }; })()`);
   const beforeFocus = await renderer.evaluate(windowProbe);
   if (stopBeforeText !== true || !(beforeFocus?.top > 0) || !(beforeFocus?.position > 0) || beforeFocus.inText !== false) {
     at('j14-keyboard-focus-keeps-window-precondition');
@@ -1169,7 +1175,10 @@ async function runAccessibilityJourney(renderer) {
     // location (#604), so it tells the facts apart: the window without focus, a caret the focus found away from the
     // text's start, or a pane that moved and came back; the plain name is left for none of them.
     if (entered?.hasFocus !== true) at('j14-keyboard-focus-keeps-window-no-reveal-window-unfocused');
-    else if (entered.caret !== 'at-start') at('j14-keyboard-focus-keeps-window-no-reveal-caret-not-at-start');
+    // Where the caret stood, told apart at the hosted marker too (#619): elsewhere in the text, outside it, or absent.
+    else if (entered.caret === 'elsewhere') at('j14-keyboard-focus-keeps-window-no-reveal-caret-elsewhere');
+    else if (entered.caret === 'outside') at('j14-keyboard-focus-keeps-window-no-reveal-caret-outside');
+    else if (entered.caret !== 'at-start') at('j14-keyboard-focus-keeps-window-no-reveal-caret-none');
     else if (Array.isArray(scrolled) && scrolled.some((top) => top !== beforeFocus.top)) at('j14-keyboard-focus-keeps-window-no-reveal-moved-back');
     else at('j14-keyboard-focus-keeps-window-no-reveal');
     requireJourney(false, 'keyboard-focus-reveal', { beforeFocus, afterFocus, entered, scrolled });
