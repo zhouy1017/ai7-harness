@@ -29,9 +29,17 @@ export function formatPriceFen(priceFen: number): string {
   return `¥${Math.floor(priceFen / 100)}.${String(priceFen % 100).padStart(2, '0')}`;
 }
 
+/**
+ * What the editor typed, as the ASCII a number is read from (Issue #430 review): a Chinese input method's full-width digits
+ * and point read as their own, and its 。 as the decimal point it was meant to be.
+ */
+function typedNumber(text: string): string {
+  return text.normalize('NFKC').replace(/。/gu, '.');
+}
+
 /** A price the editor typed, in yuan with at most two decimals, as 分; `null` when it is not one. */
 export function parsePriceYuan(text: string): number | null {
-  const match = /^\s*(\d{1,7})(?:\.(\d{1,2}))?\s*$/u.exec(text);
+  const match = /^\s*(\d{1,7})(?:\.(\d{1,2}))?\s*$/u.exec(typedNumber(text));
   if (match === null) return null;
   const fen = Number(match[1]) * 100 + Number((match[2] ?? '').padEnd(2, '0'));
   return fen >= 1 && fen <= MAX_PRICE_FEN ? fen : null;
@@ -39,7 +47,7 @@ export function parsePriceYuan(text: string): number | null {
 
 /** A first print run the editor typed, in copies; `null` when it is not one. */
 export function parseFirstPrint(text: string): number | null {
-  const match = /^\s*(\d{1,9})\s*$/u.exec(text);
+  const match = /^\s*(\d{1,9})\s*$/u.exec(typedNumber(text));
   if (match === null) return null;
   const copies = Number(match[1]);
   return copies >= 1 && copies <= MAX_FIRST_PRINT ? copies : null;

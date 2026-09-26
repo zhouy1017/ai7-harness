@@ -48,6 +48,45 @@ export const SERIES_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
+/** The most one page of a 书系 list weighs on the wire (Issue #63 review); an answer that holds two pages holds two of these. */
+export const SERIES_PAGE_BYTES = 96 * 1024;
+
+function wireBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+/**
+ * One page of a 书系 list (Issue #63 review): from the items given, in order, at most `count` and no more than `bytes` — but
+ * always the first while there is one, so paging reaches the end — and whether any were left for the next page.
+ */
+export function weighedPage<T>(items: ReadonlyArray<T>, count: number, bytes: number = SERIES_PAGE_BYTES): { page: T[]; more: boolean } {
+  const page: T[] = [];
+  let spent = 0;
+  for (const item of items) {
+    if (page.length >= count) break;
+    const weight = wireBytes(item) + 1;
+    if (page.length > 0 && spent + weight > bytes) break;
+    page.push(item);
+    spent += weight;
+  }
+  return { page, more: page.length < items.length };
+}
+
+/**
+ * The order a membership change record is listed in, newest first: by when it was recorded, then by Series, Book and the
+ * chain's own ordinal, so every record has one place and a page can start after any of them. An exact tie within one Series
+ * and Book falls to the chain's order; a clock stepped back can still list a pair's records out of it here — membership
+ * itself always follows the chain, never this listing.
+ */
+export function seriesHistoryOrder(
+  left: { readonly recordedAt: string; readonly seriesId: string; readonly bookId: string; readonly ordinal: number },
+  right: { readonly recordedAt: string; readonly seriesId: string; readonly bookId: string; readonly ordinal: number },
+): number {
+  const text = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+  return text(right.recordedAt, left.recordedAt) || text(right.seriesId, left.seriesId) || text(right.bookId, left.bookId) ||
+    right.ordinal - left.ordinal;
+}
+
 export const SERIES_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
   Object.keys(SERIES_SCHEMA_SQL).flatMap((table) => [
     [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
@@ -162,6 +201,8 @@ export interface SeriesImpactFacts {
   readonly learningDecided: number;
   /** Items of the Series' knowledge holding a revision taken from the Book (Issue #63, S28b). */
   readonly knowledgeFromBook?: number;
+  /** Open knowledge candidates citing the Book's manuscript (Issue #63 review): held back while it is not a member. */
+  readonly knowledgeCandidatesFromBook?: number;
 }
 
 /** The Book's Learning Material as the preview names it (SER-007): how many, and how many the editor has decided. */
@@ -186,6 +227,7 @@ export function seriesMembershipImpact(kind: SeriesMembershipChangeKind, facts: 
     ? `现在没有使用${series}范围、已授权或正在运行的任务。`
     : `${facts.seriesScopedRuns} 个使用${series}范围的任务已授权或正在运行。`;
   const knowledge = (facts.knowledgeFromBook ?? 0) === 0 ? [] : [`${series}的书系知识里有 ${facts.knowledgeFromBook} 个条目取自${book}的稿件；它们留在书系知识中不变。`];
+  const candidates = facts.knowledgeCandidatesFromBook ?? 0;
   const learning = facts.learningMaterials === 0
     ? `${book}还没有学习材料。`
     : `${book}有 ${facts.learningMaterials} 项学习材料，其中 ${facts.learningDecided} 项已决定学习准入。`;
@@ -194,14 +236,17 @@ export function seriesMembershipImpact(kind: SeriesMembershipChangeKind, facts: 
       impactGroup('future-tasks', [`以后新建任务时，可以明确选用${series}的范围，其中会包括${book}。`],
         [`不会把${book}自动加进任何任务，也不会因此授权运行、让其他图书读到它的原文或发给模型服务。`]),
       impactGroup('runs', [], [runs, '已授权或正在运行的任务按各自冻结的范围继续，计划不会被改动。']),
-      impactGroup('knowledge-learning', [], [...knowledge, learning, '书系知识、学习准入和学习记录各有自己的决定；加入书系不会纳入、启用或删除它们。']),
+      impactGroup('knowledge-learning', candidates === 0 ? [] : [`来自${book}稿件、尚未纳入的 ${candidates} 个书系知识候选项重新可以审阅纳入。`],
+        [...knowledge, learning, '书系知识、学习准入和学习记录各有自己的决定；加入书系不会纳入、启用或删除它们。']),
       impactGroup('history', ['追加一条书系成员变更记录，书系和图书两边都能查看。'], ['已完成的任务、结果、决定和以前的记录都保持原样。']),
     ];
   }
   return [
     impactGroup('future-tasks', [`以后新建任务时，${series}的范围不再包括${book}。`], [`${book}自己的任务照旧。`]),
     impactGroup('runs', [], [runs, '已经冻结的任务范围不会因移出而改变，任务也不会被取消。']),
-    impactGroup('knowledge-learning', [], [...knowledge, learning, '书系知识、学习准入和学习记录各有自己的决定；移出书系不会删除或改动它们。']),
+    // What it holds back says so (SER-003, SER-007; Issue #63 review): candidates citing the Book wait until it rejoins.
+    impactGroup('knowledge-learning', candidates === 0 ? [] : [`来自${book}稿件、尚未纳入的 ${candidates} 个书系知识候选项在它重新加入书系前不能纳入。`],
+      [...knowledge, learning, '书系知识、学习准入和学习记录各有自己的决定；移出书系不会删除或改动它们。']),
     impactGroup('history', ['追加一条书系成员变更记录，书系和图书两边都能查看。'], [`${book}和书系以前的记录都不会删除。`]),
   ];
 }
@@ -224,9 +269,12 @@ function isImpact(value: unknown): value is SeriesImpactGroupProjection[] {
     Array.isArray(group.unchanged) && group.unchanged.every((line) => typeof line === 'string'));
 }
 
-/** 书系一致性 for a Book already in a Series (Issue #63, S28a): the category still waits for Series Knowledge to reach review. */
+/**
+ * 书系一致性 for a Book already in a Series (Issue #63, S28a): the category itself has not yet taken Series Knowledge in, which
+ * no step of the editor's opens (Issue #63 review) — 纳入书系知识 does not.
+ */
 export function seriesConsistencyWaitingReason(titles: ReadonlyArray<string>): string {
-  return `这本书已在书系${titles.map((title) => `「${title}」`).join('、')}中；书系知识接入审阅后才能选。`;
+  return `这本书已在书系${titles.map((title) => `「${title}」`).join('、')}中；书系一致性审阅还没有接入书系知识，暂不能选。`;
 }
 
 /** Why 加入书系 cannot go on: the Book already is a member. */
@@ -249,6 +297,15 @@ export class SeriesLedger {
   /** Every Series, by name, each verified against its digest and its row. */
   list(): StoredSeries[] {
     return (this.#db.prepare('SELECT * FROM series ORDER BY title, series_id').all() as SqlRow[]).map((row) => this.#series(row));
+  }
+
+  /** Up to `limit` Series by name after the one named, each verified: a page of 书系, in the database's own order. */
+  listAfter(after: { readonly title: string; readonly seriesId: string } | null, limit: number): StoredSeries[] {
+    const rows = after === null
+      ? this.#db.prepare('SELECT * FROM series ORDER BY title, series_id LIMIT ?').all(limit)
+      : this.#db.prepare('SELECT * FROM series WHERE title > ? OR (title = ? AND series_id > ?) ORDER BY title, series_id LIMIT ?')
+        .all(after.title, after.title, after.seriesId, limit);
+    return (rows as SqlRow[]).map((row) => this.#series(row));
   }
 
   /** One Series, or `null` when there is none by that identity. */
@@ -300,10 +357,8 @@ export class SeriesLedger {
       const key = `${String(row.series_id)}/${String(row.book_id)}`;
       pairs.set(key, [...(pairs.get(key) ?? []), row]);
     }
-    // Newest first; within one Series and Book the chain's own order decides, whatever the clock said.
-    return [...pairs.values()].flatMap((pair) => this.#verified(pair))
-      .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt) ||
-        (left.seriesId === right.seriesId && left.bookId === right.bookId ? right.ordinal - left.ordinal : right.changeId.localeCompare(left.changeId)));
+    // Newest first, each record in one place (`seriesHistoryOrder`), so a page can start after any of them.
+    return [...pairs.values()].flatMap((pair) => this.#verified(pair)).sort(seriesHistoryOrder);
   }
 
   #verified(rows: SqlRow[]): StoredMembershipChange[] {
@@ -336,12 +391,15 @@ export class SeriesLedger {
     });
   }
 
-  /** The Books a Series holds now: each pair whose newest change is `加入书系`, with when it was. */
+  /**
+   * The Books a Series holds now: each pair whose newest change is `加入书系`, with when it was — newest joined first, so a
+   * Book just added heads the first page (Issue #63 review).
+   */
   members(seriesId: string): Array<{ readonly bookId: string; readonly joinedAt: string }> {
     return (this.#db.prepare(`SELECT c.book_id, c.recorded_at FROM series_membership_changes c
       WHERE c.series_id = ? AND c.kind = 'add' AND c.ordinal = (
         SELECT max(d.ordinal) FROM series_membership_changes d WHERE d.series_id = c.series_id AND d.book_id = c.book_id)
-      ORDER BY c.recorded_at, c.book_id`).all(seriesId) as SqlRow[]).map((row) => ({ bookId: String(row.book_id), joinedAt: String(row.recorded_at) }));
+      ORDER BY c.recorded_at DESC, c.book_id DESC`).all(seriesId) as SqlRow[]).map((row) => ({ bookId: String(row.book_id), joinedAt: String(row.recorded_at) }));
   }
 
   /** The Series a Book is in now, by name, with when it joined each. */

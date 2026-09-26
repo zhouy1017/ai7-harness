@@ -3,15 +3,19 @@ import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   MAINTENANCE_CLASSIFICATIONS,
   MAX_MAINTENANCE_CASES_LISTED,
+  MAX_MAINTENANCE_CASES_PAGE,
   MAX_MAINTENANCE_ERRATA_CHARACTERS,
   MAX_MAINTENANCE_EVIDENCE_CHARACTERS,
   MAX_MAINTENANCE_PROPOSALS_OFFERED,
+  MAX_MAINTENANCE_PUBLICATIONS_OFFERED,
   MAX_MAINTENANCE_REASON_CHARACTERS,
   MAX_MAINTENANCE_REVISIONS_LISTED,
   publicationText,
   type AppendMaintenanceCaseRevisionInput,
   type InspectMaintenanceCaseInput,
+  type ListMaintenanceCasesInput,
   type MaintenanceCaseLinkProjection,
+  type MaintenanceCasePageProjection,
   type MaintenanceCaseProjection,
   type MaintenanceCaseResultProjection,
   type MaintenanceCaseRevisionProjection,
@@ -265,22 +269,49 @@ export class MaintenanceCases {
       if (record.classification === 'withdrawal') withdrawn = true;
       if (record.classification === 'archive') archived = true;
       if (cases.length >= MAX_MAINTENANCE_CASES_LISTED) continue;
-      const revisions = this.#revisions(record);
-      const latest = revisions.at(-1)!;
-      cases.push({
-        caseId: record.caseId,
-        ordinal: record.ordinal,
-        classification: record.classification,
-        classificationLabel: MAINTENANCE_CLASSIFICATION_LABELS[record.classification],
-        status: latest.status,
-        statusLabel: MAINTENANCE_STATUS_LABELS[latest.status],
-        nextStep: nextStepOf(record.classification, revisions),
-        revisions: revisions.length,
-        recordedAt: record.createdAt,
-        latestAt: latest.recordedAt,
-      });
+      cases.push(this.#summary(record));
     }
     return { cases, total: rows.length, withdrawn, archived };
+  }
+
+  /**
+   * `更早的维护事项…` (MAINT-001): the designation's cases before the oldest one shown, newest first, a page at a time, so
+   * every case it holds can be opened however many came after it.
+   */
+  page(input: ListMaintenanceCasesInput): MaintenanceCasePageProjection {
+    requireMaintenance(isRecord(input) && typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) &&
+      typeof input.publicationVersionId === 'string' && UUID_PATTERN.test(input.publicationVersionId) &&
+      typeof input.beforeOrdinal === 'number' && Number.isSafeInteger(input.beforeOrdinal) && input.beforeOrdinal >= 1,
+    'MAINTENANCE_INVALID', '维护事项请求无效。');
+    requireMaintenance(this.#designation(input.bookId, input.publicationVersionId) !== null, 'MAINTENANCE_TARGET_NOT_FOUND', '所选发稿版本不属于这本书。');
+    const empty = { bookId: input.bookId, publicationVersionId: input.publicationVersionId, cases: [], more: false };
+    if (!this.#present()) return empty;
+    const rows = this.#db.prepare(
+      'SELECT case_id FROM maintenance_cases WHERE book_id = ? AND publication_version_id = ? AND ordinal < ? ORDER BY ordinal DESC LIMIT ?',
+    ).all(input.bookId, input.publicationVersionId, input.beforeOrdinal, MAX_MAINTENANCE_CASES_PAGE + 1) as SqlRow[];
+    return {
+      ...empty,
+      cases: rows.slice(0, MAX_MAINTENANCE_CASES_PAGE).map((row) => this.#summary(this.#case(input.bookId, text(row.case_id)))),
+      more: rows.length > MAX_MAINTENANCE_CASES_PAGE,
+    };
+  }
+
+  /** One case as its designation lists it. */
+  #summary(record: CaseRow): MaintenanceCaseSummaryProjection {
+    const revisions = this.#revisions(record);
+    const latest = revisions.at(-1)!;
+    return {
+      caseId: record.caseId,
+      ordinal: record.ordinal,
+      classification: record.classification,
+      classificationLabel: MAINTENANCE_CLASSIFICATION_LABELS[record.classification],
+      status: latest.status,
+      statusLabel: MAINTENANCE_STATUS_LABELS[latest.status],
+      nextStep: nextStepOf(record.classification, revisions),
+      revisions: revisions.length,
+      recordedAt: record.createdAt,
+      latestAt: latest.recordedAt,
+    };
   }
 
   /**
@@ -323,9 +354,19 @@ export class MaintenanceCases {
 
   /** Whether a 撤回 case holds the designation: in AI7 it is no longer used for 发稿 (ADR 0040). */
   withdrawn(publicationVersionId: string): boolean {
-    if (!this.#present()) return false;
-    return this.#db.prepare("SELECT 1 FROM maintenance_cases WHERE publication_version_id = ? AND classification = 'withdrawal'")
-      .get(publicationVersionId) !== undefined;
+    return this.withdrawnAt(publicationVersionId) !== null;
+  }
+
+  /**
+   * When a 撤回 case came to hold the designation — the time the case was recorded — or `null` while none holds it
+   * (Issue #427, S79b review: 范例 takes in nothing the Book delivers after it).
+   */
+  withdrawnAt(publicationVersionId: string): string | null {
+    if (!this.#present()) return null;
+    const row = this.#db.prepare(
+      "SELECT created_at FROM maintenance_cases WHERE publication_version_id = ? AND classification = 'withdrawal' ORDER BY created_at LIMIT 1",
+    ).get(publicationVersionId) as SqlRow | undefined;
+    return row === undefined ? null : text(row.created_at);
   }
 
   inspect(input: InspectMaintenanceCaseInput): MaintenanceCaseProjection {
@@ -425,6 +466,10 @@ export class MaintenanceCases {
       return this.#result(record, MAINTENANCE_RECORDED);
     }
     requireMaintenance(step.kind === 'conclude' && (step.status === 'unresolved' || step.status === 'complete'), 'MAINTENANCE_INVALID', '维护事项请求无效。');
+    // A 替代 or 再版 ends only with the separately designated version it names (MAINT-007): until one is linked it may be
+    // concluded 仍未解决, never 已完成.
+    requireMaintenance(step.status !== 'complete' || !awaitsDesignation(record.classification, revisions), 'MAINTENANCE_STEP_INVALID',
+      '替代和再版要先关联另行设定的发稿版本，才能记为已完成。');
     const outcome = publicationText(step.outcome, MAX_MAINTENANCE_REASON_CHARACTERS);
     requireMaintenance(outcome !== null, 'MAINTENANCE_REASON_INVALID', `请写明结论（1–${MAX_MAINTENANCE_REASON_CHARACTERS} 个字）。`);
     this.#appendRevision(record.caseId, latest.digest, { ...next, step: 'concluded', status: step.status, reason: outcome });
@@ -618,7 +663,7 @@ export class MaintenanceCases {
       const row = this.#db.prepare('SELECT * FROM maintenance_errata_versions WHERE errata_version_id = ?').get(revision.errataVersionId) as SqlRow | undefined;
       requireMaintenance(row !== undefined, 'MAINTENANCE_RECORD_INVALID', '维护事项关联的勘误不存在。');
       const errata = this.#errataOf(row, record.caseId);
-      return { kind: 'errata', errataVersionId: errata.errataVersionId, version: errata.version, body: errata.body };
+      return { kind: 'errata', errataVersionId: errata.errataVersionId, version: errata.version };
     }
     return null;
   }
@@ -656,10 +701,12 @@ export class MaintenanceCases {
       })),
       revisionsTotal: revisions.length,
       errata: this.#errata(record.caseId),
+      conclusions: !open ? [] : awaitsDesignation(record.classification, revisions) ? ['unresolved'] : ['unresolved', 'complete'],
       choices: {
         proposals: open && record.classification === 'correction' ? this.#proposals(record, revisions) : [],
         publications: open && (record.classification === 'correction' || record.classification === 'supersession' || record.classification === 'reissue')
-          ? this.#successors(record, revisions).map((designation) => ({ publicationVersionId: designation.publicationVersionId, label: designation.label }))
+          ? this.#successors(record, revisions).slice(0, MAX_MAINTENANCE_PUBLICATIONS_OFFERED)
+            .map((designation) => ({ publicationVersionId: designation.publicationVersionId, label: designation.label }))
           : [],
       },
       expectedRevision: latest.revision,
@@ -694,6 +741,11 @@ function proposalOf(row: SqlRow): { markId: string; label: string; stateLabel: s
     stateLabel: status === 'applied' ? '已应用' : status === 'open' ? '尚未应用' : '已处理，未应用',
     createdAt: text(row.created_at),
   };
+}
+
+/** A 替代 or 再版 with no later designation linked yet: it still waits for one (MAINT-007). */
+function awaitsDesignation(classification: MaintenanceClassification, revisions: ReadonlyArray<RevisionRow>): boolean {
+  return (classification === 'supersession' || classification === 'reissue') && !revisions.some((revision) => revision.step === 'publication-linked');
 }
 
 /** The step a case offers next (D5): none once complete. */

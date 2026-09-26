@@ -12,7 +12,16 @@ import {
   PRODUCTION_DOCUMENT_PHASE_IDS,
   MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED,
   MAX_FRAME_BYTES,
+  MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED,
   MAX_BOOK_DELIVERY_PACKAGE_EXPORTS_LISTED,
+  MAX_EXPORT_FIDELITY_POSITIONS,
+  MAX_MAINTENANCE_CASES_PAGE,
+  MAX_MAINTENANCE_ERRATA_CHARACTERS,
+  MAX_MAINTENANCE_EVIDENCE_CHARACTERS,
+  MAX_MAINTENANCE_PROPOSALS_OFFERED,
+  MAX_MAINTENANCE_PUBLICATIONS_OFFERED,
+  MAX_MAINTENANCE_REASON_CHARACTERS,
+  MAX_MAINTENANCE_REVISIONS_LISTED,
   MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS,
   MAX_BOOK_DELIVERY_PACKAGE_REPORTS_LISTED,
   MAX_BOOK_DELIVERY_PACKAGE_VERSIONS_LISTED,
@@ -37,7 +46,14 @@ import {
   type MilestoneListItemProjection,
   type PublicationDesignationProjection,
   type ProductionDocumentsProjection,
+  type BookDeliveryPackageExportReviewFileProjection,
+  type BookDeliveryPackageExportReviewProjection,
   type BookDeliveryPackageItemProjection,
+  type ExportFidelityRowProjection,
+  type MaintenanceCasePageProjection,
+  type MaintenanceCaseResultProjection,
+  type MaintenanceCaseRevisionProjection,
+  type MaintenanceCaseSummaryProjection,
   type BookDeliveryPackageProjection,
   type BookDeliveryPackageVersionProjection,
   type PublicationVersionProjection,
@@ -274,5 +290,81 @@ describe('the words of 发稿', () => {
     };
     const response = { id: identity, ok: true, op: 'prepareBookDeliveryPackage', result: { bookId: identity, outcome: 'prepared', version: 21, package: answer } };
     expect(Buffer.byteLength(JSON.stringify(response), 'utf8')).toBeLessThan(MAX_FRAME_BYTES);
+  });
+
+  it('keep the widest 图书交付包 export review within one service frame, each listed file with its fidelity (Issue #416 review)', () => {
+    const identity = '00000000-0000-4000-8000-000000000000';
+    const wide = (length: number) => '𠀀'.repeat(length);
+    // The service's own sentences are BMP characters; their widest detail is under a hundred of them.
+    const words = (length: number) => '字'.repeat(length);
+    const row = (key: ExportFidelityRowProjection['key']): ExportFidelityRowProjection => ({
+      key, label: words(12), count: 9_999_999, status: 'degraded', statusLabel: '降级导出', detail: words(120),
+      positions: Array.from({ length: MAX_EXPORT_FIDELITY_POSITIONS }, () => 9_999_999), positionsTruncated: true,
+    });
+    const manuscriptKeys: ReadonlyArray<ExportFidelityRowProjection['key']> = [
+      'inline-styles', 'annotations', 'change-suggestions', 'editor-notes', 'notes', 'tables', 'images-captions', 'sections',
+      'headers-footers', 'text-boxes', 'fields', 'file-revisions',
+    ];
+    const file = (key: string, rows: ReadonlyArray<ExportFidelityRowProjection['key']>): BookDeliveryPackageExportReviewFileProjection => ({
+      key, label: wide(120), fileName: wide(120), format: 'docx', restoration: 'from-original', restorationLine: words(100), formatLine: words(100),
+      fidelity: rows.map(row), degraded: true,
+    });
+    // The 发稿版本 and the five house types carry the manuscript's classes; every other listed file is a report's four.
+    const files = [
+      ...Array.from({ length: 6 }, (_, index) => file(`document:${index}`, manuscriptKeys)),
+      ...Array.from({ length: MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED - 6 }, (_, index) => file(`report:${index}`,
+        ['report-overview', 'report-must-items', 'report-summaries', 'report-appendix'])),
+    ];
+    const answer: BookDeliveryPackageExportReviewProjection = {
+      bookId: identity, packageVersionId: identity, versionLabel: 'v9999999', options: { includeAnnotations: true, includeSuggestions: true },
+      files, filesTruncated: true, degraded: true, statement: words(80), reviewDigest: 'f'.repeat(64),
+    };
+    const response = { id: identity, ok: true, op: 'reviewBookDeliveryPackageExport', result: answer };
+    expect(Buffer.byteLength(JSON.stringify(response), 'utf8')).toBeLessThan(MAX_FRAME_BYTES);
+  });
+
+  it('keep the widest 维护事项 answer and a page of older cases within one service frame (Issue #426 review)', () => {
+    const identity = '00000000-0000-4000-8000-000000000000';
+    const digest = 'f'.repeat(64);
+    const wide = (length: number) => '𠀀'.repeat(length);
+    // A designation named at its widest: a milestone label and a scope at their bounds.
+    const designationLabel = `第 9999999 次 · 「${wide(120)}」 · r9999999 · ${wide(80)}`;
+    // Every listed revision carries the widest words it can: the first its reason and evidence, every later one a
+    // conclusion's; a 勘误 version is named by its number, its words being the case's newest `errata` alone.
+    const revisions = Array.from({ length: MAX_MAINTENANCE_REVISIONS_LISTED }, (_, index): MaintenanceCaseRevisionProjection => ({
+      revision: 9_999_999 - index, step: index === 0 ? 'recorded' : 'concluded', stepLabel: '记录维护事项结论', status: 'unresolved', statusLabel: '等待另设发稿版本',
+      reason: wide(MAX_MAINTENANCE_REASON_CHARACTERS), evidence: index === 0 ? wide(MAX_MAINTENANCE_EVIDENCE_CHARACTERS) : null,
+      link: { kind: 'publication-version', publicationVersionId: identity, label: designationLabel }, actor: '本机编辑', recordedAt: '2026-09-26T00:00:00.000Z', digest,
+    }));
+    const answer: MaintenanceCaseResultProjection = {
+      bookId: identity,
+      completion: wide(40),
+      maintenanceCase: {
+        bookId: identity, caseId: identity, ordinal: 9_999_999, classification: 'correction', classificationLabel: '更正', consequence: wide(200),
+        internalOnly: wide(120), target: { publicationVersionId: identity, ordinal: 9_999_999, label: designationLabel, revisionId: identity, revisionLabel: 'r9999999' },
+        status: 'unresolved', statusLabel: '等待另设发稿版本', nextStep: 'link-publication', revisions, revisionsTotal: 9_999_999,
+        errata: { errataVersionId: identity, version: 9_999_999, body: wide(MAX_MAINTENANCE_ERRATA_CHARACTERS), recordedAt: '2026-09-26T00:00:00.000Z' },
+        conclusions: ['unresolved', 'complete'],
+        choices: {
+          proposals: Array.from({ length: MAX_MAINTENANCE_PROPOSALS_OFFERED }, () => ({
+            markId: identity, label: `修改建议 · 「${wide(17)}」→「${wide(17)}」`, stateLabel: '已处理，未应用', createdAt: '2026-09-26T00:00:00.000Z',
+          })),
+          publications: Array.from({ length: MAX_MAINTENANCE_PUBLICATIONS_OFFERED }, () => ({ publicationVersionId: identity, label: designationLabel })),
+        },
+        expectedRevision: 9_999_999,
+        technical: { caseDigest: digest },
+      },
+    };
+    const response = { id: identity, ok: true, op: 'saveMaintenanceErrata', result: answer };
+    expect(Buffer.byteLength(JSON.stringify(response), 'utf8')).toBeLessThan(MAX_FRAME_BYTES);
+
+    const summary: MaintenanceCaseSummaryProjection = {
+      caseId: identity, ordinal: 9_999_999, classification: 'supersession', classificationLabel: '替代', status: 'waiting', statusLabel: '等待另设发稿版本',
+      nextStep: 'link-publication', revisions: 9_999_999, recordedAt: '2026-09-26T00:00:00.000Z', latestAt: '2026-09-26T00:00:00.000Z',
+    };
+    const page: MaintenanceCasePageProjection = {
+      bookId: identity, publicationVersionId: identity, cases: Array.from({ length: MAX_MAINTENANCE_CASES_PAGE }, () => summary), more: true,
+    };
+    expect(Buffer.byteLength(JSON.stringify({ id: identity, ok: true, op: 'listMaintenanceCases', result: page }), 'utf8')).toBeLessThan(MAX_FRAME_BYTES);
   });
 });

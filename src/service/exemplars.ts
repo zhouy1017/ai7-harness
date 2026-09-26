@@ -1,6 +1,11 @@
-import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
-import type { ExemplarBookProjection, ExemplarProjection, ExemplarsProjection } from '../shared/protocol.js';
-import { BUILTIN_PRODUCTION_DOCUMENT_TYPES, productionDocumentType } from './production-document-types.js';
+import {
+  MAX_EXEMPLAR_BOOKS_PAGE,
+  MAX_EXEMPLAR_EARLIER_VERSIONS,
+  type ExemplarBookCursor,
+  type ExemplarBookProjection,
+  type ExemplarProjection,
+  type ExemplarsProjection,
+} from '../shared/protocol.js';
 
 /**
  * 知识库 › 范例 (Issue #427, plan slice S79b; V2-UX-KB-004, KB-006): a Book the house produced with AI7 brings its delivered
@@ -8,90 +13,107 @@ import { BUILTIN_PRODUCTION_DOCUMENT_TYPES, productionDocumentType } from './pro
  * one delivered after it as it is delivered — organized by Book and by document type, the Learning Eligibility `仅本社`
  * by default and nothing asked.
  *
+ * A designation a 撤回 holds is no longer used for 发稿 in AI7 (ADR 0040), so what the Book delivers after the 撤回 waits
+ * for the next designation, and comes in at it; what came in before stays, as ADR 0040 keeps the archive.
+ *
  * It is a read. Each exemplar is one exact document version as a Delivery Record named it, of a Book that has a designation,
- * both append-only records already: the archive is exactly what those records say, so it needs no relation of its own and
- * can never disagree with them. An exemplar is referenced, never copied into a manuscript or a deliverable.
+ * both append-only records already, read through their owners, which verify them exactly as 交付物 and 图书交付包 do: the
+ * archive is what those records say, so it needs no relation of its own. An exemplar is referenced, never copied into a
+ * manuscript or a deliverable.
  */
 
-type SqlRow = Record<string, SQLOutputValue>;
-
-/** What a Book is attributed to in 范例, as its people read now. */
-export interface ExemplarPeopleReader {
-  current(bookId: string): { readonly authors: ReadonlyArray<string>; readonly editors: ReadonlyArray<string> };
+/** One designation as 范例 reads it: when it was set, and when a 撤回 came to hold it. */
+export interface ExemplarDesignationReading {
+  readonly ordinal: number;
+  readonly createdAt: string;
+  readonly withdrawnAt: string | null;
 }
 
-function text(value: SQLOutputValue | undefined): string {
-  return String(value);
+/** One house type's document of a Book, with its every Delivery Record newest first. */
+export interface ExemplarDocumentReading {
+  readonly typeId: string;
+  readonly typeLabel: string;
+  readonly documentId: string;
+  readonly deliveries: ReadonlyArray<{
+    readonly version: number;
+    readonly revisionId: string;
+    readonly revisionDigest: string;
+    readonly recipientLabel: string;
+    readonly recordedAt: string;
+  }>;
 }
 
-function integer(value: SQLOutputValue | undefined): number {
-  return typeof value === 'bigint' ? Number(value) : Number(value);
+/** What 范例 reads, each through the owner of the record. */
+export interface ExemplarSources {
+  /** The Books with a 发稿版本, by title, after the cursor, at most `limit` of them. */
+  books(after: ExemplarBookCursor | null, limit: number): ReadonlyArray<{ readonly bookId: string; readonly title: string }>;
+  /** Every designation of the Book, oldest first. */
+  designations(bookId: string): ReadonlyArray<ExemplarDesignationReading>;
+  documents(bookId: string): ReadonlyArray<ExemplarDocumentReading>;
+  /** Who the Book is attributed to, as its people read now. */
+  people(bookId: string): { readonly authors: ReadonlyArray<string>; readonly editors: ReadonlyArray<string> };
 }
 
-/** The later of two instants, as the records write them (ISO 8601 in UTC, so they compare as text). */
-function later(a: string, b: string): string {
-  return a > b ? a : b;
+/**
+ * When a delivery recorded at `at` came into 范例: at once while a designation stood in AI7 — the Book's newest designation
+ * then, which no 撤回 recorded by then holds — and otherwise at the next designation after it, as one delivered before the
+ * first comes in at the first. `null` while none has come since: delivered after a 撤回, it waits for another 发稿版本.
+ * The instants are ISO 8601 in UTC, as the records write them, so they compare as text.
+ */
+export function exemplarArchivedAt(at: string, designations: ReadonlyArray<ExemplarDesignationReading>): string | null {
+  const standing = designations.filter((designation) => designation.createdAt <= at).at(-1);
+  if (standing !== undefined && (standing.withdrawnAt === null || standing.withdrawnAt > at)) return at;
+  return designations.find((designation) => designation.createdAt > at)?.createdAt ?? null;
 }
 
-export function readExemplars(db: DatabaseSync, people: ExemplarPeopleReader): ExemplarsProjection {
-  // Each Book with a 发稿版本: when it was first designated, and the latest designation it has now.
-  const designated = db.prepare(
-    `SELECT p.book_id, b.title,
-            MIN(p.created_at) AS first_designated_at,
-            MAX(p.ordinal) AS latest_ordinal
-     FROM publication_versions p JOIN books b ON b.book_id = p.book_id
-     GROUP BY p.book_id, b.title
-     ORDER BY b.title COLLATE BINARY, p.book_id`,
-  ).all() as SqlRow[];
-  const deliveries = db.prepare(
-    `SELECT d.book_id, d.document_id, d.ordinal, d.version, d.revision_id, d.revision_digest, d.recipient_label, d.recorded_at, p.type_id
-     FROM production_document_deliveries d JOIN production_documents p ON p.document_id = d.document_id
-     ORDER BY d.document_id, d.ordinal`,
-  ).all() as SqlRow[];
-  const typeOrder = new Map(BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.map((entry, index) => [entry.typeId, index] as const));
-  const books: ExemplarBookProjection[] = designated.map((row) => {
-    const bookId = text(row.book_id);
-    const firstDesignatedAt = text(row.first_designated_at);
-    const latestOrdinal = integer(row.latest_ordinal);
-    const latest = db.prepare('SELECT created_at FROM publication_versions WHERE book_id = ? AND ordinal = ?').get(bookId, latestOrdinal) as SqlRow;
-    // Each document's latest Delivery Record names the version that stands as its exemplar; earlier delivered versions
-    // stay named beneath it.
-    const byDocument = new Map<string, SqlRow[]>();
-    for (const delivery of deliveries) {
-      if (text(delivery.book_id) !== bookId) continue;
-      const list = byDocument.get(text(delivery.document_id)) ?? [];
-      list.push(delivery);
-      byDocument.set(text(delivery.document_id), list);
-    }
-    const exemplars: ExemplarProjection[] = Array.from(byDocument.values()).map((list): ExemplarProjection => {
-      const last = list.at(-1)!;
-      const typeId = text(last.type_id);
-      const version = integer(last.version);
-      const earlierVersions = Array.from(new Set(list.map((delivery) => integer(delivery.version)).filter((earlier) => earlier !== version))).sort((a, b) => a - b);
-      return {
-        documentId: text(last.document_id),
-        typeId,
-        typeLabel: productionDocumentType(typeId)?.label ?? typeId,
-        version,
-        revisionId: text(last.revision_id),
-        revisionDigest: text(last.revision_digest),
-        deliveredTo: text(last.recipient_label),
-        deliveredAt: text(last.recorded_at),
-        archivedAt: later(firstDesignatedAt, text(last.recorded_at)),
-        earlierVersions,
-        eligibility: 'house-only',
-      };
-    }).sort((a, b) => (typeOrder.get(a.typeId) ?? 99) - (typeOrder.get(b.typeId) ?? 99) || (a.documentId < b.documentId ? -1 : 1));
-    const attribution = people.current(bookId);
+/** One document's exemplar: the version its latest delivery that came into 范例 named, or `null` when none came in. */
+function exemplarOf(document: ExemplarDocumentReading, designations: ReadonlyArray<ExemplarDesignationReading>): ExemplarProjection | null {
+  const admitted = document.deliveries.flatMap((delivery) => {
+    const archivedAt = exemplarArchivedAt(delivery.recordedAt, designations);
+    return archivedAt === null ? [] : [{ delivery, archivedAt }];
+  });
+  const latest = admitted[0];
+  if (latest === undefined) return null;
+  const { delivery, archivedAt } = latest;
+  const earlier = Array.from(new Set(admitted.slice(1).map((entry) => entry.delivery.version).filter((version) => version !== delivery.version)))
+    .sort((a, b) => a - b);
+  return {
+    documentId: document.documentId,
+    typeId: document.typeId,
+    typeLabel: document.typeLabel,
+    version: delivery.version,
+    revisionId: delivery.revisionId,
+    revisionDigest: delivery.revisionDigest,
+    deliveredTo: delivery.recipientLabel,
+    deliveredAt: delivery.recordedAt,
+    archivedAt,
+    earlierVersionCount: earlier.length,
+    earlierVersions: earlier.slice(-MAX_EXEMPLAR_EARLIER_VERSIONS),
+    eligibility: 'house-only',
+  };
+}
+
+/** One page of 范例: the published Books after the cursor, by title, each with its exemplars by document type. */
+export function readExemplars(sources: ExemplarSources, after: ExemplarBookCursor | null): ExemplarsProjection {
+  const page = sources.books(after, MAX_EXEMPLAR_BOOKS_PAGE + 1);
+  const books = page.slice(0, MAX_EXEMPLAR_BOOKS_PAGE).map((book): ExemplarBookProjection => {
+    const designations = sources.designations(book.bookId);
+    const latest = designations.at(-1)!;
+    const attribution = sources.people(book.bookId);
     return {
-      bookId,
-      bookTitle: text(row.title),
+      bookId: book.bookId,
+      bookTitle: book.title,
       authors: attribution.authors,
       editors: attribution.editors,
-      publicationOrdinal: latestOrdinal,
-      designatedAt: text(latest.created_at),
-      exemplars,
+      publicationOrdinal: latest.ordinal,
+      designatedAt: latest.createdAt,
+      withdrawn: latest.withdrawnAt !== null,
+      exemplars: sources.documents(book.bookId).flatMap((document) => {
+        const exemplar = exemplarOf(document, designations);
+        return exemplar === null ? [] : [exemplar];
+      }),
     };
   });
-  return { books };
+  const last = books.at(-1);
+  return { books, nextCursor: page.length > MAX_EXEMPLAR_BOOKS_PAGE && last !== undefined ? { title: last.bookTitle, bookId: last.bookId } : null };
 }

@@ -255,9 +255,13 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['previewReviewGuidelineVersion']['output'] | null>(IPC_CHANNELS.previewReviewGuidelineVersion, input),
   importReviewGuidelineVersion: (input: ServiceOperationMap['importReviewGuidelineVersion']['input']) =>
     invoke<ServiceOperationMap['importReviewGuidelineVersion']['output']>(IPC_CHANNELS.importReviewGuidelineVersion, input),
-  inspectExemplars: () => invoke<ServiceOperationMap['inspectExemplars']['output']>(IPC_CHANNELS.inspectExemplars),
+  inspectExemplars: (input?: ServiceOperationMap['inspectExemplars']['input']) =>
+    invoke<ServiceOperationMap['inspectExemplars']['output']>(IPC_CHANNELS.inspectExemplars, input ?? { after: null }),
   inspectKnowledgeProcedures: () => invoke<ServiceOperationMap['inspectKnowledgeProcedures']['output']>(IPC_CHANNELS.inspectKnowledgeProcedures),
-  inspectLibraryMaterials: () => invoke<ServiceOperationMap['inspectLibraryMaterials']['output']>(IPC_CHANNELS.inspectLibraryMaterials),
+  inspectLibraryMaterials: (input?: ServiceOperationMap['inspectLibraryMaterials']['input']) =>
+    invoke<ServiceOperationMap['inspectLibraryMaterials']['output']>(IPC_CHANNELS.inspectLibraryMaterials, input ?? { after: null }),
+  inspectLibraryMaterial: (input: ServiceOperationMap['inspectLibraryMaterial']['input']) =>
+    invoke<ServiceOperationMap['inspectLibraryMaterial']['output']>(IPC_CHANNELS.inspectLibraryMaterial, input),
   previewLibraryMaterial: () =>
     invoke<ServiceOperationMap['previewLibraryMaterial']['output'] | null>(IPC_CHANNELS.previewLibraryMaterial),
   addLibraryMaterial: (input: ServiceOperationMap['addLibraryMaterial']['input']) =>
@@ -335,6 +339,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['recordProposalDecisionFeedback']['output']>(IPC_CHANNELS.recordProposalDecisionFeedback, input),
   inspectLearningMaterials: (input: ServiceOperationMap['inspectLearningMaterials']['input']) =>
     invoke<ServiceOperationMap['inspectLearningMaterials']['output']>(IPC_CHANNELS.inspectLearningMaterials, input),
+  inspectLearningMaterial: (input: ServiceOperationMap['inspectLearningMaterial']['input']) =>
+    invoke<ServiceOperationMap['inspectLearningMaterial']['output']>(IPC_CHANNELS.inspectLearningMaterial, input),
   decideLearningMaterial: (input: ServiceOperationMap['decideLearningMaterial']['input']) =>
     invoke<ServiceOperationMap['decideLearningMaterial']['output']>(IPC_CHANNELS.decideLearningMaterial, input),
   inspectFeedbackHistory: () =>
@@ -345,7 +351,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['recordPublicationActuals']['output']>(IPC_CHANNELS.recordPublicationActuals, input),
   setEvaluationPreferences: (input: ServiceOperationMap['setEvaluationPreferences']['input']) =>
     invoke<ServiceOperationMap['setEvaluationPreferences']['output']>(IPC_CHANNELS.setEvaluationPreferences, input),
-  inspectSeriesList: () => invoke<ServiceOperationMap['inspectSeriesList']['output']>(IPC_CHANNELS.inspectSeriesList, {}),
+  inspectSeriesList: (input?: { after?: ServiceOperationMap['inspectSeriesList']['input']['after'] }) =>
+    invoke<ServiceOperationMap['inspectSeriesList']['output']>(IPC_CHANNELS.inspectSeriesList, { after: input?.after ?? null }),
   createSeries: (input: ServiceOperationMap['createSeries']['input']) =>
     invoke<ServiceOperationMap['createSeries']['output']>(IPC_CHANNELS.createSeries, input),
   inspectSeries: (input: ServiceOperationMap['inspectSeries']['input']) =>
@@ -356,6 +363,12 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['changeSeriesMembership']['output']>(IPC_CHANNELS.changeSeriesMembership, input),
   inspectBookSeries: (input: ServiceOperationMap['inspectBookSeries']['input']) =>
     invoke<ServiceOperationMap['inspectBookSeries']['output']>(IPC_CHANNELS.inspectBookSeries, input),
+  inspectSeriesMembers: (input: ServiceOperationMap['inspectSeriesMembers']['input']) =>
+    invoke<ServiceOperationMap['inspectSeriesMembers']['output']>(IPC_CHANNELS.inspectSeriesMembers, input),
+  inspectSeriesCandidates: (input: ServiceOperationMap['inspectSeriesCandidates']['input']) =>
+    invoke<ServiceOperationMap['inspectSeriesCandidates']['output']>(IPC_CHANNELS.inspectSeriesCandidates, input),
+  inspectSeriesHistory: (input: ServiceOperationMap['inspectSeriesHistory']['input']) =>
+    invoke<ServiceOperationMap['inspectSeriesHistory']['output']>(IPC_CHANNELS.inspectSeriesHistory, input),
   inspectDataVersion: () => invoke<ServiceOperationMap['inspectDataVersion']['output']>(IPC_CHANNELS.inspectDataVersion, {}),
   chooseDatabaseExportDestination: () =>
     invoke<Awaited<ReturnType<RendererApi['chooseDatabaseExportDestination']>>>(IPC_CHANNELS.chooseDatabaseExportDestination, {}),
@@ -370,6 +383,12 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['editSeriesKnowledgeCandidate']['output']>(IPC_CHANNELS.editSeriesKnowledgeCandidate, input),
   promoteSeriesKnowledge: (input: ServiceOperationMap['promoteSeriesKnowledge']['input']) =>
     invoke<ServiceOperationMap['promoteSeriesKnowledge']['output']>(IPC_CHANNELS.promoteSeriesKnowledge, input),
+  inspectSeriesKnowledgeItems: (input: ServiceOperationMap['inspectSeriesKnowledgeItems']['input']) =>
+    invoke<ServiceOperationMap['inspectSeriesKnowledgeItems']['output']>(IPC_CHANNELS.inspectSeriesKnowledgeItems, input),
+  inspectSeriesKnowledgeCandidates: (input: ServiceOperationMap['inspectSeriesKnowledgeCandidates']['input']) =>
+    invoke<ServiceOperationMap['inspectSeriesKnowledgeCandidates']['output']>(IPC_CHANNELS.inspectSeriesKnowledgeCandidates, input),
+  inspectSeriesKnowledgeRevisions: (input: ServiceOperationMap['inspectSeriesKnowledgeRevisions']['input']) =>
+    invoke<ServiceOperationMap['inspectSeriesKnowledgeRevisions']['output']>(IPC_CHANNELS.inspectSeriesKnowledgeRevisions, input),
   applyChangeSuggestion: (input: ServiceOperationMap['applyChangeSuggestion']['input']) =>
     invoke<ServiceOperationMap['applyChangeSuggestion']['output']>(IPC_CHANNELS.applyChangeSuggestion, input),
   applyChangeSuggestionBatch: (input: ServiceOperationMap['applyChangeSuggestionBatch']['input']) =>
@@ -435,6 +454,8 @@ const api: RendererApi = Object.freeze({
     invoke<Awaited<ReturnType<RendererApi['approveBookDeliveryPackageExport']>>>(IPC_CHANNELS.approveBookDeliveryPackageExport, input),
   inspectMaintenanceCase: (input: Parameters<RendererApi['inspectMaintenanceCase']>[0]) =>
     invoke<Awaited<ReturnType<RendererApi['inspectMaintenanceCase']>>>(IPC_CHANNELS.inspectMaintenanceCase, input),
+  listMaintenanceCases: (input: Parameters<RendererApi['listMaintenanceCases']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['listMaintenanceCases']>>>(IPC_CHANNELS.listMaintenanceCases, input),
   recordMaintenanceCase: (input: Parameters<RendererApi['recordMaintenanceCase']>[0]) =>
     invoke<Awaited<ReturnType<RendererApi['recordMaintenanceCase']>>>(IPC_CHANNELS.recordMaintenanceCase, input),
   appendMaintenanceCaseRevision: (input: Parameters<RendererApi['appendMaintenanceCaseRevision']>[0]) =>

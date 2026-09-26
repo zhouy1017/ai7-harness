@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DATA_VERSION_PROMISE, dataVersionRecordsLabel, dataVersionStateLine, dataVersionUpdateLine, storeVersionLine } from '../../src/renderer/data-version-labels.js';
-import { DATA_VERSION, DATA_VERSION_FROZEN, latestSoftwareUpdate, readSoftwareVersion, type StoredVersion } from '../../src/service/data-version.js';
+import { DATA_VERSION, DATA_VERSION_FROZEN, compareSoftwareVersions, latestSoftwareUpdate, readSoftwareVersion, type StoredVersion } from '../../src/service/data-version.js';
 
 // Unit suite for 数据版本 (Issue #433, plan slice S85a; V2-UX-DSTO-016; ADR 0079 §1): the Data Version this software reads,
 // not yet frozen before the first packaged release; the software version read from the package it ships in; the latest
@@ -21,11 +21,12 @@ describe('数据版本', () => {
   it('reads the software version from the package it ships in, and refuses a package that names none', async () => {
     const root = mkdtempSync(join(tmpdir(), 'ai7-data-version-'));
     try {
-      for (const [version, expected] of [['0.1.0', '0.1.0'], ['1.2.3-beta.2', '1.2.3-beta.2']] as const) {
+      // Build metadata, which SemVer allows, is a version too (Issue #433 review).
+      for (const [version, expected] of [['0.1.0', '0.1.0'], ['1.2.3-beta.2', '1.2.3-beta.2'], ['0.2.0+build.7', '0.2.0+build.7'], ['1.0.0-rc.1+sha.5114f85', '1.0.0-rc.1+sha.5114f85']] as const) {
         writeFileSync(join(root, 'package.json'), JSON.stringify({ version }));
         await expect(readSoftwareVersion(root)).resolves.toBe(expected);
       }
-      for (const content of [JSON.stringify({}), JSON.stringify({ version: 'latest' }), JSON.stringify({ version: 1 }), '{']) {
+      for (const content of [JSON.stringify({}), JSON.stringify({ version: 'latest' }), JSON.stringify({ version: 1 }), JSON.stringify({ version: '0.2.0+' }), '{']) {
         writeFileSync(join(root, 'package.json'), content);
         await expect(readSoftwareVersion(root)).rejects.toMatchObject({ code: 'SOFTWARE_VERSION_UNAVAILABLE' });
       }
@@ -38,8 +39,11 @@ describe('数据版本', () => {
     expect(latestSoftwareUpdate([])).toBeNull();
     expect(latestSoftwareUpdate([record(1, '0.1.0')])).toBeNull();
     expect(latestSoftwareUpdate([record(1, '0.0.9'), record(2, '0.1.0')])).toEqual({
-      from: '0.0.9', to: '0.1.0', fromDataVersion: 1, toDataVersion: 1, recordedAt: '2026-09-02T00:00:00.000Z',
+      from: '0.0.9', to: '0.1.0', direction: 'newer', fromDataVersion: 1, toDataVersion: 1, recordedAt: '2026-09-02T00:00:00.000Z',
     });
+    // An older build opening the store again is no update (Issue #433 review), and build metadata alone orders nothing.
+    expect(latestSoftwareUpdate([record(1, '0.1.0'), record(2, '0.2.0'), record(3, '0.1.0')])).toMatchObject({ from: '0.2.0', to: '0.1.0', direction: 'earlier' });
+    expect(latestSoftwareUpdate([record(1, '0.2.0+build.7'), record(2, '0.2.0+build.8')])).toMatchObject({ direction: 'same' });
     // A later record for the same software — a schema revision within the same Data Version — is not an update of it.
     expect(latestSoftwareUpdate([record(1, '0.0.9'), record(2, '0.1.0'), record(3, '0.1.0')])?.to).toBe('0.1.0');
     expect(latestSoftwareUpdate([record(1, '0.0.9'), record(2, '0.1.0'), record(3, '0.2.0', 2)])).toMatchObject({ from: '0.1.0', to: '0.2.0', fromDataVersion: 1, toDataVersion: 2 });
@@ -55,11 +59,24 @@ describe('数据版本 words', () => {
 
   it('says what the latest software update did to the Data Version, and writes each record', () => {
     expect(dataVersionUpdateLine(null)).toBe('这份数据还没有经历过软件更新。');
-    const kept = { from: '0.0.9', to: '0.1.0', fromDataVersion: 1, toDataVersion: 1, recordedAt: '2026-09-25T00:00:00.000Z' };
+    const kept = { from: '0.0.9', to: '0.1.0', direction: 'newer' as const, fromDataVersion: 1, toDataVersion: 1, recordedAt: '2026-09-25T00:00:00.000Z' };
     expect(dataVersionUpdateLine(kept)).toBe('软件从 0.0.9 更新到 0.1.0；数据版本仍为 1，数据无需变更。');
     expect(dataVersionUpdateLine({ ...kept, to: '1.0.0', toDataVersion: 2 })).toBe('软件从 0.0.9 更新到 1.0.0；数据版本从 1 变为 2。');
+    expect(dataVersionUpdateLine({ ...kept, from: '0.2.0', to: '0.1.0', direction: 'earlier' })).toBe('改用较早的软件：从 0.2.0 改为 0.1.0；数据版本仍为 1，数据无需变更。');
+    expect(dataVersionUpdateLine({ ...kept, from: '0.2.0+build.7', to: '0.2.0+build.8', direction: 'same' })).toBe('软件从 0.2.0+build.7 换为 0.2.0+build.8；数据版本仍为 1，数据无需变更。');
     expect(storeVersionLine({ softwareVersion: '0.1.0', dataVersion: 1, recordedAt: '2026-09-25T00:00:00.000Z' }, (iso) => `〔${iso.slice(0, 10)}〕`))
       .toBe('〔2026-09-25〕 · 软件 0.1.0 · 数据版本 1');
     expect([dataVersionRecordsLabel(1, false), dataVersionRecordsLabel(20, true)]).toEqual(['版本记录（1）', '版本记录（最近 20 条）']);
+  });
+});
+
+describe('software version precedence (Issue #433 review)', () => {
+  it('orders versions as SemVer does, build metadata never counted', () => {
+    const ordered = ['0.1.0-alpha', '0.1.0-alpha.1', '0.1.0-alpha.beta', '0.1.0-beta', '0.1.0-beta.2', '0.1.0-beta.11', '0.1.0-rc.1', '0.1.0', '0.1.1', '0.2.0', '0.10.0', '1.0.0'];
+    for (let index = 1; index < ordered.length; index += 1) {
+      expect([compareSoftwareVersions(ordered[index - 1]!, ordered[index]!), compareSoftwareVersions(ordered[index]!, ordered[index - 1]!)]).toEqual([-1, 1]);
+    }
+    expect(compareSoftwareVersions('0.2.0+build.7', '0.2.0+build.8')).toBe(0);
+    expect(compareSoftwareVersions('0.2.0', '0.2.0')).toBe(0);
   });
 });
