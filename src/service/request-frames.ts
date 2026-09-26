@@ -21,6 +21,7 @@ import {
   MAX_MAINTENANCE_ERRATA_CHARACTERS,
   MAX_MAINTENANCE_EVIDENCE_CHARACTERS,
   MAX_MAINTENANCE_REASON_CHARACTERS,
+  MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED,
   PRODUCTION_DOCUMENT_RECIPIENT_KINDS,
   PRODUCTION_DOCUMENT_PHASE_ACTIONS,
   PRODUCTION_DOCUMENT_PHASE_IDS,
@@ -248,8 +249,6 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectGlobalAttention':
     case 'runReconnectPreflight':
     case 'inspectDefaultExecutionRules':
-    // 知识库 › 审阅规范文件 (Issue #427, S79a) reads across every Book, so it names none.
-    case 'inspectReviewGuidelines':
     case 'shutdown': {
       requireInput(value.input, [], tentativeId);
       break;
@@ -560,11 +559,24 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
-    // 导入新版本 (Issue #427, S79a): the document it versions, and the absolute path main's picker returned.
+    case 'inspectReviewGuidelines': {
+      const input = requireInputWithOptional(value.input, [], ['page'], tentativeId);
+      if (Object.hasOwn(input, 'page')) {
+        const page = requireInputWithOptional(input.page, ['documentId'], ['versionsBefore', 'clausePage'], tentativeId);
+        if (!isBoundedString(page.documentId, 64) || !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/u.test(page.documentId) ||
+            !optionalOrNull(page, 'versionsBefore', (cursor) => isSafeInteger(cursor, 2)) ||
+            (Object.hasOwn(page, 'clausePage') && !isSafeInteger(page.clausePage))) throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // The picker path starts a preview; an exact preview ID reads another bounded clause page.
     case 'previewReviewGuidelineVersion': {
-      const input = requireInput(value.input, ['documentId', 'path'], tentativeId);
-      if (!isBoundedString(input.documentId, 64) || !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/u.test(input.documentId) ||
-          !isBoundedString(input.path, 32_767) || !isAbsolute(input.path)) {
+      const input = requireInputWithOptional(value.input, ['documentId'], ['path', 'previewId', 'clausePage'], tentativeId);
+      const validSource = Object.hasOwn(input, 'previewId')
+        ? !Object.hasOwn(input, 'path') && validUuid(input.previewId) &&
+          (!Object.hasOwn(input, 'clausePage') || isSafeInteger(input.clausePage))
+        : !Object.hasOwn(input, 'clausePage') && isBoundedString(input.path, 32_767) && isAbsolute(input.path);
+      if (!isBoundedString(input.documentId, 64) || !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/u.test(input.documentId) || !validSource) {
         throw new ProtocolError(tentativeId);
       }
       break;
@@ -1227,18 +1239,27 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // Its export (Issue #416, S67b): one version of the route's Book's package, the folder the dialog returned, an export.
     case 'reviewBookDeliveryPackageExport': {
-      const input = requireInput(value.input, ['bookId', 'packageVersionId', 'options'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'packageVersionId', 'options'], ['offset'], tentativeId);
+      if (input.offset !== undefined && (!isSafeInteger(input.offset) || input.offset > Number.MAX_SAFE_INTEGER - MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED)) throw new ProtocolError(tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.packageVersionId) || !validPackageExportOptions(input.options)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'prepareBookDeliveryPackageExport': {
-      const input = requireInput(value.input, ['bookId', 'packageVersionId', 'options', 'reviewDigest', 'folder'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'packageVersionId', 'options', 'reviewDigest', 'folder', 'memberKeys'], ['offset'], tentativeId);
+      if (input.offset !== undefined && (!isSafeInteger(input.offset) || input.offset > Number.MAX_SAFE_INTEGER - MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED)) throw new ProtocolError(tentativeId);
+      if (!Array.isArray(input.memberKeys) || input.memberKeys.length === 0 || input.memberKeys.length > MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED ||
+          !input.memberKeys.every((key) => isBoundedString(key, 80)) || new Set(input.memberKeys).size !== input.memberKeys.length) throw new ProtocolError(tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.packageVersionId) || !validPackageExportOptions(input.options) ||
           !isBoundedString(input.reviewDigest, 64) ||
           !HEX_DIGEST_PATTERN.test(input.reviewDigest) || !isBoundedString(input.folder, MAX_EXPORT_DESTINATION_CODE_UNITS) ||
           !isAbsolute(input.folder)) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    case 'cancelBookDeliveryPackageExport': {
+      const input = requireInput(value.input, ['jobId'], tentativeId);
+      if (!validUuid(input.jobId)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'approveBookDeliveryPackageExport': {
@@ -1248,8 +1269,11 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // 维护事项 (Issue #426, S68a): the route's Book, one of its designations or cases, and words within their bounds.
     case 'inspectMaintenanceCase': {
-      const input = requireInput(value.input, ['bookId', 'caseId'], tentativeId);
-      if (!validUuid(input.bookId) || !validUuid(input.caseId)) throw new ProtocolError(tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'caseId'], ['beforeRevision', 'afterPublicationOrdinal', 'errataVersionId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.caseId) ||
+          (input.beforeRevision !== undefined && !isSafeInteger(input.beforeRevision, 1)) ||
+          (input.afterPublicationOrdinal !== undefined && !isSafeInteger(input.afterPublicationOrdinal, 0)) ||
+          (input.errataVersionId !== undefined && !validUuid(input.errataVersionId))) throw new ProtocolError(tentativeId);
       break;
     }
     case 'listMaintenanceCases': {

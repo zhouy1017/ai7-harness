@@ -43,10 +43,10 @@ describe('知识库', () => {
     expect(guidelineAppliedBy({ appliedBy: [{ categoryId: 'a', label: '错别字与规范用语' }, { categoryId: 'b', label: '体例与格式' }] })).toBe('用于：错别字与规范用语、体例与格式');
     expect(guidelineOlderBooks({ olderVersionBooks: [], olderVersionBookCount: 0, currentOrdinal: 2 })).toBeNull();
     expect(guidelineOlderBooks({ olderVersionBooks: [{ bookId: 'x', bookTitle: '甲书', ordinal: 1 }], olderVersionBookCount: 1, currentOrdinal: 3 }))
-      .toBe('还在用旧版：《甲书》第 1 版；这些书下次审阅会按第 3 版。');
+      .toBe('还在用旧版：《甲书》第 1 版；这些书新准备的审阅会按第 3 版；已准备的审阅仍用原版本。');
     // Past the Books it names, the line says how many there are.
     expect(guidelineOlderBooks({ olderVersionBooks: [{ bookId: 'x', bookTitle: '甲书', ordinal: 1 }, { bookId: 'y', bookTitle: '乙书', ordinal: 2 }], olderVersionBookCount: 14, currentOrdinal: 3 }))
-      .toBe('还在用旧版：《甲书》第 1 版、《乙书》第 2 版 等 14 本书；这些书下次审阅会按第 3 版。');
+      .toBe('还在用旧版：《甲书》第 1 版、《乙书》第 2 版 等 14 本书；这些书新准备的审阅会按第 3 版；已准备的审阅仍用原版本。');
     // A document AI7 fixes says why it takes no house version; one whose clauses the categories read says nothing.
     expect(guidelineFixedStatement({ use: 'clauses', appliedBy: [{ categoryId: 'a', label: '错别字与规范用语' }] })).toBeNull();
     expect(guidelineFixedStatement({ use: 'leads', appliedBy: [{ categoryId: 'p', label: '情节逻辑与前后一致' }] }))
@@ -73,9 +73,9 @@ describe('知识库', () => {
     expect(guidelinePreviewHeading({ ordinal: 2, title: '文字规范条款' })).toBe('将导入为《文字规范条款》第 2 版');
     expect(guidelinePreviewChanges({
       source: { displayName: '规范.txt', format: 'text', sha256: 'c'.repeat(64), bytes: 3 }, currentOrdinal: 1,
-      changes: { changed: 2, added: 1, removed: 0 }, clauses: [{ clauseId: 'a/1', number: 1, text: '一' }],
+      changes: { changed: 2, added: 1, removed: 0 }, clauseCount: 1,
     })).toBe('规范.txt · 1 条 · 与第 1 版相比：改动 2 条，新增 1 条，删去 0 条');
-    expect(guidelineImported('文字规范条款', 2)).toBe('已导入《文字规范条款》第 2 版；之后的审阅按第 2 版。');
+    expect(guidelineImported('文字规范条款', 2)).toBe('已导入《文字规范条款》第 2 版；新准备的审阅按第 2 版；已准备的审阅仍用原版本。');
   });
 });
 

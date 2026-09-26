@@ -47,7 +47,7 @@ export interface TaskResultWindowOptions {
   /** 跳到: that paragraph of the manuscript the result was read from — and that mark's card, for a finding — leaving 回到<位置>. */
   jump(target: { manuscriptId: string | null; blockId: string; markId: string | null }): void;
   /** 在分析中打开 / 在审阅中打开: the Task's own screen. */
-  openSurface(target: GlobalAttentionTarget): void;
+  openSurface(target: GlobalAttentionTarget, analysisRevisionId?: string): void;
   /** The window closed; `backToPanel` when the editor closed it, so the panel it came from opens again. */
   onClose(backToPanel: boolean): void;
   errorMessage(error: unknown, fallback: string): string;
@@ -156,7 +156,7 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
   open.addEventListener('click', () => {
     const target: GlobalAttentionTarget = entry.item.target;
     surface.close(false);
-    options.openSurface(target);
+    options.openSurface(target, entry.result?.kind === 'analysis-revision' ? entry.result.revisionId : undefined);
   });
 
   /** The manuscript the result was read from: its jumps land there. */

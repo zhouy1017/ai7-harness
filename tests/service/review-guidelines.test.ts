@@ -17,6 +17,7 @@ import { buildManuscriptPackage } from '../../src/service/text-manuscript.js';
 import {
   MAX_GUIDELINE_OLDER_BOOKS_SHOWN,
   MAX_GUIDELINE_VERSION_RUNS_SHOWN,
+  MAX_FRAME_BYTES,
   type LaunchPolicyProjection,
   type ReviewGuidelinesProjection,
   type ReviewRunProjection,
@@ -129,6 +130,60 @@ function file(name: string, content: string | Uint8Array): string {
 function typosDocument(projection: ReviewGuidelinesProjection) {
   return projection.documents.find((document) => document.documentId === TYPOS_DOCUMENT)!;
 }
+
+it('pages every historical version without skipping the built-in root', async () => {
+  const session = await openStore();
+  try {
+    for (let version = 2; version <= 14; version += 1) {
+      const preview = await session.store.previewReviewGuidelineVersion(TYPOS_DOCUMENT, file('pages.txt', `1. 检查规范第 ${version} 版。`));
+      session.store.importReviewGuidelineVersion(preview.previewId);
+    }
+    let shown = typosDocument(session.store.inspectReviewGuidelines());
+    const ordinals: number[] = [];
+    for (;;) {
+      expect(shown.versions.length).toBeLessThanOrEqual(5);
+      expect(shown.versionCount).toBe(14);
+      ordinals.push(...shown.versions.map((version) => version.ordinal));
+      if (shown.versionsNext === null) break;
+      shown = typosDocument(session.store.inspectReviewGuidelines({ documentId: TYPOS_DOCUMENT, versionsBefore: shown.versionsNext }));
+    }
+    expect(ordinals).toEqual(Array.from({ length: 14 }, (_, index) => 14 - index));
+    // A damaged old row must still fail a read of the latest page.
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      db.exec('DROP TRIGGER review_guideline_versions_no_update');
+      db.prepare('UPDATE review_guideline_versions SET sha256 = ? WHERE document_id = ? AND ordinal = 2').run('0'.repeat(64), TYPOS_DOCUMENT);
+    } finally { db.close(); }
+    expect(() => session.store.inspectReviewGuidelines()).toThrowError('版本记录已损坏');
+  } finally { await close(session); }
+});
+
+it('pages accepted long combining clauses losslessly before and after import within the frame bound', async () => {
+  const session = await openStore();
+  try {
+    const text = `规范${'a' + '\u0301'.repeat(2400)}😀`;
+    const source = Array.from({ length: 40 }, (_, index) => `${index + 1}. ${text}`).join('\n');
+    const preview = await session.store.previewReviewGuidelineVersion(TYPOS_DOCUMENT, file('long.txt', source));
+    const read = (committed: boolean): void => {
+      const reconstructed = Array.from({ length: 40 }, () => '');
+      for (let page = 0; page < preview.clausePages; page += 1) {
+        const projection = committed
+          ? session.store.inspectReviewGuidelines({ documentId: TYPOS_DOCUMENT, clausePage: page })
+          : session.store.readReviewGuidelinePreview(TYPOS_DOCUMENT, preview.previewId, page);
+        expect(Buffer.byteLength(JSON.stringify(projection))).toBeLessThan(MAX_FRAME_BYTES - 1024);
+        const shown = 'documents' in projection ? typosDocument(projection) : projection;
+        expect(shown.clauseCount).toBe(40);
+        expect(shown.clauses.length).toBeLessThanOrEqual(8);
+        for (const clause of shown.clauses) reconstructed[clause.number - 1] += clause.text;
+      }
+      expect(reconstructed).toEqual(Array.from({ length: 40 }, () => text));
+    };
+    read(false);
+    const imported = session.store.importReviewGuidelineVersion(preview.previewId);
+    expect(Buffer.byteLength(JSON.stringify(imported))).toBeLessThan(MAX_FRAME_BYTES - 1024);
+    read(true);
+  } finally { await close(session); }
+});
 
 async function refusal(operation: () => unknown): Promise<string> {
   try {

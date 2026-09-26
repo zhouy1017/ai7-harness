@@ -858,7 +858,7 @@ export class ManuscriptExportStore {
    * recorded and the file written atomically, with its receipt or its classified outcome. An approval already
    * given answers with what it came to — never a second write.
    */
-  async approve(input: ApproveManuscriptExportInput, available: boolean): Promise<ManuscriptExportReceiptProjection> {
+  async approve(input: ApproveManuscriptExportInput, available: boolean, beforeWrite?: () => void): Promise<ManuscriptExportReceiptProjection> {
     this.#requireAvailable(available);
     requireExport(
       isRecord(input) && typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) &&
@@ -888,6 +888,8 @@ export class ManuscriptExportStore {
       interaction: 'export-as-stated',
       approvedAt,
     });
+    // Package cancellation remains possible through payload/destination revalidation, up to this first write boundary.
+    beforeWrite?.();
     transact(this.#db, () => {
       requireExport(this.#outcomeRow(input.preparationId) === undefined, 'EXPORT_ALREADY_APPROVED', '这次导出已经批准过。');
       this.#db.prepare(

@@ -2565,11 +2565,11 @@ function registerRendererHandlers(
   );
   // 知识库 › 审阅规范文件 (Issue #427, S79a) names no Book: it reads every Book's Review Runs. 导入新版本 opens the picker and
   // hands the service the path it returned; confirming records the version, serialized with every other effect.
-  ipcMain.handle(IPC_CHANNELS.inspectReviewGuidelines, (event) =>
+  ipcMain.handle(IPC_CHANNELS.inspectReviewGuidelines, (event, input?: ServiceOperationMap['inspectReviewGuidelines']['input']) =>
     envelope(async () => {
       requireSender(event);
       requireAuthority();
-      return service.call('inspectReviewGuidelines', {});
+      return service.call('inspectReviewGuidelines', input?.page === undefined ? {} : { page: input.page });
     }),
   );
   // 知识库 › 范例 (Issue #427, S79b) names no Book either: it reads the published Books' delivered documents, a page at a
@@ -2583,13 +2583,18 @@ function registerRendererHandlers(
   );
   ipcMain.handle(
     IPC_CHANNELS.previewReviewGuidelineVersion,
-    (event, input: { documentId: string }) =>
+    (event, input: { documentId: string; previewId?: string; clausePage?: number }) =>
       envelope(async () => {
         const owned = requireSender(event);
         requireDesktop(input !== null && typeof input === 'object' && typeof input.documentId === 'string' && input.documentId.length > 0 && input.documentId.length <= 64,
           'AI7_RENDERER_BOUNDARY_INVALID');
         return serializeEffect(async () => {
           requireAuthority();
+          if (input.previewId !== undefined) {
+            requireDesktop(typeof input.previewId === 'string' && input.previewId.length <= 64, 'AI7_RENDERER_BOUNDARY_INVALID');
+            return service.call('previewReviewGuidelineVersion', { documentId: input.documentId, previewId: input.previewId,
+              ...(input.clausePage === undefined ? {} : { clausePage: input.clausePage }) });
+          }
           const path = await chooseGuidelineFile(owned);
           if (path === undefined) return null;
           return service.call('previewReviewGuidelineVersion', { documentId: input.documentId, path });
@@ -2819,7 +2824,7 @@ function registerRendererHandlers(
           requireAuthority();
           const route = requireCurrentBookRoute(owned);
           const routeGeneration = owned.routeGeneration;
-          const result = await service.call('inspectMaintenanceCase', { bookId: route.bookId, caseId: input.caseId });
+          const result = await service.call('inspectMaintenanceCase', { ...input, bookId: route.bookId });
           requireCurrentRouteGeneration(owned, routeGeneration);
           requireMaintenanceOfRoute(route, result.bookId);
           return result;
@@ -2990,6 +2995,7 @@ function registerRendererHandlers(
             bookId: route.bookId,
             packageVersionId: input.packageVersionId,
             options: input.options,
+            ...(input.offset === undefined ? {} : { offset: input.offset }),
           });
           requireCurrentRouteGeneration(owned, routeGeneration);
           requireBookDeliveryPackageOfRoute(route, result.bookId);
@@ -3014,7 +3020,9 @@ function registerRendererHandlers(
             bookId: route.bookId,
             packageVersionId: input.packageVersionId,
             options: input.options,
+            ...(input.offset === undefined ? {} : { offset: input.offset }),
             reviewDigest: input.reviewDigest,
+            memberKeys: input.memberKeys,
             folder,
           });
           requireCurrentRouteGeneration(owned, routeGeneration);
@@ -3022,6 +3030,8 @@ function registerRendererHandlers(
         });
       }),
   );
+  // The effect lock stays held while a package job runs. Only its owning window's cancellation bypasses it.
+  let packageExportInFlight: { owned: OwnedRendererWindow; bookId: string; exportId: string; job: Promise<ServiceJobProjection> } | null = null;
   ipcMain.handle(
     IPC_CHANNELS.approveBookDeliveryPackageExport,
     (event, input: Parameters<RendererApi['approveBookDeliveryPackageExport']>[0]) =>
@@ -3031,12 +3041,47 @@ function registerRendererHandlers(
           requireAuthority();
           const route = requireCurrentBookRoute(owned);
           const routeGeneration = owned.routeGeneration;
-          const result = await service.call('approveBookDeliveryPackageExport', { bookId: route.bookId, exportId: input.exportId });
-          requireCurrentRouteGeneration(owned, routeGeneration);
-          requireBookDeliveryPackageOfRoute(route, result.bookId);
-          requireBookDeliveryPackageOfRoute(route, result.package.bookId);
-          return result;
+          const active = { owned, bookId: route.bookId, exportId: input.exportId,
+            job: service.call('approveBookDeliveryPackageExport', { bookId: route.bookId, exportId: input.exportId }) };
+          packageExportInFlight = active;
+          try {
+            let job = await active.job;
+            while (job.state === 'queued' || job.state === 'running') {
+              await new Promise<void>((resolve) => setTimeout(resolve, 50));
+              job = await service.call('pollServiceJob', { jobId: job.jobId });
+            }
+            if (job.state === 'cancelled') throw new ServiceCallError('EXPORT_CANCELLED', '已取消导出，没有写入任何文件。');
+            if (job.state === 'failed') throw new ServiceCallError(job.failure?.code ?? 'EXPORT_FAILED', job.failure?.message ?? '交付包导出未完成。');
+            const result = job.result;
+            if (job.kind !== 'package-export' || result === null || !('export' in result) || result.export.exportId !== input.exportId) {
+              throw new ServiceCallError('AI7_EXPORT_INVALID', '交付包导出结果不一致。');
+            }
+            requireCurrentRouteGeneration(owned, routeGeneration);
+            requireBookDeliveryPackageOfRoute(route, result.bookId);
+            requireBookDeliveryPackageOfRoute(route, result.package.bookId);
+            return result;
+          } finally {
+            if (packageExportInFlight === active) packageExportInFlight = null;
+          }
         });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.cancelBookDeliveryPackageExport,
+    (event, input: Parameters<RendererApi['cancelBookDeliveryPackageExport']>[0]) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const active = packageExportInFlight;
+        if (active === null || active.owned !== owned || active.bookId !== route.bookId || active.exportId !== input.exportId) return false;
+        const job = await active.job;
+        if (packageExportInFlight !== active) return false;
+        try { return await service.call('cancelBookDeliveryPackageExport', { jobId: job.jobId }); }
+        catch (error) {
+          if (error instanceof ServiceCallError && error.code === 'JOB_NOT_FOUND') return false;
+          throw error;
+        }
       }),
   );
   ipcMain.handle(

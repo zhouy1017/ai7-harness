@@ -3,10 +3,17 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { setTimeout as delay } from 'node:timers/promises';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const RUNTIME_ROOT = resolve(ROOT, '.runtime');
 const ELECTRON_VERSION = '43.4.1';
+
+// Error messages and paths are not diagnostics. Only these closed system codes cross bootstrap's output boundary.
+function failureCode(error) {
+  return ['EBUSY', 'EPERM', 'EACCES', 'ENOENT', 'EEXIST', 'ENOSPC', 'EIO', 'EINVAL', 'ETIMEDOUT'].includes(error?.code)
+    ? error.code : 'unclassified';
+}
 
 function requireRuntime(condition, message) {
   if (!condition) throw new Error(message);
@@ -122,7 +129,7 @@ async function validateCarrier(runtimeRoot, artifact) {
   return executable;
 }
 
-export function verifyElectronNodeMode(executable, environment) {
+export async function verifyElectronNodeMode(executable, environment) {
   const probe = [
     "const { DatabaseSync } = require('node:sqlite');",
     "const db = new DatabaseSync(':memory:');",
@@ -131,7 +138,7 @@ export function verifyElectronNodeMode(executable, environment) {
     'db.close();',
     "console.log(JSON.stringify({ electron: process.versions.electron, node: process.versions.node, modules: process.versions.modules, sqlite, fts5 }));",
   ].join('');
-  const output = spawnSync(executable, ['-e', probe], {
+  const launch = () => spawnSync(executable, ['-e', probe], {
     cwd: ROOT,
     env: { ...environment, ELECTRON_RUN_AS_NODE: '1' },
     encoding: 'utf8',
@@ -139,6 +146,16 @@ export function verifyElectronNodeMode(executable, environment) {
     windowsHide: true,
     maxBuffer: 1024 * 1024,
   });
+  // Issue #636: Windows can briefly deny process creation while the freshly extracted executable is shared exclusively.
+  // EBUSY with no child status is a failed launch, not a failed probe. Retry only it, at most four times / 1.5 seconds.
+  // A child that ran, another system error, or invalid runtime evidence is never retried.
+  let output = launch();
+  for (const milliseconds of [100, 200, 400, 800]) {
+    if (process.platform !== 'win32' || output.status !== null || output.error?.code !== 'EBUSY') break;
+    await delay(milliseconds);
+    output = launch();
+  }
+  if (output.error) throw output.error;
   requireRuntime(output.status === 0, 'Electron Node-mode probe failed.');
   const evidence = JSON.parse(output.stdout.trim());
   requireRuntime(evidence.electron === ELECTRON_VERSION, 'Electron carrier version drifted.');
@@ -156,11 +173,16 @@ export async function materializeElectronRuntime({ archive, artifact, environmen
   const stagingRoot = await mkdtemp(resolve(runtimeParent, '.electron-staging-'));
   await requireExactRuntimeChild(runtimeParent, stagingRoot);
   let backupRoot;
+  let phase = 'extract';
+  const secondaryFailures = [];
 
   try {
     const adapter = await extractArchive(archive, stagingRoot, environment);
+    phase = 'validate';
     const executable = await validateCarrier(stagingRoot, artifact);
-    const evidence = verifyElectronNodeMode(executable, environment);
+    phase = 'probe';
+    const evidence = await verifyElectronNodeMode(executable, environment);
+    phase = 'write-evidence';
     await writeFile(
       resolve(stagingRoot, '.ai7-runtime.json'),
       `${JSON.stringify({ schemaVersion: 1, artifactId: artifact.id, sha256: artifact.sha256, adapter, evidence })}\n`,
@@ -168,6 +190,7 @@ export async function materializeElectronRuntime({ archive, artifact, environmen
     );
 
     if (existsSync(finalRoot)) {
+      phase = 'backup';
       await requireExactRuntimeChild(runtimeParent, finalRoot);
       backupRoot = resolve(runtimeParent, `.electron-backup-${process.pid}-${Date.now()}`);
       await requireExactRuntimeChild(runtimeParent, backupRoot, false);
@@ -175,15 +198,22 @@ export async function materializeElectronRuntime({ archive, artifact, environmen
       await rename(finalRoot, backupRoot);
     }
     try {
+      phase = 'promote';
       await rename(stagingRoot, finalRoot);
     } catch (error) {
-      if (backupRoot && existsSync(backupRoot) && !existsSync(finalRoot)) await rename(backupRoot, finalRoot);
+      if (backupRoot && existsSync(backupRoot) && !existsSync(finalRoot)) {
+        try { await rename(backupRoot, finalRoot); }
+        catch (rollbackError) { secondaryFailures.push(`ELECTRON_ROLLBACK/${failureCode(rollbackError)}`); }
+      }
       throw error;
     }
+    phase = 'backup-cleanup';
     if (backupRoot) await removeExactRuntimeChild(runtimeParent, backupRoot);
     return { executable: electronExecutable(finalRoot), adapter, evidence };
   } catch (error) {
-    await removeExactRuntimeChild(runtimeParent, stagingRoot);
-    throw error;
+    try { await removeExactRuntimeChild(runtimeParent, stagingRoot); }
+    catch (cleanupError) { secondaryFailures.push(`ELECTRON_CLEANUP/${failureCode(cleanupError)}`); }
+    // Cleanup and rollback cannot replace the first failure. Keep its object as a cause but print only closed markers.
+    throw new Error([`ELECTRON_MATERIALIZATION/${phase}/${failureCode(error)}`, ...secondaryFailures].join(' '), { cause: error });
   }
 }

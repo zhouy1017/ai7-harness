@@ -32,7 +32,7 @@ export const KNOWLEDGE_BASE_TAB_VIEWS: ReadonlyArray<KnowledgeBaseTabView> = [
   {
     tab: 'guidelines',
     label: '审阅规范文件',
-    holds: '审阅按这些文件的编号条款找问题，每次审阅记下它用的版本。导入新版本后，之后的审阅按新版本；做过的审阅仍写着当时的版本。',
+    holds: '审阅按这些文件的编号条款找问题，每次审阅记下它用的版本。导入新版本后，新准备的审阅按新版本；已准备或做过的审阅仍用当时的版本。',
     pending: null,
   },
   {
@@ -111,12 +111,12 @@ export function guidelineFixedStatement(document: Pick<ReviewGuidelineDocumentPr
   return `${does}。这是 AI7 的固定说明，不能导入新版本。`;
 }
 
-/** The Books that will read under a newer version at their next review, or `null` when none still reads an older one. */
+/** The Books whose newly prepared reviews will use a newer version, or `null` when none still reads an older one. */
 export function guidelineOlderBooks(document: Pick<ReviewGuidelineDocumentProjection, 'olderVersionBooks' | 'olderVersionBookCount' | 'currentOrdinal'>): string | null {
   if (document.olderVersionBookCount === 0) return null;
   const books = document.olderVersionBooks.map((book) => `《${book.bookTitle}》第 ${book.ordinal} 版`).join('、');
   const more = document.olderVersionBookCount > document.olderVersionBooks.length ? ` 等 ${document.olderVersionBookCount} 本书` : '';
-  return `还在用旧版：${books}${more}；这些书下次审阅会按第 ${document.currentOrdinal} 版。`;
+  return `还在用旧版：${books}${more}；这些书新准备的审阅会按第 ${document.currentOrdinal} 版；已准备的审阅仍用原版本。`;
 }
 
 export function guidelineClausesSummary(count: number): string {
@@ -149,13 +149,13 @@ export function guidelinePreviewHeading(preview: Pick<ReviewGuidelinePreviewProj
 }
 
 /** How the file's clauses differ from the version that applies now. */
-export function guidelinePreviewChanges(preview: Pick<ReviewGuidelinePreviewProjection, 'source' | 'currentOrdinal' | 'changes' | 'clauses'>): string {
+export function guidelinePreviewChanges(preview: Pick<ReviewGuidelinePreviewProjection, 'source' | 'currentOrdinal' | 'changes' | 'clauseCount'>): string {
   const { changed, added, removed } = preview.changes;
-  return `${preview.source.displayName} · ${preview.clauses.length} 条 · 与第 ${preview.currentOrdinal} 版相比：改动 ${changed} 条，新增 ${added} 条，删去 ${removed} 条`;
+  return `${preview.source.displayName} · ${preview.clauseCount} 条 · 与第 ${preview.currentOrdinal} 版相比：改动 ${changed} 条，新增 ${added} 条，删去 ${removed} 条`;
 }
 
 export function guidelineImported(title: string, ordinal: number): string {
-  return `已导入《${title}》第 ${ordinal} 版；之后的审阅按第 ${ordinal} 版。`;
+  return `已导入《${title}》第 ${ordinal} 版；新准备的审阅按第 ${ordinal} 版；已准备的审阅仍用原版本。`;
 }
 
 // ---- 范例 (Issue #427, plan slice S79b; KB-004, KB-006) --------------------------------------------------------------

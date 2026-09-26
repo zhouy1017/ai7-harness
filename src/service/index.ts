@@ -520,9 +520,11 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectDefaultExecutionRules() };
     // 知识库 › 审阅规范文件 (Issue #427, S79a).
     case 'inspectReviewGuidelines':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectReviewGuidelines() };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectReviewGuidelines(request.input.page) };
     case 'previewReviewGuidelineVersion':
-      return { id: request.id, ok: true, op: request.op, result: await store.previewReviewGuidelineVersion(request.input.documentId, request.input.path) };
+      return { id: request.id, ok: true, op: request.op, result: request.input.previewId !== undefined
+        ? store.readReviewGuidelinePreview(request.input.documentId, request.input.previewId, request.input.clausePage)
+        : await store.previewReviewGuidelineVersion(request.input.documentId, request.input.path) };
     case 'importReviewGuidelineVersion':
       return { id: request.id, ok: true, op: request.op, result: store.importReviewGuidelineVersion(request.input.previewId) };
     // 知识库 › 范例 (Issue #427, S79b).
@@ -883,10 +885,12 @@ async function dispatch(
         id: request.id, ok: true, op: request.op,
         result: await store.prepareBookDeliveryPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
       };
+    case 'cancelBookDeliveryPackageExport':
+      return { id: request.id, ok: true, op: request.op, result: jobs.cancelPackageExport(request.input.jobId) };
     case 'approveBookDeliveryPackageExport':
       return {
         id: request.id, ok: true, op: request.op,
-        result: await store.approveBookDeliveryPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
+        result: jobs.startPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
       };
     case 'inspectMaintenanceCase':
       return { id: request.id, ok: true, op: request.op, result: store.inspectMaintenanceCase(request.input) };
@@ -1309,7 +1313,7 @@ async function run(): Promise<void> {
     process.removeListener('SIGTERM', stop);
     process.removeListener('SIGINT', stop);
     try {
-      jobs?.dispose();
+      await jobs?.dispose();
       // The Review Run loop stops first and starts no further category; the owner then interrupts the
       // Run in flight, and the loop records what that Run came to before the store closes.
       const reviewRunsStopped = reviewRuns?.dispose();

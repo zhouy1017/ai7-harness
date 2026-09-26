@@ -742,7 +742,7 @@ async function main() {
       importedPage.cards[0].versions[0].startsWith('第 2 版 · 本社 · 导入于 ') && importedPage.cards[0].versions[0].endsWith(` · ${HOUSE_GUIDELINE_NAME} · 5 条 · 还没有审阅用过`) &&
       importedPage.cards[0].versions[1] === '第 1 版 · AI7 内置默认 · 内置 · 4 条 · 还没有审阅用过' &&
       importedPage.cards.slice(1).every((card) => card.pill === '第 1 版 · AI7 内置默认'), 'knowledge-imported-card', importedPage.cards[0]);
-    await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '')==='已导入《文字规范条款》第 2 版；之后的审阅按第 2 版。'`, 'knowledge-imported-status', 10_000);
+    await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '')==='已导入《文字规范条款》第 2 版；新准备的审阅按第 2 版；已准备的审阅仍用原版本。'`, 'knowledge-imported-status', 10_000);
     const service = await renderer.evaluate(`window.ai7.inspectReviewGuidelines().then((projection)=>projection.documents.map((document)=>[document.documentId, document.currentOrdinal, document.issuer]))`);
     requireJourney(JSON.stringify(service?.[0]) === JSON.stringify(['ai7-builtin/typos-and-usage', 2, '本社']) && service.slice(1).every(([, ordinal]) => ordinal === 1), 'knowledge-imported-service', service);
 
@@ -784,6 +784,44 @@ async function main() {
     await click(renderer, '知识库', 'knowledge-restart-open');
     const restarted = await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-restart-ready-page');
     requireJourney(restarted.cards[0].pill === '第 2 版 · 本社' && restarted.cards[0].versions.length === 2 && restarted.cards[0].clauses.length === 5, 'knowledge-restart-kept', restarted.cards[0]);
+
+    at('knowledge-guideline-import');
+    // Real picker/service/UI pages: later clauses remain reachable in preview and after import; history reaches version 1.
+    const cardSelector = '[data-guideline-document="ai7-builtin/typos-and-usage"]';
+    const activateGuideline = async (selector, name) => assertRenderer(renderer, `(() => {
+      const button=document.querySelector(${JSON.stringify(`${cardSelector} ${selector}`)});
+      if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+      button.focus(); button.click(); return true;
+    })()`, name);
+    for (let version = 3; version <= 8; version += 1) {
+      await writeFile(guidelinePath, Array.from({ length: 9 }, (_, index) => `${index + 1}. 检查第 ${version} 版的第 ${index + 1} 项规范。`).join('\n'), 'utf8');
+      // The existing picker control supplies one choice per window; restart rather than adding a repeatable bypass.
+      if (version > 3) {
+        await closeBrowser();
+        manager = await launch();
+        renderer = await waitForRenderer(manager, 'knowledge-page-window');
+        await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'knowledge-page-ready');
+        await click(renderer, '知识库', 'knowledge-page-open');
+        await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-page-loaded');
+      }
+      await activateGuideline('[data-guideline-action="import"]', 'knowledge-page-import-start');
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${cardSelector} .guideline-preview`)})?.dataset.guidelinePreview==='${version}'`, 'knowledge-page-preview');
+      if (version === 8) {
+        await activateGuideline('.guideline-preview [data-guideline-action="clauses-next"]', 'knowledge-preview-next');
+        await waitFor(renderer, `(() => { const area=document.querySelector(${JSON.stringify(`${cardSelector} .guideline-preview`)}); return area?.querySelectorAll('li').length===1 && area.querySelector('li')?.value===9 && document.activeElement===area.querySelector('h4'); })()`, 'knowledge-preview-last-focus');
+        await activateGuideline('.guideline-preview [data-guideline-action="clauses-previous"]', 'knowledge-preview-previous');
+        await waitFor(renderer, `(() => { const area=document.querySelector(${JSON.stringify(`${cardSelector} .guideline-preview`)}); return area?.querySelectorAll('li').length===8 && document.activeElement===area.querySelector('h4'); })()`, 'knowledge-preview-first-focus');
+      }
+      await activateGuideline('[data-guideline-action="confirm"]', 'knowledge-page-import-confirm');
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(cardSelector)})?.dataset.guidelineVersion==='${version}' && !document.querySelector(${JSON.stringify(`${cardSelector} .guideline-preview`)})`, 'knowledge-page-imported');
+    }
+    await assertRenderer(renderer, `(() => { const card=document.querySelector(${JSON.stringify(cardSelector)}); card.querySelector('.guideline-clauses').open=true; card.querySelector('.guideline-versions').open=true; return card.querySelectorAll('.guideline-version-list li').length===5; })()`, 'knowledge-pages-open');
+    await activateGuideline('.guideline-clauses [data-guideline-action="clauses-next"]', 'knowledge-clauses-next');
+    await waitFor(renderer, `(() => { const area=document.querySelector(${JSON.stringify(`${cardSelector} .guideline-clauses`)}); return area?.open && area.querySelectorAll('li').length===1 && area.querySelector('li')?.value===9 && document.activeElement===area.querySelector('summary'); })()`, 'knowledge-clauses-last-focus');
+    await activateGuideline('[data-guideline-action="versions-older"]', 'knowledge-versions-older');
+    await waitFor(renderer, `(() => { const area=document.querySelector(${JSON.stringify(`${cardSelector} .guideline-versions`)}); return area?.open && area.querySelector('[data-guideline-version-row="1"]') && area.querySelectorAll('.guideline-version-list li').length===3 && document.activeElement===area.querySelector('summary'); })()`, 'knowledge-versions-oldest-focus');
+    await activateGuideline('[data-guideline-action="versions-latest"]', 'knowledge-versions-latest');
+    await waitFor(renderer, `(() => { const area=document.querySelector(${JSON.stringify(`${cardSelector} .guideline-versions`)}); return area?.querySelector('[data-guideline-version-row="8"]') && area.querySelectorAll('.guideline-version-list li').length===5 && document.activeElement===area.querySelector('summary'); })()`, 'knowledge-versions-latest-focus');
 
     at('zero-activity');
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key))`, 'exact-service-readiness-remained-zero');
