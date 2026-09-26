@@ -208,7 +208,7 @@ export class AnalysisFeedbackLedger {
       requireFeedback(sha256Hex(json) === String(row.sha256), 'ANALYSIS_FEEDBACK_RECORD_INVALID', '分析反馈记录已损坏。');
       const record = JSON.parse(json) as unknown;
       const chain = `${String(row.revision_id)}\n${String(row.item_key)}`;
-      const before = last?.chain === chain ? last : null;
+      const before: { chain: string; signalId: string; ordinal: number } | null = last?.chain === chain ? last : null;
       const dimension = dimensionOf(String(row.item_key));
       const ordinal = integer(row.ordinal);
       requireFeedback(isRecord(record) && record.schema === RECORD_SCHEMA && record.signalId === row.signal_id && record.bookId === row.book_id &&
