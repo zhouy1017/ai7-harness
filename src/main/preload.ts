@@ -257,6 +257,7 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['importReviewGuidelineVersion']['output']>(IPC_CHANNELS.importReviewGuidelineVersion, input),
   inspectExemplars: (input?: ServiceOperationMap['inspectExemplars']['input']) =>
     invoke<ServiceOperationMap['inspectExemplars']['output']>(IPC_CHANNELS.inspectExemplars, input ?? { after: null }),
+  inspectKnowledgeProcedures: () => invoke<ServiceOperationMap['inspectKnowledgeProcedures']['output']>(IPC_CHANNELS.inspectKnowledgeProcedures),
   inspectReviewWorkspace: (input?: Omit<ServiceOperationMap['inspectReviewWorkspace']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['inspectReviewWorkspace']['output']>(IPC_CHANNELS.inspectReviewWorkspace, input ?? { reviewRunId: null }),
   prepareReviewRun: (input: Omit<ServiceOperationMap['prepareReviewRun']['input'], 'bookId'>) =>

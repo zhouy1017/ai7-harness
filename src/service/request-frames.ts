@@ -249,6 +249,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectGlobalAttention':
     case 'runReconnectPreflight':
     case 'inspectDefaultExecutionRules':
+    // 知识库 › 工序与规则's 工序 (Issue #427, S79d) are the house's, so the read names no Book.
+    case 'inspectKnowledgeProcedures':
     case 'shutdown': {
       requireInput(value.input, [], tentativeId);
       break;
