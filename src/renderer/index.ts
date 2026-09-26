@@ -80,6 +80,8 @@ import { mountLearningMaterials } from './quality-learning.js';
 import type { FeedbackHistoryTarget } from '../shared/protocol.js';
 import type { AnalysisFeedbackDimension } from '../shared/analysis-feedback.js';
 import { mountFeedbackHistory } from './feedback-history.js';
+import { mountEvaluationCalibration } from './evaluation-calibration.js';
+import { CALIBRATION_PAGE_GROUP, CALIBRATION_PAGE_LEDE, CALIBRATION_PAGE_TITLE, CALIBRATION_STATUS } from './evaluation-calibration-labels.js';
 import {
   FEEDBACK_HISTORY_HEADING,
   FEEDBACK_HISTORY_STATUS,
@@ -2283,6 +2285,8 @@ function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { 
     technicalDetails,
     setStatus,
     errorMessage: rendererErrorMessage,
+    // 录入定价与首印… (Issue #430, S82): 设置 › 评估校准与预测 with this Book's entry open.
+    openActuals: (bookId) => void renderEvaluationCalibration(bookId),
     // 打开 a Production Document (Issue #415): its own surface, read like the manuscript's window.
     openDocument: async (documentNow, type, notice) => {
       const opened = await window.ai7.getManuscriptWindow({ manuscriptId: documentNow.documentId, branchId: documentNow.branchId, cursor: null });
@@ -4965,6 +4969,34 @@ function renderModelServiceSettingsProjection(projection: ModelServiceSettingsPr
   replaceScreen('model-service', content);
 }
 
+/**
+ * 设置 › 编辑工作 › 评估校准与预测 (Issue #430, plan slice S82; EVAL-014): a house setting, bound to no Book, opened from the
+ * landing or from 交付物's 录入… with that Book's entry open.
+ */
+async function renderEvaluationCalibration(focusBookId: string | null): Promise<void> {
+  const content = panel();
+  content.classList.add('evaluation-calibration-page');
+  const host = element('div');
+  const back = element('div', 'button-row');
+  back.append(button('返回', 'quiet', () => void initializeStartup()));
+  content.append(
+    element('p', 'section-label', `设置 · ${CALIBRATION_PAGE_GROUP}`),
+    element('h2', undefined, CALIBRATION_PAGE_TITLE),
+    element('p', 'field-note', CALIBRATION_PAGE_LEDE),
+    host,
+    back,
+  );
+  replaceScreen('evaluation-calibration', content);
+  setStatus(CALIBRATION_STATUS.loading, 'busy');
+  const surface = mountEvaluationCalibration({ root: host, focusBookId, api: window.ai7, setStatus, errorMessage: rendererErrorMessage });
+  try {
+    await surface.load();
+    if (content.isConnected) setStatus(CALIBRATION_STATUS.opened);
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, CALIBRATION_STATUS.unavailable), 'error');
+  }
+}
+
 async function renderModelServiceSettings(): Promise<void> {
   setStatus('正在读取模型服务状态…', 'busy');
   try {
@@ -5100,6 +5132,9 @@ function renderLanding(
   dataAndStorage.dataset['settingsRoute'] = 'data-storage';
   const modelService = button('模型服务', 'secondary', () => renderModelServiceSettings());
   modelService.dataset['settingsRoute'] = 'model-service';
+  // 设置 › 编辑工作 › 评估校准与预测 (Issue #430, S82).
+  const evaluationCalibration = button(CALIBRATION_PAGE_TITLE, 'secondary', () => void renderEvaluationCalibration(null));
+  evaluationCalibration.dataset['settingsRoute'] = 'evaluation-calibration';
   // 知识库 (Issue #427, S79a): its seven classes, opening at 审阅规范文件.
   const knowledgeBase = button('知识库', 'secondary', () => renderKnowledgeBase('guidelines'));
   knowledgeBase.dataset['settingsRoute'] = 'knowledge-base';
@@ -5107,7 +5142,7 @@ function renderLanding(
   const qualityLearning = button(QUALITY_LEARNING_TITLE, 'secondary', () => void renderQualityLearning('feedback', null));
   qualityLearning.dataset['settingsRoute'] = 'quality-learning';
   const landingActions = element('div', 'button-row');
-  landingActions.append(importButton, createBook, dataAndStorage, modelService, knowledgeBase, qualityLearning);
+  landingActions.append(importButton, createBook, dataAndStorage, modelService, evaluationCalibration, knowledgeBase, qualityLearning);
   copy.append(landingActions);
   const note = element('aside', 'hero-note', '所有导入都要求先明确选择图书目标；系统不会自动选择已有图书或稿件关系。');
   content.append(copy, note);

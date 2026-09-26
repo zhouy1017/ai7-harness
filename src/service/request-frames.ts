@@ -718,6 +718,34 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectFeedbackHistory':
       requireInput(value.input, [], tentativeId);
       break;
+    case 'inspectEvaluationCalibration': {
+      const input = requireInput(value.input, ['after', 'focusBookId'], tentativeId);
+      const after = input.after;
+      if (!(input.focusBookId === null || validUuid(input.focusBookId)) ||
+          !(after === null || (isRecord(after) && hasExactKeys(after, ['title', 'bookId']) && isBoundedString(after.title, 300) && validUuid(after.bookId)))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // 录入定价与首印: the Book, how many entries the editor saw, and two whole positive numbers, the price in 分.
+    case 'recordPublicationActuals': {
+      const input = requireInput(value.input, ['bookId', 'publicationVersionId', 'expectedEntries', 'priceFen', 'firstPrint'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.publicationVersionId) || !Number.isSafeInteger(input.expectedEntries) || (input.expectedEntries as number) < 0 ||
+          !Number.isSafeInteger(input.priceFen) || (input.priceFen as number) < 1 ||
+          !Number.isSafeInteger(input.firstPrint) || (input.firstPrint as number) < 1) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // The house's two switches, and how many changes of them the editor saw.
+    case 'setEvaluationPreferences': {
+      const input = requireInput(value.input, ['expectedEntries', 'predictionEnabled', 'calibrationEnabled'], tentativeId);
+      if (!Number.isSafeInteger(input.expectedEntries) || (input.expectedEntries as number) < 0 ||
+          typeof input.predictionEnabled !== 'boolean' || typeof input.calibrationEnabled !== 'boolean') {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     // 质量与学习 › 学习准入 (Issue #61, S26b): every Book's Learning Material, or one Book's.
     case 'inspectLearningMaterials': {
       const input = requireInput(value.input, ['bookId', 'after'], tentativeId);

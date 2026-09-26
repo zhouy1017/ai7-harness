@@ -96,7 +96,7 @@ const TEXT_EXPORT_WORDS = Object.freeze({
 const EXPORT_CLOSED = '已关闭导出，没有写入任何文件。';
 // The written package: the original's parts, the comments the export writes, and the package relationships it adds.
 const EXPORTED_PARTS = Object.freeze(['[Content_Types].xml', '_rels/.rels', 'docProps/core.xml', 'word/_rels/document.xml.rels', 'word/comments.xml', 'word/commentsExtended.xml', 'word/document.xml', 'word/header1.xml']);
-const ACTUALS_PROMPT = '录入定价与首印 · 随评估功能提供';
+const ACTUALS_PROMPT = '录入定价与首印 · 尚未录入';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 // 导出's four members (Issue #413): the only renderer members named like an export, and none publishes or sends.
 // Issue #416 (S67b): a 图书交付包 version's export adds its own three, and nothing else that exports, publishes or sends.
@@ -590,11 +590,11 @@ const READ_PUBLICATION = `window.ai7.inspectDeliverables().then((deliverables) =
   prompt: deliverables.publication.actualsPrompt === null ? null : deliverables.publication.actualsPrompt.label + ' · ' + deliverables.publication.actualsPrompt.stateLabel,
 }))`;
 
-async function importAndOpen(renderer, title) {
+async function importAndOpen(renderer, title, distinct = false) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'import-landing');
   await click(renderer, '导入稿件', 'import-start');
   await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'import-target');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'import-target-select');
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector(${JSON.stringify(`input[aria-label="${distinct ? '新建图书（作为不同作品）' : '新建图书'}"]`)}); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'import-target-select');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!(radio instanceof HTMLInputElement) || radio.checked) return false; radio.click(); return radio.checked; })()`, 'import-relationship-select');
   await fill(renderer, '#book-title', title, 'import-title');
   await click(renderer, '确认书名并复核', 'import-review');
@@ -707,6 +707,39 @@ async function designate(renderer, { milestoneId, scope, basis }, completion, na
 /** V2-UX-PUB-009: neither the page nor the record it reads ever says published, sent, delivered or received. */
 async function assertNoForbiddenWords(renderer, name) {
   await assertRenderer(renderer, `(async () => { const words = ${JSON.stringify(FORBIDDEN_WORDS)}; const page = document.body.textContent ?? ''; const record = JSON.stringify([await window.ai7.inspectDeliverables(), await window.ai7.inspectProductionDocuments()]); return words.every((word) => !page.includes(word) && !record.includes(word)); })()`, name);
+}
+
+/**
+ * 设置 › 评估校准与预测 as the editor reads it (Issue #430, S82): each section's progress line and notes, the two switches'
+ * state, each published Book's line and whether its form is open, any refusal, and where focus is.
+ */
+const READ_CALIBRATION = `(() => {
+  const root = document.querySelector('[data-screen="evaluation-calibration"] .evaluation-calibration');
+  if (!(root instanceof HTMLElement) || root.querySelector('.calibration-calibration') === null) return null;
+  const switchOf = (name) => { const input = root.querySelector('[data-calibration-switch="' + name + '"]'); return input instanceof HTMLInputElement ? [input.checked, input.disabled] : null; };
+  const active = document.activeElement;
+  return {
+    calibration: root.querySelector('.calibration-calibration .calibration-progress')?.textContent ?? null,
+    waiting: root.querySelector('.calibration-waiting')?.textContent ?? null,
+    prediction: root.querySelector('.calibration-prediction .calibration-progress')?.textContent ?? null,
+    switches: { calibration: switchOf('calibration'), prediction: switchOf('prediction') },
+    empty: root.querySelector('.calibration-actuals-empty')?.textContent ?? null,
+    books: Array.from(root.querySelectorAll('li.calibration-book'), (item) => [item.dataset.bookId ?? null, item.dataset.actualsState ?? null, item.querySelector('.calibration-book-line')?.textContent ?? null, item.querySelector('.calibration-form') !== null]),
+    refusal: root.querySelector('.calibration-refusal')?.textContent ?? null,
+    focus: active instanceof HTMLElement && root.contains(active) ? (active.dataset.calibrationField ?? active.dataset.calibrationAction ?? active.dataset.calibrationSwitch ?? active.tagName) : null,
+  };
+})()`;
+async function readCalibration(renderer, predicate, name) {
+  const deadline = Date.now() + 60_000;
+  let page = null;
+  while (Date.now() < deadline) {
+    page = await renderer.evaluate(READ_CALIBRATION).catch(() => null);
+    if (page !== null && predicate(page)) return page;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  const error = new Error(`J-07/${name}`);
+  error.detail = page;
+  throw error;
 }
 
 async function main() {
@@ -973,7 +1006,7 @@ async function main() {
     at('designate-confirmed');
     await confirmWithStatement(renderer, `已设为发稿版本 · 「${SECOND.label}」 · r2 · ${PRINT.scope}`, 'designate');
     // 发稿版本 on the chosen milestone and on no other; one record with its scope, basis and time; the pending
-    // 录入定价与首印 line with no action; no change notice, because the manuscript is exactly r2.
+    // 录入定价与首印 line with 录入… beside it (Issue #430, S82); no change notice, because the manuscript is exactly r2.
     await assertRenderer(renderer, `(() => {
       const block = window.__j07.block();
       const current = window.__j07.items().filter((item) => item.dataset.publicationCurrent === 'true');
@@ -987,6 +1020,7 @@ async function main() {
         versions[0].querySelector('.publication-basis')?.textContent === ${JSON.stringify(`依据：${PRINT.basis}`)} &&
         (versions[0].querySelector('.publication-recorded')?.textContent ?? '').startsWith('本机编辑 · ') &&
         prompt?.textContent === ${JSON.stringify(ACTUALS_PROMPT)} && prompt.querySelectorAll('button, a, input, select, textarea').length === 0 &&
+        prompt.nextElementSibling === window.__j07.action('actuals') && prompt.nextElementSibling?.textContent === '录入…' &&
         block.querySelector('.publication-change-notice') === null && block.dataset.changeNotice === 'false' &&
         document.activeElement === window.__j07.action('designate');
     })()`, 'designated-on-the-chosen-milestone');
@@ -1233,10 +1267,10 @@ async function main() {
     at('actuals-prompt-and-words');
     // The 录入定价与首印 line is recorded and pending, with no action until the evaluation features take it up;
     // nothing anywhere says published, sent, delivered or received; and nothing exports, publishes or sends.
-    await assertRenderer(renderer, `(() => { const prompt = window.__j07.block().querySelector('.publication-actuals-prompt'); return prompt?.textContent === ${JSON.stringify(ACTUALS_PROMPT)} && prompt.querySelectorAll('button, a, input, select, textarea, [tabindex]').length === 0 && prompt.closest('button, a') === null; })()`, 'actuals-prompt-pending-without-action');
+    await assertRenderer(renderer, `(() => { const prompt = window.__j07.block().querySelector('.publication-actuals-prompt'); return prompt?.textContent === ${JSON.stringify(ACTUALS_PROMPT)} && prompt.querySelectorAll('button, a, input, select, textarea, [tabindex]').length === 0 && prompt.closest('button, a') === null && prompt.nextElementSibling === window.__j07.action('actuals') && prompt.nextElementSibling?.textContent === '录入…'; })()`, 'actuals-prompt-pending-with-entry');
     await assertNoForbiddenWords(renderer, 'restart-without-forbidden-words');
     // The only controls that name 导出 are 导出… of each version (Issue #413); nothing publishes or sends.
-    await assertRenderer(renderer, `(() => { const controls = Array.from(document.querySelectorAll('button, a, [role="button"], [role="menuitem"]')); const actions = Array.from(window.__j07.block().querySelectorAll('[data-publication-action]')).map((node) => node.dataset.publicationAction); return !controls.some((node) => /发布|发送/.test(node.textContent ?? '')) && controls.filter((node) => /导出/.test(node.textContent ?? '')).every((node) => node.dataset.exportAction === 'open' && node.textContent === '导出…') && JSON.stringify(actions) === '["designate"]' && ${EXPORT_MEMBERS_ONLY}; })()`, 'no-publish-or-send-action');
+    await assertRenderer(renderer, `(() => { const controls = Array.from(document.querySelectorAll('button, a, [role="button"], [role="menuitem"]')); const actions = Array.from(window.__j07.block().querySelectorAll('[data-publication-action]')).map((node) => node.dataset.publicationAction); return !controls.some((node) => /发布|发送/.test(node.textContent ?? '')) && controls.filter((node) => /导出/.test(node.textContent ?? '')).every((node) => node.dataset.exportAction === 'open' && node.textContent === '导出…') && JSON.stringify(actions) === '["designate","actuals"]' && ${EXPORT_MEMBERS_ONLY}; })()`, 'no-publish-or-send-action');
 
     at('export-cancel-creates-nothing');
     // This launch's Save dialog answers once more. 一审稿's 导出… reviews that milestone exactly as it was saved —
@@ -2134,6 +2168,81 @@ async function main() {
       exemplarPage[0].items[0][2].startsWith(`新闻稿 · 版本 ${exemplarNews.version} · 交付给`) &&
       exemplarPage[0].items[0][2].includes(` · 学习准入：仅本社 · 此前还交付过版本 ${exemplarNews.earlierVersions[0]}`),
     'exemplars-news-release', { service: exemplars?.books?.map((entry) => entry.exemplars.map((exemplar) => [exemplar.typeId, exemplar.version, exemplar.earlierVersions])), page: exemplarPage });
+
+    at('publication-actuals');
+    // 录入定价与首印 (Issue #430, plan slice S82; EVAL-010, EVAL-014): 交付物's line for the current 发稿版本 says 尚未录入 with
+    // 录入… beside it, which opens 设置 › 评估校准与预测 with this Book's entry open at 定价; a price that is not one is refused
+    // in place; 45 元 and 3,000 册 are recorded for 第 2 次发稿版本 and count one published Book toward the prediction's thirty;
+    // and 交付物's line then states them, with 修改….
+    await click(renderer, '返回', 'actuals-knowledge-back');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'actuals-landing');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(bookId)}]`, 'actuals-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}]')`, 'actuals-manuscript', 120_000);
+    await openDeliverables(renderer, 'actuals-deliverables');
+    await assertRenderer(renderer, `(() => { const prompt = window.__j07.block().querySelector('.publication-actuals-prompt'); const enter = window.__j07.block().querySelector('[data-publication-action="actuals"]'); return prompt?.textContent === ${JSON.stringify(ACTUALS_PROMPT)} && prompt.dataset.actualsState === 'missing' && enter instanceof HTMLButtonElement && enter.textContent === '录入…'; })()`, 'actuals-prompt-missing');
+    await clickSelector(renderer, '[data-screen="book-deliverables"] [data-publication-action="actuals"]', 'actuals-enter');
+    const actualsForm = await readCalibration(renderer, (page) => page.books.some(([id, , , open]) => id === bookId && open) && page.focus === 'price', 'actuals-form');
+    requireJourney(JSON.stringify(actualsForm.books) === JSON.stringify([[bookId, 'missing', '第 2 次发稿版本 · 尚未录入', true]]) &&
+      actualsForm.prediction === '已录入实际数据的已发稿图书 0 / 30 本 · 满 30 本后才能打开', 'actuals-form-words', actualsForm);
+    const writeField = (field, value) => renderer.evaluate(`(() => { const input = document.querySelector('[data-screen="evaluation-calibration"] [data-calibration-field="${field}"]'); if (!(input instanceof HTMLInputElement)) return false; input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    requireJourney(await writeField('price', '四十五'), 'actuals-price-invalid-write');
+    requireJourney(await writeField('print', '3000'), 'actuals-print-write');
+    await clickSelector(renderer, '[data-screen="evaluation-calibration"] [data-calibration-action="save"]', 'actuals-save-invalid');
+    const invalid = await readCalibration(renderer, (page) => page.refusal !== null, 'actuals-invalid');
+    requireJourney(invalid.refusal === '定价要是大于 0 的金额，最多两位小数。' && invalid.focus === 'price' && invalid.books[0]?.[1] === 'missing', 'actuals-invalid-words', invalid);
+    requireJourney(await writeField('price', '45'), 'actuals-price-write');
+    await clickSelector(renderer, '[data-screen="evaluation-calibration"] [data-calibration-action="save"]', 'actuals-save');
+    await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent === '定价与首印已录入。'`, 'actuals-saved-status');
+    const saved = await readCalibration(renderer, (page) => page.books[0]?.[1] === 'recorded', 'actuals-saved');
+    requireJourney(JSON.stringify(saved.books) === JSON.stringify([[bookId, 'recorded', '第 2 次发稿版本 · 定价 ¥45.00 · 首印 3,000 册', false]]) &&
+      saved.prediction === '已录入实际数据的已发稿图书 1 / 30 本 · 满 30 本后才能打开' && saved.focus === 'open' && saved.refusal === null, 'actuals-saved-words', saved);
+    const actualsService = await renderer.evaluate(`window.ai7.inspectEvaluationCalibration().then((answer) => answer.books.map((book) => [book.bookId, book.publicationOrdinal, book.actuals?.priceFen ?? null, book.actuals?.firstPrint ?? null, book.actuals?.current ?? null, book.entries]))`);
+    requireJourney(JSON.stringify(actualsService) === JSON.stringify([[bookId, 2, 4500, 3000, true, 1]]), 'actuals-service', actualsService);
+    await click(renderer, '返回', 'actuals-settings-back');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'actuals-landing-again');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(bookId)}]`, 'actuals-book-again');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}]')`, 'actuals-manuscript-again', 120_000);
+    await openDeliverables(renderer, 'actuals-deliverables-again');
+    await assertRenderer(renderer, `(() => { const prompt = window.__j07.block().querySelector('.publication-actuals-prompt'); const change = window.__j07.block().querySelector('[data-publication-action="actuals"]'); return prompt?.textContent === '录入定价与首印 · 已录入 · 定价 ¥45.00 · 首印 3,000 册' && prompt.dataset.actualsState === 'recorded' && change?.textContent === '修改…'; })()`, 'actuals-prompt-recorded');
+
+    // Twenty further real Books make the last Deliverables entry fall beyond the first bounded settings page.
+    for (let index = 0; index < 20; index += 1) {
+      await close();
+      renderer = await launch({ picker: manuscript });
+      await importAndOpen(renderer, `校准分页 ${String(index + 1).padStart(2, '0')}`, true);
+      await assertRenderer(renderer, PAGE_HELPERS, 'actuals-page-helpers');
+      await openMilestoneForm(renderer, 'actuals-page-milestone');
+      await fill(renderer, '#milestone-label', '分页留档', 'actuals-page-label');
+      await choosePurpose(renderer, 'stage-archive', 'actuals-page-purpose');
+      await saveMilestone(renderer, { label: '分页留档' }, 'r1', 'actuals-page-saved');
+      await openDeliverables(renderer, 'actuals-page-deliverables');
+      const milestoneId = await renderer.evaluate(`window.ai7.inspectDeliverables().then((value) => value.publication.milestones[0].milestoneId)`);
+      await designate(renderer, { milestoneId, scope: '分页归档', basis: '实际数据分页检查' }, '已设为发稿版本 · 「分页留档」 · r1 · 分页归档', 'actuals-page-designated');
+    }
+    await clickSelector(renderer, '[data-screen="book-deliverables"] [data-publication-action="actuals"]', 'actuals-off-page-entry');
+    await waitFor(renderer, `document.querySelectorAll('.calibration-book').length === 21 && document.activeElement?.dataset.calibrationField === 'price'`, 'actuals-off-page-form');
+    requireJourney(await writeField('price', '55'), 'actuals-page-price');
+    requireJourney(await writeField('print', '4000'), 'actuals-page-print');
+    // A real concurrent command changes the record while the visible form retains its original optimistic binding.
+    await assertRenderer(renderer, `(async () => { const id = document.querySelector('.calibration-form')?.closest('[data-book-id]')?.dataset.bookId; if (!id) return false; const current = await window.ai7.inspectEvaluationCalibration({ after: null, focusBookId: id }); const book = current.focusedBook; if (!book) return false; await window.ai7.recordPublicationActuals({ bookId: id, publicationVersionId: book.publicationVersionId, expectedEntries: book.entries, priceFen: 4600, firstPrint: 5000 }); return true; })()`, 'actuals-concurrent-command');
+    for (let repetition = 0; repetition < 2; repetition += 1) {
+      await clickSelector(renderer, '[data-calibration-action="next"]', 'actuals-next-page');
+      await waitFor(renderer, `document.querySelectorAll('.calibration-book').length === 1 && document.querySelector('[data-calibration-field="price"]')?.value === '55' && document.querySelector('[data-calibration-field="print"]')?.value === '4000' && document.activeElement?.hasAttribute('data-calibration-page-heading')`, 'actuals-last-page-form-kept');
+      await clickSelector(renderer, '[data-calibration-action="first"]', 'actuals-first-page');
+      await waitFor(renderer, `document.querySelectorAll('.calibration-book').length === 21 && document.querySelector('[data-calibration-field="price"]')?.value === '55' && document.querySelector('[data-calibration-field="print"]')?.value === '4000'`, 'actuals-first-page-form-kept');
+    }
+    await clickSelector(renderer, '[data-calibration-action="save"]', 'actuals-stale-save');
+    await waitFor(renderer, `document.querySelector('.calibration-form .calibration-refusal')?.textContent === '这本书的定价与首印刚被改过；请看过现在的数据再改。' && document.querySelector('[data-calibration-field="price"]')?.value === '55'`, 'actuals-stale-form-retained');
+    await clickSelector(renderer, '[data-calibration-action="cancel"]', 'actuals-reconcile-close');
+    await clickSelector(renderer, '.calibration-book:last-child [data-calibration-action="open"]', 'actuals-reconcile-open');
+    requireJourney(await writeField('price', '55'), 'actuals-reconciled-price');
+    requireJourney(await writeField('print', '4000'), 'actuals-reconciled-print');
+    await assertRenderer(renderer, `(() => { const input = document.querySelector('[data-calibration-switch="calibration"]'); if (!(input instanceof HTMLInputElement) || input.disabled) return false; input.click(); return true; })()`, 'actuals-preferences-with-form');
+    await waitFor(renderer, `!document.querySelector('[data-calibration-switch="calibration"]')?.checked && !document.querySelector('[data-calibration-switch="calibration"]')?.disabled && document.querySelector('[data-calibration-field="price"]')?.value === '55'`, 'actuals-preferences-form-kept');
+    await clickSelector(renderer, '[data-calibration-action="save"]', 'actuals-off-page-save');
+    await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent === '定价与首印已录入。' && document.activeElement?.dataset.calibrationAction === 'open'`, 'actuals-off-page-saved');
+    await clickSelector(renderer, '[data-calibration-action="next"]', 'actuals-saved-next-page');
+    await waitFor(renderer, `document.querySelectorAll('.calibration-book').length === 1 && document.querySelector('.calibration-book')?.dataset.actualsState === 'recorded' && document.querySelector('.calibration-book-line')?.textContent.includes('¥55.00')`, 'actuals-saved-target');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

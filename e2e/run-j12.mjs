@@ -461,7 +461,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     // Production Documents beside their ledgers, revision 38 adds their Delivery Records and revision 39 the Book's
     // 图书交付包 versions, so this pin moves with the terminal version the service stamps
     // (`BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION`).
-    requireJourney(version?.user_version === 50, 'credential-cleanup-metadata-version');
+    requireJourney(version?.user_version === 51, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, connection_name, provider_id, model_id,
               adapter_revision, configuration_revision, approved_fallback_chain,
@@ -569,6 +569,39 @@ async function saveMilestone(renderer) {
   await fill(renderer, '#milestone-note', '本地且离线。', 'milestone-note');
   await click(renderer, '保存里程碑版本', 'milestone-save');
   await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('.editor-meta')?.textContent.includes('当前修订版 r2')`, 'milestone-saved', 120_000);
+}
+
+/**
+ * 设置 › 评估校准与预测 as the editor reads it (Issue #430, S82): each section's progress line and notes, the two switches'
+ * state, each published Book's line and whether its form is open, any refusal, and where focus is.
+ */
+const READ_CALIBRATION = `(() => {
+  const root = document.querySelector('[data-screen="evaluation-calibration"] .evaluation-calibration');
+  if (!(root instanceof HTMLElement) || root.querySelector('.calibration-calibration') === null) return null;
+  const switchOf = (name) => { const input = root.querySelector('[data-calibration-switch="' + name + '"]'); return input instanceof HTMLInputElement ? [input.checked, input.disabled] : null; };
+  const active = document.activeElement;
+  return {
+    calibration: root.querySelector('.calibration-calibration .calibration-progress')?.textContent ?? null,
+    waiting: root.querySelector('.calibration-waiting')?.textContent ?? null,
+    prediction: root.querySelector('.calibration-prediction .calibration-progress')?.textContent ?? null,
+    switches: { calibration: switchOf('calibration'), prediction: switchOf('prediction') },
+    empty: root.querySelector('.calibration-actuals-empty')?.textContent ?? null,
+    books: Array.from(root.querySelectorAll('li.calibration-book'), (item) => [item.dataset.bookId ?? null, item.dataset.actualsState ?? null, item.querySelector('.calibration-book-line')?.textContent ?? null, item.querySelector('.calibration-form') !== null]),
+    refusal: root.querySelector('.calibration-refusal')?.textContent ?? null,
+    focus: active instanceof HTMLElement && root.contains(active) ? (active.dataset.calibrationField ?? active.dataset.calibrationAction ?? active.dataset.calibrationSwitch ?? active.tagName) : null,
+  };
+})()`;
+async function readCalibration(renderer, predicate, name) {
+  const deadline = Date.now() + 60_000;
+  let page = null;
+  while (Date.now() < deadline) {
+    page = await renderer.evaluate(READ_CALIBRATION).catch(() => null);
+    if (page !== null && predicate(page)) return page;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  const error = new Error(`J-12/${name}`);
+  error.detail = page;
+  throw error;
 }
 
 async function main() {
@@ -1459,6 +1492,32 @@ async function main() {
         finalModelState.connection?.credentialOperationState === 'missing',
       'model-removal-survived-restart',
     );
+    at('evaluation-calibration-settings');
+    // 设置 › 评估校准与预测 (Issue #430, plan slice S82; EVAL-010, EVAL-011, EVAL-014): calibration waits for AI7's 初评 and ten
+    // of the editor's adjustments and touches only AI7's starting scores; turning it off is recorded and reads back, and on
+    // again; the prediction switch stays closed until thirty published Books carry actuals; and with no Book yet published
+    // the central entry says where the actuals come from.
+    await click(primary, '评估校准与预测', 'calibration-open');
+    const calibrationPage = await readCalibration(primary, () => true, 'calibration-page');
+    requireJourney(calibrationPage.calibration === '调分记录 0 / 10 本 · 满 10 本后生效' &&
+      calibrationPage.waiting === 'AI7 初评尚未接通：你改过 AI7 的初评分数后，调分记录才开始累积。' &&
+      calibrationPage.prediction === '已录入实际数据的已发稿图书 0 / 30 本 · 满 30 本后才能打开' &&
+      JSON.stringify(calibrationPage.switches) === JSON.stringify({ calibration: [true, false], prediction: [false, true] }) &&
+      calibrationPage.empty === '还没有已发稿的图书。设为发稿版本后，在这里录入它的定价与首印。' && calibrationPage.books.length === 0,
+    'calibration-page-words', calibrationPage);
+    const toggle = (name) => primary.evaluate(`(() => { const input = document.querySelector('[data-calibration-switch="${name}"]'); if (!(input instanceof HTMLInputElement) || input.disabled) return false; input.click(); return true; })()`);
+    requireJourney(await toggle('calibration'), 'calibration-off-click');
+    const calibrationOff = await readCalibration(primary, (page) => page.calibration === '调分记录 0 / 10 本 · 已关闭', 'calibration-off');
+    requireJourney(JSON.stringify(calibrationOff.switches.calibration) === JSON.stringify([false, false]) && calibrationOff.focus === 'calibration', 'calibration-off-words', calibrationOff);
+    const offService = await primary.evaluate(`window.ai7.inspectEvaluationCalibration().then((answer) => [answer.calibration.enabled, answer.calibration.active, answer.preferenceEntries, answer.prediction.enabled])`);
+    requireJourney(JSON.stringify(offService) === JSON.stringify([false, false, 1, false]), 'calibration-off-service', offService);
+    requireJourney(await toggle('calibration'), 'calibration-on-click');
+    await readCalibration(primary, (page) => page.calibration === '调分记录 0 / 10 本 · 满 10 本后生效' && page.switches.calibration?.[0] === true, 'calibration-on');
+    // The closed switch cannot be clicked open, and the service refuses it as well.
+    requireJourney(await toggle('prediction') === false, 'prediction-closed');
+    const refusedPrediction = await primary.evaluate(`window.ai7.setEvaluationPreferences({ expectedEntries: 2, predictionEnabled: true, calibrationEnabled: true }).then(() => ({ recorded: true }), (error) => ({ code: error?.code ?? null, message: error?.message ?? null }))`);
+    requireJourney(refusedPrediction?.code === 'PREDICTION_UNAVAILABLE' && refusedPrediction.message === '至少 30 本已发稿图书录入实际数据后，才能打开定价与首印预测。', 'prediction-refused', refusedPrediction);
+
     requireJourney(loopback.observedRequests() === 0, 'zero-sentinel-requests');
     await close();
     await loopback.close();

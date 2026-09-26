@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 77 as const;
+export const SERVICE_PROTOCOL_VERSION = 79 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -124,6 +124,9 @@ export const IPC_CHANNELS = {
   decideLearningMaterial: 'ai7:j11:decide-learning-material',
   inspectLearningMaterial: 'ai7:j11:inspect-learning-material',
   inspectFeedbackHistory: 'ai7:j11:inspect-feedback-history',
+  inspectEvaluationCalibration: 'ai7:j12:inspect-evaluation-calibration',
+  recordPublicationActuals: 'ai7:j12:record-publication-actuals',
+  setEvaluationPreferences: 'ai7:j12:set-evaluation-preferences',
   applyChangeSuggestion: 'ai7:j05:apply-change-suggestion',
   applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
   reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
@@ -5292,6 +5295,82 @@ export interface FeedbackHistoryProjection {
   readonly truncated: boolean;
 }
 
+// ---- 设置 › 评估校准与预测 (Issue #430, plan slice S82; V2-UX-EVAL-010, EVAL-011, EVAL-014) --------------------------------------
+
+/** One published Book's 定价与首印 as the editor entered them for one 发稿版本. */
+export interface PublicationActualsProjection {
+  readonly priceFen: number;
+  readonly firstPrint: number;
+  /** The 发稿版本 they were entered for: 第 N 次. */
+  readonly publicationOrdinal: number;
+  readonly recordedAt: string;
+}
+
+/** One Book with a 发稿版本, as the central entry lists it. */
+export interface EvaluationCalibrationBookProjection {
+  readonly bookId: string;
+  readonly title: string;
+  readonly publicationVersionId: string;
+  readonly publicationOrdinal: number;
+  readonly designatedAt: string;
+  /** The newest actuals, and whether they are for the current 发稿版本; `null` while none were entered. */
+  readonly actuals: (PublicationActualsProjection & { readonly current: boolean }) | null;
+  /** How many entries the Book holds: the count the next one names. */
+  readonly entries: number;
+}
+
+/**
+ * 设置 › 评估校准与预测 (EVAL-014): calibration's progress toward its threshold and whether it applies, the prediction switch
+ * and what it waits for, and every Book with a 发稿版本 with its actuals.
+ */
+export const MAX_EVALUATION_CALIBRATION_BOOKS = 20;
+export interface EvaluationCalibrationCursor { readonly title: string; readonly bookId: string }
+export interface InspectEvaluationCalibrationInput {
+  readonly after: EvaluationCalibrationCursor | null;
+  readonly focusBookId: string | null;
+}
+export interface EvaluationCalibrationProjection {
+  readonly calibration: {
+    /** The editor's adjustments of AI7's starting scores; AI7's 初评 arrives with S81b, so there are none yet. */
+    readonly adjustments: number;
+    /**
+     * Whether AI7 gives 初评 scores the editor can adjust at all (Issue #430 review): not before S81b. Until then the page says
+     * so, whatever the count.
+     */
+    readonly initialScoresConnected: boolean;
+    readonly threshold: number;
+    readonly enabled: boolean;
+    readonly active: boolean;
+  };
+  readonly prediction: {
+    readonly booksWithActuals: number;
+    readonly threshold: number;
+    readonly enabled: boolean;
+    readonly available: boolean;
+  };
+  /** How many changes of the two switches the house holds: the count the next one names. */
+  readonly preferenceEntries: number;
+  readonly books: ReadonlyArray<EvaluationCalibrationBookProjection>;
+  readonly nextCursor: EvaluationCalibrationCursor | null;
+  /** One exact Book opened from Deliverables or still being edited, independent of the bounded list page. */
+  readonly focusedBook: EvaluationCalibrationBookProjection | null;
+}
+
+export interface RecordPublicationActualsInput {
+  readonly bookId: string;
+  /** The 发稿版本 the page listed: one designated since refuses the save, so numbers never land on a version nobody saw. */
+  readonly publicationVersionId: string;
+  readonly expectedEntries: number;
+  readonly priceFen: number;
+  readonly firstPrint: number;
+}
+
+export interface SetEvaluationPreferencesInput {
+  readonly expectedEntries: number;
+  readonly predictionEnabled: boolean;
+  readonly calibrationEnabled: boolean;
+}
+
 /** The drawer's `设为快速开始默认…` for one plan, and the rule that started its Task, when one did. */
 export interface TaskPlanDefaultRuleProjection {
   canSet: boolean;
@@ -5665,7 +5744,9 @@ export const PUBLICATION_NEEDS_MANUSCRIPT = '先导入稿件，再保存里程�
  * (V2-UX-EVAL-010). It is recorded now and offers no action until the evaluation features take it up.
  */
 export const PUBLICATION_ACTUALS_PROMPT_LABEL = '录入定价与首印' as const;
-export const PUBLICATION_ACTUALS_PROMPT_STATE = '随评估功能提供' as const;
+export const PUBLICATION_ACTUALS_PROMPT_STATE = '尚未录入' as const;
+/** The line once the editor entered the 发稿版本's actuals (Issue #430, S82). */
+export const PUBLICATION_ACTUALS_RECORDED_STATE = '已录入' as const;
 /** Words AI7 never uses for a Publication Version (V2-UX-PUB-009): no projection of 交付物 contains them. */
 export const PUBLICATION_FORBIDDEN_WORDS = ['已发布', '已发送', '已交付', '已确认送达'] as const;
 /** 发稿范围 and 依据, in characters (code points) once NFC-normalized and trimmed. */
@@ -5937,13 +6018,18 @@ export interface MaintenanceCaseResultProjection {
   completion: string;
 }
 
-/** The pending 录入定价与首印 line the current designation leaves; it offers no action yet. */
+/**
+ * The 录入定价与首印 line the current designation leaves (EVAL-010): `尚未录入` until the editor enters the actuals for this
+ * 发稿版本 in 设置 › 评估校准与预测 (Issue #430, S82), then `已录入` with them.
+ */
 export interface PublicationActualsPromptProjection {
   eventId: string;
   publicationVersionId: string;
   label: typeof PUBLICATION_ACTUALS_PROMPT_LABEL;
-  stateLabel: typeof PUBLICATION_ACTUALS_PROMPT_STATE;
+  stateLabel: typeof PUBLICATION_ACTUALS_PROMPT_STATE | typeof PUBLICATION_ACTUALS_RECORDED_STATE;
   recordedAt: string;
+  /** The actuals entered for this 发稿版本; `null` while none were. */
+  actuals: PublicationActualsProjection | null;
 }
 
 /**
@@ -7687,6 +7773,9 @@ export interface ServiceOperationMap {
   /** 记录学习准入决定, answered with the one material it decided. */
   decideLearningMaterial: { input: DecideLearningMaterialInput; output: LearningMaterialProjection };
   inspectFeedbackHistory: { input: Record<string, never>; output: FeedbackHistoryProjection };
+  inspectEvaluationCalibration: { input: InspectEvaluationCalibrationInput; output: EvaluationCalibrationProjection };
+  recordPublicationActuals: { input: RecordPublicationActualsInput; output: EvaluationCalibrationProjection };
+  setEvaluationPreferences: { input: SetEvaluationPreferencesInput; output: EvaluationCalibrationProjection };
   /**
    * AI7 Apply for Change Suggestions (Issue #408). The batch form is 确认应用 on 审阅's confirmation
    * strip (Issue #417): one Effect over exactly the suggestions the strip named, all or none.
@@ -8018,6 +8107,9 @@ export interface RendererApi {
   inspectLearningMaterial(input: { bookId: string; materialKey: string }): Promise<LearningMaterialProjection>;
   decideLearningMaterial(input: DecideLearningMaterialInput): Promise<LearningMaterialProjection>;
   inspectFeedbackHistory(): Promise<FeedbackHistoryProjection>;
+  inspectEvaluationCalibration(input?: InspectEvaluationCalibrationInput): Promise<EvaluationCalibrationProjection>;
+  recordPublicationActuals(input: RecordPublicationActualsInput): Promise<EvaluationCalibrationProjection>;
+  setEvaluationPreferences(input: SetEvaluationPreferencesInput): Promise<EvaluationCalibrationProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */
   applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): Promise<ManuscriptApplyCommandProjection>;

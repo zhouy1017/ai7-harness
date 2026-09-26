@@ -698,6 +698,8 @@ export class PublicationVersionStore {
         label: PUBLICATION_ACTUALS_PROMPT_LABEL,
         stateLabel: PUBLICATION_ACTUALS_PROMPT_STATE,
         recordedAt: prompt.recordedAt,
+        // The store sets what was entered for it (Issue #430, S82), from the ledger that holds it.
+        actuals: null,
       },
     };
   }

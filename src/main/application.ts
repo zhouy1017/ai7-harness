@@ -2786,6 +2786,41 @@ function registerRendererHandlers(
       return service.call('inspectLearningMaterial', { bookId: input.bookId, materialKey: input.materialKey });
     }),
   );
+  // 设置 › 评估校准与预测 (Issue #430, S82): house settings, bound to no Book route; each write is serialized with every other
+  // effect.
+  ipcMain.handle(IPC_CHANNELS.inspectEvaluationCalibration, (event, input: ServiceOperationMap['inspectEvaluationCalibration']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectEvaluationCalibration', { after: input.after, focusBookId: input.focusBookId });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.recordPublicationActuals, (event, input: ServiceOperationMap['recordPublicationActuals']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('recordPublicationActuals', {
+          bookId: input.bookId, publicationVersionId: input.publicationVersionId, expectedEntries: input.expectedEntries, priceFen: input.priceFen,
+          firstPrint: input.firstPrint,
+        });
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.setEvaluationPreferences, (event, input: ServiceOperationMap['setEvaluationPreferences']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('setEvaluationPreferences', {
+          expectedEntries: input.expectedEntries, predictionEnabled: input.predictionEnabled, calibrationEnabled: input.calibrationEnabled,
+        });
+      });
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.inspectFeedbackHistory, (event) =>
     envelope(async () => {
       requireSender(event);
