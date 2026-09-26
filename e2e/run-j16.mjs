@@ -946,7 +946,7 @@ async function main() {
         target: { kind: 'block', blockId: ${JSON.stringify(target)} } });
       const block = current.blocks.find((item) => item.blockId === ${JSON.stringify(target)}) ?? current.blocks.find((item) => item.kind === 'paragraph');
       const first = [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(block.text)][0].segment;
-      await window.ai7.createEditorialMark({ manuscriptId: current.manuscriptId, branchId: current.branchId,
+      await window.ai7.createEditorialMark({ manuscriptId: current.manuscriptId, branchId: current.branchId, windowStartBlockId: current.blocks[0].blockId,
         clientMarkId: crypto.randomUUID(), baseRevisionId: current.revisionId, expectedJournalSequence: current.journalSequence,
         blockId: block.blockId, baseBlockDigest: block.digest, fromGrapheme: 0, toGrapheme: 1, selectedText: first,
         kind: 'annotation', highlightColor: null, body: '位置返回测试', proposedText: null, rationale: null });
