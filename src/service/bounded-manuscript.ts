@@ -106,6 +106,7 @@ import {
   SERIES_KNOWLEDGE_SCHEMA_VERSION,
   STORE_VERSION_SCHEMA_VERSION,
   DATABASE_EXPORT_SCHEMA_VERSION,
+  SCHEDULED_BACKUP_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -182,6 +183,7 @@ import { SERIES_FOREIGN_KEYS, SERIES_SCHEMA_SQL, SERIES_TRIGGER_SQL } from './se
 import { SERIES_KNOWLEDGE_FOREIGN_KEYS, SERIES_KNOWLEDGE_SCHEMA_SQL, SERIES_KNOWLEDGE_TRIGGER_SQL } from './series-knowledge.js';
 import { DATA_VERSION_FOREIGN_KEYS, DATA_VERSION_SCHEMA_SQL, DATA_VERSION_TRIGGER_SQL } from './data-version.js';
 import { DATABASE_EXPORT_FOREIGN_KEYS, DATABASE_EXPORT_SCHEMA_SQL, DATABASE_EXPORT_TRIGGER_SQL } from './database-exports.js';
+import { SCHEDULED_BACKUP_FOREIGN_KEYS, SCHEDULED_BACKUP_SCHEMA_SQL, SCHEDULED_BACKUP_TRIGGER_SQL } from './scheduled-backups.js';
 import {
   MANUSCRIPT_EFFECT_FOREIGN_KEYS,
   MANUSCRIPT_EFFECT_SCHEMA_SQL,
@@ -1899,6 +1901,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...SERIES_KNOWLEDGE_FOREIGN_KEYS,
   ...DATA_VERSION_FOREIGN_KEYS,
   ...DATABASE_EXPORT_FOREIGN_KEYS,
+  ...SCHEDULED_BACKUP_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2525,6 +2528,7 @@ function requireManuscriptReimportTargetSchema(
   includeSeriesKnowledgeTables = false,
   includeDataVersionTables = false,
   includeDatabaseExportTables = false,
+  includeScheduledBackupTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2567,6 +2571,7 @@ function requireManuscriptReimportTargetSchema(
   includeSeriesKnowledgeTables ||= committed(SERIES_KNOWLEDGE_SCHEMA_SQL);
   includeDataVersionTables ||= committed(DATA_VERSION_SCHEMA_SQL);
   includeDatabaseExportTables ||= committed(DATABASE_EXPORT_SCHEMA_SQL);
+  includeScheduledBackupTables ||= committed(SCHEDULED_BACKUP_SCHEMA_SQL);
   requireExactSchema(
     db,
     {
@@ -2671,6 +2676,8 @@ function requireManuscriptReimportTargetSchema(
       ...(includeDataVersionTables ? DATA_VERSION_SCHEMA_SQL : {}),
       // Revision 55 (Issue #434, S86a) adds the database exports' preparations, approvals and receipts.
       ...(includeDatabaseExportTables ? DATABASE_EXPORT_SCHEMA_SQL : {}),
+      // Revision 56 (Issue #434, S86b) adds the 定期自动备份 switch's changes, the backups made and those removed.
+      ...(includeScheduledBackupTables ? SCHEDULED_BACKUP_SCHEMA_SQL : {}),
     },
     // The partial index that keeps one primary Manuscript per Book stands with the rebuilt relation, whatever the version.
     {
@@ -2714,6 +2721,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeSeriesKnowledgeTables ? SERIES_KNOWLEDGE_TRIGGER_SQL : {}),
       ...(includeDataVersionTables ? DATA_VERSION_TRIGGER_SQL : {}),
       ...(includeDatabaseExportTables ? DATABASE_EXPORT_TRIGGER_SQL : {}),
+      ...(includeScheduledBackupTables ? SCHEDULED_BACKUP_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5448,6 +5456,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeSeriesKnowledgeTables = false,
   includeDataVersionTables = false,
   includeDatabaseExportTables = false,
+  includeScheduledBackupTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5489,6 +5498,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeSeriesKnowledgeTables,
     includeDataVersionTables,
     includeDatabaseExportTables,
+    includeScheduledBackupTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5576,7 +5586,8 @@ export function initializeBoundedSchema(
       version === SERIES_SCHEMA_VERSION ||
       version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
       version === STORE_VERSION_SCHEMA_VERSION ||
-      version === DATABASE_EXPORT_SCHEMA_VERSION,
+      version === DATABASE_EXPORT_SCHEMA_VERSION ||
+      version === SCHEDULED_BACKUP_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5614,9 +5625,10 @@ export function initializeBoundedSchema(
       version === SERIES_SCHEMA_VERSION ||
       version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
       version === STORE_VERSION_SCHEMA_VERSION ||
-      version === DATABASE_EXPORT_SCHEMA_VERSION) {
+      version === DATABASE_EXPORT_SCHEMA_VERSION ||
+      version === SCHEDULED_BACKUP_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== DATABASE_EXPORT_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== SCHEDULED_BACKUP_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5658,6 +5670,7 @@ export function initializeBoundedSchema(
           version >= SERIES_KNOWLEDGE_SCHEMA_VERSION,
           version >= STORE_VERSION_SCHEMA_VERSION,
           version >= DATABASE_EXPORT_SCHEMA_VERSION,
+          version >= SCHEDULED_BACKUP_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);

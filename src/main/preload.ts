@@ -375,6 +375,9 @@ const api: RendererApi = Object.freeze({
   approveDatabaseExport: (input: Parameters<RendererApi['approveDatabaseExport']>[0]) =>
     invoke<ServiceOperationMap['approveDatabaseExport']['output']>(IPC_CHANNELS.approveDatabaseExport, input),
   inspectDatabaseExports: () => invoke<ServiceOperationMap['inspectDatabaseExports']['output']>(IPC_CHANNELS.inspectDatabaseExports, {}),
+  inspectScheduledBackups: () => invoke<ServiceOperationMap['inspectScheduledBackups']['output']>(IPC_CHANNELS.inspectScheduledBackups, {}),
+  setScheduledBackup: (input: Parameters<RendererApi['setScheduledBackup']>[0]) =>
+    invoke<ServiceOperationMap['setScheduledBackup']['output']>(IPC_CHANNELS.setScheduledBackup, input),
   cancelDatabaseExport: (input: Parameters<RendererApi['cancelDatabaseExport']>[0]) =>
     invoke<ServiceOperationMap['cancelDatabaseExport']['output']>(IPC_CHANNELS.cancelDatabaseExport, input),
   proposeSeriesKnowledge: (input: ServiceOperationMap['proposeSeriesKnowledge']['input']) =>

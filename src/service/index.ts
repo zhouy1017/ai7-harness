@@ -23,6 +23,7 @@ import { armSingleHostAllowance, installNodeNetworkDenial } from '../shared/netw
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../shared/protected-secret-identity.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, resolveDeveloperLiveLaunch, type DeveloperLiveRuntime } from './launch-policy.js';
 import { readSoftwareVersion } from './data-version.js';
+import { BACKUP_CHECK_INTERVAL_MS } from './scheduled-backups.js';
 import { decodeRequest, isSafeInteger, ProtocolError } from './request-frames.js';
 import { controlledConnectivity, hostConnectivity, type TaskPlanConnectivity } from './connectivity.js';
 import type { WaitingFor } from './task-plan.js';
@@ -592,6 +593,10 @@ async function dispatch(
       };
     case 'inspectDatabaseExports':
       return { id: request.id, ok: true, op: request.op, result: store.inspectDatabaseExports() };
+    case 'inspectScheduledBackups':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectScheduledBackups() };
+    case 'setScheduledBackup':
+      return { id: request.id, ok: true, op: request.op, result: await store.setScheduledBackup(request.input) };
     case 'cancelDatabaseExport':
       return { id: request.id, ok: true, op: request.op, result: store.cancelDatabaseExport(request.input.activityId) };
     case 'proposeSeriesKnowledge':
@@ -1238,6 +1243,7 @@ async function run(): Promise<void> {
   let analysisExecution: BaselineAnalysisExecutionOwner | undefined;
   let reviewRuns: ReviewRunDriver | undefined;
   let preflightTimer: NodeJS.Timeout | undefined;
+  let backupTimer: NodeJS.Timeout | undefined;
   try {
     const codeRoot = fileURLToPath(new URL('../', import.meta.url));
     const launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot, launchForm.trustedOperationalScope);
@@ -1359,6 +1365,10 @@ async function run(): Promise<void> {
     void connectivity.preflight().catch(() => undefined);
     preflightTimer = setInterval(() => void connectivity.preflight().catch(() => undefined), RECONNECT_PREFLIGHT_INTERVAL_MS);
     preflightTimer.unref();
+    // 定期自动备份 (Issue #434, S86b): asked at start, then hourly while the service runs; a backup is made only when one is due.
+    void openStore.runScheduledBackupIfDue().catch(() => undefined);
+    backupTimer = setInterval(() => void openStore.runScheduledBackupIfDue().catch(() => undefined), BACKUP_CHECK_INTERVAL_MS);
+    backupTimer.unref();
     for await (const frame of readFrames()) {
       let request: ServiceRequest;
       try {
@@ -1404,9 +1414,13 @@ async function run(): Promise<void> {
   } finally {
     clearInterval(parentLease);
     if (preflightTimer !== undefined) clearInterval(preflightTimer);
+    if (backupTimer !== undefined) clearInterval(backupTimer);
     process.removeListener('SIGTERM', stop);
     process.removeListener('SIGINT', stop);
     try {
+      // A backup under way stops at once and removes what it wrote, so none is left half-made when the store closes (Issue
+      // #434 review).
+      const backupsStopped = store?.stopScheduledBackups();
       // A database export under way stops as 取消导出 stops it, and leaves no package it was writing (Issue #434 review).
       const exportsStopped = store?.stopDatabaseExports();
       jobs?.dispose();
@@ -1416,6 +1430,7 @@ async function run(): Promise<void> {
       await analysisExecution?.dispose();
       await reviewRunsStopped;
       await harness?.dispose();
+      await backupsStopped;
       await exportsStopped;
     } finally {
       store?.close();

@@ -2984,6 +2984,23 @@ function registerRendererHandlers(
       });
     }),
   );
+  // 定期自动备份 (Issue #434, S86b): house-wide; turning the switch is serialized with every other effect.
+  ipcMain.handle(IPC_CHANNELS.inspectScheduledBackups, (event) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('inspectScheduledBackups', {});
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.setScheduledBackup, (event, input: Parameters<RendererApi['setScheduledBackup']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('setScheduledBackup', { enabled: input.enabled, expectedOrdinal: input.expectedOrdinal });
+      });
+    }),
+  );
   // 书系知识 (Issue #63, S28b): house-wide and serialized; a candidate that cites a manuscript span comes from the window that
   // holds that manuscript's capability, exactly as a mark does.
   ipcMain.handle(IPC_CHANNELS.proposeSeriesKnowledge, (event, input: ServiceOperationMap['proposeSeriesKnowledge']['input']) =>

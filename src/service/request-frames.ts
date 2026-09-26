@@ -750,8 +750,18 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectDataVersion':
     // 导出数据库 (Issue #434, S86a): the approved exports; it names nothing.
     case 'inspectDatabaseExports':
+    // 定期自动备份 (Issue #434, S86b): the switch and the backups kept; it names nothing.
+    case 'inspectScheduledBackups':
       requireInput(value.input, [], tentativeId);
       break;
+    // Turning 定期自动备份 on or off, from the state the editor saw.
+    case 'setScheduledBackup': {
+      const input = requireInput(value.input, ['enabled', 'expectedOrdinal'], tentativeId);
+      if (typeof input.enabled !== 'boolean' || !Number.isSafeInteger(input.expectedOrdinal) || (input.expectedOrdinal as number) < 0) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     // 导出数据库…: the destination, only ever the main process's, from the system Save dialog.
     case 'prepareDatabaseExport': {
       const input = requireInput(value.input, ['destination'], tentativeId);

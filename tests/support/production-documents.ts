@@ -1,9 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite';
 
 /**
- * The relations schema revisions 37 to 55 add (Issue #415, S66a to S66c; Issue #416, S67a and S67b; Issue #547; Issue #426,
+ * The relations schema revisions 37 to 56 add (Issue #415, S66a to S66c; Issue #416, S67a and S67b; Issue #547; Issue #426,
  * S68a; Issue #431, S83; Issue #427, S79a and S79c; Issue #429, S81a; Issue #94, S38; Issue #61, S26a and S26b; Issue #430, S82;
- * Issue #63, S28a and S28b; Issue #433, S85a; Issue #434, S86a), in drop order: the database exports (revision 55), the store's version records (revision 54), Series Knowledge's promotion decisions, revisions, candidates and items (revision 53),
+ * Issue #63, S28a and S28b; Issue #433, S85a; Issue #434, S86a and S86b), in drop order: the scheduled backups (revision 56), the database exports (revision 55), the store's version records (revision 54), Series Knowledge's promotion decisions, revisions, candidates and items (revision 53),
  * the Series membership changes and the Series (revision 52), the house's evaluation
  * preferences and the 定价与首印 entries (revision 51), the Learning Eligibility decisions (revision 50), the Proposal Decisions' feedback (revision 49), the analysis feedback signals (revision 48), the Evaluation Records' entries and the records (revision 47), the 资料库 items' decisions and the items (revision 46),
  * the imported review guideline versions (revision 45), each Book's people (revision 44), the 维护事项 of each 发稿版本 (revision 43), how a
@@ -15,6 +15,9 @@ import type { DatabaseSync } from 'node:sqlite';
  * validation accepts, exactly as a store an earlier build planted after this one would hold them.
  */
 export const PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER: ReadonlyArray<string> = [
+  'scheduled_backup_removals',
+  'scheduled_backups',
+  'backup_preferences',
   'database_export_receipts',
   'database_export_approvals',
   'database_export_preparations',
@@ -56,10 +59,10 @@ export const PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER: ReadonlyArray<string> = [
  * relation a migration adds starts empty.
  */
 export const OPENING_RECORD_RELATIONS: ReadonlyArray<string> = ['store_versions'];
-/** The relations revisions 37 to 55 add that a migration leaves empty: all but the store's version record. */
+/** The relations revisions 37 to 56 add that a migration leaves empty: all but the store's version record. */
 export const MIGRATION_EMPTY_RELATIONS: ReadonlyArray<string> = PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER.filter((relation) => !OPENING_RECORD_RELATIONS.includes(relation));
 
-/** Drop the relations revisions 37 to 55 added, foreign keys off around it. The caller sets the version. */
+/** Drop the relations revisions 37 to 56 added, foreign keys off around it. The caller sets the version. */
 export function dropProductionDocumentRelations(database: DatabaseSync): void {
   database.exec('PRAGMA foreign_keys = OFF');
   try {

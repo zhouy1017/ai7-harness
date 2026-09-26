@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 82 as const;
+export const SERVICE_PROTOCOL_VERSION = 83 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -147,6 +147,8 @@ export const IPC_CHANNELS = {
   chooseDatabaseExportDestination: 'ai7:j12:choose-database-export-destination',
   approveDatabaseExport: 'ai7:j12:approve-database-export',
   inspectDatabaseExports: 'ai7:j12:inspect-database-exports',
+  inspectScheduledBackups: 'ai7:j12:inspect-scheduled-backups',
+  setScheduledBackup: 'ai7:j12:set-scheduled-backup',
   cancelDatabaseExport: 'ai7:j12:cancel-database-export',
   applyChangeSuggestion: 'ai7:j05:apply-change-suggestion',
   applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
@@ -5879,6 +5881,56 @@ export interface DatabaseExportsProjection {
   readonly activity: DatabaseExportActivityProjection | null;
 }
 
+// ---- 设置 › 数据与存储 › 定期自动备份 (Issue #434, plan slice S86b; V2-UX-DSTO-018; ADR 0079 §1.4, §1.7) ---------------
+
+/** At most this many kept backups are listed, newest first. */
+export const MAX_SCHEDULED_BACKUPS_LISTED = 20;
+
+/** One kept backup: its file in the backup location, its size, when it was made and when its fourteen days end. */
+export interface ScheduledBackupProjection {
+  readonly backupId: string;
+  readonly fileName: string;
+  readonly byteLength: number;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+  /** Whether its file is still in the backup location. */
+  readonly present: boolean;
+}
+
+/** Why the service's last check made no backup, as the section states it (Issue #434 review). */
+export type ScheduledBackupFailureReason = 'no-space' | 'not-writable' | 'location-unavailable' | 'too-large' | 'other';
+
+export interface ScheduledBackupFailureProjection {
+  /** When the check that made no backup ran. */
+  readonly at: string;
+  readonly reason: ScheduledBackupFailureReason;
+}
+
+/** 定期自动备份: the switch, off by default; the fixed backup location; and the backups kept, newest first. */
+export interface ScheduledBackupsProjection {
+  readonly enabled: boolean;
+  /** How many times the switch has changed: what a change must name. */
+  readonly ordinal: number;
+  readonly location: string;
+  readonly keptDays: number;
+  readonly backups: ReadonlyArray<ScheduledBackupProjection>;
+  readonly total: number;
+  /** When the next backup is due while the switch is on; `null` while it is off. */
+  readonly nextDueAt: string | null;
+  /**
+   * A backup is being made on the service's background check, never inside a request (Issue #434 review): the section
+   * reads again until it is done.
+   */
+  readonly backingUp: boolean;
+  /** The last backup this service could not make, until one is made or the switch is turned off; `null` otherwise. */
+  readonly lastFailure: ScheduledBackupFailureProjection | null;
+}
+
+export interface SetScheduledBackupInput {
+  readonly enabled: boolean;
+  readonly expectedOrdinal: number;
+}
+
 export interface SeriesKnowledgePromotionProjection {
   readonly itemId: string;
   readonly revisionId: string;
@@ -8365,6 +8417,10 @@ export interface ServiceOperationMap {
   /** `按上述方式导出`: the one approval of one unchanged preparation, and the write it permits, carried out the same way. */
   approveDatabaseExport: { input: { preparationId: string }; output: DatabaseExportActivityProjection };
   inspectDatabaseExports: { input: Record<string, never>; output: DatabaseExportsProjection };
+  /** 定期自动备份 (Issue #434, S86b): the switch and the backups kept. */
+  inspectScheduledBackups: { input: Record<string, never>; output: ScheduledBackupsProjection };
+  /** Turn the switch from the state the editor saw; turning it on backs up at once when none was made in the day before. */
+  setScheduledBackup: { input: SetScheduledBackupInput; output: ScheduledBackupsProjection };
   /** 取消导出: stops the export under way until it begins putting the file in place. */
   cancelDatabaseExport: { input: { activityId: string }; output: DatabaseExportActivityProjection };
   /**
@@ -8725,6 +8781,8 @@ export interface RendererApi {
   chooseDatabaseExportDestination(): Promise<{ outcome: 'cancelled' } | { outcome: 'preparing'; activity: DatabaseExportActivityProjection }>;
   approveDatabaseExport(input: { preparationId: string }): Promise<DatabaseExportActivityProjection>;
   inspectDatabaseExports(): Promise<DatabaseExportsProjection>;
+  inspectScheduledBackups(): Promise<ScheduledBackupsProjection>;
+  setScheduledBackup(input: SetScheduledBackupInput): Promise<ScheduledBackupsProjection>;
   cancelDatabaseExport(input: { activityId: string }): Promise<DatabaseExportActivityProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */
