@@ -1021,7 +1021,8 @@ export class BaselineAnalysisStore {
    * A safe retry's own turn (Issue #286): the span of its attempt and unit that names the adaptation it carried out, found by
    * the store rather than by reading every span of the unit (Issue #286 review). An adaptation recorded before Issue #286 has
    * spans that name no adaptation; its retry's turn is then the one second attempt of its unit in its attempt recorded before
-   * the digests were kept, when there is exactly one — an explicit Resume could have added more, and then none is taken. Such
+   * the digests were kept, when there is exactly one, and only when it is the one adaptation of that unit in that attempt
+   * recorded before them (Issue #286 review). An explicit Resume could have added more of either, and then none is taken. Such
    * a turn keeps its payload digest and no unit-message digest.
    */
   #retryTurnOf(attemptId: string, unitOrdinal: number, adaptationId: string, recordedBefore286: boolean): BaselineAnalysisPlanAdaptationProjection['retry'] {
@@ -1040,6 +1041,12 @@ export class BaselineAnalysisStore {
     ).get(attemptId, unitOrdinal, adaptationId) as SqlRow | undefined;
     if (named !== undefined) return turn(named);
     if (!recordedBefore286) return null;
+    // Both sides are one: a second adaptation of the unit recorded before the digests could claim the same turn.
+    const adaptations = this.#db.prepare(
+      `SELECT count(*) AS total FROM (SELECT 1 FROM analysis_plan_adaptations
+       WHERE attempt_id = ? AND unit_ordinal = ? AND json_type(canonical_json, '$.firstUnitMessageDigest') IS NULL LIMIT 2)`,
+    ).get(attemptId, unitOrdinal) as SqlRow;
+    if (asNumber(adaptations.total) !== 1) return null;
     const earlier = this.#db.prepare(
       `SELECT ordinal, canonical_json FROM analysis_harness_spans
        WHERE attempt_id = ? AND unit_ordinal = ? AND json_type(canonical_json, '$.unitMessageDigest') IS NULL

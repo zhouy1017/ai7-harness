@@ -816,8 +816,45 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     });
     expect(recorded.retry!.payloadDigest).toMatch(/^[0-9a-f]{64}$/u);
     // Two such turns of the unit — as an explicit Resume could have left — name no one of them: none is taken.
-    rewrite('analysis_harness_spans', 5, (span) => ({ ...without(span, 'unitMessageDigest'), attemptIndex: 2 }));
+    let fifth: Record<string, unknown> | undefined;
+    rewrite('analysis_harness_spans', 5, (span) => {
+      fifth = span;
+      return { ...without(span, 'unitMessageDigest'), attemptIndex: 2 };
+    });
     expect((await reread()).adaptations[0]).toEqual({ ...recorded, firstUnitMessageDigest: null, retry: null, repetition: 'unrecorded' });
+    // Back to the one such turn, beside a second adaptation of the unit recorded before the digests were kept: that turn is
+    // taken for neither of them (Issue #286 review).
+    rewrite('analysis_harness_spans', 5, () => fifth!);
+    expect((await reread()).adaptations[0]!.retry).toEqual({ spanOrdinal: 6, unitMessageDigest: null, payloadDigest: recorded.retry!.payloadDigest });
+    // Another adaptation of the same attempt as the first, recorded before the digests were kept, for the unit given.
+    const plantAdaptation = (ordinal: number, unitOrdinal: number): void => {
+      const plant = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        const row = plant.prepare('SELECT * FROM analysis_plan_adaptations WHERE ordinal = 1').get() as Record<string, string | number>;
+        const another = { ...(parseCanonicalJson(String(row.canonical_json)) as Record<string, unknown>), adaptationId: randomUUID(), ordinal, unitOrdinal };
+        const stored = canonicalRecord(another);
+        plant.prepare(
+          `INSERT INTO analysis_plan_adaptations(adaptation_id, attempt_id, ordinal, unit_ordinal, adaptation_class, recorded_at, canonical_json, sha256)
+           VALUES (?, ?, ?, ?, 'safe-retry', ?, ?, ?)`,
+        ).run(another.adaptationId, row.attempt_id!, ordinal, unitOrdinal, row.recorded_at!, stored.json, stored.digest);
+      } finally {
+        plant.close();
+      }
+    };
+    plantAdaptation(2, 5);
+    const twice = await reread();
+    expect(twice.adaptations.map((adaptation) => [adaptation.unitOrdinal, adaptation.retry, adaptation.repetition])).toEqual([
+      [5, null, 'unrecorded'], [5, null, 'unrecorded'],
+    ]);
+    // The second kept since the digests were kept is found only by a span that names it, and leaves the one recorded before
+    // them its turn.
+    rewrite('analysis_plan_adaptations', 2, (adaptation) => ({ ...adaptation, firstUnitMessageDigest: null }));
+    expect((await reread()).adaptations.map((adaptation) => adaptation.retry)).toEqual([
+      { spanOrdinal: 6, unitMessageDigest: null, payloadDigest: recorded.retry!.payloadDigest }, null,
+    ]);
+    // One of another unit, recorded before the digests were kept, claims no turn of this one.
+    plantAdaptation(3, 6);
+    expect((await reread()).adaptations.map((adaptation) => [adaptation.unitOrdinal, adaptation.retry?.spanOrdinal ?? null])).toEqual([[5, 6], [5, null], [6, null]]);
   }, 300_000);
 
   it('supersedes a prepared plan on material drift, refuses the stale version, and reconfirms the next version on the same Task', async () => {
