@@ -341,13 +341,15 @@ describe('the words of 发稿', () => {
       maintenanceCase: {
         bookId: identity, caseId: identity, ordinal: 9_999_999, classification: 'correction', classificationLabel: '更正', consequence: wide(200),
         internalOnly: wide(120), target: { publicationVersionId: identity, ordinal: 9_999_999, label: designationLabel, revisionId: identity, revisionLabel: 'r9999999' },
-        status: 'unresolved', statusLabel: '等待另设发稿版本', nextStep: 'link-publication', revisions, revisionsTotal: 9_999_999,
+        status: 'unresolved', statusLabel: '等待另设发稿版本', nextStep: 'link-publication', revisions, revisionsTotal: 9_999_999, revisionsBefore: 9_999_940,
+        inspectedErrata: { errataVersionId: identity, version: 9_999_998, body: wide(MAX_MAINTENANCE_ERRATA_CHARACTERS), recordedAt: '2026-09-26T00:00:00.000Z' },
         errata: { errataVersionId: identity, version: 9_999_999, body: wide(MAX_MAINTENANCE_ERRATA_CHARACTERS), recordedAt: '2026-09-26T00:00:00.000Z' },
         conclusions: ['unresolved', 'complete'],
         choices: {
           proposals: Array.from({ length: MAX_MAINTENANCE_PROPOSALS_OFFERED }, () => ({
             markId: identity, label: `修改建议 · 「${wide(17)}」→「${wide(17)}」`, stateLabel: '已处理，未应用', createdAt: '2026-09-26T00:00:00.000Z',
           })),
+          publicationsAfter: 9_999_999,
           publications: Array.from({ length: MAX_MAINTENANCE_PUBLICATIONS_OFFERED }, () => ({ publicationVersionId: identity, label: designationLabel })),
         },
         expectedRevision: 9_999_999,
