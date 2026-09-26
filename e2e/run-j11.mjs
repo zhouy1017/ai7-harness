@@ -1861,13 +1861,28 @@ async function main() {
     await readHistory(renderer, (page) => page.entries.length === 4, 'open-history');
     await clickSelector(renderer, historyEntry('[data-feedback-origin="proposal-decision"][data-reason-state="given"]'), 'open-rejection');
     await waitFor(renderer, `(document.querySelector('.editorial-mark-layer [data-mark-card] [data-mark-reason]')?.textContent ?? '').startsWith('你的原因：证据不足')`, 'open-rejection-card', 120_000);
+    // After the handoff, the current reason belongs to the editor who revised it; the other three entries stay put.
+    await assertRenderer(renderer, `window.__j11.act('reason-revise')`, 'history-reason-revise');
+    await readDecision(renderer, (card) => card.prompt?.mode === 'revise', 'history-reason-revising');
+    await assertRenderer(renderer, `window.__j11.act('reason-own')`, 'history-reason-own');
+    await waitFor(renderer, `window.__j11.card()?.querySelector('[data-mark-form="decision-reason"] [data-mark-field="reason"]') !== null`, 'history-reason-form');
+    await assertRenderer(renderer, `window.__j11.write('reason', '交接后的新说明') && window.__j11.act('submit')`, 'history-reason-submit');
+    await waitFor(renderer, `${status} === '已改好原因；原来的原因仍留在记录里。'`, 'history-reason-saved');
     await pressEscape(renderer);
     await click(renderer, '返回图书工作概览', 'open-overview');
     await waitFor(renderer, `document.querySelector(${JSON.stringify(peopleSection)}) !== null`, 'open-overview-shown');
     await click(renderer, '返回图书列表', 'open-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'open-landing');
     await click(renderer, '质量与学习', 'open-quality');
-    await readHistory(renderer, (page) => page.entries.length === 4, 'open-history-again');
+    const revisedHistory = await readHistory(renderer, (page) => page.entries.length === 4, 'open-history-again');
+    requireJourney(revisedHistory.entries[0]?.[2] === '原因：交接后的新说明' && revisedHistory.people.length === 3 &&
+      revisedHistory.people.every((line) => line === firstPeople), 'history-revised-attribution');
+    await choose(renderer, '#feedback-filter-editor', THIRD_PEOPLE.laterEditors, 'history-new-editor');
+    await readHistory(renderer, (page) => page.entries.length === 1 && page.entries[0]?.[2] === '原因：交接后的新说明', 'history-new-editor-entry');
+    await choose(renderer, '#feedback-filter-editor', THIRD_PEOPLE.editors, 'history-old-editor');
+    await readHistory(renderer, (page) => page.entries.length === 3 && page.entries.every((entry) => entry[2] !== '原因：交接后的新说明'), 'history-old-editor-entries');
+    await choose(renderer, '#feedback-filter-editor', '', 'history-editor-all');
+    await readHistory(renderer, (page) => page.entries.length === 4, 'history-all-again');
     await clickSelector(renderer, historyEntry('[data-entry-id$="/entities/0"]'), 'open-entity');
     await waitFor(renderer, `(() => {
       const item = document.querySelector('[data-screen="book-analysis"] [data-analysis-item-key="entities/0"]');

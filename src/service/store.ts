@@ -5846,7 +5846,9 @@ export class EditorialStore {
       const reasons = new DecisionFeedbackLedger(this.#authority);
       const decisions = this.#authority.prepare(
         `SELECT m.book_id, m.mark_id, m.manuscript_id, m.branch_id, m.block_id, m.anchor_state, m.source_origin, m.source_label,
-                d.decision_id, d.disposition, d.recorded_at, r.reason, r.reason_source
+                d.decision_id, d.disposition, d.recorded_at, r.reason, r.reason_source, r.recorded_at AS reason_recorded_at,
+                (SELECT f.recorded_at FROM proposal_decision_feedback f WHERE f.decision_id = d.decision_id
+                 ORDER BY f.ordinal DESC LIMIT 1) AS feedback_recorded_at
          FROM editorial_marks m
          JOIN proposal_change_items i ON i.mark_id = m.mark_id
          JOIN proposal_item_decisions d ON d.item_id = i.item_id
@@ -5870,7 +5872,10 @@ export class EditorialStore {
           signal: DISPOSITION_LABELS[asString(row.disposition)] ?? asString(row.disposition),
           reason: feedbackReasonExcerpt(standing.reason),
           reasonState: standing.reasonState,
-          recordedAt: asString(row.recorded_at),
+          // Attribute the displayed current feedback to when it was given, not the older business decision.
+          recordedAt: standing.reasonRevisedAt ?? (row.reason_recorded_at == null
+            ? row.feedback_recorded_at == null ? asString(row.recorded_at) : asString(row.feedback_recorded_at)
+            : asString(row.reason_recorded_at)),
           target: {
             kind: 'mark', bookId, manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id), blockId: asString(row.block_id),
             markId: asString(row.mark_id), detached: row.anchor_state === 'detached',
