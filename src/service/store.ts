@@ -11095,7 +11095,7 @@ export class EditorialStore {
         } else {
           requireStore(input.conflictDisposition === 'none', 'SERIES_KNOWLEDGE_DISPOSITION_INVALID', '没有已披露的冲突可以保留。');
         }
-        return this.#seriesKnowledge.promote({ candidate: review.candidate, conflicts: Array.from(review.conflicts()), reuseScope: input.reuseScope, reviewDigest: input.reviewDigest });
+        return this.#seriesKnowledge.promote({ candidate: review.candidate, conflicts: review.conflicts(), reuseScope: input.reuseScope, reviewDigest: input.reviewDigest });
       });
       return {
         itemId: promoted.itemId,
@@ -11140,10 +11140,10 @@ export class EditorialStore {
       requireStore(item !== null && item.seriesId === series.seriesId, 'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识条目不存在。');
       const revision = this.#seriesKnowledge.revision(input.itemId, input.revisionId);
       requireStore(revision !== null, 'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识版本不存在。');
-      requireStore(Number.isSafeInteger(input.after) && input.after >= 0 && input.after <= revision.conflicts.length, 'SERIES_CURSOR_INVALID', '冲突列表位置无效。');
-      const { page, more } = weighedPage(revision.conflicts.slice(input.after, input.after + MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN + 1),
+      requireStore(Number.isSafeInteger(input.after) && input.after >= 0 && input.after <= revision.conflictCount, 'SERIES_CURSOR_INVALID', '冲突列表位置无效。');
+      const { page, more } = weighedPage(this.#seriesKnowledge.conflictsPage(revision.revisionId, revision.conflictCount, revision.conflictsDigest, input.after, MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN + 1),
         MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN, SERIES_KNOWLEDGE_PAGE_BYTES);
-      return { itemId: input.itemId, revisionId: input.revisionId, conflicts: page, total: revision.conflicts.length,
+      return { itemId: input.itemId, revisionId: input.revisionId, conflicts: page, total: revision.conflictCount,
         nextAfter: more ? input.after + page.length : null };
     });
   }
@@ -11326,7 +11326,7 @@ export class EditorialStore {
       authoring: revision.authoring,
       provenance: this.#knowledgeProvenance(revision.provenance),
       conflicts: revision.conflicts.slice(0, MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN),
-      conflictCount: revision.conflicts.length,
+      conflictCount: revision.conflictCount,
       reuseScope: revision.reuseScope,
       reuseLabel: SERIES_KNOWLEDGE_REUSE_LABELS[revision.reuseScope],
       decisionId: revision.decisionId,

@@ -46,7 +46,7 @@ const seriesKnowledgeReviewDigest = (input: Omit<Parameters<typeof seriesKnowled
   seriesKnowledgeReviewSummary({ ...input, conflicts: input.conflicts.map((entry) => ({ ...entry, line: '冲突行' })) }).digest;
 
 const revision = (ordinal: number, content: string): StoredItem['current'] => ({
-  revisionId: `revision-${ordinal}`, itemId: 'item', ordinal, content, authoring: 'editor', provenance: null, conflicts: [], reuseScope: 'series-tasks',
+  revisionId: `revision-${ordinal}`, itemId: 'item', ordinal, content, authoring: 'editor', provenance: null, conflicts: [], conflictCount: 0, conflictsDigest: sha256Hex('[]'), reuseScope: 'series-tasks',
   candidateVersionId: `version-${ordinal}`, decisionId: `decision-${ordinal}`, outcome: ordinal === 1 ? 'created' : 'updated', recordedAt: '2026-09-25T00:00:00.000Z',
 });
 const item: StoredItem = { itemId: 'item', seriesId: 'series', subject: '林默', knowledgeClass: 'characters', createdAt: '2026-09-25T00:00:00.000Z', current: revision(2, '二版'), revisionCount: 2 };

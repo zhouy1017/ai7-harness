@@ -1,3 +1,4 @@
+import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -169,7 +170,58 @@ describe('书系知识 over the real store', () => {
       expect([old.revisionId, old.total, old.conflicts.length, old.nextAfter]).toEqual([saved!.revisionId, 2500, 50, null]);
       reopened.markCleanShutdown();
     } finally { reopened.close(); }
+    const database = new DatabaseSync(databasePath());
+    try {
+      const row = database.prepare('SELECT canonical_json FROM series_knowledge_revisions WHERE revision_id = ?').get(saved!.revisionId) as { canonical_json: string };
+      const record = JSON.parse(row.canonical_json) as Record<string, unknown>;
+      expect([record.conflictCount, record.conflicts]).toEqual([2500, undefined]);
+      expect(Buffer.byteLength(row.canonical_json)).toBeLessThan(4096);
+      expect(database.prepare('SELECT count(*) total FROM series_knowledge_conflicts WHERE revision_id = ?').get(saved!.revisionId)?.total).toBe(2500);
+      // An old, off-page row is still checked, even if its own digest is recomputed: the revision binds the complete ordered set.
+      database.exec('DROP TRIGGER series_knowledge_conflicts_no_update');
+      const child = database.prepare('SELECT canonical_json FROM series_knowledge_conflicts WHERE revision_id = ? AND ordinal = 2400').get(saved!.revisionId) as { canonical_json: string };
+      const changed = canonicalRecord({ ...JSON.parse(child.canonical_json), line: '改写的冲突行' });
+      database.prepare('UPDATE series_knowledge_conflicts SET line = ?, canonical_json = ?, sha256 = ? WHERE revision_id = ? AND ordinal = 2400')
+        .run('改写的冲突行', changed.json, changed.digest, saved!.revisionId);
+      database.exec(SERIES_KNOWLEDGE_TRIGGER_SQL.series_knowledge_conflicts_no_update!);
+    } finally { database.close(); }
+    const tampered = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(refusal(() => tampered.inspectSeriesKnowledgeConflicts({ ...saved!, after: 0 }))).toMatch(/^SERIES_KNOWLEDGE_RECORD_INVALID:/);
+      tampered.markCleanShutdown();
+    } finally { tampered.close(); }
   }, 180_000);
+
+  it('rolls conflict rows back with a refused promotion and enforces their immutable parent binding', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const seriesId = store.createSeries({ title: '原子纳入', note: '' }).seriesId;
+      const input = { seriesId, target: { kind: 'new' as const, subject: '同名', knowledgeClass: 'canon' as const }, content: '候选内容', span: null };
+      const proposed = store.proposeSeriesKnowledge(input);
+      store.proposeSeriesKnowledge(input);
+      const review = store.inspectSeriesKnowledgeReview({ seriesId, candidateId: proposed.candidateId });
+      const database = new DatabaseSync(databasePath());
+      try { database.exec("CREATE TRIGGER refuse_test_promotion BEFORE INSERT ON series_knowledge_promotions BEGIN SELECT RAISE(ABORT, 'TEST_REFUSAL'); END"); }
+      finally { database.close(); }
+      const promotion = { seriesId, candidateId: proposed.candidateId, candidateVersion: 1, reviewDigest: review.reviewDigest,
+        reuseScope: 'series-tasks' as const, conflictDisposition: 'preserved' as const };
+      expect(() => store.promoteSeriesKnowledge(promotion)).toThrow();
+      expect(counts()).toMatchObject({ series_knowledge_items: 0, series_knowledge_revisions: 0, series_knowledge_conflicts: 0, series_knowledge_promotions: 0 });
+      const retry = new DatabaseSync(databasePath());
+      try { retry.exec('DROP TRIGGER refuse_test_promotion'); } finally { retry.close(); }
+      expect(store.promoteSeriesKnowledge(promotion).item.current.conflictCount).toBe(1);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+    const database = new DatabaseSync(databasePath());
+    try {
+      database.exec('PRAGMA foreign_keys = ON; BEGIN IMMEDIATE');
+      database.prepare('INSERT INTO series_knowledge_conflicts(revision_id, ordinal, kind, line, canonical_json, sha256) VALUES (?, 1, ?, ?, ?, ?)')
+        .run(randomUUID(), 'existing-item', '孤立冲突', '{}', 'f'.repeat(64));
+      expect(() => database.exec('COMMIT')).toThrow();
+      database.exec('ROLLBACK');
+      expect(() => database.exec('DELETE FROM series_knowledge_conflicts')).toThrowError(/SERIES_KNOWLEDGE_LEDGER_IMMUTABLE/u);
+    } finally { database.close(); }
+  }, 120_000);
 
   it('keeps saved-revision provenance checkpoint-relative across later edits, saves and restart', async () => {
     let seriesId: string;
@@ -236,7 +288,7 @@ describe('书系知识 over the real store', () => {
       ] as const) {
         expect(refusal(() => store.proposeSeriesKnowledge({ seriesId, ...(input as Omit<Parameters<EditorialStore['proposeSeriesKnowledge']>[0], 'seriesId'>) }))).toBe(expected);
       }
-      expect(counts()).toEqual({ series_knowledge_items: 0, series_knowledge_candidates: 0, series_knowledge_revisions: 0, series_knowledge_promotions: 0 });
+      expect(counts()).toEqual({ series_knowledge_items: 0, series_knowledge_candidates: 0, series_knowledge_revisions: 0, series_knowledge_conflicts: 0, series_knowledge_promotions: 0 });
 
       // One candidate cites the member's manuscript, one is the editor's own words; both propose 林默, so each discloses the other.
       const cited = span(store, member);
@@ -325,7 +377,7 @@ describe('书系知识 over the real store', () => {
       // Rejoining makes it reviewable again, and the preview says so.
       expect(store.previewSeriesMembershipChange({ seriesId, bookId: member.bookId, kind: 'add' }).groups[2]!.changes)
         .toEqual(['来自《书系成员》稿件、尚未纳入的 1 个书系知识候选项重新可以审阅纳入。']);
-      expect(counts()).toEqual({ series_knowledge_items: 1, series_knowledge_candidates: 6, series_knowledge_revisions: 3, series_knowledge_promotions: 3 });
+      expect(counts()).toEqual({ series_knowledge_items: 1, series_knowledge_candidates: 6, series_knowledge_revisions: 3, series_knowledge_conflicts: 2, series_knowledge_promotions: 3 });
       store.markCleanShutdown();
     } finally {
       store.close();
@@ -402,7 +454,7 @@ describe('书系知识 over the real store', () => {
       expect(after.filter((entry) => !/^series_knowledge/u.test(entry.name))).toEqual(before!);
       expect(after.filter((entry) => TABLES.includes(entry.name)).map((entry) => entry.sql))
         .toEqual(TABLES.slice().sort().map((table) => SERIES_KNOWLEDGE_SCHEMA_SQL[table as keyof typeof SERIES_KNOWLEDGE_SCHEMA_SQL]));
-      expect(counts()).toEqual({ series_knowledge_items: 0, series_knowledge_candidates: 0, series_knowledge_revisions: 0, series_knowledge_promotions: 0 });
+      expect(counts()).toEqual({ series_knowledge_items: 0, series_knowledge_candidates: 0, series_knowledge_revisions: 0, series_knowledge_conflicts: 0, series_knowledge_promotions: 0 });
     } finally {
       database.close();
     }
