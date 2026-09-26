@@ -575,7 +575,6 @@ async function main() {
     await tick(renderer, `${risk('facts-and-sources')} input[value="low"]`, 'evaluation-risk-facts');
     await tick(renderer, `${risk('law-rights-ethics-policy')} input[value="high"]`, 'evaluation-risk-legal');
     await fill(renderer, `${risk('law-rights-ethics-policy')} [data-evaluation-field="statement"]`, '书中写到真实人物，需要法务看过。', 'evaluation-risk-statement');
-    await fill(renderer, `${risk('facts-and-sources')} [data-evaluation-field="statement"]`, '已核对事实和来源，未发现未解决问题。', 'evaluation-low-risk-statement');
     const capped = await readEvaluation(renderer, (page) => page.record?.blocked === true, 'evaluation-capped');
     requireJourney(JSON.stringify(capped.record.conclusions) === JSON.stringify([['recommend', false, true], ['revise', false, false], ['defer', false, false], ['reject', false, false]]),
       'evaluation-recommend-waits', capped.record.conclusions);
@@ -591,6 +590,10 @@ async function main() {
       savedPage.record.conclusions[1][1] === true && savedPage.focus === 'save', 'evaluation-saved-words', savedPage);
 
     at('evaluation-finalize');
+    await clickSelector(renderer, '[data-evaluation-action="finalize"]', 'evaluation-missing-low-statement');
+    await waitFor(renderer, `${status} === '定稿前，要写明「事实与来源」的风险说明。'`, 'evaluation-low-statement-refused');
+    await readEvaluation(renderer, (page) => page.record?.state === 'editing' && page.record.entries === '2', 'evaluation-refusal-keeps-draft');
+    await fill(renderer, `${risk('facts-and-sources')} [data-evaluation-field="statement"]`, '已核对事实和来源，未发现未解决问题。', 'evaluation-low-risk-statement');
     // 定稿: the version reads as it was, with the actor and the time, and 重新评估 begins the next.
     await clickSelector(renderer, '[data-evaluation-action="finalize"]', 'evaluation-finalize');
     await waitFor(renderer, `${status} === '第 1 版评估已定稿。'`, 'evaluation-finalized-status');

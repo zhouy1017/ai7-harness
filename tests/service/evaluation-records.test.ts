@@ -98,10 +98,11 @@ describe('②C 评估 over the real store', () => {
 
       // 保存评估: 66.5 out of the 80 still rated, one item 不评; the conclusion the editor chose.
       const saved = save(1, scored([18, 16.5, 15, 17, '市场资料不足'], {
-        risks: RISKS('high'), readiness: ['第三章结尾需要重写', ''], strengths: ['人物鲜明'], weaknesses: ['节奏偏慢'], verdict: '整体可用，需修改。', conclusion: 'revise',
+        risks: RISKS('high').map((risk, index) => index === 0 ? { ...risk, statement: null } : risk), readiness: ['第三章结尾需要重写', ''], strengths: ['人物鲜明'], weaknesses: ['节奏偏慢'], verdict: '整体可用，需修改。', conclusion: 'revise',
       })).record!;
       expect(saved).toMatchObject({ state: 'editing', entries: 2, total: { score: 66.5, fullMarks: 80, notRated: 1, unscored: 0 }, conclusion: 'revise', recommendationBlocked: true });
       expect(saved.content.readiness).toEqual(['第三章结尾需要重写']);
+      expect(saved.content.risks[0]?.statement).toBeNull();
       expect(await refusal(() => save(2, saved.content))).toBe('EVALUATION_UNCHANGED:评估没有变化。');
       expect(await refusal(() => save(1, scored([18])))).toBe('EVALUATION_MOVED:这一版评估刚在另一个窗口保存过；请看过最新的再改。');
       // A version belongs to its Book.
