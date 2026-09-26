@@ -29,54 +29,54 @@ export interface ExemplarDesignationReading {
   readonly withdrawnAt: string | null;
 }
 
-/** One house type's document of a Book, with its every Delivery Record newest first. */
+interface ExemplarDeliveryReading {
+  readonly version: number;
+  readonly revisionId: string;
+  readonly revisionDigest: string;
+  readonly recipientLabel: string;
+  readonly recordedAt: string;
+}
+
+/** One house type's document, with streamed Delivery Records in either required order. */
 export interface ExemplarDocumentReading {
   readonly typeId: string;
   readonly typeLabel: string;
   readonly documentId: string;
-  readonly deliveries: ReadonlyArray<{
-    readonly version: number;
-    readonly revisionId: string;
-    readonly revisionDigest: string;
-    readonly recipientLabel: string;
-    readonly recordedAt: string;
-  }>;
+  readonly deliveries: (order: 'latest' | 'version') => Iterable<ExemplarDeliveryReading>;
 }
 
 /** What 范例 reads, each through the owner of the record. */
 export interface ExemplarSources {
   /** The Books with a 发稿版本, by title, after the cursor, at most `limit` of them. */
   books(after: ExemplarBookCursor | null, limit: number): ReadonlyArray<{ readonly bookId: string; readonly title: string }>;
-  /** Every designation of the Book, oldest first. */
-  designations(bookId: string): ReadonlyArray<ExemplarDesignationReading>;
+  /** Validate the designation ledger, retaining its latest entry and exact time lookup only. */
+  archive(bookId: string): { latest: ExemplarDesignationReading; archivedAt(at: string): string | null };
   documents(bookId: string): ReadonlyArray<ExemplarDocumentReading>;
   /** Who the Book is attributed to, as its people read now. */
   people(bookId: string): { readonly authors: ReadonlyArray<string>; readonly editors: ReadonlyArray<string> };
 }
 
-/**
- * When a delivery recorded at `at` came into 范例: at once while a designation stood in AI7 — the Book's newest designation
- * then, which no 撤回 recorded by then holds — and otherwise at the next designation after it, as one delivered before the
- * first comes in at the first. `null` while none has come since: delivered after a 撤回, it waits for another 发稿版本.
- * The instants are ISO 8601 in UTC, as the records write them, so they compare as text.
- */
-export function exemplarArchivedAt(at: string, designations: ReadonlyArray<ExemplarDesignationReading>): string | null {
-  const standing = designations.filter((designation) => designation.createdAt <= at).at(-1);
-  if (standing !== undefined && (standing.withdrawnAt === null || standing.withdrawnAt > at)) return at;
-  return designations.find((designation) => designation.createdAt > at)?.createdAt ?? null;
-}
-
 /** One document's exemplar: the version its latest delivery that came into 范例 named, or `null` when none came in. */
-function exemplarOf(document: ExemplarDocumentReading, designations: ReadonlyArray<ExemplarDesignationReading>): ExemplarProjection | null {
-  const admitted = document.deliveries.flatMap((delivery) => {
-    const archivedAt = exemplarArchivedAt(delivery.recordedAt, designations);
-    return archivedAt === null ? [] : [{ delivery, archivedAt }];
-  });
-  const latest = admitted[0];
+function exemplarOf(document: ExemplarDocumentReading, archive: ReturnType<ExemplarSources['archive']>): ExemplarProjection | null {
+  let latest: { delivery: ExemplarDeliveryReading; archivedAt: string } | undefined;
+  // Visit every record, even after finding the latest, so old corruption cannot disappear behind a page.
+  for (const delivery of document.deliveries('latest')) {
+    const archivedAt = archive.archivedAt(delivery.recordedAt);
+    if (latest === undefined && archivedAt !== null) latest = { delivery, archivedAt };
+  }
   if (latest === undefined) return null;
   const { delivery, archivedAt } = latest;
-  const earlier = Array.from(new Set(admitted.slice(1).map((entry) => entry.delivery.version).filter((version) => version !== delivery.version)))
-    .sort((a, b) => a - b);
+  const earlier: number[] = [];
+  let earlierVersionCount = 0;
+  let lastVersion: number | undefined;
+  // Version ordering makes duplicate delivery records adjacent; no history-sized Set is needed.
+  for (const entry of document.deliveries('version')) {
+    if (entry.version === delivery.version || entry.version === lastVersion || archive.archivedAt(entry.recordedAt) === null) continue;
+    lastVersion = entry.version;
+    earlierVersionCount += 1;
+    earlier.push(entry.version);
+    if (earlier.length > MAX_EXEMPLAR_EARLIER_VERSIONS) earlier.shift();
+  }
   return {
     documentId: document.documentId,
     typeId: document.typeId,
@@ -87,8 +87,8 @@ function exemplarOf(document: ExemplarDocumentReading, designations: ReadonlyArr
     deliveredTo: delivery.recipientLabel,
     deliveredAt: delivery.recordedAt,
     archivedAt,
-    earlierVersionCount: earlier.length,
-    earlierVersions: earlier.slice(-MAX_EXEMPLAR_EARLIER_VERSIONS),
+    earlierVersionCount,
+    earlierVersions: earlier,
     eligibility: 'house-only',
   };
 }
@@ -97,8 +97,8 @@ function exemplarOf(document: ExemplarDocumentReading, designations: ReadonlyArr
 export function readExemplars(sources: ExemplarSources, after: ExemplarBookCursor | null): ExemplarsProjection {
   const page = sources.books(after, MAX_EXEMPLAR_BOOKS_PAGE + 1);
   const books = page.slice(0, MAX_EXEMPLAR_BOOKS_PAGE).map((book): ExemplarBookProjection => {
-    const designations = sources.designations(book.bookId);
-    const latest = designations.at(-1)!;
+    const archive = sources.archive(book.bookId);
+    const latest = archive.latest;
     const attribution = sources.people(book.bookId);
     return {
       bookId: book.bookId,
@@ -109,7 +109,7 @@ export function readExemplars(sources: ExemplarSources, after: ExemplarBookCurso
       designatedAt: latest.createdAt,
       withdrawn: latest.withdrawnAt !== null,
       exemplars: sources.documents(book.bookId).flatMap((document) => {
-        const exemplar = exemplarOf(document, designations);
+        const exemplar = exemplarOf(document, archive);
         return exemplar === null ? [] : [exemplar];
       }),
     };

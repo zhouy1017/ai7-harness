@@ -5453,12 +5453,12 @@ export class EditorialStore {
     if (after !== null) {
       requireStore(UUID_PATTERN.test(after.bookId) && after.title === safeTitle(after.title), 'EXEMPLAR_CURSOR_INVALID', '范例列表位置无效。');
     }
-    return this.#publicationCall(() => readExemplars({
+    return this.#documentCall(() => this.#publicationCall(() => readExemplars({
       books: (cursor, limit) => this.#publicationVersions.designatedBooks(cursor, limit),
-      designations: (bookId) => this.#publicationVersions.history(bookId),
-      documents: (bookId) => this.#documentCall(() => this.#productionDocuments.deliveryReadings(bookId)),
+      archive: (bookId) => this.#publicationVersions.exemplarArchive(bookId),
+      documents: (bookId) => this.#productionDocuments.deliveryReadings(bookId),
       people: (bookId) => this.#peopleCall(() => this.#bookPeople.current(bookId)),
-    }, after));
+    }, after)));
   }
 
   /** 导入新版本's first step: the picked file's clauses as the next version of one document would read them; nothing is recorded. */

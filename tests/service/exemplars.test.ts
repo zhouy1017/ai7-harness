@@ -215,6 +215,16 @@ describe('知识库 › 范例 over the real store', () => {
       const exemplar = store.inspectExemplars(null).books[0]!.exemplars[0]!;
       expect([exemplar.version, exemplar.earlierVersionCount, exemplar.earlierVersions])
         .toEqual([versions, versions - 1, Array.from({ length: MAX_EXEMPLAR_EARLIER_VERSIONS }, (_, index) => versions - MAX_EXEMPLAR_EARLIER_VERSIONS + index)]);
+      // Redelivering an older version makes it current without counting duplicate deliveries as distinct versions.
+      for (let duplicate = 0; duplicate < 2; duplicate += 1) {
+        await store.recordProductionDocumentDelivery({
+          bookId: book.bookId, documentId: news.documentId, version: { kind: 'saved', revisionId: news.versions[0]!.revisionId },
+          recipient: { kind: 'editorial', custom: null }, note: null,
+        });
+      }
+      const redelivered = store.inspectExemplars(null).books[0]!.exemplars[0]!;
+      expect([redelivered.version, redelivered.earlierVersionCount, redelivered.earlierVersions])
+        .toEqual([1, versions - 1, Array.from({ length: MAX_EXEMPLAR_EARLIER_VERSIONS }, (_, index) => versions - MAX_EXEMPLAR_EARLIER_VERSIONS + index + 1)]);
       store.markCleanShutdown();
     } finally {
       store.close();
