@@ -2738,7 +2738,7 @@ function registerRendererHandlers(
           requireAuthority();
           const route = requireCurrentBookRoute(owned);
           const routeGeneration = owned.routeGeneration;
-          const result = await service.call('inspectMaintenanceCase', { bookId: route.bookId, caseId: input.caseId });
+          const result = await service.call('inspectMaintenanceCase', { ...input, bookId: route.bookId });
           requireCurrentRouteGeneration(owned, routeGeneration);
           requireMaintenanceOfRoute(route, result.bookId);
           return result;

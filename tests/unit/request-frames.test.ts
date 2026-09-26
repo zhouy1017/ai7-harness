@@ -440,6 +440,7 @@ describe('decodeRequest accepts well-formed frames', () => {
     const bookId = randomUUID();
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
       { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID() } },
+      { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID(), beforeRevision: 61, afterPublicationOrdinal: 30, errataVersionId: randomUUID() } },
       { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 22 } },
       { op: 'recordMaintenanceCase', input: { bookId, publicationVersionId: randomUUID(), classification: 'errata', reason: '读者来信指出有误', evidence: null } },
       { op: 'recordMaintenanceCase', input: { bookId, publicationVersionId: randomUUID(), classification: 'withdrawal', reason: '𠀀'.repeat(500), evidence: '质检单' } },
@@ -462,6 +463,9 @@ describe('decodeRequest accepts well-formed frames', () => {
     const refused: ReadonlyArray<{ op: string; input: unknown }> = [
       { op: 'inspectMaintenanceCase', input: { bookId } },
       { op: 'inspectMaintenanceCase', input: { bookId, caseId: 'first' } },
+      ...[0, -1, 1.5, '2'].map((beforeRevision) => ({ op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID(), beforeRevision } })),
+      { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID(), afterPublicationOrdinal: -1 } },
+      { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID(), errataVersionId: 'first' } },
       { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID() } },
       { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 0 } },
       { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 2.5 } },

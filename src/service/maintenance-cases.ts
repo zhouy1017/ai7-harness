@@ -333,7 +333,11 @@ export class MaintenanceCases {
     requireMaintenance(isRecord(input) && typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) &&
       typeof input.caseId === 'string' && UUID_PATTERN.test(input.caseId), 'MAINTENANCE_INVALID', '维护事项请求无效。');
     requireMaintenance(this.#present(), 'MAINTENANCE_NOT_FOUND', '这个维护事项不属于这本书。');
-    return this.#projection(this.#case(input.bookId, input.caseId));
+    requireMaintenance((input.beforeRevision === undefined || (Number.isSafeInteger(input.beforeRevision) && input.beforeRevision >= 1)) &&
+      (input.afterPublicationOrdinal === undefined || (Number.isSafeInteger(input.afterPublicationOrdinal) && input.afterPublicationOrdinal >= 0)) &&
+      (input.errataVersionId === undefined || (typeof input.errataVersionId === 'string' && UUID_PATTERN.test(input.errataVersionId))),
+    'MAINTENANCE_INVALID', '维护事项请求无效。');
+    return this.#projection(this.#case(input.bookId, input.caseId), input);
   }
 
   /**
@@ -518,7 +522,7 @@ export class MaintenanceCases {
   }
 
   /** The case's revisions in order, each verified and chained to the one before it. */
-  #revisions(record: CaseRow): RevisionState {
+  #revisions(record: CaseRow, beforeRevision = Number.MAX_SAFE_INTEGER): RevisionState {
     const rows = this.#db.prepare('SELECT * FROM maintenance_case_revisions WHERE case_id = ? ORDER BY revision').iterate(record.caseId);
     let prior: string | null = null;
     let total = 0;
@@ -545,8 +549,10 @@ export class MaintenanceCases {
       total += 1;
       latest = revision;
       steps.add(revision.step);
-      listed.push(revision);
-      if (listed.length > MAX_MAINTENANCE_REVISIONS_LISTED) listed.shift();
+      if (revision.revision < beforeRevision) {
+        listed.push(revision);
+        if (listed.length > MAX_MAINTENANCE_REVISIONS_LISTED) listed.shift();
+      }
     }
     requireMaintenance(latest !== null, 'MAINTENANCE_RECORD_INVALID', '维护事项缺少它的第一条记录。');
     return { latest, listed, total, steps };
@@ -582,7 +588,7 @@ export class MaintenanceCases {
   }
 
   /** The Book's designations after the target, in order: what 关联发稿版本 may name, less the ones already linked. */
-  #successors(record: CaseRow, selectedId: string | null = null): Designation[] {
+  #successors(record: CaseRow, selectedId: string | null = null, afterOrdinal = 0): Designation[] {
     const target = this.#designation(record.bookId, record.publicationVersionId)!;
     return (this.#db.prepare(
       `SELECT pv.publication_version_id, pv.ordinal, pv.created_at, pv.revision_id, pv.scope, pv.sha256, mr.revision_label, mv.label milestone_label
@@ -594,7 +600,7 @@ export class MaintenanceCases {
          AND NOT EXISTS (SELECT 1 FROM maintenance_case_revisions linked
            WHERE linked.case_id = ? AND linked.link_publication_version_id = pv.publication_version_id)
        ORDER BY pv.ordinal LIMIT ?`,
-    ).all(record.bookId, target.ordinal, selectedId, selectedId, record.caseId, MAX_MAINTENANCE_PUBLICATIONS_OFFERED) as SqlRow[]).map(designationOf);
+    ).all(record.bookId, Math.max(target.ordinal, afterOrdinal), selectedId, selectedId, record.caseId, MAX_MAINTENANCE_PUBLICATIONS_OFFERED + 1) as SqlRow[]).map(designationOf);
   }
 
   /** The Book's manuscript's 修改建议 made after the designation, newest first: what 关联修改建议 may name, less the linked. */
@@ -638,12 +644,21 @@ export class MaintenanceCases {
     return null;
   }
 
-  #projection(record: CaseRow): MaintenanceCaseProjection {
-    const revisions = this.#revisions(record);
+  #projection(record: CaseRow, input: Partial<InspectMaintenanceCaseInput> = {}): MaintenanceCaseProjection {
+    const revisions = this.#revisions(record, input.beforeRevision);
     const latest = revisions.latest;
     const target = this.#designation(record.bookId, record.publicationVersionId)!;
     const open = latest.status !== 'complete';
     const listed = revisions.listed;
+    const publications = open && (record.classification === 'correction' || record.classification === 'supersession' || record.classification === 'reissue')
+      ? this.#successors(record, null, input.afterPublicationOrdinal) : [];
+    let inspectedErrata = null;
+    if (input.errataVersionId !== undefined) {
+      const row = this.#db.prepare('SELECT * FROM maintenance_errata_versions WHERE case_id = ? AND errata_version_id = ?')
+        .get(record.caseId, input.errataVersionId) as SqlRow | undefined;
+      requireMaintenance(row !== undefined, 'MAINTENANCE_NOT_FOUND', '这个勘误版本不属于当前维护事项。');
+      inspectedErrata = this.#errataOf(row, record.caseId);
+    }
     return {
       bookId: record.bookId,
       caseId: record.caseId,
@@ -670,14 +685,16 @@ export class MaintenanceCases {
         digest: revision.digest,
       })),
       revisionsTotal: revisions.total,
+      revisionsBefore: (listed[0]?.revision ?? 1) > 1 ? listed[0]!.revision : null,
+      inspectedErrata,
       errata: this.#errata(record.caseId),
       conclusions: !open ? [] : awaitsDesignation(record.classification, revisions) ? ['unresolved'] : ['unresolved', 'complete'],
       choices: {
         proposals: open && record.classification === 'correction' ? this.#proposals(record) : [],
-        publications: open && (record.classification === 'correction' || record.classification === 'supersession' || record.classification === 'reissue')
-          ? this.#successors(record)
-            .map((designation) => ({ publicationVersionId: designation.publicationVersionId, label: designation.label }))
-          : [],
+        publications: publications.slice(0, MAX_MAINTENANCE_PUBLICATIONS_OFFERED)
+          .map((designation) => ({ publicationVersionId: designation.publicationVersionId, label: designation.label })),
+        publicationsAfter: publications.length > MAX_MAINTENANCE_PUBLICATIONS_OFFERED
+          ? publications[MAX_MAINTENANCE_PUBLICATIONS_OFFERED - 1]!.ordinal : null,
       },
       expectedRevision: latest.revision,
       technical: { caseDigest: record.digest },

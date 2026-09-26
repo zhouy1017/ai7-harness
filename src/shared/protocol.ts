@@ -5080,6 +5080,8 @@ export interface MaintenanceCaseProjection {
   nextStep: MaintenanceNextStep | null;
   revisions: ReadonlyArray<MaintenanceCaseRevisionProjection>;
   revisionsTotal: number;
+  revisionsBefore: number | null;
+  inspectedErrata: null | { errataVersionId: string; version: number; body: string; recordedAt: string };
   /** The newest 勘误 version, with how many there are; `null` before the first. */
   errata: null | { errataVersionId: string; version: number; body: string; recordedAt: string };
   /**
@@ -5091,6 +5093,7 @@ export interface MaintenanceCaseProjection {
   choices: {
     proposals: ReadonlyArray<{ markId: string; label: string; stateLabel: string; createdAt: string }>;
     publications: ReadonlyArray<{ publicationVersionId: string; label: string }>;
+    publicationsAfter: number | null;
   };
   /** The revision the editor read: the next step names it, and a step against another is refused. */
   expectedRevision: number;
@@ -5109,6 +5112,9 @@ export interface RecordMaintenanceCaseInput {
 export interface InspectMaintenanceCaseInput {
   bookId: string;
   caseId: string;
+  beforeRevision?: number;
+  afterPublicationOrdinal?: number;
+  errataVersionId?: string;
 }
 
 /** `更早的维护事项…`: the older cases of one designation of the route's Book, before the oldest one shown. */

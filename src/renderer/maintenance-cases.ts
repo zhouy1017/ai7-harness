@@ -35,7 +35,6 @@ import {
   MAINTENANCE_PROPOSALS_LEGEND,
   MAINTENANCE_PUBLICATIONS_LEGEND,
   MAINTENANCE_REASON_LABEL,
-  MAINTENANCE_REVISIONS_TRUNCATED,
   MAINTENANCE_STATUS_LINES,
   MAINTENANCE_TECHNICAL_TERMS,
   MAINTENANCE_TIMELINE_LABEL,
@@ -98,6 +97,7 @@ interface Draft {
 }
 
 interface OpenCase {
+  inspection?: Omit<Parameters<RendererApi['inspectMaintenanceCase']>[0], 'caseId'>;
   caseId: string;
   /** The designation whose item holds the case. */
   publicationVersionId: string;
@@ -364,11 +364,26 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
       item.append(line);
       if (revision.reason !== null) item.append(el('span', 'maintenance-revision-reason', maintenanceReasonLine(revision.step, revision.reason)));
       if (revision.evidence !== null) item.append(el('span', 'field-note maintenance-revision-evidence', maintenanceEvidenceLine(revision.evidence)));
-      if (revision.link !== null) item.append(el('span', 'field-note maintenance-revision-link', maintenanceLinkLine(revision.link)));
+      if (revision.link?.kind === 'errata') {
+        const link = el('button', 'quiet maintenance-revision-link', `查看${maintenanceLinkLine(revision.link)}`);
+        link.type = 'button';
+        link.disabled = working;
+        const versionId = revision.link.errataVersionId;
+        link.addEventListener('click', () => void inspectPage(current, 'errataVersionId', versionId));
+        item.append(link);
+      } else if (revision.link !== null) item.append(el('span', 'field-note maintenance-revision-link', maintenanceLinkLine(revision.link)));
       timeline.append(item);
     }
     panel.append(timeline);
-    if (projection.revisionsTotal > projection.revisions.length) panel.append(el('p', 'field-note', MAINTENANCE_REVISIONS_TRUNCATED));
+    if (projection.revisionsBefore !== null) panel.append(inspectionButton(current, '更早的记录', 'beforeRevision', projection.revisionsBefore));
+    if (current.inspection?.beforeRevision !== undefined) panel.append(inspectionButton(current, '返回最新记录', 'beforeRevision', null));
+    if (projection.inspectedErrata !== null) {
+      const inspected = el('section', 'maintenance-inspected-errata');
+      inspected.append(el('h6', undefined, `查看勘误 · 版本 ${projection.inspectedErrata.version}`),
+        el('p', 'maintenance-inspected-errata-body', projection.inspectedErrata.body),
+        inspectionButton(current, '关闭勘误版本', 'errataVersionId', null));
+      panel.append(inspected);
+    }
     if (projection.errata !== null) {
       const errata = el('div', 'maintenance-errata');
       errata.append(el('p', 'maintenance-errata-heading', maintenanceErrataHeading(projection.errata.version)), el('p', 'maintenance-errata-body', projection.errata.body));
@@ -473,6 +488,8 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
       if (projection.choices.publications.length === 0) form.append(el('p', 'field-note maintenance-no-choice', MAINTENANCE_NO_PUBLICATIONS));
       else form.append(radios(MAINTENANCE_PUBLICATIONS_LEGEND, projection.choices.publications.map((publication) => ({ value: publication.publicationVersionId, label: publication.label, detail: null })),
         current.choice, (value) => { current.choice = value; }));
+      if (projection.choices.publicationsAfter !== null) form.append(inspectionButton(current, '后续发稿版本', 'afterPublicationOrdinal', projection.choices.publicationsAfter));
+      if (current.inspection?.afterPublicationOrdinal !== undefined) form.append(inspectionButton(current, '返回最早的可选版本', 'afterPublicationOrdinal', null));
     } else {
       if (panel === 'conclude') {
         // Only the conclusions the case may record now: a 替代 or 再版 still waiting for its version is never 已完成.
@@ -561,13 +578,40 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     await read(current, caseSelector(summary.caseId, '.maintenance-case-heading'));
   }
 
+  type InspectionKey = 'beforeRevision' | 'afterPublicationOrdinal' | 'errataVersionId';
+
+  function inspectionButton(current: OpenCase, label: string, key: InspectionKey, value: number | string | null): HTMLButtonElement {
+    const button = el('button', 'quiet', label);
+    button.type = 'button';
+    button.disabled = working;
+    button.dataset['maintenanceInspect'] = key;
+    button.addEventListener('click', () => void inspectPage(current, key, value));
+    return button;
+  }
+
+  async function inspectPage(current: OpenCase, key: InspectionKey, value: number | string | null): Promise<void> {
+    if (destroyed || working || open !== current) return;
+    const next = { ...current.inspection };
+    if (value === null) delete next[key];
+    else if (key === 'errataVersionId' && typeof value === 'string') next.errataVersionId = value;
+    else if (key === 'beforeRevision' && typeof value === 'number') next.beforeRevision = value;
+    else if (key === 'afterPublicationOrdinal' && typeof value === 'number') next.afterPublicationOrdinal = value;
+    else return;
+    current.inspection = next;
+    if (key === 'afterPublicationOrdinal') current.choice = null;
+    working = true;
+    await read(current, caseSelector(current.caseId, '.maintenance-case-heading'));
+    working = false;
+    if (!destroyed && open === current) options.redraw();
+  }
+
   /** Read one case again and draw it; an answer the editor moved past never paints. */
   async function read(current: OpenCase, focus: string | null): Promise<void> {
     const request = ++ticket;
     options.redraw();
     options.setStatus(MAINTENANCE_STATUS_LINES.reading, 'busy');
     try {
-      const projection = await api.inspectMaintenanceCase({ caseId: current.caseId });
+      const projection = await api.inspectMaintenanceCase({ ...current.inspection, caseId: current.caseId });
       if (destroyed || open !== current || request !== ticket) return;
       if (projection.bookId !== bookId || projection.caseId !== current.caseId) throw new Error(MAINTENANCE_STATUS_LINES.readFailed);
       current.projection = projection;

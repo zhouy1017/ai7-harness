@@ -1196,8 +1196,11 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // 维护事项 (Issue #426, S68a): the route's Book, one of its designations or cases, and words within their bounds.
     case 'inspectMaintenanceCase': {
-      const input = requireInput(value.input, ['bookId', 'caseId'], tentativeId);
-      if (!validUuid(input.bookId) || !validUuid(input.caseId)) throw new ProtocolError(tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'caseId'], ['beforeRevision', 'afterPublicationOrdinal', 'errataVersionId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.caseId) ||
+          (input.beforeRevision !== undefined && !isSafeInteger(input.beforeRevision, 1)) ||
+          (input.afterPublicationOrdinal !== undefined && !isSafeInteger(input.afterPublicationOrdinal, 0)) ||
+          (input.errataVersionId !== undefined && !validUuid(input.errataVersionId))) throw new ProtocolError(tentativeId);
       break;
     }
     case 'listMaintenanceCases': {
