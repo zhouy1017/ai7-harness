@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 60 as const;
+export const SERVICE_PROTOCOL_VERSION = 61 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -132,6 +132,7 @@ export const IPC_CHANNELS = {
   decideProductionDocumentType: 'ai7:j07:decide-production-document-type',
   saveProductionDocumentVersion: 'ai7:j07:save-production-document-version',
   recordProductionDocumentDelivery: 'ai7:j07:record-production-document-delivery',
+  transitionProductionDocumentPhase: 'ai7:j07:transition-production-document-phase',
   inspectGlobalAttention: 'ai7:j09:inspect-global-attention',
   reviewManuscriptExport: 'ai7:j07:review-manuscript-export',
   chooseManuscriptExportDestination: 'ai7:j07:choose-manuscript-export-destination',
@@ -5047,6 +5048,124 @@ export interface ProductionDocumentProjection {
   deliveriesTruncated: boolean;
   /** `交付后有修改` (DELIV-004): an edit after a delivery — the document was delivered, and its text is no version it was delivered at. */
   changedSinceDelivery: boolean;
+  /** Its Deliverable Workflow Lens (Issue #415, S66c; V2-UX-WORK-001 to 009): the pinned profile and its seven phases. */
+  workflow: ProductionDocumentWorkflowProjection;
+}
+
+/** The seven shared phases of a Deliverable Workflow (V2-UX-WORK-003), in the profile's order. */
+export type ProductionDocumentPhaseId =
+  | 'intake'
+  | 'source-development'
+  | 'drafting'
+  | 'review-verification'
+  | 'finalization'
+  | 'delivery'
+  | 'maintenance';
+export const PRODUCTION_DOCUMENT_PHASE_IDS: readonly ProductionDocumentPhaseId[] = [
+  'intake', 'source-development', 'drafting', 'review-verification', 'finalization', 'delivery', 'maintenance',
+];
+export const PRODUCTION_DOCUMENT_PHASE_LABELS: Readonly<Record<ProductionDocumentPhaseId, string>> = {
+  intake: '接收与准备',
+  'source-development': '来源建设',
+  drafting: '起草',
+  'review-verification': '审阅与核查',
+  finalization: '定稿',
+  delivery: '交付',
+  maintenance: '维护',
+};
+
+/**
+ * A phase's recorded state (WORK-004): only the editor's deterministic commands move it (WORK-008). `等待你处理` is read
+ * beside it from the document's own facts, never recorded.
+ */
+export type ProductionDocumentPhaseState = 'not-started' | 'in-progress' | 'completed' | 'skipped' | 'reopened';
+export const PRODUCTION_DOCUMENT_PHASE_STATE_LABELS: Readonly<Record<ProductionDocumentPhaseState, string>> = {
+  'not-started': '未开始',
+  'in-progress': '进行中',
+  completed: '已完成',
+  skipped: '已跳过',
+  reopened: '已重新打开',
+};
+/** The pill of a phase that is open and has something the editor must handle (WORK-004). */
+export const PRODUCTION_DOCUMENT_PHASE_WAITING_LABEL = '等待你处理';
+
+export type ProductionDocumentPhaseAction = 'start' | 'complete' | 'skip' | 'reopen';
+export const PRODUCTION_DOCUMENT_PHASE_ACTIONS: readonly ProductionDocumentPhaseAction[] = ['start', 'complete', 'skip', 'reopen'];
+
+/** Why a phase is skipped (WORK-009): choices shown unselected, and 自行输入, which needs the editor's words. */
+export type ProductionDocumentSkipReason = 'not-needed' | 'done-elsewhere' | 'later' | 'custom';
+export const PRODUCTION_DOCUMENT_SKIP_REASONS: Readonly<Record<ProductionDocumentSkipReason, string>> = {
+  'not-needed': '这份文档不需要这一阶段',
+  'done-elsewhere': '这一阶段已在别处完成',
+  later: '暂时跳过，之后再补',
+  custom: '自行输入',
+};
+/** Why a completed or skipped phase is reopened (WORK-009), the same way. */
+export type ProductionDocumentReopenReason = 'needs-change' | 'sources-changed' | 'redo-after-delivery' | 'custom';
+export const PRODUCTION_DOCUMENT_REOPEN_REASONS: Readonly<Record<ProductionDocumentReopenReason, string>> = {
+  'needs-change': '发现需要再改的地方',
+  'sources-changed': '来源或事实有变化',
+  'redo-after-delivery': '交付后需要重做',
+  custom: '自行输入',
+};
+/** The editor's own words beside a reason, in characters once NFC-normalized and trimmed. */
+export const MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS = 200;
+
+/** One recorded move of a phase (WORK-009): what it did, from which state to which, why, and when. */
+export interface ProductionDocumentPhaseTransitionProjection {
+  action: ProductionDocumentPhaseAction;
+  fromState: ProductionDocumentPhaseState;
+  toState: ProductionDocumentPhaseState;
+  /** A skip's or a reopen's reason: the choice, its words, and the editor's own; `null` for 开始 and 完成. */
+  reason: null | { choice: string; label: string; text: string | null };
+  recordedAt: string;
+}
+
+export interface ProductionDocumentPhaseProjection {
+  phaseId: ProductionDocumentPhaseId;
+  label: string;
+  state: ProductionDocumentPhaseState;
+  /** The state's words, or `等待你处理` for an open phase with something to handle. */
+  stateLabel: string;
+  /** What the open phase waits for the editor on, read from the document now; `null` when nothing. */
+  waiting: string | null;
+  /** What the editor may do to it now, in the order the lens offers them. */
+  actions: ReadonlyArray<ProductionDocumentPhaseAction>;
+  /**
+   * The move that brought the phase to its state — a skip's or a reopen's with its reason — or `null` before any. Every
+   * earlier move stays recorded (WORK-009); 交付物's one read carries only this one for each phase, to stay one frame.
+   */
+  latest: ProductionDocumentPhaseTransitionProjection | null;
+  /** How many moves the phase has had. */
+  moves: number;
+}
+
+/**
+ * A Production Document's Deliverable Workflow Lens (Issue #415, S66c; V2-UX-WORK-001 to 009): the profile it follows,
+ * pinned when the document began (WORK-002), a factual summary with no percentage (WORK-007), 下一项需要处理
+ * (WORK-005), and its seven phases, several of which may be open at once (WORK-004).
+ */
+export interface ProductionDocumentWorkflowProjection {
+  profile: { id: string; name: string; version: string; activatedAt: string };
+  summary: string;
+  /** Waiting items first, then the open phases, in phase order; empty when nothing needs the editor. */
+  next: ReadonlyArray<{ phaseId: ProductionDocumentPhaseId; text: string }>;
+  phases: ReadonlyArray<ProductionDocumentPhaseProjection>;
+  /** How many moves the document's phases have had: a move names it, so one made since the editor looked is refused. */
+  transitions: number;
+}
+
+/**
+ * One deterministic move of one phase of a document of the route's Book (WORK-008, WORK-009): 开始, 完成, 跳过 or 重新打开,
+ * the last two with a reason. `expectedTransitions` is the count the editor saw.
+ */
+export interface TransitionProductionDocumentPhaseInput {
+  bookId: string;
+  documentId: string;
+  phaseId: ProductionDocumentPhaseId;
+  action: ProductionDocumentPhaseAction;
+  expectedTransitions: number;
+  reason: null | { choice: string; text: string | null };
 }
 
 /** Who a delivery is for: the house's list, or the editor's own words (DELIV-003). */
@@ -6370,6 +6489,7 @@ export interface ServiceOperationMap {
    * when it is none yet; the export follows on the export card.
    */
   recordProductionDocumentDelivery: { input: RecordProductionDocumentDeliveryInput; output: ProductionDocumentResultProjection };
+  transitionProductionDocumentPhase: { input: TransitionProductionDocumentPhaseInput; output: ProductionDocumentResultProjection };
   /**
    * 待我处理 (Issue #424, plan slice S78): every Book's items in the four groups. It takes no input and names
    * no Book, because it reads across them; it is a read and records nothing.
@@ -6611,6 +6731,7 @@ export interface RendererApi {
   saveProductionDocumentVersion(input: Omit<SaveProductionDocumentVersionInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 交付: a Delivery Record of one exact version of a document of that Book; nothing is sent. */
   recordProductionDocumentDelivery(input: Omit<RecordProductionDocumentDeliveryInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
+  transitionProductionDocumentPhase(input: Omit<TransitionProductionDocumentPhaseInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 待我处理 across every Book (Issue #424): a read in any window, whatever it shows; it holds and grants nothing. */
   inspectGlobalAttention(): Promise<GlobalAttentionProjection>;
   /**

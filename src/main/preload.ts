@@ -361,6 +361,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['prepareBookDeliveryPackage']['output']>(IPC_CHANNELS.prepareBookDeliveryPackage, input),
   createProductionDocument: (input: Omit<ServiceOperationMap['createProductionDocument']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['createProductionDocument']['output']>(IPC_CHANNELS.createProductionDocument, input),
+  transitionProductionDocumentPhase: (input: Omit<ServiceOperationMap['transitionProductionDocumentPhase']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['transitionProductionDocumentPhase']['output']>(IPC_CHANNELS.transitionProductionDocumentPhase, input),
   decideProductionDocumentType: (input: Omit<ServiceOperationMap['decideProductionDocumentType']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['decideProductionDocumentType']['output']>(IPC_CHANNELS.decideProductionDocumentType, input),
   saveProductionDocumentVersion: (input: Omit<ServiceOperationMap['saveProductionDocumentVersion']['input'], 'bookId'>) =>

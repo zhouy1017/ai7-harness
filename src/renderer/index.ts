@@ -6141,7 +6141,13 @@ function renderEditorWindow(
   const railColumn = element('div', 'rail-column');
   railColumn.append(positionRailLabel, railTrack);
   edge.append(edgeEntries, railColumn);
-  const documentLens = productionDocument === undefined ? undefined : renderDocumentLens(productionDocument);
+  // The document's workflow moves by the editor's commands in its lens (Issue #415, S66c); a refused move reads it again.
+  const documentLens = productionDocument === undefined ? undefined : renderDocumentLens(productionDocument, {
+    move: async (input) => (await window.ai7.transitionProductionDocumentPhase({ documentId: productionDocument.document.documentId, ...input })).document,
+    read: async () => (await window.ai7.inspectProductionDocuments()).types.find((type) => type.typeId === productionDocument.typeId)?.document ?? null,
+    setStatus,
+    errorMessage: rendererErrorMessage,
+  });
   if (documentLens !== undefined) workspace.classList.add('document-workspace');
   workspace.append(manuscript, ...(documentLens === undefined ? [] : [documentLens.element]), navigator, edge);
 
@@ -7157,7 +7163,11 @@ function renderEditorWindow(
     editor,
     api: window.ai7,
     busy: () => authoritativeMutationBusy() || serviceJobBusy(),
-    marksChanged: () => manuscriptRail?.refresh(),
+    // A mark changes what a Production Document's workflow waits on (N 条修改建议待处理), which its lens reads again.
+    marksChanged: () => {
+      manuscriptRail?.refresh();
+      documentLens?.refresh();
+    },
     openReviewFinding: (target) => void leaveForReview({ reviewRunId: target.reviewRunId, findingId: target.findingId }),
     openConflict: (markId) => void leaveForConflict(markId),
     // An Apply is an authoritative write like a replacement or an undo: the window is reloaded from the

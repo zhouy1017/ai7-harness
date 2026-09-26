@@ -2796,6 +2796,30 @@ function registerRendererHandlers(
         });
       }),
   );
+  // A document's workflow phase (Issue #415, S66c): one deterministic move of a document of the route's Book, serialized
+  // like every other command; the service decides whether the move is open to the phase and still what the editor saw.
+  ipcMain.handle(
+    IPC_CHANNELS.transitionProductionDocumentPhase,
+    (event, input: Omit<ServiceOperationMap['transitionProductionDocumentPhase']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('transitionProductionDocumentPhase', {
+            bookId: route.bookId,
+            documentId: input.documentId,
+            phaseId: input.phaseId,
+            action: input.action,
+            expectedTransitions: input.expectedTransitions,
+            reason: input.reason,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          return requireProductionDocumentResultOfRoute(route, result);
+        });
+      }),
+  );
   ipcMain.handle(
     IPC_CHANNELS.saveProductionDocumentVersion,
     (event, input: Omit<ServiceOperationMap['saveProductionDocumentVersion']['input'], 'bookId'>) =>

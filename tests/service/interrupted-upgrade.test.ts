@@ -10,18 +10,24 @@ import { EDITORIAL_MARK_SCHEMA_SQL, initializeEditorialMarkSchema } from '../../
 import { IMPORT_FIDELITY_CATEGORIES_REVISION_26_SQL, initializeImportRetentionSchema } from '../../src/service/import-retention.js';
 import { initializeImportedMarkSchema } from '../../src/service/imported-marks.js';
 import { initializeManuscriptEffectSchema, MANUSCRIPT_EFFECT_SCHEMA_SQL } from '../../src/service/manuscript-apply.js';
+import { loadBuiltInManuscriptProfile } from '../../src/service/native-workflow-profile.js';
 import { initializeExportLedgerSchema } from '../../src/service/manuscript-export.js';
 import {
   initializeProductionDocumentDeliverySchema,
   initializeProductionDocumentSchema,
   PRODUCTION_DOCUMENT_SCHEMA_SQL,
 } from '../../src/service/production-document-ledger.js';
+import {
+  initializeProductionDocumentWorkflowSchema,
+  PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_SQL,
+  type WorkflowProfilePin,
+} from '../../src/service/production-document-workflow.js';
 import { initializeProposalConflictSchema } from '../../src/service/proposal-conflicts.js';
 import { initializePublicationVersionSchema } from '../../src/service/publication-versions.js';
 import { initializeReimportGroupSchema } from '../../src/service/reimport-group-ledger.js';
 import { initializeReviewRunSchema } from '../../src/service/review/review-runs.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { downgradeKindCoupledRelationsToRevision23 } from '../support/analysis-ledger-revisions.js';
 import { plantRevision34Relations } from '../support/clarifications.js';
 import { downgradeAnalysisRunStatesToRevision29 } from '../support/connectivity-wait.js';
@@ -47,9 +53,13 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 // helpers plant one, runs that revision's step alone, and opens it.
 
 let roots: ServiceTestRoots;
+/** The profile the store's documents follow, which revision 40's step pins on each instance it creates. */
+let profile: WorkflowProfilePin;
 
 beforeEach(async () => {
   roots = await createServiceTestRoots('ai7-service-interrupted-upgrade-');
+  const { projection } = await loadBuiltInManuscriptProfile(roots.codeRoot);
+  profile = { id: projection.id, name: projection.name, version: projection.version, digest: projection.digest };
 });
 
 afterEach(async () => {
@@ -111,6 +121,11 @@ interface Revision {
 
 // Newest first: a store is walked down one revision at a time.
 const REVISIONS: ReadonlyArray<Revision> = [
+  {
+    revision: 40,
+    step: (database) => initializeProductionDocumentWorkflowSchema(database, profile),
+    undo: (database) => drop(database, Object.keys(PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_SQL).reverse()),
+  },
   { revision: 39, step: initializeBookDeliveryPackageSchema, undo: (database) => drop(database, ['book_delivery_package_versions']) },
   { revision: 38, step: initializeProductionDocumentDeliverySchema, undo: (database) => drop(database, ['production_document_deliveries']) },
   // Revision 37 also rebuilt `manuscripts`; every earlier revision's validation accepts the rebuilt relation.
@@ -185,11 +200,11 @@ describe('an upgrade interrupted before its version stamp', () => {
   for (const { revision, step } of REVISIONS) {
     if (step === null) continue;
     it(`is finished by the next open when revision ${revision}'s relations committed and its stamp did not`, async () => {
-      expect(await opened()).toBe(BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION);
+      expect(await opened()).toBe(PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION);
       const terminal = tables();
       // The plant is a store at the revision before, which opens and upgrades as one.
       plant(revision - 1);
-      expect(await opened()).toBe(BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION);
+      expect(await opened()).toBe(PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION);
       expect(tables()).toEqual(terminal);
       // The step commits the revision's relations, and the process stops before the stamp.
       plant(revision - 1);
@@ -197,15 +212,15 @@ describe('an upgrade interrupted before its version stamp', () => {
         step(database);
         expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(revision - 1);
       });
-      expect(await opened()).toBe(BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION);
+      expect(await opened()).toBe(PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION);
       expect(tables()).toEqual(terminal);
       // Once finished it opens as any store does.
-      expect(await opened()).toBe(BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION);
+      expect(await opened()).toBe(PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION);
     }, 120_000);
   }
 
   it('still refuses a store holding only some of a revision\'s relations', async () => {
-    expect(await opened()).toBe(BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION);
+    expect(await opened()).toBe(PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION);
     plant(36);
     withDatabase((database) => database.exec(PRODUCTION_DOCUMENT_SCHEMA_SQL.production_documents));
     const refused = await EditorialStore.open(roots.dataRoot, roots.codeRoot).then((store) => {
