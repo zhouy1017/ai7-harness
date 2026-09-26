@@ -192,7 +192,7 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     const olderPage = older.get(designation.publicationVersionId);
     if (olderPage === undefined ? maintenance.total > shown.length : olderHasMore) {
       const more = el('div', 'maintenance-older');
-      more.append(el('p', 'field-note', maintenanceOlderLine(maintenance.total - shown.length)));
+      more.append(el('p', 'field-note', olderPage === undefined ? maintenanceOlderLine(maintenance.total - shown.length) : '还有更早的维护事项。'));
       const read = actionButton('older', 'quiet', () => void loadOlder(designation.publicationVersionId, shown));
       read.disabled = working;
       more.append(read);
@@ -533,7 +533,7 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
       if (destroyed || request !== ticket) return;
       if (page.bookId !== bookId || page.publicationVersionId !== publicationVersionId) throw new Error(MAINTENANCE_STATUS_LINES.olderFailed);
       older.clear();
-      older.set(publicationVersionId, page.cases);
+      older.set(publicationVersionId, [...page.cases]);
       olderHasMore = page.more;
       const first = page.cases[0];
       pendingFocus = first === undefined ? null : { publicationVersionId, selector: caseSelector(first.caseId, '[data-maintenance-action="toggle-case"]') };
