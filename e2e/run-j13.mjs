@@ -658,6 +658,7 @@ async function main() {
     })()`, 'history-seed');
     await leaveSeries(renderer, 'history-pages');
     await bookSide(renderer, first, 'history-pages');
+    await readBookSeries(renderer, (page) => page.history.length === 20, 'history-page-ready');
     await assertRenderer(renderer, `(() => { document.querySelector('details.book-series-history').open = true; return true; })()`, 'history-expand');
     for (let repeat = 0; repeat < 2; repeat += 1) {
       await clickSelector(renderer, '[data-series-action="book-history-more"]', 'book-history-next');
@@ -667,6 +668,7 @@ async function main() {
     }
     await backToLibrary(renderer, 'history-pages');
     // Empty runner-authored Books and Series through the real service; no fixture database or mocked page response.
+    at('series-bounded-seed');
     const pageBooks = await renderer.evaluate(`(async () => {
       const books = [];
       for (let index = 0; index < 51; index += 1) {
@@ -679,6 +681,7 @@ async function main() {
       return books;
     })()`);
     requireJourney(pageBooks.length === 51 && pageBooks.every((id) => UUID_PATTERN.test(id)), 'page-books-created');
+    at('series-bounded-navigation');
     await click(renderer, '书系', 'paged-series-list');
     await readSeriesList(renderer, (page) => page.items.length === 50, 'list-first-page');
     for (let repeat = 0; repeat < 2; repeat += 1) {
