@@ -963,6 +963,15 @@ async function main() {
     await click(renderer, '打开稿件', 'chip-reopen');
     await waitFor(renderer, `${CHIP} !== null && ${CHIP}.dataset.returnChip === ${JSON.stringify(chip.blockId)}`, 'chip-still-there', 60_000);
 
+    // One unused way back survives visiting another Book; later navigation cannot evict it.
+    await click(renderer, '返回图书工作概览', 'chip-other-overview');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'chip-other-overview-ready');
+    await click(renderer, '返回图书列表', 'chip-other-library');
+    const otherBookId = await importSample1(renderer, 'J-16 返回位置的另一图书', true, 'chip-other-import');
+    await click(renderer, '打开稿件', 'chip-other-open');
+    await waitFor(renderer, `document.querySelector('.editor-shell')?.dataset.bookId === ${JSON.stringify(otherBookId)}`, 'chip-other-editor');
+    await assertRenderer(renderer, `${CHIP}?.dataset.returnChip === ${JSON.stringify(chip.blockId)}`, 'chip-preserved-across-books');
+
     at('chip-return');
     // 回到<位置>: the manuscript is back where the editor was reading before the jump, and the chip is gone.
     await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'chip-use');
