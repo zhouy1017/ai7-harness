@@ -208,7 +208,7 @@ The Data Version (ADR 0079 §1) is `1`, and it is not frozen: Data Version 1 is 
 
 A version record rewritten by hand stops the store from opening. The backup before a breaking upgrade, its rollback, and the package format they share with 导出数据库 come with S85b and S86 (#434).
 
-导出数据库 (Issue #434, S86a) is service protocol version 81 and schema revision 55. `src/service/database-exports.ts` owns three append-only relations: each export's preparation, approval and receipt. They are ledgers like the export ledger's, and every read verifies them.
+导出数据库 (Issue #434, S86a) is service protocol version 82 and schema revision 55. `src/service/database-exports.ts` owns three append-only relations: each export's preparation, approval and receipt. They are ledgers like the export ledger's, and every read verifies them.
 
 The package, `ai7.database-package/1`, is a ZIP of:
 - `store/ai7.sqlite`, a consistent copy of the store made by `VACUUM INTO`;
