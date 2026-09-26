@@ -1010,27 +1010,43 @@ export class BaselineAnalysisStore {
       const record = parseCanonicalJson(asString(row.canonical_json)) as Omit<PlanAdaptationRecord, 'firstUnitMessageDigest'> & { firstUnitMessageDigest?: string | null };
       const first = record.firstUnitMessageDigest ?? null;
       requireAnalysis(record.adaptationId === row.adaptation_id && record.adaptationClass === 'safe-retry', 'ANALYSIS_RECORD_INVALID', '计划内调整记录无效。');
-      const retry = this.#retryTurnOf(asString(row.attempt_id), asNumber(row.unit_ordinal), record.adaptationId);
+      const retry = this.#retryTurnOf(asString(row.attempt_id), asNumber(row.unit_ordinal), record.adaptationId, record.firstUnitMessageDigest === undefined);
       const repetition: SafeRetryRepetition = first === null || retry === null || retry.unitMessageDigest === null ? 'unrecorded'
         : retry.unitMessageDigest === first ? 'byte-identical' : 'differs';
       return { ...record, firstUnitMessageDigest: first, retry, repetition, label: planAdaptationLabel(record.unitOrdinal, record.classifiedReason, repetition) };
     });
   }
 
-  /** A safe retry's own turn: the span of its attempt and unit that names the adaptation it carried out (Issue #286). */
-  #retryTurnOf(attemptId: string, unitOrdinal: number, adaptationId: string): BaselineAnalysisPlanAdaptationProjection['retry'] {
-    const rows = this.#db.prepare('SELECT ordinal, canonical_json FROM analysis_harness_spans WHERE attempt_id = ? AND unit_ordinal = ? ORDER BY ordinal')
-      .all(attemptId, unitOrdinal) as SqlRow[];
-    for (const row of rows) {
+  /**
+   * A safe retry's own turn (Issue #286): the span of its attempt and unit that names the adaptation it carried out, found by
+   * the store rather than by reading every span of the unit (Issue #286 review). An adaptation recorded before Issue #286 has
+   * spans that name no adaptation; its retry's turn is then the one second attempt of its unit in its attempt recorded before
+   * the digests were kept, when there is exactly one — an explicit Resume could have added more, and then none is taken. Such
+   * a turn keeps its payload digest and no unit-message digest.
+   */
+  #retryTurnOf(attemptId: string, unitOrdinal: number, adaptationId: string, recordedBefore286: boolean): BaselineAnalysisPlanAdaptationProjection['retry'] {
+    const turn = (row: SqlRow): NonNullable<BaselineAnalysisPlanAdaptationProjection['retry']> => {
       const span = parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>;
-      if (span.adaptationId !== adaptationId) continue;
       return {
         spanOrdinal: asNumber(row.ordinal),
         unitMessageDigest: typeof span.unitMessageDigest === 'string' ? span.unitMessageDigest : null,
         payloadDigest: typeof span.payloadDigest === 'string' ? span.payloadDigest : null,
       };
-    }
-    return null;
+    };
+    const named = this.#db.prepare(
+      `SELECT ordinal, canonical_json FROM analysis_harness_spans
+       WHERE attempt_id = ? AND unit_ordinal = ? AND json_extract(canonical_json, '$.adaptationId') = ?
+       ORDER BY ordinal LIMIT 1`,
+    ).get(attemptId, unitOrdinal, adaptationId) as SqlRow | undefined;
+    if (named !== undefined) return turn(named);
+    if (!recordedBefore286) return null;
+    const earlier = this.#db.prepare(
+      `SELECT ordinal, canonical_json FROM analysis_harness_spans
+       WHERE attempt_id = ? AND unit_ordinal = ? AND json_type(canonical_json, '$.unitMessageDigest') IS NULL
+         AND json_type(canonical_json, '$.adaptationId') IS NULL AND json_extract(canonical_json, '$.attemptIndex') = 2
+       ORDER BY ordinal LIMIT 2`,
+    ).all(attemptId, unitOrdinal) as SqlRow[];
+    return earlier.length === 1 ? turn(earlier[0]!) : null;
   }
 
   /**

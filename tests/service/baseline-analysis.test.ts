@@ -804,10 +804,20 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     rewrite('analysis_harness_spans', 6, (span) => without(span, 'unitMessageDigest'));
     expect((await reread()).adaptations[0]).toMatchObject({ repetition: 'unrecorded', retry: { spanOrdinal: 6, unitMessageDigest: null }, label: recorded.label });
     rewrite('analysis_harness_spans', 6, (span) => without(span, 'adaptationId'));
+    // An adaptation kept since the digests were kept is found only by the span that names it: none is guessed at.
+    expect((await reread()).adaptations[0]).toMatchObject({ retry: null, repetition: 'unrecorded' });
     rewrite('analysis_plan_adaptations', 1, (adaptation) => without(adaptation, 'firstUnitMessageDigest'));
     const before286 = await reread();
     expect(before286.attempt!.spans[5]!.unitMessageDigest).toBeNull();
-    expect(before286.adaptations[0]).toEqual({ ...recorded, firstUnitMessageDigest: null, retry: null, repetition: 'unrecorded' });
+    // The retry's turn is still found, as the one second attempt of its unit recorded before the digests were kept, and its
+    // payload digest read; what it sent of the unit message is unrecorded (Issue #286 review).
+    expect(before286.adaptations[0]).toEqual({
+      ...recorded, firstUnitMessageDigest: null, retry: { spanOrdinal: 6, unitMessageDigest: null, payloadDigest: recorded.retry!.payloadDigest }, repetition: 'unrecorded',
+    });
+    expect(recorded.retry!.payloadDigest).toMatch(/^[0-9a-f]{64}$/u);
+    // Two such turns of the unit — as an explicit Resume could have left — name no one of them: none is taken.
+    rewrite('analysis_harness_spans', 5, (span) => ({ ...without(span, 'unitMessageDigest'), attemptIndex: 2 }));
+    expect((await reread()).adaptations[0]).toEqual({ ...recorded, firstUnitMessageDigest: null, retry: null, repetition: 'unrecorded' });
   }, 300_000);
 
   it('supersedes a prepared plan on material drift, refuses the stale version, and reconfirms the next version on the same Task', async () => {
