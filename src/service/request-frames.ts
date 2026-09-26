@@ -657,8 +657,9 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // ②C 评估 (Issue #429, S81a): the route's Book, and a version by its identity or the latest.
     case 'inspectEvaluation': {
-      const input = requireInput(value.input, ['bookId', 'recordId'], tentativeId);
-      if (!validUuid(input.bookId) || !(input.recordId === null || validUuid(input.recordId))) throw new ProtocolError(tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'recordId'], ['recordsBefore'], tentativeId);
+      if (!validUuid(input.bookId) || !(input.recordId === null || validUuid(input.recordId)) ||
+          !optionalOrNull(input, 'recordsBefore', (before) => isSafeInteger(before, 2))) throw new ProtocolError(tentativeId);
       break;
     }
     case 'startEvaluation': {

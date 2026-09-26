@@ -543,7 +543,7 @@ async function dispatch(
     case 'inspectEvaluationProfiles':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluationProfiles() };
     case 'inspectEvaluation':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluation(request.input.bookId, request.input.recordId) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluation(request.input.bookId, request.input.recordId, request.input.recordsBefore) };
     case 'startEvaluation':
       return { id: request.id, ok: true, op: request.op, result: store.startEvaluation(request.input.bookId) };
     case 'saveEvaluation':

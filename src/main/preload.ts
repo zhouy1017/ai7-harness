@@ -269,7 +269,7 @@ const api: RendererApi = Object.freeze({
   decideLibraryMaterial: (input: ServiceOperationMap['decideLibraryMaterial']['input']) =>
     invoke<ServiceOperationMap['decideLibraryMaterial']['output']>(IPC_CHANNELS.decideLibraryMaterial, input),
   inspectEvaluationProfiles: () => invoke<ServiceOperationMap['inspectEvaluationProfiles']['output']>(IPC_CHANNELS.inspectEvaluationProfiles),
-  inspectEvaluation: (input: { recordId: string | null }) =>
+  inspectEvaluation: (input: { recordId: string | null; recordsBefore?: number | null }) =>
     invoke<ServiceOperationMap['inspectEvaluation']['output']>(IPC_CHANNELS.inspectEvaluation, input),
   startEvaluation: () => invoke<ServiceOperationMap['startEvaluation']['output']>(IPC_CHANNELS.startEvaluation),
   saveEvaluation: (input: Omit<ServiceOperationMap['saveEvaluation']['input'], 'bookId'>) =>

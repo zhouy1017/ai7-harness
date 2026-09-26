@@ -2635,7 +2635,7 @@ function registerRendererHandlers(
       const route = requireCurrentBookRoute(owned);
       const routeGeneration = owned.routeGeneration;
       const routeRequestSequence = owned.routeRequestSequence;
-      const result = await service.call('inspectEvaluation', { bookId: route.bookId, recordId: input.recordId });
+      const result = await service.call('inspectEvaluation', { bookId: route.bookId, recordId: input.recordId, recordsBefore: input.recordsBefore ?? null });
       requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
       if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '评估不属于当前图书工作台。');
       return result;

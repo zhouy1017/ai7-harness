@@ -5588,8 +5588,8 @@ export class EditorialStore {
   }
 
   /** ②C 评估 of one Book (Issue #429, S81a; EVAL-001, EVAL-012): its versions, one on show, and whether one can begin. */
-  inspectEvaluation(bookId: string, recordId: string | null): EvaluationWorkspaceProjection {
-    return this.#evaluationCall(() => this.#evaluations.workspace(bookId, this.#evaluationBookTitle(bookId), recordId));
+  inspectEvaluation(bookId: string, recordId: string | null, recordsBefore?: number | null): EvaluationWorkspaceProjection {
+    return this.#evaluationCall(() => this.#evaluations.workspace(bookId, this.#evaluationBookTitle(bookId), recordId, recordsBefore));
   }
 
   /** 开始评估 or 重新评估: a new version bound to the manuscript's current revision, and the page with it on show. */

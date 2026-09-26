@@ -657,6 +657,29 @@ async function main() {
     const service = await renderer.evaluate(`window.ai7.inspectEvaluationProfiles().then((projection) => projection.profiles.map((entry) => [entry.records, entry.books]))`);
     requireJourney(JSON.stringify(service) === JSON.stringify([[2, 1]]) && typeof thirdId === 'string', 'evaluation-profile-service', service);
 
+    at('evaluation-reevaluate');
+    await click(renderer, '返回', 'evaluation-pages-return');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'evaluation-pages-library');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id="${thirdId}"]`, 'evaluation-pages-book');
+    await waitFor(renderer, `document.querySelector('.book-evaluation-summary [data-evaluation-action="open"]')`, 'evaluation-pages-overview');
+    await clickSelector(renderer, '.book-evaluation-summary [data-evaluation-action="open"]', 'evaluation-pages-open');
+    await readEvaluation(renderer, (page) => page.record?.heading === '第 2 版 · 编辑评分中', 'evaluation-pages-second');
+    for (let ordinal = 2; ordinal <= 12; ordinal += 1) {
+      await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', 'evaluation-pages-conclusion');
+      await clickSelector(renderer, '[data-evaluation-action="finalize"]', 'evaluation-pages-finalize');
+      await readEvaluation(renderer, (page) => page.record?.heading === `第 ${ordinal} 版 · 定稿`, 'evaluation-pages-finalized');
+      await clickSelector(renderer, '[data-evaluation-action="start"]', 'evaluation-pages-next');
+      await readEvaluation(renderer, (page) => page.record?.heading === `第 ${ordinal + 1} 版 · 编辑评分中`, 'evaluation-pages-started');
+    }
+    await fill(renderer, `${item('literary-quality')} [data-evaluation-field="score"]`, '17.5', 'evaluation-pages-unsaved');
+    await clickSelector(renderer, '[data-evaluation-action="versions-older"]', 'evaluation-pages-older');
+    await waitFor(renderer, `document.querySelectorAll('.evaluation-version-list li').length===3 && document.querySelector('.evaluation-version-list button')?.textContent.startsWith('第 3 版') && document.activeElement===document.querySelector('.evaluation-versions h3')`, 'evaluation-pages-oldest');
+    await assertRenderer(renderer, `document.querySelector(${JSON.stringify(`${item('literary-quality')} [data-evaluation-field="score"]`)})?.value==='17.5' && document.querySelector('.evaluation-record')?.dataset.entries==='1'`, 'evaluation-pages-kept-input');
+    await clickSelector(renderer, '[data-evaluation-action="versions-latest"]', 'evaluation-pages-latest');
+    await waitFor(renderer, `document.querySelectorAll('.evaluation-version-list li').length===10 && document.querySelector('.evaluation-version-list button')?.textContent.startsWith('第 13 版') && document.activeElement===document.querySelector('.evaluation-versions h3')`, 'evaluation-pages-latest-focus');
+    await clickSelector(renderer, '[data-evaluation-action="save"]', 'evaluation-pages-save-input');
+    await readEvaluation(renderer, (page) => page.record?.entries === '2' && page.record.items[0][2] === '17.5', 'evaluation-pages-saved-input');
+
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
 

@@ -105,14 +105,17 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
   let workspace: EvaluationWorkspaceProjection | null = null;
   let refusal: string | null = null;
 
-  const paint = (focus: string | null): void => {
+  const paint = (focus: string | null, preserveForm = false): void => {
     if (workspace === null) return;
-    root.dataset['evaluationRecords'] = String(workspace.records.length);
+    const keptForm = preserveForm ? root.querySelector<HTMLElement>('.evaluation-record') : null;
+    root.dataset['evaluationRecords'] = String(workspace.recordCount);
     const parts: HTMLElement[] = [];
     // The versions, newest first; each opens as it was recorded.
     if (workspace.records.length > 0) {
       const versions = el('section', 'evaluation-versions');
-      versions.append(el('h3', undefined, EVALUATION_VERSIONS_HEADING));
+      const heading = el('h3', undefined, EVALUATION_VERSIONS_HEADING);
+      heading.tabIndex = -1;
+      versions.append(heading);
       const list = el('ol', 'evaluation-version-list');
       for (const summary of workspace.records) {
         const item = el('li');
@@ -125,6 +128,15 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         list.append(item);
       }
       versions.append(list);
+      if (workspace.recordCount > workspace.records.length) {
+        const controls = el('div', 'button-row');
+        const latest = action('最新版本', 'quiet', 'versions-latest', () => void turn(null));
+        const older = action('更早版本', 'secondary', 'versions-older', () => void turn(workspace?.recordsNext ?? null));
+        latest.disabled = busy || workspace.recordsBefore === null;
+        older.disabled = busy || workspace.recordsNext === null;
+        controls.append(latest, older);
+        versions.append(controls);
+      }
       parts.push(versions);
     } else {
       parts.push(el('p', 'field-note evaluation-empty', EVALUATION_EMPTY));
@@ -143,9 +155,28 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       note.setAttribute('role', 'alert');
       parts.push(note);
     }
-    if (workspace.record !== null) parts.push(recordNode(workspace.record));
+    if (workspace.record !== null) parts.push(keptForm ?? recordNode(workspace.record));
     root.replaceChildren(...parts);
     if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();
+  };
+
+  const turn = async (recordsBefore: number | null): Promise<void> => {
+    if (busy || workspace === null) return;
+    busy = true;
+    try {
+      const page = await api.inspectEvaluation({ recordId: workspace.record?.recordId ?? null, recordsBefore });
+      if (!root.isConnected) return;
+      // Browsing version summaries must not replace unsaved input or advance its optimistic save version.
+      workspace = { ...page, record: workspace.record };
+      refusal = null;
+    } catch (error) {
+      if (!root.isConnected) return;
+      refusal = errorMessage(error, EVALUATION_STATUS.unavailable);
+      setStatus(refusal, 'error');
+    } finally {
+      busy = false;
+      if (root.isConnected) paint('.evaluation-versions h3', true);
+    }
   };
 
   const recordNode = (record: EvaluationRecordProjection): HTMLElement => {

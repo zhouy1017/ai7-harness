@@ -54,6 +54,43 @@ const RISKS = (legal: 'low' | 'medium' | 'high', reviewed = false): EvaluationCo
 ];
 
 describe('②C 评估 over the real store', () => {
+  it('keeps save chains and version pages bounded while every version and comparison stays readable', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importSample1Book(store, roots.codeRoot, '评估分页');
+      let firstId = '';
+      for (let ordinal = 1; ordinal <= 13; ordinal += 1) {
+        let record = store.startEvaluation(book.bookId).record!;
+        if (ordinal === 1) firstId = record.recordId;
+        for (let save = 0; save < (ordinal === 1 ? 24 : 1); save += 1) {
+          record = store.saveEvaluation({ bookId: book.bookId, recordId: record.recordId, expectedEntries: record.entries,
+            content: scored([10, 11, 12, 13, 14], { risks: RISKS('low'), verdict: `评估保存 ${save}`, conclusion: 'revise' }), finalize: false }).record!;
+        }
+        store.saveEvaluation({ bookId: book.bookId, recordId: record.recordId, expectedEntries: record.entries, content: record.content, finalize: true });
+      }
+      let page = store.inspectEvaluation(book.bookId, null);
+      const ordinals: number[] = [];
+      for (;;) {
+        expect(page.records.length).toBeLessThanOrEqual(10);
+        expect(page.recordCount).toBe(13);
+        expect(page.record?.ordinal).toBe(13);
+        ordinals.push(...page.records.map((record) => record.ordinal));
+        if (page.recordsNext === null) break;
+        page = store.inspectEvaluation(book.bookId, null, page.recordsNext);
+      }
+      expect(ordinals).toEqual(Array.from({ length: 13 }, (_, index) => 13 - index));
+      expect(store.inspectEvaluation(book.bookId, firstId, 4).record).toMatchObject({ ordinal: 1, entries: 26, comparison: null });
+      const second = page.records.find((record) => record.ordinal === 2)!;
+      expect(store.inspectEvaluation(book.bookId, second.recordId).record?.comparison?.previousOrdinal).toBe(1);
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        db.exec('DROP TRIGGER evaluation_record_entries_no_update');
+        db.prepare('UPDATE evaluation_record_entries SET sha256 = ? WHERE record_id = ? AND ordinal = 2').run('0'.repeat(64), firstId);
+      } finally { db.close(); }
+      expect(() => store.inspectEvaluation(book.bookId, null)).toThrowError('评估记录已损坏');
+    } finally { store.close(); }
+  }, 120_000);
+
   it('binds a version to the revision, scores it as the editor writes it, closes it at 定稿, and compares the next with it', async () => {
     await requireExactSample1(roots.codeRoot);
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);

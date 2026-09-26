@@ -338,32 +338,36 @@ export class EvaluationRecords {
   }
 
   /** One version's entries, oldest first, each verified and chained to the one before; the first to the record itself. */
-  #entries(record: StoredRecord): StoredEntry[] {
-    const rows = this.#db.prepare('SELECT * FROM evaluation_record_entries WHERE record_id = ? ORDER BY ordinal').all(record.recordId) as SqlRow[];
+  #entries(record: StoredRecord): { count: number; latest: StoredEntry } {
+    const rows = this.#db.prepare('SELECT * FROM evaluation_record_entries WHERE record_id = ? ORDER BY ordinal').iterate(record.recordId);
     let previous = record.sha256;
-    const entries = rows.map((row, index) => {
+    let count = 0;
+    let latest: StoredEntry | undefined;
+    for (const row of rows) {
+      requireEvaluation(latest === undefined || latest.kind === 'draft', 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
       const json = String(row.canonical_json);
       requireEvaluation(sha256Hex(json) === String(row.sha256), 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
       const entry = JSON.parse(json) as unknown;
       requireEvaluation(isRecord(entry) && entry.schema === ENTRY_SCHEMA && entry.entryId === row.entry_id && entry.recordId === record.recordId &&
-        entry.ordinal === index + 1 && integer(row.ordinal) === index + 1 && entry.kind === row.kind && entry.previousSha256 === previous &&
+        entry.ordinal === count + 1 && integer(row.ordinal) === count + 1 && entry.kind === row.kind && entry.previousSha256 === previous &&
         String(row.previous_sha256) === previous && entry.recordedAt === row.recorded_at && entry.actor === EVALUATION_ACTOR && isRecord(entry.content),
       'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
       previous = String(row.sha256);
-      return {
-        ordinal: index + 1,
+      count += 1;
+      latest = {
+        ordinal: count,
         kind: entry.kind as StoredEntry['kind'],
         content: entry.content as unknown as EvaluationContent,
         recordedAt: String(row.recorded_at),
         sha256: String(row.sha256),
       };
-    });
-    requireEvaluation(entries.length >= 1 && entries.slice(0, -1).every((entry) => entry.kind === 'draft'), 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
-    return entries;
+    }
+    requireEvaluation(latest !== undefined, 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
+    return { count, latest };
   }
 
-  #records(bookId: string): StoredRecord[] {
-    return (this.#db.prepare('SELECT * FROM evaluation_records WHERE book_id = ? ORDER BY ordinal').all(bookId) as SqlRow[]).map((row) => this.#record(row));
+  *#records(bookId: string): Generator<StoredRecord> {
+    for (const row of this.#db.prepare('SELECT * FROM evaluation_records WHERE book_id = ? ORDER BY ordinal').iterate(bookId)) yield this.#record(row);
   }
 
   #append(record: StoredRecord, previous: string, ordinal: number, kind: StoredEntry['kind'], content: EvaluationContent): void {
@@ -393,18 +397,19 @@ export class EvaluationRecords {
   start(bookId: string): string {
     const manuscript = this.#manuscripts.current(bookId);
     requireEvaluation(manuscript !== null, 'EVALUATION_NO_MANUSCRIPT', '这本书还没有稿件，没有可以评估的内容。');
-    const records = this.#records(bookId);
-    const last = records.at(-1);
-    const lastEntries = last === undefined ? [] : this.#entries(last);
-    requireEvaluation(last === undefined || lastEntries.at(-1)!.kind === 'finalized', 'EVALUATION_OPEN',
+    let last: StoredRecord | undefined;
+    let count = 0;
+    for (const record of this.#records(bookId)) { last = record; count += 1; }
+    const lastEntry = last === undefined ? undefined : this.#entries(last).latest;
+    requireEvaluation(last === undefined || lastEntry!.kind === 'finalized', 'EVALUATION_OPEN',
       `第 ${last?.ordinal ?? 0} 版还没有定稿；定稿后才能重新评估。`);
     const profile = this.profile();
     const { sha256: profileSha256, ...snapshot } = profile;
     const seed = last === undefined
       ? emptyEvaluationContent(snapshot)
-      : this.#reseed(lastEntries.at(-1)!.content, snapshot);
+      : this.#reseed(lastEntry!.content, snapshot);
     const recordId = randomUUID();
-    const ordinal = records.length + 1;
+    const ordinal = count + 1;
     const createdAt = new Date().toISOString();
     const record = canonicalRecord({
       schema: RECORD_SCHEMA,
@@ -464,17 +469,16 @@ export class EvaluationRecords {
     const record = this.#record(row);
     requireEvaluation(record.bookId === bookId, 'EVALUATION_NOT_FOUND', '这个评估版本不属于当前图书。');
     const entries = this.#entries(record);
-    const last = entries.at(-1)!;
+    const last = entries.latest;
     requireEvaluation(last.kind !== 'finalized', 'EVALUATION_FINALIZED', `第 ${record.ordinal} 版已经定稿，不能再改；要改就重新评估。`);
-    requireEvaluation(entries.length === expectedEntries, 'EVALUATION_MOVED', '这一版评估刚在另一个窗口保存过；请看过最新的再改。');
+    requireEvaluation(entries.count === expectedEntries, 'EVALUATION_MOVED', '这一版评估刚在另一个窗口保存过；请看过最新的再改。');
     const { sha256: _digest, ...profile } = record.profile;
     const checked = evaluationContent(content, profile, finalize);
     requireEvaluation(finalize || !sameContent(checked, last.content), 'EVALUATION_UNCHANGED', '评估没有变化。');
-    this.#append(record, last.sha256, entries.length + 1, finalize ? 'finalized' : 'draft', checked);
+    this.#append(record, last.sha256, entries.count + 1, finalize ? 'finalized' : 'draft', checked);
   }
 
-  #summary(record: StoredRecord, entries: ReadonlyArray<StoredEntry>): EvaluationRecordSummaryProjection {
-    const last = entries.at(-1)!;
+  #summary(record: StoredRecord, last: StoredEntry): EvaluationRecordSummaryProjection {
     return {
       recordId: record.recordId,
       ordinal: record.ordinal,
@@ -487,9 +491,9 @@ export class EvaluationRecords {
     };
   }
 
-  #comparison(previous: { record: StoredRecord; entries: ReadonlyArray<StoredEntry> } | undefined, current: { record: StoredRecord; content: EvaluationContent }): EvaluationComparisonProjection | null {
+  #comparison(previous: { record: StoredRecord; latest: StoredEntry } | undefined, current: { record: StoredRecord; content: EvaluationContent }): EvaluationComparisonProjection | null {
     if (previous === undefined) return null;
-    const before = previous.entries.at(-1)!.content;
+    const before = previous.latest.content;
     const value = (item: EvaluationContent['items'][number] | undefined): number | 'not-rated' | null =>
       item === undefined ? null : item.notRated !== null ? 'not-rated' : item.score;
     return {
@@ -510,22 +514,37 @@ export class EvaluationRecords {
   }
 
   /** ②C 评估 of one Book (EVAL-001, EVAL-012): every version newest first, one on show with its comparison, and whether to begin. */
-  workspace(bookId: string, bookTitle: string, recordId: string | null): EvaluationWorkspaceProjection {
-    const records = this.#records(bookId);
-    const chains = records.map((record) => ({ record, entries: this.#entries(record) }));
-    const shown = recordId === null ? chains.at(-1) : chains.find((chain) => chain.record.recordId === recordId);
+  workspace(bookId: string, bookTitle: string, recordId: string | null, before: number | null = null): EvaluationWorkspaceProjection {
+    requireEvaluation(before === null || (Number.isSafeInteger(before) && before > 1), 'EVALUATION_PAGE_INVALID', '评估版本页码无效。');
+    const summaries: EvaluationRecordSummaryProjection[] = [];
+    let count = 0;
+    let open: { record: StoredRecord; count: number; latest: StoredEntry } | undefined;
+    let shown: typeof open;
+    for (const record of this.#records(bookId)) {
+      const chain = { record, ...this.#entries(record) };
+      count += 1;
+      open = chain;
+      if (recordId === null || record.recordId === recordId) shown = chain;
+      if (before === null || record.ordinal < before) {
+        summaries.push(this.#summary(record, chain.latest));
+        if (summaries.length > 10) summaries.shift();
+      }
+    }
     requireEvaluation(recordId === null || shown !== undefined, 'EVALUATION_NOT_FOUND', '没有这个评估版本。');
     let record: EvaluationRecordProjection | null = null;
     if (shown !== undefined) {
-      const last = shown.entries.at(-1)!;
-      const previous = shown.record.previousRecordId === null ? undefined : chains.find((chain) => chain.record.recordId === shown.record.previousRecordId);
+      const last = shown.latest;
+      const previousRow = shown.record.previousRecordId === null ? undefined : this.#db.prepare('SELECT * FROM evaluation_records WHERE record_id = ? AND book_id = ?')
+        .get(shown.record.previousRecordId, bookId);
+      const previousRecord = previousRow === undefined ? undefined : this.#record(previousRow);
+      const previous = previousRecord === undefined ? undefined : { record: previousRecord, latest: this.#entries(previousRecord).latest };
       record = {
-        ...this.#summary(shown.record, shown.entries),
+        ...this.#summary(shown.record, last),
         revisionId: shown.record.revisionId,
         uncheckpointed: shown.record.uncheckpointed,
         profile: shown.record.profile,
         content: last.content,
-        entries: shown.entries.length,
+        entries: shown.count,
         savedAt: last.recordedAt,
         finalized: last.kind === 'finalized' ? { actor: EVALUATION_ACTOR, at: last.recordedAt } : null,
         recommendationBlocked: recommendationBlocked(last.content.risks),
@@ -533,10 +552,9 @@ export class EvaluationRecords {
       };
     }
     const manuscript = this.#manuscripts.current(bookId);
-    const open = chains.at(-1);
     const start: EvaluationWorkspaceProjection['start'] = manuscript === null
       ? { allowed: false, reason: '这本书还没有稿件，没有可以评估的内容。' }
-      : open !== undefined && open.entries.at(-1)!.kind !== 'finalized'
+      : open !== undefined && open.latest.kind !== 'finalized'
         ? { allowed: false, reason: `第 ${open.record.ordinal} 版还没有定稿；定稿后才能重新评估。` }
         : { allowed: true, kind: open === undefined ? 'first' : 'again' };
     return {
@@ -544,7 +562,10 @@ export class EvaluationRecords {
       bookTitle,
       manuscript: manuscript === null ? null : { revisionId: manuscript.revisionId, revisionLabel: manuscript.revisionLabel, uncheckpointed: manuscript.uncheckpointed },
       profile: this.profile(),
-      records: chains.map((chain) => this.#summary(chain.record, chain.entries)).reverse(),
+      records: summaries.reverse(),
+      recordCount: count,
+      recordsBefore: before,
+      recordsNext: (summaries.at(-1)?.ordinal ?? 1) > 1 ? summaries.at(-1)!.ordinal : null,
       record,
       start,
     };

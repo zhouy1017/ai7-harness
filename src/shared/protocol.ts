@@ -5001,6 +5001,9 @@ export interface EvaluationWorkspaceProjection {
   /** The profile a new version would snapshot. */
   readonly profile: EvaluationProfileProjection;
   readonly records: ReadonlyArray<EvaluationRecordSummaryProjection>;
+  readonly recordCount: number;
+  readonly recordsBefore: number | null;
+  readonly recordsNext: number | null;
   readonly record: EvaluationRecordProjection | null;
   /** `开始评估` or `重新评估`, or why neither can begin now. */
   readonly start: { readonly allowed: true; readonly kind: 'first' | 'again' } | { readonly allowed: false; readonly reason: string };
@@ -7252,7 +7255,7 @@ export interface ServiceOperationMap {
   };
   /** ②C 评估 of the route's Book (Issue #429, S81a): one version by its identity, or the latest when `null`. */
   inspectEvaluation: {
-    input: { bookId: string; recordId: string | null };
+    input: { bookId: string; recordId: string | null; recordsBefore?: number | null };
     output: EvaluationWorkspaceProjection;
   };
   /** 开始评估 or 重新评估: a new version bound to the manuscript's current revision. */
@@ -7654,7 +7657,7 @@ export interface RendererApi {
   /** 知识库 › 评估方案 (Issue #429, S81a): names no Book. */
   inspectEvaluationProfiles(): Promise<EvaluationProfilesProjection>;
   /** ②C 评估 of the Book the window is showing (Issue #429, S81a); the renderer never names the Book. */
-  inspectEvaluation(input: { recordId: string | null }): Promise<EvaluationWorkspaceProjection>;
+  inspectEvaluation(input: { recordId: string | null; recordsBefore?: number | null }): Promise<EvaluationWorkspaceProjection>;
   startEvaluation(): Promise<EvaluationWorkspaceProjection>;
   saveEvaluation(input: { recordId: string; expectedEntries: number; content: EvaluationContent; finalize: boolean }): Promise<EvaluationWorkspaceProjection>;
   /**

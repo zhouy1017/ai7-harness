@@ -1133,6 +1133,8 @@ describe('decodeRequest rejects malformed frames', () => {
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
       { op: 'inspectEvaluationProfiles', input: {} },
       { op: 'inspectEvaluation', input: { bookId, recordId: null } },
+      { op: 'inspectEvaluation', input: { bookId, recordId: null, recordsBefore: 11 } },
+      { op: 'inspectEvaluation', input: { bookId, recordId: null, recordsBefore: null } },
       { op: 'inspectEvaluation', input: { bookId, recordId } },
       { op: 'startEvaluation', input: { bookId } },
       { op: 'saveEvaluation', input: { bookId, recordId, expectedEntries: 1, content, finalize: false } },
@@ -1145,6 +1147,9 @@ describe('decodeRequest rejects malformed frames', () => {
     for (const [op, input] of [
       ['inspectEvaluationProfiles', { bookId }],
       ['inspectEvaluation', { bookId }],
+      ['inspectEvaluation', { bookId, recordId: null, recordsBefore: 1 }],
+      ['inspectEvaluation', { bookId, recordId: null, recordsBefore: 2.5 }],
+      ['inspectEvaluation', { bookId, recordId: null, recordsBefore: '11' }],
       ['inspectEvaluation', { bookId: 'book', recordId: null }],
       ['startEvaluation', { bookId, recordId }],
       ['saveEvaluation', { bookId, recordId, expectedEntries: 0, content, finalize: false }],
