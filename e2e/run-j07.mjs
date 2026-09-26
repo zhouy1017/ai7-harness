@@ -1916,6 +1916,10 @@ async function main() {
     })()`, 'package-export-history');
     requireJourney(JSON.stringify((await readdir(packageFolder)).sort()) === JSON.stringify(firstMembers.map(([, , , fileName]) => fileName).sort()), 'package-export-selected-subset-only');
     await clickSelector(renderer, packageAction('export-close'), 'package-export-subset-close');
+    // Each native dialog control is single-use. Restart with a fresh answer for the second explicit batch.
+    await close();
+    renderer = await launch({ folder: packageFolder });
+    await reopenDeliverables(renderer, 'package-export-second-batch');
     await clickSelector(renderer, packageAction('export'), 'package-export-remaining-open');
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'ready'`, 'package-export-remaining-reviewed', 60_000);
     await clickSelector(renderer, 'input[data-package-member="document:news-release"]', 'package-export-select-remaining');
