@@ -8,6 +8,7 @@ import type {
   BookTaskItemProjection,
   DefaultExecutionRuleReference,
   DefaultExecutionRulesProjection,
+  ExemplarsProjection,
   QuickStartBaselineAnalysisResult,
   BaselineAnalysisResultSetRevisionProjection,
   BaselineAnalysisSelectedRange,
@@ -72,6 +73,14 @@ import { mountDeliverables, type DeliverablesSurface } from './deliverables.js';
 import { mountBookPeople } from './book-people.js';
 import { mountReviewGuidelines } from './review-guidelines.js';
 import {
+  EXEMPLARS_EMPTY,
+  EXEMPLARS_LATER,
+  EXEMPLARS_MORE,
+  EXEMPLARS_NONE_DELIVERED,
+  EXEMPLARS_STATUS,
+  exemplarAttribution,
+  exemplarDesignation,
+  exemplarLine,
   GUIDELINE_STATUS,
   KNOWLEDGE_BASE_LEDE,
   KNOWLEDGE_BASE_TABS_LABEL,
@@ -4267,6 +4276,16 @@ async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocu
     return;
   }
   const { content, panelNode } = knowledgeBasePage(tab, tabFocused);
+  if (tab === 'exemplars') {
+    setStatus(EXEMPLARS_STATUS.loading, 'busy');
+    try {
+      renderExemplars(panelNode, await window.ai7.inspectExemplars({ after: null }));
+      if (content.isConnected) setStatus(EXEMPLARS_STATUS.opened);
+    } catch (error) {
+      setStatus(rendererErrorMessage(error, EXEMPLARS_STATUS.unavailable), 'error');
+    }
+    return;
+  }
   if (tab !== 'guidelines') {
     setStatus(`${knowledgeBaseTabView(tab).label}已打开`);
     return;
@@ -4279,6 +4298,87 @@ async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocu
   } catch (error) {
     setStatus(rendererErrorMessage(error, GUIDELINE_STATUS.unavailable), 'error');
   }
+}
+
+/**
+ * 知识库 › 范例 (Issue #427, S79b; KB-004, KB-006): each published Book with who it is attributed to and when it was set as a
+ * 发稿版本, and its delivered documents by type — each the version its latest delivery named, with its eligibility. The
+ * Books come a page at a time; moving forward or back to the first page replaces the current bounded page.
+ */
+function renderExemplars(root: HTMLElement, projection: ExemplarsProjection): void {
+  if (projection.books.length === 0) root.append(element('p', 'field-note exemplars-empty', EXEMPLARS_EMPTY));
+  const list = element('div', 'exemplar-list');
+  const append = (books: ExemplarsProjection['books']): HTMLElement | null => {
+    list.replaceChildren();
+    let first: HTMLElement | null = null;
+    for (const book of books) {
+      const card = element('article', 'exemplar-book');
+      card.dataset['bookId'] = book.bookId;
+      card.dataset['exemplarCount'] = String(book.exemplars.length);
+      card.dataset['exemplarWithdrawn'] = String(book.withdrawn);
+      const heading = element('h3', undefined, `《${book.bookTitle}》`);
+      heading.tabIndex = -1;
+      first ??= heading;
+      card.append(
+        heading,
+        element('p', 'field-note exemplar-attribution', exemplarAttribution(book)),
+        element('p', 'field-note exemplar-designation', exemplarDesignation(book, localInstantLabel)),
+      );
+      if (book.exemplars.length === 0) card.append(element('p', 'field-note', EXEMPLARS_NONE_DELIVERED));
+      const items = element('ul', 'exemplar-items');
+      for (const exemplar of book.exemplars) {
+        const item = element('li', undefined, exemplarLine(exemplar, localInstantLabel));
+        item.dataset['exemplarDocument'] = exemplar.documentId;
+        item.dataset['exemplarType'] = exemplar.typeId;
+        item.dataset['exemplarVersion'] = String(exemplar.version);
+        items.append(item);
+      }
+      if (book.exemplars.length > 0) card.append(items);
+      list.append(card);
+    }
+    root.dataset['exemplarBooks'] = String(list.children.length);
+    return first;
+  };
+  append(projection.books);
+  let cursor = projection.nextCursor;
+  const more = element('button', 'button secondary', EXEMPLARS_MORE);
+  more.type = 'button';
+  more.dataset['exemplarAction'] = 'more';
+  const moreRow = element('div', 'button-row exemplars-more');
+  moreRow.hidden = cursor === null;
+  const firstPage = element('button', 'button secondary', '回到第一页');
+  firstPage.type = 'button';
+  firstPage.dataset['exemplarAction'] = 'first';
+  firstPage.hidden = true;
+  more.hidden = cursor === null;
+  moreRow.append(firstPage, more);
+  const turn = async (after: ExemplarsProjection['nextCursor']) => {
+    if (more.disabled) return;
+    more.disabled = true;
+    firstPage.disabled = true;
+    setStatus(EXEMPLARS_STATUS.loadingMore, 'busy');
+    try {
+      const next = await window.ai7.inspectExemplars({ after });
+      if (!root.isConnected) return;
+      const first = append(next.books);
+      cursor = next.nextCursor;
+      firstPage.hidden = after === null;
+      more.hidden = cursor === null;
+      moreRow.hidden = cursor === null && after === null;
+      setStatus(EXEMPLARS_STATUS.opened);
+      const focusTarget = first ?? root.closest('.knowledge-base')?.querySelector<HTMLElement>('h2');
+      if (focusTarget) { focusTarget.tabIndex = -1; focusTarget.focus(); }
+    } catch (error) {
+      if (!root.isConnected) return;
+      setStatus(rendererErrorMessage(error, EXEMPLARS_STATUS.unavailable), 'error');
+    } finally {
+      more.disabled = false;
+      firstPage.disabled = false;
+    }
+  };
+  more.addEventListener('click', () => { if (cursor !== null) void turn(cursor); });
+  firstPage.addEventListener('click', () => void turn(null));
+  root.append(list, moreRow, ...EXEMPLARS_LATER.map((line) => element('p', 'field-note exemplars-later', line)));
 }
 
 /**

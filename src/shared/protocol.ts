@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 69 as const;
+export const SERVICE_PROTOCOL_VERSION = 70 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -77,6 +77,7 @@ export const IPC_CHANNELS = {
   inspectReviewGuidelines: 'ai7:j15:inspect-review-guidelines',
   previewReviewGuidelineVersion: 'ai7:j15:preview-review-guideline-version',
   importReviewGuidelineVersion: 'ai7:j15:import-review-guideline-version',
+  inspectExemplars: 'ai7:j07:inspect-exemplars',
   inspectReviewWorkspace: 'ai7:j04:inspect-review-workspace',
   prepareReviewRun: 'ai7:j04:prepare-review-run',
   authorizeReviewRun: 'ai7:j04:authorize-review-run',
@@ -4680,6 +4681,67 @@ export interface ReviewGuidelinePreviewProjection {
   readonly changes: { readonly changed: number; readonly added: number; readonly removed: number };
 }
 
+// ---- 知识库 › 范例 (Issue #427, plan slice S79b; V2-UX-KB-004, KB-006) --------------------------------------------------
+
+/** The published Books one answer of 范例 carries, by title; `更多已出版的书…` reads the next (Issue #427 review). */
+export const MAX_EXEMPLAR_BOOKS_PAGE = 20;
+/** The earlier delivered versions an exemplar names, the latest of them; the rest are counted. */
+export const MAX_EXEMPLAR_EARLIER_VERSIONS = 10;
+
+/** Where the next page of 范例 starts: after this Book, in title order as 书库 pages. */
+export interface ExemplarBookCursor {
+  readonly title: string;
+  readonly bookId: string;
+}
+
+/** One exemplar: the version of one delivered document of a published Book that stands in 范例. */
+export interface ExemplarProjection {
+  readonly documentId: string;
+  readonly typeId: string;
+  readonly typeLabel: string;
+  /** The document version its latest Delivery Record named. */
+  readonly version: number;
+  readonly revisionId: string;
+  readonly revisionDigest: string;
+  readonly deliveredTo: string;
+  readonly deliveredAt: string;
+  /**
+   * When it came into 范例: its delivery, made while a 发稿版本 stood in AI7; or, for one delivered before the first
+   * designation or after a 撤回, the next designation.
+   */
+  readonly archivedAt: string;
+  /** How many other versions of the document came into 范例 before this one. */
+  readonly earlierVersionCount: number;
+  /** The latest of them, oldest first, at most `MAX_EXEMPLAR_EARLIER_VERSIONS`. */
+  readonly earlierVersions: ReadonlyArray<number>;
+  /** The Learning Eligibility it came in with: `仅本社`, the default, asked of no one. */
+  readonly eligibility: 'house-only';
+}
+
+/** A published Book in 范例: who it is attributed to, its latest 发稿版本, and its exemplars by document type. */
+export interface ExemplarBookProjection {
+  readonly bookId: string;
+  readonly bookTitle: string;
+  /** As the Book's 人员 read now. */
+  readonly authors: ReadonlyArray<string>;
+  readonly editors: ReadonlyArray<string>;
+  /** Its latest designation: which one, and when. */
+  readonly publicationOrdinal: number;
+  readonly designatedAt: string;
+  /**
+   * Whether a 撤回 holds that designation (ADR 0040): in AI7 it is no longer used for 发稿, so what the Book delivers
+   * after it comes in only once another 发稿版本 is set. What came in before stays.
+   */
+  readonly withdrawn: boolean;
+  readonly exemplars: ReadonlyArray<ExemplarProjection>;
+}
+
+export interface ExemplarsProjection {
+  readonly books: ReadonlyArray<ExemplarBookProjection>;
+  /** Where the next page starts; `null` when this is the last. */
+  readonly nextCursor: ExemplarBookCursor | null;
+}
+
 /** The drawer's `设为快速开始默认…` for one plan, and the rule that started its Task, when one did. */
 export interface TaskPlanDefaultRuleProjection {
   canSet: boolean;
@@ -6882,6 +6944,11 @@ export interface ServiceOperationMap {
     input: { previewId: string };
     output: ReviewGuidelinesProjection;
   };
+  /** 知识库 › 范例 (Issue #427, S79b): the published Books' delivered documents, by Book and type, a page at a time. */
+  inspectExemplars: {
+    input: { after: ExemplarBookCursor | null };
+    output: ExemplarsProjection;
+  };
   /**
    * 审阅 (Issue #417, plan slice S69). The workspace is one read; preparing a Review Run is a
    * cooperative job; the one approval records the Run's authorization and starts its drive loop at once,
@@ -7257,6 +7324,8 @@ export interface RendererApi {
   /** 导入新版本: the native picker, then the file's clauses as the next version would read them; `null` when the picker was cancelled. */
   previewReviewGuidelineVersion(input: { documentId: string; previewId?: string; clausePage?: number }): Promise<ReviewGuidelinePreviewProjection | null>;
   importReviewGuidelineVersion(input: { previewId: string }): Promise<ReviewGuidelinesProjection>;
+  /** 知识库 › 范例 (Issue #427, S79b): names no Book; it reads the published Books' delivered documents, a page at a time. */
+  inspectExemplars(input?: { after: ExemplarBookCursor | null }): Promise<ExemplarsProjection>;
   /**
    * 审阅 of the Book the window is showing (Issue #417). Inspecting without a Run opens the latest; a
    * running Run is followed by inspecting it again, and its executing category carries its progress.

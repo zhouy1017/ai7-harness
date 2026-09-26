@@ -1,4 +1,11 @@
-import type { ReviewGuidelineDocumentProjection, ReviewGuidelinePreviewProjection, ReviewGuidelineVersionProjection } from '../shared/protocol.js';
+import type {
+  ExemplarBookProjection,
+  ExemplarProjection,
+  ReviewGuidelineDocumentProjection,
+  ReviewGuidelinePreviewProjection,
+  ReviewGuidelineVersionProjection,
+} from '../shared/protocol.js';
+import { MAINTENANCE_WITHDRAWN } from '../shared/maintenance-wording.js';
 
 /**
  * 知识库's words (Issue #427, plan slice S79a; editor-surfaces §8.4, V2-UX-KB-001 to KB-010): its seven classes in the
@@ -44,8 +51,8 @@ export const KNOWLEDGE_BASE_TAB_VIEWS: ReadonlyArray<KnowledgeBaseTabView> = [
   {
     tab: 'exemplars',
     label: '范例',
-    holds: '按已出版图书组织的审稿意见、新闻稿、宣传文章与评论文章；本社的书设为发稿版本后自动归入，学习准入默认「仅本社」。',
-    pending: '尚未提供：范例的自动归入与导入还没有接通。',
+    holds: '按已出版图书组织的审稿意见、新闻稿、宣传文章与评论文章；本社的书设为发稿版本后，交付过的文档自动归入，学习准入默认「仅本社」。',
+    pending: null,
   },
   {
     tab: 'library',
@@ -149,4 +156,54 @@ export function guidelinePreviewChanges(preview: Pick<ReviewGuidelinePreviewProj
 
 export function guidelineImported(title: string, ordinal: number): string {
   return `已导入《${title}》第 ${ordinal} 版；新准备的审阅按第 ${ordinal} 版；已准备的审阅仍用原版本。`;
+}
+
+// ---- 范例 (Issue #427, plan slice S79b; KB-004, KB-006) --------------------------------------------------------------
+
+export const EXEMPLARS_EMPTY = '还没有设为发稿版本的图书。本社的书设为发稿版本后，交付过的文档自动归入这里。';
+export const EXEMPLARS_NONE_DELIVERED = '还没有交付过的文档；交付后自动归入。';
+/** Reads the next page of published Books (Issue #427 review). */
+export const EXEMPLARS_MORE = '更多已出版的书…';
+export const EXEMPLARS_STATUS = {
+  loading: '正在读取范例…',
+  opened: '范例已打开',
+  loadingMore: '正在读取更多已出版的书…',
+  unavailable: '无法读取范例。',
+} as const;
+/** What 范例 does not hold yet, said once below the Books. */
+export const EXEMPLARS_LATER = [
+  '审稿意见随「评估与审稿意见」到来后，也会在设为发稿版本时归入。',
+  '以前出版的书的范例由编辑导入并标明图书、作者、责编：尚未提供。',
+] as const;
+export const EXEMPLAR_ELIGIBILITY_LABELS: Readonly<Record<ExemplarProjection['eligibility'], string>> = { 'house-only': '仅本社' };
+
+/** Who a published Book is attributed to, as its 人员 read now. */
+export function exemplarAttribution(book: Pick<ExemplarBookProjection, 'authors' | 'editors'>): string {
+  const authors = book.authors.length === 0 ? '未填写' : book.authors.join('、');
+  const editors = book.editors.length === 0 ? '未填写' : book.editors.join('、');
+  return `作者：${authors} · 责编：${editors}`;
+}
+
+/**
+ * The Book's latest designation — which time it was set and when (Issue #427 review) — and, when a 撤回 holds it, that what
+ * the Book delivers from then on waits for another 发稿版本 (ADR 0040).
+ */
+export function exemplarDesignation(book: Pick<ExemplarBookProjection, 'designatedAt' | 'publicationOrdinal' | 'withdrawn'>, instant: (iso: string) => string): string {
+  const designated = `第 ${book.publicationOrdinal} 次设为发稿版本于 ${instant(book.designatedAt)}`;
+  return book.withdrawn ? `${designated} · ${MAINTENANCE_WITHDRAWN}；之后交付的文档，另设发稿版本后才归入` : designated;
+}
+
+/**
+ * One exemplar's line: its type and version, where it was delivered and when, when it came in, its eligibility, and the
+ * versions delivered before it — every one while they are few, and past that how many, with the latest named.
+ */
+export function exemplarLine(exemplar: ExemplarProjection, instant: (iso: string) => string): string {
+  const named = exemplar.earlierVersions.join('、');
+  const earlier = exemplar.earlierVersionCount === 0
+    ? ''
+    : exemplar.earlierVersionCount > exemplar.earlierVersions.length
+      ? ` · 此前还交付过 ${exemplar.earlierVersionCount} 个版本，最近的是版本 ${named}`
+      : ` · 此前还交付过版本 ${named}`;
+  return `${exemplar.typeLabel} · 版本 ${exemplar.version} · 交付给${exemplar.deliveredTo}于 ${instant(exemplar.deliveredAt)} · 归入于 ${instant(exemplar.archivedAt)}` +
+    ` · 学习准入：${EXEMPLAR_ELIGIBILITY_LABELS[exemplar.eligibility]}${earlier}`;
 }

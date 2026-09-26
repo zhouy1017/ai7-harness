@@ -1143,6 +1143,23 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
+  it('accepts 知识库 › 范例 only as a page start: none, or a title and Book as 书库 pages (Issue #427)', () => {
+    for (const input of [{ after: null }, { after: { title: '出版之书', bookId: randomUUID() } }]) {
+      const request = { id: randomUUID(), op: 'inspectExemplars', input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    for (const input of [
+      {},
+      { after: null, bookId: randomUUID() },
+      { after: { title: '出版之书' } },
+      { after: { title: '出版之书', bookId: 'not-a-book' } },
+      { after: { title: 'x'.repeat(181), bookId: randomUUID() } },
+      { after: '出版之书' },
+    ]) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op: 'inspectExemplars', input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('rejects a 待我处理 read that names a Book, a group, a filter or anything else', () => {
     const id = randomUUID();
     const refused: ReadonlyArray<unknown> = [

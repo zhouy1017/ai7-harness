@@ -252,12 +252,23 @@ function requireRecord(json: SQLOutputValue | undefined, digest: SQLOutputValue 
 export interface PublicationMaintenanceSource {
   summaries(bookId: string, publicationVersionId: string): PublicationMaintenanceProjection;
   withdrawn(publicationVersionId: string): boolean;
+  /** When a 撤回 came to hold the designation, or `null` while none holds it. */
+  withdrawnAt(publicationVersionId: string): string | null;
 }
 
 const NO_MAINTENANCE: PublicationMaintenanceSource = {
   summaries: () => ({ cases: [], total: 0, withdrawn: false, archived: false }),
   withdrawn: () => false,
+  withdrawnAt: () => null,
 };
+
+/** One designation as 范例 reads it (Issue #427, S79b review): which one, when, and when a 撤回 came to hold it. */
+export interface PublicationHistoryEntry {
+  readonly publicationVersionId: string;
+  readonly ordinal: number;
+  readonly createdAt: string;
+  readonly withdrawnAt: string | null;
+}
 
 export class PublicationVersionStore {
   readonly #db: DatabaseSync;
@@ -335,6 +346,46 @@ export class PublicationVersionStore {
       // A 撤回 case holds it (Issue #426, S68a): in AI7 it is no longer used for 发稿 (ADR 0040).
       withdrawn: current.projection.maintenance.withdrawn,
     };
+  }
+
+  /**
+   * The Books that have a 发稿版本, by title as 书库 pages them, after `after` and at most `limit` of them (Issue #427, S79b:
+   * 范例 holds exactly these Books).
+   */
+  designatedBooks(after: { title: string; bookId: string } | null, limit: number): Array<{ bookId: string; title: string }> {
+    const rows = this.#db.prepare(
+      `SELECT b.book_id, b.title FROM books b
+       WHERE EXISTS (SELECT 1 FROM publication_versions p WHERE p.book_id = b.book_id)
+         ${after === null ? '' : 'AND (b.title COLLATE BINARY > ? COLLATE BINARY OR (b.title = ? COLLATE BINARY AND b.book_id > ?))'}
+       ORDER BY b.title COLLATE BINARY, b.book_id
+       LIMIT ?`,
+    ).all(...(after === null ? [] : [after.title, after.title, after.bookId]), limit) as SqlRow[];
+    return rows.map((row) => ({ bookId: text(row.book_id), title: text(row.title) }));
+  }
+
+  /**
+   * Every designation is streamed and verified exactly as 交付物 reads it, retaining only the latest and when a 撤回 came to
+   * hold it (Issue #427, S79b review): 范例 takes in what the Book delivered while a designation stood in AI7.
+   */
+  exemplarArchive(bookId: string): { latest: PublicationHistoryEntry; archivedAt(at: string): string | null } {
+    requirePublication(typeof bookId === 'string' && UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+    let latest: PublicationHistoryEntry | undefined;
+    for (const { projection } of this.#readDesignations(bookId, this.#head(bookId), Number.MAX_SAFE_INTEGER)) {
+      const withdrawnAt = this.#maintenance.withdrawnAt(projection.publicationVersionId);
+      latest ??= { publicationVersionId: projection.publicationVersionId, ordinal: projection.ordinal, createdAt: projection.createdAt, withdrawnAt };
+    }
+    requirePublication(latest !== undefined, 'PUBLICATION_RECORD_INVALID', '范例缺少发稿版本。');
+    const standing = this.#db.prepare('SELECT publication_version_id FROM publication_versions WHERE book_id = ? AND created_at <= ? ORDER BY ordinal DESC LIMIT 1');
+    const next = this.#db.prepare('SELECT created_at FROM publication_versions WHERE book_id = ? AND created_at > ? ORDER BY ordinal LIMIT 1');
+    return { latest, archivedAt: (at) => {
+      const row = standing.get(bookId, at) as SqlRow | undefined;
+      if (row !== undefined) {
+        const withdrawnAt = this.#maintenance.withdrawnAt(text(row.publication_version_id));
+        if (withdrawnAt === null || withdrawnAt > at) return at;
+      }
+      const future = next.get(bookId, at) as SqlRow | undefined;
+      return future === undefined ? null : text(future.created_at);
+    } };
   }
 
   /**
@@ -556,6 +607,10 @@ export class PublicationVersionStore {
    * revision they froze.
    */
   #designations(bookId: string, head: ManuscriptHead | null, limit: number): ReadDesignation[] {
+    return Array.from(this.#readDesignations(bookId, head, limit));
+  }
+
+  *#readDesignations(bookId: string, head: ManuscriptHead | null, limit: number): IterableIterator<ReadDesignation> {
     const rows = this.#db.prepare(
       `SELECT pv.publication_version_id, pv.ordinal, pv.manuscript_id, pv.branch_id, pv.milestone_id, pv.revision_id,
               pv.revision_digest, pv.scope, pv.basis, pv.actor, pv.created_at, pv.canonical_json, pv.sha256,
@@ -571,9 +626,12 @@ export class PublicationVersionStore {
        WHERE pv.book_id = ?
        ORDER BY pv.ordinal DESC
        LIMIT ?`,
-    ).all(bookId, limit) as SqlRow[];
-    requirePublication(rows.length === 0 || head !== null, 'PUBLICATION_RECORD_INVALID', '发稿记录缺少所属稿件。');
-    return rows.map((row, index) => this.#designation(row, index === 0, bookId, head!));
+    ).iterate(bookId, limit) as IterableIterator<SqlRow>;
+    let index = 0;
+    for (const row of rows) {
+      requirePublication(head !== null, 'PUBLICATION_RECORD_INVALID', '发稿记录缺少所属稿件。');
+      yield this.#designation(row, index++ === 0, bookId, head);
+    }
   }
 
   #designation(row: SqlRow, current: boolean, bookId: string, head: ManuscriptHead): ReadDesignation {
