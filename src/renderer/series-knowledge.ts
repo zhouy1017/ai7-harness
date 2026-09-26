@@ -117,6 +117,7 @@ interface History {
   nextBefore: number | null;
   later: boolean;
   failed: boolean;
+  retryFresh: boolean;
 }
 
 export interface MountSeriesKnowledgeOptions {
@@ -255,7 +256,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
 
   /** 历次版本: read the first time the editor opens it, newest first, with `更早的版本…` for the rest (Issue #63 review). */
   const historyNode = (item: SeriesKnowledgeItemProjection): HTMLElement => {
-    const state = histories.get(item.itemId) ?? { open: false, revisions: null, nextBefore: null, later: false, failed: false };
+    const state = histories.get(item.itemId) ?? { open: false, revisions: null, nextBefore: null, later: false, failed: false, retryFresh: true };
     const details = el('details', 'knowledge-item-history');
     details.open = state.open;
     details.append(el('summary', undefined, knowledgeRevisionsSummary(item.revisionCount)));
@@ -270,11 +271,11 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     }
     if (state.failed) {
       details.append(el('p', 'field-note', '历次版本未能读取。可以重试；已有页面保留。'));
-      details.append(moreRow('重试读取版本', 'revisions-retry', () => void loadRevisions(item.itemId, state.revisions === null || !state.later)));
+      details.append(moreRow('重试读取版本', 'revisions-retry', () => void loadRevisions(item.itemId, state.retryFresh)));
     }
     details.addEventListener('toggle', () => {
       if (!details.isConnected) return;
-      const known = histories.get(item.itemId) ?? { open: false, revisions: null, nextBefore: null, later: false, failed: false };
+      const known = histories.get(item.itemId) ?? { open: false, revisions: null, nextBefore: null, later: false, failed: false, retryFresh: true };
       if (busy) { details.open = known.open; return; }
       const opening = details.open && !known.open;
       known.open = details.open;
@@ -286,9 +287,10 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
 
   const loadRevisions = async (itemId: string, fresh: boolean): Promise<void> => {
     if (busy || !knowledge?.items.some((item) => item.itemId === itemId)) return;
-    const state = histories.get(itemId) ?? { open: true, revisions: null, nextBefore: null, later: false, failed: false };
+    const state = histories.get(itemId) ?? { open: true, revisions: null, nextBefore: null, later: false, failed: false, retryFresh: true };
     const epoch = historyEpoch;
     state.failed = false;
+    state.retryFresh = fresh;
     busy = true;
     paint(null);
     try {
