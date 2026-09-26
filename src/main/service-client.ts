@@ -53,7 +53,11 @@ export function requestTimeoutMs(operation: ServiceOperation): number {
     operation === 'approveBookDeliveryPackageExport' ||
     // 资料库 (Issue #427, S79c) reads a file of up to 1 GiB whole to digest it, and 放入资料库 copies, syncs and checks
     // it; from a slow disk or share that takes minutes, and a timeout would stop the service mid-copy.
-    operation === 'previewLibraryMaterial' || operation === 'addLibraryMaterial';
+    operation === 'previewLibraryMaterial' || operation === 'addLibraryMaterial' ||
+    // 导入数据库 (Issue #434, S86c) reads and verifies a whole package for its preview; 替换 and 回退 extract one whole and back
+    // the data up as another, and 取消替换 removes the extracted copy: each grows with the data.
+    operation === 'inspectDatabaseImport' || operation === 'prepareDatabaseReplacement' ||
+    operation === 'rollBackDatabaseReplacement' || operation === 'cancelDatabaseReplacement';
   return long ? LONG_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
 }
 
@@ -129,7 +133,7 @@ function serviceEnvironment(
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 83 &&
+    value.protocolVersion === 84 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&

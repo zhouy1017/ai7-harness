@@ -422,6 +422,11 @@ export class BaselineAnalysisExecutionOwner {
     return this.#active.size >= this.#capacity;
   }
 
+  /** Whether nothing runs, waits for a place, or waits to finish its cancellation: no Run will write until another starts. */
+  get idle(): boolean {
+    return this.#active.size === 0 && this.#queued.length === 0 && this.#pendingCancels.length === 0;
+  }
+
   /** How many Runs execute at once. */
   get capacity(): number {
     return this.#capacity;

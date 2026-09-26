@@ -1405,6 +1405,38 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
+  it('accepts 导入数据库: an absolute package, the one preview it replaces with, and the one replacement each change names (Issue #434, S86c)', () => {
+    const source = process.platform === 'win32' ? 'C:\\Users\\编辑\\Documents\\AI7 数据库.ai7db' : '/Users/编辑/Documents/AI7 数据库.ai7db';
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'inspectDatabaseImport', input: { source } },
+      { op: 'prepareDatabaseReplacement', input: { previewId: randomUUID() } },
+      { op: 'cancelDatabaseReplacement', input: { replacementId: randomUUID() } },
+      { op: 'rollBackDatabaseReplacement', input: { replacementId: randomUUID() } },
+      { op: 'inspectDatabaseReplacements', input: {} },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    for (const [op, input] of [
+      ['inspectDatabaseImport', { source: 'AI7 数据库.ai7db' }],
+      ['inspectDatabaseImport', { source: 'x'.repeat(1025) }],
+      ['inspectDatabaseImport', { source: 7 }],
+      ['inspectDatabaseImport', {}],
+      ['inspectDatabaseImport', { source, previewId: randomUUID() }],
+      ['prepareDatabaseReplacement', { previewId: 'preview' }],
+      ['prepareDatabaseReplacement', { previewId: randomUUID(), choice: 'replace' }],
+      ['prepareDatabaseReplacement', {}],
+      ['cancelDatabaseReplacement', { replacementId: 'replacement' }],
+      ['cancelDatabaseReplacement', {}],
+      ['rollBackDatabaseReplacement', { replacementId: 7 }],
+      ['rollBackDatabaseReplacement', {}],
+      ['inspectDatabaseReplacements', { pending: true }],
+    ] as const) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('accepts 书系知识: a candidate of the editor\'s words or a manuscript span, its review, its edit and its promotion (Issue #63, S28b)', () => {
     const seriesId = randomUUID();
     const candidateId = randomUUID();

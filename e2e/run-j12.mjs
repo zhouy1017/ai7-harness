@@ -1,4 +1,4 @@
-import { createWriteStream } from 'node:fs';
+import { createWriteStream, existsSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
@@ -462,7 +462,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     // Production Documents beside their ledgers, revision 38 adds their Delivery Records and revision 39 the Book's
     // 图书交付包 versions, so this pin moves with the terminal version the service stamps
     // (`BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION`).
-    requireJourney(version?.user_version === 56, 'credential-cleanup-metadata-version');
+    requireJourney(version?.user_version === 57, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, connection_name, provider_id, model_id,
               adapter_revision, configuration_revision, approved_fallback_chain,
@@ -1514,7 +1514,7 @@ async function main() {
     const packaged = unzipSync(await readFile(databaseExportPath));
     const manifest = JSON.parse(strFromU8(packaged['manifest.json']));
     requireJourney(
-      manifest.schema === 'ai7.database-package/1' && manifest.dataVersion === 1 && manifest.schemaRevision === 56 &&
+      manifest.schema === 'ai7.database-package/1' && manifest.dataVersion === 1 && manifest.schemaRevision === 57 &&
         manifest.credentials === 'excluded' && manifest.contents?.books === booksShown && Object.keys(packaged)[0] === 'store/ai7.sqlite',
       'database-export-manifest',
       { schema: manifest.schema, dataVersion: manifest.dataVersion, schemaRevision: manifest.schemaRevision, contents: manifest.contents },
@@ -1526,11 +1526,122 @@ async function main() {
     requireJourney(backupFiles.length === 1 && backupFiles[0].startsWith('AI7 自动备份 '), 'scheduled-backup-file', backupFiles);
     const backupPackage = unzipSync(await readFile(resolve(backupLocation, backupFiles[0])));
     const backupManifest = JSON.parse(strFromU8(backupPackage['manifest.json']));
-    requireJourney(backupManifest.origin === 'scheduled-backup' && backupManifest.schemaRevision === 56 && backupManifest.credentials === 'excluded',
+    requireJourney(backupManifest.origin === 'scheduled-backup' && backupManifest.schemaRevision === 57 && backupManifest.credentials === 'excluded',
       'scheduled-backup-manifest', { origin: backupManifest.origin, schemaRevision: backupManifest.schemaRevision });
     const backupMembersWithSecret = Object.entries(backupPackage).filter(([, bytes]) => [secretOne, secretTwo].some((secret) =>
       Buffer.from(bytes).includes(Buffer.from(secret, 'utf8')) || Buffer.from(bytes).includes(Buffer.from(secret, 'utf16le')))).map(([name]) => name);
     requireJourney(backupMembersWithSecret.length === 0, 'scheduled-backup-no-credential', backupMembersWithSecret);
+
+    at('database-import-replace-and-roll-back');
+    // 导入数据库 (Issue #434, S86c; DSTO-017; ADR 0079 §1.3, §1.4): the file exported above is read and verified whole before
+    // anything is chosen; 替换本机全部数据 — never preselected — backs the data up first and completes at AI7's next start, when
+    // the data is the file's; and 回退到替换前的数据 brings back what it replaced, the data it replaces backed up first as well.
+    // `现在关闭 AI7` closes AI7 itself, so the runner waits for it to go before it starts AI7 again.
+    const quitThroughProduct = async (name) => {
+      await click(primary, '现在关闭 AI7', `${name}-quit`);
+      const deadline = Date.now() + 30_000;
+      while (browser?.isConnected() && Date.now() < deadline) await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+      requireJourney(browser !== undefined && !browser.isConnected(), `${name}-closed-itself`);
+      browser = undefined;
+      browserAcquisition = undefined;
+      managerForCleanup = undefined;
+    };
+    const bookTitles = async () => JSON.parse(await primary.evaluate(`window.ai7.listBooks({ after: null }).then((page) => JSON.stringify(page.items.map((book) => book.title).sort()))`));
+    const openDataAndStorage = async (name) => {
+      await click(primary, '数据与存储', `${name}-open`);
+      await waitFor(primary, `document.querySelector('.database-import [data-database-import-action="choose"]') && document.querySelector('.database-import')?.dataset.pending === 'false'`, `${name}-ready`);
+    };
+    manager = await launch(databaseExportPath);
+    [primary] = await waitForRendererCount(manager, 1, 'database-import-window');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'database-import-landing');
+    await createEmptyBook(primary, 'J12 替换前的图书');
+    await click(primary, '返回图书列表', 'database-import-book-return');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'database-import-book-returned');
+    const titlesBeforeReplace = await bookTitles();
+    requireJourney(titlesBeforeReplace.length === booksShown + 1 && titlesBeforeReplace.includes('J12 替换前的图书'), 'database-import-titles-before', titlesBeforeReplace);
+    await openDataAndStorage('database-import');
+    await assertRenderer(primary, `document.querySelector('.database-import')?.dataset.replacements === '0' && document.querySelector('.database-import-records summary')?.textContent === '替换记录（0）'`, 'database-import-no-records');
+    await click(primary, '导入数据库…', 'database-import-choose');
+    await waitFor(primary, `document.querySelector('.database-import-preview')?.dataset.previewId !== undefined`, 'database-import-previewed');
+    const previewRows = await primary.evaluate(`Array.from(document.querySelectorAll('.database-import-preview dt')).map((term) => [term.textContent, term.nextElementSibling?.textContent ?? null])`);
+    requireJourney(
+      Array.isArray(previewRows) && JSON.stringify(previewRows.map((row) => row[0])) === JSON.stringify(['文件', '来源', '版本', '内容', '完整性']) &&
+        previewRows[0][1].startsWith('「AI7 数据库.ai7db」 · ') && previewRows[1][1].startsWith('导出数据库 · ') &&
+        /^数据版本 1 · 与本机相同 · 软件 \d+\.\d+\.\d+/u.test(previewRows[2][1]) && previewRows[3][1].startsWith(`${booksShown} 本图书 · `) &&
+        /^已逐项核对 \d+ 个文件，完整$/u.test(previewRows[4][1]),
+      'database-import-preview-words',
+      previewRows,
+    );
+    // Neither choice is preselected: `按所选方式导入` waits for the editor's, and what it will do is said once it is made.
+    await assertRenderer(primary, `(() => { const choice = document.querySelector('input[name="database-import-choice"]'); const confirm = document.querySelector('[data-database-import-action="confirm"]'); return choice instanceof HTMLInputElement && !choice.checked && document.activeElement === choice && confirm instanceof HTMLButtonElement && confirm.disabled && document.querySelector('.database-import-consequence')?.hidden === true; })()`, 'database-import-not-preselected');
+    await assertRenderer(primary, `(() => { const choice = document.querySelector('input[name="database-import-choice"][value="replace"]'); if (!(choice instanceof HTMLInputElement)) return false; choice.click(); return choice.checked && document.querySelector('.database-import-consequence')?.hidden === false && !document.querySelector('[data-database-import-action="confirm"]').disabled; })()`, 'database-import-choose-replace');
+    await click(primary, '按所选方式导入', 'database-import-confirm');
+    await waitFor(primary, `document.querySelector('.database-import-pending')?.dataset.replacementId !== undefined && document.querySelector('.database-import')?.dataset.pending === 'true'`, 'database-import-pending');
+    const pendingLines = await primary.evaluate(`Array.from(document.querySelectorAll('.database-import-pending p')).map((line) => line.textContent)`);
+    const replaceBackup = /^本机现在的数据已备份为「(AI7 替换前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(pendingLines) ? pendingLines[1] ?? '' : '')?.[1];
+    requireJourney(
+      Array.isArray(pendingLines) && pendingLines.length === 3 && pendingLines[0] === '已准备好用「AI7 数据库.ai7db」替换本机全部数据。' &&
+        replaceBackup !== undefined && pendingLines[2] === 'AI7 下次启动时完成替换；在此之前不能再做修改，要继续修改请先取消替换。',
+      'database-import-pending-words',
+      pendingLines,
+    );
+    await assertRenderer(primary, `document.activeElement?.dataset.databaseImportAction === 'quit' && document.querySelector('[data-database-import-action="choose"]').disabled && document.querySelector('.database-import-preview').hidden`, 'database-import-quit-focused');
+    // Nothing more is written while the replacement waits (Issue #434 review): a change is refused in those words, and a read
+    // still answers.
+    const whileWaiting = await primary.evaluate(`window.ai7.setScheduledBackup({ enabled: true, expectedOrdinal: 0 }).then(() => null, (error) => [error?.code ?? null, error?.message ?? null])`);
+    requireJourney(Array.isArray(whileWaiting) && whileWaiting[0] === 'DATABASE_REPLACEMENT_WAITING' &&
+      whileWaiting[1] === '本机数据正在等 AI7 重新启动后被替换；在此之前不能再做修改。要继续修改，请先取消替换。', 'database-import-writes-refused', whileWaiting);
+    requireJourney(JSON.stringify(await bookTitles()) === JSON.stringify(titlesBeforeReplace), 'database-import-reads-while-waiting');
+    const replacementId = await primary.evaluate(`document.querySelector('.database-import-pending').dataset.replacementId`);
+    await quitThroughProduct('database-import');
+
+    // The next start brings the file's data in: the Book made after the export is gone, and the replacement is recorded there.
+    manager = await launch();
+    [primary] = await waitForRendererCount(manager, 1, 'database-replaced-window');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'database-replaced-landing');
+    const titlesReplaced = await bookTitles();
+    requireJourney(titlesReplaced.length === booksShown && !titlesReplaced.includes('J12 替换前的图书') &&
+      titlesReplaced.every((title) => titlesBeforeReplace.includes(title)), 'database-replaced-titles', titlesReplaced);
+    await openDataAndStorage('database-replaced');
+    await waitFor(primary, `document.querySelector('.database-import')?.dataset.replacements === '1' && document.querySelector('.database-import')?.dataset.rollBackOf === ${JSON.stringify(replacementId)}`, 'database-replaced-recorded');
+    await assertRenderer(primary, `(() => { const line = document.querySelector('.database-replacement-record')?.textContent ?? ''; return line.endsWith(${JSON.stringify(` · 已用「AI7 数据库.ai7db」替换本机全部数据 · 替换前备份「${replaceBackup}」`)}) && document.querySelector('.database-import-roll-back p')?.textContent === ${JSON.stringify(`上次用「AI7 数据库.ai7db」替换了本机全部数据；替换前的数据在「${replaceBackup}」里。`)}; })()`, 'database-replaced-words');
+    // 回退到替换前的数据…, confirmed on its own: `不回退` holds the focus until the editor chooses.
+    await click(primary, '回退到替换前的数据…', 'database-roll-back-open');
+    await assertRenderer(primary, `document.activeElement?.dataset.databaseImportAction === 'keep' && document.querySelector('.database-import-roll-back-confirm .attention-note')?.textContent === ${JSON.stringify(`回退会用「${replaceBackup}」替换本机现在的全部数据。AI7 先把现在的数据也备份一次；回退在 AI7 下次启动时完成。`)}`, 'database-roll-back-confirmation');
+    await click(primary, '确认回退', 'database-roll-back-confirm');
+    await waitFor(primary, `document.querySelector('.database-import-pending')?.dataset.kind === 'roll-back'`, 'database-roll-back-pending');
+    const rollBackLines = await primary.evaluate(`Array.from(document.querySelectorAll('.database-import-pending p')).map((line) => line.textContent)`);
+    const rollBackBackup = /^本机现在的数据已备份为「(AI7 替换前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(rollBackLines) ? rollBackLines[1] ?? '' : '')?.[1];
+    requireJourney(
+      Array.isArray(rollBackLines) && rollBackLines[0] === `已准备好回退到「${replaceBackup}」。` && rollBackBackup !== undefined && rollBackBackup !== replaceBackup &&
+        rollBackLines[2] === 'AI7 下次启动时完成回退；在此之前不能再做修改，要继续修改请先取消回退。',
+      'database-roll-back-pending-words',
+      rollBackLines,
+    );
+    await quitThroughProduct('database-roll-back');
+
+    // The next start brings back the data the replacement took: the Book made before it is there again.
+    manager = await launch();
+    [primary] = await waitForRendererCount(manager, 1, 'database-rolled-back-window');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'database-rolled-back-landing');
+    const titlesRolledBack = await bookTitles();
+    requireJourney(JSON.stringify(titlesRolledBack) === JSON.stringify(titlesBeforeReplace), 'database-rolled-back-titles', titlesRolledBack);
+    await openDataAndStorage('database-rolled-back');
+    await waitFor(primary, `document.querySelector('.database-import')?.dataset.replacements === '1' && document.querySelector('.database-import')?.dataset.rollBackOf === undefined && (document.querySelector('.database-replacement-record')?.textContent ?? '').endsWith(${JSON.stringify(` · 已回退到「${replaceBackup}」 · 回退前备份「${rollBackBackup}」`)})`, 'database-rolled-back-recorded');
+    await close();
+    // Both backups wait in the backup location, each the database package of the data it replaced, neither with a credential.
+    const replaceBackups = (await readdir(backupLocation)).filter((name) => name.startsWith('AI7 替换前备份 ')).sort();
+    requireJourney(JSON.stringify(replaceBackups) === JSON.stringify([replaceBackup, rollBackBackup].sort()), 'database-replace-backups', replaceBackups);
+    for (const name of replaceBackups) {
+      const replacedPackage = unzipSync(await readFile(resolve(backupLocation, name)));
+      const replacedManifest = JSON.parse(strFromU8(replacedPackage['manifest.json']));
+      requireJourney(replacedManifest.origin === 'pre-replace-backup' && replacedManifest.schemaRevision === 57 && replacedManifest.credentials === 'excluded' &&
+        replacedManifest.contents?.books === (name === replaceBackup ? booksShown + 1 : booksShown), 'database-replace-backup-manifest', { name, contents: replacedManifest.contents });
+      const withSecret = Object.entries(replacedPackage).filter(([, bytes]) => [secretOne, secretTwo].some((secret) =>
+        Buffer.from(bytes).includes(Buffer.from(secret, 'utf8')) || Buffer.from(bytes).includes(Buffer.from(secret, 'utf16le')))).map(([member]) => member);
+      requireJourney(withSecret.length === 0, 'database-replace-backup-no-credential', withSecret);
+    }
+    requireJourney(!existsSync(`${dataRoot}-replacing`), 'database-replacement-staging-gone');
 
     at('model-service-remove-and-restart');
     manager = await launch();

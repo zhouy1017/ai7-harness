@@ -752,8 +752,31 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectDatabaseExports':
     // 定期自动备份 (Issue #434, S86b): the switch and the backups kept; it names nothing.
     case 'inspectScheduledBackups':
+    // 导入数据库 (Issue #434, S86c): the replacement waiting and those recorded; it names nothing.
+    case 'inspectDatabaseReplacements':
       requireInput(value.input, [], tentativeId);
       break;
+    // 导入数据库…: the package, only ever the main process's, from the system Open dialog.
+    case 'inspectDatabaseImport': {
+      const input = requireInput(value.input, ['source'], tentativeId);
+      if (!isBoundedString(input.source, MAX_EXPORT_DESTINATION_CODE_UNITS) || !isAbsolute(input.source)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // 替换本机全部数据: the one preview it takes the package of.
+    case 'prepareDatabaseReplacement': {
+      const input = requireInput(value.input, ['previewId'], tentativeId);
+      if (!validUuid(input.previewId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 取消替换 and 回退到替换前的数据: the one replacement each names.
+    case 'cancelDatabaseReplacement':
+    case 'rollBackDatabaseReplacement': {
+      const input = requireInput(value.input, ['replacementId'], tentativeId);
+      if (!validUuid(input.replacementId)) throw new ProtocolError(tentativeId);
+      break;
+    }
     // Turning 定期自动备份 on or off, from the state the editor saw.
     case 'setScheduledBackup': {
       const input = requireInput(value.input, ['enabled', 'expectedOrdinal'], tentativeId);

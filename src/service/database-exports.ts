@@ -10,6 +10,7 @@ import {
   type DatabaseExportPreparationProjection,
   type DatabaseExportReceiptProjection,
   type DatabaseExportsProjection,
+  type DatabasePackageOrigin,
 } from '../shared/protocol.js';
 import { fixedArchiveTime } from '../shared/archive-time.js';
 import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
@@ -169,8 +170,11 @@ export function initializeDatabaseExportSchema(db: DatabaseSync): void {
 
 // ---- the package --------------------------------------------------------------------------------------
 
-/** Why a package was made: the editor's own export (S86a), or a 定期自动备份 (S86b). S85b writes the same package. */
-export type DatabasePackageOrigin = 'database-export' | 'scheduled-backup';
+/**
+ * Why a package was made: the editor's own export (S86a), a 定期自动备份 (S86b), or the backup AI7 makes before it replaces
+ * the local data with another package (S86c). S85b writes the same package.
+ */
+export type { DatabasePackageOrigin };
 
 export interface DatabasePackageFacts {
   readonly dataVersion: number;

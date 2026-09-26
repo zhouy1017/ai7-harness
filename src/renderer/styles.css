@@ -761,6 +761,12 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .document-delivery h5, .document-deliveries-section h5 { margin: .6rem 0 0; font-size: .95rem; }
 .document-delivery fieldset { min-width: 0; margin: .45rem 0 0; padding: .55rem .6rem; border: 1px solid #d5dcd9; border-radius: 8px; }
 .document-delivery .choice-row { display: flex; gap: .45rem; align-items: flex-start; margin-top: .35rem; }
+/* 导入数据库 (S86c): the previewed file's one choice, never preselected, in a fieldset that reflows with the page. */
+.database-import-choices { min-width: 0; margin: .6rem 0 0; padding: .55rem .6rem; border: 1px solid #d5dcd9; border-radius: 8px; }
+.database-import-choices legend { font-weight: 700; overflow-wrap: anywhere; }
+.database-import-choice { display: flex; gap: .45rem; align-items: flex-start; overflow-wrap: anywhere; }
+.database-import-consequence[hidden], .database-import-preview[hidden], .database-import-pending[hidden], .database-import-roll-back[hidden] { display: none; }
+.database-import-pending, .database-import-roll-back { margin-top: .6rem; }
 .document-delivery input[type="text"], .document-delivery textarea { width: 100%; box-sizing: border-box; margin-top: .35rem; }
 .document-delivery .delivery-note { display: block; margin-top: .5rem; }
 .delivery-statement { margin: .6rem 0 0; padding: .5rem .65rem; border-left: 4px solid #416458; background: #f1f4ec; font-weight: 800; }

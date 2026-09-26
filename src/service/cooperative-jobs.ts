@@ -28,6 +28,11 @@ export class CooperativeJobOwner {
     this.#store = store;
   }
 
+  /** Whether any job is queued or running now. */
+  get busy(): boolean {
+    return [...this.#jobs.values()].some((job) => job.projection.state === 'queued' || job.projection.state === 'running');
+  }
+
   startSearch(manuscriptId: string, branchId: string, query: string): ServiceJobProjection {
     this.#requireCapacity();
     const search = this.#store.createSearch(manuscriptId, branchId, query);

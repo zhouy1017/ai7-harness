@@ -506,7 +506,12 @@ function registerRendererHandlers(
   consumeInjectedSavePath: () => string | undefined,
   printExportPage: (pagePath: string, pdfPath: string) => Promise<void>,
   consumeInjectedFolderPath: () => string | undefined,
+  quitApplication: () => 'quitting' | 'blocked',
+  unsavedWindows: () => boolean,
 ): () => void {
+  const requireNothingUnsaved = (): void => {
+    if (unsavedWindows()) throw new ServiceCallError('DATABASE_REPLACEMENT_UNSAVED', '还有窗口里的修改没有保存；请先保存或关闭那个窗口，再替换本机数据。');
+  };
   const AMBIGUOUS_SERVICE_FAILURES = new Set([
     'COMMIT_PROOF_INCONCLUSIVE',
     'IMPORT_COMMIT_OUTCOME_UNCERTAIN',
@@ -1252,6 +1257,32 @@ function registerRendererHandlers(
     if (chosen.canceled || chosen.filePath === undefined || chosen.filePath.length === 0) return undefined;
     requireDesktop(isAbsolute(chosen.filePath));
     return chosen.filePath;
+  };
+
+  /**
+   * 导入数据库… (Issue #434, S86c; DSTO-017): the platform's own Open dialog, suggesting AI7's database files. J-12 alone answers
+   * it through its picker control, which serves one choice per window as the manuscript picker's; `undefined` is a cancelled
+   * dialog.
+   */
+  const chooseDatabaseImportFile = async (owned: OwnedRendererWindow): Promise<string | undefined> => {
+    let selectedPath = owned.injectedPickerPath;
+    owned.injectedPickerPath = undefined;
+    if (!selectedPath) {
+      const selected = await dialog.showOpenDialog(owned.window, {
+        title: '选择要导入的数据库文件',
+        buttonLabel: '选择此文件',
+        defaultPath: app.getPath('documents'),
+        properties: ['openFile'],
+        filters: [
+          { name: 'AI7 数据库', extensions: ['ai7db'] },
+          { name: '所有文件', extensions: ['*'] },
+        ],
+      });
+      if (selected.canceled || selected.filePaths.length !== 1) return undefined;
+      selectedPath = selected.filePaths[0];
+    }
+    requireDesktop(selectedPath !== undefined && isAbsolute(selectedPath));
+    return selectedPath;
   };
 
   /**
@@ -3001,6 +3032,64 @@ function registerRendererHandlers(
       });
     }),
   );
+  // 导入数据库 (Issue #434, S86c): house-wide, bound to no Book route. Choosing the file reads it for the preview; preparing,
+  // cancelling and rolling back a replacement are serialized with every other effect.
+  ipcMain.handle(IPC_CHANNELS.chooseDatabaseImportFile, (event) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async (): Promise<Awaited<ReturnType<RendererApi['chooseDatabaseImportFile']>>> => {
+        requireAuthority();
+        const source = await chooseDatabaseImportFile(owned);
+        if (source === undefined) return { outcome: 'cancelled' };
+        return { outcome: 'previewed', preview: await service.call('inspectDatabaseImport', { source }) };
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.prepareDatabaseReplacement, (event, input: Parameters<RendererApi['prepareDatabaseReplacement']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        // Once a replacement waits nothing more is saved (Issue #434 review), so no window may still hold changes not yet saved.
+        requireNothingUnsaved();
+        return service.call('prepareDatabaseReplacement', { previewId: input.previewId });
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.cancelDatabaseReplacement, (event, input: Parameters<RendererApi['cancelDatabaseReplacement']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('cancelDatabaseReplacement', { replacementId: input.replacementId });
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectDatabaseReplacements, (event) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('inspectDatabaseReplacements', {});
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.rollBackDatabaseReplacement, (event, input: Parameters<RendererApi['rollBackDatabaseReplacement']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        requireNothingUnsaved();
+        return service.call('rollBackDatabaseReplacement', { replacementId: input.replacementId });
+      });
+    }),
+  );
+  // 现在关闭 AI7 (Issue #434, S86c): the whole application closes, after every effect already asked for, unless a window still
+  // holds changes not yet saved — then nothing closes and that window says so, as when the editor closes AI7 themselves.
+  ipcMain.handle(IPC_CHANNELS.quitApplication, (event) =>
+    envelope(async () => {
+      requireSender(event);
+      return serializeEffect(async (): Promise<Awaited<ReturnType<RendererApi['quitApplication']>>> => ({ outcome: quitApplication() }));
+    }),
+  );
   // 书系知识 (Issue #63, S28b): house-wide and serialized; a candidate that cites a manuscript span comes from the window that
   // holds that manuscript's capability, exactly as a mark does.
   ipcMain.handle(IPC_CHANNELS.proposeSeriesKnowledge, (event, input: ServiceOperationMap['proposeSeriesKnowledge']['input']) =>
@@ -4684,6 +4773,18 @@ export async function runApplication(): Promise<void> {
           return path;
         };
       })(),
+      // 现在关闭 AI7 (Issue #434, S86c): a window still holding changes not yet saved keeps AI7 open and says so, as when the
+      // editor closes AI7 themselves; otherwise AI7 closes once the answer is on its way.
+      () => {
+        const risky = [...ownedWindows.values()].filter((owned) => owned.closeRisk && !owned.window.isDestroyed());
+        if (risky.length > 0) {
+          for (const owned of risky) owned.window.webContents.send(MAIN_EVENTS.closeBlocked);
+          return 'blocked';
+        }
+        setImmediate(() => app.quit());
+        return 'quitting';
+      },
+      () => [...ownedWindows.values()].some((owned) => owned.closeRisk && !owned.window.isDestroyed()),
     );
     startupLocation = reachStartup('renderer-first-paint');
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);

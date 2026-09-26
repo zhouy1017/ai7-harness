@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
 import { DATABASE_EXPORT_TRIGGER_SQL, copyStore, databasePackageSources, writeDatabasePackage, type DatabasePackageBounds } from '../../src/service/database-exports.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { SCHEDULED_BACKUP_SCHEMA_VERSION, STORE_VERSION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { DATABASE_REPLACEMENT_SCHEMA_VERSION, STORE_VERSION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
@@ -125,7 +125,7 @@ describe('导出数据库 over the real store', () => {
         schema: 'ai7.database-package/1',
         dataVersion: 1,
         softwareVersion: version,
-        schemaRevision: SCHEDULED_BACKUP_SCHEMA_VERSION,
+        schemaRevision: DATABASE_REPLACEMENT_SCHEMA_VERSION,
         origin: 'database-export',
         credentials: 'excluded',
         contents: { books: 1, sourceVersions: 1, libraryMaterials: 0, series: 0 },
@@ -140,7 +140,7 @@ describe('导出数据库 over the real store', () => {
       writeFileSync(copyPath, packaged['store/ai7.sqlite']!);
       const copy = new DatabaseSync(copyPath, { readOnly: true });
       try {
-        expect((copy.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SCHEDULED_BACKUP_SCHEMA_VERSION);
+        expect((copy.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_REPLACEMENT_SCHEMA_VERSION);
         expect((copy.prepare('SELECT count(*) count FROM books').get() as { count: number }).count).toBe(1);
       } finally {
         copy.close();
@@ -290,7 +290,7 @@ describe('导出数据库 over the real store', () => {
         first.close();
         const plant = new DatabaseSync(join(other.dataRoot, 'store', 'ai7.sqlite'));
         try {
-          plant.exec(`DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; PRAGMA user_version = ${STORE_VERSION_SCHEMA_VERSION};`);
+          plant.exec(`DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; PRAGMA user_version = ${STORE_VERSION_SCHEMA_VERSION};`);
         } finally {
           plant.close();
         }
@@ -303,7 +303,7 @@ describe('导出数据库 over the real store', () => {
         }
         const check = new DatabaseSync(join(other.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
         try {
-          expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SCHEDULED_BACKUP_SCHEMA_VERSION);
+          expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_REPLACEMENT_SCHEMA_VERSION);
         } finally {
           check.close();
         }
@@ -353,7 +353,9 @@ describe('导出数据库 off the request (Issue #434 review, V2-UX-EXP-011)', (
       // It copies the store first, then packs it (Issue #434 review).
       expect(started).toMatchObject({ kind: 'prepare', state: 'running', step: 'copying', cancellable: true, preparation: null, receipt: null, failure: null });
       expect(refusal(() => store.startDatabaseExportPreparation(join(roots.inputRoot, '另一个.ai7db'), true))).toBe('DATABASE_EXPORT_BUSY');
+      expect(store.databaseExportRunning()).toBe(true);
       await store.databaseExportSettled();
+      expect(store.databaseExportRunning()).toBe(false);
       const prepared = store.inspectDatabaseExports().activity!;
       expect(prepared).toMatchObject({ activityId: started.activityId, state: 'prepared', step: null, cancellable: false, receipt: null, failure: null });
       expect(prepared.totalBytes).toBeGreaterThan(0);

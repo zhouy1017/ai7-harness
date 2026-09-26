@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 83 as const;
+export const SERVICE_PROTOCOL_VERSION = 84 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -149,6 +149,12 @@ export const IPC_CHANNELS = {
   inspectDatabaseExports: 'ai7:j12:inspect-database-exports',
   inspectScheduledBackups: 'ai7:j12:inspect-scheduled-backups',
   setScheduledBackup: 'ai7:j12:set-scheduled-backup',
+  chooseDatabaseImportFile: 'ai7:j12:choose-database-import-file',
+  prepareDatabaseReplacement: 'ai7:j12:prepare-database-replacement',
+  cancelDatabaseReplacement: 'ai7:j12:cancel-database-replacement',
+  inspectDatabaseReplacements: 'ai7:j12:inspect-database-replacements',
+  rollBackDatabaseReplacement: 'ai7:j12:roll-back-database-replacement',
+  quitApplication: 'ai7:j12:quit-application',
   cancelDatabaseExport: 'ai7:j12:cancel-database-export',
   applyChangeSuggestion: 'ai7:j05:apply-change-suggestion',
   applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
@@ -5931,6 +5937,86 @@ export interface SetScheduledBackupInput {
   readonly expectedOrdinal: number;
 }
 
+// ---- 设置 › 数据与存储 › 导入数据库 (Issue #434, plan slice S86c; V2-UX-DSTO-017; ADR 0079 §1.3, §1.4) --------------------
+
+/** Why a database package was made: 导出数据库 (S86a), a 定期自动备份 (S86b), or the backup made before a replacement (S86c). */
+export type DatabasePackageOrigin = 'database-export' | 'scheduled-backup' | 'pre-replace-backup';
+
+/**
+ * Whether this AI7 can take a package's data: the same Data Version, and a schema revision it knows. A package from a newer
+ * Data Version or a newer AI7 waits for AI7 to be updated; one from an older Data Version waits for the upgrade path (S85b).
+ */
+export type DatabaseImportCompatibility = 'compatible' | 'newer-data-version' | 'older-data-version' | 'newer-schema';
+
+/** At most this many replacements are listed, newest first. */
+export const MAX_DATABASE_REPLACEMENTS_LISTED = 20;
+
+/**
+ * 导入数据库's preview (DSTO-017): a package read and verified member by member — its file, where it came from and when, its
+ * versions against this AI7's, and what it holds. Nothing has been taken from it.
+ */
+export interface DatabaseImportPreviewProjection {
+  readonly previewId: string;
+  readonly fileName: string;
+  readonly source: string;
+  readonly byteLength: number;
+  readonly origin: DatabasePackageOrigin;
+  readonly createdAt: string;
+  readonly dataVersion: number;
+  readonly softwareVersion: string;
+  readonly schemaRevision: number;
+  /** This AI7's own Data Version, the package's is read against. */
+  readonly localDataVersion: number;
+  readonly compatibility: DatabaseImportCompatibility;
+  readonly contents: DatabaseExportContentsProjection;
+  /** How many files the package holds, each verified. */
+  readonly members: number;
+}
+
+/** A replacement prepared and waiting for AI7's next start, with the backup made of the data it replaces. */
+export interface DatabasePendingReplacementProjection {
+  readonly replacementId: string;
+  readonly kind: 'replace' | 'roll-back';
+  readonly packageFileName: string;
+  readonly packageCreatedAt: string;
+  readonly packageOrigin: DatabasePackageOrigin;
+  readonly contents: DatabaseExportContentsProjection;
+  readonly backupFileName: string;
+  readonly preparedAt: string;
+}
+
+/** One replacement as the data open now records it: applied, in the data it brought in; failed, in the data it spared. */
+export interface DatabaseReplacementRecordProjection {
+  readonly replacementId: string;
+  readonly kind: 'replace' | 'roll-back';
+  readonly outcome: 'applied' | 'failed';
+  readonly packageFileName: string;
+  readonly backupFileName: string;
+  readonly preparedAt: string;
+  readonly recordedAt: string;
+  /** Whether its backup is still in the backup location. */
+  readonly backupPresent: boolean;
+  /**
+   * Why one that failed failed: its data would not open; what waited was no longer the package the preparation verified; or
+   * an open of the data it moved in was interrupted, which leaves nothing to tell that data from what was verified (Issue #434
+   * review). `null` for one applied, and for one that failed before this was recorded.
+   */
+  readonly failure: DatabaseReplacementFailure | null;
+}
+
+/** Why a replacement failed, as its record says. */
+export type DatabaseReplacementFailure = 'unopenable' | 'changed' | 'interrupted';
+
+/** 替换本机全部数据: the replacement waiting for AI7's next start, if any, and the replacements this data records. */
+export interface DatabaseReplacementsProjection {
+  readonly pending: DatabasePendingReplacementProjection | null;
+  readonly replacements: ReadonlyArray<DatabaseReplacementRecordProjection>;
+  readonly total: number;
+  /** The replacement `回退到替换前的数据` undoes: the latest, when it replaced this data and its backup is still there. */
+  readonly rollBackOf: string | null;
+  readonly backupLocation: string;
+}
+
 export interface SeriesKnowledgePromotionProjection {
   readonly itemId: string;
   readonly revisionId: string;
@@ -8421,6 +8507,14 @@ export interface ServiceOperationMap {
   inspectScheduledBackups: { input: Record<string, never>; output: ScheduledBackupsProjection };
   /** Turn the switch from the state the editor saw; turning it on backs up at once when none was made in the day before. */
   setScheduledBackup: { input: SetScheduledBackupInput; output: ScheduledBackupsProjection };
+  /** 导入数据库 (Issue #434, S86c): the file the Open dialog answered, read and verified whole; nothing is taken from it. */
+  inspectDatabaseImport: { input: { source: string }; output: DatabaseImportPreviewProjection };
+  /** `替换本机全部数据`: the local data backed up, and the previewed package prepared to replace it at AI7's next start. */
+  prepareDatabaseReplacement: { input: { previewId: string }; output: DatabaseReplacementsProjection };
+  cancelDatabaseReplacement: { input: { replacementId: string }; output: DatabaseReplacementsProjection };
+  inspectDatabaseReplacements: { input: Record<string, never>; output: DatabaseReplacementsProjection };
+  /** `回退到替换前的数据`: the latest replacement's backup prepared to replace the local data, itself backed up first. */
+  rollBackDatabaseReplacement: { input: { replacementId: string }; output: DatabaseReplacementsProjection };
   /** 取消导出: stops the export under way until it begins putting the file in place. */
   cancelDatabaseExport: { input: { activityId: string }; output: DatabaseExportActivityProjection };
   /**
@@ -8783,6 +8877,14 @@ export interface RendererApi {
   inspectDatabaseExports(): Promise<DatabaseExportsProjection>;
   inspectScheduledBackups(): Promise<ScheduledBackupsProjection>;
   setScheduledBackup(input: SetScheduledBackupInput): Promise<ScheduledBackupsProjection>;
+  /** 导入数据库… (Issue #434, S86c): the platform's Open dialog, then the chosen package read and verified for its preview. */
+  chooseDatabaseImportFile(): Promise<{ outcome: 'cancelled' } | { outcome: 'previewed'; preview: DatabaseImportPreviewProjection }>;
+  prepareDatabaseReplacement(input: { previewId: string }): Promise<DatabaseReplacementsProjection>;
+  cancelDatabaseReplacement(input: { replacementId: string }): Promise<DatabaseReplacementsProjection>;
+  inspectDatabaseReplacements(): Promise<DatabaseReplacementsProjection>;
+  rollBackDatabaseReplacement(input: { replacementId: string }): Promise<DatabaseReplacementsProjection>;
+  /** `现在关闭 AI7`: AI7 closes, unless a window holds changes not yet saved; a prepared replacement completes at the next start. */
+  quitApplication(): Promise<{ outcome: 'quitting' } | { outcome: 'blocked' }>;
   cancelDatabaseExport(input: { activityId: string }): Promise<DatabaseExportActivityProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */

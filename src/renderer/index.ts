@@ -97,6 +97,7 @@ import {
   storeVersionLine,
 } from './data-version-labels.js';
 import { mountDatabaseExport } from './database-export.js';
+import { mountDatabaseImport } from './database-import.js';
 import { mountScheduledBackup } from './scheduled-backup.js';
 import { SERIES_BACK_TO_LIST, SERIES_LEDE, SERIES_STATUS, SERIES_TITLE } from './series-labels.js';
 import { CALIBRATION_PAGE_GROUP, CALIBRATION_PAGE_LEDE, CALIBRATION_PAGE_TITLE, CALIBRATION_STATUS } from './evaluation-calibration-labels.js';
@@ -4471,10 +4472,13 @@ async function renderDataAndStorage(): Promise<void> {
     versions.append(element('h3', undefined, DATA_VERSION_HEADING), element('p', 'field-note', '正在读取版本…'));
     // 导出数据库 (Issue #434, S86a; DSTO-017): the one file, through the system's Save dialog and an approval as stated.
     const databaseExport = element('section', 'source-card');
+    // 导入数据库 (Issue #434, S86c; DSTO-017): the file previewed whole, then the one choice, never preselected, of what to do.
+    const databaseImport = element('section', 'source-card');
     // 定期自动备份 (Issue #434, S86b; DSTO-018): the switch, off by default, and the backups kept beside the data.
     const scheduledBackup = element('section', 'source-card');
-    content.append(summary, credentials, versions, databaseExport, scheduledBackup, actions);
+    content.append(summary, credentials, versions, databaseExport, databaseImport, scheduledBackup, actions);
     mountDatabaseExport({ root: databaseExport, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
+    mountDatabaseImport({ root: databaseImport, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
     mountScheduledBackup({ root: scheduledBackup, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
     void window.ai7.inspectDataVersion().then((version) => {
       if (!versions.isConnected) return;

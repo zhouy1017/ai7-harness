@@ -27,14 +27,22 @@ Since #433 (S85a), after the restart, 数据与存储 also shows `版本`. It gi
 Since #434 (S86a), a stage after the credential is replaced relaunches with `--j12-save-path`, opens 数据与存储 and runs 导出数据库…:
 - The prepared card states the file, the place, `新建文件`, the contents and `数据版本 1`.
 - `按上述方式导出` writes the file and reads `已导出到所选位置`.
-- The runner then opens the package and checks its manifest: Data Version 1, the current schema revision (56 since S86b), credentials excluded, and the number of Books the card counted.
+- The runner then opens the package and checks its manifest: Data Version 1, the terminal schema revision (57 since S86c), credentials excluded, and the number of Books the card counted.
 - It finds neither synthetic credential in any member, in UTF-8 or UTF-16.
 
 Since S86b, the same stage checks 定期自动备份:
 - The switch is off by default, and the page names the backup location beside the data root.
 - Turning it on makes one backup at once and reads `已打开 · 每天一次 · 保留 14 天`, with focus kept on the switch. The backup is written on the service's background check, and the section reads again until it is there.
 - Turning it off keeps that backup.
-- The runner finds the one `AI7 自动备份 …` file there. Its manifest says `scheduled-backup` and schema revision 56, and no member holds either synthetic credential.
+- The runner finds the one `AI7 自动备份 …` file there. Its manifest says `scheduled-backup` and the terminal schema revision, and no member holds either synthetic credential.
+
+Since S86c, the stage `database-import-replace-and-roll-back` relaunches with `--j12-picker-path` naming the exported package, and makes one more Book. Then:
+- 导入数据库 previews the file in five rows: 文件, 来源, 版本, 内容, 完整性. The Book count matches the export.
+- The choice is not preselected, and `按所选方式导入` stays disabled until it is made.
+- 替换本机全部数据 waits for the next start, naming its `AI7 替换前备份 …` file. `现在关闭 AI7` closes AI7 itself, and the runner waits for it to go.
+- After the next start, the Book made after the export is gone, and the replacement is recorded.
+- 回退到替换前的数据 is confirmed on its own, and after another start the Books are exactly those before the replacement.
+- Both `AI7 替换前备份 …` files are packages with origin `pre-replace-backup`. The first counts one more Book than the export. Neither holds a synthetic credential, and the staging place beside the data root is gone.
 
 ## J-15 native artifact lifecycle
 
