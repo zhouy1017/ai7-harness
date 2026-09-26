@@ -305,6 +305,20 @@ export class AnalysisFeedbackLedger {
   }
 
   /**
+   * Each item's latest judgment in one Book that says why — a reason or a correction — oldest first: what 学习准入 may ask
+   * about (Issue #61, S26b). A bare verdict, or a judgment an editor has since changed, is not among them.
+   */
+  latestWithWords(bookId: string): Array<AnalysisFeedbackSignalProjection & { readonly revisionId: string; readonly itemKey: string; readonly dimension: AnalysisFeedbackDimension }> {
+    return Array.from(this.#chains('book_id = ?', bookId).values(), (chain) => chain.at(-1)!)
+      .filter((signal) => signal.reason !== null || signal.correction !== null)
+      .sort((a, b) => (a.recordedAt < b.recordedAt ? -1 : a.recordedAt > b.recordedAt ? 1 : a.signalId < b.signalId ? -1 : 1))
+      .map((signal) => ({
+        signalId: signal.signalId, judgment: signal.judgment, reason: signal.reason, correction: signal.correction, recordedAt: signal.recordedAt,
+        supersedes: signal.supersedes, revisionId: signal.revisionId, itemKey: signal.itemKey, dimension: signal.dimension,
+      }));
+  }
+
+  /**
    * The Analysis Quality Metric of one Book (ANALYSIS-024): each judged item's latest judgment once, over every revision of
    * the Book, counted by dimension, with the digest of exactly the signals it counted. No other Book's signals enter it.
    */

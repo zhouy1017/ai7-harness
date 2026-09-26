@@ -2768,6 +2768,41 @@ function registerRendererHandlers(
         });
       }),
   );
+  // 质量与学习 › 学习准入 (Issue #61, S26b): a house-wide destination like 知识库, bound to no Book route; each decision names
+  // its Book and is serialized with every other effect.
+  ipcMain.handle(IPC_CHANNELS.inspectLearningMaterials, (event, input: ServiceOperationMap['inspectLearningMaterials']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectLearningMaterials', { bookId: input.bookId, after: input.after ?? null });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectLearningMaterial, (event, input: ServiceOperationMap['inspectLearningMaterial']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectLearningMaterial', { bookId: input.bookId, materialKey: input.materialKey });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.decideLearningMaterial, (event, input: ServiceOperationMap['decideLearningMaterial']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('decideLearningMaterial', {
+          bookId: input.bookId,
+          materialKey: input.materialKey,
+          materialDigest: input.materialDigest,
+          expectedDecisions: input.expectedDecisions,
+          choice: input.choice,
+          note: input.note,
+        });
+      });
+    }),
+  );
   ipcMain.handle(
     IPC_CHANNELS.decideLibraryMaterial,
     (event, input: ServiceOperationMap['decideLibraryMaterial']['input']) =>

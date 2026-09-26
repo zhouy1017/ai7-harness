@@ -283,9 +283,16 @@ export const ANALYSIS_FEEDBACK_SCHEMA_VERSION = 48;
 /**
  * The Decision Feedback revision (Issue #61, S26a; V2-UX-FDBK-001 to FDBK-007): one additive, append-only relation owned by
  * `decision-feedback.ts` and created before this version is stamped — the editor's 不说明 and each later change of the
- * reason for one Proposal Decision, chained per decision. No existing row changes. This is the terminal version.
+ * reason for one Proposal Decision, chained per decision. No existing row changes.
  */
 export const DECISION_FEEDBACK_SCHEMA_VERSION = 49;
+/**
+ * The Learning Eligibility revision (Issue #61, S26b; V2-UX-LEARN-004 to LEARN-007): one additive, append-only relation
+ * owned by `learning-eligibility.ts` and created before this version is stamped — each explicit decision on whether one
+ * Learning Material of a Book may teach, and in which scope, chained per material. No existing row changes. This is the
+ * terminal version.
+ */
+export const LEARNING_ELIGIBILITY_SCHEMA_VERSION = 50;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
@@ -1341,7 +1348,7 @@ function validateRevision16AnalysisLedgerSchema(db: DatabaseSync): void {
 
 export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
-  requireTask(version === DECISION_FEEDBACK_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
+  requireTask(version === LEARNING_ELIGIBILITY_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
   validateJ03TaskAuthorizationSchema(db);
   validateAnalysisLedgerSchema(db);
 }
@@ -1539,7 +1546,7 @@ function migrateAnalysisLedgerToRevision17(db: DatabaseSync, from: typeof J04_BA
         db.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_delete`]!);
       }
       seedInitialPlanVersions(db);
-      db.exec(`PRAGMA user_version = ${DECISION_FEEDBACK_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${LEARNING_ELIGIBILITY_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -1604,7 +1611,7 @@ function migrateAnalysisLedgerToRevision24(db: DatabaseSync): void {
  * terminal shape first.
  */
 function advanceToTerminalRevision(db: DatabaseSync): void {
-  migrateInTransaction(db, `PRAGMA user_version = ${DECISION_FEEDBACK_SCHEMA_VERSION};`, 'Terminal version');
+  migrateInTransaction(db, `PRAGMA user_version = ${LEARNING_ELIGIBILITY_SCHEMA_VERSION};`, 'Terminal version');
 }
 
 /**
@@ -1629,7 +1636,7 @@ function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24
                   mode, predecessor_revision_id, selected_start_position, selected_end_position
            FROM temp.migrate_analysis_task_intents ORDER BY migrate_rowid`);
       rebuildResultSetRelations(db);
-      db.exec(`PRAGMA user_version = ${DECISION_FEEDBACK_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${LEARNING_ELIGIBILITY_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -1680,10 +1687,10 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION || version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
       version === MAINTENANCE_CASE_SCHEMA_VERSION || version === BOOK_PEOPLE_SCHEMA_VERSION ||
       version === REVIEW_GUIDELINE_SCHEMA_VERSION || version === LIBRARY_MATERIAL_SCHEMA_VERSION || version === EVALUATION_RECORD_SCHEMA_VERSION ||
-      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION || version === DECISION_FEEDBACK_SCHEMA_VERSION,
+      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION || version === DECISION_FEEDBACK_SCHEMA_VERSION || version === LEARNING_ELIGIBILITY_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === DECISION_FEEDBACK_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === LEARNING_ELIGIBILITY_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
   // Revisions 30 to 32 widen the Run states, the Run Authorizations' origin and the Task Outcomes first, for every
   // store that has an analysis ledger: each revision from 15 up carries them as revision 15 created them or as an
   // earlier one of these widenings left them, so once widened, every older revision's own validation below reads
@@ -1712,9 +1719,9 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION || version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION || version === MAINTENANCE_CASE_SCHEMA_VERSION ||
       version === BOOK_PEOPLE_SCHEMA_VERSION || version === REVIEW_GUIDELINE_SCHEMA_VERSION || version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
-      version === EVALUATION_RECORD_SCHEMA_VERSION || version === ANALYSIS_FEEDBACK_SCHEMA_VERSION) {
+      version === EVALUATION_RECORD_SCHEMA_VERSION || version === ANALYSIS_FEEDBACK_SCHEMA_VERSION || version === DECISION_FEEDBACK_SCHEMA_VERSION) {
     // Revisions 25 to 29 add no task-authorization or analysis relation, revisions 30 to 35 have just widened the
-    // four they move, and revisions 36 to 49 add none, so the ledger a revision-24 to revision-48 store carries is
+    // four they move, and revisions 36 to 50 add none, so the ledger a revision-24 to revision-49 store carries is
     // already the terminal one: it is validated as the terminal shape, and nothing but the version moves.
     validateJ03TaskAuthorizationSchema(db);
     validateAnalysisLedgerSchema(db);
@@ -1750,7 +1757,7 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   }
   const analysisStatements = `${Object.values(ANALYSIS_LEDGER_SCHEMA_SQL).join(';\n')};
       ${Object.values(ANALYSIS_LEDGER_TRIGGER_SQL).join(';\n')};
-      PRAGMA user_version = ${DECISION_FEEDBACK_SCHEMA_VERSION};`;
+      PRAGMA user_version = ${LEARNING_ELIGIBILITY_SCHEMA_VERSION};`;
   if (version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION) {
     validateJ03TaskAuthorizationSchema(db);
     return migrateInTransaction(db, analysisStatements, 'Analysis ledger');

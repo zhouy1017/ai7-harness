@@ -18,6 +18,7 @@ import {
   MAX_BOOK_RELATED_PEOPLE,
   MAX_BOOK_SUMMARY_FILTER_CHARACTERS,
   MAINTENANCE_CLASSIFICATIONS,
+  LEARNING_MATERIAL_KEY_PATTERN,
   LIBRARY_MATERIAL_KINDS,
   MAX_LEARNING_ELIGIBILITY_REASON_GRAPHEMES,
   type LibraryMaterialKind,
@@ -278,6 +279,17 @@ function validRecoveryWindowTarget(value: unknown): boolean {
 
 /** The instant a 资料库 page starts after: an arrival's own, as the store writes it. */
 const LIBRARY_CURSOR_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+
+/** The instant a 学习准入 page starts after: a material's own, as the store writes it. */
+const LEARNING_CURSOR_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+
+/**
+ * A Learning Material's place, checked by its kind (Issue #61 review): a 修改建议's decision, an analysis item, or a 审阅
+ * finding whose `rvf_` identity has an underscore — which a single character class for every kind once refused.
+ */
+function validLearningMaterialKey(value: unknown): boolean {
+  return isBoundedString(value, 160) && LEARNING_MATERIAL_KEY_PATTERN.test(value);
+}
 
 export function decodeRequest(frame: Uint8Array): ServiceRequest {
   let value: unknown;
@@ -698,6 +710,37 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           !(input.expectedLatestSignalId === null || validUuid(input.expectedLatestSignalId)) ||
           (input.judgment !== 'accurate' && input.judgment !== 'inaccurate' && input.judgment !== 'incomplete') ||
           !validFeedbackReason(input.reason) || !(input.correction === null || isBoundedString(input.correction, 4_000, true))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // 质量与学习 › 学习准入 (Issue #61, S26b): every Book's Learning Material, or one Book's.
+    case 'inspectLearningMaterials': {
+      const input = requireInput(value.input, ['bookId', 'after'], tentativeId);
+      const after = input.after;
+      if (!(input.bookId === null || validUuid(input.bookId)) ||
+          !(after === null || (isRecord(after) && hasExactKeys(after, ['bookTitle', 'bookId', 'orderedAt', 'materialKey']) &&
+            isBoundedString(after.bookTitle, 180) && validUuid(after.bookId) && isBoundedString(after.orderedAt, 40) &&
+            LEARNING_CURSOR_INSTANT.test(after.orderedAt) && validLearningMaterialKey(after.materialKey)))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // One material by its Book and place, as its Review Card reads it.
+    case 'inspectLearningMaterial': {
+      const input = requireInput(value.input, ['bookId', 'materialKey'], tentativeId);
+      if (!validUuid(input.bookId) || !validLearningMaterialKey(input.materialKey)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 记录学习准入决定: the material by its place and exact version, how many decisions the editor saw, one choice of the closed
+    // set, and an optional note; whether the material still stands so is the store's.
+    case 'decideLearningMaterial': {
+      const input = requireInput(value.input, ['bookId', 'materialKey', 'materialDigest', 'expectedDecisions', 'choice', 'note'], tentativeId);
+      if (!validUuid(input.bookId) || !validLearningMaterialKey(input.materialKey) ||
+          !isBoundedString(input.materialDigest, 64) || !HEX_DIGEST_PATTERN.test(input.materialDigest) ||
+          !Number.isSafeInteger(input.expectedDecisions) || (input.expectedDecisions as number) < 0 ||
+          (input.choice !== 'book' && input.choice !== 'house' && input.choice !== 'excluded' && input.choice !== 'deferred') ||
+          !(input.note === null || isBoundedString(input.note, 4_000, true))) {
         throw new ProtocolError(tentativeId);
       }
       break;

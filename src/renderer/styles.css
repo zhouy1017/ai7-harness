@@ -629,6 +629,26 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .analysis-feedback-metric { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #d5dcd9; }
 .analysis-feedback-metric h5, .analysis-feedback-metric p { margin: 0 0 .4rem; overflow-wrap: anywhere; }
 .analysis-feedback-total { font-weight: 700; }
+/* 质量与学习 › 学习准入 (S26b): Books in turn, each material one row, its Review Card opening in place. */
+.learning-materials { display: grid; gap: .8rem; }
+.learning-book { display: grid; gap: .45rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
+.learning-book h3, .learning-book p { margin: 0; overflow-wrap: anywhere; }
+.learning-material-list { display: grid; gap: .5rem; margin: 0; padding: 0; list-style: none; }
+.learning-material { display: grid; gap: .35rem; min-width: 0; padding: .55rem .7rem; border-left: 3px solid #c9d6d2; }
+.learning-material-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem; overflow-wrap: anywhere; }
+.learning-card { display: grid; gap: .5rem; min-width: 0; padding: .8rem; border: 2px solid #2c463b; border-radius: 10px; background: #f6f8f2; }
+.learning-card h4, .learning-card p { margin: 0; overflow-wrap: anywhere; }
+.learning-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .25rem .8rem; margin: 0; }
+.learning-facts dt { font-weight: 700; }
+.learning-facts dd { margin: 0; overflow-wrap: anywhere; }
+.learning-excerpt { margin: 0; padding-left: 1.1rem; }
+.learning-choices { display: grid; gap: .35rem; min-width: 0; margin: 0; padding: .5rem .7rem; border: 1px solid #ded9cd; border-radius: 8px; }
+.learning-choices legend { font-weight: 700; overflow-wrap: anywhere; }
+.learning-choice { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem; overflow-wrap: anywhere; }
+.learning-choice input:disabled + span { color: #6f7569; }
+.learning-note { display: grid; gap: .3rem; min-width: 0; }
+.learning-note textarea { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; }
+.learning-consequence[hidden] { display: none; }
 /* 知识库 › 资料库 (S79c): one card per collected item; the arrival form and each decision open inside the page, never a modal. */
 .library-list { display: grid; gap: .8rem; }
 .library-material, .library-preview { display: grid; gap: .45rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
@@ -1246,6 +1266,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .library-material, .library-preview, .library-chooser, .library-chooser fieldset, .library-kinds,
   .evaluation-record, .evaluation-item, .evaluation-risk, .evaluation-conclusion, .evaluation-comparison, .evaluation-profile,
   .analysis-feedback-card, .analysis-feedback-card fieldset,
+  .learning-book, .learning-card, .learning-choices,
   .task-plan-clarification, .task-plan-choice, .task-plan-choice-recommended, .task-plan-clarification-deferred, .task-plan-edit-ask-first,
   .task-plan-budget-form, .task-plan-budget-input {
     color: CanvasText;

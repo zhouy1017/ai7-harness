@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LIBRARY_OBJECT_DIRECTORY, identifyLibraryMaterialFormat } from '../../src/service/library-materials.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { DECISION_FEEDBACK_SCHEMA_VERSION, REVIEW_GUIDELINE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { LEARNING_ELIGIBILITY_SCHEMA_VERSION, REVIEW_GUIDELINE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
   MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN,
   MAX_LIBRARY_MATERIALS_PAGE,
@@ -191,7 +191,7 @@ describe('知识库 › 资料库 over the real store', () => {
     }
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DECISION_FEEDBACK_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LEARNING_ELIGIBILITY_SCHEMA_VERSION);
       for (const table of ['library_materials', 'library_material_decisions']) {
         expect(() => database.exec(`UPDATE ${table} SET recorded_at = recorded_at`)).toThrowError(/LIBRARY_MATERIAL_LEDGER_IMMUTABLE/u);
         expect(() => database.exec(`DELETE FROM ${table}`)).toThrowError(/LIBRARY_MATERIAL_LEDGER_IMMUTABLE/u);
@@ -335,7 +335,7 @@ describe('知识库 › 资料库 over the real store', () => {
     // A revision-45 store never held the relations: planted by dropping them, it gains them again, empty.
     const plant = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      plant.exec(`DROP TABLE proposal_decision_feedback; DROP TABLE analysis_feedback_signals; DROP TABLE evaluation_record_entries; DROP TABLE evaluation_records; DROP TABLE library_material_decisions; DROP TABLE library_materials; PRAGMA user_version = ${REVIEW_GUIDELINE_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE learning_eligibility_decisions; DROP TABLE proposal_decision_feedback; DROP TABLE analysis_feedback_signals; DROP TABLE evaluation_record_entries; DROP TABLE evaluation_records; DROP TABLE library_material_decisions; DROP TABLE library_materials; PRAGMA user_version = ${REVIEW_GUIDELINE_SCHEMA_VERSION};`);
     } finally {
       plant.close();
     }
@@ -348,7 +348,7 @@ describe('知识库 › 资料库 over the real store', () => {
     }
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DECISION_FEEDBACK_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LEARNING_ELIGIBILITY_SCHEMA_VERSION);
       expect((database.prepare('SELECT count(*) count FROM library_materials').get() as { count: number }).count).toBe(0);
       expect((database.prepare('SELECT count(*) count FROM library_material_decisions').get() as { count: number }).count).toBe(0);
     } finally {

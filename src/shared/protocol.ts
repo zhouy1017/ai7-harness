@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 75 as const;
+export const SERVICE_PROTOCOL_VERSION = 76 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -120,6 +120,9 @@ export const IPC_CHANNELS = {
   recordChangeSuggestionDecision: 'ai7:j05:record-change-suggestion-decision',
   recordProposalDecisionReason: 'ai7:j05:record-proposal-decision-reason',
   recordProposalDecisionFeedback: 'ai7:j11:record-proposal-decision-feedback',
+  inspectLearningMaterials: 'ai7:j11:inspect-learning-materials',
+  decideLearningMaterial: 'ai7:j11:decide-learning-material',
+  inspectLearningMaterial: 'ai7:j11:inspect-learning-material',
   applyChangeSuggestion: 'ai7:j05:apply-change-suggestion',
   applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
   reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
@@ -5106,6 +5109,105 @@ export interface RecordAnalysisFeedbackInput {
   readonly correction: string | null;
 }
 
+// ---- 质量与学习 › 学习准入 (Issue #61, plan slice S26b; V2-UX-LEARN-001 to LEARN-012, ATTN-009, FDBK-013) ----------------
+
+/**
+ * Where a Learning Material came from: a 修改建议 decided with the editor's reason or their own wording, a judgment of an
+ * analysis result that says why, or a 审阅 finding the editor ignored and said why.
+ */
+export type LearningMaterialKind = 'proposal-decision' | 'analysis-feedback' | 'review-disposition';
+export const LEARNING_MATERIAL_KINDS: readonly LearningMaterialKind[] = ['proposal-decision', 'analysis-feedback', 'review-disposition'];
+
+const LEARNING_UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
+/**
+ * A material's place, by its kind (Issue #61 review): a 修改建议's decision, an analysis item of a Result Set Revision, or a
+ * 审阅 finding of a Review Run — each exactly as the store names it, a finding's `rvf_` identity included.
+ */
+export const LEARNING_MATERIAL_KEY_PATTERN = new RegExp(
+  `^(?:proposal-decision:${LEARNING_UUID}|analysis-feedback:${LEARNING_UUID}/(?:synopsis|(?:entities|events|relationships|settings)/\\d{1,6})` +
+  `|review-disposition:${LEARNING_UUID}/rvf_[0-9a-f]{24})$`,
+  'u',
+);
+
+/** The materials one answer of 学习准入 carries, Book by Book; `更多学习材料…` reads the next (Issue #61 review). */
+export const MAX_LEARNING_MATERIALS_PAGE = 40;
+
+/**
+ * Where the next page of 学习准入 starts: after this material of this Book — Books by title, a Book's materials by kind, then
+ * by when each came to be (a later reason never moves one), then by place.
+ */
+export interface LearningMaterialCursor {
+  readonly bookTitle: string;
+  readonly bookId: string;
+  readonly orderedAt: string;
+  readonly materialKey: string;
+}
+
+/**
+ * Where a material stands (LEARN-006, LEARN-007): waiting for a decision; changed since the decision it had, which no longer
+ * binds it; left for later; or decided.
+ */
+export type LearningMaterialState = 'pending' | 'changed' | 'deferred' | 'decided';
+
+/** One Learning Material as its Review Card shows it (LEARN-003). */
+export interface LearningMaterialProjection {
+  /** The material's place: its kind and the record it comes from. */
+  readonly materialKey: string;
+  readonly kind: LearningMaterialKind;
+  /** The exact version a decision binds: the digest of what the material says now. */
+  readonly digest: string;
+  /** Where it came from, in the editor's words: `修改建议 · 拒绝`, `分析反馈 · 人物与名称`, `审阅 · 错别字与规范用语`. */
+  readonly originLabel: string;
+  /** When its record was made or last changed. */
+  readonly recordedAt: string;
+  /** A bounded excerpt of what it is, a few lines kept on this device. */
+  readonly excerpt: ReadonlyArray<string>;
+  /** Why it is a candidate, in plain words. */
+  readonly rationale: string;
+  readonly state: LearningMaterialState;
+  /** The decision that stands — or, when the material changed, the one it had — or `null` while none was made. */
+  readonly decision: null | { readonly choice: LearningEligibilityChoice; readonly note: string | null; readonly decidedAt: string };
+  /** How many decisions the material holds: the count the next one names. */
+  readonly decisions: number;
+}
+
+/** One Book's Learning Materials, with the Book's 作者 and 责编 every decision is attributed to (FDBK-013). */
+export interface LearningMaterialsBookProjection {
+  readonly bookId: string;
+  readonly title: string;
+  readonly authors: ReadonlyArray<string>;
+  readonly editors: ReadonlyArray<string>;
+  /** How many materials the Book has in all, whichever page shows them. */
+  readonly materialCount: number;
+  /** Those this page shows. */
+  readonly materials: ReadonlyArray<LearningMaterialProjection>;
+}
+
+/**
+ * 质量与学习 › 学习准入: one page of the Books with Learning Material, one Book when a Book is named — at most
+ * `MAX_LEARNING_MATERIALS_PAGE` materials, a Book whose materials run on repeated at the top of the next page.
+ */
+export interface LearningMaterialsProjection {
+  /** The governing basis every decision here records, in plain words (LEARN-003, LEARN-008). */
+  readonly basis: string;
+  readonly books: ReadonlyArray<LearningMaterialsBookProjection>;
+  /** Where the next page starts; `null` when this is the last. */
+  readonly nextCursor: LearningMaterialCursor | null;
+}
+
+/**
+ * 记录学习准入决定 (LEARN-007): one choice for the exact version the editor read — `仅纳入当前图书`, `纳入出版社经验`,
+ * `明确排除` or `稍后决定` — with an optional note, naming how many decisions the material held.
+ */
+export interface DecideLearningMaterialInput {
+  readonly bookId: string;
+  readonly materialKey: string;
+  readonly materialDigest: string;
+  readonly expectedDecisions: number;
+  readonly choice: LearningEligibilityChoice;
+  readonly note: string | null;
+}
+
 /** The drawer's `设为快速开始默认…` for one plan, and the rule that started its Task, when one did. */
 export interface TaskPlanDefaultRuleProjection {
   canSet: boolean;
@@ -6428,7 +6530,11 @@ export type GlobalAttentionStateKey =
   // decided under the one it has, or eligibility left for later (LEARN-006).
   | 'library-attribution-pending'
   | 'learning-eligibility-pending'
-  | 'learning-eligibility-deferred';
+  | 'learning-eligibility-deferred'
+  // A Book's Learning Material waiting for the editor (Issue #61, S26b; LEARN-002, ATTN-009): one item per Book, while any
+  // material waits for a decision or changed since it had one, or else while any was left for later.
+  | 'learning-materials-pending'
+  | 'learning-materials-deferred';
 
 /**
  * The closed map of safe next steps (V2-UX-ATTN-007): each is an action the item's own record offers, in
@@ -6458,12 +6564,14 @@ export type GlobalAttentionNextStep =
   | 'maintenance-conclude'
   // A 资料库 item's own two decisions (Issue #427, S79c), in its card's words.
   | 'set-library-attribution'
-  | 'set-learning-eligibility';
+  | 'set-learning-eligibility'
+  // A Book's Learning Material in 质量与学习 (Issue #61, S26b).
+  | 'decide-learning-materials';
 export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'view-run', 'view-review', 'reconfirm-plan', 'continue-review', 'return-to-recovery', 'retry-abandon-cleanup', 'await-local-check',
   'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'reprepare', 'redo', 'view-plan',
   'maintenance-link-proposal', 'maintenance-link-publication', 'maintenance-write-errata', 'maintenance-conclude',
-  'set-library-attribution', 'set-learning-eligibility',
+  'set-library-attribution', 'set-learning-eligibility', 'decide-learning-materials',
 ];
 
 /**
@@ -6482,7 +6590,9 @@ export type GlobalAttentionTarget =
   // 交付物 with the case open on its 发稿版本 (Issue #426, S68b).
   | { kind: 'maintenance'; bookId: string; publicationVersionId: string; caseId: string }
   // 知识库 › 资料库 with the item's card (Issue #427, S79c).
-  | { kind: 'library-material'; materialId: string };
+  | { kind: 'library-material'; materialId: string }
+  // 质量与学习 › 学习准入 with the Book's materials (Issue #61, S26b).
+  | { kind: 'learning-materials'; bookId: string };
 
 /** The Active Work Object of one item, in its record's own terms (V2-UX-ATTN-007). */
 export type GlobalAttentionObjectProjection =
@@ -6493,7 +6603,9 @@ export type GlobalAttentionObjectProjection =
   | { kind: 'review'; ordinal: number }
   | { kind: 'maintenance'; classification: MaintenanceClassification; ordinal: number; publicationOrdinal: number }
   // A 资料库 item (Issue #427, S79c): its title and kind, and where it belongs so far — a Book, the house, or not yet decided.
-  | { kind: 'library-material'; title: string; materialKind: LibraryMaterialKind; scope: 'none' | 'book' | 'house' };
+  | { kind: 'library-material'; title: string; materialKind: LibraryMaterialKind; scope: 'none' | 'book' | 'house' }
+  // A Book's Learning Material (Issue #61, S26b): how many wait for a decision, and how many were left for later.
+  | { kind: 'learning-materials'; pending: number; deferred: number };
 
 /** The record facts an item's reason is told from: identities, counts and states, never manuscript text. */
 export interface GlobalAttentionFactsProjection {
@@ -7485,6 +7597,11 @@ export interface ServiceOperationMap {
   recordChangeSuggestionDecision: { input: RecordChangeSuggestionDecisionInput; output: EditorialMarkCommandProjection };
   recordProposalDecisionReason: { input: RecordProposalDecisionReasonInput; output: EditorialMarkCommandProjection };
   recordProposalDecisionFeedback: { input: RecordProposalDecisionFeedbackInput; output: EditorialMarkCommandProjection };
+  inspectLearningMaterials: { input: { bookId: string | null; after: LearningMaterialCursor | null }; output: LearningMaterialsProjection };
+  /** One material as its Review Card reads it, by its Book and place. */
+  inspectLearningMaterial: { input: { bookId: string; materialKey: string }; output: LearningMaterialProjection };
+  /** 记录学习准入决定, answered with the one material it decided. */
+  decideLearningMaterial: { input: DecideLearningMaterialInput; output: LearningMaterialProjection };
   /**
    * AI7 Apply for Change Suggestions (Issue #408). The batch form is 确认应用 on 审阅's confirmation
    * strip (Issue #417): one Effect over exactly the suggestions the strip named, all or none.
@@ -7812,6 +7929,9 @@ export interface RendererApi {
   recordChangeSuggestionDecision(input: RecordChangeSuggestionDecisionInput): Promise<EditorialMarkCommandProjection>;
   recordProposalDecisionReason(input: RecordProposalDecisionReasonInput): Promise<EditorialMarkCommandProjection>;
   recordProposalDecisionFeedback(input: RecordProposalDecisionFeedbackInput): Promise<EditorialMarkCommandProjection>;
+  inspectLearningMaterials(input: { bookId: string | null; after?: LearningMaterialCursor | null }): Promise<LearningMaterialsProjection>;
+  inspectLearningMaterial(input: { bookId: string; materialKey: string }): Promise<LearningMaterialProjection>;
+  decideLearningMaterial(input: DecideLearningMaterialInput): Promise<LearningMaterialProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */
   applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): Promise<ManuscriptApplyCommandProjection>;

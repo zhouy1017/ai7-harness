@@ -61,6 +61,7 @@ const STATES: ReadonlyArray<GlobalAttentionStateKey> = [
   'analysis-prepared', 'review-prepared', 'analysis-cancelled',
   'maintenance-pending', 'maintenance-waiting',
   'library-attribution-pending', 'learning-eligibility-pending', 'learning-eligibility-deferred',
+  'learning-materials-pending', 'learning-materials-deferred',
 ];
 
 function item(state: GlobalAttentionStateKey, overrides: Partial<GlobalAttentionItemProjection> = {}): GlobalAttentionItemProjection {
@@ -186,6 +187,9 @@ describe('each item', () => {
       'library-attribution-pending': '资料库归属待定',
       'learning-eligibility-pending': '学习准入待定',
       'learning-eligibility-deferred': '学习准入待定 · 稍后决定',
+      // A Book's Learning Material (Issue #61, S26b).
+      'learning-materials-pending': '学习准入待处理',
+      'learning-materials-deferred': '学习准入待处理 · 稍后决定',
     });
     for (const state of STATES) {
       expect(GLOBAL_ATTENTION_STATE_PILLS[state].shape).toMatch(/^(circle|ring|half|triangle|square|diamond|check|dash)$/u);
@@ -228,6 +232,7 @@ describe('each item', () => {
       // A 资料库 item's own two decisions (Issue #427, S79c): its card's buttons.
       'set-library-attribution': '定归属…',
       'set-learning-eligibility': '定学习准入…',
+      'decide-learning-materials': '定学习准入…',
     });
     // The drawer's own words for the way on from a Run the ceiling stopped (Issue #51, S16a).
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['adjust-budget-redo']).toBe(TASK_BAR_ADJUST_BUDGET_REDO);
@@ -276,6 +281,10 @@ describe('each item', () => {
     expect(globalAttentionObjectLabel({ kind: 'maintenance', classification: 'supersession', ordinal: 3, publicationOrdinal: 1 })).toBe('维护事项 · 第 3 项 · 替代 · 第 1 次发稿版本');
     // Issue #427 (S79c): a 资料库 item by its kind and title.
     expect(globalAttentionObjectLabel({ kind: 'library-material', title: 'sample1', materialKind: 'book', scope: 'none' })).toBe('资料库 · 图书「sample1」');
+    // Issue #61 review: only what there is — a Book whose material was all left for later says no 0 条待定.
+    expect(globalAttentionObjectLabel({ kind: 'learning-materials', pending: 2, deferred: 0 })).toBe('学习材料 · 2 条待定');
+    expect(globalAttentionObjectLabel({ kind: 'learning-materials', pending: 2, deferred: 1 })).toBe('学习材料 · 2 条待定，1 条稍后决定');
+    expect(globalAttentionObjectLabel({ kind: 'learning-materials', pending: 0, deferred: 1 })).toBe('学习材料 · 1 条稍后决定');
   });
 
   it('gives each state its reason, from the record\'s own facts', () => {
@@ -333,6 +342,12 @@ describe('each item', () => {
       'learning-eligibility-deferred': globalAttentionReason(item('learning-eligibility-deferred', {
         object: { kind: 'library-material', title: '参考书', materialKind: 'book', scope: 'house' }, nextStep: 'set-learning-eligibility',
       })),
+      'learning-materials-pending': globalAttentionReason(item('learning-materials-pending', {
+        object: { kind: 'learning-materials', pending: 2, deferred: 0 }, nextStep: 'decide-learning-materials',
+      })),
+      'learning-materials-deferred': globalAttentionReason(item('learning-materials-deferred', {
+        object: { kind: 'learning-materials', pending: 0, deferred: 1 }, nextStep: 'decide-learning-materials',
+      })),
     };
     expect(reasons).toEqual({
       'import-outcome-uncertain': '本地证据目前无法证明这次原子提交已经完成或确定未提交；已阻止重试、放弃和清理。',
@@ -383,6 +398,8 @@ describe('each item', () => {
       'library-attribution-pending': '放进资料库以后还没有定归属：定了归属与学习准入，任务才能把它列进「允许参考」。',
       'learning-eligibility-pending': '归属已定，学习准入还没有定：没有你的决定，它不会用来学习，任务也还不能把它列进「允许参考」。',
       'learning-eligibility-deferred': '学习准入记为稍后决定：决定之前，它不会用来学习，任务也还不能把它列进「允许参考」。',
+      'learning-materials-pending': '你的反馈与改动里有可以用来学习的材料：学习准入策略还只是建议，没有你的决定，它们不会用来学习。',
+      'learning-materials-deferred': '这些学习材料记为稍后决定：决定之前，它们不会用来学习。',
     });
     const maintenance = (classification: 'correction' | 'reissue', nextStep: 'maintenance-link-proposal' | 'maintenance-link-publication' | 'maintenance-conclude') =>
       globalAttentionReason(item(classification === 'reissue' ? 'maintenance-waiting' : 'maintenance-pending', {
@@ -429,6 +446,7 @@ describe('material and knowledge-base items (V2-UX-ATTN-009)', () => {
       ['外部来源留存失败', 'exceptions'],
       ['资料库归属待定', 'decisions'],
       ['学习准入待定', 'decisions'],
+      ['学习准入待处理', 'decisions'],
       ['索引完成', 'recent'],
     ]);
     for (const entry of GLOBAL_ATTENTION_MATERIAL_GROUPS) expect(GLOBAL_ATTENTION_GROUP_KEYS).toContain(entry.group);
@@ -438,6 +456,9 @@ describe('material and knowledge-base items (V2-UX-ATTN-009)', () => {
     expect(GLOBAL_ATTENTION_STATE_LABELS['library-attribution-pending']).toBe(placed.get('library-attribution-pending')!.label);
     expect(GLOBAL_ATTENTION_STATE_LABELS['learning-eligibility-pending']).toBe(placed.get('learning-eligibility-pending')!.label);
     expect(GLOBAL_ATTENTION_STATE_LABELS['learning-eligibility-deferred'].startsWith(placed.get('learning-eligibility-pending')!.label)).toBe(true);
+    // A Book's Learning Material has its records since Issue #61 (S26b), in the same group under the spec's own words.
+    expect(GLOBAL_ATTENTION_STATE_LABELS['learning-materials-pending']).toBe(placed.get('learning-materials-pending')!.label);
+    expect(GLOBAL_ATTENTION_STATE_LABELS['learning-materials-deferred'].startsWith(placed.get('learning-materials-pending')!.label)).toBe(true);
     for (const label of Object.values(GLOBAL_ATTENTION_STATE_LABELS)) expect(label).not.toMatch(/留存|索引/u);
     // An item of 资料库 names where it belongs in the Book's place: a Book, the house, or not yet.
     const library = (scope: 'none' | 'book' | 'house', title: string | null) =>

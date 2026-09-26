@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MAINTENANCE_CASE_SCHEMA_SQL } from '../../src/service/maintenance-cases.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { DECISION_FEEDBACK_SCHEMA_VERSION, PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { LEARNING_ELIGIBILITY_SCHEMA_VERSION, PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
   MAINTENANCE_CONCLUDED,
   MAINTENANCE_FORBIDDEN_COMPLETIONS,
@@ -310,6 +310,7 @@ describe('⑥ 维护事项 (S68a)', () => {
     try {
       planted.exec('PRAGMA foreign_keys = OFF');
       planted.exec(`BEGIN IMMEDIATE;
+        DROP TABLE learning_eligibility_decisions;
         DROP TABLE proposal_decision_feedback;
         DROP TABLE analysis_feedback_signals;
         DROP TABLE evaluation_record_entries;
@@ -335,7 +336,7 @@ describe('⑥ 维护事项 (S68a)', () => {
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DECISION_FEEDBACK_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LEARNING_ELIGIBILITY_SCHEMA_VERSION);
       for (const table of LEDGER) expect((after.prepare(`SELECT count(*) count FROM ${table}`).get() as { count: number }).count).toBe(0);
       expect((after.prepare("SELECT count(*) count FROM sqlite_schema WHERE type = 'trigger' AND name LIKE 'maintenance_%'").get() as { count: number }).count).toBe(6);
     } finally {

@@ -76,6 +76,8 @@ import { mountReviewGuidelines } from './review-guidelines.js';
 import { mountLibraryMaterials } from './library-materials.js';
 import { mountEvaluation } from './evaluation.js';
 import { analysisFeedbackEngaged, mountAnalysisFeedback } from './analysis-feedback.js';
+import { mountLearningMaterials } from './quality-learning.js';
+import { LEARNING_HEADING, LEARNING_STATUS, QUALITY_LEARNING_LEDE, QUALITY_LEARNING_TITLE } from './quality-learning-labels.js';
 import {
   EVALUATION_LEDE,
   EVALUATION_STATUS,
@@ -758,6 +760,9 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget): Promise
     // no Book's, so no Book route is asked for.
     case 'library-material':
       await renderKnowledgeBase('library', false, target.materialId);
+      return;
+    case 'learning-materials':
+      await renderQualityLearning(target.bookId);
       return;
   }
 }
@@ -4539,6 +4544,42 @@ function renderExemplars(root: HTMLElement, projection: ExemplarsProjection): vo
 }
 
 /**
+ * 质量与学习 (Issue #61, plan slice S26b; LEARN-002, FDBK-010): a house-wide destination beside 知识库, opened from the
+ * landing or from a Book's 学习准入待处理 in 待我处理 — then for that Book, with the way to every Book one step away.
+ */
+async function renderQualityLearning(bookId: string | null): Promise<void> {
+  const content = panel();
+  content.classList.add('quality-learning');
+  const section = element('section', 'learning-section');
+  section.append(element('h3', undefined, LEARNING_HEADING));
+  const host = element('div');
+  section.append(host);
+  const back = element('div', 'button-row');
+  if (bookId !== null) {
+    const all = button('显示全部图书', 'quiet', () => void renderQualityLearning(null));
+    all.dataset['learningAction'] = 'all-books';
+    back.append(all);
+  }
+  back.append(button('返回', 'quiet', () => void initializeStartup()));
+  content.append(
+    element('p', 'section-label', `${QUALITY_LEARNING_TITLE} · ${LEARNING_HEADING}`),
+    element('h2', undefined, QUALITY_LEARNING_TITLE),
+    element('p', 'field-note', QUALITY_LEARNING_LEDE),
+    section,
+    back,
+  );
+  replaceScreen('quality-learning', content);
+  setStatus(LEARNING_STATUS.loading, 'busy');
+  const surface = mountLearningMaterials({ root: host, bookId, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, technicalDetails });
+  try {
+    await surface.load();
+    if (content.isConnected) setStatus(LEARNING_STATUS.opened);
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, LEARNING_STATUS.unavailable), 'error');
+  }
+}
+
+/**
  * 知识库's page on screen: its heading, the seven classes as a tab list — arrow keys move between them — and the chosen
  * class's panel, which says what the class holds and, for a class a later slice brings, why it shows nothing yet.
  */
@@ -4968,8 +5009,11 @@ function renderLanding(
   // 知识库 (Issue #427, S79a): its seven classes, opening at 审阅规范文件.
   const knowledgeBase = button('知识库', 'secondary', () => renderKnowledgeBase('guidelines'));
   knowledgeBase.dataset['settingsRoute'] = 'knowledge-base';
+  // 质量与学习 (Issue #61, S26b): 学习准入, the house's record of what may teach and where.
+  const qualityLearning = button(QUALITY_LEARNING_TITLE, 'secondary', () => void renderQualityLearning(null));
+  qualityLearning.dataset['settingsRoute'] = 'quality-learning';
   const landingActions = element('div', 'button-row');
-  landingActions.append(importButton, createBook, dataAndStorage, modelService, knowledgeBase);
+  landingActions.append(importButton, createBook, dataAndStorage, modelService, knowledgeBase, qualityLearning);
   copy.append(landingActions);
   const note = element('aside', 'hero-note', '所有导入都要求先明确选择图书目标；系统不会自动选择已有图书或稿件关系。');
   content.append(copy, note);
