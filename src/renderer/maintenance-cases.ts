@@ -69,6 +69,8 @@ import { localInstantLabel } from './plan-preview-labels.js';
 export interface MaintenanceSurface {
   /** The 维护事项 part of one designation item, from its summaries and the surface's own state. */
   render(designation: PublicationVersionProjection): HTMLElement;
+  /** Keep one exact attention target reachable when its designation is outside the bounded history. */
+  renderOutsideHistory(listed: ReadonlyArray<PublicationVersionProjection>): HTMLElement | null;
   busy(): boolean;
   destroy(): void;
 }
@@ -158,6 +160,8 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
   let ticket = 0;
   let draft: Draft | null = null;
   let open: OpenCase | null = null;
+  // One closed target remains as its own reopen control, preserving keyboard focus after close.
+  let outside: MaintenanceCaseProjection | null = null;
   /**
    * One bounded older page from `更早的维护事项…`, below the cases 交付物 lists (MAINT-001). A step on one of
    * them updates its line from the step's answer; 交付物's own read refreshes the rest.
@@ -246,6 +250,30 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     section.append(row);
     if (drafting) section.append(renderDraft(draft!, designation));
     focusAfterDraw(section, designation.publicationVersionId);
+    return section;
+  }
+
+  function renderOutsideHistory(listed: ReadonlyArray<PublicationVersionProjection>): HTMLElement | null {
+    const publicationVersionId = open?.publicationVersionId ?? outside?.target.publicationVersionId;
+    if (publicationVersionId === undefined || listed.some((item) => item.publicationVersionId === publicationVersionId)) {
+      outside = null;
+      return null;
+    }
+    if (open?.projection !== null && open?.projection !== undefined) outside = open.projection;
+    const section = el('section', 'maintenance maintenance-outside-history');
+    section.dataset['publicationVersionId'] = publicationVersionId;
+    const heading = el('h5', undefined, MAINTENANCE_HEADING);
+    heading.id = uid('heading');
+    section.setAttribute('aria-labelledby', heading.id);
+    section.append(heading);
+    if (outside !== null) {
+      const list = el('ol', 'maintenance-cases');
+      list.append(renderSummary(summaryOf(outside), publicationVersionId));
+      section.append(list);
+    } else if (open !== null) {
+      section.append(renderCase(open));
+    }
+    focusAfterDraw(section, publicationVersionId);
     return section;
   }
 
@@ -643,7 +671,8 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     try {
       const projection = await api.inspectMaintenanceCase({ ...current.inspection, caseId: current.caseId });
       if (destroyed || open !== current || request !== ticket) return;
-      if (projection.bookId !== bookId || projection.caseId !== current.caseId) throw new Error(MAINTENANCE_STATUS_LINES.readFailed);
+      if (projection.bookId !== bookId || projection.caseId !== current.caseId ||
+          projection.target.publicationVersionId !== current.publicationVersionId) throw new Error(MAINTENANCE_STATUS_LINES.readFailed);
       current.projection = projection;
       pendingFocus = focus === null ? null : { publicationVersionId: current.publicationVersionId, selector: focus };
       options.redraw();
@@ -775,6 +804,7 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
 
   return {
     render,
+    renderOutsideHistory,
     busy: () => working,
     destroy() {
       destroyed = true;

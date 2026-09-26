@@ -342,7 +342,7 @@ export class MaintenanceCases {
     return rows.flatMap((row): MaintenanceAttentionReading[] => {
       const record = this.#case(text(row.book_id), text(row.case_id));
       const revisions = this.#revisions(record);
-      const latest = revisions.at(-1)!;
+      const latest = revisions.latest;
       const nextStep = nextStepOf(record.classification, revisions);
       if (latest.status === 'complete' || nextStep === null) return [];
       const target = this.#designation(record.bookId, record.publicationVersionId)!;

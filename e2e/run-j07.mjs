@@ -2152,6 +2152,40 @@ async function main() {
     const leftOver = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((attention) => attention.groups.flatMap((group) => group.items).filter((entry) => entry.target.kind === 'maintenance').length)`);
     requireJourney(leftOver === 0, 'maintenance-attention-none-left', leftOver);
 
+    // A bounded publication list must not hide the exact target selected in attention.
+    const outsideCase = await renderer.evaluate(`(async () => {
+      const before = await window.ai7.inspectDeliverables();
+      const target = before.publication.designations.find((item) => item.ordinal === 2);
+      const result = await window.ai7.recordMaintenanceCase({ publicationVersionId: target.publicationVersionId,
+        classification: 'errata', reason: ${JSON.stringify(MAINTENANCE_MORE)}, evidence: null });
+      for (let index = 0; index < 31; index += 1) {
+        await window.ai7.designatePublicationVersion({ milestoneId: ${JSON.stringify(first)},
+          scope: ${JSON.stringify(EBOOK.scope)} + '（' + index + '）', basis: ${JSON.stringify(EBOOK.basis)} });
+      }
+      const after = await window.ai7.inspectDeliverables();
+      return { caseId: result.maintenanceCase.caseId, publicationVersionId: target.publicationVersionId,
+        hidden: !after.publication.designations.some((item) => item.publicationVersionId === target.publicationVersionId),
+        count: after.publication.designations.length };
+    })()`);
+    requireJourney(outsideCase.hidden && outsideCase.count === 30, 'maintenance-attention-designation-outside-page');
+    await clickSelector(renderer, attentionEntry, 'maintenance-attention-outside-entry');
+    const outsideOpen = `[data-screen="global-attention"] [data-attention-open="maintenance:${outsideCase.caseId}"]`;
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(outsideOpen)}) !== null`, 'maintenance-attention-outside-listed', 30_000);
+    await clickSelector(renderer, outsideOpen, 'maintenance-attention-outside-open');
+    const outsideSection = `[data-screen="book-deliverables"] .maintenance-outside-history[data-publication-version-id="${outsideCase.publicationVersionId}"]`;
+    const outsideHeading = `${outsideSection} section.maintenance-case .maintenance-case-heading`;
+    await waitFor(renderer, `(() => { const heading = document.querySelector(${JSON.stringify(outsideHeading)});
+      return heading instanceof HTMLElement && document.activeElement === heading &&
+        document.querySelector(${JSON.stringify(`${outsideSection} section.maintenance-case`)})?.dataset.caseId === ${JSON.stringify(outsideCase.caseId)} &&
+        document.querySelector(${JSON.stringify(`${outsideSection} .maintenance-target`)})?.textContent.includes('第 2 次') &&
+        document.querySelectorAll('ol.publication-versions > li').length === 30; })()`, 'maintenance-attention-outside-focused', 60_000);
+    const outsideToggle = `${outsideSection} [data-maintenance-action="toggle-case"]`;
+    await clickSelector(renderer, outsideToggle, 'maintenance-attention-outside-close');
+    await waitFor(renderer, `(() => { const toggle = document.querySelector(${JSON.stringify(outsideToggle)});
+      return toggle instanceof HTMLElement && document.activeElement === toggle && toggle.getAttribute('aria-expanded') === 'false'; })()`, 'maintenance-attention-outside-close-focused');
+    await clickSelector(renderer, outsideToggle, 'maintenance-attention-outside-reopen');
+    await waitFor(renderer, `document.activeElement === document.querySelector(${JSON.stringify(outsideHeading)})`, 'maintenance-attention-outside-reopened');
+
     at('documents-restart');
     // A restart moves nothing: 交付物, 交付 · 生产文档 and 图书交付包 answer byte for byte as before — 维护事项 included — the
     // card still names its second delivery, the package lists its two versions and v2's export, and the 新闻稿 opens at 版本 3

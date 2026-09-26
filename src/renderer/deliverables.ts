@@ -511,6 +511,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     for (const designation of designations) list.append(renderDesignation(designation));
     section.append(list);
     if (next.publication.designationsTruncated) section.append(el('p', 'field-note', publicationsTruncatedLine(designations.length)));
+    const outside = maintenance.renderOutsideHistory(designations);
+    if (outside !== null) section.append(outside);
     return section;
   }
 
