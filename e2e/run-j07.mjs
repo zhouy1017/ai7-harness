@@ -1830,7 +1830,8 @@ async function main() {
       ['document:news-release', 'docx', '新闻稿 · 版本 3', `002 ${EXCERPT.title} · 新闻稿 · 版本 3.docx`],
       ['manifest', 'markdown', '交付包清单', PACKAGE_MANIFEST_FILE],
     ];
-    const packageFileLines = (outcome, words) => packageFiles.map(([key, format, label, fileName]) =>
+    const firstMembers = packageFiles.filter(([key]) => key !== 'document:news-release');
+    const packageFileLines = (outcome, words, members = packageFiles) => members.map(([key, format, label, fileName]) =>
       [key, format, label, `「${fileName}」 · ${format === 'docx' ? 'DOCX' : 'Markdown'}`, outcome, words].join('|'));
     const recordsBefore = await renderer.evaluate(`window.ai7.inspectDeliverables().then((answer) => JSON.stringify(answer.exports))`);
     const packageAction = (action) => `[data-screen="book-deliverables"] ol.package-version-list > li[data-package-current="true"] [data-package-action="${action}"]`;
@@ -1879,7 +1880,7 @@ async function main() {
     await waitFor(renderer, switchedTo(false), 'package-export-reviewed-without-annotations', 60_000);
     await toggleAnnotations('package-export-annotations-on');
     await waitFor(renderer, switchedTo(true), 'package-export-reviewed-with-annotations', 60_000);
-    for (const [key] of packageFiles) {
+    for (const [key] of firstMembers) {
       await clickSelector(renderer, `input[data-package-member="${key}"]`, 'package-export-select-member');
     }
     await clickSelector(renderer, packageAction('export-choose'), 'package-export-choose');
@@ -1888,31 +1889,42 @@ async function main() {
       const panel = window.__j07.packageExport();
       const approve = panel.querySelector('[data-package-action="export-approve"]');
       return panel.querySelector('.package-export-folder-line')?.textContent === ${JSON.stringify(`导出到：${packageFolder}`)} &&
-        JSON.stringify(window.__j07.packageExportFiles()) === ${JSON.stringify(JSON.stringify(packageFileLines('prepared', '已准备')))} &&
+        JSON.stringify(window.__j07.packageExportFiles()) === ${JSON.stringify(JSON.stringify(packageFileLines('prepared', '已准备', firstMembers)))} &&
         approve instanceof HTMLButtonElement && !approve.disabled && document.activeElement === approve &&
         panel.querySelector('[data-package-action="export-choose"]')?.textContent === '重新选择位置…' &&
         (window.__j07.packageVersions()[0].querySelector('.package-version-line')?.textContent ?? '').startsWith('v2 · 图书交付包已准备 · 暂无导出记录');
     })()`, 'package-export-bound-to-the-folder');
     requireJourney((await readdir(packageFolder)).length === 0, 'package-export-prepared-writes-nothing');
     await clickSelector(renderer, packageAction('export-approve'), 'package-export-approve');
-    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'done' && window.__j07.status() === '已导出到所选位置 · 3 个文件'`, 'package-export-written', 60_000);
+    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'done' && window.__j07.status() === '已导出到所选位置 · 2 个文件'`, 'package-export-written', 60_000);
     await assertRenderer(renderer, `(() => {
       const panel = window.__j07.packageExport();
       const result = panel.querySelector('.package-export-result');
       const [v2, v1] = window.__j07.packageVersions();
       const history = Array.from(v2.querySelectorAll('ol.package-export-list > li'));
-      return result?.dataset.packageExportState === 'exported' && result.querySelector('.package-export-summary')?.textContent === '已导出到所选位置 · 3 个文件' &&
+      return result?.dataset.packageExportState === 'exported' && result.querySelector('.package-export-summary')?.textContent === '已导出到所选位置 · 2 个文件' &&
         result.querySelector('.package-export-stopped') === null &&
-        JSON.stringify(window.__j07.packageExportFiles()) === ${JSON.stringify(JSON.stringify(packageFileLines('created', '已导出到所选位置')))} &&
+        JSON.stringify(window.__j07.packageExportFiles()) === ${JSON.stringify(JSON.stringify(packageFileLines('created', '已导出到所选位置', firstMembers)))} &&
         document.activeElement === result.querySelector('[data-package-action="export-reveal"]') && panel.querySelector('[data-package-action="export-choose"]') === null &&
         (v2.querySelector('.package-version-line')?.textContent ?? '').startsWith('v2 · 图书交付包已准备 · 已导出 1 次') &&
         history.length === 1 && history[0].dataset.packageExportState === 'exported' &&
-        (history[0].querySelector('.package-export-line')?.textContent ?? '').startsWith('已导出到所选位置 · 3 个文件 · ') &&
+        (history[0].querySelector('.package-export-line')?.textContent ?? '').startsWith('已导出到所选位置 · 2 个文件 · ') &&
         history[0].querySelector('.package-export-folder')?.textContent === ${JSON.stringify(packageFolder)} &&
         history[0].querySelector('[data-package-action="reveal-export"]')?.textContent === '在文件夹中显示' &&
         v1.querySelector('ol.package-export-list') === null && (v1.querySelector('.package-version-line')?.textContent ?? '').startsWith('v1 · 图书交付包已准备 · 暂无导出记录') &&
         window.__j07.pkg().dataset.packageVersions === '2' && window.__j07.pkg().dataset.packageChanged === 'false';
     })()`, 'package-export-history');
+    requireJourney(JSON.stringify((await readdir(packageFolder)).sort()) === JSON.stringify(firstMembers.map(([, , , fileName]) => fileName).sort()), 'package-export-selected-subset-only');
+    await clickSelector(renderer, packageAction('export-close'), 'package-export-subset-close');
+    await clickSelector(renderer, packageAction('export'), 'package-export-remaining-open');
+    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'ready'`, 'package-export-remaining-reviewed', 60_000);
+    await clickSelector(renderer, 'input[data-package-member="document:news-release"]', 'package-export-select-remaining');
+    await clickSelector(renderer, packageAction('export-choose'), 'package-export-remaining-choose');
+    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'prepared'`, 'package-export-remaining-prepared', 60_000);
+    await assertRenderer(renderer, `window.__j07.packageExport().querySelectorAll('ol.package-export-files > li').length === 1`, 'package-export-one-prepared-member');
+    await clickSelector(renderer, packageAction('export-approve'), 'package-export-remaining-approve');
+    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'done' && window.__j07.status() === '已导出到所选位置 · 1 个文件'`, 'package-export-remaining-written', 60_000);
+    await assertRenderer(renderer, `window.__j07.packageVersions()[0].querySelectorAll('ol.package-export-list > li').length === 2`, 'package-export-two-subset-receipts');
     // The folder holds exactly the three files; each DOCX is a package, and the 交付包清单 is the version's own words, byte
     // for byte, as the package and its Delivery Records answer them.
     requireJourney(JSON.stringify((await readdir(packageFolder)).sort()) === JSON.stringify(packageFiles.map(([, , , fileName]) => fileName).sort()), 'package-export-folder-files');
@@ -1958,7 +1970,7 @@ async function main() {
     await reopenDeliverables(renderer, 'documents-restart');
     const documentsAfter = await renderer.evaluate(readBoth);
     requireJourney(typeof documentsBefore === 'string' && documentsAfter === documentsBefore, 'documents-restart-moved-nothing');
-    await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentState === 'document' && window.__j07.card('news-release').dataset.documentDeliveries === '2' && window.__j07.card('news-release').dataset.documentChangedSinceDelivery === 'false' && window.__j07.packageVersions().length === 2 && (window.__j07.packageVersions()[0].querySelector('ol.package-export-list > li .package-export-line')?.textContent ?? '').startsWith('已导出到所选位置 · 3 个文件 · ')`, 'documents-restart-card');
+    await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentState === 'document' && window.__j07.card('news-release').dataset.documentDeliveries === '2' && window.__j07.card('news-release').dataset.documentChangedSinceDelivery === 'false' && window.__j07.packageVersions().length === 2 && (window.__j07.packageVersions()[0].querySelector('ol.package-export-list > li .package-export-line')?.textContent ?? '').startsWith('已导出到所选位置 · 1 个文件 · ')`, 'documents-restart-card');
     await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="open"]', 'documents-restart-open');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] .editor-toolbar h2')?.textContent === '新闻稿 · 版本 3' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.textContent?.endsWith(${JSON.stringify(`${DOCUMENT_EDIT}${DELIVERY_EDIT}`)})`, 'documents-restart-document');
     await assertNoForbiddenWords(renderer, 'documents-without-forbidden-words');
