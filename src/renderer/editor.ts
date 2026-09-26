@@ -494,6 +494,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     view.setProps({ editable: isEditable });
     view.dom.setAttribute('aria-readonly', isEditable() ? 'false' : 'true');
     view.dom.dataset['operationLocked'] = operationLocked ? 'true' : 'false';
+    // Whether an input method's composition is open in the text: a key command waits on it (#579).
+    view.dom.dataset['composing'] = composing ? 'true' : 'false';
     if (deferredNavigationContinuity) view.dom.setAttribute('tabindex', '0');
     else view.dom.removeAttribute('tabindex');
   };
@@ -567,6 +569,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     applyEditableState();
     // A restore superseded before its frame never runs: the later one speaks for the window now shown.
     if (pendingRestore) cancelAnimationFrame(pendingRestore.frame);
+    const focusAtSchedule = document.activeElement;
     const run = (): void => {
       pendingRestore = undefined;
       if (destroyed) return;
@@ -578,7 +581,10 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       } else if (target) {
         target.scrollIntoView({ block: 'center' });
       }
-      if (continuity?.focused || (!continuity && focusBlockId !== null)) {
+      // An explicit command can move focus while this arrival waits for its frame (for example, starting a document
+      // phase just after saving a version). Restore the arrival, but do not reclaim focus from that later command.
+      const focusUnchanged = document.activeElement === focusAtSchedule || view.hasFocus();
+      if (focusUnchanged && (continuity?.focused || (!continuity && focusBlockId !== null))) {
         if (deferredNavigationContinuity) view.dom.focus({ preventScroll: true });
         else view.focus();
       }
@@ -821,11 +827,13 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       },
       compositionstart() {
         composing = true;
+        view.dom.dataset['composing'] = 'true';
         queueMicrotask(announceState);
         return false;
       },
       compositionend() {
         composing = false;
+        view.dom.dataset['composing'] = 'false';
         const waiting = compositionWaiters;
         compositionWaiters = [];
         for (const resolve of waiting) resolve();

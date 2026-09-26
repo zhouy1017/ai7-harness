@@ -6,6 +6,7 @@ import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
+import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import { parseDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
 import { EDITOR_AUTHOR_LABEL } from '../../src/service/docx-export.js';
 import {
@@ -16,7 +17,7 @@ import {
   writeAtomically,
 } from '../../src/service/manuscript-export.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CLARIFICATION_SCHEMA_VERSION, BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION, IMPORTED_MARK_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { CLARIFICATION_SCHEMA_VERSION, BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION, IMPORTED_MARK_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import {
   DEFAULT_MANUSCRIPT_EXPORT_OPTIONS,
@@ -452,7 +453,7 @@ describe('④ 导出: the Export Fidelity Review, the preparation, the approval 
       const namespace = /xmlns:w="([^"]+)"/.exec(documentXml)![1]!;
       entries['word/document.xml'] = strToU8(documentXml.replace('<w:document ', `<document xmlns="${namespace}" `).replace('</w:document>', '</document>'));
       const unprefixed = join(roots.inputRoot, `${randomUUID()}.docx`);
-      await writeFile(unprefixed, zipSync(entries));
+      await writeFile(unprefixed, zipSync(entries, { mtime: fixedArchiveTime() }));
       const staged = await store.stageSelectedManuscript(randomUUID(), unprefixed);
       // The field reads back as a degradation the editor accepts before the import commits.
       const newBook = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
@@ -576,7 +577,7 @@ describe('④ 导出: the Export Fidelity Review, the preparation, the approval 
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION);
       const truthAfter = relationTruth(database);
       expect([...truthAfter.keys()]).toEqual([...truthBefore.keys(), ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER].sort());
       for (const relation of [...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER]) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);

@@ -5,6 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { fixedArchiveTime } from './composed-docx.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const CHARACTER_COUNT = 10_000_000;
@@ -143,6 +144,7 @@ async function createSyntheticDocx(path) {
   });
   const pushEntry = async (name, value) => {
     const entry = new ZipPassThrough(name);
+    entry.mtime = fixedArchiveTime();
     zip.add(entry);
     entry.push(strToU8(value), true);
     await waitForPendingDrain();
@@ -156,6 +158,7 @@ async function createSyntheticDocx(path) {
     '<?xml version="1.0" encoding="UTF-8"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>千万字有界编辑校验</dc:title></cp:coreProperties>',
   );
   const document = new ZipPassThrough('word/document.xml');
+  document.mtime = fixedArchiveTime();
   zip.add(document);
   document.push(strToU8('<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'), false);
   await waitForPendingDrain();
@@ -1070,8 +1073,47 @@ async function runAccessibilityJourney(renderer) {
   }
   at('j14-keyboard-search-focus');
   await renderer.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0, replacementStart: 0, replacementEnd: 1 });
+  // ⌘F is pressed only once its precondition holds: the composition the step before left open has ended in the editor, the
+  // window has focus and focus is still in the text. #579 suspected a key that reached the renderer before the composition's
+  // end, which the guard just proven refuses; the wait rules that out rather than assuming it. A failure names the
+  // precondition that was missing, or what this key press did instead (#474's pattern).
+  const readiness = `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); return { compositionEnded: editor?.dataset.composing === 'false', windowFocused: document.hasFocus(), editorFocused: document.activeElement === editor }; })()`;
+  let ready = null;
+  const readyBy = Date.now() + 10_000;
+  while (Date.now() < readyBy) {
+    ready = await renderer.evaluate(readiness);
+    if (ready?.compositionEnded === true && ready.windowFocused === true && ready.editorFocused === true) break;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+  }
+  if (ready?.compositionEnded !== true || ready.windowFocused !== true || ready.editorFocused !== true) {
+    if (ready?.compositionEnded !== true) at('j14-keyboard-search-focus-composition-open');
+    else if (ready.windowFocused !== true) at('j14-keyboard-search-focus-window-unfocused');
+    else at('j14-keyboard-search-focus-editor-unfocused');
+    requireJourney(false, 'keyboard-search-focus-precondition', { ready });
+  }
+  // What this one press did is recorded as it happens: whether its keydown reached the page, with which modifiers and in
+  // what composition state, and whether the guard announced a refusal after it. The status line still holds the refusal
+  // the step before proved, so its words alone cannot say what this press did; setStatus replaces the line's text, so an
+  // observer sees a refusal even in the same words.
+  await renderer.evaluate(`(() => { const status = document.querySelector('#persistence-status'); const editor = document.querySelector('[data-testid="manuscript-editor"]'); const probe = { keydown: null, guardAnnounced: false }; const onKeydown = (event) => { if (probe.keydown === null && event.key.toLowerCase() === 'f') probe.keydown = { isComposing: event.isComposing, composing: editor?.dataset.composing ?? null, metaKey: event.metaKey, ctrlKey: event.ctrlKey }; }; const observer = new MutationObserver(() => { if (status?.textContent.includes('输入法组合尚未结束')) probe.guardAnnounced = true; }); if (status) observer.observe(status, { childList: true, characterData: true, subtree: true }); window.addEventListener('keydown', onKeydown, true); probe.stop = () => { observer.disconnect(); window.removeEventListener('keydown', onKeydown, true); }; globalThis.__ai7SearchKeyProbe = probe; return true; })()`);
   await press(renderer, 'f', modifier);
-  await waitFor(renderer, `document.activeElement?.id === 'manuscript-search'`, 'keyboard-search-focus');
+  let moved = false;
+  const movedBy = Date.now() + 60_000;
+  while (Date.now() < movedBy && !moved) {
+    moved = await renderer.evaluate(`document.activeElement?.id === 'manuscript-search'`) === true;
+    if (!moved) await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  const after = await renderer.evaluate(`(() => { const probe = globalThis.__ai7SearchKeyProbe; probe?.stop(); return { keydown: probe?.keydown ?? null, guardAnnounced: probe?.guardAnnounced === true, active: document.activeElement?.id || document.activeElement?.tagName || null }; })()`);
+  if (!moved) {
+    // The hosted marker names only the location (#591): whether the keydown reached the page, and with the platform's
+    // modifier, is told apart here rather than in the detail only a local debug run writes.
+    const platformModifier = modifier === 4 ? 'metaKey' : 'ctrlKey';
+    if (after?.guardAnnounced === true) at('j14-keyboard-search-focus-guard-announced');
+    else if ((after?.keydown ?? null) === null) at('j14-keyboard-search-focus-key-not-received');
+    else if (after.keydown[platformModifier] !== true) at('j14-keyboard-search-focus-modifier-missing');
+    else at('j14-keyboard-search-focus-no-focus-move');
+    requireJourney(false, 'keyboard-search-focus', { ready, after });
+  }
   at('j14-visible-focus');
   await assertRenderer(renderer, `(() => { const input = document.querySelector('#manuscript-search'); return input?.matches(':focus-visible') && getComputedStyle(input).outlineStyle !== 'none'; })()`, 'visible-focus');
   at('j14-keyboard-focus-keeps-window');
@@ -1082,23 +1124,37 @@ async function runAccessibilityJourney(renderer) {
   // without moving anything, so the one Tab below is the only thing that can move the pane. The document's
   // selection is cleared first: a selection the steps before left inside the text is restored on focus
   // without a reveal, and where they leave it varies from run to run, which left this step with nothing
-  // to prove (#493). With none, the focus that enters the text puts the caret at the window's start.
+  // to prove (#493). The editor keeps a selection of its own, too, and writes it back into the page when it
+  // takes focus whatever the page's selection says, so one left mid-text by the steps before could still
+  // meet the focus there (#619). The caret is therefore put at the window's start through the editor itself
+  // first: the text takes focus without scrolling, the page's caret is set at its start, and the editor
+  // reads it as it reads a caret the reader places. ProseMirror treats a DOM caret at the start within 200 ms
+  // of focus as a browser reset and restores its old selection, so wait past that pinned guard first. Blur,
+  // clear and refocus then prove that the editor itself restores the start before the Tab being tested.
   const windowProbe = `(() => { const pane = document.querySelector('.editor-window'); const editor = document.querySelector('[data-testid="manuscript-editor"]'); return { top: Math.round(pane.scrollTop), first: editor?.firstElementChild?.dataset.blockId ?? null, position: Number(document.querySelector('#manuscript-position')?.value), inText: document.activeElement === editor }; })()`;
-  const stopBeforeText = await renderer.evaluate(`(async () => { const pane = document.querySelector('.editor-window'); const editor = document.querySelector('[data-testid="manuscript-editor"]'); const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); document.getSelection().removeAllRanges(); await frames(); pane.scrollTop = Math.floor((pane.scrollHeight - pane.clientHeight) / 2); await frames(); const stops = Array.from(document.querySelectorAll('button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]')).filter((stop) => stop === editor || (!stop.disabled && stop.tabIndex >= 0 && stop.offsetParent !== null)); const index = stops.indexOf(editor); for (let before = index - 1; before >= 0; before -= 1) { stops[before].focus({ preventScroll: true }); if (document.activeElement === stops[before]) return true; } return { index, stops: stops.length }; })()`);
+  const stopBeforeText = await renderer.evaluate(`(async () => { const pane = document.querySelector('.editor-window'); const editor = document.querySelector('[data-testid="manuscript-editor"]'); const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); editor.focus({ preventScroll: true }); await new Promise((resolve) => setTimeout(resolve, 250)); const start = document.createRange(); start.setStart(document.createTreeWalker(editor, NodeFilter.SHOW_TEXT).nextNode() ?? editor, 0); start.collapse(true); document.getSelection().removeAllRanges(); document.getSelection().addRange(start); await frames(); editor.blur(); document.getSelection().removeAllRanges(); editor.focus({ preventScroll: true }); await frames(); const restored = document.getSelection(); const before = document.createRange(); before.setStart(editor, 0); if (!restored?.isCollapsed || !editor.contains(restored.anchorNode)) return { caretAtStart: false }; before.setEnd(restored.anchorNode, restored.anchorOffset); if (before.toString().length !== 0) return { caretAtStart: false }; document.getSelection().removeAllRanges(); await frames(); pane.scrollTop = Math.floor((pane.scrollHeight - pane.clientHeight) / 2); await frames(); const stops = Array.from(document.querySelectorAll('button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]')).filter((stop) => stop === editor || (!stop.disabled && stop.tabIndex >= 0 && stop.offsetParent !== null)); const index = stops.indexOf(editor); for (let before = index - 1; before >= 0; before -= 1) { stops[before].focus({ preventScroll: true }); if (document.activeElement === stops[before]) return true; } return { index, stops: stops.length }; })()`);
   const beforeFocus = await renderer.evaluate(windowProbe);
   if (stopBeforeText !== true || !(beforeFocus?.top > 0) || !(beforeFocus?.position > 0) || beforeFocus.inText !== false) {
     at('j14-keyboard-focus-keeps-window-precondition');
     requireJourney(false, 'keyboard-focus-precondition', { stopBeforeText, beforeFocus });
   }
+  // Every scroll of the pane from here on is recorded, so a reveal the pane took back is told from none (#604).
+  await renderer.evaluate(`(() => { const pane = document.querySelector('.editor-window'); const probe = { tops: [] }; const onScroll = () => probe.tops.push(Math.round(pane.scrollTop)); pane.addEventListener('scroll', onScroll); probe.stop = () => pane.removeEventListener('scroll', onScroll); globalThis.__ai7RevealProbe = probe; return true; })()`);
   // Tab walks forward from that stop until it enters the text; no stop on the way is inside the pane,
   // so the pane stays where it was put until the focus that is under test arrives.
   const walked = [];
+  let entered = null;
   for (let tabs = 0; tabs < 12; tabs += 1) {
     await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
     await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
     const stop = await renderer.evaluate(`(() => { const active = document.activeElement; const editor = document.querySelector('[data-testid="manuscript-editor"]'); return active === editor ? 'TEXT' : (active?.id || active?.className || active?.tagName || 'none') + ':' + (active?.textContent ?? '').slice(0, 12) + '@' + Math.round(document.querySelector('.editor-window').scrollTop); })()`);
     walked.push(stop);
-    if (stop === 'TEXT') break;
+    if (stop === 'TEXT') {
+      // What the focus found as it entered the text (#604): whether the window had focus, and where the caret stood —
+      // at the text's start, as the cleared selection leaves it, or elsewhere, as #493's restored selection did.
+      entered = await renderer.evaluate(`(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const selection = document.getSelection(); let caret = 'none'; if (selection && selection.rangeCount > 0) { if (!editor.contains(selection.anchorNode)) caret = 'outside'; else { const before = document.createRange(); before.setStart(editor, 0); before.setEnd(selection.anchorNode, selection.anchorOffset); caret = before.toString().length === 0 ? 'at-start' : 'elsewhere'; } } return { hasFocus: document.hasFocus(), caret }; })()`);
+      break;
+    }
   }
   if (localDebugEnabled()) recordDebugDetail('J-02', `tab walk ${JSON.stringify(walked)}`);
   if (walked.at(-1) !== 'TEXT') {
@@ -1109,14 +1165,23 @@ async function runAccessibilityJourney(renderer) {
   // enough for it to show on the slowest hosted runner.
   await new Promise((resolveWait) => setTimeout(resolveWait, 1_500));
   const afterFocus = await renderer.evaluate(windowProbe);
+  const scrolled = await renderer.evaluate(`(() => { const probe = globalThis.__ai7RevealProbe; probe?.stop(); globalThis.__ai7RevealProbe = undefined; return probe?.tops ?? []; })()`);
   if (afterFocus?.first !== beforeFocus.first || afterFocus?.position !== beforeFocus.position) {
     at('j14-keyboard-focus-keeps-window-paged');
     requireJourney(false, 'keyboard-focus-keeps-window', { beforeFocus, afterFocus });
   }
   if (afterFocus.top === beforeFocus.top) {
-    // The browser revealed nothing, so nothing was proven: say so rather than pass on it.
-    at('j14-keyboard-focus-keeps-window-no-reveal');
-    requireJourney(false, 'keyboard-focus-reveal', { beforeFocus, afterFocus });
+    // The browser revealed nothing, so nothing was proven: say so rather than pass on it. A hosted run prints only the
+    // location (#604), so it tells the facts apart: the window without focus, a caret the focus found away from the
+    // text's start, or a pane that moved and came back; the plain name is left for none of them.
+    if (entered?.hasFocus !== true) at('j14-keyboard-focus-keeps-window-no-reveal-window-unfocused');
+    // Where the caret stood, told apart at the hosted marker too (#619): elsewhere in the text, outside it, or absent.
+    else if (entered.caret === 'elsewhere') at('j14-keyboard-focus-keeps-window-no-reveal-caret-elsewhere');
+    else if (entered.caret === 'outside') at('j14-keyboard-focus-keeps-window-no-reveal-caret-outside');
+    else if (entered.caret !== 'at-start') at('j14-keyboard-focus-keeps-window-no-reveal-caret-none');
+    else if (Array.isArray(scrolled) && scrolled.some((top) => top !== beforeFocus.top)) at('j14-keyboard-focus-keeps-window-no-reveal-moved-back');
+    else at('j14-keyboard-focus-keeps-window-no-reveal');
+    requireJourney(false, 'keyboard-focus-reveal', { beforeFocus, afterFocus, entered, scrolled });
   }
   at('j14-top-edge-pages-back-once');
   // The reader's own scroll to the top edge still asks for the window before — once: the pane then

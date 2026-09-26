@@ -1,6 +1,7 @@
 import {
   ADMITTED_JOURNEYS,
   classifyJourneyResult,
+  collectReadinessTrace,
   collectJourneyDisclosures,
   normalizePnpmArgs,
   runJourneyProcess,
@@ -34,6 +35,8 @@ if (args.length !== 0) {
       // failure names where it stopped. Failure path only: a passing run's output is unchanged.
       const failure = classifyJourneyResult(result, journey);
       console.error(`LOCAL_COMPLETION/${journey}/fail/${failure.location}/${failure.errorClass}`);
+      const readiness = collectReadinessTrace(result, journey);
+      if (readiness !== null) console.error(`LOCAL_COMPLETION/${journey}/readiness/${readiness}`);
       process.exitCode = result.code || 1;
       break;
     }

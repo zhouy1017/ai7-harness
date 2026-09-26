@@ -8,6 +8,7 @@ import {
   publicationText,
   type BookDeliveryPackageConditionProjection,
   type BookDeliveryPackageContentProjection,
+  type BookDeliveryPackageExportSummaryProjection,
   type BookDeliveryPackageItemProjection,
   type BookDeliveryPackageProjection,
   type BookDeliveryPackageVersionProjection,
@@ -191,6 +192,8 @@ export interface BookDeliveryPackageSources {
   publication(bookId: string): PackagePublicationReading | null;
   documents(bookId: string): ReadonlyArray<PackageDocumentReading>;
   reviewRuns(bookId: string): ReadonlyArray<PackageReviewRunReading>;
+  /** Each version's exports newest first, as far as they are listed, and how many there were (Issue #416, S67b). */
+  exportHistory?(bookId: string, packageVersionId: string): { exports: BookDeliveryPackageExportSummaryProjection[]; total: number };
 }
 
 export class BookDeliveryPackageError extends Error {
@@ -215,8 +218,8 @@ const integer = (value: SQLOutputValue | undefined): number => {
   return value;
 };
 
-/** What a package holds apart from its purpose: exactly what `contentDigest` names. */
-interface PackageContent {
+/** What a package holds apart from its purpose: exactly what `contentDigest` names. Its export reads it (Issue #416, S67b). */
+export interface PackageContent {
   schema: 'ai7.book-delivery-package-content/1';
   bookId: string;
   publication: null | Omit<PackagePublicationReading, 'changedSince'>;
@@ -239,7 +242,8 @@ interface PackageReading {
   preview: BookDeliveryPackageContentProjection;
 }
 
-interface VersionRecord {
+/** One frozen version as it is recorded; `BookDeliveryPackages.record` reads it back verified. */
+export interface PackageVersionRecord {
   schema: 'ai7.book-delivery-package/1';
   packageVersionId: string;
   packageId: string;
@@ -305,7 +309,7 @@ export class BookDeliveryPackages {
       return { outcome: 'unchanged', version: integer(latest.version) };
     }
     const version = latest === undefined ? 1 : integer(latest.version) + 1;
-    const record: VersionRecord = {
+    const record: PackageVersionRecord = {
       schema: 'ai7.book-delivery-package/1',
       packageVersionId: randomUUID(),
       packageId: latest === undefined ? randomUUID() : text(latest.package_id),
@@ -490,19 +494,19 @@ export class BookDeliveryPackages {
     };
   }
 
+  /** One frozen version of this Book's package, its record verified against its digest, or `null` when it is none of it. */
+  record(bookId: string, packageVersionId: string): { record: PackageVersionRecord; digest: string } | null {
+    if (!UUID_PATTERN.test(bookId) || !UUID_PATTERN.test(packageVersionId)) return null;
+    const row = this.#db.prepare('SELECT * FROM book_delivery_package_versions WHERE package_version_id = ? AND book_id = ?')
+      .get(packageVersionId, bookId) as SqlRow | undefined;
+    return row === undefined ? null : verifiedVersion(row);
+  }
+
   /** One frozen version, its record verified against its digest. */
   #version(row: SqlRow, current: boolean): BookDeliveryPackageVersionProjection {
-    const json = text(row.canonical_json);
-    const digest = text(row.sha256);
-    requirePackage(sha256Hex(json) === digest, 'BOOK_DELIVERY_PACKAGE_RECORD_INVALID', '图书交付包记录与其摘要不一致。');
-    const record = JSON.parse(json) as VersionRecord;
-    const version = integer(row.version);
-    requirePackage(
-      record.schema === 'ai7.book-delivery-package/1' && record.packageVersionId === text(row.package_version_id) && record.version === version &&
-        record.contentDigest === text(row.content_sha256) && canonicalRecord(record.content).digest === record.contentDigest,
-      'BOOK_DELIVERY_PACKAGE_RECORD_INVALID',
-      '图书交付包记录无效。',
-    );
+    const { record, digest } = verifiedVersion(row);
+    const version = record.version;
+    const history = this.#sources.exportHistory?.(record.bookId, record.packageVersionId);
     const publication = record.content.publication;
     const includedDocuments = record.content.documents.filter((entry) => entry.disposition === 'included').length;
     const notForThisBook = record.content.documents.length - includedDocuments;
@@ -520,8 +524,28 @@ export class BookDeliveryPackages {
         `本书不做 ${notForThisBook} 类`,
         `审阅报告 ${record.content.reviewReports.length} 份`,
       ].join(' · '),
-      exportHistoryLabel: BOOK_DELIVERY_PACKAGE_WORDS.exportHistoryNone,
+      exportHistoryLabel: history === undefined || history.total === 0
+        ? BOOK_DELIVERY_PACKAGE_WORDS.exportHistoryNone
+        : `已导出 ${history.total} 次`,
+      exports: history?.exports ?? [],
+      exportsTruncated: history !== undefined && history.total > history.exports.length,
       technical: { contentDigest: record.contentDigest, digest, priorVersionId: record.priorVersionId },
     };
   }
+}
+
+/** A version's row read back: its record verified against its digest and its content against the content digest. */
+function verifiedVersion(row: SqlRow): { record: PackageVersionRecord; digest: string } {
+  const json = text(row.canonical_json);
+  const digest = text(row.sha256);
+  requirePackage(sha256Hex(json) === digest, 'BOOK_DELIVERY_PACKAGE_RECORD_INVALID', '图书交付包记录与其摘要不一致。');
+  const record = JSON.parse(json) as PackageVersionRecord;
+  requirePackage(
+    record.schema === 'ai7.book-delivery-package/1' && record.packageVersionId === text(row.package_version_id) &&
+      record.version === integer(row.version) && record.contentDigest === text(row.content_sha256) &&
+      canonicalRecord(record.content).digest === record.contentDigest,
+    'BOOK_DELIVERY_PACKAGE_RECORD_INVALID',
+    '图书交付包记录无效。',
+  );
+  return { record, digest };
 }

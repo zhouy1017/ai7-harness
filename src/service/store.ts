@@ -30,9 +30,16 @@ import type {
   ProductionDocumentResultProjection,
   SaveProductionDocumentVersionInput,
   RecordProductionDocumentDeliveryInput,
+  TransitionProductionDocumentPhaseInput,
   BookDeliveryPackageProjection,
   BookDeliveryPackageResultProjection,
   PrepareBookDeliveryPackageInput,
+  ApproveBookDeliveryPackageExportInput,
+  BookDeliveryPackageExportProjection,
+  BookDeliveryPackageExportResultProjection,
+  BookDeliveryPackageExportReviewProjection,
+  PrepareBookDeliveryPackageExportInput,
+  ReviewBookDeliveryPackageExportInput,
   ProductionDocumentsProjection,
   MilestonePurposeKind,
   PublicationDesignationProjection,
@@ -260,6 +267,14 @@ import { initializeReimportGroupSchema } from './reimport-group-ledger.js';
 import { initializeProductionDocumentDeliverySchema, initializeProductionDocumentSchema } from './production-document-ledger.js';
 import { BookDeliveryPackageError, BookDeliveryPackages, initializeBookDeliveryPackageSchema } from './book-delivery-packages.js';
 import {
+  BookDeliveryPackageExportError,
+  BookDeliveryPackageExports,
+  initializeBookDeliveryPackageExportSchema,
+} from './book-delivery-package-exports.js';
+import {
+  ProductionDocumentWorkflow, ProductionDocumentWorkflowError, initializeProductionDocumentWorkflowSchema, type WorkflowProfilePin,
+} from './production-document-workflow.js';
+import {
   PRODUCTION_DOCUMENTS_NEED_MANUSCRIPT, ProductionDocumentError, ProductionDocuments, productionDocumentMarksNotCarried,
 } from './production-documents.js';
 import type { WaitingRunBlockCause } from './reconnect-preflight.js';
@@ -337,6 +352,8 @@ import {
   PRODUCTION_DOCUMENT_SCHEMA_VERSION,
   PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION,
   BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION,
+  PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION,
+  BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1552,7 +1569,9 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === REIMPORT_GROUP_SCHEMA_VERSION ||
       currentVersion === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
       currentVersion === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
-      currentVersion === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION,
+      currentVersion === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
+      currentVersion === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
+      currentVersion === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1587,7 +1606,9 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === REIMPORT_GROUP_SCHEMA_VERSION ||
       currentVersion === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
       currentVersion === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
-      currentVersion === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION
+      currentVersion === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
+      currentVersion === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
+      currentVersion === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1936,7 +1957,9 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === REIMPORT_GROUP_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION,
+      version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
+      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1960,7 +1983,9 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === REIMPORT_GROUP_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION) return;
+      version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
+      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2076,7 +2101,9 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === REIMPORT_GROUP_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION,
+      version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
+      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2099,7 +2126,9 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === REIMPORT_GROUP_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION) return;
+      version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
+      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2392,7 +2421,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2418,6 +2447,8 @@ function validateModelServiceSchema(
       version >= PRODUCTION_DOCUMENT_SCHEMA_VERSION,
       version >= PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION,
       version >= BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION,
+      version >= PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION,
+      version >= BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2468,7 +2499,9 @@ function initializeModelServiceSchema(
       version === REIMPORT_GROUP_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION,
+      version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
+      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2491,7 +2524,9 @@ function initializeModelServiceSchema(
       version === REIMPORT_GROUP_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION) {
+      version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
+      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
+      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -2937,6 +2972,8 @@ interface ReimportCommitWork {
   readonly legacyResultWithoutPresentation: boolean;
   phase: 'parse' | 'mappings';
   parseBytes: number;
+  /** A converted source's working representation, reproduced from the kept original before the parse (Issue #597). */
+  converted: { digest: string; byteLength: number; fidelity: FidelityCategoryProjection[] } | null;
   parsedIngest: IngestedDocx | null;
   parseFailure: unknown;
   mappingPosition: number;
@@ -3256,6 +3293,28 @@ function closeDatabaseQuietly(db: DatabaseSync | null): void {
   }
 }
 
+/**
+ * Why a Book's own Source Version cannot take the same file again (Issue #532): an earlier parser read it, and AI7 reads
+ * files differently now. Said at the choice, in the editor's words; the way on is a new Book.
+ */
+export const SOURCE_VERSION_PARSER_CHANGED_MESSAGE =
+  '这本书里已有同一个文件的来源版本，但它是用旧版 AI7 的读取方式导入的；AI7 现在读取文件的方式已经不同，不能在原来的来源版本上再次导入这个文件。可以把它作为新建图书导入。';
+
+/**
+ * J-01's `tamper-reimport-proof-before-validation` control (Issue #569): one reimport mapping's staged text altered before the
+ * whole-store validation, which must then refuse the store. Only a mapping that has staged text is chosen — a deletion's is
+ * NULL, and `NULL || '篡改'` is NULL, which would report one change and alter nothing — so the store is tampered every time.
+ */
+export const REIMPORT_PROOF_TAMPER_SQL = `UPDATE manuscript_reimport_mappings SET staged_text = staged_text || '篡改'
+           WHERE mapping_id = (
+             SELECT mapping_id FROM manuscript_reimport_mappings WHERE staged_text IS NOT NULL ORDER BY mapping_id LIMIT 1
+           )`;
+
+/** The profile a Production Document follows (Issue #415, S66c): the Book's built-in workflow profile's projection. */
+function workflowProfilePin(profile: BuiltInWorkflowProfile): WorkflowProfilePin {
+  return { id: profile.projection.id, name: profile.projection.name, version: profile.projection.version, digest: profile.projection.digest };
+}
+
 export class EditorialStore {
   readonly #dataRoot: string;
   readonly #objectsRoot: string;
@@ -3278,7 +3337,10 @@ export class EditorialStore {
   readonly #reviewRuns: ReviewRunStore;
   readonly #publicationVersions: PublicationVersionStore;
   readonly #productionDocuments: ProductionDocuments;
+  /** Each Production Document's Deliverable Workflow (Issue #415, S66c). */
+  readonly #documentWorkflow: ProductionDocumentWorkflow;
   readonly #bookDeliveryPackages: BookDeliveryPackages;
+  readonly #packageExports: BookDeliveryPackageExports;
   readonly #manuscriptExport: ManuscriptExportStore;
   readonly #proposalConflicts: ProposalConflictStore;
   /** 默认执行规则 (Issue #421): the rules 快速开始 starts a Task under. */
@@ -3335,11 +3397,15 @@ export class EditorialStore {
       readObject: (objectDigest) => this.#readContentObject(objectDigest),
       dataRoot,
       checkpointOwner: boundedAuthority,
+      // A package export's 交付包清单 (Issue #416, S67b), written by the package's export from the version's own record.
+      packageManifest: (bookId, packageVersionId) => this.#packageExports.manifest(bookId, packageVersionId),
+      packageVersion: (bookId, packageVersionId) => this.#packageExports.version(bookId, packageVersionId),
     });
     // 交付物 lists a Book's approved exports beside its 发稿 (Issue #413), read from the export ledger. Its Production
     // Documents (Issue #415) are a read of their own, each Delivery Record with what its export came to.
+    this.#documentWorkflow = new ProductionDocumentWorkflow(authority, workflowProfilePin(workflowProfile));
     this.#productionDocuments = new ProductionDocuments(authority, (bookId, revisionId, from, until) =>
-      this.#manuscriptExport.latestExport(bookId, 'production-document-version', revisionId, from, until));
+      this.#manuscriptExport.latestExport(bookId, 'production-document-version', revisionId, from, until), this.#documentWorkflow);
     this.#publicationVersions = new PublicationVersionStore(authority, (bookId) => this.#manuscriptExport.records(bookId));
     // 图书交付包 (Issue #416) reads the Book's current 发稿版本, each house type's Delivery Records and its Review Runs.
     this.#bookDeliveryPackages = new BookDeliveryPackages(authority, {
@@ -3362,6 +3428,11 @@ export class EditorialStore {
       },
       documents: (bookId) => this.#productionDocuments.packageReadings(bookId),
       reviewRuns: (bookId) => this.#reviewRuns.packageReadings(bookId),
+      exportHistory: (bookId, packageVersionId) => this.#packageExports.history(bookId, packageVersionId),
+    });
+    // Its export (Issue #416, S67b) writes each file through the export ledger and links them to the exact version.
+    this.#packageExports = new BookDeliveryPackageExports(authority, this.#manuscriptExport, {
+      record: (bookId, packageVersionId) => this.#bookDeliveryPackages.record(bookId, packageVersionId),
     });
     this.#proposalConflicts = new ProposalConflictStore(authority, this.#editorialMarks);
     this.#workflowProfile = workflowProfile;
@@ -3400,10 +3471,7 @@ export class EditorialStore {
       initializeBoundedSchema(authority, workflowProfile);
       initializeSourceImportSchema(authority, workflowProfile);
       if (control.induceReimportProofTamper) {
-        requireStore(authority.prepare(
-          `UPDATE manuscript_reimport_mappings SET staged_text = staged_text || '篡改'
-           WHERE mapping_id = (SELECT mapping_id FROM manuscript_reimport_mappings ORDER BY mapping_id LIMIT 1)`,
-        ).run().changes === 1, 'E2E_CONTROL_INVALID', '没有可用于启动校验的重新导入证明。');
+        requireStore(authority.prepare(REIMPORT_PROOF_TAMPER_SQL).run().changes === 1, 'E2E_CONTROL_INVALID', '没有可用于启动校验的重新导入证明。');
       }
       initializeManuscriptReimportSchema(authority, workflowProfile);
       // A store already at the terminal version is validated whole exactly twice per open: once above,
@@ -3449,6 +3517,10 @@ export class EditorialStore {
       // frozen 图书交付包 versions.
       initializeProductionDocumentDeliverySchema(authority);
       initializeBookDeliveryPackageSchema(authority);
+      // Revision 40 (Issue #415, S66c) adds each document's workflow instance and phase moves, and revision 41 (Issue #416,
+      // S67b) each package export and the files it links.
+      initializeProductionDocumentWorkflowSchema(authority, workflowProfilePin(workflowProfile));
+      initializeBookDeliveryPackageExportSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -5617,8 +5689,18 @@ export class EditorialStore {
   async #convertSelectedManuscript(
     selectedPath: string,
     format: ManuscriptConversionProjection['sourceFormat'],
+    expected?: { digest: string; byteLength: number },
   ): Promise<{ docx: Uint8Array; loss: ConversionLoss } | null> {
     const bytes = await readFile(selectedPath);
+    // A kept original is the digest of record (ADR 0072 §2): the bytes converted are the bytes the digest names, read
+    // once, so a same-size change that converts to the same working representation is still refused (#606's review).
+    if (expected !== undefined) {
+      requireStore(
+        bytes.byteLength === expected.byteLength && sha256(bytes) === expected.digest,
+        'SNAPSHOT_RESELECTION_REQUIRED',
+        '暂存对象摘要无效。',
+      );
+    }
     try {
       return format === 'DOC' ? await convertDocManuscript(bytes) : convertTextManuscript(bytes, { format });
     } catch (error) {
@@ -6013,7 +6095,10 @@ export class EditorialStore {
 
     const draft = one(
       this.#authority
-        .prepare('SELECT state, draft_version, object_digest FROM import_drafts WHERE draft_id = ?')
+        .prepare(
+          `SELECT state, draft_version, object_digest, source_format, working_object_digest, converter_identity
+           FROM import_drafts WHERE draft_id = ?`,
+        )
         .all(draftId) as SqlRow[],
       'DRAFT_NOT_FOUND',
       '导入草稿不存在。',
@@ -6033,6 +6118,28 @@ export class EditorialStore {
     } catch (error) {
       if (error instanceof StoreFatalError) throw error;
       throw new StoreError('SNAPSHOT_RESELECTION_REQUIRED', '重选文件无法形成完整的本地暂存快照。');
+    }
+    // A converted draft was read through its working representation, so reselecting its original reproduces that
+    // representation and restages it (Issue #611): after a converter change the draft is whole again, never only 放弃.
+    // It is routed on its own row, whatever the picked file is named or identified as: the original's digest of record,
+    // checked before any conversion or write, is the whole identity proof, and a draft read through a working
+    // representation never takes the source-only or the DOCX path (#615's review).
+    const recordedConversion = readConversionColumns(
+      draft,
+      draft.source_format === null || draft.source_format === undefined ? 'DOCX' : requireSourceFormat(asString(draft.source_format)),
+      '导入草稿的转换记录不完整。',
+    );
+    if (recordedConversion !== null) {
+      const original = one(
+        this.#authority.prepare('SELECT byte_length FROM content_objects WHERE object_digest = ?').all(expectedDigest) as SqlRow[],
+        'STORE_CORRUPT',
+        '导入草稿的原文件对象不存在。',
+      );
+      return this.#reselectConvertedDraft(
+        { draftId, selectionToken, selectedPath, displayName },
+        { expectedDigest, expectedBytes: asNumber(original.byte_length), expectedDraftVersion, previousState, recovered: attempt !== null },
+        recordedConversion.sourceFormat,
+      );
     }
     // Reselection identifies the file the same way staging does, so a format the product does not
     // read as a Manuscript comes back as the same source-only draft rather than a bare refusal.
@@ -6116,6 +6223,110 @@ export class EditorialStore {
     } finally {
       this.#discardIngest(ingested.ingestId);
     }
+  }
+
+  /**
+   * Reselect the exact original behind a converted draft (Issue #611). The original's own bytes are the identity check, as
+   * a first staging's are; the working representation is then reproduced from them and restaged — persisted, parsed and
+   * checked exactly as the first staging did — and the draft returns to `staged` with it, so a draft whose representation
+   * could no longer be reproduced, after a converter change, is whole again. The review it had is invalidated.
+   */
+  async #reselectConvertedDraft(
+    selection: { draftId: string; selectionToken: string; selectedPath: string; displayName: string },
+    draft: { expectedDigest: string; expectedBytes: number; expectedDraftVersion: number; previousState: string; recovered: boolean },
+    sourceFormat: ManuscriptConversionProjection['sourceFormat'],
+  ): Promise<ContinueImportProjection> {
+    const { draftId, selectionToken, selectedPath, displayName } = selection;
+    // The conversion is today's route for the draft's own format, as a first staging's is (#615's review): the working
+    // representation restaged below is this converter's output, so the draft, its review and a later Source Version
+    // name this converter, never the one recorded at the first staging (ADR 0072 §2).
+    const route = editableImport(sourceFormat);
+    requireStore(route.available && route.conversion !== undefined, 'SNAPSHOT_RESELECTION_REQUIRED', '重选文件无法再次转换。');
+    const conversion = route.conversion;
+    let converted: { docx: Uint8Array; loss: ConversionLoss } | null;
+    try {
+      // The bytes converted are the bytes the draft's digest names, read once (#606's review): another file is refused
+      // as the reselection's own mismatch.
+      converted = await this.#convertSelectedManuscript(selectedPath, conversion.sourceFormat,
+        { digest: draft.expectedDigest, byteLength: draft.expectedBytes });
+    } catch (error) {
+      if (error instanceof StoreFatalError) throw error;
+      if (error instanceof StoreError && error.code === 'SNAPSHOT_RESELECTION_REQUIRED') {
+        throw new StoreError('RESELECTION_MISMATCH', '重选文件与原暂存来源身份不一致。');
+      }
+      if (error instanceof StoreError) throw error;
+      throw new StoreError('SNAPSHOT_RESELECTION_REQUIRED', '重选文件无法形成完整的本地暂存快照。');
+    }
+    requireStore(converted !== null, 'SNAPSHOT_RESELECTION_REQUIRED', '重选文件无法再次转换。');
+    const fidelity = conversionFidelityReport(conversion, converted.loss);
+    return this.#withContentObjectLifecycle(async () => {
+      this.#requireNoAbandonmentCleanupIntent(draftId);
+      const retained = await this.#persistRetainedOriginal(selectedPath, conversion.sourceFormat);
+      requireStore(retained.digest === draft.expectedDigest, 'RESELECTION_MISMATCH', '重选文件与原暂存来源身份不一致。');
+      const working = await this.#persistWorkingObject(converted.docx);
+      const ingested = await this.#parseIntoIngestedWorkingRepresentation(draftId, working.path, displayName);
+      try {
+        const { parsed } = ingested;
+        requireStore(isCleanTracerFidelity(parsed.fidelity), 'FIDELITY_OUTSIDE_TRACER', '工作表示带有解析器自身的保真信号。');
+        requireStore(
+          parsed.sourceDigest === working.digest && parsed.archiveBytes === working.byteLength,
+          'OBJECT_VERIFY_FAILED',
+          '工作表示对象与解析结果不一致。',
+        );
+        const nextVersion = draft.expectedDraftVersion + 1;
+        const now = new Date().toISOString();
+        this.#transaction(this.#authority, () => {
+          const current = one(
+            this.#authority
+              .prepare('SELECT state, draft_version, object_digest FROM import_drafts WHERE draft_id = ?')
+              .all(draftId) as SqlRow[],
+            'DRAFT_NOT_FOUND',
+            '导入草稿不存在。',
+          );
+          requireStore(
+            (asString(current.state) === 'staged' || asString(current.state) === 'reviewed') &&
+              asNumber(current.draft_version) === draft.expectedDraftVersion &&
+              asString(current.object_digest) === draft.expectedDigest,
+            'DRAFT_VERSION_CHANGED',
+            '导入草稿在重选持久化前已变化。',
+          );
+          this.#insertContentObject(working.digest, working.relativeKey, working.byteLength, now);
+          this.#insertContentObject(retained.digest, retained.relativeKey, retained.byteLength, now);
+          this.#authority.prepare('DELETE FROM manuscript_reimport_comparisons WHERE draft_id = ?').run(draftId);
+          this.#authority.prepare('DELETE FROM staged_import_snapshots WHERE draft_id = ?').run(draftId);
+          // As the first staging: the snapshot is keyed on the original's digest, the working representation is what was read.
+          this.#promoteIngestSnapshot(draftId, ingested, now, { sourceDigest: retained.digest, fidelity });
+          const draftUpdate = this.#authority
+            .prepare(
+              `UPDATE import_drafts
+               SET selection_token = ?, state = 'staged', draft_version = ?, display_name = ?, selected_path = ?,
+                   working_object_digest = ?, converter_identity = ?, reviewed_title = NULL, reviewed_target_choice_id = NULL,
+                   reviewed_target_kind = NULL, reviewed_existing_book_id = NULL,
+                   reviewed_relationship = NULL, reviewed_book_state_digest = NULL,
+                   reviewed_reuse_source_version_id = NULL,
+                   reviewed_lineage_status = NULL, reviewed_lineage_source_version_id = NULL,
+                   reviewed_checkpoint_revision_id = NULL, reviewed_manuscript_id = NULL, reviewed_branch_id = NULL,
+                   review_digest = NULL, reviewed_at = NULL
+               WHERE draft_id = ? AND draft_version = ? AND state IN ('staged', 'reviewed')`,
+            )
+            .run(selectionToken, nextVersion, displayName, selectedPath, working.digest, conversion.converterIdentity,
+              draftId, draft.expectedDraftVersion);
+          requireStore(draftUpdate.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在重选时已变化。');
+          this.#authority.prepare("DELETE FROM import_commit_attempts WHERE draft_id = ? AND state = 'prepared'").run(draftId);
+          this.#boundedCall(() => this.#boundedAuthority.assertStagedDraftIntegrity(draftId));
+          this.#assertForeignKeys(this.#authority);
+        });
+        return {
+          state: 'target-review-required',
+          staged: this.#stagedProjection(this.#loadDraftSnapshot(draftId)),
+          originalFileAccess: { state: 'available-exact', label: '原始所选文件仍可访问且身份一致' },
+          reviewInvalidated: draft.previousState === 'reviewed' || draft.recovered,
+          notice: '已通过原来源摘要精确匹配完成重选，并重新转换、形成完整暂存与预检；请重新确认全部决定。',
+        };
+      } finally {
+        this.#discardIngest(ingested.ingestId);
+      }
+    });
   }
 
   /**
@@ -8220,6 +8431,7 @@ export class EditorialStore {
       legacyResultWithoutPresentation: options.legacyResultWithoutPresentation === true,
       phase: 'parse',
       parseBytes: 0,
+      converted: null,
       parsedIngest: null,
       parseFailure: null,
       mappingPosition: 0,
@@ -8228,14 +8440,26 @@ export class EditorialStore {
       offsetSegments: [],
     };
     this.#reimportCommitWork.set(workId, work);
-    void this.#parseIntoIngest(input.draftId, objectPath, snapshotBeforeAttempt.displayName, {
-      signal: abortController.signal,
-      onArchiveProgress: (bytes) => {
-        if (this.#reimportCommitWork.get(workId) === work) {
-          work.parseBytes = Math.min(bytes, snapshotBeforeAttempt.sourceBytes);
-        }
-      },
-    }).then((ingested) => {
+    // A converted source was read through its working representation (ADR 0072 §2), and the kept original is not a Word
+    // document: the commit re-reads the working representation, after reproducing the conversion from the original, as
+    // revalidation does (Issue #597). Its parse progress still counts against the original's bytes.
+    const parseSource = async (): Promise<IngestedDocx> => {
+      const converted = snapshotBeforeAttempt.conversion === null
+        ? null
+        : await this.#revalidateConversion(snapshotBeforeAttempt, objectPath);
+      work.converted = converted;
+      return this.#parseIntoIngest(input.draftId, converted?.path ?? objectPath, snapshotBeforeAttempt.displayName, {
+        signal: abortController.signal,
+        onArchiveProgress: (bytes) => {
+          if (this.#reimportCommitWork.get(workId) === work) {
+            // The segment is sized by the original's bytes; a working representation's parse is scaled into it.
+            const scaled = converted === null ? bytes : Math.round(bytes * snapshotBeforeAttempt.sourceBytes / converted.byteLength);
+            work.parseBytes = Math.min(scaled, snapshotBeforeAttempt.sourceBytes);
+          }
+        },
+      });
+    };
+    void parseSource().then((ingested) => {
       if (this.#reimportCommitWork.get(workId) === work) work.parsedIngest = ingested;
       else this.#discardIngest(ingested.ingestId);
     }).catch((error: unknown) => {
@@ -8345,14 +8569,18 @@ export class EditorialStore {
         return { done: false, completed: work.parseBytes, total: work.total, result: null };
       }
       const parsed = work.parsedIngest.parsed;
+      // A converted source is checked against its reproduced working representation, and its fidelity is the
+      // conversion's, as revalidation checks it (Issue #597).
+      const converted = work.snapshot.conversion === null ? null : work.converted;
       requireStore(
-        parsed.sourceDigest === work.snapshot.sourceDigest && parsed.archiveBytes === work.snapshot.sourceBytes &&
+        parsed.sourceDigest === (converted?.digest ?? work.snapshot.sourceDigest) &&
+          parsed.archiveBytes === (converted?.byteLength ?? work.snapshot.sourceBytes) &&
           parsed.parserIdentity === work.snapshot.parserIdentity &&
           parsed.contentDigest === work.snapshot.contentDigest &&
           parsed.structureDigest === work.snapshot.structureDigest &&
           parsed.blockCount === work.snapshot.blockCount &&
           parsed.characterCount === work.snapshot.characterCount &&
-          canonicalJson(parsed.fidelity) === canonicalJson(work.snapshot.fidelity) &&
+          canonicalJson(converted?.fidelity ?? parsed.fidelity) === canonicalJson(work.snapshot.fidelity) &&
           parsed.titleSuggestion.value === work.snapshot.titleSuggestion &&
           parsed.titleSuggestion.sourceLabel === work.snapshot.titleSource &&
           this.#retentionCall(() => stagedImportSourcesMatch(this.#authority, work.input.draftId, work.parsedIngest!.sources)),
@@ -9592,6 +9820,8 @@ export class EditorialStore {
         documentId, bookId: input.bookId, typeId: input.typeId, originSourceVersionId: plan.sourceVersionId,
         parserIdentity: parsed.parserIdentity, createdAt: now,
       });
+      // The document begins following the Book's workflow profile now (Issue #415, S66c; WORK-002).
+      this.#documentWorkflow.recordInstance(documentId, now);
       this.#productionDocuments.recordVersion(documentId, revisionId, revisionDigest, 'created');
     }));
     // The material's comments and tracked changes stay with the material: the document says so where it opens.
@@ -9736,12 +9966,27 @@ export class EditorialStore {
     return { bookId, documents, typeId, document: card?.document ?? null, notice };
   }
 
+  /**
+   * 开始 / 完成 / 跳过 / 重新打开 one phase of a document of this Book (Issue #415, S66c; WORK-008, WORK-009): one deterministic
+   * move recorded in one transaction, or refused — a move the phase's state does not allow, one without the reason a skip
+   * or a reopen needs, or one made after the phases moved since the editor looked. It grants nothing else (WORK-011).
+   */
+  transitionProductionDocumentPhase(input: TransitionProductionDocumentPhaseInput): ProductionDocumentResultProjection {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(input.bookId) && UUID_PATTERN.test(input.documentId), 'PRODUCTION_DOCUMENT_INVALID', '生产文档参数无效。');
+    const row = this.#documentCall(() => this.#productionDocuments.documentById(input.bookId, input.documentId));
+    requireStore(row !== undefined, 'PRODUCTION_DOCUMENT_NOT_FOUND', '这本书没有这份生产文档。');
+    const recordedAt = new Date().toISOString();
+    this.#documentCall(() => this.#transaction(this.#authority, () => this.#documentWorkflow.transition(input, recordedAt)));
+    return this.#productionDocumentResult(input.bookId, row.typeId);
+  }
+
   #documentCall<T>(operation: () => T): T {
     this.#assertAvailable();
     try {
       return operation();
     } catch (error) {
-      if (error instanceof ProductionDocumentError) throw new StoreError(error.code, error.message);
+      if (error instanceof ProductionDocumentError || error instanceof ProductionDocumentWorkflowError) throw new StoreError(error.code, error.message);
       if (error instanceof AggregateError) {
         this.#poisoned = true;
         throw new StoreFatalError(error);
@@ -9765,13 +10010,42 @@ export class EditorialStore {
     return { bookId: input.bookId, outcome: outcome.outcome, version: outcome.version, package: this.inspectBookDeliveryPackage(input.bookId) };
   }
 
+  /** `导出…` of one package version (Issue #416, S67b): the files it writes, each reviewed as S64 reviews a file. */
+  async reviewBookDeliveryPackageExport(input: ReviewBookDeliveryPackageExportInput, available: boolean): Promise<BookDeliveryPackageExportReviewProjection> {
+    return this.#packageExportCall(() => this.#packageExports.review(input, available));
+  }
+
+  /** The folder the system dialog returned: one preparation per file there, and the export that links them. */
+  async prepareBookDeliveryPackageExport(input: PrepareBookDeliveryPackageExportInput, available: boolean): Promise<BookDeliveryPackageExportProjection> {
+    return this.#packageExportCall(() => this.#packageExports.prepare(input, available));
+  }
+
+  /** `按上述方式导出`: each file approved and written in turn with its receipt, and the package as it stands. */
+  async approveBookDeliveryPackageExport(input: ApproveBookDeliveryPackageExportInput, available: boolean, beforeWrite?: () => void): Promise<BookDeliveryPackageExportResultProjection> {
+    const exported = await this.#packageExportCall(() => this.#packageExports.approve(input, available, beforeWrite));
+    return { bookId: input.bookId, export: exported, package: this.inspectBookDeliveryPackage(input.bookId) };
+  }
+
+  async #packageExportCall<T>(operation: () => Promise<T>): Promise<T> {
+    return this.#exportCall(async () => {
+      try {
+        return await operation();
+      } catch (error) {
+        if (error instanceof BookDeliveryPackageExportError || error instanceof BookDeliveryPackageError) throw new StoreError(error.code, error.message);
+        throw error;
+      }
+    });
+  }
+
   #packageCall<T>(operation: () => T): T {
     this.#assertAvailable();
     try {
       return operation();
     } catch (error) {
       if (error instanceof BookDeliveryPackageError || error instanceof PublicationVersionError || error instanceof ProductionDocumentError ||
-        error instanceof ReviewRunError) throw new StoreError(error.code, error.message);
+        error instanceof ReviewRunError || error instanceof BookDeliveryPackageExportError || error instanceof ExportLedgerError) {
+        throw new StoreError(error.code, error.message);
+      }
       if (error instanceof AggregateError) {
         this.#poisoned = true;
         throw new StoreFatalError(error);
@@ -10532,7 +10806,10 @@ export class EditorialStore {
     originalPath: string,
   ): Promise<{ digest: string; byteLength: number; path: string; fidelity: FidelityCategoryProjection[] }> {
     const conversion = snapshot.conversion!;
-    const converted = await this.#convertSelectedManuscript(originalPath, conversion.sourceFormat);
+    const converted = await this.#convertSelectedManuscript(originalPath, conversion.sourceFormat, {
+      digest: snapshot.sourceDigest,
+      byteLength: snapshot.sourceBytes,
+    });
     requireStore(converted !== null, 'SNAPSHOT_RESELECTION_REQUIRED', '保留的原始文件无法再次转换。');
     const digest = sha256(converted.docx);
     requireStore(
@@ -11445,6 +11722,21 @@ export class EditorialStore {
     };
   }
 
+  /**
+   * The same file again onto the Source Version a Book already holds for it is a reuse, and a Source Version keeps the
+   * reading its parser made (Issue #532). One an earlier parser read — a Book imported before this build's parser — cannot
+   * take the file again under this one: the refusal names the parser change at the choice, not at the commit, and never
+   * blames the file. Development stores before the first packaged release are disposable (ADR 0079 §1b).
+   */
+  #requireSameParser(sourceVersionId: string, snapshot: DraftSnapshot): void {
+    const row = one(
+      this.#authority.prepare('SELECT parser_identity FROM source_versions WHERE source_version_id = ?').all(sourceVersionId) as SqlRow[],
+      'SOURCE_VERSION_REUSE_INVALID',
+      '明确选择的来源版本不存在。',
+    );
+    requireStore(nullableString(row.parser_identity) === snapshot.parserIdentity, 'SOURCE_VERSION_PARSER_CHANGED', SOURCE_VERSION_PARSER_CHANGED_MESSAGE);
+  }
+
   #resolveReimportTarget(
     selection: ManuscriptReimportTargetSelection,
     snapshot: DraftSnapshot,
@@ -11470,6 +11762,7 @@ export class EditorialStore {
         'SOURCE_VERSION_REUSE_REQUIRED',
         '同图书已有精确来源版本；必须明确选择后才能复用。',
       );
+      this.#requireSameParser(current.exactSourceVersionId, snapshot);
     }
     let lineage: ResolvedReimportTarget['lineage'];
     if (selection.lineage.kind === 'unconfirmed') {
@@ -11718,6 +12011,7 @@ export class EditorialStore {
         'SOURCE_VERSION_REUSE_REQUIRED',
         '同图书已有精确来源版本；必须明确选择后才能复用。',
       );
+      this.#requireSameParser(target.exactSourceVersionId, snapshot);
     } else {
       requireStore(selection.reuseSourceVersionId === null, 'SOURCE_VERSION_REUSE_INVALID', '所选来源版本不能在该图书中复用。');
     }
@@ -11914,6 +12208,11 @@ export class EditorialStore {
       if (current.bookStateDigest !== snapshot.reviewedBookStateDigest ||
         current.manuscriptId !== snapshot.reviewedManuscriptId || current.branchId !== snapshot.reviewedBranchId ||
         current.exactSourceVersionId !== snapshot.reviewedReuseSourceVersionId) return null;
+      // The Source Version it reuses must have been read the way this draft is (Issue #532). A review made before an update
+      // that changed the parser is caught earlier, by `#revalidateSnapshot`'s parser drift; this catches a review an earlier
+      // build prepared under this same parser over a Source Version an earlier parser read. It does not come back ready, and
+      // preparing it again says why.
+      if (current.exactSourceVersionId !== null) this.#requireSameParser(current.exactSourceVersionId, snapshot);
       const lineage = comparison.lineage_status === 'verified'
         ? {
             status: 'verified' as const,
@@ -12257,12 +12556,13 @@ export class EditorialStore {
       const structureDigest = nullableString(row.structure_digest);
       const parserIdentity = nullableString(row.parser_identity);
       const displayName = asString(row.display_name);
+      // Content and structure digests that agree are the same content whichever parser read each side (Issue #532): a Book
+      // an earlier parser read is still found by it.
       const comparableParse = parserIdentity !== null && snapshot.parserIdentity !== null;
       const identityClass =
         sourceDigest === snapshot.sourceDigest
           ? ({ kind: 'immutable-original', label: '精确原始文件身份' } as const)
           : comparableParse &&
-              parserIdentity === snapshot.parserIdentity &&
               contentDigest === snapshot.contentDigest &&
               structureDigest === snapshot.structureDigest
             ? ({ kind: 'parsed-content-structure', label: '发现相同内容' } as const)
@@ -12684,8 +12984,8 @@ export class EditorialStore {
               sir.source_version_disposition, sir.retained_boundary_json,
               sir.named_non_effects_json, sir.record_digest, sir.imported_at,
               sv.display_name, sv.format, sv.object_digest, sv.source_digest, sv.content_digest,
-              sv.structure_digest, sv.parser_identity, co.byte_length,
-              sp.acquisition_path, sp.locality, sp.sanitized_identity, sp.recorded_at
+              sv.structure_digest, sv.parser_identity, sv.working_object_digest, sv.converter_identity,
+              co.byte_length, sp.acquisition_path, sp.locality, sp.sanitized_identity, sp.recorded_at
        FROM import_commits ic
        JOIN source_import_records sir ON sir.commit_id = ic.commit_id
        JOIN source_versions sv
@@ -12745,6 +13045,7 @@ export class EditorialStore {
       importedAt,
     }));
     requireStore(recordDigest === asString(row.record_digest), 'STORE_CORRUPT', '来源导入记录摘要无效。');
+    const conversion = readConversionColumns(row, requireSourceFormat(asString(row.format)), '来源版本的转换记录不完整。');
     const receiptRecords = this.#sourceImportRecordPresentations(bookId, [sourceImportRecordId]);
     const receiptSource = receiptRecords.find((record) => record.kind === 'source');
     const receiptRecord = receiptRecords.find((record) => record.kind === 'source-import-record');
@@ -12766,9 +13067,10 @@ export class EditorialStore {
         sourceSha256: boundary.sourceSha256,
         sourceBytes: boundary.sourceBytes,
         provenanceLabel: '本机文件选择器 · 本地解析 · 未联网',
-        // A source-only import retained the original whole and read nothing through a converter.
-        conversion: null,
-        workingObjectSha256: null,
+        // A TXT, Markdown or legacy .doc kept as source material was read through its converter, and the
+        // commit recorded that working representation on the Source Version (ADR 0072 §2, #552).
+        conversion,
+        workingObjectSha256: conversion === null ? null : asString(row.working_object_digest),
       },
       retainedBoundary: boundary,
       provenance: {

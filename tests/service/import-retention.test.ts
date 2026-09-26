@@ -1,14 +1,17 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
+import { unzipSync, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseDocx, type ParsedDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
+import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import {
   IMPORT_FIDELITY_CATEGORIES_REVISION_26_SQL,
   importFidelityCategoriesShape,
 } from '../../src/service/import-retention.js';
-import { EditorialStore } from '../../src/service/store.js';
-import { CLARIFICATION_SCHEMA_VERSION, BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION, PROPOSAL_CONFLICT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { EditorialStore, SOURCE_VERSION_PARSER_CHANGED_MESSAGE, StoreError } from '../../src/service/store.js';
+import { CLARIFICATION_SCHEMA_VERSION, BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION, PROPOSAL_CONFLICT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import type { ManuscriptBlockProjection, TextBoxDisposition } from '../../src/shared/protocol.js';
 import {
   ADMITTED_BASELINE_DOCX,
@@ -19,7 +22,7 @@ import { IMPORT_RETENTION_RELATIONS_DROP_ORDER, SAMPLE1_V1_REPORT } from '../sup
 import { IMPORTED_MARK_RELATIONS_DROP_ORDER } from '../support/imported-marks.js';
 import { EXPORT_LEDGER_RELATIONS_DROP_ORDER } from '../support/manuscript-export.js';
 import { DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER } from '../support/default-execution-rules.js';
-import { SAMPLE1_BLOCKS, importSample1Book, requireExactSample1 } from '../support/sample1-baseline.js';
+import { SAMPLE1_BLOCKS, importSample1Book, requireExactSample1, sample1Path } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js';
 import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
@@ -54,6 +57,42 @@ const TEXT_BOX_EXCERPT: ComposedManuscriptRequest = {
 
 function databasePath(): string {
   return join(roots.dataRoot, 'store', 'ai7.sqlite');
+}
+
+/**
+ * Plant revision 26 exactly as a build before ADR 0086 left it, over a store holding one imported sample1 Book: its
+ * review is the eight-row one the frozen builder rebuilds under parser identity /1, degraded and accepted as it had to
+ * be, and `import_fidelity_categories` holds revision 26's text. Returns the planted rows.
+ */
+function plantRevision26(): Row[] {
+  return withDatabase(false, (database) => {
+    database.exec('PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE;');
+    const review = database.prepare('SELECT fidelity_review_id, source_version_id FROM manuscript_import_records').get() as Row;
+    const reviewId = String(review.fidelity_review_id);
+    database.prepare("UPDATE source_versions SET parser_identity = 'ai7-docx-fflate-saxes/1' WHERE source_version_id = ?").run(String(review.source_version_id));
+    database.prepare("UPDATE source_provenance SET parser_identity = 'ai7-docx-fflate-saxes/1' WHERE source_version_id = ?").run(String(review.source_version_id));
+    database.prepare('DELETE FROM import_fidelity_categories WHERE fidelity_review_id = ?').run(reviewId);
+    for (const relation of [...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER]) database.exec(`DROP TABLE ${relation}`);
+    database.exec('DROP TABLE import_fidelity_categories');
+    database.exec(IMPORT_FIDELITY_CATEGORIES_REVISION_26_SQL);
+    const insert = database.prepare(
+      `INSERT INTO import_fidelity_categories(fidelity_review_id, category_key, display_label, item_count, status, detail, position)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    SAMPLE1_V1_REPORT.forEach((category, index) =>
+      insert.run(reviewId, category.key, category.label, category.count, category.status, category.detail, index + 1));
+    database.prepare("UPDATE import_fidelity_reviews SET outcome = 'degraded-import-no-round-trip' WHERE fidelity_review_id = ?").run(reviewId);
+    const decisionId = randomUUID();
+    database.prepare('INSERT INTO import_degradation_decisions(degradation_decision_id, fidelity_review_id, decision, created_at) VALUES (?, ?, ?, ?)')
+      .run(decisionId, reviewId,
+        '{"items":[{"categoryKey":"inline-styles","count":266,"label":"行内样式"},{"categoryKey":"sections","count":1,"label":"分节"}],' +
+        '"schema":"ai7.import-degradation-decision/1","scope":"this-import-only","state":"accepted-complete-set"}',
+        new Date().toISOString());
+    database.prepare('UPDATE manuscript_import_records SET degradation_decision_id = ?').run(decisionId);
+    database.exec(`PRAGMA user_version = ${PROPOSAL_CONFLICT_SCHEMA_VERSION}; COMMIT; PRAGMA foreign_keys = ON;`);
+    expect(importFidelityCategoriesShape(database)).toBe('revision-26');
+    return database.prepare('SELECT rowid, * FROM import_fidelity_categories ORDER BY rowid').all() as Row[];
+  });
 }
 
 function withDatabase<T>(readOnly: boolean, body: (database: DatabaseSync) => T): T {
@@ -336,6 +375,62 @@ describe('import retention over the real store (ADR 0086)', () => {
   }, 180_000);
 });
 
+describe('the startup validation J-01 proves (Issue #584)', () => {
+  it('refuses a store whose reimport proof the tamper control altered, as the validator and not as the control', async () => {
+    const first = await composed({ source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 6, title: '篡改证明组稿' });
+    const second = await composed({ source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 7, title: '篡改证明组稿' });
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importComposed(store, first.path);
+      const staged = await store.stageSelectedManuscript(randomUUID(), second.path);
+      const started = store.createManuscriptReimportPreparationWork(staged.draftId, staged.draftVersion, {
+        kind: 'existing-book', bookId: book.bookId, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId: null,
+      });
+      let prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
+      while (!prepared.done) prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
+      let review = prepared.review!;
+      let cursor: number | null = null;
+      do {
+        const page = store.getReimportMappingPage(review.draftId, review.draftVersion, cursor);
+        for (const item of page.items.filter((entry) => entry.verb === null)) {
+          const resolution = store.createReimportResolutionWork(review.draftId, review.draftVersion, item.groupId, 'rewrite');
+          let progress = store.advanceReimportResolutionWork(resolution.workId);
+          while (!progress.done) progress = store.advanceReimportResolutionWork(resolution.workId);
+          review = progress.review!;
+        }
+        cursor = page.nextCursor;
+      } while (cursor !== null);
+      const commit = await store.createManuscriptReimportCommitWork({
+        draftId: review.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId: randomUUID(),
+      });
+      let result = commit.result;
+      while (result === null) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        result = (await store.advanceManuscriptReimportCommitWork(commit.workId!)).result;
+      }
+      expect(result.resultKind).toBe('changed');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    // The control alters one mapping that has staged text, and the store is then refused by what validates it — never by
+    // the control's own E2E_CONTROL_INVALID, nor by a statement that could not be prepared.
+    const opened = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
+      induceUnprovableReconciliation: false,
+      persistLegacyReviewedDraft: false,
+      induceReimportProofTamper: true,
+      induceAbandonObjectRemovalFailure: false,
+      interruptAfterAbandonObjectRemoval: false,
+      baselineAnalysisRoute: null,
+    }).then((store) => {
+      store.close();
+      return null;
+    }, (error: unknown) => error);
+    expect([opened instanceof Error ? opened.name : typeof opened, (opened as { code?: unknown } | null)?.code, opened instanceof Error ? opened.message : null])
+      .toEqual(['BoundedStoreError', 'SCHEMA_INVALID', '稿件重新导入块摘要无效。']);
+  }, 180_000);
+});
+
 describe('schema revision 27 over the real store', () => {
   it('migrates a revision-26 store holding a legacy eight-row review, with every fidelity row byte for byte', async () => {
     await requireExactSample1(roots.codeRoot);
@@ -351,34 +446,7 @@ describe('schema revision 27 over the real store', () => {
     // Plant revision 26 exactly as a build before ADR 0086 left it: the review is the eight-row one the
     // frozen builder rebuilds under parser identity /1, degraded and accepted as it had to be, and
     // `import_fidelity_categories` holds revision 26's text.
-    const before = withDatabase(false, (database) => {
-      database.exec('PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE;');
-      const review = database.prepare('SELECT fidelity_review_id, source_version_id FROM manuscript_import_records').get() as Row;
-      const reviewId = String(review.fidelity_review_id);
-      database.prepare("UPDATE source_versions SET parser_identity = 'ai7-docx-fflate-saxes/1' WHERE source_version_id = ?").run(String(review.source_version_id));
-      database.prepare("UPDATE source_provenance SET parser_identity = 'ai7-docx-fflate-saxes/1' WHERE source_version_id = ?").run(String(review.source_version_id));
-      database.prepare('DELETE FROM import_fidelity_categories WHERE fidelity_review_id = ?').run(reviewId);
-      for (const relation of [...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER]) database.exec(`DROP TABLE ${relation}`);
-      database.exec('DROP TABLE import_fidelity_categories');
-      database.exec(IMPORT_FIDELITY_CATEGORIES_REVISION_26_SQL);
-      const insert = database.prepare(
-        `INSERT INTO import_fidelity_categories(fidelity_review_id, category_key, display_label, item_count, status, detail, position)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      );
-      SAMPLE1_V1_REPORT.forEach((category, index) =>
-        insert.run(reviewId, category.key, category.label, category.count, category.status, category.detail, index + 1));
-      database.prepare("UPDATE import_fidelity_reviews SET outcome = 'degraded-import-no-round-trip' WHERE fidelity_review_id = ?").run(reviewId);
-      const decisionId = randomUUID();
-      database.prepare('INSERT INTO import_degradation_decisions(degradation_decision_id, fidelity_review_id, decision, created_at) VALUES (?, ?, ?, ?)')
-        .run(decisionId, reviewId,
-          '{"items":[{"categoryKey":"inline-styles","count":266,"label":"行内样式"},{"categoryKey":"sections","count":1,"label":"分节"}],' +
-          '"schema":"ai7.import-degradation-decision/1","scope":"this-import-only","state":"accepted-complete-set"}',
-          new Date().toISOString());
-      database.prepare('UPDATE manuscript_import_records SET degradation_decision_id = ?').run(decisionId);
-      database.exec(`PRAGMA user_version = ${PROPOSAL_CONFLICT_SCHEMA_VERSION}; COMMIT; PRAGMA foreign_keys = ON;`);
-      expect(importFidelityCategoriesShape(database)).toBe('revision-26');
-      return database.prepare('SELECT rowid, * FROM import_fidelity_categories ORDER BY rowid').all() as Row[];
-    });
+    const before = plantRevision26();
     expect(before).toHaveLength(8);
 
     const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -393,7 +461,7 @@ describe('schema revision 27 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION);
       expect(importFidelityCategoriesShape(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM import_fidelity_categories ORDER BY rowid').all()).toEqual(before);
       for (const relation of [...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER]) {
@@ -401,5 +469,138 @@ describe('schema revision 27 over the real store', () => {
       }
       expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     });
+  }, 180_000);
+
+  it('names the parser change when a Book an earlier parser read takes its unchanged file again, at the choice (Issue #532)', async () => {
+    await requireExactSample1(roots.codeRoot);
+    let bookId: string;
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      bookId = (await importSample1Book(store, roots.codeRoot, '旧读取方式')).bookId;
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    plantRevision26();
+    const sourceVersionId = withDatabase(true, (database) =>
+      String((database.prepare('SELECT source_version_id FROM source_versions').get() as Row).source_version_id));
+    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const refused = (operation: () => unknown): [string, string] | null => {
+        try {
+          operation();
+        } catch (error) {
+          if (error instanceof StoreError) return [error.code, error.message];
+          throw error;
+        }
+        return null;
+      };
+      // The unchanged file, staged under this build's parser: the Book holds its exact Source Version, read under /1. Taken
+      // again as a reimport, the choice itself says why not, before any review is prepared.
+      const again = await migrated.stageSelectedManuscript(randomUUID(), sample1Path(roots.codeRoot));
+      expect(refused(() => {
+        const started = migrated.createManuscriptReimportPreparationWork(again.draftId, again.draftVersion, {
+          kind: 'existing-book', bookId, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId: sourceVersionId,
+        });
+        let progress = migrated.advanceManuscriptReimportPreparationWork(started.workId);
+        while (!progress.done) progress = migrated.advanceManuscriptReimportPreparationWork(started.workId);
+      })).toEqual(['SOURCE_VERSION_PARSER_CHANGED', SOURCE_VERSION_PARSER_CHANGED_MESSAGE]);
+      // As source material for the Book, the same.
+      const asSource = await migrated.stageSelectedManuscript(randomUUID(), sample1Path(roots.codeRoot));
+      expect(refused(() => migrated.prepareSourceImportReview(asSource.draftId, asSource.draftVersion, {
+        kind: 'existing-book', bookId, relationship: 'source-only', reuseSourceVersionId: sourceVersionId,
+      }))).toEqual(['SOURCE_VERSION_PARSER_CHANGED', SOURCE_VERSION_PARSER_CHANGED_MESSAGE]);
+      // The way on the words name: the file comes in as a new Book.
+      const renewed = await importSample1Book(migrated, roots.codeRoot, '重新导入为新书');
+      expect(renewed.bookId).not.toBe(bookId);
+      migrated.markCleanShutdown();
+    } finally {
+      migrated.close();
+    }
+  }, 180_000);
+
+  it('does not bring back ready a reimport review over a Source Version an earlier parser read, and says why when it is prepared again (Issue #580)', async () => {
+    await requireExactSample1(roots.codeRoot);
+    let draftId: string;
+    let draftVersion: number;
+    let bookId: string;
+    let sourceVersionId: string;
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      bookId = (await importSample1Book(store, roots.codeRoot, '旧读取方式')).bookId;
+      sourceVersionId = withDatabase(true, (database) => String((database.prepare('SELECT source_version_id FROM source_versions').get() as Row).source_version_id));
+      // The unchanged file taken again as a reimport that reuses its exact Source Version: a review ready under this parser.
+      const again = await store.stageSelectedManuscript(randomUUID(), sample1Path(roots.codeRoot));
+      const started = store.createManuscriptReimportPreparationWork(again.draftId, again.draftVersion, {
+        kind: 'existing-book', bookId, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId: sourceVersionId,
+      });
+      let prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
+      while (!prepared.done) prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
+      draftId = prepared.review!.draftId;
+      draftVersion = prepared.review!.draftVersion;
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    // The Source Version as an earlier parser left it. sample1 has no comments or revisions, so its /2 and /3 reports are one.
+    withDatabase(false, (database) => {
+      database.prepare("UPDATE source_versions SET parser_identity = 'ai7-docx-fflate-saxes/2' WHERE source_version_id = ?").run(sourceVersionId);
+      database.prepare("UPDATE source_provenance SET parser_identity = 'ai7-docx-fflate-saxes/2' WHERE source_version_id = ?").run(sourceVersionId);
+    });
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const continued = await reopened.continueImportDraft(draftId!, draftVersion!);
+      expect(continued.state === 'target-review-required' && continued.reviewInvalidated).toBe(true);
+      const staged = continued.state === 'target-review-required' ? continued.staged : null;
+      const refused = ((): [string, string] | null => {
+        try {
+          const started = reopened.createManuscriptReimportPreparationWork(staged!.draftId, staged!.draftVersion, {
+            kind: 'existing-book', bookId: bookId!, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId: sourceVersionId!,
+          });
+          let progress = reopened.advanceManuscriptReimportPreparationWork(started.workId);
+          while (!progress.done) progress = reopened.advanceManuscriptReimportPreparationWork(started.workId);
+        } catch (error) {
+          if (error instanceof StoreError) return [error.code, error.message];
+          throw error;
+        }
+        return null;
+      })();
+      expect(refused).toEqual(['SOURCE_VERSION_PARSER_CHANGED', SOURCE_VERSION_PARSER_CHANGED_MESSAGE]);
+      expect(SOURCE_VERSION_PARSER_CHANGED_MESSAGE.endsWith('可以把它作为新建图书导入。')).toBe(true);
+      reopened.markCleanShutdown();
+    } finally {
+      reopened.close();
+    }
+  }, 180_000);
+
+  it('finds a Book an earlier parser read by its content when the same content comes in another file (Issue #532)', async () => {
+    await requireExactSample1(roots.codeRoot);
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      await importSample1Book(store, roots.codeRoot, '旧读取方式');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    plantRevision26();
+    const [sourceVersionId, sourceDigest] = withDatabase(true, (database) => {
+      const row = database.prepare('SELECT source_version_id, source_digest FROM source_versions').get() as Row;
+      return [String(row.source_version_id), String(row.source_digest)];
+    });
+    // sample1's own parts in another container: other bytes, the same body, so the same content and structure.
+    const twin = join(roots.inputRoot, 'sample1-另存.docx');
+    writeFileSync(twin, zipSync(unzipSync(readFileSync(sample1Path(roots.codeRoot))), { mtime: fixedArchiveTime() }));
+    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const staged = await migrated.stageSelectedManuscript(randomUUID(), twin);
+      expect(staged.source.sourceSha256).not.toBe(sourceDigest);
+      // Read under /1 and under this build's parser, the content and structure agree: the Book is found.
+      expect(staged.identityFindings.map((finding) => [finding.sourceVersionId, finding.identityClass])).toEqual([
+        [sourceVersionId, { kind: 'parsed-content-structure', label: '发现相同内容' }],
+      ]);
+      migrated.markCleanShutdown();
+    } finally {
+      migrated.close();
+    }
   }, 180_000);
 });

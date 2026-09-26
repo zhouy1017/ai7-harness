@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { appendFileSync, createWriteStream, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readReadinessTrace } from './readiness-trace.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const JOURNEY_RUNNER_ENTRY = resolve(ROOT, 'e2e', 'run.mjs');
@@ -467,10 +468,25 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-ime-command-guard-command-ran',
     'j14-ime-command-guard-status-missing',
     'j14-keyboard-search-focus',
+    // Issue #579: which precondition of ⌘F was missing, or what the command did instead.
+    'j14-keyboard-search-focus-composition-open',
+    'j14-keyboard-search-focus-window-unfocused',
+    'j14-keyboard-search-focus-editor-unfocused',
+    'j14-keyboard-search-focus-guard-announced',
+    // Issue #591: the ⌘F keydown never reached the page, or reached it without the platform's modifier.
+    'j14-keyboard-search-focus-key-not-received',
+    'j14-keyboard-search-focus-modifier-missing',
+    'j14-keyboard-search-focus-no-focus-move',
     'j14-visible-focus',
     'j14-keyboard-focus-keeps-window',
     'j14-keyboard-focus-keeps-window-precondition',
     'j14-keyboard-focus-keeps-window-paged',
+    // Issue #604: what the focus found when nothing was revealed.
+    'j14-keyboard-focus-keeps-window-no-reveal-window-unfocused',
+    'j14-keyboard-focus-keeps-window-no-reveal-caret-elsewhere',
+    'j14-keyboard-focus-keeps-window-no-reveal-caret-outside',
+    'j14-keyboard-focus-keeps-window-no-reveal-caret-none',
+    'j14-keyboard-focus-keeps-window-no-reveal-moved-back',
     'j14-keyboard-focus-keeps-window-no-reveal',
     'j14-top-edge-pages-back-once',
     'j14-top-edge-pages-back-once-bounced',
@@ -836,6 +852,20 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'documents-cards',
     'document-create',
     'document-edit-and-version',
+    // Issue #415 (S66c): the document's Deliverable Workflow — 开始, 完成, 跳过 and 重新打开 with their reasons.
+    'document-workflow',
+    'document-workflow-start',
+    'document-workflow-start-focus',
+    'document-workflow-complete',
+    'document-workflow-skip-open',
+    'document-workflow-skip-focus',
+    'document-workflow-skip-unreasoned',
+    'document-workflow-skip-reason',
+    'document-workflow-skip-confirm',
+    'document-workflow-reopen-open',
+    'document-workflow-reopen-words',
+    'document-workflow-reopen-confirm',
+    'document-workflow-summary',
     'document-card-after-version',
     'document-not-for-this-book',
     // Issue #415 (S66b): 交付 — a Delivery Record of one saved version, its export, 交付后有修改 and 再交付….
@@ -848,6 +878,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'package-not-for-this-book',
     'package-prepare',
     'package-v2',
+    // Issue #416 (S67b): v2 exported into a chosen folder, file by file with receipts, and its history.
+    'package-export',
     'documents-restart',
     'zero-loopback-requests',
     'completion-browser-close',
@@ -1479,6 +1511,14 @@ async function writeDebugFailure(journey, location, error) {
   writeFileSync(resolve(artifactRoot, 'failure.txt'), `${lines.join('\n')}\n`);
   await captureArmedBrowsers('failure');
   console.error(`LOCAL_DEBUG/${journey}/artifacts/${debugArtifactLabel(artifactRoot)}/screenshots/${screenshotsWritten}`);
+}
+
+/**
+ * The readiness trace a failed Journey printed (Issue #518), without its prefix: which startup step the product reached
+ * and when, validated as content-free, or `null`. A passing run's output is never read for it.
+ */
+export function collectReadinessTrace(result, journey) {
+  return readReadinessTrace(result.stderr, journey);
 }
 
 /** Classify a finished journey process the same way the payload-safe diagnostic does. */

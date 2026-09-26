@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 60 as const;
+export const SERVICE_PROTOCOL_VERSION = 62 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -128,10 +128,15 @@ export const IPC_CHANNELS = {
   inspectProductionDocuments: 'ai7:j07:inspect-production-documents',
   inspectBookDeliveryPackage: 'ai7:j07:inspect-book-delivery-package',
   prepareBookDeliveryPackage: 'ai7:j07:prepare-book-delivery-package',
+  reviewBookDeliveryPackageExport: 'ai7:j07:review-book-delivery-package-export',
+  chooseBookDeliveryPackageExportFolder: 'ai7:j07:choose-book-delivery-package-export-folder',
+  approveBookDeliveryPackageExport: 'ai7:j07:approve-book-delivery-package-export',
+  cancelBookDeliveryPackageExport: 'ai7:j07:cancel-book-delivery-package-export',
   createProductionDocument: 'ai7:j07:create-production-document',
   decideProductionDocumentType: 'ai7:j07:decide-production-document-type',
   saveProductionDocumentVersion: 'ai7:j07:save-production-document-version',
   recordProductionDocumentDelivery: 'ai7:j07:record-production-document-delivery',
+  transitionProductionDocumentPhase: 'ai7:j07:transition-production-document-phase',
   inspectGlobalAttention: 'ai7:j09:inspect-global-attention',
   reviewManuscriptExport: 'ai7:j07:review-manuscript-export',
   chooseManuscriptExportDestination: 'ai7:j07:choose-manuscript-export-destination',
@@ -5047,6 +5052,124 @@ export interface ProductionDocumentProjection {
   deliveriesTruncated: boolean;
   /** `交付后有修改` (DELIV-004): an edit after a delivery — the document was delivered, and its text is no version it was delivered at. */
   changedSinceDelivery: boolean;
+  /** Its Deliverable Workflow Lens (Issue #415, S66c; V2-UX-WORK-001 to 009): the pinned profile and its seven phases. */
+  workflow: ProductionDocumentWorkflowProjection;
+}
+
+/** The seven shared phases of a Deliverable Workflow (V2-UX-WORK-003), in the profile's order. */
+export type ProductionDocumentPhaseId =
+  | 'intake'
+  | 'source-development'
+  | 'drafting'
+  | 'review-verification'
+  | 'finalization'
+  | 'delivery'
+  | 'maintenance';
+export const PRODUCTION_DOCUMENT_PHASE_IDS: readonly ProductionDocumentPhaseId[] = [
+  'intake', 'source-development', 'drafting', 'review-verification', 'finalization', 'delivery', 'maintenance',
+];
+export const PRODUCTION_DOCUMENT_PHASE_LABELS: Readonly<Record<ProductionDocumentPhaseId, string>> = {
+  intake: '接收与准备',
+  'source-development': '来源建设',
+  drafting: '起草',
+  'review-verification': '审阅与核查',
+  finalization: '定稿',
+  delivery: '交付',
+  maintenance: '维护',
+};
+
+/**
+ * A phase's recorded state (WORK-004): only the editor's deterministic commands move it (WORK-008). `等待你处理` is read
+ * beside it from the document's own facts, never recorded.
+ */
+export type ProductionDocumentPhaseState = 'not-started' | 'in-progress' | 'completed' | 'skipped' | 'reopened';
+export const PRODUCTION_DOCUMENT_PHASE_STATE_LABELS: Readonly<Record<ProductionDocumentPhaseState, string>> = {
+  'not-started': '未开始',
+  'in-progress': '进行中',
+  completed: '已完成',
+  skipped: '已跳过',
+  reopened: '已重新打开',
+};
+/** The pill of a phase that is open and has something the editor must handle (WORK-004). */
+export const PRODUCTION_DOCUMENT_PHASE_WAITING_LABEL = '等待你处理';
+
+export type ProductionDocumentPhaseAction = 'start' | 'complete' | 'skip' | 'reopen';
+export const PRODUCTION_DOCUMENT_PHASE_ACTIONS: readonly ProductionDocumentPhaseAction[] = ['start', 'complete', 'skip', 'reopen'];
+
+/** Why a phase is skipped (WORK-009): choices shown unselected, and 自行输入, which needs the editor's words. */
+export type ProductionDocumentSkipReason = 'not-needed' | 'done-elsewhere' | 'later' | 'custom';
+export const PRODUCTION_DOCUMENT_SKIP_REASONS: Readonly<Record<ProductionDocumentSkipReason, string>> = {
+  'not-needed': '这份文档不需要这一阶段',
+  'done-elsewhere': '这一阶段已在别处完成',
+  later: '暂时跳过，之后再补',
+  custom: '自行输入',
+};
+/** Why a completed or skipped phase is reopened (WORK-009), the same way. */
+export type ProductionDocumentReopenReason = 'needs-change' | 'sources-changed' | 'redo-after-delivery' | 'custom';
+export const PRODUCTION_DOCUMENT_REOPEN_REASONS: Readonly<Record<ProductionDocumentReopenReason, string>> = {
+  'needs-change': '发现需要再改的地方',
+  'sources-changed': '来源或事实有变化',
+  'redo-after-delivery': '交付后需要重做',
+  custom: '自行输入',
+};
+/** The editor's own words beside a reason, in characters once NFC-normalized and trimmed. */
+export const MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS = 200;
+
+/** One recorded move of a phase (WORK-009): what it did, from which state to which, why, and when. */
+export interface ProductionDocumentPhaseTransitionProjection {
+  action: ProductionDocumentPhaseAction;
+  fromState: ProductionDocumentPhaseState;
+  toState: ProductionDocumentPhaseState;
+  /** A skip's or a reopen's reason: the choice, its words, and the editor's own; `null` for 开始 and 完成. */
+  reason: null | { choice: string; label: string; text: string | null };
+  recordedAt: string;
+}
+
+export interface ProductionDocumentPhaseProjection {
+  phaseId: ProductionDocumentPhaseId;
+  label: string;
+  state: ProductionDocumentPhaseState;
+  /** The state's words, or `等待你处理` for an open phase with something to handle. */
+  stateLabel: string;
+  /** What the open phase waits for the editor on, read from the document now; `null` when nothing. */
+  waiting: string | null;
+  /** What the editor may do to it now, in the order the lens offers them. */
+  actions: ReadonlyArray<ProductionDocumentPhaseAction>;
+  /**
+   * The move that brought the phase to its state — a skip's or a reopen's with its reason — or `null` before any. Every
+   * earlier move stays recorded (WORK-009); 交付物's one read carries only this one for each phase, to stay one frame.
+   */
+  latest: ProductionDocumentPhaseTransitionProjection | null;
+  /** How many moves the phase has had. */
+  moves: number;
+}
+
+/**
+ * A Production Document's Deliverable Workflow Lens (Issue #415, S66c; V2-UX-WORK-001 to 009): the profile it follows,
+ * pinned when the document began (WORK-002), a factual summary with no percentage (WORK-007), 下一项需要处理
+ * (WORK-005), and its seven phases, several of which may be open at once (WORK-004).
+ */
+export interface ProductionDocumentWorkflowProjection {
+  profile: { id: string; name: string; version: string; activatedAt: string };
+  summary: string;
+  /** Waiting items first, then the open phases, in phase order; empty when nothing needs the editor. */
+  next: ReadonlyArray<{ phaseId: ProductionDocumentPhaseId; text: string }>;
+  phases: ReadonlyArray<ProductionDocumentPhaseProjection>;
+  /** How many moves the document's phases have had: a move names it, so one made since the editor looked is refused. */
+  transitions: number;
+}
+
+/**
+ * One deterministic move of one phase of a document of the route's Book (WORK-008, WORK-009): 开始, 完成, 跳过 or 重新打开,
+ * the last two with a reason. `expectedTransitions` is the count the editor saw.
+ */
+export interface TransitionProductionDocumentPhaseInput {
+  bookId: string;
+  documentId: string;
+  phaseId: ProductionDocumentPhaseId;
+  action: ProductionDocumentPhaseAction;
+  expectedTransitions: number;
+  reason: null | { choice: string; text: string | null };
 }
 
 /** Who a delivery is for: the house's list, or the editor's own words (DELIV-003). */
@@ -5236,8 +5359,11 @@ export interface BookDeliveryPackageVersionProjection {
   current: boolean;
   /** What the version holds, in one line. */
   summary: string;
-  /** The derived Package Export History (DPKG-011): `暂无导出记录` until a file is exported. */
+  /** The derived Package Export History (DPKG-011): `暂无导出记录`, or how many exports wrote files and when the latest did. */
   exportHistoryLabel: string;
+  /** The version's exports newest first (Issue #416, S67b), at most `MAX_BOOK_DELIVERY_PACKAGE_EXPORTS_LISTED`, each in one line. */
+  exports: ReadonlyArray<BookDeliveryPackageExportSummaryProjection>;
+  exportsTruncated: boolean;
   /** 查看技术详情 only. */
   technical: { contentDigest: string; digest: string; priorVersionId: string | null };
 }
@@ -5275,6 +5401,146 @@ export interface BookDeliveryPackageResultProjection {
   bookId: string;
   outcome: 'prepared' | 'unchanged';
   version: number;
+  package: BookDeliveryPackageProjection;
+}
+
+// ---- 图书交付包's export (Issue #416, plan slice S67b; BUNDLE-004, DPKG-011, DPKG-013, DPKG-014, EXP-010 to EXP-022) --------
+
+/** At most this many exports of one package version are listed, newest first; the count says how many there were. */
+export const MAX_BOOK_DELIVERY_PACKAGE_EXPORTS_LISTED = 2;
+/** A review page and one explicitly selected export batch contain at most this many files. */
+export const MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED = 40;
+
+/** One file a package export writes: what it holds, its file name and its format. */
+export interface BookDeliveryPackageExportFileProjection {
+  /** `publication`, `document:<typeId>`, `report:<reportId>` or `manifest`. */
+  key: string;
+  /** What the file holds, in the editor's words: `稿件 · 发稿版本「一审稿」 · r1`. */
+  label: string;
+  fileName: string;
+  format: ManuscriptExportFormat;
+}
+
+/**
+ * 含批注 and 含修改建议（作为修订） of the files a package export writes from the manuscript and the documents (EXP-023): both
+ * on until the editor turns one off, and bound into the review. 备注 never go with a package.
+ */
+export type BookDeliveryPackageExportOptions = Pick<ManuscriptExportOptions, 'includeAnnotations' | 'includeSuggestions'>;
+
+/**
+ * One file as `导出…` reviews it (EXP-007 to EXP-009): how it is written, what its format keeps and each class's fidelity —
+ * the Export Fidelity Review S64 shows for one file, so no loss in a package's file is silent.
+ */
+export interface BookDeliveryPackageExportReviewFileProjection extends BookDeliveryPackageExportFileProjection {
+  restoration: 'from-original' | 'regenerated';
+  restorationLine: string;
+  formatLine: string;
+  fidelity: ReadonlyArray<ExportFidelityRowProjection>;
+  /** Some class is `降级导出` or `无法导出`: `按上述方式导出` then accepts it for this export (EXP-008). */
+  degraded: boolean;
+}
+
+/** `导出…` of one package version: the files it writes under the options chosen, and the review they bind (EXP-010). */
+export interface BookDeliveryPackageExportReviewProjection {
+  bookId: string;
+  packageVersionId: string;
+  /** `v2`. */
+  versionLabel: string;
+  options: BookDeliveryPackageExportOptions;
+  /** At most `MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED`, in the order they are written. */
+  files: ReadonlyArray<BookDeliveryPackageExportReviewFileProjection>;
+  /** More candidate files can be reviewed on the next page; none are implicitly selected. */
+  filesTruncated: boolean;
+  offset: number;
+  nextOffset: number | null;
+  /** Some file on this page is degraded. */
+  degraded: boolean;
+  /** EXP-014 and EXP-015: the files go to a folder the editor chooses, and nothing is sent anywhere. */
+  statement: string;
+  /** Binds the folder's preparation to exactly this review, its options included. */
+  reviewDigest: string;
+}
+
+/** What one file of a package export came to (EXP-013, EXP-021). */
+export interface BookDeliveryPackageExportFileOutcomeProjection extends BookDeliveryPackageExportFileProjection {
+  preparationId: string;
+  /** `prepared` until `按上述方式导出`; then the receipt's own outcome, or `not-written` for a file after one that stopped. */
+  outcome: 'prepared' | 'created' | 'failed' | 'ambiguous' | 'not-written';
+  outcomeLabel: string;
+  /** Whether 在文件夹中显示 can be offered: only for a verified file. */
+  revealAvailable: boolean;
+}
+
+/** One export of one package version (DPKG-014): its folder, its files and what each came to. It never changes the package. */
+export interface BookDeliveryPackageExportProjection {
+  exportId: string;
+  packageVersionId: string;
+  versionLabel: string;
+  /** The folder as the system dialog returned it. */
+  folder: string;
+  /** `prepared` before `按上述方式导出`; `exported` once every file was written; `incomplete` when a file stopped it. */
+  state: 'prepared' | 'exported' | 'incomplete';
+  /** `已导出到所选位置 · 4 个文件`, `已准备，尚未导出 · 4 个文件`, or how many files were written and how many were not. */
+  summary: string;
+  createdAt: string;
+  files: ReadonlyArray<BookDeliveryPackageExportFileOutcomeProjection>;
+  /** More files than the answer lists. */
+  filesTruncated: boolean;
+  /** In `按上述方式导出`'s own answer: the file that stopped the rest, and why; `null` otherwise. */
+  stopped: { fileName: string; reason: string } | null;
+}
+
+/**
+ * One export of a version as its history lists it (DPKG-011): what it came to, where and when, in one line. What each
+ * file came to is the export's own answer; 交付物's one read of every version stays one frame. A folder chosen and never
+ * approved is no export, and the history never lists one.
+ */
+export interface BookDeliveryPackageExportSummaryProjection {
+  exportId: string;
+  folder: string;
+  state: Exclude<BookDeliveryPackageExportProjection['state'], 'prepared'>;
+  summary: string;
+  /** When its last file's outcome was recorded. */
+  exportedAt: string;
+  fileCount: number;
+  /** A file it wrote and verified, for 在文件夹中显示 to show the folder by; `null` when it wrote none. */
+  revealPreparationId: string | null;
+}
+
+/** `导出…` of one version of the route's Book's package, under the options chosen. */
+export interface ReviewBookDeliveryPackageExportInput {
+  offset?: number;
+  bookId: string;
+  packageVersionId: string;
+  options: BookDeliveryPackageExportOptions;
+}
+
+/** `选择位置…`: the folder the system dialog returned, bound to the review the editor read and its options. */
+export interface PrepareBookDeliveryPackageExportInput {
+  offset?: number;
+  memberKeys: ReadonlyArray<string>;
+  bookId: string;
+  packageVersionId: string;
+  options: BookDeliveryPackageExportOptions;
+  reviewDigest: string;
+  folder: string;
+}
+
+/** `按上述方式导出` of one prepared package export. */
+export interface ApproveBookDeliveryPackageExportInput {
+  bookId: string;
+  exportId: string;
+}
+
+/** What the folder dialog came to: nothing is recorded when it was cancelled (EXP-020), else the prepared export. */
+export type ChooseBookDeliveryPackageExportFolderResult =
+  | { outcome: 'cancelled' }
+  | { outcome: 'prepared'; export: BookDeliveryPackageExportProjection };
+
+/** What `按上述方式导出` came to, and the package as it stands, its export history included. */
+export interface BookDeliveryPackageExportResultProjection {
+  bookId: string;
+  export: BookDeliveryPackageExportProjection;
   package: BookDeliveryPackageProjection;
 }
 
@@ -5564,7 +5830,8 @@ export interface ExportFidelityRowProjection {
  * version of a 审阅报告 and the revision its Review Run read.
  */
 export interface ManuscriptExportTargetProjection {
-  kind: 'current' | 'milestone' | 'report' | 'document';
+  /** `package-manifest` is the service's own target (Issue #416, S67b): a package export's 交付包清单, never the renderer's. */
+  kind: 'current' | 'milestone' | 'report' | 'document' | 'package-manifest';
   milestoneId: string | null;
   milestoneLabel: string | null;
   revisionId: string;
@@ -5573,6 +5840,8 @@ export interface ManuscriptExportTargetProjection {
   report: { reportId: string; version: number; reviewRunId: string; runLabel: string } | null;
   /** The Production Document version exported (Issue #415, S66b): its type and `版本 N`; `null` for any other target. */
   document: { documentId: string; typeId: string; typeLabel: string; versionLabel: string } | null;
+  /** The package version whose 交付包清单 is exported (Issue #416, S67b); `null` for any other target. */
+  packageVersion: { packageVersionId: string; versionLabel: string } | null;
 }
 
 /** One format as the export card offers it: DOCX, the optional PDF, and the Markdown 备用格式 (Issue #500, S64b). */
@@ -5754,11 +6023,11 @@ export interface ServiceJobProjection {
    * job's result is the 审阅 workspace with the prepared Run open.
    */
   kind: 'search' | 'replacement' | 'reimport-preparation' | 'reimport-resolution' | 'reimport-commit' |
-    'task-authorization-preparation' | 'baseline-analysis-preparation' | 'review-run-preparation';
+    'task-authorization-preparation' | 'baseline-analysis-preparation' | 'review-run-preparation' | 'package-export';
   state: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   progress: { completed: number; total: number; label: string };
   result: SearchSummaryProjection | ReplacementPreviewProjection | ReviewBeforeManuscriptReimportProjection |
-    ManuscriptReimportCommitProjection | TaskAuthorizationProjection | BaselineAnalysisProjection | ReviewWorkspaceProjection | null;
+    ManuscriptReimportCommitProjection | TaskAuthorizationProjection | BaselineAnalysisProjection | ReviewWorkspaceProjection | BookDeliveryPackageExportResultProjection | null;
   failure: null | { code: string; message: string };
 }
 
@@ -6362,6 +6631,13 @@ export interface ServiceOperationMap {
   inspectBookDeliveryPackage: { input: InspectBookDeliveryPackageInput; output: BookDeliveryPackageProjection };
   /** `准备图书交付包`: freeze the content the editor saw as the package's next version, or say it is unchanged. */
   prepareBookDeliveryPackage: { input: PrepareBookDeliveryPackageInput; output: BookDeliveryPackageResultProjection };
+  /** `导出…` of one package version (Issue #416, S67b): the files it writes. A read. */
+  reviewBookDeliveryPackageExport: { input: ReviewBookDeliveryPackageExportInput; output: BookDeliveryPackageExportReviewProjection };
+  /** The folder the main process's dialog returned: one preparation per file, recorded together; nothing is written. */
+  prepareBookDeliveryPackageExport: { input: PrepareBookDeliveryPackageExportInput; output: BookDeliveryPackageExportProjection };
+  /** `按上述方式导出`: each file approved and written in turn, with its receipt; a file that stops it stops the rest. */
+  approveBookDeliveryPackageExport: { input: ApproveBookDeliveryPackageExportInput; output: ServiceJobProjection };
+  cancelBookDeliveryPackageExport: { input: { jobId: string }; output: boolean };
   createProductionDocument: { input: CreateProductionDocumentInput; output: ProductionDocumentResultProjection };
   decideProductionDocumentType: { input: DecideProductionDocumentTypeInput; output: ProductionDocumentResultProjection };
   saveProductionDocumentVersion: { input: SaveProductionDocumentVersionInput; output: ProductionDocumentResultProjection };
@@ -6370,6 +6646,7 @@ export interface ServiceOperationMap {
    * when it is none yet; the export follows on the export card.
    */
   recordProductionDocumentDelivery: { input: RecordProductionDocumentDeliveryInput; output: ProductionDocumentResultProjection };
+  transitionProductionDocumentPhase: { input: TransitionProductionDocumentPhaseInput; output: ProductionDocumentResultProjection };
   /**
    * 待我处理 (Issue #424, plan slice S78): every Book's items in the four groups. It takes no input and names
    * no Book, because it reads across them; it is a read and records nothing.
@@ -6603,6 +6880,13 @@ export interface RendererApi {
   inspectBookDeliveryPackage(): Promise<BookDeliveryPackageProjection>;
   /** `准备图书交付包`: freeze exactly the content read, with its purpose; it creates no file and sends nothing. */
   prepareBookDeliveryPackage(input: Omit<PrepareBookDeliveryPackageInput, 'bookId'>): Promise<BookDeliveryPackageResultProjection>;
+  /** `导出…` of one version of that Book's package (Issue #416, S67b): the files it would write. */
+  reviewBookDeliveryPackageExport(input: Omit<ReviewBookDeliveryPackageExportInput, 'bookId'>): Promise<BookDeliveryPackageExportReviewProjection>;
+  /** `选择位置…`: the system's own folder dialog, then the export prepared there; a cancelled dialog records nothing. */
+  chooseBookDeliveryPackageExportFolder(input: Omit<PrepareBookDeliveryPackageExportInput, 'bookId' | 'folder'>): Promise<ChooseBookDeliveryPackageExportFolderResult>;
+  /** `按上述方式导出` of a prepared package export: its files written, each with its receipt. */
+  approveBookDeliveryPackageExport(input: Omit<ApproveBookDeliveryPackageExportInput, 'bookId'>): Promise<BookDeliveryPackageExportResultProjection>;
+  cancelBookDeliveryPackageExport(input: Omit<ApproveBookDeliveryPackageExportInput, 'bookId'>): Promise<boolean>;
   /** 从来源材料创建 (Issue #415): a document of one house type of that Book, from one of its source-only materials. */
   createProductionDocument(input: Omit<CreateProductionDocumentInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 本书不做 or 恢复 for one house type of that Book. */
@@ -6611,6 +6895,7 @@ export interface RendererApi {
   saveProductionDocumentVersion(input: Omit<SaveProductionDocumentVersionInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 交付: a Delivery Record of one exact version of a document of that Book; nothing is sent. */
   recordProductionDocumentDelivery(input: Omit<RecordProductionDocumentDeliveryInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
+  transitionProductionDocumentPhase(input: Omit<TransitionProductionDocumentPhaseInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 待我处理 across every Book (Issue #424): a read in any window, whatever it shows; it holds and grants nothing. */
   inspectGlobalAttention(): Promise<GlobalAttentionProjection>;
   /**

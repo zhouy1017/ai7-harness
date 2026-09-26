@@ -203,7 +203,7 @@ describe('the four groups of 待我处理', () => {
     ]);
   });
 
-  it('reads what a Run waits for only while one waits, and a failed read as the plain case (Issue #539)', async () => {
+  it('reads what a Run waits for only while one waits, and a failed read as waiting for the connection (Issue #539)', async () => {
     let reads = 0;
     const read = async () => {
       reads += 1;

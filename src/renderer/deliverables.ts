@@ -100,6 +100,7 @@ import {
   type DocumentAction,
 } from './production-document-labels.js';
 import { mountBookDeliveryPackage } from './book-delivery-package.js';
+import { renderWorkflowCardSummary } from './production-document-workflow.js';
 
 /**
  * ⑥ 交付物 as far as plan slice S65 reaches (Issue #414; editor-surfaces §9, V2-UX-MILE-008, PUB-002 to
@@ -122,7 +123,8 @@ export interface DeliverablesSurface {
 }
 
 type DeliverablesApi = Pick<RendererApi, 'inspectDeliverables' | 'inspectProductionDocuments' | 'inspectBookDeliveryPackage' |
-  'prepareBookDeliveryPackage' | 'designatePublicationVersion' | 'reviewManuscriptExport' |
+  'prepareBookDeliveryPackage' | 'reviewBookDeliveryPackageExport' | 'chooseBookDeliveryPackageExportFolder' |
+  'approveBookDeliveryPackageExport' | 'cancelBookDeliveryPackageExport' | 'designatePublicationVersion' | 'reviewManuscriptExport' |
   'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
   'createProductionDocument' | 'decideProductionDocumentType' | 'recordProductionDocumentDelivery'>;
 
@@ -858,6 +860,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       item.dataset['documentChangedSinceDelivery'] = String(documentNow.changedSinceDelivery);
       item.append(el('p', 'document-delivery-line', latest === undefined ? DOCUMENT_NOT_DELIVERED : documentDeliveryLine(latest, localInstantLabel(latest.recordedAt))));
       if (documentNow.changedSinceDelivery) item.append(el('p', 'attention-note document-changed-since-delivery', DOCUMENT_CHANGED_SINCE_DELIVERY));
+      // Its Deliverable Workflow at a glance (Issue #415, S66c; WORK-005): the summary, the first 下一项 and the seven phases.
+      item.append(renderWorkflowCardSummary(documentNow.workflow));
       const deliver = documentButton(latest === undefined ? 'deliver' : 'redeliver', type, 'secondary');
       const deliveryOpen = deliveryForm?.typeId === type.typeId;
       deliver.setAttribute('aria-expanded', String(deliveryOpen));

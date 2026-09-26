@@ -100,6 +100,26 @@ describe('②A follows one draw at a time', () => {
     expect(left.drawn).toEqual([]);
   });
 
+  it('says a draw that fails, though the draw began the card\'s next draw before it failed (Issue #551)', async () => {
+    const host = {};
+    const failed: unknown[] = [];
+    const generation = follower.drawn(host);
+    follower.later(host, generation, 250, {
+      belongs: () => true,
+      read: async () => ({ bookId: 'b', revision: 6 }),
+      unchanged: () => false,
+      again: () => 2_000,
+      // As ②A's own draw does: it starts the card's next draw, then fails.
+      draw: () => {
+        follower.drawn(host);
+        throw new Error('draw failed');
+      },
+      failed: (error) => { failed.push(error); },
+    });
+    await vi.advanceTimersByTimeAsync(250);
+    expect(failed).toHaveLength(1);
+  });
+
   it('says a failed read only while its draw is still the card\'s, and follows another Book\'s card by its own draws', async () => {
     const host = {};
     const other = {};

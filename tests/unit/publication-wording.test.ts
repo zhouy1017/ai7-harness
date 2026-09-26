@@ -6,9 +6,14 @@ import {
   MAX_PRODUCTION_DOCUMENT_DELIVERIES_LISTED,
   MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS,
   MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS,
+  MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS,
   MAX_PRODUCTION_DOCUMENT_SOURCES_LISTED,
+  PRODUCTION_DOCUMENT_PHASE_IDS,
   MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED,
   MAX_FRAME_BYTES,
+  MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED,
+  MAX_BOOK_DELIVERY_PACKAGE_EXPORTS_LISTED,
+  MAX_EXPORT_FIDELITY_POSITIONS,
   MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS,
   MAX_BOOK_DELIVERY_PACKAGE_REPORTS_LISTED,
   MAX_BOOK_DELIVERY_PACKAGE_VERSIONS_LISTED,
@@ -33,7 +38,10 @@ import {
   type MilestoneListItemProjection,
   type PublicationDesignationProjection,
   type ProductionDocumentsProjection,
+  type BookDeliveryPackageExportReviewFileProjection,
+  type BookDeliveryPackageExportReviewProjection,
   type BookDeliveryPackageItemProjection,
+  type ExportFidelityRowProjection,
   type BookDeliveryPackageProjection,
   type BookDeliveryPackageVersionProjection,
   type PublicationVersionProjection,
@@ -126,7 +134,7 @@ describe('the words of 发稿', () => {
         bookId: identity,
         preparationId: identity,
         // A milestone's target, with its label at its bound, is wider than a 审阅报告's (Issue #500, S64b part 2).
-        target: { kind: 'milestone' as const, milestoneId: identity, milestoneLabel: label, revisionId: identity, revisionLabel: 'r9999999', report: null, document: null },
+        target: { kind: 'milestone' as const, milestoneId: identity, milestoneLabel: label, revisionId: identity, revisionLabel: 'r9999999', report: null, document: null, packageVersion: null },
         // Issue #500: the longest format name the receipt binds.
         format: 'markdown' as const,
         outcome: 'ambiguous' as const,
@@ -186,6 +194,23 @@ describe('the words of 发稿', () => {
             })),
             deliveriesTruncated: true,
             changedSinceDelivery: true,
+            // Issue #415 (S66c): seven phases, each with its latest move at its widest reason.
+            workflow: {
+              profile: { id: 'p'.repeat(128), name: '流'.repeat(64), version: '9'.repeat(32), activatedAt: time },
+              summary: '7 个阶段进行中 · 7 项等待处理',
+              next: PRODUCTION_DOCUMENT_PHASE_IDS.map((phaseId) => ({ phaseId, text: `${'阶'.repeat(8)} · 9999999 条修改建议待处理` })),
+              phases: PRODUCTION_DOCUMENT_PHASE_IDS.map((phaseId) => ({
+                phaseId, label: '阶'.repeat(8), state: 'reopened' as const, stateLabel: '等待你处理', waiting: '9999999 条修改建议待处理',
+                actions: ['complete', 'skip'] as const,
+                latest: {
+                  action: 'reopen' as const, fromState: 'skipped' as const, toState: 'reopened' as const,
+                  reason: { choice: 'redo-after-delivery', label: '交付后需要重做', text: '𠀀'.repeat(MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS) },
+                  recordedAt: time,
+                },
+                moves: 9_999_999,
+              })),
+              transitions: 9_999_999,
+            },
           },
         })),
         sources: Array.from({ length: MAX_PRODUCTION_DOCUMENT_SOURCES_LISTED }, () => ({
@@ -227,13 +252,51 @@ describe('the words of 发稿', () => {
       },
       versions: Array.from({ length: MAX_BOOK_DELIVERY_PACKAGE_VERSIONS_LISTED }, (_, index): BookDeliveryPackageVersionProjection => ({
         packageVersionId: identity, packageId: identity, version: index + 1, label: `v${index + 1}`, purpose: wide(MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS),
-        preparedAt: '2026-09-24T00:00:00.000Z', current: index === 0, summary: wide(200), exportHistoryLabel: '暂无导出记录',
+        preparedAt: '2026-09-24T00:00:00.000Z', current: index === 0, summary: wide(200), exportHistoryLabel: '已导出 9999999 次',
+        // Issue #416 (S67b): each version's exports as far as they are listed, each folder at its bound in code units.
+        exports: Array.from({ length: MAX_BOOK_DELIVERY_PACKAGE_EXPORTS_LISTED }, () => ({
+          exportId: identity, folder: '𠀀'.repeat(MAX_EXPORT_DESTINATION_CODE_UNITS / 2), state: 'incomplete' as const,
+          summary: '已导出 9999 个文件，9999 个未能导出，9999 个结果待确认，其余 9999 个没有写入', exportedAt: '2026-09-24T00:00:00.000Z', fileCount: 9999,
+          revealPreparationId: identity,
+        })),
+        exportsTruncated: true,
         technical: { contentDigest: digest, digest, priorVersionId: identity },
       })),
       versionsTruncated: true,
       changedSinceLatest: true,
     };
     const response = { id: identity, ok: true, op: 'prepareBookDeliveryPackage', result: { bookId: identity, outcome: 'prepared', version: 21, package: answer } };
+    expect(Buffer.byteLength(JSON.stringify(response), 'utf8')).toBeLessThan(MAX_FRAME_BYTES);
+  });
+
+  it('keep the widest 图书交付包 export review within one service frame, each listed file with its fidelity (Issue #416 review)', () => {
+    const identity = '00000000-0000-4000-8000-000000000000';
+    const wide = (length: number) => '𠀀'.repeat(length);
+    // The service's own sentences are BMP characters; their widest detail is under a hundred of them.
+    const words = (length: number) => '字'.repeat(length);
+    const row = (key: ExportFidelityRowProjection['key']): ExportFidelityRowProjection => ({
+      key, label: words(12), count: 9_999_999, status: 'degraded', statusLabel: '降级导出', detail: words(120),
+      positions: Array.from({ length: MAX_EXPORT_FIDELITY_POSITIONS }, () => 9_999_999), positionsTruncated: true,
+    });
+    const manuscriptKeys: ReadonlyArray<ExportFidelityRowProjection['key']> = [
+      'inline-styles', 'annotations', 'change-suggestions', 'editor-notes', 'notes', 'tables', 'images-captions', 'sections',
+      'headers-footers', 'text-boxes', 'fields', 'file-revisions',
+    ];
+    const file = (key: string, rows: ReadonlyArray<ExportFidelityRowProjection['key']>): BookDeliveryPackageExportReviewFileProjection => ({
+      key, label: wide(120), fileName: wide(120), format: 'docx', restoration: 'from-original', restorationLine: words(100), formatLine: words(100),
+      fidelity: rows.map(row), degraded: true,
+    });
+    // The 发稿版本 and the five house types carry the manuscript's classes; every other listed file is a report's four.
+    const files = [
+      ...Array.from({ length: 6 }, (_, index) => file(`document:${index}`, manuscriptKeys)),
+      ...Array.from({ length: MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED - 6 }, (_, index) => file(`report:${index}`,
+        ['report-overview', 'report-must-items', 'report-summaries', 'report-appendix'])),
+    ];
+    const answer: BookDeliveryPackageExportReviewProjection = {
+      bookId: identity, packageVersionId: identity, versionLabel: 'v9999999', options: { includeAnnotations: true, includeSuggestions: true },
+      files, filesTruncated: true, offset: 0, nextOffset: 40, degraded: true, statement: words(80), reviewDigest: 'f'.repeat(64),
+    };
+    const response = { id: identity, ok: true, op: 'reviewBookDeliveryPackageExport', result: answer };
     expect(Buffer.byteLength(JSON.stringify(response), 'utf8')).toBeLessThan(MAX_FRAME_BYTES);
   });
 });

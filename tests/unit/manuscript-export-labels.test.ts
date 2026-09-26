@@ -36,18 +36,20 @@ import {
 
 // The words of ④ 导出 (Issue #413; editor-surfaces §7 导出, V2-UX-EXP-001 to EXP-024), pinned byte for byte.
 
-const current: ManuscriptExportTargetProjection = { kind: 'current', milestoneId: null, milestoneLabel: null, revisionId: 'r', revisionLabel: 'r3', report: null, document: null };
-const milestone: ManuscriptExportTargetProjection = { kind: 'milestone', milestoneId: 'm', milestoneLabel: '一审稿', revisionId: 'r', revisionLabel: 'r1', report: null, document: null };
+const current: ManuscriptExportTargetProjection = { kind: 'current', milestoneId: null, milestoneLabel: null, revisionId: 'r', revisionLabel: 'r3', report: null, document: null, packageVersion: null };
+const milestone: ManuscriptExportTargetProjection = { kind: 'milestone', milestoneId: 'm', milestoneLabel: '一审稿', revisionId: 'r', revisionLabel: 'r1', report: null, document: null, packageVersion: null };
 // Issue #500 (S64b part 2): the second version of the 审阅报告 of a Book's first Review Run.
 const report: ManuscriptExportTargetProjection = {
   kind: 'report', milestoneId: null, milestoneLabel: null, revisionId: 'r', revisionLabel: 'r2',
   report: { reportId: 'p', version: 2, reviewRunId: 'v', runLabel: '第 1 次' },
   document: null,
+  packageVersion: null,
 };
 // Issue #415 (S66b): the second saved version of a Book's 新闻稿.
 const documentVersion: ManuscriptExportTargetProjection = {
   kind: 'document', milestoneId: null, milestoneLabel: null, revisionId: 'r', revisionLabel: 'r2', report: null,
   document: { documentId: 'd', typeId: 'news-release', typeLabel: '新闻稿', versionLabel: '版本 2' },
+  packageVersion: null,
 };
 
 function row(overrides: Partial<ExportFidelityRowProjection>): ExportFidelityRowProjection {
