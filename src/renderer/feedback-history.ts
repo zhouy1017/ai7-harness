@@ -163,7 +163,9 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
     if (focus !== null) {
       const target = root.querySelector<HTMLElement>(focus);
       if (target?.matches(':disabled') === false) target.focus();
-      else root.querySelector<HTMLElement>('[data-feedback-action="reset"]:not(:disabled), [data-feedback-action="next"]:not(:disabled), #feedback-filter-book')?.focus();
+      else (root.querySelector<HTMLElement>('[data-feedback-action="reset"]:not(:disabled)') ??
+        root.querySelector<HTMLElement>('[data-feedback-action="next"]:not(:disabled)') ??
+        root.querySelector<HTMLElement>('#feedback-filter-book'))?.focus();
     }
   };
 
