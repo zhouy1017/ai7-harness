@@ -987,7 +987,7 @@ async function main() {
     })()`, 'leave-typed');
     // At once, well inside the half second before the words would write themselves.
     await assertRenderer(renderer, `(() => { const open = document.querySelector('.task-result-window [data-task-result-action="open"]'); if (!(open instanceof HTMLButtonElement)) return false; open.click(); return true; })()`, 'leave-open-analysis');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card')?.dataset.resultRevisionOrdinal === '1'`, 'leave-analysis-exact-historical-result', 60_000);
+    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card')?.dataset.inspectedRevisionOrdinal === '1'`, 'leave-analysis-exact-historical-result', 60_000);
     await click(renderer, '打开稿件', 'leave-reopen');
     await waitFor(renderer, `(document.querySelector(${JSON.stringify(`[data-screen="editor"] .ProseMirror [data-block-id="${chip.blockId}"]`)})?.textContent ?? '').endsWith(${JSON.stringify(LEAVE_WORDS)})`, 'leave-words-kept', 60_000);
 
