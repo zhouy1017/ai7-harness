@@ -238,7 +238,7 @@ A file found gone is recorded as `missing`. A file at the name that is another i
 
 At shutdown the service stops a check under way before the store closes: the write stops at its next chunk and removes what it wrote. A backup the check could not make is stated in the section, with its reason by the refusal's code, until one is made or the switch is turned off. No External Export Policy approval is involved: the switch is the decision (ADR 0079 §1.7), and nothing is written anywhere but that location.
 
-导入数据库 and 替换本机全部数据 (Issue #434, S86c) are service protocol version 83 and schema revision 57. `src/service/database-package-reader.ts` reads a package through its ZIP central directory, member by member, and refuses it before anything is taken unless:
+导入数据库 and 替换本机全部数据 (Issue #434, S86c) are service protocol version 84 and schema revision 57. `src/service/database-package-reader.ts` reads a package through its ZIP central directory, member by member, and refuses it before anything is taken unless:
 - the manifest has its exact shape;
 - every member path is relative, inside the Agent Data Root, outside `store/` (but for the store's copy), `shell/` and `export-staging/`, compared without regard to case, and a name Windows writes as named;
 - the members are exactly the ZIP's entries, and each one's size and SHA-256 match.
