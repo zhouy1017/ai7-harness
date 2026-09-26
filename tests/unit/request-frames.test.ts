@@ -12,6 +12,7 @@ import {
   MAX_MARK_BODY_CODE_UNITS,
   MAX_MILESTONE_PURPOSE_CODE_UNITS,
   MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS,
+  MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS,
   MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS,
   MAX_PROPOSAL_CONFLICT_UNITS,
   MAX_PUBLICATION_BASIS_CHARACTERS,
@@ -325,6 +326,28 @@ describe('decodeRequest accepts well-formed frames', () => {
     }
   });
 
+  it('takes a workflow move\'s reason within the one bound the service holds it to, and refuses one past it (Issue #626)', () => {
+    const move = { bookId: randomUUID(), documentId: randomUUID(), phaseId: 'drafting', action: 'skip', expectedTransitions: 3 };
+    const taken: ReadonlyArray<unknown> = [
+      { ...move, reason: { choice: 'custom', text: '𠀀'.repeat(MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS) } },
+      { ...move, reason: { choice: 'later', text: null } },
+      { ...move, action: 'start', reason: null },
+    ];
+    for (const input of taken) {
+      const request = { id: randomUUID(), op: 'transitionProductionDocumentPhase', input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    const refused: ReadonlyArray<unknown> = [
+      { ...move, reason: { choice: 'custom', text: '字'.repeat(MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS + 1) } },
+      { ...move, reason: { choice: 'Custom Reason', text: null } },
+      { ...move, reason: { choice: 'later' } },
+      { ...move, reason: 'later' },
+    ];
+    for (const input of refused) {
+      expect(() => decodeRequest(frameOf({ id: randomUUID(), op: 'transitionProductionDocumentPhase', input }))).toThrowError(ProtocolError);
+    }
+  });
+
   it('rejects a 生产文档 read or command whose type, identities, decision, recipient, note or key set is wrong', () => {
     const id = randomUUID();
     const bookId = randomUUID();
@@ -425,11 +448,11 @@ describe('decodeRequest accepts well-formed frames', () => {
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
       { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options } },
       { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options: { includeAnnotations: false, includeSuggestions: true } } },
-      { op: 'prepareBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options, reviewDigest: 'a'.repeat(64), folder } },
+      { op: 'prepareBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options, memberKeys: ['manifest'], reviewDigest: 'a'.repeat(64), folder } },
       {
         op: 'prepareBookDeliveryPackageExport',
         input: {
-          bookId, packageVersionId: randomUUID(), options, reviewDigest: 'b'.repeat(64),
+          bookId, packageVersionId: randomUUID(), options, memberKeys: ['manifest'], reviewDigest: 'b'.repeat(64),
           folder: `${folder}${'径'.repeat(MAX_EXPORT_DESTINATION_CODE_UNITS - folder.length)}`,
         },
       },
@@ -486,6 +509,7 @@ describe('decodeRequest accepts well-formed frames', () => {
     const bookId = randomUUID();
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
       { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID() } },
+      { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID(), beforeRevision: 61, afterPublicationOrdinal: 30, errataVersionId: randomUUID() } },
       { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 22 } },
       { op: 'recordMaintenanceCase', input: { bookId, publicationVersionId: randomUUID(), classification: 'errata', reason: '读者来信指出有误', evidence: null } },
       { op: 'recordMaintenanceCase', input: { bookId, publicationVersionId: randomUUID(), classification: 'withdrawal', reason: '𠀀'.repeat(500), evidence: '质检单' } },
@@ -508,6 +532,9 @@ describe('decodeRequest accepts well-formed frames', () => {
     const refused: ReadonlyArray<{ op: string; input: unknown }> = [
       { op: 'inspectMaintenanceCase', input: { bookId } },
       { op: 'inspectMaintenanceCase', input: { bookId, caseId: 'first' } },
+      ...[0, -1, 1.5, '2'].map((beforeRevision) => ({ op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID(), beforeRevision } })),
+      { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID(), afterPublicationOrdinal: -1 } },
+      { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID(), errataVersionId: 'first' } },
       { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID() } },
       { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 0 } },
       { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 2.5 } },
@@ -538,8 +565,10 @@ describe('decodeRequest accepts well-formed frames', () => {
     const id = randomUUID();
     const bookId = randomUUID();
     const options = { includeAnnotations: true, includeSuggestions: true };
-    const prepare = { bookId, packageVersionId: randomUUID(), options, reviewDigest: 'a'.repeat(64), folder: resolve('交付包导出') };
+    const prepare = { bookId, packageVersionId: randomUUID(), options, memberKeys: ['manifest'], reviewDigest: 'a'.repeat(64), folder: resolve('交付包导出') };
     const refused: ReadonlyArray<{ op: string; input: unknown }> = [
+      ...[-1, 0.5, Number.MAX_SAFE_INTEGER, null].map((offset) => ({ op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: prepare.packageVersionId, options, offset } })),
+      ...[undefined, [], ['manifest', 'manifest'], Array(41).fill('manifest'), ['x'.repeat(81)], [false]].map((memberKeys) => ({ op: 'prepareBookDeliveryPackageExport', input: { ...prepare, memberKeys } })),
       { op: 'reviewBookDeliveryPackageExport', input: { bookId } },
       { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID() } },
       { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: 'v2', options } },
@@ -555,7 +584,7 @@ describe('decodeRequest accepts well-formed frames', () => {
       { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, reviewDigest: 'a'.repeat(63) } },
       { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, folder: '交付包导出' } },
       { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, folder: `${prepare.folder}${'径'.repeat(MAX_EXPORT_DESTINATION_CODE_UNITS)}` } },
-      { op: 'prepareBookDeliveryPackageExport', input: { bookId, packageVersionId: prepare.packageVersionId, options, reviewDigest: prepare.reviewDigest } },
+      { op: 'prepareBookDeliveryPackageExport', input: { bookId, packageVersionId: prepare.packageVersionId, options, memberKeys: ['manifest'], reviewDigest: prepare.reviewDigest } },
       { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, fileNames: ['交付包清单.md'] } },
       { op: 'approveBookDeliveryPackageExport', input: { bookId, exportId: 'last' } },
       { op: 'approveBookDeliveryPackageExport', input: { bookId, exportId: randomUUID(), folder: prepare.folder } },
@@ -1083,6 +1112,9 @@ describe('decodeRequest rejects malformed frames', () => {
   it('accepts 知识库 › 审阅规范文件: the read naming nothing, a preview by document and absolute path, a confirmation by preview (Issue #427)', () => {
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
       { op: 'inspectReviewGuidelines', input: {} },
+      { op: 'inspectReviewGuidelines', input: { page: { documentId: 'ai7-builtin/typos-and-usage', versionsBefore: 9, clausePage: 2 } } },
+      { op: 'inspectReviewGuidelines', input: { page: { documentId: 'ai7-builtin/typos-and-usage', versionsBefore: null } } },
+      { op: 'previewReviewGuidelineVersion', input: { documentId: 'ai7-builtin/typos-and-usage', previewId: randomUUID(), clausePage: 3 } },
       { op: 'previewReviewGuidelineVersion', input: { documentId: 'ai7-builtin/typos-and-usage', path: `${process.cwd()}/规范/文字.docx` } },
       { op: 'importReviewGuidelineVersion', input: { previewId: randomUUID() } },
     ];
@@ -1093,6 +1125,12 @@ describe('decodeRequest rejects malformed frames', () => {
     const absolute = `${process.cwd()}/规范/文字.docx`;
     for (const [op, input] of [
       ['inspectReviewGuidelines', { bookId: randomUUID() }],
+      ['inspectReviewGuidelines', { page: { documentId: 'ai7-builtin/typos-and-usage', versionsBefore: 1 } }],
+      ['inspectReviewGuidelines', { page: { documentId: 'ai7-builtin/typos-and-usage', clausePage: -1 } }],
+      ['inspectReviewGuidelines', { page: { documentId: 'ai7-builtin/typos-and-usage', clausePage: null } }],
+      ['inspectReviewGuidelines', { page: { documentId: 'ai7-builtin/typos-and-usage', clauses: [] } }],
+      ['previewReviewGuidelineVersion', { documentId: 'ai7-builtin/typos-and-usage', previewId: randomUUID(), path: absolute }],
+      ['previewReviewGuidelineVersion', { documentId: 'ai7-builtin/typos-and-usage', previewId: randomUUID(), clausePage: -1 }],
       ['previewReviewGuidelineVersion', { documentId: 'ai7-builtin/typos-and-usage' }],
       ['previewReviewGuidelineVersion', { documentId: 'ai7-builtin/typos-and-usage', path: '规范/文字.docx' }],
       ['previewReviewGuidelineVersion', { documentId: '../escape', path: absolute }],

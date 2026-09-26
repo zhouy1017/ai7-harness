@@ -430,6 +430,38 @@ async function main() {
     await clickSelector(renderer, '[data-book-filter-action="clear"]', 'search-clear');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work')?.dataset.bookFilter === 'none' && document.querySelectorAll('[data-screen="landing"] section.recent-work article.book-summary-item').length === 2 && ${status} === '已显示全部图书'`, 'search-cleared');
 
+    // Hold the real request's completion callback until later navigation has acquired user input.
+    // The Promise hook exists only during the synchronous click and is restored before any other work.
+    for (const action of ['find', 'clear']) {
+      if (action === 'clear') await search(renderer, 'author', '吴二', 'late-clear-setup');
+      else await fill(renderer, '#book-filter-text', '吴二', 'late-find-words');
+      await assertRenderer(renderer, `(() => {
+        const original = Promise.prototype.then;
+        const held = { release: null };
+        window.__j11HeldSearch = held;
+        try {
+          Promise.prototype.then = function (success, failure) {
+            Promise.prototype.then = original;
+            return original.call(this,
+              (value) => { held.release = () => success(value); },
+              (error) => { held.release = () => failure(error); });
+          };
+          document.querySelector('[data-book-filter-action="${action}"]').click();
+        } finally { Promise.prototype.then = original; }
+        return true;
+      })()`, `late-${action}-hold`);
+      await waitFor(renderer, `typeof window.__j11HeldSearch?.release === 'function'`, `late-${action}-response-held`);
+      await click(renderer, '新建图书', `late-${action}-navigate`);
+      await fill(renderer, '#empty-book-title', '保留输入', `late-${action}-draft`);
+      await assertRenderer(renderer, `(() => {
+        window.__j11HeldSearch.release();
+        delete window.__j11HeldSearch;
+        return document.querySelector('[data-screen="book-create"] #empty-book-title')?.value === '保留输入';
+      })()`, `late-${action}-keeps-destination`);
+      await click(renderer, '取消', `late-${action}-cancel`);
+      await waitFor(renderer, `document.querySelector('[data-screen="landing"] form.book-filter')`, `late-${action}-landing`);
+    }
+
     at('restart-keeps-people');
     // A restart moves nothing: the cards and the 工作概览 read the people exactly as saved.
     const booksBefore = await renderer.evaluate(`window.ai7.listBooks({ after: null }).then((page) => JSON.stringify(page))`);
