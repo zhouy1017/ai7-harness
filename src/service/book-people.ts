@@ -291,11 +291,13 @@ export class BookPeople {
    */
   #latest(bookId: string): { version: number; people: PeopleSet; roles: BookPeopleRoleList | null; recordedAt: string; digest: string } | undefined {
     if (this.#db.prepare(TABLE_PRESENT).get() === undefined) return undefined;
-    const rows = this.#db.prepare('SELECT * FROM book_people_versions WHERE book_id = ? ORDER BY version').all(bookId) as SqlRow[];
+    const rows = this.#db.prepare('SELECT * FROM book_people_versions WHERE book_id = ? ORDER BY version').iterate(bookId);
+    let version = 0;
     let prior: string | null = null;
     let latest: { version: number; people: PeopleSet; roles: BookPeopleRoleList | null; recordedAt: string; digest: string } | undefined;
-    for (const [index, row] of rows.entries()) {
-      requirePeople(typeof row.version_id === 'string' && typeof row.version === 'number' && row.version === index + 1 &&
+    for (const row of rows) {
+      version += 1;
+      requirePeople(typeof row.version_id === 'string' && typeof row.version === 'number' && row.version === version &&
         typeof row.recorded_at === 'string' && typeof row.canonical_json === 'string' && typeof row.sha256 === 'string' &&
         typeof row.authors_text === 'string' && typeof row.editors_text === 'string' && typeof row.related_json === 'string' &&
         typeof row.role_configuration_version === 'string' && typeof row.role_configuration_digest === 'string',
