@@ -13,12 +13,63 @@ import { canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
  * Every store records it: schema revision 54 owns one ledger of the versions that opened the store — the software, the
  * Data Version and the schema revision — appended whenever one of them differs from the last, so a software update that
  * keeps the Data Version can say so. Each record is canonical and digested, appended once and never rewritten.
+ *
+ * S85b (ADR 0079 §1.1, §1.3, §1.4): every schema revision after the first release is classified additive or breaking, and a
+ * breaking one raises the Data Version. An open that must raise it backs the data up first (`upgrade-backup.ts`), and the
+ * record of that open carries the upgrade — from which Data Version, what changed, and the backup made — for the 版本 row.
  */
 
 /** The Data Version this software reads and writes. A breaking migration — one older software could not read — raises it. */
 export const DATA_VERSION = 1 as const;
 /** Whether the Data Version is frozen: only at the first packaged release (ADR 0079 §1.2). */
 export const DATA_VERSION_FROZEN = false as const;
+
+/** How a schema revision stands against the Data Version (ADR 0079 §1.1): additive stays inside it; breaking raises it by one. */
+export type SchemaRevisionClass = 'additive' | 'breaking';
+
+export interface ClassifiedSchemaRevision {
+  readonly revision: number;
+  readonly class: SchemaRevisionClass;
+  /** What a breaking revision changes, in the editor's words: the 版本 row states it after the upgrade. */
+  readonly change?: string;
+}
+
+/**
+ * The last schema revision of Data Version 1 as the first packaged release freezes it (ADR 0079 §1.2): `null` until then.
+ * Development stores are disposable before that release, so the revisions up to it are never classified.
+ */
+export const DATA_VERSION_BASELINE_REVISION: number | null = null;
+
+/**
+ * Every schema revision after the baseline, classified (ADR 0079 §1.1): this list is what 「非必要不改」 means in code. Each new
+ * revision from the first release on is added here as additive or breaking, and a breaking one raises `DATA_VERSION` by one,
+ * which the unit suite holds. Before that release the list is empty, and every revision reads as Data Version 1.
+ */
+export const SCHEMA_REVISION_CLASSES: ReadonlyArray<ClassifiedSchemaRevision> = [];
+
+/** The Data Version a store at `revision` holds: one more than 1 for every breaking revision it has passed. */
+export function dataVersionAt(revision: number, classes: ReadonlyArray<ClassifiedSchemaRevision> = SCHEMA_REVISION_CLASSES): number {
+  return 1 + classes.filter((entry) => entry.class === 'breaking' && entry.revision <= revision).length;
+}
+
+/** What each breaking revision after `fromRevision`, up to `toRevision`, changes: the upgrade the 版本 row states. */
+export function breakingChanges(fromRevision: number, toRevision: number, classes: ReadonlyArray<ClassifiedSchemaRevision> = SCHEMA_REVISION_CLASSES): string[] {
+  return classes.filter((entry) => entry.class === 'breaking' && entry.revision > fromRevision && entry.revision <= toRevision)
+    .map((entry) => entry.change ?? '');
+}
+
+/** The one name form of a pre-upgrade backup (S85b), which a version record may name. */
+export const PRE_UPGRADE_BACKUP_NAME = /^AI7 升级前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db$/u;
+
+/** An upgrade of the data to a later Data Version (S85b): from where, what changed, and the backup made before it. */
+export interface DataVersionUpgrade {
+  readonly fromDataVersion: number;
+  readonly fromSchemaRevision: number;
+  /** The software that last opened the data before the upgrade; `null` for data from before its versions were recorded. */
+  readonly fromSoftwareVersion: string | null;
+  readonly changes: ReadonlyArray<string>;
+  readonly backup: { readonly fileName: string; readonly byteLength: number; readonly sha256: string };
+}
 /** How many version records the answer lists, newest first. */
 export const MAX_STORE_VERSIONS_LISTED = 20;
 
@@ -148,6 +199,36 @@ export interface StoredVersion {
   readonly dataVersion: number;
   readonly schemaRevision: number;
   readonly recordedAt: string;
+  /** The upgrade this open made, when it raised the Data Version (S85b); `null` for every other record. */
+  readonly upgrade: DataVersionUpgrade | null;
+}
+
+const DIGEST = /^[0-9a-f]{64}$/u;
+const MAX_UPGRADE_CHANGES = 20;
+const MAX_UPGRADE_CHANGE_CHARACTERS = 200;
+
+/** An upgrade as a record carries it, whole: its fields and no others, each of its kind, and below the record's Data Version. */
+function readUpgrade(value: unknown, dataVersion: number): DataVersionUpgrade {
+  const keys = ['backup', 'changes', 'fromDataVersion', 'fromSchemaRevision', 'fromSoftwareVersion'];
+  requireDataVersion(isRecord(value) && Object.keys(value).sort().join(',') === keys.join(','), 'STORE_VERSION_RECORD_INVALID', INVALID);
+  const { fromDataVersion, fromSchemaRevision, fromSoftwareVersion, changes, backup } = value;
+  requireDataVersion(typeof fromDataVersion === 'number' && Number.isSafeInteger(fromDataVersion) && fromDataVersion >= 1 && fromDataVersion < dataVersion &&
+    typeof fromSchemaRevision === 'number' && Number.isSafeInteger(fromSchemaRevision) && fromSchemaRevision >= 1 &&
+    (fromSoftwareVersion === null || (typeof fromSoftwareVersion === 'string' && SOFTWARE_VERSION.test(fromSoftwareVersion))) &&
+    Array.isArray(changes) && changes.length >= 1 && changes.length <= MAX_UPGRADE_CHANGES &&
+    changes.every((change) => typeof change === 'string' && change.length >= 1 && change.length <= MAX_UPGRADE_CHANGE_CHARACTERS) &&
+    isRecord(backup) && Object.keys(backup).sort().join(',') === 'byteLength,fileName,sha256' &&
+    typeof backup.fileName === 'string' && PRE_UPGRADE_BACKUP_NAME.test(backup.fileName) &&
+    typeof backup.byteLength === 'number' && Number.isSafeInteger(backup.byteLength) && backup.byteLength > 0 &&
+    typeof backup.sha256 === 'string' && DIGEST.test(backup.sha256),
+  'STORE_VERSION_RECORD_INVALID', INVALID);
+  return {
+    fromDataVersion,
+    fromSchemaRevision,
+    fromSoftwareVersion,
+    changes: [...(changes as string[])],
+    backup: { fileName: backup.fileName, byteLength: backup.byteLength, sha256: backup.sha256 },
+  };
 }
 
 export class DataVersionLedger {
@@ -172,13 +253,20 @@ export class DataVersionLedger {
         (record.supersedes ?? null) === (row.supersedes_record_id ?? null) && (record.supersedes ?? null) === (before?.recordId ?? null) &&
         ordinal === (before?.ordinal ?? 0) + 1,
       'STORE_VERSION_RECORD_INVALID', INVALID);
+      const dataVersion = Number(row.data_version);
+      const upgrade = 'upgrade' in record ? readUpgrade(record.upgrade, dataVersion) : null;
+      // An upgrade is made by the open that raised the Data Version, from the Data Version the record before it holds — or, for
+      // data whose earlier versions were never recorded, from what its schema revision held.
+      requireDataVersion(upgrade === null || before === null || before.dataVersion === upgrade.fromDataVersion,
+        'STORE_VERSION_RECORD_INVALID', INVALID);
       const entry: StoredVersion = {
         recordId: String(row.record_id),
         ordinal,
         softwareVersion: String(row.software_version),
-        dataVersion: Number(row.data_version),
+        dataVersion,
         schemaRevision: Number(row.schema_revision),
         recordedAt: String(row.recorded_at),
+        upgrade,
       };
       before = entry;
       return entry;
@@ -187,14 +275,22 @@ export class DataVersionLedger {
 
   /**
    * The versions that opened the store now, inside the caller's transaction: appended when the software, the Data Version or
-   * the schema revision differs from the last record, and nothing otherwise. Answers whether it appended.
+   * the schema revision differs from the last record, and nothing otherwise. An open that raised the Data Version names the
+   * upgrade it made (S85b). Answers whether it appended.
    */
-  recordOpen(input: { readonly softwareVersion: string; readonly dataVersion: number; readonly schemaRevision: number }): boolean {
+  recordOpen(input: {
+    readonly softwareVersion: string;
+    readonly dataVersion: number;
+    readonly schemaRevision: number;
+    readonly upgrade?: DataVersionUpgrade | null;
+  }): boolean {
     requireDataVersion(SOFTWARE_VERSION.test(input.softwareVersion) && Number.isSafeInteger(input.dataVersion) && input.dataVersion >= 1 &&
       Number.isSafeInteger(input.schemaRevision) && input.schemaRevision >= 1, 'STORE_VERSION_INVALID', '数据版本记录无效。');
+    const upgrade = input.upgrade ?? null;
+    if (upgrade !== null) readUpgrade(upgrade, input.dataVersion);
     const history = this.history();
     const latest = history.at(-1) ?? null;
-    if (latest !== null && latest.softwareVersion === input.softwareVersion && latest.dataVersion === input.dataVersion &&
+    if (upgrade === null && latest !== null && latest.softwareVersion === input.softwareVersion && latest.dataVersion === input.dataVersion &&
       latest.schemaRevision === input.schemaRevision) return false;
     const recordId = randomUUID();
     const ordinal = history.length + 1;
@@ -208,6 +304,7 @@ export class DataVersionLedger {
       schemaRevision: input.schemaRevision,
       supersedes: latest?.recordId ?? null,
       recordedAt,
+      ...(upgrade === null ? {} : { upgrade }),
     });
     this.#db.prepare(
       `INSERT INTO store_versions(record_id, ordinal, software_version, data_version, schema_revision, supersedes_record_id, recorded_at, canonical_json, sha256)

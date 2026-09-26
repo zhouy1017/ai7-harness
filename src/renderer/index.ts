@@ -91,9 +91,13 @@ import {
   DATA_VERSION_SOFTWARE,
   DATA_VERSION_UNAVAILABLE,
   DATA_VERSION_UPDATE,
+  DATA_VERSION_UPGRADE,
   dataVersionRecordsLabel,
+  dataVersionRollbackLine,
   dataVersionStateLine,
   dataVersionUpdateLine,
+  dataVersionUpgradeBackupLine,
+  dataVersionUpgradeLine,
   storeVersionLine,
 } from './data-version-labels.js';
 import { mountDatabaseExport } from './database-export.js';
@@ -4492,6 +4496,18 @@ async function renderDataAndStorage(): Promise<void> {
         element('dt', undefined, DATA_VERSION_MEANING), element('dd', 'data-version-state', dataVersionStateLine(version)),
         element('dt', undefined, DATA_VERSION_UPDATE), element('dd', 'data-version-update', dataVersionUpdateLine(version.update)),
       );
+      // An upgrade to a later Data Version (Issue #433, S85b; DSTO-016): what changed, the backup made first, and how to go back.
+      versions.dataset['upgrades'] = String(version.upgrades.length);
+      const upgraded = version.upgrades[0];
+      if (upgraded !== undefined) {
+        const lines = element('dd', 'data-version-upgrade');
+        lines.append(
+          element('p', undefined, dataVersionUpgradeLine(upgraded, localInstantLabel)),
+          element('p', 'field-note', dataVersionUpgradeBackupLine(upgraded)),
+        );
+        if (upgraded.backupPresent) lines.append(element('p', 'field-note', dataVersionRollbackLine(upgraded)));
+        rows.append(element('dt', undefined, DATA_VERSION_UPGRADE), lines);
+      }
       const history = element('details', 'data-version-history');
       const list = element('ol');
       for (const record of version.history) list.append(element('li', undefined, storeVersionLine(record, localInstantLabel)));

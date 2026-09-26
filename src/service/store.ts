@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { closeSync, constants, createReadStream, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
+import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, extname, isAbsolute, posix, relative, resolve, sep } from 'node:path';
+import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { J03_TASK_GOAL, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
@@ -417,17 +417,21 @@ import {
   SERIES_KNOWLEDGE_REUSE_SCOPES,
 } from '../shared/protocol.js';
 import {
+  type ClassifiedSchemaRevision,
   DATA_VERSION,
   DATA_VERSION_FROZEN,
+  dataVersionAt,
   DataVersionError,
   DataVersionLedger,
-  MAX_STORE_VERSIONS_LISTED,
   initializeDataVersionSchema,
   latestSoftwareUpdate,
+  MAX_STORE_VERSIONS_LISTED,
   readSoftwareVersion,
+  SCHEMA_REVISION_CLASSES,
 } from './data-version.js';
 import { DatabaseExportError, DatabaseExports, initializeDatabaseExportSchema } from './database-exports.js';
-import { ScheduledBackupError, ScheduledBackups, initializeScheduledBackupSchema } from './scheduled-backups.js';
+import { ScheduledBackupError, ScheduledBackups, backupLocationFor, initializeScheduledBackupSchema } from './scheduled-backups.js';
+import { backUpBeforeUpgrade } from './upgrade-backup.js';
 import { DatabasePackageError } from './database-package-reader.js';
 import {
   DatabaseReplacementError,
@@ -3011,6 +3015,11 @@ interface StoreControl {
    * service suites open it.
    */
   softwareVersion?: string;
+  /**
+   * The suites' own classification of schema revisions (Issue #433, S85b), so an upgrade to a later Data Version can be
+   * opened before the first packaged release classifies one. The service entry never sets it.
+   */
+  schemaRevisionClasses?: ReadonlyArray<ClassifiedSchemaRevision>;
 }
 
 function continuationNotice(access: OriginalFileAccessProjection): string {
@@ -3743,6 +3752,8 @@ export class EditorialStore {
   readonly #databaseReplacements: DatabaseReplacements;
   /** The software this store was opened by (Issue #433, S85a): read once from the package it ships in. */
   #softwareVersion = '';
+  /** The Data Version this software holds the store at: the classification's, read at open (Issue #433, S85b). */
+  #dataVersion: number = DATA_VERSION;
   /** The code this store was opened with: what opens a package's data as a store of its own (Issue #434, S86d). */
   #codeRoot = '';
   /** ②C 评估 (Issue #429, S81a): each Book's versioned Evaluation Records. */
@@ -3811,15 +3822,15 @@ export class EditorialStore {
     this.#seriesKnowledge = new SeriesKnowledgeLedger(authority);
     this.#dataVersions = new DataVersionLedger(authority);
     this.#databaseExports = new DatabaseExports(authority, dataRoot, {
-      facts: () => ({ dataVersion: DATA_VERSION, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION }),
       contents: () => this.#databaseContents(),
     });
     this.#scheduledBackups = new ScheduledBackups(authority, dataRoot, {
-      facts: () => ({ dataVersion: DATA_VERSION, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION }),
       contents: () => this.#databaseContents(),
     });
     this.#databaseReplacements = new DatabaseReplacements(authority, dataRoot, {
-      facts: () => ({ dataVersion: DATA_VERSION, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION }),
       contents: () => this.#databaseContents(),
       // A package's data opens as a store of its own, with no launch control: brought to this revision and checked whole.
       openPackage: async (root) => {
@@ -3959,6 +3970,15 @@ export class EditorialStore {
     let ingest: DatabaseSync | null = null;
     try {
       configureDatabase(authority, 'FILE');
+      // 升级前备份 (Issue #433, S85b; DSTO-016): a store this software must move to a later Data Version is written whole into
+      // the backup location before anything migrates it, and a backup that cannot be made opens nothing.
+      const classes = control.schemaRevisionClasses ?? SCHEMA_REVISION_CLASSES;
+      const upgrade = await backUpBeforeUpgrade(authority, dataRoot, {
+        terminalRevision: DATABASE_MERGE_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
+      }).catch((error: unknown) => {
+        if (error instanceof DataVersionError) throw new StoreError(error.code, error.message);
+        throw error;
+      });
       initializeSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       initializeSourceImportSchema(authority, workflowProfile);
@@ -4086,10 +4106,13 @@ export class EditorialStore {
       // Every store records the versions that open it (Issue #433, S85a; DSTO-016): a new record only when one changed.
       store.#softwareVersion = softwareVersion;
       store.#codeRoot = codeRoot;
+      store.#dataVersion = dataVersionAt(DATABASE_MERGE_SCHEMA_VERSION, classes);
+      // The open that raised the Data Version records the upgrade it made with the backup (S85b).
       store.#dataVersionCall(() => store.#transaction(authority, () => store.#dataVersions.recordOpen({
         softwareVersion,
-        dataVersion: DATA_VERSION,
+        dataVersion: store.#dataVersion,
         schemaRevision: DATABASE_MERGE_SCHEMA_VERSION,
+        upgrade,
       })));
       return store;
     } catch (error) {
@@ -11519,15 +11542,28 @@ export class EditorialStore {
     return this.#dataVersionCall(() => {
       const history = this.#dataVersions.history();
       const latest = history.at(-1)!;
+      const location = backupLocationFor(this.#dataRoot);
       return {
         softwareVersion: this.#softwareVersion,
-        dataVersion: DATA_VERSION,
+        dataVersion: this.#dataVersion,
         frozen: DATA_VERSION_FROZEN,
         schemaRevision: latest.schemaRevision,
         update: latestSoftwareUpdate(history),
         history: [...history].reverse().slice(0, MAX_STORE_VERSIONS_LISTED)
           .map((entry) => ({ softwareVersion: entry.softwareVersion, dataVersion: entry.dataVersion, schemaRevision: entry.schemaRevision, recordedAt: entry.recordedAt })),
         historyTruncated: history.length > MAX_STORE_VERSIONS_LISTED,
+        // Each upgrade to a later Data Version, newest first, with the backup made before it (Issue #433, S85b).
+        upgrades: history.flatMap((entry) => (entry.upgrade === null ? [] : [{
+          fromDataVersion: entry.upgrade.fromDataVersion,
+          toDataVersion: entry.dataVersion,
+          fromSoftwareVersion: entry.upgrade.fromSoftwareVersion,
+          softwareVersion: entry.softwareVersion,
+          changes: entry.upgrade.changes,
+          backupFileName: entry.upgrade.backup.fileName,
+          backupPresent: existsSync(join(location, entry.upgrade.backup.fileName)),
+          recordedAt: entry.recordedAt,
+        }])).reverse().slice(0, MAX_STORE_VERSIONS_LISTED),
+        backupLocation: location,
       };
     });
   }

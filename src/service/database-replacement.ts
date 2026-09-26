@@ -178,7 +178,7 @@ type Phase = 'moving-out' | 'moving-in' | 'opening' | 'applied' | 'discarding' |
 type MergePhase = 'saving-store' | 'merging' | 'opening-merge' | 'merge-applied' | 'restoring-store' | 'store-restored';
 const PHASES: ReadonlyArray<string> = ['moving-out', 'moving-in', 'opening', 'applied', 'discarding', 'restoring', 'restored',
   'saving-store', 'merging', 'opening-merge', 'merge-applied', 'restoring-store', 'store-restored'];
-const ORIGINS: ReadonlyArray<string> = ['database-export', 'scheduled-backup', 'pre-replace-backup', 'pre-merge-backup'];
+const ORIGINS: ReadonlyArray<string> = ['database-export', 'scheduled-backup', 'pre-replace-backup', 'pre-merge-backup', 'pre-upgrade-backup'];
 const MERGE_NOTICES: ReadonlyArray<string> = ['series', 'library-materials', 'workspace-profile', 'internal-number'];
 const BOOK_STATUSES: ReadonlyArray<string> = ['new', 'present', 'same-title'];
 

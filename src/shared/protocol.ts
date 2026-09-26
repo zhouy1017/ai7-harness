@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 85 as const;
+export const SERVICE_PROTOCOL_VERSION = 86 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -5808,6 +5808,24 @@ export interface DataVersionProjection {
   } | null;
   readonly history: ReadonlyArray<StoreVersionProjection>;
   readonly historyTruncated: boolean;
+  /** Each upgrade of this data to a later Data Version, newest first (Issue #433, S85b); none before the first release. */
+  readonly upgrades: ReadonlyArray<DataVersionUpgradeProjection>;
+  /** Where the backup made before each upgrade is kept. */
+  readonly backupLocation: string;
+}
+
+/** An upgrade of the data to a later Data Version (Issue #433, S85b; DSTO-016): what changed, and the backup made before it. */
+export interface DataVersionUpgradeProjection {
+  readonly fromDataVersion: number;
+  readonly toDataVersion: number;
+  /** The software that last opened the data before; `null` for data from before its versions were recorded. */
+  readonly fromSoftwareVersion: string | null;
+  readonly softwareVersion: string;
+  readonly changes: ReadonlyArray<string>;
+  readonly backupFileName: string;
+  /** Whether that backup is still in the backup location. */
+  readonly backupPresent: boolean;
+  readonly recordedAt: string;
 }
 
 // ---- 设置 › 数据与存储 › 导出数据库 (Issue #434, plan slice S86a; V2-UX-DSTO-017; ADR 0079 §1.4, §1.6, §1.7) -------------
@@ -5919,7 +5937,7 @@ export interface SetScheduledBackupInput {
  * Why a database package was made: 导出数据库 (S86a), a 定期自动备份 (S86b), the backup made before a replacement (S86c), or the
  * one made before a merge (S86d).
  */
-export type DatabasePackageOrigin = 'database-export' | 'scheduled-backup' | 'pre-replace-backup' | 'pre-merge-backup';
+export type DatabasePackageOrigin = 'database-export' | 'scheduled-backup' | 'pre-replace-backup' | 'pre-merge-backup' | 'pre-upgrade-backup';
 
 /** One Book of a previewed package, as `只导入其中的图书` would take it (Issue #434, S86d; ADR 0079 §1.5). */
 export interface DatabaseImportBookProjection {

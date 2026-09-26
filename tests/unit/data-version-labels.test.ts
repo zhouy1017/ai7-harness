@@ -2,20 +2,73 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { DATA_VERSION_PROMISE, dataVersionRecordsLabel, dataVersionStateLine, dataVersionUpdateLine, storeVersionLine } from '../../src/renderer/data-version-labels.js';
-import { DATA_VERSION, DATA_VERSION_FROZEN, compareSoftwareVersions, latestSoftwareUpdate, readSoftwareVersion, type StoredVersion } from '../../src/service/data-version.js';
+import {
+  DATA_VERSION_PROMISE,
+  DATA_VERSION_UPGRADE,
+  dataVersionRecordsLabel,
+  dataVersionRollbackLine,
+  dataVersionStateLine,
+  dataVersionUpdateLine,
+  dataVersionUpgradeBackupLine,
+  dataVersionUpgradeLine,
+  storeVersionLine,
+} from '../../src/renderer/data-version-labels.js';
+import {
+  DATA_VERSION,
+  DATA_VERSION_BASELINE_REVISION,
+  DATA_VERSION_FROZEN,
+  PRE_UPGRADE_BACKUP_NAME,
+  SCHEMA_REVISION_CLASSES,
+  breakingChanges,
+  compareSoftwareVersions,
+  dataVersionAt,
+  latestSoftwareUpdate,
+  readSoftwareVersion,
+  type StoredVersion,
+} from '../../src/service/data-version.js';
+import { DATABASE_MERGE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { preUpgradeBackupFileName } from '../../src/service/upgrade-backup.js';
 
 // Unit suite for 数据版本 (Issue #433, plan slice S85a; V2-UX-DSTO-016; ADR 0079 §1): the Data Version this software reads,
 // not yet frozen before the first packaged release; the software version read from the package it ships in; the latest
 // software update found in the store's version records; and every line 数据与存储 states.
 
 const record = (ordinal: number, softwareVersion: string, dataVersion = 1): StoredVersion => ({
-  recordId: `record-${ordinal}`, ordinal, softwareVersion, dataVersion, schemaRevision: 54, recordedAt: `2026-09-${String(ordinal).padStart(2, '0')}T00:00:00.000Z`,
+  recordId: `record-${ordinal}`, ordinal, softwareVersion, dataVersion, schemaRevision: 54, recordedAt: `2026-09-${String(ordinal).padStart(2, '0')}T00:00:00.000Z`, upgrade: null,
 });
 
 describe('数据版本', () => {
   it('reads Data Version 1, not frozen before the first packaged release', () => {
     expect([DATA_VERSION, DATA_VERSION_FROZEN]).toEqual([1, false]);
+  });
+
+  it('holds the Data Version to the classification of every schema revision after the release baseline (Issue #433, S85b)', () => {
+    // Nothing is frozen before the first packaged release: no baseline, no revision classified, and every revision reads as 1.
+    expect([DATA_VERSION_BASELINE_REVISION, SCHEMA_REVISION_CLASSES]).toEqual([null, []]);
+    // The software's Data Version is always the classification's at its terminal revision: a breaking revision added to the
+    // list without raising DATA_VERSION, or DATA_VERSION raised without one, fails here.
+    expect(DATA_VERSION).toBe(dataVersionAt(DATABASE_MERGE_SCHEMA_VERSION));
+    // Classified entries lie after the baseline, one per revision, in order, and a breaking one says what it changes.
+    const revisions = SCHEMA_REVISION_CLASSES.map((entry) => entry.revision);
+    expect(revisions).toEqual([...new Set(revisions)].sort((left, right) => left - right));
+    expect(SCHEMA_REVISION_CLASSES.every((entry) => DATA_VERSION_BASELINE_REVISION !== null && entry.revision > DATA_VERSION_BASELINE_REVISION &&
+      entry.revision <= DATABASE_MERGE_SCHEMA_VERSION && (entry.class === 'additive' || (entry.change ?? '').length > 0))).toBe(true);
+    // Additive revisions stay inside a Data Version; each breaking one raises it by one, and says what changed.
+    const classes = [
+      { revision: 60, class: 'additive' as const },
+      { revision: 61, class: 'breaking' as const, change: '甲' },
+      { revision: 62, class: 'additive' as const },
+      { revision: 63, class: 'breaking' as const, change: '乙' },
+    ];
+    expect([59, 60, 61, 62, 63, 64].map((revision) => dataVersionAt(revision, classes))).toEqual([1, 1, 2, 2, 3, 3]);
+    expect([breakingChanges(59, 64, classes), breakingChanges(61, 64, classes), breakingChanges(61, 62, classes)]).toEqual([['甲', '乙'], ['乙'], []]);
+  });
+
+  it('names a backup before an upgrade by the computer\'s own time, in the one form a record may name (Issue #433, S85b)', () => {
+    expect(preUpgradeBackupFileName(new Date(2026, 8, 26, 10, 0, 5))).toBe('AI7 升级前备份 2026-09-26 10-00-05.ai7db');
+    expect(PRE_UPGRADE_BACKUP_NAME.test(preUpgradeBackupFileName(new Date(2026, 0, 2, 3, 4, 5)))).toBe(true);
+    expect(['../victim.ai7db', 'AI7 自动备份 2026-09-26 10-00-05.ai7db', 'AI7 升级前备份 2026-09-26 10-00-05.ai7db.exe']
+      .map((name) => PRE_UPGRADE_BACKUP_NAME.test(name))).toEqual([false, false, false]);
   });
 
   it('reads the software version from the package it ships in, and refuses a package that names none', async () => {
@@ -55,6 +108,24 @@ describe('数据版本 words', () => {
     expect(DATA_VERSION_PROMISE).toBe('数据版本只在旧版软件无法再读取这些数据时才会改变；普通的软件更新保持它不变。');
     expect(dataVersionStateLine({ frozen: false, dataVersion: 1 })).toBe('开发阶段：首个正式发布时冻结为数据版本 1；在那之前，开发中的数据可以重建。');
     expect(dataVersionStateLine({ frozen: true, dataVersion: 1 })).toBe('数据版本 1 已冻结。');
+  });
+
+  it('states an upgrade of the data, the backup made first, and how to go back (Issue #433, S85b)', () => {
+    const instant = (iso: string): string => `〔${iso.slice(5, 10)}〕`;
+    const upgrade = {
+      recordedAt: '2026-09-26T02:00:00.000Z', fromDataVersion: 1, toDataVersion: 2, changes: ['批注改为按段落记下', '书系记下成员的加入顺序'],
+      backupFileName: 'AI7 升级前备份 2026-09-26 10-00-05.ai7db', backupPresent: true, fromSoftwareVersion: '0.1.0',
+    };
+    expect(DATA_VERSION_UPGRADE).toBe('最近一次数据升级');
+    expect(dataVersionUpgradeLine(upgrade, instant)).toBe('〔09-26〕 · 数据版本从 1 升级为 2：批注改为按段落记下；书系记下成员的加入顺序。');
+    expect([dataVersionUpgradeBackupLine(upgrade), dataVersionUpgradeBackupLine({ ...upgrade, backupPresent: false })]).toEqual([
+      '升级前的数据已备份为「AI7 升级前备份 2026-09-26 10-00-05.ai7db」，在备份位置保留到你删除。',
+      '升级前备份「AI7 升级前备份 2026-09-26 10-00-05.ai7db」已不在备份位置。',
+    ]);
+    expect([dataVersionRollbackLine(upgrade), dataVersionRollbackLine({ fromSoftwareVersion: null })]).toEqual([
+      '回退只恢复升级前的数据：先安装升级前的 AI7（0.1.0），再用它的「导入数据库 › 替换本机全部数据」选这份备份。AI7 不保留、也不运行旧版软件。',
+      '回退只恢复升级前的数据：先安装升级前的 AI7，再用它的「导入数据库 › 替换本机全部数据」选这份备份。AI7 不保留、也不运行旧版软件。',
+    ]);
   });
 
   it('says what the latest software update did to the Data Version, and writes each record', () => {
