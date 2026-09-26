@@ -181,7 +181,11 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
       chosen = { ...filters };
       after = cursor;
     } catch (error) {
-      if (root.isConnected) setStatus(errorMessage(error, FEEDBACK_HISTORY_STATUS.openFailed), 'error');
+      if (projection === null) {
+        if (root.isConnected) root.replaceChildren(el('p', 'field-note', errorMessage(error, FEEDBACK_HISTORY_STATUS.unavailable)));
+        throw error;
+      }
+      if (root.isConnected) setStatus(errorMessage(error, FEEDBACK_HISTORY_STATUS.unavailable), 'error');
     } finally {
       loading = false;
       if (root.isConnected) paint(focus);
