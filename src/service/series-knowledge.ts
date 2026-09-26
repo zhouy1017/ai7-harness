@@ -281,8 +281,8 @@ function isConflicts(value: unknown): value is SeriesKnowledgeConflictProjection
  */
 export function seriesKnowledgeConflicts(
   candidate: Pick<StoredCandidate, 'candidateId' | 'target'>,
-  items: ReadonlyArray<StoredItem>,
-  open: ReadonlyArray<Pick<StoredCandidate, 'candidateId' | 'versionId' | 'version' | 'target'>>,
+  items: Iterable<StoredItem>,
+  open: Iterable<Pick<StoredCandidate, 'candidateId' | 'versionId' | 'version' | 'target'>>,
 ): FoundConflict[] {
   const key = seriesKnowledgeSubjectKey(candidate.target.subject);
   const found: FoundConflict[] = [];
@@ -298,10 +298,10 @@ export function seriesKnowledgeConflicts(
     }
   } else {
     const target = candidate.target;
-    const item = items.find((entry) => entry.itemId === target.itemId);
-    const current = item?.current;
-    if (item !== undefined && current !== undefined && current.revisionId !== target.baseRevisionId) {
-      found.push({ kind: 'item-updated', ref: current.revisionId, line: `「${item.subject}」在提议之后已更新为第 ${current.ordinal} 版。` });
+    for (const item of items) {
+      if (item.itemId === target.itemId && item.current.revisionId !== target.baseRevisionId) {
+        found.push({ kind: 'item-updated', ref: item.current.revisionId, line: `「${item.subject}」在提议之后已更新为第 ${item.current.ordinal} 版。` });
+      }
     }
   }
   for (const other of open) {
@@ -339,9 +339,9 @@ export class SeriesKnowledgeLedger {
   }
 
   /** Every item of a Series, by name, with its revisions verified oldest first and each one's decision. */
-  items(seriesId: string): StoredItem[] {
-    const rows = this.#db.prepare('SELECT * FROM series_knowledge_items WHERE series_id = ? ORDER BY subject, item_id').all(seriesId) as SqlRow[];
-    return rows.map((row) => this.#item(row));
+  *items(seriesId: string): IterableIterator<StoredItem> {
+    const rows = this.#db.prepare('SELECT * FROM series_knowledge_items WHERE series_id = ? ORDER BY subject, item_id').iterate(seriesId) as IterableIterator<SqlRow>;
+    for (const row of rows) yield this.#item(row);
   }
 
   /**
@@ -503,11 +503,11 @@ export class SeriesKnowledgeLedger {
   }
 
   /** The candidates of a Series not yet taken in, each at its newest version, oldest first. */
-  open(seriesId: string): StoredCandidate[] {
-    const ids = (this.#db.prepare(`SELECT candidate_id, min(recorded_at) first FROM series_knowledge_candidates WHERE series_id = ?
+  *open(seriesId: string): IterableIterator<StoredCandidate> {
+    const rows = this.#db.prepare(`SELECT candidate_id, min(recorded_at) first FROM series_knowledge_candidates WHERE series_id = ?
       AND candidate_id NOT IN (SELECT candidate_id FROM series_knowledge_promotions) GROUP BY candidate_id ORDER BY first, candidate_id`)
-      .all(seriesId) as SqlRow[]).map((row) => String(row.candidate_id));
-    return ids.map((candidateId) => this.candidate(candidateId)!);
+      .iterate(seriesId) as IterableIterator<SqlRow>;
+    for (const row of rows) yield this.candidate(String(row.candidate_id))!;
   }
 
   /**

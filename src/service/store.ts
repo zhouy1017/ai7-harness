@@ -11153,10 +11153,8 @@ export class EditorialStore {
 
   /** One page of a Series' open candidates after the one named, oldest proposed first, each with how many conflicts it discloses. */
   #knowledgeCandidatesPage(seriesId: string, after: SeriesKnowledgeCandidatesCursor | null): SeriesKnowledgeCandidatesPageProjection {
-    const items = this.#seriesKnowledge.items(seriesId);
-    const open = this.#seriesKnowledge.open(seriesId);
     const read = this.#seriesKnowledge.openPage(seriesId, after, MAX_SERIES_KNOWLEDGE_CANDIDATES_PAGE + 1);
-    const projected = read.map(({ candidate }) => this.#knowledgeCandidateProjection(candidate, seriesKnowledgeConflicts(candidate, items, open).length));
+    const projected = read.map(({ candidate }) => this.#knowledgeCandidateProjection(candidate, seriesKnowledgeConflicts(candidate, this.#seriesKnowledge.items(seriesId), this.#seriesKnowledge.open(seriesId)).length));
     const { page, more } = weighedPage(projected, MAX_SERIES_KNOWLEDGE_CANDIDATES_PAGE, SERIES_KNOWLEDGE_PAGE_BYTES);
     const last = read[page.length - 1];
     return { candidates: page, nextCursor: more && last !== undefined ? { firstAt: last.firstAt, candidateId: last.candidate.candidateId } : null };
@@ -11212,7 +11210,7 @@ export class EditorialStore {
     const items = this.#seriesKnowledge.items(series.seriesId);
     const conflicts = seriesKnowledgeConflicts(candidate, items, this.#seriesKnowledge.open(series.seriesId));
     const target = candidate.target;
-    const current = target.kind === 'existing' ? items.find((item) => item.itemId === target.itemId)?.current ?? null : null;
+    const current = target.kind === 'existing' ? this.#seriesKnowledge.item(target.itemId)?.current ?? null : null;
     // A provenance-bound candidate cites a member Book's manuscript: once the Book has left the Series it cannot be taken in.
     const blocked = candidate.provenance !== null && !this.#series.seriesOf(candidate.provenance.bookId).some((entry) => entry.seriesId === series.seriesId)
       ? `《${this.#evaluationBookTitle(candidate.provenance.bookId)}》已不在书系「${series.title}」中；来自它的候选项不能纳入。`
