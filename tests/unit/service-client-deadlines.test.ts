@@ -104,6 +104,35 @@ describe('serial service request execution deadlines', () => {
     expect(peer.kill).not.toHaveBeenCalled();
   });
 
+  it('advances the deadline after a completed service refusal', async () => {
+    const long = outcome(client.call('getStartup', {}));
+    const read = outcome(client.call('inspectGlobalAttention', {}));
+    await vi.advanceTimersByTimeAsync(35_000);
+    peer.send({ id: peer.requests[0]!.id, ok: false, error: { code: 'TEST_REFUSAL', message: 'refused' } });
+    await expect(long).resolves.toBe('TEST_REFUSAL');
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(read).resolves.toBe('SERVICE_TIMEOUT');
+  });
+
+  it('faults an out-of-order response rather than starting an inconsistent deadline', async () => {
+    const long = outcome(client.call('getStartup', {}));
+    const read = outcome(client.call('inspectGlobalAttention', {}));
+    peer.reply(peer.requests[1]!, { groups: [], running: false });
+    await expect(long).resolves.toBe('SERVICE_PROTOCOL_FAILED');
+    await expect(read).resolves.toBe('SERVICE_PROTOCOL_FAILED');
+    expect(peer.kill).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears waiting deadlines after a transport failure', async () => {
+    const long = outcome(client.call('getStartup', {}));
+    const read = outcome(client.call('inspectGlobalAttention', {}));
+    peer.stdout.emit('error', new Error('test transport failure'));
+    await expect(long).resolves.toBe('SERVICE_PROTOCOL_FAILED');
+    await expect(read).resolves.toBe('SERVICE_PROTOCOL_FAILED');
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(peer.kill).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the sixteen-request admission bound', async () => {
     const admitted = Array.from({ length: 16 }, () => outcome(client.call('getStartup', {})));
     await expect(outcome(client.call('getStartup', {}))).resolves.toBe('SERVICE_UNAVAILABLE');
