@@ -568,6 +568,22 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .default-rule-heading h3 { margin: 0; overflow-wrap: anywhere; }
 .default-rule-card p { margin: 0; }
 .default-rule-state-deactivated { border-style: dashed; }
+/* 知识库 (Issue #427, S79a): its seven classes as tabs, and 审阅规范文件's cards. */
+.knowledge-tabs { display: flex; flex-wrap: wrap; gap: .4rem; margin: .8rem 0; padding-bottom: .5rem; border-bottom: 1px solid #ded9cd; }
+.knowledge-tabs [role="tab"][aria-selected="true"] { border-bottom: 3px solid #2c463b; font-weight: 800; }
+.knowledge-panel { display: grid; gap: .8rem; min-width: 0; }
+.knowledge-holds { margin: 0; }
+.guideline-list { display: grid; gap: .8rem; }
+.guideline-card { display: grid; gap: .45rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
+.guideline-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: .6rem; }
+.guideline-heading h3 { margin: 0; overflow-wrap: anywhere; }
+.guideline-card p { margin: 0; }
+.guideline-clause-list { display: grid; gap: .3rem; margin: .4rem 0 0; padding-left: 1.8rem; }
+.guideline-clause-list li { overflow-wrap: anywhere; }
+.guideline-citations { margin-left: .5rem; color: #5c6358; font-size: .9em; white-space: nowrap; }
+.guideline-version-list { display: grid; gap: .3rem; margin: .4rem 0 0; padding-left: 1.2rem; overflow-wrap: anywhere; }
+.guideline-preview { display: grid; gap: .5rem; padding: .8rem; border: 2px solid #2c463b; border-radius: 10px; background: #f6f8f2; }
+.guideline-preview h4 { margin: 0; }
 /* On a surface that raises a Task, the plan is one line and 查看计划 (S72 D4). */
 .task-plan-summary { margin-top: 1rem; }
 .task-plan-summary h4 { margin: 0; }
@@ -1162,7 +1178,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal,
   .global-attention-group, .global-attention-item,
   .manuscript-export, .export-format-option, .export-option, .export-fidelity-row, .export-receipt, .export-records > li,
-  .task-plan-default-rule-confirm, .default-rule-card, .task-plan-activity, .task-bar-cancel-impact,
+  .task-plan-default-rule-confirm, .default-rule-card, .guideline-card, .guideline-preview, .task-plan-activity, .task-bar-cancel-impact,
   .task-plan-clarification, .task-plan-choice, .task-plan-choice-recommended, .task-plan-clarification-deferred, .task-plan-edit-ask-first,
   .task-plan-budget-form, .task-plan-budget-input {
     color: CanvasText;

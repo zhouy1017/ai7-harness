@@ -1109,6 +1109,40 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
+  it('accepts 知识库 › 审阅规范文件: the read naming nothing, a preview by document and absolute path, a confirmation by preview (Issue #427)', () => {
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'inspectReviewGuidelines', input: {} },
+      { op: 'inspectReviewGuidelines', input: { page: { documentId: 'ai7-builtin/typos-and-usage', versionsBefore: 9, clausePage: 2 } } },
+      { op: 'inspectReviewGuidelines', input: { page: { documentId: 'ai7-builtin/typos-and-usage', versionsBefore: null } } },
+      { op: 'previewReviewGuidelineVersion', input: { documentId: 'ai7-builtin/typos-and-usage', previewId: randomUUID(), clausePage: 3 } },
+      { op: 'previewReviewGuidelineVersion', input: { documentId: 'ai7-builtin/typos-and-usage', path: `${process.cwd()}/规范/文字.docx` } },
+      { op: 'importReviewGuidelineVersion', input: { previewId: randomUUID() } },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    const absolute = `${process.cwd()}/规范/文字.docx`;
+    for (const [op, input] of [
+      ['inspectReviewGuidelines', { bookId: randomUUID() }],
+      ['inspectReviewGuidelines', { page: { documentId: 'ai7-builtin/typos-and-usage', versionsBefore: 1 } }],
+      ['inspectReviewGuidelines', { page: { documentId: 'ai7-builtin/typos-and-usage', clausePage: -1 } }],
+      ['inspectReviewGuidelines', { page: { documentId: 'ai7-builtin/typos-and-usage', clausePage: null } }],
+      ['inspectReviewGuidelines', { page: { documentId: 'ai7-builtin/typos-and-usage', clauses: [] } }],
+      ['previewReviewGuidelineVersion', { documentId: 'ai7-builtin/typos-and-usage', previewId: randomUUID(), path: absolute }],
+      ['previewReviewGuidelineVersion', { documentId: 'ai7-builtin/typos-and-usage', previewId: randomUUID(), clausePage: -1 }],
+      ['previewReviewGuidelineVersion', { documentId: 'ai7-builtin/typos-and-usage' }],
+      ['previewReviewGuidelineVersion', { documentId: 'ai7-builtin/typos-and-usage', path: '规范/文字.docx' }],
+      ['previewReviewGuidelineVersion', { documentId: '../escape', path: absolute }],
+      ['previewReviewGuidelineVersion', { documentId: 'x'.repeat(65), path: absolute }],
+      ['previewReviewGuidelineVersion', { documentId: 'ai7-builtin/typos-and-usage', path: absolute, clauses: [] }],
+      ['importReviewGuidelineVersion', { previewId: 'latest' }],
+      ['importReviewGuidelineVersion', {}],
+    ] as const) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('rejects a 待我处理 read that names a Book, a group, a filter or anything else', () => {
     const id = randomUUID();
     const refused: ReadonlyArray<unknown> = [

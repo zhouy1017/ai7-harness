@@ -549,6 +549,33 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'inspectReviewGuidelines': {
+      const input = requireInputWithOptional(value.input, [], ['page'], tentativeId);
+      if (Object.hasOwn(input, 'page')) {
+        const page = requireInputWithOptional(input.page, ['documentId'], ['versionsBefore', 'clausePage'], tentativeId);
+        if (!isBoundedString(page.documentId, 64) || !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/u.test(page.documentId) ||
+            !optionalOrNull(page, 'versionsBefore', (cursor) => isSafeInteger(cursor, 2)) ||
+            (Object.hasOwn(page, 'clausePage') && !isSafeInteger(page.clausePage))) throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // The picker path starts a preview; an exact preview ID reads another bounded clause page.
+    case 'previewReviewGuidelineVersion': {
+      const input = requireInputWithOptional(value.input, ['documentId'], ['path', 'previewId', 'clausePage'], tentativeId);
+      const validSource = Object.hasOwn(input, 'previewId')
+        ? !Object.hasOwn(input, 'path') && validUuid(input.previewId) &&
+          (!Object.hasOwn(input, 'clausePage') || isSafeInteger(input.clausePage))
+        : !Object.hasOwn(input, 'clausePage') && isBoundedString(input.path, 32_767) && isAbsolute(input.path);
+      if (!isBoundedString(input.documentId, 64) || !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/u.test(input.documentId) || !validSource) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'importReviewGuidelineVersion': {
+      const input = requireInput(value.input, ['previewId'], tentativeId);
+      if (!validUuid(input.previewId)) throw new ProtocolError(tentativeId);
+      break;
+    }
     // 停用 (Issue #421): a rule names itself; which Book it belongs to is the store's to know.
     case 'deactivateDefaultExecutionRule': {
       const input = requireInput(value.input, ['ruleId'], tentativeId);

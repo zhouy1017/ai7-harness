@@ -249,6 +249,12 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectDefaultExecutionRules']['output']>(IPC_CHANNELS.inspectDefaultExecutionRules),
   deactivateDefaultExecutionRule: (input: ServiceOperationMap['deactivateDefaultExecutionRule']['input']) =>
     invoke<ServiceOperationMap['deactivateDefaultExecutionRule']['output']>(IPC_CHANNELS.deactivateDefaultExecutionRule, input),
+  inspectReviewGuidelines: (input?: ServiceOperationMap['inspectReviewGuidelines']['input']) =>
+    invoke<ServiceOperationMap['inspectReviewGuidelines']['output']>(IPC_CHANNELS.inspectReviewGuidelines, input ?? {}),
+  previewReviewGuidelineVersion: (input: { documentId: string; previewId?: string; clausePage?: number }) =>
+    invoke<ServiceOperationMap['previewReviewGuidelineVersion']['output'] | null>(IPC_CHANNELS.previewReviewGuidelineVersion, input),
+  importReviewGuidelineVersion: (input: ServiceOperationMap['importReviewGuidelineVersion']['input']) =>
+    invoke<ServiceOperationMap['importReviewGuidelineVersion']['output']>(IPC_CHANNELS.importReviewGuidelineVersion, input),
   inspectReviewWorkspace: (input?: Omit<ServiceOperationMap['inspectReviewWorkspace']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['inspectReviewWorkspace']['output']>(IPC_CHANNELS.inspectReviewWorkspace, input ?? { reviewRunId: null }),
   prepareReviewRun: (input: Omit<ServiceOperationMap['prepareReviewRun']['input'], 'bookId'>) =>

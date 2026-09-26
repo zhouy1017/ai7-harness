@@ -600,6 +600,11 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'restart-book-a-unavailable',
     'second-book-disabled',
     'accessibility-reflow-forced-colors',
+    'knowledge-guidelines',
+    'knowledge-guideline-import',
+    'j14-knowledge-keyboard',
+    'j14-knowledge-reflow-forced-colors',
+    'knowledge-guideline-restart',
     'zero-activity',
   ]),
   'J-03': Object.freeze([

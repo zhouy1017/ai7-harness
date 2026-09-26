@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 68 as const;
+export const SERVICE_PROTOCOL_VERSION = 69 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -74,6 +74,9 @@ export const IPC_CHANNELS = {
   setDefaultExecutionRule: 'ai7:j04:set-default-execution-rule',
   inspectDefaultExecutionRules: 'ai7:j04:inspect-default-execution-rules',
   deactivateDefaultExecutionRule: 'ai7:j04:deactivate-default-execution-rule',
+  inspectReviewGuidelines: 'ai7:j15:inspect-review-guidelines',
+  previewReviewGuidelineVersion: 'ai7:j15:preview-review-guideline-version',
+  importReviewGuidelineVersion: 'ai7:j15:import-review-guideline-version',
   inspectReviewWorkspace: 'ai7:j04:inspect-review-workspace',
   prepareReviewRun: 'ai7:j04:prepare-review-run',
   authorizeReviewRun: 'ai7:j04:authorize-review-run',
@@ -4574,6 +4577,109 @@ export interface DefaultExecutionRulesProjection {
   statement: string;
 }
 
+// ---- 知识库 › 审阅规范文件 (Issue #427, plan slice S79a; V2-UX-KB-001 to KB-003, REV-012) ----------------------------
+
+/** The largest guideline file 导入新版本 reads: a Word document or plain text of numbered clauses. */
+export const MAX_REVIEW_GUIDELINE_FILE_BYTES = 2 * 1024 * 1024;
+/** The Review Runs a guideline version names, the latest first; the page counts the rest (Issue #427 review). */
+export const MAX_GUIDELINE_VERSION_RUNS_SHOWN = 5;
+/** The Books 还在用旧版 names, by title; the page counts the rest (Issue #427 review). */
+export const MAX_GUIDELINE_OLDER_BOOKS_SHOWN = 10;
+
+/** The file one imported version was read from: its name as picked, how it was read, and its exact bytes. */
+export interface ReviewGuidelineSourceProjection {
+  readonly displayName: string;
+  readonly format: 'docx' | 'text';
+  readonly sha256: string;
+  readonly bytes: number;
+}
+
+export interface ReviewGuidelineClauseProjection {
+  readonly clauseId: string;
+  readonly number: number;
+  readonly text: string;
+  /** How many findings of the Review Runs that applied this version cite this clause, each finding once. */
+  readonly citations: number;
+}
+
+export interface ReviewGuidelineVersionProjection {
+  readonly ordinal: number;
+  readonly issuer: string;
+  /** `null` for AI7's built-in first version, which is configuration and never stored. */
+  readonly versionId: string | null;
+  readonly recordedAt: string | null;
+  readonly source: ReviewGuidelineSourceProjection | null;
+  readonly clauseCount: number;
+  readonly digest: string;
+  /**
+   * How many Review Runs used exactly this version: a category of the Run that applies the document formed its findings
+   * under it. A Run only prepared, refused or failed has used nothing yet.
+   */
+  readonly usedByCount: number;
+  /** The latest of those Runs, newest first, at most `MAX_GUIDELINE_VERSION_RUNS_SHOWN`. */
+  readonly usedBy: ReadonlyArray<{ readonly bookId: string; readonly bookTitle: string; readonly reviewRunId: string; readonly reviewOrdinal: number; readonly createdAt: string }>;
+}
+
+/**
+ * How the review categories that apply a guideline document read it (Issue #427 review). `clauses`: the Editorial Review
+ * Contract hands its numbered clauses to the model, so the house may import its own next version. `leads`: the category
+ * turns the baseline analysis's leads into annotations and reads no clause. `factual-kind`: the category runs AI7's own
+ * fixed factual-review contract. The last two are AI7's fixed statements of what the category does, never imported.
+ */
+export type ReviewGuidelineDocumentUse = 'clauses' | 'leads' | 'factual-kind';
+
+export interface ReviewGuidelineDocumentProjection {
+  readonly documentId: string;
+  readonly title: string;
+  /** Who issued the version that applies now: `AI7 内置默认`, or `本社` once the house imported its own. */
+  readonly issuer: string;
+  readonly currentOrdinal: number;
+  readonly use: ReviewGuidelineDocumentUse;
+  /** The review categories that apply this document. */
+  readonly appliedBy: ReadonlyArray<{ readonly categoryId: string; readonly label: string }>;
+  /** The clauses of the version that applies now. */
+  readonly clauses: ReadonlyArray<ReviewGuidelineClauseProjection>;
+  readonly clauseCount: number;
+  readonly clausePage: number;
+  readonly clausePages: number;
+  /** Every version, newest first. */
+  readonly versions: ReadonlyArray<ReviewGuidelineVersionProjection>;
+  readonly versionCount: number;
+  readonly versionsBefore: number | null;
+  readonly versionsNext: number | null;
+  /** How many Books' latest Review Run that used this document used an older version than the current one. */
+  readonly olderVersionBookCount: number;
+  /** Those Books by title, at most `MAX_GUIDELINE_OLDER_BOOKS_SHOWN`. */
+  readonly olderVersionBooks: ReadonlyArray<{ readonly bookId: string; readonly bookTitle: string; readonly ordinal: number }>;
+}
+
+export interface ReviewGuidelinesProjection {
+  readonly documents: ReadonlyArray<ReviewGuidelineDocumentProjection>;
+}
+
+export interface ReviewGuidelinesPage {
+  readonly documentId: string;
+  readonly versionsBefore?: number | null;
+  readonly clausePage?: number;
+}
+
+/** 导入新版本 before it is confirmed: the clauses the file holds, as the document's next version would read them. */
+export interface ReviewGuidelinePreviewProjection {
+  readonly previewId: string;
+  readonly documentId: string;
+  readonly title: string;
+  /** The version the file would become. */
+  readonly ordinal: number;
+  readonly currentOrdinal: number;
+  readonly source: ReviewGuidelineSourceProjection;
+  readonly clauses: ReadonlyArray<{ readonly clauseId: string; readonly number: number; readonly text: string }>;
+  readonly clauseCount: number;
+  readonly clausePage: number;
+  readonly clausePages: number;
+  /** How the clauses differ from the current version's, by number. */
+  readonly changes: { readonly changed: number; readonly added: number; readonly removed: number };
+}
+
 /** The drawer's `设为快速开始默认…` for one plan, and the rule that started its Task, when one did. */
 export interface TaskPlanDefaultRuleProjection {
   canSet: boolean;
@@ -6761,6 +6867,21 @@ export interface ServiceOperationMap {
     input: { ruleId: string };
     output: DefaultExecutionRuleProjection;
   };
+  /** 知识库 › 审阅规范文件 (Issue #427, S79a): every guideline document the review categories apply, with its versions. */
+  inspectReviewGuidelines: {
+    input: { page?: ReviewGuidelinesPage };
+    output: ReviewGuidelinesProjection;
+  };
+  /** 导入新版本's reading of the file main's picker returned: nothing is recorded until it is confirmed. */
+  previewReviewGuidelineVersion: {
+    input: { documentId: string; path?: string; previewId?: string; clausePage?: number };
+    output: ReviewGuidelinePreviewProjection;
+  };
+  /** 确认导入: the previewed clauses become the document's next version, issued by the house. */
+  importReviewGuidelineVersion: {
+    input: { previewId: string };
+    output: ReviewGuidelinesProjection;
+  };
   /**
    * 审阅 (Issue #417, plan slice S69). The workspace is one read; preparing a Review Run is a
    * cooperative job; the one approval records the Run's authorization and starts its drive loop at once,
@@ -7131,6 +7252,11 @@ export interface RendererApi {
   setDefaultExecutionRule(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<DefaultExecutionRuleProjection>;
   inspectDefaultExecutionRules(): Promise<DefaultExecutionRulesProjection>;
   deactivateDefaultExecutionRule(input: { ruleId: string }): Promise<DefaultExecutionRuleProjection>;
+  /** 知识库 › 审阅规范文件 (Issue #427, S79a): names no Book; it reads every Book's Review Runs to say who used which version. */
+  inspectReviewGuidelines(input?: { page?: ReviewGuidelinesPage }): Promise<ReviewGuidelinesProjection>;
+  /** 导入新版本: the native picker, then the file's clauses as the next version would read them; `null` when the picker was cancelled. */
+  previewReviewGuidelineVersion(input: { documentId: string; previewId?: string; clausePage?: number }): Promise<ReviewGuidelinePreviewProjection | null>;
+  importReviewGuidelineVersion(input: { previewId: string }): Promise<ReviewGuidelinesProjection>;
   /**
    * 审阅 of the Book the window is showing (Issue #417). Inspecting without a Run opens the latest; a
    * running Run is followed by inspecting it again, and its executing category carries its progress.

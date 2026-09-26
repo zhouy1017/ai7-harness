@@ -64,6 +64,7 @@ import type { EditorialMarkStore, ProducedEditorialMarkInput } from '../editoria
 import type { ReviewRunAttentionReading } from '../global-attention.js';
 import {
   BUILTIN_REVIEW_CATEGORY_CONFIGURATION,
+  houseGuidelineDocuments,
   reviewCategoryBasisStatement,
   reviewCategoryConfigurationDigest,
   type ReviewCategoryConfiguration,
@@ -392,6 +393,21 @@ const UNSTARTED_DETAIL = '尚未开始；继续审阅时从这一类接着审。
 const UNWRITTEN_DETAIL = '运行已结束，发现尚未标到稿件上；继续审阅时写入。' as const;
 const INTERRUPTED_DETAIL = '服务在这一类运行期间停止；继续审阅时记为已中断，再接着审其余类别。' as const;
 const FAILED_UNRECORDED_DETAIL = '这一类的运行失败了；继续审阅时记下这一结果，再接着审其余类别。' as const;
+export const HOUSE_GUIDELINE_NOT_TRANSMITTABLE = 'REVIEW_GUIDELINE_NOT_TRANSMITTABLE' as const;
+
+/**
+ * Under developer-live, a category whose guideline clauses the house imported is refused before any dispatch (Issue #427,
+ * S79a review): those clauses would enter the category's prompt, and the active Provider Processing policy admits only
+ * public or synthetic text until the Owner admits house guideline text in a policy revision. Under development-ci nothing
+ * is transmitted, so nothing is refused. `null` when nothing stands in the way.
+ */
+export function houseGuidelineRefusal(entry: ReviewCategoryConfigurationEntry, live: boolean): string | null {
+  if (!live || entry.executor !== 'review-category-contract') return null;
+  const house = houseGuidelineDocuments(entry);
+  if (house.length === 0) return null;
+  const named = house.map((document) => `《${document.title}》第 ${document.version} 版`).join('、');
+  return `这一类按本社导入的${named}审阅；开发者实时模式下，本社的条款在获准发给模型之前不会发出，这一类暂不能开始。`;
+}
 
 /** ADR 0066's tiers read as V2-UX-REV-004's severities (ambiguity A3, decided by the slice). */
 const FACTUAL_TIER_SEVERITY: Readonly<Record<FactualSeverityTier, ReviewFindingSeverity>> = { A: 'must', B: 'should', C: 'note' };
@@ -706,6 +722,7 @@ interface PlannedCategory {
 interface PreparationWork {
   readonly workId: string;
   readonly bookId: string;
+  readonly configuration: ReviewCategoryConfiguration;
   readonly launchPolicy: LaunchPolicyProjection;
   readonly scope: ResolvedReviewScope;
   readonly planned: ReadonlyArray<PlannedCategory>;
@@ -755,7 +772,8 @@ export class ReviewRunStore {
   readonly #db: DatabaseSync;
   readonly #marks: EditorialMarkStore;
   readonly #ledgers: ReviewRunLedgers;
-  readonly #configuration: ReviewCategoryConfiguration;
+  /** The configuration as it applies now (Issue #427, S79a): each guideline document at its latest version. */
+  readonly #configuration: () => ReviewCategoryConfiguration;
   readonly #work = new Map<string, PreparationWork>();
   /** The Review Runs being driven in this service lifetime, with the Book each belongs to. */
   readonly #driving = new Map<string, string>();
@@ -764,7 +782,7 @@ export class ReviewRunStore {
     db: DatabaseSync,
     marks: EditorialMarkStore,
     ledgers: ReviewRunLedgers,
-    configuration: ReviewCategoryConfiguration = BUILTIN_REVIEW_CATEGORY_CONFIGURATION,
+    configuration: () => ReviewCategoryConfiguration = () => BUILTIN_REVIEW_CATEGORY_CONFIGURATION,
   ) {
     this.#db = db;
     this.#marks = marks;
@@ -802,16 +820,18 @@ export class ReviewRunStore {
     requireReview(!this.#bookIsDriving(bookId), 'REVIEW_RUN_ACTIVE', RUN_ACTIVE_REASON);
     // Two preparations of one Book would prepare the same category ledgers' Tasks under each other.
     requireReview(!Array.from(this.#work.values()).some((work) => work.bookId === bookId), 'REVIEW_RUN_PREPARING', '这本书有一次审阅正在准备计划；准备完成后再新建。');
-    requireReview(Array.isArray(input.categoryIds) && input.categoryIds.length >= 1 && input.categoryIds.length <= this.#configuration.categories.length &&
+    // The configuration a preparation starts under is the one its Run snapshots, whatever is imported meanwhile (REV-012).
+    const configuration = this.#configuration();
+    requireReview(Array.isArray(input.categoryIds) && input.categoryIds.length >= 1 && input.categoryIds.length <= configuration.categories.length &&
       new Set(input.categoryIds).size === input.categoryIds.length, 'REVIEW_CATEGORIES_INVALID', '请选择至少一个审阅类别，且不要重复。');
     for (const categoryId of input.categoryIds) {
-      requireReview(this.#configuration.categories.some((entry) => entry.categoryId === categoryId), 'REVIEW_CATEGORY_UNKNOWN', '没有这个审阅类别。');
+      requireReview(configuration.categories.some((entry) => entry.categoryId === categoryId), 'REVIEW_CATEGORY_UNKNOWN', '没有这个审阅类别。');
     }
     const chapters = this.#chapterOptions(bookId, head);
     const scope = this.#resolveScope(input.scope, chapters);
     const baseline = this.#readBaseline(bookId);
     // Configuration order is the categories' position in the Run, whatever order they were ticked in.
-    const planned = this.#configuration.categories
+    const planned = configuration.categories
       .filter((entry) => input.categoryIds.includes(entry.categoryId))
       .map((entry, position): PlannedCategory => {
         const reading = this.#readCategory(bookId, head, entry, baseline, undefined);
@@ -823,6 +843,7 @@ export class ReviewRunStore {
     const work: PreparationWork = {
       workId: randomUUID(),
       bookId,
+      configuration,
       launchPolicy: structuredClone(input.launchPolicy),
       scope,
       planned,
@@ -953,7 +974,7 @@ export class ReviewRunStore {
           workingDigest: head.workingDigest,
         },
         scope: { kind: work.scope.kind, label: reviewScopeLabel(work.scope), selectedRange: work.scope.selectedRange },
-        configuration: this.#configurationPin(),
+        configuration: this.#configurationPin(work.configuration),
         categories: work.prepared,
       };
       const record = canonicalRecord(snapshot);
@@ -969,11 +990,11 @@ export class ReviewRunStore {
     return reviewRunId;
   }
 
-  #configurationPin(): { schema: string; version: string; digest: string } {
+  #configurationPin(configuration: ReviewCategoryConfiguration): { schema: string; version: string; digest: string } {
     return {
-      schema: this.#configuration.schema,
-      version: this.#configuration.version,
-      digest: reviewCategoryConfigurationDigest(this.#configuration),
+      schema: configuration.schema,
+      version: configuration.version,
+      digest: reviewCategoryConfigurationDigest(configuration),
     };
   }
 
@@ -1277,6 +1298,12 @@ export class ReviewRunStore {
     const approved = this.#authorizationOf(reviewRunId)?.approvals.get(categoryId);
     requireReview(approved !== undefined, 'REVIEW_RUN_NOT_AUTHORIZED', '这次审阅尚未授权这一类的计划。');
     const ledger = this.#ledgers.ledgerOf(category.entry);
+    // House guideline text never reaches a live model before the Owner admits it, whenever the Run was prepared.
+    const withheld = houseGuidelineRefusal(category.entry, ledger.launch.live !== null);
+    if (withheld !== null) {
+      this.#recordEvent(reviewRunId, categoryId, 'refused', withheld, { extra: { code: HOUSE_GUIDELINE_NOT_TRANSMITTABLE } });
+      return null;
+    }
     let dispatchRunRecordId: string | null;
     try {
       dispatchRunRecordId = ledger.authorize(snapshot.bookId, category.task.taskIntentId, approved).dispatchRunRecordId;
@@ -1832,7 +1859,8 @@ export class ReviewRunStore {
     requireReview(validFindingPage(page), 'REVIEW_PAGE_INVALID', '发现的分页或筛选无效。');
     const head = this.#head(bookId);
     const baseline = head === null ? { revision: null, error: null } : this.#readBaseline(bookId);
-    const readings = this.#configuration.categories.map((entry) => this.#readCategory(bookId, head, entry, baseline, progress));
+    const configuration = this.#configuration();
+    const readings = configuration.categories.map((entry) => this.#readCategory(bookId, head, entry, baseline, progress));
     const chapters = head === null ? { basis: 'outline' as const, chapters: [] } : this.#chapterOptions(bookId, head);
     // The 审阅记录 lists the newest Runs only; a Run beyond them is still opened when it is named.
     const rows = this.#db.prepare('SELECT * FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC LIMIT ?')
@@ -1851,7 +1879,7 @@ export class ReviewRunStore {
     const workspace: ReviewWorkspaceProjection = {
       bookId,
       manuscript: head,
-      configuration: this.#configurationPin(),
+      configuration: this.#configurationPin(configuration),
       categories: readings.map((reading) => this.#workspaceCategory(reading, chapters)),
       coverage: this.#coverage(bookId, head, readings, baseline),
       scopeOptions: this.#scopeOptions(head, chapters),
@@ -1958,6 +1986,8 @@ export class ReviewRunStore {
     if (entry.executor === 'baseline-leads') {
       return { entry, unavailableReason: baseline.error ?? (baseline.revision === null ? LEADS_ABSENT_REASON : null), facts: none, projection: null };
     }
+    const withheld = houseGuidelineRefusal(entry, this.#ledgers.baseline().launch.live !== null);
+    if (withheld !== null) return { entry, unavailableReason: withheld, facts: none, projection: null };
     let projection: AnalysisProjection;
     try {
       projection = this.#ledgers.ledgerOf(entry).inspect(bookId, progress);
