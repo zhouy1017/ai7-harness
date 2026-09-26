@@ -5788,6 +5788,8 @@ export interface DataVersionProjection {
   readonly update: {
     readonly from: string;
     readonly to: string;
+    /** Newer, earlier (an older build opened the store again), or the same precedence (Issue #433 review). */
+    readonly direction: 'newer' | 'earlier' | 'same';
     readonly fromDataVersion: number;
     readonly toDataVersion: number;
     readonly recordedAt: string;

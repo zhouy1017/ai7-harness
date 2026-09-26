@@ -196,14 +196,14 @@ A promotion creates the item with its first revision, or appends the next revisi
 
 Nothing of 书系知识 is read whole (Issue #63 review). The Series answer carries the first page of items, by name, each with its current revision only and how many revisions it holds, and the first page of open candidates, oldest proposed first, with the counts. `inspectSeriesKnowledgeItems` reads further pages of items, narrowed to names holding the words `查找条目` gives; `inspectSeriesKnowledgeCandidates` further candidates; and `inspectSeriesKnowledgeRevisions` an item's 历次版本, ten at a time, newest first. Each page is bounded by count and by 64 KiB. A cited passage is shown whole up to 200 graphemes and beyond that as its opening, the record keeping all of it; one cited while changes waited in the journal beyond its revision says so. `proposeSeriesKnowledge` answers with the candidate alone and `promoteSeriesKnowledge` with the item alone, and the page reads the Series again.
 
-数据版本 (Issue #433, S85a) is service protocol version 81 and schema revision 54. It adds one append-only relation owned by `src/service/data-version.ts`: `store_versions`, which records the software version, the Data Version and the schema revision that opened the store, whenever one of them changes. The software version comes from the `package.json` the product ships in. The built carrier holds no package manifest, so the service entry reads it from the source checkout that contains `dist/` and hands it to the store.
+数据版本 (Issue #433, S85a) is service protocol version 81 and schema revision 54. It adds one append-only relation owned by `src/service/data-version.ts`: `store_versions`, which records the software version, the Data Version and the schema revision that opened the store, whenever one of them changes. The software version comes from the `package.json` the product ships in, SemVer build metadata included. The built carrier holds no package manifest, so the service entry reads it from the source checkout that contains `dist/` and hands it to the store. A service that stops before it is ready writes `AI7_SERVICE_STOPPED/<code>` to stderr: the refusal's code, never its words (Issue #433 review).
 
 The Data Version (ADR 0079 §1) is `1`, and it is not frozen: Data Version 1 is set at the first packaged release, and until then development stores are disposable. A breaking migration, one older software could not read, would raise it. An additive schema revision stays inside it.
 
 `inspectDataVersion` answers 设置 › 数据与存储's 版本:
 - the software version and the Data Version, apart;
 - whether the Data Version is frozen;
-- the latest software update, and whether it kept the Data Version;
+- the latest software change, and whether it kept the Data Version. Versions order by SemVer precedence, so an older build opening the data again reads `改用较早的软件：从 … 改为 …`, never an update (Issue #433 review);
 - the version records, newest first.
 
 A version record rewritten by hand stops the store from opening. The backup before a breaking upgrade, its rollback, and the package format they share with 导出数据库 come with S85b and S86 (#434).

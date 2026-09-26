@@ -1404,6 +1404,11 @@ async function run(): Promise<void> {
   }
 }
 
-await run().catch(() => {
+await run().catch((error: unknown) => {
+  // A service that stops before it is ready says which refusal stopped it (Issue #433 review): its code alone, never its
+  // words or anything it read.
+  const code = typeof error === 'object' && error !== null && typeof (error as { code?: unknown }).code === 'string' &&
+    /^[A-Z][A-Z0-9_]{0,63}$/u.test((error as { code: string }).code) ? (error as { code: string }).code : 'UNEXPECTED';
+  process.stderr.write(`AI7_SERVICE_STOPPED/${code}\n`);
   process.exitCode = 1;
 });
