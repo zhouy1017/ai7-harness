@@ -8,14 +8,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { writeDatabasePackage } from '../../src/service/database-exports.js';
 import { isPackageMemberPath, verifyDatabasePackage } from '../../src/service/database-package-reader.js';
+import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 
 // Unit suite for reading a database package (Issue #434, plan slice S86c; V2-UX-DSTO-017; ADR 0079 §1.4): a package the writer
 // made is read back whole and verified member by member; a flipped byte is damage; anything that is not a package — no
 // manifest, a member outside the Agent Data Root or in a place a package never carries, a manifest the entries do not match —
 // is refused before anything is taken from it.
-
-/** The fixed archive time (#601), local until `src/shared/archive-time.ts` reaches this stack: 2026-01-01 08:00 local. */
-const fixedArchiveTime = (): Date => new Date(2026, 0, 1, 8, 0, 0);
 
 let root: string;
 
