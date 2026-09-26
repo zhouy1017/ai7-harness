@@ -181,7 +181,7 @@ async function clickBook(renderer, bookId, name) {
 }
 
 async function fill(renderer, selector, value, name) {
-  await assertRenderer(renderer, `(() => { const input=document.querySelector(${JSON.stringify(selector)}); if(!(input instanceof HTMLInputElement))return false; input.value=${JSON.stringify(value)}; input.dispatchEvent(new Event('input',{bubbles:true})); return true; })()`, name);
+  await assertRenderer(renderer, `(() => { const input=document.querySelector(${JSON.stringify(selector)}); if(!(input instanceof HTMLInputElement)&&!(input instanceof HTMLTextAreaElement))return false; input.value=${JSON.stringify(value)}; input.dispatchEvent(new Event('input',{bubbles:true})); return true; })()`, name);
 }
 
 async function createEmptyBook(renderer, title) {
@@ -1012,7 +1012,7 @@ async function main() {
     await clickSelector(renderer, `${reader} [data-library-action="read-reason"]`, 'library-full-note-open');
     let reconstructed = '';
     for (let part = 0; part < 4; part += 1) {
-      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${reader} .library-reason-text`)}) === document.activeElement`, 'library-note-fragment-focus');
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(reader)})?.dataset.reasonOffset === '${part * 1024}' && document.querySelector(${JSON.stringify(`${reader} .library-reason-text`)}) === document.activeElement`, 'library-note-fragment-focus');
       const fragment = await renderer.evaluate(`(() => { const root=document.querySelector(${JSON.stringify(reader)}); return {text:root.querySelector('.library-reason-text').textContent,next:root.querySelector('[data-library-action="reason-next"]')!==null}; })()`);
       reconstructed += fragment.text;
       if (!fragment.next) break;
@@ -1049,7 +1049,8 @@ async function main() {
     }
 
     // Populate the Book chooser through the ordinary creation form, then retain one explicit choice across replacement pages.
-    await click(renderer, '返回图书列表', 'library-books-landing');
+    await click(renderer, '返回', 'library-books-landing');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'library-books-landed');
     for (let index = 0; index < 19; index += 1) {
       await createEmptyBook(renderer, `J15 分页图书${String(index).padStart(2, '0')}`);
       await click(renderer, '返回图书列表', 'library-books-return');

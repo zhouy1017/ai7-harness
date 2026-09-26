@@ -243,6 +243,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
         if (page.nextOffset !== null) row.append(action('下一段', 'quiet', 'reason-next', () => void read(page.nextOffset!)));
         row.append(action('收起说明', 'quiet', 'reason-close', () => { section.replaceChildren(open); open.disabled = false; open.focus(); }));
         section.replaceChildren(text, row);
+        section.dataset['reasonOffset'] = String(offset);
         text.focus();
       } catch (error) {
         if (!section.isConnected) return;
