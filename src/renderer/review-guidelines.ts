@@ -67,7 +67,12 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     }
     root.replaceChildren(list);
     root.dataset['guidelineCount'] = String(projection?.documents.length ?? 0);
-    if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();
+    if (focus !== null) {
+      const target = root.querySelector<HTMLElement>(focus);
+      if (target instanceof HTMLButtonElement && target.disabled) {
+        (target.closest('details')?.querySelector('summary') ?? target.closest('section')?.querySelector('h4'))?.focus();
+      } else target?.focus();
+    }
   };
 
   const card = (document: ReviewGuidelineDocumentProjection): HTMLElement => {

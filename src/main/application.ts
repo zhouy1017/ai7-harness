@@ -2569,7 +2569,7 @@ function registerRendererHandlers(
     envelope(async () => {
       requireSender(event);
       requireAuthority();
-      return service.call('inspectReviewGuidelines', { page: input?.page });
+      return service.call('inspectReviewGuidelines', input?.page === undefined ? {} : { page: input.page });
     }),
   );
   ipcMain.handle(
@@ -2583,7 +2583,8 @@ function registerRendererHandlers(
           requireAuthority();
           if (input.previewId !== undefined) {
             requireDesktop(typeof input.previewId === 'string' && input.previewId.length <= 64, 'AI7_RENDERER_BOUNDARY_INVALID');
-            return service.call('previewReviewGuidelineVersion', { documentId: input.documentId, previewId: input.previewId, clausePage: input.clausePage });
+            return service.call('previewReviewGuidelineVersion', { documentId: input.documentId, previewId: input.previewId,
+              ...(input.clausePage === undefined ? {} : { clausePage: input.clausePage }) });
           }
           const path = await chooseGuidelineFile(owned);
           if (path === undefined) return null;
