@@ -172,7 +172,7 @@ describe('the execution owner\'s concurrency governor over the real store on exa
       expect(owner.admitOrQueue(queuedRun.runRecordId)).toBe('queued');
       const blocked = store.inspectBaselineAnalysis(overflow.bookId);
       expect(blocked.run).toMatchObject({ state: 'blocked-before-dispatch', attempt: null });
-      expect(blocked.run!.blockedReasons.join()).toContain('重新准备并开始');
+      expect(blocked.run?.blockedReasons?.join()).toContain('重新准备并开始');
       store.cancelWaitingBaselineAnalysis(waiting.bookId, waiting.taskIntentId);
       expect(owner.dequeue(queuedRun.runRecordId)).toBe(true);
       const prepared = prepare(store, overflow.bookId);
