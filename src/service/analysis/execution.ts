@@ -382,7 +382,7 @@ export class BaselineAnalysisExecutionOwner {
   /**
    * The Runs authorized and waiting on the governor (Issue #49, S14; CONC-007), in the order they were started: each is
    * admitted, in its turn, as a place frees. Their ledger records them `authorized` until then, so a service that
-   * stops keeps the queue, and the next start queues them again in the same order.
+   * stops leaves those records recoverable; restart blocks them before dispatch and requires a fresh explicit start.
    */
   readonly #queued: Array<{ runRecordId: string; ledger: BaselineAnalysisStore }> = [];
   #disposed = false;
@@ -448,7 +448,7 @@ export class BaselineAnalysisExecutionOwner {
    * no Run waits before it, else queued — `authorized` in its ledger, read as 等待运行名额 — and admitted in its turn.
    */
   admitOrQueue(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): 'admitted' | 'queued' {
-    // AI7 is closing: the start stays `authorized`, and the next launch queues it again.
+    // AI7 is closing: the start stays `authorized`; restart recovery requires a fresh explicit start.
     if (this.#disposed) throw new ExecutionAdmissionError('EXECUTION_STOPPING', '本地业务服务正在停止。');
     if (this.#active.has(runRecordId)) return 'admitted';
     if (this.#queued.some((entry) => entry.runRecordId === runRecordId)) return 'queued';
