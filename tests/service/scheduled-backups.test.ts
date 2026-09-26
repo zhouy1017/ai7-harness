@@ -282,8 +282,10 @@ describe('定期自动备份 over the real store', () => {
       // The second backup's file is replaced by other bytes of the same size: it is no longer the file AI7 made.
       const second = join(location, backupFileName(at(DAY)));
       await writeFile(second, Buffer.alloc((await stat(second)).size, 7));
-      // What a check cut off left — its package and the store copy it was made from — and, beside them, what is not a check's.
-      const leftovers = [`.${randomUUID()}.ai7db.partial`, `.${randomUUID()}.ai7db.partial.store`];
+      // What a check cut off left — its package, the store copy it was made from and the journals SQLite keeps beside that copy
+      // while it is made (Issue #434 review) — and, beside them, what is not a check's.
+      const copy = `.${randomUUID()}.ai7db.partial.store`;
+      const leftovers = [`.${randomUUID()}.ai7db.partial`, copy, `${copy}-journal`, `${copy}-wal`, `${copy}-shm`];
       for (const name of leftovers) await writeFile(join(location, name), 'cut off');
       const others = ['.keep', 'notes.txt', `.${randomUUID()}.ai7db.partial.bak`];
       for (const name of others) await writeFile(join(location, name), 'not a check\'s');

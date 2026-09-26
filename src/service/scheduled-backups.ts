@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { lstat, mkdir, readdir, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdir, opendir, realpath, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -52,7 +52,7 @@ const EXPIRY_BATCH = 16;
 export const BACKUP_FILE_NAME = /^AI7 自动备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db$/u;
 const BACKUP_FILE_NAME_GLOB = 'AI7 自动备份 [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]-[0-9][0-9]-[0-9][0-9].ai7db';
 /** What a check cut off leaves: the package it was writing, and the copy of the store that package is made from. */
-const PARTIAL_FILE_NAME = /^\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.ai7db\.partial(?:\.store)?$/u;
+const PARTIAL_FILE_NAME = /^\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.ai7db\.partial(?:\.store(?:-journal|-wal|-shm)?)?$/u;
 
 export const SCHEDULED_BACKUP_SCHEMA_SQL = {
   backup_preferences: `CREATE TABLE backup_preferences (
@@ -468,9 +468,10 @@ export class ScheduledBackups {
   async #sweepPartials(): Promise<void> {
     const location = await existingBackupLocation(this.#dataRoot);
     if (location === null) return;
-    for (const entry of await readdir(location)) {
-      if (!PARTIAL_FILE_NAME.test(entry)) continue;
-      const path = join(location, entry);
+    // Read as a stream (Issue #434 review): whatever else the backup location holds, the sweep holds one name at a time.
+    for await (const entry of await opendir(location)) {
+      if (!PARTIAL_FILE_NAME.test(entry.name)) continue;
+      const path = join(location, entry.name);
       try {
         if ((await lstat(path)).isFile()) await rm(path, { force: true });
       } catch {
