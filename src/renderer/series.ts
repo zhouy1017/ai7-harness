@@ -1,8 +1,10 @@
 import type {
   BookSeriesProjection,
   RendererApi,
+  SeriesCandidatesCursor,
   SeriesImpactGroupProjection,
   SeriesListProjection,
+  SeriesSummaryProjection,
   SeriesMembershipChangeKind,
   SeriesMembershipChangeProjection,
   SeriesMembershipPreviewProjection,
@@ -14,8 +16,13 @@ import {
   BOOK_SERIES_HISTORY,
   BOOK_SERIES_NONE,
   SERIES_ADD_LEGEND,
+  SERIES_ADD_MORE,
+  SERIES_ADD_NO_BOOKS,
+  SERIES_ADD_NO_MATCH,
   SERIES_ADD_NONE,
   SERIES_ADD_OPEN,
+  SERIES_ADD_SEARCH,
+  SERIES_ADD_SEARCH_LABEL,
   SERIES_CANCEL,
   SERIES_CHANGES_LABEL,
   SERIES_CREATE,
@@ -24,9 +31,12 @@ import {
   SERIES_HISTORY_EMPTY,
   SERIES_HISTORY_HEADING,
   SERIES_HISTORY_IMPACT,
+  SERIES_HISTORY_MORE,
+  SERIES_LIST_MORE,
   SERIES_MEMBER_COLUMNS,
   SERIES_MEMBERS_EMPTY,
   SERIES_MEMBERS_HEADING,
+  SERIES_MEMBERS_MORE,
   SERIES_NAME_LABEL,
   SERIES_NO_CHANGE,
   SERIES_NOTE_LABEL,
@@ -38,6 +48,7 @@ import {
   SERIES_UNCHANGED_LABEL,
   bookSeriesChangeLine,
   bookSeriesMembershipLine,
+  bookSeriesMoreLine,
   seriesChangeByline,
   seriesChangeLine,
   seriesConsistencyLine,
@@ -167,8 +178,42 @@ export function mountSeriesList(options: MountSeriesListOptions): { load(): Prom
       }
       nodes.push(list);
     }
+    if (projection.nextCursor !== null) {
+      const row = el('div', 'button-row series-more');
+      const more = action(SERIES_LIST_MORE, 'secondary', 'list-more', () => void loadMore());
+      more.disabled = busy;
+      row.append(more);
+      nodes.push(row);
+    }
     root.replaceChildren(...nodes);
     if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();
+  };
+
+  /** `更多书系…`: the next page by name, a Series already shown (one just created) never twice. */
+  const loadMore = async (): Promise<void> => {
+    if (busy || projection?.nextCursor == null) return;
+    busy = true;
+    paint(null);
+    setStatus(SERIES_STATUS.loadingMore, 'busy');
+    try {
+      const page = await api.inspectSeriesList({ after: projection.nextCursor });
+      const known = new Set(projection.series.map((entry) => entry.seriesId));
+      const added = page.series.filter((entry) => !known.has(entry.seriesId));
+      projection = { series: [...projection.series, ...added], nextCursor: page.nextCursor };
+      busy = false;
+      paint(added[0] === undefined ? null : `[data-series-id="${added[0].seriesId}"] [data-series-action="open"]`);
+      setStatus(SERIES_STATUS.opened);
+    } catch (error) {
+      busy = false;
+      paint('[data-series-action="list-more"]');
+      setStatus(errorMessage(error, SERIES_STATUS.unavailable), 'error');
+    }
+  };
+
+  /** The new Series in its place by name among those shown: the answer carries it alone (Issue #63 review). */
+  const withCreated = (series: ReadonlyArray<SeriesSummaryProjection>, created: SeriesSummaryProjection): SeriesSummaryProjection[] => {
+    const at = series.findIndex((entry) => entry.title > created.title);
+    return at < 0 ? [...series, created] : [...series.slice(0, at), created, ...series.slice(at)];
   };
 
   const formNode = (): HTMLElement => {
@@ -217,7 +262,7 @@ export function mountSeriesList(options: MountSeriesListOptions): { load(): Prom
     setStatus(SERIES_STATUS.creating, 'busy');
     try {
       const created = await api.createSeries({ title: form.title, note: form.note });
-      projection = created.list;
+      projection = projection === null ? { series: [created.series], nextCursor: null } : { ...projection, series: withCreated(projection.series, created.series) };
       busy = false;
       form = null;
       paint(`[data-series-id="${created.seriesId}"] [data-series-action="open"]`);
@@ -233,7 +278,7 @@ export function mountSeriesList(options: MountSeriesListOptions): { load(): Prom
   return {
     async load(): Promise<void> {
       root.replaceChildren(el('p', 'field-note', SERIES_STATUS.loading));
-      projection = await api.inspectSeriesList();
+      projection = await api.inspectSeriesList({ after: null });
       paint(options.focusSeriesId === null ? null : `[data-series-id="${options.focusSeriesId}"] [data-series-action="open"]`);
     },
   };
@@ -242,7 +287,8 @@ export function mountSeriesList(options: MountSeriesListOptions): { load(): Prom
 export interface MountSeriesOptions {
   readonly root: HTMLElement;
   readonly seriesId: string;
-  readonly api: Pick<RendererApi, 'inspectSeries' | 'previewSeriesMembershipChange' | 'changeSeriesMembership'>;
+  readonly api: Pick<RendererApi, 'inspectSeries' | 'inspectSeriesMembers' | 'inspectSeriesCandidates' | 'inspectSeriesHistory' |
+    'previewSeriesMembershipChange' | 'changeSeriesMembership'>;
   readonly setStatus: Status;
   readonly errorMessage: (error: unknown, fallback: string) => string;
 }
@@ -250,13 +296,25 @@ export interface MountSeriesOptions {
 /**
  * One Series' 成员与共享范围 (SER-001 to SER-010): the member table, 加入书系… and 移出书系… each through the inline preview
  * whose only committing action is exactly `加入书系` or `移出书系`, and the change records, newest first.
+ *
+ * Every list is read a page at a time (Issue #63 review): members newest joined first with `更多成员…`, the records with
+ * `更早的记录…`, and 加入书系…'s Books by title with `查找书名` and `更多图书…` — so every Book can be added and every member
+ * removed, however many there are.
  */
 export function mountSeries(options: MountSeriesOptions): { load(): Promise<SeriesProjection> } {
   const { root, api, setStatus, errorMessage } = options;
   root.classList.add('series-page');
   let projection: SeriesProjection | null = null;
-  /** The Book being chosen for 加入书系, while the chooser is open. */
-  let chooser: { bookId: string | null } | null = null;
+  /**
+   * 加入书系…'s chooser while it is open: the Book chosen, the words searched for, the Books read so far — `null` while the
+   * first page is on its way — and where the next page starts.
+   */
+  let chooser: {
+    bookId: string | null;
+    text: string;
+    candidates: Array<{ readonly bookId: string; readonly title: string }> | null;
+    next: SeriesCandidatesCursor | null;
+  } | null = null;
   let preview: SeriesMembershipPreviewProjection | null = null;
   /** The preview the editor asked for and could not see, so a stale refusal can ask again. */
   let asked: { bookId: string; kind: SeriesMembershipChangeKind } | null = null;
@@ -271,19 +329,28 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
     members.append(el('h3', undefined, SERIES_MEMBERS_HEADING), el('p', 'field-note series-scope-note', SERIES_SCOPE_NOTE));
     if (projection.members.length === 0) members.append(el('p', 'field-note series-members-empty', SERIES_MEMBERS_EMPTY));
     else members.append(memberTable(projection));
+    if (projection.membersNext !== null) {
+      const row = el('div', 'button-row series-more');
+      const more = action(SERIES_MEMBERS_MORE, 'secondary', 'members-more', () => void loadMembers());
+      more.disabled = busy;
+      row.append(more);
+      members.append(row);
+    }
     const addRow = el('div', 'button-row series-add-row');
     const addOpen = action(SERIES_ADD_OPEN, 'secondary', 'add-open', () => {
       if (busy) return;
-      chooser = { bookId: null };
+      chooser = { bookId: null, text: '', candidates: null, next: null };
       preview = null;
       refusal = null;
-      paint('input[name="series-add-book"]');
+      void loadCandidates(true);
     });
-    addOpen.disabled = busy || projection.candidates.length === 0 || chooser !== null || preview !== null;
+    const nothingToAdd = projection.memberCount >= projection.bookCount;
+    addOpen.disabled = busy || nothingToAdd || chooser !== null || preview !== null;
     addRow.append(addOpen);
-    if (projection.candidates.length === 0) addRow.append(el('p', 'field-note series-add-none', SERIES_ADD_NONE));
+    // A house with no Book yet says so, rather than that every Book is already in (Issue #63 review).
+    if (nothingToAdd) addRow.append(el('p', 'field-note series-add-none', projection.bookCount === 0 ? SERIES_ADD_NO_BOOKS : SERIES_ADD_NONE));
     members.append(addRow);
-    if (chooser !== null) members.append(chooserNode(projection));
+    if (chooser !== null) members.append(chooserNode());
     if (preview !== null || (refusal !== null && asked !== null)) members.append(previewNode());
 
     const history = el('section', 'series-history-section');
@@ -293,6 +360,13 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       const list = el('ol', 'series-history');
       for (const change of projection.history) list.append(renderChange(change, seriesChangeLine(change)));
       history.append(list);
+    }
+    if (projection.historyNext !== null) {
+      const row = el('div', 'button-row series-more');
+      const more = action(SERIES_HISTORY_MORE, 'secondary', 'history-more', () => void loadHistory());
+      more.disabled = busy;
+      row.append(more);
+      history.append(row);
     }
     root.replaceChildren(members, history);
     if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();
@@ -339,10 +413,32 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
     return table;
   };
 
-  const chooserNode = (series: SeriesProjection): HTMLElement => {
+  const chooserNode = (): HTMLElement => {
     const box = el('fieldset', 'series-add-chooser');
     box.append(el('legend', undefined, SERIES_ADD_LEGEND));
-    for (const candidate of series.candidates) {
+    // 查找书名 first, so Tab from a chosen Book goes on to 查看影响.
+    const searchRow = el('div', 'series-add-search');
+    const searchLabel = el('label', 'series-field');
+    const search = el('input');
+    search.id = 'series-add-search';
+    search.type = 'search';
+    search.value = chooser?.text ?? '';
+    search.disabled = busy;
+    search.addEventListener('input', () => { if (chooser !== null) chooser.text = search.value; });
+    search.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' || event.isComposing) return;
+      event.preventDefault();
+      void loadCandidates(true);
+    });
+    searchLabel.append(el('span', undefined, SERIES_ADD_SEARCH_LABEL), search);
+    const find = action(SERIES_ADD_SEARCH, 'secondary', 'add-search', () => void loadCandidates(true));
+    find.disabled = busy;
+    searchRow.append(searchLabel, find);
+    box.append(searchRow);
+    const candidates = chooser?.candidates ?? null;
+    if (candidates === null) box.append(el('p', 'field-note', SERIES_STATUS.loading));
+    else if (candidates.length === 0) box.append(el('p', 'field-note series-add-no-match', (chooser?.text.trim() ?? '') === '' ? SERIES_ADD_NONE : SERIES_ADD_NO_MATCH));
+    for (const candidate of candidates ?? []) {
       const label = el('label', 'series-add-choice');
       const radio = el('input');
       radio.type = 'radio';
@@ -357,6 +453,13 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       });
       label.append(radio, el('span', undefined, `《${candidate.title}》`));
       box.append(label);
+    }
+    if (chooser?.next != null) {
+      const row = el('div', 'button-row series-more');
+      const more = action(SERIES_ADD_MORE, 'secondary', 'add-more', () => void loadCandidates(false));
+      more.disabled = busy;
+      row.append(more);
+      box.append(row);
     }
     const look = action(SERIES_PREVIEW_ACTION, 'primary', 'preview', () => {
       if (chooser?.bookId) void ask(chooser.bookId, 'add');
@@ -413,6 +516,80 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
     return box;
   };
 
+  /**
+   * 加入书系…'s Books (Issue #63 review): the first page for the words searched — every Book the Series does not hold when there
+   * are none — or the next page after those shown. Focus goes to the first Book the read brought.
+   */
+  const loadCandidates = async (fresh: boolean): Promise<void> => {
+    if (busy || projection === null || chooser === null) return;
+    const open = chooser;
+    busy = true;
+    if (fresh) {
+      open.candidates = null;
+      open.next = null;
+      open.bookId = null;
+    }
+    paint(null);
+    try {
+      const page = await api.inspectSeriesCandidates({ seriesId: projection.seriesId, text: open.text, after: fresh ? null : open.next });
+      busy = false;
+      if (chooser !== open) return;
+      const known = new Set((open.candidates ?? []).map((entry) => entry.bookId));
+      const added = page.candidates.filter((entry) => !known.has(entry.bookId));
+      open.candidates = [...(open.candidates ?? []), ...added];
+      open.next = page.nextCursor;
+      paint(added[0] === undefined ? '#series-add-search' : `input[name="series-add-book"][value="${added[0].bookId}"]`);
+    } catch (error) {
+      busy = false;
+      if (open.candidates === null) open.candidates = [];
+      paint('#series-add-search');
+      setStatus(errorMessage(error, SERIES_STATUS.unavailable), 'error');
+    }
+  };
+
+  /** `更多成员…`: the next page of members, newest joined first. */
+  const loadMembers = async (): Promise<void> => {
+    if (busy || projection?.membersNext == null) return;
+    const shown = projection;
+    busy = true;
+    paint(null);
+    setStatus(SERIES_STATUS.loadingMore, 'busy');
+    try {
+      const page = await api.inspectSeriesMembers({ seriesId: shown.seriesId, after: shown.membersNext });
+      const known = new Set(shown.members.map((member) => member.bookId));
+      const added = page.members.filter((member) => !known.has(member.bookId));
+      projection = { ...shown, members: [...shown.members, ...added], membersNext: page.nextCursor };
+      busy = false;
+      paint(added[0] === undefined ? null : `tr[data-book-id="${added[0].bookId}"] [data-series-action="remove-open"]`);
+      setStatus(SERIES_STATUS.opened);
+    } catch (error) {
+      busy = false;
+      paint('[data-series-action="members-more"]');
+      setStatus(errorMessage(error, SERIES_STATUS.unavailable), 'error');
+    }
+  };
+
+  /** `更早的记录…`: the next page of the Series' change records, newest first. */
+  const loadHistory = async (): Promise<void> => {
+    if (busy || projection?.historyNext == null) return;
+    const shown = projection;
+    busy = true;
+    paint(null);
+    setStatus(SERIES_STATUS.loadingMore, 'busy');
+    try {
+      const page = await api.inspectSeriesHistory({ seriesId: shown.seriesId, bookId: null, after: shown.historyNext });
+      const known = new Set(shown.history.map((change) => change.changeId));
+      projection = { ...shown, history: [...shown.history, ...page.history.filter((change) => !known.has(change.changeId))], historyNext: page.nextCursor };
+      busy = false;
+      paint(projection.historyNext === null ? null : '[data-series-action="history-more"]');
+      setStatus(SERIES_STATUS.opened);
+    } catch (error) {
+      busy = false;
+      paint('[data-series-action="history-more"]');
+      setStatus(errorMessage(error, SERIES_STATUS.unavailable), 'error');
+    }
+  };
+
   /** Ask the service what the change would do: the preview replaces the chooser, and nothing is recorded yet. */
   const ask = async (bookId: string, kind: SeriesMembershipChangeKind): Promise<void> => {
     if (busy || projection === null) return;
@@ -446,7 +623,9 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
     setStatus(SERIES_STATUS.committing, 'busy');
     try {
       const result = await api.changeSeriesMembership({ seriesId: shown.seriesId, bookId: shown.bookId, kind: shown.kind, previewDigest: shown.previewDigest });
-      projection = result.series;
+      // The answer is the record alone (Issue #63 review): the Series is read again, its first pages newest first, so a Book
+      // just added heads the member table. The change stands whatever that read meets.
+      try { projection = await api.inspectSeries({ seriesId: shown.seriesId }); } catch { /* the page keeps what it had */ }
       busy = false;
       preview = null;
       asked = null;
@@ -477,7 +656,7 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
 export interface MountBookSeriesOptions {
   readonly root: HTMLElement;
   readonly bookId: string;
-  readonly api: Pick<RendererApi, 'inspectBookSeries'>;
+  readonly api: Pick<RendererApi, 'inspectBookSeries' | 'inspectSeriesHistory'>;
 }
 
 /** A Book's 书系 on its 工作概览 (SER-009): the Series it is in now and its membership change records. A read. */
@@ -497,11 +676,33 @@ export function mountBookSeries(options: MountBookSeriesOptions): void {
         line.dataset['seriesId'] = membership.seriesId;
         nodes.push(line);
       }
-      if (projection.history.length > 0) {
+      if (projection.membershipCount > projection.memberships.length) {
+        nodes.push(el('p', 'field-note book-series-more', bookSeriesMoreLine(projection.membershipCount - projection.memberships.length)));
+      }
+      if (projection.historyCount > 0) {
         const details = el('details', 'book-series-history');
         const list = el('ol');
         for (const change of projection.history) list.append(renderChange(change, bookSeriesChangeLine(change)));
-        details.append(el('summary', undefined, `${BOOK_SERIES_HISTORY}（${projection.history.length}）`), list);
+        // The summary counts every record; `更早的记录…` reads those past the first page (Issue #63 review).
+        details.append(el('summary', undefined, `${BOOK_SERIES_HISTORY}（${projection.historyCount}）`), list);
+        let next = projection.historyNext;
+        if (next !== null) {
+          const more = action(SERIES_HISTORY_MORE, 'secondary', 'book-history-more', () => {
+            if (next === null || more.disabled) return;
+            more.disabled = true;
+            void options.api.inspectSeriesHistory({ seriesId: null, bookId: options.bookId, after: next }).then(
+              (page) => {
+                if (!root.isConnected) return;
+                for (const change of page.history) list.append(renderChange(change, bookSeriesChangeLine(change)));
+                next = page.nextCursor;
+                if (next === null) more.remove();
+                else more.disabled = false;
+              },
+              () => { more.disabled = false; },
+            );
+          });
+          details.append(more);
+        }
         nodes.push(details);
       }
       root.replaceChildren(...nodes);

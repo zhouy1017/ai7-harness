@@ -133,6 +133,9 @@ export const IPC_CHANNELS = {
   previewSeriesMembershipChange: 'ai7:j13:preview-series-membership-change',
   changeSeriesMembership: 'ai7:j13:change-series-membership',
   inspectBookSeries: 'ai7:j13:inspect-book-series',
+  inspectSeriesMembers: 'ai7:j13:inspect-series-members',
+  inspectSeriesCandidates: 'ai7:j13:inspect-series-candidates',
+  inspectSeriesHistory: 'ai7:j13:inspect-series-history',
   applyChangeSuggestion: 'ai7:j05:apply-change-suggestion',
   applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
   reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
@@ -5374,10 +5377,44 @@ export interface SetEvaluationPreferencesInput {
 /** A Series name, in characters (code points) once NFC-normalized and trimmed; its 说明 likewise. */
 export const MAX_SERIES_TITLE_CHARACTERS = 40;
 export const MAX_SERIES_NOTE_CHARACTERS = 500;
-/** How many members, Books offered for 加入书系, and changes one Series answer lists at most. */
-export const MAX_SERIES_MEMBERS_LISTED = 500;
-export const MAX_SERIES_CANDIDATES_LISTED = 200;
-export const MAX_SERIES_HISTORY_LISTED = 100;
+/**
+ * How many Series, members, Books offered for 加入书系, and change records one answer carries at most (Issue #63 review).
+ * Every list is read a page at a time, so none is out of reach, and no page weighs more than the service's byte budget.
+ */
+export const MAX_SERIES_LIST_PAGE = 50;
+export const MAX_SERIES_MEMBERS_PAGE = 50;
+export const MAX_SERIES_CANDIDATES_PAGE = 50;
+export const MAX_SERIES_HISTORY_PAGE = 20;
+/** How many of the Series a Book is in its 工作概览 names; every one is also reached from 书系. */
+export const MAX_BOOK_SERIES_MEMBERSHIPS = 50;
+/** The words 查找 matches in a Book's title for 加入书系, at most. */
+export const MAX_SERIES_CANDIDATE_QUERY_CHARACTERS = 40;
+
+/** Where the next page of 书系 starts: after this Series, by name. */
+export interface SeriesListCursor {
+  readonly title: string;
+  readonly seriesId: string;
+}
+
+/** Where the next page of a Series' members starts: after this member, newest joined first. */
+export interface SeriesMembersCursor {
+  readonly joinedAt: string;
+  readonly bookId: string;
+}
+
+/** Where the next page of Books offered for 加入书系 starts: after this Book, by title. */
+export interface SeriesCandidatesCursor {
+  readonly title: string;
+  readonly bookId: string;
+}
+
+/** Where the next page of membership change records starts: after this record, newest first. */
+export interface SeriesHistoryCursor {
+  readonly recordedAt: string;
+  readonly seriesId: string;
+  readonly bookId: string;
+  readonly ordinal: number;
+}
 
 export type SeriesMembershipChangeKind = 'add' | 'remove';
 
@@ -5390,8 +5427,10 @@ export interface SeriesSummaryProjection {
   readonly createdAt: string;
 }
 
+/** One page of 书系, by name; `nextCursor` reads the next (`更多书系…`). */
 export interface SeriesListProjection {
   readonly series: ReadonlyArray<SeriesSummaryProjection>;
+  readonly nextCursor: SeriesListCursor | null;
 }
 
 export interface CreateSeriesInput {
@@ -5403,7 +5442,8 @@ export interface SeriesCreationProjection {
   readonly seriesId: string;
   /** `已新建书系「…」`. */
   readonly completionLabel: string;
-  readonly list: SeriesListProjection;
+  /** The new Series as the list shows it: the answer never carries the whole list (Issue #63 review). */
+  readonly series: SeriesSummaryProjection;
 }
 
 /** One of the preview's four consequence groups (SER-003): what changes, and what stays as it is. */
@@ -5442,20 +5482,40 @@ export interface SeriesMemberProjection {
 }
 
 /**
- * 书系 › one Series › 成员与共享范围 (SER-001): its member Books, the Books that may be added, and every membership change,
- * newest first. It is not a reader of the member manuscripts.
+ * 书系 › one Series › 成员与共享范围 (SER-001): the first page of its member Books, newest joined first — a Book just added is
+ * always on it — and of its membership changes, newest first, each with where the next page starts, and how many Books the
+ * Series and the house hold, which is what 加入书系… can offer. It is not a reader of the member manuscripts.
  */
 export interface SeriesProjection {
   readonly seriesId: string;
   readonly title: string;
   readonly note: string;
   readonly createdAt: string;
+  readonly memberCount: number;
+  readonly bookCount: number;
   readonly members: ReadonlyArray<SeriesMemberProjection>;
-  readonly membersTruncated: boolean;
-  readonly candidates: ReadonlyArray<{ readonly bookId: string; readonly title: string }>;
-  readonly candidatesTruncated: boolean;
+  readonly membersNext: SeriesMembersCursor | null;
   readonly history: ReadonlyArray<SeriesMembershipChangeProjection>;
-  readonly historyTruncated: boolean;
+  readonly historyCount: number;
+  readonly historyNext: SeriesHistoryCursor | null;
+}
+
+/** A further page of a Series' members (`更多成员…`). */
+export interface SeriesMembersPageProjection {
+  readonly members: ReadonlyArray<SeriesMemberProjection>;
+  readonly nextCursor: SeriesMembersCursor | null;
+}
+
+/** A page of the Books 加入书系… offers — every Book not in the Series, by title — narrowed by 查找 when words are given. */
+export interface SeriesCandidatesProjection {
+  readonly candidates: ReadonlyArray<{ readonly bookId: string; readonly title: string }>;
+  readonly nextCursor: SeriesCandidatesCursor | null;
+}
+
+/** A further page of membership change records, of one Series or of one Book (`更早的记录…`). */
+export interface SeriesHistoryPageProjection {
+  readonly history: ReadonlyArray<SeriesMembershipChangeProjection>;
+  readonly nextCursor: SeriesHistoryCursor | null;
 }
 
 export interface PreviewSeriesMembershipChangeInput {
@@ -5488,15 +5548,21 @@ export interface SeriesMembershipChangeResultProjection {
   readonly changeId: string;
   /** `已加入书系「…」：《…》` or `已移出书系「…」：《…》`. */
   readonly completionLabel: string;
-  readonly series: SeriesProjection;
+  /** The record the change made: the answer carries it alone, and the page reads the Series again (Issue #63 review). */
+  readonly change: SeriesMembershipChangeProjection;
 }
 
-/** A Book's side of 书系 (SER-009): the Series it is in now and every change of its membership, newest first. */
+/**
+ * A Book's side of 书系 (SER-009): the Series it is in now, by name — at most `MAX_BOOK_SERIES_MEMBERSHIPS`, with how many in
+ * all — and the first page of its membership changes, newest first, with how many there are and where the next page starts.
+ */
 export interface BookSeriesProjection {
   readonly bookId: string;
   readonly memberships: ReadonlyArray<{ readonly seriesId: string; readonly title: string; readonly joinedAt: string }>;
+  readonly membershipCount: number;
   readonly history: ReadonlyArray<SeriesMembershipChangeProjection>;
-  readonly historyTruncated: boolean;
+  readonly historyCount: number;
+  readonly historyNext: SeriesHistoryCursor | null;
 }
 
 /** The drawer's `设为快速开始默认…` for one plan, and the rule that started its Task, when one did. */
@@ -7904,12 +7970,16 @@ export interface ServiceOperationMap {
   inspectEvaluationCalibration: { input: Record<string, never>; output: EvaluationCalibrationProjection };
   recordPublicationActuals: { input: RecordPublicationActualsInput; output: EvaluationCalibrationProjection };
   setEvaluationPreferences: { input: SetEvaluationPreferencesInput; output: EvaluationCalibrationProjection };
-  inspectSeriesList: { input: Record<string, never>; output: SeriesListProjection };
+  inspectSeriesList: { input: { after: SeriesListCursor | null }; output: SeriesListProjection };
   createSeries: { input: CreateSeriesInput; output: SeriesCreationProjection };
   inspectSeries: { input: { seriesId: string }; output: SeriesProjection };
   previewSeriesMembershipChange: { input: PreviewSeriesMembershipChangeInput; output: SeriesMembershipPreviewProjection };
   changeSeriesMembership: { input: ChangeSeriesMembershipInput; output: SeriesMembershipChangeResultProjection };
   inspectBookSeries: { input: { bookId: string }; output: BookSeriesProjection };
+  inspectSeriesMembers: { input: { seriesId: string; after: SeriesMembersCursor | null }; output: SeriesMembersPageProjection };
+  inspectSeriesCandidates: { input: { seriesId: string; text: string; after: SeriesCandidatesCursor | null }; output: SeriesCandidatesProjection };
+  /** Exactly one of a Series and a Book. */
+  inspectSeriesHistory: { input: { seriesId: string | null; bookId: string | null; after: SeriesHistoryCursor | null }; output: SeriesHistoryPageProjection };
   /**
    * AI7 Apply for Change Suggestions (Issue #408). The batch form is 确认应用 on 审阅's confirmation
    * strip (Issue #417): one Effect over exactly the suggestions the strip named, all or none.
@@ -8244,12 +8314,15 @@ export interface RendererApi {
   inspectEvaluationCalibration(): Promise<EvaluationCalibrationProjection>;
   recordPublicationActuals(input: RecordPublicationActualsInput): Promise<EvaluationCalibrationProjection>;
   setEvaluationPreferences(input: SetEvaluationPreferencesInput): Promise<EvaluationCalibrationProjection>;
-  inspectSeriesList(): Promise<SeriesListProjection>;
+  inspectSeriesList(input?: { after?: SeriesListCursor | null }): Promise<SeriesListProjection>;
   createSeries(input: CreateSeriesInput): Promise<SeriesCreationProjection>;
   inspectSeries(input: { seriesId: string }): Promise<SeriesProjection>;
   previewSeriesMembershipChange(input: PreviewSeriesMembershipChangeInput): Promise<SeriesMembershipPreviewProjection>;
   changeSeriesMembership(input: ChangeSeriesMembershipInput): Promise<SeriesMembershipChangeResultProjection>;
   inspectBookSeries(input: { bookId: string }): Promise<BookSeriesProjection>;
+  inspectSeriesMembers(input: { seriesId: string; after: SeriesMembersCursor | null }): Promise<SeriesMembersPageProjection>;
+  inspectSeriesCandidates(input: { seriesId: string; text: string; after: SeriesCandidatesCursor | null }): Promise<SeriesCandidatesProjection>;
+  inspectSeriesHistory(input: { seriesId: string | null; bookId: string | null; after: SeriesHistoryCursor | null }): Promise<SeriesHistoryPageProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */
   applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): Promise<ManuscriptApplyCommandProjection>;

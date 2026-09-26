@@ -160,7 +160,7 @@ The runner creates three empty Books, 星河之一, 星河之二 and 书系之�
 - `加入书系` answers `已加入书系「星河三部曲」：《星河之一》`. The member table reads 图书 · 作者 · 责编 · 加入时间 · 书系一致性审阅 · 操作, with `未填写` twice and `尚未审阅`. Focus sits on the row's `移出书系…`.
 - One record, `加入书系 · 《星河之一》`, keeps the four groups it showed. The service and the Book's own side agree.
 
-**A stale preview.** While the preview for 星河之二 is open, the runner adds and removes 星河之二 through the service, as another window could. `加入书系` is then refused with `预览之后，书系成员或相关记录有了变化；请重新查看影响，再决定。`. The preview is withdrawn, and focus moves to `重新查看影响`, which reads it again. Only then does `加入书系` go through. The records now read, newest first: 加入, 移出, 加入 for 星河之二, and 加入 for 星河之一.
+**A stale preview.** While the preview for 星河之二 is open, the runner adds and removes 星河之二 through the service, as another window could. `加入书系` is then refused with `预览之后，书系成员或相关记录有了变化；请重新查看影响，再决定。`. The preview is withdrawn, and focus moves to `重新查看影响`, which reads it again. Only then does `加入书系` go through. The member table now lists 星河之二 above 星河之一, newest joined first. The records now read, newest first: 加入, 移出, 加入 for 星河之二, and 加入 for 星河之一.
 
 **Finding by 书系.** 书库's search by `书系` for 星河三部曲 finds exactly 星河之一 and 星河之二, and the line reads `按书系查找「星河三部曲」`.
 
@@ -169,6 +169,8 @@ The runner creates three empty Books, 星河之一, 星河之二 and 书系之�
 **Removing a Book.** `移出书系…` on 星河之一's row opens `移出书系的影响`. Its groups say the Series' scope no longer includes the Book and that frozen Runs are neither changed nor cancelled. Its only committing action is `移出书系`. It answers `已移出书系「星河三部曲」：《星河之一》`, focus returns to `加入书系…`, and the list reads `成员 1 本`.
 
 **After a restart** everything reads as before, and 星河之一 is in no Series, with both of its records.
+
+The lists' further pages and 加入书系…'s search (Issue #63 review) — `更多书系…`, `更多成员…`, `更多图书…`, `更早的记录…` and `查找书名` — are pressed in no Journey: J-13's lists fit their first pages. The service's paging is proven below the Journey.
 
 **Keyboard and display (J-14).** From the keyboard:
 - Enter on `加入书系…` opens the chooser at its first Book, and Escape closes it back onto the opener.

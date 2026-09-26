@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
+  SERIES_ADD_MORE,
+  SERIES_ADD_NO_BOOKS,
+  SERIES_ADD_NO_MATCH,
+  SERIES_ADD_SEARCH,
+  SERIES_ADD_SEARCH_LABEL,
+  SERIES_HISTORY_MORE,
   SERIES_LEDE,
+  SERIES_LIST_MORE,
   SERIES_MEMBER_COLUMNS,
+  SERIES_MEMBERS_MORE,
   SERIES_SCOPE_NOTE,
   bookSeriesChangeLine,
   bookSeriesMembershipLine,
+  bookSeriesMoreLine,
   seriesChangeByline,
   seriesChangeLine,
   seriesConsistencyLine,
@@ -16,6 +25,7 @@ import {
 } from '../../src/renderer/series-labels.js';
 import {
   SERIES_IMPACT_GROUPS,
+  SERIES_PAGE_BYTES,
   seriesLearningFacts,
   seriesConsistencyWaitingReason,
   seriesMemberAbsent,
@@ -24,7 +34,9 @@ import {
   seriesNote,
   seriesPreviewDigest,
   seriesTitle,
+  weighedPage,
 } from '../../src/service/series.js';
+import { MAX_FRAME_BYTES } from '../../src/shared/protocol.js';
 
 // Unit suite for 书系 (Issue #63, plan slice S28a; V2-UX-SER-001 to SER-012): the names a Series may take, the four groups of
 // the Series Membership Impact Preview in their fixed order with what changes and what stays, the digest that moves with any
@@ -121,5 +133,26 @@ describe('书系 words', () => {
     expect([seriesChangeLine(change), bookSeriesChangeLine(change), seriesChangeByline(change, instant)])
       .toEqual(['加入书系 · 《星河之一》', '加入书系「星河三部曲」', '本机编辑 · 〔2026-09-25〕']);
     expect(bookSeriesMembershipLine({ title: '星河三部曲', joinedAt: '2026-09-25T08:00:00.000Z' }, instant)).toBe('书系「星河三部曲」 · 〔2026-09-25〕 加入');
+  });
+
+  it('pages every list and says what 加入书系… can and cannot offer (Issue #63 review)', () => {
+    expect([SERIES_LIST_MORE, SERIES_MEMBERS_MORE, SERIES_ADD_MORE, SERIES_HISTORY_MORE]).toEqual(['更多书系…', '更多成员…', '更多图书…', '更早的记录…']);
+    expect([SERIES_ADD_SEARCH_LABEL, SERIES_ADD_SEARCH]).toEqual(['查找书名', '查找']);
+    expect(SERIES_ADD_NO_BOOKS).toBe('书库里还没有图书；导入或新建图书后，才能加入书系。');
+    expect(SERIES_ADD_NO_MATCH).toBe('没有书名含这些字词、可以加入的图书。');
+    expect(bookSeriesMoreLine(3)).toBe('还在另外 3 个书系中，可以在「书系」里查看。');
+  });
+});
+
+describe('书系 pages (Issue #63 review)', () => {
+  it('stops by count or by weight, whichever comes first, yet always carries the first item', () => {
+    const items = Array.from({ length: 12 }, (_, index) => ({ index, text: '字'.repeat(1000) }));
+    expect(weighedPage(items, 5)).toEqual({ page: items.slice(0, 5), more: true });
+    expect(weighedPage(items.slice(0, 5), 5)).toEqual({ page: items.slice(0, 5), more: false });
+    const weight = Buffer.byteLength(JSON.stringify(items[0]), 'utf8') + 1;
+    expect(weighedPage(items, 12, weight * 3).page).toHaveLength(3);
+    expect(weighedPage(items, 12, 10)).toEqual({ page: items.slice(0, 1), more: true });
+    expect(weighedPage([], 5)).toEqual({ page: [], more: false });
+    expect(SERIES_PAGE_BYTES * 2).toBeLessThan(MAX_FRAME_BYTES);
   });
 });

@@ -48,6 +48,45 @@ export const SERIES_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
+/** The most one page of a 书系 list weighs on the wire (Issue #63 review); an answer that holds two pages holds two of these. */
+export const SERIES_PAGE_BYTES = 96 * 1024;
+
+function wireBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+/**
+ * One page of a 书系 list (Issue #63 review): from the items given, in order, at most `count` and no more than `bytes` — but
+ * always the first while there is one, so paging reaches the end — and whether any were left for the next page.
+ */
+export function weighedPage<T>(items: ReadonlyArray<T>, count: number, bytes: number = SERIES_PAGE_BYTES): { page: T[]; more: boolean } {
+  const page: T[] = [];
+  let spent = 0;
+  for (const item of items) {
+    if (page.length >= count) break;
+    const weight = wireBytes(item) + 1;
+    if (page.length > 0 && spent + weight > bytes) break;
+    page.push(item);
+    spent += weight;
+  }
+  return { page, more: page.length < items.length };
+}
+
+/**
+ * The order a membership change record is listed in, newest first: by when it was recorded, then by Series, Book and the
+ * chain's own ordinal, so every record has one place and a page can start after any of them. An exact tie within one Series
+ * and Book falls to the chain's order; a clock stepped back can still list a pair's records out of it here — membership
+ * itself always follows the chain, never this listing.
+ */
+export function seriesHistoryOrder(
+  left: { readonly recordedAt: string; readonly seriesId: string; readonly bookId: string; readonly ordinal: number },
+  right: { readonly recordedAt: string; readonly seriesId: string; readonly bookId: string; readonly ordinal: number },
+): number {
+  const text = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+  return text(right.recordedAt, left.recordedAt) || text(right.seriesId, left.seriesId) || text(right.bookId, left.bookId) ||
+    right.ordinal - left.ordinal;
+}
+
 export const SERIES_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
   Object.keys(SERIES_SCHEMA_SQL).flatMap((table) => [
     [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
@@ -248,6 +287,15 @@ export class SeriesLedger {
     return (this.#db.prepare('SELECT * FROM series ORDER BY title, series_id').all() as SqlRow[]).map((row) => this.#series(row));
   }
 
+  /** Up to `limit` Series by name after the one named, each verified: a page of 书系, in the database's own order. */
+  listAfter(after: { readonly title: string; readonly seriesId: string } | null, limit: number): StoredSeries[] {
+    const rows = after === null
+      ? this.#db.prepare('SELECT * FROM series ORDER BY title, series_id LIMIT ?').all(limit)
+      : this.#db.prepare('SELECT * FROM series WHERE title > ? OR (title = ? AND series_id > ?) ORDER BY title, series_id LIMIT ?')
+        .all(after.title, after.title, after.seriesId, limit);
+    return (rows as SqlRow[]).map((row) => this.#series(row));
+  }
+
   /** One Series, or `null` when there is none by that identity. */
   find(seriesId: string): StoredSeries | null {
     const row = this.#db.prepare('SELECT * FROM series WHERE series_id = ?').get(seriesId) as SqlRow | undefined;
@@ -297,10 +345,8 @@ export class SeriesLedger {
       const key = `${String(row.series_id)}/${String(row.book_id)}`;
       pairs.set(key, [...(pairs.get(key) ?? []), row]);
     }
-    // Newest first; within one Series and Book the chain's own order decides, whatever the clock said.
-    return [...pairs.values()].flatMap((pair) => this.#verified(pair))
-      .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt) ||
-        (left.seriesId === right.seriesId && left.bookId === right.bookId ? right.ordinal - left.ordinal : right.changeId.localeCompare(left.changeId)));
+    // Newest first, each record in one place (`seriesHistoryOrder`), so a page can start after any of them.
+    return [...pairs.values()].flatMap((pair) => this.#verified(pair)).sort(seriesHistoryOrder);
   }
 
   #verified(rows: SqlRow[]): StoredMembershipChange[] {
@@ -333,12 +379,15 @@ export class SeriesLedger {
     });
   }
 
-  /** The Books a Series holds now: each pair whose newest change is `加入书系`, with when it was. */
+  /**
+   * The Books a Series holds now: each pair whose newest change is `加入书系`, with when it was — newest joined first, so a
+   * Book just added heads the first page (Issue #63 review).
+   */
   members(seriesId: string): Array<{ readonly bookId: string; readonly joinedAt: string }> {
     return (this.#db.prepare(`SELECT c.book_id, c.recorded_at FROM series_membership_changes c
       WHERE c.series_id = ? AND c.kind = 'add' AND c.ordinal = (
         SELECT max(d.ordinal) FROM series_membership_changes d WHERE d.series_id = c.series_id AND d.book_id = c.book_id)
-      ORDER BY c.recorded_at, c.book_id`).all(seriesId) as SqlRow[]).map((row) => ({ bookId: String(row.book_id), joinedAt: String(row.recorded_at) }));
+      ORDER BY c.recorded_at DESC, c.book_id DESC`).all(seriesId) as SqlRow[]).map((row) => ({ bookId: String(row.book_id), joinedAt: String(row.recorded_at) }));
   }
 
   /** The Series a Book is in now, by name, with when it joined each. */

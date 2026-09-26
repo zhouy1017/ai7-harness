@@ -1301,12 +1301,21 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
-  it('accepts 书系: the list naming nothing, 新建书系 by two texts, a Series, a membership change and its preview, and a Book\'s side (Issue #63, S28a)', () => {
+  it('accepts 书系: the list a page at a time, 新建书系 by two texts, a Series, its further pages, a membership change and its preview, and a Book\'s side (Issue #63, S28a)', () => {
     const seriesId = randomUUID();
     const bookId = randomUUID();
     const change = { seriesId, bookId, kind: 'add', previewDigest: 'c'.repeat(64) };
+    const instant = '2026-09-26T01:02:03.004Z';
+    const record = { recordedAt: instant, seriesId, bookId, ordinal: 2 };
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
-      { op: 'inspectSeriesList', input: {} },
+      { op: 'inspectSeriesList', input: { after: null } },
+      { op: 'inspectSeriesList', input: { after: { title: '星河三部曲', seriesId } } },
+      { op: 'inspectSeriesMembers', input: { seriesId, after: null } },
+      { op: 'inspectSeriesMembers', input: { seriesId, after: { joinedAt: instant, bookId } } },
+      { op: 'inspectSeriesCandidates', input: { seriesId, text: '', after: null } },
+      { op: 'inspectSeriesCandidates', input: { seriesId, text: '星河', after: { title: '星河之一', bookId } } },
+      { op: 'inspectSeriesHistory', input: { seriesId, bookId: null, after: null } },
+      { op: 'inspectSeriesHistory', input: { seriesId: null, bookId, after: record } },
       { op: 'createSeries', input: { title: '星河三部曲', note: '' } },
       { op: 'createSeries', input: { title: '星河三部曲', note: '三部长篇' } },
       { op: 'inspectSeries', input: { seriesId } },
@@ -1322,7 +1331,21 @@ describe('decodeRequest rejects malformed frames', () => {
       expect(decodeRequest(frameOf(request))).toEqual(request);
     }
     for (const [op, input] of [
+      // Each page starts after one item of its own list, and nothing else (Issue #63 review).
+      ['inspectSeriesList', {}],
       ['inspectSeriesList', { seriesId }],
+      ['inspectSeriesList', { after: { title: '', seriesId } }],
+      ['inspectSeriesList', { after: { title: '星'.repeat(81), seriesId } }],
+      ['inspectSeriesMembers', { seriesId, after: { joinedAt: 'yesterday', bookId } }],
+      ['inspectSeriesMembers', { seriesId }],
+      ['inspectSeriesCandidates', { seriesId, text: '星河\n之一', after: null }],
+      ['inspectSeriesCandidates', { seriesId, text: '星'.repeat(81), after: null }],
+      ['inspectSeriesCandidates', { seriesId, after: null }],
+      ['inspectSeriesCandidates', { seriesId, text: '', after: { title: '星河之一', bookId, seriesId } }],
+      ['inspectSeriesHistory', { seriesId, bookId, after: null }],
+      ['inspectSeriesHistory', { seriesId: null, bookId: null, after: null }],
+      ['inspectSeriesHistory', { seriesId, bookId: null, after: { ...record, ordinal: 0 } }],
+      ['inspectSeriesHistory', { seriesId, bookId: null, after: { recordedAt: instant, seriesId, bookId } }],
       ['createSeries', { title: '星河三部曲' }],
       ['createSeries', { title: '', note: '' }],
       ['createSeries', { title: 7, note: '' }],

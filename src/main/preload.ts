@@ -351,7 +351,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['recordPublicationActuals']['output']>(IPC_CHANNELS.recordPublicationActuals, input),
   setEvaluationPreferences: (input: ServiceOperationMap['setEvaluationPreferences']['input']) =>
     invoke<ServiceOperationMap['setEvaluationPreferences']['output']>(IPC_CHANNELS.setEvaluationPreferences, input),
-  inspectSeriesList: () => invoke<ServiceOperationMap['inspectSeriesList']['output']>(IPC_CHANNELS.inspectSeriesList, {}),
+  inspectSeriesList: (input?: { after?: ServiceOperationMap['inspectSeriesList']['input']['after'] }) =>
+    invoke<ServiceOperationMap['inspectSeriesList']['output']>(IPC_CHANNELS.inspectSeriesList, { after: input?.after ?? null }),
   createSeries: (input: ServiceOperationMap['createSeries']['input']) =>
     invoke<ServiceOperationMap['createSeries']['output']>(IPC_CHANNELS.createSeries, input),
   inspectSeries: (input: ServiceOperationMap['inspectSeries']['input']) =>
@@ -362,6 +363,12 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['changeSeriesMembership']['output']>(IPC_CHANNELS.changeSeriesMembership, input),
   inspectBookSeries: (input: ServiceOperationMap['inspectBookSeries']['input']) =>
     invoke<ServiceOperationMap['inspectBookSeries']['output']>(IPC_CHANNELS.inspectBookSeries, input),
+  inspectSeriesMembers: (input: ServiceOperationMap['inspectSeriesMembers']['input']) =>
+    invoke<ServiceOperationMap['inspectSeriesMembers']['output']>(IPC_CHANNELS.inspectSeriesMembers, input),
+  inspectSeriesCandidates: (input: ServiceOperationMap['inspectSeriesCandidates']['input']) =>
+    invoke<ServiceOperationMap['inspectSeriesCandidates']['output']>(IPC_CHANNELS.inspectSeriesCandidates, input),
+  inspectSeriesHistory: (input: ServiceOperationMap['inspectSeriesHistory']['input']) =>
+    invoke<ServiceOperationMap['inspectSeriesHistory']['output']>(IPC_CHANNELS.inspectSeriesHistory, input),
   applyChangeSuggestion: (input: ServiceOperationMap['applyChangeSuggestion']['input']) =>
     invoke<ServiceOperationMap['applyChangeSuggestion']['output']>(IPC_CHANNELS.applyChangeSuggestion, input),
   applyChangeSuggestionBatch: (input: ServiceOperationMap['applyChangeSuggestionBatch']['input']) =>

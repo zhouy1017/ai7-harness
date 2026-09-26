@@ -115,8 +115,16 @@ import type {
   ChangeSeriesMembershipInput,
   CreateSeriesInput,
   PreviewSeriesMembershipChangeInput,
+  SeriesCandidatesCursor,
+  SeriesCandidatesProjection,
   SeriesCreationProjection,
+  SeriesHistoryCursor,
+  SeriesHistoryPageProjection,
+  SeriesListCursor,
   SeriesListProjection,
+  SeriesMemberProjection,
+  SeriesMembersCursor,
+  SeriesMembersPageProjection,
   SeriesMembershipChangeProjection,
   SeriesMembershipChangeResultProjection,
   SeriesMembershipPreviewProjection,
@@ -353,16 +361,22 @@ import {
   seriesMemberAlready,
   seriesLearningFacts,
   seriesMembershipImpact,
+  seriesHistoryOrder,
   seriesPreviewDigest,
+  weighedPage,
   type StoredMembershipChange,
   type StoredSeries,
 } from './series.js';
 import { CALIBRATION_MIN_ADJUSTMENTS, PREDICTION_MIN_BOOKS_WITH_ACTUALS, calibrationActive, predictionAvailable } from '../shared/evaluation-calibration.js';
 import {
   MAX_FEEDBACK_HISTORY_ENTRIES,
-  MAX_SERIES_CANDIDATES_LISTED,
-  MAX_SERIES_HISTORY_LISTED,
-  MAX_SERIES_MEMBERS_LISTED,
+  MAX_BOOK_SERIES_MEMBERSHIPS,
+  MAX_SERIES_CANDIDATE_QUERY_CHARACTERS,
+  MAX_SERIES_CANDIDATES_PAGE,
+  MAX_SERIES_HISTORY_PAGE,
+  MAX_SERIES_LIST_PAGE,
+  MAX_SERIES_MEMBERS_PAGE,
+  MAX_SERIES_TITLE_CHARACTERS,
   PUBLICATION_ACTUALS_RECORDED_STATE,
 } from '../shared/protocol.js';
 import { readExemplars } from './exemplars.js';
@@ -10694,27 +10708,85 @@ export class EditorialStore {
 
   // ---- 书系 › 成员与共享范围 (Issue #63, plan slice S28a; V2-UX-SER-001 to SER-012) --------------------------------------
 
-  /** 书系: every Series of the house, by name, with how many Books each holds now. A read. */
-  inspectSeriesList(): SeriesListProjection {
-    return this.#seriesCall(() => this.#seriesListProjection());
-  }
-
-  #seriesListProjection(): SeriesListProjection {
-    const counts = this.#series.memberCounts();
-    return { series: this.#series.list().map((entry) => ({ ...entry, memberCount: counts.get(entry.seriesId) ?? 0 })) };
-  }
-
-  /** 新建书系: a name the house has not used, and an optional 说明. It holds no Book until one is added. */
-  createSeries(input: CreateSeriesInput): SeriesCreationProjection {
+  /** 书系: one page of the house's Series, by name, with how many Books each holds now (Issue #63 review). A read. */
+  inspectSeriesList(after: SeriesListCursor | null = null): SeriesListProjection {
     return this.#seriesCall(() => {
-      const created = this.#transaction(this.#authority, () => this.#series.create(input));
-      return { seriesId: created.seriesId, completionLabel: `已新建书系「${created.title}」`, list: this.#seriesListProjection() };
+      requireStore(after === null || (UUID_PATTERN.test(after.seriesId) && typeof after.title === 'string' && after.title.length >= 1 &&
+        after.title.length <= 2 * MAX_SERIES_TITLE_CHARACTERS), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      const counts = this.#series.memberCounts();
+      const rows = this.#series.listAfter(after, MAX_SERIES_LIST_PAGE + 1).map((entry) => ({ ...entry, memberCount: counts.get(entry.seriesId) ?? 0 }));
+      const { page, more } = weighedPage(rows, MAX_SERIES_LIST_PAGE);
+      const last = page.at(-1);
+      return { series: page, nextCursor: more && last !== undefined ? { title: last.title, seriesId: last.seriesId } : null };
     });
   }
 
-  /** One Series' 成员与共享范围 (SER-001): its members, the Books that may join, and every membership change. A read. */
+  /** 新建书系: a name the house has not used, and an optional 说明. It holds no Book until one is added; the answer is it alone. */
+  createSeries(input: CreateSeriesInput): SeriesCreationProjection {
+    return this.#seriesCall(() => {
+      const created = this.#transaction(this.#authority, () => this.#series.create(input));
+      return { seriesId: created.seriesId, completionLabel: `已新建书系「${created.title}」`, series: { ...created, memberCount: 0 } };
+    });
+  }
+
+  /**
+   * One Series' 成员与共享范围 (SER-001): the first page of its members and of its membership changes, and how many Books it
+   * and the house hold. A read.
+   */
   inspectSeries(seriesId: string): SeriesProjection {
     return this.#seriesCall(() => this.#seriesProjection(this.#requireSeries(seriesId)));
+  }
+
+  /** `更多成员…`: the next page of a Series' members, newest joined first (Issue #63 review). A read. */
+  inspectSeriesMembers(seriesId: string, after: SeriesMembersCursor | null): SeriesMembersPageProjection {
+    return this.#seriesCall(() => {
+      const series = this.#requireSeries(seriesId);
+      requireStore(after === null || (UUID_PATTERN.test(after.bookId) && typeof after.joinedAt === 'string' && !Number.isNaN(Date.parse(after.joinedAt))),
+        'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      const { members, nextCursor } = this.#seriesMembersPage(series.seriesId, after);
+      return { members, nextCursor };
+    });
+  }
+
+  /**
+   * 加入书系…'s Books (Issue #63 review): a page of every Book the Series does not hold, by title, narrowed to titles holding
+   * the editor's words when they give any — so every Book can be found and added, however many the house holds. A read.
+   */
+  inspectSeriesCandidates(seriesId: string, text: string, after: SeriesCandidatesCursor | null): SeriesCandidatesProjection {
+    return this.#seriesCall(() => {
+      const series = this.#requireSeries(seriesId);
+      const words = typeof text === 'string' && text.isWellFormed() ? text.normalize('NFC').trim() : null;
+      requireStore(words !== null && [...words].length <= MAX_SERIES_CANDIDATE_QUERY_CHARACTERS && !/[\r\n]/u.test(words), 'SERIES_QUERY_INVALID',
+        `查找的书名字词最多 ${MAX_SERIES_CANDIDATE_QUERY_CHARACTERS} 个字，写在一行里。`);
+      requireStore(after === null || (UUID_PATTERN.test(after.bookId) && typeof after.title === 'string' && after.title.length >= 1 && after.title.length <= 180),
+        'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      const rows = this.#authority.prepare(
+        `SELECT b.book_id, b.title FROM books b
+         WHERE NOT EXISTS (
+             SELECT 1 FROM series_membership_changes c WHERE c.series_id = ? AND c.book_id = b.book_id AND c.kind = 'add'
+               AND c.ordinal = (SELECT max(d.ordinal) FROM series_membership_changes d WHERE d.series_id = c.series_id AND d.book_id = c.book_id))
+           AND (? = '' OR instr(lower(b.title), lower(?)) > 0)
+           AND (? IS NULL OR b.title > ? OR (b.title = ? AND b.book_id > ?))
+         ORDER BY b.title, b.book_id LIMIT ?`,
+      ).all(series.seriesId, words, words, after?.title ?? null, after?.title ?? null, after?.title ?? null, after?.bookId ?? null,
+        MAX_SERIES_CANDIDATES_PAGE + 1) as SqlRow[];
+      const { page, more } = weighedPage(rows.map((row) => ({ bookId: asString(row.book_id), title: asString(row.title) })), MAX_SERIES_CANDIDATES_PAGE);
+      const last = page.at(-1);
+      return { candidates: page, nextCursor: more && last !== undefined ? { title: last.title, bookId: last.bookId } : null };
+    });
+  }
+
+  /** `更早的记录…`: the next page of one Series' or one Book's membership change records, newest first (Issue #63 review). A read. */
+  inspectSeriesHistory(filter: { readonly seriesId: string | null; readonly bookId: string | null }, after: SeriesHistoryCursor | null): SeriesHistoryPageProjection {
+    return this.#seriesCall(() => {
+      requireStore((filter.seriesId === null) !== (filter.bookId === null), 'SERIES_HISTORY_INVALID', '成员变更记录要按一个书系或一本书读取。');
+      requireStore(after === null || (typeof after.recordedAt === 'string' && !Number.isNaN(Date.parse(after.recordedAt)) && UUID_PATTERN.test(after.seriesId) &&
+        UUID_PATTERN.test(after.bookId) && Number.isSafeInteger(after.ordinal) && after.ordinal >= 1), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      const read = filter.seriesId !== null
+        ? this.#seriesHistoryPage({ seriesId: this.#requireSeries(filter.seriesId).seriesId }, after)
+        : this.#seriesHistoryPage({ bookId: filter.bookId! }, after);
+      return { history: read.history, nextCursor: read.nextCursor };
+    });
   }
 
   /**
@@ -10728,6 +10800,7 @@ export class EditorialStore {
   /**
    * 加入书系 or 移出书系 (SER-008 to SER-010): the preview is recomputed inside the transaction, and a preview the membership
    * or a governing record has moved past is refused rather than applied; the change record keeps what the preview showed.
+   * The answer is that record alone (Issue #63 review): the page reads the Series again, each list a page at a time.
    */
   changeSeriesMembership(input: ChangeSeriesMembershipInput): SeriesMembershipChangeResultProjection {
     return this.#seriesCall(() => {
@@ -10749,22 +10822,27 @@ export class EditorialStore {
       return {
         changeId: change.changeId,
         completionLabel: `${change.kind === 'add' ? '已加入' : '已移出'}书系「${preview.seriesTitle}」：《${preview.bookTitle}》`,
-        series: this.#seriesProjection(this.#requireSeries(preview.seriesId)),
+        change: this.#seriesChange(change, preview.seriesTitle, preview.bookTitle),
       };
     });
   }
 
-  /** A Book's side of 书系 (SER-009): the Series it is in now, and each change of its membership, newest first. A read. */
+  /**
+   * A Book's side of 书系 (SER-009): the Series it is in now — at most `MAX_BOOK_SERIES_MEMBERSHIPS`, with how many in all —
+   * and the first page of its membership changes, newest first. A read.
+   */
   inspectBookSeries(bookId: string): BookSeriesProjection {
     return this.#seriesCall(() => {
-      const bookTitle = this.#evaluationBookTitle(bookId);
-      const titles = new Map(this.#series.list().map((entry) => [entry.seriesId, entry.title]));
-      const history = this.#series.history({ bookId });
+      this.#evaluationBookTitle(bookId);
+      const memberships = this.#series.seriesOf(bookId);
+      const history = this.#seriesHistoryPage({ bookId }, null);
       return {
         bookId,
-        memberships: this.#series.seriesOf(bookId),
-        history: history.slice(0, MAX_SERIES_HISTORY_LISTED).map((change) => this.#seriesChange(change, titles.get(change.seriesId) ?? '', bookTitle)),
-        historyTruncated: history.length > MAX_SERIES_HISTORY_LISTED,
+        memberships: memberships.slice(0, MAX_BOOK_SERIES_MEMBERSHIPS),
+        membershipCount: memberships.length,
+        history: history.history,
+        historyCount: history.count,
+        historyNext: history.nextCursor,
       };
     });
   }
@@ -10805,15 +10883,30 @@ export class EditorialStore {
   }
 
   #seriesProjection(series: StoredSeries): SeriesProjection {
-    const joined = this.#series.members(series.seriesId);
-    const memberIds = new Set(joined.map((entry) => entry.bookId));
-    const titles = new Map((this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').all() as SqlRow[])
-      .map((row) => [asString(row.book_id), asString(row.title)]));
-    const members = joined.slice(0, MAX_SERIES_MEMBERS_LISTED).map((entry) => {
+    const members = this.#seriesMembersPage(series.seriesId, null);
+    const history = this.#seriesHistoryPage({ seriesId: series.seriesId }, null);
+    return {
+      ...series,
+      memberCount: members.count,
+      bookCount: Number((this.#authority.prepare('SELECT count(*) count FROM books').get() as SqlRow).count),
+      members: members.members,
+      membersNext: members.nextCursor,
+      history: history.history,
+      historyCount: history.count,
+      historyNext: history.nextCursor,
+    };
+  }
+
+  /** One page of a Series' members after the one named, newest joined first, and how many it holds in all. */
+  #seriesMembersPage(seriesId: string, after: SeriesMembersCursor | null): SeriesMembersPageProjection & { count: number } {
+    const joined = this.#series.members(seriesId);
+    const rest = after === null ? joined
+      : joined.filter((entry) => entry.joinedAt < after.joinedAt || (entry.joinedAt === after.joinedAt && entry.bookId < after.bookId));
+    const members: SeriesMemberProjection[] = rest.slice(0, MAX_SERIES_MEMBERS_PAGE + 1).map((entry) => {
       const people = this.#bookPeople.current(entry.bookId);
       return {
         bookId: entry.bookId,
-        title: titles.get(entry.bookId) ?? '',
+        title: this.#evaluationBookTitle(entry.bookId),
         authors: people.authors,
         editors: people.editors,
         joinedAt: entry.joinedAt,
@@ -10821,16 +10914,33 @@ export class EditorialStore {
         seriesConsistencyReview: null,
       };
     });
-    const candidates = [...titles].filter(([bookId]) => !memberIds.has(bookId)).map(([bookId, title]) => ({ bookId, title }));
-    const history = this.#series.history({ seriesId: series.seriesId });
+    const { page, more } = weighedPage(members, MAX_SERIES_MEMBERS_PAGE);
+    const last = page.at(-1);
+    return { members: page, nextCursor: more && last !== undefined ? { joinedAt: last.joinedAt, bookId: last.bookId } : null, count: joined.length };
+  }
+
+  /** One page of one Series' or one Book's membership change records after the one named, newest first, and how many in all. */
+  #seriesHistoryPage(filter: { readonly seriesId: string } | { readonly bookId: string }, after: SeriesHistoryCursor | null):
+  SeriesHistoryPageProjection & { count: number } {
+    const all = this.#series.history(filter);
+    const rest = (after === null ? all : all.filter((change) => seriesHistoryOrder(change, after) > 0)).slice(0, MAX_SERIES_HISTORY_PAGE + 1);
+    const seriesTitles = new Map<string, string>();
+    const bookTitles = new Map<string, string>();
+    const titleOf = (titles: Map<string, string>, key: string, read: () => string): string => {
+      if (!titles.has(key)) titles.set(key, read());
+      return titles.get(key)!;
+    };
+    const projected = rest.map((change) => this.#seriesChange(
+      change,
+      titleOf(seriesTitles, change.seriesId, () => this.#requireSeries(change.seriesId).title),
+      titleOf(bookTitles, change.bookId, () => this.#evaluationBookTitle(change.bookId)),
+    ));
+    const { page, more } = weighedPage(projected, MAX_SERIES_HISTORY_PAGE);
+    const last = rest[page.length - 1];
     return {
-      ...series,
-      members,
-      membersTruncated: joined.length > MAX_SERIES_MEMBERS_LISTED,
-      candidates: candidates.slice(0, MAX_SERIES_CANDIDATES_LISTED),
-      candidatesTruncated: candidates.length > MAX_SERIES_CANDIDATES_LISTED,
-      history: history.slice(0, MAX_SERIES_HISTORY_LISTED).map((change) => this.#seriesChange(change, series.title, titles.get(change.bookId) ?? '')),
-      historyTruncated: history.length > MAX_SERIES_HISTORY_LISTED,
+      history: page,
+      nextCursor: more && last !== undefined ? { recordedAt: last.recordedAt, seriesId: last.seriesId, bookId: last.bookId, ordinal: last.ordinal } : null,
+      count: all.length,
     };
   }
 
