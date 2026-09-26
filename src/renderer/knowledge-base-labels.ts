@@ -1,4 +1,10 @@
 import type {
+  LearningEligibilityChoice,
+  LibraryMaterialDecisionProjection,
+  LibraryMaterialFormat,
+  LibraryMaterialKind,
+  LibraryMaterialPreviewProjection,
+  LibraryMaterialProjection,
   KnowledgeArtifactProjection,
   KnowledgeProcedureProjection,
   ExemplarBookProjection,
@@ -60,7 +66,7 @@ export const KNOWLEDGE_BASE_TAB_VIEWS: ReadonlyArray<KnowledgeBaseTabView> = [
     tab: 'library',
     label: '资料库',
     holds: '编辑收集的图书、资料、论文与网页；定了归属与学习准入，任务才能把它列进「允许参考」。',
-    pending: '尚未提供：资料库还没有接通。',
+    pending: null,
   },
   {
     tab: 'external',
@@ -232,4 +238,152 @@ export function artifactLine(artifact: Pick<KnowledgeArtifactProjection, 'title'
   if (artifact.state === 'available-to-install') return `${named} · 可获取 · 尚未安装`;
   const enabled = artifact.enabledBooks === 0 ? '还没有图书启用' : `已为 ${artifact.enabledBooks} 本书启用`;
   return `${named} · 已安装 · ${enabled}`;
+}
+
+// ---- 资料库 (Issue #427, plan slice S79c; KB-007, KB-002, ATTN-009, LEARN-004 to LEARN-010) ------------------------------
+
+export const LIBRARY_ADD = '放入资料…';
+export const LIBRARY_ADD_CONFIRM = '放入资料库';
+export const LIBRARY_CANCEL = '取消';
+export const LIBRARY_ATTRIBUTE = '定归属…';
+export const LIBRARY_ATTRIBUTE_CONFIRM = '确定归属';
+export const LIBRARY_ELIGIBILITY = '定学习准入…';
+export const LIBRARY_ELIGIBILITY_CONFIRM = '记录决定';
+export const LIBRARY_EMPTY = '资料库里还没有资料。放进来以后，先定归属与学习准入，任务才能把它列进「允许参考」。';
+export const LIBRARY_TITLE_LABEL = '标题';
+export const LIBRARY_KIND_LEGEND = '这是什么';
+export const LIBRARY_ATTRIBUTION_TERM = '归属';
+export const LIBRARY_ELIGIBILITY_TERM = '学习准入';
+export const LIBRARY_HOUSE = '社级';
+export const LIBRARY_SERIES = '书系';
+/** A Series cannot be named until Series exist (Issue #63, S28); the choice is shown, and says why it is not there. */
+export const LIBRARY_SERIES_UNAVAILABLE = '还没有书系：书系接通后，才能把资料归到书系。';
+export const LIBRARY_SERIES_ELIGIBILITY = '纳入当前书系';
+export const LIBRARY_SERIES_ELIGIBILITY_UNAVAILABLE = '这份资料没有归到书系。';
+export const LIBRARY_NO_ATTRIBUTION = '尚未定归属';
+export const LIBRARY_NO_ELIGIBILITY = '尚未定';
+export const LIBRARY_ELIGIBILITY_NEEDS_ATTRIBUTION = '先定归属，再定学习准入。';
+export const LIBRARY_ELIGIBILITY_RESET = '归属改了：学习准入要按新的归属重新定，之前的决定仍留在记录里。';
+export const LIBRARY_RECOMMENDED = '建议';
+export const LIBRARY_REASON_LABEL = '补充说明（可不填）';
+/** What eligibility does and does not do (LEARN-009, LEARN-010), said once beside the choice. */
+export const LIBRARY_ELIGIBILITY_BOUNDARY = '学习准入只决定它能不能在所选范围内形成学习信号：不会启用记忆，不会扩大任务的读取范围，也不允许把它发送出去。';
+/** The wider choice's consequence, shown inline when it is chosen (LEARN-005, LEARN-012). */
+export const LIBRARY_HOUSE_CONSEQUENCE = '纳入出版社经验：全社以后的图书都可能从它学习。';
+export const LIBRARY_STATUS = {
+  loading: '正在读取资料库…',
+  opened: '资料库已打开',
+  unavailable: '无法读取资料库。',
+  choosing: '正在读取所选文件…',
+  cancelled: '没有选择文件。',
+  adding: '正在放入资料库…',
+  addFailed: '无法放入这个文件。',
+  deciding: '正在记录决定…',
+  decideFailed: '无法记录这个决定。',
+  loadingMore: '正在读取更多资料…',
+  loadingBooks: '正在读取图书…',
+  booksFailed: '无法读取图书列表。',
+} as const;
+/** Reads the next page of items, and of the Books an attribution can name (Issue #427 review). */
+export const LIBRARY_MORE = '更多资料…';
+export const LIBRARY_BOOKS_MORE = '更多图书…';
+
+export const LIBRARY_KIND_LABELS: Readonly<Record<LibraryMaterialKind, string>> = { book: '图书', paper: '论文', document: '资料', web: '网页' };
+export const LIBRARY_FORMAT_LABELS: Readonly<Record<LibraryMaterialFormat, string>> = {
+  DOCX: 'Word',
+  DOC: 'Word 97-2003',
+  PDF: 'PDF',
+  ODT: 'OpenDocument',
+  RTF: 'RTF',
+  TXT: '纯文本',
+  MD: 'Markdown',
+  HTML: '网页文件',
+  EPUB: 'EPUB',
+  UNKNOWN: '其他格式',
+};
+
+/** A file's size as the editor reads it. */
+export function libraryBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} 字节`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+export function libraryPreviewHeading(preview: Pick<LibraryMaterialPreviewProjection, 'source'>): string {
+  return `放入资料库：${preview.source.displayName}`;
+}
+
+export function libraryPreviewFacts(preview: Pick<LibraryMaterialPreviewProjection, 'source'>): string {
+  return `${LIBRARY_FORMAT_LABELS[preview.source.format]} · ${libraryBytes(preview.source.bytes)} · 原件原样保存在本机，不会改动`;
+}
+
+/** What arrived, how big it is, and when. */
+export function librarySourceLine(material: Pick<LibraryMaterialProjection, 'source' | 'recordedAt'>, instant: (iso: string) => string): string {
+  return `${material.source.displayName} · ${LIBRARY_FORMAT_LABELS[material.source.format]} · ${libraryBytes(material.source.bytes)} · 放入于 ${instant(material.recordedAt)}`;
+}
+
+/** One Learning Eligibility choice as the chooser offers it and the card states it (LEARN-004 to LEARN-006). */
+export function eligibilityChoiceLabel(choice: LearningEligibilityChoice, bookTitle: string | null): string {
+  switch (choice) {
+    case 'book':
+      return `仅纳入《${bookTitle ?? ''}》`;
+    case 'house':
+      return '纳入出版社经验';
+    case 'excluded':
+      return '明确排除';
+    case 'deferred':
+      return '稍后决定';
+  }
+}
+
+/** Where the item belongs now. */
+export function libraryAttributionLine(material: Pick<LibraryMaterialProjection, 'attribution'>): string {
+  if (material.attribution === null) return LIBRARY_NO_ATTRIBUTION;
+  return material.attribution.scope === 'book' ? `《${material.attribution.bookTitle}》` : LIBRARY_HOUSE;
+}
+
+/** The Learning Eligibility that stands under that attribution, with the editor's note. */
+export function libraryEligibilityLine(material: Pick<LibraryMaterialProjection, 'eligibility'>): string {
+  if (material.eligibility === null) return LIBRARY_NO_ELIGIBILITY;
+  const note = material.eligibility.reason === null ? '' : `（说明：${material.eligibility.reason}）`;
+  return `${eligibilityChoiceLabel(material.eligibility.choice, material.eligibility.bookTitle)}${note}`;
+}
+
+/** Whose Tasks may list it under 允许参考 (KB-007), or what it still waits for. */
+export function libraryReferenceLine(material: Pick<LibraryMaterialProjection, 'reference' | 'eligibility'>): string {
+  if (material.reference.state === 'available') {
+    return material.reference.scope === 'book'
+      ? `《${material.reference.bookTitle}》的任务可以把它列进「允许参考」。`
+      : '每本书的任务都可以把它列进「允许参考」。';
+  }
+  return material.eligibility?.choice === 'deferred'
+    ? '学习准入记为稍后决定：决定之前，任务还不能把它列进「允许参考」。'
+    : '定了归属与学习准入，任务才能把它列进「允许参考」。';
+}
+
+/** The decisions on record: how many, and — past the latest the card names — that only those are listed. */
+export function libraryDecisionsSummary(count: number, shown: number = count): string {
+  return shown < count ? `决定记录（${count}，列出最近 ${shown} 条）` : `决定记录（${count}）`;
+}
+
+/** One decision on record, oldest first: a later one supersedes it and neither is rewritten (LEARN-007). */
+export function libraryDecisionLine(entry: LibraryMaterialDecisionProjection, instant: (iso: string) => string): string {
+  const { decision } = entry;
+  const what = decision.kind === 'attribution'
+    ? `${LIBRARY_ATTRIBUTION_TERM}：${decision.scope === 'book' ? `《${decision.bookTitle}》` : LIBRARY_HOUSE}`
+    : `${LIBRARY_ELIGIBILITY_TERM}：${eligibilityChoiceLabel(decision.choice, decision.bookTitle)}${decision.reason === null ? '' : `（说明：${decision.reason}）`}`;
+  return `第 ${entry.ordinal} 条 · ${what} · 本机编辑 · ${instant(entry.recordedAt)}`;
+}
+
+export function libraryAdded(title: string): string {
+  return `已放入资料库：「${title}」；请定归属与学习准入。`;
+}
+
+export function libraryAttributed(title: string, where: string): string {
+  return `已记录归属：「${title}」归到${where}。`;
+}
+
+export function libraryEligibilityDecided(title: string, choice: string): string {
+  return `已记录学习准入：「${title}」 · ${choice}。`;
 }

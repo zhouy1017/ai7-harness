@@ -96,6 +96,7 @@ import {
   MAINTENANCE_CASE_SCHEMA_VERSION,
   BOOK_PEOPLE_SCHEMA_VERSION,
   REVIEW_GUIDELINE_SCHEMA_VERSION,
+  LIBRARY_MATERIAL_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -162,6 +163,7 @@ import {
 } from './maintenance-cases.js';
 import { BOOK_PEOPLE_FOREIGN_KEYS, BOOK_PEOPLE_SCHEMA_SQL, BOOK_PEOPLE_TRIGGER_SQL } from './book-people.js';
 import { REVIEW_GUIDELINE_FOREIGN_KEYS, REVIEW_GUIDELINE_SCHEMA_SQL, REVIEW_GUIDELINE_TRIGGER_SQL } from './review-guidelines.js';
+import { LIBRARY_MATERIAL_FOREIGN_KEYS, LIBRARY_MATERIAL_SCHEMA_SQL, LIBRARY_MATERIAL_TRIGGER_SQL } from './library-materials.js';
 import {
   MANUSCRIPT_EFFECT_FOREIGN_KEYS,
   MANUSCRIPT_EFFECT_SCHEMA_SQL,
@@ -1869,6 +1871,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...MAINTENANCE_CASE_FOREIGN_KEYS,
   ...BOOK_PEOPLE_FOREIGN_KEYS,
   ...REVIEW_GUIDELINE_FOREIGN_KEYS,
+  ...LIBRARY_MATERIAL_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2485,6 +2488,7 @@ function requireManuscriptReimportTargetSchema(
   includeMaintenanceCaseTables = false,
   includeBookPeopleTables = false,
   includeReviewGuidelineTables = false,
+  includeLibraryMaterialTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2517,6 +2521,7 @@ function requireManuscriptReimportTargetSchema(
   includeMaintenanceCaseTables ||= committed(MAINTENANCE_CASE_SCHEMA_SQL);
   includeBookPeopleTables ||= committed(BOOK_PEOPLE_SCHEMA_SQL);
   includeReviewGuidelineTables ||= committed(REVIEW_GUIDELINE_SCHEMA_SQL);
+  includeLibraryMaterialTables ||= committed(LIBRARY_MATERIAL_SCHEMA_SQL);
   requireExactSchema(
     db,
     {
@@ -2601,6 +2606,8 @@ function requireManuscriptReimportTargetSchema(
       ...(includeBookPeopleTables ? BOOK_PEOPLE_SCHEMA_SQL : {}),
       // Revision 45 (Issue #427, S79a) adds the versions a house imports of its review guideline documents.
       ...(includeReviewGuidelineTables ? REVIEW_GUIDELINE_SCHEMA_SQL : {}),
+      // Revision 46 (Issue #427, S79c) adds the items an editor put into 资料库 and their decisions.
+      ...(includeLibraryMaterialTables ? LIBRARY_MATERIAL_SCHEMA_SQL : {}),
     },
     // The partial index that keeps one primary Manuscript per Book stands with the rebuilt relation, whatever the version.
     {
@@ -2634,6 +2641,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeMaintenanceCaseTables ? MAINTENANCE_CASE_TRIGGER_SQL : {}),
       ...(includeBookPeopleTables ? BOOK_PEOPLE_TRIGGER_SQL : {}),
       ...(includeReviewGuidelineTables ? REVIEW_GUIDELINE_TRIGGER_SQL : {}),
+      ...(includeLibraryMaterialTables ? LIBRARY_MATERIAL_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5358,6 +5366,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeMaintenanceCaseTables = false,
   includeBookPeopleTables = false,
   includeReviewGuidelineTables = false,
+  includeLibraryMaterialTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5389,6 +5398,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeMaintenanceCaseTables,
     includeBookPeopleTables,
     includeReviewGuidelineTables,
+    includeLibraryMaterialTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5466,7 +5476,8 @@ export function initializeBoundedSchema(
       version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
       version === MAINTENANCE_CASE_SCHEMA_VERSION ||
       version === BOOK_PEOPLE_SCHEMA_VERSION ||
-      version === REVIEW_GUIDELINE_SCHEMA_VERSION,
+      version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
+      version === LIBRARY_MATERIAL_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5494,9 +5505,10 @@ export function initializeBoundedSchema(
       version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
       version === MAINTENANCE_CASE_SCHEMA_VERSION ||
       version === BOOK_PEOPLE_SCHEMA_VERSION ||
-      version === REVIEW_GUIDELINE_SCHEMA_VERSION) {
+      version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
+      version === LIBRARY_MATERIAL_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== REVIEW_GUIDELINE_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== LIBRARY_MATERIAL_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5528,6 +5540,7 @@ export function initializeBoundedSchema(
           version >= MAINTENANCE_CASE_SCHEMA_VERSION,
           version >= BOOK_PEOPLE_SCHEMA_VERSION,
           version >= REVIEW_GUIDELINE_SCHEMA_VERSION,
+          version >= LIBRARY_MATERIAL_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);
