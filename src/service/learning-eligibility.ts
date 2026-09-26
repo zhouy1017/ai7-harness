@@ -97,6 +97,23 @@ const EXCERPT_GRAPHEMES = 60;
 export const LEARNING_ELIGIBILITY_BASIS =
   '学习准入策略还在「仅建议」阶段：没有批准任何可以自动纳入的材料或范围，所以每一条都由你决定。' as const;
 
+/**
+ * The policy a decision is made under, by identity, mode and version (the policy's rule 5; Issue #61 review): recorded with
+ * its words, so a policy that moves on adds a basis of its own, and every decision made under an earlier one still reads.
+ */
+export const LEARNING_ELIGIBILITY_POLICY_BASIS = {
+  policy: 'ai7.learning-eligibility-policy',
+  mode: 'recommendation-only',
+  version: 1,
+  text: LEARNING_ELIGIBILITY_BASIS,
+} as const;
+/** Every basis a stored decision may name. */
+const KNOWN_LEARNING_ELIGIBILITY_BASES: ReadonlyArray<unknown> = [LEARNING_ELIGIBILITY_POLICY_BASIS];
+
+function knownBasis(value: unknown): boolean {
+  return KNOWN_LEARNING_ELIGIBILITY_BASES.some((basis) => canonicalJson(basis) === canonicalJson(value));
+}
+
 /** Revision 50's relation, created once: a store that predates it gains one empty relation and nothing existing moves. */
 export function initializeLearningEligibilitySchema(db: DatabaseSync): void {
   if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
@@ -121,11 +138,30 @@ export interface LearningMaterialCandidate {
   readonly kind: LearningMaterialKind;
   readonly originLabel: string;
   readonly recordedAt: string;
+  /**
+   * When the material came to be, by which the page orders it (Issue #61 review): a 修改建议's decision time, which a later
+   * reason never moves, or the time of the judgment or disposition it is.
+   */
+  readonly orderedAt: string;
   /** What the digest covers: exactly what the material says, never where it is shown. */
   readonly content: unknown;
   /** The Review Card's bounded lines; empty when the reader asked only for where each material stands. */
   readonly excerpt: ReadonlyArray<string>;
   readonly rationale: string;
+}
+
+/** The page's order of a Book's materials (Issue #61 review): 修改建议 first, then analysis items, then 审阅 findings. */
+const KIND_ORDER: ReadonlyArray<string> = ['proposal-decision:', 'analysis-feedback:', 'review-disposition:'];
+
+/**
+ * How two materials of one Book compare on the page — by kind, then by when each came to be, then by place — the cursor a
+ * page ends at included, since its key names its kind.
+ */
+export function learningMaterialOrder(a: { readonly materialKey: string; readonly orderedAt: string }, b: { readonly materialKey: string; readonly orderedAt: string }): number {
+  const kind = (key: string): number => KIND_ORDER.findIndex((prefix) => key.startsWith(prefix));
+  return kind(a.materialKey) - kind(b.materialKey) ||
+    (a.orderedAt < b.orderedAt ? -1 : a.orderedAt > b.orderedAt ? 1 : 0) ||
+    (a.materialKey < b.materialKey ? -1 : a.materialKey > b.materialKey ? 1 : 0);
 }
 
 /** The exact version a decision binds. */
@@ -154,6 +190,8 @@ export function proposalDecisionCandidate(decision: {
   readonly reason: string | null;
   readonly reasonSource: string | null;
   readonly recordedAt: string;
+  /** When the decision was made, whatever reason came later. */
+  readonly decidedAt: string;
 }, withExcerpt: boolean): LearningMaterialCandidate {
   const edited = decision.disposition === 'accepted-with-edit' && decision.editedText !== null;
   const excerpt: string[] = [];
@@ -168,6 +206,7 @@ export function proposalDecisionCandidate(decision: {
     kind: 'proposal-decision',
     originLabel: `修改建议 · ${DISPOSITION_LABELS[decision.disposition] ?? decision.disposition}`,
     recordedAt: decision.recordedAt,
+    orderedAt: decision.decidedAt,
     content: {
       disposition: decision.disposition,
       currentText: decision.currentText,
@@ -226,6 +265,7 @@ export function analysisFeedbackCandidate(signal: {
     kind: 'analysis-feedback',
     originLabel: `分析反馈 · ${DIMENSION_LABELS[signal.dimension]}`,
     recordedAt: signal.recordedAt,
+    orderedAt: signal.recordedAt,
     content: { signalId: signal.signalId, revisionId: signal.revisionId, itemKey: signal.itemKey, judgment: signal.judgment, reason: signal.reason, correction: signal.correction },
     excerpt,
     rationale: '你指出了分析结果哪里不对、为什么：它可以帮 AI7 以后读得更准。',
@@ -246,6 +286,7 @@ export function reviewDispositionCandidate(signal: {
     kind: 'review-disposition',
     originLabel: `审阅 · ${signal.categoryLabel}`,
     recordedAt: signal.recordedAt,
+    orderedAt: signal.recordedAt,
     content: { signalId: signal.signalId, reviewRunId: signal.reviewRunId, findingId: signal.findingId, reason: signal.reason },
     excerpt: withExcerpt ? [`你忽略了这条发现 · 原因：${bounded(signal.reason)}`] : [],
     rationale: '你说明了为什么这条发现不必处理：它可以帮 AI7 以后少提这类问题。',
@@ -302,7 +343,7 @@ export class LearningEligibilityLedger {
       const ordinal = Number(row.ordinal);
       requireLearning(isRecord(record) && record.schema === DECISION_SCHEMA && record.decisionId === row.decision_id && record.bookId === bookId &&
         record.materialKey === materialKey && record.materialDigest === row.material_digest && record.ordinal === ordinal &&
-        record.choice === row.choice && record.recordedAt === row.recorded_at && record.actor === ACTOR && record.basis === LEARNING_ELIGIBILITY_BASIS &&
+        record.choice === row.choice && record.recordedAt === row.recorded_at && record.actor === ACTOR && knownBasis(record.basis) &&
         (record.supersedes ?? null) === (row.supersedes_decision_id ?? null) && (record.supersedes ?? null) === (before?.decisionId ?? null) &&
         ordinal === (before?.ordinal ?? 0) + 1 && (record.note === null || typeof record.note === 'string'),
       'LEARNING_ELIGIBILITY_RECORD_INVALID', '学习准入记录已损坏。');
@@ -375,7 +416,7 @@ export class LearningEligibilityLedger {
       ordinal,
       choice: input.choice,
       note,
-      basis: LEARNING_ELIGIBILITY_BASIS,
+      basis: LEARNING_ELIGIBILITY_POLICY_BASIS,
       attribution: { peopleVersion: input.attribution.peopleVersion, authors: [...input.attribution.authors], editors: [...input.attribution.editors] },
       supersedes: latest?.decisionId ?? null,
       actor: ACTOR,

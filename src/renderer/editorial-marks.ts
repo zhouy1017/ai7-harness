@@ -1239,9 +1239,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
             ? {
                 action: 'accept-and-apply',
                 label: '接受并应用',
+                // The menu's 接受并应用 is the card's own decision, and asks why once as the card's does (Issue #61 review).
                 run: () => void writeManuscript(mark.markId, (clientEffectId) => api.applyChangeSuggestion({
                   ...binding(), markId: mark.markId, clientEffectId, interaction: 'accept-and-apply', editedText: null, reason: null,
-                }), '已应用这条修改建议。'),
+                }), '已应用这条修改建议。', null),
               }
             : { action: 'accept-and-apply', label: '接受并应用', disabledReason: exact ? '这条修改建议已经处理过' : '原文已变，无法应用' },
         ...((mark.conflict === 'unresolved' || mark.conflict === 'deferred') && options.openConflict !== undefined

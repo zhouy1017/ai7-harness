@@ -47,7 +47,10 @@ describe('学习准入 words', () => {
   });
 
   it('names a Book with its people, a material with its origin, and the decision it has', () => {
-    expect(learningBookHeading({ title: '样书', materials: [{} as never, {} as never] })).toBe('《样书》 · 2 条');
+    // The Book's materials in all, whichever page shows them.
+    expect(learningBookHeading({ title: '样书', materialCount: 2 })).toBe('《样书》 · 2 条');
+    // The Book's count in all, whichever page shows its materials (Issue #61 review).
+    expect(learningBookHeading({ title: '样书', materialCount: 45 })).toBe('《样书》 · 45 条');
     expect(learningPeopleLine({ authors: [], editors: [] })).toBe('作者与责编：尚未填写');
     expect(learningPeopleLine({ authors: ['周一', '吴二'], editors: [] })).toBe('作者：周一、吴二 · 责编：尚未填写');
     expect(learningPeopleLine({ authors: ['周一'], editors: ['郑三'] })).toBe('作者：周一 · 责编：郑三');
@@ -77,7 +80,7 @@ describe('反馈记录 words (Issue #61, S26c)', () => {
 describe('学习准入 candidates', () => {
   const decision = {
     decisionId: '00000000-0000-4000-8000-000000000001', disposition: 'rejected', currentText: '原来的说法', proposedText: '建议的说法',
-    editedText: null, reason: '证据不足', reasonSource: 'suggested', recordedAt: '2026-09-25T06:00:00.000Z',
+    editedText: null, reason: '证据不足', reasonSource: 'suggested', recordedAt: '2026-09-25T06:00:00.000Z', decidedAt: '2026-09-25T05:00:00.000Z',
   } as const;
 
   it('reads a decided 修改建议 as what was suggested, what the editor did, and why', () => {

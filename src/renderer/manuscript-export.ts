@@ -113,6 +113,44 @@ function fact(term: string, value: string): HTMLElement[] {
   return [el('dt', undefined, term), el('dd', 'technical-identity', value)];
 }
 
+/** One class of the Export Fidelity Review: its name and count, its status in text and shape, what happens to it, where. */
+function renderExportFidelityRow(row: ExportFidelityRowProjection): HTMLElement {
+  const item = el('li', 'export-fidelity-row');
+  item.dataset['exportFidelity'] = row.key;
+  item.dataset['exportStatus'] = row.status;
+  item.dataset['exportCount'] = String(row.count);
+  const name = el('span', 'export-fidelity-name', row.label);
+  name.append(el('span', 'count', exportCountText(row.count)));
+  const pill = el('span', `status-pill export-status-${row.status}`, exportPillText(row));
+  const detail = el('p', 'export-fidelity-detail', row.detail);
+  const positions = exportPositionsLine(row);
+  if (positions !== null) detail.append(el('span', 'export-fidelity-positions', positions));
+  item.append(name, pill, detail);
+  return item;
+}
+
+/**
+ * V2-UX-EXP-007: every applicable class of one file; one kept and found nowhere is summarized on one line. A package's
+ * export (Issue #416, S67b) draws each file's under a disclosure of its own, with the note said once for all of them.
+ */
+export function renderExportFidelity(
+  reviewed: Pick<ManuscriptExportReviewProjection, 'fidelity' | 'degraded' | 'restoration' | 'restorationLine'>,
+  parts: { heading: boolean; degradedNote: boolean } = { heading: true, degradedNote: true },
+): HTMLElement {
+  const section = el('section', 'export-fidelity');
+  section.dataset['exportDegraded'] = reviewed.degraded ? 'true' : 'false';
+  section.dataset['exportRestoration'] = reviewed.restoration;
+  if (parts.heading) section.append(el('h5', undefined, EXPORT_FIDELITY_HEADING));
+  section.append(el('p', 'export-restoration-line', reviewed.restorationLine));
+  const list = el('ol', 'export-fidelity-list');
+  for (const row of exportShownRows(reviewed.fidelity)) list.append(renderExportFidelityRow(row));
+  section.append(list);
+  const absent = exportAbsentLine(reviewed.fidelity);
+  if (absent !== null) section.append(el('p', 'field-note export-absent-line', absent));
+  if (parts.degradedNote && reviewed.degraded) section.append(el('p', 'export-degraded-note attention-note', EXPORT_DEGRADED_NOTE));
+  return section;
+}
+
 function actionButton(action: ExportAction, className: string, onClick: () => void): HTMLButtonElement {
   const button = el('button', className, EXPORT_ACTION_LABELS[action]);
   button.type = 'button';
@@ -289,7 +327,7 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
     // A report carries no mark, so it has no 含批注, 含修改建议 or 含备注 to choose (Issue #500, S64b part 2).
     section.append(renderFormats(current, busy));
     if (current.target.kind !== 'report') section.append(renderOptions(current, busy));
-    if (current.review !== null) section.append(renderFidelity(current.review));
+    if (current.review !== null) section.append(renderExportFidelity(current.review));
     section.append(renderDestination(current, busy));
     const problem = el('p', 'export-problem', current.problem ?? '');
     problem.setAttribute('role', 'alert');
@@ -388,36 +426,6 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
     }
     fieldset.append(el('p', 'field-note', EXPORT_OPTIONS_NOTE));
     return fieldset;
-  }
-
-  function renderFidelityRow(row: ExportFidelityRowProjection): HTMLElement {
-    const item = el('li', 'export-fidelity-row');
-    item.dataset['exportFidelity'] = row.key;
-    item.dataset['exportStatus'] = row.status;
-    item.dataset['exportCount'] = String(row.count);
-    const name = el('span', 'export-fidelity-name', row.label);
-    name.append(el('span', 'count', exportCountText(row.count)));
-    const pill = el('span', `status-pill export-status-${row.status}`, exportPillText(row));
-    const detail = el('p', 'export-fidelity-detail', row.detail);
-    const positions = exportPositionsLine(row);
-    if (positions !== null) detail.append(el('span', 'export-fidelity-positions', positions));
-    item.append(name, pill, detail);
-    return item;
-  }
-
-  /** V2-UX-EXP-007: every applicable class; one kept and found nowhere is summarized on one line. */
-  function renderFidelity(reviewed: ManuscriptExportReviewProjection): HTMLElement {
-    const section = el('section', 'export-fidelity');
-    section.dataset['exportDegraded'] = reviewed.degraded ? 'true' : 'false';
-    section.dataset['exportRestoration'] = reviewed.restoration;
-    section.append(el('h5', undefined, EXPORT_FIDELITY_HEADING), el('p', 'export-restoration-line', reviewed.restorationLine));
-    const list = el('ol', 'export-fidelity-list');
-    for (const row of exportShownRows(reviewed.fidelity)) list.append(renderFidelityRow(row));
-    section.append(list);
-    const absent = exportAbsentLine(reviewed.fidelity);
-    if (absent !== null) section.append(el('p', 'field-note export-absent-line', absent));
-    if (reviewed.degraded) section.append(el('p', 'export-degraded-note attention-note', EXPORT_DEGRADED_NOTE));
-    return section;
   }
 
   /** The destination is chosen only through the system dialog; a name already there is the dialog's to ask about. */

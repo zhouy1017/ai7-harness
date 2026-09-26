@@ -18,6 +18,7 @@ import {
   MAX_BOOK_RELATED_PEOPLE,
   MAX_BOOK_SUMMARY_FILTER_CHARACTERS,
   MAINTENANCE_CLASSIFICATIONS,
+  LEARNING_MATERIAL_KEY_PATTERN,
   LIBRARY_MATERIAL_KINDS,
   MAX_LEARNING_ELIGIBILITY_REASON_GRAPHEMES,
   type LibraryMaterialKind,
@@ -255,6 +256,12 @@ function validExportOptions(value: unknown): boolean {
     typeof value.includeEditorNotes === 'boolean';
 }
 
+/** A package export's 含批注 and 含修改建议, each a switch and nothing else; 备注 never go with a package (Issue #416). */
+function validPackageExportOptions(value: unknown): boolean {
+  return isRecord(value) && hasExactKeys(value, ['includeAnnotations', 'includeSuggestions']) &&
+    typeof value.includeAnnotations === 'boolean' && typeof value.includeSuggestions === 'boolean';
+}
+
 function validRecoverySelection(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return (value.kind === 'journal' && hasExactKeys(value, ['kind'])) ||
@@ -268,6 +275,20 @@ function validRecoveryWindowTarget(value: unknown): boolean {
     (value.kind === 'start' && hasExactKeys(value, ['kind'])) ||
     (value.kind === 'after' && hasExactKeys(value, ['kind', 'position']) && isSafeInteger(value.position, 1))
   );
+}
+
+/** The instant a 资料库 page starts after: an arrival's own, as the store writes it. */
+const LIBRARY_CURSOR_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+
+/** The instant a 学习准入 page starts after: a material's own, as the store writes it. */
+const LEARNING_CURSOR_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+
+/**
+ * A Learning Material's place, checked by its kind (Issue #61 review): a 修改建议's decision, an analysis item, or a 审阅
+ * finding whose `rvf_` identity has an underscore — which a single character class for every kind once refused.
+ */
+function validLearningMaterialKey(value: unknown): boolean {
+  return isBoundedString(value, 160) && LEARNING_MATERIAL_KEY_PATTERN.test(value);
 }
 
 export function decodeRequest(frame: Uint8Array): ServiceRequest {
@@ -296,10 +317,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectDefaultExecutionRules':
     // 知识库 › 审阅规范文件 (Issue #427, S79a) reads across every Book, so it names none.
     case 'inspectReviewGuidelines':
-    // 知识库 › 范例 (Issue #427, S79b) reads every published Book, so it names none.
-    case 'inspectExemplars':
+    // 知识库 › 工序与规则's 工序 (Issue #427, S79d) are the house's, so the read names no Book.
     case 'inspectKnowledgeProcedures':
-    case 'inspectLibraryMaterials':
     case 'inspectEvaluationProfiles':
     case 'shutdown': {
       requireInput(value.input, [], tentativeId);
@@ -342,6 +361,16 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       const input = requireInput(value.input, ['credentialReference', 'credentialOperationState'], tentativeId);
       if (!isBoundedString(input.credentialReference, 36) || !UUID_PATTERN.test(input.credentialReference) ||
           !['ready', 'missing', 'needs-attention'].includes(input.credentialOperationState as string)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // 知识库 › 范例 (Issue #427, S79b) reads the published Books a page at a time, so it names none: only where the page
+    // starts, as 书库's does.
+    case 'inspectExemplars': {
+      const after = requireInput(value.input, ['after'], tentativeId).after;
+      if (!(after === null || (isRecord(after) && hasExactKeys(after, ['title', 'bookId']) &&
+          isBoundedString(after.title, 180) && isBoundedString(after.bookId, 36) && UUID_PATTERN.test(after.bookId)))) {
         throw new ProtocolError(tentativeId);
       }
       break;
@@ -615,6 +644,21 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validUuid(input.previewId)) throw new ProtocolError(tentativeId);
       break;
     }
+    // 知识库 › 资料库 (Issue #427, S79c) names no Book: only where its page starts, after one item, newest first.
+    case 'inspectLibraryMaterials': {
+      const after = requireInput(value.input, ['after'], tentativeId).after;
+      if (!(after === null || (isRecord(after) && hasExactKeys(after, ['recordedAt', 'materialId']) &&
+          isBoundedString(after.recordedAt, 40) && LIBRARY_CURSOR_INSTANT.test(after.recordedAt) && validUuid(after.materialId)))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // One 资料库 item, by its identity.
+    case 'inspectLibraryMaterial': {
+      const input = requireInput(value.input, ['materialId'], tentativeId);
+      if (!validUuid(input.materialId)) throw new ProtocolError(tentativeId);
+      break;
+    }
     // 放入资料… (Issue #427, S79c): the absolute path main's picker returned.
     case 'previewLibraryMaterial': {
       const input = requireInput(value.input, ['path'], tentativeId);
@@ -676,16 +720,27 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     // 质量与学习 › 学习准入 (Issue #61, S26b): every Book's Learning Material, or one Book's.
     case 'inspectLearningMaterials': {
-      const input = requireInput(value.input, ['bookId'], tentativeId);
-      if (!(input.bookId === null || validUuid(input.bookId))) throw new ProtocolError(tentativeId);
+      const input = requireInput(value.input, ['bookId', 'after'], tentativeId);
+      const after = input.after;
+      if (!(input.bookId === null || validUuid(input.bookId)) ||
+          !(after === null || (isRecord(after) && hasExactKeys(after, ['bookTitle', 'bookId', 'orderedAt', 'materialKey']) &&
+            isBoundedString(after.bookTitle, 180) && validUuid(after.bookId) && isBoundedString(after.orderedAt, 40) &&
+            LEARNING_CURSOR_INSTANT.test(after.orderedAt) && validLearningMaterialKey(after.materialKey)))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // One material by its Book and place, as its Review Card reads it.
+    case 'inspectLearningMaterial': {
+      const input = requireInput(value.input, ['bookId', 'materialKey'], tentativeId);
+      if (!validUuid(input.bookId) || !validLearningMaterialKey(input.materialKey)) throw new ProtocolError(tentativeId);
       break;
     }
     // 记录学习准入决定: the material by its place and exact version, how many decisions the editor saw, one choice of the closed
     // set, and an optional note; whether the material still stands so is the store's.
     case 'decideLearningMaterial': {
       const input = requireInput(value.input, ['bookId', 'materialKey', 'materialDigest', 'expectedDecisions', 'choice', 'note'], tentativeId);
-      if (!validUuid(input.bookId) || !isBoundedString(input.materialKey, 160) ||
-          !/^(?:proposal-decision|analysis-feedback|review-disposition):[0-9a-z/:.-]{1,140}$/u.test(input.materialKey) ||
+      if (!validUuid(input.bookId) || !validLearningMaterialKey(input.materialKey) ||
           !isBoundedString(input.materialDigest, 64) || !HEX_DIGEST_PATTERN.test(input.materialDigest) ||
           !Number.isSafeInteger(input.expectedDecisions) || (input.expectedDecisions as number) < 0 ||
           (input.choice !== 'book' && input.choice !== 'house' && input.choice !== 'excluded' && input.choice !== 'deferred') ||
@@ -1378,13 +1433,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // Its export (Issue #416, S67b): one version of the route's Book's package, the folder the dialog returned, an export.
     case 'reviewBookDeliveryPackageExport': {
-      const input = requireInput(value.input, ['bookId', 'packageVersionId'], tentativeId);
-      if (!validUuid(input.bookId) || !validUuid(input.packageVersionId)) throw new ProtocolError(tentativeId);
+      const input = requireInput(value.input, ['bookId', 'packageVersionId', 'options'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.packageVersionId) || !validPackageExportOptions(input.options)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'prepareBookDeliveryPackageExport': {
-      const input = requireInput(value.input, ['bookId', 'packageVersionId', 'reviewDigest', 'folder'], tentativeId);
-      if (!validUuid(input.bookId) || !validUuid(input.packageVersionId) || !isBoundedString(input.reviewDigest, 64) ||
+      const input = requireInput(value.input, ['bookId', 'packageVersionId', 'options', 'reviewDigest', 'folder'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.packageVersionId) || !validPackageExportOptions(input.options) ||
+          !isBoundedString(input.reviewDigest, 64) ||
           !HEX_DIGEST_PATTERN.test(input.reviewDigest) || !isBoundedString(input.folder, MAX_EXPORT_DESTINATION_CODE_UNITS) ||
           !isAbsolute(input.folder)) {
         throw new ProtocolError(tentativeId);
@@ -1400,6 +1456,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectMaintenanceCase': {
       const input = requireInput(value.input, ['bookId', 'caseId'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.caseId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'listMaintenanceCases': {
+      const input = requireInput(value.input, ['bookId', 'publicationVersionId', 'beforeOrdinal'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.publicationVersionId) || typeof input.beforeOrdinal !== 'number' ||
+          !Number.isSafeInteger(input.beforeOrdinal) || input.beforeOrdinal < 1) {
+        throw new ProtocolError(tentativeId);
+      }
       break;
     }
     case 'recordMaintenanceCase': {

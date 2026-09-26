@@ -20,6 +20,7 @@ import {
   type RecordAnalysisFeedbackInput,
 } from '../shared/protocol.js';
 import { canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
+import { BASELINE_ANALYSIS_KIND } from './analysis/identity.js';
 import { graphemeCount } from './analysis/factual-review-contract.js';
 
 /**
@@ -211,6 +212,7 @@ export class AnalysisFeedbackLedger {
       const dimension = dimensionOf(String(row.item_key));
       const ordinal = integer(row.ordinal);
       requireFeedback(isRecord(record) && record.schema === RECORD_SCHEMA && record.signalId === row.signal_id && record.bookId === row.book_id &&
+        record.kind === BASELINE_ANALYSIS_KIND &&
         record.revisionId === row.revision_id && record.itemKey === row.item_key && record.ordinal === ordinal &&
         record.judgment === row.judgment && record.recordedAt === row.recorded_at && record.actor === ANALYSIS_FEEDBACK_ACTOR &&
         dimension !== null && record.dimension === dimension && (record.supersedes ?? null) === (row.supersedes_signal_id ?? null) &&
@@ -279,7 +281,8 @@ export class AnalysisFeedbackLedger {
       schema: RECORD_SCHEMA,
       signalId,
       bookId,
-      kind: 'baseline-analysis',
+      // The analysis kind the ledger stores the Result Set under (ANALYSIS-023), never the task plan's name.
+      kind: BASELINE_ANALYSIS_KIND,
       revisionId: revision.revisionId,
       revisionDigest: revision.digest,
       dimension: item.dimension,
