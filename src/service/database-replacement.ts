@@ -197,7 +197,7 @@ type Phase = 'moving-out' | 'moving-in' | 'opening' | 'applied' | 'discarding' |
 type MergePhase = 'saving-store' | 'merging' | 'opening-merge' | 'merge-applied' | 'restoring-store' | 'store-restored';
 const PHASES: ReadonlyArray<string> = ['moving-out', 'moving-in', 'opening', 'applied', 'discarding', 'restoring', 'restored', 'refused',
   'saving-store', 'merging', 'opening-merge', 'merge-applied', 'restoring-store', 'store-restored'];
-const ORIGINS: ReadonlyArray<string> = ['database-export', 'scheduled-backup', 'pre-replace-backup', 'pre-merge-backup'];
+const ORIGINS: ReadonlyArray<string> = ['database-export', 'scheduled-backup', 'pre-replace-backup', 'pre-merge-backup', 'pre-upgrade-backup'];
 const MERGE_NOTICES: ReadonlyArray<string> = ['series', 'library-materials', 'internal-number'];
 const BOOK_STATUSES: ReadonlyArray<string> = ['new', 'present', 'same-title'];
 
@@ -227,7 +227,8 @@ function isIntent(value: unknown): value is ReplacementIntent {
 }
 
 /** Write `text` to `path` whole or not at all: a partial file, synced, then renamed into place. */
-async function writeAtomic(path: string, text: string): Promise<void> {
+/** A small file written whole or not at all: to a partial beside it, synced, then renamed over it. */
+export async function writeAtomic(path: string, text: string): Promise<void> {
   const partial = `${path}.${randomUUID()}.partial`;
   let handle: FileHandle | undefined;
   try {

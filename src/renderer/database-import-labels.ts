@@ -81,6 +81,7 @@ export const DATABASE_PACKAGE_ORIGIN_LABELS: Readonly<Record<DatabasePackageOrig
   'scheduled-backup': '定期自动备份',
   'pre-replace-backup': '替换前备份',
   'pre-merge-backup': '合并前备份',
+  'pre-upgrade-backup': '升级前备份',
 };
 
 /** The file's Data Version against this AI7's, and the software that made it. */

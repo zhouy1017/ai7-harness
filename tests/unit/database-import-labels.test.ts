@@ -103,6 +103,7 @@ describe('导入数据库\'s words', () => {
     ]);
     expect(DATABASE_PACKAGE_ORIGIN_LABELS).toEqual({
       'database-export': '导出数据库', 'scheduled-backup': '定期自动备份', 'pre-replace-backup': '替换前备份', 'pre-merge-backup': '合并前备份',
+      'pre-upgrade-backup': '升级前备份',
     });
     expect(databaseImportRefusalLine(preview)).toBeNull();
   });

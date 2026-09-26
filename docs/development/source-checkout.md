@@ -302,6 +302,34 @@ A merge uses the replacement's staging place:
   - The file references a merge copies are read as streams.
 - **The package's store as verified (Issue #434 review):** before a merge reads the package's store, every journal beside it is removed. Since the store stands alone with a rollback journal, a write-ahead log put beside it is never read either. Only the verified file reaches the merge.
 
+升级前备份 (Issue #433, S85b; ADR 0079 §1.1, §1.3, §1.4) is service protocol version 86 and adds no schema revision. `src/service/data-version.ts` classifies every schema revision after the one the first packaged release freezes as Data Version 1: additive stays inside the Data Version, and breaking raises it by one. `dataVersionAt` counts the breaking revisions, and the unit suite holds `DATA_VERSION` to it. Nothing is frozen before that release, so the list is empty and every revision reads as Data Version 1.
+
+When an open finds the store at a lower Data Version than this software's:
+- `src/service/upgrade-backup.ts` writes the store and every file beside it as the database package, origin `pre-upgrade-backup`, into the backup location as `AI7 升级前备份 <date time>.ai7db`, before anything migrates the store. It is kept until the editor deletes it.
+- The backup is put in place by the create-only publication every export uses, so a file that appeared at its name while the package was written is left as it is (`UPGRADE_BACKUP_EXISTS`, Issue #433 review).
+- A backup that cannot be made refuses the open with `UPGRADE_BACKUP_FAILED`, and nothing is migrated.
+- **The pending note (Issue #433 review):**
+  - Once the backup is in place, and before anything migrates the store, the upgrade is noted beside the store in `store/upgrade-pending.json`, written whole or not at all. `store/` moves with the store it belongs to, and no database package carries it.
+  - An open stopped after its migration and before the store recorded the upgrade finds the note at the next open. That open records the upgrade then, with the backup already made, and makes no second one.
+  - An open stopped before migrating anything backs the data up again, since the data could have changed since.
+  - The note also names what it was for: the software, Data Version and schema revision the open was bringing the store to. Only a note of the same software bringing the store to the same revision and Data Version is this open's own. Any other note never stands in for this software's backup (Issue #433 review):
+    - When that note's migration raised the Data Version, its upgrade is recorded first, as that software's. The record states how far the migration took the data: the Data Version reached, and the changes up to there.
+    - This open still makes the backup its own upgrade needs.
+  - **Carried upgrades (Issue #433 review):**
+    - Every upgrade no open has recorded yet is carried on in the note, oldest first, whether or not the open that finds it migrates anything, until the store records them all.
+    - A note carries at most sixteen. An open that would carry one more upgrades nothing and refuses with `UPGRADE_NOTE_FULL`.
+    - A new store carries nothing on.
+  - An upgrade already recorded is never recorded twice: the ledger is searched for the whole upgrade, as a stream. A carried one already recorded adds no record at all. The note is cleared once the records are written.
+  - A note that does not read as AI7's refuses the open with `UPGRADE_NOTE_UNREADABLE`, since its upgrade's backup could no longer be named. So does one carrying more than sixteen, or one larger than 1 MiB (its size is read before any of it); the largest note AI7 writes stays well under that.
+- The version record of that open carries the upgrade: the Data Version and schema revision it came from, the software that last opened it, the classified changes, and the backup's name, size and digest. Every read checks it.
+
+数据与存储's 版本 states the latest upgrade, the backup and how to go back. Going back restores the data only, through the earlier software's `导入数据库 › 替换本机全部数据`; this software previews such a backup as an older Data Version and does not take it. The earlier software cannot open the upgraded data, so the steps move that data aside first (Issue #433 review):
+1. Close AI7 and rename the data folder, keeping it.
+2. Install and start the earlier AI7, which starts with empty data.
+3. In its 导入数据库, choose the backup from the backup location, which stays beside the renamed folder's original name, and replace.
+
+The suites open stores with their own classification (`StoreControl.schemaRevisionClasses`) and stop an open just before or after its version record (`StoreControl.interruptUpgradeAt`); the service entry sets neither.
+
 
 
 Delivery Records (Issue #415, S66b) are schema revision 38, on service protocol version 56. `production_document_deliveries` is one more append-only relation in `src/service/production-document-ledger.ts`: each row is `第 N 次交付` of one document, names one saved version by its revision and digest, and records the recipient, from the house's list (宣传部, 编辑部, 外部媒体, 其他) or in the editor's own words, and an optional note. Its canonical record and digest are verified on every read. `交付` names a saved version, or the current text: bound to the working digest the form read, it is saved as the next version (origin `delivery`) in the transaction that records the delivery, and the recipient and note are checked before anything is saved. A delivery sends nothing. The export of a delivered version goes through the same export ledger under target kind `production-document-version`, with the revision columns left empty and the document's identity and version digest in the canonical record. A Delivery Record reads its file from the newest export of its version approved after it and before the document's next delivery that wrote its file, or else from the newest attempt, so a failed or unconfirmed re-export never hides the file handed over. `交付后有修改` is an edit after a delivery: the document was delivered and its working digest is no delivered version's, so delivering an earlier saved version raises nothing. Production Documents moved out of the 交付物 answer into a read of their own, `inspectProductionDocuments`: with their versions and Delivery Records beside the Manuscript's milestones and designations, the widest answer would not fit one service frame. The documents' commands answer with that read, and `recordProductionDocumentDelivery` is the one new command.
