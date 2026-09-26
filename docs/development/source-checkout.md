@@ -206,7 +206,7 @@ The Data Version (ADR 0079 §1) is `1`, and it is not frozen: Data Version 1 is 
 - the latest software change, and whether it kept the Data Version. Versions order by SemVer precedence, so an older build opening the data again reads `改用较早的软件：从 … 改为 …`, never an update (Issue #433 review);
 - the version records, newest first.
 
-A version record rewritten by hand stops the store from opening. The backup before a breaking upgrade, its rollback, and the package format they share with 导出数据库 come with S85b and S86 (#434).
+A version record rewritten by hand stops the store from opening. Both opening and inspection stream and validate the full chain, retaining only the current record, latest software transition and newest twenty records; an older software transition remains visible even after later schema-only records. Numeric prerelease identifiers are compared exactly, including values beyond JavaScript's safe-integer range. The backup before a breaking upgrade, its rollback, and the package format they share with 导出数据库 come with S85b and S86 (#434).
 
 
 
