@@ -183,6 +183,22 @@ describe('学习准入 over the real store', () => {
       const excluded = choose(deferred, { choice: 'excluded', note: '不代表我的一贯做法' });
       expect([excluded.state, excluded.decision?.choice]).toEqual(['decided', 'excluded']);
       expect(attention(store)).toEqual([]);
+      // 反馈历史 (Issue #61, S26c) lists every current decision, newest first — the silent and the dismissed ones too, each read
+      // as no more than that, the material among them once — with the people each is attributed to and where each opens.
+      const history = store.inspectFeedbackHistory();
+      expect(history.books).toEqual([{
+        bookId: book.bookId, title: '学习组稿', authors: ['周一'], editors: ['郑三'], peopleVersions: [{ version: 1, authors: ['周一'], editors: ['郑三'] }],
+      }]);
+      expect(history.truncated).toBe(false);
+      expect(history.entries.map((entry) => [entry.origin, entry.dimension, entry.signal, entry.reason, entry.reasonState, entry.peopleVersion])).toEqual([
+        ['proposal-decision', null, '拒绝', null, 'dismissed', 1],
+        ['proposal-decision', null, '拒绝', null, 'none', 1],
+        ['proposal-decision', null, '修改后接受', null, 'none', 1],
+        ['proposal-decision', null, '拒绝', '方向不合适', 'given', 1],
+      ]);
+      expect(history.entries[3]!.target).toEqual({
+        kind: 'mark', bookId: book.bookId, manuscriptId: book.manuscriptId, branchId: book.branchId, blockId: expect.stringMatching(/^blk_/u), markId: rejectedMark, detached: false,
+      });
       // Deciding changes nothing it came from: the decision and its reason read as they were.
       expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, rejectedMark).suggestion!.decision).toMatchObject({ disposition: 'rejected', reason: '方向不合适', reasonState: 'given' });
       store.markCleanShutdown();
@@ -335,7 +351,7 @@ describe('学习准入 over the real store', () => {
     const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
     const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
     try {
-      const { bookId } = await importSample1Book(store, roots.codeRoot, 'L2 审阅学习');
+      const { bookId, manuscriptId, branchId } = await importSample1Book(store, roots.codeRoot, 'L2 审阅学习');
       await pinEditorialWorkspaceProfileRevision2(store, bookId);
       recordMissingCredentialConnection(store, 'L2 主编辑连接');
       let progress = store.createReviewRunPreparationWork(bookId, [TYPOS_AND_USAGE.categoryId], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, launchPolicy);
@@ -356,6 +372,20 @@ describe('学习准入 over the real store', () => {
       const decided = store.decideLearningMaterial(input);
       expect([decided.materialKey, decided.state, decided.decision?.choice, decided.decisions]).toEqual([material.materialKey, 'decided', 'excluded', 1]);
       expect(store.inspectLearningMaterial(bookId, material.materialKey)).toEqual(decided);
+      // 反馈历史 (Issue #61, S26c review): the ignored finding stands under its category and opens at the finding; a 修改建议
+      // the category made, rejected for the editor's reason, is about that category too.
+      const suggested = store.inspectReviewWorkspace(bookId, run.reviewRunId).run!.findings.find((entry) => entry.findingId !== finding.findingId && entry.markId !== null)!;
+      const window = store.getManuscriptWindow(manuscriptId, branchId, null);
+      store.recordChangeSuggestionDecision({
+        manuscriptId, branchId, windowStartBlockId: window.blocks[0]!.blockId, markId: suggested.markId!, clientDecisionId: randomUUID(),
+        disposition: 'rejected', editedText: null, reason: '保留作者用字',
+      });
+      const history = store.inspectFeedbackHistory().entries;
+      expect(history.map((entry) => [entry.origin, entry.dimension, entry.signal, entry.reason, entry.reasonState])).toEqual([
+        ['proposal-decision', '错别字与规范用语', '拒绝', '保留作者用字', 'given'],
+        ['review-disposition', '错别字与规范用语', '忽略', '本书体例允许这种写法', 'given'],
+      ]);
+      expect(history[1]!.target).toEqual({ kind: 'review', bookId, reviewRunId: run.reviewRunId, findingId: finding.findingId });
       store.markCleanShutdown();
     } finally {
       const stopped = driver.dispose();

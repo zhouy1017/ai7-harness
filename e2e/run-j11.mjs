@@ -38,6 +38,10 @@ import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabl
 // its consequence first; one material is decided for the Book with the editor's note and the other left for later, which
 // 待我处理 then says; Enter and Escape reach the card without a pointer; it reflows at 200% and keeps its borders without
 // colour; and a restart moves nothing.
+//
+// Since #61 (S26c) 质量与学习 opens from the landing at 反馈历史, the passive history of the same Book's feedback: newest
+// first, each entry's verdict and reason as it stands and nothing pending; filtered by 来源, and — once the Book's 作者 and
+// 责编 are set on its 工作概览 — by them; each opening the exact record it came from.
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -60,6 +64,9 @@ const SUGGESTION_APPLIED = '（旅程示例二）';
 const OWN_REASON = '（旅程示例）篇幅所限';
 /** 学习准入's words (Issue #61, S26b): the Journey's note, and what the page says of every decision. */
 const LEARNING_NOTE = '（旅程示例）只在这本书里参考';
+/** 反馈历史's words (Issue #61, S26c), and the stand-in people the Journey gives 评估旅程丙. */
+const FEEDBACK_HISTORY_NOTE = '这里只是记录你给过的反馈：不会催你补充原因，也不会把没有说明当作认可。';
+const THIRD_PEOPLE = Object.freeze({ authors: '冯五', editors: '郑三', laterEditors: '王六' });
 const LEARNING_BASIS = '学习准入策略还在「仅建议」阶段：没有批准任何可以自动纳入的材料或范围，所以每一条都由你决定。';
 const LEARNING_INFLUENCE = '纳入以后，它只可能在所选范围内帮 AI7 以后的建议更接近你的判断：不会改动稿件或它来自的记录，不会自动生效为规则，不会启用记忆，也不会被发送出去。';
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
@@ -816,6 +823,39 @@ async function readLearning(renderer, predicate, name) {
   throw error;
 }
 const learningRow = (kind) => `[data-screen="quality-learning"] li.learning-material[data-material-key^="${kind}:"]`;
+
+/**
+ * 反馈历史 as the editor reads it (Issue #61, S26c): its note, what it says when nothing matches, each Book's heading and
+ * people, each entry's origin, first line and reason, the people an entry names as its own, the filters' values and choices,
+ * and where focus is.
+ */
+const READ_HISTORY = `(() => {
+  const root = document.querySelector('[data-screen="quality-learning"] .feedback-history');
+  if (!(root instanceof HTMLElement) || root.dataset.feedbackEntries === undefined) return null;
+  const active = document.activeElement;
+  return {
+    note: root.querySelector('.feedback-history-note')?.textContent ?? null,
+    none: root.querySelector('.feedback-history-none')?.textContent ?? null,
+    books: Array.from(root.querySelectorAll('.feedback-book'), (book) => [book.querySelector('h3')?.textContent ?? null, book.querySelector('.feedback-people')?.textContent ?? null]),
+    entries: Array.from(root.querySelectorAll('li.feedback-entry'), (item) => [item.dataset.feedbackOrigin ?? null, item.querySelector('.feedback-entry-line')?.textContent ?? null, item.querySelector('.feedback-entry-reason')?.textContent ?? null]),
+    people: Array.from(root.querySelectorAll('li.feedback-entry'), (item) => item.querySelector('.feedback-entry-people')?.textContent ?? null),
+    filters: Object.fromEntries(Array.from(root.querySelectorAll('select[data-feedback-filter]'), (select) => [select.dataset.feedbackFilter, [select.value, Array.from(select.options, (option) => option.textContent)]])),
+    focus: active instanceof HTMLElement && root.contains(active) ? (active.id || active.dataset.feedbackAction || active.tagName) : null,
+  };
+})()`;
+async function readHistory(renderer, predicate, name) {
+  const deadline = Date.now() + 60_000;
+  let page = null;
+  while (Date.now() < deadline) {
+    page = await renderer.evaluate(READ_HISTORY).catch(() => null);
+    if (page !== null && predicate(page)) return page;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  const error = new Error(`J-11/${name}`);
+  error.detail = page;
+  throw error;
+}
+const historyEntry = (condition) => `[data-screen="quality-learning"] li.feedback-entry${condition} [data-feedback-action="open"]`;
 
 async function main() {
   parseJourney();
@@ -1734,11 +1774,108 @@ async function main() {
     await launch();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'learning-restart-ready');
     await click(renderer, '质量与学习', 'learning-restart-open');
+    // Synchronized delta with S26c: the landing opens 质量与学习 at 反馈历史, and 学习准入 is its second tab.
+    await clickSelector(renderer, '#quality-tab-learning', 'learning-restart-tab');
     const learningAfterPage = await readLearning(renderer, (page) => page.books.length === 1, 'learning-restart-page');
     requireJourney(JSON.stringify(learningAfterPage.books[0].materials.map(([kind, state]) => [kind, state])) === JSON.stringify([['proposal-decision', 'decided'], ['analysis-feedback', 'deferred']]),
       'learning-restart-page-words', learningAfterPage);
     const learningAfter = await renderer.evaluate(`window.ai7.inspectLearningMaterials({ bookId: null }).then((projection) => JSON.stringify(projection))`);
     requireJourney(typeof learningBefore === 'string' && learningAfter === learningBefore, 'learning-restart-unmoved');
+
+    // ---- 质量与学习 › 反馈历史 (Issue #61, plan slice S26c; FDBK-009, FDBK-010, FDBK-013) ---------------------------------------
+    at('feedback-history');
+    // 反馈历史, where the landing opens 质量与学习: the Book's four pieces of feedback, newest first — the acceptance nobody
+    // explained, the rejection with its reason as it stands, the entity's latest 准确 and the synopsis's own words — each read
+    // as no more than it is, with nothing pending or counted.
+    await clickSelector(renderer, '#quality-tab-feedback', 'feedback-history-tab');
+    const history = await readHistory(renderer, (page) => page.entries.length === 4, 'feedback-history-read');
+    requireJourney(history.note === FEEDBACK_HISTORY_NOTE && history.none === null &&
+      JSON.stringify(history.books) === JSON.stringify([[`《${THIRD.title}》 · 4 条`, '作者与责编：尚未填写']]) &&
+      JSON.stringify(history.entries) === JSON.stringify([
+        ['proposal-decision', '修改建议 · 接受', '没有说明原因'],
+        ['proposal-decision', '修改建议 · 拒绝', '原因：证据不足'],
+        ['analysis-feedback', '分析反馈 · 人物与名称 · 准确', '没有说明原因'],
+        ['analysis-feedback', '分析反馈 · 全书梗概 · 不完整', `原因：${SYNOPSIS_REASON}`],
+      ]) && JSON.stringify(history.filters.origin) === JSON.stringify(['', ['全部', '修改建议', '分析反馈', '审阅']]) &&
+      JSON.stringify(history.filters.author) === JSON.stringify(['', ['全部']]), 'feedback-history-words', history);
+    await choose(renderer, '#feedback-filter-origin', 'analysis-feedback', 'feedback-filter-origin');
+    const analysisOnly = await readHistory(renderer, (page) => page.entries.length === 2, 'feedback-filter-origin-read');
+    requireJourney(analysisOnly.entries.every(([origin]) => origin === 'analysis-feedback') && analysisOnly.focus === 'feedback-filter-origin', 'feedback-filter-origin-words', analysisOnly);
+    await choose(renderer, '#feedback-filter-origin', '', 'feedback-filter-origin-all');
+    await readHistory(renderer, (page) => page.entries.length === 4, 'feedback-filter-origin-cleared');
+
+    at('feedback-history-attribution');
+    // The Book's 作者 and 责编, set on its 工作概览, attribute its feedback (FDBK-013): 作者 冯五 keeps all four, 责编 郑三 with it
+    // too, and with 来源 审阅 — the Book gave none — nothing is left, and the page says so.
+    await click(renderer, '返回', 'attribution-back');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'attribution-landing');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(thirdId)}]`, 'attribution-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(thirdId)}]')`, 'attribution-manuscript', 120_000);
+    await click(renderer, '返回图书工作概览', 'attribution-overview');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(peopleSection)})?.dataset.peopleVersion === '0'`, 'attribution-people');
+    await clickSelector(renderer, `${peopleSection} [data-people-action="edit"]`, 'attribution-edit');
+    await fill(renderer, `${peopleSection} input[data-people-field="authors"]`, THIRD_PEOPLE.authors, 'attribution-authors');
+    await fill(renderer, `${peopleSection} input[data-people-field="editors"]`, THIRD_PEOPLE.editors, 'attribution-editors');
+    await clickSelector(renderer, `${peopleSection} [data-people-action="save"]`, 'attribution-save');
+    await waitFor(renderer, `${status} === '人员已保存' && document.querySelector(${JSON.stringify(peopleSection)})?.dataset.peopleVersion === '1'`, 'attribution-saved');
+    await click(renderer, '返回图书列表', 'attribution-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'attribution-landing-again');
+    await click(renderer, '质量与学习', 'attribution-quality');
+    const attributed = await readHistory(renderer, (page) => page.books[0]?.[1] === `作者：${THIRD_PEOPLE.authors} · 责编：${THIRD_PEOPLE.editors}`, 'attribution-history');
+    requireJourney(JSON.stringify(attributed.filters.author) === JSON.stringify(['', ['全部', THIRD_PEOPLE.authors]]) &&
+      JSON.stringify(attributed.filters.editor) === JSON.stringify(['', ['全部', THIRD_PEOPLE.editors]]), 'attribution-filters', attributed.filters);
+    await choose(renderer, '#feedback-filter-author', THIRD_PEOPLE.authors, 'attribution-author');
+    await choose(renderer, '#feedback-filter-editor', THIRD_PEOPLE.editors, 'attribution-editor');
+    await readHistory(renderer, (page) => page.entries.length === 4 && page.filters.author?.[0] === THIRD_PEOPLE.authors && page.filters.editor?.[0] === THIRD_PEOPLE.editors, 'attribution-both');
+    await choose(renderer, '#feedback-filter-origin', 'review-disposition', 'attribution-review');
+    const noneLeft = await readHistory(renderer, (page) => page.entries.length === 0, 'attribution-none');
+    requireJourney(noneLeft.none === '没有符合的反馈记录。' && noneLeft.books.length === 0, 'attribution-none-words', noneLeft);
+
+    // A later 责编 takes nothing from the one before (FDBK-013, Issue #61 review): all four came before any people were saved,
+    // so they stay with the first — 郑三 is still the 责编 offered and keeps all four, and each entry names whose it is.
+    await click(renderer, '返回', 'later-back');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'later-landing');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(thirdId)}]`, 'later-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(thirdId)}]')`, 'later-manuscript', 120_000);
+    await click(renderer, '返回图书工作概览', 'later-overview');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(peopleSection)})?.dataset.peopleVersion === '1'`, 'later-people');
+    await clickSelector(renderer, `${peopleSection} [data-people-action="edit"]`, 'later-edit');
+    await fill(renderer, `${peopleSection} input[data-people-field="editors"]`, THIRD_PEOPLE.laterEditors, 'later-editors');
+    await clickSelector(renderer, `${peopleSection} [data-people-action="save"]`, 'later-save');
+    await waitFor(renderer, `${status} === '人员已保存' && document.querySelector(${JSON.stringify(peopleSection)})?.dataset.peopleVersion === '2'`, 'later-saved');
+    await click(renderer, '返回图书列表', 'later-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'later-landing-again');
+    await click(renderer, '质量与学习', 'later-quality');
+    const later = await readHistory(renderer, (page) => page.books[0]?.[1] === `作者：${THIRD_PEOPLE.authors} · 责编：${THIRD_PEOPLE.laterEditors}`, 'later-history');
+    const firstPeople = `当时的人员 · 作者：${THIRD_PEOPLE.authors} · 责编：${THIRD_PEOPLE.editors}`;
+    requireJourney(JSON.stringify(later.filters.editor) === JSON.stringify(['', ['全部', THIRD_PEOPLE.editors]]) &&
+      later.people.length === 4 && later.people.every((line) => line === firstPeople), 'later-attribution', { filters: later.filters, people: later.people });
+    await choose(renderer, '#feedback-filter-editor', THIRD_PEOPLE.editors, 'later-editor');
+    await readHistory(renderer, (page) => page.entries.length === 4 && page.filters.editor?.[0] === THIRD_PEOPLE.editors, 'later-editor-keeps');
+
+    at('feedback-history-open');
+    // Each entry opens its exact record: the rejection, the manuscript with its 修改建议's card and the reason as it stands; the
+    // entity's judgment, ②A on the revision it judged — the current one — on 人物与名称, not the tab ②A opens at, with the
+    // judged item in view and focused (Issue #61 review).
+    await choose(renderer, '#feedback-filter-origin', '', 'open-origin-all');
+    await readHistory(renderer, (page) => page.entries.length === 4, 'open-history');
+    await clickSelector(renderer, historyEntry('[data-feedback-origin="proposal-decision"][data-reason-state="given"]'), 'open-rejection');
+    await waitFor(renderer, `(document.querySelector('.editorial-mark-layer [data-mark-card] [data-mark-reason]')?.textContent ?? '').startsWith('你的原因：证据不足')`, 'open-rejection-card', 120_000);
+    await pressEscape(renderer);
+    await click(renderer, '返回图书工作概览', 'open-overview');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(peopleSection)}) !== null`, 'open-overview-shown');
+    await click(renderer, '返回图书列表', 'open-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'open-landing');
+    await click(renderer, '质量与学习', 'open-quality');
+    await readHistory(renderer, (page) => page.entries.length === 4, 'open-history-again');
+    await clickSelector(renderer, historyEntry('[data-entry-id$="/entities/0"]'), 'open-entity');
+    await waitFor(renderer, `(() => {
+      const item = document.querySelector('[data-screen="book-analysis"] [data-analysis-item-key="entities/0"]');
+      const card = document.querySelector('.baseline-analysis-card');
+      return item instanceof HTMLElement && item.dataset.analysisFeedbackJudgment === 'accurate' && card instanceof HTMLElement && card.dataset.analysisTab === 'entities' &&
+        item.closest('[data-analysis-panel]')?.hidden === false && item.getClientRects().length > 0 && document.activeElement === item;
+    })()`, 'open-entity-in-view', 60_000);
+    await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.inspectedRevisionId === undefined`, 'open-entity-current');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

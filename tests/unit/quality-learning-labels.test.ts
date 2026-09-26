@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  FEEDBACK_HISTORY_DETACHED,
+  FEEDBACK_HISTORY_HEADING,
+  FEEDBACK_HISTORY_NOTE,
+  FEEDBACK_HISTORY_STATUS,
+  QUALITY_LEARNING_TABS,
+  feedbackAttributionLine,
+  feedbackEntryLine,
+  feedbackReasonLine,
   LEARNING_CHOICES,
   LEARNING_INFLUENCE,
   LEARNING_SERIES_UNAVAILABLE,
@@ -56,6 +64,25 @@ describe('学习准入 words', () => {
     expect(learningDecisionLine({ decision: { choice: 'book', note: '只在这本书里参考', decidedAt: '2026-09-25T06:00:00.000Z' } }, instant))
       .toBe('仅纳入当前图书 · 〔2026-09-25〕 · 只在这本书里参考');
     expect(LEARNING_STATE_LABELS).toEqual({ pending: '待定', changed: '改过 · 需要重新决定', deferred: '稍后决定', decided: '已决定' });
+  });
+});
+
+describe('反馈历史 words (Issue #61, S26c)', () => {
+  it('opens at the history, says what it is not, and reads each entry by origin, dimension, verdict and reason', () => {
+    // The view is named as the spec names it: 反馈历史 (Issue #61, S26c review).
+    expect(QUALITY_LEARNING_TABS.map((entry) => [entry.tab, entry.label])).toEqual([['feedback', '反馈历史'], ['learning', '学习准入']]);
+    expect([FEEDBACK_HISTORY_HEADING, FEEDBACK_HISTORY_STATUS.loading, FEEDBACK_HISTORY_STATUS.opened]).toEqual(['反馈历史', '正在读取反馈历史…', '反馈历史已打开']);
+    // An entry names the people it is attributed to where they are not the Book's now, and a gone paragraph says so.
+    expect(feedbackAttributionLine({ authors: ['周一'], editors: ['郑三'] })).toBe('当时的人员 · 作者：周一 · 责编：郑三');
+    expect(FEEDBACK_HISTORY_DETACHED).toBe('这条修改建议所在的段落已不在稿件中。');
+    expect(FEEDBACK_HISTORY_NOTE).toBe('这里只是记录你给过的反馈：不会催你补充原因，也不会把没有说明当作认可。');
+    expect(feedbackEntryLine({ origin: 'proposal-decision', dimension: null, signal: '拒绝' })).toBe('修改建议 · 拒绝');
+    expect(feedbackEntryLine({ origin: 'analysis-feedback', dimension: '全书梗概', signal: '不完整' })).toBe('分析反馈 · 全书梗概 · 不完整');
+    expect(feedbackEntryLine({ origin: 'review-disposition', dimension: '错别字与规范用语', signal: '忽略' })).toBe('审阅 · 错别字与规范用语 · 忽略');
+    // Neither 不说明 nor silence is read as more than that (FDBK-007).
+    expect(feedbackReasonLine({ reason: '证据不足', reasonState: 'given' })).toBe('原因：证据不足');
+    expect(feedbackReasonLine({ reason: null, reasonState: 'dismissed' })).toBe('选择了不说明原因');
+    expect(feedbackReasonLine({ reason: null, reasonState: 'none' })).toBe('没有说明原因');
   });
 });
 

@@ -546,6 +546,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectLearningMaterial(request.input.bookId, request.input.materialKey) };
     case 'decideLearningMaterial':
       return { id: request.id, ok: true, op: request.op, result: store.decideLearningMaterial(request.input) };
+    case 'inspectFeedbackHistory':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectFeedbackHistory() };
     case 'inspectEvaluationProfiles':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluationProfiles() };
     case 'inspectEvaluation':

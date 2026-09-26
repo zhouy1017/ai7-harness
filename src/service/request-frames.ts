@@ -714,6 +714,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    // 质量与学习 › 反馈历史 (Issue #61, S26c): every Book's feedback; it names nothing.
+    case 'inspectFeedbackHistory':
+      requireInput(value.input, [], tentativeId);
+      break;
     // 质量与学习 › 学习准入 (Issue #61, S26b): every Book's Learning Material, or one Book's.
     case 'inspectLearningMaterials': {
       const input = requireInput(value.input, ['bookId', 'after'], tentativeId);

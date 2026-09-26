@@ -7,11 +7,18 @@ import {
   type AnalysisFeedbackJudgment,
 } from '../shared/analysis-feedback.js';
 import {
+  MAX_FEEDBACK_HISTORY_ENTRIES,
+  MAX_FEEDBACK_HISTORY_REASON_GRAPHEMES,
   MAX_LEARNING_ELIGIBILITY_REASON_GRAPHEMES,
+  type FeedbackHistoryBookProjection,
+  type FeedbackHistoryEntryProjection,
+  type FeedbackHistoryPeopleVersion,
+  type FeedbackHistoryProjection,
   type LearningEligibilityChoice,
   type LearningMaterialKind,
   type LearningMaterialProjection,
 } from '../shared/protocol.js';
+import { graphemesOf } from '../shared/mark-anchor.js';
 import { canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
 import { graphemeCount } from './analysis/factual-review-contract.js';
 
@@ -164,6 +171,56 @@ export function learningMaterialOrder(a: { readonly materialKey: string; readonl
     (a.materialKey < b.materialKey ? -1 : a.materialKey > b.materialKey ? 1 : 0);
 }
 
+/** The most one answer of 反馈历史 weighs on the wire, with the Books and people it brings (Issue #61 review). */
+export const FEEDBACK_HISTORY_PAGE_BYTES = 256 * 1024;
+
+function wireBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+/** A reason as 反馈历史 shows it: whole up to `MAX_FEEDBACK_HISTORY_REASON_GRAPHEMES`, beyond that its opening and `…`. */
+export function feedbackReasonExcerpt(reason: string | null): string | null {
+  if (reason === null) return null;
+  const graphemes = graphemesOf(reason);
+  return graphemes.length <= MAX_FEEDBACK_HISTORY_REASON_GRAPHEMES ? reason : `${graphemes.slice(0, MAX_FEEDBACK_HISTORY_REASON_GRAPHEMES).join('')}…`;
+}
+
+/**
+ * One answer of 反馈历史 (Issue #61 review): its entries, newest first as given, at most `MAX_FEEDBACK_HISTORY_ENTRIES` and no
+ * more than `budget` bytes once each Book and each version of its people an entry brings are weighed with it — but always
+ * the newest while there is one — its Books by title, and whether older entries were left out.
+ */
+export function feedbackHistoryPage(
+  entries: ReadonlyArray<FeedbackHistoryEntryProjection>,
+  bookOf: (bookId: string) => Omit<FeedbackHistoryBookProjection, 'peopleVersions'>,
+  peopleOf: (bookId: string, version: number) => FeedbackHistoryPeopleVersion | null,
+  budget: number = FEEDBACK_HISTORY_PAGE_BYTES,
+): FeedbackHistoryProjection {
+  const kept: FeedbackHistoryEntryProjection[] = [];
+  const books = new Map<string, { book: Omit<FeedbackHistoryBookProjection, 'peopleVersions'>; versions: Map<number, FeedbackHistoryPeopleVersion> }>();
+  let spent = 0;
+  for (const entry of entries) {
+    if (kept.length >= MAX_FEEDBACK_HISTORY_ENTRIES) break;
+    const known = books.get(entry.bookId);
+    const book = known?.book ?? bookOf(entry.bookId);
+    const people = entry.peopleVersion === 0 || known?.versions.has(entry.peopleVersion) === true ? null : peopleOf(entry.bookId, entry.peopleVersion);
+    const weight = wireBytes(entry) + 1 + (known === undefined ? wireBytes(book) + 1 : 0) + (people === null ? 0 : wireBytes(people) + 1);
+    if (kept.length > 0 && spent + weight > budget) break;
+    kept.push(entry);
+    spent += weight;
+    const held = known ?? { book, versions: new Map<number, FeedbackHistoryPeopleVersion>() };
+    if (people !== null) held.versions.set(people.version, people);
+    books.set(entry.bookId, held);
+  }
+  return {
+    books: [...books.values()]
+      .map(({ book, versions }) => ({ ...book, peopleVersions: [...versions.values()].sort((a, b) => a.version - b.version) }))
+      .sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : a.bookId < b.bookId ? -1 : 1)),
+    entries: kept,
+    truncated: kept.length < entries.length,
+  };
+}
+
 /** The exact version a decision binds. */
 export function learningMaterialDigest(candidate: Pick<LearningMaterialCandidate, 'materialKey' | 'kind' | 'content'>): string {
   return sha256Hex(canonicalJson({ schema: MATERIAL_SCHEMA, materialKey: candidate.materialKey, kind: candidate.kind, content: candidate.content }));
@@ -174,7 +231,8 @@ function bounded(text: string): string {
   return graphemes.length <= EXCERPT_GRAPHEMES ? graphemes.join('') : `${graphemes.slice(0, EXCERPT_GRAPHEMES).join('')}…`;
 }
 
-const DISPOSITION_LABELS: Readonly<Record<string, string>> = { accepted: '接受', 'accepted-with-edit': '修改后接受', rejected: '拒绝' };
+/** A 修改建议's decision in the editor's words, as 学习准入 and 反馈历史 both say it. */
+export const DISPOSITION_LABELS: Readonly<Record<string, string>> = { accepted: '接受', 'accepted-with-edit': '修改后接受', rejected: '拒绝' };
 
 /**
  * A 修改建议's current decision that carries the editor's reason or their own wording: what was suggested, what they did,
@@ -221,10 +279,22 @@ export function proposalDecisionCandidate(decision: {
   };
 }
 
-const DIMENSION_LABELS: Readonly<Record<AnalysisFeedbackDimension, string>> = {
+export const DIMENSION_LABELS: Readonly<Record<AnalysisFeedbackDimension, string>> = {
   synopsis: '全书梗概', entities: '人物与名称', events: '事件', relationships: '关系', settings: '设定',
 };
-const JUDGMENT_LABELS: Readonly<Record<AnalysisFeedbackJudgment, string>> = { accurate: '准确', inaccurate: '不准确', incomplete: '不完整' };
+export const JUDGMENT_LABELS: Readonly<Record<AnalysisFeedbackJudgment, string>> = { accurate: '准确', inaccurate: '不准确', incomplete: '不完整' };
+
+/** A judgment's reason in the editor's words: the alternative's own label, or what they wrote under 其他. */
+export function analysisReasonLabel(signal: {
+  readonly dimension: AnalysisFeedbackDimension;
+  readonly judgment: AnalysisFeedbackJudgment;
+  readonly reason: null | { readonly choice: string; readonly text: string | null };
+}): string | null {
+  if (signal.reason === null) return null;
+  if (signal.reason.choice === ANALYSIS_FEEDBACK_OTHER) return signal.reason.text;
+  if (signal.judgment === 'accurate') return signal.reason.choice;
+  return ANALYSIS_FEEDBACK_REASONS[signal.dimension][signal.judgment].find((entry) => entry.choice === signal.reason!.choice)?.label ?? signal.reason.choice;
+}
 
 /**
  * An item of an analysis result the editor judged and said why, as their latest judgment of it stands. It is the item's
@@ -240,13 +310,7 @@ export function analysisFeedbackCandidate(signal: {
   readonly correction: string | null;
   readonly recordedAt: string;
 }, itemLabel: string | null): LearningMaterialCandidate {
-  const reasonLabel = signal.reason === null
-    ? null
-    : signal.reason.choice === ANALYSIS_FEEDBACK_OTHER
-      ? signal.reason.text
-      : signal.judgment === 'accurate'
-        ? signal.reason.choice
-        : ANALYSIS_FEEDBACK_REASONS[signal.dimension][signal.judgment].find((entry) => entry.choice === signal.reason!.choice)?.label ?? signal.reason.choice;
+  const reasonLabel = analysisReasonLabel(signal);
   const excerpt: string[] = [];
   if (itemLabel !== null) {
     excerpt.push(`${DIMENSION_LABELS[signal.dimension]}：${bounded(itemLabel)}`);

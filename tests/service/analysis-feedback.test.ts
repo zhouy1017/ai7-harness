@@ -152,6 +152,11 @@ describe('②A 分析反馈 over the real store', () => {
       expect(withEvent.metric).toMatchObject({ judged: 2, accurate: 1, inaccurate: 0, incomplete: 1 });
       // Reading it twice answers the same, and writes nothing.
       expect(store.inspectAnalysisFeedback(bookId, revisionId)).toEqual(withEvent);
+      // 反馈历史 opens each judgment on its own item (Issue #61, S26c review): the revision, the item, and the tab it sits on.
+      expect(store.inspectFeedbackHistory().entries.map((entry) => [entry.dimension, entry.signal, entry.reason, entry.target])).toEqual([
+        ['事件', '不完整', '漏了事件的起因', { kind: 'analysis', bookId, revisionId, itemKey: 'events/0', dimension: 'events' }],
+        ['人物与名称', '准确', null, { kind: 'analysis', bookId, revisionId, itemKey: 'entities/0', dimension: 'entities' }],
+      ]);
       // Another Book cannot read or judge this Book's revision — one analysed as well, so the refusal is the ownership
       // check's own, never an absent analysis.
       const other = (await importSample1Book(store, roots.codeRoot, '另一本分析之书')).bookId;
