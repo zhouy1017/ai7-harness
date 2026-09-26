@@ -95,6 +95,6 @@ describe('分析反馈 words', () => {
         { itemKey: 'synopsis', dimension: 'synopsis', index: 0, digest: 'a'.repeat(64), latest: signal({}), signals: 2 },
         { itemKey: 'entities/0', dimension: 'entities', index: 0, digest: 'b'.repeat(64), latest: null, signals: 0 },
       ],
-    })).toBe('Revision 2 · 00000000-0000-4000-8000-000000000002 · 已判断 1 / 2 条');
+    })).toBe('Revision 2 · 00000000-0000-4000-8000-000000000002 · 已判断 1 条');
   });
 });

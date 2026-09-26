@@ -2,6 +2,15 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/**
+ * The fixed time every archive these composers write carries (Issue #601): the product's `fixedArchiveTime`
+ * (`src/shared/archive-time.ts`), built from local fields so a ZIP's DOS time is the same on every time zone. The unit
+ * suite keeps the two equal.
+ */
+export function fixedArchiveTime() {
+  return new Date(2026, 0, 1, 8, 0, 0);
+}
+
 // Composed manuscript inputs for the Journey runners: the plain-JS twin of the vitest builder
 // `tests/support/composed-fixture.ts`. A Journey whose subject is manuscript content composes its DOCX
 // at run time from a contiguous excerpt of the one admitted Public SampleBook (ADR 0043 as narrowed by
@@ -324,7 +333,7 @@ export async function composeRevisedAdmittedDocx(path, { source, title, paragrap
     '[Content_Types].xml': strToU8('<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>'),
     'docProps/core.xml': strToU8(`<?xml version="1.0" encoding="UTF-8"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${escapeXml(title)}</dc:title></cp:coreProperties>`),
     ...parts,
-  }, { level: 6, mtime: new Date('2026-01-01T00:00:00.000Z') });
+  }, { level: 6, mtime: fixedArchiveTime() });
   await writeFile(path, archive, { flag: 'wx' });
   return archive;
 }
@@ -439,7 +448,7 @@ export async function composeExportAdmittedDocx(path, { source, startBlock, bloc
       `<?xml version="1.0" encoding="UTF-8"?><w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
       `<w:comment w:id="1" w:author="${escapeXml(comment.author)}" w:date="2026-09-01T00:00:00Z" w:initials="示"><w:p><w:r><w:t xml:space="preserve">${escapeXml(commentWords)}</w:t></w:r></w:p></w:comment></w:comments>`,
     ),
-  }, { level: 6, mtime: new Date('2026-01-01T00:00:00.000Z') });
+  }, { level: 6, mtime: fixedArchiveTime() });
   await writeFile(path, archive, { flag: 'wx' });
   return archive;
 }
@@ -577,7 +586,7 @@ export async function composeAdmittedDocx(path, { source, startBlock, blocks, ti
     '[Content_Types].xml': strToU8('<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>'),
     'docProps/core.xml': strToU8(`<?xml version="1.0" encoding="UTF-8"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${escapeXml(title)}</dc:title></cp:coreProperties>`),
     ...body,
-  }, { level: 6, mtime: new Date('2026-01-01T00:00:00.000Z') });
+  }, { level: 6, mtime: fixedArchiveTime() });
   await writeFile(path, archive, { flag: 'wx' });
   return archive;
 }

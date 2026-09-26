@@ -3,8 +3,11 @@ import { readFile, stat } from 'node:fs/promises';
 import { basename } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
+  MAX_GUIDELINE_OLDER_BOOKS_SHOWN,
+  MAX_GUIDELINE_VERSION_RUNS_SHOWN,
   MAX_REVIEW_GUIDELINE_FILE_BYTES,
   type ReviewGuidelineDocumentProjection,
+  type ReviewGuidelineDocumentUse,
   type ReviewGuidelinePreviewProjection,
   type ReviewGuidelineSourceProjection,
   type ReviewGuidelinesProjection,
@@ -17,6 +20,7 @@ import { MANUSCRIPT_FORMAT_HEAD_BYTES, identifyManuscriptFormat } from './manusc
 import {
   BUILTIN_REVIEW_CATEGORY_CONFIGURATION,
   type ReviewCategoryConfiguration,
+  type ReviewCategoryExecutor,
   type ReviewGuidelineClause,
   type ReviewGuidelineDocument,
 } from './review/category-configuration.js';
@@ -26,7 +30,8 @@ import {
  * category applies are AI7's own short defaults, issued as `AI7 内置默认` at version 1 and never stored. A house imports
  * its own next version of one of them — a Word file or plain text of numbered clauses — and every Review Run prepared
  * after that applies it, while each earlier Run keeps naming the version it used: a Run snapshots its category entries,
- * guideline documents with their versions and clauses included.
+ * guideline documents with their versions and clauses included. Only a document whose categories hand its clauses to the
+ * model takes a house version; the others state what AI7's fixed executors do, and stay AI7's (Issue #427 review).
  *
  * Schema revision 45 owns one relation, a ledger like the others: each row is one imported version, chained to the version
  * before it by that version's digest — version 2 to the built-in document's — appended once and never rewritten.
@@ -88,9 +93,14 @@ export const MAX_GUIDELINE_CLAUSE_GRAPHEMES = 300;
 /** Previews wait in memory for their confirmation; a service that restarts forgets them, and the editor chooses again. */
 const MAX_PREVIEWS = 16;
 const CONTROL_CHARACTER = /[\p{Cc}\p{Zl}\p{Zp}]/u;
-/** `1.`, `1、`, `1．`, `1)` or `1）` — and `第1条` or `第一条` — open a clause; any other paragraph continues it. */
-const ARABIC_CLAUSE = /^\s*(\d{1,3})\s*[.、．)）]\s*(.*)$/u;
-const CHINESE_CLAUSE = /^\s*第\s*([0-9一二三四五六七八九十百]{1,4})\s*条\s*[：:、.．]?\s*(.*)$/u;
+/** `1.`, `1、`, `1．`, `1)` or `1）`, in half- or full-width digits — and `第1条` or `第一条` — open a clause; any other paragraph continues it. */
+const ARABIC_CLAUSE = /^\s*([0-9０-９]{1,3})\s*[.、．)）]\s*(.*)$/u;
+const CHINESE_CLAUSE = /^\s*第\s*([0-9０-９一二三四五六七八九十百]{1,4})\s*条\s*[：:、.．]?\s*(.*)$/u;
+
+/** Full-width digits read as the digits they are. */
+function asciiDigits(text: string): string {
+  return text.replace(/[０-９]/gu, (digit) => String.fromCharCode(digit.charCodeAt(0) - 0xfee0));
+}
 
 /** Revision 45's relation, created once: a store that predates it gains one empty relation and nothing existing moves. */
 export function initializeReviewGuidelineSchema(db: DatabaseSync): void {
@@ -110,7 +120,7 @@ export function initializeReviewGuidelineSchema(db: DatabaseSync): void {
 
 /** A number written in Chinese, 一 to 九百九十九, as a clause may be numbered. */
 function chineseNumber(text: string): number | null {
-  if (/^\d+$/u.test(text)) return Number(text);
+  if (/^\d+$/u.test(asciiDigits(text))) return Number(asciiDigits(text));
   const digits: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
   let total = 0;
   let current = 0;
@@ -141,7 +151,7 @@ export function parseGuidelineClauses(paragraphs: ReadonlyArray<string>, prefix:
     if (paragraph.length === 0) continue;
     const arabic = ARABIC_CLAUSE.exec(paragraph);
     const chinese = arabic === null ? CHINESE_CLAUSE.exec(paragraph) : null;
-    const number = arabic !== null ? Number(arabic[1]) : chinese !== null ? chineseNumber(chinese[1]!) : null;
+    const number = arabic !== null ? Number(asciiDigits(arabic[1]!)) : chinese !== null ? chineseNumber(chinese[1]!) : null;
     const rest = (arabic?.[2] ?? chinese?.[2] ?? '').trim();
     if (number !== null) {
       requireGuideline(number === clauses.length + 1, 'REVIEW_GUIDELINE_NUMBERING',
@@ -151,7 +161,9 @@ export function parseGuidelineClauses(paragraphs: ReadonlyArray<string>, prefix:
       clauses.at(-1)!.parts.push(paragraph);
     }
   }
-  requireGuideline(clauses.length > 0, 'REVIEW_GUIDELINE_NO_CLAUSES', '没有找到编号条款：每一条要以“1.”或“第1条”这样的编号开头。');
+  // Word's automatic list numbering is the list's, not the paragraph's text, so a file numbered that way reads as none.
+  requireGuideline(clauses.length > 0, 'REVIEW_GUIDELINE_NO_CLAUSES',
+    '没有找到编号条款：每一条要以“1.”或“第1条”这样的编号开头；Word 自动生成的编号读不到，请把编号写成文字。');
   requireGuideline(clauses.length <= MAX_GUIDELINE_CLAUSES, 'REVIEW_GUIDELINE_TOO_MANY', `条款多于 ${MAX_GUIDELINE_CLAUSES} 条；一份审阅规范文件最多 ${MAX_GUIDELINE_CLAUSES} 条。`);
   return clauses.map((clause) => {
     const text = clause.parts.join(' ').trim();
@@ -220,17 +232,34 @@ interface Preview {
   readonly source: ReviewGuidelineSourceProjection;
 }
 
+interface BuiltinDocument {
+  readonly document: ReviewGuidelineDocument;
+  readonly appliedBy: Array<{ categoryId: string; label: string }>;
+  readonly executors: ReviewCategoryExecutor[];
+}
+
 /** The built-in documents in the order the categories apply them, each once, with the categories that apply it. */
-function builtinDocuments(): Array<{ document: ReviewGuidelineDocument; appliedBy: Array<{ categoryId: string; label: string }> }> {
-  const found = new Map<string, { document: ReviewGuidelineDocument; appliedBy: Array<{ categoryId: string; label: string }> }>();
+function builtinDocuments(): Array<BuiltinDocument & { use: ReviewGuidelineDocumentUse }> {
+  const found = new Map<string, BuiltinDocument>();
   for (const entry of BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories) {
     for (const document of entry.guidelineDocuments) {
-      const known = found.get(document.documentId) ?? { document, appliedBy: [] };
+      const known = found.get(document.documentId) ?? { document, appliedBy: [], executors: [] };
       known.appliedBy.push({ categoryId: entry.categoryId, label: entry.label });
+      known.executors.push(entry.executor);
       found.set(document.documentId, known);
     }
   }
-  return Array.from(found.values());
+  return Array.from(found.values(), (known) => ({ ...known, use: documentUse(known.executors) }));
+}
+
+/**
+ * How a document's categories read it (Issue #427 review): its clauses only when every category that applies it hands them
+ * to the model through the Editorial Review Contract. 事实核查 runs AI7's fixed factual-review kind, and 情节逻辑 turns
+ * the baseline's leads into annotations without a model, so a house version of theirs would be named and never applied.
+ */
+function documentUse(executors: ReadonlyArray<ReviewCategoryExecutor>): ReviewGuidelineDocumentUse {
+  if (executors.every((executor) => executor === 'review-category-contract')) return 'clauses';
+  return executors.includes('factual-review-kind') ? 'factual-kind' : 'leads';
 }
 
 /** The digest version 2 of a document chains to: its built-in first version, as the configuration states it. */
@@ -273,17 +302,22 @@ export class ReviewGuidelineLedger {
     this.#db = db;
   }
 
-  /** Every stored version of one document, oldest first, each verified: its digest, and its chain to the one before. */
+  /**
+   * Every stored version of one document, oldest first, each verified: its digest, and its chain to the one before. The
+   * chain's root is the built-in version the house's first import followed, as that import recorded it, so a later build
+   * that rewords a built-in clause leaves every version the house imported readable (Issue #427 review).
+   */
   #versions(document: ReviewGuidelineDocument): StoredVersion[] {
     const rows = this.#db.prepare('SELECT * FROM review_guideline_versions WHERE document_id = ? ORDER BY ordinal').all(document.documentId) as SqlRow[];
-    let previous = builtinDigest(document);
+    let previous: string | null = null;
     return rows.map((row, index) => {
       const json = String(row.canonical_json);
       requireGuideline(sha256Hex(json) === String(row.sha256), 'REVIEW_GUIDELINE_RECORD_INVALID', '审阅规范文件的版本记录已损坏。');
       const record = JSON.parse(json) as unknown;
       requireGuideline(isRecord(record) && record.schema === RECORD_SCHEMA && record.versionId === row.version_id &&
         record.documentId === document.documentId && record.ordinal === index + 2 && integer(row.ordinal) === index + 2 &&
-        record.previousSha256 === previous && String(row.previous_sha256) === previous && record.recordedAt === row.recorded_at &&
+        typeof record.previousSha256 === 'string' && (previous === null ? /^[0-9a-f]{64}$/u.test(record.previousSha256) : record.previousSha256 === previous) &&
+        String(row.previous_sha256) === record.previousSha256 && record.recordedAt === row.recorded_at &&
         Array.isArray(record.clauses) && isRecord(record.source),
       'REVIEW_GUIDELINE_RECORD_INVALID', '审阅规范文件的版本记录已损坏。');
       previous = String(row.sha256);
@@ -303,8 +337,8 @@ export class ReviewGuidelineLedger {
   }
 
   /** A document as it now applies: its latest imported version, or the built-in first. */
-  #current(document: ReviewGuidelineDocument): { document: ReviewGuidelineDocument; digest: string } {
-    const latest = this.#versions(document).at(-1);
+  #current(document: ReviewGuidelineDocument, versions: ReadonlyArray<StoredVersion> = this.#versions(document)): { document: ReviewGuidelineDocument; digest: string } {
+    const latest = versions.at(-1);
     return latest === undefined
       ? { document, digest: builtinDigest(document) }
       : {
@@ -314,11 +348,12 @@ export class ReviewGuidelineLedger {
   }
 
   /**
-   * The review category configuration as it now applies (REV-012): the built-in one with each guideline document at its
-   * latest version. A Review Run prepared now snapshots exactly this.
+   * The review category configuration as it now applies (REV-012): the built-in one with each guideline document whose
+   * clauses reach the model at its latest version. A Review Run prepared now snapshots exactly this.
    */
   configuration(): ReviewCategoryConfiguration {
-    const current = new Map(builtinDocuments().map(({ document }) => [document.documentId, this.#current(document).document] as const));
+    const current = new Map(builtinDocuments().filter(({ use }) => use === 'clauses')
+      .map(({ document }) => [document.documentId, this.#current(document).document] as const));
     return {
       ...BUILTIN_REVIEW_CATEGORY_CONFIGURATION,
       categories: BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.map((entry) => ({
@@ -335,6 +370,7 @@ export class ReviewGuidelineLedger {
   preview(documentId: string, read: { source: ReviewGuidelineSourceProjection; paragraphs: ReadonlyArray<string> }): ReviewGuidelinePreviewProjection {
     const known = builtinDocuments().find((entry) => entry.document.documentId === documentId);
     requireGuideline(known !== undefined, 'REVIEW_GUIDELINE_UNKNOWN', '没有这份审阅规范文件。');
+    requireGuideline(known.use === 'clauses', 'REVIEW_GUIDELINE_FIXED', `《${known.document.title}》是 AI7 的固定说明，不能导入新版本。`);
     const builtin = known.document;
     const versions = this.#versions(builtin);
     const current = this.#current(builtin);
@@ -395,8 +431,14 @@ export class ReviewGuidelineLedger {
     this.#previews.delete(previewId);
   }
 
-  /** What each Review Run's snapshot applied: every guideline document of its categories, at the version it used. */
+  /**
+   * What each Review Run used: every guideline document of its categories that formed their findings, at the version its
+   * snapshot applied. A category only prepared, refused or failed has used nothing (Issue #427 review).
+   */
   #runReadings(): RunReading[] {
+    const materialized = new Set((this.#db.prepare(
+      "SELECT DISTINCT review_run_id, category_id FROM review_run_category_events WHERE state = 'materialized'",
+    ).all() as SqlRow[]).map((row) => `${String(row.review_run_id)}\n${String(row.category_id)}`));
     const rows = this.#db.prepare(
       `SELECT r.review_run_id, r.book_id, r.ordinal, r.created_at, r.canonical_json, b.title
        FROM review_runs r JOIN books b ON b.book_id = r.book_id
@@ -408,6 +450,7 @@ export class ReviewGuidelineLedger {
       const categories = isRecord(snapshot) && Array.isArray(snapshot.categories) ? snapshot.categories : [];
       for (const category of categories) {
         if (!isRecord(category) || !isRecord(category.entry) || !Array.isArray(category.entry.guidelineDocuments)) continue;
+        if (!materialized.has(`${String(row.review_run_id)}\n${String(category.categoryId)}`)) continue;
         for (const document of category.entry.guidelineDocuments) {
           if (!isRecord(document) || typeof document.documentId !== 'string') continue;
           const version = Number(document.version);
@@ -428,31 +471,49 @@ export class ReviewGuidelineLedger {
   }
 
   /**
-   * 知识库 › 审阅规范文件 (KB-001 to KB-003): each document with its current version and the categories that apply it; its
-   * clauses, each with how many findings of the Runs that applied this version cite it; every version with the Review
-   * Runs that used it; and the Books whose latest Review Run applying it used an older version.
+   * 知识库 › 审阅规范文件 (KB-001 to KB-003): each document with its current version, how its categories read it and which
+   * apply it; its clauses, each with how many findings of the Runs that used this version cite it; every version with how
+   * many Review Runs used it and the latest of them; and the Books whose latest Review Run using it used an older version.
+   * What grows with the house's work — Runs and Books — is counted, and only the latest few named (Issue #427 review).
    */
   projection(): ReviewGuidelinesProjection {
     const runs = this.#runReadings();
+    const runsById = new Map(runs.map((run) => [run.reviewRunId, run] as const));
     const citations = this.#db.prepare(
-      `SELECT review_run_id, category_id, clause_ref, finding_id FROM review_findings WHERE clause_ref IS NOT NULL`,
+      'SELECT review_run_id, category_id, clause_ref, kind_ref FROM review_findings WHERE clause_ref IS NOT NULL',
     ).all() as SqlRow[];
-    const documents: ReviewGuidelineDocumentProjection[] = builtinDocuments().map(({ document: builtin, appliedBy }) => {
-      const stored = this.#versions(builtin);
-      const current = this.#current(builtin);
+    const documents: ReviewGuidelineDocumentProjection[] = builtinDocuments().map(({ document: builtin, appliedBy, use }) => {
+      // A document AI7 fixes is never imported, so it reads only as AI7 issued it.
+      const stored = use === 'clauses' ? this.#versions(builtin) : [];
+      const current = this.#current(builtin, stored);
       const currentOrdinal = Number(current.document.version);
-      const usedBy = (ordinal: number) => runs
-        .filter((run) => run.documents.get(builtin.documentId)?.version === ordinal)
-        .map((run) => ({ bookId: run.bookId, bookTitle: run.bookTitle, reviewRunId: run.reviewRunId, reviewOrdinal: run.ordinal, createdAt: run.createdAt }));
-      // A finding cites a clause of the version its Run applied; the same finding found again by a later Run counts once.
+      // The Runs that used each version, oldest first as they were read.
+      const byVersion = new Map<number, RunReading[]>();
+      for (const run of runs) {
+        const applied = run.documents.get(builtin.documentId);
+        if (applied === undefined) continue;
+        const used = byVersion.get(applied.version) ?? [];
+        used.push(run);
+        byVersion.set(applied.version, used);
+      }
+      const usedByOf = (ordinal: number): Pick<ReviewGuidelineVersionProjection, 'usedByCount' | 'usedBy'> => {
+        const used = byVersion.get(ordinal) ?? [];
+        return {
+          usedByCount: used.length,
+          usedBy: used.slice(-MAX_GUIDELINE_VERSION_RUNS_SHOWN).reverse()
+            .map((run) => ({ bookId: run.bookId, bookTitle: run.bookTitle, reviewRunId: run.reviewRunId, reviewOrdinal: run.ordinal, createdAt: run.createdAt })),
+        };
+      };
+      // A finding cites a clause of the version its Run applied. The same finding found again by a later Run of its Book —
+      // the same category's finding of the same words, which keeps its mark — counts once (Issue #427 review).
       const citing = new Map<string, Set<string>>();
       for (const row of citations) {
-        const run = runs.find((candidate) => candidate.reviewRunId === String(row.review_run_id));
+        const run = runsById.get(String(row.review_run_id));
         const applied = run?.documents.get(builtin.documentId);
-        if (applied === undefined || applied.version !== currentOrdinal || !applied.categoryIds.includes(String(row.category_id))) continue;
+        if (run === undefined || applied === undefined || applied.version !== currentOrdinal || !applied.categoryIds.includes(String(row.category_id))) continue;
         const clauseId = String(row.clause_ref);
         const findings = citing.get(clauseId) ?? new Set<string>();
-        findings.add(String(row.finding_id));
+        findings.add(`${run.bookId}\n${String(row.category_id)}\n${String(row.kind_ref)}`);
         citing.set(clauseId, findings);
       }
       const versions: ReviewGuidelineVersionProjection[] = [
@@ -464,7 +525,7 @@ export class ReviewGuidelineLedger {
           source: null,
           clauseCount: builtin.clauses.length,
           digest: builtinDigest(builtin),
-          usedBy: usedBy(1),
+          ...usedByOf(1),
         },
         ...stored.map((version) => ({
           ordinal: version.ordinal,
@@ -474,10 +535,10 @@ export class ReviewGuidelineLedger {
           source: version.source,
           clauseCount: version.clauses.length,
           digest: version.sha256,
-          usedBy: usedBy(version.ordinal),
+          ...usedByOf(version.ordinal),
         })),
       ].reverse();
-      // A Book's latest Review Run that applied this document names the version it still reads under.
+      // A Book's latest Review Run that used this document names the version it still reads under.
       const latestByBook = new Map<string, RunReading>();
       for (const run of runs) {
         if (!run.documents.has(builtin.documentId)) continue;
@@ -493,6 +554,7 @@ export class ReviewGuidelineLedger {
         title: current.document.title,
         issuer: current.document.issuer,
         currentOrdinal,
+        use,
         appliedBy,
         clauses: current.document.clauses.map((clause, index) => ({
           clauseId: clause.clauseId,
@@ -501,7 +563,8 @@ export class ReviewGuidelineLedger {
           citations: citing.get(clause.clauseId)?.size ?? 0,
         })),
         versions,
-        olderVersionBooks,
+        olderVersionBookCount: olderVersionBooks.length,
+        olderVersionBooks: olderVersionBooks.slice(0, MAX_GUIDELINE_OLDER_BOOKS_SHOWN),
       };
     });
     return { documents };

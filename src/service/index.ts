@@ -528,11 +528,13 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.importReviewGuidelineVersion(request.input.previewId) };
     // 知识库 › 范例 (Issue #427, S79b).
     case 'inspectExemplars':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectExemplars() };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectExemplars(request.input.after) };
     case 'inspectKnowledgeProcedures':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectKnowledgeProcedures() };
+      return { id: request.id, ok: true, op: request.op, result: await store.inspectKnowledgeProcedures() };
     case 'inspectLibraryMaterials':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterials() };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterials(request.input.after) };
+    case 'inspectLibraryMaterial':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterial(request.input.materialId) };
     case 'previewLibraryMaterial':
       return { id: request.id, ok: true, op: request.op, result: await store.previewLibraryMaterial(request.input.path) };
     case 'addLibraryMaterial':
@@ -540,7 +542,9 @@ async function dispatch(
     case 'decideLibraryMaterial':
       return { id: request.id, ok: true, op: request.op, result: store.decideLibraryMaterial(request.input) };
     case 'inspectLearningMaterials':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectLearningMaterials(request.input.bookId) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectLearningMaterials(request.input.bookId, request.input.after) };
+    case 'inspectLearningMaterial':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectLearningMaterial(request.input.bookId, request.input.materialKey) };
     case 'decideLearningMaterial':
       return { id: request.id, ok: true, op: request.op, result: store.decideLearningMaterial(request.input) };
     case 'inspectFeedbackHistory':
@@ -552,7 +556,7 @@ async function dispatch(
     case 'setEvaluationPreferences':
       return { id: request.id, ok: true, op: request.op, result: store.setEvaluationPreferences(request.input) };
     case 'inspectSeriesList':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesList() };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesList(request.input.after) };
     case 'createSeries':
       return { id: request.id, ok: true, op: request.op, result: store.createSeries(request.input) };
     case 'inspectSeries':
@@ -563,6 +567,15 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.changeSeriesMembership(request.input) };
     case 'inspectBookSeries':
       return { id: request.id, ok: true, op: request.op, result: store.inspectBookSeries(request.input.bookId) };
+    case 'inspectSeriesMembers':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesMembers(request.input.seriesId, request.input.after) };
+    case 'inspectSeriesCandidates':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesCandidates(request.input.seriesId, request.input.text, request.input.after) };
+    case 'inspectSeriesHistory':
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: store.inspectSeriesHistory({ seriesId: request.input.seriesId, bookId: request.input.bookId }, request.input.after),
+      };
     case 'inspectDataVersion':
       return { id: request.id, ok: true, op: request.op, result: store.inspectDataVersion() };
     case 'proposeSeriesKnowledge':
@@ -573,6 +586,12 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.editSeriesKnowledgeCandidate(request.input) };
     case 'promoteSeriesKnowledge':
       return { id: request.id, ok: true, op: request.op, result: store.promoteSeriesKnowledge(request.input) };
+    case 'inspectSeriesKnowledgeItems':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeItems(request.input.seriesId, request.input.text, request.input.after) };
+    case 'inspectSeriesKnowledgeCandidates':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeCandidates(request.input.seriesId, request.input.after) };
+    case 'inspectSeriesKnowledgeRevisions':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeRevisions(request.input.seriesId, request.input.itemId, request.input.before) };
     case 'inspectEvaluationProfiles':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluationProfiles() };
     case 'inspectEvaluation':
@@ -949,6 +968,8 @@ async function dispatch(
       };
     case 'inspectMaintenanceCase':
       return { id: request.id, ok: true, op: request.op, result: store.inspectMaintenanceCase(request.input) };
+    case 'listMaintenanceCases':
+      return { id: request.id, ok: true, op: request.op, result: store.listMaintenanceCases(request.input) };
     case 'recordMaintenanceCase':
       return { id: request.id, ok: true, op: request.op, result: store.recordMaintenanceCase(request.input) };
     case 'appendMaintenanceCaseRevision':
@@ -1280,14 +1301,8 @@ async function run(): Promise<void> {
         // It stays 任务等待你的说明 with its answer; the next launch takes it on again.
       }
     }
-    // Starts the governor had not admitted when AI7 closed (Issue #49, S14; CONC-007) wait again, in their order.
-    for (const runRecordId of reconciled.queued) {
-      try {
-        analysisExecution.admitOrQueue(runRecordId, store.baselineAnalysisLedger);
-      } catch {
-        // One this launch cannot admit is blocked before dispatch with the reason; nothing of it ran.
-      }
-    }
+    // Starts the governor had not admitted when AI7 closed were blocked with why by the reconciliation: nothing starts by
+    // itself after a restart (ADR 0034), and the editor starts them again when they choose.
     // A Review Run's categories take a place of the one owner's governor one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);
     // Connectivity Wait (Issue #502). The reading is the device's own unless J-04's control names a file; the

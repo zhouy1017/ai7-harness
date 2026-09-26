@@ -601,7 +601,7 @@ async function main() {
     await click(renderer, '书系', 'series-destination');
     const empty = await readSeriesList(renderer, () => true, 'series-empty-page');
     requireJourney(empty.lede === SERIES_LEDE && empty.empty === '还没有书系。' && empty.items.length === 0 && !empty.form, 'series-empty-words', empty);
-    requireJourney(JSON.stringify(await renderer.evaluate('window.ai7.inspectSeriesList()')) === JSON.stringify({ series: [] }), 'series-empty-service');
+    requireJourney(JSON.stringify(await renderer.evaluate('window.ai7.inspectSeriesList()')) === JSON.stringify({ series: [], nextCursor: null }), 'series-empty-service');
 
     at('series-create');
     // 新建书系: the form opens at its name with the action unavailable until there is one; a name past its bound is refused in
@@ -681,7 +681,9 @@ async function main() {
       const add = await window.ai7.previewSeriesMembershipChange({ seriesId, bookId, kind: 'add' });
       await window.ai7.changeSeriesMembership({ seriesId, bookId, kind: 'add', previewDigest: add.previewDigest });
       const remove = await window.ai7.previewSeriesMembershipChange({ seriesId, bookId, kind: 'remove' });
-      return (await window.ai7.changeSeriesMembership({ seriesId, bookId, kind: 'remove', previewDigest: remove.previewDigest })).series.history.length;
+      await window.ai7.changeSeriesMembership({ seriesId, bookId, kind: 'remove', previewDigest: remove.previewDigest });
+      // A change answers with its record alone (Issue #63 review): the Series is read again for its records.
+      return (await window.ai7.inspectSeries({ seriesId })).history.length;
     })()`);
     requireJourney(elsewhere === 3, 'stale-elsewhere', elsewhere);
     await clickSelector(renderer, '[data-series-action="commit"]', 'stale-commit');
@@ -696,7 +698,8 @@ async function main() {
     await clickSelector(renderer, '[data-series-action="commit"]', 'stale-commit-again');
     await waitFor(renderer, `${status} === ${JSON.stringify(`已加入书系「${SERIES}」：《${SECOND}》`)}`, 'stale-added-status');
     const both = await readSeries(renderer, (read) => read.members.length === 2 && read.preview === null, 'stale-added');
-    requireJourney(JSON.stringify(both.members.map(([id]) => id)) === JSON.stringify([first, second]) &&
+    // Members newest joined first (Issue #63 review): the Book just added heads the table.
+    requireJourney(JSON.stringify(both.members.map(([id]) => id)) === JSON.stringify([second, first]) &&
       JSON.stringify(both.history.map(([kind, bookId]) => [kind, bookId])) === JSON.stringify([['add', second], ['remove', second], ['add', second], ['add', first]]),
     'stale-added-words', both);
 
@@ -880,7 +883,7 @@ async function main() {
     const review = await readKnowledge(renderer, (read) => read.review?.identity !== null && read.review?.identity !== undefined && read.focus === 'review-heading', 'knowledge-review');
     requireJourney(review.review.identity === `书系「${SERIES}」 · 新条目「${PLACE}」（地点）` && review.review.provenance === `来自《${MEMBER}》r1 的原文：「${quote}」` &&
       review.review.superseded === null && review.review.conflictLabel === '存在书系知识冲突 · 需要处理' &&
-      JSON.stringify(review.review.conflicts) === JSON.stringify([['competing-candidate', `另一个候选项也在提议「海边 小城」：${EDITOR_WORDS}`]]) &&
+      JSON.stringify(review.review.conflicts) === JSON.stringify([['competing-candidate', '另一个候选项也在提议「海边 小城」（第 1 版）。']]) &&
       JSON.stringify(review.review.dispositions) === JSON.stringify([['edit', '编辑候选项', null], ['preserve', '保留已披露冲突', 'false'], ['review-cancel', '取消', null]]) &&
       JSON.stringify(review.review.reuse) === JSON.stringify([['series-tasks', false], ['consistency-review', false]]) &&
       JSON.stringify(review.review.promote) === JSON.stringify(['纳入书系知识', true]) && review.review.waits === '先处理已披露的冲突：编辑候选项，或选择保留已披露冲突。',
@@ -906,7 +909,7 @@ async function main() {
     await clickSelector(renderer, `[data-candidate-id="${fromEditor}"] [data-knowledge-action="review"]`, 'knowledge-edit-review');
     const existing = await readKnowledge(renderer, (read) => read.review?.candidateId === fromEditor && read.review.identity !== null, 'knowledge-edit-review-open');
     requireJourney(JSON.stringify(existing.review.conflicts.map(([kind]) => kind)) === JSON.stringify(['existing-item']) &&
-      existing.review.conflicts[0][1] === `书系知识里已有「${PLACE}」（地点）第 1 版：${quote}`, 'knowledge-existing-conflict', existing);
+      existing.review.conflicts[0][1] === `书系知识里已有「${PLACE}」（地点）第 1 版。`, 'knowledge-existing-conflict', existing);
     await clickSelector(renderer, '[data-knowledge-action="edit"]', 'knowledge-edit-open');
     const editing = await readKnowledge(renderer, (read) => read.review?.editing === true, 'knowledge-editing');
     requireJourney(JSON.stringify(editing.review.editTargets) === JSON.stringify([['new', true], [itemId, false]]), 'knowledge-editing-words', editing);
@@ -925,7 +928,15 @@ async function main() {
     const updated = await readKnowledge(renderer, (read) => read.items[0]?.[1] === `「${PLACE}」 · 地点 · 第 2 版` && read.review === null, 'knowledge-updated');
     requireJourney(updated.items[0][2] === EDITOR_WORDS && updated.items[0][3] === '编辑撰写' && updated.items[0][4] === '以后的用途：以后的书系范围任务都可以选用' &&
       updated.items[0][5] === null && updated.items[0][6] === '历次版本（2）' && updated.candidatesEmpty === '没有待审阅的候选项。', 'knowledge-updated-words', updated);
-    const knowledgeService = await renderer.evaluate(`window.ai7.inspectSeries({ seriesId: ${JSON.stringify(seriesId)} }).then((answer) => [answer.knowledge.items.map((item) => [item.itemId, item.subject, item.knowledgeClass, item.revisions.map((revision) => [revision.ordinal, revision.outcome, revision.authoring, revision.conflicts.length, revision.reuseScope])]), answer.knowledge.candidates.length])`);
+    // An item answers with its current revision; its 历次版本 are read on their own (Issue #63 review).
+    const knowledgeService = await renderer.evaluate(`(async () => {
+      const seriesId = ${JSON.stringify(seriesId)};
+      const answer = await window.ai7.inspectSeries({ seriesId });
+      const items = await Promise.all(answer.knowledge.items.map(async (item) => [item.itemId, item.subject, item.knowledgeClass,
+        (await window.ai7.inspectSeriesKnowledgeRevisions({ seriesId, itemId: item.itemId, before: null })).revisions
+          .map((revision) => [revision.ordinal, revision.outcome, revision.authoring, revision.conflicts.length, revision.reuseScope])]));
+      return [items, answer.knowledge.candidates.length];
+    })()`);
     requireJourney(JSON.stringify(knowledgeService) === JSON.stringify([[[itemId, PLACE, 'places', [[2, 'updated', 'editor', 0, 'series-tasks'], [1, 'created', 'manuscript-revision', 1, 'consistency-review']]]], 0]),
       'knowledge-service', knowledgeService);
 

@@ -450,6 +450,8 @@ const SAMPLE1_UNITS = 8;
 /** Two reading ranges settle; the third waits, in flight, until the Journey writes the next number. */
 const FIRST_HOLD = 2;
 const PANEL_NOTE = '这里只列这本书的任务；跨书的待办在「待我处理」。';
+/** Authored words typed a moment before a way out of the panel's result window (Issue #423 review). */
+const LEAVE_WORDS = '〔离开前刚写下的字〕';
 
 async function pressEscape(renderer) {
   const escape = { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 };
@@ -952,6 +954,24 @@ async function main() {
     // 回到<位置>: the manuscript is back where the editor was reading before the jump, and the chip is gone.
     await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'chip-use');
     await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)} && (document.querySelector('#persistence-status')?.textContent ?? '').startsWith('已回到')`, 'chip-returned', 60_000);
+    // A way out of 查看结果's window leaves the manuscript as its own ways out do (Issue #423 review): words typed a moment
+    // before 在分析中打开 are written first, and the manuscript opened again from ②A holds them where they were typed.
+    await openPanel(renderer, 'leave');
+    await cardAction(renderer, 'analysis-completed', 'result', 'leave-result-open');
+    await waitFor(renderer, `document.querySelector('.task-result-window')?.dataset.taskResult === 'ready'`, 'leave-result-window', 30_000);
+    await assertRenderer(renderer, `(() => {
+      const block = document.querySelector(${JSON.stringify(`[data-screen="editor"] .ProseMirror [data-block-id="${chip.blockId}"]`)});
+      if (!(block instanceof HTMLElement)) return false;
+      block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false);
+      const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+      document.execCommand('insertText', false, ${JSON.stringify(LEAVE_WORDS)});
+      return block.textContent?.endsWith(${JSON.stringify(LEAVE_WORDS)}) === true;
+    })()`, 'leave-typed');
+    // At once, well inside the half second before the words would write themselves.
+    await assertRenderer(renderer, `(() => { const open = document.querySelector('.task-result-window [data-task-result-action="open"]'); if (!(open instanceof HTMLButtonElement)) return false; open.click(); return true; })()`, 'leave-open-analysis');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card')`, 'leave-analysis', 60_000);
+    await click(renderer, '打开稿件', 'leave-reopen');
+    await waitFor(renderer, `(document.querySelector(${JSON.stringify(`[data-screen="editor"] .ProseMirror [data-block-id="${chip.blockId}"]`)})?.textContent ?? '').endsWith(${JSON.stringify(LEAVE_WORDS)})`, 'leave-words-kept', 60_000);
 
     at('analysis-jump-chip');
     // A jump from another screen leaves the same way back: ②A's 回到稿件范围 on the seventh range opens the manuscript there,

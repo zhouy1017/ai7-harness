@@ -14,8 +14,18 @@ import {
   knowledgeRevisionLine,
   knowledgeSupersededLine,
   knowledgeTargetLine,
+  KNOWLEDGE_CANDIDATES_MORE,
+  KNOWLEDGE_ITEMS_MORE,
+  KNOWLEDGE_PROPOSE_FOR_ITEM,
+  KNOWLEDGE_REVISIONS_MORE,
+  KNOWLEDGE_SEARCH,
+  KNOWLEDGE_SEARCH_LABEL,
+  KNOWLEDGE_SEARCH_NONE,
+  knowledgeConflictsMoreLine,
+  knowledgeRevisionsSummary,
 } from '../../src/renderer/series-knowledge-labels.js';
 import {
+  knowledgeQuoteExcerpt,
   seriesKnowledgeConflicts,
   seriesKnowledgeContent,
   seriesKnowledgeReviewDigest,
@@ -57,7 +67,7 @@ describe('书系知识 names and classes', () => {
 describe('书系知识 conflicts, by identity alone', () => {
   it('finds an item of the same name for a new one, however it is spaced, and nothing for another name', () => {
     const found = seriesKnowledgeConflicts(candidate('a', { kind: 'new', subject: '林 默', knowledgeClass: 'places' }), [item], []);
-    expect(found).toEqual([{ kind: 'existing-item', ref: 'revision-2', line: '书系知识里已有「林默」（人物）第 2 版：二版' }]);
+    expect(found).toEqual([{ kind: 'existing-item', ref: 'revision-2', line: '书系知识里已有「林默」（人物）第 2 版。' }]);
     expect(seriesKnowledgeConflicts(candidate('a', { kind: 'new', subject: '苏晴', knowledgeClass: 'characters' }), [item], [])).toEqual([]);
   });
 
@@ -65,7 +75,7 @@ describe('书系知识 conflicts, by identity alone', () => {
     const read = (baseRevisionId: string): StoredCandidate['target'] => ({ kind: 'existing', itemId: 'item', subject: '林默', knowledgeClass: 'characters', baseRevisionId });
     expect(seriesKnowledgeConflicts(candidate('a', read('revision-2')), [item], [])).toEqual([]);
     expect(seriesKnowledgeConflicts(candidate('a', read('revision-1')), [item], []))
-      .toEqual([{ kind: 'item-updated', ref: 'revision-2', line: '「林默」在提议之后已更新为第 2 版：二版' }]);
+      .toEqual([{ kind: 'item-updated', ref: 'revision-2', line: '「林默」在提议之后已更新为第 2 版。' }]);
   });
 
   it('finds every other open candidate of the same item or name, and never the candidate itself', () => {
@@ -73,7 +83,7 @@ describe('书系知识 conflicts, by identity alone', () => {
     const rival = candidate('b', { kind: 'new', subject: ' 苏 晴', knowledgeClass: 'places' }, '另一种说法');
     const unrelated = candidate('c', { kind: 'new', subject: '海城', knowledgeClass: 'places' });
     expect(seriesKnowledgeConflicts(self, [], [self, rival, unrelated]))
-      .toEqual([{ kind: 'competing-candidate', ref: 'b-v1', line: '另一个候选项也在提议「 苏 晴」：另一种说法' }]);
+      .toEqual([{ kind: 'competing-candidate', ref: 'b-v1', line: '另一个候选项也在提议「 苏 晴」（第 1 版）。' }]);
     const onItem = candidate('d', { kind: 'existing', itemId: 'item', subject: '林默', knowledgeClass: 'characters', baseRevisionId: 'revision-2' });
     const alsoOnItem = candidate('e', { kind: 'existing', itemId: 'item', subject: '林默', knowledgeClass: 'characters', baseRevisionId: 'revision-2' });
     expect(seriesKnowledgeConflicts(onItem, [item], [onItem, alsoOnItem]).map((entry) => entry.kind)).toEqual(['competing-candidate']);
@@ -106,11 +116,15 @@ describe('书系知识 words', () => {
     expect(knowledgeTargetLine({ target })).toBe('新条目「林默」（人物）');
     expect(knowledgeTargetLine({ target: { ...target, kind: 'existing', itemId: 'item', baseRevisionOrdinal: 2 } })).toBe('更新「林默」（人物，基于第 2 版）');
     expect(knowledgeProvenanceLine(null)).toBe('编辑撰写');
-    expect(knowledgeProvenanceLine({
-      kind: 'manuscript-revision', bookId: 'book', bookTitle: '星河之一', manuscriptId: 'm', revisionId: 'r', revisionLabel: 'r3', journalSequence: 0,
-      blockId: 'b', fromGrapheme: 0, toGrapheme: 4, quote: '海边小城',
-    })).toBe('来自《星河之一》r3 的原文：「海边小城」');
-    expect(knowledgeItemLine({ subject: '林默', classLabel: '人物', revisions: [{ ordinal: 3 }, { ordinal: 2 }] })).toBe('「林默」 · 人物 · 第 3 版');
+    const cited = {
+      kind: 'manuscript-revision' as const, bookId: 'book', bookTitle: '星河之一', manuscriptId: 'm', revisionId: 'r', revisionLabel: 'r3', journalSequence: 0,
+      blockId: 'b', fromGrapheme: 0, toGrapheme: 4, quote: '海边小城', uncheckpointed: false,
+    };
+    expect(knowledgeProvenanceLine(cited)).toBe('来自《星河之一》r3 的原文：「海边小城」');
+    // Words cited while changes waited beyond the revision are not said to be the revision's (Issue #63 review).
+    expect(knowledgeProvenanceLine({ ...cited, journalSequence: 2, uncheckpointed: true })).toBe('来自《星河之一》的稿件（r3 之后另有尚未保存为修订版的改动）：「海边小城」');
+    expect(knowledgeItemLine({ subject: '林默', classLabel: '人物', current: { ordinal: 3 } })).toBe('「林默」 · 人物 · 第 3 版');
+    expect(knowledgeRevisionsSummary(3)).toBe('历次版本（3）');
     expect([knowledgeRevisionLine({ ordinal: 1, outcome: 'created', content: '初版' }), knowledgeRevisionLine({ ordinal: 2, outcome: 'updated', content: '二版' })])
       .toEqual(['第 1 版 · 纳入：初版', '第 2 版 · 更新：二版']);
     expect([knowledgeKeptConflictsLine(0), knowledgeKeptConflictsLine(2)]).toEqual([null, '保留了 2 处已披露冲突，未作核实。']);
@@ -122,12 +136,22 @@ describe('书系知识 words', () => {
     expect(knowledgeReviewIdentity({ seriesTitle: '星河三部曲', candidate: { target } as never })).toBe('书系「星河三部曲」 · 条目「林默」（人物）');
     expect(knowledgeReviewIdentity({ seriesTitle: '星河三部曲', candidate: { target: { ...target, kind: 'new', itemId: null } } as never })).toBe('书系「星河三部曲」 · 新条目「林默」（人物）');
     expect(knowledgeSupersededLine({ ordinal: 2, content: '二版' })).toBe('将被取代的当前版本：第 2 版 · 二版');
-    const conflict = [{ kind: 'competing-candidate' as const, line: '另一个' }];
-    expect(knowledgePromoteWaits({ conflicts: [], blocked: null }, false, false)).toBe(KNOWLEDGE_WAIT_REUSE);
-    expect(knowledgePromoteWaits({ conflicts: [], blocked: null }, true, false)).toBeNull();
-    expect(knowledgePromoteWaits({ conflicts: conflict, blocked: null }, true, false)).toBe(KNOWLEDGE_WAIT_CONFLICT);
-    expect(knowledgePromoteWaits({ conflicts: conflict, blocked: null }, false, true)).toBe(KNOWLEDGE_WAIT_REUSE);
-    expect(knowledgePromoteWaits({ conflicts: conflict, blocked: null }, true, true)).toBeNull();
-    expect(knowledgePromoteWaits({ conflicts: [], blocked: '已不在书系中' }, true, false)).toBe('已不在书系中');
+    // Counted in full, whatever part of them the review lists (Issue #63 review).
+    expect(knowledgePromoteWaits({ conflictCount: 0, blocked: null }, false, false)).toBe(KNOWLEDGE_WAIT_REUSE);
+    expect(knowledgePromoteWaits({ conflictCount: 0, blocked: null }, true, false)).toBeNull();
+    expect(knowledgePromoteWaits({ conflictCount: 1, blocked: null }, true, false)).toBe(KNOWLEDGE_WAIT_CONFLICT);
+    expect(knowledgePromoteWaits({ conflictCount: 1, blocked: null }, false, true)).toBe(KNOWLEDGE_WAIT_REUSE);
+    expect(knowledgePromoteWaits({ conflictCount: 1, blocked: null }, true, true)).toBeNull();
+    expect(knowledgePromoteWaits({ conflictCount: 0, blocked: '已不在书系中' }, true, false)).toBe('已不在书系中');
+    expect([knowledgeConflictsMoreLine(50, 50), knowledgeConflictsMoreLine(50, 53)]).toEqual([null, '另有 3 处冲突未列出。']);
+  });
+
+  it('pages every list and proposes for any item wherever it was found (Issue #63 review)', () => {
+    expect([KNOWLEDGE_ITEMS_MORE, KNOWLEDGE_CANDIDATES_MORE, KNOWLEDGE_REVISIONS_MORE]).toEqual(['更多条目…', '更多候选项…', '更早的版本…']);
+    expect([KNOWLEDGE_SEARCH_LABEL, KNOWLEDGE_SEARCH, KNOWLEDGE_SEARCH_NONE]).toEqual(['查找条目', '查找', '没有名称含这些字词的条目。']);
+    expect(KNOWLEDGE_PROPOSE_FOR_ITEM).toBe('提议修改…');
+    // A cited passage stands whole up to two hundred graphemes, and beyond that as its opening.
+    expect(knowledgeQuoteExcerpt('海'.repeat(200))).toBe('海'.repeat(200));
+    expect(knowledgeQuoteExcerpt('𠀀'.repeat(201))).toBe(`${'𠀀'.repeat(200)}…`);
   });
 });

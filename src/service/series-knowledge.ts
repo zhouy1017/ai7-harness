@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   MAX_SERIES_KNOWLEDGE_CONTENT_CHARACTERS,
+  MAX_SERIES_KNOWLEDGE_QUOTE_GRAPHEMES,
   MAX_SERIES_KNOWLEDGE_SUBJECT_CHARACTERS,
   SERIES_KNOWLEDGE_CLASSES,
   SERIES_KNOWLEDGE_CLASS_LABELS,
@@ -12,6 +13,7 @@ import {
   type SeriesKnowledgeReuseScope,
 } from '../shared/protocol.js';
 import { canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
+import { graphemesOf } from '../shared/mark-anchor.js';
 
 /**
  * 书系知识 (Issue #63, plan slice S28b; V2-UX-SER-013 to SER-019; ADR 0036). Series Knowledge enters only through an explicit
@@ -186,6 +188,15 @@ export function isSeriesKnowledgeReuseScope(value: unknown): value is SeriesKnow
   return typeof value === 'string' && (SERIES_KNOWLEDGE_REUSE_SCOPES as readonly string[]).includes(value);
 }
 
+/** The most one page of 书系知识 weighs on the wire (Issue #63 review): the Series page holds two beside its members and records. */
+export const SERIES_KNOWLEDGE_PAGE_BYTES = 64 * 1024;
+
+/** A cited passage as a list or a review shows it: whole up to `MAX_SERIES_KNOWLEDGE_QUOTE_GRAPHEMES`, beyond that its opening and `…`. */
+export function knowledgeQuoteExcerpt(quote: string): string {
+  const graphemes = graphemesOf(quote);
+  return graphemes.length <= MAX_SERIES_KNOWLEDGE_QUOTE_GRAPHEMES ? quote : `${graphemes.slice(0, MAX_SERIES_KNOWLEDGE_QUOTE_GRAPHEMES).join('')}…`;
+}
+
 /** Where a provenance-bound candidate came from, as its record keeps it. */
 export interface StoredProvenance {
   readonly kind: 'manuscript-revision';
@@ -264,12 +275,13 @@ function isConflicts(value: unknown): value is SeriesKnowledgeConflictProjection
 /**
  * The conflicts a review discloses for a candidate (SER-016), by identity alone: for a new item, an item of the Series with the
  * same name; for an existing item, a revision appended since the candidate read it; and any other open candidate proposing
- * the same item or the same name.
+ * the same item or the same name. Each line names the item or the candidate and its version, never their words (Issue #63
+ * review), so a review stays small however many there are.
  */
 export function seriesKnowledgeConflicts(
   candidate: Pick<StoredCandidate, 'candidateId' | 'target'>,
   items: ReadonlyArray<StoredItem>,
-  open: ReadonlyArray<Pick<StoredCandidate, 'candidateId' | 'versionId' | 'target' | 'content'>>,
+  open: ReadonlyArray<Pick<StoredCandidate, 'candidateId' | 'versionId' | 'version' | 'target'>>,
 ): FoundConflict[] {
   const key = seriesKnowledgeSubjectKey(candidate.target.subject);
   const found: FoundConflict[] = [];
@@ -280,7 +292,7 @@ export function seriesKnowledgeConflicts(
       found.push({
         kind: 'existing-item',
         ref: current.revisionId,
-        line: `书系知识里已有「${item.subject}」（${SERIES_KNOWLEDGE_CLASS_LABELS[item.knowledgeClass]}）第 ${current.ordinal} 版：${current.content}`,
+        line: `书系知识里已有「${item.subject}」（${SERIES_KNOWLEDGE_CLASS_LABELS[item.knowledgeClass]}）第 ${current.ordinal} 版。`,
       });
     }
   } else {
@@ -288,14 +300,14 @@ export function seriesKnowledgeConflicts(
     const item = items.find((entry) => entry.itemId === target.itemId);
     const current = item?.revisions.at(-1);
     if (item !== undefined && current !== undefined && current.revisionId !== target.baseRevisionId) {
-      found.push({ kind: 'item-updated', ref: current.revisionId, line: `「${item.subject}」在提议之后已更新为第 ${current.ordinal} 版：${current.content}` });
+      found.push({ kind: 'item-updated', ref: current.revisionId, line: `「${item.subject}」在提议之后已更新为第 ${current.ordinal} 版。` });
     }
   }
   for (const other of open) {
     if (other.candidateId === candidate.candidateId) continue;
     const sameItem = candidate.target.kind === 'existing' && other.target.kind === 'existing' && other.target.itemId === candidate.target.itemId;
     if (!sameItem && seriesKnowledgeSubjectKey(other.target.subject) !== key) continue;
-    found.push({ kind: 'competing-candidate', ref: other.versionId, line: `另一个候选项也在提议「${other.target.subject}」：${other.content}` });
+    found.push({ kind: 'competing-candidate', ref: other.versionId, line: `另一个候选项也在提议「${other.target.subject}」（第 ${other.version} 版）。` });
   }
   return found;
 }
@@ -329,6 +341,24 @@ export class SeriesKnowledgeLedger {
   items(seriesId: string): StoredItem[] {
     const rows = this.#db.prepare('SELECT * FROM series_knowledge_items WHERE series_id = ? ORDER BY subject, item_id').all(seriesId) as SqlRow[];
     return rows.map((row) => this.#item(row));
+  }
+
+  /**
+   * Up to `limit` items of a Series by name after the one named, narrowed to names holding the words when there are any — a
+   * page of 书系知识 (Issue #63 review) — each verified with its revisions.
+   */
+  itemsPage(seriesId: string, words: string, after: { readonly subject: string; readonly itemId: string } | null, limit: number): StoredItem[] {
+    const rows = this.#db.prepare(`SELECT * FROM series_knowledge_items WHERE series_id = ?
+        AND (? = '' OR instr(lower(subject), lower(?)) > 0)
+        AND (? IS NULL OR subject > ? OR (subject = ? AND item_id > ?))
+      ORDER BY subject, item_id LIMIT ?`)
+      .all(seriesId, words, words, after?.subject ?? null, after?.subject ?? null, after?.subject ?? null, after?.itemId ?? null, limit) as SqlRow[];
+    return rows.map((row) => this.#item(row));
+  }
+
+  /** How many items a Series holds. */
+  itemCount(seriesId: string): number {
+    return Number((this.#db.prepare('SELECT count(*) count FROM series_knowledge_items WHERE series_id = ?').get(seriesId) as SqlRow).count);
   }
 
   /** One item, or `null`. */
@@ -456,6 +486,35 @@ export class SeriesKnowledgeLedger {
       AND candidate_id NOT IN (SELECT candidate_id FROM series_knowledge_promotions) GROUP BY candidate_id ORDER BY first, candidate_id`)
       .all(seriesId) as SqlRow[]).map((row) => String(row.candidate_id));
     return ids.map((candidateId) => this.candidate(candidateId)!);
+  }
+
+  /**
+   * Up to `limit` open candidates of a Series after the one named, oldest proposed first, each at its newest version with when
+   * it was first proposed: a page of 待审阅的候选项 (Issue #63 review).
+   */
+  openPage(seriesId: string, after: { readonly firstAt: string; readonly candidateId: string } | null, limit: number): Array<{ candidate: StoredCandidate; firstAt: string }> {
+    const rows = this.#db.prepare(`SELECT candidate_id, min(recorded_at) first FROM series_knowledge_candidates WHERE series_id = ?
+        AND candidate_id NOT IN (SELECT candidate_id FROM series_knowledge_promotions) GROUP BY candidate_id
+        HAVING ? IS NULL OR first > ? OR (first = ? AND candidate_id > ?)
+      ORDER BY first, candidate_id LIMIT ?`)
+      .all(seriesId, after?.firstAt ?? null, after?.firstAt ?? null, after?.firstAt ?? null, after?.candidateId ?? null, limit) as SqlRow[];
+    return rows.map((row) => ({ candidate: this.candidate(String(row.candidate_id))!, firstAt: String(row.first) }));
+  }
+
+  /** How many candidates of a Series wait to be taken in. */
+  openCount(seriesId: string): number {
+    return Number((this.#db.prepare(`SELECT count(DISTINCT candidate_id) count FROM series_knowledge_candidates WHERE series_id = ?
+      AND candidate_id NOT IN (SELECT candidate_id FROM series_knowledge_promotions)`).get(seriesId) as SqlRow).count);
+  }
+
+  /**
+   * How many open candidates of a Series cite one Book's manuscript: what 移出书系 holds back until the Book rejoins, and what
+   * a rejoining makes reviewable again (Issue #63 review).
+   */
+  openFromBook(seriesId: string, bookId: string): number {
+    if (this.#db.prepare(TABLE_PRESENT).get() === undefined) return 0;
+    return Number((this.#db.prepare(`SELECT count(DISTINCT candidate_id) count FROM series_knowledge_candidates WHERE series_id = ? AND source_book_id = ?
+      AND candidate_id NOT IN (SELECT candidate_id FROM series_knowledge_promotions)`).get(seriesId, bookId) as SqlRow).count);
   }
 
   /** How many items of a Series hold a revision taken from one Book: what 移出书系 names and leaves in place (SER-007). */
