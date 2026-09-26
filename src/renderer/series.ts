@@ -212,7 +212,7 @@ export function mountSeriesList(options: MountSeriesListOptions): { load(): Prom
       setStatus(SERIES_STATUS.opened);
     } catch (error) {
       busy = false;
-      paint('[data-series-action="list-more"]');
+      paint(fresh ? '[data-series-action="list-first"]' : '[data-series-action="list-more"]');
       setStatus(errorMessage(error, SERIES_STATUS.unavailable), 'error');
     }
   };
@@ -603,7 +603,7 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       setStatus(SERIES_STATUS.opened);
     } catch (error) {
       busy = false;
-      paint('[data-series-action="members-more"]');
+      paint(fresh ? '[data-series-action="members-first"]' : '[data-series-action="members-more"]');
       setStatus(errorMessage(error, SERIES_STATUS.unavailable), 'error');
     }
   };
@@ -625,7 +625,7 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       setStatus(SERIES_STATUS.opened);
     } catch (error) {
       busy = false;
-      paint('[data-series-action="history-more"]');
+      paint(fresh ? '[data-series-action="history-first"]' : '[data-series-action="history-more"]');
       setStatus(errorMessage(error, SERIES_STATUS.unavailable), 'error');
     }
   };
