@@ -11,6 +11,7 @@ import {
   type DatabaseExportsProjection,
   type DatabasePackageOrigin,
 } from '../shared/protocol.js';
+import { fixedArchiveTime } from '../shared/archive-time.js';
 import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
 import {
@@ -203,14 +204,17 @@ export async function databasePackageSources(dataRoot: string): Promise<Array<{ 
 
 /**
  * Write the package for `db` and the files under `dataRoot` to `packagePath`, which must not exist yet, streaming each
- * member so no file is held whole. Answers the package's size and digest and its members.
+ * member so no file is held whole. Answers the package's size and digest and its members. A `signal` aborted stops the
+ * write at its next chunk, and neither the package nor the store copy is left (Issue #434 review).
  */
 export async function writeDatabasePackage(
   db: DatabaseSync,
   dataRoot: string,
   packagePath: string,
   facts: DatabasePackageFacts,
+  signal?: AbortSignal,
 ): Promise<{ bytes: number; sha256: string; members: DatabasePackageMember[] }> {
+  signal?.throwIfAborted();
   const snapshotPath = `${packagePath}.store`;
   await rm(snapshotPath, { force: true });
   // A consistent copy of the store, taken between two statements of the one connection that writes it.
@@ -239,11 +243,20 @@ export async function writeDatabasePackage(
         await file.writeFile(chunk);
       }
     };
-    const mtime = new Date(facts.createdAt);
     const members: DatabasePackageMember[] = [];
     const add = async (member: string, path: string, compress: boolean): Promise<void> => {
-      const entry = compress ? new ZipDeflate(member, { level: 6 }) : new ZipPassThrough(member);
-      entry.mtime = mtime;
+      // Every entry carries the one fixed archive time (Issue #434 review, #615): the export's own time is the manifest's
+      // `createdAt`, which is what a preview reads.
+      let entry: ZipDeflate | ZipPassThrough;
+      if (compress) {
+        const deflated = new ZipDeflate(member, { level: 6 });
+        deflated.mtime = fixedArchiveTime();
+        entry = deflated;
+      } else {
+        const stored = new ZipPassThrough(member);
+        stored.mtime = fixedArchiveTime();
+        entry = stored;
+      }
       zip.add(entry);
       const memberHash = createHash('sha256');
       let memberBytes = 0;
@@ -251,6 +264,7 @@ export async function writeDatabasePackage(
       try {
         const buffer = Buffer.allocUnsafe(COPY_CHUNK_BYTES);
         for (;;) {
+          signal?.throwIfAborted();
           const { bytesRead } = await source.read(buffer, 0, buffer.length, null);
           if (bytesRead === 0) break;
           // fflate may keep a pushed chunk until it is written, so each push gets bytes of its own.
@@ -270,6 +284,7 @@ export async function writeDatabasePackage(
     };
     await add(DATABASE_PACKAGE_STORE_MEMBER, snapshotPath, true);
     for (const source of sources) await add(source.member, source.path, false);
+    signal?.throwIfAborted();
     const manifest = canonicalRecord({
       schema: DATABASE_PACKAGE_SCHEMA,
       dataVersion: facts.dataVersion,
@@ -282,7 +297,7 @@ export async function writeDatabasePackage(
       members,
     });
     const manifestEntry = new ZipDeflate(DATABASE_PACKAGE_MANIFEST_MEMBER, { level: 6 });
-    manifestEntry.mtime = mtime;
+    manifestEntry.mtime = fixedArchiveTime();
     zip.add(manifestEntry);
     manifestEntry.push(strToU8(manifest.json), true);
     zip.end();
@@ -362,15 +377,12 @@ export class DatabaseExports {
    * area and recorded with its digest and size, what it holds, and the file it would create or replace. Nothing is
    * written at the destination; a preparation never approved is only its record (V2-UX-EXP-020).
    */
-  async prepare(destinationInput: unknown): Promise<DatabaseExportPreparationProjection> {
+  async prepare(destinationInput: unknown, available: boolean): Promise<DatabaseExportPreparationProjection> {
+    requireDatabaseExport(available, 'EXPORT_POLICY_UNAVAILABLE', '对外导出策略未通过本次启动的校验，导出不可用。');
     const destination = await resolveExportDestination(destinationInput, DATABASE_PACKAGE_EXTENSION, this.#dataRoot);
-    const staging = await this.#stagingDirectory();
     // One package is staged at a time: an earlier preparation's that was never approved is not kept.
-    for (const entry of await readdir(staging)) {
-      if (entry.endsWith(DATABASE_PACKAGE_EXTENSION) || entry.endsWith(`${DATABASE_PACKAGE_EXTENSION}.store`)) {
-        await rm(join(staging, entry), { force: true });
-      }
-    }
+    await this.sweep();
+    const staging = await this.#stagingDirectory();
     const preparationId = randomUUID();
     const effectIntentId = randomUUID();
     const createdAt = new Date().toISOString();
@@ -418,7 +430,8 @@ export class DatabaseExports {
    * prepared; the approval is recorded, the package is written at the destination atomically, and the outcome is receipted.
    * Nothing retries by itself (V2-UX-EXP-021).
    */
-  async approve(preparationId: unknown): Promise<DatabaseExportReceiptProjection> {
+  async approve(preparationId: unknown, available: boolean): Promise<DatabaseExportReceiptProjection> {
+    requireDatabaseExport(available, 'EXPORT_POLICY_UNAVAILABLE', '对外导出策略未通过本次启动的校验，导出不可用。');
     requireDatabaseExport(typeof preparationId === 'string' && UUID_PATTERN.test(preparationId), 'DATABASE_EXPORT_NOT_FOUND', '这次数据库导出不存在。');
     const { row: preparation } = this.#verifiedPreparation(preparationId);
     requireDatabaseExport(this.#db.prepare('SELECT 1 FROM database_export_approvals WHERE preparation_id = ?').get(preparationId) === undefined,
@@ -486,6 +499,20 @@ export class DatabaseExports {
 
   preparationOf(preparationId: string): DatabaseExportPreparationProjection {
     return this.#preparation(preparationId);
+  }
+
+  /**
+   * At store open (Issue #434 review): a staged package no approval will ever take — a preparation from before this launch,
+   * cancelled, or cut off mid-write — is a whole copy of the data, so none is kept. Its preparation's record stays, and an
+   * approval of it is refused as stale and prepares again.
+   */
+  async sweep(): Promise<void> {
+    const staging = await this.#stagingDirectory();
+    for (const entry of await readdir(staging)) {
+      if (entry.endsWith(DATABASE_PACKAGE_EXTENSION) || entry.endsWith(`${DATABASE_PACKAGE_EXTENSION}.store`)) {
+        await rm(join(staging, entry), { force: true });
+      }
+    }
   }
 
   async #stagingDirectory(): Promise<string> {

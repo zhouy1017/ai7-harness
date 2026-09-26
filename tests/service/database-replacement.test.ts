@@ -55,8 +55,8 @@ function titles(store: EditorialStore): string[] {
 /** 导出数据库 of the store as it is, into the input root. */
 async function exported(store: EditorialStore, name: string): Promise<string> {
   const destination = join(roots.inputRoot, name);
-  const preparation = await store.prepareDatabaseExport(destination);
-  expect((await store.approveDatabaseExport(preparation.preparationId)).outcome).toBe('created');
+  const preparation = await store.prepareDatabaseExport(destination, true);
+  expect((await store.approveDatabaseExport(preparation.preparationId, true)).outcome).toBe('created');
   return destination;
 }
 

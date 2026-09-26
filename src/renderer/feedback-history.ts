@@ -1,6 +1,7 @@
-import type { FeedbackHistoryEntryProjection, FeedbackHistoryProjection, FeedbackHistoryTarget, RendererApi } from '../shared/protocol.js';
+import type { FeedbackHistoryEntryProjection, FeedbackHistoryPeopleVersion, FeedbackHistoryProjection, FeedbackHistoryTarget, RendererApi } from '../shared/protocol.js';
 import {
   FEEDBACK_HISTORY_ALL,
+  FEEDBACK_HISTORY_DETACHED,
   FEEDBACK_HISTORY_EMPTY,
   FEEDBACK_HISTORY_FILTERS,
   FEEDBACK_HISTORY_NONE_MATCH,
@@ -9,6 +10,7 @@ import {
   FEEDBACK_HISTORY_STATUS,
   FEEDBACK_HISTORY_TRUNCATED,
   FEEDBACK_ORIGIN_LABELS,
+  feedbackAttributionLine,
   feedbackEntryLine,
   feedbackReasonLine,
   learningPeopleLine,
@@ -16,10 +18,14 @@ import {
 import { localInstantLabel } from './plan-preview-labels.js';
 
 /**
- * 质量与学习 › 反馈记录 (Issue #61, plan slice S26c; V2-UX-FDBK-009, FDBK-010, FDBK-013): every piece of the editor's feedback,
+ * 质量与学习 › 反馈历史 (Issue #61, plan slice S26c; V2-UX-FDBK-009, FDBK-010, FDBK-013): every piece of the editor's feedback,
  * grouped by Book with its 作者 and 责编, newest first — where it came from, what it is about, what they decided or judged,
  * and the reason as it stands — filtered by 图书, 来源, 作者 and 责编, each opening the exact record it came from. Passive
  * history: nothing is pending, counted or asked for again.
+ *
+ * Each entry is attributed to the Book's people as they stood when it was given (Issue #61 review): 作者 and 责编 filter by
+ * those, their choices are the names any entry here is attributed to, and an entry whose people are not the Book's now says
+ * whose it is.
  */
 export interface MountFeedbackHistoryOptions {
   readonly root: HTMLElement;
@@ -47,9 +53,10 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
   const chosen: Record<Filter, string> = { book: '', origin: '', author: '', editor: '' };
   let opening = false;
 
-  const peopleOf = (bookId: string) => projection?.books.find((book) => book.bookId === bookId) ?? null;
+  const peopleOf = (entry: FeedbackHistoryEntryProjection): FeedbackHistoryPeopleVersion | null =>
+    projection?.books.find((book) => book.bookId === entry.bookId)?.peopleVersions.find((version) => version.version === entry.peopleVersion) ?? null;
   const matches = (entry: FeedbackHistoryEntryProjection): boolean => {
-    const people = peopleOf(entry.bookId);
+    const people = peopleOf(entry);
     return (chosen.book === '' || entry.bookId === chosen.book) &&
       (chosen.origin === '' || entry.origin === chosen.origin) &&
       (chosen.author === '' || (people?.authors.includes(chosen.author) ?? false)) &&
@@ -84,8 +91,9 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
       root.replaceChildren(...parts);
       return;
     }
-    const authors = [...new Set(projection.books.flatMap((book) => book.authors))];
-    const editors = [...new Set(projection.books.flatMap((book) => book.editors))];
+    const versions = projection.books.flatMap((book) => book.peopleVersions);
+    const authors = [...new Set(versions.flatMap((version) => version.authors))];
+    const editors = [...new Set(versions.flatMap((version) => version.editors))];
     const filters = el('div', 'feedback-filters');
     filters.append(
       select('book', projection.books.map((book) => [book.bookId, `《${book.title}》`] as const)),
@@ -108,23 +116,31 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
       section.dataset['bookId'] = book.bookId;
       section.append(el('h3', undefined, `《${book.title}》 · ${entries.length} 条`), el('p', 'field-note feedback-people', learningPeopleLine(book)));
       const list = el('ul', 'feedback-entries');
+      const now = learningPeopleLine(book);
       for (const entry of entries) {
         const item = el('li', 'feedback-entry');
         item.dataset['entryId'] = entry.entryId;
         item.dataset['feedbackOrigin'] = entry.origin;
         item.dataset['reasonState'] = entry.reasonState;
-        const go = el('button', 'button quiet', FEEDBACK_HISTORY_OPEN);
-        go.type = 'button';
-        go.dataset['feedbackAction'] = 'open';
-        go.setAttribute('aria-label', `${FEEDBACK_HISTORY_OPEN.replace('…', '')}：${feedbackEntryLine(entry)}`);
-        go.disabled = opening;
-        go.addEventListener('click', () => void openEntry(entry));
+        item.dataset['peopleVersion'] = String(entry.peopleVersion);
         item.append(
           el('p', 'feedback-entry-line', feedbackEntryLine(entry)),
           el('p', 'feedback-entry-reason', feedbackReasonLine(entry)),
           el('p', 'field-note feedback-entry-time', `记录于 ${localInstantLabel(entry.recordedAt)}`),
-          go,
         );
+        const people = peopleOf(entry);
+        if (people !== null && learningPeopleLine(people) !== now) item.append(el('p', 'field-note feedback-entry-people', feedbackAttributionLine(people)));
+        if (entry.target.kind === 'mark' && entry.target.detached) {
+          item.append(el('p', 'field-note feedback-entry-detached', FEEDBACK_HISTORY_DETACHED));
+        } else {
+          const go = el('button', 'button quiet', FEEDBACK_HISTORY_OPEN);
+          go.type = 'button';
+          go.dataset['feedbackAction'] = 'open';
+          go.setAttribute('aria-label', `${FEEDBACK_HISTORY_OPEN.replace('…', '')}：${feedbackEntryLine(entry)}`);
+          go.disabled = opening;
+          go.addEventListener('click', () => void openEntry(entry));
+          item.append(go);
+        }
         list.append(item);
       }
       section.append(list);

@@ -446,6 +446,9 @@ export class BaselineAnalysisExecutionOwner {
       this.#admitInTurn(runRecordId, ledger);
       return 'admitted';
     }
+    // A start this launch could never admit — no route for it, a plan frozen under another route, a Book it may not
+    // transmit — is blocked now with the reason, never left reading 等待运行名额 for a turn it cannot take (Issue #49 review).
+    this.#blockOnRefusal(runRecordId, ledger, () => this.#requireStartable(runRecordId, ledger));
     this.#queued.push({ runRecordId, ledger });
     return 'queued';
   }
@@ -456,14 +459,52 @@ export class BaselineAnalysisExecutionOwner {
    * it never reads 等待运行名额 for a turn it cannot take.
    */
   #admitInTurn(runRecordId: string, ledger: BaselineAnalysisStore): void {
+    this.#blockOnRefusal(runRecordId, ledger, () => this.admitAndDispatch(runRecordId, ledger));
+  }
+
+  /** A start refused while it is still `authorized` is blocked before dispatch with the reason, and the refusal thrown. */
+  #blockOnRefusal(runRecordId: string, ledger: BaselineAnalysisStore, attempt: () => void): void {
     try {
-      this.admitAndDispatch(runRecordId, ledger);
+      attempt();
     } catch (error) {
       if (ledger.currentRunState(runRecordId) === 'authorized') {
         const reason = error instanceof Error ? error.message : '运行未能进入调度。';
         ledger.recordRunState(runRecordId, 'blocked-before-dispatch', { detail: reason, reasons: [reason] });
       }
       throw error;
+    }
+  }
+
+  /**
+   * What admitting a just-authorized start checks, whatever the governor's places (Issue #49 review): this launch has a
+   * route and froze the ledger under the same launch, the plan still reads under this launch's route, its Book may be
+   * transmitted, and the start is still `authorized`. Only a free place is left for its turn.
+   */
+  #requireStartable(runRecordId: string, ledger: BaselineAnalysisStore): void {
+    const live = this.#requireLaunchOf(ledger);
+    this.#requireTransmittable(ledger.loadExecutionPlan(runRecordId), live);
+    if (ledger.currentRunState(runRecordId) !== 'authorized') {
+      throw new ExecutionAdmissionError('EXECUTION_STATE_INVALID', '只有刚记录授权的运行可以进入调度。');
+    }
+  }
+
+  /**
+   * This launch has a route, and the ledger froze its plans under the same launch: one bound to another launch would
+   * hand over a plan whose route this owner cannot honour. The live runtime, if any.
+   */
+  #requireLaunchOf(ledger: BaselineAnalysisStore): DeveloperLiveRuntime | null {
+    const live = this.#deps.developerLive ?? null;
+    if (live === null && this.#deps.fixture === null) throw new ExecutionAdmissionError('EXECUTION_ROUTE_ABSENT', '没有可执行的本地确定性路由。');
+    if ((ledger.launch.live !== null) !== (live !== null)) {
+      throw new ExecutionAdmissionError('EXECUTION_LEDGER_LAUNCH_MISMATCH', '该分析账本绑定的可信区间与执行所有者不一致；未开始执行。');
+    }
+    return live;
+  }
+
+  /** The Public SampleBook check precedes admission, so an unadmitted Book never reaches a payload. */
+  #requireTransmittable(facts: ExecutionPlanFacts, live: DeveloperLiveRuntime | null): void {
+    if (live !== null && !DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS.has(facts.sourceDigest)) {
+      throw new ExecutionAdmissionError('EXECUTION_SOURCE_NOT_TRANSMITTABLE', '当前图书不在 developer-live 可传输的 Public SampleBook 集合内；未发起任何传输。');
     }
   }
 
@@ -513,18 +554,9 @@ export class BaselineAnalysisExecutionOwner {
     if (this.#disposed) throw new ExecutionAdmissionError('EXECUTION_STOPPING', '本地业务服务正在停止。');
     if (this.#active.has(runRecordId)) throw new ExecutionAdmissionError('EXECUTION_STATE_INVALID', '这个运行已经在执行。');
     if (this.busy) throw new ExecutionAdmissionError('EXECUTION_BUSY', `运行名额已满：本实例一次执行 ${this.#capacity} 个运行。`);
-    const live = this.#deps.developerLive ?? null;
-    if (live === null && this.#deps.fixture === null) throw new ExecutionAdmissionError('EXECUTION_ROUTE_ABSENT', '没有可执行的本地确定性路由。');
-    // Every ledger this owner serves froze its plans under the launch this owner executes under. One
-    // that was bound to another launch would hand over a plan whose route this owner cannot honour.
-    if ((ledger.launch.live !== null) !== (live !== null)) {
-      throw new ExecutionAdmissionError('EXECUTION_LEDGER_LAUNCH_MISMATCH', '该分析账本绑定的可信区间与执行所有者不一致；未开始执行。');
-    }
+    const live = this.#requireLaunchOf(ledger);
     const facts = ledger.loadExecutionPlan(runRecordId);
-    // The Public SampleBook check precedes admission, so an unadmitted Book never reaches a payload.
-    if (live !== null && !DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS.has(facts.sourceDigest)) {
-      throw new ExecutionAdmissionError('EXECUTION_SOURCE_NOT_TRANSMITTABLE', '当前图书不在 developer-live 可传输的 Public SampleBook 集合内；未发起任何传输。');
-    }
+    this.#requireTransmittable(facts, live);
     const state = ledger.currentRunState(runRecordId);
     const resuming = options.resume === true;
     // A Run waiting for the editor's answer (Issue #422, S76d) goes on as a continuation too, once the answer is there.

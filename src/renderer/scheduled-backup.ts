@@ -4,8 +4,10 @@ import {
   SCHEDULED_BACKUP_LEDE,
   SCHEDULED_BACKUP_LOCATION,
   SCHEDULED_BACKUP_NONE,
+  SCHEDULED_BACKUP_RUNNING,
   SCHEDULED_BACKUP_STATUS_LINES,
   SCHEDULED_BACKUP_SWITCH,
+  scheduledBackupFailureLine,
   scheduledBackupLine,
   scheduledBackupStateLine,
   scheduledBackupsLabel,
@@ -14,10 +16,14 @@ import {
 /**
  * 定期自动备份 in 设置 › 数据与存储 (Issue #434, plan slice S86b; V2-UX-DSTO-018; ADR 0079 §1.4, §1.7): the switch, off by
  * default and turned only by the editor; the fixed backup location; and the backups kept. Turning it on backs up at once
- * when none was made in the day before; turning it off removes nothing.
+ * when none was made in the day before; turning it off removes nothing. The backup is written on the service's background
+ * check, so the section reads again while one is being made, and states a backup that could not be (Issue #434 review).
  */
 
 type Status = (message: string, tone?: 'busy' | 'success' | 'error') => void;
+
+/** How often the section reads again while a backup is being made. */
+const BACKUP_FOLLOW_MS = 1_000;
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -40,6 +46,14 @@ export function mountScheduledBackup(options: MountScheduledBackupOptions): void
   let projection: ScheduledBackupsProjection | null = null;
   let busy = false;
   let refusal: string | null = null;
+  let followTimer: number | undefined;
+  /** The section as it stood before the editor turned the switch on, while the backup that turn started is followed. */
+  let awaited: ScheduledBackupsProjection | null = null;
+
+  const switchFocused = (): boolean => {
+    const active = document.activeElement;
+    return active instanceof HTMLInputElement && root.contains(active) && active.matches('[data-scheduled-backup-switch]');
+  };
 
   const paint = (focusSwitch: boolean): void => {
     if (projection === null) return;
@@ -65,6 +79,11 @@ export function mountScheduledBackup(options: MountScheduledBackupOptions): void
       projection.total === 0 ? el('p', 'field-note', SCHEDULED_BACKUP_NONE) : list,
     );
     const nodes: HTMLElement[] = [el('h3', undefined, SCHEDULED_BACKUP_HEADING), el('p', 'field-note', SCHEDULED_BACKUP_LEDE), wrapper, state];
+    root.dataset['backingUp'] = String(projection.backingUp);
+    if (projection.backingUp) nodes.push(el('p', 'field-note scheduled-backup-running', SCHEDULED_BACKUP_RUNNING));
+    if (projection.lastFailure !== null) {
+      nodes.push(el('p', 'attention-note scheduled-backup-failure', scheduledBackupFailureLine(projection.lastFailure, instant)));
+    }
     if (refusal !== null) {
       const alert = el('p', 'attention-note', refusal);
       alert.setAttribute('role', 'alert');
@@ -75,11 +94,44 @@ export function mountScheduledBackup(options: MountScheduledBackupOptions): void
     if (focusSwitch) input.focus();
   };
 
+  /** What the backup a turn started came to, once the check has finished. */
+  const settle = (before: ScheduledBackupsProjection, after: ScheduledBackupsProjection): void => {
+    if (after.lastFailure !== null) {
+      setStatus(scheduledBackupFailureLine(after.lastFailure, instant), 'error');
+      return;
+    }
+    const made = after.backups[0] !== undefined && after.backups[0].backupId !== before.backups[0]?.backupId;
+    setStatus(made ? SCHEDULED_BACKUP_STATUS_LINES.backedUp : SCHEDULED_BACKUP_STATUS_LINES.turnedOn, 'success');
+  };
+
+  // While a backup is being made, the section reads again until it is done, keeping focus where it was.
+  const follow = (): void => {
+    if (followTimer !== undefined) window.clearTimeout(followTimer);
+    followTimer = undefined;
+    if (projection === null || !projection.backingUp || !root.isConnected) return;
+    followTimer = window.setTimeout(() => {
+      followTimer = undefined;
+      if (!root.isConnected || busy) return;
+      void api.inspectScheduledBackups().then((next) => {
+        if (!root.isConnected || busy) return;
+        const focused = switchFocused();
+        projection = next;
+        paint(focused);
+        if (!next.backingUp && awaited !== null) {
+          settle(awaited, next);
+          awaited = null;
+        }
+        follow();
+      }, () => follow());
+    }, BACKUP_FOLLOW_MS);
+  };
+
   const turn = async (enabled: boolean): Promise<void> => {
     if (busy || projection === null) return;
     const before = projection;
     busy = true;
     refusal = null;
+    awaited = null;
     paint(true);
     setStatus(enabled ? SCHEDULED_BACKUP_STATUS_LINES.turningOn : SCHEDULED_BACKUP_STATUS_LINES.turningOff, 'busy');
     try {
@@ -87,8 +139,13 @@ export function mountScheduledBackup(options: MountScheduledBackupOptions): void
       busy = false;
       if (!root.isConnected) return;
       paint(true);
-      setStatus(!enabled ? SCHEDULED_BACKUP_STATUS_LINES.turnedOff
-        : projection.total > before.total ? SCHEDULED_BACKUP_STATUS_LINES.backedUp : SCHEDULED_BACKUP_STATUS_LINES.turnedOn, 'success');
+      if (enabled && projection.backingUp) {
+        awaited = before;
+        setStatus(SCHEDULED_BACKUP_STATUS_LINES.backingUp, 'busy');
+      } else {
+        setStatus(enabled ? SCHEDULED_BACKUP_STATUS_LINES.turnedOn : SCHEDULED_BACKUP_STATUS_LINES.turnedOff, 'success');
+      }
+      follow();
     } catch (error) {
       busy = false;
       if (!root.isConnected) return;
@@ -96,6 +153,7 @@ export function mountScheduledBackup(options: MountScheduledBackupOptions): void
       try { projection = await api.inspectScheduledBackups(); } catch { /* the section keeps what it had */ }
       paint(true);
       setStatus(refusal, 'error');
+      follow();
     }
   };
 
@@ -104,6 +162,7 @@ export function mountScheduledBackup(options: MountScheduledBackupOptions): void
     if (!root.isConnected) return;
     projection = loaded;
     paint(false);
+    follow();
   }, (error: unknown) => {
     if (!root.isConnected) return;
     root.replaceChildren(el('h3', undefined, SCHEDULED_BACKUP_HEADING), el('p', 'attention-note', errorMessage(error, SCHEDULED_BACKUP_STATUS_LINES.unavailable)));

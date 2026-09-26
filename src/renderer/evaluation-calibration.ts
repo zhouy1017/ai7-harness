@@ -75,7 +75,8 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
       el('h3', undefined, CALIBRATION_HEADING),
       el('p', 'calibration-progress', calibrationProgressLine(calibration)),
       el('p', 'field-note', CALIBRATION_SCOPE),
-      ...(calibration.adjustments < calibration.threshold ? [el('p', 'field-note calibration-waiting', CALIBRATION_WAITING)] : []),
+      // Said while AI7 gives no 初评 to adjust (Issue #430 review), not by the count: after S81b a count below ten is progress.
+      ...(!calibration.initialScoresConnected ? [el('p', 'field-note calibration-waiting', CALIBRATION_WAITING)] : []),
       calibrationSwitch,
     );
     refusalFor('calibration', calibrationSection);
@@ -200,7 +201,7 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
     paint(null);
     setStatus(CALIBRATION_STATUS.saving, 'busy');
     try {
-      projection = await api.recordPublicationActuals({ bookId: book.bookId, expectedEntries: book.entries, priceFen, firstPrint });
+      projection = await api.recordPublicationActuals({ bookId: book.bookId, publicationVersionId: book.publicationVersionId, expectedEntries: book.entries, priceFen, firstPrint });
       busy = false;
       form = null;
       paint(`[data-book-id="${book.bookId}"] [data-calibration-action="open"]`);

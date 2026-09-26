@@ -529,11 +529,13 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.importReviewGuidelineVersion(request.input.previewId) };
     // 知识库 › 范例 (Issue #427, S79b).
     case 'inspectExemplars':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectExemplars() };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectExemplars(request.input.after) };
     case 'inspectKnowledgeProcedures':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectKnowledgeProcedures() };
+      return { id: request.id, ok: true, op: request.op, result: await store.inspectKnowledgeProcedures() };
     case 'inspectLibraryMaterials':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterials() };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterials(request.input.after) };
+    case 'inspectLibraryMaterial':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterial(request.input.materialId) };
     case 'previewLibraryMaterial':
       return { id: request.id, ok: true, op: request.op, result: await store.previewLibraryMaterial(request.input.path) };
     case 'addLibraryMaterial':
@@ -541,7 +543,9 @@ async function dispatch(
     case 'decideLibraryMaterial':
       return { id: request.id, ok: true, op: request.op, result: store.decideLibraryMaterial(request.input) };
     case 'inspectLearningMaterials':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectLearningMaterials(request.input.bookId) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectLearningMaterials(request.input.bookId, request.input.after) };
+    case 'inspectLearningMaterial':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectLearningMaterial(request.input.bookId, request.input.materialKey) };
     case 'decideLearningMaterial':
       return { id: request.id, ok: true, op: request.op, result: store.decideLearningMaterial(request.input) };
     case 'inspectFeedbackHistory':
@@ -553,7 +557,7 @@ async function dispatch(
     case 'setEvaluationPreferences':
       return { id: request.id, ok: true, op: request.op, result: store.setEvaluationPreferences(request.input) };
     case 'inspectSeriesList':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesList() };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesList(request.input.after) };
     case 'createSeries':
       return { id: request.id, ok: true, op: request.op, result: store.createSeries(request.input) };
     case 'inspectSeries':
@@ -564,12 +568,28 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.changeSeriesMembership(request.input) };
     case 'inspectBookSeries':
       return { id: request.id, ok: true, op: request.op, result: store.inspectBookSeries(request.input.bookId) };
+    case 'inspectSeriesMembers':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesMembers(request.input.seriesId, request.input.after) };
+    case 'inspectSeriesCandidates':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesCandidates(request.input.seriesId, request.input.text, request.input.after) };
+    case 'inspectSeriesHistory':
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: store.inspectSeriesHistory({ seriesId: request.input.seriesId, bookId: request.input.bookId }, request.input.after),
+      };
     case 'inspectDataVersion':
       return { id: request.id, ok: true, op: request.op, result: store.inspectDataVersion() };
+    // Only under this launch's verified External Export Policy, as every other export (Issue #434, S86a review).
     case 'prepareDatabaseExport':
-      return { id: request.id, ok: true, op: request.op, result: await store.prepareDatabaseExport(request.input.destination) };
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: await store.prepareDatabaseExport(request.input.destination, launchPolicy.externalExport.currentExportEffectAvailable),
+      };
     case 'approveDatabaseExport':
-      return { id: request.id, ok: true, op: request.op, result: await store.approveDatabaseExport(request.input.preparationId) };
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: await store.approveDatabaseExport(request.input.preparationId, launchPolicy.externalExport.currentExportEffectAvailable),
+      };
     case 'inspectDatabaseExports':
       return { id: request.id, ok: true, op: request.op, result: store.inspectDatabaseExports() };
     case 'inspectScheduledBackups':
@@ -594,6 +614,12 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.editSeriesKnowledgeCandidate(request.input) };
     case 'promoteSeriesKnowledge':
       return { id: request.id, ok: true, op: request.op, result: store.promoteSeriesKnowledge(request.input) };
+    case 'inspectSeriesKnowledgeItems':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeItems(request.input.seriesId, request.input.text, request.input.after) };
+    case 'inspectSeriesKnowledgeCandidates':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeCandidates(request.input.seriesId, request.input.after) };
+    case 'inspectSeriesKnowledgeRevisions':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeRevisions(request.input.seriesId, request.input.itemId, request.input.before) };
     case 'inspectEvaluationProfiles':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluationProfiles() };
     case 'inspectEvaluation':
@@ -970,6 +996,8 @@ async function dispatch(
       };
     case 'inspectMaintenanceCase':
       return { id: request.id, ok: true, op: request.op, result: store.inspectMaintenanceCase(request.input) };
+    case 'listMaintenanceCases':
+      return { id: request.id, ok: true, op: request.op, result: store.listMaintenanceCases(request.input) };
     case 'recordMaintenanceCase':
       return { id: request.id, ok: true, op: request.op, result: store.recordMaintenanceCase(request.input) };
     case 'appendMaintenanceCaseRevision':
@@ -1302,14 +1330,8 @@ async function run(): Promise<void> {
         // It stays 任务等待你的说明 with its answer; the next launch takes it on again.
       }
     }
-    // Starts the governor had not admitted when AI7 closed (Issue #49, S14; CONC-007) wait again, in their order.
-    for (const runRecordId of reconciled.queued) {
-      try {
-        analysisExecution.admitOrQueue(runRecordId, store.baselineAnalysisLedger);
-      } catch {
-        // One this launch cannot admit is blocked before dispatch with the reason; nothing of it ran.
-      }
-    }
+    // Starts the governor had not admitted when AI7 closed were blocked with why by the reconciliation: nothing starts by
+    // itself after a restart (ADR 0034), and the editor starts them again when they choose.
     // A Review Run's categories take a place of the one owner's governor one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);
     // Connectivity Wait (Issue #502). The reading is the device's own unless J-04's control names a file; the
@@ -1403,6 +1425,9 @@ async function run(): Promise<void> {
     process.removeListener('SIGTERM', stop);
     process.removeListener('SIGINT', stop);
     try {
+      // A backup under way stops at once and removes what it wrote, so none is left half-made when the store closes (Issue
+      // #434 review).
+      const backupsStopped = store?.stopScheduledBackups();
       jobs?.dispose();
       // The Review Run loop stops first and starts no further category; the owner then interrupts the
       // Run in flight, and the loop records what that Run came to before the store closes.
@@ -1410,12 +1435,18 @@ async function run(): Promise<void> {
       await analysisExecution?.dispose();
       await reviewRunsStopped;
       await harness?.dispose();
+      await backupsStopped;
     } finally {
       store?.close();
     }
   }
 }
 
-await run().catch(() => {
+await run().catch((error: unknown) => {
+  // A service that stops before it is ready says which refusal stopped it (Issue #433 review): its code alone, never its
+  // words or anything it read.
+  const code = typeof error === 'object' && error !== null && typeof (error as { code?: unknown }).code === 'string' &&
+    /^[A-Z][A-Z0-9_]{0,63}$/u.test((error as { code: string }).code) ? (error as { code: string }).code : 'UNEXPECTED';
+  process.stderr.write(`AI7_SERVICE_STOPPED/${code}\n`);
   process.exitCode = 1;
 });

@@ -1,26 +1,35 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { lstat, mkdir, realpath, rename, rm } from 'node:fs/promises';
+import { lstat, mkdir, readdir, realpath, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   MAX_SCHEDULED_BACKUPS_LISTED,
   type DatabaseExportContentsProjection,
+  type ScheduledBackupFailureProjection,
+  type ScheduledBackupFailureReason,
   type ScheduledBackupProjection,
   type ScheduledBackupsProjection,
 } from '../shared/protocol.js';
 import { canonicalJson, canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
 import { DATABASE_PACKAGE_EXTENSION, writeDatabasePackage } from './database-exports.js';
+import { fileDigest } from './manuscript-export.js';
 
 /**
  * 定期自动备份 (Issue #434, plan slice S86b; V2-UX-DSTO-018; ADR 0079 §1.4, §1.7): a switch, off by default. On, AI7 writes the
  * database package of S86a once a day into the fixed backup location beside the Agent Data Root, keeps fourteen days of
  * them, and never a credential. The switch is the decision (§1.7): no External Export Policy approval and no picker, and
- * nothing is written anywhere but that location. Turning it off makes no more backups and removes none: those kept stay
- * until their fourteen days pass.
+ * nothing is written anywhere but that location. Turning it off makes no more backups; those kept stay until their
+ * fourteen days pass.
+ *
+ * Every backup is made on the service's background check — at start, hourly, and at once when the switch is turned on —
+ * and never inside a request, so no window waits on the write (Issue #434 review). A check first clears what a check cut
+ * off left and removes every backup whose days passed, each on its own, and only then writes. It removes nothing but a
+ * file it made: one of its own names, whose size and digest are the ones recorded.
  *
  * Schema revision 56 owns three relations, ledgers like the others: the switch's changes, chained; each backup made, with
- * its file's name, size and digest; and each backup removed, because its fourteen days passed or its file was found gone.
+ * its file's name, size and digest; and each backup removed — its fourteen days passed, its file was found gone, or the
+ * file at its name was found to be another, which is left where it is.
  */
 
 export const BACKUP_KEPT_DAYS = 14;
@@ -32,6 +41,15 @@ export const BACKUP_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 const PREFERENCE_SCHEMA = 'ai7.scheduled-backup.preference/1' as const;
 const BACKUP_SCHEMA = 'ai7.scheduled-backup/1' as const;
 const REMOVAL_SCHEMA = 'ai7.scheduled-backup.removal/1' as const;
+
+/**
+ * The one form a backup's name takes, and the only one a record may name (Issue #434 review): a name that leaves the
+ * backup location, or names anything else in it, is never AI7's to remove.
+ */
+export const BACKUP_FILE_NAME = /^AI7 自动备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db$/u;
+const BACKUP_FILE_NAME_GLOB = 'AI7 自动备份 [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]-[0-9][0-9]-[0-9][0-9].ai7db';
+/** What a check cut off leaves: the package it was writing, and the copy of the store that package is made from. */
+const PARTIAL_FILE_NAME = /^\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.ai7db\.partial(?:\.store)?$/u;
 
 export const SCHEDULED_BACKUP_SCHEMA_SQL = {
   backup_preferences: `CREATE TABLE backup_preferences (
@@ -46,7 +64,7 @@ export const SCHEDULED_BACKUP_SCHEMA_SQL = {
 ) STRICT`,
   scheduled_backups: `CREATE TABLE scheduled_backups (
   backup_id TEXT PRIMARY KEY,
-  file_name TEXT NOT NULL UNIQUE CHECK(length(file_name) BETWEEN 1 AND 255),
+  file_name TEXT NOT NULL UNIQUE CHECK(file_name GLOB '${BACKUP_FILE_NAME_GLOB}'),
   byte_length INTEGER NOT NULL CHECK(byte_length > 0),
   file_sha256 TEXT NOT NULL CHECK(length(file_sha256) = 64),
   data_version INTEGER NOT NULL CHECK(data_version >= 1),
@@ -60,7 +78,7 @@ export const SCHEDULED_BACKUP_SCHEMA_SQL = {
   scheduled_backup_removals: `CREATE TABLE scheduled_backup_removals (
   removal_id TEXT PRIMARY KEY,
   backup_id TEXT NOT NULL UNIQUE REFERENCES scheduled_backups(backup_id),
-  reason TEXT NOT NULL CHECK(reason IN ('expired', 'missing')),
+  reason TEXT NOT NULL CHECK(reason IN ('expired', 'missing', 'changed')),
   removed_at TEXT NOT NULL,
   canonical_json TEXT NOT NULL,
   sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
@@ -125,14 +143,56 @@ export function backupLocationFor(dataRoot: string): string {
   return `${dataRoot}-backups`;
 }
 
-/** The backup location, made when it is first needed, and refused unless it is a directory of its own. */
-export async function ensureBackupLocation(dataRoot: string): Promise<string> {
-  const location = backupLocationFor(dataRoot);
-  await mkdir(location, { recursive: true });
+async function verifiedLocation(location: string): Promise<string> {
   const info = await lstat(location);
   requireBackup(info.isDirectory() && !info.isSymbolicLink() && (await realpath(location)) === location,
     'BACKUP_LOCATION_INVALID', '备份位置不可用。');
   return location;
+}
+
+/** The backup location, made when it is first needed, and refused unless it is a directory of its own. */
+export async function ensureBackupLocation(dataRoot: string): Promise<string> {
+  const location = backupLocationFor(dataRoot);
+  await mkdir(location, { recursive: true });
+  return verifiedLocation(location);
+}
+
+/** The backup location when it exists, verified as when it is made; `null` before the first backup made it. */
+async function existingBackupLocation(dataRoot: string): Promise<string | null> {
+  const location = backupLocationFor(dataRoot);
+  if (!(await present(location))) return null;
+  return verifiedLocation(location);
+}
+
+async function present(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+/** Why a check made no backup, as the section states it: the file system's refusal by its code, never its words or a path. */
+export function backupFailureReason(error: unknown): ScheduledBackupFailureReason {
+  switch (typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined) {
+    case 'ENOSPC':
+    case 'EDQUOT':
+      return 'no-space';
+    case 'EACCES':
+    case 'EPERM':
+    case 'EROFS':
+      return 'not-writable';
+    case 'BACKUP_LOCATION_INVALID':
+    case 'EEXIST':
+    case 'ENOTDIR':
+      return 'location-unavailable';
+    case 'DATABASE_PACKAGE_TOO_LARGE':
+      return 'too-large';
+    default:
+      return 'other';
+  }
 }
 
 function two(value: number): string {
@@ -176,6 +236,7 @@ interface KeptBackup {
   readonly backupId: string;
   readonly fileName: string;
   readonly byteLength: number;
+  readonly fileSha256: string;
   readonly createdAt: string;
 }
 
@@ -183,7 +244,15 @@ export class ScheduledBackups {
   readonly #db: DatabaseSync;
   readonly #dataRoot: string;
   readonly #sources: ScheduledBackupSources;
-  #running = false;
+  /** The check under way: one at a time, and a caller while it runs is answered by it. */
+  #inFlight: Promise<boolean> | null = null;
+  #controller: AbortController | null = null;
+  /** Whether the check under way is writing its backup. */
+  #writing = false;
+  /** Set once the service stops: no check starts after it. */
+  #stopped = false;
+  /** The last backup this service could not make, until one is made or the switch is turned off. */
+  #lastFailure: ScheduledBackupFailureProjection | null = null;
 
   constructor(db: DatabaseSync, dataRoot: string, sources: ScheduledBackupSources) {
     this.#db = db;
@@ -215,7 +284,7 @@ export class ScheduledBackups {
     return { enabled, ordinal: rows.length };
   }
 
-  /** Turn the switch, from exactly the state the editor saw. Turning it on backs up at once when none was made today. */
+  /** Turn the switch, from exactly the state the editor saw. It records the switch only: the backup is the check's. */
   setEnabled(enabled: unknown, expectedOrdinal: unknown): void {
     requireBackup(typeof enabled === 'boolean' && typeof expectedOrdinal === 'number' && Number.isSafeInteger(expectedOrdinal) && expectedOrdinal >= 0,
       'SCHEDULED_BACKUP_INVALID', '定期自动备份的设置无效。');
@@ -232,26 +301,73 @@ export class ScheduledBackups {
       `INSERT INTO backup_preferences(preference_id, ordinal, enabled, supersedes_preference_id, recorded_at, canonical_json, sha256)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     ).run(preferenceId, ordinal, enabled ? 1 : 0, supersedes, recordedAt, record.json, record.digest);
+    if (!enabled) this.#lastFailure = null;
   }
 
   /**
-   * Once a day while the switch is on: write the package into the backup location unless one was made in the day before
-   * `now`, then remove every backup older than fourteen days. Answers whether a backup was made.
+   * The service's check, asked at start, hourly, and when the switch is turned on (Issue #434 review). It first clears what
+   * a check cut off left and removes every backup older than fourteen days, each on its own; then, while the switch is on
+   * and none was made in the day before `now`, it writes the package into the backup location. One check runs at a time,
+   * and a caller while it runs is answered by it. Answers whether a backup was made.
    */
-  async runIfDue(now: Date): Promise<boolean> {
-    if (this.#running) return false;
-    this.#running = true;
+  runIfDue(now: Date): Promise<boolean> {
+    if (this.#stopped) return Promise.resolve(false);
+    if (this.#inFlight !== null) return this.#inFlight;
+    const controller = new AbortController();
+    const run = this.#run(now, controller.signal).finally(() => {
+      this.#inFlight = null;
+      this.#controller = null;
+    });
+    this.#inFlight = run;
+    this.#controller = controller;
+    return run;
+  }
+
+  /**
+   * At shutdown, before the store closes (Issue #434 review): no check starts after it, and the one under way stops at its
+   * next chunk and removes what it wrote, so no half-made or unrecorded file is left in the backup location.
+   */
+  async stop(): Promise<void> {
+    this.#stopped = true;
+    this.#controller?.abort();
+    await this.#inFlight?.catch(() => undefined);
+  }
+
+  async #run(now: Date, signal: AbortSignal): Promise<boolean> {
     try {
-      let made = false;
-      const kept = this.#kept();
-      if (this.preference().enabled && !kept.some((backup) => now.getTime() - Date.parse(backup.createdAt) < BACKUP_INTERVAL_MS)) {
-        await this.#backUp(now);
-        made = true;
+      await this.#sweepPartials();
+      // Before any write, so a backup that cannot be written never keeps the space those whose days passed hold.
+      await this.#removeExpired(now, signal);
+      signal.throwIfAborted();
+      if (!this.#due(now)) return false;
+      this.#writing = true;
+      try {
+        await this.#backUp(now, signal);
+      } finally {
+        this.#writing = false;
       }
-      await this.#removeExpired(now);
-      return made;
-    } finally {
-      this.#running = false;
+      this.#lastFailure = null;
+      return true;
+    } catch (error) {
+      // The section states a backup the switch asked for and this service could not make; a stop at shutdown is no failure.
+      if (!signal.aborted && this.#enabled()) this.#lastFailure = { at: now.toISOString(), reason: backupFailureReason(error) };
+      throw error;
+    }
+  }
+
+  #due(now: Date): boolean {
+    return this.preference().enabled && !this.#madeWithinDay(this.#kept(), now);
+  }
+
+  #madeWithinDay(kept: ReadonlyArray<KeptBackup>, now: Date): boolean {
+    return kept.some((backup) => now.getTime() - Date.parse(backup.createdAt) < BACKUP_INTERVAL_MS);
+  }
+
+  #enabled(): boolean {
+    try {
+      return this.preference().enabled;
+    } catch {
+      return false;
     }
   }
 
@@ -278,21 +394,30 @@ export class ScheduledBackups {
       nextDueAt: !preference.enabled ? null
         : latest === null ? now.toISOString()
           : new Date(Math.max(now.getTime(), Date.parse(latest.createdAt) + BACKUP_INTERVAL_MS)).toISOString(),
+      // The check under way is writing the backup, or will once it has removed those whose days passed.
+      backingUp: this.#inFlight !== null && (this.#writing || (preference.enabled && !this.#madeWithinDay(kept, now))),
+      lastFailure: this.#lastFailure,
     };
   }
 
-  async #backUp(now: Date): Promise<void> {
+  async #backUp(now: Date, signal: AbortSignal): Promise<void> {
     const location = await ensureBackupLocation(this.#dataRoot);
     const fileName = backupFileName(now);
-    requireBackup(this.#db.prepare('SELECT 1 FROM scheduled_backups WHERE file_name = ?').get(fileName) === undefined,
+    const target = join(location, fileName);
+    // Never over a file already at that name: a backup is only ever a new file.
+    requireBackup(this.#db.prepare('SELECT 1 FROM scheduled_backups WHERE file_name = ?').get(fileName) === undefined && !(await present(target)),
       'SCHEDULED_BACKUP_EXISTS', '这一刻的备份已经有了。');
     const partial = join(location, `.${randomUUID()}${DATABASE_PACKAGE_EXTENSION}.partial`);
     const facts = this.#sources.facts();
     const contents = this.#sources.contents();
     const createdAt = now.toISOString();
+    let placed = false;
     try {
-      const written = await writeDatabasePackage(this.#db, this.#dataRoot, partial, { ...facts, createdAt, origin: 'scheduled-backup', contents });
-      await rename(partial, join(location, fileName));
+      const written = await writeDatabasePackage(this.#db, this.#dataRoot, partial, { ...facts, createdAt, origin: 'scheduled-backup', contents }, signal);
+      signal.throwIfAborted();
+      await rename(partial, target);
+      placed = true;
+      signal.throwIfAborted();
       const backupId = randomUUID();
       const record = canonicalRecord({
         schema: BACKUP_SCHEMA,
@@ -311,27 +436,81 @@ export class ScheduledBackups {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(backupId, fileName, written.bytes, written.sha256, facts.dataVersion, facts.schemaRevision, facts.softwareVersion,
         canonicalJson(contents), createdAt, record.json, record.digest);
+      placed = false;
+    } catch (error) {
+      // A file under a backup's name that no record names would never be listed or removed (Issue #434 review).
+      if (placed) await rm(target, { force: true }).catch(() => undefined);
+      throw error;
     } finally {
       await rm(partial, { force: true }).catch(() => undefined);
+      await rm(`${partial}.store`, { force: true }).catch(() => undefined);
     }
   }
 
-  /** Every backup older than fourteen days is removed, and one whose file is gone is recorded as found gone. */
-  async #removeExpired(now: Date): Promise<void> {
-    const location = backupLocationFor(this.#dataRoot);
-    for (const backup of this.#kept()) {
-      if (now.getTime() - Date.parse(backup.createdAt) < BACKUP_KEPT_DAYS * DAY_MS) continue;
-      const path = join(location, backup.fileName);
-      const present = existsSync(path);
-      if (present) await rm(path, { force: true });
-      const removalId = randomUUID();
-      const removedAt = now.toISOString();
-      const reason = present ? 'expired' : 'missing';
-      const record = canonicalRecord({ schema: REMOVAL_SCHEMA, removalId, backupId: backup.backupId, reason, removedAt });
-      this.#db.prepare(
-        'INSERT INTO scheduled_backup_removals(removal_id, backup_id, reason, removed_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)',
-      ).run(removalId, backup.backupId, reason, removedAt, record.json, record.digest);
+  /**
+   * What a check cut off left — by a crash, or a stop that outlasted the grace it was given — is removed before the next
+   * one writes (Issue #434 review): only files of the form a check writes, never a kept backup or anything else there.
+   */
+  async #sweepPartials(): Promise<void> {
+    const location = await existingBackupLocation(this.#dataRoot);
+    if (location === null) return;
+    for (const entry of await readdir(location)) {
+      if (!PARTIAL_FILE_NAME.test(entry)) continue;
+      const path = join(location, entry);
+      try {
+        if ((await lstat(path)).isFile()) await rm(path, { force: true });
+      } catch {
+        // Held open elsewhere, or gone already: the next check tries again.
+      }
     }
+  }
+
+  /**
+   * Every backup older than fourteen days, each on its own (Issue #434 review). Its file is removed only while it is still
+   * the one AI7 made — a regular file of the recorded size and digest — and the backup is recorded as expired; a file found
+   * gone is recorded as such; a file at its name that is another is left where it is and recorded as changed. One that
+   * cannot be dealt with now stays kept, the others go on, and the next check tries it again.
+   */
+  async #removeExpired(now: Date, signal: AbortSignal): Promise<void> {
+    const expired = this.#kept().filter((backup) => now.getTime() - Date.parse(backup.createdAt) >= BACKUP_KEPT_DAYS * DAY_MS);
+    if (expired.length === 0) return;
+    const location = await existingBackupLocation(this.#dataRoot);
+    for (const backup of expired) {
+      signal.throwIfAborted();
+      try {
+        const path = location === null ? null : join(location, backup.fileName);
+        const state = path === null ? 'missing' : await this.#fileState(path, backup);
+        if (state === 'unreadable') continue;
+        if (state === 'ours') await rm(path!);
+        this.#recordRemoval(backup.backupId, state === 'ours' ? 'expired' : state, now);
+      } catch {
+        // This one stays kept until the next check.
+      }
+    }
+  }
+
+  /** Whether the file at a backup's name is still the one AI7 made, gone, another, or cannot be read now. */
+  async #fileState(path: string, backup: KeptBackup): Promise<'ours' | 'missing' | 'changed' | 'unreadable'> {
+    let info;
+    try {
+      info = await lstat(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'missing';
+      return 'unreadable';
+    }
+    if (!info.isFile() || info.size !== backup.byteLength) return 'changed';
+    const digest = await fileDigest(path);
+    if (digest === null) return 'unreadable';
+    return digest.bytes === backup.byteLength && digest.sha256 === backup.fileSha256 ? 'ours' : 'changed';
+  }
+
+  #recordRemoval(backupId: string, reason: 'expired' | 'missing' | 'changed', now: Date): void {
+    const removalId = randomUUID();
+    const removedAt = now.toISOString();
+    const record = canonicalRecord({ schema: REMOVAL_SCHEMA, removalId, backupId, reason, removedAt });
+    this.#db.prepare(
+      'INSERT INTO scheduled_backup_removals(removal_id, backup_id, reason, removed_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)',
+    ).run(removalId, backupId, reason, removedAt, record.json, record.digest);
   }
 
   /** The backups not yet removed, newest first, each record verified. */
@@ -344,6 +523,8 @@ export class ScheduledBackups {
     const kept: KeptBackup[] = [];
     for (const row of rows) {
       const backupId = text(row.backup_id);
+      // Only a name of the one form a backup is given: a record naming anything else is not AI7's (Issue #434 review).
+      requireBackup(BACKUP_FILE_NAME.test(text(row.file_name)), 'SCHEDULED_BACKUP_RECORD_INVALID', INVALID);
       const contents: unknown = JSON.parse(text(row.contents_json));
       requireStored(row.canonical_json, row.sha256, {
         schema: BACKUP_SCHEMA,
@@ -367,7 +548,13 @@ export class ScheduledBackups {
         });
         continue;
       }
-      kept.push({ backupId, fileName: text(row.file_name), byteLength: integer(row.byte_length), createdAt: text(row.created_at) });
+      kept.push({
+        backupId,
+        fileName: text(row.file_name),
+        byteLength: integer(row.byte_length),
+        fileSha256: text(row.file_sha256),
+        createdAt: text(row.created_at),
+      });
     }
     return kept;
   }

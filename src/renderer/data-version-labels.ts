@@ -23,12 +23,18 @@ export function dataVersionStateLine(projection: Pick<DataVersionProjection, 'fr
     : `开发阶段：首个正式发布时冻结为数据版本 ${projection.dataVersion}；在那之前，开发中的数据可以重建。`;
 }
 
-/** The latest software update and what it did to the Data Version (DSTO-016). */
+/**
+ * The latest software change and what it did to the Data Version (DSTO-016): an update, or — when an older build opened the
+ * store again — a change to earlier software, never called an update (Issue #433 review).
+ */
 export function dataVersionUpdateLine(update: DataVersionProjection['update']): string {
   if (update === null) return '这份数据还没有经历过软件更新。';
+  const change = update.direction === 'earlier'
+    ? `改用较早的软件：从 ${update.from} 改为 ${update.to}`
+    : update.direction === 'same' ? `软件从 ${update.from} 换为 ${update.to}` : `软件从 ${update.from} 更新到 ${update.to}`;
   return update.fromDataVersion === update.toDataVersion
-    ? `软件从 ${update.from} 更新到 ${update.to}；数据版本仍为 ${update.toDataVersion}，数据无需变更。`
-    : `软件从 ${update.from} 更新到 ${update.to}；数据版本从 ${update.fromDataVersion} 变为 ${update.toDataVersion}。`;
+    ? `${change}；数据版本仍为 ${update.toDataVersion}，数据无需变更。`
+    : `${change}；数据版本从 ${update.fromDataVersion} 变为 ${update.toDataVersion}。`;
 }
 
 /** The records' summary: how many, and whether only the newest are listed. */

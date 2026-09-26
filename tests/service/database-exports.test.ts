@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -63,7 +63,7 @@ describe('导出数据库 over the real store', () => {
       await mkdir(join(roots.dataRoot, 'shell'), { recursive: true });
       await writeFile(join(roots.dataRoot, 'shell', 'Preferences'), '{}');
       const destination = join(roots.inputRoot, 'AI7 数据库.ai7db');
-      const preparation = await store.prepareDatabaseExport(destination);
+      const preparation = await store.prepareDatabaseExport(destination, true);
       const version = (JSON.parse(await readFile(join(roots.codeRoot, 'package.json'), 'utf8')) as { version: string }).version;
       expect(preparation).toMatchObject({
         fileName: 'AI7 数据库.ai7db',
@@ -113,12 +113,12 @@ describe('导出数据库 over the real store', () => {
       }
 
       // The approval writes exactly the prepared package, once.
-      const receipt = await store.approveDatabaseExport(preparation.preparationId);
+      const receipt = await store.approveDatabaseExport(preparation.preparationId, true);
       expect(receipt).toMatchObject({ outcome: 'created', outcomeLabel: '已导出到所选位置', detail: '已新建「AI7 数据库.ai7db」。', fileName: 'AI7 数据库.ai7db' });
       const written = await readFile(destination);
       expect([written.byteLength, receipt.byteLength]).toEqual([preparation.payloadBytes, preparation.payloadBytes]);
       expect(staging()).toEqual([]);
-      expect(code(await store.approveDatabaseExport(preparation.preparationId).catch((error: unknown) => error))).toBe('DATABASE_EXPORT_ALREADY_APPROVED');
+      expect(code(await store.approveDatabaseExport(preparation.preparationId, true).catch((error: unknown) => error))).toBe('DATABASE_EXPORT_ALREADY_APPROVED');
       expect(store.inspectDatabaseExports()).toMatchObject({ total: 1, exports: [{ preparationId: preparation.preparationId, outcome: 'created' }] });
       store.markCleanShutdown();
     } finally {
@@ -139,25 +139,25 @@ describe('导出数据库 over the real store', () => {
     try {
       const destination = join(roots.inputRoot, '旧的备份.ai7db');
       await writeFile(destination, 'an earlier file the dialog resolved');
-      const first = await store.prepareDatabaseExport(destination);
+      const first = await store.prepareDatabaseExport(destination, true);
       expect([first.disposition, first.dispositionLabel]).toEqual(['replace', '替换所选位置的同名文件']);
       // A second preparation keeps one staged package, so the first can no longer be approved.
-      const second = await store.prepareDatabaseExport(destination);
+      const second = await store.prepareDatabaseExport(destination, true);
       expect(staging()).toHaveLength(1);
-      expect(code(await store.approveDatabaseExport(first.preparationId).catch((error: unknown) => error))).toBe('DATABASE_EXPORT_STALE');
+      expect(code(await store.approveDatabaseExport(first.preparationId, true).catch((error: unknown) => error))).toBe('DATABASE_EXPORT_STALE');
       // A file changed since the dialog resolved it is never replaced: 未能导出, and it stays as it is.
       await writeFile(destination, 'another program wrote here since');
-      const refused = await store.approveDatabaseExport(second.preparationId);
+      const refused = await store.approveDatabaseExport(second.preparationId, true);
       expect([refused.outcome, refused.outcomeLabel]).toEqual(['failed', '未能导出']);
       expect(await readFile(destination, 'utf8')).toBe('another program wrote here since');
       // Destinations never written: inside the Agent Data Root, or without the package's extension.
       for (const [path, expected] of [[join(roots.dataRoot, 'inside.ai7db'), 'EXPORT_DESTINATION_INVALID'], [join(roots.inputRoot, 'wrong.zip'), 'EXPORT_DESTINATION_INVALID']] as const) {
-        expect(code(await store.prepareDatabaseExport(path).catch((error: unknown) => error))).toBe(expected);
+        expect(code(await store.prepareDatabaseExport(path, true).catch((error: unknown) => error))).toBe(expected);
       }
-      expect(code(await store.approveDatabaseExport(randomUUID()).catch((error: unknown) => error))).toBe('DATABASE_EXPORT_NOT_FOUND');
+      expect(code(await store.approveDatabaseExport(randomUUID(), true).catch((error: unknown) => error))).toBe('DATABASE_EXPORT_NOT_FOUND');
       // A replace of the file as the dialog resolved it writes the package over exactly that file.
-      const third = await store.prepareDatabaseExport(destination);
-      const replaced = await store.approveDatabaseExport(third.preparationId);
+      const third = await store.prepareDatabaseExport(destination, true);
+      const replaced = await store.approveDatabaseExport(third.preparationId, true);
       expect([replaced.outcome, replaced.detail]).toEqual(['replaced', '已替换所选位置的「旧的备份.ai7db」。']);
       expect((await readFile(destination)).byteLength).toBe(third.payloadBytes);
       store.markCleanShutdown();
@@ -170,8 +170,8 @@ describe('导出数据库 over the real store', () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const destination = join(roots.inputRoot, 'ledger.ai7db');
     try {
-      const preparation = await store.prepareDatabaseExport(destination);
-      await store.approveDatabaseExport(preparation.preparationId);
+      const preparation = await store.prepareDatabaseExport(destination, true);
+      await store.approveDatabaseExport(preparation.preparationId, true);
       store.markCleanShutdown();
     } finally {
       store.close();
@@ -276,6 +276,35 @@ describe('导出数据库 over the real store', () => {
       } finally {
         await other.dispose();
       }
+    }
+  }, 180_000);
+
+  it('exports only under a verified policy, and keeps no staged copy of the data across a launch (Issue #434, S86a review)', async () => {
+    const destination = join(roots.inputRoot, 'policy.ai7db');
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let prepared: string;
+    try {
+      // A launch whose External Export Policy was not verified refuses before anything is staged or recorded.
+      expect(code(await store.prepareDatabaseExport(destination, false).catch((error: unknown) => error))).toBe('EXPORT_POLICY_UNAVAILABLE');
+      expect([staging(), store.inspectDatabaseExports().exports]).toEqual([[], []]);
+      prepared = (await store.prepareDatabaseExport(destination, true)).preparationId;
+      expect(staging()).toHaveLength(1);
+      expect(code(await store.approveDatabaseExport(prepared, false).catch((error: unknown) => error))).toBe('EXPORT_POLICY_UNAVAILABLE');
+      expect(existsSync(destination)).toBe(false);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    // The next launch sweeps the copy no approval took; the preparation is then stale, and preparing again works.
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(staging()).toEqual([]);
+      expect(code(await reopened.approveDatabaseExport(prepared!, true).catch((error: unknown) => error))).toBe('DATABASE_EXPORT_STALE');
+      const again = await reopened.prepareDatabaseExport(destination, true);
+      expect((await reopened.approveDatabaseExport(again.preparationId, true)).outcome).toBe('created');
+      reopened.markCleanShutdown();
+    } finally {
+      reopened.close();
     }
   }, 180_000);
 });

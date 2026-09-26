@@ -56,10 +56,15 @@ describe('定价与首印 as the editor types them', () => {
     expect(parsePriceYuan(' 39.90 ')).toBe(3990);
     expect(parsePriceYuan('0.01')).toBe(1);
     expect(parsePriceYuan('1000000')).toBe(MAX_PRICE_FEN);
+    // A Chinese input method's full-width digits and point, and its 。, read as meant (Issue #430 review).
+    expect(parsePriceYuan('４５')).toBe(4500);
+    expect(parsePriceYuan('４５．５')).toBe(4550);
+    expect(parsePriceYuan('45。5')).toBe(4550);
+    expect(parsePriceYuan('　３９．９０　')).toBe(3990);
   });
 
   it('refuses a price that is not a positive amount of yuan with at most two decimals', () => {
-    for (const text of ['', ' ', '0', '0.00', '-45', '45.', '.5', '45.123', '4,500', '四十五', '45元', '¥45', '1e3', '1000000.01', '12345678']) {
+    for (const text of ['', ' ', '0', '0.00', '-45', '45.', '.5', '45.123', '4,500', '４，５００', '四十五', '45元', '¥45', '￥45', '1e3', '1000000.01', '12345678', '45。。5']) {
       expect(parsePriceYuan(text), text).toBeNull();
     }
   });
@@ -68,10 +73,11 @@ describe('定价与首印 as the editor types them', () => {
     expect(parseFirstPrint('3000')).toBe(3000);
     expect(parseFirstPrint(' 1 ')).toBe(1);
     expect(parseFirstPrint(String(MAX_FIRST_PRINT))).toBe(MAX_FIRST_PRINT);
+    expect(parseFirstPrint('３０００')).toBe(3000);
   });
 
   it('refuses a first print run that is not a whole positive number of copies', () => {
-    for (const text of ['', '0', '-3000', '3000.5', '3,000', '三千', '3000册', '1e4', String(MAX_FIRST_PRINT + 1), '1234567890']) {
+    for (const text of ['', '0', '-3000', '3000.5', '3000。5', '3,000', '三千', '3000册', '1e4', String(MAX_FIRST_PRINT + 1), '1234567890']) {
       expect(parseFirstPrint(text), text).toBeNull();
     }
   });
@@ -117,7 +123,8 @@ describe('评估校准与预测 words', () => {
   it('says what calibration never touches, what the prediction would add, and why there is nothing to count yet', () => {
     expect(CALIBRATION_SCOPE).toContain('不改你的评分');
     expect(CALIBRATION_SCOPE).toContain('风险项');
-    expect(CALIBRATION_PAGE_LEDE).toContain('AI7 不预测');
+    // 默认: with the prediction switch on, AI7 does predict (Issue #430 review).
+    expect(CALIBRATION_PAGE_LEDE).toContain('AI7 默认不预测');
     expect(PREDICTION_ADDS).toContain('预测 · 低确定性');
     expect(CALIBRATION_WAITING).toContain('AI7 初评尚未接通');
     expect(ACTUALS_EMPTY).toContain('设为发稿版本');

@@ -7,11 +7,18 @@ import {
   type AnalysisFeedbackJudgment,
 } from '../shared/analysis-feedback.js';
 import {
+  MAX_FEEDBACK_HISTORY_ENTRIES,
+  MAX_FEEDBACK_HISTORY_REASON_GRAPHEMES,
   MAX_LEARNING_ELIGIBILITY_REASON_GRAPHEMES,
+  type FeedbackHistoryBookProjection,
+  type FeedbackHistoryEntryProjection,
+  type FeedbackHistoryPeopleVersion,
+  type FeedbackHistoryProjection,
   type LearningEligibilityChoice,
   type LearningMaterialKind,
   type LearningMaterialProjection,
 } from '../shared/protocol.js';
+import { graphemesOf } from '../shared/mark-anchor.js';
 import { canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
 import { graphemeCount } from './analysis/factual-review-contract.js';
 
@@ -97,6 +104,23 @@ const EXCERPT_GRAPHEMES = 60;
 export const LEARNING_ELIGIBILITY_BASIS =
   '学习准入策略还在「仅建议」阶段：没有批准任何可以自动纳入的材料或范围，所以每一条都由你决定。' as const;
 
+/**
+ * The policy a decision is made under, by identity, mode and version (the policy's rule 5; Issue #61 review): recorded with
+ * its words, so a policy that moves on adds a basis of its own, and every decision made under an earlier one still reads.
+ */
+export const LEARNING_ELIGIBILITY_POLICY_BASIS = {
+  policy: 'ai7.learning-eligibility-policy',
+  mode: 'recommendation-only',
+  version: 1,
+  text: LEARNING_ELIGIBILITY_BASIS,
+} as const;
+/** Every basis a stored decision may name. */
+const KNOWN_LEARNING_ELIGIBILITY_BASES: ReadonlyArray<unknown> = [LEARNING_ELIGIBILITY_POLICY_BASIS];
+
+function knownBasis(value: unknown): boolean {
+  return KNOWN_LEARNING_ELIGIBILITY_BASES.some((basis) => canonicalJson(basis) === canonicalJson(value));
+}
+
 /** Revision 50's relation, created once: a store that predates it gains one empty relation and nothing existing moves. */
 export function initializeLearningEligibilitySchema(db: DatabaseSync): void {
   if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
@@ -121,11 +145,80 @@ export interface LearningMaterialCandidate {
   readonly kind: LearningMaterialKind;
   readonly originLabel: string;
   readonly recordedAt: string;
+  /**
+   * When the material came to be, by which the page orders it (Issue #61 review): a 修改建议's decision time, which a later
+   * reason never moves, or the time of the judgment or disposition it is.
+   */
+  readonly orderedAt: string;
   /** What the digest covers: exactly what the material says, never where it is shown. */
   readonly content: unknown;
   /** The Review Card's bounded lines; empty when the reader asked only for where each material stands. */
   readonly excerpt: ReadonlyArray<string>;
   readonly rationale: string;
+}
+
+/** The page's order of a Book's materials (Issue #61 review): 修改建议 first, then analysis items, then 审阅 findings. */
+const KIND_ORDER: ReadonlyArray<string> = ['proposal-decision:', 'analysis-feedback:', 'review-disposition:'];
+
+/**
+ * How two materials of one Book compare on the page — by kind, then by when each came to be, then by place — the cursor a
+ * page ends at included, since its key names its kind.
+ */
+export function learningMaterialOrder(a: { readonly materialKey: string; readonly orderedAt: string }, b: { readonly materialKey: string; readonly orderedAt: string }): number {
+  const kind = (key: string): number => KIND_ORDER.findIndex((prefix) => key.startsWith(prefix));
+  return kind(a.materialKey) - kind(b.materialKey) ||
+    (a.orderedAt < b.orderedAt ? -1 : a.orderedAt > b.orderedAt ? 1 : 0) ||
+    (a.materialKey < b.materialKey ? -1 : a.materialKey > b.materialKey ? 1 : 0);
+}
+
+/** The most one answer of 反馈历史 weighs on the wire, with the Books and people it brings (Issue #61 review). */
+export const FEEDBACK_HISTORY_PAGE_BYTES = 256 * 1024;
+
+function wireBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+/** A reason as 反馈历史 shows it: whole up to `MAX_FEEDBACK_HISTORY_REASON_GRAPHEMES`, beyond that its opening and `…`. */
+export function feedbackReasonExcerpt(reason: string | null): string | null {
+  if (reason === null) return null;
+  const graphemes = graphemesOf(reason);
+  return graphemes.length <= MAX_FEEDBACK_HISTORY_REASON_GRAPHEMES ? reason : `${graphemes.slice(0, MAX_FEEDBACK_HISTORY_REASON_GRAPHEMES).join('')}…`;
+}
+
+/**
+ * One answer of 反馈历史 (Issue #61 review): its entries, newest first as given, at most `MAX_FEEDBACK_HISTORY_ENTRIES` and no
+ * more than `budget` bytes once each Book and each version of its people an entry brings are weighed with it — but always
+ * the newest while there is one — its Books by title, and whether older entries were left out.
+ */
+export function feedbackHistoryPage(
+  entries: ReadonlyArray<FeedbackHistoryEntryProjection>,
+  bookOf: (bookId: string) => Omit<FeedbackHistoryBookProjection, 'peopleVersions'>,
+  peopleOf: (bookId: string, version: number) => FeedbackHistoryPeopleVersion | null,
+  budget: number = FEEDBACK_HISTORY_PAGE_BYTES,
+): FeedbackHistoryProjection {
+  const kept: FeedbackHistoryEntryProjection[] = [];
+  const books = new Map<string, { book: Omit<FeedbackHistoryBookProjection, 'peopleVersions'>; versions: Map<number, FeedbackHistoryPeopleVersion> }>();
+  let spent = 0;
+  for (const entry of entries) {
+    if (kept.length >= MAX_FEEDBACK_HISTORY_ENTRIES) break;
+    const known = books.get(entry.bookId);
+    const book = known?.book ?? bookOf(entry.bookId);
+    const people = entry.peopleVersion === 0 || known?.versions.has(entry.peopleVersion) === true ? null : peopleOf(entry.bookId, entry.peopleVersion);
+    const weight = wireBytes(entry) + 1 + (known === undefined ? wireBytes(book) + 1 : 0) + (people === null ? 0 : wireBytes(people) + 1);
+    if (kept.length > 0 && spent + weight > budget) break;
+    kept.push(entry);
+    spent += weight;
+    const held = known ?? { book, versions: new Map<number, FeedbackHistoryPeopleVersion>() };
+    if (people !== null) held.versions.set(people.version, people);
+    books.set(entry.bookId, held);
+  }
+  return {
+    books: [...books.values()]
+      .map(({ book, versions }) => ({ ...book, peopleVersions: [...versions.values()].sort((a, b) => a.version - b.version) }))
+      .sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : a.bookId < b.bookId ? -1 : 1)),
+    entries: kept,
+    truncated: kept.length < entries.length,
+  };
 }
 
 /** The exact version a decision binds. */
@@ -138,7 +231,7 @@ function bounded(text: string): string {
   return graphemes.length <= EXCERPT_GRAPHEMES ? graphemes.join('') : `${graphemes.slice(0, EXCERPT_GRAPHEMES).join('')}…`;
 }
 
-/** A 修改建议's decision in the editor's words, as 学习准入 and 反馈记录 both say it. */
+/** A 修改建议's decision in the editor's words, as 学习准入 and 反馈历史 both say it. */
 export const DISPOSITION_LABELS: Readonly<Record<string, string>> = { accepted: '接受', 'accepted-with-edit': '修改后接受', rejected: '拒绝' };
 
 /**
@@ -154,6 +247,8 @@ export function proposalDecisionCandidate(decision: {
   readonly reason: string | null;
   readonly reasonSource: string | null;
   readonly recordedAt: string;
+  /** When the decision was made, whatever reason came later. */
+  readonly decidedAt: string;
 }, withExcerpt: boolean): LearningMaterialCandidate {
   const edited = decision.disposition === 'accepted-with-edit' && decision.editedText !== null;
   const excerpt: string[] = [];
@@ -168,6 +263,7 @@ export function proposalDecisionCandidate(decision: {
     kind: 'proposal-decision',
     originLabel: `修改建议 · ${DISPOSITION_LABELS[decision.disposition] ?? decision.disposition}`,
     recordedAt: decision.recordedAt,
+    orderedAt: decision.decidedAt,
     content: {
       disposition: decision.disposition,
       currentText: decision.currentText,
@@ -226,6 +322,7 @@ export function analysisFeedbackCandidate(signal: {
     kind: 'analysis-feedback',
     originLabel: `分析反馈 · ${DIMENSION_LABELS[signal.dimension]}`,
     recordedAt: signal.recordedAt,
+    orderedAt: signal.recordedAt,
     content: { signalId: signal.signalId, revisionId: signal.revisionId, itemKey: signal.itemKey, judgment: signal.judgment, reason: signal.reason, correction: signal.correction },
     excerpt,
     rationale: '你指出了分析结果哪里不对、为什么：它可以帮 AI7 以后读得更准。',
@@ -246,6 +343,7 @@ export function reviewDispositionCandidate(signal: {
     kind: 'review-disposition',
     originLabel: `审阅 · ${signal.categoryLabel}`,
     recordedAt: signal.recordedAt,
+    orderedAt: signal.recordedAt,
     content: { signalId: signal.signalId, reviewRunId: signal.reviewRunId, findingId: signal.findingId, reason: signal.reason },
     excerpt: withExcerpt ? [`你忽略了这条发现 · 原因：${bounded(signal.reason)}`] : [],
     rationale: '你说明了为什么这条发现不必处理：它可以帮 AI7 以后少提这类问题。',
@@ -302,7 +400,7 @@ export class LearningEligibilityLedger {
       const ordinal = Number(row.ordinal);
       requireLearning(isRecord(record) && record.schema === DECISION_SCHEMA && record.decisionId === row.decision_id && record.bookId === bookId &&
         record.materialKey === materialKey && record.materialDigest === row.material_digest && record.ordinal === ordinal &&
-        record.choice === row.choice && record.recordedAt === row.recorded_at && record.actor === ACTOR && record.basis === LEARNING_ELIGIBILITY_BASIS &&
+        record.choice === row.choice && record.recordedAt === row.recorded_at && record.actor === ACTOR && knownBasis(record.basis) &&
         (record.supersedes ?? null) === (row.supersedes_decision_id ?? null) && (record.supersedes ?? null) === (before?.decisionId ?? null) &&
         ordinal === (before?.ordinal ?? 0) + 1 && (record.note === null || typeof record.note === 'string'),
       'LEARNING_ELIGIBILITY_RECORD_INVALID', '学习准入记录已损坏。');
@@ -375,7 +473,7 @@ export class LearningEligibilityLedger {
       ordinal,
       choice: input.choice,
       note,
-      basis: LEARNING_ELIGIBILITY_BASIS,
+      basis: LEARNING_ELIGIBILITY_POLICY_BASIS,
       attribution: { peopleVersion: input.attribution.peopleVersion, authors: [...input.attribution.authors], editors: [...input.attribution.editors] },
       supersedes: latest?.decisionId ?? null,
       actor: ACTOR,

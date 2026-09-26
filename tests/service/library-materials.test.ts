@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -6,7 +6,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LIBRARY_OBJECT_DIRECTORY, identifyLibraryMaterialFormat } from '../../src/service/library-materials.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { DATABASE_REPLACEMENT_SCHEMA_VERSION, REVIEW_GUIDELINE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
-import type { GlobalAttentionItemProjection, LibraryMaterialProjection, LibraryMaterialsProjection } from '../../src/shared/protocol.js';
+import {
+  MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN,
+  MAX_LIBRARY_MATERIALS_PAGE,
+  type GlobalAttentionItemProjection,
+  type LibraryMaterialProjection,
+  type LibraryMaterialsProjection,
+} from '../../src/shared/protocol.js';
 import { sample1Path } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
@@ -83,7 +89,7 @@ describe('知识库 › 资料库 over the real store', () => {
       const preview = await store.previewLibraryMaterial(source);
       expect(preview.source).toEqual({ displayName: 'sample1.docx', format: 'DOCX', bytes: bytes.length, sha256: digest });
       expect([preview.suggestedTitle, preview.suggestedKind]).toEqual(['sample1', null]);
-      expect(store.inspectLibraryMaterials().materials).toEqual([]);
+      expect(store.inspectLibraryMaterials(null).materials).toEqual([]);
       expect(keptObjects()).toEqual([]);
 
       // A title that cannot stand is refused before anything is copied.
@@ -95,11 +101,14 @@ describe('知识库 › 资料库 over the real store', () => {
 
       // 放入资料库: the original kept byte for byte under its digest, the item named as the editor named it, and no attribution,
       // no eligibility and no 允许参考 until the editor decides them.
-      const added = only(await store.addLibraryMaterial({ previewId: preview.previewId, title: ' 样书一 ', kind: 'book' }));
+      const added = (await store.addLibraryMaterial({ previewId: preview.previewId, title: ' 样书一 ', kind: 'book' }));
       expect(added).toMatchObject({
         title: '样书一', kind: 'book', source: preview.source, attribution: null, eligibility: null, eligibilityReset: false,
-        reference: { state: 'pending' }, decisions: [],
+        reference: { state: 'pending' }, decisionCount: 0, decisions: [],
       });
+      // Answered with its one item, as the page and the item's own read have it.
+      expect(only(store.inspectLibraryMaterials(null))).toEqual(added);
+      expect(store.inspectLibraryMaterial(added.materialId)).toEqual(added);
       expect(keptObjects()).toEqual([`${digest}.docx`]);
       expect(readFileSync(join(roots.dataRoot, LIBRARY_OBJECT_DIRECTORY, 'sha256', digest.slice(0, 2), `${digest}.docx`)).equals(bytes)).toBe(true);
       // The same file again is refused at once; a preview once used is gone.
@@ -121,7 +130,7 @@ describe('知识库 › 资料库 over the real store', () => {
         .toBe('LIBRARY_MATERIAL_BOOK_NOT_FOUND:所选图书不存在。');
 
       // 定归属 to one Book: it now waits for its eligibility, under that Book.
-      const attributed = only(decide(0, { kind: 'attribution', attribution: { scope: 'book', bookId: bookA } }));
+      const attributed = (decide(0, { kind: 'attribution', attribution: { scope: 'book', bookId: bookA } }));
       expect(attributed.attribution).toMatchObject({ scope: 'book', bookId: bookA, bookTitle: '资料库之书甲' });
       expect([attributed.eligibility, attributed.reference]).toEqual([null, { state: 'pending' }]);
       expect(attention(store)).toEqual([
@@ -133,12 +142,12 @@ describe('知识库 › 资料库 over the real store', () => {
       expect(await refusal(() => decide(1, { kind: 'attribution', attribution: { scope: 'book', bookId: bookA } }))).toBe('LIBRARY_ATTRIBUTION_UNCHANGED:归属没有变化。');
 
       // 稍后决定 is a choice of its own: nothing is eligible or excluded, 允许参考 still waits, and 待我处理 still lists it.
-      const deferred = only(decide(1, { kind: 'eligibility', choice: 'deferred', reason: null }));
+      const deferred = (decide(1, { kind: 'eligibility', choice: 'deferred', reason: null }));
       expect([deferred.eligibility?.choice, deferred.reference]).toEqual(['deferred', { state: 'pending' }]);
       expect(attention(store).map(([group, state, book]) => [group, state, book])).toEqual([['decisions', 'learning-eligibility-deferred', '资料库之书甲']]);
 
       // 仅纳入 the Book, with the editor's note: the Book's Tasks may list it under 允许参考, and 待我处理 lets it go.
-      const decided = only(decide(2, { kind: 'eligibility', choice: 'book', reason: '  责编确认可用于本书。  ' }));
+      const decided = (decide(2, { kind: 'eligibility', choice: 'book', reason: '  责编确认可用于本书。  ' }));
       expect(decided.eligibility).toMatchObject({ choice: 'book', bookTitle: '资料库之书甲', reason: '责编确认可用于本书。' });
       expect(decided.reference).toEqual({ state: 'available', scope: 'book', bookTitle: '资料库之书甲' });
       expect(attention(store)).toEqual([]);
@@ -146,16 +155,17 @@ describe('知识库 › 资料库 over the real store', () => {
 
       // Moved to the house: the eligibility decided for the Book is set aside, not carried over — the editor decides again, and
       // a Book's own scope is no longer there to choose.
-      const moved = only(decide(3, { kind: 'attribution', attribution: { scope: 'house' } }));
+      const moved = (decide(3, { kind: 'attribution', attribution: { scope: 'house' } }));
       expect([moved.attribution?.scope, moved.eligibility, moved.eligibilityReset, moved.reference]).toEqual(['house', null, true, { state: 'pending' }]);
       expect(attention(store)).toEqual([
         ['decisions', 'learning-eligibility-pending', null, { kind: 'library-material', title: '样书一', materialKind: 'book', scope: 'house' }, 'set-learning-eligibility', target],
       ]);
       expect(await refusal(() => decide(4, { kind: 'eligibility', choice: 'book', reason: null }))).toBe('LEARNING_ELIGIBILITY_SCOPE:这份资料归属社级，没有可以只纳入的那本书。');
-      const house = only(decide(4, { kind: 'eligibility', choice: 'house', reason: null }));
+      const house = (decide(4, { kind: 'eligibility', choice: 'house', reason: null }));
       expect([house.eligibility?.choice, house.eligibilityReset, house.reference]).toEqual(['house', false, { state: 'available', scope: 'house' }]);
 
       // Every decision stays on record, oldest first: a later one superseded each earlier one and none was rewritten.
+      expect(house.decisionCount).toBe(5);
       expect(house.decisions.map((entry) => [entry.ordinal, entry.decision])).toEqual([
         [1, { kind: 'attribution', scope: 'book', bookId: bookA, bookTitle: '资料库之书甲' }],
         [2, { kind: 'eligibility', choice: 'deferred', bookTitle: null, reason: null }],
@@ -164,7 +174,7 @@ describe('知识库 › 资料库 over the real store', () => {
         [5, { kind: 'eligibility', choice: 'house', bookTitle: null, reason: null }],
       ]);
       // Reading it twice answers the same, and writes nothing.
-      expect(store.inspectLibraryMaterials()).toEqual(store.inspectLibraryMaterials());
+      expect(store.inspectLibraryMaterials(null)).toEqual(store.inspectLibraryMaterials(null));
       store.markCleanShutdown();
     } finally {
       store.close();
@@ -173,7 +183,7 @@ describe('知识库 › 资料库 over the real store', () => {
     // A restart keeps every record, and forgets any preview: a file chosen before it is chosen again.
     const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
-      const kept = only(reopened.inspectLibraryMaterials());
+      const kept = only(reopened.inspectLibraryMaterials(null));
       expect([kept.title, kept.attribution?.scope, kept.eligibility?.choice, kept.decisions.length]).toEqual(['样书一', 'house', 'house', 5]);
       reopened.markCleanShutdown();
     } finally {
@@ -194,7 +204,7 @@ describe('知识库 › 资料库 over the real store', () => {
   it('names a file from its content, suggests a web page for HTML, and keeps nothing it cannot keep as the editor saw it', async () => {
     // What a file is, from its first window: a Word file by its part, an EPUB by its stored media type, HTML by its opening,
     // Markdown by its name, and a ZIP that is none of these as a file nothing here reads.
-    const zip = (name: string, data: string): Uint8Array => {
+    const localHeader = (name: string, data: string): Uint8Array => {
       const header = new Uint8Array(30 + name.length + data.length);
       header.set([0x50, 0x4b, 0x03, 0x04]);
       header[26] = name.length;
@@ -203,10 +213,20 @@ describe('知识库 › 资料库 over the real store', () => {
     };
     const text = (value: string): Uint8Array => new TextEncoder().encode(value);
     expect(identifyLibraryMaterialFormat(readFileSync(sample1Path(roots.codeRoot)).subarray(0, 65_536), 'sample1.docx')).toBe('DOCX');
-    expect(identifyLibraryMaterialFormat(zip('mimetype', 'application/epub+zip'), 'a.epub')).toBe('EPUB');
-    expect(identifyLibraryMaterialFormat(zip('data/part.xml', '<x/>'), 'a.zip')).toBe('UNKNOWN');
+    expect(identifyLibraryMaterialFormat(localHeader('mimetype', 'application/epub+zip'), 'a.epub')).toBe('EPUB');
+    expect(identifyLibraryMaterialFormat(localHeader('data/part.xml', '<x/>'), 'a.zip')).toBe('UNKNOWN');
+    // Only an entry named under `word/` is a Word part: not `foreword/`, and not stored text that mentions `/word/`.
+    expect(identifyLibraryMaterialFormat(localHeader('word/document.xml', '<w:document/>'), 'a.docx')).toBe('DOCX');
+    expect(identifyLibraryMaterialFormat(localHeader('foreword/chapter.xml', '<x/>'), 'chapters.zip')).toBe('UNKNOWN');
+    expect(identifyLibraryMaterialFormat(localHeader('notes.txt', 'see /word/document.xml'), 'notes.zip')).toBe('UNKNOWN');
     expect(identifyLibraryMaterialFormat(text('﻿<!-- 保存的网页 -->\n<!DOCTYPE html><html><body>页</body></html>'), 'page.htm')).toBe('HTML');
     expect(identifyLibraryMaterialFormat(text('资料库里的一段说明。'), 'note.txt')).toBe('TXT');
+    // Many comments before what follows are read in one pass (ADR 0072's hostile input), whatever follows them.
+    const comments = '<!-- 注释 -->\n'.repeat(26);
+    const started = Date.now();
+    expect(identifyLibraryMaterialFormat(text(`${comments}# 资料说明`), 'notes.md')).toBe('MD');
+    expect(identifyLibraryMaterialFormat(text(`${comments}<!doctype html><html></html>`), 'notes.htm')).toBe('HTML');
+    expect(Date.now() - started).toBeLessThan(1_000);
     expect(identifyLibraryMaterialFormat(text('# 资料库说明'), 'note.md')).toBe('MD');
     expect(identifyLibraryMaterialFormat(text('%PDF-1.7\n'), 'paper.pdf')).toBe('PDF');
     expect(identifyLibraryMaterialFormat(Uint8Array.of(0, 1, 2, 3, 0xff), 'data.bin')).toBe('UNKNOWN');
@@ -225,15 +245,82 @@ describe('知识库 › 资料库 over the real store', () => {
       writeFileSync(notePath, 'AI7 资料库说明，改过之后。');
       expect(await refusal(() => store.addLibraryMaterial({ previewId: note.previewId, title: '资料说明', kind: 'document' })))
         .toBe('LIBRARY_MATERIAL_CHANGED:所选文件在预览之后变了；请重新选择。');
-      expect(store.inspectLibraryMaterials().materials).toEqual([]);
+      expect(store.inspectLibraryMaterials(null).materials).toEqual([]);
       expect(keptObjects()).toEqual([]);
 
       // The web page, kept as a web page: its original under its own extension.
-      const kept = only(await store.addLibraryMaterial({ previewId: page.previewId, title: page.suggestedTitle, kind: 'web' }));
+      const kept = (await store.addLibraryMaterial({ previewId: page.previewId, title: page.suggestedTitle, kind: 'web' }));
       expect([kept.kind, kept.source.format, keptObjects()]).toEqual(['web', 'HTML', [`${page.source.sha256}.html`]]);
       store.markCleanShutdown();
     } finally {
       store.close();
+    }
+  }, 120_000);
+
+  it('reads the items a page at a time, newest first, and an item by itself, its decisions counted past the latest ten', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const bookA = emptyBook(store, '分页之书');
+      // More items than one page holds, each its own small file of the suite's words.
+      const added: LibraryMaterialProjection[] = [];
+      for (let index = 1; index <= MAX_LIBRARY_MATERIALS_PAGE + 1; index += 1) {
+        const preview = await store.previewLibraryMaterial(file(`资料${index}.txt`, `AI7 资料库分页用的第 ${index} 份资料。`));
+        added.push(await store.addLibraryMaterial({ previewId: preview.previewId, title: `资料 ${index}`, kind: 'document' }));
+      }
+      const newest = [...added].reverse();
+      const first = store.inspectLibraryMaterials(null);
+      expect(first.materials.map((material) => material.materialId)).toEqual(newest.slice(0, MAX_LIBRARY_MATERIALS_PAGE).map((material) => material.materialId));
+      const last = first.materials.at(-1)!;
+      expect(first.nextCursor).toEqual({ recordedAt: last.recordedAt, materialId: last.materialId });
+      const second = store.inspectLibraryMaterials(first.nextCursor);
+      expect([second.materials.map((material) => material.materialId), second.nextCursor]).toEqual([[added[0]!.materialId], null]);
+      // The oldest, not on the first page, read by itself as 待我处理 opens it.
+      expect(store.inspectLibraryMaterial(added[0]!.materialId)).toEqual(second.materials[0]);
+      expect(await refusal(() => store.inspectLibraryMaterial(randomUUID()))).toBe('LIBRARY_MATERIAL_NOT_FOUND:资料库里没有这份资料。');
+      expect(await refusal(() => store.inspectLibraryMaterials({ recordedAt: 'yesterday', materialId: 'first' })))
+        .toBe('LIBRARY_MATERIAL_CURSOR_INVALID:资料库列表位置无效。');
+
+      // Twelve decisions on one item: the card counts them all and names the latest ten.
+      const material = added[0]!.materialId;
+      const decisions = MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN + 2;
+      let now = added[0]!;
+      for (let index = 0; index < decisions; index += 1) {
+        const attribution = index % 2 === 0 ? { scope: 'book' as const, bookId: bookA } : { scope: 'house' as const };
+        now = store.decideLibraryMaterial({ materialId: material, expectedDecisions: index, decision: { kind: 'attribution', attribution } });
+      }
+      expect([now.decisionCount, now.decisions.map((entry) => entry.ordinal)])
+        .toEqual([decisions, Array.from({ length: MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN }, (_, index) => decisions - MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN + index + 1)]);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 300_000);
+
+  it('removes at open what an interrupted 放入资料库 left beside the kept originals, and keeps every original on record', async () => {
+    const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let digest: string;
+    try {
+      const preview = await first.previewLibraryMaterial(file('留存.txt', 'AI7 资料库留存的一份资料。'));
+      digest = preview.source.sha256;
+      await first.addLibraryMaterial({ previewId: preview.previewId, title: '留存', kind: 'document' });
+      first.markCleanShutdown();
+    } finally {
+      first.close();
+    }
+    // A copy written aside and an original whose arrival was never recorded, as a service stopped mid-way leaves them.
+    const directory = join(roots.dataRoot, LIBRARY_OBJECT_DIRECTORY, 'sha256', digest.slice(0, 2));
+    writeFileSync(join(directory, `.partial-${randomUUID()}`), 'half a copy');
+    const orphan = 'e'.repeat(64);
+    mkdirSync(join(roots.dataRoot, LIBRARY_OBJECT_DIRECTORY, 'sha256', orphan.slice(0, 2)), { recursive: true });
+    writeFileSync(join(roots.dataRoot, LIBRARY_OBJECT_DIRECTORY, 'sha256', orphan.slice(0, 2), `${orphan}.pdf`), 'never recorded');
+    expect(keptObjects()).toHaveLength(3);
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(keptObjects()).toEqual([`${digest}.txt`]);
+      expect(only(reopened.inspectLibraryMaterials(null)).title).toBe('留存');
+      reopened.markCleanShutdown();
+    } finally {
+      reopened.close();
     }
   }, 120_000);
 
@@ -254,8 +341,7 @@ describe('知识库 › 资料库 over the real store', () => {
     }
     const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
-      const projection = migrated.inspectLibraryMaterials();
-      expect([projection.materials, projection.books.map((book) => book.title)]).toEqual([[], ['迁移之书']]);
+      expect(migrated.inspectLibraryMaterials(null)).toEqual({ materials: [], nextCursor: null });
       migrated.markCleanShutdown();
     } finally {
       migrated.close();

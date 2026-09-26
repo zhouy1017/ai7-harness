@@ -29,6 +29,37 @@ const STARTUP_READY_TIMEOUT_MS = 2 * 60_000;
 const SERVICE_STOP_GRACE_MS = 5_000;
 const SERVICE_STOP_FORCE_MS = 5_000;
 
+/**
+ * How long one request may take before the service is treated as hung and stopped: startup's readiness, the operations
+ * whose work grows with a file or a manuscript, and every other request, each as the reason beside it says.
+ */
+export function requestTimeoutMs(operation: ServiceOperation): number {
+  if (operation === 'ready') return STARTUP_READY_TIMEOUT_MS;
+  const long =
+    operation === 'stageSelectedManuscript' || operation === 'commitNewBookImport' || operation === 'commitSourceImport' ||
+    operation === 'commitManuscriptReimport' || operation === 'commitReplacement' ||
+    operation === 'saveMilestone' || operation === 'getStartup' || operation === 'getRecoveryComparison' ||
+    operation === 'viewRecoveryCandidate' || operation === 'restoreRecovery' ||
+    operation === 'authorizeBaselineAnalysis' ||
+    // A Review Run's drive loop starts inside these two answers, and it writes at once whatever
+    // needs no model: the leads, or a category whose Run finished before a restart.
+    operation === 'authorizeReviewRun' || operation === 'continueReviewRun' ||
+    // An export renders the whole file for its review, its staging, its preparation and its approval; a timeout
+    // would stop the service mid-write and leave its stage behind.
+    operation === 'reviewManuscriptExport' || operation === 'stageManuscriptExport' ||
+    operation === 'prepareManuscriptExport' || operation === 'approveManuscriptExport' ||
+    // A 图书交付包 export (Issue #416, S67b) does the same for every file of the version, one after another.
+    operation === 'reviewBookDeliveryPackageExport' || operation === 'prepareBookDeliveryPackageExport' ||
+    operation === 'approveBookDeliveryPackageExport' ||
+    // 资料库 (Issue #427, S79c) reads a file of up to 1 GiB whole to digest it, and 放入资料库 copies, syncs and checks
+    // it; from a slow disk or share that takes minutes, and a timeout would stop the service mid-copy.
+    operation === 'previewLibraryMaterial' || operation === 'addLibraryMaterial' ||
+    // 导出数据库 (Issue #434, S86a review) copies, compresses and digests the whole store for its preparation, and writes that
+    // file to the chosen place for its approval: a large store takes minutes, and a timeout would stop the service mid-write.
+    operation === 'prepareDatabaseExport' || operation === 'approveDatabaseExport';
+  return long ? LONG_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
+}
+
 interface PendingRequest {
   readonly operation: ServiceOperation;
   readonly resolve: (value: unknown) => void;
@@ -224,25 +255,7 @@ export class ServiceClient {
         this.#pending.delete(id);
         reject(new ServiceCallError('SERVICE_TIMEOUT', '本地业务服务响应超时。'));
         this.#fault();
-      }, operation === 'ready'
-        ? STARTUP_READY_TIMEOUT_MS
-        : operation === 'stageSelectedManuscript' || operation === 'commitNewBookImport' || operation === 'commitSourceImport' ||
-            operation === 'commitManuscriptReimport' || operation === 'commitReplacement' ||
-            operation === 'saveMilestone' || operation === 'getStartup' || operation === 'getRecoveryComparison' ||
-            operation === 'viewRecoveryCandidate' || operation === 'restoreRecovery' ||
-            operation === 'authorizeBaselineAnalysis' ||
-            // A Review Run's drive loop starts inside these two answers, and it writes at once whatever
-            // needs no model: the leads, or a category whose Run finished before a restart.
-            operation === 'authorizeReviewRun' || operation === 'continueReviewRun' ||
-            // An export renders the whole file for its review, its staging, its preparation and its approval; a timeout
-            // would stop the service mid-write and leave its stage behind.
-            operation === 'reviewManuscriptExport' || operation === 'stageManuscriptExport' ||
-            operation === 'prepareManuscriptExport' || operation === 'approveManuscriptExport' ||
-            // A 图书交付包 export (Issue #416, S67b) does the same for every file of the version, one after another.
-            operation === 'reviewBookDeliveryPackageExport' || operation === 'prepareBookDeliveryPackageExport' ||
-            operation === 'approveBookDeliveryPackageExport'
-          ? LONG_REQUEST_TIMEOUT_MS
-          : REQUEST_TIMEOUT_MS);
+      }, requestTimeoutMs(operation));
       timeout.unref();
       this.#pending.set(id, {
         operation,
