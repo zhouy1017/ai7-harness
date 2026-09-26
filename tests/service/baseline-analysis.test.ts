@@ -33,7 +33,8 @@ import {
   type JournalAcknowledgement,
   type LaunchPolicyProjection,
 } from '../../src/shared/protocol.js';
-import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { canonicalJson, canonicalRecord, parseCanonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { SAFE_RETRY_REPETITION_DIFFERS } from '../../src/service/analysis/plan-boundary.js';
 import {
   PRE_RUN_REPORT_REASON,
   runReportAccountingDigest,
@@ -680,6 +681,11 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(attempt.spans.map((span) => [span.unitOrdinal, span.attemptIndex])).toEqual([[1, 1], [2, 1], [3, 1], [4, 1], [5, 1], [5, 2], [6, 1], [7, 1], [8, 1]]);
       expect(attempt.spans.every((span) => span.payloadDigest !== null && DIGEST_PATTERN.test(span.payloadDigest))).toBe(true);
       expect(attempt.spans[5]!.payloadDigest).not.toBe(attempt.spans[4]!.payloadDigest);
+      // The whole payloads differ — the single Session's retry carries the turns before it — while the unit message, the
+      // range's text as the model reads it, repeats byte for byte (Issue #286). Every unit's message is its own.
+      expect(attempt.spans.every((span) => span.unitMessageDigest !== null && DIGEST_PATTERN.test(span.unitMessageDigest))).toBe(true);
+      expect(attempt.spans[5]!.unitMessageDigest).toBe(attempt.spans[4]!.unitMessageDigest);
+      expect(new Set(attempt.spans.map((span) => span.unitMessageDigest)).size).toBe(SAMPLE1_UNITS);
       // The adaptation record: one, for unit 5, written for attempt 2 inside the unchanged envelope and binding.
       expect(settled.run!.adaptations).toHaveLength(1);
       const adaptation = settled.run!.adaptations[0]!;
@@ -697,6 +703,10 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
         firstPayloadDigest: attempt.spans[4]!.payloadDigest,
         planEnvelopeDigest: prepared.planEnvelope!.digest,
         bindingDigest,
+        // It names what the first attempt sent, and follows the span that names it to what the retry sent (Issue #286).
+        firstUnitMessageDigest: attempt.spans[4]!.unitMessageDigest,
+        retry: { spanOrdinal: attempt.spans[5]!.ordinal, unitMessageDigest: attempt.spans[5]!.unitMessageDigest, payloadDigest: attempt.spans[5]!.payloadDigest },
+        repetition: 'byte-identical',
       });
       expect(adaptation.adaptationId).toMatch(UUID_PATTERN);
       expect(adaptation.requestDigest).toBe(unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, 5, prepared.coverageManifest!.units[4]!.digest));
@@ -739,7 +749,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     try {
       const restarted = reopened.inspectBaselineAnalysis(bookId);
       expect(restarted.run?.adaptations).toHaveLength(1);
-      expect(restarted.run?.adaptations[0]).toMatchObject({ unitOrdinal: 5, bindingDigest, attemptIndex: 2 });
+      expect(restarted.run?.adaptations[0]).toMatchObject({ unitOrdinal: 5, bindingDigest, attemptIndex: 2, repetition: 'byte-identical' });
       expect(restarted.run?.attempt?.spans.map((span) => span.attemptIndex)).toEqual([1, 1, 1, 1, 1, 2, 1, 1, 1]);
       expect(restarted.authorization?.planVersionOrdinal).toBe(1);
       expect(restarted.resultSetRevision?.provenance.adaptations).toEqual({ count: 1, unitOrdinals: [5] });
@@ -757,6 +767,47 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     } finally {
       database.close();
     }
+
+    // The record tells the retry's whole story (Issue #286): a retry whose turn did not repeat the first attempt's unit
+    // message reads as the violation it is, and one recorded before the digests were kept reads as unrecorded, in the
+    // words it always had. The retry is the Run's sixth turn.
+    const rewrite = (table: 'analysis_harness_spans' | 'analysis_plan_adaptations', ordinal: number, change: (record: Record<string, unknown>) => Record<string, unknown>): void => {
+      const tamper = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        const row = tamper.prepare(`SELECT rowid, canonical_json FROM ${table} WHERE ordinal = ?`).get(ordinal) as { rowid: number; canonical_json: string };
+        const record = canonicalRecord(change(parseCanonicalJson(row.canonical_json) as Record<string, unknown>));
+        tamper.exec(`DROP TRIGGER ${table}_no_update`);
+        tamper.prepare(`UPDATE ${table} SET canonical_json = ?, sha256 = ? WHERE rowid = ?`).run(record.json, record.digest, row.rowid);
+        tamper.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_update`]!);
+      } finally {
+        tamper.close();
+      }
+    };
+    const without = (record: Record<string, unknown>, ...keys: string[]): Record<string, unknown> =>
+      Object.fromEntries(Object.entries(record).filter(([key]) => !keys.includes(key)));
+    const reread = async (): Promise<NonNullable<BaselineAnalysisProjection['run']>> => {
+      const again = await openWithRoute(roots.dataRoot, transient);
+      try {
+        const run = again.inspectBaselineAnalysis(bookId).run!;
+        again.markCleanShutdown();
+        return run;
+      } finally {
+        again.close();
+      }
+    };
+    const recorded = (await reread()).adaptations[0]!;
+    rewrite('analysis_harness_spans', 6, (span) => ({ ...span, unitMessageDigest: 'f'.repeat(64) }));
+    const differs = (await reread()).adaptations[0]!;
+    expect(differs).toMatchObject({ repetition: 'differs', retry: { spanOrdinal: 6, unitMessageDigest: 'f'.repeat(64) } });
+    expect(differs.label).toBe(`${recorded.label} · ${SAFE_RETRY_REPETITION_DIFFERS}`);
+    // A retry's turn that names no message digest is not read as a violation: it only kept less.
+    rewrite('analysis_harness_spans', 6, (span) => without(span, 'unitMessageDigest'));
+    expect((await reread()).adaptations[0]).toMatchObject({ repetition: 'unrecorded', retry: { spanOrdinal: 6, unitMessageDigest: null }, label: recorded.label });
+    rewrite('analysis_harness_spans', 6, (span) => without(span, 'adaptationId'));
+    rewrite('analysis_plan_adaptations', 1, (adaptation) => without(adaptation, 'firstUnitMessageDigest'));
+    const before286 = await reread();
+    expect(before286.attempt!.spans[5]!.unitMessageDigest).toBeNull();
+    expect(before286.adaptations[0]).toEqual({ ...recorded, firstUnitMessageDigest: null, retry: null, repetition: 'unrecorded' });
   }, 300_000);
 
   it('supersedes a prepared plan on material drift, refuses the stale version, and reconfirms the next version on the same Task', async () => {
