@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 78 as const;
+export const SERVICE_PROTOCOL_VERSION = 79 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -5323,6 +5323,12 @@ export interface EvaluationCalibrationBookProjection {
  * 设置 › 评估校准与预测 (EVAL-014): calibration's progress toward its threshold and whether it applies, the prediction switch
  * and what it waits for, and every Book with a 发稿版本 with its actuals.
  */
+export const MAX_EVALUATION_CALIBRATION_BOOKS = 20;
+export interface EvaluationCalibrationCursor { readonly title: string; readonly bookId: string }
+export interface InspectEvaluationCalibrationInput {
+  readonly after: EvaluationCalibrationCursor | null;
+  readonly focusBookId: string | null;
+}
 export interface EvaluationCalibrationProjection {
   readonly calibration: {
     /** The editor's adjustments of AI7's starting scores; AI7's 初评 arrives with S81b, so there are none yet. */
@@ -5345,6 +5351,9 @@ export interface EvaluationCalibrationProjection {
   /** How many changes of the two switches the house holds: the count the next one names. */
   readonly preferenceEntries: number;
   readonly books: ReadonlyArray<EvaluationCalibrationBookProjection>;
+  readonly nextCursor: EvaluationCalibrationCursor | null;
+  /** One exact Book opened from Deliverables or still being edited, independent of the bounded list page. */
+  readonly focusedBook: EvaluationCalibrationBookProjection | null;
 }
 
 export interface RecordPublicationActualsInput {
@@ -7764,7 +7773,7 @@ export interface ServiceOperationMap {
   /** 记录学习准入决定, answered with the one material it decided. */
   decideLearningMaterial: { input: DecideLearningMaterialInput; output: LearningMaterialProjection };
   inspectFeedbackHistory: { input: Record<string, never>; output: FeedbackHistoryProjection };
-  inspectEvaluationCalibration: { input: Record<string, never>; output: EvaluationCalibrationProjection };
+  inspectEvaluationCalibration: { input: InspectEvaluationCalibrationInput; output: EvaluationCalibrationProjection };
   recordPublicationActuals: { input: RecordPublicationActualsInput; output: EvaluationCalibrationProjection };
   setEvaluationPreferences: { input: SetEvaluationPreferencesInput; output: EvaluationCalibrationProjection };
   /**
@@ -8098,7 +8107,7 @@ export interface RendererApi {
   inspectLearningMaterial(input: { bookId: string; materialKey: string }): Promise<LearningMaterialProjection>;
   decideLearningMaterial(input: DecideLearningMaterialInput): Promise<LearningMaterialProjection>;
   inspectFeedbackHistory(): Promise<FeedbackHistoryProjection>;
-  inspectEvaluationCalibration(): Promise<EvaluationCalibrationProjection>;
+  inspectEvaluationCalibration(input?: InspectEvaluationCalibrationInput): Promise<EvaluationCalibrationProjection>;
   recordPublicationActuals(input: RecordPublicationActualsInput): Promise<EvaluationCalibrationProjection>;
   setEvaluationPreferences(input: SetEvaluationPreferencesInput): Promise<EvaluationCalibrationProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;

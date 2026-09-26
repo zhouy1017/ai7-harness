@@ -1,4 +1,4 @@
-import type { EvaluationCalibrationBookProjection, EvaluationCalibrationProjection, RendererApi } from '../shared/protocol.js';
+import type { EvaluationCalibrationBookProjection, EvaluationCalibrationCursor, EvaluationCalibrationProjection, RendererApi } from '../shared/protocol.js';
 import { formatPriceFen, parseFirstPrint, parsePriceYuan } from '../shared/evaluation-calibration.js';
 import {
   ACTUALS_CANCEL,
@@ -61,6 +61,37 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
   /** The one entry form open, with what the editor typed so far. */
   let form: { bookId: string; price: string; print: string } | null = null;
   let refusal: { readonly where: string; readonly message: string } | null = null;
+  let after: EvaluationCalibrationCursor | null = null;
+  const focusBookId = (): string | null => form?.bookId ?? options.focusBookId;
+  const visibleBooks = (): ReadonlyArray<EvaluationCalibrationBookProjection> => projection === null ? []
+    : projection.focusedBook === null || projection.books.some((book) => book.bookId === projection.focusedBook!.bookId)
+      ? projection.books : [...projection.books, projection.focusedBook];
+  const readPage = (): Promise<EvaluationCalibrationProjection> => api.inspectEvaluationCalibration({ after, focusBookId: focusBookId() });
+  // Commands update their own state without resetting the current page or an unrelated form.
+  const adoptCommand = (next: EvaluationCalibrationProjection): void => {
+    if (projection === null) { projection = next; return; }
+    projection = { ...next, nextCursor: projection.nextCursor,
+      books: projection.books.map((book) => next.focusedBook?.bookId === book.bookId ? next.focusedBook : book),
+      focusedBook: next.focusedBook ?? projection.focusedBook };
+  };
+  const page = async (cursor: EvaluationCalibrationCursor | null): Promise<void> => {
+    if (busy) return;
+    busy = true;
+    paint(null);
+    try {
+      const next = await api.inspectEvaluationCalibration({ after: cursor, focusBookId: focusBookId() });
+      if (!root.isConnected) return;
+      projection = next;
+      after = cursor;
+      busy = false;
+      paint('[data-calibration-page-heading]');
+    } catch (error) {
+      if (!root.isConnected) return;
+      busy = false;
+      paint('[data-calibration-page-heading]');
+      setStatus(errorMessage(error, CALIBRATION_STATUS.failed), 'error');
+    }
+  };
 
   const paint = (focus: string | null): void => {
     if (projection === null) return;
@@ -94,11 +125,28 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
     refusalFor('prediction', predictionSection);
 
     const actualsSection = el('section', 'calibration-section calibration-actuals');
-    actualsSection.append(el('h3', undefined, ACTUALS_HEADING));
-    if (projection.books.length === 0) actualsSection.append(el('p', 'field-note calibration-actuals-empty', ACTUALS_EMPTY));
+    const heading = el('h3', undefined, ACTUALS_HEADING);
+    heading.tabIndex = -1;
+    heading.dataset['calibrationPageHeading'] = '';
+    actualsSection.append(heading);
+    const books = visibleBooks();
+    if (books.length === 0) actualsSection.append(el('p', 'field-note calibration-actuals-empty', ACTUALS_EMPTY));
     const list = el('ul', 'calibration-actuals-list');
-    for (const book of projection.books) list.append(bookNode(book));
-    if (projection.books.length > 0) actualsSection.append(list);
+    for (const book of books) list.append(bookNode(book));
+    if (books.length > 0) actualsSection.append(list);
+    const pages = el('div', 'button-row');
+    if (after !== null) {
+      const first = action('回到开头', 'quiet', 'first', () => void page(null));
+      first.disabled = busy;
+      pages.append(first);
+    }
+    if (projection.nextCursor !== null) {
+      const nextCursor = projection.nextCursor;
+      const next = action('下一页图书', 'secondary', 'next', () => void page(nextCursor));
+      next.disabled = busy;
+      pages.append(next);
+    }
+    actualsSection.append(pages);
     root.replaceChildren(calibrationSection, predictionSection, actualsSection);
     if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();
   };
@@ -201,15 +249,19 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
     paint(null);
     setStatus(CALIBRATION_STATUS.saving, 'busy');
     try {
-      projection = await api.recordPublicationActuals({ bookId: book.bookId, publicationVersionId: book.publicationVersionId, expectedEntries: book.entries, priceFen, firstPrint });
+      const next = await api.recordPublicationActuals({ bookId: book.bookId, publicationVersionId: book.publicationVersionId, expectedEntries: book.entries, priceFen, firstPrint });
+      if (!root.isConnected) return;
+      adoptCommand(next);
       busy = false;
       form = null;
       paint(`[data-book-id="${book.bookId}"] [data-calibration-action="open"]`);
       setStatus(CALIBRATION_STATUS.actualsSaved, 'success');
     } catch (error) {
+      if (!root.isConnected) return;
       busy = false;
       refusal = { where: book.bookId, message: errorMessage(error, CALIBRATION_STATUS.failed) };
-      try { projection = await api.inspectEvaluationCalibration(); } catch { /* the page keeps what it had */ }
+      try { projection = await readPage(); } catch { /* the page keeps what it had */ }
+      if (!root.isConnected) return;
       paint(`[data-book-id="${book.bookId}"] [data-calibration-action="save"]`);
       setStatus(refusal.message, 'error');
     }
@@ -222,14 +274,18 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
     paint(null);
     setStatus(CALIBRATION_STATUS.saving, 'busy');
     try {
-      projection = await api.setEvaluationPreferences({ expectedEntries: projection.preferenceEntries, ...next });
+      const updated = await api.setEvaluationPreferences({ expectedEntries: projection.preferenceEntries, ...next });
+      if (!root.isConnected) return;
+      adoptCommand(updated);
       busy = false;
       paint(`[data-calibration-switch="${where}"]`);
       setStatus(CALIBRATION_STATUS.preferencesSaved, 'success');
     } catch (error) {
+      if (!root.isConnected) return;
       busy = false;
       refusal = { where, message: errorMessage(error, CALIBRATION_STATUS.failed) };
-      try { projection = await api.inspectEvaluationCalibration(); } catch { /* the page keeps what it had */ }
+      try { projection = await readPage(); } catch { /* the page keeps what it had */ }
+      if (!root.isConnected) return;
       paint(`[data-calibration-switch="${where}"]`);
       setStatus(refusal.message, 'error');
     }
@@ -238,10 +294,11 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
   return {
     async load(): Promise<void> {
       root.replaceChildren(el('p', 'field-note', CALIBRATION_STATUS.loading));
-      projection = await api.inspectEvaluationCalibration();
+      projection = await readPage();
+      if (!root.isConnected) return;
       const focus = options.focusBookId;
-      if (focus !== null && projection.books.some((book) => book.bookId === focus)) {
-        const book = projection.books.find((entry) => entry.bookId === focus)!;
+      if (focus !== null && visibleBooks().some((book) => book.bookId === focus)) {
+        const book = visibleBooks().find((entry) => entry.bookId === focus)!;
         const current = book.actuals !== null && book.actuals.current ? book.actuals : null;
         form = { bookId: focus, price: current === null ? '' : formatPriceFen(current.priceFen).slice(1), print: current === null ? '' : String(current.firstPrint) };
         paint(`[data-book-id="${focus}"] input[data-calibration-field="price"]`);

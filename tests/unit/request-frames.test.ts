@@ -1266,7 +1266,8 @@ describe('decodeRequest rejects malformed frames', () => {
     const actuals = { bookId, publicationVersionId: randomUUID(), expectedEntries: 0, priceFen: 4500, firstPrint: 3000 };
     const preferences = { expectedEntries: 2, predictionEnabled: false, calibrationEnabled: true };
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
-      { op: 'inspectEvaluationCalibration', input: {} },
+      { op: 'inspectEvaluationCalibration', input: { after: null, focusBookId: null } },
+      { op: 'inspectEvaluationCalibration', input: { after: { title: '图书', bookId }, focusBookId: bookId } },
       { op: 'recordPublicationActuals', input: actuals },
       { op: 'recordPublicationActuals', input: { ...actuals, expectedEntries: 3, priceFen: 1, firstPrint: 1 } },
       { op: 'setEvaluationPreferences', input: preferences },
@@ -1278,6 +1279,9 @@ describe('decodeRequest rejects malformed frames', () => {
     }
     for (const [op, input] of [
       ['inspectEvaluationCalibration', { bookId }],
+      ['inspectEvaluationCalibration', { after: null, focusBookId: 'book' }],
+      ['inspectEvaluationCalibration', { after: { title: '图书', bookId: 'book' }, focusBookId: null }],
+      ['inspectEvaluationCalibration', { after: { title: '图书', bookId, hidden: true }, focusBookId: null }],
       ['recordPublicationActuals', { ...actuals, bookId: 'book' }],
       ['recordPublicationActuals', { ...actuals, expectedEntries: -1 }],
       ['recordPublicationActuals', { ...actuals, priceFen: 0 }],

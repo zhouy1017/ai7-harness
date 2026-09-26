@@ -38,11 +38,11 @@ afterEach(async () => {
 
 interface Imported { bookId: string; manuscriptId: string; branchId: string }
 
-async function importBook(store: EditorialStore): Promise<Imported> {
+async function importBook(store: EditorialStore, distinct = false): Promise<Imported> {
   const selectedPath = join(roots.inputRoot, `${randomUUID()}.docx`);
   await composeManuscriptDocx(selectedPath, EXCERPT);
   const staged = await store.stageSelectedManuscript(randomUUID(), selectedPath);
-  const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion, { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false);
+  const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion, { kind: 'new-book', choiceId: distinct ? 'new-book-distinct-intended-work' : 'new-book', confirmedTitle: staged.titleSuggestion.value }, false);
   const commitId = randomUUID();
   const commit = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest!, commitId });
   await store.acknowledgeImportCompletion(commitId);
@@ -116,6 +116,8 @@ describe('设置 › 评估校准与预测 over the real store', () => {
         prediction: { booksWithActuals: 0, threshold: 30, enabled: false, available: false },
         preferenceEntries: 0,
         books: [],
+        nextCursor: null,
+        focusedBook: null,
       });
       const book = await importBook(store);
       bookId = book.bookId;
@@ -296,6 +298,36 @@ describe('设置 › 评估校准与预测 over the real store', () => {
       tampered.close();
     }
   }, 120_000);
+
+  it('pages published Books and reads an exact off-page Book without losing its save target', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const ids: string[] = [];
+      for (let index = 0; index < 21; index += 1) {
+        const book = await importBook(store, index > 0);
+        await publish(store, book, `分页${index}`, '纸质版');
+        ids.push(book.bookId);
+      }
+      const first = store.inspectEvaluationCalibration();
+      expect(first.books).toHaveLength(20);
+      expect(first.nextCursor).not.toBeNull();
+      const last = store.inspectEvaluationCalibration({ after: first.nextCursor, focusBookId: null });
+      expect(last.books).toHaveLength(1);
+      expect(last.nextCursor).toBeNull();
+      expect([...first.books, ...last.books].map((book) => book.bookId).sort()).toEqual(ids.sort());
+      const target = last.books[0]!;
+      const opened = store.inspectEvaluationCalibration({ after: null, focusBookId: target.bookId });
+      expect(opened.books).toEqual(first.books);
+      expect(opened.focusedBook).toEqual(target);
+      const saved = store.recordPublicationActuals({ bookId: target.bookId, publicationVersionId: target.publicationVersionId, expectedEntries: 0, priceFen: 4500, firstPrint: 3000 });
+      expect(saved.books).toHaveLength(20);
+      expect(saved.focusedBook?.bookId).toBe(target.bookId);
+      expect(saved.focusedBook?.entries).toBe(1);
+      expect(saved.focusedBook?.actuals?.priceFen).toBe(4500);
+      expect(store.inspectEvaluationCalibration({ after: first.nextCursor, focusBookId: null }).books).toEqual([saved.focusedBook]);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  }, 300_000);
 
   it('opens the prediction at the thirtieth published Book with actuals and not before, and a switch that is on can always be turned off', () => {
     // The ledger alone, over the two relations it references, so thirty published Books need no thirty imports.

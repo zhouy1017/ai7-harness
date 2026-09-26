@@ -549,7 +549,7 @@ async function dispatch(
     case 'inspectFeedbackHistory':
       return { id: request.id, ok: true, op: request.op, result: store.inspectFeedbackHistory() };
     case 'inspectEvaluationCalibration':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluationCalibration() };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluationCalibration(request.input) };
     case 'recordPublicationActuals':
       return { id: request.id, ok: true, op: request.op, result: store.recordPublicationActuals(request.input) };
     case 'setEvaluationPreferences':

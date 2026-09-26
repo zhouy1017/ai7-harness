@@ -716,10 +716,17 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // 质量与学习 › 反馈历史 (Issue #61, S26c): every Book's feedback; it names nothing.
     case 'inspectFeedbackHistory':
-    // 设置 › 评估校准与预测 (Issue #430, S82): the house's page; it names nothing.
-    case 'inspectEvaluationCalibration':
       requireInput(value.input, [], tentativeId);
       break;
+    case 'inspectEvaluationCalibration': {
+      const input = requireInput(value.input, ['after', 'focusBookId'], tentativeId);
+      const after = input.after;
+      if (!(input.focusBookId === null || validUuid(input.focusBookId)) ||
+          !(after === null || (isRecord(after) && hasExactKeys(after, ['title', 'bookId']) && isBoundedString(after.title, 300) && validUuid(after.bookId)))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     // 录入定价与首印: the Book, how many entries the editor saw, and two whole positive numbers, the price in 分.
     case 'recordPublicationActuals': {
       const input = requireInput(value.input, ['bookId', 'publicationVersionId', 'expectedEntries', 'priceFen', 'firstPrint'], tentativeId);

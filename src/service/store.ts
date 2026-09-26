@@ -3,7 +3,7 @@ import { closeSync, constants, createReadStream, fstatSync, lstatSync, openSync,
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { J03_TASK_GOAL, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
+import { J03_TASK_GOAL, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
   InspectTaskPlanInput,
   TaskPlanProjection,
@@ -110,6 +110,7 @@ import type {
   RecordProposalDecisionFeedbackInput,
   DecideLearningMaterialInput,
   FeedbackHistoryEntryProjection,
+  InspectEvaluationCalibrationInput,
   EvaluationCalibrationBookProjection,
   EvaluationCalibrationProjection,
   RecordPublicationActualsInput,
@@ -10556,8 +10557,8 @@ export class EditorialStore {
    * 设置 › 评估校准与预测 (Issue #430, plan slice S82; EVAL-010, EVAL-011, EVAL-014): calibration's progress and switch, the
    * prediction switch and the published Books it waits on, and every Book with a 发稿版本 with its 定价与首印. A read.
    */
-  inspectEvaluationCalibration(): EvaluationCalibrationProjection {
-    return this.#calibrationCall(() => this.#evaluationCalibrationProjection());
+  inspectEvaluationCalibration(input: InspectEvaluationCalibrationInput = { after: null, focusBookId: null }): EvaluationCalibrationProjection {
+    return this.#calibrationCall(() => this.#evaluationCalibrationProjection(input));
   }
 
   /**
@@ -10582,7 +10583,7 @@ export class EditorialStore {
           firstPrint: input.firstPrint,
         });
       });
-      return this.#evaluationCalibrationProjection();
+      return this.#evaluationCalibrationProjection({ after: null, focusBookId: input.bookId });
     });
   }
 
@@ -10594,33 +10595,45 @@ export class EditorialStore {
     });
   }
 
-  #evaluationCalibrationProjection(): EvaluationCalibrationProjection {
+  #evaluationCalibrationBook(bookId: string, title: string): EvaluationCalibrationBookProjection | null {
+    const current = this.#publicationCall(() => this.#publicationVersions.current(bookId));
+    if (current === null) return null;
+    const latest = this.#evaluationCalibration.latestActuals(bookId);
+    return {
+      bookId, title,
+      publicationVersionId: current.projection.publicationVersionId,
+      publicationOrdinal: current.projection.ordinal,
+      designatedAt: current.projection.createdAt,
+      actuals: latest === null ? null : {
+        priceFen: latest.priceFen, firstPrint: latest.firstPrint, publicationOrdinal: latest.publicationOrdinal,
+        recordedAt: latest.recordedAt, current: latest.publicationVersionId === current.projection.publicationVersionId,
+      },
+      entries: latest?.ordinal ?? 0,
+    };
+  }
+
+  #evaluationCalibrationProjection(input: InspectEvaluationCalibrationInput = { after: null, focusBookId: null }): EvaluationCalibrationProjection {
+    const { after, focusBookId } = input;
+    requireStore(after === null || (UUID_PATTERN.test(after.bookId) && after.title === safeTitle(after.title)), 'CALIBRATION_CURSOR_INVALID', '实际数据列表位置无效。');
+    requireStore(focusBookId === null || UUID_PATTERN.test(focusBookId), 'BOOK_INVALID', '图书标识无效。');
     const preferences = this.#evaluationCalibration.preferences();
     const booksWithActuals = this.#evaluationCalibration.booksWithActuals();
-    // AI7's 初评 arrives with S81b (Issue #429): until then the editor has no AI7 score to adjust, so none is counted.
+    // AI7's 初评 arrives with S81b; no score exists for the editor to adjust yet.
     const adjustments = 0;
+    const where = 'EXISTS (SELECT 1 FROM publication_versions p WHERE p.book_id = b.book_id)';
+    const rows = (after === null
+      ? this.#authority.prepare(`SELECT b.book_id, b.title FROM books b WHERE ${where} ORDER BY b.title, b.book_id LIMIT ?`).all(MAX_EVALUATION_CALIBRATION_BOOKS + 1)
+      : this.#authority.prepare(`SELECT b.book_id, b.title FROM books b WHERE ${where} AND (b.title > ? OR (b.title = ? AND b.book_id > ?)) ORDER BY b.title, b.book_id LIMIT ?`)
+        .all(after.title, after.title, after.bookId, MAX_EVALUATION_CALIBRATION_BOOKS + 1)) as SqlRow[];
     const books: EvaluationCalibrationBookProjection[] = [];
-    for (const row of this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').all() as SqlRow[]) {
-      const bookId = asString(row.book_id);
-      const current = this.#publicationCall(() => this.#publicationVersions.current(bookId));
-      if (current === null) continue;
-      const latest = this.#evaluationCalibration.latestActuals(bookId);
-      books.push({
-        bookId,
-        title: asString(row.title),
-        publicationVersionId: current.projection.publicationVersionId,
-        publicationOrdinal: current.projection.ordinal,
-        designatedAt: current.projection.createdAt,
-        actuals: latest === null ? null : {
-          priceFen: latest.priceFen,
-          firstPrint: latest.firstPrint,
-          publicationOrdinal: latest.publicationOrdinal,
-          recordedAt: latest.recordedAt,
-          current: latest.publicationVersionId === current.projection.publicationVersionId,
-        },
-        entries: latest?.ordinal ?? 0,
-      });
+    for (const row of rows.slice(0, MAX_EVALUATION_CALIBRATION_BOOKS)) {
+      const book = this.#evaluationCalibrationBook(asString(row.book_id), asString(row.title));
+      if (book !== null) books.push(book);
     }
+    const last = books.at(-1);
+    const focusedRow = focusBookId === null ? undefined : this.#authority.prepare('SELECT title FROM books WHERE book_id = ?').get(focusBookId) as SqlRow | undefined;
+    const focusedBook = focusBookId === null || focusedRow === undefined ? null
+      : books.find((book) => book.bookId === focusBookId) ?? this.#evaluationCalibrationBook(focusBookId, asString(focusedRow.title));
     return {
       calibration: {
         adjustments,
@@ -10637,6 +10650,8 @@ export class EditorialStore {
       },
       preferenceEntries: preferences.entries,
       books,
+      focusedBook,
+      nextCursor: rows.length > MAX_EVALUATION_CALIBRATION_BOOKS && last !== undefined ? { title: last.title, bookId: last.bookId } : null,
     };
   }
 
