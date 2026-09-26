@@ -320,7 +320,7 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
   let membersLater = false;
   let historyLater = false;
   /**
-   * 加入书系…'s chooser while it is open: the Book chosen, the words searched for, the Books read so far — `null` while the
+   * 加入书系…'s chooser while it is open: the Book chosen, the words searched for, one page — `null` while the
    * first page is on its way — and where the next page starts.
    */
   let chooser: {
@@ -328,7 +328,7 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
     selected: { readonly bookId: string; readonly title: string } | null;
     later: boolean;
     text: string;
-    candidates: Array<{ readonly bookId: string; readonly title: string }> | null;
+    candidates: ReadonlyArray<{ readonly bookId: string; readonly title: string }> | null;
     next: SeriesCandidatesCursor | null;
   } | null = null;
   let preview: SeriesMembershipPreviewProjection | null = null;
@@ -467,7 +467,8 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
     if (candidates === null) box.append(el('p', 'field-note', SERIES_STATUS.loading));
     else if (candidates.length === 0) box.append(el('p', 'field-note series-add-no-match', (chooser?.text.trim() ?? '') === '' ? SERIES_ADD_NONE : SERIES_ADD_NO_MATCH));
     const visible = [...(candidates ?? [])];
-    if (chooser?.selected && !visible.some((entry) => entry.bookId === chooser!.selected!.bookId)) visible.push(chooser.selected);
+    const selected = chooser?.selected;
+    if (selected && !visible.some((entry) => entry.bookId === selected.bookId)) visible.push(selected);
     for (const candidate of visible) {
       const label = el('label', 'series-add-choice');
       const radio = el('input');
