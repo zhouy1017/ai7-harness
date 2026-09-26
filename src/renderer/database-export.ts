@@ -167,8 +167,9 @@ export function mountDatabaseExport(options: MountDatabaseExportOptions): void {
 
   /** A preparation that ended: the prepared file to approve, nothing written, or why not. */
   const settlePreparation = (ended: DatabaseExportActivityProjection): void => {
+    // The controls are enabled before focus moves to one: a disabled control takes no focus (Issue #434 review).
+    setBusy(false);
     if (ended.state === 'prepared' && ended.preparation !== null) {
-      setBusy(false);
       showPrepared(ended.preparation);
       setStatus(DATABASE_EXPORT_STATUS_LINES.prepared, 'success');
     } else if (ended.state === 'cancelled') {
@@ -181,6 +182,7 @@ export function mountDatabaseExport(options: MountDatabaseExportOptions): void {
 
   /** An approval that ended: what it came to, the prepared file as it was, or why not. */
   const settleApproval = async (ended: DatabaseExportActivityProjection): Promise<void> => {
+    setBusy(false);
     if (ended.state === 'finished' && ended.receipt !== null) {
       const receipt = ended.receipt;
       const outcome = el('p', `database-export-outcome outcome-${receipt.outcome}`, databaseExportOutcomeLine(receipt));

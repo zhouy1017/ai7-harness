@@ -496,10 +496,9 @@ interface StoredReplacement {
   readonly failure?: DatabaseReplacementFailure;
 }
 
-/** What the store knows that a preview and a backup need: the versions it is at, and what its data holds. */
+/** What the store knows that a preview and a backup need: the versions it is at. A backup counts what it holds from its copy. */
 export interface DatabaseReplacementSources {
   facts(): { dataVersion: number; softwareVersion: string; schemaRevision: number };
-  contents(): DatabaseExportContentsProjection;
 }
 
 interface Preview {
@@ -682,7 +681,6 @@ export class DatabaseReplacements {
         ...this.#sources.facts(),
         createdAt: now.toISOString(),
         origin: 'pre-replace-backup',
-        contents: this.#sources.contents(),
       }));
       // Only ever a new file (Issue #434 review): the name is taken at the instant the backup is put there, as every export's.
       const taken = await takeFreeName(partial, target);
