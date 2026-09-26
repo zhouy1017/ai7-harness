@@ -251,10 +251,22 @@ const SNAPSHOT_PAGES_PER_STEP = 256;
 /**
  * Copy the store open on `db` to `path` with SQLite's online backup, a few pages at a time (Issue #434 review): the event loop
  * turns between two steps, so the service answers other requests meanwhile, and a stop is honoured at the next step. A write
- * this connection makes meanwhile lands in the copy too.
+ * this connection makes meanwhile lands in the copy too. `onPages` hears, after each step, how many pages are copied of how
+ * many.
  */
-export async function copyStore(db: DatabaseSync, path: string, signal?: AbortSignal): Promise<void> {
-  await backup(db, path, { rate: SNAPSHOT_PAGES_PER_STEP, progress: () => signal?.throwIfAborted() });
+export async function copyStore(
+  db: DatabaseSync,
+  path: string,
+  signal?: AbortSignal,
+  onPages?: (copied: number, total: number) => void,
+): Promise<void> {
+  await backup(db, path, {
+    rate: SNAPSHOT_PAGES_PER_STEP,
+    progress: ({ totalPages, remainingPages }: { totalPages: number; remainingPages: number }) => {
+      signal?.throwIfAborted();
+      onPages?.(totalPages - remainingPages, totalPages);
+    },
+  });
 }
 
 /** The copy of the store and whatever journal SQLite may leave beside it. */
@@ -280,8 +292,12 @@ function contentsOfCopy(path: string): DatabaseExportContentsProjection {
   }
 }
 
-/** How far writing a package has come: the bytes read of the files it carries, the store's copy among them. */
+/**
+ * How far writing a package has come (Issue #434 review): while the store is `copying`, the bytes of its pages copied of all of
+ * them; then, `packing`, the bytes read of the files it carries, the store's copy among them.
+ */
 export interface DatabasePackageProgress {
+  readonly step: 'copying' | 'packing';
   readonly completedBytes: number;
   readonly totalBytes: number;
 }
@@ -314,7 +330,15 @@ export async function writeDatabasePackage(
   signal?.throwIfAborted();
   let output;
   try {
-    await copyStore(db, snapshotPath, signal);
+    const pageSize = Number((db.prepare('PRAGMA page_size').get() as { page_size: number | bigint }).page_size);
+    let copyBytes = 0;
+    onProgress?.({ step: 'copying', completedBytes: 0, totalBytes: 0 });
+    await copyStore(db, snapshotPath, signal, (copied, total) => {
+      copyBytes = total * pageSize;
+      onProgress?.({ step: 'copying', completedBytes: copied * pageSize, totalBytes: copyBytes });
+    });
+    // SQLite hears of the last step before it is taken: the copy is whole now.
+    onProgress?.({ step: 'copying', completedBytes: copyBytes, totalBytes: copyBytes });
     const packageFacts: DatabasePackageFacts = { ...facts(), contents: contentsOfCopy(snapshotPath) };
     const sources = await databasePackageSources(dataRoot);
     const totalBytes = sources.reduce((sum, source) => sum + source.bytes, (await lstat(snapshotPath)).size);
@@ -372,7 +396,7 @@ export async function writeDatabasePackage(
           await flush();
           completedBytes += bytesRead;
           // A file that grew since the walk found it raises the total rather than reading past it.
-          onProgress?.({ completedBytes, totalBytes: Math.max(totalBytes, completedBytes) });
+          onProgress?.({ step: 'packing', completedBytes, totalBytes: Math.max(totalBytes, completedBytes) });
         }
       } finally {
         await source.close();
@@ -506,7 +530,7 @@ export class DatabaseExports {
    */
   startPreparation(destinationInput: unknown, available: boolean): DatabaseExportActivityProjection {
     requireDatabaseExport(available, 'EXPORT_POLICY_UNAVAILABLE', '对外导出策略未通过本次启动的校验，导出不可用。');
-    const activity = this.#begin('prepare', 'packing');
+    const activity = this.#begin('prepare', 'copying');
     activity.done = this.#prepare(activity, destinationInput);
     return this.#projection(activity);
   }
@@ -633,6 +657,7 @@ export class DatabaseExports {
       }), {
         signal,
         onProgress: (progress) => {
+          activity.step = progress.step;
           activity.completedBytes = progress.completedBytes;
           activity.totalBytes = progress.totalBytes;
         },

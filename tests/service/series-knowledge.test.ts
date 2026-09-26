@@ -282,7 +282,7 @@ describe('书系知识 over the real store', () => {
     const plant = new DatabaseSync(databasePath());
     let before: Array<{ name: string; sql: string }>;
     try {
-      plant.exec(`DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; ${TABLES.slice().reverse().map((table) => `DROP TABLE ${table};`).join(' ')} PRAGMA user_version = ${SERIES_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; ${TABLES.slice().reverse().map((table) => `DROP TABLE ${table};`).join(' ')} PRAGMA user_version = ${SERIES_SCHEMA_VERSION};`);
       before = schemaOf(plant);
     } finally {
       plant.close();
@@ -300,7 +300,7 @@ describe('书系知识 over the real store', () => {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_MERGE_SCHEMA_VERSION);
       const after = schemaOf(database);
       // Revision 54's version ledger (Issue #433, S85a) returns with it, as the planted store lacked it too.
-      expect(after.filter((entry) => !/^(series_knowledge|store_versions|database_export_|backup_preferences|scheduled_backup|database_replacements|database_merges)/u.test(entry.name))).toEqual(before!);
+      expect(after.filter((entry) => !/^(series_knowledge|store_versions|database_export_|backup_preferences|scheduled_backup|database_replacements|database_merge)/u.test(entry.name))).toEqual(before!);
       expect(after.filter((entry) => TABLES.includes(entry.name)).map((entry) => entry.sql))
         .toEqual(TABLES.slice().sort().map((table) => SERIES_KNOWLEDGE_SCHEMA_SQL[table as keyof typeof SERIES_KNOWLEDGE_SCHEMA_SQL]));
       expect(counts()).toEqual({ series_knowledge_items: 0, series_knowledge_candidates: 0, series_knowledge_revisions: 0, series_knowledge_promotions: 0 });

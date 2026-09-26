@@ -156,5 +156,10 @@ describe('software version precedence (Issue #433 review)', () => {
     }
     expect(compareSoftwareVersions('0.2.0+build.7', '0.2.0+build.8')).toBe(0);
     expect(compareSoftwareVersions('0.2.0', '0.2.0')).toBe(0);
+    const lower = '1.0.0-9007199254740992';
+    const higher = '1.0.0-9007199254740993';
+    expect([compareSoftwareVersions(lower, higher), compareSoftwareVersions(higher, lower)]).toEqual([-1, 1]);
+    expect(latestSoftwareUpdate([record(1, lower), record(2, higher)])).toMatchObject({ direction: 'newer' });
+    expect(latestSoftwareUpdate([record(1, higher), record(2, lower)])).toMatchObject({ direction: 'earlier' });
   });
 });

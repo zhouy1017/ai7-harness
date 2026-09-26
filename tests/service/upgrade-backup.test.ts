@@ -81,7 +81,7 @@ async function storeBeforeUpgrade(): Promise<void> {
   }
   const plant = new DatabaseSync(storePath());
   try {
-    plant.exec(`DROP TABLE database_merges; PRAGMA user_version = ${DATABASE_REPLACEMENT_SCHEMA_VERSION};`);
+    plant.exec(`DROP TABLE database_merge_books; DROP TABLE database_merges; PRAGMA user_version = ${DATABASE_REPLACEMENT_SCHEMA_VERSION};`);
   } finally {
     plant.close();
   }

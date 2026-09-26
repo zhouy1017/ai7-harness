@@ -290,7 +290,7 @@ describe('导出数据库 over the real store', () => {
         first.close();
         const plant = new DatabaseSync(join(other.dataRoot, 'store', 'ai7.sqlite'));
         try {
-          plant.exec(`DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; PRAGMA user_version = ${STORE_VERSION_SCHEMA_VERSION};`);
+          plant.exec(`DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; PRAGMA user_version = ${STORE_VERSION_SCHEMA_VERSION};`);
         } finally {
           plant.close();
         }
@@ -350,7 +350,8 @@ describe('导出数据库 off the request (Issue #434 review, V2-UX-EXP-011)', (
       await importBook(store);
       const destination = join(roots.inputRoot, '进度.ai7db');
       const started = store.startDatabaseExportPreparation(destination, true);
-      expect(started).toMatchObject({ kind: 'prepare', state: 'running', step: 'packing', cancellable: true, preparation: null, receipt: null, failure: null });
+      // It copies the store first, then packs it (Issue #434 review).
+      expect(started).toMatchObject({ kind: 'prepare', state: 'running', step: 'copying', cancellable: true, preparation: null, receipt: null, failure: null });
       expect(refusal(() => store.startDatabaseExportPreparation(join(roots.inputRoot, '另一个.ai7db'), true))).toBe('DATABASE_EXPORT_BUSY');
       expect(store.databaseExportRunning()).toBe(true);
       await store.databaseExportSettled();
@@ -389,7 +390,11 @@ describe('导出数据库 off the request (Issue #434 review, V2-UX-EXP-011)', (
       await store.databaseExportSettled();
       expect(store.inspectDatabaseExports().activity).toMatchObject({ activityId: first.activityId, state: 'cancelled', preparation: null, failure: null });
       const second = store.startDatabaseExportPreparation(destination, true);
-      await until(() => (store.inspectDatabaseExports().activity?.completedBytes ?? 0) > 0, 'packing under way');
+      // The store is copied first; this stop lands once packing is under way.
+      await until(() => {
+        const activity = store.inspectDatabaseExports().activity;
+        return activity?.step === 'packing' && activity.completedBytes > 0;
+      }, 'packing under way');
       const midway = store.cancelDatabaseExport(second.activityId);
       expect(midway.completedBytes).toBeLessThan(midway.totalBytes);
       await store.databaseExportSettled();
@@ -553,6 +558,27 @@ describe('the database package (Issue #434 review)', () => {
       expect(settled).toBe(false);
       controller.abort();
       await expect(copying).rejects.toMatchObject({ name: 'AbortError' });
+    } finally {
+      db.close();
+    }
+  }, 180_000);
+
+  it('says how far the copy of the store has come, as a step of its own, before it packs (Issue #434 review)', async () => {
+    const db = storeOfBooks(join(roots.inputRoot, 'copied-progress.sqlite'), 40_000);
+    try {
+      const dataRoot = join(roots.inputRoot, 'root');
+      await mkdir(dataRoot);
+      const heard: Array<{ step: string; completedBytes: number; totalBytes: number }> = [];
+      await writeDatabasePackage(db, dataRoot, join(roots.inputRoot, 'copied-progress.ai7db'), FACTS, { onProgress: (progress) => heard.push({ ...progress }) });
+      const copying = heard.filter((progress) => progress.step === 'copying');
+      const firstPacking = heard.findIndex((progress) => progress.step === 'packing');
+      // Every copying reading comes before packing begins, and the copy's own measure rises to its whole, a page's bytes at a time.
+      expect(firstPacking).toBe(copying.length);
+      expect(copying.length).toBeGreaterThan(2);
+      const pages = copying.at(-1)!;
+      expect(pages.totalBytes).toBeGreaterThan(40_000 * 1000);
+      expect(pages.completedBytes).toBe(pages.totalBytes);
+      expect(copying.slice(1).every((progress, index) => progress.completedBytes >= copying[index]!.completedBytes)).toBe(true);
     } finally {
       db.close();
     }

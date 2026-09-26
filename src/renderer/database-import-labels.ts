@@ -146,8 +146,10 @@ export function databasePendingLines(
 
 /** One replacement or merge as 导入记录 lists it: when, what it came to, and the backup it made. */
 export function databaseReplacementRecordLine(record: DatabaseReplacementRecordProjection, instant: (iso: string) => string): string {
-  // Why one failed (Issue #434 review): what waited had changed since it was prepared, or its data would not open.
-  const why = record.failure === 'changed' ? '准备好的文件已不完整或被改动' : '它无法打开';
+  // Why one failed (Issue #434 review): what waited had changed since it was prepared, an open of the data it brought in was
+  // interrupted, or its data would not open.
+  const why = record.failure === 'changed' ? '准备好的文件已不完整或被改动'
+    : record.failure === 'interrupted' ? '上次启动时打开替换来的数据被中断' : '它无法打开';
   if (record.kind === 'merge') {
     const named = record.mergedTitles ?? [];
     const count = record.mergedCount ?? named.length;

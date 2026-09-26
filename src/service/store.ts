@@ -425,7 +425,6 @@ import {
   DataVersionError,
   DataVersionLedger,
   initializeDataVersionSchema,
-  latestSoftwareUpdate,
   MAX_STORE_VERSIONS_LISTED,
   readSoftwareVersion,
   SCHEMA_REVISION_CLASSES,
@@ -11549,29 +11548,29 @@ export class EditorialStore {
   /** The software version and the Data Version apart, the latest software update, and the store's version records. A read. */
   inspectDataVersion(): DataVersionProjection {
     return this.#dataVersionCall(() => {
-      const history = this.#dataVersions.history();
-      const latest = history.at(-1)!;
+      const { latest, recent, update, count, upgrades } = this.#dataVersions.standing();
       const location = backupLocationFor(this.#dataRoot);
       return {
         softwareVersion: this.#softwareVersion,
         dataVersion: this.#dataVersion,
         frozen: DATA_VERSION_FROZEN,
-        schemaRevision: latest.schemaRevision,
-        update: latestSoftwareUpdate(history),
-        history: [...history].reverse().slice(0, MAX_STORE_VERSIONS_LISTED)
+        schemaRevision: latest!.schemaRevision,
+        update,
+        history: recent
           .map((entry) => ({ softwareVersion: entry.softwareVersion, dataVersion: entry.dataVersion, schemaRevision: entry.schemaRevision, recordedAt: entry.recordedAt })),
-        historyTruncated: history.length > MAX_STORE_VERSIONS_LISTED,
-        // Each upgrade to a later Data Version, newest first, with the backup made before it (Issue #433, S85b).
-        upgrades: history.flatMap((entry) => (entry.upgrade === null ? [] : [{
-          fromDataVersion: entry.upgrade.fromDataVersion,
+        historyTruncated: count > MAX_STORE_VERSIONS_LISTED,
+        // Each upgrade to a later Data Version, newest first, with the backup made before it (Issue #433, S85b): the newest
+        // twenty, kept as the ledger is read as a stream.
+        upgrades: upgrades.map((entry) => ({
+          fromDataVersion: entry.upgrade!.fromDataVersion,
           toDataVersion: entry.dataVersion,
-          fromSoftwareVersion: entry.upgrade.fromSoftwareVersion,
+          fromSoftwareVersion: entry.upgrade!.fromSoftwareVersion,
           softwareVersion: entry.softwareVersion,
-          changes: entry.upgrade.changes,
-          backupFileName: entry.upgrade.backup.fileName,
-          backupPresent: existsSync(join(location, entry.upgrade.backup.fileName)),
+          changes: entry.upgrade!.changes,
+          backupFileName: entry.upgrade!.backup.fileName,
+          backupPresent: existsSync(join(location, entry.upgrade!.backup.fileName)),
           recordedAt: entry.recordedAt,
-        }])).reverse().slice(0, MAX_STORE_VERSIONS_LISTED),
+        })),
         backupLocation: location,
       };
     });

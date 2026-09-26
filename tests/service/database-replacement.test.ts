@@ -330,7 +330,7 @@ describe('导入数据库 over the real store', () => {
     // A revision-56 store gains the empty ledger, and nothing else moves.
     database = new DatabaseSync(path);
     try {
-      database.exec(`DROP TABLE database_merges; DROP TABLE database_replacements; PRAGMA user_version = ${SCHEDULED_BACKUP_SCHEMA_VERSION};`);
+      database.exec(`DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; PRAGMA user_version = ${SCHEDULED_BACKUP_SCHEMA_VERSION};`);
     } finally {
       database.close();
     }

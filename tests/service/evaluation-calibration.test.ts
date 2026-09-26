@@ -328,7 +328,7 @@ describe('设置 › 评估校准与预测 over the real store', () => {
     const plant = new DatabaseSync(databasePath());
     let before: Array<{ name: string; sql: string }>;
     try {
-      plant.exec(`DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; PRAGMA user_version = ${LEARNING_ELIGIBILITY_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; PRAGMA user_version = ${LEARNING_ELIGIBILITY_SCHEMA_VERSION};`);
       before = tablesOf(plant);
     } finally {
       plant.close();
@@ -347,7 +347,7 @@ describe('设置 › 评估校准与预测 over the real store', () => {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_MERGE_SCHEMA_VERSION);
       const after = tablesOf(database);
       // Revision 52's Series relations (Issue #63, S28a) return with it, as the planted store lacked them too.
-      expect(after.filter((entry) => !/^(publication_actuals|evaluation_preferences|series|store_versions|database_export_|backup_preferences|scheduled_backup|database_replacements|database_merges)/u.test(entry.name))).toEqual(before!);
+      expect(after.filter((entry) => !/^(publication_actuals|evaluation_preferences|series|store_versions|database_export_|backup_preferences|scheduled_backup|database_replacements|database_merge)/u.test(entry.name))).toEqual(before!);
       expect(after.filter((entry) => ACTUALS_TABLES.includes(entry.name)).map((entry) => entry.sql))
         .toEqual(ACTUALS_TABLES.slice().sort().map((table) => EVALUATION_CALIBRATION_SCHEMA_SQL[table as keyof typeof EVALUATION_CALIBRATION_SCHEMA_SQL]));
       expect(counts()).toEqual({ publication_actuals: 0, evaluation_preferences: 0 });
