@@ -2223,13 +2223,21 @@ async function main() {
     await waitFor(renderer, `document.querySelectorAll('.calibration-book').length === 21 && document.activeElement?.dataset.calibrationField === 'price'`, 'actuals-off-page-form');
     requireJourney(await writeField('price', '55'), 'actuals-page-price');
     requireJourney(await writeField('print', '4000'), 'actuals-page-print');
+    // A real concurrent command changes the record while the visible form retains its original optimistic binding.
+    await assertRenderer(renderer, `(async () => { const id = document.querySelector('.calibration-form')?.closest('[data-book-id]')?.dataset.bookId; if (!id) return false; const current = await window.ai7.inspectEvaluationCalibration({ after: null, focusBookId: id }); const book = current.focusedBook; if (!book) return false; await window.ai7.recordPublicationActuals({ bookId: id, publicationVersionId: book.publicationVersionId, expectedEntries: book.entries, priceFen: 4600, firstPrint: 5000 }); return true; })()`, 'actuals-concurrent-command');
     for (let repetition = 0; repetition < 2; repetition += 1) {
       await clickSelector(renderer, '[data-calibration-action="next"]', 'actuals-next-page');
       await waitFor(renderer, `document.querySelectorAll('.calibration-book').length === 1 && document.querySelector('[data-calibration-field="price"]')?.value === '55' && document.querySelector('[data-calibration-field="print"]')?.value === '4000' && document.activeElement?.hasAttribute('data-calibration-page-heading')`, 'actuals-last-page-form-kept');
       await clickSelector(renderer, '[data-calibration-action="first"]', 'actuals-first-page');
       await waitFor(renderer, `document.querySelectorAll('.calibration-book').length === 21 && document.querySelector('[data-calibration-field="price"]')?.value === '55' && document.querySelector('[data-calibration-field="print"]')?.value === '4000'`, 'actuals-first-page-form-kept');
     }
-    await clickSelector(renderer, '[data-calibration-switch="calibration"]', 'actuals-preferences-with-form');
+    await clickSelector(renderer, '[data-calibration-action="save"]', 'actuals-stale-save');
+    await waitFor(renderer, `document.querySelector('.calibration-form .calibration-refusal')?.textContent === '这本书的定价与首印刚被改过；请看过现在的数据再改。' && document.querySelector('[data-calibration-field="price"]')?.value === '55'`, 'actuals-stale-form-retained');
+    await clickSelector(renderer, '[data-calibration-action="cancel"]', 'actuals-reconcile-close');
+    await clickSelector(renderer, '.calibration-book:last-child [data-calibration-action="open"]', 'actuals-reconcile-open');
+    requireJourney(await writeField('price', '55'), 'actuals-reconciled-price');
+    requireJourney(await writeField('print', '4000'), 'actuals-reconciled-print');
+    await assertRenderer(renderer, `(() => { const input = document.querySelector('[data-calibration-switch="calibration"]'); if (!(input instanceof HTMLInputElement) || input.disabled) return false; input.click(); return true; })()`, 'actuals-preferences-with-form');
     await waitFor(renderer, `!document.querySelector('[data-calibration-switch="calibration"]')?.checked && !document.querySelector('[data-calibration-switch="calibration"]')?.disabled && document.querySelector('[data-calibration-field="price"]')?.value === '55'`, 'actuals-preferences-form-kept');
     await clickSelector(renderer, '[data-calibration-action="save"]', 'actuals-off-page-save');
     await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent === '定价与首印已录入。' && document.activeElement?.dataset.calibrationAction === 'open'`, 'actuals-off-page-saved');

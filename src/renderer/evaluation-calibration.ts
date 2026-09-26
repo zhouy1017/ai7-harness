@@ -59,13 +59,16 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
   let projection: EvaluationCalibrationProjection | null = null;
   let busy = false;
   /** The one entry form open, with what the editor typed so far. */
-  let form: { bookId: string; price: string; print: string } | null = null;
+  let form: { bookId: string; publicationVersionId: string; expectedEntries: number; price: string; print: string } | null = null;
   let refusal: { readonly where: string; readonly message: string } | null = null;
   let after: EvaluationCalibrationCursor | null = null;
   const focusBookId = (): string | null => form?.bookId ?? options.focusBookId;
-  const visibleBooks = (): ReadonlyArray<EvaluationCalibrationBookProjection> => projection === null ? []
-    : projection.focusedBook === null || projection.books.some((book) => book.bookId === projection.focusedBook!.bookId)
-      ? projection.books : [...projection.books, projection.focusedBook];
+  const visibleBooks = (): ReadonlyArray<EvaluationCalibrationBookProjection> => {
+    if (projection === null) return [];
+    const focused = projection.focusedBook;
+    return focused === null || projection.books.some((book) => book.bookId === focused.bookId)
+      ? projection.books : [...projection.books, focused];
+  };
   const readPage = (): Promise<EvaluationCalibrationProjection> => api.inspectEvaluationCalibration({ after, focusBookId: focusBookId() });
   // Commands update their own state without resetting the current page or an unrelated form.
   const adoptCommand = (next: EvaluationCalibrationProjection): void => {
@@ -183,6 +186,8 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
         const current = book.actuals !== null && book.actuals.current ? book.actuals : null;
         form = {
           bookId: book.bookId,
+          publicationVersionId: book.publicationVersionId,
+          expectedEntries: book.entries,
           price: current === null ? '' : formatPriceFen(current.priceFen).slice(1),
           print: current === null ? '' : String(current.firstPrint),
         };
@@ -249,7 +254,7 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
     paint(null);
     setStatus(CALIBRATION_STATUS.saving, 'busy');
     try {
-      const next = await api.recordPublicationActuals({ bookId: book.bookId, publicationVersionId: book.publicationVersionId, expectedEntries: book.entries, priceFen, firstPrint });
+      const next = await api.recordPublicationActuals({ bookId: form.bookId, publicationVersionId: form.publicationVersionId, expectedEntries: form.expectedEntries, priceFen, firstPrint });
       if (!root.isConnected) return;
       adoptCommand(next);
       busy = false;
@@ -300,7 +305,8 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
       if (focus !== null && visibleBooks().some((book) => book.bookId === focus)) {
         const book = visibleBooks().find((entry) => entry.bookId === focus)!;
         const current = book.actuals !== null && book.actuals.current ? book.actuals : null;
-        form = { bookId: focus, price: current === null ? '' : formatPriceFen(current.priceFen).slice(1), print: current === null ? '' : String(current.firstPrint) };
+        form = { bookId: focus, publicationVersionId: book.publicationVersionId, expectedEntries: book.entries,
+          price: current === null ? '' : formatPriceFen(current.priceFen).slice(1), print: current === null ? '' : String(current.firstPrint) };
         paint(`[data-book-id="${focus}"] input[data-calibration-field="price"]`);
       } else {
         paint(null);
