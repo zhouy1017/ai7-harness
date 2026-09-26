@@ -14,7 +14,7 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { DECISION_FEEDBACK_SCHEMA_VERSION, LEARNING_ELIGIBILITY_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
-import { MAX_LEARNING_MATERIALS_PAGE } from '../../src/shared/protocol.js';
+import { MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE } from '../../src/shared/protocol.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type {
   CreateEditorialMarkInput,
@@ -321,6 +321,44 @@ describe('学习准入 over the real store', () => {
       expect(refusal(() => store.inspectLearningMaterial(books[0]!.bookId, one.materialKey))).toBe('LEARNING_MATERIAL_NOT_FOUND:这条材料已经不在学习准入之列。');
       expect(refusal(() => store.inspectLearningMaterials(null, { bookTitle: '分页之书一', bookId: books[0]!.bookId, orderedAt: 'yesterday', materialKey: one.materialKey })))
         .toBe('LEARNING_CURSOR_INVALID:学习准入列表位置无效。');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 300_000);
+
+  it('pages accepted long notes below the frame bound without losing a material', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBookOf(store, '长说明分页', 1, '长说明分页');
+      const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const binding = { manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId };
+      const note = '👨‍👩‍👧‍👦'.repeat(350);
+      for (let index = 0; index < MAX_LEARNING_MATERIALS_PAGE; index += 1) {
+        const markId = store.createEditorialMark(suggestion(book, window, index, index + 1, `改${index}`)).markId;
+        store.recordChangeSuggestionDecision({ ...binding, markId, clientDecisionId: randomUUID(), disposition: 'rejected', editedText: null, reason: '保留原文' });
+      }
+      for (const material of store.inspectLearningMaterials(book.bookId).books[0]!.materials) {
+        const input = { bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: 0, choice: 'book' as const, note };
+        const frame = { id: randomUUID(), op: 'decideLearningMaterial', input };
+        expect(decodeRequest(new TextEncoder().encode(JSON.stringify(frame)))).toEqual(frame);
+        store.decideLearningMaterial(input);
+      }
+      let page = store.inspectLearningMaterials(book.bookId);
+      expect(page.nextCursor).not.toBeNull();
+      const keys: string[] = [];
+      for (let count = 0; count < MAX_LEARNING_MATERIALS_PAGE; count += 1) {
+        expect(Buffer.byteLength(JSON.stringify(page), 'utf8')).toBeLessThan(MAX_FRAME_BYTES / 2);
+        for (const material of page.books.flatMap((entry) => entry.materials)) {
+          expect(material.decision?.note).toBe(note);
+          keys.push(material.materialKey);
+        }
+        if (page.nextCursor === null) break;
+        page = store.inspectLearningMaterials(book.bookId, page.nextCursor);
+      }
+      expect(page.nextCursor).toBeNull();
+      expect(keys).toHaveLength(MAX_LEARNING_MATERIALS_PAGE);
+      expect(new Set(keys).size).toBe(MAX_LEARNING_MATERIALS_PAGE);
       store.markCleanShutdown();
     } finally {
       store.close();

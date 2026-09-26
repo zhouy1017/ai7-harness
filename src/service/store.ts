@@ -5771,12 +5771,23 @@ export class EditorialStore {
         }
         if (collected.length > MAX_LEARNING_MATERIALS_PAGE) break;
       }
-      const shown = collected.slice(0, MAX_LEARNING_MATERIALS_PAGE);
+      const shown: typeof collected = [];
       const books: LearningMaterialsBookProjection[] = [];
-      for (const entry of shown) {
+      let bytes = 4_096; // Basis, final cursor and envelope punctuation, beyond the weighed Books and materials.
+      let more = collected.length > MAX_LEARNING_MATERIALS_PAGE;
+      for (const entry of collected.slice(0, MAX_LEARNING_MATERIALS_PAGE)) {
         const book = books.at(-1);
+        const heading = book?.bookId === entry.bookId ? null : this.#learningBookOf(entry.bookId, entry.title);
+        const weight = Buffer.byteLength(JSON.stringify(entry.material), 'utf8') + 1 +
+          (heading === null ? 0 : Buffer.byteLength(JSON.stringify({ ...heading, materials: [] }), 'utf8') + 1);
+        if (shown.length > 0 && bytes + weight > MAX_FRAME_BYTES / 2) {
+          more = true;
+          break;
+        }
         if (book !== undefined && book.bookId === entry.bookId) (book.materials as LearningMaterialProjection[]).push(entry.material);
-        else books.push({ ...this.#learningBookOf(entry.bookId, entry.title), materials: [entry.material] });
+        else books.push({ ...heading!, materials: [entry.material] });
+        shown.push(entry);
+        bytes += weight;
       }
       // A Book named by itself is shown even while it has no material.
       if (bookId !== null && after === null && books.length === 0 && rows.length === 1) books.push({ ...this.#learningBookOf(bookId, asString(rows[0]!.title)), materials: [] });
@@ -5784,7 +5795,7 @@ export class EditorialStore {
       return {
         basis: LEARNING_ELIGIBILITY_BASIS,
         books,
-        nextCursor: collected.length > MAX_LEARNING_MATERIALS_PAGE && last !== undefined
+        nextCursor: more && last !== undefined
           ? { bookTitle: last.title, bookId: last.bookId, orderedAt: last.orderedAt, materialKey: last.material.materialKey }
           : null,
       };

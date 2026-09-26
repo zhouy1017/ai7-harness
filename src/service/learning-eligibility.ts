@@ -170,8 +170,15 @@ export function learningMaterialDigest(candidate: Pick<LearningMaterialCandidate
 }
 
 function bounded(text: string): string {
-  const graphemes = Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(text.replace(/\s+/gu, ' ').trim()), (part) => part.segment);
-  return graphemes.length <= EXCERPT_GRAPHEMES ? graphemes.join('') : `${graphemes.slice(0, EXCERPT_GRAPHEMES).join('')}…`;
+  let excerpt = '';
+  let count = 0;
+  for (const { segment } of new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(text.replace(/\s+/gu, ' ').trim())) {
+    // One grapheme may contain arbitrarily many combining marks. A preview must also fit the service frame.
+    if (count === EXCERPT_GRAPHEMES || excerpt.length + segment.length > 1_024) return `${excerpt}…`;
+    excerpt += segment;
+    count += 1;
+  }
+  return excerpt;
 }
 
 const DISPOSITION_LABELS: Readonly<Record<string, string>> = { accepted: '接受', 'accepted-with-edit': '修改后接受', rejected: '拒绝' };
