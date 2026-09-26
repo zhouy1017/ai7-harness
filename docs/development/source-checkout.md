@@ -261,6 +261,7 @@ The reader holds every entry to the size its central directory declares (Issue #
 - **Resumed apply (Issue #434 review):** an apply resumed while it moved the data aside or the package in verifies what waits again first, each member where it now stands: in `incoming/`, or already moved into the Agent Data Root, and once.
   - What waited changed, or its intent no longer reads: `refused.json` is written and the data goes back. What came in goes to `discarded/` and the data moved aside comes back, so the data opens as it was.
   - The replacement is recorded as failed with `failure: 'changed'`.
+- **Resumed at its first open (Issue #434 review):** an apply resumed at `opening` opens the data only when it is still exactly what was verified. Otherwise the open was interrupted: SQLite leaves its journals beside the store as soon as it opens, so nothing tells an interrupted open's changes from any other. The data goes back as it was, and the replacement is recorded as failed with `failure: 'interrupted'` (「上次启动时打开替换来的数据被中断」).
 - **Failure:** a store that will not open is moved into `discarded/`, and the data from `previous/` is moved back.
 - **Recording:** `database_replacements` records the replacement in the data that opened: applied, in the data it brought in, or failed, in the data it spared, the failure's reason (`unopenable` or `changed`) in its canonical record only. Only then is the staging place removed. The ledger is read as a stream, verified row by row, holding the twenty newest and counting the rest.
 

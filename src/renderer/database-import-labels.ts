@@ -106,8 +106,10 @@ export function databasePendingLines(pending: Pick<DatabasePendingReplacementPro
 
 /** One replacement as 替换记录 lists it: when, what it came to, and the backup it made. */
 export function databaseReplacementRecordLine(record: DatabaseReplacementRecordProjection, instant: (iso: string) => string): string {
-  // Why one failed (Issue #434 review): what waited had changed since it was prepared, or its data would not open.
-  const why = record.failure === 'changed' ? '准备好的文件已不完整或被改动' : '它无法打开';
+  // Why one failed (Issue #434 review): what waited had changed since it was prepared, an open of the data it brought in was
+  // interrupted, or its data would not open.
+  const why = record.failure === 'changed' ? '准备好的文件已不完整或被改动'
+    : record.failure === 'interrupted' ? '上次启动时打开替换来的数据被中断' : '它无法打开';
   const what = record.kind === 'roll-back'
     ? record.outcome === 'applied' ? `已回退到「${record.packageFileName}」` : `未能回退到「${record.packageFileName}」：${why}，本机数据保持原样`
     : record.outcome === 'applied' ? `已用「${record.packageFileName}」替换本机全部数据` : `未能用「${record.packageFileName}」替换：${why}，本机数据保持原样`;

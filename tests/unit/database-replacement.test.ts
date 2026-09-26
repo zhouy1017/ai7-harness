@@ -198,6 +198,46 @@ describe('applying a replacement of the local data', () => {
     expect(marker()).toBe('original');
   });
 
+  it('opens data resumed at its first open only while it is exactly what was verified, and otherwise puts the data back (Issue #434 review)', async () => {
+    const movedIn = (): void => {
+      setPhase('opening');
+      mkdirSync(join(staging(), 'previous'));
+      for (const entry of ['objects', 'recovery-objects', 'store']) renameSync(join(dataRoot, entry), join(staging(), 'previous', entry));
+      for (const entry of ['objects', 'store']) renameSync(join(staging(), 'incoming', entry), join(dataRoot, entry));
+    };
+    // Stopped once it was moved in, before anything opened it: the bytes are the verified ones, and it opens.
+    let intent = await prepared();
+    movedIn();
+    expect(await openWithPendingReplacement(dataRoot, open)).toEqual({ store: 'package', replacement: { intent, outcome: 'applied' } });
+    await completeReplacement(dataRoot);
+
+    // Stopped while it opened: SQLite's journal beside the store, or a changed file, can be an interrupted open's or not — the
+    // data goes back either way, and the replacement is recorded as interrupted.
+    const interruptions: ReadonlyArray<() => void> = [
+      () => writeFileSync(join(dataRoot, 'store', 'ai7.sqlite-wal'), 'written by an open'),
+      () => writeFileSync(join(dataRoot, 'objects', 'marker.txt'), 'changed'),
+      () => rmSync(join(dataRoot, 'store', 'ai7.sqlite')),
+    ];
+    for (const interruption of interruptions) {
+      rmSync(dataRoot, { recursive: true, force: true });
+      mkdirSync(join(dataRoot, 'store'), { recursive: true });
+      writeFileSync(join(dataRoot, 'store', 'ai7.sqlite'), 'the store as it is');
+      mkdirSync(join(dataRoot, 'objects'), { recursive: true });
+      writeFileSync(join(dataRoot, 'objects', 'marker.txt'), 'original');
+      mkdirSync(join(dataRoot, 'recovery-objects', 'v1'), { recursive: true });
+      writeFileSync(join(dataRoot, 'recovery-objects', 'v1', 'kept'), 'recovery');
+      mkdirSync(join(dataRoot, 'shell'), { recursive: true });
+      mkdirSync(join(dataRoot, 'export-staging'), { recursive: true });
+      intent = await prepared();
+      movedIn();
+      interruption();
+      expect(await openWithPendingReplacement(dataRoot, open)).toEqual({ store: 'original', replacement: { intent, outcome: 'failed', failure: 'interrupted' } });
+      expect(readFileSync(join(dataRoot, 'store', 'ai7.sqlite'), 'utf8')).toBe('the store as it is');
+      expect(existsSync(join(dataRoot, 'store', 'ai7.sqlite-wal'))).toBe(false);
+      await completeReplacement(dataRoot);
+    }
+  });
+
   it('reads the list of what waits only within the bound a package manifest has (Issue #434 review)', async () => {
     const intent = await prepared();
     truncateSync(join(staging(), 'members.json'), MAX_MANIFEST_BYTES + 1);

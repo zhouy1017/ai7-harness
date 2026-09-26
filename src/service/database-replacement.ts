@@ -419,6 +419,15 @@ export async function openWithPendingReplacement<T>(
     phase = phase === 'moving-out' ? 'restoring' : 'discarding';
     await writePhase(staging, phase);
   }
+  // An apply resumed while it opened the data it moved in cannot tell bytes still awaiting their first open from ones the
+  // interrupted open already changed — SQLite leaves its journals beside the store as soon as it opens — unless they are exactly
+  // what the preparation verified (Issue #434 review). Otherwise the data goes back as it was, and the replacement is recorded
+  // as failed because it was interrupted.
+  if (phase === 'opening' && (intent === null || !(await stagedAsVerified(staging, intent, dataRoot)))) {
+    await writeAtomic(join(staging, REFUSAL_NOTE), JSON.stringify('interrupted'));
+    phase = 'discarding';
+    await writePhase(staging, phase);
+  }
   if (phase === null) {
     if (intent === null) {
       // An interrupted preparation: nothing was moved, so the data stays and the staging goes.
@@ -478,12 +487,25 @@ export async function openWithPendingReplacement<T>(
     phase = 'restored';
     await writePhase(staging, phase);
   }
-  const failure: DatabaseReplacementFailure = existsSync(join(staging, REFUSAL_NOTE)) ? 'changed' : 'unopenable';
+  const failure = await refusalOf(staging) ?? 'unopenable';
   return { store: await openStore(), replacement: intent === null ? null : { intent, outcome: 'failed', failure } };
 }
 
-/** Written when a resumed apply found what waited changed: the data put back is then recorded as refused for that reason. */
+/**
+ * Written when a resumed apply put the data back because what waited had changed, or because an open of the data it moved in
+ * was interrupted: the replacement is then recorded as failed for that reason.
+ */
 const REFUSAL_NOTE = 'refused.json';
+
+/** Why a resumed apply put the data back, as its note says; `null` when none was written, or what is there is not one. */
+async function refusalOf(staging: string): Promise<'changed' | 'interrupted' | null> {
+  try {
+    const noted: unknown = JSON.parse(await readFile(join(staging, REFUSAL_NOTE), 'utf8'));
+    return noted === 'changed' || noted === 'interrupted' ? noted : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * After the store opened by `openWithPendingReplacement` has recorded the replacement: the staging place goes, with the data
@@ -779,7 +801,7 @@ export class DatabaseReplacements {
     requireReplacement(isRecord(record), 'DATABASE_REPLACEMENT_RECORD_INVALID', INVALID);
     // A failed replacement's reason lives only in its record, and only there.
     const failure = record.failure;
-    requireReplacement(failure === undefined || (outcome === 'failed' && (failure === 'unopenable' || failure === 'changed')),
+    requireReplacement(failure === undefined || (outcome === 'failed' && (failure === 'unopenable' || failure === 'changed' || failure === 'interrupted')),
       'DATABASE_REPLACEMENT_RECORD_INVALID', INVALID);
     const read: StoredReplacement = failure === undefined ? stored : { ...stored, failure: failure as DatabaseReplacementFailure };
     requireReplacement(canonicalJson(record) === canonicalJson({ schema: RECORD_SCHEMA, ...read }), 'DATABASE_REPLACEMENT_RECORD_INVALID', INVALID);
