@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readSync, rmSync, writeFileSync, writeSync } from 'node:fs';
+import { closeSync, constants, copyFileSync, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { DIGEST_PATTERN, canonicalJson, isRecord, parseCanonicalJson } from './analysis/canonical.js';
@@ -523,13 +523,15 @@ export function isMergingBooks(value: unknown): value is MergingBooks {
 
 /**
  * Each Book the staged list at `path` names, in order, read a chunk at a time; the list must be exactly what `expected` names —
- * its digest and its count — or reading it throws `DATABASE_MERGE_BOOKS_CHANGED` once that is known.
+ * its digest and its count — or reading it throws `DATABASE_MERGE_BOOKS_CHANGED` once that is known. It is opened once and read
+ * only as the regular file that handle is (Issue #434 review): where the system has them, a link is not followed and nothing
+ * waits on a pipe.
  */
 export function* readMergingBooks(path: string, expected: MergingBooks): Generator<MergeBookPlan> {
   const changed = (): DatabaseMergeError => new DatabaseMergeError('DATABASE_MERGE_BOOKS_CHANGED', '准备好的图书清单已不完整或被改动。');
   let fd: number;
   try {
-    fd = openSync(path, 'r');
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   } catch {
     throw changed();
   }
@@ -539,6 +541,7 @@ export function* readMergingBooks(path: string, expected: MergingBooks): Generat
   let count = 0;
   const decoder = new TextDecoder('utf-8', { fatal: true });
   try {
+    if (!fstatSync(fd).isFile()) throw changed();
     for (;;) {
       const read = readSync(fd, buffer, 0, buffer.length, null);
       if (read === 0) break;
