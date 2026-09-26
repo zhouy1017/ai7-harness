@@ -21,6 +21,7 @@ import {
   MAX_MAINTENANCE_ERRATA_CHARACTERS,
   MAX_MAINTENANCE_EVIDENCE_CHARACTERS,
   MAX_MAINTENANCE_REASON_CHARACTERS,
+  MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED,
   PRODUCTION_DOCUMENT_RECIPIENT_KINDS,
   PRODUCTION_DOCUMENT_PHASE_ACTIONS,
   PRODUCTION_DOCUMENT_PHASE_IDS,
@@ -1228,18 +1229,27 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // Its export (Issue #416, S67b): one version of the route's Book's package, the folder the dialog returned, an export.
     case 'reviewBookDeliveryPackageExport': {
-      const input = requireInput(value.input, ['bookId', 'packageVersionId', 'options'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'packageVersionId', 'options'], ['offset'], tentativeId);
+      if (input.offset !== undefined && (!isSafeInteger(input.offset) || input.offset > Number.MAX_SAFE_INTEGER - MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED)) throw new ProtocolError(tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.packageVersionId) || !validPackageExportOptions(input.options)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'prepareBookDeliveryPackageExport': {
-      const input = requireInput(value.input, ['bookId', 'packageVersionId', 'options', 'reviewDigest', 'folder'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'packageVersionId', 'options', 'reviewDigest', 'folder', 'memberKeys'], ['offset'], tentativeId);
+      if (input.offset !== undefined && (!isSafeInteger(input.offset) || input.offset > Number.MAX_SAFE_INTEGER - MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED)) throw new ProtocolError(tentativeId);
+      if (!Array.isArray(input.memberKeys) || input.memberKeys.length === 0 || input.memberKeys.length > MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED ||
+          !input.memberKeys.every((key) => isBoundedString(key, 80)) || new Set(input.memberKeys).size !== input.memberKeys.length) throw new ProtocolError(tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.packageVersionId) || !validPackageExportOptions(input.options) ||
           !isBoundedString(input.reviewDigest, 64) ||
           !HEX_DIGEST_PATTERN.test(input.reviewDigest) || !isBoundedString(input.folder, MAX_EXPORT_DESTINATION_CODE_UNITS) ||
           !isAbsolute(input.folder)) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    case 'cancelBookDeliveryPackageExport': {
+      const input = requireInput(value.input, ['jobId'], tentativeId);
+      if (!validUuid(input.jobId)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'approveBookDeliveryPackageExport': {
@@ -1249,8 +1259,11 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // 维护事项 (Issue #426, S68a): the route's Book, one of its designations or cases, and words within their bounds.
     case 'inspectMaintenanceCase': {
-      const input = requireInput(value.input, ['bookId', 'caseId'], tentativeId);
-      if (!validUuid(input.bookId) || !validUuid(input.caseId)) throw new ProtocolError(tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'caseId'], ['beforeRevision', 'afterPublicationOrdinal', 'errataVersionId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.caseId) ||
+          (input.beforeRevision !== undefined && !isSafeInteger(input.beforeRevision, 1)) ||
+          (input.afterPublicationOrdinal !== undefined && !isSafeInteger(input.afterPublicationOrdinal, 0)) ||
+          (input.errataVersionId !== undefined && !validUuid(input.errataVersionId))) throw new ProtocolError(tentativeId);
       break;
     }
     case 'listMaintenanceCases': {

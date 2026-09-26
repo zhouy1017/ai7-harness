@@ -140,6 +140,7 @@ export const IPC_CHANNELS = {
   recordMaintenanceCase: 'ai7:j07:record-maintenance-case',
   appendMaintenanceCaseRevision: 'ai7:j07:append-maintenance-case-revision',
   saveMaintenanceErrata: 'ai7:j07:save-maintenance-errata',
+  cancelBookDeliveryPackageExport: 'ai7:j07:cancel-book-delivery-package-export',
   createProductionDocument: 'ai7:j07:create-production-document',
   decideProductionDocumentType: 'ai7:j07:decide-production-document-type',
   saveProductionDocumentVersion: 'ai7:j07:save-production-document-version',
@@ -5248,6 +5249,8 @@ export interface MaintenanceCaseProjection {
   nextStep: MaintenanceNextStep | null;
   revisions: ReadonlyArray<MaintenanceCaseRevisionProjection>;
   revisionsTotal: number;
+  revisionsBefore: number | null;
+  inspectedErrata: null | { errataVersionId: string; version: number; body: string; recordedAt: string };
   /** The newest 勘误 version, with how many there are; `null` before the first. */
   errata: null | { errataVersionId: string; version: number; body: string; recordedAt: string };
   /**
@@ -5259,6 +5262,7 @@ export interface MaintenanceCaseProjection {
   choices: {
     proposals: ReadonlyArray<{ markId: string; label: string; stateLabel: string; createdAt: string }>;
     publications: ReadonlyArray<{ publicationVersionId: string; label: string }>;
+    publicationsAfter: number | null;
   };
   /** The revision the editor read: the next step names it, and a step against another is refused. */
   expectedRevision: number;
@@ -5277,6 +5281,9 @@ export interface RecordMaintenanceCaseInput {
 export interface InspectMaintenanceCaseInput {
   bookId: string;
   caseId: string;
+  beforeRevision?: number;
+  afterPublicationOrdinal?: number;
+  errataVersionId?: string;
 }
 
 /** `更早的维护事项…`: the older cases of one designation of the route's Book, before the oldest one shown. */
@@ -5761,7 +5768,7 @@ export interface BookDeliveryPackageResultProjection {
 
 /** At most this many exports of one package version are listed, newest first; the count says how many there were. */
 export const MAX_BOOK_DELIVERY_PACKAGE_EXPORTS_LISTED = 2;
-/** At most this many files of one export are listed; an export of more says how many it wrote. */
+/** A review page and one explicitly selected export batch contain at most this many files. */
 export const MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED = 40;
 
 /** One file a package export writes: what it holds, its file name and its format. */
@@ -5802,9 +5809,11 @@ export interface BookDeliveryPackageExportReviewProjection {
   options: BookDeliveryPackageExportOptions;
   /** At most `MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED`, in the order they are written. */
   files: ReadonlyArray<BookDeliveryPackageExportReviewFileProjection>;
-  /** More files than the review lists: they are written too. */
+  /** More candidate files can be reviewed on the next page; none are implicitly selected. */
   filesTruncated: boolean;
-  /** Some file is degraded, listed or not. */
+  offset: number;
+  nextOffset: number | null;
+  /** Some file on this page is degraded. */
   degraded: boolean;
   /** EXP-014 and EXP-015: the files go to a folder the editor chooses, and nothing is sent anywhere. */
   statement: string;
@@ -5860,6 +5869,7 @@ export interface BookDeliveryPackageExportSummaryProjection {
 
 /** `导出…` of one version of the route's Book's package, under the options chosen. */
 export interface ReviewBookDeliveryPackageExportInput {
+  offset?: number;
   bookId: string;
   packageVersionId: string;
   options: BookDeliveryPackageExportOptions;
@@ -5867,6 +5877,8 @@ export interface ReviewBookDeliveryPackageExportInput {
 
 /** `选择位置…`: the folder the system dialog returned, bound to the review the editor read and its options. */
 export interface PrepareBookDeliveryPackageExportInput {
+  offset?: number;
+  memberKeys: ReadonlyArray<string>;
   bookId: string;
   packageVersionId: string;
   options: BookDeliveryPackageExportOptions;
@@ -6437,11 +6449,11 @@ export interface ServiceJobProjection {
    * job's result is the 审阅 workspace with the prepared Run open.
    */
   kind: 'search' | 'replacement' | 'reimport-preparation' | 'reimport-resolution' | 'reimport-commit' |
-    'task-authorization-preparation' | 'baseline-analysis-preparation' | 'review-run-preparation';
+    'task-authorization-preparation' | 'baseline-analysis-preparation' | 'review-run-preparation' | 'package-export';
   state: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   progress: { completed: number; total: number; label: string };
   result: SearchSummaryProjection | ReplacementPreviewProjection | ReviewBeforeManuscriptReimportProjection |
-    ManuscriptReimportCommitProjection | TaskAuthorizationProjection | BaselineAnalysisProjection | ReviewWorkspaceProjection | null;
+    ManuscriptReimportCommitProjection | TaskAuthorizationProjection | BaselineAnalysisProjection | ReviewWorkspaceProjection | BookDeliveryPackageExportResultProjection | null;
   failure: null | { code: string; message: string };
 }
 
@@ -7067,7 +7079,8 @@ export interface ServiceOperationMap {
   /** The folder the main process's dialog returned: one preparation per file, recorded together; nothing is written. */
   prepareBookDeliveryPackageExport: { input: PrepareBookDeliveryPackageExportInput; output: BookDeliveryPackageExportProjection };
   /** `按上述方式导出`: each file approved and written in turn, with its receipt; a file that stops it stops the rest. */
-  approveBookDeliveryPackageExport: { input: ApproveBookDeliveryPackageExportInput; output: BookDeliveryPackageExportResultProjection };
+  approveBookDeliveryPackageExport: { input: ApproveBookDeliveryPackageExportInput; output: ServiceJobProjection };
+  cancelBookDeliveryPackageExport: { input: { jobId: string }; output: boolean };
   inspectMaintenanceCase: { input: InspectMaintenanceCaseInput; output: MaintenanceCaseProjection };
   listMaintenanceCases: { input: ListMaintenanceCasesInput; output: MaintenanceCasePageProjection };
   recordMaintenanceCase: { input: RecordMaintenanceCaseInput; output: MaintenanceCaseResultProjection };
@@ -7340,6 +7353,7 @@ export interface RendererApi {
   appendMaintenanceCaseRevision(input: Omit<AppendMaintenanceCaseRevisionInput, 'bookId'>): Promise<MaintenanceCaseResultProjection>;
   /** `保存勘误版本`. */
   saveMaintenanceErrata(input: Omit<SaveMaintenanceErrataInput, 'bookId'>): Promise<MaintenanceCaseResultProjection>;
+  cancelBookDeliveryPackageExport(input: Omit<ApproveBookDeliveryPackageExportInput, 'bookId'>): Promise<boolean>;
   /** 从来源材料创建 (Issue #415): a document of one house type of that Book, from one of its source-only materials. */
   createProductionDocument(input: Omit<CreateProductionDocumentInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 本书不做 or 恢复 for one house type of that Book. */

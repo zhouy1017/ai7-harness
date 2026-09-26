@@ -2,7 +2,13 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { PUBLICATION_FORBIDDEN_WORDS, type ProductionDocumentProjection } from '../../src/shared/protocol.js';
+import {
+  MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS,
+  PRODUCTION_DOCUMENT_REOPEN_REASONS,
+  PRODUCTION_DOCUMENT_SKIP_REASONS,
+  PUBLICATION_FORBIDDEN_WORDS,
+  type ProductionDocumentProjection,
+} from '../../src/shared/protocol.js';
 import * as labels from '../../src/renderer/production-document-labels.js';
 import { documentStanding } from '../../src/renderer/production-document-lens.js';
 
@@ -118,9 +124,11 @@ describe('the words of 交付 · 生产文档', () => {
     // restore stands, after the choices close and before the reopen is offered.
     const source = readFileSync(join(ROOT, 'src', 'renderer', 'index.ts'), 'utf8').replace(/\r\n/gu, '\n');
     // The call is a statement of the catch itself: on its own line at the catch's indentation, after the choices close and
-    // before the reopen is offered — so neither a guard around it nor a handler it moved into passes, whatever order its
-    // parts are named in (#609). A comment that names the function is not a call.
-    expect(source).toMatch(/^( +)choices\.disabled = true;$[\s\S]*?^\1showRestoreStands\(\{ [^}\n]+ \}\);$[\s\S]*?^\1actions\.replaceChildren\(reopen\);$/mu);
+    // before the reopen is offered — so neither a guard around it nor a handler it moved into passes (#609). A comment that
+    // names the function is not a call. It passes the four parts by their own names, in whatever order: a part given in
+    // another's place is typed alike and compiles, and would leave the choice's words on screen (#616).
+    const call = /^( +)choices\.disabled = true;$[\s\S]*?^\1showRestoreStands\(\{ ([^}\n]+) \}\);$[\s\S]*?^\1actions\.replaceChildren\(reopen\);$/mu.exec(source);
+    expect(call?.[2]?.split(', ').sort()).toEqual(['heading', 'lede', 'legend', 'sectionLabel']);
     expect(source.split('showRestoreStands({').length - 1).toBe(1);
   });
 
@@ -152,6 +160,22 @@ describe('the words of 交付 · 生产文档', () => {
 });
 
 // Issue #415 (S66c): the Deliverable Workflow Lens's own words; the phases, pills, summary and reasons come from the service.
+describe('a workflow reason\'s words and keys (Issue #626)', () => {
+  it('counts the reason\'s own words as the service does, and says what keeps them from being recorded', () => {
+    expect(labels.phaseReasonTextProblem('')).toBeNull();
+    expect(labels.phaseReasonTextProblem('𠀀'.repeat(MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS))).toBeNull();
+    expect(labels.phaseReasonTextProblem('字'.repeat(MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS + 1)))
+      .toBe(`说明最多 ${MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS} 个字符，现在 ${MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS + 1} 个。`);
+    expect(labels.phaseReasonTextProblem('a\uD800b')).toBe('说明含有无法保存的字符。');
+  });
+
+  it('keeps every reason key it has shipped, so a move recorded with a key alone still reads', () => {
+    // Keys may be added and relabelled — a move records its words — but never removed.
+    expect(Object.keys(PRODUCTION_DOCUMENT_SKIP_REASONS)).toEqual(expect.arrayContaining(['not-needed', 'done-elsewhere', 'later', 'custom']));
+    expect(Object.keys(PRODUCTION_DOCUMENT_REOPEN_REASONS)).toEqual(expect.arrayContaining(['needs-change', 'sources-changed', 'redo-after-delivery', 'custom']));
+  });
+});
+
 describe('the words of a document\'s workflow', () => {
   it('names the profile, the lists and a phase\'s four moves, and asks for a reason before 跳过 and 重新打开', () => {
     expect(labels.workflowProfileLine('基础书稿编辑流程', '2.0.0', '2026年9月24日 10:30')).toBe('基础书稿编辑流程 2.0.0 · 启用于 2026年9月24日 10:30');
