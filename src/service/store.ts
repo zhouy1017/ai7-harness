@@ -34,6 +34,12 @@ import type {
   BookDeliveryPackageProjection,
   BookDeliveryPackageResultProjection,
   PrepareBookDeliveryPackageInput,
+  ApproveBookDeliveryPackageExportInput,
+  BookDeliveryPackageExportProjection,
+  BookDeliveryPackageExportResultProjection,
+  BookDeliveryPackageExportReviewProjection,
+  PrepareBookDeliveryPackageExportInput,
+  ReviewBookDeliveryPackageExportInput,
   ProductionDocumentsProjection,
   MilestonePurposeKind,
   PublicationDesignationProjection,
@@ -261,6 +267,11 @@ import { initializeReimportGroupSchema } from './reimport-group-ledger.js';
 import { initializeProductionDocumentDeliverySchema, initializeProductionDocumentSchema } from './production-document-ledger.js';
 import { BookDeliveryPackageError, BookDeliveryPackages, initializeBookDeliveryPackageSchema } from './book-delivery-packages.js';
 import {
+  BookDeliveryPackageExportError,
+  BookDeliveryPackageExports,
+  initializeBookDeliveryPackageExportSchema,
+} from './book-delivery-package-exports.js';
+import {
   ProductionDocumentWorkflow, ProductionDocumentWorkflowError, initializeProductionDocumentWorkflowSchema, type WorkflowProfilePin,
 } from './production-document-workflow.js';
 import {
@@ -342,6 +353,7 @@ import {
   PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION,
   BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION,
   PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION,
+  BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1558,7 +1570,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
       currentVersion === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
       currentVersion === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
-      currentVersion === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION,
+      currentVersion === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
+      currentVersion === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1594,7 +1607,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
       currentVersion === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
       currentVersion === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
-      currentVersion === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION
+      currentVersion === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
+      currentVersion === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1944,7 +1958,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION,
+      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
+      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1969,7 +1984,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION) return;
+      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
+      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2086,7 +2102,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION,
+      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
+      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2110,7 +2127,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION) return;
+      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
+      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2403,7 +2421,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2430,6 +2448,7 @@ function validateModelServiceSchema(
       version >= PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION,
       version >= BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION,
       version >= PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION,
+      version >= BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2481,7 +2500,8 @@ function initializeModelServiceSchema(
       version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION,
+      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
+      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2505,7 +2525,8 @@ function initializeModelServiceSchema(
       version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION) {
+      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
+      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3319,6 +3340,7 @@ export class EditorialStore {
   /** Each Production Document's Deliverable Workflow (Issue #415, S66c). */
   readonly #documentWorkflow: ProductionDocumentWorkflow;
   readonly #bookDeliveryPackages: BookDeliveryPackages;
+  readonly #packageExports: BookDeliveryPackageExports;
   readonly #manuscriptExport: ManuscriptExportStore;
   readonly #proposalConflicts: ProposalConflictStore;
   /** 默认执行规则 (Issue #421): the rules 快速开始 starts a Task under. */
@@ -3375,6 +3397,9 @@ export class EditorialStore {
       readObject: (objectDigest) => this.#readContentObject(objectDigest),
       dataRoot,
       checkpointOwner: boundedAuthority,
+      // A package export's 交付包清单 (Issue #416, S67b), written by the package's export from the version's own record.
+      packageManifest: (bookId, packageVersionId) => this.#packageExports.manifest(bookId, packageVersionId),
+      packageVersion: (bookId, packageVersionId) => this.#packageExports.version(bookId, packageVersionId),
     });
     // 交付物 lists a Book's approved exports beside its 发稿 (Issue #413), read from the export ledger. Its Production
     // Documents (Issue #415) are a read of their own, each Delivery Record with what its export came to.
@@ -3403,6 +3428,11 @@ export class EditorialStore {
       },
       documents: (bookId) => this.#productionDocuments.packageReadings(bookId),
       reviewRuns: (bookId) => this.#reviewRuns.packageReadings(bookId),
+      exportHistory: (bookId, packageVersionId) => this.#packageExports.history(bookId, packageVersionId),
+    });
+    // Its export (Issue #416, S67b) writes each file through the export ledger and links them to the exact version.
+    this.#packageExports = new BookDeliveryPackageExports(authority, this.#manuscriptExport, {
+      record: (bookId, packageVersionId) => this.#bookDeliveryPackages.record(bookId, packageVersionId),
     });
     this.#proposalConflicts = new ProposalConflictStore(authority, this.#editorialMarks);
     this.#workflowProfile = workflowProfile;
@@ -3487,8 +3517,10 @@ export class EditorialStore {
       // frozen 图书交付包 versions.
       initializeProductionDocumentDeliverySchema(authority);
       initializeBookDeliveryPackageSchema(authority);
-      // Revision 40 (Issue #415, S66c) adds each document's workflow instance and phase moves.
+      // Revision 40 (Issue #415, S66c) adds each document's workflow instance and phase moves, and revision 41 (Issue #416,
+      // S67b) each package export and the files it links.
       initializeProductionDocumentWorkflowSchema(authority, workflowProfilePin(workflowProfile));
+      initializeBookDeliveryPackageExportSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -9978,13 +10010,42 @@ export class EditorialStore {
     return { bookId: input.bookId, outcome: outcome.outcome, version: outcome.version, package: this.inspectBookDeliveryPackage(input.bookId) };
   }
 
+  /** `导出…` of one package version (Issue #416, S67b): the files it writes, each reviewed as S64 reviews a file. */
+  async reviewBookDeliveryPackageExport(input: ReviewBookDeliveryPackageExportInput, available: boolean): Promise<BookDeliveryPackageExportReviewProjection> {
+    return this.#packageExportCall(() => this.#packageExports.review(input, available));
+  }
+
+  /** The folder the system dialog returned: one preparation per file there, and the export that links them. */
+  async prepareBookDeliveryPackageExport(input: PrepareBookDeliveryPackageExportInput, available: boolean): Promise<BookDeliveryPackageExportProjection> {
+    return this.#packageExportCall(() => this.#packageExports.prepare(input, available));
+  }
+
+  /** `按上述方式导出`: each file approved and written in turn with its receipt, and the package as it stands. */
+  async approveBookDeliveryPackageExport(input: ApproveBookDeliveryPackageExportInput, available: boolean, beforeWrite?: () => void): Promise<BookDeliveryPackageExportResultProjection> {
+    const exported = await this.#packageExportCall(() => this.#packageExports.approve(input, available, beforeWrite));
+    return { bookId: input.bookId, export: exported, package: this.inspectBookDeliveryPackage(input.bookId) };
+  }
+
+  async #packageExportCall<T>(operation: () => Promise<T>): Promise<T> {
+    return this.#exportCall(async () => {
+      try {
+        return await operation();
+      } catch (error) {
+        if (error instanceof BookDeliveryPackageExportError || error instanceof BookDeliveryPackageError) throw new StoreError(error.code, error.message);
+        throw error;
+      }
+    });
+  }
+
   #packageCall<T>(operation: () => T): T {
     this.#assertAvailable();
     try {
       return operation();
     } catch (error) {
       if (error instanceof BookDeliveryPackageError || error instanceof PublicationVersionError || error instanceof ProductionDocumentError ||
-        error instanceof ReviewRunError) throw new StoreError(error.code, error.message);
+        error instanceof ReviewRunError || error instanceof BookDeliveryPackageExportError || error instanceof ExportLedgerError) {
+        throw new StoreError(error.code, error.message);
+      }
       if (error instanceof AggregateError) {
         this.#poisoned = true;
         throw new StoreFatalError(error);

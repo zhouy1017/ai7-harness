@@ -878,6 +878,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'package-not-for-this-book',
     'package-prepare',
     'package-v2',
+    // Issue #416 (S67b): v2 exported into a chosen folder, file by file with receipts, and its history.
+    'package-export',
     'documents-restart',
     'zero-loopback-requests',
     'completion-browser-close',

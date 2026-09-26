@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 61 as const;
+export const SERVICE_PROTOCOL_VERSION = 62 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -128,6 +128,10 @@ export const IPC_CHANNELS = {
   inspectProductionDocuments: 'ai7:j07:inspect-production-documents',
   inspectBookDeliveryPackage: 'ai7:j07:inspect-book-delivery-package',
   prepareBookDeliveryPackage: 'ai7:j07:prepare-book-delivery-package',
+  reviewBookDeliveryPackageExport: 'ai7:j07:review-book-delivery-package-export',
+  chooseBookDeliveryPackageExportFolder: 'ai7:j07:choose-book-delivery-package-export-folder',
+  approveBookDeliveryPackageExport: 'ai7:j07:approve-book-delivery-package-export',
+  cancelBookDeliveryPackageExport: 'ai7:j07:cancel-book-delivery-package-export',
   createProductionDocument: 'ai7:j07:create-production-document',
   decideProductionDocumentType: 'ai7:j07:decide-production-document-type',
   saveProductionDocumentVersion: 'ai7:j07:save-production-document-version',
@@ -5355,8 +5359,11 @@ export interface BookDeliveryPackageVersionProjection {
   current: boolean;
   /** What the version holds, in one line. */
   summary: string;
-  /** The derived Package Export History (DPKG-011): `暂无导出记录` until a file is exported. */
+  /** The derived Package Export History (DPKG-011): `暂无导出记录`, or how many exports wrote files and when the latest did. */
   exportHistoryLabel: string;
+  /** The version's exports newest first (Issue #416, S67b), at most `MAX_BOOK_DELIVERY_PACKAGE_EXPORTS_LISTED`, each in one line. */
+  exports: ReadonlyArray<BookDeliveryPackageExportSummaryProjection>;
+  exportsTruncated: boolean;
   /** 查看技术详情 only. */
   technical: { contentDigest: string; digest: string; priorVersionId: string | null };
 }
@@ -5394,6 +5401,146 @@ export interface BookDeliveryPackageResultProjection {
   bookId: string;
   outcome: 'prepared' | 'unchanged';
   version: number;
+  package: BookDeliveryPackageProjection;
+}
+
+// ---- 图书交付包's export (Issue #416, plan slice S67b; BUNDLE-004, DPKG-011, DPKG-013, DPKG-014, EXP-010 to EXP-022) --------
+
+/** At most this many exports of one package version are listed, newest first; the count says how many there were. */
+export const MAX_BOOK_DELIVERY_PACKAGE_EXPORTS_LISTED = 2;
+/** A review page and one explicitly selected export batch contain at most this many files. */
+export const MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED = 40;
+
+/** One file a package export writes: what it holds, its file name and its format. */
+export interface BookDeliveryPackageExportFileProjection {
+  /** `publication`, `document:<typeId>`, `report:<reportId>` or `manifest`. */
+  key: string;
+  /** What the file holds, in the editor's words: `稿件 · 发稿版本「一审稿」 · r1`. */
+  label: string;
+  fileName: string;
+  format: ManuscriptExportFormat;
+}
+
+/**
+ * 含批注 and 含修改建议（作为修订） of the files a package export writes from the manuscript and the documents (EXP-023): both
+ * on until the editor turns one off, and bound into the review. 备注 never go with a package.
+ */
+export type BookDeliveryPackageExportOptions = Pick<ManuscriptExportOptions, 'includeAnnotations' | 'includeSuggestions'>;
+
+/**
+ * One file as `导出…` reviews it (EXP-007 to EXP-009): how it is written, what its format keeps and each class's fidelity —
+ * the Export Fidelity Review S64 shows for one file, so no loss in a package's file is silent.
+ */
+export interface BookDeliveryPackageExportReviewFileProjection extends BookDeliveryPackageExportFileProjection {
+  restoration: 'from-original' | 'regenerated';
+  restorationLine: string;
+  formatLine: string;
+  fidelity: ReadonlyArray<ExportFidelityRowProjection>;
+  /** Some class is `降级导出` or `无法导出`: `按上述方式导出` then accepts it for this export (EXP-008). */
+  degraded: boolean;
+}
+
+/** `导出…` of one package version: the files it writes under the options chosen, and the review they bind (EXP-010). */
+export interface BookDeliveryPackageExportReviewProjection {
+  bookId: string;
+  packageVersionId: string;
+  /** `v2`. */
+  versionLabel: string;
+  options: BookDeliveryPackageExportOptions;
+  /** At most `MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED`, in the order they are written. */
+  files: ReadonlyArray<BookDeliveryPackageExportReviewFileProjection>;
+  /** More candidate files can be reviewed on the next page; none are implicitly selected. */
+  filesTruncated: boolean;
+  offset: number;
+  nextOffset: number | null;
+  /** Some file on this page is degraded. */
+  degraded: boolean;
+  /** EXP-014 and EXP-015: the files go to a folder the editor chooses, and nothing is sent anywhere. */
+  statement: string;
+  /** Binds the folder's preparation to exactly this review, its options included. */
+  reviewDigest: string;
+}
+
+/** What one file of a package export came to (EXP-013, EXP-021). */
+export interface BookDeliveryPackageExportFileOutcomeProjection extends BookDeliveryPackageExportFileProjection {
+  preparationId: string;
+  /** `prepared` until `按上述方式导出`; then the receipt's own outcome, or `not-written` for a file after one that stopped. */
+  outcome: 'prepared' | 'created' | 'failed' | 'ambiguous' | 'not-written';
+  outcomeLabel: string;
+  /** Whether 在文件夹中显示 can be offered: only for a verified file. */
+  revealAvailable: boolean;
+}
+
+/** One export of one package version (DPKG-014): its folder, its files and what each came to. It never changes the package. */
+export interface BookDeliveryPackageExportProjection {
+  exportId: string;
+  packageVersionId: string;
+  versionLabel: string;
+  /** The folder as the system dialog returned it. */
+  folder: string;
+  /** `prepared` before `按上述方式导出`; `exported` once every file was written; `incomplete` when a file stopped it. */
+  state: 'prepared' | 'exported' | 'incomplete';
+  /** `已导出到所选位置 · 4 个文件`, `已准备，尚未导出 · 4 个文件`, or how many files were written and how many were not. */
+  summary: string;
+  createdAt: string;
+  files: ReadonlyArray<BookDeliveryPackageExportFileOutcomeProjection>;
+  /** More files than the answer lists. */
+  filesTruncated: boolean;
+  /** In `按上述方式导出`'s own answer: the file that stopped the rest, and why; `null` otherwise. */
+  stopped: { fileName: string; reason: string } | null;
+}
+
+/**
+ * One export of a version as its history lists it (DPKG-011): what it came to, where and when, in one line. What each
+ * file came to is the export's own answer; 交付物's one read of every version stays one frame. A folder chosen and never
+ * approved is no export, and the history never lists one.
+ */
+export interface BookDeliveryPackageExportSummaryProjection {
+  exportId: string;
+  folder: string;
+  state: Exclude<BookDeliveryPackageExportProjection['state'], 'prepared'>;
+  summary: string;
+  /** When its last file's outcome was recorded. */
+  exportedAt: string;
+  fileCount: number;
+  /** A file it wrote and verified, for 在文件夹中显示 to show the folder by; `null` when it wrote none. */
+  revealPreparationId: string | null;
+}
+
+/** `导出…` of one version of the route's Book's package, under the options chosen. */
+export interface ReviewBookDeliveryPackageExportInput {
+  offset?: number;
+  bookId: string;
+  packageVersionId: string;
+  options: BookDeliveryPackageExportOptions;
+}
+
+/** `选择位置…`: the folder the system dialog returned, bound to the review the editor read and its options. */
+export interface PrepareBookDeliveryPackageExportInput {
+  offset?: number;
+  memberKeys: ReadonlyArray<string>;
+  bookId: string;
+  packageVersionId: string;
+  options: BookDeliveryPackageExportOptions;
+  reviewDigest: string;
+  folder: string;
+}
+
+/** `按上述方式导出` of one prepared package export. */
+export interface ApproveBookDeliveryPackageExportInput {
+  bookId: string;
+  exportId: string;
+}
+
+/** What the folder dialog came to: nothing is recorded when it was cancelled (EXP-020), else the prepared export. */
+export type ChooseBookDeliveryPackageExportFolderResult =
+  | { outcome: 'cancelled' }
+  | { outcome: 'prepared'; export: BookDeliveryPackageExportProjection };
+
+/** What `按上述方式导出` came to, and the package as it stands, its export history included. */
+export interface BookDeliveryPackageExportResultProjection {
+  bookId: string;
+  export: BookDeliveryPackageExportProjection;
   package: BookDeliveryPackageProjection;
 }
 
@@ -5683,7 +5830,8 @@ export interface ExportFidelityRowProjection {
  * version of a 审阅报告 and the revision its Review Run read.
  */
 export interface ManuscriptExportTargetProjection {
-  kind: 'current' | 'milestone' | 'report' | 'document';
+  /** `package-manifest` is the service's own target (Issue #416, S67b): a package export's 交付包清单, never the renderer's. */
+  kind: 'current' | 'milestone' | 'report' | 'document' | 'package-manifest';
   milestoneId: string | null;
   milestoneLabel: string | null;
   revisionId: string;
@@ -5692,6 +5840,8 @@ export interface ManuscriptExportTargetProjection {
   report: { reportId: string; version: number; reviewRunId: string; runLabel: string } | null;
   /** The Production Document version exported (Issue #415, S66b): its type and `版本 N`; `null` for any other target. */
   document: { documentId: string; typeId: string; typeLabel: string; versionLabel: string } | null;
+  /** The package version whose 交付包清单 is exported (Issue #416, S67b); `null` for any other target. */
+  packageVersion: { packageVersionId: string; versionLabel: string } | null;
 }
 
 /** One format as the export card offers it: DOCX, the optional PDF, and the Markdown 备用格式 (Issue #500, S64b). */
@@ -5873,11 +6023,11 @@ export interface ServiceJobProjection {
    * job's result is the 审阅 workspace with the prepared Run open.
    */
   kind: 'search' | 'replacement' | 'reimport-preparation' | 'reimport-resolution' | 'reimport-commit' |
-    'task-authorization-preparation' | 'baseline-analysis-preparation' | 'review-run-preparation';
+    'task-authorization-preparation' | 'baseline-analysis-preparation' | 'review-run-preparation' | 'package-export';
   state: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   progress: { completed: number; total: number; label: string };
   result: SearchSummaryProjection | ReplacementPreviewProjection | ReviewBeforeManuscriptReimportProjection |
-    ManuscriptReimportCommitProjection | TaskAuthorizationProjection | BaselineAnalysisProjection | ReviewWorkspaceProjection | null;
+    ManuscriptReimportCommitProjection | TaskAuthorizationProjection | BaselineAnalysisProjection | ReviewWorkspaceProjection | BookDeliveryPackageExportResultProjection | null;
   failure: null | { code: string; message: string };
 }
 
@@ -6481,6 +6631,13 @@ export interface ServiceOperationMap {
   inspectBookDeliveryPackage: { input: InspectBookDeliveryPackageInput; output: BookDeliveryPackageProjection };
   /** `准备图书交付包`: freeze the content the editor saw as the package's next version, or say it is unchanged. */
   prepareBookDeliveryPackage: { input: PrepareBookDeliveryPackageInput; output: BookDeliveryPackageResultProjection };
+  /** `导出…` of one package version (Issue #416, S67b): the files it writes. A read. */
+  reviewBookDeliveryPackageExport: { input: ReviewBookDeliveryPackageExportInput; output: BookDeliveryPackageExportReviewProjection };
+  /** The folder the main process's dialog returned: one preparation per file, recorded together; nothing is written. */
+  prepareBookDeliveryPackageExport: { input: PrepareBookDeliveryPackageExportInput; output: BookDeliveryPackageExportProjection };
+  /** `按上述方式导出`: each file approved and written in turn, with its receipt; a file that stops it stops the rest. */
+  approveBookDeliveryPackageExport: { input: ApproveBookDeliveryPackageExportInput; output: ServiceJobProjection };
+  cancelBookDeliveryPackageExport: { input: { jobId: string }; output: boolean };
   createProductionDocument: { input: CreateProductionDocumentInput; output: ProductionDocumentResultProjection };
   decideProductionDocumentType: { input: DecideProductionDocumentTypeInput; output: ProductionDocumentResultProjection };
   saveProductionDocumentVersion: { input: SaveProductionDocumentVersionInput; output: ProductionDocumentResultProjection };
@@ -6723,6 +6880,13 @@ export interface RendererApi {
   inspectBookDeliveryPackage(): Promise<BookDeliveryPackageProjection>;
   /** `准备图书交付包`: freeze exactly the content read, with its purpose; it creates no file and sends nothing. */
   prepareBookDeliveryPackage(input: Omit<PrepareBookDeliveryPackageInput, 'bookId'>): Promise<BookDeliveryPackageResultProjection>;
+  /** `导出…` of one version of that Book's package (Issue #416, S67b): the files it would write. */
+  reviewBookDeliveryPackageExport(input: Omit<ReviewBookDeliveryPackageExportInput, 'bookId'>): Promise<BookDeliveryPackageExportReviewProjection>;
+  /** `选择位置…`: the system's own folder dialog, then the export prepared there; a cancelled dialog records nothing. */
+  chooseBookDeliveryPackageExportFolder(input: Omit<PrepareBookDeliveryPackageExportInput, 'bookId' | 'folder'>): Promise<ChooseBookDeliveryPackageExportFolderResult>;
+  /** `按上述方式导出` of a prepared package export: its files written, each with its receipt. */
+  approveBookDeliveryPackageExport(input: Omit<ApproveBookDeliveryPackageExportInput, 'bookId'>): Promise<BookDeliveryPackageExportResultProjection>;
+  cancelBookDeliveryPackageExport(input: Omit<ApproveBookDeliveryPackageExportInput, 'bookId'>): Promise<boolean>;
   /** 从来源材料创建 (Issue #415): a document of one house type of that Book, from one of its source-only materials. */
   createProductionDocument(input: Omit<CreateProductionDocumentInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 本书不做 or 恢复 for one house type of that Book. */

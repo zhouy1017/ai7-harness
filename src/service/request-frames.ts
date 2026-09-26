@@ -12,6 +12,7 @@ import {
   MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS,
   MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS,
   MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS,
+  MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED,
   PRODUCTION_DOCUMENT_RECIPIENT_KINDS,
   PRODUCTION_DOCUMENT_PHASE_ACTIONS,
   PRODUCTION_DOCUMENT_PHASE_IDS,
@@ -183,6 +184,12 @@ function validExportOptions(value: unknown): boolean {
   return isRecord(value) && hasExactKeys(value, ['includeAnnotations', 'includeSuggestions', 'includeEditorNotes']) &&
     typeof value.includeAnnotations === 'boolean' && typeof value.includeSuggestions === 'boolean' &&
     typeof value.includeEditorNotes === 'boolean';
+}
+
+/** A package export's 含批注 and 含修改建议, each a switch and nothing else; 备注 never go with a package (Issue #416). */
+function validPackageExportOptions(value: unknown): boolean {
+  return isRecord(value) && hasExactKeys(value, ['includeAnnotations', 'includeSuggestions']) &&
+    typeof value.includeAnnotations === 'boolean' && typeof value.includeSuggestions === 'boolean';
 }
 
 function validRecoverySelection(value: unknown): boolean {
@@ -1152,6 +1159,36 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           !isBoundedString(input.expectedContentDigest, 64) || !HEX_DIGEST_PATTERN.test(input.expectedContentDigest)) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    // Its export (Issue #416, S67b): one version of the route's Book's package, the folder the dialog returned, an export.
+    case 'reviewBookDeliveryPackageExport': {
+      const input = requireInputWithOptional(value.input, ['bookId', 'packageVersionId', 'options'], ['offset'], tentativeId);
+      if (input.offset !== undefined && (!isSafeInteger(input.offset) || input.offset > Number.MAX_SAFE_INTEGER - MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED)) throw new ProtocolError(tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.packageVersionId) || !validPackageExportOptions(input.options)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'prepareBookDeliveryPackageExport': {
+      const input = requireInputWithOptional(value.input, ['bookId', 'packageVersionId', 'options', 'reviewDigest', 'folder', 'memberKeys'], ['offset'], tentativeId);
+      if (input.offset !== undefined && (!isSafeInteger(input.offset) || input.offset > Number.MAX_SAFE_INTEGER - MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED)) throw new ProtocolError(tentativeId);
+      if (!Array.isArray(input.memberKeys) || input.memberKeys.length === 0 || input.memberKeys.length > MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED ||
+          !input.memberKeys.every((key) => isBoundedString(key, 80)) || new Set(input.memberKeys).size !== input.memberKeys.length) throw new ProtocolError(tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.packageVersionId) || !validPackageExportOptions(input.options) ||
+          !isBoundedString(input.reviewDigest, 64) ||
+          !HEX_DIGEST_PATTERN.test(input.reviewDigest) || !isBoundedString(input.folder, MAX_EXPORT_DESTINATION_CODE_UNITS) ||
+          !isAbsolute(input.folder)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'cancelBookDeliveryPackageExport': {
+      const input = requireInput(value.input, ['jobId'], tentativeId);
+      if (!validUuid(input.jobId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'approveBookDeliveryPackageExport': {
+      const input = requireInput(value.input, ['bookId', 'exportId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.exportId)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'createProductionDocument': {
