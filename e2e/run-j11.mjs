@@ -1494,12 +1494,16 @@ async function main() {
 
     at('feedback-silence-is-not-approval');
     // What nobody judged stays unjudged: every other item reads no judgment, the tally counts the two, and nothing asks for
-    // more — 待我处理 lists no feedback.
+    // more — 待我处理 lists no feedback. The one thing it gains is 学习准入's single item for the Book (Issue #61, S26b): the
+    // synopsis was judged in the editor's own words, which are material for them to decide on, not a call to judge the rest.
     const silence = await readFeedback(renderer, (page) => page.card === null, 'feedback-silence');
     requireJourney(silence.items.filter(([, judgment]) => judgment !== 'none').map(([key, judgment]) => `${key}:${judgment}`).join() === 'synopsis:incomplete,entities/0:accurate' &&
       silence.metric.judged === '2', 'feedback-silence-unjudged', silence.items.map(([key, judgment]) => [key, judgment]));
     const attentionAfter = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => projection.groups.map((group) => [group.key, group.items.map((entry) => entry.itemId)]))`);
-    requireJourney(Array.isArray(attentionBefore) && JSON.stringify(attentionAfter) === JSON.stringify(attentionBefore), 'feedback-no-attention', { before: attentionBefore, after: attentionAfter });
+    const learningAsk = `learning-materials:${thirdId}`;
+    const attentionBesideLearning = Array.isArray(attentionAfter) ? attentionAfter.map(([key, items]) => [key, items.filter((itemId) => itemId !== learningAsk)]) : null;
+    requireJourney(Array.isArray(attentionBefore) && JSON.stringify(attentionBesideLearning) === JSON.stringify(attentionBefore) &&
+      attentionAfter.some(([key, items]) => key === 'decisions' && items.includes(learningAsk)), 'feedback-no-attention', { before: attentionBefore, after: attentionAfter });
 
     at('feedback-restart');
     // A restart moves nothing: each judgment and the tally read as before, over the same lineage.
