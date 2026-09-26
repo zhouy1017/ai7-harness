@@ -8,6 +8,12 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const RUNTIME_ROOT = resolve(ROOT, '.runtime');
 const ELECTRON_VERSION = '43.4.1';
 
+// Error messages and paths are not diagnostics. Only these closed system codes cross bootstrap's output boundary.
+function failureCode(error) {
+  return ['EBUSY', 'EPERM', 'EACCES', 'ENOENT', 'EEXIST', 'ENOSPC', 'EIO', 'EINVAL', 'ETIMEDOUT'].includes(error?.code)
+    ? error.code : 'unclassified';
+}
+
 function requireRuntime(condition, message) {
   if (!condition) throw new Error(message);
 }
@@ -156,11 +162,16 @@ export async function materializeElectronRuntime({ archive, artifact, environmen
   const stagingRoot = await mkdtemp(resolve(runtimeParent, '.electron-staging-'));
   await requireExactRuntimeChild(runtimeParent, stagingRoot);
   let backupRoot;
+  let phase = 'extract';
+  const secondaryFailures = [];
 
   try {
     const adapter = await extractArchive(archive, stagingRoot, environment);
+    phase = 'validate';
     const executable = await validateCarrier(stagingRoot, artifact);
+    phase = 'probe';
     const evidence = verifyElectronNodeMode(executable, environment);
+    phase = 'write-evidence';
     await writeFile(
       resolve(stagingRoot, '.ai7-runtime.json'),
       `${JSON.stringify({ schemaVersion: 1, artifactId: artifact.id, sha256: artifact.sha256, adapter, evidence })}\n`,
@@ -168,6 +179,7 @@ export async function materializeElectronRuntime({ archive, artifact, environmen
     );
 
     if (existsSync(finalRoot)) {
+      phase = 'backup';
       await requireExactRuntimeChild(runtimeParent, finalRoot);
       backupRoot = resolve(runtimeParent, `.electron-backup-${process.pid}-${Date.now()}`);
       await requireExactRuntimeChild(runtimeParent, backupRoot, false);
@@ -175,15 +187,22 @@ export async function materializeElectronRuntime({ archive, artifact, environmen
       await rename(finalRoot, backupRoot);
     }
     try {
+      phase = 'promote';
       await rename(stagingRoot, finalRoot);
     } catch (error) {
-      if (backupRoot && existsSync(backupRoot) && !existsSync(finalRoot)) await rename(backupRoot, finalRoot);
+      if (backupRoot && existsSync(backupRoot) && !existsSync(finalRoot)) {
+        try { await rename(backupRoot, finalRoot); }
+        catch (rollbackError) { secondaryFailures.push(`ELECTRON_ROLLBACK/${failureCode(rollbackError)}`); }
+      }
       throw error;
     }
+    phase = 'backup-cleanup';
     if (backupRoot) await removeExactRuntimeChild(runtimeParent, backupRoot);
     return { executable: electronExecutable(finalRoot), adapter, evidence };
   } catch (error) {
-    await removeExactRuntimeChild(runtimeParent, stagingRoot);
-    throw error;
+    try { await removeExactRuntimeChild(runtimeParent, stagingRoot); }
+    catch (cleanupError) { secondaryFailures.push(`ELECTRON_CLEANUP/${failureCode(cleanupError)}`); }
+    // Cleanup and rollback cannot replace the first failure. Keep its object as a cause but print only closed markers.
+    throw new Error([`ELECTRON_MATERIALIZATION/${phase}/${failureCode(error)}`, ...secondaryFailures].join(' '), { cause: error });
   }
 }

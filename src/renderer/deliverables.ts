@@ -887,14 +887,15 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       open.disabled = working || documents.unavailableReason !== null;
       open.addEventListener('click', () => void openDocument(documentNow, type));
       actions.append(open);
+      // Its Deliverable Workflow at a glance (Issue #415, S66c; WORK-005): the summary, the first 下一项 and the seven phases —
+      // before 交付状态, in the order §9 总览页 and DELIV-001 give (Issue #626).
+      item.append(renderWorkflowCardSummary(documentNow.workflow));
       // 交付 (Issue #415, S66b): the latest Delivery Record, or none yet, and 交付后有修改 once an edit left every delivered version.
       const latest = documentNow.deliveries[0];
       item.dataset['documentDeliveries'] = String(documentNow.deliveries.length);
       item.dataset['documentChangedSinceDelivery'] = String(documentNow.changedSinceDelivery);
       item.append(el('p', 'document-delivery-line', latest === undefined ? DOCUMENT_NOT_DELIVERED : documentDeliveryLine(latest, localInstantLabel(latest.recordedAt))));
       if (documentNow.changedSinceDelivery) item.append(el('p', 'attention-note document-changed-since-delivery', DOCUMENT_CHANGED_SINCE_DELIVERY));
-      // Its Deliverable Workflow at a glance (Issue #415, S66c; WORK-005): the summary, the first 下一项 and the seven phases.
-      item.append(renderWorkflowCardSummary(documentNow.workflow));
       const deliver = documentButton(latest === undefined ? 'deliver' : 'redeliver', type, 'secondary');
       const deliveryOpen = deliveryForm?.typeId === type.typeId;
       deliver.setAttribute('aria-expanded', String(deliveryOpen));
