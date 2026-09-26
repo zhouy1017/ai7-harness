@@ -1467,6 +1467,22 @@ async function main() {
     await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '保存当前编辑' && !button.disabled)`, 'document-edit-save-ready');
     await click(renderer, '保存当前编辑', 'document-edit-save');
     await waitFor(renderer, `window.__j07.status().includes('已写入修订日志')`, 'document-edit-durable');
+    // Hold the new version's first animation frame until the next explicit command has taken focus. This reproduces
+    // a slow frame on macOS: an arrival's pending editor restore must not steal focus back from the workflow row.
+    await assertRenderer(renderer, `(() => {
+      const request = window.requestAnimationFrame.bind(window);
+      const cancel = window.cancelAnimationFrame.bind(window);
+      const held = new Map(); let id = 0;
+      window.requestAnimationFrame = (callback) => { const key = --id; held.set(key, callback); return key; };
+      window.cancelAnimationFrame = (key) => { if (!held.delete(key)) cancel(key); };
+      window.__j07.releaseVersionFrame = () => {
+        window.requestAnimationFrame = request; window.cancelAnimationFrame = cancel;
+        for (const callback of held.values()) callback(performance.now());
+        held.clear(); delete window.__j07.releaseVersionFrame;
+        return new Promise((resolve) => request(() => resolve(true)));
+      };
+      return true;
+    })()`, 'document-version-hold-frame');
     await clickSelector(renderer, '.editor-shell[data-deliverable="production-document"] [data-document-action="saveVersion"]', 'document-save-version');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] .editor-toolbar h2')?.textContent === '新闻稿 · 版本 2' && window.__j07.status() === '已保存为版本 2'`, 'document-version-saved', 120_000);
     await assertRenderer(renderer, `(() => { const versions = Array.from(document.querySelectorAll('aside.document-lens ol.document-version-list > li')).map((item) => item.dataset.versionOrdinal + ':' + (item.dataset.versionCurrent ?? '')); return JSON.stringify(versions) === '["2:true","1:"]' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.textContent?.endsWith(${JSON.stringify(DOCUMENT_EDIT)}); })()`, 'document-two-versions');
@@ -1480,6 +1496,8 @@ async function main() {
     await assertRenderer(renderer, `(() => { const section = document.querySelector('aside.document-lens section.document-workflow'); const rows = Array.from(section?.querySelectorAll('li.document-phase') ?? []); return (section?.querySelector('.document-workflow-profile')?.textContent ?? '').startsWith('基础书稿编辑流程 2.0.0 · 启用于 ') && section.querySelector('.document-workflow-summary')?.textContent === '七个阶段都未开始' && section.querySelector('.document-workflow-next-empty')?.textContent === '目前没有需要处理的事项' && JSON.stringify(rows.map((row) => row.dataset.phaseId + ':' + row.dataset.phaseState)) === JSON.stringify(['intake', 'source-development', 'drafting', 'review-verification', 'finalization', 'delivery', 'maintenance'].map((id) => id + ':not-started')) && rows.every((row) => JSON.stringify(Array.from(row.querySelectorAll('[data-phase-action]'), (button) => button.textContent)) === '["开始","跳过…"]'); })()`, 'document-workflow-fresh');
     at('document-workflow-start');
     await clickSelector(renderer, `aside.document-lens li.document-phase[data-phase-id="drafting"] [data-phase-action="start"]`, 'document-workflow-start');
+    await waitFor(renderer, `${phaseState('drafting', 'in-progress')} && window.__j07.status() === '「起草」已开始' && document.activeElement === ${phaseRow('drafting')}`, 'document-workflow-before-version-frame');
+    await assertRenderer(renderer, `window.__j07.releaseVersionFrame()`, 'document-version-release-frame');
     try {
       await waitFor(renderer, `${phaseState('drafting', 'in-progress')} && window.__j07.status() === '「起草」已开始' && document.activeElement === ${phaseRow('drafting')}`, 'document-workflow-started');
     } catch (error) {
