@@ -997,6 +997,8 @@ async function runWorkspaceJourney(renderer, dataRoot) {
     if (!(error instanceof Error) || error.message !== 'J-02/milestone-r2') throw error;
     const ipcCategory = await milestoneIpcTimeoutCategory(renderer, milestoneDrainObservation);
     const objectCategory = await milestoneObjectTimeoutCategory(dataRoot);
+    // Both categories are closed literals; expose no IPC payload, file name or manuscript text.
+    at(`milestone-r2-${ipcCategory}-${objectCategory}`);
     throw new Error(`J-02/milestone-r2-${ipcCategory}-${objectCategory}`);
   }
   at('milestone-save-ipc-order');
