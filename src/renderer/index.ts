@@ -245,7 +245,7 @@ function openTaskResult(entry: BookTaskItemProjection, backToPanel: () => void):
     jump: (target) => {
       if (bookId !== null) void jumpToManuscript(bookId, target);
     },
-    openSurface: (target) => void leaveThen(() => openGlobalAttentionTarget(target)),
+    openSurface: (target, revisionId) => void leaveThen(() => openGlobalAttentionTarget(target, revisionId)),
     onClose: (back) => {
       taskResultWindow = undefined;
       if (back) backToPanel();
@@ -672,7 +672,7 @@ async function openGlobalAttentionItem(item: GlobalAttentionItemProjection): Pro
 }
 
 /** One record, opened in this window — 待我处理's items and the 任务 panel's cards (Issue #423, S77a) alike. */
-async function openGlobalAttentionTarget(target: GlobalAttentionTarget): Promise<void> {
+async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysisRevisionId?: string): Promise<void> {
   switch (target.kind) {
     case 'manuscript-recovery':
       await returnToRecoveryComparison(target.attentionId);
@@ -690,7 +690,7 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget): Promise
       await renderStartupProjection(await window.ai7.getImportStartup());
       return;
     case 'analysis':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => renderBookAnalysis(route.bookId, route.bookTitle));
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => renderBookAnalysis(route.bookId, route.bookTitle, analysisRevisionId));
       return;
     case 'analysis-plan':
       await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
@@ -1913,7 +1913,7 @@ async function renderBookWorkbenchChooser(
  * The way back to the manuscript and to the overview sits in a persistent region, because a settled
  * result set is the longest thing this product renders and its way out must survive it (LAYER-005).
  */
-function renderBookAnalysis(bookId: string, bookTitle: string): void {
+function renderBookAnalysis(bookId: string, bookTitle: string, revisionId?: string): void {
   const content = panel();
   content.classList.add('book-analysis');
   content.dataset['bookId'] = bookId;
@@ -1950,7 +1950,7 @@ function renderBookAnalysis(bookId: string, bookTitle: string): void {
   replaceScreen('book-analysis', content);
   setStatus('分析已打开');
   const inspect = (first: boolean): void => {
-    void window.ai7.inspectBaselineAnalysis().then(
+    void window.ai7.inspectBaselineAnalysis(revisionId === undefined ? undefined : { revisionId }).then(
       (projection) => {
         if (host.isConnected && projection.bookId === host.dataset['analysisBookId']) renderBaselineAnalysis(host, projection, bookTitle);
       },
@@ -7559,7 +7559,7 @@ function renderEditorWindow(
     track: railTrack,
     api: window.ai7,
     binding: () => ({ manuscriptId: currentWindow.manuscriptId, branchId: currentWindow.branchId }),
-    jumpToBlock: (blockId) => void navigate({ kind: 'block', blockId }),
+    jumpToBlock: (blockId) => void manuscriptOnScreen?.jump({ blockId, markId: null }),
     onError: (error) => setStatus(rendererErrorMessage(error, '全稿位置轨未能更新。'), 'error'),
   });
   manuscriptRail.setPosition(initialWindow.position.proportion);

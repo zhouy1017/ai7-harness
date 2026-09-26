@@ -939,6 +939,19 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.task-result-window') === null && ${blockInView(target)} && ${CHIP} !== null`, 'result-jumped', 60_000);
     const chip = await renderer.evaluate(`(() => { const chip = ${CHIP}; return chip === null ? null : { blockId: chip.dataset.returnChip ?? null, words: chip.textContent.startsWith('回到') && chip.textContent.length > 2, title: chip.title }; })()`);
     requireJourney(typeof chip?.blockId === 'string' && chip.blockId !== target && chip.words === true && chip.title === '回到跳转前的位置', 'result-jump-chip', { found: chip !== null, same: chip?.blockId === target });
+    const railTarget = await renderer.evaluate(`(async () => {
+      const overview = await window.ai7.getBookOverview({ bookId: ${JSON.stringify(bookId)}, historyCursor: null });
+      const anchor = overview.manuscriptAnchor;
+      const current = await window.ai7.getManuscriptWindowAt({ manuscriptId: anchor.manuscriptId, branchId: anchor.branchId,
+        target: { kind: 'block', blockId: ${JSON.stringify(target)} } });
+      const block = current.blocks.find((item) => item.blockId === ${JSON.stringify(target)}) ?? current.blocks.find((item) => item.kind === 'paragraph');
+      const first = [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(block.text)][0].segment;
+      await window.ai7.createEditorialMark({ manuscriptId: current.manuscriptId, branchId: current.branchId,
+        clientMarkId: crypto.randomUUID(), baseRevisionId: current.revisionId, expectedJournalSequence: current.journalSequence,
+        blockId: block.blockId, baseBlockDigest: block.digest, fromGrapheme: 0, toGrapheme: 1, selectedText: first,
+        kind: 'annotation', highlightColor: null, body: '位置返回测试', proposedText: null, rationale: null });
+      return block.blockId;
+    })()`);
 
     at('chip-persists');
     // Until it is used the chip stays: across 导航, and across leaving the manuscript and coming back.
@@ -954,6 +967,11 @@ async function main() {
     // 回到<位置>: the manuscript is back where the editor was reading before the jump, and the chip is gone.
     await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'chip-use');
     await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)} && (document.querySelector('#persistence-status')?.textContent ?? '').startsWith('已回到')`, 'chip-returned', 60_000);
+    await waitFor(renderer, `document.querySelector('.rail-marker[data-rail-kind="annotation"]') !== null`, 'mark-rail-ready');
+    await clickSelector(renderer, '.rail-marker[data-rail-kind="annotation"]', 'mark-rail-jump');
+    await waitFor(renderer, `${blockInView(railTarget)} && ${CHIP}?.dataset.returnChip === ${JSON.stringify(chip.blockId)}`, 'mark-rail-return-chip', 60_000);
+    await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'mark-rail-return');
+    await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)}`, 'mark-rail-returned', 60_000);
     // A way out of 查看结果's window leaves the manuscript as its own ways out do (Issue #423 review): words typed a moment
     // before 在分析中打开 are written first, and the manuscript opened again from ②A holds them where they were typed.
     await openPanel(renderer, 'leave');
@@ -969,7 +987,7 @@ async function main() {
     })()`, 'leave-typed');
     // At once, well inside the half second before the words would write themselves.
     await assertRenderer(renderer, `(() => { const open = document.querySelector('.task-result-window [data-task-result-action="open"]'); if (!(open instanceof HTMLButtonElement)) return false; open.click(); return true; })()`, 'leave-open-analysis');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card')`, 'leave-analysis', 60_000);
+    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card')?.dataset.resultRevisionOrdinal === '1'`, 'leave-analysis-exact-historical-result', 60_000);
     await click(renderer, '打开稿件', 'leave-reopen');
     await waitFor(renderer, `(document.querySelector(${JSON.stringify(`[data-screen="editor"] .ProseMirror [data-block-id="${chip.blockId}"]`)})?.textContent ?? '').endsWith(${JSON.stringify(LEAVE_WORDS)})`, 'leave-words-kept', 60_000);
 
