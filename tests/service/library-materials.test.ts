@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { LIBRARY_OBJECT_DIRECTORY, identifyLibraryMaterialFormat } from '../../src/service/library-materials.js';
+import { LIBRARY_MATERIAL_TRIGGER_SQL, LIBRARY_OBJECT_DIRECTORY, identifyLibraryMaterialFormat } from '../../src/service/library-materials.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { LIBRARY_MATERIAL_SCHEMA_VERSION, REVIEW_GUIDELINE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
@@ -290,6 +290,20 @@ describe('知识库 › 资料库 over the real store', () => {
       }
       expect([now.decisionCount, now.decisions.map((entry) => entry.ordinal)])
         .toEqual([decisions, Array.from({ length: MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN }, (_, index) => decisions - MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN + index + 1)]);
+      now = store.decideLibraryMaterial({ materialId: material, expectedDecisions: now.decisionCount, decision: { kind: 'eligibility', choice: 'excluded', reason: null } });
+      for (let index = 0; index < decisions; index += 1) {
+        now = store.decideLibraryMaterial({ materialId: material, expectedDecisions: now.decisionCount,
+          decision: { kind: 'attribution', attribution: index % 2 === 0 ? { scope: 'book', bookId: bookA } : { scope: 'house' } } });
+      }
+      // The old eligibility has left the displayed page but still explains why attribution reset it.
+      expect([now.decisionCount, now.eligibility, now.eligibilityReset, now.decisions.length]).toEqual([decisions * 2 + 1, null, true, MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN]);
+      const tamper = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        tamper.exec('DROP TRIGGER library_material_decisions_no_update');
+        tamper.prepare("UPDATE library_material_decisions SET canonical_json = canonical_json || ' ' WHERE material_id = ? AND ordinal = 1").run(material);
+        tamper.exec(LIBRARY_MATERIAL_TRIGGER_SQL.library_material_decisions_no_update!);
+      } finally { tamper.close(); }
+      expect(await refusal(() => store.inspectLibraryMaterial(material))).toBe('LIBRARY_MATERIAL_DECISION_INVALID:资料库的决定记录已损坏。');
       store.markCleanShutdown();
     } finally {
       store.close();
