@@ -9,7 +9,8 @@ import { formatPriceFen } from '../shared/evaluation-calibration.js';
 
 export const CALIBRATION_PAGE_TITLE = '评估校准与预测';
 export const CALIBRATION_PAGE_GROUP = '编辑工作';
-export const CALIBRATION_PAGE_LEDE = '这里的两个开关只影响 AI7 的初评与预测，不改你的评分；定价与首印由你录入，AI7 不预测。';
+/** True with the prediction switch on as off (Issue #430 review): AI7 predicts nothing unless the editor turns it on. */
+export const CALIBRATION_PAGE_LEDE = '这里的两个开关只影响 AI7 的初评与预测，不改你的评分；定价与首印由你录入，AI7 默认不预测。';
 export const CALIBRATION_HEADING = '校准';
 /** What calibration touches, and what it never does (EVAL-011). */
 export const CALIBRATION_SCOPE = '校准只调整 AI7 给出的初评分数，不改你的评分，也不改风险项。';
@@ -41,7 +42,7 @@ export const CALIBRATION_STATUS = {
 } as const;
 
 /** Calibration's progress toward its threshold, and whether it applies (EVAL-011, EVAL-014). */
-export function calibrationProgressLine(calibration: EvaluationCalibrationProjection['calibration']): string {
+export function calibrationProgressLine(calibration: Pick<EvaluationCalibrationProjection['calibration'], 'adjustments' | 'threshold' | 'enabled' | 'active'>): string {
   const progress = `调分记录 ${calibration.adjustments} / ${calibration.threshold} 本`;
   if (!calibration.enabled) return `${progress} · 已关闭`;
   return calibration.active ? `${progress} · 已生效` : `${progress} · 满 ${calibration.threshold} 本后生效`;

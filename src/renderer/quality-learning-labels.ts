@@ -45,7 +45,10 @@ export const LEARNING_STATUS = {
   recording: '正在记录学习准入决定…',
   recorded: '学习准入决定已记录。',
   failed: '无法记录这个决定。',
+  loadingMore: '正在读取更多学习材料…',
 } as const;
+/** Reads the next page of materials (Issue #61 review). */
+export const LEARNING_MORE = '更多学习材料…';
 
 export const LEARNING_STATE_LABELS: Readonly<Record<LearningMaterialState, string>> = {
   pending: '待定',
@@ -81,8 +84,9 @@ export function learningChoiceConsequence(choice: LearningEligibilityChoice, boo
 }
 
 /** A Book's heading in the list. */
-export function learningBookHeading(book: Pick<LearningMaterialsBookProjection, 'title' | 'materials'>): string {
-  return `《${book.title}》 · ${book.materials.length} 条`;
+/** A Book's heading: its title and how many materials it has in all, whichever page shows them. */
+export function learningBookHeading(book: Pick<LearningMaterialsBookProjection, 'title' | 'materialCount'>): string {
+  return `《${book.title}》 · ${book.materialCount} 条`;
 }
 
 /** Who the Book's decisions are attributed to (FDBK-013). */
@@ -103,26 +107,28 @@ export function learningDecisionLine(material: Pick<LearningMaterialProjection, 
   return `${learningChoiceLabel(material.decision.choice)} · ${instant(material.decision.decidedAt)}${note}`;
 }
 
-// ---- 反馈记录 (Issue #61, plan slice S26c; V2-UX-FDBK-009, FDBK-010, FDBK-013) ----------------------------------------------
+// ---- 反馈历史 (Issue #61, plan slice S26c; V2-UX-FDBK-009, FDBK-010, FDBK-013) ----------------------------------------------
 
 export const QUALITY_LEARNING_TABS: ReadonlyArray<{ readonly tab: 'feedback' | 'learning'; readonly label: string }> = [
-  { tab: 'feedback', label: '反馈记录' },
+  { tab: 'feedback', label: '反馈历史' },
   { tab: 'learning', label: '学习准入' },
 ];
 export const QUALITY_LEARNING_TABS_LABEL = '质量与学习的内容';
-export const FEEDBACK_HISTORY_HEADING = '反馈记录';
+export const FEEDBACK_HISTORY_HEADING = '反馈历史';
 /** What the history is and is not (FDBK-007, FDBK-010), said once above it. */
 export const FEEDBACK_HISTORY_NOTE = '这里只是记录你给过的反馈：不会催你补充原因，也不会把没有说明当作认可。';
 export const FEEDBACK_HISTORY_EMPTY = '还没有反馈记录。你对修改建议、分析结果和审阅发现的处理与原因，会记在这里。';
 export const FEEDBACK_HISTORY_NONE_MATCH = '没有符合的反馈记录。';
 export const FEEDBACK_HISTORY_TRUNCATED = '只列出最近的记录。';
 export const FEEDBACK_HISTORY_OPEN = '打开…';
+/** In place of 打开… when the paragraph a 修改建议 was made on is gone from the manuscript (Issue #61 review). */
+export const FEEDBACK_HISTORY_DETACHED = '这条修改建议所在的段落已不在稿件中。';
 export const FEEDBACK_HISTORY_ALL = '全部';
 export const FEEDBACK_HISTORY_FILTERS = { book: '图书', origin: '来源', author: '作者', editor: '责编' } as const;
 export const FEEDBACK_HISTORY_STATUS = {
-  loading: '正在读取反馈记录…',
-  opened: '反馈记录已打开',
-  unavailable: '无法读取反馈记录。',
+  loading: '正在读取反馈历史…',
+  opened: '反馈历史已打开',
+  unavailable: '无法读取反馈历史。',
   opening: '正在打开这条反馈所在的记录…',
   openFailed: '无法打开这条反馈所在的记录。',
 } as const;
@@ -136,6 +142,14 @@ export const FEEDBACK_ORIGIN_LABELS: Readonly<Record<'proposal-decision' | 'anal
 /** One entry's first line: where it came from, what it is about, and what the editor decided or judged. */
 export function feedbackEntryLine(entry: { readonly origin: keyof typeof FEEDBACK_ORIGIN_LABELS; readonly dimension: string | null; readonly signal: string }): string {
   return `${FEEDBACK_ORIGIN_LABELS[entry.origin]}${entry.dimension === null ? '' : ` · ${entry.dimension}`} · ${entry.signal}`;
+}
+
+/**
+ * The people an entry is attributed to — the Book's as they stood when it was given (FDBK-013; Issue #61 review) — said on
+ * the entry only where they are not the Book's people now, which its heading names.
+ */
+export function feedbackAttributionLine(people: { readonly authors: ReadonlyArray<string>; readonly editors: ReadonlyArray<string> }): string {
+  return `当时的人员 · ${learningPeopleLine(people)}`;
 }
 
 /** Its reason as it stands; neither 不说明 nor silence is read as anything more (FDBK-007). */

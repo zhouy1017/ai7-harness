@@ -421,12 +421,17 @@ describe('decodeRequest accepts well-formed frames', () => {
   it('accepts a 图书交付包 version\'s export: its review, the folder the dialog returned within its bound, and its approval (Issue #416, S67b)', () => {
     const bookId = randomUUID();
     const folder = resolve('交付包导出');
+    const options = { includeAnnotations: true, includeSuggestions: false };
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
-      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID() } },
-      { op: 'prepareBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), reviewDigest: 'a'.repeat(64), folder } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options: { includeAnnotations: false, includeSuggestions: true } } },
+      { op: 'prepareBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options, reviewDigest: 'a'.repeat(64), folder } },
       {
         op: 'prepareBookDeliveryPackageExport',
-        input: { bookId, packageVersionId: randomUUID(), reviewDigest: 'b'.repeat(64), folder: `${folder}${'径'.repeat(MAX_EXPORT_DESTINATION_CODE_UNITS - folder.length)}` },
+        input: {
+          bookId, packageVersionId: randomUUID(), options, reviewDigest: 'b'.repeat(64),
+          folder: `${folder}${'径'.repeat(MAX_EXPORT_DESTINATION_CODE_UNITS - folder.length)}`,
+        },
       },
       { op: 'approveBookDeliveryPackageExport', input: { bookId, exportId: randomUUID() } },
     ];
@@ -482,6 +487,7 @@ describe('decodeRequest accepts well-formed frames', () => {
     const bookId = randomUUID();
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
       { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID() } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 22 } },
       { op: 'recordMaintenanceCase', input: { bookId, publicationVersionId: randomUUID(), classification: 'errata', reason: '读者来信指出有误', evidence: null } },
       { op: 'recordMaintenanceCase', input: { bookId, publicationVersionId: randomUUID(), classification: 'withdrawal', reason: '𠀀'.repeat(500), evidence: '质检单' } },
       { op: 'appendMaintenanceCaseRevision', input: { bookId, caseId: randomUUID(), expectedRevision: 1, step: { kind: 'link-proposal', markId: randomUUID() } } },
@@ -503,6 +509,12 @@ describe('decodeRequest accepts well-formed frames', () => {
     const refused: ReadonlyArray<{ op: string; input: unknown }> = [
       { op: 'inspectMaintenanceCase', input: { bookId } },
       { op: 'inspectMaintenanceCase', input: { bookId, caseId: 'first' } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID() } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 0 } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 2.5 } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: '22' } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: 'first', beforeOrdinal: 22 } },
+      { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 22, limit: 100 } },
       { op: 'recordMaintenanceCase', input: { ...record, classification: 'recall' } },
       { op: 'recordMaintenanceCase', input: { ...record, reason: '   ' } },
       { op: 'recordMaintenanceCase', input: { ...record, reason: '由'.repeat(501) } },
@@ -523,19 +535,28 @@ describe('decodeRequest accepts well-formed frames', () => {
     }
   });
 
-  it('rejects a 图书交付包 export whose version, digest, folder or key set is wrong (Issue #416, S67b)', () => {
+  it('rejects a 图书交付包 export whose version, switches, digest, folder or key set is wrong (Issue #416, S67b)', () => {
     const id = randomUUID();
     const bookId = randomUUID();
-    const prepare = { bookId, packageVersionId: randomUUID(), reviewDigest: 'a'.repeat(64), folder: resolve('交付包导出') };
+    const options = { includeAnnotations: true, includeSuggestions: true };
+    const prepare = { bookId, packageVersionId: randomUUID(), options, reviewDigest: 'a'.repeat(64), folder: resolve('交付包导出') };
     const refused: ReadonlyArray<{ op: string; input: unknown }> = [
       { op: 'reviewBookDeliveryPackageExport', input: { bookId } },
-      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: 'v2' } },
-      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), folder: prepare.folder } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID() } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: 'v2', options } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options, folder: prepare.folder } },
+      // 备注 never go with a package, and each switch is a switch.
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options: { ...options, includeEditorNotes: false } } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options: { includeAnnotations: true } } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options: { includeAnnotations: 1, includeSuggestions: true } } },
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options: null } },
+      { op: 'prepareBookDeliveryPackageExport', input: { bookId, packageVersionId: prepare.packageVersionId, reviewDigest: prepare.reviewDigest, folder: prepare.folder } },
+      { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, options: { includeAnnotations: true, includeSuggestions: 'yes' } } },
       { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, reviewDigest: 'A'.repeat(64) } },
       { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, reviewDigest: 'a'.repeat(63) } },
       { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, folder: '交付包导出' } },
       { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, folder: `${prepare.folder}${'径'.repeat(MAX_EXPORT_DESTINATION_CODE_UNITS)}` } },
-      { op: 'prepareBookDeliveryPackageExport', input: { bookId, packageVersionId: prepare.packageVersionId, reviewDigest: prepare.reviewDigest } },
+      { op: 'prepareBookDeliveryPackageExport', input: { bookId, packageVersionId: prepare.packageVersionId, options, reviewDigest: prepare.reviewDigest } },
       { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, fileNames: ['交付包清单.md'] } },
       { op: 'approveBookDeliveryPackageExport', input: { bookId, exportId: 'last' } },
       { op: 'approveBookDeliveryPackageExport', input: { bookId, exportId: randomUUID(), folder: prepare.folder } },
@@ -1085,6 +1106,23 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
+  it('accepts 知识库 › 范例 only as a page start: none, or a title and Book as 书库 pages (Issue #427)', () => {
+    for (const input of [{ after: null }, { after: { title: '出版之书', bookId: randomUUID() } }]) {
+      const request = { id: randomUUID(), op: 'inspectExemplars', input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    for (const input of [
+      {},
+      { after: null, bookId: randomUUID() },
+      { after: { title: '出版之书' } },
+      { after: { title: '出版之书', bookId: 'not-a-book' } },
+      { after: { title: 'x'.repeat(181), bookId: randomUUID() } },
+      { after: '出版之书' },
+    ]) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op: 'inspectExemplars', input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('accepts ②C 评估: the profile read naming nothing, a version by the route\'s Book, a start, and a save of the closed content shape (Issue #429, S81a)', () => {
     const bookId = randomUUID();
     const recordId = randomUUID();
@@ -1127,19 +1165,32 @@ describe('decodeRequest rejects malformed frames', () => {
       bookId, materialKey: `proposal-decision:${randomUUID()}`, materialDigest: 'b'.repeat(64), expectedDecisions: 0, choice: 'book', note: null,
     };
     for (const [op, input] of [
-      ['inspectLearningMaterials', { bookId: null }],
-      ['inspectLearningMaterials', { bookId }],
+      ['inspectLearningMaterials', { bookId: null, after: null }],
+      ['inspectLearningMaterials', { bookId, after: null }],
+      ['inspectLearningMaterials', { bookId: null, after: { bookTitle: '学习之书', bookId, orderedAt: '2026-09-26T01:02:03.004Z', materialKey: `proposal-decision:${randomUUID()}` } }],
+      ['inspectLearningMaterial', { bookId, materialKey: `review-disposition:${randomUUID()}/rvf_${'9c'.repeat(12)}` }],
       ['inspectFeedbackHistory', {}],
       ['decideLearningMaterial', decision],
       ['decideLearningMaterial', { ...decision, materialKey: `analysis-feedback:${randomUUID()}/entities/12`, expectedDecisions: 3, choice: 'deferred', note: '以后再说' }],
-      ['decideLearningMaterial', { ...decision, materialKey: `review-disposition:${randomUUID()}/finding-7`, choice: 'excluded' }],
+      ['decideLearningMaterial', { ...decision, materialKey: `analysis-feedback:${randomUUID()}/synopsis`, choice: 'house' }],
+      // A 审阅 finding's own identity, underscore and all (Issue #61 review).
+      ['decideLearningMaterial', { ...decision, materialKey: `review-disposition:${randomUUID()}/rvf_${'9c'.repeat(12)}`, choice: 'excluded' }],
     ] as const) {
       const request = { id: randomUUID(), op, input };
       expect(decodeRequest(frameOf(request))).toEqual(request);
     }
     for (const [op, input] of [
       ['inspectLearningMaterials', {}],
-      ['inspectLearningMaterials', { bookId: 'book' }],
+      ['inspectLearningMaterials', { bookId: null }],
+      ['inspectLearningMaterials', { bookId: 'book', after: null }],
+      ['inspectLearningMaterials', { bookId: null, after: { bookTitle: '学习之书', bookId, orderedAt: 'yesterday', materialKey: `proposal-decision:${randomUUID()}` } }],
+      ['inspectLearningMaterials', { bookId: null, after: { bookTitle: '学习之书', bookId, orderedAt: '2026-09-26T01:02:03.004Z', materialKey: 'library:x' } }],
+      ['inspectLearningMaterial', { bookId, materialKey: `review-disposition:${randomUUID()}/finding-7` }],
+      ['inspectLearningMaterial', { materialKey: `proposal-decision:${randomUUID()}` }],
+      // Each kind's own shape: a place that another kind would carry is none.
+      ['decideLearningMaterial', { ...decision, materialKey: `review-disposition:${randomUUID()}/finding-7` }],
+      ['decideLearningMaterial', { ...decision, materialKey: `proposal-decision:${randomUUID()}/entities/1` }],
+      ['decideLearningMaterial', { ...decision, materialKey: `analysis-feedback:${randomUUID()}/chapters/1` }],
       ['inspectFeedbackHistory', { bookId }],
       ['decideLearningMaterial', { ...decision, choice: 'series' }],
       ['decideLearningMaterial', { ...decision, choice: null }],
@@ -1213,7 +1264,7 @@ describe('decodeRequest rejects malformed frames', () => {
 
   it('accepts 设置 › 评估校准与预测: the read naming nothing, 定价与首印 in whole 分 and copies, and the two switches (Issue #430, S82)', () => {
     const bookId = randomUUID();
-    const actuals = { bookId, expectedEntries: 0, priceFen: 4500, firstPrint: 3000 };
+    const actuals = { bookId, publicationVersionId: randomUUID(), expectedEntries: 0, priceFen: 4500, firstPrint: 3000 };
     const preferences = { expectedEntries: 2, predictionEnabled: false, calibrationEnabled: true };
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
       { op: 'inspectEvaluationCalibration', input: {} },
@@ -1235,7 +1286,10 @@ describe('decodeRequest rejects malformed frames', () => {
       ['recordPublicationActuals', { ...actuals, priceFen: '4500' }],
       ['recordPublicationActuals', { ...actuals, firstPrint: 0 }],
       ['recordPublicationActuals', { ...actuals, firstPrint: 3000.5 }],
-      ['recordPublicationActuals', { ...actuals, publicationVersionId: randomUUID() }],
+      // The 发稿版本 the page listed, always (Issue #430 review).
+      ['recordPublicationActuals', { ...actuals, publicationVersionId: 'version' }],
+      ['recordPublicationActuals', { bookId, expectedEntries: 0, priceFen: 4500, firstPrint: 3000 }],
+      ['recordPublicationActuals', { ...actuals, publicationOrdinal: 1 }],
       ['recordPublicationActuals', { bookId, expectedEntries: 0, priceFen: 4500 }],
       ['setEvaluationPreferences', { ...preferences, predictionEnabled: 'on' }],
       ['setEvaluationPreferences', { ...preferences, calibrationEnabled: 1 }],
@@ -1290,7 +1344,9 @@ describe('decodeRequest rejects malformed frames', () => {
   it('accepts 知识库 › 资料库: the read naming nothing, a preview by absolute path, an arrival, and a decision of a closed shape (Issue #427, S79c)', () => {
     const materialId = randomUUID();
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
-      { op: 'inspectLibraryMaterials', input: {} },
+      { op: 'inspectLibraryMaterials', input: { after: null } },
+      { op: 'inspectLibraryMaterials', input: { after: { recordedAt: '2026-09-26T01:02:03.004Z', materialId: randomUUID() } } },
+      { op: 'inspectLibraryMaterial', input: { materialId } },
       { op: 'previewLibraryMaterial', input: { path: `${process.cwd()}/资料/样书.pdf` } },
       { op: 'addLibraryMaterial', input: { previewId: randomUUID(), title: '样书一', kind: 'book' } },
       { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId: randomUUID() } } } },
@@ -1305,6 +1361,12 @@ describe('decodeRequest rejects malformed frames', () => {
     const house = { kind: 'attribution', attribution: { scope: 'house' } };
     for (const [op, input] of [
       ['inspectLibraryMaterials', { bookId: randomUUID() }],
+      ['inspectLibraryMaterials', {}],
+      ['inspectLibraryMaterials', { after: { recordedAt: 'yesterday', materialId } }],
+      ['inspectLibraryMaterials', { after: { recordedAt: '2026-09-26T01:02:03.004Z', materialId: 'first' } }],
+      ['inspectLibraryMaterials', { after: { recordedAt: '2026-09-26T01:02:03.004Z' } }],
+      ['inspectLibraryMaterial', { materialId: 'first' }],
+      ['inspectLibraryMaterial', {}],
       ['previewLibraryMaterial', { path: '资料/样书.pdf' }],
       ['previewLibraryMaterial', {}],
       ['addLibraryMaterial', { previewId: randomUUID(), title: '样书一', kind: 'magazine' }],

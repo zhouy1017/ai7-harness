@@ -62,6 +62,7 @@ import type {
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
   J03_TASK_GOAL,
+  MAX_BOOK_SUMMARY_FILTER_CHARACTERS,
   MAX_REPLACEMENT_EXCLUSIONS,
   MILESTONE_PURPOSE_KINDS,
   MILESTONE_PURPOSE_LABELS,
@@ -74,9 +75,10 @@ import { mountBookPeople } from './book-people.js';
 import { mountReviewGuidelines } from './review-guidelines.js';
 import { mountLibraryMaterials } from './library-materials.js';
 import { mountEvaluation } from './evaluation.js';
-import { mountAnalysisFeedback } from './analysis-feedback.js';
+import { analysisFeedbackEngaged, mountAnalysisFeedback } from './analysis-feedback.js';
 import { mountLearningMaterials } from './quality-learning.js';
 import type { FeedbackHistoryTarget } from '../shared/protocol.js';
+import type { AnalysisFeedbackDimension } from '../shared/analysis-feedback.js';
 import { mountFeedbackHistory } from './feedback-history.js';
 import { mountEvaluationCalibration } from './evaluation-calibration.js';
 import { mountBookSeries, mountSeries, mountSeriesList } from './series.js';
@@ -110,7 +112,9 @@ import {
   procedureLine,
   EXEMPLARS_EMPTY,
   EXEMPLARS_LATER,
+  EXEMPLARS_MORE,
   EXEMPLARS_NONE_DELIVERED,
+  EXEMPLARS_STATUS,
   exemplarAttribution,
   exemplarDesignation,
   exemplarLine,
@@ -124,7 +128,14 @@ import {
   type KnowledgeBaseTab,
 } from './knowledge-base-labels.js';
 import { openTaskResultWindow, type TaskResultWindow } from './task-result-window.js';
-import { RETURN_CHIP_TITLE, TASK_PANEL_COMPOSE_STATUS, returnChipArrived, returnChipLabel, returnChipPlace } from './task-panel-labels.js';
+import {
+  RETURN_CHIP_TITLE,
+  TASK_PANEL_COMPOSE_STATUS,
+  TASK_PANEL_LEAVE_STATUS,
+  returnChipArrived,
+  returnChipLabel,
+  returnChipPlace,
+} from './task-panel-labels.js';
 import {
   BOOK_FILTER_ACTIONS,
   BOOK_FILTER_FIELD_LABEL,
@@ -144,6 +155,7 @@ import {
   DOCUMENT_STATUS_LINES,
   DOCUMENT_SURFACE_LABEL,
   documentVersionSavedLine,
+  showRestoreStands,
 } from './production-document-labels.js';
 import { documentStanding, renderDocumentLens, type ProductionDocumentContext } from './production-document-lens.js';
 import { AnalysisFollower } from './analysis-follow.js';
@@ -261,11 +273,11 @@ const taskDrawer = mountTaskDrawer({
   awaitServiceJob,
   onOpen: () => closeNavigation?.(),
   onRecorded: (kind) => taskSurfaceRefresh[kind]?.(),
-  openRunSurface: (plan) => void openTaskRunSurface(plan),
+  openRunSurface: (plan) => void leaveThen(() => openTaskRunSurface(plan)),
   openConnectionSettings: () => void renderModelServiceSettings(),
   openRules: () => void renderKnowledgeBase('rules'),
   // ① 任务面 (Issue #423, S77a): a card's own record, 查看结果's floating window and 发起全书任务.
-  openTaskTarget: (target) => void openGlobalAttentionTarget(target),
+  openTaskTarget: (target) => void leaveThen(() => openGlobalAttentionTarget(target)),
   openTaskResult: (entry, backToPanel) => openTaskResult(entry, backToPanel),
   startWholeBookTask: (bookId, input) => startWholeBookTask(bookId, input),
 });
@@ -291,7 +303,7 @@ function openTaskResult(entry: BookTaskItemProjection, backToPanel: () => void):
     jump: (target) => {
       if (bookId !== null) void jumpToManuscript(bookId, target);
     },
-    openSurface: (target) => void openGlobalAttentionTarget(target),
+    openSurface: (target) => void leaveThen(() => openGlobalAttentionTarget(target)),
     onClose: (back) => {
       taskResultWindow = undefined;
       if (back) backToPanel();
@@ -309,6 +321,9 @@ async function startWholeBookTask(
   bookId: string,
   input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; quick: DefaultExecutionRuleReference | null },
 ): Promise<{ ref: string; note?: string } | null> {
+  // The Task Input is frozen from the journal: the words typed just now, and any held after a failed write, are
+  // settled first, or nothing is prepared.
+  if (!(await settleScreen())) return null;
   setStatus(TASK_PANEL_COMPOSE_STATUS.preparing, 'busy');
   try {
     const initial = await window.ai7.prepareBaselineAnalysis({ goal: input.goal, update: input.update, reconfirm: false });
@@ -465,6 +480,31 @@ let globalAttentionSurface: GlobalAttentionSurface | undefined;
  */
 let leaveGuard: (() => Promise<boolean>) | null = null;
 let authorityInterrupted = false;
+
+/**
+ * A way out that is not the surface's own — a 任务 card, 查看结果's window, the drawer's 查看运行 — and 发起全书任务 settle
+ * the surface on screen as its own ways out do (Issue #423 review): the manuscript's local edits are written and its
+ * position taken first, and a refusal keeps it on screen. `true` once it may go on; with nothing to settle, at once.
+ */
+async function settleScreen(): Promise<boolean> {
+  const guard = leaveGuard;
+  if (guard === null) return true;
+  setStatus(TASK_PANEL_LEAVE_STATUS.settling, 'busy');
+  try {
+    if (await guard()) return true;
+    // The surface's own refusal stands; only a silent one is named here.
+    if (persistenceStatus.textContent === TASK_PANEL_LEAVE_STATUS.settling) setStatus(TASK_PANEL_LEAVE_STATUS.stayed, 'error');
+    return false;
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, TASK_PANEL_LEAVE_STATUS.stayed), 'error');
+    return false;
+  }
+}
+
+/** Open another page once the surface on screen has settled; a refusal keeps it. */
+async function leaveThen(open: () => Promise<void>): Promise<void> {
+  if (await settleScreen()) await open();
+}
 
 /**
  * 待我处理 (Issue #424, plan slice S78): one reader for the whole window, read on every screen change and
@@ -744,7 +784,7 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget): Promise
 }
 
 /**
- * Where a 反馈记录 entry opens (Issue #61, S26c; FDBK-009): the exact record, in its Book — the manuscript with the
+ * Where a 反馈历史 entry opens (Issue #61, S26c; FDBK-009): the exact record, in its Book — the manuscript with the
  * 修改建议's card open, ②A on the revision the judgment was made of, or ②B with the finding in view.
  */
 async function openFeedbackTarget(target: FeedbackHistoryTarget): Promise<void> {
@@ -756,7 +796,8 @@ async function openFeedbackTarget(target: FeedbackHistoryTarget): Promise<void> 
       });
       return;
     case 'analysis':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => renderBookAnalysis(route.bookId, route.bookTitle, target.revisionId));
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>
+        renderBookAnalysis(route.bookId, route.bookTitle, { revisionId: target.revisionId, itemKey: target.itemKey, dimension: target.dimension }));
       return;
     case 'review':
       await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>
@@ -1168,13 +1209,12 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
   let selection: RecoverySelection | undefined;
   const content = panel();
   content.classList.add('manuscript-recovery-panel');
-  content.append(
-    element('p', 'section-label', `稿件恢复优先 · ${recovery.unresolvedCount} 项待确认`),
-    element('h2', undefined, '先确认中断后的稿件状态'),
-    element('p', 'lede', recovery.snapshot.state === 'eligible'
-      ? '系统不会替你选择恢复来源。三个已校验证据保持并列，恢复只会形成新的后代修订版。'
-      : '系统不会替你选择恢复来源。当前两个可选证据保持并列；快照状态另行披露，恢复只会形成新的后代修订版。'),
-  );
+  const sectionLabel = element('p', 'section-label', `稿件恢复优先 · ${recovery.unresolvedCount} 项待确认`);
+  const heading = element('h2', undefined, '先确认中断后的稿件状态');
+  const lede = element('p', 'lede', recovery.snapshot.state === 'eligible'
+    ? '系统不会替你选择恢复来源。三个已校验证据保持并列，恢复只会形成新的后代修订版。'
+    : '系统不会替你选择恢复来源。当前两个可选证据保持并列；快照状态另行披露，恢复只会形成新的后代修订版。');
+  content.append(sectionLabel, heading, lede);
   const identity = element('section', 'source-card recovery-identity');
   const identityDetails = element('dl');
   // This card takes the demoting rank but no disclosure of its own. A `<summary>` is focusable and this
@@ -1197,7 +1237,8 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
   const choices = element('fieldset', 'recovery-comparison');
   choices.setAttribute('role', 'radiogroup');
   choices.setAttribute('aria-label', '恢复来源比较');
-  choices.append(element('legend', undefined, '选择一个证据来源（默认不选择）'));
+  const legend = element('legend', undefined, '选择一个证据来源（默认不选择）');
+  choices.append(legend);
   const cards = element('div', 'recovery-candidate-grid');
   cards.dataset['eligibleCandidateCount'] = recovery.snapshot.state === 'eligible' ? '3' : '2';
   const consequence = element('p', 'recovery-selection-consequence');
@@ -1252,19 +1293,28 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
     try {
       await openBook();
     } catch (error) {
-      // Neither drew (Issue #551). The restore stands, so the recovery's own choices are no longer the editor's: the screen
-      // stays, no longer busy, and offers to open the Book again, as 打开稿件 does when it fails.
-      const reopen = button('打开图书', 'primary', async () => {
+      // Neither drew (Issue #551). The restore stands, so the recovery's own choices are no longer the editor's: they close,
+      // the screen stays, no longer busy, and offers again where the restore lives — 交付物 for a document, the Book for the
+      // manuscript — as 打开稿件 does when it fails, with focus on it (Issue #582).
+      choices.disabled = true;
+      consequence.hidden = true;
+      // Nothing waits on the editor's confirmation any more (Issues #593, #603), so the screen's words stop asking for a
+      // decision.
+      showRestoreStands({ sectionLabel, heading, lede, legend });
+      const reopen = button(onDocument ? PUBLICATION_ACTION_LABELS.open : '打开图书', 'primary', async () => {
         reopen.disabled = true;
-        setStatus('正在打开图书…', 'busy');
+        setStatus(onDocument ? DELIVERABLES_STATUS_LINES.opening : '正在打开图书…', 'busy');
         try {
           await openBook();
         } catch (again) {
           reopen.disabled = false;
-          setStatus(rendererErrorMessage(again, '无法打开图书。'), 'error');
+          setStatus(onDocument
+            ? `${DOCUMENT_STATUS_LINES.recoveredRetryFailed}${rendererErrorMessage(again, DELIVERABLES_STATUS_LINES.openFailed)}`
+            : `已恢复为新版本 ${restored.descendantRevisionLabel}，但图书还是没能打开：${rendererErrorMessage(again, '无法打开图书。')}`, 'error');
         }
       });
       actions.replaceChildren(reopen);
+      reopen.focus();
       setStatus(onDocument
         ? DOCUMENT_STATUS_LINES.recoveredNothingOpened
         : `已恢复为新版本 ${restored.descendantRevisionLabel}，但稿件和图书都没能打开：${rendererErrorMessage(error, '可以再打开图书。')}`, 'error');
@@ -1952,7 +2002,7 @@ async function renderBookWorkbenchChooser(
  * The way back to the manuscript and to the overview sits in a persistent region, because a settled
  * result set is the longest thing this product renders and its way out must survive it (LAYER-005).
  */
-function renderBookAnalysis(bookId: string, bookTitle: string, revisionId?: string): void {
+function renderBookAnalysis(bookId: string, bookTitle: string, judged?: JudgedAnalysisItem): void {
   const content = panel();
   content.classList.add('book-analysis');
   content.dataset['bookId'] = bookId;
@@ -1989,13 +2039,15 @@ function renderBookAnalysis(bookId: string, bookTitle: string, revisionId?: stri
   replaceScreen('book-analysis', content);
   setStatus('分析已打开');
   const inspect = (first: boolean): void => {
-    // A 反馈记录 entry opens ②A on the revision it judged (Issue #61, S26c): read-only when that is no longer the current one.
-    const read = first && revisionId !== undefined
-      ? window.ai7.inspectBaselineAnalysis().then((current) => current.resultSetRevision?.revisionId === revisionId ? current : window.ai7.inspectBaselineAnalysis({ revisionId }))
+    // A 反馈历史 entry opens ②A on the revision it judged (Issue #61, S26c): read-only when that is no longer the current one.
+    const read = first && judged !== undefined
+      ? window.ai7.inspectBaselineAnalysis().then((current) => current.resultSetRevision?.revisionId === judged.revisionId ? current : window.ai7.inspectBaselineAnalysis({ revisionId: judged.revisionId }))
       : window.ai7.inspectBaselineAnalysis();
     void read.then(
       (projection) => {
-        if (host.isConnected && projection.bookId === host.dataset['analysisBookId']) renderBaselineAnalysis(host, projection, bookTitle);
+        if (!host.isConnected || projection.bookId !== host.dataset['analysisBookId']) return;
+        renderBaselineAnalysis(host, projection, bookTitle);
+        if (first && judged !== undefined) showJudgedAnalysisItem(host, judged.itemKey);
       },
       (error) => {
         if (!host.isConnected) return;
@@ -2015,7 +2067,28 @@ function renderBookAnalysis(bookId: string, bookTitle: string, revisionId?: stri
   };
   // The drawer's bar started this Task or reconfirmed its plan (Issue #420): ②A reads it again.
   taskSurfaceRefresh = { 'baseline-analysis': () => inspect(false) };
+  // The item a 反馈历史 entry judged opens on its own tab (Issue #61 review), the tab the card is drawn with.
+  if (judged !== undefined) analysisTabChoice.set(bookId, judged.dimension);
   inspect(true);
+}
+
+/** The item of ②A a 反馈历史 entry judged: its revision, its place, and the tab it sits on. */
+interface JudgedAnalysisItem {
+  readonly revisionId: string;
+  readonly itemKey: string;
+  readonly dimension: AnalysisFeedbackDimension;
+}
+
+/**
+ * The judged item in view (Issue #61 review): its tab already chosen, the item is scrolled to and takes focus, so the
+ * judgment 打开… led to is what the editor sees and a screen reader reads first.
+ */
+function showJudgedAnalysisItem(host: HTMLElement, itemKey: string): void {
+  const item = host.querySelector<HTMLElement>(`[data-analysis-item-key="${CSS.escape(itemKey)}"]`);
+  if (item === null) return;
+  item.tabIndex = -1;
+  item.scrollIntoView({ block: 'center' });
+  item.focus({ preventScroll: true });
 }
 
 /**
@@ -3584,6 +3657,8 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
     },
     unchanged: (next) => JSON.stringify(next) === JSON.stringify(projection),
     again: () => analysisFollowDelayMs(projection.state),
+    // An open 分析反馈 card the editor is in stays as it is: the Run's progress is drawn once they leave it (Issue #94 review).
+    held: () => analysisFeedbackEngaged(host),
     draw: (next) => renderBaselineAnalysis(host, next, bookTitle),
     failed: (error) => setStatus(rendererErrorMessage(error, '无法刷新基线稿件分析状态。'), 'error'),
   });
@@ -4408,12 +4483,12 @@ async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocu
     return;
   }
   if (tab === 'exemplars') {
-    setStatus('正在读取范例…', 'busy');
+    setStatus(EXEMPLARS_STATUS.loading, 'busy');
     try {
-      renderExemplars(panelNode, await window.ai7.inspectExemplars());
-      if (content.isConnected) setStatus('范例已打开');
+      renderExemplars(panelNode, await window.ai7.inspectExemplars({ after: null }));
+      if (content.isConnected) setStatus(EXEMPLARS_STATUS.opened);
     } catch (error) {
-      setStatus(rendererErrorMessage(error, '无法读取范例。'), 'error');
+      setStatus(rendererErrorMessage(error, EXEMPLARS_STATUS.unavailable), 'error');
     }
     return;
   }
@@ -4475,43 +4550,74 @@ function renderEvaluationProfiles(root: HTMLElement, projection: EvaluationProfi
 
 /**
  * 知识库 › 范例 (Issue #427, S79b; KB-004, KB-006): each published Book with who it is attributed to and when it was set as a
- * 发稿版本, and its delivered documents by type — each the version its latest delivery named, with its eligibility.
+ * 发稿版本, and its delivered documents by type — each the version its latest delivery named, with its eligibility. The
+ * Books come a page at a time: `更多已出版的书…` reads the next and focuses the first Book it adds (Issue #427 review).
  */
 function renderExemplars(root: HTMLElement, projection: ExemplarsProjection): void {
-  root.dataset['exemplarBooks'] = String(projection.books.length);
   if (projection.books.length === 0) root.append(element('p', 'field-note exemplars-empty', EXEMPLARS_EMPTY));
   const list = element('div', 'exemplar-list');
-  for (const book of projection.books) {
-    const card = element('article', 'exemplar-book');
-    card.dataset['bookId'] = book.bookId;
-    card.dataset['exemplarCount'] = String(book.exemplars.length);
-    card.append(
-      element('h3', undefined, `《${book.bookTitle}》`),
-      element('p', 'field-note exemplar-attribution', exemplarAttribution(book)),
-      element('p', 'field-note exemplar-designation', exemplarDesignation(book, localInstantLabel)),
-    );
-    if (book.exemplars.length === 0) card.append(element('p', 'field-note', EXEMPLARS_NONE_DELIVERED));
-    const items = element('ul', 'exemplar-items');
-    for (const exemplar of book.exemplars) {
-      const item = element('li', undefined, exemplarLine(exemplar, localInstantLabel));
-      item.dataset['exemplarDocument'] = exemplar.documentId;
-      item.dataset['exemplarType'] = exemplar.typeId;
-      item.dataset['exemplarVersion'] = String(exemplar.version);
-      items.append(item);
+  const append = (books: ExemplarsProjection['books']): HTMLElement | null => {
+    let first: HTMLElement | null = null;
+    for (const book of books) {
+      const card = element('article', 'exemplar-book');
+      card.dataset['bookId'] = book.bookId;
+      card.dataset['exemplarCount'] = String(book.exemplars.length);
+      card.dataset['exemplarWithdrawn'] = String(book.withdrawn);
+      const heading = element('h3', undefined, `《${book.bookTitle}》`);
+      heading.tabIndex = -1;
+      first ??= heading;
+      card.append(
+        heading,
+        element('p', 'field-note exemplar-attribution', exemplarAttribution(book)),
+        element('p', 'field-note exemplar-designation', exemplarDesignation(book, localInstantLabel)),
+      );
+      if (book.exemplars.length === 0) card.append(element('p', 'field-note', EXEMPLARS_NONE_DELIVERED));
+      const items = element('ul', 'exemplar-items');
+      for (const exemplar of book.exemplars) {
+        const item = element('li', undefined, exemplarLine(exemplar, localInstantLabel));
+        item.dataset['exemplarDocument'] = exemplar.documentId;
+        item.dataset['exemplarType'] = exemplar.typeId;
+        item.dataset['exemplarVersion'] = String(exemplar.version);
+        items.append(item);
+      }
+      if (book.exemplars.length > 0) card.append(items);
+      list.append(card);
     }
-    if (book.exemplars.length > 0) card.append(items);
-    list.append(card);
-  }
-  root.append(list, ...EXEMPLARS_LATER.map((line) => element('p', 'field-note exemplars-later', line)));
+    root.dataset['exemplarBooks'] = String(list.children.length);
+    return first;
+  };
+  append(projection.books);
+  let cursor = projection.nextCursor;
+  const more = element('button', 'button secondary', EXEMPLARS_MORE);
+  more.type = 'button';
+  more.dataset['exemplarAction'] = 'more';
+  const moreRow = element('div', 'button-row exemplars-more');
+  moreRow.hidden = cursor === null;
+  moreRow.append(more);
+  more.addEventListener('click', () => void (async () => {
+    if (cursor === null || more.disabled) return;
+    more.disabled = true;
+    setStatus(EXEMPLARS_STATUS.loadingMore, 'busy');
+    try {
+      const next = await window.ai7.inspectExemplars({ after: cursor });
+      if (!root.isConnected) return;
+      const first = append(next.books);
+      cursor = next.nextCursor;
+      moreRow.hidden = cursor === null;
+      setStatus(EXEMPLARS_STATUS.opened);
+      first?.focus();
+    } catch (error) {
+      setStatus(rendererErrorMessage(error, EXEMPLARS_STATUS.unavailable), 'error');
+    } finally {
+      more.disabled = false;
+    }
+  })());
+  root.append(list, moreRow, ...EXEMPLARS_LATER.map((line) => element('p', 'field-note exemplars-later', line)));
 }
 
 /**
- * 知识库's page on screen: its heading, the seven classes as a tab list — arrow keys move between them — and the chosen
- * class's panel, which says what the class holds and, for a class a later slice brings, why it shows nothing yet.
- */
-/**
  * 质量与学习 (Issue #61, plan slices S26b and S26c; LEARN-002, FDBK-009, FDBK-010): a house-wide destination beside 知识库 with
- * two tabs — 反馈记录, the passive history it opens at from the landing, and 学习准入, where a Book's 学习准入待处理 in
+ * two tabs — 反馈历史, the passive history it opens at from the landing, and 学习准入, where a Book's 学习准入待处理 in
  * 待我处理 opens it, for that Book, with the way to every Book one step away.
  */
 async function renderQualityLearning(tab: 'feedback' | 'learning', bookId: string | null, tabFocused = false): Promise<void> {
@@ -4577,6 +4683,10 @@ async function renderQualityLearning(tab: 'feedback' | 'learning', bookId: strin
   }
 }
 
+/**
+ * 知识库's page on screen: its heading, the seven classes as a tab list — arrow keys move between them — and the chosen
+ * class's panel, which says what the class holds and, for a class a later slice brings, why it shows nothing yet.
+ */
 function knowledgeBasePage(tab: KnowledgeBaseTab, tabFocused: boolean): { content: HTMLElement; panelNode: HTMLElement } {
   const view = knowledgeBaseTabView(tab);
   const content = panel();
@@ -4654,12 +4764,26 @@ function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjecti
     const artifacts = element('ul', 'knowledge-artifact-list');
     for (const artifact of procedures.artifacts) {
       const item = element('li', undefined, artifactLine(artifact));
-      item.dataset['artifactId'] = artifact.artifactId;
       item.dataset['artifactState'] = artifact.state;
       item.dataset['artifactEnabledBooks'] = String(artifact.enabledBooks);
       artifacts.append(item);
     }
-    section.append(element('h3', undefined, PROCEDURES_HEADING), list, artifacts);
+    // The identities are the Technical Identity Layer's (ADR 0071 §1, LAYER-001): the 方案's carrier and 权限侧车, and each
+    // 工序's own id, one step away from the words above.
+    const identities = technicalDetails(
+      'native-artifact-facts',
+      ...procedures.artifacts.flatMap((artifact) => [
+        element('dt', undefined, '原生载体身份'), element('dd', 'technical-identity', artifact.technical.artifactId),
+        element('dt', undefined, '原生载体版本'), element('dd', 'technical-identity', artifact.technical.version),
+        element('dt', undefined, 'SHA-256'), element('dd', 'technical-identity', artifact.technical.sha256),
+        element('dt', undefined, '权限侧车'), element('dd', 'technical-identity', artifact.technical.sidecarId),
+        ...(artifact.technical.sidecarSha256 === null
+          ? []
+          : [element('dt', undefined, '权限侧车 SHA-256'), element('dd', 'technical-identity', artifact.technical.sidecarSha256)]),
+      ]),
+      ...procedures.procedures.flatMap((procedure) => [element('dt', undefined, procedure.title), element('dd', 'technical-identity', procedure.procedureId)]),
+    );
+    section.append(element('h3', undefined, PROCEDURES_HEADING), list, artifacts, identities);
     panelNode.append(section, element('h3', undefined, RULES_HEADING));
   }
   panelNode.append(element('p', 'field-note', projection.statement));
@@ -4969,6 +5093,8 @@ function renderBookFilter(
   const text = element('input');
   text.id = 'book-filter-text';
   text.type = 'search';
+  // The service reads at most this many characters; a longer paste is cut here rather than refused as a bad request.
+  text.maxLength = MAX_BOOK_SUMMARY_FILTER_CHARACTERS;
   text.value = filter?.text ?? '';
   textLabel.append(text);
   const find = button(BOOK_FILTER_ACTIONS.find, 'secondary', () => undefined);
@@ -6740,6 +6866,24 @@ function renderEditorWindow(
   });
   openDeliverables.dataset['workDestination'] = 'deliverables';
   if (isDocument) openDeliverables.textContent = DOCUMENT_ACTION_LABELS.back;
+  // 评估 (Issue #429, S81a review; IA-012, editor-surfaces §0.3) sits between 审阅 and 交付物, and leaves the manuscript as
+  // they do: local edits settled and the position taken first, and a refusal keeps the manuscript on screen.
+  const openEvaluation = button(EVALUATION_TITLE, 'secondary', async () => {
+    openEvaluation.disabled = true;
+    setStatus(EVALUATION_STATUS.leaving, 'busy');
+    try {
+      if (!(await settleLocalEdit())) {
+        openEvaluation.disabled = authoritativeMutationBusy();
+        return;
+      }
+      await rememberEntryPosition();
+      renderBookEvaluation(currentWindow.bookId, bookTitle);
+    } catch (error) {
+      openEvaluation.disabled = authoritativeMutationBusy();
+      setStatus(rendererErrorMessage(error, EVALUATION_STATUS.openFailed), 'error');
+    }
+  });
+  openEvaluation.dataset['workDestination'] = 'evaluation';
   const toolbarActions = element('div', 'button-row');
   if (recoveryAttentionId) {
     toolbarActions.append(button('返回恢复待确认', 'secondary', async () => {
@@ -6757,12 +6901,12 @@ function renderEditorWindow(
   const recordsGroup = element('nav', 'book-records-group');
   recordsGroup.setAttribute('aria-label', '资料与记录');
   recordsGroup.append(element('span', 'section-label', '资料与记录'), ...(isDocument ? [] : [openAnalysis]), backToOverview);
-  // IA-006's `工作` group (稿件 / 审阅 / 评估 / 交付物), as much of it as exists: 审阅 (editor-surfaces §4) and
-  // 交付物 (§9). They are destinations of the Book beside 资料与记录, never entries on the right edge, whose
-  // three entries are 导航 / 分析 / 任务.
+  // IA-006's `工作` group (稿件 / 审阅 / 评估 / 交付物): 审阅 (editor-surfaces §4), 评估 (§5) and 交付物 (§9) — a document has
+  // only its way back. They are destinations of the Book beside 资料与记录, never entries on the right edge, whose three
+  // entries are 导航 / 分析 / 任务.
   const workGroup = element('nav', 'book-work-group');
   workGroup.setAttribute('aria-label', REVIEW_WORK_GROUP_LABEL);
-  workGroup.append(element('span', 'section-label', REVIEW_WORK_GROUP_LABEL), ...(isDocument ? [] : [openReview]), openDeliverables);
+  workGroup.append(element('span', 'section-label', REVIEW_WORK_GROUP_LABEL), ...(isDocument ? [] : [openReview, openEvaluation]), openDeliverables);
   // 保存为版本 (Issue #415): a document's working text becomes its next version; the manuscript's milestones stay its own.
   const saveVersion = button(DOCUMENT_ACTION_LABELS.saveVersion, 'secondary', () => void saveDocumentVersion());
   saveVersion.dataset['documentAction'] = 'saveVersion';
@@ -7098,6 +7242,7 @@ function renderEditorWindow(
     backToOverview.disabled = busy;
     openAnalysis.disabled = busy;
     openReview.disabled = busy;
+    openEvaluation.disabled = busy;
     openDeliverables.disabled = busy;
     undo.disabled = busy;
     redo.disabled = busy;
@@ -8061,7 +8206,11 @@ function renderEditorWindow(
     editor,
     api: window.ai7,
     busy: () => authoritativeMutationBusy() || serviceJobBusy(),
-    marksChanged: () => manuscriptRail?.refresh(),
+    // A mark changes what a Production Document's workflow waits on (N 条修改建议待处理), which its lens reads again.
+    marksChanged: () => {
+      manuscriptRail?.refresh();
+      documentLens?.refresh();
+    },
     openReviewFinding: (target) => void leaveForReview({ reviewRunId: target.reviewRunId, findingId: target.findingId }),
     openConflict: (markId) => void leaveForConflict(markId),
     // An Apply is an authoritative write like a replacement or an undo: the window is reloaded from the
