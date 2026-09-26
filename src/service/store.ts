@@ -11595,9 +11595,13 @@ export class EditorialStore {
     return this.#databaseReplacementCall(() => this.#databaseReplacements.preview(source));
   }
 
-  /** `替换本机全部数据`: the data as it is backed up, and the previewed package waiting to replace it at AI7's next start. */
+  /**
+   * `替换本机全部数据`: the data as it is backed up, and the previewed package waiting to replace it at AI7's next start. The
+   * backup writes alone in the backup location (Issue #434, S86c restack): after a 定期自动备份 check under way, and with none
+   * starting until it is written.
+   */
   async prepareDatabaseReplacement(previewId: string, now: Date = new Date()): Promise<DatabaseReplacementsProjection> {
-    return this.#databaseReplacementCall(() => this.#databaseReplacements.prepare(previewId, now));
+    return this.#databaseReplacementCall(() => this.#scheduledBackups.alone(() => this.#databaseReplacements.prepare(previewId, now)));
   }
 
   /** `取消替换`: the replacement waiting is removed and the data stays as it is. */
@@ -11610,9 +11614,9 @@ export class EditorialStore {
     return this.#databaseReplacementCall(() => this.#databaseReplacements.projection());
   }
 
-  /** `回退到替换前的数据`: the latest replacement's backup waiting to replace the data, which is backed up first. */
+  /** `回退到替换前的数据`: the latest replacement's backup waiting to replace the data, which is backed up first, alone too. */
   async rollBackDatabaseReplacement(replacementId: string, now: Date = new Date()): Promise<DatabaseReplacementsProjection> {
-    return this.#databaseReplacementCall(() => this.#databaseReplacements.rollBack(replacementId, now));
+    return this.#databaseReplacementCall(() => this.#scheduledBackups.alone(() => this.#databaseReplacements.rollBack(replacementId, now)));
   }
 
   async #databaseReplacementCall<T>(operation: () => Promise<T>): Promise<T> {

@@ -120,7 +120,7 @@ describe('导入数据库 over the real store', () => {
         origin: 'pre-replace-backup', dataVersion: 1, schemaRevision: DATABASE_REPLACEMENT_SCHEMA_VERSION, credentials: 'excluded',
         contents: { books: 2 },
       });
-      expect((await readdir(backups())).filter((name) => name.endsWith('.partial'))).toEqual([]);
+      expect((await readdir(backups())).filter((name) => name.includes('.partial'))).toEqual([]);
       // The data is untouched until then, and one replacement waits at a time; the preview it took is spent.
       expect(titles(store)).toEqual(['乙书', '甲书']);
       expect(code(await store.prepareDatabaseReplacement(preview.previewId, T).catch((error: unknown) => error))).toBe('DATABASE_IMPORT_PREVIEW_STALE');
@@ -344,4 +344,42 @@ describe('导入数据库 over the real store', () => {
       database.close();
     }
   });
+
+  it('writes the backup before a replacement alone in the backup location, beside 定期自动备份 (Issue #434, S86c restack)', async () => {
+    const hours = (count: number): Date => new Date(T.getTime() + count * 60 * 60 * 1000);
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      createBook(store, '甲书');
+      const packagePath = await exported(store, 'AI7 数据库.ai7db');
+      await store.setScheduledBackup({ enabled: true, expectedOrdinal: 0 }, T);
+      expect(await store.runScheduledBackupIfDue(T)).toBe(true);
+      const preview = await store.inspectDatabaseImport(packagePath);
+      // While the backup before the replacement is being made, a 定期自动备份 check starts nothing: no sweep, no backup.
+      const preparing = store.prepareDatabaseReplacement(preview.previewId, LATER);
+      expect(await store.runScheduledBackupIfDue(hours(25))).toBe(false);
+      expect((await preparing).pending).toMatchObject({ backupFileName: preReplaceBackupFileName(LATER) });
+      // Once it is written, the check runs as ever.
+      expect(await store.runScheduledBackupIfDue(hours(25))).toBe(true);
+      const names = await readdir(backups());
+      expect([names.includes(preReplaceBackupFileName(LATER)), names.filter((name) => name.includes('.partial'))]).toEqual([true, []]);
+      expect(store.inspectScheduledBackups(hours(25)).total).toBe(2);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    // The next open brings the package's data in, whose switch is off. Turned on there, 回退 writes its backup alone as well.
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const replaced = await store.inspectDatabaseReplacements();
+      await store.setScheduledBackup({ enabled: true, expectedOrdinal: 0 }, hours(49));
+      expect(await store.runScheduledBackupIfDue(hours(49))).toBe(true);
+      const rollingBack = store.rollBackDatabaseReplacement(replaced.rollBackOf!, hours(50));
+      expect(await store.runScheduledBackupIfDue(hours(74))).toBe(false);
+      expect((await rollingBack).pending).toMatchObject({ kind: 'roll-back', backupFileName: preReplaceBackupFileName(hours(50)) });
+      expect(await store.runScheduledBackupIfDue(hours(74))).toBe(true);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
 });

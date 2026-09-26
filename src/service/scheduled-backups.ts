@@ -251,6 +251,8 @@ export class ScheduledBackups {
   #writing = false;
   /** Set once the service stops: no check starts after it. */
   #stopped = false;
+  /** Another write into the backup location running now — the backup before a replacement (S86c): no check starts meanwhile. */
+  #held = 0;
   /** The last backup this service could not make, until one is made or the switch is turned off. */
   #lastFailure: ScheduledBackupFailureProjection | null = null;
 
@@ -311,7 +313,7 @@ export class ScheduledBackups {
    * and a caller while it runs is answered by it. Answers whether a backup was made.
    */
   runIfDue(now: Date): Promise<boolean> {
-    if (this.#stopped) return Promise.resolve(false);
+    if (this.#stopped || this.#held > 0) return Promise.resolve(false);
     if (this.#inFlight !== null) return this.#inFlight;
     const controller = new AbortController();
     const run = this.#run(now, controller.signal).finally(() => {
@@ -321,6 +323,21 @@ export class ScheduledBackups {
     this.#inFlight = run;
     this.#controller = controller;
     return run;
+  }
+
+  /**
+   * Another write into the backup location — the backup before a replacement (Issue #434, S86c) — runs alone: after the check
+   * under way, and with no check starting until it ends. A check's sweep so never takes a file that write is making, and two
+   * whole packages are never written at once. A check skipped meanwhile is asked again within the hour.
+   */
+  async alone<T>(write: () => Promise<T>): Promise<T> {
+    while (this.#inFlight !== null) await this.#inFlight.catch(() => undefined);
+    this.#held += 1;
+    try {
+      return await write();
+    } finally {
+      this.#held -= 1;
+    }
   }
 
   /**

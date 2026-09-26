@@ -7,7 +7,13 @@ import { strFromU8, unzipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
 import { writeDatabasePackage } from '../../src/service/database-exports.js';
-import { SCHEDULED_BACKUP_TRIGGER_SQL, backupFileName } from '../../src/service/scheduled-backups.js';
+import {
+  SCHEDULED_BACKUP_TRIGGER_SQL,
+  ScheduledBackups,
+  backupFileName,
+  backupLocationFor,
+  initializeScheduledBackupSchema,
+} from '../../src/service/scheduled-backups.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { DATABASE_EXPORT_SCHEMA_VERSION, DATABASE_REPLACEMENT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -450,6 +456,46 @@ describe('定期自动备份 over the real store', () => {
       // Not asked, it writes the package whole.
       expect((await writeDatabasePackage(db, dataRoot, packagePath, facts)).members.map((member) => member.path)).toEqual(['store/ai7.sqlite', 'object.bin']);
       expect(leftBehind()).toEqual([true, false]);
+    } finally {
+      db.close();
+    }
+  }, 180_000);
+
+  it('lets another write into the backup location run alone: after the check under way, and with none starting meanwhile (Issue #434, S86c restack)', async () => {
+    const dataRoot = join(roots.inputRoot, 'data');
+    await mkdir(dataRoot);
+    const location = backupLocationFor(dataRoot);
+    const db = new DatabaseSync(':memory:');
+    try {
+      initializeScheduledBackupSchema(db);
+      const backups = new ScheduledBackups(db, dataRoot, {
+        facts: () => ({ dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: DATABASE_REPLACEMENT_SCHEMA_VERSION }),
+        contents: () => ({ books: 0, sourceVersions: 0, libraryMaterials: 0, series: 0 }),
+      });
+      backups.setEnabled(true, 0);
+      // A write asked while a check runs starts only once that check has made its backup.
+      const check = backups.runIfDue(T);
+      const seen = await backups.alone(async () => backups.projection(T));
+      expect([await check, seen.total, seen.backingUp]).toEqual([true, 1, false]);
+      // While a write runs, a check starts nothing, and its sweep never takes the file that write is making.
+      const making = join(location, `.${randomUUID()}.ai7db.partial`);
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const writing = backups.alone(async () => {
+        await writeFile(making, 'being written');
+        await released;
+      });
+      while (!existsSync(making)) await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(await backups.runIfDue(at(DAY))).toBe(false);
+      expect(existsSync(making)).toBe(true);
+      release();
+      await writing;
+      // Once it has ended, the check runs: a file it left is swept, and the backup made.
+      expect(await backups.runIfDue(at(DAY))).toBe(true);
+      expect(existsSync(making)).toBe(false);
+      await backups.stop();
     } finally {
       db.close();
     }
