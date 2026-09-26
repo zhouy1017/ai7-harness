@@ -184,6 +184,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j07-picker-path' ||
           key === '--j09-picker-path' ||
           key === '--j10-picker-path' ||
+          key === '--j16-picker-path' ||
           key === '--j07-save-path' ||
           key === '--j07-folder-path' ||
           key === '--j04-save-path' ||
@@ -223,9 +224,10 @@ function parseArguments(argv: string[]): LaunchArguments {
   const j07PickerPath = values.get('--j07-picker-path');
   const j09PickerPath = values.get('--j09-picker-path');
   const j10PickerPath = values.get('--j10-picker-path');
+  const j16PickerPath = values.get('--j16-picker-path');
   requireDesktop(
     [j01PickerPath, j02PickerPath, j08PickerPath, j12PickerPath, j03PickerPath, j04PickerPath, j05PickerPath, j06PickerPath, j07PickerPath, j09PickerPath,
-      j10PickerPath].filter(Boolean).length <= 1,
+      j10PickerPath, j16PickerPath].filter(Boolean).length <= 1,
   );
   // The picker-path launch controls carry whatever their Journey selects, in any recognised format
   // or none, so each one asks only that it is its own Journey's absolute path.
@@ -262,9 +264,12 @@ function parseArguments(argv: string[]): LaunchArguments {
   requireDesktop(
     j10PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-10' && isAbsolute(j10PickerPath)),
   );
+  requireDesktop(
+    j16PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-16' && isAbsolute(j16PickerPath)),
+  );
   const injectedPickerPath =
     j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath ?? j04PickerPath ?? j05PickerPath ?? j06PickerPath ??
-      j07PickerPath ?? j09PickerPath ?? j10PickerPath;
+      j07PickerPath ?? j09PickerPath ?? j10PickerPath ?? j16PickerPath;
   // The Save dialog's launch control is guarded exactly as the picker controls are: each Journey's own, and absolute —
   // J-07's for its exports, J-04's for the 审阅报告's (Issue #500, S64b part 2).
   const j07SavePath = values.get('--j07-save-path');
@@ -315,11 +320,12 @@ function parseArguments(argv: string[]): LaunchArguments {
   requireDesktop(
     recoveryControlValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-08' && recoveryControl !== undefined),
   );
-  // The model adapter binds a Journey whose Runs execute: J-04's analysis, J-09's 运行中 and 最近完成 (Issue #424), and
-  // J-10's cancelled Run (Issue #422).
+  // The model adapter binds a Journey whose Runs execute: J-04's analysis, J-09's 运行中 and 最近完成 (Issue #424),
+  // J-10's cancelled Run (Issue #422), and J-16's 任务 panel (Issue #423).
   requireDesktop(
     modelAdapterControlValue === undefined ||
-      ((process.env.AI7_E2E_JOURNEY === 'J-04' || process.env.AI7_E2E_JOURNEY === 'J-09' || process.env.AI7_E2E_JOURNEY === 'J-10') &&
+      ((process.env.AI7_E2E_JOURNEY === 'J-04' || process.env.AI7_E2E_JOURNEY === 'J-09' || process.env.AI7_E2E_JOURNEY === 'J-10' ||
+        process.env.AI7_E2E_JOURNEY === 'J-16') &&
         modelAdapterControl !== undefined),
   );
   requireDesktop([importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length <= 1);
@@ -327,9 +333,11 @@ function parseArguments(argv: string[]): LaunchArguments {
   // simulates whether the adapter's route has a network, it sits beside the adapter rather than excluding it.
   const connectivityPath = values.get('--j04-connectivity-path');
   requireDesktop(connectivityPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && isAbsolute(connectivityPath)));
-  // J-10's unit hold (Issue #422) is guarded the same way — J-10's own, and absolute — and sits beside the adapter.
+  // J-10's unit hold (Issue #422) is guarded the same way — J-10's own, and J-16's to hold a Run in its 任务 panel (Issue
+  // #423), and absolute — and sits beside the adapter.
   const unitHoldPath = values.get('--j10-unit-hold-path');
-  requireDesktop(unitHoldPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-10' && isAbsolute(unitHoldPath)));
+  requireDesktop(unitHoldPath === undefined ||
+    ((process.env.AI7_E2E_JOURNEY === 'J-10' || process.env.AI7_E2E_JOURNEY === 'J-16') && isAbsolute(unitHoldPath)));
   requireDesktop(
     observeJ12RevealValue === undefined ||
       (process.env.AI7_E2E_JOURNEY === 'J-12' && observeJ12RevealValue === 'true'),
@@ -2826,6 +2834,20 @@ function registerRendererHandlers(
     }
     return result;
   };
+  // ① 任务面 (Issue #423, S77a): a read of the route's Book's Tasks, bound to its read epoch like every route read.
+  ipcMain.handle(IPC_CHANNELS.inspectBookTasks, (event) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectBookTasks', { bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '任务不属于当前图书工作台。');
+      return result;
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.inspectProductionDocuments, (event) =>
     envelope(async () => {
       const owned = requireSender(event);
@@ -3382,6 +3404,22 @@ function registerRendererHandlers(
         if (result.branchId !== input.branchId) {
           throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '重做结果不属于当前稿件分支。');
         }
+        return result;
+      });
+    }),
+  );
+  // 保存人员 (Issue #431, S83): a Book's 作者, 责编 and 相关人 on its 工作概览 — the Book this window shows, or none yet.
+  ipcMain.handle(IPC_CHANNELS.updateBookPeople, (event, input: Parameters<RendererApi['updateBookPeople']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = owned.route;
+        requireDesktop(route === null || (route.kind === 'book' && route.bookId === input.bookId), 'AI7_RENDERER_BOUNDARY_INVALID');
+        const result = await service.call('updateBookPeople', {
+          bookId: input.bookId, expectedVersion: input.expectedVersion, authors: input.authors, editors: input.editors, related: input.related,
+        });
+        requireDesktop(result.bookId === input.bookId, 'AI7_SERVICE_ROUTE_INVALID');
         return result;
       });
     }),

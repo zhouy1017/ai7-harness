@@ -300,6 +300,8 @@ describe('decodeRequest accepts well-formed frames', () => {
     const delivery = { bookId, documentId: randomUUID(), version: { kind: 'saved', revisionId: randomUUID() } };
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
       { op: 'inspectProductionDocuments', input: { bookId } },
+      // The Book's 任务 panel (Issue #423, S77a).
+      { op: 'inspectBookTasks', input: { bookId } },
       { op: 'createProductionDocument', input: { bookId, typeId: 'news-release', sourceVersionId: randomUUID() } },
       { op: 'decideProductionDocumentType', input: { bookId, typeId: 'marketing-points', notForThisBook: true } },
       { op: 'decideProductionDocumentType', input: { bookId, typeId: 'promotion-article', notForThisBook: false } },
@@ -365,6 +367,9 @@ describe('decodeRequest accepts well-formed frames', () => {
       { op: 'inspectProductionDocuments', input: {} },
       { op: 'inspectProductionDocuments', input: { bookId: 'current' } },
       { op: 'inspectProductionDocuments', input: { bookId, typeId: 'news-release' } },
+      { op: 'inspectBookTasks', input: {} },
+      { op: 'inspectBookTasks', input: { bookId: 'current' } },
+      { op: 'inspectBookTasks', input: { bookId, group: 'waiting' } },
       // A delivery names one recipient kind; only 自行输入 carries words, within their bound, and a note stays in its own.
       { op: 'recordProductionDocumentDelivery', input: { ...delivery, recipient: { kind: 'press', custom: null }, note: null } },
       { op: 'recordProductionDocumentDelivery', input: { ...delivery, recipient: { kind: 'publicity', custom: '宣传部' }, note: null } },
@@ -456,6 +461,47 @@ describe('decodeRequest accepts well-formed frames', () => {
     for (const { op, input } of inputs) {
       const request = { id: randomUUID(), op, input };
       expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+  });
+
+  it('accepts a Book\'s people and 书库\'s search within their bounds (Issue #431, S83)', () => {
+    const bookId = randomUUID();
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'updateBookPeople', input: { bookId, expectedVersion: 0, authors: ['周一', '吴二'], editors: ['郑三'], related: [{ roleId: 'proofreader', name: '王四' }] } },
+      { op: 'updateBookPeople', input: { bookId, expectedVersion: 3, authors: [], editors: [], related: [] } },
+      { op: 'updateBookPeople', input: { bookId, expectedVersion: 1, authors: ['𠀀'.repeat(40)], editors: [], related: [] } },
+      { op: 'listBooks', input: { after: null } },
+      { op: 'listBooks', input: { after: null, filter: { field: 'author', text: '吴二' } } },
+      { op: 'listBooks', input: { after: { title: '人员之书甲', bookId }, filter: { field: 'all', text: '郑' } } },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+  });
+
+  it('rejects a people frame or a search whose names, bounds, role or key set is wrong (Issue #431, S83)', () => {
+    const id = randomUUID();
+    const bookId = randomUUID();
+    const people = { bookId, expectedVersion: 0, authors: ['周一'], editors: [], related: [] };
+    const refused: ReadonlyArray<{ op: string; input: unknown }> = [
+      { op: 'updateBookPeople', input: { ...people, expectedVersion: -1 } },
+      { op: 'updateBookPeople', input: { ...people, authors: ['   '] } },
+      { op: 'updateBookPeople', input: { ...people, authors: ['名'.repeat(41)] } },
+      { op: 'updateBookPeople', input: { ...people, authors: Array.from({ length: 11 }, (_, index) => `作者${index}`) } },
+      { op: 'updateBookPeople', input: { ...people, editors: 'Zheng San' } },
+      { op: 'updateBookPeople', input: { ...people, related: [{ roleId: 'Proofreader', name: '王四' }] } },
+      { op: 'updateBookPeople', input: { ...people, related: [{ roleId: 'proofreader', name: '王四', note: '' }] } },
+      { op: 'updateBookPeople', input: { bookId, expectedVersion: 0, authors: [], editors: [] } },
+      { op: 'listBooks', input: { after: null, filter: { field: 'series', text: '书系' } } },
+      { op: 'listBooks', input: { after: null, filter: { field: 'author', text: '' } } },
+      { op: 'listBooks', input: { after: null, filter: { field: 'author', text: '一\n吴' } } },
+      { op: 'listBooks', input: { after: null, filter: { field: 'author', text: '字'.repeat(41) } } },
+      { op: 'listBooks', input: { after: null, filter: { field: 'author' } } },
+      { op: 'listBooks', input: { after: null, page: 2 } },
+    ];
+    for (const { op, input } of refused) {
+      expect(rejectionFor(frameOf({ id, op, input })).requestId).toBe(id);
     }
   });
 

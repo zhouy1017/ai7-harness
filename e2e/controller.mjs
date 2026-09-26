@@ -93,7 +93,7 @@ if (isJourneyRunner) {
   }
 }
 
-export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15', 'J-03', 'J-04', 'J-05', 'J-06', 'J-07', 'J-09', 'J-10']);
+export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15', 'J-03', 'J-04', 'J-05', 'J-06', 'J-07', 'J-09', 'J-10', 'J-11', 'J-16']);
 
 // The bounded pull-request subset of ADMITTED_JOURNEYS under ADR 0075. Every member launches the
 // same production-shaped subject, so a broken build, launch, IPC, data root, or service still fails
@@ -187,6 +187,8 @@ const JOURNEY_MODULES = Object.freeze({
   'J-07': new URL('./run-j07.mjs', import.meta.url),
   'J-09': new URL('./run-j09.mjs', import.meta.url),
   'J-10': new URL('./run-j10.mjs', import.meta.url),
+  'J-11': new URL('./run-j11.mjs', import.meta.url),
+  'J-16': new URL('./run-j16.mjs', import.meta.url),
 });
 
 const J01_LAUNCH_SCENARIOS = Object.freeze([
@@ -397,6 +399,12 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'renderer-ready-flag',
     'renderer-ready-landing',
     'import-stage',
+    // Where staging stood when its bound passed (#621).
+    'import-stage-reading',
+    'import-stage-parsing',
+    'import-stage-recording',
+    'import-stage-screen',
+    'import-stage-unreadable',
     'import-review',
     'import-commit',
     'import-editor-open',
@@ -882,6 +890,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'package-export',
     // Issue #426 (S68a): 维护事项 — a 勘误 recorded, written and concluded, and 撤回 of the current designation.
     'maintenance-cases',
+    // Issue #426 (S68b): 维护事项待处理 — a waiting 替代 in 待我处理, opened back at its case, and cleared by an 归档.
+    'maintenance-attention',
     'documents-restart',
     'zero-loopback-requests',
     'completion-browser-close',
@@ -987,6 +997,67 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'account-limit-stop',
     'account-limit-resolve',
     'account-limit-resumed',
+    'zero-loopback-requests',
+    'completion-browser-close',
+    'completion-cleanup',
+  ]),
+  // J-11 (Issue #431, plan slice S83): a Book's 作者, 责编 and 相关人 on its 工作概览, on 书库's cards, found by 书名, 作者
+  // and 责编, and kept across a restart — two empty Books, no manuscript read.
+  'J-11': Object.freeze([
+    'entry',
+    'controller-loopback-sentinel',
+    'controller-imports',
+    'renderer-api-boundary',
+    'first-book-created',
+    'people-empty',
+    'j14-people-keyboard',
+    'people-form',
+    'j14-people-zoom-200-reflow',
+    'j14-people-forced-colors',
+    'people-saved',
+    'people-unchanged',
+    'second-book-created',
+    'library-cards',
+    'library-search',
+    'restart-keeps-people',
+    'zero-loopback-requests',
+    'completion-browser-close',
+    'completion-cleanup',
+  ]),
+  // J-16 (Issue #423, plan slice S77a): the 任务 panel — the Book's Tasks beside the manuscript, controlled from their cards,
+  // a finished Task's result in a window beside the text, and the 回到<位置> chip a jump leaves.
+  'J-16': Object.freeze([
+    'entry',
+    'controller-loopback-sentinel',
+    'controller-imports',
+    'exact-sample1',
+    'renderer-api-boundary',
+    'book-import',
+    'book-prerequisites',
+    'model-credential-saved',
+    'model-credential-removed',
+    'panel-open',
+    'panel-prepare',
+    'panel-start',
+    'panel-pause',
+    'panel-resume',
+    'panel-compose-update',
+    'panel-cancel',
+    'result-window',
+    'result-jump',
+    'chip-persists',
+    'chip-return',
+    'chip-return-state-unavailable',
+    'chip-return-retained-busy',
+    'chip-return-retained-ready',
+    'chip-return-target-missing',
+    'chip-return-status-replaced',
+    'chip-return-late-completion',
+    'analysis-jump-chip',
+    'j14-panel-keyboard',
+    'j14-panel-zoom-200-reflow',
+    'j14-panel-forced-colors',
+    'restart-keeps-tasks',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',

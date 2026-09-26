@@ -23,7 +23,7 @@ import {
   TASK_BAR_WAITING_FOR_CONNECTION,
   TASK_BAR_WAITING_NOTE,
   TASK_DRAWER_BACK,
-  TASK_DRAWER_BACK_REASON,
+  TASK_DRAWER_BACK_TITLE,
   TASK_DRAWER_FOOTER,
   TASK_DRAWER_MODE_KEY,
   TASK_DRAWER_MODES,
@@ -192,7 +192,7 @@ describe('the drawer', () => {
   it('names itself, its header actions and its footer in §6\'s and PLAN-007\'s words', () => {
     expect(TASK_DRAWER_TITLE).toBe('任务计划');
     expect(TASK_DRAWER_BACK).toBe('← 任务');
-    expect(TASK_DRAWER_BACK_REASON).toBe('任务面接通后可用');
+    expect(TASK_DRAWER_BACK_TITLE).toBe('回到这本书的任务');
     expect(TASK_DRAWER_FOOTER).toBe('计划说明，不是运行授权');
     expect(TASK_PLAN_OPEN).toBe('查看计划');
   });
@@ -255,7 +255,7 @@ describe('the goal block (D5)', () => {
 
   it('says the saved revision leaves the Task untouched by later editing (TASK-039/040), and why 修改 waits', () => {
     expect(taskPlanSavedLine('r2')).toBe('已为任务保存修订版 r2，之后的编辑不影响这项任务。');
-    expect(TASK_PLAN_EDIT_REASON).toBe('回到撰写随任务面板提供');
+    expect(TASK_PLAN_EDIT_REASON).toBe('修改任务说法随撰写框提供');
   });
 });
 

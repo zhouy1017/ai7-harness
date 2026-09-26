@@ -8,6 +8,7 @@ import type {
   InspectTaskPlanInput,
   TaskPlanProjection,
   GlobalAttentionProjection,
+  BookTasksProjection,
   ApproveManuscriptExportInput,
   InspectManuscriptExportReceiptInput,
   StageManuscriptExportInput,
@@ -35,6 +36,9 @@ import type {
   BookDeliveryPackageResultProjection,
   PrepareBookDeliveryPackageInput,
   ApproveBookDeliveryPackageExportInput,
+  BookPeopleResultProjection,
+  BookSummaryFilter,
+  UpdateBookPeopleInput,
   AppendMaintenanceCaseRevisionInput,
   InspectMaintenanceCaseInput,
   ListMaintenanceCasesInput,
@@ -191,6 +195,7 @@ import { initializePublicationVersionSchema, PublicationVersionError, Publicatio
 import {
   GLOBAL_ATTENTION_READ_LIMIT,
   GlobalAttentionError,
+  composeBookTasks,
   composeGlobalAttention,
   readImportAttention,
   readRecoveryAttention,
@@ -275,6 +280,7 @@ import { initializeReimportGroupSchema } from './reimport-group-ledger.js';
 import { initializeProductionDocumentDeliverySchema, initializeProductionDocumentSchema } from './production-document-ledger.js';
 import { BookDeliveryPackageError, BookDeliveryPackages, initializeBookDeliveryPackageSchema } from './book-delivery-packages.js';
 import { MaintenanceCaseError, MaintenanceCases, initializeMaintenanceCaseSchema } from './maintenance-cases.js';
+import { BookPeople, BookPeopleError, initializeBookPeopleSchema } from './book-people.js';
 import {
   ProductionDocumentOriginError,
   initializeProductionDocumentOriginSchema,
@@ -370,6 +376,7 @@ import {
   BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
   PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
   MAINTENANCE_CASE_SCHEMA_VERSION,
+  BOOK_PEOPLE_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1589,7 +1596,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
       currentVersion === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       currentVersion === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
-      currentVersion === MAINTENANCE_CASE_SCHEMA_VERSION,
+      currentVersion === MAINTENANCE_CASE_SCHEMA_VERSION ||
+      currentVersion === BOOK_PEOPLE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1628,7 +1636,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
       currentVersion === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       currentVersion === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
-      currentVersion === MAINTENANCE_CASE_SCHEMA_VERSION
+      currentVersion === MAINTENANCE_CASE_SCHEMA_VERSION ||
+      currentVersion === BOOK_PEOPLE_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1981,7 +1990,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
-      version === MAINTENANCE_CASE_SCHEMA_VERSION,
+      version === MAINTENANCE_CASE_SCHEMA_VERSION ||
+      version === BOOK_PEOPLE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2009,7 +2019,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
-      version === MAINTENANCE_CASE_SCHEMA_VERSION) return;
+      version === MAINTENANCE_CASE_SCHEMA_VERSION ||
+      version === BOOK_PEOPLE_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2129,7 +2140,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
-      version === MAINTENANCE_CASE_SCHEMA_VERSION,
+      version === MAINTENANCE_CASE_SCHEMA_VERSION ||
+      version === BOOK_PEOPLE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2156,7 +2168,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
-      version === MAINTENANCE_CASE_SCHEMA_VERSION) return;
+      version === MAINTENANCE_CASE_SCHEMA_VERSION ||
+      version === BOOK_PEOPLE_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2449,7 +2462,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== MAINTENANCE_CASE_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== BOOK_PEOPLE_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2479,6 +2492,7 @@ function validateModelServiceSchema(
       version >= BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
       version >= PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
       version >= MAINTENANCE_CASE_SCHEMA_VERSION,
+      version >= BOOK_PEOPLE_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2533,7 +2547,8 @@ function initializeModelServiceSchema(
       version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
-      version === MAINTENANCE_CASE_SCHEMA_VERSION,
+      version === MAINTENANCE_CASE_SCHEMA_VERSION ||
+      version === BOOK_PEOPLE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2560,7 +2575,8 @@ function initializeModelServiceSchema(
       version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
-      version === MAINTENANCE_CASE_SCHEMA_VERSION) {
+      version === MAINTENANCE_CASE_SCHEMA_VERSION ||
+      version === BOOK_PEOPLE_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3371,6 +3387,7 @@ export class EditorialStore {
   readonly #reviewRuns: ReviewRunStore;
   readonly #publicationVersions: PublicationVersionStore;
   readonly #maintenanceCases: MaintenanceCases;
+  readonly #bookPeople: BookPeople;
   readonly #productionDocuments: ProductionDocuments;
   /** Each Production Document's Deliverable Workflow (Issue #415, S66c). */
   readonly #documentWorkflow: ProductionDocumentWorkflow;
@@ -3443,6 +3460,8 @@ export class EditorialStore {
       this.#manuscriptExport.latestExport(bookId, 'production-document-version', revisionId, from, until), this.#documentWorkflow);
     // Each designation carries its 维护事项 (Issue #426, S68a), and a 撤回 one is no longer used for 发稿.
     this.#maintenanceCases = new MaintenanceCases(authority);
+    // Each Book's 作者, 责编 and 相关人 (Issue #431, S83).
+    this.#bookPeople = new BookPeople(authority);
     this.#publicationVersions = new PublicationVersionStore(authority, (bookId) => this.#manuscriptExport.records(bookId), {
       summaries: (bookId, publicationVersionId) => this.#maintenanceCases.summaries(bookId, publicationVersionId),
       withdrawn: (publicationVersionId) => this.#maintenanceCases.withdrawn(publicationVersionId),
@@ -3566,6 +3585,8 @@ export class EditorialStore {
       // 维护事项 of each 发稿版本.
       initializeProductionDocumentOriginSchema(authority);
       initializeMaintenanceCaseSchema(authority);
+      // Revision 44 (Issue #431, S83) adds each Book's people.
+      initializeBookPeopleSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -4748,9 +4769,11 @@ export class EditorialStore {
       'BOOK_MANUSCRIPT_STATE_INVALID',
       '图书主稿件关系或记录图不完整。',
     );
+    const people = this.#peopleCall(() => this.#bookPeople.current(bookId));
     if (manuscripts.length === 0) {
       return requireBoundedBookOverview({
         book: bookProjection,
+        people,
         manuscriptState: { state: 'empty', label: '尚无稿件' },
         primaryAction: { kind: 'import-first-manuscript', label: '导入首份稿件', bookId },
         manuscriptAnchor: null,
@@ -4824,6 +4847,7 @@ export class EditorialStore {
     });
     return requireBoundedBookOverview({
       book: bookProjection,
+      people,
       manuscriptState: { state: 'populated', label: '已有主稿件', manuscriptId },
       primaryAction: { kind: 'open-manuscript', label: '打开稿件', manuscriptId, branchId },
       manuscriptAnchor: this.#manuscriptAnchor(manuscriptId, branchId),
@@ -5332,7 +5356,7 @@ export class EditorialStore {
     return records;
   }
 
-  listBooks(after: BookSummaryCursor | null): BookSummaryPageProjection {
+  listBooks(after: BookSummaryCursor | null, filter: BookSummaryFilter | null = null): BookSummaryPageProjection {
     this.#assertAvailable();
     if (after !== null) {
       requireStore(
@@ -5341,16 +5365,21 @@ export class EditorialStore {
         '图书列表位置无效。',
       );
     }
+    // 书库's search (Issue #431, S83): the Books whose 书名, 作者 or 责编 hold the words, paged the same way.
+    const narrowing = filter === null ? null : this.#peopleCall(() => this.#bookPeople.filter(filter));
+    const conditions = [
+      ...(after === null ? [] : ['(b.title COLLATE BINARY > ? COLLATE BINARY OR (b.title = ? COLLATE BINARY AND b.book_id > ?))']),
+      ...(narrowing === null ? [] : [narrowing.where]),
+    ];
     const sql = `SELECT b.book_id, b.stable_identity, b.title, b.internal_number,
                         CASE WHEN EXISTS (SELECT 1 FROM manuscripts m WHERE m.book_id = b.book_id AND m.role = 'primary')
                           THEN 'populated' ELSE 'empty' END manuscript_state
                  FROM books b
-                 ${after === null ? '' : 'WHERE b.title COLLATE BINARY > ? COLLATE BINARY OR (b.title = ? COLLATE BINARY AND b.book_id > ?)'}
+                 ${conditions.length === 0 ? '' : `WHERE ${conditions.join(' AND ')}`}
                  ORDER BY b.title COLLATE BINARY, b.book_id
                  LIMIT ${BOOK_SUMMARY_PAGE_SIZE + 1}`;
-    const rows = (after === null
-      ? this.#authority.prepare(sql).all()
-      : this.#authority.prepare(sql).all(after.title, after.title, after.bookId)) as SqlRow[];
+    const parameters = [...(after === null ? [] : [after.title, after.title, after.bookId]), ...(narrowing?.parameters ?? [])];
+    const rows = this.#authority.prepare(sql).all(...parameters) as SqlRow[];
     const summaries = rows.map((row) => {
       const bookId = asString(row.book_id);
       const stableIdentity = asString(row.stable_identity);
@@ -5374,6 +5403,7 @@ export class EditorialStore {
         stableIdentity,
         title,
         internalNumber,
+        people: this.#peopleCall(() => this.#bookPeople.summary(bookId)),
         manuscriptState: projectedManuscriptState,
         manuscriptStateLabel: projectedManuscriptState === 'empty' ? '尚无稿件' as const : '已有主稿件' as const,
         reimportLineageSourceVersionIds: lineagePage.items,
@@ -5388,6 +5418,25 @@ export class EditorialStore {
         ? { title: last.title, bookId: last.bookId }
         : null,
     };
+  }
+
+  /** `保存人员` (Issue #431, S83; BOOK-006): the Book's next people version, or none when nothing changed. */
+  updateBookPeople(input: UpdateBookPeopleInput): BookPeopleResultProjection {
+    return this.#peopleCall(() => this.#transaction(this.#authority, () => this.#bookPeople.update(input)));
+  }
+
+  #peopleCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof BookPeopleError) throw new StoreError(error.code, error.message);
+      if (error instanceof AggregateError) {
+        this.#poisoned = true;
+        throw new StoreFatalError(error);
+      }
+      throw error;
+    }
   }
 
   getReimportLineageSourceVersionPage(
@@ -10218,9 +10267,40 @@ export class EditorialStore {
           analysisOutcomes: baseline.outcomes,
           reviewRuns: review.latest,
           reviewCompletions: review.completed,
+          maintenance: this.#maintenanceCases.attentionReadings(limit),
           busy,
           waitingFor,
         }, now);
+      } catch (error) {
+        if (error instanceof GlobalAttentionError || error instanceof MaintenanceCaseError) throw new StoreError(error.code, error.message);
+        throw error;
+      }
+    });
+  }
+
+  /**
+   * The Book's 任务 panel (Issue #423, plan slice S77a; editor-surfaces §1 任务面, V2-UX-TASK-044): 待我处理's readings of this
+   * Book's Tasks alone — its latest baseline Task and Review Run, prepared ones included, and every finished one, the
+   * cancelled included — composed into 等你处理, 进行中 and 最近完成 by `global-attention.ts`. A read: nothing is written,
+   * claimed or terminalized.
+   */
+  inspectBookTasks(bookId: string, progress: ProgressReader, waitingFor: WaitingFor = 'admitting'): BookTasksProjection {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+    one(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').all(bookId) as SqlRow[], 'BOOK_NOT_FOUND', '图书不存在。');
+    return this.#reviewCall(() => {
+      const limit = GLOBAL_ATTENTION_READ_LIMIT;
+      try {
+        const baseline = this.#baselineAnalysis.attentionReadings(progress, '', limit, { bookId, cancelled: true });
+        const review = this.#reviewRuns.attentionReadings(progress, '', limit, { bookId, prepared: true });
+        return composeBookTasks({
+          bookId,
+          analysisTasks: baseline.tasks,
+          analysisOutcomes: baseline.outcomes,
+          reviewRuns: review.latest,
+          reviewCompletions: review.completed,
+          waitingFor,
+        });
       } catch (error) {
         if (error instanceof GlobalAttentionError) throw new StoreError(error.code, error.message);
         throw error;

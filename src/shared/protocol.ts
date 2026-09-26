@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 64 as const;
+export const SERVICE_PROTOCOL_VERSION = 67 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -82,6 +82,7 @@ export const IPC_CHANNELS = {
   generateReviewReport: 'ai7:j04:generate-review-report',
   inspectReviewFindingOfMark: 'ai7:j04:inspect-review-finding-of-mark',
   listBooks: 'ai7:j01:list-books',
+  updateBookPeople: 'ai7:j11:update-book-people',
   prepareNewBookReview: 'ai7:j01:prepare-new-book-review',
   commitNewBookImport: 'ai7:j01:commit-new-book-import',
   prepareSourceImportReview: 'ai7:j01:prepare-source-import-review',
@@ -143,6 +144,7 @@ export const IPC_CHANNELS = {
   recordProductionDocumentDelivery: 'ai7:j07:record-production-document-delivery',
   transitionProductionDocumentPhase: 'ai7:j07:transition-production-document-phase',
   inspectGlobalAttention: 'ai7:j09:inspect-global-attention',
+  inspectBookTasks: 'ai7:j16:inspect-book-tasks',
   reviewManuscriptExport: 'ai7:j07:review-manuscript-export',
   chooseManuscriptExportDestination: 'ai7:j07:choose-manuscript-export-destination',
   approveManuscriptExport: 'ai7:j07:approve-manuscript-export',
@@ -525,6 +527,8 @@ export interface BookWorkOverviewProjection {
     internalNumber: string | null;
     createdAt: string;
   };
+  /** 作者, 责编 and 相关人 (Issue #431, S83; BOOK-006). */
+  people: BookPeopleProjection;
   manuscriptState:
     | { state: 'empty'; label: '尚无稿件' }
     | { state: 'populated'; label: '已有主稿件'; manuscriptId: string };
@@ -630,6 +634,8 @@ export interface BookSummaryProjection {
   stableIdentity: string;
   title: string;
   internalNumber: string | null;
+  /** 作者, 责编 and 相关人 for the card (Issue #431, S83). */
+  people: { authors: ReadonlyArray<string>; editors: ReadonlyArray<string>; related: ReadonlyArray<{ roleLabel: string; name: string }> };
   manuscriptState: 'empty' | 'populated';
   manuscriptStateLabel: '尚无稿件' | '已有主稿件';
   reimportLineageSourceVersionIds: ReadonlyArray<string>;
@@ -640,6 +646,58 @@ export interface BookSummaryCursor {
   title: string;
   bookId: string;
 }
+
+// ---- 作者 · 责编 · 相关人 (Issue #431, plan slice S83; V2-UX-BOOK-006, FDBK-013) -------------------------------------------
+
+/** One name, in characters (code points) once NFC-normalized and trimmed. */
+export const MAX_BOOK_PERSON_NAME_CHARACTERS = 40;
+export const MAX_BOOK_AUTHORS = 10;
+export const MAX_BOOK_EDITORS = 10;
+export const MAX_BOOK_RELATED_PEOPLE = 30;
+/** Separates several names in one field: 「张三、李四」. A name never holds one. */
+export const BOOK_PEOPLE_NAME_SEPARATOR = '、';
+
+/** One 相关人: a role of the house list, and a name. */
+export interface BookRelatedPersonProjection {
+  roleId: string;
+  roleLabel: string;
+  name: string;
+}
+
+/** A Book's 作者, 责编 and 相关人 as its newest version records them; attribution dimensions, never accounts. */
+export interface BookPeopleProjection {
+  /** 0 before the first save. */
+  version: number;
+  authors: ReadonlyArray<string>;
+  editors: ReadonlyArray<string>;
+  related: ReadonlyArray<BookRelatedPersonProjection>;
+  /** The house's role list the form offers, in its order. */
+  roles: ReadonlyArray<{ roleId: string; label: string }>;
+  recordedAt: string | null;
+}
+
+/** `保存人员`: the whole set, against the version the editor read. */
+export interface UpdateBookPeopleInput {
+  bookId: string;
+  expectedVersion: number;
+  authors: ReadonlyArray<string>;
+  editors: ReadonlyArray<string>;
+  related: ReadonlyArray<{ roleId: string; name: string }>;
+}
+
+export interface BookPeopleResultProjection {
+  bookId: string;
+  outcome: 'recorded' | 'unchanged';
+  completionLabel: '人员已保存' | '人员没有变化';
+  people: BookPeopleProjection;
+}
+
+/** 书库's search (IA-008, BOOK-006): one field — or all of 书名, 作者 and 责编 — holding the words. */
+export interface BookSummaryFilter {
+  field: 'all' | 'title' | 'author' | 'editor';
+  text: string;
+}
+export const MAX_BOOK_SUMMARY_FILTER_CHARACTERS = 40;
 
 export interface BookSummaryPageProjection {
   items: ReadonlyArray<BookSummaryProjection>;
@@ -5830,7 +5888,15 @@ export type GlobalAttentionStateKey =
   | 'review-continuable'
   | 'analysis-completed'
   | 'analysis-completed-with-gaps'
-  | 'review-completed';
+  | 'review-completed'
+  // The Book's 任务 panel alone (Issue #423, S77a; TASK-044): a Task whose plan is prepared and not started, a Review Run
+  // prepared and not started, and a Task the editor cancelled. 待我处理 lists none of them.
+  | 'analysis-prepared'
+  | 'review-prepared'
+  | 'analysis-cancelled'
+  // 维护事项待处理 (Issue #426, S68b; MAINT-012): a case with a named next step, or one waiting for a later designation.
+  | 'maintenance-pending'
+  | 'maintenance-waiting';
 
 /**
  * The closed map of safe next steps (V2-UX-ATTN-007): each is an action the item's own record offers, in
@@ -5850,10 +5916,18 @@ export type GlobalAttentionNextStep =
   | 'resolve-model-service'
   | 'reprepare'
   // 改计划重做 for a Run the launch's ceiling stopped under developer-live (Issue #541): the plan cannot raise it.
-  | 'redo';
+  | 'redo'
+  // A prepared plan the editor has not started (Issue #423, S77a): the drawer's 查看计划并开始.
+  | 'view-plan'
+  // A 维护事项's own next step (Issue #426, S68b), in the case's own words.
+  | 'maintenance-link-proposal'
+  | 'maintenance-link-publication'
+  | 'maintenance-write-errata'
+  | 'maintenance-conclude';
 export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'view-run', 'view-review', 'reconfirm-plan', 'continue-review', 'return-to-recovery', 'retry-abandon-cleanup', 'await-local-check',
-  'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'reprepare', 'redo',
+  'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'reprepare', 'redo', 'view-plan',
+  'maintenance-link-proposal', 'maintenance-link-publication', 'maintenance-write-errata', 'maintenance-conclude',
 ];
 
 /**
@@ -5866,7 +5940,11 @@ export type GlobalAttentionTarget =
   | { kind: 'manuscript-conflict'; bookId: string; manuscriptId: string; branchId: string; markId: string }
   | { kind: 'analysis'; bookId: string; taskIntentId: string }
   | { kind: 'analysis-plan'; bookId: string; taskIntentId: string }
-  | { kind: 'review'; bookId: string; reviewRunId: string };
+  | { kind: 'review'; bookId: string; reviewRunId: string }
+  // A prepared Review Run's plan in the Task Drawer (Issue #423, S77a).
+  | { kind: 'review-plan'; bookId: string; reviewRunId: string }
+  // 交付物 with the case open on its 发稿版本 (Issue #426, S68b).
+  | { kind: 'maintenance'; bookId: string; publicationVersionId: string; caseId: string };
 
 /** The Active Work Object of one item, in its record's own terms (V2-UX-ATTN-007). */
 export type GlobalAttentionObjectProjection =
@@ -5874,7 +5952,8 @@ export type GlobalAttentionObjectProjection =
   | { kind: 'recovery'; branchName: string }
   | { kind: 'manuscript-conflict'; conflictKind: ProposalConflictKind }
   | { kind: 'analysis'; mode: BaselineAnalysisTaskMode }
-  | { kind: 'review'; ordinal: number };
+  | { kind: 'review'; ordinal: number }
+  | { kind: 'maintenance'; classification: MaintenanceClassification; ordinal: number; publicationOrdinal: number };
 
 /** The record facts an item's reason is told from: identities, counts and states, never manuscript text. */
 export interface GlobalAttentionFactsProjection {
@@ -5928,6 +6007,49 @@ export interface GlobalAttentionProjection {
   /** The Actionable Attention Count: the items of the first two groups, and no others (V2-UX-ATTN-006). */
   actionableCount: number;
   /** A Run is in flight now, or a Review Run is being driven: a reader follows it slowly until it ends. */
+  running: boolean;
+}
+
+// ---- ① 任务面 (Issue #423, plan slice S77a; editor-surfaces §1 任务面, V2-UX-TASK-044, TASK-045) --------------------
+
+/**
+ * The three groups of a Book's 任务 panel, in their one fixed order (V2-UX-TASK-044): 等你处理 · 进行中 · 最近完成. They are
+ * 待我处理's groups for this Book's Tasks: 等你处理 holds its 异常与结果待确认 and 等待你的决定, 进行中 its 运行中与已暂停.
+ */
+export type BookTaskGroupKey = 'waiting' | 'running' | 'recent';
+export const BOOK_TASK_GROUP_KEYS: readonly BookTaskGroupKey[] = ['waiting', 'running', 'recent'];
+/** How many finished Tasks 最近完成 lists, newest first; the panel has no age limit. */
+export const BOOK_TASK_RECENT_LIMIT = 10;
+
+/** What a finished Task's `查看结果` opens (V2-UX-TASK-045): the result it formed, read as its own screen reads it. */
+export type BookTaskResultRef =
+  | { kind: 'analysis-revision'; revisionId: string }
+  | { kind: 'review-run'; reviewRunId: string };
+
+/** One Task of the Book as the panel shows it: 待我处理's item for it, and the result `查看结果` opens. */
+export interface BookTaskItemProjection {
+  item: GlobalAttentionItemProjection;
+  /** `null` for a Task that formed no result — a Run that stopped before it read anything. */
+  result: BookTaskResultRef | null;
+}
+
+export interface BookTaskGroupProjection {
+  key: BookTaskGroupKey;
+  items: ReadonlyArray<BookTaskItemProjection>;
+  /** How many Tasks the group holds; more than `items` when the group is longer than one answer lists. */
+  total: number;
+}
+
+/**
+ * The Book's 任务 panel (editor-surfaces §1 任务面; V2-UX-TASK-044): its Tasks — baseline analysis and 审阅 — in the three
+ * groups. A read: it records, claims and terminalizes nothing, as 待我处理 does not. The panel lists only this Book's Tasks;
+ * work across Books stays in 待我处理.
+ */
+export interface BookTasksProjection {
+  bookId: string;
+  /** Always the three groups, in the fixed order. */
+  groups: ReadonlyArray<BookTaskGroupProjection>;
+  /** A Run of this Book is in flight, a Review Run is being driven, or a Run waits to start: the panel follows it. */
   running: boolean;
 }
 
@@ -6647,9 +6769,11 @@ export interface ServiceOperationMap {
   generateReviewReport: { input: GenerateReviewReportInput; output: ReviewWorkspaceProjection };
   inspectReviewFindingOfMark: { input: InspectReviewFindingOfMarkInput; output: ReviewFindingOfMarkProjection | null };
   listBooks: {
-    input: { after: BookSummaryCursor | null };
+    /** `filter` narrows the list to the Books whose 书名, 作者 or 责编 hold the words (Issue #431, S83). */
+    input: { after: BookSummaryCursor | null; filter?: BookSummaryFilter };
     output: BookSummaryPageProjection;
   };
+  updateBookPeople: { input: UpdateBookPeopleInput; output: BookPeopleResultProjection };
   prepareNewBookReview: {
     input: {
       draftId: string;
@@ -6849,6 +6973,8 @@ export interface ServiceOperationMap {
    * no Book, because it reads across them; it is a read and records nothing.
    */
   inspectGlobalAttention: { input: Record<string, never>; output: GlobalAttentionProjection };
+  /** The Book's 任务 panel (Issue #423, plan slice S77a): a read of that Book's Tasks in the three groups. */
+  inspectBookTasks: { input: { bookId: string }; output: BookTasksProjection };
   reviewManuscriptExport: { input: ReviewManuscriptExportInput; output: ManuscriptExportReviewProjection };
   prepareManuscriptExport: { input: PrepareManuscriptExportInput; output: ManuscriptExportPreparationProjection };
   approveManuscriptExport: { input: ApproveManuscriptExportInput; output: ManuscriptExportReceiptProjection };
@@ -7019,6 +7145,8 @@ export interface RendererApi {
   /** 查看任务 on a Mark Card: the Run a `review-category` mark came from, `null` for any other mark. */
   inspectReviewFindingOfMark(input: InspectReviewFindingOfMarkRendererInput): Promise<ReviewFindingOfMarkProjection | null>;
   listBooks(input: ServiceOperationMap['listBooks']['input']): Promise<BookSummaryPageProjection>;
+  /** `保存人员` on a Book's 工作概览 (Issue #431, S83): the Book the window shows or is about to. */
+  updateBookPeople(input: UpdateBookPeopleInput): Promise<BookPeopleResultProjection>;
   prepareNewBookReview(input: ServiceOperationMap['prepareNewBookReview']['input']): Promise<ReviewBeforeImportProjection>;
   commitNewBookImport(input: CommitNewBookRendererInput): Promise<ManuscriptImportCommitProjection>;
   prepareSourceImportReview(input: ServiceOperationMap['prepareSourceImportReview']['input']): Promise<ReviewBeforeSourceImportProjection>;
@@ -7105,6 +7233,8 @@ export interface RendererApi {
   transitionProductionDocumentPhase(input: Omit<TransitionProductionDocumentPhaseInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 待我处理 across every Book (Issue #424): a read in any window, whatever it shows; it holds and grants nothing. */
   inspectGlobalAttention(): Promise<GlobalAttentionProjection>;
+  /** The 任务 panel of the Book this window shows (Issue #423, S77a): a read; it holds and grants nothing. */
+  inspectBookTasks(): Promise<BookTasksProjection>;
   /**
    * ④ 导出 (Issue #413): the Export Fidelity Review of one exact version of that Book's Manuscript. A current
    * revision with unsaved edits is saved as a revision first.
