@@ -5,6 +5,8 @@ import {
   DATABASE_EXPORT_LEDE,
   DATABASE_EXPORT_NO_RECORDS,
   DATABASE_EXPORT_STATUS_LINES,
+  DATABASE_EXPORT_STEPS,
+  databaseExportActivityLine,
   databaseExportContentsLine,
   databaseExportOutcomeLine,
   databaseExportPreparedRows,
@@ -46,10 +48,23 @@ describe('导出数据库\'s words', () => {
   it('says what the one file holds and never does, and names the actions as every export does', () => {
     expect(DATABASE_EXPORT_HEADING).toBe('导出数据库');
     expect(DATABASE_EXPORT_LEDE).toBe('把全部图书、稿件与历史、知识库和设置打包成一个文件。文件不含模型服务凭据，也不加密；包里记录数据版本和导出时间。');
-    expect(DATABASE_EXPORT_ACTIONS).toEqual({ choose: '导出数据库…', approve: '按上述方式导出', cancel: '取消' });
+    expect(DATABASE_EXPORT_ACTIONS).toEqual({ choose: '导出数据库…', approve: '按上述方式导出', cancel: '取消', stop: '取消导出' });
     expect(DATABASE_EXPORT_STATUS_LINES.cancelled).toBe('已取消选择保存位置，没有写入任何文件。');
     expect(DATABASE_EXPORT_STATUS_LINES.closed).toBe('已取消这次导出，没有写入任何文件。');
     expect(DATABASE_EXPORT_NO_RECORDS).toBe('还没有导出过数据库。');
+  });
+
+  it('says how far an export under way has come, and never reads it done before it is (Issue #434 review, V2-UX-EXP-011)', () => {
+    const at = (step: keyof typeof DATABASE_EXPORT_STEPS | null, completedBytes: number, totalBytes: number): string =>
+      databaseExportActivityLine({ step, completedBytes, totalBytes });
+    expect(at('packing', 0, 0)).toBe('正在打包数据库 · 0%');
+    expect(at('packing', 421, 1000)).toBe('正在打包数据库 · 42%');
+    expect(at('verifying', 1000, 1000)).toBe('正在核对准备好的文件 · 99%');
+    expect(at('writing', 2000, 4000)).toBe('正在写入所选位置 · 50%');
+    // Putting the file in place is the one step nothing stops, and it has no count.
+    expect(at('committing', 3500, 4000)).toBe('正在把文件放到所选位置，已不能取消');
+    expect(at(null, 4000, 4000)).toBe('');
+    expect(DATABASE_EXPORT_STATUS_LINES.writingStopped).toBe('已取消导出，所选位置没有变化；准备好的文件还在，可以再次按上述方式导出。');
   });
 
   it('states the prepared file whole before it is written', () => {
