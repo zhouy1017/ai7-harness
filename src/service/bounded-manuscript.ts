@@ -2561,6 +2561,7 @@ function requireManuscriptReimportTargetSchema(
   includeEvaluationCalibrationTables ||= committed(EVALUATION_CALIBRATION_SCHEMA_SQL);
   includeSeriesTables ||= committed(SERIES_SCHEMA_SQL);
   includeSeriesKnowledgeTables ||= committed(SERIES_KNOWLEDGE_SCHEMA_SQL);
+  includeDataVersionTables ||= committed(DATA_VERSION_SCHEMA_SQL);
   requireExactSchema(
     db,
     {
