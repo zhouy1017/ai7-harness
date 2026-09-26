@@ -1128,6 +1128,28 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    // 不说明 or 改原因 after a decision (Issue #61, S26a): the decision, how many entries the editor saw, and the action's own
+    // shape — no reason with 不说明, a reason and where it came from with 改原因.
+    case 'recordProposalDecisionFeedback': {
+      const input = requireInput(
+        value.input,
+        ['manuscriptId', 'branchId', 'windowStartBlockId', 'markId', 'decisionId', 'expectedFeedback', 'action', 'reason', 'reasonSource'],
+        tentativeId,
+      );
+      if (
+        !validMarkBinding(input) ||
+        !isBoundedString(input.markId, 36) || !UUID_PATTERN.test(input.markId) ||
+        !isBoundedString(input.decisionId, 36) || !UUID_PATTERN.test(input.decisionId) ||
+        !Number.isSafeInteger(input.expectedFeedback) || (input.expectedFeedback as number) < 0 ||
+        !(input.action === 'dismiss'
+          ? input.reason === null && input.reasonSource === null
+          : input.action === 'revise' && isBoundedString(input.reason, MAX_MARK_BODY_CODE_UNITS) &&
+            (input.reasonSource === 'suggested' || input.reasonSource === 'free-text'))
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     case 'recordProposalDecisionReason': {
       const input = requireInput(
         value.input,

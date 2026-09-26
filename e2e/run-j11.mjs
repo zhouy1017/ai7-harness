@@ -27,6 +27,11 @@ import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabl
 // entry changed to 准确 as a successor the service keeps beside the first; the same judgment again refused as changing
 // nothing; Enter and Escape without a pointer; the card at 200% and without colour; what nobody judged left unjudged and
 // unlisted; and a restart moving nothing. Every correction and reason is the Journey's own stand-in.
+//
+// Since #61 (S26a) J-11 also walks the reason a Proposal Decision is asked for once, on two 修改建议 of its own words made on
+// the same manuscript through the selection menu: 拒绝 asks why under 你的处理, and 不说明 records no more than that, never
+// asked again on reopening; of the editor's own accord 补充原因… takes their words and 改原因… a successor; 接受并应用 asks
+// too, and moving on without answering records nothing; Enter reaches the row without a pointer; a restart asks nothing.
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -43,6 +48,10 @@ const FIXTURE_IDENTITY = 'sample1-baseline-happy';
 const ENTITY_CORRECTION = '（旅程示例）应分作两个人物';
 const SYNOPSIS_REASON = '（旅程示例）少了尾声';
 const METRIC_NOTE = '只统计你明确给出的判断：没有判断的条目不算认可；这是对分析结果的评价，不代表事实核实，也不改变 AI7 的做法。';
+/** 就地反馈轻问's suggestions and reason (Issue #61): the Journey's own words, never the manuscript's. */
+const SUGGESTION_REJECTED = '（旅程示例一）';
+const SUGGESTION_APPLIED = '（旅程示例二）';
+const OWN_REASON = '（旅程示例）篇幅所限';
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
 const CREDENTIAL_CLEANUP_TIMEOUT_MS = 15_000;
 const FORCE_EXIT_TIMEOUT_MS = 5_000;
@@ -231,7 +240,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     database.exec('PRAGMA query_only = ON;');
     // The terminal version the service stamps, as J-16 reads it: the 分析反馈 revision since Issue #94 (S38), and after it
     // this pin moves with whatever revision a later slice takes.
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 48, 'credential-cleanup-metadata-version');
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 49, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
               approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
@@ -574,6 +583,160 @@ async function readFeedback(renderer, predicate, name) {
 }
 const feedbackItem = (itemKey) => `[data-screen="book-analysis"] [data-analysis-item-key="${itemKey}"]`;
 const rowOf = (page, itemKey) => page.items.find(([key]) => key === itemKey) ?? [];
+
+// ---- the Mark surface, as J-05 acts on it (Issue #61, S26a) ---------------------------------------------------------------
+
+// A hand on the manuscript: put a selection into a block by offset, right-click the way a pointer does, and act on the
+// floating Mark surface by its data attributes. A block's durable text leaves out any preview's words.
+const MARK_HELPERS = `(() => {
+  if (window.__j11) return true;
+  const editor = () => document.querySelector('[data-testid="manuscript-editor"]');
+  const block = (id) => editor()?.querySelector('[data-block-id="' + id + '"]') ?? null;
+  const durable = (root) => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) => node.parentElement?.closest('[data-mark-preview]') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    return nodes;
+  };
+  const point = (root, offset) => {
+    let left = offset;
+    for (const node of durable(root)) {
+      if (left <= node.data.length) return [node, left];
+      left -= node.data.length;
+    }
+    return null;
+  };
+  const layer = () => document.querySelector('.editorial-mark-layer');
+  window.__j11 = {
+    place: (id, from, to) => {
+      const root = block(id);
+      if (!root) return false;
+      editor().focus();
+      const start = point(root, from);
+      const end = point(root, to);
+      if (!start || !end) return false;
+      const range = document.createRange();
+      range.setStart(start[0], start[1]);
+      range.setEnd(end[0], end[1]);
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return selection.toString().length === to - from;
+    },
+    rightClick: (element) => {
+      if (!(element instanceof HTMLElement)) return false;
+      const rect = element.getBoundingClientRect();
+      const init = { bubbles: true, cancelable: true, button: 2, buttons: 2, clientX: rect.left + Math.min(10, rect.width / 2), clientY: rect.top + Math.min(24, rect.height / 2) };
+      element.dispatchEvent(new MouseEvent('mousedown', init));
+      element.dispatchEvent(new MouseEvent('mouseup', { ...init, buttons: 0 }));
+      element.dispatchEvent(new MouseEvent('contextmenu', { ...init, buttons: 0 }));
+      return true;
+    },
+    block,
+    mark: (kind, id) => Array.from(block(id)?.querySelectorAll('.editorial-mark[data-mark-kind="' + kind + '"]') ?? []),
+    menu: () => document.querySelector('.editorial-mark-menu-layer [data-mark-menu]'),
+    item: (action) => document.querySelector('.editorial-mark-menu-layer [data-mark-menu] [data-mark-action="' + action + '"]'),
+    card: () => layer()?.querySelector('[data-mark-card]') ?? null,
+    composer: () => layer()?.querySelector('[data-mark-composer]') ?? null,
+    act: (action) => {
+      const control = layer()?.querySelector('[data-mark-card] [data-mark-action="' + action + '"], [data-mark-composer] [data-mark-action="' + action + '"]');
+      if (!(control instanceof HTMLButtonElement) || control.disabled) return false;
+      control.click();
+      return true;
+    },
+    write: (field, value) => {
+      const input = layer()?.querySelector('[data-mark-field="' + field + '"]');
+      if (!(input instanceof HTMLTextAreaElement)) return false;
+      input.value = value;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    },
+  };
+  return true;
+})()`;
+
+/** A menu opened with the pointer: the editor reads a selection a tick after the page sets it, so it is asked again until it shows. */
+async function rightClickUntil(renderer, prepare, target, ready, name) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    await assertRenderer(renderer, prepare, `${name}-prepare`);
+    await new Promise((resolveWait) => setTimeout(resolveWait, 80));
+    await assertRenderer(renderer, `window.__j11.rightClick(${target})`, `${name}-right-click`);
+    if (await renderer.evaluate(`Boolean(${ready})`)) return;
+    await pressEscape(renderer);
+    await new Promise((resolveWait) => setTimeout(resolveWait, 120));
+  }
+  throw new Error(`J-11/${name}`);
+}
+async function openSelectionMenu(renderer, blockId, from, to, name) {
+  await rightClickUntil(
+    renderer,
+    `window.__j11.place(${JSON.stringify(blockId)}, ${from}, ${to})`,
+    `window.__j11.block(${JSON.stringify(blockId)})`,
+    `window.__j11.menu()?.dataset.markMenu === 'selection' && window.__j11.menu().textContent.includes('已选 ${to - from} 字')`,
+    name,
+  );
+}
+async function chooseMenuItem(renderer, action, name) {
+  await assertRenderer(renderer, `(() => { const item = window.__j11.item(${JSON.stringify(action)}); if (!(item instanceof HTMLButtonElement) || item.disabled) return false; item.click(); return true; })()`, name);
+}
+/** A pointer puts the caret down before its click arrives, and the editor reads that caret a tick later; asked again until it has. */
+async function openMarkCard(renderer, kind, blockId, name) {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    await assertRenderer(renderer, `window.__j11.mark(${JSON.stringify(kind)}, ${JSON.stringify(blockId)}).length > 0 && window.__j11.place(${JSON.stringify(blockId)}, 0, 0)`, `${name}-caret`);
+    await new Promise((resolveWait) => setTimeout(resolveWait, 80));
+    await assertRenderer(renderer, `window.__j11.mark(${JSON.stringify(kind)}, ${JSON.stringify(blockId)})[0].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })) || true`, `${name}-click`);
+    const settle = Date.now() + 1_500;
+    while (Date.now() < settle) {
+      if (await renderer.evaluate(`window.__j11.card()?.dataset.markKind === ${JSON.stringify(kind)}`)) return;
+      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    }
+  }
+  throw new Error(`J-11/${name}-card`);
+}
+
+/**
+ * A 修改建议's card as the editor reads it after a decision: its reason's state; the one row asking why, with its question,
+ * its chips (and whether any is pressed), `其他 / 自行输入` and how it ends; the reason recorded, with where it came from; the
+ * editor's own `补充原因…` or `改原因…`; and where focus is. Nothing of the manuscript is read.
+ */
+const READ_DECISION = `(() => {
+  const card = document.querySelector('.editorial-mark-layer [data-mark-card]');
+  if (!(card instanceof HTMLElement)) return null;
+  const yours = card.querySelector('[data-mark-region="disposition"]');
+  const row = card.querySelector('[data-mark-reasons]');
+  const reason = card.querySelector('[data-mark-reason]');
+  const active = document.activeElement;
+  return {
+    state: yours?.dataset.markReasonState ?? null,
+    applied: card.querySelector('[data-mark-application]') !== null,
+    prompt: row === null ? null : {
+      mode: row.dataset.markReasonMode ?? null,
+      question: row.querySelector('p')?.textContent ?? null,
+      chips: Array.from(row.querySelectorAll('[data-mark-reason-chip]'), (chip) => [chip.dataset.markReasonChip, chip.getAttribute('aria-pressed') === 'true']),
+      own: row.querySelector('[data-mark-action="reason-own"]')?.textContent ?? null,
+      end: row.querySelector('[data-mark-action="reason-dismiss"], [data-mark-action="reason-cancel"]')?.textContent ?? null,
+    },
+    reason: reason === null ? null : [reason.dataset.markReason ?? null, reason.textContent],
+    later: card.querySelector('[data-mark-action="reason-add"], [data-mark-action="reason-revise"]')?.textContent ?? null,
+    focus: active instanceof HTMLElement && card.contains(active) ? (active.dataset.markReasonChip ?? active.dataset.markAction ?? active.tagName) : null,
+  };
+})()`;
+async function readDecision(renderer, predicate, name) {
+  const deadline = Date.now() + 60_000;
+  let card = null;
+  while (Date.now() < deadline) {
+    card = await renderer.evaluate(READ_DECISION).catch(() => null);
+    if (card !== null && predicate(card)) return card;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  const error = new Error(`J-11/${name}`);
+  error.detail = card;
+  throw error;
+}
 
 async function main() {
   parseJourney();
@@ -1270,6 +1433,112 @@ async function main() {
     const feedbackAfter = await readFeedback(renderer, (page) => page.metric?.judged === '2' && page.items.every(([, judgment]) => judgment !== null), 'feedback-restart-after');
     requireJourney(JSON.stringify(feedbackAfter.items) === JSON.stringify(feedbackBefore.items) && JSON.stringify(feedbackAfter.metric) === JSON.stringify(feedbackBefore.metric),
       'feedback-restart-unmoved', { before: feedbackBefore.items, after: feedbackAfter.items });
+
+    // ---- 就地反馈轻问 after a Proposal Decision (Issue #61, plan slice S26a; FDBK-001 to FDBK-007, PDEC-009, MARK-005) -------
+    at('decision-feedback-suggestions');
+    // Two 修改建议 of the Journey's own words on the same manuscript, made through the selection menu as J-05 makes them.
+    await click(renderer, '打开稿件', 'decision-open-manuscript');
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'decision-editor', 120_000);
+    await assertRenderer(renderer, MARK_HELPERS, 'decision-page-helpers');
+    // Two paragraphs whose first 40 code units are 40 graphemes, so a range by offset is a range of characters.
+    const markable = await renderer.evaluate(`(() => { const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }); return Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).filter((node) => { const head = (node.textContent ?? '').slice(0, 40); return head.length === 40 && Array.from(segmenter.segment(head)).length === 40; }).slice(0, 2).map((node) => node.dataset.blockId); })()`);
+    requireJourney(Array.isArray(markable) && markable.length === 2 && markable.every((id) => /^blk_[0-9a-f]{24}$/.test(id)), 'decision-markable-paragraphs');
+    const [rejectBlock, applyBlock] = markable;
+    for (const [blockId, words, name] of [[rejectBlock, SUGGESTION_REJECTED, 'decision-suggestion-rejected'], [applyBlock, SUGGESTION_APPLIED, 'decision-suggestion-applied']]) {
+      await openSelectionMenu(renderer, blockId, 2, 6, `${name}-menu`);
+      await chooseMenuItem(renderer, 'add-change-suggestion', `${name}-choose`);
+      await waitFor(renderer, `window.__j11.composer()?.dataset.markComposer === 'create-change-suggestion'`, `${name}-composer`);
+      await assertRenderer(renderer, `window.__j11.write('proposedText', ${JSON.stringify(words)}) && window.__j11.act('submit')`, `${name}-submit`);
+      await waitFor(renderer, `window.__j11.mark('change-suggestion', ${JSON.stringify(blockId)}).length > 0 && window.__j11.composer() === null`, `${name}-drawn`);
+    }
+
+    at('decision-feedback-dismiss');
+    // 拒绝 asks why once, under 你的处理: three reasons fitted to a rejection, none chosen, `其他 / 自行输入` beside them, and
+    // `不说明`. 不说明 records no more than that, and closing and reopening the card never asks again.
+    await openMarkCard(renderer, 'change-suggestion', rejectBlock, 'decision-reject-card');
+    await assertRenderer(renderer, `window.__j11.act('reject')`, 'decision-reject');
+    const asked = await readDecision(renderer, (card) => card.prompt?.mode === 'prompt', 'decision-reject-asked');
+    requireJourney(asked.state === 'none' && asked.prompt.question === '为什么拒绝？（可选）' &&
+      JSON.stringify(asked.prompt.chips) === JSON.stringify([['证据不足', false], ['方向不合适', false], ['保持作者风格', false]]) &&
+      asked.prompt.own === '其他 / 自行输入' && asked.prompt.end === '不说明' && asked.reason === null && asked.later === null, 'decision-reject-asked-words', asked);
+    await assertRenderer(renderer, `window.__j11.act('reason-dismiss')`, 'decision-dismiss');
+    await waitFor(renderer, `${status} === '已记下：这次不说明原因。'`, 'decision-dismiss-status');
+    const dismissed = await readDecision(renderer, (card) => card.state === 'dismissed', 'decision-dismissed');
+    requireJourney(dismissed.prompt === null && dismissed.reason === null && dismissed.later === '补充原因…', 'decision-dismissed-words', dismissed);
+    await pressEscape(renderer);
+    await waitFor(renderer, `window.__j11.card() === null`, 'decision-dismissed-closed');
+    await openMarkCard(renderer, 'change-suggestion', rejectBlock, 'decision-dismissed-reopen');
+    const reopenedDismissed = await readDecision(renderer, (card) => card.state === 'dismissed', 'decision-dismissed-reopened');
+    requireJourney(reopenedDismissed.prompt === null && reopenedDismissed.later === '补充原因…', 'decision-dismissed-not-asked-again', reopenedDismissed);
+
+    at('decision-feedback-own-accord');
+    // Of the editor's own accord: 补充原因… opens the same row, ending in 取消 rather than 不说明; their own words under
+    // `其他 / 自行输入` are recorded as theirs; 改原因… records a successor, the first reason kept on record.
+    await assertRenderer(renderer, `window.__j11.act('reason-add')`, 'decision-add');
+    const adding = await readDecision(renderer, (card) => card.prompt?.mode === 'add', 'decision-adding');
+    requireJourney(adding.prompt.end === '取消' && adding.prompt.chips.every(([, pressed]) => pressed === false), 'decision-adding-words', adding);
+    await assertRenderer(renderer, `window.__j11.act('reason-own')`, 'decision-own');
+    await waitFor(renderer, `window.__j11.card()?.querySelector('[data-mark-form="decision-reason"] [data-mark-field="reason"]') !== null`, 'decision-own-form');
+    await assertRenderer(renderer, `window.__j11.write('reason', ${JSON.stringify(OWN_REASON)}) && window.__j11.act('submit')`, 'decision-own-submit');
+    await waitFor(renderer, `${status} === '已记下你的原因。'`, 'decision-own-status');
+    const own = await readDecision(renderer, (card) => card.state === 'given', 'decision-own-recorded');
+    requireJourney(JSON.stringify(own.reason) === JSON.stringify(['free-text', `你的原因：${OWN_REASON}`]) && own.later === '改原因…' && own.prompt === null, 'decision-own-words', own);
+    await assertRenderer(renderer, `window.__j11.act('reason-revise')`, 'decision-revise');
+    await readDecision(renderer, (card) => card.prompt?.mode === 'revise', 'decision-revising');
+    await assertRenderer(renderer, `(() => { const chip = window.__j11.card()?.querySelector('[data-mark-reason-chip="证据不足"]'); if (!(chip instanceof HTMLButtonElement)) return false; chip.click(); return true; })()`, 'decision-revise-chip');
+    await waitFor(renderer, `${status} === '已改好原因；原来的原因仍留在记录里。'`, 'decision-revise-status');
+    const revisedCard = await readDecision(renderer, (card) => card.reason?.[0] === 'suggested', 'decision-revised');
+    requireJourney(revisedCard.reason[1].startsWith('你的原因：证据不足（') && revisedCard.reason[1].endsWith(' 改过）') && revisedCard.later === '改原因…', 'decision-revised-words', revisedCard);
+    await pressEscape(renderer);
+    await waitFor(renderer, `window.__j11.card() === null`, 'decision-revised-closed');
+
+    at('decision-feedback-after-apply');
+    // 接受并应用 asks why too, with the reasons fitted to an acceptance; moving on without answering ends the prompt and records
+    // nothing: reopened, the card offers 补充原因… and the service holds no entry after the decision.
+    await openMarkCard(renderer, 'change-suggestion', applyBlock, 'decision-apply-card');
+    await assertRenderer(renderer, `window.__j11.act('accept-and-apply')`, 'decision-accept-and-apply');
+    const applied = await readDecision(renderer, (card) => card.applied && card.prompt?.mode === 'prompt', 'decision-applied-asked');
+    requireJourney(applied.state === 'none' && applied.prompt.question === '为什么接受？（可选）' &&
+      JSON.stringify(applied.prompt.chips) === JSON.stringify([['语言更准确', false], ['保持作者风格', false]]) && applied.prompt.end === '不说明', 'decision-applied-asked-words', applied);
+    await pressEscape(renderer);
+    await waitFor(renderer, `window.__j11.card() === null`, 'decision-applied-moved-on');
+    await openMarkCard(renderer, 'change-suggestion', applyBlock, 'decision-applied-reopen');
+    const movedOn = await readDecision(renderer, (card) => card.applied && card.state === 'none', 'decision-applied-reopened');
+    requireJourney(movedOn.prompt === null && movedOn.later === '补充原因…', 'decision-applied-not-asked-again', movedOn);
+    const appliedMark = await renderer.evaluate(`window.__j11.card()?.dataset.markCard ?? null`);
+    requireJourney(typeof appliedMark === 'string', 'decision-applied-mark-identity');
+    const appliedDecision = await renderer.evaluate(`(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(THIRD.title)}); const card = await window.ai7.getEditorialMarkCard({ manuscriptId: work.manuscriptId, branchId: work.branchId, markId: ${JSON.stringify(appliedMark)} }); return card.suggestion.decision; })()`);
+    requireJourney(appliedDecision?.disposition === 'accepted' && appliedDecision.reasonState === 'none' && appliedDecision.feedbackEntries === 0 && appliedDecision.reason === null,
+      'decision-applied-nothing-recorded', appliedDecision);
+
+    at('j14-decision-feedback-keyboard');
+    // Without a pointer: Enter on 补充原因… opens the row with the focus on its first reason, and Escape leaves it.
+    await assertRenderer(renderer, `(() => { const add = window.__j11.card()?.querySelector('[data-mark-action="reason-add"]'); if (!(add instanceof HTMLButtonElement)) return false; add.focus(); return document.activeElement === add; })()`, 'decision-keyboard-focused');
+    await pressEnter(renderer);
+    const keyboardRow = await readDecision(renderer, (card) => card.prompt?.mode === 'add' && card.focus === '语言更准确', 'decision-keyboard-row');
+    requireJourney(keyboardRow.prompt.end === '取消', 'decision-keyboard-row-words', keyboardRow);
+    await pressEscape(renderer);
+    await waitFor(renderer, `window.__j11.card() === null`, 'decision-keyboard-closed');
+
+    at('decision-feedback-restart');
+    // A restart asks nothing again: the rejection keeps its changed reason, and the acceptance nobody explained still waits
+    // only for the editor's own 补充原因….
+    await close();
+    cancellation.throwIfRequested();
+    await launch();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'decision-restart-ready');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(thirdId)}]`, 'decision-restart-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(thirdId)}]') && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'decision-restart-manuscript', 120_000);
+    await assertRenderer(renderer, MARK_HELPERS, 'decision-restart-helpers');
+    await openMarkCard(renderer, 'change-suggestion', rejectBlock, 'decision-restart-rejected');
+    const keptRejected = await readDecision(renderer, (card) => card.state === 'given', 'decision-restart-rejected-read');
+    requireJourney(keptRejected.prompt === null && keptRejected.reason?.[0] === 'suggested' && keptRejected.reason[1].startsWith('你的原因：证据不足（'), 'decision-restart-rejected-kept', keptRejected);
+    await pressEscape(renderer);
+    await waitFor(renderer, `window.__j11.card() === null`, 'decision-restart-rejected-closed');
+    await openMarkCard(renderer, 'change-suggestion', applyBlock, 'decision-restart-applied');
+    const keptApplied = await readDecision(renderer, (card) => card.applied && card.state === 'none', 'decision-restart-applied-read');
+    requireJourney(keptApplied.prompt === null && keptApplied.later === '补充原因…', 'decision-restart-applied-not-asked', keptApplied);
+    await pressEscape(renderer);
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
