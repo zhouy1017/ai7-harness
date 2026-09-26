@@ -125,7 +125,7 @@ export interface DeliverablesSurface {
 
 type DeliverablesApi = Pick<RendererApi, 'inspectDeliverables' | 'inspectProductionDocuments' | 'inspectBookDeliveryPackage' |
   'prepareBookDeliveryPackage' | 'reviewBookDeliveryPackageExport' | 'chooseBookDeliveryPackageExportFolder' |
-  'approveBookDeliveryPackageExport' | 'designatePublicationVersion' | 'reviewManuscriptExport' |
+  'approveBookDeliveryPackageExport' | 'cancelBookDeliveryPackageExport' | 'designatePublicationVersion' | 'reviewManuscriptExport' |
   'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
   'createProductionDocument' | 'decideProductionDocumentType' | 'recordProductionDocumentDelivery'>;
 

@@ -78,7 +78,7 @@ describe('the words of 图书交付包', () => {
     });
     expect(labels.packageExportOpenAccessibleName('v2')).toBe('导出图书交付包 v2…');
     expect(labels.packageExportHeading('v2')).toBe('导出 · 图书交付包 v2');
-    expect([labels.PACKAGE_EXPORT_FILES_LABEL, labels.PACKAGE_EXPORT_FILES_TRUNCATED]).toEqual(['写入所选文件夹的文件', '其余文件也一并写入，这里只列出前面的。']);
+    expect([labels.PACKAGE_EXPORT_FILES_LABEL, labels.PACKAGE_EXPORT_FILES_TRUNCATED]).toEqual(['写入所选文件夹的文件', '还有其他文件，可以翻页查看并另行选择导出。']);
     expect(labels.packageExportFileName('书名 · 一审稿.docx', 'docx')).toBe('「书名 · 一审稿.docx」 · DOCX');
     expect(labels.packageExportFileName('交付包清单.md', 'markdown')).toBe('「交付包清单.md」 · Markdown');
     expect(labels.PACKAGE_EXPORT_FOLDER_UNCHOSEN)

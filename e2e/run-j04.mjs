@@ -66,7 +66,7 @@ const CHANGE_SUGGESTION_APPLY_MEMBERS = ['applyChangeSuggestion', 'applyChangeSu
 // the system dialog chose, approved per file.
 const EXPORT_MEMBERS = [
   'reviewManuscriptExport', 'chooseManuscriptExportDestination', 'approveManuscriptExport', 'revealManuscriptExport',
-  'reviewBookDeliveryPackageExport', 'chooseBookDeliveryPackageExportFolder', 'approveBookDeliveryPackageExport',
+  'reviewBookDeliveryPackageExport', 'chooseBookDeliveryPackageExportFolder', 'approveBookDeliveryPackageExport', 'cancelBookDeliveryPackageExport',
 ];
 // Synchronized delta with Issue #417: 审阅's seven members. None is named like an execution, effect,
 // apply or export member, so the two pins below hold them without an exception.

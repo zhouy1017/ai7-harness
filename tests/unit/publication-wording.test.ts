@@ -294,7 +294,7 @@ describe('the words of 发稿', () => {
     ];
     const answer: BookDeliveryPackageExportReviewProjection = {
       bookId: identity, packageVersionId: identity, versionLabel: 'v9999999', options: { includeAnnotations: true, includeSuggestions: true },
-      files, filesTruncated: true, degraded: true, statement: words(80), reviewDigest: 'f'.repeat(64),
+      files, filesTruncated: true, offset: 0, nextOffset: 40, degraded: true, statement: words(80), reviewDigest: 'f'.repeat(64),
     };
     const response = { id: identity, ok: true, op: 'reviewBookDeliveryPackageExport', result: answer };
     expect(Buffer.byteLength(JSON.stringify(response), 'utf8')).toBeLessThan(MAX_FRAME_BYTES);
