@@ -4364,7 +4364,8 @@ function renderExemplars(root: HTMLElement, projection: ExemplarsProjection): vo
       more.hidden = cursor === null;
       moreRow.hidden = cursor === null && after === null;
       setStatus(EXEMPLARS_STATUS.opened);
-      (first ?? firstPage)?.focus();
+      const focusTarget = first ?? root.closest('.knowledge-base')?.querySelector<HTMLElement>('h2');
+      if (focusTarget) { focusTarget.tabIndex = -1; focusTarget.focus(); }
     } catch (error) {
       if (!root.isConnected) return;
       setStatus(rendererErrorMessage(error, EXEMPLARS_STATUS.unavailable), 'error');
