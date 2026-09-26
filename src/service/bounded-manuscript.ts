@@ -2576,6 +2576,7 @@ function requireManuscriptReimportTargetSchema(
   includeDataVersionTables ||= committed(DATA_VERSION_SCHEMA_SQL);
   includeDatabaseExportTables ||= committed(DATABASE_EXPORT_SCHEMA_SQL);
   includeScheduledBackupTables ||= committed(SCHEDULED_BACKUP_SCHEMA_SQL);
+  includeDatabaseReplacementTables ||= committed(DATABASE_REPLACEMENT_SCHEMA_SQL);
   requireExactSchema(
     db,
     {
