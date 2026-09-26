@@ -13,7 +13,9 @@ let connection: Promise<IDBDatabase> | null = null;
 function database(): Promise<IDBDatabase> {
   if (connection !== null) return connection;
   const opened = new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open('ai7-reading-return', 1);
+    let request: IDBOpenDBRequest;
+    try { request = indexedDB.open('ai7-reading-return', 1); }
+    catch { reject(new Error(UNAVAILABLE)); return; }
     let failed = false;
     const fail = (): void => { failed = true; reject(new Error(UNAVAILABLE)); };
     request.onupgradeneeded = () => request.result.createObjectStore(STORE);

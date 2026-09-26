@@ -7001,11 +7001,13 @@ function renderEditorWindow(
         back.disabled = false;
         return;
       }
+      const request = ++returnRequest;
       try {
-        ++returnRequest;
-        returnPlace = await consumeReturnPlace(chip);
+        const retained = await consumeReturnPlace(chip);
+        if (!chipHost.isConnected || request !== returnRequest) return;
+        returnPlace = retained;
       } catch (error) {
-        if (!chipHost.isConnected) return;
+        if (!chipHost.isConnected || request !== returnRequest) return;
         back.disabled = false;
         setStatus(rendererErrorMessage(error, '已到达原位置，但未能清除返回位置；可以重试。'), 'error');
         return;
