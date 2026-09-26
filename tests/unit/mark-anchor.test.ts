@@ -164,18 +164,60 @@ describe('a point that cannot say which side of text written at it it is on cove
   it('takes words written back at it as written there when they begin with the grapheme after it (Issue #568)', () => {
     // 他说|，好吗 after ，我们走吧 was deleted at 2. Written back, the derived span says 我们走吧， at 3: slid left over the equal
     // ， it reaches the point, so the point covers ，我们走吧 rather than stay bare at 2.
+    const current = graphemesOf('他说，好吗');
     const next = graphemesOf('他说，我们走吧，好吗');
-    const derived = deriveSpanEdit(graphemesOf('他说，好吗'), next)!;
+    const derived = deriveSpanEdit(current, next)!;
     const at = { fromGrapheme: 2, toGrapheme: 2 };
     expect(derived).toEqual({ fromGrapheme: 3, toGrapheme: 3, insertedGraphemes: 5 });
-    expect(coverSpanEdit(at, derived, next.length, next)).toEqual({ fromGrapheme: 2, toGrapheme: 7, state: 'drifted' });
-    // Without the text it cannot tell, and words that cannot slide to it stay wholly behind it.
+    expect(coverSpanEdit(at, derived, next.length, { current, next })).toEqual({ fromGrapheme: 2, toGrapheme: 7, state: 'drifted' });
+    // Without the texts — an Apply's or a replacement's span, whose place is known — it is followed as it is, and words that
+    // cannot slide to it stay wholly behind it.
     expect(coverSpanEdit(at, derived, next.length)).toEqual({ fromGrapheme: 2, toGrapheme: 2, state: 'drifted' });
     const later = graphemesOf('他说，好我们吗');
-    expect(coverSpanEdit(at, deriveSpanEdit(graphemesOf('他说，好吗'), later)!, later.length, later)).toEqual({ fromGrapheme: 2, toGrapheme: 2, state: 'drifted' });
-    // A replacement is never slid: only pure insertions are ambiguous this way.
-    const replaced = graphemesOf('他说，X们走吧，好吗');
-    expect(coverSpanEdit(at, { fromGrapheme: 3, toGrapheme: 4, insertedGraphemes: 6 }, replaced.length, replaced)).toEqual({ fromGrapheme: 2, toGrapheme: 2, state: 'drifted' });
+    expect(coverSpanEdit(at, deriveSpanEdit(current, later)!, later.length, { current, next: later })).toEqual({ fromGrapheme: 2, toGrapheme: 2, state: 'drifted' });
+    // A replacement is never slid: only pure insertions and deletions are ambiguous this way. Slid, this one would reach the
+    // point over the equal ，and cover [2,7).
+    const replaced = graphemesOf('他说，我们走吧，吗');
+    expect(coverSpanEdit(at, { fromGrapheme: 3, toGrapheme: 4, insertedGraphemes: 5 }, replaced.length, { current: graphemesOf('他说，X吗'), next: replaced }))
+      .toEqual({ fromGrapheme: 2, toGrapheme: 2, state: 'drifted' });
+  });
+
+  it('takes a redo, or a deletion, of the words it covers as removing exactly them (Issue #568 review)', () => {
+    // After the undo it covers ，我们走吧 at [2,7). The redo's derived span removes 我们走吧， at [3,8): slid left over the equal ，
+    // it removes exactly what the point covers, so the point is bare at 2 again rather than keep the ， before 好吗.
+    const current = graphemesOf('他说，我们走吧，好吗');
+    const next = graphemesOf('他说，好吗');
+    const derived = deriveSpanEdit(current, next)!;
+    const covering = { fromGrapheme: 2, toGrapheme: 7 };
+    expect(derived).toEqual({ fromGrapheme: 3, toGrapheme: 8, insertedGraphemes: 0 });
+    expect(coverSpanEdit(covering, derived, next.length, { current, next })).toEqual({ fromGrapheme: 2, toGrapheme: 2, state: 'drifted' });
+    expect(coverSpanEdit(covering, derived, next.length)).toEqual({ fromGrapheme: 2, toGrapheme: 3, state: 'drifted' });
+    // A deletion that cannot remove exactly what it covers is followed as it is: one that cannot slide at all, and one that
+    // slides a grapheme — xa，b，c losing b， could as well lose ，b — but would then take the ， of the a， it covers.
+    const part = graphemesOf('他说，走吧，好吗');
+    expect(coverSpanEdit(covering, deriveSpanEdit(current, part)!, part.length, { current, next: part })).toEqual({ fromGrapheme: 2, toGrapheme: 5, state: 'drifted' });
+    const before = graphemesOf('xa，b，c');
+    const after = graphemesOf('xa，c');
+    expect(deriveSpanEdit(before, after)).toEqual({ fromGrapheme: 3, toGrapheme: 5, insertedGraphemes: 0 });
+    expect(coverSpanEdit({ fromGrapheme: 1, toGrapheme: 3 }, deriveSpanEdit(before, after)!, after.length, { current: before, next: after }))
+      .toEqual({ fromGrapheme: 1, toGrapheme: 3, state: 'drifted' });
+  });
+
+  it('never slides past the point, whatever repeats beyond it (Issue #568 review)', () => {
+    // xa|ay: one more a written at the point is derived at 3, and the run of a goes on past the point to 1. Slid, it stops at
+    // the point and covers [2,3); slid on to 1, it would not reach the point and be left behind it.
+    const current = graphemesOf('xaay');
+    const next = graphemesOf('xaaay');
+    const derived = deriveSpanEdit(current, next)!;
+    expect(derived).toEqual({ fromGrapheme: 3, toGrapheme: 3, insertedGraphemes: 1 });
+    expect(coverSpanEdit({ fromGrapheme: 2, toGrapheme: 2 }, derived, next.length, { current, next })).toEqual({ fromGrapheme: 2, toGrapheme: 3, state: 'drifted' });
+    // Nor a deletion past what the point covers: a|a|ay losing one a is derived at 2. Slid, it stops at the a covered at 1 and
+    // removes exactly it; slid on to 0, it would not remove what the point covers and leave that a covered.
+    const whole = graphemesOf('aaay');
+    const less = graphemesOf('aay');
+    expect(deriveSpanEdit(whole, less)).toEqual({ fromGrapheme: 2, toGrapheme: 3, insertedGraphemes: 0 });
+    expect(coverSpanEdit({ fromGrapheme: 1, toGrapheme: 2 }, deriveSpanEdit(whole, less)!, less.length, { current: whole, next: less }))
+      .toEqual({ fromGrapheme: 1, toGrapheme: 1, state: 'drifted' });
   });
 
   it('covers what replaces a span across it, falls back to a point when what it covers goes, and stays in its block', () => {

@@ -599,7 +599,63 @@ describe('a DOCX\'s comments and tracked changes enter the imported manuscript (
         const conflict = store.inspectProposalConflict({ ...book, markId: insertion.markId });
         expect(conflict).toMatchObject({ conflictKind: 'suggestion', fromGrapheme: 16, toGrapheme: 26, base: '', newVersion: { available: true, blocker: null } });
         expect(digest(conflict.current)).toBe(digest(deleted));
+        // The same words removed again — 重做, or deleted by the editor — are found starting at 17 as well: the point is bare
+        // at 16 again, and keeps nothing of what followed them (Issue #568 review).
+        if (undo) {
+          store.redoManuscript(commit.manuscriptId, commit.branchId, store.getManuscriptWindow(commit.manuscriptId, commit.branchId, null).workingDigest);
+        } else {
+          edit(17, 27, '');
+        }
+        expect(anchorOf()).toEqual(['drifted', 16, 16]);
       }
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 240_000);
+
+  it('slides only a derived span: an Apply that writes its words just past a drifted insertion leaves that point bare (Issue #568 review)', async () => {
+    // ¶2 with two pending insertions: A at 8, and B at 11, whose words end with the grapheme at 10. Deleting [7,10) drifts A to
+    // 7 and leaves B exact at 8, just past it. B's words, applied at 8, could slide over the equal grapheme onto A's point; an
+    // Apply's span says where its words go, so A stays bare at 7.
+    const paragraph = await graphemes(span(10));
+    const words = await graphemes(span(8, 12, 28));
+    expect([words.length, words.at(-1) === paragraph[10]]).toEqual([16, true]);
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const { commit } = await importRevised(store, await composeRevised({
+        paragraphs: [
+          { runs: [text(span(8))] },
+          {
+            runs: [
+              text(span(10, 0, 8)), revised(span(11, 0, 5), 'ins', AUTHOR, '2026-09-01T10:01:00Z'), text(span(10, 8, 11)),
+              revised(span(8, 12, 28), 'ins', OTHER, '2026-09-01T10:02:00Z'), text(span(10, 11)),
+            ],
+          },
+        ],
+      }));
+      const book = { manuscriptId: commit.manuscriptId, branchId: commit.branchId };
+      const blockId = workingBlocks(store, commit.manuscriptId, commit.branchId)[1]!.blockId;
+      const [a, b] = windowMarks(store, commit.manuscriptId, commit.branchId)
+        .filter((mark) => mark.blockId === blockId).sort((left, right) => left.fromGrapheme - right.fromGrapheme);
+      expect([a!.fromGrapheme, b!.fromGrapheme]).toEqual([8, 11]);
+      const anchorOf = (markId: string) => {
+        const mark = windowMarks(store, commit.manuscriptId, commit.branchId).find((candidate) => candidate.markId === markId)!;
+        return [mark.anchorState, mark.fromGrapheme, mark.toGrapheme];
+      };
+      const window = store.getManuscriptWindow(commit.manuscriptId, commit.branchId, null);
+      store.flushJournalEdit({
+        clientEditId: randomUUID(), ...book, baseRevisionId: window.revisionId, blockId, windowStartBlockId: window.blocks[0]!.blockId,
+        baseBlockDigest: window.blocks.find((block) => block.blockId === blockId)!.digest, expectedJournalSequence: window.journalSequence,
+        fromGrapheme: 7, toGrapheme: 10, insertText: '',
+      });
+      expect([anchorOf(a!.markId), anchorOf(b!.markId)]).toEqual([['drifted', 7, 7], ['exact', 8, 8]]);
+      store.applyChangeSuggestion({
+        ...book, windowStartBlockId: window.blocks[0]!.blockId, markId: b!.markId, clientEffectId: randomUUID(),
+        interaction: 'accept-and-apply', editedText: null, reason: null,
+      });
+      expect(anchorOf(b!.markId).slice(1)).toEqual([8, 24]);
+      expect(anchorOf(a!.markId)).toEqual(['drifted', 7, 7]);
       store.markCleanShutdown();
     } finally {
       store.close();

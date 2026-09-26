@@ -7303,9 +7303,10 @@ export class BoundedManuscriptStore {
       requireBounded(updated.changes === 1, 'EDIT_BLOCK_CHANGED', '内容块在保存时已变化。');
       updateWorkingOffsetNodes(this.#db, input.branchId, asNumber(block.position), delta);
       this.#refreshBlockIndexes(input.branchId, input.blockId, asNumber(block.position), kind, level, afterText, afterDigest);
+      // The renderer derives this span from the block's two texts, as an undo's is derived here (Issue #568).
       followBlockTextChangeForMarks(this.#db, input.branchId, input.blockId, beforeText, afterText, sequence, [
         { fromGrapheme: input.fromGrapheme, toGrapheme: input.toGrapheme, insertedGraphemes: inserted.length, inserted },
-      ]);
+      ], true);
       this.#db.prepare(
         `INSERT INTO edit_journal_entries(
            journal_entry_id, client_edit_id, request_fingerprint, manuscript_id, branch_id, base_revision_id,
