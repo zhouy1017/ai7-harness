@@ -67,7 +67,7 @@ import { localInstantLabel } from './plan-preview-labels.js';
 export interface MountLibraryMaterialsOptions {
   readonly root: HTMLElement;
   readonly api: Pick<RendererApi, 'inspectLibraryMaterials' | 'inspectLibraryMaterial' | 'previewLibraryMaterial' | 'addLibraryMaterial' |
-    'decideLibraryMaterial' | 'listBooks'>;
+    'decideLibraryMaterial' | 'listBooks' | 'readLibraryDecisionReason'>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
   readonly technicalDetails: (key: string, ...rows: HTMLElement[]) => HTMLElement;
@@ -76,7 +76,7 @@ export interface MountLibraryMaterialsOptions {
 }
 
 type Chooser =
-  | { readonly materialId: string; readonly kind: 'attribution'; choice: string | null }
+  | { readonly materialId: string; readonly kind: 'attribution'; choice: string | null; book: { bookId: string; title: string } | null }
   | { readonly materialId: string; readonly kind: 'eligibility'; choice: LearningEligibilityChoice | null; reason: string };
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -115,14 +115,16 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
   const { root, api, setStatus, errorMessage, technicalDetails } = options;
   root.classList.add('library-materials');
   let busy = false;
-  /** The items read so far, newest first, and where the next page starts. */
+  /** One page, newest first, and where the next page starts. */
   let materials: LibraryMaterialProjection[] = [];
   let cursor: LibraryMaterialCursor | null = null;
+  let onFirstPage = true;
   /** The item 待我处理 opened when it is not among them: read by itself, and shown first. */
   let pinned: LibraryMaterialProjection | null = null;
   /** The Books 定归属 can name, as 书库 pages them, and where the next page starts; `null` until first read. */
   let books: Array<{ bookId: string; title: string }> | null = null;
   let booksCursor: BookSummaryCursor | null = null;
+  let onFirstBooksPage = true;
   /** The file 放入资料… read, and what the editor has written about it so far. */
   let preview: LibraryMaterialPreviewProjection | null = null;
   let draft: { title: string; kind: LibraryMaterialKind | null } = { title: '', kind: null };
@@ -154,11 +156,18 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     const list = el('div', 'library-list');
     for (const material of listed) list.append(card(material));
     parts.push(list);
-    if (cursor !== null) {
+    if (cursor !== null || !onFirstPage) {
       const row = el('div', 'button-row library-more');
-      const more = action(LIBRARY_MORE, 'secondary', 'more', () => void loadMore());
-      more.disabled = busy;
-      row.append(more);
+      if (!onFirstPage) {
+        const first = action('回到最新资料', 'secondary', 'first', () => void loadMore(true));
+        first.disabled = busy || chooser !== null || preview !== null;
+        row.append(first);
+      }
+      if (cursor !== null) {
+        const more = action(LIBRARY_MORE, 'secondary', 'more', () => void loadMore());
+        more.disabled = busy || chooser !== null || preview !== null;
+        row.append(more);
+      }
       parts.push(row);
     }
     root.replaceChildren(...parts);
@@ -213,6 +222,41 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     return section;
   };
 
+  /** The full immutable note stays readable one fragment at a time, independently of later decisions. */
+  const reasonReader = (materialId: string, ordinal: number): HTMLElement => {
+    const section = el('section', 'library-reason-reader');
+    const open = action('说明未显示完；阅读完整说明…', 'quiet', 'read-reason', () => void read(0));
+    section.append(open);
+    let loading = false;
+    const read = async (offset: number): Promise<void> => {
+      if (loading) return;
+      loading = true;
+      const controls = [...section.querySelectorAll('button')];
+      for (const button of controls) button.disabled = true;
+      try {
+        const page = await api.readLibraryDecisionReason({ materialId, ordinal, offset });
+        if (!section.isConnected) return;
+        const text = el('p', 'library-reason-text', page.text);
+        text.tabIndex = -1;
+        const row = el('div', 'button-row');
+        if (page.previousOffset !== null) row.append(action('上一段', 'quiet', 'reason-previous', () => void read(page.previousOffset!)));
+        if (page.nextOffset !== null) row.append(action('下一段', 'quiet', 'reason-next', () => void read(page.nextOffset!)));
+        row.append(action('收起说明', 'quiet', 'reason-close', () => { section.replaceChildren(open); open.disabled = false; open.focus(); }));
+        section.replaceChildren(text, row);
+        text.focus();
+      } catch (error) {
+        if (!section.isConnected) return;
+        section.querySelector('[role="alert"]')?.remove();
+        section.append(alert(errorMessage(error, '暂时无法读取这段说明，请重试。')));
+        for (const button of controls) button.disabled = false;
+        controls[0]?.focus();
+      } finally {
+        loading = false;
+      }
+    };
+    return section;
+  };
+
   const card = (material: LibraryMaterialProjection): HTMLElement => {
     const node = el('article', 'library-material');
     node.dataset['materialId'] = material.materialId;
@@ -231,6 +275,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       el('dt', undefined, LIBRARY_ELIGIBILITY_TERM), el('dd', 'library-eligibility', libraryEligibilityLine(material)),
     );
     node.append(facts);
+    if (material.eligibility?.reasonHasMore) node.append(reasonReader(material.materialId, material.eligibility.ordinal));
     if (material.eligibilityReset) node.append(el('p', 'attention-note library-reset', LIBRARY_ELIGIBILITY_RESET));
     node.append(el('p', `library-reference library-reference-${material.reference.state}`, libraryReferenceLine(material)));
     if (refusal?.materialId === material.materialId) node.append(alert(refusal.message));
@@ -259,6 +304,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     for (const entry of material.decisions) {
       const row = el('li', undefined, libraryDecisionLine(entry, localInstantLabel));
       row.dataset['decisionOrdinal'] = String(entry.ordinal);
+      if (entry.decision.kind === 'eligibility' && entry.decision.reasonHasMore) row.append(reasonReader(material.materialId, entry.ordinal));
       list.append(row);
     }
     history.append(list, technicalDetails('library-material-facts',
@@ -292,8 +338,13 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     let confirm: HTMLButtonElement | null = null;
     const chosen = (value: string): void => {
       state.choice = value;
+      state.book = books?.find((book) => `book:${book.bookId}` === value) ??
+        (state.book !== null && `book:${state.book.bookId}` === value ? state.book : null);
       if (confirm !== null) confirm.disabled = busy;
     };
+    if (state.book !== null && !books?.some((book) => book.bookId === state.book!.bookId)) {
+      fieldset.append(choice(name, `book:${state.book.bookId}`, `已选：《${state.book.title}》`, true, busy, chosen));
+    }
     for (const book of books ?? []) {
       fieldset.append(choice(name, `book:${book.bookId}`, `《${book.title}》`, state.choice === `book:${book.bookId}`, busy, chosen));
     }
@@ -301,6 +352,11 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       const more = action(LIBRARY_BOOKS_MORE, 'quiet', 'more-books', () => void loadBooks(material));
       more.disabled = busy;
       fieldset.append(more);
+    }
+    if (!onFirstBooksPage) {
+      const first = action('回到图书首页', 'quiet', 'first-books', () => void loadBooks(material, true));
+      first.disabled = busy;
+      fieldset.append(first);
     }
     fieldset.append(
       choice(name, 'series', LIBRARY_SERIES, false, true, chosen),
@@ -314,7 +370,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       const decision: LibraryMaterialDecisionInput = value === 'house'
         ? { kind: 'attribution', attribution: { scope: 'house' } }
         : { kind: 'attribution', attribution: { scope: 'book', bookId: value.slice('book:'.length) } };
-      const where = value === 'house' ? LIBRARY_HOUSE : `《${books?.find((book) => `book:${book.bookId}` === value)?.title ?? ''}》`;
+      const where = value === 'house' ? LIBRARY_HOUSE : `《${state.book?.title ?? ''}》`;
       void decide(material, decision, libraryAttributed(material.title, where));
     });
     confirm.disabled = busy || state.choice === null;
@@ -376,7 +432,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     if (busy) return;
     refusal = null;
     chooser = kind === 'attribution'
-      ? { materialId: material.materialId, kind, choice: null }
+      ? { materialId: material.materialId, kind, choice: null, book: null }
       : { materialId: material.materialId, kind, choice: null, reason: '' };
     // The Books an attribution can name come from 书库's first page, read when the choice is first opened.
     if (kind === 'attribution' && books === null) {
@@ -387,24 +443,25 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
   };
 
   /** 书库's next page of Books for 定归属, in its title order; the first new one takes focus. */
-  const loadBooks = async (material: LibraryMaterialProjection): Promise<void> => {
+  const loadBooks = async (material: LibraryMaterialProjection, restart = false): Promise<void> => {
     if (busy) return;
     busy = true;
     const first = books === null;
     setStatus(LIBRARY_STATUS.loadingBooks, 'busy');
     try {
-      const page = await api.listBooks({ after: first ? null : booksCursor });
+      const page = await api.listBooks({ after: first || restart ? null : booksCursor });
       if (!root.isConnected) return;
-      const before = books?.length ?? 0;
-      books = [...(books ?? []), ...page.items.map((item) => ({ bookId: item.bookId, title: item.title }))];
+      books = page.items.map((item) => ({ bookId: item.bookId, title: item.title }));
+      onFirstBooksPage = first || restart;
       booksCursor = page.nextCursor;
       busy = false;
       setStatus(LIBRARY_STATUS.opened);
-      const added = books[before];
+      const added = books[0];
       paint(first || added === undefined
         ? `[data-material-id="${material.materialId}"] .library-chooser input:not([disabled])`
         : `[data-material-id="${material.materialId}"] [data-library-choice="book:${added.bookId}"]`);
     } catch (error) {
+      if (!root.isConnected) return;
       busy = false;
       if (first) chooser = null;
       const message = errorMessage(error, LIBRARY_STATUS.booksFailed);
@@ -415,23 +472,24 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
   };
 
   /** The next page of items, oldest after the last shown; the first new one takes focus. */
-  const loadMore = async (): Promise<void> => {
-    if (busy || cursor === null) return;
+  const loadMore = async (restart = false): Promise<void> => {
+    if (busy || chooser !== null || preview !== null || (!restart && cursor === null)) return;
     busy = true;
     setStatus(LIBRARY_STATUS.loadingMore, 'busy');
     try {
-      const page = await api.inspectLibraryMaterials({ after: cursor });
+      const page = await api.inspectLibraryMaterials({ after: restart ? null : cursor });
       if (!root.isConnected) return;
-      const fresh = page.materials.filter((material) => !materials.some((known) => known.materialId === material.materialId));
-      materials = [...materials, ...fresh];
+      materials = [...page.materials];
+      onFirstPage = restart;
       cursor = page.nextCursor;
       busy = false;
       setStatus(LIBRARY_STATUS.opened);
-      paint(fresh[0] === undefined ? null : `[data-material-id="${fresh[0].materialId}"] h3`);
+      paint(materials[0] === undefined ? '[data-library-action="add"]' : `[data-material-id="${materials[0].materialId}"] h3`);
     } catch (error) {
+      if (!root.isConnected) return;
       busy = false;
       setStatus(errorMessage(error, LIBRARY_STATUS.unavailable), 'error');
-      paint('[data-library-action="more"]');
+      paint(`[data-library-action="${restart ? 'first' : 'more'}"]`);
     }
   };
 
@@ -443,6 +501,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     paint(null);
     try {
       const read = await api.previewLibraryMaterial();
+      if (!root.isConnected) return;
       busy = false;
       if (read === null) {
         setStatus(LIBRARY_STATUS.cancelled);
@@ -454,6 +513,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       setStatus(libraryPreviewHeading(read));
       paint('.library-preview h3');
     } catch (error) {
+      if (!root.isConnected) return;
       busy = false;
       const message = errorMessage(error, LIBRARY_STATUS.addFailed);
       refusal = { materialId: null, message };
@@ -472,14 +532,15 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     paint(null);
     try {
       const added = await api.addLibraryMaterial(input);
-      // The newest item: first on the page, wherever it had been read before.
-      materials = [added, ...materials.filter((material) => material.materialId !== added.materialId)];
-      if (pinned?.materialId === added.materialId) pinned = null;
+      if (!root.isConnected) return;
+      // Keep the completed arrival as the one exact card above the current bounded page.
+      pinned = added;
       busy = false;
       preview = null;
       setStatus(libraryAdded(added.title), 'success');
       paint(`[data-material-id="${added.materialId}"] h3`);
     } catch (error) {
+      if (!root.isConnected) return;
       // The preview stays, so a title that could not stand can be written again; one the service no longer holds says so.
       busy = false;
       const message = errorMessage(error, LIBRARY_STATUS.addFailed);
@@ -497,6 +558,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     paint(null);
     try {
       const now = await api.decideLibraryMaterial({ materialId: material.materialId, expectedDecisions: material.decisionCount, decision });
+      if (!root.isConnected) return;
       replace(now);
       busy = false;
       chooser = null;
@@ -506,6 +568,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
         ? `[data-material-id="${material.materialId}"] [data-library-action="eligibility"]`
         : `[data-material-id="${material.materialId}"] h3`);
     } catch (error) {
+      if (!root.isConnected) return;
       busy = false;
       chooser = null;
       const message = errorMessage(error, LIBRARY_STATUS.decideFailed);
@@ -517,6 +580,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       } catch {
         // The refusal already says what happened.
       }
+      if (!root.isConnected) return;
       paint(`[data-material-id="${material.materialId}"] h3`);
     }
   };
@@ -526,6 +590,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       root.dataset['library'] = 'loading';
       try {
         const page = await api.inspectLibraryMaterials({ after: null });
+        if (!root.isConnected) return;
         materials = [...page.materials];
         cursor = page.nextCursor;
         // The item 待我处理 opened, read by itself when it is older than the first page.
@@ -536,12 +601,14 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
             pinned = null;
           }
         }
+        if (!root.isConnected) return;
         root.dataset['library'] = 'ready';
         const target = options.focusMaterialId === null ? undefined : shown().find((material) => material.materialId === options.focusMaterialId);
         paint(target === undefined
           ? null
           : `[data-material-id="${target.materialId}"] [data-library-action="${target.attribution === null ? 'attribute' : 'eligibility'}"]`);
       } catch (error) {
+        if (!root.isConnected) return;
         root.dataset['library'] = 'failed';
         root.replaceChildren(el('p', 'attention-note', errorMessage(error, LIBRARY_STATUS.unavailable)));
         throw error;

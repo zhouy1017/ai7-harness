@@ -534,6 +534,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterials(request.input.after) };
     case 'inspectLibraryMaterial':
       return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterial(request.input.materialId) };
+    case 'readLibraryDecisionReason':
+      return { id: request.id, ok: true, op: request.op, result: store.readLibraryDecisionReason(request.input) };
     case 'previewLibraryMaterial':
       return { id: request.id, ok: true, op: request.op, result: await store.previewLibraryMaterial(request.input.path) };
     case 'addLibraryMaterial':

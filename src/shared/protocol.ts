@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 72 as const;
+export const SERVICE_PROTOCOL_VERSION = 73 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -84,6 +84,7 @@ export const IPC_CHANNELS = {
   addLibraryMaterial: 'ai7:j15:add-library-material',
   decideLibraryMaterial: 'ai7:j15:decide-library-material',
   inspectLibraryMaterial: 'ai7:j15:inspect-library-material',
+  readLibraryDecisionReason: 'ai7:j15:read-library-decision-reason',
   inspectReviewWorkspace: 'ai7:j04:inspect-review-workspace',
   prepareReviewRun: 'ai7:j04:prepare-review-run',
   authorizeReviewRun: 'ai7:j04:authorize-review-run',
@@ -4836,7 +4837,7 @@ export interface LibraryMaterialDecisionProjection {
   readonly decision:
     | { readonly kind: 'attribution'; readonly scope: 'book'; readonly bookId: string; readonly bookTitle: string }
     | { readonly kind: 'attribution'; readonly scope: 'house' }
-    | { readonly kind: 'eligibility'; readonly choice: LearningEligibilityChoice; readonly bookTitle: string | null; readonly reason: string | null };
+    | { readonly kind: 'eligibility'; readonly choice: LearningEligibilityChoice; readonly bookTitle: string | null; readonly reason: string | null; readonly reasonHasMore: boolean };
 }
 
 /** One 资料库 item: what arrived, where it belongs, whether it may teach, and whose Tasks may list it under 允许参考. */
@@ -4858,6 +4859,8 @@ export interface LibraryMaterialProjection {
     readonly choice: LearningEligibilityChoice;
     readonly bookTitle: string | null;
     readonly reason: string | null;
+    readonly reasonHasMore: boolean;
+    readonly ordinal: number;
     readonly decidedAt: string;
   };
   /** A decision made under an earlier attribution, which changing the attribution set aside: it is decided again. */
@@ -4879,6 +4882,14 @@ export interface LibraryMaterialsProjection {
   readonly materials: ReadonlyArray<LibraryMaterialProjection>;
   /** Where the next page starts; `null` when this is the last. */
   readonly nextCursor: LibraryMaterialCursor | null;
+}
+
+/** One bounded fragment of an immutable eligibility decision's complete note. */
+export const LIBRARY_REASON_PAGE_UNITS = 1024;
+export interface LibraryDecisionReasonPage {
+  readonly text: string;
+  readonly nextOffset: number | null;
+  readonly previousOffset: number | null;
 }
 
 /** The drawer's `设为快速开始默认…` for one plan, and the rule that started its Task, when one did. */
@@ -7105,6 +7116,10 @@ export interface ServiceOperationMap {
     input: { materialId: string };
     output: LibraryMaterialProjection;
   };
+  readLibraryDecisionReason: {
+    input: { materialId: string; ordinal: number; offset: number };
+    output: LibraryDecisionReasonPage;
+  };
   /** 放入资料…: the absolute path main's picker returned, read as it would arrive; nothing is kept. */
   previewLibraryMaterial: {
     input: { path: string };
@@ -7502,6 +7517,7 @@ export interface RendererApi {
   inspectLibraryMaterials(input?: { after: LibraryMaterialCursor | null }): Promise<LibraryMaterialsProjection>;
   /** One 资料库 item, by its identity. */
   inspectLibraryMaterial(input: { materialId: string }): Promise<LibraryMaterialProjection>;
+  readLibraryDecisionReason(input: ServiceOperationMap['readLibraryDecisionReason']['input']): Promise<LibraryDecisionReasonPage>;
   /** 放入资料…: the native picker, then the file as it would arrive; `null` when the picker was cancelled. */
   previewLibraryMaterial(): Promise<LibraryMaterialPreviewProjection | null>;
   addLibraryMaterial(input: { previewId: string; title: string; kind: LibraryMaterialKind }): Promise<LibraryMaterialProjection>;

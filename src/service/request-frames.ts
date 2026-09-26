@@ -19,7 +19,8 @@ import {
   MAX_BOOK_SUMMARY_FILTER_CHARACTERS,
   MAINTENANCE_CLASSIFICATIONS,
   LIBRARY_MATERIAL_KINDS,
-  MAX_LEARNING_ELIGIBILITY_REASON_GRAPHEMES,
+  MAX_FRAME_BYTES,
+  LIBRARY_REASON_PAGE_UNITS,
   type LibraryMaterialKind,
   MAX_MAINTENANCE_ERRATA_CHARACTERS,
   MAX_MAINTENANCE_EVIDENCE_CHARACTERS,
@@ -123,7 +124,7 @@ function validLibraryDecision(value: unknown): boolean {
   }
   return value.kind === 'eligibility' && hasExactKeys(value, ['kind', 'choice', 'reason']) &&
     (value.choice === 'book' || value.choice === 'house' || value.choice === 'excluded' || value.choice === 'deferred') &&
-    (value.reason === null || isBoundedString(value.reason, MAX_LEARNING_ELIGIBILITY_REASON_GRAPHEMES * 8, true));
+    (value.reason === null || isBoundedString(value.reason, MAX_FRAME_BYTES, true));
 }
 
 function validMarkBinding(input: Record<string, unknown>): boolean {
@@ -614,6 +615,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectLibraryMaterial': {
       const input = requireInput(value.input, ['materialId'], tentativeId);
       if (!validUuid(input.materialId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'readLibraryDecisionReason': {
+      const input = requireInput(value.input, ['materialId', 'ordinal', 'offset'], tentativeId);
+      if (!validUuid(input.materialId) || !isSafeInteger(input.ordinal, 1) || !isSafeInteger(input.offset, 0) ||
+          Number(input.offset) % LIBRARY_REASON_PAGE_UNITS !== 0) throw new ProtocolError(tentativeId);
       break;
     }
     // 放入资料… (Issue #427, S79c): the absolute path main's picker returned.

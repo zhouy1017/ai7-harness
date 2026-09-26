@@ -2629,6 +2629,14 @@ function registerRendererHandlers(
       return service.call('inspectLibraryMaterial', { materialId: input.materialId });
     }),
   );
+  ipcMain.handle(IPC_CHANNELS.readLibraryDecisionReason, (event, input: ServiceOperationMap['readLibraryDecisionReason']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('readLibraryDecisionReason', { materialId: input.materialId, ordinal: input.ordinal, offset: input.offset });
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.previewLibraryMaterial, (event) =>
     envelope(async () => {
       const owned = requireSender(event);

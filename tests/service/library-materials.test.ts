@@ -9,6 +9,7 @@ import { LIBRARY_MATERIAL_SCHEMA_VERSION, REVIEW_GUIDELINE_SCHEMA_VERSION } from
 import {
   MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN,
   MAX_LIBRARY_MATERIALS_PAGE,
+  MAX_FRAME_BYTES,
   type GlobalAttentionItemProjection,
   type LibraryMaterialProjection,
   type LibraryMaterialsProjection,
@@ -168,10 +169,10 @@ describe('知识库 › 资料库 over the real store', () => {
       expect(house.decisionCount).toBe(5);
       expect(house.decisions.map((entry) => [entry.ordinal, entry.decision])).toEqual([
         [1, { kind: 'attribution', scope: 'book', bookId: bookA, bookTitle: '资料库之书甲' }],
-        [2, { kind: 'eligibility', choice: 'deferred', bookTitle: null, reason: null }],
-        [3, { kind: 'eligibility', choice: 'book', bookTitle: '资料库之书甲', reason: '责编确认可用于本书。' }],
+        [2, { kind: 'eligibility', choice: 'deferred', bookTitle: null, reason: null, reasonHasMore: false }],
+        [3, { kind: 'eligibility', choice: 'book', bookTitle: '资料库之书甲', reason: '责编确认可用于本书。', reasonHasMore: false }],
         [4, { kind: 'attribution', scope: 'house' }],
-        [5, { kind: 'eligibility', choice: 'house', bookTitle: null, reason: null }],
+        [5, { kind: 'eligibility', choice: 'house', bookTitle: null, reason: null, reasonHasMore: false }],
       ]);
       // Reading it twice answers the same, and writes nothing.
       expect(store.inspectLibraryMaterials(null)).toEqual(store.inspectLibraryMaterials(null));
@@ -256,6 +257,51 @@ describe('知识库 › 资料库 over the real store', () => {
       store.close();
     }
   }, 120_000);
+
+  it('bounds a full page of long accepted notes and reads every immutable note without loss', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const reason = '👨‍👩‍👧‍👦'.repeat(300);
+      let materialId = '';
+      for (let index = 0; index < MAX_LIBRARY_MATERIALS_PAGE; index += 1) {
+        const preview = await store.previewLibraryMaterial(file(`note-${index}.txt`, `Library test reference ${index}`));
+        const item = await store.addLibraryMaterial({ previewId: preview.previewId, title: `资料${index}`, kind: 'document' });
+        materialId = item.materialId;
+        store.decideLibraryMaterial({ materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'house' } } });
+        for (let ordinal = 2; ordinal <= 11; ordinal += 1) {
+          store.decideLibraryMaterial({ materialId, expectedDecisions: ordinal - 1,
+            decision: { kind: 'eligibility', choice: ordinal % 2 === 0 ? 'house' : 'excluded', reason } });
+        }
+      }
+      const projection = store.inspectLibraryMaterials(null);
+      expect(projection.materials).toHaveLength(20);
+      expect(Buffer.byteLength(JSON.stringify({ id: randomUUID(), ok: true, op: 'inspectLibraryMaterials', result: projection }))).toBeLessThan(MAX_FRAME_BYTES);
+      expect(projection.materials.every((item) => item.eligibility?.reasonHasMore && item.decisions.length === 10)).toBe(true);
+      const readAll = (ordinal: number): string => {
+        let offset: number | null = 0;
+        let full = '';
+        while (offset !== null) {
+          const page = store.readLibraryDecisionReason({ materialId, ordinal, offset });
+          expect(page.text.isWellFormed()).toBe(true);
+          expect(page.text.length).toBeLessThanOrEqual(1025);
+          if (page.previousOffset !== null) expect(store.readLibraryDecisionReason({ materialId, ordinal, offset: page.previousOffset }).nextOffset).toBe(offset);
+          full += page.text;
+          offset = page.nextOffset;
+        }
+        return full;
+      };
+      expect(readAll(2)).toBe(reason);
+      const combining = 'a' + '\u0301'.repeat(8_000);
+      store.decideLibraryMaterial({ materialId, expectedDecisions: 11, decision: { kind: 'eligibility', choice: 'house', reason: combining } });
+      expect(readAll(12)).toBe(combining);
+      expect(readAll(2)).toBe(reason); // still the exact old note after a newer decision
+      expect(await refusal(() => store.readLibraryDecisionReason({ materialId, ordinal: 1, offset: 0 }))).toContain('LIBRARY_MATERIAL_CURSOR_INVALID');
+      expect(await refusal(() => store.readLibraryDecisionReason({ materialId, ordinal: 2, offset: 99_328 }))).toContain('LIBRARY_MATERIAL_CURSOR_INVALID');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  });
 
   it('reads the items a page at a time, newest first, and an item by itself, its decisions counted past the latest ten', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);

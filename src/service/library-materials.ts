@@ -5,6 +5,7 @@ import { basename, extname, posix, resolve } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   LIBRARY_MATERIAL_KINDS,
+  LIBRARY_REASON_PAGE_UNITS,
   MAX_LEARNING_ELIGIBILITY_REASON_GRAPHEMES,
   MAX_LIBRARY_MATERIAL_BYTES,
   MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN,
@@ -12,6 +13,7 @@ import {
   MAX_LIBRARY_MATERIALS_PAGE,
   type LearningEligibilityChoice,
   type LibraryMaterialCursor,
+  type LibraryDecisionReasonPage,
   type LibraryMaterialDecisionInput,
   type LibraryMaterialDecisionProjection,
   type LibraryMaterialFormat,
@@ -110,6 +112,16 @@ const MAX_PREVIEWS = 16;
 const CONTROL_CHARACTER = /[\p{Cc}\p{Zl}\p{Zp}]/u;
 const REASON_CONTROL_CHARACTER = /[\p{Zl}\p{Zp}]|(?![\n])\p{Cc}/u;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
+const REASON_PREVIEW_UNITS = 128;
+
+/** Shift both adjacent fixed-window boundaries left at a split surrogate, preserving every character exactly once. */
+function reasonFragment(text: string, offset: number, units: number): string {
+  let start = offset;
+  let end = Math.min(text.length, offset + units);
+  if (start > 0 && /[\uDC00-\uDFFF]/u.test(text.charAt(start))) start -= 1;
+  if (end < text.length && /[\uDC00-\uDFFF]/u.test(text.charAt(end))) end -= 1;
+  return text.slice(start, end);
+}
 
 const OBJECT_EXTENSIONS: Readonly<Record<LibraryMaterialFormat, string>> = {
   DOCX: '.docx',
@@ -633,6 +645,23 @@ export class LibraryMaterialLedger {
     return this.#view(this.#material(row), new Map());
   }
 
+  /** Read the exact immutable note, validating its entire chain, without returning the other notes. */
+  reasonPage(materialId: string, ordinal: number, offset: number): LibraryDecisionReasonPage {
+    requireLibrary(UUID_PATTERN.test(materialId) && Number.isSafeInteger(ordinal) && ordinal > 0 &&
+      Number.isSafeInteger(offset) && offset >= 0 && offset % LIBRARY_REASON_PAGE_UNITS === 0,
+    'LIBRARY_MATERIAL_CURSOR_INVALID', '资料说明页码无效。');
+    const row = this.#db.prepare('SELECT * FROM library_materials WHERE material_id = ?').get(materialId) as SqlRow | undefined;
+    requireLibrary(row !== undefined, 'LIBRARY_MATERIAL_NOT_FOUND', '资料库里没有这份资料。');
+    let reason: string | null = null;
+    for (const decision of this.#decisions(this.#material(row))) {
+      if (decision.ordinal === ordinal && decision.kind === 'eligibility') reason = decision.reason;
+    }
+    requireLibrary(reason !== null && offset < reason.length, 'LIBRARY_MATERIAL_CURSOR_INVALID', '资料说明页码无效。');
+    return { text: reasonFragment(reason, offset, LIBRARY_REASON_PAGE_UNITS),
+      nextOffset: offset + LIBRARY_REASON_PAGE_UNITS < reason.length ? offset + LIBRARY_REASON_PAGE_UNITS : null,
+      previousOffset: offset === 0 ? null : offset - LIBRARY_REASON_PAGE_UNITS };
+  }
+
   /** An item's card: where it stands, whether a Task may list it, and its decisions — how many, and the latest of them. */
   #view(material: StoredMaterial, titles: Map<string, string>): LibraryMaterialProjection {
     const title = (bookId: string): string => {
@@ -652,7 +681,9 @@ export class LibraryMaterialLedger {
       : {
         choice: now.eligibility.choice,
         bookTitle: now.eligibility.bookId === null ? null : title(now.eligibility.bookId),
-        reason: now.eligibility.reason,
+        reason: now.eligibility.reason === null ? null : reasonFragment(now.eligibility.reason, 0, REASON_PREVIEW_UNITS),
+        reasonHasMore: (now.eligibility.reason?.length ?? 0) > REASON_PREVIEW_UNITS,
+        ordinal: now.eligibility.ordinal,
         decidedAt: now.eligibility.recordedAt,
       };
     const reference: LibraryMaterialProjection['reference'] = attribution === null || eligibility === null || eligibility.choice === 'deferred'
@@ -679,7 +710,9 @@ export class LibraryMaterialLedger {
           ? entry.scope === 'book'
             ? { kind: 'attribution', scope: 'book', bookId: entry.bookId, bookTitle: title(entry.bookId) }
             : { kind: 'attribution', scope: 'house' }
-          : { kind: 'eligibility', choice: entry.choice, bookTitle: entry.bookId === null ? null : title(entry.bookId), reason: entry.reason },
+          : { kind: 'eligibility', choice: entry.choice, bookTitle: entry.bookId === null ? null : title(entry.bookId),
+            reason: entry.reason === null ? null : reasonFragment(entry.reason, 0, REASON_PREVIEW_UNITS),
+            reasonHasMore: (entry.reason?.length ?? 0) > REASON_PREVIEW_UNITS },
       })),
     };
   }

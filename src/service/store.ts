@@ -5,6 +5,7 @@ import { basename, extname, isAbsolute, posix, relative, resolve, sep } from 'no
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { J03_TASK_GOAL, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
+  ServiceOperationMap,
   InspectTaskPlanInput,
   TaskPlanProjection,
   GlobalAttentionProjection,
@@ -5525,6 +5526,10 @@ export class EditorialStore {
   /** One 资料库 item as its card reads it. */
   inspectLibraryMaterial(materialId: string): LibraryMaterialProjection {
     return this.#libraryCall(() => this.#libraryMaterials.item(materialId));
+  }
+
+  readLibraryDecisionReason(input: ServiceOperationMap['readLibraryDecisionReason']['input']): ServiceOperationMap['readLibraryDecisionReason']['output'] {
+    return this.#libraryCall(() => this.#libraryMaterials.reasonPage(input.materialId, input.ordinal, input.offset));
   }
 
   /** 放入资料…'s first step: the picked file identified, measured and digested as it would arrive; nothing is kept. */
