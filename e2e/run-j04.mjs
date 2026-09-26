@@ -69,8 +69,8 @@ const CHANGE_SUGGESTION_APPLY_MEMBERS = ['applyChangeSuggestion', 'applyChangeSu
 const EXPORT_MEMBERS = [
   'reviewManuscriptExport', 'chooseManuscriptExportDestination', 'approveManuscriptExport', 'revealManuscriptExport',
   'reviewBookDeliveryPackageExport', 'chooseBookDeliveryPackageExportFolder', 'approveBookDeliveryPackageExport',
-  // Synchronized delta with Issue #434 (S86a): 导出数据库's three, house-wide.
-  'chooseDatabaseExportDestination', 'approveDatabaseExport', 'inspectDatabaseExports',
+  // Synchronized delta with Issue #434 (S86a): 导出数据库's three, house-wide, and since its review 取消导出, which only stops one.
+  'chooseDatabaseExportDestination', 'approveDatabaseExport', 'inspectDatabaseExports', 'cancelDatabaseExport',
 ];
 // Synchronized delta with Issue #417: 审阅's seven members. None is named like an execution, effect,
 // apply or export member, so the two pins below hold them without an exception.

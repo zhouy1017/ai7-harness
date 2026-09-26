@@ -1,4 +1,9 @@
-import type { DatabaseExportContentsProjection, DatabaseExportPreparationProjection, DatabaseExportReceiptProjection } from '../shared/protocol.js';
+import type {
+  DatabaseExportActivityProjection,
+  DatabaseExportContentsProjection,
+  DatabaseExportPreparationProjection,
+  DatabaseExportReceiptProjection,
+} from '../shared/protocol.js';
 import { exportBytesLabel } from './manuscript-export-labels.js';
 
 /**
@@ -14,6 +19,8 @@ export const DATABASE_EXPORT_ACTIONS = {
   choose: '导出数据库…',
   approve: '按上述方式导出',
   cancel: '取消',
+  // Stops the export under way, until the file is being put in place (V2-UX-EXP-011).
+  stop: '取消导出',
 } as const;
 export const DATABASE_EXPORT_STATUS_LINES = {
   choosing: '正在打开系统的保存对话框…',
@@ -24,9 +31,33 @@ export const DATABASE_EXPORT_STATUS_LINES = {
   approveFailed: '未能导出数据库。',
   closed: '已取消这次导出，没有写入任何文件。',
   recordsUnavailable: '无法读取导出记录。',
+  packing: '正在打包数据库…',
+  stopping: '正在取消导出…',
+  stopFailed: '未能取消导出。',
+  // 取消导出 while the prepared file was read, before the approval was recorded.
+  writingStopped: '已取消导出，所选位置没有变化；准备好的文件还在，可以再次按上述方式导出。',
+  lost: '读不到这次导出的进度了，请查看导出记录。',
 } as const;
+/** What an export under way is doing, step by step (V2-UX-EXP-011). */
+export const DATABASE_EXPORT_STEPS = {
+  packing: '正在打包数据库',
+  verifying: '正在核对准备好的文件',
+  writing: '正在写入所选位置',
+  committing: '正在把文件放到所选位置，已不能取消',
+} as const satisfies Record<NonNullable<DatabaseExportActivityProjection['step']>, string>;
 export const DATABASE_EXPORT_RECORDS = '导出记录';
 export const DATABASE_EXPORT_NO_RECORDS = '还没有导出过数据库。';
+
+/**
+ * How far an export under way has come (V2-UX-EXP-011): `正在打包数据库 · 42%`, measured in the bytes it has read of those it
+ * reads. It never reads 100% before it has ended, and putting the file in place, which nothing stops, reads without a count.
+ */
+export function databaseExportActivityLine(activity: Pick<DatabaseExportActivityProjection, 'step' | 'completedBytes' | 'totalBytes'>): string {
+  if (activity.step === null) return '';
+  if (activity.step === 'committing') return DATABASE_EXPORT_STEPS.committing;
+  const percent = activity.totalBytes > 0 ? Math.min(99, Math.floor((activity.completedBytes / activity.totalBytes) * 100)) : 0;
+  return `${DATABASE_EXPORT_STEPS[activity.step]} · ${percent}%`;
+}
 
 /** `3 本图书 · 5 个来源版本 · 资料库 2 项 · 书系 1 个`. */
 export function databaseExportContentsLine(contents: DatabaseExportContentsProjection): string {

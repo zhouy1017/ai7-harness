@@ -155,6 +155,7 @@ export const IPC_CHANNELS = {
   inspectDatabaseReplacements: 'ai7:j12:inspect-database-replacements',
   rollBackDatabaseReplacement: 'ai7:j12:roll-back-database-replacement',
   quitApplication: 'ai7:j12:quit-application',
+  cancelDatabaseExport: 'ai7:j12:cancel-database-export',
   applyChangeSuggestion: 'ai7:j05:apply-change-suggestion',
   applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
   reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
@@ -5856,10 +5857,33 @@ export interface DatabaseExportReceiptProjection {
   readonly recordedAt: string | null;
 }
 
-/** The approved database exports, newest first, and how many there are. */
+/**
+ * The database export under way, or how the last one in this launch ended (Issue #434 review; V2-UX-EXP-011). A preparation
+ * packs the store; an approval reads the prepared file, writes it, and reads it back — `completedBytes` of `totalBytes` —
+ * and `cancellable` says whether 取消导出 still stops it, which it does until the file is being put in place. Once it ends:
+ * `prepared` with the preparation, `finished` with the approval's receipt, `cancelled` with nothing recorded, or `failed`
+ * with why.
+ */
+export interface DatabaseExportActivityProjection {
+  readonly activityId: string;
+  readonly kind: 'prepare' | 'approve';
+  readonly state: 'running' | 'prepared' | 'finished' | 'cancelled' | 'failed';
+  readonly step: 'packing' | 'verifying' | 'writing' | 'committing' | null;
+  readonly completedBytes: number;
+  readonly totalBytes: number;
+  readonly cancellable: boolean;
+  /** What a preparation made once it has, and what an approval writes. */
+  readonly preparation: DatabaseExportPreparationProjection | null;
+  /** What an approval came to, once it did. */
+  readonly receipt: DatabaseExportReceiptProjection | null;
+  readonly failure: { readonly code: string; readonly message: string } | null;
+}
+
+/** The approved database exports, newest first, how many there are, and the export under way. */
 export interface DatabaseExportsProjection {
   readonly exports: ReadonlyArray<DatabaseExportReceiptProjection>;
   readonly total: number;
+  readonly activity: DatabaseExportActivityProjection | null;
 }
 
 // ---- 设置 › 数据与存储 › 定期自动备份 (Issue #434, plan slice S86b; V2-UX-DSTO-018; ADR 0079 §1.4, §1.7) ---------------
@@ -8461,10 +8485,13 @@ export interface ServiceOperationMap {
   inspectSeriesKnowledgeCandidates: { input: { seriesId: string; after: SeriesKnowledgeCandidatesCursor | null }; output: SeriesKnowledgeCandidatesPageProjection };
   inspectSeriesKnowledgeRevisions: { input: { seriesId: string; itemId: string; before: number | null }; output: SeriesKnowledgeRevisionsProjection };
   inspectDataVersion: { input: Record<string, never>; output: DataVersionProjection };
-  /** 导出数据库 (Issue #434, S86a): the destination the Save dialog answered becomes one preparation of the package. */
-  prepareDatabaseExport: { input: { destination: string }; output: DatabaseExportPreparationProjection };
-  /** `按上述方式导出`: the one approval of one unchanged preparation, and the write it permits. */
-  approveDatabaseExport: { input: { preparationId: string }; output: DatabaseExportReceiptProjection };
+  /**
+   * 导出数据库 (Issue #434, S86a): the destination the Save dialog answered becomes one preparation of the package, packed off
+   * the request; answers at once with the export's activity (V2-UX-EXP-011).
+   */
+  prepareDatabaseExport: { input: { destination: string }; output: DatabaseExportActivityProjection };
+  /** `按上述方式导出`: the one approval of one unchanged preparation, and the write it permits, carried out the same way. */
+  approveDatabaseExport: { input: { preparationId: string }; output: DatabaseExportActivityProjection };
   inspectDatabaseExports: { input: Record<string, never>; output: DatabaseExportsProjection };
   /** 定期自动备份 (Issue #434, S86b): the switch and the backups kept. */
   inspectScheduledBackups: { input: Record<string, never>; output: ScheduledBackupsProjection };
@@ -8478,6 +8505,8 @@ export interface ServiceOperationMap {
   inspectDatabaseReplacements: { input: Record<string, never>; output: DatabaseReplacementsProjection };
   /** `回退到替换前的数据`: the latest replacement's backup prepared to replace the local data, itself backed up first. */
   rollBackDatabaseReplacement: { input: { replacementId: string }; output: DatabaseReplacementsProjection };
+  /** 取消导出: stops the export under way until it begins putting the file in place. */
+  cancelDatabaseExport: { input: { activityId: string }; output: DatabaseExportActivityProjection };
   /**
    * AI7 Apply for Change Suggestions (Issue #408). The batch form is 确认应用 on 审阅's confirmation
    * strip (Issue #417): one Effect over exactly the suggestions the strip named, all or none.
@@ -8829,9 +8858,12 @@ export interface RendererApi {
   inspectSeriesKnowledgeCandidates(input: { seriesId: string; after: SeriesKnowledgeCandidatesCursor | null }): Promise<SeriesKnowledgeCandidatesPageProjection>;
   inspectSeriesKnowledgeRevisions(input: { seriesId: string; itemId: string; before: number | null }): Promise<SeriesKnowledgeRevisionsProjection>;
   inspectDataVersion(): Promise<DataVersionProjection>;
-  /** 导出数据库… (Issue #434, S86a): the platform's Save dialog, then the preparation of the package for the chosen file. */
-  chooseDatabaseExportDestination(): Promise<{ outcome: 'cancelled' } | { outcome: 'prepared'; preparation: DatabaseExportPreparationProjection }>;
-  approveDatabaseExport(input: { preparationId: string }): Promise<DatabaseExportReceiptProjection>;
+  /**
+   * 导出数据库… (Issue #434, S86a): the platform's Save dialog, then the preparation of the package for the chosen file — begun,
+   * and followed through `inspectDatabaseExports` (V2-UX-EXP-011).
+   */
+  chooseDatabaseExportDestination(): Promise<{ outcome: 'cancelled' } | { outcome: 'preparing'; activity: DatabaseExportActivityProjection }>;
+  approveDatabaseExport(input: { preparationId: string }): Promise<DatabaseExportActivityProjection>;
   inspectDatabaseExports(): Promise<DatabaseExportsProjection>;
   inspectScheduledBackups(): Promise<ScheduledBackupsProjection>;
   setScheduledBackup(input: SetScheduledBackupInput): Promise<ScheduledBackupsProjection>;
@@ -8843,6 +8875,7 @@ export interface RendererApi {
   rollBackDatabaseReplacement(input: { replacementId: string }): Promise<DatabaseReplacementsProjection>;
   /** `现在关闭 AI7`: AI7 closes, unless a window holds changes not yet saved; a prepared replacement completes at the next start. */
   quitApplication(): Promise<{ outcome: 'quitting' } | { outcome: 'blocked' }>;
+  cancelDatabaseExport(input: { activityId: string }): Promise<DatabaseExportActivityProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */
   applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): Promise<ManuscriptApplyCommandProjection>;

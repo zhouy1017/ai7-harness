@@ -591,12 +591,12 @@ export class DatabaseReplacements {
     requireReplacement(!existsSync(target), 'DATABASE_REPLACEMENT_BACKUP_EXISTS', '这一刻已经做过一次替换前备份，请稍后再试。');
     const partial = join(location, `.${randomUUID()}${DATABASE_PACKAGE_EXTENSION}.partial`);
     try {
-      const written = await writeDatabasePackage(this.#db, this.#dataRoot, partial, {
+      const written = await writeDatabasePackage(this.#db, this.#dataRoot, partial, () => ({
         ...this.#sources.facts(),
         createdAt: now.toISOString(),
         origin: 'pre-replace-backup',
         contents: this.#sources.contents(),
-      });
+      }));
       await rename(partial, target);
       return { fileName, sha256: written.sha256 };
     } finally {

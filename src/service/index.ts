@@ -579,16 +579,17 @@ async function dispatch(
       };
     case 'inspectDataVersion':
       return { id: request.id, ok: true, op: request.op, result: store.inspectDataVersion() };
-    // Only under this launch's verified External Export Policy, as every other export (Issue #434, S86a review).
+    // Only under this launch's verified External Export Policy, as every other export (Issue #434, S86a review), and off the
+    // request: each answers at once with the export's activity, which the window follows (Issue #434 review, V2-UX-EXP-011).
     case 'prepareDatabaseExport':
       return {
         id: request.id, ok: true, op: request.op,
-        result: await store.prepareDatabaseExport(request.input.destination, launchPolicy.externalExport.currentExportEffectAvailable),
+        result: store.startDatabaseExportPreparation(request.input.destination, launchPolicy.externalExport.currentExportEffectAvailable),
       };
     case 'approveDatabaseExport':
       return {
         id: request.id, ok: true, op: request.op,
-        result: await store.approveDatabaseExport(request.input.preparationId, launchPolicy.externalExport.currentExportEffectAvailable),
+        result: store.startDatabaseExportApproval(request.input.preparationId, launchPolicy.externalExport.currentExportEffectAvailable),
       };
     case 'inspectDatabaseExports':
       return { id: request.id, ok: true, op: request.op, result: store.inspectDatabaseExports() };
@@ -606,6 +607,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: await store.inspectDatabaseReplacements() };
     case 'rollBackDatabaseReplacement':
       return { id: request.id, ok: true, op: request.op, result: await store.rollBackDatabaseReplacement(request.input.replacementId) };
+    case 'cancelDatabaseExport':
+      return { id: request.id, ok: true, op: request.op, result: store.cancelDatabaseExport(request.input.activityId) };
     case 'proposeSeriesKnowledge':
       return { id: request.id, ok: true, op: request.op, result: store.proposeSeriesKnowledge(request.input) };
     case 'inspectSeriesKnowledgeReview':
@@ -1428,6 +1431,8 @@ async function run(): Promise<void> {
       // A backup under way stops at once and removes what it wrote, so none is left half-made when the store closes (Issue
       // #434 review).
       const backupsStopped = store?.stopScheduledBackups();
+      // A database export under way stops as 取消导出 stops it, and leaves no package it was writing (Issue #434 review).
+      const exportsStopped = store?.stopDatabaseExports();
       jobs?.dispose();
       // The Review Run loop stops first and starts no further category; the owner then interrupts the
       // Run in flight, and the loop records what that Run came to before the store closes.
@@ -1436,6 +1441,7 @@ async function run(): Promise<void> {
       await reviewRunsStopped;
       await harness?.dispose();
       await backupsStopped;
+      await exportsStopped;
     } finally {
       store?.close();
     }

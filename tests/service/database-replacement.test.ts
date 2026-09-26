@@ -68,9 +68,9 @@ async function handmade(name: string, dataVersion: number, schemaRevision: numbe
   try {
     database.exec(`CREATE TABLE marker (value TEXT) STRICT; PRAGMA user_version = ${schemaRevision};`);
     const path = join(roots.inputRoot, name);
-    await writeDatabasePackage(database, other, path, {
+    await writeDatabasePackage(database, other, path, () => ({
       dataVersion, softwareVersion: '0.1.0', schemaRevision, createdAt: T.toISOString(), origin: 'database-export', contents,
-    });
+    }));
     return path;
   } finally {
     database.close();

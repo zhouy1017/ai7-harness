@@ -36,9 +36,9 @@ async function writtenPackage(): Promise<string> {
   try {
     database.exec('CREATE TABLE books (book_id TEXT PRIMARY KEY) STRICT; INSERT INTO books VALUES (\'b\'); PRAGMA user_version = 55;');
     const path = join(root, 'written.ai7db');
-    await writeDatabasePackage(database, dataRoot, path, {
+    await writeDatabasePackage(database, dataRoot, path, () => ({
       dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 55, createdAt: '2026-09-25T02:00:00.000Z', origin: 'database-export', contents,
-    });
+    }));
     return path;
   } finally {
     database.close();

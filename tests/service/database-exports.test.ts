@@ -1,12 +1,12 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, writeFileSync } from 'node:fs';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { strFromU8, unzipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
-import { DATABASE_EXPORT_TRIGGER_SQL } from '../../src/service/database-exports.js';
+import { DATABASE_EXPORT_TRIGGER_SQL, databasePackageSources, writeDatabasePackage, type DatabasePackageBounds } from '../../src/service/database-exports.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { DATABASE_REPLACEMENT_SCHEMA_VERSION, STORE_VERSION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
@@ -44,6 +44,40 @@ async function importBook(store: EditorialStore): Promise<string> {
   const commit = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest!, commitId });
   await store.acknowledgeImportCompletion(commitId);
   return commit.bookId;
+}
+
+/** A refusal thrown at once, by its code. */
+function refusal(operation: () => unknown): unknown {
+  try {
+    operation();
+  } catch (error) {
+    return code(error);
+  }
+  return 'no-error';
+}
+
+/** Turns the event loop until `condition` holds; the bound keeps a wrong expectation from hanging the suite. */
+async function until(condition: () => boolean, label: string): Promise<void> {
+  const deadline = Date.now() + 60_000;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${label}`);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+/** A data file large enough that packing and writing it take many chunks, so 取消导出 can land midway. */
+async function bulk(megabytes: number): Promise<void> {
+  await mkdir(join(roots.dataRoot, 'bulk'), { recursive: true });
+  await writeFile(join(roots.dataRoot, 'bulk', 'filler.bin'), randomBytes(megabytes << 20));
+}
+
+/** Everything in the staging area, the store's copy a package is made from included. */
+function staged(): string[] {
+  try {
+    return readdirSync(join(roots.dataRoot, 'export-staging'));
+  } catch {
+    return [];
+  }
 }
 
 function staging(): string[] {
@@ -262,7 +296,7 @@ describe('导出数据库 over the real store', () => {
         }
         const migrated = await EditorialStore.open(other.dataRoot, other.codeRoot);
         try {
-          expect(migrated.inspectDatabaseExports()).toEqual({ exports: [], total: 0 });
+          expect(migrated.inspectDatabaseExports()).toEqual({ exports: [], total: 0, activity: null });
           migrated.markCleanShutdown();
         } finally {
           migrated.close();
@@ -307,4 +341,218 @@ describe('导出数据库 over the real store', () => {
       reopened.close();
     }
   }, 180_000);
+});
+
+describe('导出数据库 off the request (Issue #434 review, V2-UX-EXP-011)', () => {
+  it('packs and writes as an activity that says how far it has come, one export at a time', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      await importBook(store);
+      const destination = join(roots.inputRoot, '进度.ai7db');
+      const started = store.startDatabaseExportPreparation(destination, true);
+      expect(started).toMatchObject({ kind: 'prepare', state: 'running', step: 'packing', cancellable: true, preparation: null, receipt: null, failure: null });
+      expect(refusal(() => store.startDatabaseExportPreparation(join(roots.inputRoot, '另一个.ai7db'), true))).toBe('DATABASE_EXPORT_BUSY');
+      await store.databaseExportSettled();
+      const prepared = store.inspectDatabaseExports().activity!;
+      expect(prepared).toMatchObject({ activityId: started.activityId, state: 'prepared', step: null, cancellable: false, receipt: null, failure: null });
+      expect(prepared.totalBytes).toBeGreaterThan(0);
+      expect(prepared.completedBytes).toBe(prepared.totalBytes);
+      const preparation = prepared.preparation!;
+      expect(preparation).toMatchObject({ fileName: '进度.ai7db', disposition: 'create', receipt: null });
+      // The approval reads the prepared file, writes it, and reads it back where it was written and where it landed.
+      const approving = store.startDatabaseExportApproval(preparation.preparationId, true);
+      expect(approving).toMatchObject({ kind: 'approve', state: 'running', step: 'verifying', cancellable: true, totalBytes: preparation.payloadBytes * 4, receipt: null });
+      expect(approving.preparation?.preparationId).toBe(preparation.preparationId);
+      await store.databaseExportSettled();
+      const finished = store.inspectDatabaseExports().activity!;
+      expect(finished).toMatchObject({ state: 'finished', step: null, completedBytes: preparation.payloadBytes * 4, receipt: { outcome: 'created' } });
+      expect((await readFile(destination)).byteLength).toBe(preparation.payloadBytes);
+      // An export that ended is not stopped again, and 取消导出 names the export it stops.
+      expect(store.cancelDatabaseExport(finished.activityId)).toEqual(finished);
+      expect(refusal(() => store.cancelDatabaseExport(randomUUID()))).toBe('DATABASE_EXPORT_ACTIVITY_NOT_FOUND');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
+  it('stops packing at 取消导出, at once or midway, and leaves no package, copy or preparation', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const destination = join(roots.inputRoot, '取消打包.ai7db');
+    try {
+      await importBook(store);
+      await bulk(24);
+      const first = store.startDatabaseExportPreparation(destination, true);
+      expect(store.cancelDatabaseExport(first.activityId)).toMatchObject({ state: 'running', cancellable: false });
+      await store.databaseExportSettled();
+      expect(store.inspectDatabaseExports().activity).toMatchObject({ activityId: first.activityId, state: 'cancelled', preparation: null, failure: null });
+      const second = store.startDatabaseExportPreparation(destination, true);
+      await until(() => (store.inspectDatabaseExports().activity?.completedBytes ?? 0) > 0, 'packing under way');
+      const midway = store.cancelDatabaseExport(second.activityId);
+      expect(midway.completedBytes).toBeLessThan(midway.totalBytes);
+      await store.databaseExportSettled();
+      const stopped = store.inspectDatabaseExports().activity!;
+      expect(stopped).toMatchObject({ activityId: second.activityId, state: 'cancelled', preparation: null });
+      // It stopped where it was, not after packing the rest.
+      expect(stopped.completedBytes).toBeLessThan(stopped.totalBytes);
+      expect(staged()).toEqual([]);
+      expect(existsSync(destination)).toBe(false);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      expect((database.prepare('SELECT count(*) count FROM database_export_preparations').get() as { count: number }).count).toBe(0);
+    } finally {
+      database.close();
+    }
+  }, 180_000);
+
+  it('stops an approval before it is recorded, keeping the prepared file, or while it writes, receipting the destination unchanged', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      await importBook(store);
+      await bulk(24);
+      const destination = join(roots.inputRoot, '批准后取消.ai7db');
+      const preparation = await store.prepareDatabaseExport(destination, true);
+      // While the prepared file is read: nothing is recorded, and the prepared file waits for another approval.
+      const reading = store.startDatabaseExportApproval(preparation.preparationId, true);
+      store.cancelDatabaseExport(reading.activityId);
+      await store.databaseExportSettled();
+      expect(store.inspectDatabaseExports()).toMatchObject({ total: 0, activity: { state: 'cancelled', receipt: null, failure: null } });
+      // It stopped at once, not after reading the prepared file through.
+      expect(store.inspectDatabaseExports().activity!.completedBytes).toBeLessThan(preparation.payloadBytes);
+      expect(staging()).toHaveLength(1);
+      // While it is written: the approval is spent, and its receipt says the destination did not change.
+      const writing = store.startDatabaseExportApproval(preparation.preparationId, true);
+      await until(() => {
+        const activity = store.inspectDatabaseExports().activity;
+        return activity?.step === 'writing' && activity.completedBytes > preparation.payloadBytes;
+      }, 'writing under way');
+      expect(store.cancelDatabaseExport(writing.activityId).cancellable).toBe(false);
+      await store.databaseExportSettled();
+      const ended = store.inspectDatabaseExports();
+      expect(ended.total).toBe(1);
+      // It stopped in the copy, not after copying the rest.
+      expect(ended.activity!.completedBytes).toBeLessThan(preparation.payloadBytes * 2);
+      expect(ended.activity).toMatchObject({
+        state: 'finished',
+        receipt: { outcome: 'failed', outcomeLabel: '未能导出', detail: '你取消了导出，所选位置没有变化。' },
+      });
+      expect(existsSync(destination)).toBe(false);
+      expect(readdirSync(roots.inputRoot).filter((name) => name.endsWith('.ai7-partial'))).toEqual([]);
+      expect(staged()).toEqual([]);
+      expect(refusal(() => store.startDatabaseExportApproval(preparation.preparationId, true))).toBe('DATABASE_EXPORT_ALREADY_APPROVED');
+      // While the written file is read back, before it is put in place: the same receipt, and nothing left beside the destination.
+      const again = await store.prepareDatabaseExport(destination, true);
+      const checking = store.startDatabaseExportApproval(again.preparationId, true);
+      await until(() => (store.inspectDatabaseExports().activity?.completedBytes ?? 0) > again.payloadBytes * 2, 'the written file read back');
+      store.cancelDatabaseExport(checking.activityId);
+      await store.databaseExportSettled();
+      expect(store.inspectDatabaseExports().activity?.receipt).toMatchObject({ outcome: 'failed', detail: '你取消了导出，所选位置没有变化。' });
+      expect(store.inspectDatabaseExports().activity!.completedBytes).toBeLessThan(again.payloadBytes * 3);
+      expect(existsSync(destination)).toBe(false);
+      expect(readdirSync(roots.inputRoot).filter((name) => name.endsWith('.ai7-partial'))).toEqual([]);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
+  it('stops the export under way when the service stops, and starts none after', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      await importBook(store);
+      await bulk(24);
+      store.startDatabaseExportPreparation(join(roots.inputRoot, '停止.ai7db'), true);
+      await until(() => (store.inspectDatabaseExports().activity?.completedBytes ?? 0) > 0, 'packing under way');
+      await store.stopDatabaseExports();
+      expect(store.inspectDatabaseExports().activity).toMatchObject({ state: 'cancelled' });
+      expect(staged()).toEqual([]);
+      expect(refusal(() => store.startDatabaseExportPreparation(join(roots.inputRoot, '之后.ai7db'), true))).toBe('SERVICE_STOPPING');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+});
+
+describe('the database package (Issue #434 review)', () => {
+  it('counts what its copy of the store holds, whatever another request writes while it is made', async () => {
+    const path = join(roots.inputRoot, 'counted.sqlite');
+    const db = new DatabaseSync(path);
+    try {
+      db.exec('CREATE TABLE books (book_id TEXT PRIMARY KEY)');
+      db.prepare('INSERT INTO books VALUES (?)').run(randomUUID());
+      const books = (): number => (db.prepare('SELECT count(*) count FROM books').get() as { count: number }).count;
+      const write = (): void => {
+        db.prepare('INSERT INTO books VALUES (?)').run(randomUUID());
+      };
+      const dataRoot = join(roots.inputRoot, 'root');
+      await mkdir(dataRoot);
+      const packagePath = join(roots.inputRoot, 'counted.ai7db');
+      const written = await writeDatabasePackage(db, dataRoot, packagePath, () => {
+        // Another request's writes, queued as the facts are read: none may land before the store is copied.
+        queueMicrotask(write);
+        setImmediate(write);
+        return {
+          dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 1, createdAt: new Date().toISOString(), origin: 'database-export',
+          contents: { books: books(), sourceVersions: 0, libraryMaterials: 0, series: 0 },
+        };
+      });
+      expect(written.facts.contents.books).toBe(1);
+      const packaged = unzipSync(await readFile(packagePath));
+      expect((parseCanonicalJson(strFromU8(packaged['manifest.json']!)) as { contents: { books: number } }).contents.books).toBe(1);
+      const copyPath = join(roots.inputRoot, 'counted-copy.sqlite');
+      writeFileSync(copyPath, packaged['store/ai7.sqlite']!);
+      const copy = new DatabaseSync(copyPath, { readOnly: true });
+      try {
+        expect((copy.prepare('SELECT count(*) count FROM books').get() as { count: number }).count).toBe(1);
+      } finally {
+        copy.close();
+      }
+      // The other writes landed, after the copy.
+      expect(books()).toBe(3);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('walks the data root a directory at a time, refusing one it cannot package as soon as that is known', async () => {
+    const root = join(roots.inputRoot, 'walk');
+    await mkdir(join(root, 'a', 'b'), { recursive: true });
+    await writeFile(join(root, '1'), '1');
+    await writeFile(join(root, '2'), '2');
+    await writeFile(join(root, 'a', '3'), '33');
+    await writeFile(join(root, 'a', 'b', '4'), '444');
+    // The live store, the staging area and the shell's profile are never carried.
+    for (const excluded of ['store', 'export-staging', 'shell']) {
+      await mkdir(join(root, excluded));
+      await writeFile(join(root, excluded, 'x'), 'x');
+    }
+    const bounds = { members: 6, directories: 3 };
+    expect(await databasePackageSources(root, bounds)).toEqual([
+      { member: '1', path: join(root, '1'), bytes: 1 },
+      { member: '2', path: join(root, '2'), bytes: 1 },
+      { member: 'a/3', path: join(root, 'a', '3'), bytes: 2 },
+      { member: 'a/b/4', path: join(root, 'a', 'b', '4'), bytes: 3 },
+    ]);
+    const refused = (value: DatabasePackageBounds): Promise<unknown> =>
+      databasePackageSources(root, value).then(() => 'no-error', (error: unknown) => (error as { code?: unknown }).code);
+    // A listing holds no more names than the package could carry beside the store and the manifest: three at the top
+    // are too many for a package of four, before any of them is walked.
+    expect(await refused({ members: 4, directories: 3 })).toBe('DATABASE_PACKAGE_TOO_LARGE');
+    // Names listed and not yet walked count as they are listed: the last directory's file is one too many for five.
+    expect(await refused({ members: 5, directories: 3 })).toBe('DATABASE_PACKAGE_TOO_LARGE');
+    // One more file anywhere is one too many, and so is one more directory, however few files it holds.
+    await writeFile(join(root, 'a', 'b', '5'), '5');
+    expect(await refused(bounds)).toBe('DATABASE_PACKAGE_TOO_LARGE');
+    await rm(join(root, 'a', 'b', '5'));
+    await mkdir(join(root, 'a', 'b', 'c'));
+    expect(await refused(bounds)).toBe('DATABASE_PACKAGE_TOO_LARGE');
+    // Directories are bounded on their own: a fourth is one too many for three, with room for every file.
+    expect(await refused({ members: 100, directories: 3 })).toBe('DATABASE_PACKAGE_TOO_LARGE');
+    expect(await refused({ members: 100, directories: 4 })).toBe('no-error');
+  });
 });
