@@ -748,8 +748,30 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectEvaluationCalibration':
     // 设置 › 数据与存储 › 版本 (Issue #433, S85a): the store's versions; it names nothing.
     case 'inspectDataVersion':
+    // 导出数据库 (Issue #434, S86a): the approved exports; it names nothing.
+    case 'inspectDatabaseExports':
       requireInput(value.input, [], tentativeId);
       break;
+    // 导出数据库…: the destination, only ever the main process's, from the system Save dialog.
+    case 'prepareDatabaseExport': {
+      const input = requireInput(value.input, ['destination'], tentativeId);
+      if (!isBoundedString(input.destination, MAX_EXPORT_DESTINATION_CODE_UNITS) || !isAbsolute(input.destination)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // 按上述方式导出: the one preparation it approves.
+    case 'approveDatabaseExport': {
+      const input = requireInput(value.input, ['preparationId'], tentativeId);
+      if (!validUuid(input.preparationId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 取消导出: the one export under way it stops.
+    case 'cancelDatabaseExport': {
+      const input = requireInput(value.input, ['activityId'], tentativeId);
+      if (!validUuid(input.activityId)) throw new ProtocolError(tentativeId);
+      break;
+    }
     // 录入定价与首印: the Book, how many entries the editor saw, and two whole positive numbers, the price in 分.
     case 'recordPublicationActuals': {
       const input = requireInput(value.input, ['bookId', 'publicationVersionId', 'expectedEntries', 'priceFen', 'firstPrint'], tentativeId);

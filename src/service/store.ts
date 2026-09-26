@@ -147,6 +147,11 @@ import type {
   SeriesKnowledgeSpanInput,
   SeriesKnowledgeTarget,
   DataVersionProjection,
+  DatabaseExportActivityProjection,
+  DatabaseExportContentsProjection,
+  DatabaseExportPreparationProjection,
+  DatabaseExportReceiptProjection,
+  DatabaseExportsProjection,
   EvaluationCalibrationProjection,
   RecordPublicationActualsInput,
   SetEvaluationPreferencesInput,
@@ -417,6 +422,7 @@ import {
   initializeDataVersionSchema,
   readSoftwareVersion,
 } from './data-version.js';
+import { DatabaseExportError, DatabaseExports, initializeDatabaseExportSchema } from './database-exports.js';
 import {
   SeriesKnowledgeError,
   SeriesKnowledgeLedger,
@@ -544,6 +550,7 @@ import {
   SERIES_SCHEMA_VERSION,
   SERIES_KNOWLEDGE_SCHEMA_VERSION,
   STORE_VERSION_SCHEMA_VERSION,
+  DATABASE_EXPORT_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1774,7 +1781,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
       currentVersion === SERIES_SCHEMA_VERSION ||
       currentVersion === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      currentVersion === STORE_VERSION_SCHEMA_VERSION,
+      currentVersion === STORE_VERSION_SCHEMA_VERSION ||
+      currentVersion === DATABASE_EXPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1824,7 +1832,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
       currentVersion === SERIES_SCHEMA_VERSION ||
       currentVersion === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      currentVersion === STORE_VERSION_SCHEMA_VERSION
+      currentVersion === STORE_VERSION_SCHEMA_VERSION ||
+      currentVersion === DATABASE_EXPORT_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2188,7 +2197,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
       version === SERIES_SCHEMA_VERSION ||
       version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      version === STORE_VERSION_SCHEMA_VERSION,
+      version === STORE_VERSION_SCHEMA_VERSION ||
+      version === DATABASE_EXPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2227,7 +2237,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
       version === SERIES_SCHEMA_VERSION ||
       version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      version === STORE_VERSION_SCHEMA_VERSION) return;
+      version === STORE_VERSION_SCHEMA_VERSION ||
+      version === DATABASE_EXPORT_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2358,7 +2369,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
       version === SERIES_SCHEMA_VERSION ||
       version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      version === STORE_VERSION_SCHEMA_VERSION,
+      version === STORE_VERSION_SCHEMA_VERSION ||
+      version === DATABASE_EXPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2396,7 +2408,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
       version === SERIES_SCHEMA_VERSION ||
       version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      version === STORE_VERSION_SCHEMA_VERSION) return;
+      version === STORE_VERSION_SCHEMA_VERSION ||
+      version === DATABASE_EXPORT_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2689,7 +2702,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== STORE_VERSION_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== DATABASE_EXPORT_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2730,6 +2743,7 @@ function validateModelServiceSchema(
       version >= SERIES_SCHEMA_VERSION,
       version >= SERIES_KNOWLEDGE_SCHEMA_VERSION,
       version >= STORE_VERSION_SCHEMA_VERSION,
+      version >= DATABASE_EXPORT_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2795,7 +2809,8 @@ function initializeModelServiceSchema(
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
       version === SERIES_SCHEMA_VERSION ||
       version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      version === STORE_VERSION_SCHEMA_VERSION,
+      version === STORE_VERSION_SCHEMA_VERSION ||
+      version === DATABASE_EXPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2833,7 +2848,8 @@ function initializeModelServiceSchema(
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
       version === SERIES_SCHEMA_VERSION ||
       version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      version === STORE_VERSION_SCHEMA_VERSION) {
+      version === STORE_VERSION_SCHEMA_VERSION ||
+      version === DATABASE_EXPORT_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3675,6 +3691,8 @@ export class EditorialStore {
   readonly #series: SeriesLedger;
   readonly #seriesKnowledge: SeriesKnowledgeLedger;
   readonly #dataVersions: DataVersionLedger;
+  /** 导出数据库 (Issue #434, S86a): the package's preparations, approvals and receipts. */
+  readonly #databaseExports: DatabaseExports;
   /** The software this store was opened by (Issue #433, S85a): read once from the package it ships in. */
   #softwareVersion = '';
   /** ②C 评估 (Issue #429, S81a): each Book's versioned Evaluation Records. */
@@ -3742,6 +3760,9 @@ export class EditorialStore {
     this.#series = new SeriesLedger(authority);
     this.#seriesKnowledge = new SeriesKnowledgeLedger(authority);
     this.#dataVersions = new DataVersionLedger(authority);
+    this.#databaseExports = new DatabaseExports(authority, dataRoot, {
+      facts: () => ({ dataVersion: DATA_VERSION, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_EXPORT_SCHEMA_VERSION }),
+    });
     this.#evaluations = new EvaluationRecords(authority, { current: (bookId) => this.#evaluationManuscript(bookId) });
     this.#analysisFeedback = new AnalysisFeedbackLedger(authority);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
@@ -3901,7 +3922,7 @@ export class EditorialStore {
       // (Issue #61, S26b) the editor's Learning Eligibility decisions, and revision 51 (Issue #430, S82) each Book's 定价与首印
       // and the house's evaluation preferences; revision 52 (Issue #63, S28a) the house's Series and their membership changes,
       // and revision 53 (Issue #63, S28b) Series Knowledge: candidates, items, revisions and promotion decisions; revision 54
-      // (Issue #433, S85a) the versions that opened the store.
+      // (Issue #433, S85a) the versions that opened the store; and revision 55 (Issue #434, S86a) the database exports.
       initializeBookPeopleSchema(authority);
       initializeReviewGuidelineSchema(authority);
       initializeLibraryMaterialSchema(authority);
@@ -3913,6 +3934,7 @@ export class EditorialStore {
       initializeSeriesSchema(authority);
       initializeSeriesKnowledgeSchema(authority);
       initializeDataVersionSchema(authority);
+      initializeDatabaseExportSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -3951,13 +3973,15 @@ export class EditorialStore {
         store.#boundedCall(() => store.#boundedAuthority.isRecoveryObjectReferenced(relativeKey)));
       // What an interrupted 放入资料库 left beside the kept originals (Issue #427 review).
       await store.#libraryMaterials.sweep();
+      // A database package staged and never approved, or cut off mid-write, is a whole copy of the data (Issue #434 review).
+      await store.#databaseExports.sweep();
       store.#boundedCall(() => store.#boundedAuthority.startServiceLifetime(lifetimeId, new Date().toISOString()));
       // Every store records the versions that open it (Issue #433, S85a; DSTO-016): a new record only when one changed.
       store.#softwareVersion = softwareVersion;
       store.#dataVersionCall(() => store.#transaction(authority, () => store.#dataVersions.recordOpen({
         softwareVersion,
         dataVersion: DATA_VERSION,
-        schemaRevision: STORE_VERSION_SCHEMA_VERSION,
+        schemaRevision: DATABASE_EXPORT_SCHEMA_VERSION,
       })));
       return store;
     } catch (error) {
@@ -4840,6 +4864,8 @@ export class EditorialStore {
   }
 
   close(): void {
+    // A database export still under way stops as 取消导出 stops it (Issue #434 review).
+    void this.#databaseExports.stop();
     this.#taskAuthorization.prepare({ phase: 'cancel-all' });
     this.#reviewRuns.prepare({ phase: 'cancel-all' });
     this.#baselineAnalysis.prepare({ phase: 'cancel-all' });
@@ -11395,6 +11421,72 @@ export class EditorialStore {
         historyTruncated: count > MAX_STORE_VERSIONS_LISTED,
       };
     });
+  }
+
+  // ---- 设置 › 数据与存储 › 导出数据库 (Issue #434, plan slice S86a; V2-UX-DSTO-017; ADR 0079 §1.4, §1.6, §1.7) ----------------
+
+  /**
+   * The destination the Save dialog answered becomes one preparation of the database package — only under this launch's
+   * verified External Export Policy (Issue #434, S86a review) — packed off the request: answers at once with the export's
+   * activity, which 取消导出 stops (V2-UX-EXP-011).
+   */
+  startDatabaseExportPreparation(destination: string, available: boolean): DatabaseExportActivityProjection {
+    return this.#databaseExportRead(() => this.#databaseExports.startPreparation(destination, available));
+  }
+
+  /** `按上述方式导出`: the one approval of one unchanged preparation, and the write it permits, under the same policy and the same way. */
+  startDatabaseExportApproval(preparationId: string, available: boolean): DatabaseExportActivityProjection {
+    return this.#databaseExportRead(() => this.#databaseExports.startApproval(preparationId, available));
+  }
+
+  /** 取消导出: the export under way stops until it begins putting the file in place. */
+  cancelDatabaseExport(activityId: string): DatabaseExportActivityProjection {
+    return this.#databaseExportRead(() => this.#databaseExports.cancel(activityId));
+  }
+
+  /** Prepare, and wait for the preparation: what a caller that follows no activity uses. */
+  async prepareDatabaseExport(destination: string, available: boolean): Promise<DatabaseExportPreparationProjection> {
+    return this.#databaseExportCall(() => this.#databaseExports.prepare(destination, available));
+  }
+
+  /** Approve, and wait for the receipt: what a caller that follows no activity uses. */
+  async approveDatabaseExport(preparationId: string, available: boolean): Promise<DatabaseExportReceiptProjection> {
+    return this.#databaseExportCall(() => this.#databaseExports.approve(preparationId, available));
+  }
+
+  /** Resolves once the database export under way, if any, has ended. */
+  async databaseExportSettled(): Promise<void> {
+    await this.#databaseExports.settled();
+  }
+
+  /** At shutdown: the database export under way stops, leaving no package it was writing, before the store closes. */
+  stopDatabaseExports(): Promise<void> {
+    return this.#databaseExports.stop();
+  }
+
+  /** The approved database exports, newest first, and the export under way. A read. */
+  inspectDatabaseExports(): DatabaseExportsProjection {
+    return this.#databaseExportRead(() => this.#databaseExports.history());
+  }
+
+  #databaseExportRead<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof DatabaseExportError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
+  }
+
+  async #databaseExportCall<T>(operation: () => Promise<T>): Promise<T> {
+    this.#assertAvailable();
+    try {
+      return await operation();
+    } catch (error) {
+      if (error instanceof DatabaseExportError || error instanceof ExportLedgerError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
   }
 
   #dataVersionCall<T>(operation: () => T): T {

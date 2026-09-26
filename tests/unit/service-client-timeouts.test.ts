@@ -15,4 +15,10 @@ describe('the service request deadlines', () => {
     expect(requestTimeoutMs('decideLibraryMaterial')).toBe(ordinary);
     expect(requestTimeoutMs('inspectLibraryMaterial')).toBe(ordinary);
   });
+
+  it('answers 导出数据库 at once, since packing and writing the store run off the request (Issue #434 review, V2-UX-EXP-011)', () => {
+    const ordinary = requestTimeoutMs('inspectLibraryMaterials');
+    expect(['prepareDatabaseExport', 'approveDatabaseExport', 'inspectDatabaseExports', 'cancelDatabaseExport'].map((operation) =>
+      requestTimeoutMs(operation as Parameters<typeof requestTimeoutMs>[0]))).toEqual([ordinary, ordinary, ordinary, ordinary]);
+  });
 });

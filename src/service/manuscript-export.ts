@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { link, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
@@ -259,7 +259,7 @@ export const EXPORT_STAGING_DIRECTORY = 'export-staging';
  * written, and the words say so rather than that it changed.
  */
 export const EXPORT_TARGET_UNREADABLE_DETAIL = '要替换的文件现在无法读取（可能被另一个程序打开，或是还没有下载到本机的云端文件），没有写入，所选位置没有变化；请让它可以读取后再导出。';
-const FAILURE_DETAILS: Readonly<Record<string, string>> = {
+export const EXPORT_FAILURE_DETAILS: Readonly<Record<string, string>> = {
   EXPORT_STAGE_FAILED: '无法在所选文件夹中写入导出文件，所选位置没有变化。',
   EXPORT_STAGE_VERIFY_FAILED: '写入的临时文件校验不一致，已经删除，所选位置没有变化。',
   EXPORT_TARGET_CHANGED: '所选位置在批准后发生了变化，没有写入；请重新选择保存位置。',
@@ -270,6 +270,8 @@ const FAILURE_DETAILS: Readonly<Record<string, string>> = {
   EXPORT_COMMIT_UNCERTAIN: '系统没有确认文件是否已放到所选位置。请到所选位置核对；AI7 不会自动重试。',
   EXPORT_VERIFY_UNCERTAIN: '文件已放到所选位置，但读回校验没有通过。请到所选位置核对；AI7 不会自动重试。',
   EXPORT_INTERRUPTED: '导出在写入所选位置时中断，AI7 无法确认文件是否已写好。请到所选位置核对；如需重新导出，请重新选择保存位置。',
+  // Issue #434 review (V2-UX-EXP-011): 取消导出 before the file was put in place.
+  EXPORT_CANCELLED: '你取消了导出，所选位置没有变化。',
 };
 
 // ---- the store ------------------------------------------------------------------------------------
@@ -476,12 +478,39 @@ async function targetState(path: string): Promise<'absent' | 'file' | 'other'> {
   }
 }
 
-async function fileDigest(path: string): Promise<{ bytes: number; sha256: string } | null> {
+/** What a long read or write may be told (Issue #434 review, V2-UX-EXP-011): when to stop, and each chunk it gets through. */
+export interface ChunkedFileOptions {
+  /** Aborted, the read stops at its next chunk. */
+  readonly signal?: AbortSignal | undefined;
+  /** Called with each chunk's size once it is read or written. */
+  readonly onBytes?: ((bytes: number) => void) | undefined;
+}
+
+/**
+ * A file's size and digest, read in chunks so a large one — a database package (Issue #434) — is never held whole. `null`
+ * for a file that cannot be read, and for a read the signal stopped.
+ */
+export async function fileDigest(path: string, options: ChunkedFileOptions = {}): Promise<{ bytes: number; sha256: string } | null> {
   try {
     const info = await lstat(path);
     if (!info.isFile() || info.isSymbolicLink()) return null;
-    const content = await readFile(path);
-    return { bytes: content.byteLength, sha256: sha256Hex(content) };
+    const hash = createHash('sha256');
+    let bytes = 0;
+    const handle = await open(path, 'r');
+    try {
+      const buffer = Buffer.allocUnsafe(STAGED_COPY_CHUNK_BYTES);
+      for (;;) {
+        options.signal?.throwIfAborted();
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+        if (bytesRead === 0) break;
+        hash.update(buffer.subarray(0, bytesRead));
+        bytes += bytesRead;
+        options.onBytes?.(bytesRead);
+      }
+    } finally {
+      await handle.close();
+    }
+    return { bytes, sha256: hash.digest('hex') };
   } catch {
     return null;
   }
@@ -558,22 +587,45 @@ export interface ReplacedFileIdentity {
 }
 
 /**
+ * A payload already written to a file of its own, too large to hold in memory: a database package its preparation
+ * staged (Issue #434, S86a). It is copied into the stage in chunks and verified exactly as bytes are.
+ */
+export interface StagedPayload {
+  readonly path: string;
+  readonly bytes: number;
+}
+
+const STAGED_COPY_CHUNK_BYTES = 1 << 20;
+
+/** What a long write may be told besides when to stop and each chunk (Issue #434 review, V2-UX-EXP-011). */
+export interface AtomicWriteOptions extends ChunkedFileOptions {
+  /** Called once the write begins putting the file in place: from there nothing stops it. */
+  readonly onCommit?: () => void;
+}
+
+/**
  * Write `payload` at `destination` atomically (V2-UX-EXP-012): stage it beside the destination under a name no
  * one could take for the result and that only this write owns, sync and verify it, check the destination is
  * still what the dialog resolved, take the chosen name under the approved disposition, and verify the final
  * file. A `create` never publishes over a file that appeared meanwhile, and a `replace` replaces exactly the
  * file the editor chose to replace. Nothing at the destination changes before the name is taken; after it, a
- * file that cannot be verified is `ambiguous`, never retried.
+ * file that cannot be verified is `ambiguous`, never retried. A signal aborted before the name is taken stops
+ * the write and removes its stage: `EXPORT_CANCELLED`, the destination as it was (V2-UX-EXP-011).
  */
 export async function writeAtomically(
   destination: string,
-  payload: Uint8Array,
+  payload: Uint8Array | StagedPayload,
   payloadSha256: string,
   disposition: ManuscriptExportDisposition,
   effectIntentId: string,
   replaces: ReplacedFileIdentity | null = null,
+  options: AtomicWriteOptions = {},
 ): Promise<WriteOutcome> {
+  const { signal, onBytes } = options;
+  // Read afresh each time: a signal may be aborted while any await is pending.
+  const cancelled = (): boolean => signal?.aborted === true;
   const directory = dirname(destination);
+  const payloadBytes = payload instanceof Uint8Array ? payload.byteLength : payload.bytes;
   const staged = stagedPathFor(destination, effectIntentId, randomUUID());
   // Only a stage this write created may be removed: an exclusive open that found a file leaves it to its owner.
   let owned = false;
@@ -586,17 +638,38 @@ export async function writeAtomically(
   try {
     handle = await open(staged, 'wx');
     owned = true;
-    await handle.writeFile(payload);
+    if (payload instanceof Uint8Array) {
+      await handle.writeFile(payload);
+      onBytes?.(payload.byteLength);
+    } else {
+      const source = await open(payload.path, 'r');
+      try {
+        const buffer = Buffer.allocUnsafe(STAGED_COPY_CHUNK_BYTES);
+        for (;;) {
+          signal?.throwIfAborted();
+          const { bytesRead } = await source.read(buffer, 0, buffer.length, null);
+          if (bytesRead === 0) break;
+          await handle.writeFile(buffer.subarray(0, bytesRead));
+          onBytes?.(bytesRead);
+        }
+      } finally {
+        await source.close();
+      }
+    }
     await handle.sync();
   } catch {
     await handle?.close().catch(() => undefined);
     handle = undefined;
     await discard();
-    return { outcome: 'failed', code: 'EXPORT_STAGE_FAILED' };
+    return { outcome: 'failed', code: cancelled() ? 'EXPORT_CANCELLED' : 'EXPORT_STAGE_FAILED' };
   }
   await handle.close();
-  const stagedDigest = await fileDigest(staged);
-  if (stagedDigest?.sha256 !== payloadSha256 || stagedDigest.bytes !== payload.byteLength) {
+  const stagedDigest = await fileDigest(staged, { signal, onBytes });
+  if (cancelled()) {
+    await discard();
+    return { outcome: 'failed', code: 'EXPORT_CANCELLED' };
+  }
+  if (stagedDigest?.sha256 !== payloadSha256 || stagedDigest.bytes !== payloadBytes) {
     await discard();
     return { outcome: 'failed', code: 'EXPORT_STAGE_VERIFY_FAILED' };
   }
@@ -608,7 +681,11 @@ export async function writeAtomically(
   // A `replace` renames over the file the dialog resolved and no other: one a sync client or another program put
   // there since is left as it is, and nothing is written.
   if (disposition === 'replace') {
-    const standing = await fileDigest(destination);
+    const standing = await fileDigest(destination, { signal });
+    if (cancelled()) {
+      await discard();
+      return { outcome: 'failed', code: 'EXPORT_CANCELLED' };
+    }
     if (standing === null && replaces !== null) {
       await discard();
       return { outcome: 'failed', code: 'EXPORT_TARGET_UNREADABLE' };
@@ -618,6 +695,14 @@ export async function writeAtomically(
       return { outcome: 'failed', code: 'EXPORT_TARGET_CHANGED' };
     }
   }
+  // A stop asked for while the destination was checked is honoured here, the last point before the file is put in place, with
+  // nothing awaited between this and the commit (Issue #434 review).
+  if (cancelled()) {
+    await discard();
+    return { outcome: 'failed', code: 'EXPORT_CANCELLED' };
+  }
+  // From here the write puts the file in place, and nothing stops it.
+  options.onCommit?.();
   if (disposition === 'create') {
     const taken = await takeFreeName(staged, destination);
     // After a link both names hold the payload, and the stage — this write's own — is not left behind.
@@ -638,7 +723,7 @@ export async function writeAtomically(
       }
       owned = false;
       const landed = await fileDigest(destination);
-      if (landed?.sha256 === payloadSha256 && landed.bytes === payload.byteLength) {
+      if (landed?.sha256 === payloadSha256 && landed.bytes === payloadBytes) {
         return { outcome: 'replaced', bytes: landed.bytes, sha256: landed.sha256 };
       }
       return { outcome: 'ambiguous', code: 'EXPORT_COMMIT_UNCERTAIN' };
@@ -649,9 +734,51 @@ export async function writeAtomically(
   } catch {
     // Taking the name is what publishes the file; a folder that cannot be synced is verified by reading back below.
   }
-  const final = await fileDigest(destination);
-  if (final?.sha256 !== payloadSha256 || final.bytes !== payload.byteLength) return { outcome: 'ambiguous', code: 'EXPORT_VERIFY_UNCERTAIN' };
+  const final = await fileDigest(destination, { onBytes });
+  if (final?.sha256 !== payloadSha256 || final.bytes !== payloadBytes) return { outcome: 'ambiguous', code: 'EXPORT_VERIFY_UNCERTAIN' };
   return { outcome: disposition === 'create' ? 'created' : 'replaced', bytes: final.bytes, sha256: final.sha256 };
+}
+
+/** Where an approved export writes: the chosen path, its name, and whether it creates a file or replaces exactly one. */
+export interface ResolvedExportDestination {
+  path: string;
+  fileName: string;
+  disposition: ManuscriptExportDisposition;
+  replaces: ReplacedFileIdentity | null;
+}
+
+/**
+ * The destination the platform's Save dialog answered, checked: an absolute path ending in `extension`, in a folder that
+ * exists and lies outside the Agent Data Root, naming nothing or a file — which it then replaces exactly as it stands now.
+ * Shared by every export that writes one file (Issue #434: the database package too).
+ */
+export async function resolveExportDestination(value: unknown, extension: string, dataRoot: string): Promise<ResolvedExportDestination> {
+  requireExport(
+    typeof value === 'string' && value.isWellFormed() && value.length > 0 && value.length <= MAX_EXPORT_DESTINATION_CODE_UNITS &&
+      !value.includes('\u0000') && isAbsolute(value),
+    'EXPORT_DESTINATION_INVALID',
+    '所选保存位置无效。',
+  );
+  requireExport(extname(value).toLowerCase() === extension, 'EXPORT_DESTINATION_INVALID', `请以 ${extension} 作为文件名的结尾。`);
+  const fileName = basename(value);
+  requireExport(fileName.length > 0 && fileName.length <= 255, 'EXPORT_DESTINATION_INVALID', '所选文件名无效。');
+  let directory: string;
+  try {
+    directory = await realpath(dirname(value));
+    requireExport((await lstat(directory)).isDirectory(), 'EXPORT_DESTINATION_INVALID', '所选保存位置不是文件夹。');
+  } catch (error) {
+    if (error instanceof ExportLedgerError) throw error;
+    throw new ExportLedgerError('EXPORT_DESTINATION_INVALID', '所选文件夹无法访问。');
+  }
+  requireExport(!isInsideOrEqual(dataRoot, directory), 'EXPORT_DESTINATION_INVALID',
+    '不能导出到 AI7 保存数据的位置，请选择别的文件夹。');
+  const state = await targetState(value);
+  requireExport(state !== 'other', 'EXPORT_DESTINATION_INVALID', '所选位置不是可以写入的文件。');
+  if (state === 'absent') return { path: value, fileName, disposition: 'create', replaces: null };
+  // The file the editor chose to replace, as it stands now: the preparation binds exactly this one.
+  const standing = await fileDigest(value);
+  requireExport(standing !== null, 'EXPORT_DESTINATION_INVALID', '所选位置的文件无法读取。');
+  return { path: value, fileName, disposition: 'replace', replaces: standing };
 }
 
 /**
@@ -1055,34 +1182,8 @@ export class ManuscriptExportStore {
     requireExport(available, 'EXPORT_POLICY_UNAVAILABLE', '对外导出策略未通过本次启动的校验，导出不可用。');
   }
 
-  async #requireDestination(value: unknown, format: ManuscriptExportFormat): Promise<{ path: string; fileName: string; disposition: ManuscriptExportDisposition; replaces: ReplacedFileIdentity | null }> {
-    requireExport(
-      typeof value === 'string' && value.isWellFormed() && value.length > 0 && value.length <= MAX_EXPORT_DESTINATION_CODE_UNITS &&
-        !value.includes('\u0000') && isAbsolute(value),
-      'EXPORT_DESTINATION_INVALID',
-      '所选保存位置无效。',
-    );
-    const extension = FORMAT_EXTENSIONS[format];
-    requireExport(extname(value).toLowerCase() === extension, 'EXPORT_DESTINATION_INVALID', `请以 ${extension} 作为文件名的结尾。`);
-    const fileName = basename(value);
-    requireExport(fileName.length > 0 && fileName.length <= 255, 'EXPORT_DESTINATION_INVALID', '所选文件名无效。');
-    let directory: string;
-    try {
-      directory = await realpath(dirname(value));
-      requireExport((await lstat(directory)).isDirectory(), 'EXPORT_DESTINATION_INVALID', '所选保存位置不是文件夹。');
-    } catch (error) {
-      if (error instanceof ExportLedgerError) throw error;
-      throw new ExportLedgerError('EXPORT_DESTINATION_INVALID', '所选文件夹无法访问。');
-    }
-    requireExport(!isInsideOrEqual(this.#environment.dataRoot, directory), 'EXPORT_DESTINATION_INVALID',
-      '不能导出到 AI7 保存数据的位置，请选择别的文件夹。');
-    const state = await targetState(value);
-    requireExport(state !== 'other', 'EXPORT_DESTINATION_INVALID', '所选位置不是可以写入的文件。');
-    if (state === 'absent') return { path: value, fileName, disposition: 'create', replaces: null };
-    // The file the editor chose to replace, as it stands now: the preparation binds exactly this one.
-    const standing = await fileDigest(value);
-    requireExport(standing !== null, 'EXPORT_DESTINATION_INVALID', '所选位置的文件无法读取。');
-    return { path: value, fileName, disposition: 'replace', replaces: standing };
+  async #requireDestination(value: unknown, format: ManuscriptExportFormat): Promise<ResolvedExportDestination> {
+    return resolveExportDestination(value, FORMAT_EXTENSIONS[format], this.#environment.dataRoot);
   }
 
   /** The file a preparation's `replace` binds, as its record holds it; `null` for a `create`. */
@@ -1766,7 +1867,7 @@ export class ManuscriptExportStore {
         ...base,
         outcome: 'ambiguous',
         outcomeLabel: EXPORT_OUTCOME_LABELS.ambiguous,
-        detail: FAILURE_DETAILS.EXPORT_INTERRUPTED!,
+        detail: EXPORT_FAILURE_DETAILS.EXPORT_INTERRUPTED!,
         byteLength: null,
         recordedAt: null,
         revealAvailable: false,
@@ -1800,7 +1901,7 @@ export class ManuscriptExportStore {
       outcomeLabel: exported ? EXPORT_OUTCOME_LABELS.exported : kind === 'ambiguous' ? EXPORT_OUTCOME_LABELS.ambiguous : EXPORT_OUTCOME_LABELS.failed,
       detail: exported
         ? kind === 'created' ? `已新建「${preparation.fileName}」。` : `已替换所选位置的「${preparation.fileName}」。`
-        : FAILURE_DETAILS[failureCode ?? ''] ?? FAILURE_DETAILS.EXPORT_COMMIT_UNCERTAIN!,
+        : EXPORT_FAILURE_DETAILS[failureCode ?? ''] ?? EXPORT_FAILURE_DETAILS.EXPORT_COMMIT_UNCERTAIN!,
       byteLength,
       recordedAt: text(outcome.recorded_at),
       revealAvailable: exported,

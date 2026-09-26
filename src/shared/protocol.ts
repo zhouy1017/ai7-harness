@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 81 as const;
+export const SERVICE_PROTOCOL_VERSION = 82 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -144,6 +144,10 @@ export const IPC_CHANNELS = {
   inspectSeriesKnowledgeCandidates: 'ai7:j13:inspect-series-knowledge-candidates',
   inspectSeriesKnowledgeRevisions: 'ai7:j13:inspect-series-knowledge-revisions',
   inspectDataVersion: 'ai7:j12:inspect-data-version',
+  chooseDatabaseExportDestination: 'ai7:j12:choose-database-export-destination',
+  approveDatabaseExport: 'ai7:j12:approve-database-export',
+  inspectDatabaseExports: 'ai7:j12:inspect-database-exports',
+  cancelDatabaseExport: 'ai7:j12:cancel-database-export',
   applyChangeSuggestion: 'ai7:j05:apply-change-suggestion',
   applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
   reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
@@ -5798,6 +5802,83 @@ export interface DataVersionProjection {
   readonly historyTruncated: boolean;
 }
 
+// ---- 设置 › 数据与存储 › 导出数据库 (Issue #434, plan slice S86a; V2-UX-DSTO-017; ADR 0079 §1.4, §1.6, §1.7) -------------
+
+/** At most this many database exports are listed, newest first. */
+export const MAX_DATABASE_EXPORTS_LISTED = 20;
+
+/** What a database package holds, counted when it is made. */
+export interface DatabaseExportContentsProjection {
+  readonly books: number;
+  readonly sourceVersions: number;
+  readonly libraryMaterials: number;
+  readonly series: number;
+}
+
+/**
+ * One prepared database export (DSTO-017; EXP-012 to EXP-021): the package with its size, Data Version and contents, the file
+ * it would create or replace, and — once approved — what the write came to.
+ */
+export interface DatabaseExportPreparationProjection {
+  readonly preparationId: string;
+  readonly fileName: string;
+  readonly destination: string;
+  readonly disposition: ManuscriptExportDisposition;
+  readonly dispositionLabel: string;
+  readonly payloadBytes: number;
+  readonly dataVersion: number;
+  readonly softwareVersion: string;
+  readonly contents: DatabaseExportContentsProjection;
+  readonly preparedAt: string;
+  readonly receipt: DatabaseExportReceiptProjection | null;
+}
+
+/**
+ * What one approved database export came to: a verified created or replaced file — `已导出到所选位置` — or `未能导出` when
+ * nothing at the destination changed, or `结果待确认` when AI7 cannot tell, which never retries by itself.
+ */
+export interface DatabaseExportReceiptProjection {
+  readonly preparationId: string;
+  readonly fileName: string;
+  readonly destination: string;
+  readonly approvedAt: string;
+  readonly outcome: 'created' | 'replaced' | 'ambiguous' | 'failed';
+  readonly outcomeLabel: string;
+  readonly detail: string;
+  readonly byteLength: number | null;
+  readonly recordedAt: string | null;
+}
+
+/**
+ * The database export under way, or how the last one in this launch ended (Issue #434 review; V2-UX-EXP-011). A preparation
+ * copies the store — the bytes of the pages copied — and then packs it with every other file; an approval reads the prepared
+ * file, writes it, and reads it back — `completedBytes` of `totalBytes` in each step —
+ * and `cancellable` says whether 取消导出 still stops it, which it does until the file is being put in place. Once it ends:
+ * `prepared` with the preparation, `finished` with the approval's receipt, `cancelled` with nothing recorded, or `failed`
+ * with why.
+ */
+export interface DatabaseExportActivityProjection {
+  readonly activityId: string;
+  readonly kind: 'prepare' | 'approve';
+  readonly state: 'running' | 'prepared' | 'finished' | 'cancelled' | 'failed';
+  readonly step: 'copying' | 'packing' | 'verifying' | 'writing' | 'committing' | null;
+  readonly completedBytes: number;
+  readonly totalBytes: number;
+  readonly cancellable: boolean;
+  /** What a preparation made once it has, and what an approval writes. */
+  readonly preparation: DatabaseExportPreparationProjection | null;
+  /** What an approval came to, once it did. */
+  readonly receipt: DatabaseExportReceiptProjection | null;
+  readonly failure: { readonly code: string; readonly message: string } | null;
+}
+
+/** The approved database exports, newest first, how many there are, and the export under way. */
+export interface DatabaseExportsProjection {
+  readonly exports: ReadonlyArray<DatabaseExportReceiptProjection>;
+  readonly total: number;
+  readonly activity: DatabaseExportActivityProjection | null;
+}
+
 export interface SeriesKnowledgePromotionProjection {
   readonly itemId: string;
   readonly revisionId: string;
@@ -8277,6 +8358,16 @@ export interface ServiceOperationMap {
   inspectSeriesKnowledgeRevisions: { input: { seriesId: string; itemId: string; before: number | null }; output: SeriesKnowledgeRevisionsProjection };
   inspectDataVersion: { input: Record<string, never>; output: DataVersionProjection };
   /**
+   * 导出数据库 (Issue #434, S86a): the destination the Save dialog answered becomes one preparation of the package, packed off
+   * the request; answers at once with the export's activity (V2-UX-EXP-011).
+   */
+  prepareDatabaseExport: { input: { destination: string }; output: DatabaseExportActivityProjection };
+  /** `按上述方式导出`: the one approval of one unchanged preparation, and the write it permits, carried out the same way. */
+  approveDatabaseExport: { input: { preparationId: string }; output: DatabaseExportActivityProjection };
+  inspectDatabaseExports: { input: Record<string, never>; output: DatabaseExportsProjection };
+  /** 取消导出: stops the export under way until it begins putting the file in place. */
+  cancelDatabaseExport: { input: { activityId: string }; output: DatabaseExportActivityProjection };
+  /**
    * AI7 Apply for Change Suggestions (Issue #408). The batch form is 确认应用 on 审阅's confirmation
    * strip (Issue #417): one Effect over exactly the suggestions the strip named, all or none.
    */
@@ -8627,6 +8718,14 @@ export interface RendererApi {
   inspectSeriesKnowledgeCandidates(input: { seriesId: string; after: SeriesKnowledgeCandidatesCursor | null }): Promise<SeriesKnowledgeCandidatesPageProjection>;
   inspectSeriesKnowledgeRevisions(input: { seriesId: string; itemId: string; before: number | null }): Promise<SeriesKnowledgeRevisionsProjection>;
   inspectDataVersion(): Promise<DataVersionProjection>;
+  /**
+   * 导出数据库… (Issue #434, S86a): the platform's Save dialog, then the preparation of the package for the chosen file — begun,
+   * and followed through `inspectDatabaseExports` (V2-UX-EXP-011).
+   */
+  chooseDatabaseExportDestination(): Promise<{ outcome: 'cancelled' } | { outcome: 'preparing'; activity: DatabaseExportActivityProjection }>;
+  approveDatabaseExport(input: { preparationId: string }): Promise<DatabaseExportActivityProjection>;
+  inspectDatabaseExports(): Promise<DatabaseExportsProjection>;
+  cancelDatabaseExport(input: { activityId: string }): Promise<DatabaseExportActivityProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */
   applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): Promise<ManuscriptApplyCommandProjection>;

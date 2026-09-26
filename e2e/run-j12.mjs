@@ -7,6 +7,7 @@ import { createServer } from 'node:http';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { strFromU8, unzipSync } from 'fflate';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
@@ -461,7 +462,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     // Production Documents beside their ledgers, revision 38 adds their Delivery Records and revision 39 the Book's
     // 图书交付包 versions, so this pin moves with the terminal version the service stamps
     // (`BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION`).
-    requireJourney(version?.user_version === 54, 'credential-cleanup-metadata-version');
+    requireJourney(version?.user_version === 55, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, connection_name, provider_id, model_id,
               adapter_revision, configuration_revision, approved_fallback_chain,
@@ -816,7 +817,7 @@ async function main() {
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
     electronExecutableForCleanup = executable;
-    const launch = async (picker) => {
+    const launch = async (picker, savePath) => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
         '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
@@ -824,6 +825,8 @@ async function main() {
         '--j12-observe-reveal', 'true', '--launcher-pid', String(process.pid),
       ];
       if (picker) args.splice(args.length - 4, 0, '--j12-picker-path', picker);
+      // 导出数据库's Save dialog, answered once (Issue #434, S86a).
+      if (savePath) args.splice(args.length - 4, 0, '--j12-save-path', savePath);
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       cancellation.throwIfRequested();
       browserAcquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args, env: productEnvironment(executable), timeout: 60_000 });
@@ -1471,6 +1474,44 @@ async function main() {
     );
     await close();
     await assertSecretsAbsentFromDataRoot(dataRoot, [secretOne, secretTwo], 'model-replacement-secrets-absent-from-data-root');
+
+    at('database-export');
+    // 导出数据库 (Issue #434, S86a; DSTO-017; ADR 0079 §1.6): with the replacement credential protected, the one file the editor
+    // approves holds every Book, says its Data Version, and holds neither credential in any of its members.
+    const databaseExportPath = resolve(runRoot, 'database-export', 'AI7 数据库.ai7db');
+    await mkdir(dirname(databaseExportPath), { recursive: true });
+    manager = await launch(undefined, databaseExportPath);
+    [primary] = await waitForRendererCount(manager, 1, 'database-export-window');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'database-export-landing');
+    await click(primary, '数据与存储', 'database-export-open');
+    await waitFor(primary, `document.querySelector('.database-export [data-database-export-action="choose"]') && document.querySelector('.database-export-records summary')`, 'database-export-ready');
+    await click(primary, '导出数据库…', 'database-export-choose');
+    await waitFor(primary, `document.querySelector('.database-export-prepared')?.dataset.preparationId !== undefined`, 'database-export-prepared');
+    const preparedRows = await primary.evaluate(`Array.from(document.querySelectorAll('.database-export-prepared dt')).map((term) => [term.textContent, term.nextElementSibling?.textContent ?? null])`);
+    const booksShown = Number(/^(\d+) 本图书/u.exec(Array.isArray(preparedRows) ? preparedRows.find((row) => row[0] === '内容')?.[1] ?? '' : '')?.[1]);
+    requireJourney(
+      Array.isArray(preparedRows) && preparedRows.length === 5 &&
+        JSON.stringify(preparedRows.map((row) => row[0])) === JSON.stringify(['文件', '位置', '方式', '内容', '版本']) &&
+        preparedRows[0][1].startsWith('「AI7 数据库.ai7db」 · ') && preparedRows[1][1] === databaseExportPath && preparedRows[2][1] === '新建文件' &&
+        Number.isSafeInteger(booksShown) && booksShown >= 1 && /^数据版本 1 · 软件 \d+\.\d+\.\d+/u.test(preparedRows[4][1]),
+      'database-export-prepared-words',
+      preparedRows,
+    );
+    await click(primary, '按上述方式导出', 'database-export-approve');
+    await waitFor(primary, `document.querySelector('.database-export-prepared')?.dataset.outcome === 'created'`, 'database-export-created');
+    await assertRenderer(primary, `document.querySelector('.database-export-outcome')?.textContent === '已导出到所选位置：已新建「AI7 数据库.ai7db」。' && document.querySelector('.database-export')?.dataset.databaseExports === '1'`, 'database-export-outcome-words');
+    await close();
+    const packaged = unzipSync(await readFile(databaseExportPath));
+    const manifest = JSON.parse(strFromU8(packaged['manifest.json']));
+    requireJourney(
+      manifest.schema === 'ai7.database-package/1' && manifest.dataVersion === 1 && manifest.schemaRevision === 55 &&
+        manifest.credentials === 'excluded' && manifest.contents?.books === booksShown && Object.keys(packaged)[0] === 'store/ai7.sqlite',
+      'database-export-manifest',
+      { schema: manifest.schema, dataVersion: manifest.dataVersion, schemaRevision: manifest.schemaRevision, contents: manifest.contents },
+    );
+    const membersWithSecret = Object.entries(packaged).filter(([, bytes]) => [secretOne, secretTwo].some((secret) =>
+      Buffer.from(bytes).includes(Buffer.from(secret, 'utf8')) || Buffer.from(bytes).includes(Buffer.from(secret, 'utf16le')))).map(([name]) => name);
+    requireJourney(membersWithSecret.length === 0, 'database-export-no-credential', membersWithSecret);
 
     at('model-service-remove-and-restart');
     manager = await launch();
