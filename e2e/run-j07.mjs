@@ -590,11 +590,11 @@ const READ_PUBLICATION = `window.ai7.inspectDeliverables().then((deliverables) =
   prompt: deliverables.publication.actualsPrompt === null ? null : deliverables.publication.actualsPrompt.label + ' · ' + deliverables.publication.actualsPrompt.stateLabel,
 }))`;
 
-async function importAndOpen(renderer, title) {
+async function importAndOpen(renderer, title, distinct = false) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'import-landing');
   await click(renderer, '导入稿件', 'import-start');
   await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'import-target');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'import-target-select');
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector(${JSON.stringify(`input[aria-label="${distinct ? '新建图书（作为不同作品）' : '新建图书'}"]`)}); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'import-target-select');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!(radio instanceof HTMLInputElement) || radio.checked) return false; radio.click(); return radio.checked; })()`, 'import-relationship-select');
   await fill(renderer, '#book-title', title, 'import-title');
   await click(renderer, '确认书名并复核', 'import-review');
@@ -2134,6 +2134,34 @@ async function main() {
       exemplarPage[0].items[0][2].startsWith(`新闻稿 · 版本 ${exemplarNews.version} · 交付给`) &&
       exemplarPage[0].items[0][2].includes(` · 学习准入：仅本社 · 此前还交付过版本 ${exemplarNews.earlierVersions[0]}`),
     'exemplars-news-release', { service: exemplars?.books?.map((entry) => entry.exemplars.map((exemplar) => [exemplar.typeId, exemplar.version, exemplar.earlierVersions])), page: exemplarPage });
+
+    // Exercise real catalogue paging after importing and designating twenty additional Books through the product.
+    // Each launch owns one picker answer; the same admitted excerpt is explicitly a distinct intended work.
+    for (let index = 0; index < 20; index += 1) {
+      await close();
+      renderer = await launch({ picker: manuscript });
+      await importAndOpen(renderer, `范例分页 ${String(index + 1).padStart(2, '0')}`, true);
+      await assertRenderer(renderer, PAGE_HELPERS, 'exemplars-page-helpers');
+      await openMilestoneForm(renderer, 'exemplars-page-milestone');
+      await fill(renderer, '#milestone-label', '分页留档', 'exemplars-page-label');
+      await choosePurpose(renderer, 'stage-archive', 'exemplars-page-purpose');
+      await saveMilestone(renderer, { label: '分页留档' }, 'r1', 'exemplars-page-saved');
+      await openDeliverables(renderer, 'exemplars-page-deliverables');
+      const milestoneId = await renderer.evaluate(`window.ai7.inspectDeliverables().then((value) => value.publication.milestones[0].milestoneId)`);
+      await designate(renderer, { milestoneId, scope: '分页归档', basis: '范例分页检查' }, '已设为发稿版本 · 「分页留档」 · r1 · 分页归档', 'exemplars-page-designated');
+    }
+    await close();
+    renderer = await launch();
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'exemplars-pages-landing');
+    await click(renderer, '知识库', 'exemplars-pages-knowledge');
+    await click(renderer, '范例', 'exemplars-pages-tab');
+    await waitFor(renderer, `document.querySelectorAll('.exemplar-book').length === 20`, 'exemplars-first-page');
+    for (let repetition = 0; repetition < 2; repetition += 1) {
+      await clickSelector(renderer, '[data-exemplar-action="more"]', 'exemplars-next-page');
+      await waitFor(renderer, `document.querySelectorAll('.exemplar-book').length === 1 && document.activeElement === document.querySelector('.exemplar-book h3') && document.querySelector('[data-exemplar-action="more"]').hidden`, 'exemplars-last-page-bounded');
+      await clickSelector(renderer, '[data-exemplar-action="first"]', 'exemplars-return-first');
+      await waitFor(renderer, `document.querySelectorAll('.exemplar-book').length === 20 && document.activeElement === document.querySelector('.exemplar-book h3') && document.querySelector('[data-exemplar-action="first"]').hidden`, 'exemplars-first-page-replaced');
+    }
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

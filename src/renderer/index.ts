@@ -4301,12 +4301,13 @@ async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocu
 /**
  * 知识库 › 范例 (Issue #427, S79b; KB-004, KB-006): each published Book with who it is attributed to and when it was set as a
  * 发稿版本, and its delivered documents by type — each the version its latest delivery named, with its eligibility. The
- * Books come a page at a time: `更多已出版的书…` reads the next and focuses the first Book it adds (Issue #427 review).
+ * Books come a page at a time; moving forward or back to the first page replaces the current bounded page.
  */
 function renderExemplars(root: HTMLElement, projection: ExemplarsProjection): void {
   if (projection.books.length === 0) root.append(element('p', 'field-note exemplars-empty', EXEMPLARS_EMPTY));
   const list = element('div', 'exemplar-list');
   const append = (books: ExemplarsProjection['books']): HTMLElement | null => {
+    list.replaceChildren();
     let first: HTMLElement | null = null;
     for (const book of books) {
       const card = element('article', 'exemplar-book');
@@ -4343,25 +4344,37 @@ function renderExemplars(root: HTMLElement, projection: ExemplarsProjection): vo
   more.dataset['exemplarAction'] = 'more';
   const moreRow = element('div', 'button-row exemplars-more');
   moreRow.hidden = cursor === null;
-  moreRow.append(more);
-  more.addEventListener('click', () => void (async () => {
-    if (cursor === null || more.disabled) return;
+  const firstPage = element('button', 'button secondary', '回到第一页');
+  firstPage.type = 'button';
+  firstPage.dataset['exemplarAction'] = 'first';
+  firstPage.hidden = true;
+  more.hidden = cursor === null;
+  moreRow.append(firstPage, more);
+  const turn = async (after: ExemplarsProjection['nextCursor']) => {
+    if (more.disabled) return;
     more.disabled = true;
+    firstPage.disabled = true;
     setStatus(EXEMPLARS_STATUS.loadingMore, 'busy');
     try {
-      const next = await window.ai7.inspectExemplars({ after: cursor });
+      const next = await window.ai7.inspectExemplars({ after });
       if (!root.isConnected) return;
       const first = append(next.books);
       cursor = next.nextCursor;
-      moreRow.hidden = cursor === null;
+      firstPage.hidden = after === null;
+      more.hidden = cursor === null;
+      moreRow.hidden = cursor === null && after === null;
       setStatus(EXEMPLARS_STATUS.opened);
-      first?.focus();
+      (first ?? firstPage)?.focus();
     } catch (error) {
+      if (!root.isConnected) return;
       setStatus(rendererErrorMessage(error, EXEMPLARS_STATUS.unavailable), 'error');
     } finally {
       more.disabled = false;
+      firstPage.disabled = false;
     }
-  })());
+  };
+  more.addEventListener('click', () => { if (cursor !== null) void turn(cursor); });
+  firstPage.addEventListener('click', () => void turn(null));
   root.append(list, moreRow, ...EXEMPLARS_LATER.map((line) => element('p', 'field-note exemplars-later', line)));
 }
 
