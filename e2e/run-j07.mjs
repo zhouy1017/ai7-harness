@@ -1880,9 +1880,12 @@ async function main() {
     await waitFor(renderer, switchedTo(false), 'package-export-reviewed-without-annotations', 60_000);
     await toggleAnnotations('package-export-annotations-on');
     await waitFor(renderer, switchedTo(true), 'package-export-reviewed-with-annotations', 60_000);
-    for (const [key] of firstMembers) {
-      await clickSelector(renderer, `input[data-package-member="${key}"]`, 'package-export-select-member');
-    }
+    const selectPackageMember = (key) => assertRenderer(renderer, `(() => {
+      const box = window.__j07.packageExport()?.querySelector('input[data-package-member=' + CSS.escape(${JSON.stringify(key)}) + ']');
+      if (!(box instanceof HTMLInputElement) || box.type !== 'checkbox' || box.disabled || box.checked) return false;
+      box.focus(); box.click(); return true;
+    })()`, 'package-export-select-member');
+    for (const [key] of firstMembers) await selectPackageMember(key);
     await clickSelector(renderer, packageAction('export-choose'), 'package-export-choose');
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'prepared' && window.__j07.status() === '已准备好导出文件，等待你确认。'`, 'package-export-prepared', 60_000);
     await assertRenderer(renderer, `(() => {
@@ -1922,7 +1925,7 @@ async function main() {
     await reopenDeliverables(renderer, 'package-export-second-batch');
     await clickSelector(renderer, packageAction('export'), 'package-export-remaining-open');
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'ready'`, 'package-export-remaining-reviewed', 60_000);
-    await clickSelector(renderer, 'input[data-package-member="document:news-release"]', 'package-export-select-remaining');
+    await selectPackageMember('document:news-release');
     await clickSelector(renderer, packageAction('export-choose'), 'package-export-remaining-choose');
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'prepared'`, 'package-export-remaining-prepared', 60_000);
     await assertRenderer(renderer, `window.__j07.packageExport().querySelectorAll('ol.package-export-files > li').length === 1`, 'package-export-one-prepared-member');
