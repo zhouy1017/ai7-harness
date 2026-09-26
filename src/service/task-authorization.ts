@@ -1191,7 +1191,6 @@ function validateStoredCanonicalRows(db: DatabaseSync): void {
             mr.source_version_id, sv.source_digest, m.manuscript_id joined_manuscript_id,
             mb.branch_id joined_branch_id, pin.book_id artifact_pin_book_id,
             installation.content_sha256 native_carrier_sha256,
-            connection.credential_reference,
             ra.task_intent_id authorization_task_id, ra.authorization_id, ra.plan_envelope_sha256,
             ra.origin, ra.authorized_at, ra.canonical_json authorization_json,
             rr.task_intent_id run_task_id, rr.run_record_id, rr.authorization_id run_authorization_id,
@@ -1217,9 +1216,7 @@ function validateStoredCanonicalRows(db: DatabaseSync): void {
        AND pin.sidecar_id = 'ai7.editorial-workspace-profile.authority'
        AND pin.sidecar_revision = 2 AND pin.sidecar_sha256 = '${SIDECAR_DIGEST}'
      LEFT JOIN native_artifact_installations installation
-       ON installation.artifact_id = pin.native_artifact_id
-     LEFT JOIN model_service_connections connection
-       ON connection.connection_id = 'main-editorial-deepseek-v4-pro'`,
+       ON installation.artifact_id = pin.native_artifact_id`,
   ).all() as SqlRow[];
   for (const row of rows) {
     const taskIntentId = asString(row.task_intent_id);
@@ -1246,7 +1243,11 @@ function validateStoredCanonicalRows(db: DatabaseSync): void {
       const journalSequence = asNumber(row.journal_sequence);
       const createdForDirtyJournal = asNumber(row.created_for_dirty_journal);
       const sourceVersionId = asString(row.source_version_id);
-      const credentialReference = asString(row.credential_reference);
+      // The plan is read against the credential reference it froze, never this computer's connection: a Book merged from
+      // another computer brings its plans and not that computer's connection (Issue #434 review), and each plan still has
+      // to be exactly what its own reference and pin derive.
+      const plan = parseCanonicalJson(row.provider_plan_json) as { providerProcessing?: unknown; credentialReference?: unknown };
+      const credentialReference = typeof plan.credentialReference === 'string' ? plan.credentialReference : '';
       requireTask(
         row.checkpoint_id === taskIntentId && UUID_PATTERN.test(manuscriptId) && UUID_PATTERN.test(branchId) &&
         UUID_PATTERN.test(revisionId) && /^r[1-9][0-9]*$/.test(revisionLabel) && DIGEST_PATTERN.test(revisionDigest) &&
@@ -1297,8 +1298,7 @@ function validateStoredCanonicalRows(db: DatabaseSync): void {
       // The plan is validated against the pin it froze, not against the launch reading it now: the
       // row states its own scope, and the Execution Plan and Plan Envelope must be the derivations
       // of that same pin. Under `development-ci` this is byte for byte the check it always was.
-      const pin = providerProcessingPinOf(
-        (parseCanonicalJson(row.provider_plan_json) as { providerProcessing?: unknown }).providerProcessing);
+      const pin = providerProcessingPinOf(plan.providerProcessing);
       requireTask(pin !== null, 'TASK_RECORD_INVALID', 'Provider Resolution Plan 的 Provider Processing pin 无效。');
       requireTask(row.provider_plan_json === canonicalJson(providerResolutionPlanValue(credentialReference, pin)),
         'TASK_RECORD_INVALID', 'Provider Resolution Plan 无效。');

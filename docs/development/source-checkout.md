@@ -268,17 +268,28 @@ The backup before a replacement or a merge and the 定期自动备份 check writ
 - `seed`: `books`, fixed to the Books chosen. A reference to another Book is refused.
 - `owned`: a row that references an owned row, or that an owned row references.
 - `dependent`: an import draft a committed import names.
-- `shared`: a house row an owned row references, taken when this store lacks it — a content object, a workflow profile, the service lifetime a journal entry was written in.
-- `excluded`: said as a notice — Series membership and Series knowledge, 资料库 decisions, the 编辑工作区方案's enablement.
+- `shared`: a house row an owned row references, taken when this store lacks it — a content object, a workflow profile, the service lifetime a journal entry was written in, the 编辑工作区方案 a Book enabled.
+- `excluded`: said as a notice — Series membership and Series knowledge, 资料库 decisions.
 - `transient` and `house`: never taken.
 - `derived`: the search index, filled for the working text taken.
 
-A few references the store keeps by value — each import record's commit, each journal entry's lifetime — are followed as if they were foreign keys. The rows go in one transaction, in any order: foreign keys are checked at commit, and the store's insert triggers look only for a conflicting row, never for a parent. The stored files they name are copied first. A Book whose 内部编号 is another Book's here merges without one.
+A few references the store keeps by value — each import record's commit, each journal entry's lifetime — are followed as if they were foreign keys. The relations go in one transaction, in any order: foreign keys are checked at commit, and the store's insert triggers look only for a conflicting row, never for a parent. The rows of each relation go in the order they were written, which is what the one trigger comparing rows of its own relation asks for: a Book's 方案 pins, Revision 1 before Revision 2. The stored files they name are copied first. A Book whose 内部编号 is another Book's here merges without one.
+
+A Book's enablement of the 编辑工作区方案 and the 权限侧车 revisions it pinned are its own, because its prepared Tasks name them (Issue #434 review). The 方案 itself is the one every AI7 carries, fixed to its bytes. Data that has not installed it gains it whole from a Book that enabled it: its installation, both sidecar revisions as installing writes them, and the carrier it retains. Data that has installed it keeps its own. A J-03 Task's plan is read against the credential reference that plan froze, as against its pin, never against this computer's connection. So a Book from another computer opens with its Tasks as recorded, and any new Run still needs this computer's own connection.
 
 A merge uses the replacement's staging place:
-- **Prepare:** extract the package, open it there as a store of its own (which brings it to this revision and checks it whole), plan which of its Books are new, already here or same-titled, back up the data as it is (`AI7 合并前备份 …`, origin `pre-merge-backup`), and write an intent of kind `merge`.
-- **Apply,** at the next open, onto the data as it is then: the store's files are copied aside, the Books are merged into the closed store, and the store opens. A merge or an open that fails puts the saved files back, and the data opens as it was. An interruption after the merge's commit finds its Books there and merges nothing twice.
-- **Recording:** `database_merges` records each merge, applied or failed, with its Books and notices. 导入记录 lists merges beside replacements. 回退 reads the replacements alone.
+- **Prepare:** extract the package, open it there as a store of its own (which brings it to this revision and checks it whole), and write the members as they then stand to `members.json`. Then plan which of its Books are new, already here or same-titled, back up the data as it is (`AI7 合并前备份 …`, origin `pre-merge-backup`), and write an intent of kind `merge` naming the digest of `members.json`. Unlike a replacement, a waiting merge refuses nothing: it applies onto the data as it is at the next open, so a change made meanwhile stays.
+- **Apply,** at the next open, onto the data as it is then:
+  - `incoming/` is first verified against `members.json`, as for a replacement. A staging place changed since is `refused`, and the merge is recorded failed with `failure: 'changed'`.
+  - Otherwise the store's files are copied aside, the Books are merged into the closed store, and the store opens.
+  - A merge or an open that fails puts the saved files back, and the data opens as it was.
+  - An interruption after the merge's commit finds its Books there and merges nothing twice.
+- **Recording:** `database_merges` records each merge, applied or failed, with its Books and notices, and a failure's reason in its canonical record only. 导入记录 lists merges beside replacements, the two ledgers read as streams merged newest first. 回退 reads the replacements alone.
+- **Bounded (Issue #434 review):**
+  - The plan streams the package's Books. The preview lists the first fifty and counts them all as new, already here or same-titled.
+  - A waiting merge lists fifty and counts every Book it takes.
+  - A record names ten titles and counts the rest.
+  - The file references a merge copies are read as streams.
 
 
 

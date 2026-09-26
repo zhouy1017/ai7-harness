@@ -27,6 +27,7 @@ import {
   restoreStoreFiles,
   saveStoreFiles,
   storeFilesSaved,
+  MAX_MERGE_BOOKS_LISTED,
   type MergePlan,
 } from './database-merge.js';
 import { EXPORT_STAGING_DIRECTORY, fileDigest, takeFreeName } from './manuscript-export.js';
@@ -98,6 +99,9 @@ function requireReplacement(condition: unknown, code: string, message: string): 
 }
 
 type SqlRow = Record<string, SQLOutputValue>;
+
+/** How many of a merge's titles its record names; the rest are counted. */
+const MAX_MERGED_TITLES_LISTED = 10;
 
 const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'database_replacements'";
 const INTENT_SCHEMA = 'ai7.database-replacement.intent/1' as const;
@@ -186,7 +190,7 @@ type MergePhase = 'saving-store' | 'merging' | 'opening-merge' | 'merge-applied'
 const PHASES: ReadonlyArray<string> = ['moving-out', 'moving-in', 'opening', 'applied', 'discarding', 'restoring', 'restored', 'refused',
   'saving-store', 'merging', 'opening-merge', 'merge-applied', 'restoring-store', 'store-restored'];
 const ORIGINS: ReadonlyArray<string> = ['database-export', 'scheduled-backup', 'pre-replace-backup', 'pre-merge-backup'];
-const MERGE_NOTICES: ReadonlyArray<string> = ['series', 'library-materials', 'workspace-profile', 'internal-number'];
+const MERGE_NOTICES: ReadonlyArray<string> = ['series', 'library-materials', 'internal-number'];
 const BOOK_STATUSES: ReadonlyArray<string> = ['new', 'present', 'same-title'];
 
 function isBook(value: unknown): value is DatabaseImportBookProjection {
@@ -692,7 +696,7 @@ export class DatabaseReplacements {
       try {
         plan = this.#plan(copy);
       } catch {
-        plan = { books: [], notices: [] };
+        plan = { books: [], counts: { new: 0, present: 0, sameTitle: 0 }, merging: [], notices: [] };
       }
     } finally {
       await handle?.close().catch(() => undefined);
@@ -716,6 +720,7 @@ export class DatabaseReplacements {
       contents: verified.manifest.contents,
       members: verified.manifest.members.length,
       books: plan.books,
+      bookCounts: plan.counts,
       mergeNotices: plan.notices,
     };
   }
@@ -737,7 +742,7 @@ export class DatabaseReplacements {
       const incoming = join(replacementStagingFor(this.#dataRoot), 'incoming');
       await this.#sources.openPackage(incoming);
       const plan = this.#plan(join(incoming, 'store', 'ai7.sqlite'));
-      const merging = plan.books.filter((book) => book.status !== 'present');
+      const merging = plan.merging;
       requireReplacement(merging.length > 0, 'DATABASE_MERGE_NOTHING', '这个文件里的图书本机都已经有了。');
       const packageMembersSha256 = await writeReplacementMembers(this.#dataRoot, await stagedMembers(incoming));
       const backup = await this.#backUp(now, 'pre-merge-backup');
@@ -831,7 +836,9 @@ export class DatabaseReplacements {
         preparedAt: record.preparedAt,
         recordedAt: record.recordedAt,
         backupPresent: existsSync(join(location, record.backupFileName)),
-        mergedTitles: record.mergeBooks === null ? null : record.mergeBooks.map((book) => book.title),
+        // A merge names its first titles and counts the rest (Issue #434 review).
+        mergedTitles: record.mergeBooks === null ? null : record.mergeBooks.slice(0, MAX_MERGED_TITLES_LISTED).map((book) => book.title),
+        mergedCount: record.mergeBooks === null ? null : record.mergeBooks.length,
         failure: record.failure ?? null,
       })),
       total,
@@ -1084,7 +1091,9 @@ function pendingProjection(intent: ReplacementIntent): DatabasePendingReplacemen
     contents: intent.packageContents,
     backupFileName: intent.backupFileName,
     preparedAt: intent.preparedAt,
-    mergeBooks: intent.mergeBooks,
+    // A waiting merge lists its first Books and counts them all (Issue #434 review).
+    mergeBooks: intent.mergeBooks === null ? null : intent.mergeBooks.slice(0, MAX_MERGE_BOOKS_LISTED),
+    mergeBooksTotal: intent.mergeBooks === null ? null : intent.mergeBooks.length,
     mergeNotices: intent.mergeNotices,
   };
 }

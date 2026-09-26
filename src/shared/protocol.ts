@@ -5956,7 +5956,7 @@ export interface DatabaseImportBookProjection {
 }
 
 /** What stays behind when a package's Books merge: Series, 资料库 items, the 编辑工作区方案's enablement, a 内部编号 taken here. */
-export type DatabaseMergeNotice = 'series' | 'library-materials' | 'workspace-profile' | 'internal-number';
+export type DatabaseMergeNotice = 'series' | 'library-materials' | 'internal-number';
 
 /**
  * Whether this AI7 can take a package's data: the same Data Version, and a schema revision it knows. A package from a newer
@@ -5987,8 +5987,10 @@ export interface DatabaseImportPreviewProjection {
   readonly contents: DatabaseExportContentsProjection;
   /** How many files the package holds, each verified. */
   readonly members: number;
-  /** Its Books, as merging would take them (S86d). */
+  /** Its first Books, as merging would take them (S86d), at most fifty; the rest are counted (Issue #434 review). */
   readonly books: ReadonlyArray<DatabaseImportBookProjection>;
+  /** How many of its Books merging would take as new, leave as already here, or take beside one of the same title. */
+  readonly bookCounts: { readonly new: number; readonly present: number; readonly sameTitle: number };
   readonly mergeNotices: ReadonlyArray<DatabaseMergeNotice>;
 }
 
@@ -6002,8 +6004,10 @@ export interface DatabasePendingReplacementProjection {
   readonly contents: DatabaseExportContentsProjection;
   readonly backupFileName: string;
   readonly preparedAt: string;
-  /** A merge's Books: the ones it takes, each with how (S86d); `null` for a replacement. */
+  /** A merge's first Books: the ones it takes, each with how (S86d), at most fifty; `null` for a replacement. */
   readonly mergeBooks: ReadonlyArray<DatabaseImportBookProjection> | null;
+  /** How many Books the merge takes; `null` for a replacement. */
+  readonly mergeBooksTotal: number | null;
   readonly mergeNotices: ReadonlyArray<DatabaseMergeNotice>;
 }
 
@@ -6021,8 +6025,10 @@ export interface DatabaseReplacementRecordProjection {
   readonly recordedAt: string;
   /** Whether its backup is still in the backup location. */
   readonly backupPresent: boolean;
-  /** The titles of the Books a merge took; `null` for a replacement. */
+  /** The first titles of the Books a merge took, at most ten; `null` for a replacement. */
   readonly mergedTitles: ReadonlyArray<string> | null;
+  /** How many Books a merge took; `null` for a replacement. */
+  readonly mergedCount: number | null;
   /**
    * Why one that failed failed: its data would not open, or what waited was no longer the package the preparation verified
    * (Issue #434 review). `null` for one applied, and for one that failed before this was recorded.

@@ -12,9 +12,9 @@ import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
  * - `owned`: a row that references an owned row, or that an owned row references, belongs to the Book;
  * - `dependent`: a row taken only because an owned row references it (an import draft a reimport compared against);
  * - `shared`: a house row an owned row references, taken when this store lacks it (a content object, a workflow profile,
- *   the service lifetime a journal entry was written in);
+ *   the service lifetime a journal entry was written in, the 编辑工作区方案 a Book enabled);
  * - `excluded`: a Book's row that stays behind, said as a notice — its Series membership and Series knowledge, its 资料库
- *   decisions, its 编辑工作区方案 enablement;
+ *   decisions;
  * - `transient`: working state of a session, never taken — import drafts in progress, searches, replacement previews;
  * - `house`: the house's own records, never taken;
  * - `derived`: the search index, rebuilt for the rows taken.
@@ -204,17 +204,21 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   book_dimension_sets: 'owned',
   book_dimensions: 'owned',
   book_people_versions: 'owned',
-  // House rows a Book's records reference: taken when this store lacks them.
+  // Its enablement of the 编辑工作区方案 and the 权限侧车 revisions it pinned, which its prepared Tasks name (Issue #434 review).
+  native_artifact_book_enablements: 'owned',
+  editorial_workspace_profile_book_pins: 'owned',
+  // House rows a Book's records reference: taken when this store lacks them. The 方案 is the one every AI7 carries, fixed to
+  // its bytes: a Book that enabled it brings it, whole, to data that has not installed it.
   content_objects: 'shared',
   workflow_profiles: 'shared',
   service_lifetimes: 'shared',
+  native_artifact_installations: 'shared',
+  editorial_workspace_profile_sidecar_revisions: 'shared',
   // What stays behind, said as a notice.
   series_membership_changes: 'excluded',
   series_knowledge_candidates: 'excluded',
   series_knowledge_revisions: 'excluded',
   library_material_decisions: 'excluded',
-  native_artifact_book_enablements: 'excluded',
-  editorial_workspace_profile_book_pins: 'excluded',
   // Working state of a session.
   import_commit_attempts: 'transient',
   import_abandonment_cleanup_intents: 'transient',
@@ -230,8 +234,6 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   manuscript_replacement_matches: 'transient',
   // The house's own records.
   model_service_connections: 'house',
-  native_artifact_installations: 'house',
-  editorial_workspace_profile_sidecar_revisions: 'house',
   review_guideline_versions: 'house',
   library_materials: 'house',
   series: 'house',
@@ -257,14 +259,13 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
 };
 
 /** What stays behind when a Book merges, said to the editor. */
-export type MergeNotice = 'series' | 'library-materials' | 'workspace-profile' | 'internal-number';
+export type MergeNotice = 'series' | 'library-materials' | 'internal-number';
 
 const EXCLUSION_NOTICES: Readonly<Record<string, { notice: MergeNotice; bookColumn: string }>> = {
   series_membership_changes: { notice: 'series', bookColumn: 'book_id' },
   series_knowledge_candidates: { notice: 'series', bookColumn: 'source_book_id' },
   series_knowledge_revisions: { notice: 'series', bookColumn: 'source_book_id' },
   library_material_decisions: { notice: 'library-materials', bookColumn: 'book_id' },
-  native_artifact_book_enablements: { notice: 'workspace-profile', bookColumn: 'book_id' },
 };
 
 export class DatabaseMergeError extends Error {
@@ -366,8 +367,16 @@ export interface MergeBookPlan {
   readonly internalNumberCleared: boolean;
 }
 
+/** At most this many of a package's Books are listed in a preview or a waiting merge; the rest are counted (Issue #434 review). */
+export const MAX_MERGE_BOOKS_LISTED = 50;
+
 export interface MergePlan {
+  /** The package's first Books, in the order they were made, as merging would take them: what a preview lists. */
   readonly books: ReadonlyArray<MergeBookPlan>;
+  /** How many of the package's Books merging would take as new, leave as already here, or take beside one of the same title. */
+  readonly counts: { readonly new: number; readonly present: number; readonly sameTitle: number };
+  /** Every Book merging would take, in the same order: what the merge names and takes. */
+  readonly merging: ReadonlyArray<MergeBookPlan>;
   readonly notices: ReadonlyArray<MergeNotice>;
 }
 
@@ -375,38 +384,49 @@ export interface MergePlan {
  * The Books of the store attached as `src`, as merging them into `main` would take them: new, already here, or with a title
  * already here — and what would stay behind. A read of both.
  */
-export function planMerge(db: DatabaseSync): MergePlan {
+export function planMerge(db: DatabaseSync, listed = MAX_MERGE_BOOKS_LISTED): MergePlan {
+  const counts = { new: 0, present: 0, sameTitle: 0 };
   // A store with no Books offers none to merge.
-  if (!tableExists(db, 'src', 'books')) return { books: [], notices: [] };
+  if (!tableExists(db, 'src', 'books')) return { books: [], counts, merging: [], notices: [] };
   const internal = columnsOf(db, 'src', 'books').includes('internal_number');
+  // Read as a stream (Issue #434 review): the page listed and the Books merging would take, never every Book whole.
   const rows = db.prepare(
     `SELECT book_id, stable_identity, title, ${internal ? 'internal_number' : 'NULL AS internal_number'} FROM src.books ORDER BY created_at, book_id`,
-  ).all() as SqlRow[];
+  ).iterate() as Iterable<SqlRow>;
   const present = db.prepare('SELECT 1 FROM main.books WHERE book_id = ? OR stable_identity = ?');
   const sameTitle = db.prepare('SELECT 1 FROM main.books WHERE title = ?');
   const numberTaken = db.prepare('SELECT 1 FROM main.books WHERE internal_number = ?');
-  const books = rows.map((row): MergeBookPlan => {
+  const books: MergeBookPlan[] = [];
+  const merging: MergeBookPlan[] = [];
+  let numberCleared = false;
+  for (const row of rows) {
     const bookId = String(row.book_id);
     const title = String(row.title);
     const status = present.get(bookId, String(row.stable_identity)) !== undefined ? 'present'
       : sameTitle.get(title) !== undefined ? 'same-title' : 'new';
-    return {
+    const book: MergeBookPlan = {
       bookId,
       title,
       status,
       internalNumberCleared: status !== 'present' && row.internal_number !== null && numberTaken.get(String(row.internal_number)) !== undefined,
     };
-  });
-  const merging = books.filter((book) => book.status !== 'present').map((book) => book.bookId);
+    if (status === 'present') counts.present += 1;
+    else if (status === 'same-title') counts.sameTitle += 1;
+    else counts.new += 1;
+    if (books.length < listed) books.push(book);
+    if (status !== 'present') merging.push(book);
+    numberCleared ||= book.internalNumberCleared;
+  }
+  const mergingIds = JSON.stringify(merging.map((book) => book.bookId));
   const notices = new Set<MergeNotice>();
   for (const [table, { notice, bookColumn }] of Object.entries(EXCLUSION_NOTICES)) {
     if (merging.length === 0 || !tableExists(db, 'src', table)) continue;
     const found = db.prepare(`SELECT 1 FROM src.${quoted(table)} WHERE ${quoted(bookColumn)} IN (SELECT value FROM json_each(?)) LIMIT 1`)
-      .get(JSON.stringify(merging));
+      .get(mergingIds);
     if (found !== undefined) notices.add(notice);
   }
-  if (books.some((book) => book.internalNumberCleared)) notices.add('internal-number');
-  return { books, notices: [...notices].sort() };
+  if (numberCleared) notices.add('internal-number');
+  return { books, counts, merging, notices: [...notices].sort() };
 }
 
 // ---- the merge -----------------------------------------------------------------------------------------
@@ -420,6 +440,7 @@ export interface MergeCounts {
 
 const CONTENT_KEY = /^sha256\/[0-9a-f]{2}\/[0-9a-f]{64}\.[a-z0-9]+$/u;
 const RECOVERY_KEY = /^v1\/[0-9a-f]{64}\.snapshot$/u;
+const RETAINED_CARRIER_KEY = /^sha256\/[0-9a-f]{2}\/[0-9a-f]{64}\/package\.json$/u;
 
 /** Copy a stored file the merge takes, unless this data already has it: its name is its content's digest. */
 function copyStoredFile(sourceRoot: string, targetRoot: string, place: string, key: string, pattern: RegExp): boolean {
@@ -449,7 +470,9 @@ export function mergeBooks(db: DatabaseSync, bookIds: ReadonlyArray<string>, roo
   db.exec('BEGIN IMMEDIATE');
   try {
     // Every foreign key is checked when the merge commits, and the store's insert triggers look only for a conflicting row,
-    // never for a parent, so the rows go in whatever order the relations are listed.
+    // never for a parent, so the relations go in whatever order they are listed. The rows of one relation go in the order they
+    // were written, which is the order the one trigger that compares rows of its own relation asks for: a Book's 方案 pins,
+    // Revision 1 before Revision 2.
     db.exec('PRAGMA defer_foreign_keys = ON');
     db.exec('CREATE TEMP TABLE merge_rows (tbl TEXT NOT NULL, r INTEGER NOT NULL, PRIMARY KEY (tbl, r)) WITHOUT ROWID');
     const seeded = db.prepare(
@@ -495,13 +518,24 @@ export function mergeBooks(db: DatabaseSync, bookIds: ReadonlyArray<string>, roo
       pull(key.parent,
         `${tuple('x', key.parentColumns)} IN (SELECT ${tuple('c', key.columns).slice(1, -1)} FROM src.${quoted(key.table)} c ${owned(key.table, 'c')})`);
     }
-    // The stored files first: the content objects and the milestones' recovery objects the rows name.
+    // The 编辑工作区方案 a Book enabled comes whole to data that has not installed it: with both of its 权限侧车 revisions, as
+    // installing it writes them, not only the one the Book pinned. Data that has installed it keeps its own.
+    pull('editorial_workspace_profile_sidecar_revisions',
+      `x.native_artifact_id IN (SELECT i.artifact_id FROM src.native_artifact_installations i ${owned('native_artifact_installations', 'i')})`);
+    // The stored files first: the content objects and the milestones' recovery objects the rows name, each read as it is copied.
     let files = 0;
-    for (const row of db.prepare(`SELECT x.relative_key AS k FROM src.content_objects x ${owned('content_objects', 'x')}`).all() as SqlRow[]) {
+    for (const row of db.prepare(`SELECT x.relative_key AS k FROM src.content_objects x ${owned('content_objects', 'x')}`).iterate() as Iterable<SqlRow>) {
       if (copyStoredFile(roots.source, roots.target, 'objects', String(row.k), CONTENT_KEY)) files += 1;
     }
-    for (const row of db.prepare(`SELECT x.object_relative_key AS k FROM src.recovery_snapshots x ${owned('recovery_snapshots', 'x')}`).all() as SqlRow[]) {
+    for (const row of db.prepare(`SELECT x.object_relative_key AS k FROM src.recovery_snapshots x ${owned('recovery_snapshots', 'x')}`).iterate() as Iterable<SqlRow>) {
       if (copyStoredFile(roots.source, roots.target, 'recovery-objects', String(row.k), RECOVERY_KEY)) files += 1;
+    }
+    // And the carrier a 方案 installed here by the merge keeps, as installing it retains it.
+    for (const row of db.prepare(
+      `SELECT x.retained_key AS k FROM src.native_artifact_installations x ${owned('native_artifact_installations', 'x')}
+       WHERE x.artifact_id NOT IN (SELECT artifact_id FROM main.native_artifact_installations)`,
+    ).iterate() as Iterable<SqlRow>) {
+      if (copyStoredFile(roots.source, roots.target, 'native-artifacts', String(row.k), RETAINED_CARRIER_KEY)) files += 1;
     }
     // The rows. A Book whose 内部编号 is already another Book's here merges without one; a house row this store already has
     // stays as it is.
@@ -521,7 +555,7 @@ export function mergeBooks(db: DatabaseSync, bookIds: ReadonlyArray<string>, roo
         : '';
       rows += Number(db.prepare(
         `INSERT INTO main.${quoted(table)} (${columns.map(quoted).join(', ')})
-         SELECT ${selected.join(', ')} FROM src.${quoted(table)} x ${owned(table, 'x')} WHERE 1 = 1${absent}`,
+         SELECT ${selected.join(', ')} FROM src.${quoted(table)} x ${owned(table, 'x')} WHERE 1 = 1${absent} ORDER BY x.rowid`,
       ).run().changes);
     }
     // The search index over the working text the Book brought.
