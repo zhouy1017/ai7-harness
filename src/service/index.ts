@@ -1389,6 +1389,7 @@ async function run(): Promise<void> {
           credentialReadiness: () => owner.liveCredentialReadiness(),
           slotBusy: () => owner.busy,
           admit: (runRecordId) => owner.admitAndDispatch(runRecordId, openStore.baselineAnalysisLedger, { afterReconnectPreflight: true }),
+          frozen: () => openStore.replacementFrozen(),
         }).finally(() => {
           preflightInFlight = null;
         });
@@ -1398,9 +1399,10 @@ async function run(): Promise<void> {
     // OFF-013: a Run left waiting when AI7 last closed is looked at once the service is active again, and then
     // periodically while it runs — never by a launch of its own, which connectivity returning cannot cause.
     void connectivity.preflight().catch(() => undefined);
-    // A waiting Run is not admitted while a replacement waits: it would write what the replacement then loses (Issue #434 review).
+    // A waiting Run is not admitted while a replacement is prepared or waits: it would write what the replacement then loses
+    // (Issue #434 review). A preflight under way checks again itself.
     preflightTimer = setInterval(() => {
-      if (!openStore.replacementWaiting()) void connectivity.preflight().catch(() => undefined);
+      if (!openStore.replacementFrozen()) void connectivity.preflight().catch(() => undefined);
     }, RECONNECT_PREFLIGHT_INTERVAL_MS);
     preflightTimer.unref();
     // 定期自动备份 (Issue #434, S86b): asked at start, then hourly while the service runs; a backup is made only when one is due.

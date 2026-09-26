@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { writeDatabasePackage } from '../../src/service/database-exports.js';
+import { MAX_MANIFEST_BYTES } from '../../src/service/database-package-reader.js';
 import {
   DatabaseReplacementError,
   completeReplacement,
@@ -63,7 +64,7 @@ async function otherPackage(): Promise<{ path: string; sha256: string }> {
     packages += 1;
     const path = join(root, `AI7 数据库 ${packages}.ai7db`);
     const written = await writeDatabasePackage(database, other, path, () => ({
-      dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 57, createdAt: T.toISOString(), origin: 'database-export', contents,
+      dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 57, createdAt: T.toISOString(), origin: 'database-export',
     }));
     return { path, sha256: written.sha256 };
   } finally {
@@ -150,6 +151,58 @@ describe('applying a replacement of the local data', () => {
     const opened = await openWithPendingReplacement(dataRoot, open);
     expect([opened.store, opened.replacement?.outcome]).toEqual(['package', 'applied']);
     expect(entries(dataRoot)).toEqual(['export-staging', 'objects', 'shell', 'store']);
+  });
+
+  it('verifies what waits again when it resumes moving the data aside or the package in, and puts the data back when it changed (Issue #434 review)', async () => {
+    // Interrupted while moving the data aside, then a member of the package changed: the data comes back, and nothing moved in.
+    let intent = await prepared();
+    setPhase('moving-out');
+    mkdirSync(join(staging(), 'previous'));
+    renameSync(join(dataRoot, 'objects'), join(staging(), 'previous', 'objects'));
+    writeFileSync(join(staging(), 'incoming', 'objects', 'marker.txt'), 'changed');
+    expect(await openWithPendingReplacement(dataRoot, open)).toEqual({ store: 'original', replacement: { intent, outcome: 'failed', failure: 'changed' } });
+    expect(entries(dataRoot)).toEqual(['export-staging', 'objects', 'recovery-objects', 'shell', 'store']);
+    expect(readFileSync(join(dataRoot, 'store', 'ai7.sqlite'), 'utf8')).toBe('the store as it is');
+    await completeReplacement(dataRoot);
+    expect(existsSync(staging())).toBe(false);
+
+    // Interrupted while moving the package in, then a file put among what came in: that goes out, and the data comes back.
+    intent = await prepared();
+    setPhase('moving-in');
+    mkdirSync(join(staging(), 'previous'));
+    for (const entry of ['objects', 'recovery-objects', 'store']) renameSync(join(dataRoot, entry), join(staging(), 'previous', entry));
+    renameSync(join(staging(), 'incoming', 'objects'), join(dataRoot, 'objects'));
+    writeFileSync(join(dataRoot, 'objects', 'extra.bin'), 'extra');
+    expect(await openWithPendingReplacement(dataRoot, open)).toEqual({ store: 'original', replacement: { intent, outcome: 'failed', failure: 'changed' } });
+    expect(entries(dataRoot)).toEqual(['export-staging', 'objects', 'recovery-objects', 'shell', 'store']);
+    expect(readFileSync(join(dataRoot, 'recovery-objects', 'v1', 'kept'), 'utf8')).toBe('recovery');
+    // An open interrupted before the failure was recorded finds it the same, and still moves nothing in.
+    expect((await openWithPendingReplacement(dataRoot, open)).replacement).toEqual({ intent, outcome: 'failed', failure: 'changed' });
+    await completeReplacement(dataRoot);
+
+    // And a member in both places at once is not what was verified either: each member is read where it stands, once.
+    intent = await prepared();
+    setPhase('moving-in');
+    mkdirSync(join(staging(), 'previous'));
+    for (const entry of ['objects', 'recovery-objects', 'store']) renameSync(join(dataRoot, entry), join(staging(), 'previous', entry));
+    cpSync(join(staging(), 'incoming', 'store'), join(dataRoot, 'store'), { recursive: true });
+    expect((await openWithPendingReplacement(dataRoot, open)).replacement).toEqual({ intent, outcome: 'failed', failure: 'changed' });
+    expect(marker()).toBe('original');
+    await completeReplacement(dataRoot);
+
+    // A resumed apply whose intent no longer reads cannot be verified, and moves nothing more in either.
+    await prepared();
+    setPhase('moving-out');
+    writeFileSync(join(staging(), 'intent.json'), '{}');
+    expect(await openWithPendingReplacement(dataRoot, open)).toEqual({ store: 'original', replacement: null });
+    expect(marker()).toBe('original');
+  });
+
+  it('reads the list of what waits only within the bound a package manifest has (Issue #434 review)', async () => {
+    const intent = await prepared();
+    truncateSync(join(staging(), 'members.json'), MAX_MANIFEST_BYTES + 1);
+    expect(await openWithPendingReplacement(dataRoot, open)).toEqual({ store: 'original', replacement: { intent, outcome: 'failed', failure: 'changed' } });
+    expect(marker()).toBe('original');
   });
 
   it('moves data that will not open out again and the data it would have replaced back, and says the replacement failed', async () => {

@@ -11638,7 +11638,8 @@ export class EditorialStore {
    * starting until it is written.
    */
   async prepareDatabaseReplacement(previewId: string, now: Date = new Date()): Promise<DatabaseReplacementsProjection> {
-    return this.#databaseReplacementCall(() => this.#scheduledBackups.alone(() => this.#databaseReplacements.prepare(previewId, now)));
+    return this.#databaseReplacementCall(() =>
+      this.#databaseReplacements.freezing(() => this.#scheduledBackups.alone(() => this.#databaseReplacements.prepare(previewId, now))));
   }
 
   /**
@@ -11647,6 +11648,14 @@ export class EditorialStore {
    */
   replacementWaiting(): boolean {
     return this.#databaseReplacements.waiting;
+  }
+
+  /**
+   * Whether a replacement is being prepared or waits (Issue #434 review): Reconnect Preflight admits nothing then, from the
+   * moment the replacement is asked for, and a preflight under way checks again before it admits or blocks a Run.
+   */
+  replacementFrozen(): boolean {
+    return this.#databaseReplacements.frozen;
   }
 
   /** `取消替换`: the replacement waiting is removed and the data stays as it is. */
@@ -11661,7 +11670,8 @@ export class EditorialStore {
 
   /** `回退到替换前的数据`: the latest replacement's backup waiting to replace the data, which is backed up first, alone too. */
   async rollBackDatabaseReplacement(replacementId: string, now: Date = new Date()): Promise<DatabaseReplacementsProjection> {
-    return this.#databaseReplacementCall(() => this.#scheduledBackups.alone(() => this.#databaseReplacements.rollBack(replacementId, now)));
+    return this.#databaseReplacementCall(() =>
+      this.#databaseReplacements.freezing(() => this.#scheduledBackups.alone(() => this.#databaseReplacements.rollBack(replacementId, now))));
   }
 
   async #databaseReplacementCall<T>(operation: () => Promise<T>): Promise<T> {

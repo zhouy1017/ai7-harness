@@ -80,6 +80,7 @@ function preflight(store: EditorialStore, owner: BaselineAnalysisExecutionOwner,
     credentialReadiness: () => owner.liveCredentialReadiness(),
     slotBusy: () => owner.busy,
     admit: (runRecordId) => owner.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { afterReconnectPreflight: true }),
+    frozen: () => store.replacementFrozen(),
   });
 }
 
