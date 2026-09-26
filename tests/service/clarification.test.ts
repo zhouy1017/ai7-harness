@@ -4,8 +4,14 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { CLARIFICATION_CANCELLED_ANSWERED, CLARIFICATION_CANCELLED_UNANSWERED, CLARIFICATION_RECORD_GAP } from '../../src/service/analysis/clarifications.js';
-import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
+import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
+import {
+  CLARIFICATION_CANCELLED_ANSWERED,
+  CLARIFICATION_CANCELLED_UNANSWERED,
+  CLARIFICATION_RECORD_GAP,
+  CLARIFICATION_TRIGGER_SQL,
+} from '../../src/service/analysis/clarifications.js';
+import { BaselineAnalysisExecutionOwner, SAFE_RETRY_NOT_REPEATED } from '../../src/service/analysis/execution.js';
 import { ASK_FIRST_SAFE_RETRY_STATEMENT } from '../../src/service/analysis/plan-boundary.js';
 import { PLAN_EDIT_ADAPTATION_LABELS } from '../../src/service/analysis/plan-edits.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
@@ -291,10 +297,127 @@ describe('Clarification Requests over the real store', () => {
       expect(answer).toMatchObject({ optionId: 'retry', note: '服务刚才在维护' });
       expect(settled.run!.adaptations).toHaveLength(1);
       expect(settled.run!.adaptations[0]).toMatchObject({ unitOrdinal: 5, adaptationClass: 'safe-retry', clarificationAnswerId: answer.answerId });
+      // It repeated what unit 5's first attempt sent, byte for byte, and its record says so (Issue #286): the question kept
+      // the first attempt's unit-message digest, and the retry's turn names the adaptation it carried out.
+      const spans = settled.run!.attempt!.spans;
+      const first = spans.find((span) => span.unitOrdinal === 5 && span.attemptIndex === 1)!;
+      const retried = spans.find((span) => span.unitOrdinal === 5 && span.attemptIndex === 2)!;
+      expect(first.unitMessageDigest).toMatch(/^[0-9a-f]{64}$/u);
+      expect(store.baselineAnalysisLedger.clarificationsOf(runRecordId)[0]!.firstUnitMessageDigest).toBe(first.unitMessageDigest);
+      expect(settled.run!.adaptations[0]).toMatchObject({
+        firstUnitMessageDigest: first.unitMessageDigest,
+        retry: { spanOrdinal: retried.ordinal, unitMessageDigest: first.unitMessageDigest, payloadDigest: retried.payloadDigest },
+        repetition: 'byte-identical',
+      });
       const after = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
       expect(after.clarifications[0]).toMatchObject({ state: 'answered', answer: { optionId: 'retry', note: '服务刚才在维护', line: '你已回答：再试一次 · 说明：服务刚才在维护' } });
       // Nothing is asked of a Run that has ended.
       expect(await refusal(() => store.answerBaselineAnalysisClarification({ bookId, taskIntentId, requestId: card.requestId, optionId: 'retry', note: null }))).toBe('ANALYSIS_CLARIFICATION_STALE');
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('sends no retry that would not repeat what the first attempt sent, and settles the unit as the gap it is', async () => {
+    const store = await openWithRoute(transient);
+    const execution = owner(store, transient);
+    try {
+      const bookId = await importedBook(store, 'L2 sample1 澄清重发');
+      const { taskIntentId, runRecordId } = askingRun(store, bookId);
+      execution.admitAndDispatch(runRecordId);
+      await execution.whenIdle();
+      expect(store.inspectBaselineAnalysis(bookId, () => null).state).toBe('awaiting-clarification');
+      // Issue #286: the question names what unit 5's first attempt sent. Recorded as though that message read otherwise —
+      // as a later AI7 building it differently would find it — the retry the answer asks for would not be the same bytes.
+      withDatabase(false, (database) => {
+        const row = database.prepare('SELECT request_id, canonical_json FROM analysis_clarification_requests WHERE run_record_id = ?').get(runRecordId) as Row;
+        const request = parseCanonicalJson(String(row.canonical_json)) as Record<string, unknown>;
+        expect(request.firstUnitMessageDigest).toMatch(/^[0-9a-f]{64}$/u);
+        const record = canonicalRecord({ ...request, firstUnitMessageDigest: 'e'.repeat(64) });
+        database.exec('DROP TRIGGER analysis_clarification_requests_no_update');
+        database.prepare('UPDATE analysis_clarification_requests SET canonical_json = ?, sha256 = ? WHERE request_id = ?').run(record.json, record.digest, row.request_id!);
+        database.exec(CLARIFICATION_TRIGGER_SQL.analysis_clarification_requests_no_update!);
+      });
+      const card = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }).clarifications[0]!;
+      store.answerBaselineAnalysisClarification({ bookId, taskIntentId, requestId: card.requestId, optionId: 'retry', note: null });
+      expect(execution.continueAnswered(runRecordId, store.baselineAnalysisLedger)).toBe('continuing');
+      await execution.whenIdle();
+      // Nothing was sent again and no adaptation was recorded: unit 5 is the gap its first failure left, saying why.
+      const settled = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(states(settled)).toEqual(['authorized', 'admitted', 'executing', 'awaiting-clarification', 'admitted', 'executing', 'completed-with-gaps']);
+      expect(turns(settled).filter(([unit]) => unit === 5)).toEqual([[5, 1]]);
+      expect(settled.run!.adaptations).toEqual([]);
+      const gap = settled.resultSetRevision!.gaps.find((entry) => entry.unitOrdinal === 5)!;
+      expect(gap.code).toBe('adapter-failure');
+      expect(gap.reason).toContain('PROVIDER_ERROR');
+      expect(gap.reason.endsWith(`；${SAFE_RETRY_NOT_REPEATED}`)).toBe(true);
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('lets the retry go on a question recorded before its first message was kept, and reads the repetition as unrecorded', async () => {
+    const store = await openWithRoute(transient);
+    const execution = owner(store, transient);
+    try {
+      const bookId = await importedBook(store, 'L2 sample1 澄清旧问题');
+      const { taskIntentId, runRecordId } = askingRun(store, bookId);
+      execution.admitAndDispatch(runRecordId);
+      await execution.whenIdle();
+      // The question as AI7 recorded it before Issue #286: nothing says what the first attempt sent, so nothing refuses.
+      withDatabase(false, (database) => {
+        const row = database.prepare('SELECT request_id, canonical_json FROM analysis_clarification_requests WHERE run_record_id = ?').get(runRecordId) as Row;
+        const request = parseCanonicalJson(String(row.canonical_json)) as Record<string, unknown>;
+        const record = canonicalRecord(Object.fromEntries(Object.entries(request).filter(([key]) => key !== 'firstUnitMessageDigest')));
+        database.exec('DROP TRIGGER analysis_clarification_requests_no_update');
+        database.prepare('UPDATE analysis_clarification_requests SET canonical_json = ?, sha256 = ? WHERE request_id = ?').run(record.json, record.digest, row.request_id!);
+        database.exec(CLARIFICATION_TRIGGER_SQL.analysis_clarification_requests_no_update!);
+      });
+      expect(store.baselineAnalysisLedger.clarificationsOf(runRecordId)[0]!.firstUnitMessageDigest).toBeNull();
+      const card = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }).clarifications[0]!;
+      store.answerBaselineAnalysisClarification({ bookId, taskIntentId, requestId: card.requestId, optionId: 'retry', note: null });
+      expect(execution.continueAnswered(runRecordId, store.baselineAnalysisLedger)).toBe('continuing');
+      await execution.whenIdle();
+      const settled = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(turns(settled).filter(([unit]) => unit === 5)).toEqual([[5, 1], [5, 2]]);
+      const retried = settled.run!.attempt!.spans.find((span) => span.unitOrdinal === 5 && span.attemptIndex === 2)!;
+      const adaptation = settled.run!.adaptations[0]!;
+      expect(adaptation).toMatchObject({
+        firstUnitMessageDigest: null,
+        retry: { spanOrdinal: retried.ordinal, unitMessageDigest: retried.unitMessageDigest },
+        repetition: 'unrecorded',
+      });
+      expect(adaptation.label).toBe(`计划内调整 · 单元 5 安全重试 1 次 · ${adaptation.classifiedReason}`);
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('makes the retry answered while the Run reads on at its next boundary, repeating what the first attempt sent', async () => {
+    const store = await openWithRoute(transient);
+    const execution = owner(store, transient, true);
+    try {
+      const bookId = await importedBook(store, 'L2 sample1 澄清继续重试');
+      const { taskIntentId, runRecordId } = askingRun(store, bookId);
+      writeFileSync(holdPath, '5');
+      execution.admitAndDispatch(runRecordId);
+      await until(() => execution.progressFor(runRecordId)?.currentUnitOrdinal === 7, 'unit 7 in flight');
+      const reading = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, (id) => execution.progressFor(id));
+      store.answerBaselineAnalysisClarification({ bookId, taskIntentId, requestId: reading.clarifications[0]!.requestId, optionId: 'retry', note: null });
+      writeFileSync(holdPath, 'release');
+      await execution.whenIdle();
+      // It never waited: unit 5 was retried at the boundary after unit 7, with the message its first attempt sent (Issue #286).
+      const settled = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(states(settled)).toEqual(['authorized', 'admitted', 'executing', 'completed-with-gaps']);
+      expect(turns(settled)).toEqual([[1, 1], [2, 1], [3, 1], [4, 1], [5, 1], [6, 1], [7, 1], [5, 2], [8, 1]]);
+      const first = settled.run!.attempt!.spans.find((span) => span.unitOrdinal === 5 && span.attemptIndex === 1)!;
+      expect(settled.run!.adaptations[0]).toMatchObject({ firstUnitMessageDigest: first.unitMessageDigest, repetition: 'byte-identical' });
       store.markCleanShutdown();
     } finally {
       await execution.dispose();

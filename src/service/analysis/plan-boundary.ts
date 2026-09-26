@@ -8,6 +8,7 @@ import type {
   PlanRevisionDiffEntryProjection,
   PlanRevisionDiffValue,
   PlanRevisionState,
+  SafeRetryRepetition,
 } from '../../shared/protocol.js';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, requireAnalysis } from './canonical.js';
 
@@ -219,6 +220,8 @@ export interface PlanAdaptationRecordInput {
   readonly failureStatus: number | null;
   readonly requestDigest: string;
   readonly firstPayloadDigest: string | null;
+  /** The digest of the unit message the first attempt submitted, which the retry repeats (Issue #286). */
+  readonly firstUnitMessageDigest: string | null;
   readonly planEnvelopeDigest: string;
   readonly bindingDigest: string;
   readonly recordedAt: string;
@@ -226,18 +229,23 @@ export interface PlanAdaptationRecordInput {
   readonly clarificationAnswerId?: string;
 }
 
+/** The stored `safe-retry` Plan Adaptation: its projection without what a read derives — the retry's own turn and the label. */
+export type PlanAdaptationRecord = Omit<BaselineAnalysisPlanAdaptationProjection, 'retry' | 'repetition' | 'label'>;
+
 /**
  * The immutable `safe-retry` Plan Adaptation record, written before the retry is dispatched: the
  * unit, the class, the attempt index the repetition will carry, the classified reason of the failed
- * first attempt, the first attempt's payload digest, and the unchanged envelope and binding digests.
- * The retry's own payload digest is recorded by the retry's harness span once it exists.
+ * first attempt, the first attempt's payload and unit-message digests, and the unchanged envelope and
+ * binding digests. The retry's own digests are recorded by the retry's harness span once it exists,
+ * and that span names this record (Issue #286).
  */
-export function buildPlanAdaptationRecord(input: PlanAdaptationRecordInput): { record: Omit<BaselineAnalysisPlanAdaptationProjection, 'label'>; json: string; digest: string } {
+export function buildPlanAdaptationRecord(input: PlanAdaptationRecordInput): { record: PlanAdaptationRecord; json: string; digest: string } {
   requireAnalysis(UUID_PATTERN.test(input.adaptationId) && UUID_PATTERN.test(input.attemptId) && UUID_PATTERN.test(input.runRecordId) && UUID_PATTERN.test(input.taskIntentId),
     'ANALYSIS_RECORD_INVALID', '计划内调整记录身份无效。');
   requireAnalysis(Number.isSafeInteger(input.ordinal) && input.ordinal >= 1 && Number.isSafeInteger(input.unitOrdinal) && input.unitOrdinal >= 1 &&
     input.attemptIndex === 2 && DIGEST_PATTERN.test(input.requestDigest) && DIGEST_PATTERN.test(input.planEnvelopeDigest) && DIGEST_PATTERN.test(input.bindingDigest) &&
-    (input.firstPayloadDigest === null || DIGEST_PATTERN.test(input.firstPayloadDigest)), 'ANALYSIS_RECORD_INVALID', '计划内调整记录无效。');
+    (input.firstPayloadDigest === null || DIGEST_PATTERN.test(input.firstPayloadDigest)) &&
+    (input.firstUnitMessageDigest === null || DIGEST_PATTERN.test(input.firstUnitMessageDigest)), 'ANALYSIS_RECORD_INVALID', '计划内调整记录无效。');
   const record = {
     adaptationId: input.adaptationId,
     attemptId: input.attemptId,
@@ -253,6 +261,7 @@ export function buildPlanAdaptationRecord(input: PlanAdaptationRecordInput): { r
     failureStatus: input.failureStatus,
     requestDigest: input.requestDigest,
     firstPayloadDigest: input.firstPayloadDigest,
+    firstUnitMessageDigest: input.firstUnitMessageDigest,
     planEnvelopeDigest: input.planEnvelopeDigest,
     bindingDigest: input.bindingDigest,
     recordedAt: input.recordedAt,
@@ -263,9 +272,16 @@ export function buildPlanAdaptationRecord(input: PlanAdaptationRecordInput): { r
   return { record, json: canonical.json, digest: canonical.digest };
 }
 
-/** The timeline and Overview wording of one adaptation: `计划内调整 · 单元 N 安全重试 1 次 · <classified reason>`. */
-export function planAdaptationLabel(unitOrdinal: number, classifiedReason: string): string {
-  return `计划内调整 · 单元 ${unitOrdinal} 安全重试 1 次 · ${classifiedReason}`;
+/** What an adaptation's wording adds when its retry did not repeat the first attempt's unit message (Issue #286). */
+export const SAFE_RETRY_REPETITION_DIFFERS = '重试发出的稿件与第 1 次不同' as const;
+
+/**
+ * The timeline and Overview wording of one adaptation: `计划内调整 · 单元 N 安全重试 1 次 · <classified reason>`, and the
+ * violation after it when the retry's unit message was not the first attempt's (Issue #286).
+ */
+export function planAdaptationLabel(unitOrdinal: number, classifiedReason: string, repetition: SafeRetryRepetition): string {
+  const label = `计划内调整 · 单元 ${unitOrdinal} 安全重试 1 次 · ${classifiedReason}`;
+  return repetition === 'differs' ? `${label} · ${SAFE_RETRY_REPETITION_DIFFERS}` : label;
 }
 
 /**

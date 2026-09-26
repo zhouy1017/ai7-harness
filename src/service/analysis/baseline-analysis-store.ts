@@ -52,6 +52,7 @@ import {
   type ReviewScopePlanProjection,
   type RunAttemptState,
   type RunBudgetCeilingState,
+  type SafeRetryRepetition,
 } from '../../shared/protocol.js';
 import {
   PLAN_REVISION_REQUIRED_REASON,
@@ -63,6 +64,7 @@ import {
   planRevisionLabel,
   reusePlanCountsDiffEntry,
   sameMaterialPlanInputs,
+  type PlanAdaptationRecord,
 } from './plan-boundary.js';
 import {
   NO_PLAN_EDITS,
@@ -431,6 +433,8 @@ export interface PlanAdaptationInput {
   readonly failureStatus: number | null;
   readonly requestDigest: string;
   readonly firstPayloadDigest: string | null;
+  /** The digest of the unit message the first attempt submitted (Issue #286); `null` when the request it answers kept none. */
+  readonly firstUnitMessageDigest: string | null;
   readonly planEnvelopeDigest: string;
   readonly bindingDigest: string;
 }
@@ -992,7 +996,9 @@ export class BaselineAnalysisStore {
 
   /**
    * The durable `safe-retry` Plan Adaptations of one Run, in record order. Both the Run's timeline
-   * and its Run Report read them from here, so neither restates what the other saw.
+   * and its Run Report read them from here, so neither restates what the other saw. Each follows the
+   * span that names it to the retry's own turn, and reads whether that turn repeated the first
+   * attempt's unit message byte for byte (Issue #286).
    */
   adaptationsOf(runRecordId: string): BaselineAnalysisPlanAdaptationProjection[] {
     return (this.#db.prepare(
@@ -1000,10 +1006,47 @@ export class BaselineAnalysisStore {
        JOIN analysis_execution_attempts attempt ON attempt.attempt_id = adaptation.attempt_id
        WHERE attempt.run_record_id = ? ORDER BY adaptation.ordinal`,
     ).all(runRecordId) as SqlRow[]).map((row): BaselineAnalysisPlanAdaptationProjection => {
-      const record = parseCanonicalJson(asString(row.canonical_json)) as Omit<BaselineAnalysisPlanAdaptationProjection, 'label'>;
+      // An adaptation recorded before Issue #286 names no unit-message digest, and reads as one that kept none.
+      const record = parseCanonicalJson(asString(row.canonical_json)) as Omit<PlanAdaptationRecord, 'firstUnitMessageDigest'> & { firstUnitMessageDigest?: string | null };
+      const first = record.firstUnitMessageDigest ?? null;
       requireAnalysis(record.adaptationId === row.adaptation_id && record.adaptationClass === 'safe-retry', 'ANALYSIS_RECORD_INVALID', '计划内调整记录无效。');
-      return { ...record, label: planAdaptationLabel(record.unitOrdinal, record.classifiedReason) };
+      const retry = this.#retryTurnOf(asString(row.attempt_id), asNumber(row.unit_ordinal), record.adaptationId, record.firstUnitMessageDigest === undefined);
+      const repetition: SafeRetryRepetition = first === null || retry === null || retry.unitMessageDigest === null ? 'unrecorded'
+        : retry.unitMessageDigest === first ? 'byte-identical' : 'differs';
+      return { ...record, firstUnitMessageDigest: first, retry, repetition, label: planAdaptationLabel(record.unitOrdinal, record.classifiedReason, repetition) };
     });
+  }
+
+  /**
+   * A safe retry's own turn (Issue #286): the span of its attempt and unit that names the adaptation it carried out, found by
+   * the store rather than by reading every span of the unit (Issue #286 review). An adaptation recorded before Issue #286 has
+   * spans that name no adaptation; its retry's turn is then the one second attempt of its unit in its attempt recorded before
+   * the digests were kept, when there is exactly one — an explicit Resume could have added more, and then none is taken. Such
+   * a turn keeps its payload digest and no unit-message digest.
+   */
+  #retryTurnOf(attemptId: string, unitOrdinal: number, adaptationId: string, recordedBefore286: boolean): BaselineAnalysisPlanAdaptationProjection['retry'] {
+    const turn = (row: SqlRow): NonNullable<BaselineAnalysisPlanAdaptationProjection['retry']> => {
+      const span = parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>;
+      return {
+        spanOrdinal: asNumber(row.ordinal),
+        unitMessageDigest: typeof span.unitMessageDigest === 'string' ? span.unitMessageDigest : null,
+        payloadDigest: typeof span.payloadDigest === 'string' ? span.payloadDigest : null,
+      };
+    };
+    const named = this.#db.prepare(
+      `SELECT ordinal, canonical_json FROM analysis_harness_spans
+       WHERE attempt_id = ? AND unit_ordinal = ? AND json_extract(canonical_json, '$.adaptationId') = ?
+       ORDER BY ordinal LIMIT 1`,
+    ).get(attemptId, unitOrdinal, adaptationId) as SqlRow | undefined;
+    if (named !== undefined) return turn(named);
+    if (!recordedBefore286) return null;
+    const earlier = this.#db.prepare(
+      `SELECT ordinal, canonical_json FROM analysis_harness_spans
+       WHERE attempt_id = ? AND unit_ordinal = ? AND json_type(canonical_json, '$.unitMessageDigest') IS NULL
+         AND json_type(canonical_json, '$.adaptationId') IS NULL AND json_extract(canonical_json, '$.attemptIndex') = 2
+       ORDER BY ordinal LIMIT 2`,
+    ).all(attemptId, unitOrdinal) as SqlRow[];
+    return earlier.length === 1 ? turn(earlier[0]!) : null;
   }
 
   /**
@@ -1876,6 +1919,7 @@ export class BaselineAnalysisStore {
           unitOrdinal: row.unit_ordinal === null ? null : asNumber(row.unit_ordinal),
           attemptIndex: typeof record.attemptIndex === 'number' ? record.attemptIndex : 1,
           payloadDigest: typeof record.payloadDigest === 'string' ? record.payloadDigest : null,
+          unitMessageDigest: typeof record.unitMessageDigest === 'string' ? record.unitMessageDigest : null,
         };
       });
       attempt = {
@@ -3020,6 +3064,7 @@ export class BaselineAnalysisStore {
     requestDigest: string;
     failure: { code: string; failureClass: string; status: number | null; reason: string };
     firstPayloadDigest: string | null;
+    firstUnitMessageDigest: string;
     firstUsage: { inputTokens: number; outputTokens: number } | null;
     firstWallMs: number;
   }): string {
@@ -3044,6 +3089,8 @@ export class BaselineAnalysisStore {
       requestDigest: input.requestDigest,
       failure: input.failure,
       firstPayloadDigest: input.firstPayloadDigest,
+      // What the retry the answer may let the Run make has to repeat byte for byte (Issue #286).
+      firstUnitMessageDigest: input.firstUnitMessageDigest,
       firstUsage: input.firstUsage,
       firstWallMs: Math.max(0, Math.round(input.firstWallMs)),
       raisedAt,
@@ -3093,6 +3140,7 @@ export class BaselineAnalysisStore {
         requestDigest: request.requestDigest as string,
         failure: request.failure as ClarificationFacts['failure'],
         firstPayloadDigest: request.firstPayloadDigest as string | null,
+        firstUnitMessageDigest: typeof request.firstUnitMessageDigest === 'string' ? request.firstUnitMessageDigest : null,
         firstUsage: request.firstUsage as ClarificationFacts['firstUsage'],
         firstWallMs: request.firstWallMs as number,
         answer,
@@ -3600,18 +3648,24 @@ export class BaselineAnalysisStore {
     return asNumber(row.submitted);
   }
 
-  /** One technical turn by reference; from Issue #48 also which attempt of its unit it was and the payload digest the gate admitted. */
+  /**
+   * One technical turn by reference; from Issue #48 also which attempt of its unit it was and the payload digest the gate
+   * admitted, and from Issue #286 the digest of the unit message it submitted and, on a safe retry's turn, the adaptation
+   * it carried out.
+   */
   recordSpan(
     attemptId: string,
     ordinal: number,
     span: { sessionId: string; startSeq: number; endSeq: number },
     unitOrdinal: number | null,
-    turn: { attemptIndex: number; payloadDigest: string | null } = { attemptIndex: 1, payloadDigest: null },
+    turn: { attemptIndex: number; payloadDigest: string | null; unitMessageDigest: string; adaptationId: string | null },
   ): void {
     const recordedAt = new Date().toISOString();
     const record = canonicalRecord({
       spanId: randomUUID(), attemptId, ordinal, harnessSessionId: span.sessionId, startSeq: span.startSeq, endSeq: span.endSeq, unitOrdinal, recordedAt,
-      attemptIndex: turn.attemptIndex, payloadDigest: turn.payloadDigest,
+      attemptIndex: turn.attemptIndex, payloadDigest: turn.payloadDigest, unitMessageDigest: turn.unitMessageDigest,
+      // Only a safe retry's turn names the adaptation it carried out.
+      ...(turn.adaptationId === null ? {} : { adaptationId: turn.adaptationId }),
     });
     const spanId = (parseCanonicalJson(record.json) as { spanId: string }).spanId;
     this.#db.prepare(
