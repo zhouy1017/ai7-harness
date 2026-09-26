@@ -319,21 +319,19 @@ function quickStartStartedLine(rule: DefaultExecutionRuleReference, projection: 
 
 /** A place in one manuscript branch, and the words the chip names it by. */
 interface ReadingPlace {
+  readonly bookId: string;
+  readonly bookTitle: string;
   readonly manuscriptId: string;
   readonly branchId: string;
   readonly blockId: string;
   readonly place: string;
 }
 /**
- * The way back each jump left, per manuscript branch, until it is used: a later jump keeps the place the editor was
- * reading before the first one. It lives outside every screen, so the chip stands wherever the manuscript is drawn again.
+ * One outstanding way back for this renderer, until used. Later jumps and Book changes preserve it.
+ * Only the last screen's reading position is cached; other Books already have a bounded service-owned entry reader.
  */
-const returnChips = new Map<string, ReadingPlace>();
-/** Where the editor was reading each branch when they last left it: a jump into it from another screen returns there. */
-const readingPlaces = new Map<string, ReadingPlace>();
-function placeKey(manuscriptId: string, branchId: string): string {
-  return `${manuscriptId}\n${branchId}`;
-}
+let returnChip: ReadingPlace | null = null;
+let lastReadingPlace: ReadingPlace | null = null;
 /** The manuscript on screen now: where it is read and how it jumps within itself. Set by the editor, cleared with it. */
 let manuscriptOnScreen: null | {
   readonly bookId: string;
@@ -344,10 +342,21 @@ let manuscriptOnScreen: null | {
 } = null;
 
 /** A jump from another screen — 审阅's 回到原文, ②A's 回到稿件范围, a result's 跳到 — leaves the way back to where the editor last read. */
-function leaveReturnChip(manuscriptId: string, branchId: string): void {
-  const key = placeKey(manuscriptId, branchId);
-  const known = readingPlaces.get(key);
-  if (known !== undefined && !returnChips.has(key)) returnChips.set(key, known);
+async function leaveReturnChip(bookId: string, manuscriptId: string, branchId: string, bookTitle: string): Promise<void> {
+  if (returnChip !== null) return;
+  const known = lastReadingPlace;
+  if (known?.manuscriptId === manuscriptId && known.branchId === branchId) {
+    returnChip = known;
+    return;
+  }
+  const overview = await window.ai7.getBookOverview({ bookId, historyCursor: null });
+  const anchor = overview.manuscriptAnchor;
+  if (anchor?.manuscriptId !== manuscriptId || anchor.branchId !== branchId || anchor.entry === null) return;
+  const remembered = await window.ai7.getManuscriptWindowAt({ manuscriptId, branchId, target: { kind: 'block', blockId: anchor.entry.blockId } });
+  const block = remembered.blocks.find((item) => item.blockId === anchor.entry?.blockId);
+  if (block !== undefined && returnChip === null) {
+    returnChip = { bookId, bookTitle, manuscriptId, branchId, blockId: block.blockId, place: returnChipPlace(remembered.position.structureLabel, block.position) };
+  }
 }
 
 /** 跳到 (TASK-045): the manuscript at that paragraph — moved in place while it is on screen — leaving 回到<位置>. */
@@ -363,7 +372,7 @@ async function jumpToManuscript(bookId: string, target: { manuscriptId: string |
     const anchor = overview.manuscriptAnchor;
     if (anchor === null || (target.manuscriptId !== null && target.manuscriptId !== anchor.manuscriptId)) throw new Error('这项结果所在的稿件已不在这本书中。');
     const opened = await window.ai7.getManuscriptWindowAt({ manuscriptId: anchor.manuscriptId, branchId: anchor.branchId, target: { kind: 'block', blockId: target.blockId } });
-    leaveReturnChip(anchor.manuscriptId, anchor.branchId);
+    await leaveReturnChip(bookId, anchor.manuscriptId, anchor.branchId, overview.book.title);
     await openEditorWindow(opened, overview.book.title, undefined, undefined, target.markId ?? undefined);
   } catch (error) {
     setStatus(rendererErrorMessage(error, '无法打开对应稿件位置。'), 'error');
@@ -579,7 +588,7 @@ function applyAuthorityInterruption(): void {
 function replaceScreen(state: string, content: HTMLElement): void {
   // Where the manuscript was read as it is left (Issue #423, S77a): a jump back into it from another screen returns there.
   const reading = manuscriptOnScreen?.readingPlace() ?? null;
-  if (reading !== null) readingPlaces.set(placeKey(reading.manuscriptId, reading.branchId), reading);
+  if (reading !== null) lastReadingPlace = reading;
   manuscriptOnScreen = null;
   taskResultWindow?.close(false);
   editorialMarks?.destroy();
@@ -2013,7 +2022,7 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
         branchId: target.branchId,
         target: { kind: 'block', blockId: target.blockId },
       });
-      leaveReturnChip(target.manuscriptId, target.branchId);
+      await leaveReturnChip(bookId, target.manuscriptId, target.branchId, bookTitle);
       await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId ?? undefined);
     },
     openPlan: (reviewRunId) => openTaskPlan(bookId, 'review-run', reviewRunId),
@@ -2559,7 +2568,7 @@ function analysisReturnButton(
     setStatus('正在打开对应稿件范围…', 'busy');
     try {
       const opened = await window.ai7.getManuscriptWindowAt({ manuscriptId, branchId, target: { kind: 'block', blockId } });
-      leaveReturnChip(manuscriptId, branchId);
+      await leaveReturnChip(opened.bookId, manuscriptId, branchId, bookTitle);
       await openEditorWindow(opened, bookTitle);
     } catch (error) {
       returnToRange.disabled = false;
@@ -6935,7 +6944,6 @@ function renderEditorWindow(
   }
 
   // 回到<位置> (Issue #423, S77a; TASK-045): where this manuscript is read, the chip that goes back, and a result's jump.
-  const chipKey = placeKey(initialWindow.manuscriptId, initialWindow.branchId);
   const readingPlace = (): ReadingPlace | null => {
     if (!editor) return null;
     const windowNow = editor.currentWindow();
@@ -6953,6 +6961,8 @@ function renderEditorWindow(
       }
     }
     return {
+      bookId: windowNow.bookId,
+      bookTitle,
       manuscriptId: windowNow.manuscriptId,
       branchId: windowNow.branchId,
       blockId: block.blockId,
@@ -6963,19 +6973,42 @@ function renderEditorWindow(
     if (editor?.selectRange(blockId, 0, 0) === true) editor.focus();
   };
   function paintReturnChip(): void {
-    const chip = returnChips.get(chipKey);
-    chipHost.hidden = chip === undefined;
-    if (chip === undefined) {
+    const chip = returnChip;
+    chipHost.hidden = chip === null;
+    if (chip === null) {
       chipHost.replaceChildren();
       return;
     }
-    const back = button(returnChipLabel(chip.place), 'secondary', async () => {
+    const place = chip.bookId === initialWindow.bookId ? chip.place : `《${chip.bookTitle}》${chip.place}`;
+    const back = button(returnChipLabel(place), 'secondary', async () => {
       back.disabled = true;
+      if (chip.manuscriptId !== initialWindow.manuscriptId || chip.branchId !== initialWindow.branchId) {
+        try {
+          await leaveThen(async () => {
+            // Release this Book through the existing route before claiming the remembered one.
+            await window.ai7.leaveBookWorkbench();
+            await initializeStartup();
+            await requestBookWorkbenchRoute({ kind: 'book', bookId: chip.bookId }, async (route) => {
+              const opened = await window.ai7.getManuscriptWindowAt({ manuscriptId: chip.manuscriptId, branchId: chip.branchId, target: { kind: 'block', blockId: chip.blockId } });
+              returnChip = null;
+              try { await openEditorWindow(opened, route.bookTitle); }
+              catch (error) { returnChip = chip; throw error; }
+              setStatus(returnChipArrived(place), 'success');
+              if (editor?.selectRange(chip.blockId, 0, 0) === true) editor.focus();
+            });
+          });
+        } catch (error) {
+          setStatus(rendererErrorMessage(error, '无法回到原来的稿件位置。'), 'error');
+        } finally {
+          if (back.isConnected) back.disabled = false;
+        }
+        return;
+      }
       if (!(await navigate({ kind: 'block', blockId: chip.blockId }))) {
         back.disabled = false;
         return;
       }
-      returnChips.delete(chipKey);
+      returnChip = null;
       paintReturnChip();
       setStatus(returnChipArrived(chip.place), 'success');
       landAt(chip.blockId);
@@ -6994,7 +7027,7 @@ function renderEditorWindow(
     jump: async (target) => {
       const here = readingPlace();
       if (!(await navigate({ kind: 'block', blockId: target.blockId }))) return;
-      if (here !== null && here.blockId !== target.blockId && !returnChips.has(chipKey)) returnChips.set(chipKey, here);
+      if (here !== null && here.blockId !== target.blockId && returnChip === null) returnChip = here;
       paintReturnChip();
       if (target.markId !== null && editorialMarks !== undefined) await editorialMarks.openMark(target.markId);
       else landAt(target.blockId);
