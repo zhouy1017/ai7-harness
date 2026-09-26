@@ -598,11 +598,15 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     else if (key === 'afterPublicationOrdinal' && typeof value === 'number') next.afterPublicationOrdinal = value;
     else return;
     current.inspection = next;
+    current.problem = null;
     if (key === 'afterPublicationOrdinal') current.choice = null;
     working = true;
     await read(current, caseSelector(current.caseId, '.maintenance-case-heading'));
     working = false;
-    if (!destroyed && open === current) options.redraw();
+    if (!destroyed && open === current) {
+      pendingFocus = { publicationVersionId: current.publicationVersionId, selector: caseSelector(current.caseId, '.maintenance-case-heading') };
+      options.redraw();
+    }
   }
 
   /** Read one case again and draw it; an answer the editor moved past never paints. */

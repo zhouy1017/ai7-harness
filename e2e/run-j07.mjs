@@ -1987,8 +1987,10 @@ async function main() {
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-errata-heading`)})?.textContent === '勘误 · 第 2 版'`, 'maintenance-errata-second-saved', 60_000);
     await clickSelector(renderer, `${designationItem(1)} .maintenance-timeline > li[data-revision="2"] button.maintenance-revision-link`, 'maintenance-errata-history-open');
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-inspected-errata-body`)})?.textContent === ${JSON.stringify(MAINTENANCE_ERRATA)}`, 'maintenance-errata-history-exact');
+    await assertRenderer(renderer, `document.activeElement === document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-case-heading`)})`, 'maintenance-history-reader-focus');
     await clickSelector(renderer, `${designationItem(1)} [data-maintenance-inspect="errataVersionId"]`, 'maintenance-errata-history-close');
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-inspected-errata`)}) === null`, 'maintenance-errata-history-closed');
+    await assertRenderer(renderer, `document.activeElement === document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-case-heading`)})`, 'maintenance-history-close-focus');
     await clickSelector(renderer, maintenanceAction(1, 'conclude'), 'maintenance-conclude-open');
     await assertRenderer(renderer, `(() => { const radio = document.querySelector(${JSON.stringify(`${designationItem(1)} form.maintenance-step[data-maintenance-step="conclude"] input[type="radio"][value="complete"]`)}); radio.click(); return radio.checked; })()`, 'maintenance-conclude-complete');
     await fill(renderer, `${designationItem(1)} form.maintenance-step[data-maintenance-step="conclude"] textarea`, MAINTENANCE_OUTCOME, 'maintenance-outcome');
