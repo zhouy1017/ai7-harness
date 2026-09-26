@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
-import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
@@ -831,8 +831,20 @@ describe('what a merge refuses, puts back and brings forward', () => {
     try {
       expect(titles(target)).toEqual([]);
       expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'failed', failure: 'changed', mergedCount: 0, mergedTitles: [] });
-      // Prepared again and merged: its record names both Books, from rows of its own.
+      // Prepared again, with something that is not a file where its list goes: that is what waited having changed too.
       await target.prepareDatabaseMerge((await target.inspectDatabaseImport(packagePath)).previewId, LATER);
+    } finally {
+      target.close();
+    }
+    const list = join(replacementStagingFor(otherRoot), MERGING_BOOKS_FILE);
+    await rm(list);
+    await mkdir(list);
+    target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      expect(titles(target)).toEqual([]);
+      expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'failed', failure: 'changed', mergedCount: 0 });
+      // Prepared again and merged: its record names both Books, from rows of its own.
+      await target.prepareDatabaseMerge((await target.inspectDatabaseImport(packagePath)).previewId, new Date(LATER.getTime() + 60_000));
     } finally {
       target.close();
     }
