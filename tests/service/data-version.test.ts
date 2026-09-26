@@ -151,7 +151,7 @@ describe('数据版本 over the real store', () => {
         ledger.recordOpen({ softwareVersion: '0.1.0', dataVersion: 1, schemaRevision: 54 }),
         ledger.recordOpen({ softwareVersion: '0.1.0', dataVersion: 2, schemaRevision: 54 }),
       ]).toEqual([true, false, true, true]);
-      expect(ledger.history().map((entry) => [entry.ordinal, entry.schemaRevision, entry.dataVersion])).toEqual([[1, 53, 1], [2, 54, 1], [3, 54, 2]]);
+      expect(Array.from(ledger.history(), (entry) => [entry.ordinal, entry.schemaRevision, entry.dataVersion])).toEqual([[1, 53, 1], [2, 54, 1], [3, 54, 2]]);
     } finally {
       database.close();
     }
@@ -164,7 +164,7 @@ describe('数据版本 over the real store', () => {
         ledger.recordOpen({ softwareVersion: '0.1.0', dataVersion: 1, schemaRevision: 54 });
         planted.exec('DROP TRIGGER store_versions_no_update');
         rewrite(planted);
-        return codeOf(() => ledger.history());
+        return codeOf(() => ledger.standing());
       } finally {
         planted.close();
       }
@@ -205,6 +205,31 @@ describe('数据版本 over the real store', () => {
     expect([more.history.length, more.historyTruncated, more.history[0]!.softwareVersion, more.history[1]!.softwareVersion, more.history.at(-1)!.softwareVersion])
       .toEqual([MAX_STORE_VERSIONS_LISTED, true, version, '0.0.19', '0.0.2']);
   }, 120_000);
+
+  it('keeps an older software transition while bounding recent records and validating superseded history', () => {
+    const database = new DatabaseSync(':memory:');
+    try {
+      initializeDataVersionSchema(database);
+      const ledger = new DataVersionLedger(database);
+      ledger.recordOpen({ softwareVersion: '0.1.0', dataVersion: 1, schemaRevision: 1 });
+      ledger.recordOpen({ softwareVersion: '0.2.0', dataVersion: 1, schemaRevision: 1 });
+      for (let schemaRevision = 2; schemaRevision <= 65; schemaRevision += 1) {
+        ledger.recordOpen({ softwareVersion: '0.2.0', dataVersion: 1, schemaRevision });
+      }
+      const standing = ledger.standing();
+      expect(standing.count).toBe(66);
+      expect(standing.recent).toHaveLength(MAX_STORE_VERSIONS_LISTED);
+      expect([standing.recent[0]?.ordinal, standing.recent.at(-1)?.ordinal]).toEqual([66, 47]);
+      expect(standing.update).toMatchObject({ from: '0.1.0', to: '0.2.0', direction: 'newer' });
+      expect(ledger.recordOpen({ softwareVersion: '0.2.0', dataVersion: 1, schemaRevision: 65 })).toBe(false);
+      database.exec('DROP TRIGGER store_versions_no_update');
+      database.exec("UPDATE store_versions SET software_version = '0.0.9' WHERE ordinal = 1");
+      expect(() => ledger.standing()).toThrowError(DataVersionError);
+      expect(() => ledger.recordOpen({ softwareVersion: '0.2.0', dataVersion: 1, schemaRevision: 65 })).toThrowError(DataVersionError);
+    } finally {
+      database.close();
+    }
+  });
 
   it('adds revision 54 to a revision-53 store, recording the versions that open it from then on', async () => {
     await reopened(() => undefined);

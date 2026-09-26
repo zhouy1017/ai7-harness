@@ -180,9 +180,12 @@ export function mountDatabaseExport(options: MountDatabaseExportOptions): void {
     }
   };
 
-  /** An approval that ended: what it came to, the prepared file as it was, or why not. */
+  /**
+   * An approval that ended: what it came to, the prepared file as it was, or why not. The controls stay held while the records
+   * are read, so no other export can start meanwhile and be unlocked when this one ends (Issue #434 review); they are enabled,
+   * and focus moves, only once nothing more is awaited.
+   */
   const settleApproval = async (ended: DatabaseExportActivityProjection): Promise<void> => {
-    setBusy(false);
     if (ended.state === 'finished' && ended.receipt !== null) {
       const receipt = ended.receipt;
       const outcome = el('p', `database-export-outcome outcome-${receipt.outcome}`, databaseExportOutcomeLine(receipt));
@@ -193,12 +196,16 @@ export function mountDatabaseExport(options: MountDatabaseExportOptions): void {
       const exported = receipt.outcome === 'created' || receipt.outcome === 'replaced';
       setStatus(receipt.outcomeLabel, exported ? 'success' : 'error');
       await showRecords();
+      if (!root.isConnected) return;
+      setBusy(false);
       choose.focus();
     } else if (ended.state === 'cancelled') {
       // Stopped before the approval was recorded: the prepared file is as it was, and 按上述方式导出 may take it again.
+      setBusy(false);
       setStatus(DATABASE_EXPORT_STATUS_LINES.writingStopped);
       prepared.querySelector<HTMLButtonElement>('[data-database-export-action="approve"]')?.focus();
     } else {
+      setBusy(false);
       setStatus(ended.failure?.message ?? DATABASE_EXPORT_STATUS_LINES.approveFailed, 'error');
     }
   };
