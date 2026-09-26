@@ -173,8 +173,9 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
     paint(null);
     try {
       const result = await api.inspectFeedbackHistory({ bookId: filters.book || null,
-        origin: (filters.origin || null) as FeedbackHistoryInput['origin'], author: filters.author || null,
-        editor: filters.editor || null, after: cursor });
+        origin: filters.origin === 'proposal-decision' || filters.origin === 'analysis-feedback' || filters.origin === 'review-disposition' ? filters.origin : null,
+        author: filters.author || null,
+        editor: filters.editor || null, after: cursor ?? null });
       if (!root.isConnected) return;
       projection = result;
       chosen = { ...filters };
