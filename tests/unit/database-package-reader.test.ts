@@ -37,7 +37,7 @@ async function writtenPackage(): Promise<string> {
     database.exec('CREATE TABLE books (book_id TEXT PRIMARY KEY) STRICT; INSERT INTO books VALUES (\'b\'); PRAGMA user_version = 55;');
     const path = join(root, 'written.ai7db');
     await writeDatabasePackage(database, dataRoot, path, () => ({
-      dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 55, createdAt: '2026-09-25T02:00:00.000Z', origin: 'database-export', contents,
+      dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 55, createdAt: '2026-09-25T02:00:00.000Z', origin: 'database-export',
     }));
     return path;
   } finally {
@@ -88,7 +88,10 @@ describe('reading a database package', () => {
       data: async (chunk) => { current!.bytes += chunk.byteLength; },
       end: async () => { visited.push(current!); },
     });
-    expect(verified.manifest).toMatchObject({ dataVersion: 1, schemaRevision: 55, origin: 'database-export', contents });
+    // What it holds is what the writer counted in its own copy of the store: the one Book, and none of the relations it lacks.
+    expect(verified.manifest).toMatchObject({
+      dataVersion: 1, schemaRevision: 55, origin: 'database-export', contents: { books: 1, sourceVersions: 0, libraryMaterials: 0, series: 0 },
+    });
     expect(verified.sha256).toBe(digest(readFileSync(path)));
     expect(visited.map((member) => member.path)).toEqual(['store/ai7.sqlite', 'objects/sha256/one.docx']);
     expect(visited[1]!.bytes).toBe('a stored manuscript object'.length);

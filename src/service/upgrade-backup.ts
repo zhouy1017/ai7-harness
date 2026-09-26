@@ -3,7 +3,6 @@ import { existsSync } from 'node:fs';
 import { lstat, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
-import type { DatabaseExportContentsProjection } from '../shared/protocol.js';
 import { canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
 import { DataVersionError, breakingChanges, dataVersionAt, readUpgrade, type ClassifiedSchemaRevision, type DataVersionUpgrade } from './data-version.js';
 import { DATABASE_PACKAGE_EXTENSION, writeDatabasePackage } from './database-exports.js';
@@ -36,13 +35,6 @@ export function preUpgradeBackupFileName(at: Date): string {
 
 function tableExists(db: DatabaseSync, table: string): boolean {
   return db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) !== undefined;
-}
-
-/** What the data holds as it is, counted over the relations its revision has. */
-function contentsOf(db: DatabaseSync): DatabaseExportContentsProjection {
-  const count = (table: string): number =>
-    tableExists(db, table) ? Number((db.prepare(`SELECT count(*) AS count FROM "${table}"`).get() as SqlRow).count) : 0;
-  return { books: count('books'), sourceVersions: count('source_versions'), libraryMaterials: count('library_materials'), series: count('series') };
 }
 
 /** The software that last opened the data, as its version records say; `null` for a store from before they were kept. */
@@ -136,7 +128,6 @@ export async function backUpBeforeUpgrade(db: DatabaseSync, dataRoot: string, op
       schemaRevision: revision,
       createdAt: options.now.toISOString(),
       origin: 'pre-upgrade-backup',
-      contents: contentsOf(db),
     }));
     // Only ever a new file (Issue #433 review): the name is taken at the instant the backup is put there, as every export's, so
     // a file that appeared at it while the package was written is left as it is.
