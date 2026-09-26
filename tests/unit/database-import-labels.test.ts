@@ -146,9 +146,12 @@ describe('导入数据库\'s words', () => {
     expect([
       databaseReplacementRecordLine({ ...record, outcome: 'failed', failure: 'changed' }, instant),
       databaseReplacementRecordLine({ ...record, kind: 'roll-back', outcome: 'failed', failure: 'changed', packageFileName: 'AI7 替换前备份 1.ai7db' }, instant),
+      // And one whose open of the data it brought in was interrupted.
+      databaseReplacementRecordLine({ ...record, outcome: 'failed', failure: 'interrupted' }, instant),
     ]).toEqual([
       '〔09-25T02:05〕 · 未能用「AI7 数据库.ai7db」替换：准备好的文件已不完整或被改动，本机数据保持原样 · 替换前备份「AI7 替换前备份 2026-09-25 10-00-00.ai7db」',
       '〔09-25T02:05〕 · 未能回退到「AI7 替换前备份 1.ai7db」：准备好的文件已不完整或被改动，本机数据保持原样 · 回退前备份「AI7 替换前备份 2026-09-25 10-00-00.ai7db」',
+      '〔09-25T02:05〕 · 未能用「AI7 数据库.ai7db」替换：上次启动时打开替换来的数据被中断，本机数据保持原样 · 替换前备份「AI7 替换前备份 2026-09-25 10-00-00.ai7db」',
     ]);
     expect([databaseReplacementRecordsLabel(0, 0), databaseReplacementRecordsLabel(2, 2), databaseReplacementRecordsLabel(20, 23)])
       .toEqual(['导入记录（0）', '导入记录（2）', '导入记录（最近 20 次，共 23 次）']);

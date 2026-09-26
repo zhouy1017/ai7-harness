@@ -5860,7 +5860,8 @@ export interface DatabaseExportReceiptProjection {
 
 /**
  * The database export under way, or how the last one in this launch ended (Issue #434 review; V2-UX-EXP-011). A preparation
- * packs the store; an approval reads the prepared file, writes it, and reads it back — `completedBytes` of `totalBytes` —
+ * copies the store — the bytes of the pages copied — and then packs it with every other file; an approval reads the prepared
+ * file, writes it, and reads it back — `completedBytes` of `totalBytes` in each step —
  * and `cancellable` says whether 取消导出 still stops it, which it does until the file is being put in place. Once it ends:
  * `prepared` with the preparation, `finished` with the approval's receipt, `cancelled` with nothing recorded, or `failed`
  * with why.
@@ -5869,7 +5870,7 @@ export interface DatabaseExportActivityProjection {
   readonly activityId: string;
   readonly kind: 'prepare' | 'approve';
   readonly state: 'running' | 'prepared' | 'finished' | 'cancelled' | 'failed';
-  readonly step: 'packing' | 'verifying' | 'writing' | 'committing' | null;
+  readonly step: 'copying' | 'packing' | 'verifying' | 'writing' | 'committing' | null;
   readonly completedBytes: number;
   readonly totalBytes: number;
   readonly cancellable: boolean;
@@ -6030,14 +6031,15 @@ export interface DatabaseReplacementRecordProjection {
   /** How many Books a merge took; `null` for a replacement. */
   readonly mergedCount: number | null;
   /**
-   * Why one that failed failed: its data would not open, or what waited was no longer the package the preparation verified
-   * (Issue #434 review). `null` for one applied, and for one that failed before this was recorded.
+   * Why one that failed failed: its data would not open; what waited was no longer the package the preparation verified; or
+   * an open of the data it moved in was interrupted, which leaves nothing to tell that data from what was verified (Issue #434
+   * review). `null` for one applied, and for one that failed before this was recorded.
    */
   readonly failure: DatabaseReplacementFailure | null;
 }
 
 /** Why a replacement failed, as its record says. */
-export type DatabaseReplacementFailure = 'unopenable' | 'changed';
+export type DatabaseReplacementFailure = 'unopenable' | 'changed' | 'interrupted';
 
 /** 替换本机全部数据: the replacement waiting for AI7's next start, if any, and the replacements this data records. */
 export interface DatabaseReplacementsProjection {

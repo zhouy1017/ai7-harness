@@ -57,6 +57,9 @@ describe('导出数据库\'s words', () => {
   it('says how far an export under way has come, and never reads it done before it is (Issue #434 review, V2-UX-EXP-011)', () => {
     const at = (step: keyof typeof DATABASE_EXPORT_STEPS | null, completedBytes: number, totalBytes: number): string =>
       databaseExportActivityLine({ step, completedBytes, totalBytes });
+    // The store is copied first, measured in the bytes of its pages (Issue #434 review).
+    expect(at('copying', 0, 0)).toBe('正在复制本机数据 · 0%');
+    expect(at('copying', 8192, 16384)).toBe('正在复制本机数据 · 50%');
     expect(at('packing', 0, 0)).toBe('正在打包数据库 · 0%');
     expect(at('packing', 421, 1000)).toBe('正在打包数据库 · 42%');
     expect(at('verifying', 1000, 1000)).toBe('正在核对准备好的文件 · 99%');

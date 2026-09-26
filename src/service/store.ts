@@ -424,7 +424,6 @@ import {
   DataVersionLedger,
   MAX_STORE_VERSIONS_LISTED,
   initializeDataVersionSchema,
-  latestSoftwareUpdate,
   readSoftwareVersion,
 } from './data-version.js';
 import { DatabaseExportError, DatabaseExports, initializeDatabaseExportSchema } from './database-exports.js';
@@ -11517,17 +11516,16 @@ export class EditorialStore {
   /** The software version and the Data Version apart, the latest software update, and the store's version records. A read. */
   inspectDataVersion(): DataVersionProjection {
     return this.#dataVersionCall(() => {
-      const history = this.#dataVersions.history();
-      const latest = history.at(-1)!;
+      const { latest, recent, update, count } = this.#dataVersions.standing();
       return {
         softwareVersion: this.#softwareVersion,
         dataVersion: DATA_VERSION,
         frozen: DATA_VERSION_FROZEN,
-        schemaRevision: latest.schemaRevision,
-        update: latestSoftwareUpdate(history),
-        history: [...history].reverse().slice(0, MAX_STORE_VERSIONS_LISTED)
+        schemaRevision: latest!.schemaRevision,
+        update,
+        history: recent
           .map((entry) => ({ softwareVersion: entry.softwareVersion, dataVersion: entry.dataVersion, schemaRevision: entry.schemaRevision, recordedAt: entry.recordedAt })),
-        historyTruncated: history.length > MAX_STORE_VERSIONS_LISTED,
+        historyTruncated: count > MAX_STORE_VERSIONS_LISTED,
       };
     });
   }
