@@ -4,9 +4,10 @@ import type { ReviewRunDriveStep, ReviewRunHandOff } from './review-runs.js';
 /**
  * The drive loop of a Review Run (Issue #417, plan slice S69; B1, B2; V2-UX-REV-008).
  *
- * An approved Run's categories are executed one after another through the one execution owner — its
- * single slot stays single: a category's Task is authorized on its own ledger only when its turn comes,
- * handed to the owner at once, awaited, and its findings written to the manuscript before the next
+ * An approved Run's categories are executed one after another through the one execution owner, each taking
+ * a place of its governor (Issue #49, S14): a category's Task is authorized on its own ledger only when its
+ * turn comes and a place is free, handed to the owner at once, awaited, and its findings written to the
+ * manuscript before the next
  * category starts, so a finished category is actionable while the Run goes on. The leads of 情节逻辑与
  * 前后一致 need no Task and are written at their turn. A failure of one category never stops the
  * others.
@@ -35,10 +36,14 @@ export interface ReviewRunDriveSteps {
   fail(reviewRunId: string, categoryId: string, code: string, message: string): void;
 }
 
-/** The part of the one execution owner the loop uses: its single-slot admission and its idle signal. */
+/**
+ * The part of the one execution owner the loop uses (Issue #49, S14): admission into one of its governor's places, the
+ * signal that one is free, and the end of the category Run it handed over.
+ */
 export interface ReviewRunExecutionOwner {
   admitAndDispatch(runRecordId: string, ledger: BaselineAnalysisStore): void;
-  whenIdle(): Promise<void>;
+  whenPlaceFree(): Promise<void>;
+  whenDone(runRecordId: string): Promise<void>;
 }
 
 function codeOf(error: unknown): string {
@@ -138,9 +143,9 @@ export class ReviewRunDriver {
           break;
         case 'start': {
           if (this.#stopping) return;
-          // The slot first, then the ledger's authorization: a baseline Run holding it is waited for,
-          // and the authorization is written only once the category can be handed over at once.
-          await this.#owner.whenIdle();
+          // A place first, then the ledger's authorization: while other Runs hold every place the category waits,
+          // and the authorization is written only once it can be handed over at once.
+          await this.#owner.whenPlaceFree();
           if (this.#stopping) return;
           const handOff = this.#steps.start(reviewRunId, categoryId);
           if (handOff !== null) await this.#dispatch(reviewRunId, categoryId, handOff);
@@ -148,7 +153,7 @@ export class ReviewRunDriver {
         }
         case 'dispatch':
           if (this.#stopping) return;
-          await this.#owner.whenIdle();
+          await this.#owner.whenPlaceFree();
           if (this.#stopping) return;
           await this.#dispatch(reviewRunId, categoryId, step);
           break;
@@ -161,7 +166,7 @@ export class ReviewRunDriver {
       this.#owner.admitAndDispatch(handOff.runRecordId, handOff.ledger);
     } catch (error) {
       const code = codeOf(error);
-      // The slot was taken between the wait and the hand-off: the next step waits again and dispatches.
+      // The last place was taken between the wait and the hand-off: the next step waits again and dispatches.
       if (code === 'EXECUTION_BUSY') return;
       this.#steps.refuseDispatch(reviewRunId, categoryId, handOff.runRecordId, code, messageOf(error));
       if (code === 'EXECUTION_STOPPING') this.#stopping = true;
@@ -171,8 +176,8 @@ export class ReviewRunDriver {
       this.#steps.recordDispatch(reviewRunId, categoryId, handOff.runRecordId);
     } catch {
       // The Run is executing whether or not its dispatch was recorded; the next step settles it from its
-      // own ledger record once the owner is idle.
+      // own ledger record once it has ended.
     }
-    await this.#owner.whenIdle();
+    await this.#owner.whenDone(handOff.runRecordId);
   }
 }

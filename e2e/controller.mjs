@@ -922,8 +922,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'completion-cleanup',
   ]),
   // J-09 (Issue #424, plan slice S78): 待我处理 — the cross-Book attention view, its four groups and its count,
-  // made from two Books of exact `sample1`. Each stage is one thing an editor does or finds, so a hosted
-  // failure names the behaviour that broke.
+  // made from two Books of exact `sample1`; then concurrent Book work (Issue #49, plan slice S14) over a third — two
+  // Runs at once, a third start 等待运行名额, 暂停 handing its place over without taking focus, 取消任务, and each Run's
+  // records kept to its own Book. Each stage is one thing an editor does or finds, so a hosted failure names the
+  // behaviour that broke.
   'J-09': Object.freeze([
     'entry',
     'controller-loopback-sentinel',
@@ -950,6 +952,16 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-attention-keyboard',
     'j14-attention-zoom-200-reflow',
     'j14-attention-forced-colors',
+    'concurrent-third-book',
+    'concurrent-first-run',
+    'concurrent-second-run',
+    'concurrent-queued-run',
+    'j14-queued-forced-colors',
+    'concurrent-attention',
+    'concurrent-pause',
+    'concurrent-no-focus-theft',
+    'concurrent-cancel',
+    'concurrent-isolation',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',

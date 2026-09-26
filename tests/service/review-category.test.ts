@@ -56,7 +56,7 @@ interface Book {
   readonly branchId: string;
 }
 
-async function withBook(body: (book: Book) => Promise<void>): Promise<void> {
+async function withBook(body: (book: Book) => Promise<void>, capacity?: number): Promise<void> {
   await requireExactSample1(roots.codeRoot);
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
@@ -66,7 +66,9 @@ async function withBook(body: (book: Book) => Promise<void>): Promise<void> {
     interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const owner = new BaselineAnalysisExecutionOwner({
+    ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null }, ...(capacity === undefined ? {} : { capacity }),
+  });
   try {
     const imported = await importSample1Book(store, roots.codeRoot, 'L2 sample1 审阅');
     await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
@@ -216,14 +218,15 @@ describe('a review category over the real store on exact sample1', () => {
     });
   });
 
-  it('holds one Result Set per category beside each other and runs their Tasks one at a time through the one slot', async () => {
+  it('holds one Result Set per category beside each other and runs their Tasks through the one owner\'s places', async () => {
+    // One place (Issue #49, S14): the places are the owner's and not a ledger's, whatever their number.
     await withBook(async (book) => {
       const typos = prepareAndAuthorize(book, TYPOS_AND_USAGE, { mode: 'review-first', selectedRange: null });
       const style = prepareAndAuthorize(book, STYLE_AND_FORMAT, { mode: 'review-first', selectedRange: null });
       const typosLedger = book.store.reviewCategoryLedger(reviewCategoryKindDefinition(TYPOS_AND_USAGE));
       const styleLedger = book.store.reviewCategoryLedger(reviewCategoryKindDefinition(STYLE_AND_FORMAT));
       book.owner.admitAndDispatch(typos.runRecordId, typosLedger);
-      // The slot is the owner's and not a ledger's: a second category waits for the first.
+      // The place is the owner's and not a ledger's: a second category waits for the first.
       let refused: unknown = null;
       try {
         book.owner.admitAndDispatch(style.runRecordId, styleLedger);
@@ -241,6 +244,6 @@ describe('a review category over the real store on exact sample1', () => {
       expect(settledTypos.resultSetRevision!.resultSetId).not.toBe(settledStyle.resultSetRevision!.resultSetId);
       // The baseline kind's own Result Set is untouched by either.
       expect(book.store.inspectBaselineAnalysis(book.bookId).resultSetRevision).toBeNull();
-    });
+    }, 1);
   });
 });

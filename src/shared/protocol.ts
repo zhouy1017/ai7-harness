@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 67 as const;
+export const SERVICE_PROTOCOL_VERSION = 68 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -2998,7 +2998,9 @@ export interface BaselineAnalysisProjection {
   kind: typeof BASELINE_ANALYSIS_KIND;
   contractVersion: typeof BASELINE_ANALYSIS_CONTRACT_VERSION;
   state: 'available' | 'prepared' | 'authorized-blocked' | 'waiting' | 'admitted' | 'executing' | 'settled' | 'failed' | 'interrupted' | 'cancelled' | 'cancelling'
-    | 'pausing' | 'paused' | 'resumable' | 'awaiting-clarification';
+    | 'pausing' | 'paused' | 'resumable' | 'awaiting-clarification'
+    // Authorized and waiting on the instance's concurrency governor for a place (Issue #49, S14; CONC-007).
+    | 'queued';
   stateLabel: string;
   taskIntent: null | {
     taskIntentId: string;
@@ -4199,7 +4201,9 @@ export interface InspectTaskPlanInput {
 export type TaskPlanStateKey =
   | 'ready' | 'changed' | 'unconnected' | 'offline' | 'recorded' | 'blocked' | 'waiting' | 'running' | 'settled' | 'stopped'
   | 'cancelled' | 'cancelling' | 'cancelled-after-start' | 'pausing' | 'paused' | 'resumable' | 'awaiting-clarification' | 'budget-reached'
-  | 'account-limit' | 'plan-moved';
+  | 'account-limit' | 'plan-moved'
+  // 等待运行名额 (Issue #49, S14; CONC-007): authorized, and waiting on the governor for a place; nothing has begun.
+  | 'queued';
 
 /**
  * A started Run's controls in the drawer's bar and its activity above the plan (Issue #422, plan slice S76a;
@@ -5880,6 +5884,8 @@ export type GlobalAttentionStateKey =
   | 'analysis-waiting-slot'
   // Online with nothing in its way, the next Reconnect Preflight admits it; it is not in the scheduler yet (Issue #539).
   | 'analysis-waiting-admission'
+  // 等待运行名额 on the governor (Issue #49, S14; CONC-007): a start waiting for a place, never a ceiling or a limit.
+  | 'analysis-waiting-capacity'
   | 'analysis-cancelling'
   | 'analysis-pausing'
   | 'analysis-paused'
@@ -7094,8 +7100,8 @@ export interface RendererApi {
   prepareBaselineAnalysis(input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean; redoOf?: string | null }): Promise<ServiceJobProjection>;
   /**
    * The Task Drawer bar's 开始任务 for the analysis (Issue #420, S74a): records the Run Authorization and the
-   * Run Record and admits the Run to the one slot; refused with `EXECUTION_BUSY`, before anything is
-   * recorded, while another Run holds it.
+   * Run Record and hands the Run to the execution owner's governor, which admits it at once while a place is
+   * free, or has it wait for one — `queued`, 等待运行名额 — and admits it in its turn (Issue #49, S14).
    */
   authorizeBaselineAnalysis(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisProjection>;
   startBaselineAnalysisWhenOnline(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisProjection>;
@@ -7134,8 +7140,8 @@ export interface RendererApi {
   prepareReviewRun(input: Omit<PrepareReviewRunInput, 'bookId'>): Promise<ServiceJobProjection>;
   /**
    * The one approval — the Task Drawer bar's 开始任务 since Issue #420 (S74a); the Run is already being driven
-   * when the answer arrives. Refused with `EXECUTION_BUSY`, before anything is written, while a Run holds
-   * the one slot.
+   * when the answer arrives. Refused with `EXECUTION_BUSY`, before anything is written, while other Runs hold
+   * every place of the governor (Issue #49, S14).
    */
   authorizeReviewRun(input: Omit<AuthorizeReviewRunInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
   continueReviewRun(input: Omit<ContinueReviewRunInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;

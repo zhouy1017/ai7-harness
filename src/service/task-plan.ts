@@ -487,6 +487,9 @@ function baselineState(projection: BaselineAnalysisProjection, stopped?: Baselin
     // (`withWaitingReason`); on its own the record says only that it waits for the network.
     case 'waiting':
       return { key: 'waiting', label: WAITING_LABELS.network };
+    // 等待运行名额 (Issue #49, S14; CONC-007): authorized, and waiting on the governor for a place.
+    case 'queued':
+      return { key: 'queued', label: '等待运行名额' };
     // A Run the editor cancelled before it ran anything keeps the dash of a cancelled wait (Issue #502); one it
     // cancelled after it began reading reads 已取消 in its own shape, and 正在取消 while it stops (Issue #422).
     case 'cancelled':
@@ -1125,7 +1128,7 @@ export interface BaselineStoppedRunFacts {
 }
 
 /** 续行's own words when the service cannot let the Run go on now (CONT-015): each names what it waits for. */
-export const RESUME_BLOCKED_SLOT = '另一项任务正在运行；它结束后再续行。';
+export const RESUME_BLOCKED_SLOT = '运行名额已满：正在运行的任务结束后再续行。';
 export const RESUME_BLOCKED_CONNECTION = '模型未连接：续行要发送到模型服务，所需的凭据还没有就绪；连接好之后才能续行。';
 export const RESUME_BLOCKED_OFFLINE = '离线：续行要连到模型服务，而这台设备现在没有网络；联网后再续行。';
 /** The Run's persisted binding no longer reads the same under this launch (CONT-016): the way on is 改计划重做. */

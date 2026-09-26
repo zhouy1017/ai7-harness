@@ -440,7 +440,7 @@ export const QUICK_START_RULE_CHANGED = '这条默认执行规则刚刚停用或
 export const QUICK_START_PLAN_CHANGED = '计划的关键内容已变化，这次没有按规则开始；请查看计划修订并重新确认计划。';
 export const QUICK_START_NEEDS_CONNECTION = '模型未连接：这份计划要发送到模型服务，所需的凭据还没有就绪；连接好之后再开始。';
 export const QUICK_START_OFFLINE = '离线：这份计划要连到模型服务，而这台设备现在没有网络；可以在计划里选择联网后开始任务。';
-export const QUICK_START_SLOT_BUSY = '另一项任务正在运行；它结束后再开始。';
+export const QUICK_START_SLOT_BUSY = '运行名额已满：正在运行的任务结束后再开始。';
 export const QUICK_START_NOT_READY = '这份计划现在不能开始；请看过计划后再开始。';
 
 // The drawer's `设为快速开始默认…`.

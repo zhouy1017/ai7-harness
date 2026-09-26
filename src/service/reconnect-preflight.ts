@@ -51,9 +51,10 @@ export function planDriftReason(changed: ReadonlyArray<string>): string {
  *   plan drift (OFF-009);
  * - blocked with what moved when the plan its authorization bound no longer stands — it never dispatches
  *   (OFF-008);
- * - left waiting while the one execution slot is held, since a waiting Run takes no slot and nothing queues;
- * - otherwise admitted to the slot through the execution owner, exactly as an immediate start is, and
- *   dispatched — at most one per preflight, because the slot holds one Run.
+ * - left waiting while every place of the execution owner's governor is taken, since a waiting Run takes no
+ *   place until it is admitted (Issue #49, S14);
+ * - otherwise admitted to a place through the execution owner, exactly as an immediate start is, and
+ *   dispatched — as many as the governor has places for; the rest wait for the next preflight.
  * An admission this launch can never make blocks the Run with the owner's own reason rather than leaving it to
  * wait for nothing. Nothing is sent and no usage arises before admission, and no credential value is read here —
  * only the readiness the dispatch check reports.

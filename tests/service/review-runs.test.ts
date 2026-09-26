@@ -237,12 +237,16 @@ class RefusingFirstDispatch implements ReviewRunExecutionOwner {
     this.#inner.admitAndDispatch(runRecordId, ledger);
   }
 
-  whenIdle(): Promise<void> {
-    return this.#inner.whenIdle();
+  whenPlaceFree(): Promise<void> {
+    return this.#inner.whenPlaceFree();
+  }
+
+  whenDone(runRecordId: string): Promise<void> {
+    return this.#inner.whenDone(runRecordId);
   }
 }
 
-/** The one owner, holding the loop at its `gateAt`-th wait for the slot until the suite releases it. */
+/** The one owner, holding the loop at its `gateAt`-th wait — for a place, or for a category Run — until the suite releases it. */
 class GatedOwner implements ReviewRunExecutionOwner {
   readonly #inner: BaselineAnalysisExecutionOwner;
   readonly #gateAt: number;
@@ -263,13 +267,21 @@ class GatedOwner implements ReviewRunExecutionOwner {
     this.#inner.admitAndDispatch(runRecordId, ledger);
   }
 
-  async whenIdle(): Promise<void> {
+  whenPlaceFree(): Promise<void> {
+    return this.#wait(() => this.#inner.whenPlaceFree());
+  }
+
+  whenDone(runRecordId: string): Promise<void> {
+    return this.#wait(() => this.#inner.whenDone(runRecordId));
+  }
+
+  async #wait(then: () => Promise<void>): Promise<void> {
     this.#waits += 1;
     if (this.#waits === this.#gateAt) {
       this.#reach();
       await this.#gate;
     }
-    return this.#inner.whenIdle();
+    return then();
   }
 
   release(): void {

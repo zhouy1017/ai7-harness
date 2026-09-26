@@ -3483,7 +3483,7 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
   if (revision !== null) {
     // A Task in flight is what the editor came for, so the card opens where its plan and its Run are;
     // a choice the editor made themselves always wins over either default.
-    const taskInFlight = projection.state === 'prepared' || projection.state === 'authorized-blocked' ||
+    const taskInFlight = projection.state === 'prepared' || projection.state === 'authorized-blocked' || projection.state === 'queued' ||
       projection.state === 'waiting' || projection.state === 'admitted' || projection.state === 'executing' || projection.state === 'cancelling' ||
       projection.state === 'pausing' || projection.state === 'paused' || projection.state === 'resumable' ||
       projection.state === 'awaiting-clarification';
@@ -3559,6 +3559,8 @@ function analysisFollowDelayMs(state: BaselineAnalysisProjection['state']): numb
       return 250;
     case 'waiting':
     case 'awaiting-clarification':
+    // 等待运行名额 (Issue #49, S14): the card moves on once the governor admits the Run.
+    case 'queued':
       return 2_000;
     default:
       return null;

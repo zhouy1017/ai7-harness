@@ -3897,8 +3897,8 @@ export class EditorialStore {
   /**
    * The editor's one approval of a prepared Review Run, naming the exact plan digest of every
    * Task-backed category (B1). The caller then hands the Run to the drive loop. `slotBusy` is the
-   * execution owner's word that another Run holds its one slot: a new approval is refused with
-   * `EXECUTION_BUSY` before anything is written (Issue #420, S74a A2).
+   * execution owner's word that other Runs hold every place of its governor: a new approval is refused with
+   * `EXECUTION_BUSY` before anything is written (Issue #420, S74a A2; Issue #49, S14).
    */
   authorizeReviewRun(
     bookId: string,
@@ -4119,17 +4119,15 @@ export class EditorialStore {
   }
 
   /**
-   * Records the standard-direct authorization and the Run; the caller admits the Run when dispatch is
-   * allowed. `slotBusy` is the execution owner's word that another Run holds its one slot: a Run that would
-   * dispatch is then refused with `EXECUTION_BUSY` before anything is recorded (Issue #420, S74a A2).
+   * Records the standard-direct authorization and the Run; the caller hands the Run to the execution owner when
+   * dispatch is allowed, which admits it or queues it on the governor (Issue #49, S14; CONC-007).
    */
   authorizeBaselineAnalysis(
     bookId: string,
     taskIntentId: string,
     planEnvelopeDigest: string,
-    slotBusy = false,
   ): { projection: BaselineAnalysisProjection; dispatchRunRecordId: string | null } {
-    const authorized = this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, slotBusy));
+    const authorized = this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest));
     return { projection: authorized.projection as BaselineAnalysisProjection, dispatchRunRecordId: authorized.dispatchRunRecordId };
   }
 
@@ -4138,7 +4136,7 @@ export class EditorialStore {
    * authorize it, and its Run waits in Connectivity Wait — nothing sent, no usage, nothing begun.
    */
   startBaselineAnalysisWhenOnline(bookId: string, taskIntentId: string, planEnvelopeDigest: string): BaselineAnalysisProjection {
-    return this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, false, 'when-online')).projection as BaselineAnalysisProjection;
+    return this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, 'when-online')).projection as BaselineAnalysisProjection;
   }
 
   /** 取消 while the Book's baseline Run waits (OFF-010): terminal, before any dispatch, without provider work. */
@@ -4462,7 +4460,7 @@ export class EditorialStore {
         return fellBack(QUICK_START_NOT_READY);
     }
     if (envelope.dispatchAllowed && runtime.connectivity.slotBusy()) return fellBack(QUICK_START_SLOT_BUSY);
-    const authorized = this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, false, 'now',
+    const authorized = this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, 'now',
       { kind: 'default-execution-rule', ruleVersionId }));
     return { outcome: 'started', reasons: [], dispatchRunRecordId: authorized.dispatchRunRecordId };
   }

@@ -132,6 +132,8 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   'analysis-waiting-slot': '等待运行名额',
   // The drawer's own word for it (Issue #539): nothing runs yet.
   'analysis-waiting-admission': '正在排队',
+  // A start waiting on the governor for a place (Issue #49, S14; CONC-007), in the drawer's words for it.
+  'analysis-waiting-capacity': '等待运行名额',
   'analysis-cancelling': '正在取消',
   'analysis-pausing': '正在暂停',
   'analysis-paused': '已暂停',
@@ -176,6 +178,7 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
   'analysis-waiting-connection': { tone: 'attention', shape: 'triangle' },
   'analysis-waiting-slot': { tone: 'neutral', shape: 'ring' },
   'analysis-waiting-admission': { tone: 'neutral', shape: 'ring' },
+  'analysis-waiting-capacity': { tone: 'neutral', shape: 'ring' },
   'analysis-cancelling': { tone: 'attention', shape: 'half' },
   'analysis-pausing': { tone: 'attention', shape: 'half' },
   'analysis-paused': { tone: 'neutral', shape: 'half' },
@@ -324,13 +327,15 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
         ? `${GLOBAL_ATTENTION_CLARIFICATION_WAITING}：它想知道要不要把一个阅读范围安全地再试一次。`
         : `${GLOBAL_ATTENTION_CLARIFICATION_CONTINUING}：它想知道要不要把一个阅读范围安全地再试一次。`;
     case 'analysis-queued':
-      return '已进入 AI7 调度器（单槽位）。';
+      return '已进入 AI7 调度器。';
     case 'analysis-waiting-network':
       return '联网后开始任务：恢复联网后，AI7 先核对计划再开始；现在什么都没有运行。';
     case 'analysis-waiting-connection':
       return '模型连接缺少凭据：到设置连接模型服务后，任务会在联网时开始。';
     case 'analysis-waiting-slot':
-      return '另一项任务正在运行；它结束后，这项任务在联网时开始。';
+      return '运行名额已满：正在运行的任务结束后，这项任务在联网时开始。';
+    case 'analysis-waiting-capacity':
+      return '运行名额已满：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送。';
     case 'analysis-waiting-admission':
       return '已经联网：AI7 先核对计划，没有变化就开始；现在什么都没有运行。';
     case 'analysis-running':

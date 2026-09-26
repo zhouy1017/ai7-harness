@@ -986,9 +986,9 @@ export class ReviewRunStore {
    * stale. The ledgers' own authorizations are written later, one category at a time, when the drive
    * loop reaches each; a plan that moves in between is refused there, with the ledger's reason.
    *
-   * `slotBusy` is the execution owner's word that another Run holds its one slot (Issue #420, S74a A2): a
-   * new approval is then refused before anything is written, so the Run never waits in a queue; a repeat
-   * of an approval already recorded answers as it always has.
+   * `slotBusy` is the execution owner's word that other Runs hold every place of its governor (Issue #420, S74a
+   * A2; Issue #49, S14): a new approval is then refused before anything is written, so the Run never waits in a
+   * queue; a repeat of an approval already recorded answers as it always has.
    */
   recordAuthorization(bookId: string, reviewRunId: string, planDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>, slotBusy = false): void {
     const snapshot = this.#runOfBook(bookId, reviewRunId);
@@ -1296,7 +1296,7 @@ export class ReviewRunStore {
 
   recordDispatch(reviewRunId: string, categoryId: string, runRecordId: string): void {
     this.#category(reviewRunId, categoryId);
-    this.#recordEvent(reviewRunId, categoryId, 'dispatched', '已进入 AI7 调度器（单槽位）。', { runRecordId });
+    this.#recordEvent(reviewRunId, categoryId, 'dispatched', '已进入 AI7 调度器。', { runRecordId });
   }
 
   /**
@@ -1333,7 +1333,7 @@ export class ReviewRunStore {
       const events = this.#events(reviewRunId, categoryId);
       if (events.some((event) => TERMINAL_CATEGORY_EVENTS.has(event.state) || event.state === 'settled')) return;
       if (state !== 'blocked-before-dispatch' && !events.some((event) => event.state === 'dispatched')) {
-        this.#recordEvent(reviewRunId, categoryId, 'dispatched', '已进入 AI7 调度器（单槽位）。', { runRecordId });
+        this.#recordEvent(reviewRunId, categoryId, 'dispatched', '已进入 AI7 调度器。', { runRecordId });
       }
       const outcome = this.#db.prepare('SELECT classification, result_set_revision_id, canonical_json, sha256 FROM analysis_task_outcomes WHERE run_record_id = ?')
         .get(runRecordId) as SqlRow | undefined;
