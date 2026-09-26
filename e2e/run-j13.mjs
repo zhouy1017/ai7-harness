@@ -670,7 +670,8 @@ async function main() {
     // The same membership changes elsewhere while the editor reads a preview — 星河之二 added and removed again. The preview's
     // 加入书系 is refused and withdrawn, 重新查看影响 reads it again, and only then does 加入书系 go through.
     await clickSelector(renderer, '[data-series-action="add-open"]', 'stale-add-open');
-    const remaining = await readSeries(renderer, (read) => read.chooser !== null, 'stale-chooser');
+    // The chooser reads its Books when it opens (Issue #63 review): wait for them, not only for the chooser.
+    const remaining = await readSeries(renderer, (read) => read.chooser !== null && read.chooser.length === 2, 'stale-chooser');
     requireJourney(JSON.stringify(remaining.chooser) === JSON.stringify([[outside, false, `《${OUTSIDE}》`], [second, false, `《${SECOND}》`]]), 'stale-chooser-words', remaining);
     await clickSelector(renderer, `input[name="series-add-book"][value="${second}"]`, 'stale-choose-second');
     await clickSelector(renderer, '[data-series-action="preview"]', 'stale-preview');
