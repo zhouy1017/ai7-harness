@@ -56,7 +56,11 @@ export function requestTimeoutMs(operation: ServiceOperation): number {
     operation === 'previewLibraryMaterial' || operation === 'addLibraryMaterial' ||
     // 导出数据库 (Issue #434, S86a review) copies, compresses and digests the whole store for its preparation, and writes that
     // file to the chosen place for its approval: a large store takes minutes, and a timeout would stop the service mid-write.
-    operation === 'prepareDatabaseExport' || operation === 'approveDatabaseExport';
+    operation === 'prepareDatabaseExport' || operation === 'approveDatabaseExport' ||
+    // 导入数据库 (Issue #434, S86c) reads and verifies a whole package for its preview; 替换 and 回退 extract one whole and back
+    // the data up as another, and 取消替换 removes the extracted copy: each grows with the data, as 导出数据库 does.
+    operation === 'inspectDatabaseImport' || operation === 'prepareDatabaseReplacement' ||
+    operation === 'rollBackDatabaseReplacement' || operation === 'cancelDatabaseReplacement';
   return long ? LONG_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
 }
 

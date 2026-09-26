@@ -21,4 +21,12 @@ describe('the service request deadlines', () => {
     expect([requestTimeoutMs('prepareDatabaseExport'), requestTimeoutMs('approveDatabaseExport')]).toEqual([long, long]);
     expect(requestTimeoutMs('inspectDatabaseExports')).toBe(requestTimeoutMs('inspectLibraryMaterials'));
   });
+
+  it('gives 导入数据库 the long budget, since its preview, 替换, 回退 and 取消 each read or write a whole package (Issue #434, S86c)', () => {
+    const long = requestTimeoutMs('approveManuscriptExport');
+    const operations = ['inspectDatabaseImport', 'prepareDatabaseReplacement', 'rollBackDatabaseReplacement', 'cancelDatabaseReplacement'] as const;
+    expect(operations.map((operation) => requestTimeoutMs(operation))).toEqual([long, long, long, long]);
+    // The list of replacements is a read of the ledger and the staging place's intent, so it keeps the ordinary deadline.
+    expect(requestTimeoutMs('inspectDatabaseReplacements')).toBe(requestTimeoutMs('inspectLibraryMaterials'));
+  });
 });
