@@ -436,6 +436,7 @@ import {
   initializeDatabaseReplacementSchema,
   openWithPendingReplacement,
 } from './database-replacement.js';
+import { DatabaseMergeError, initializeDatabaseMergeSchema } from './database-merge.js';
 import {
   SeriesKnowledgeError,
   SeriesKnowledgeLedger,
@@ -566,6 +567,7 @@ import {
   DATABASE_EXPORT_SCHEMA_VERSION,
   SCHEDULED_BACKUP_SCHEMA_VERSION,
   DATABASE_REPLACEMENT_SCHEMA_VERSION,
+  DATABASE_MERGE_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1799,7 +1801,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === STORE_VERSION_SCHEMA_VERSION ||
       currentVersion === DATABASE_EXPORT_SCHEMA_VERSION ||
       currentVersion === SCHEDULED_BACKUP_SCHEMA_VERSION ||
-      currentVersion === DATABASE_REPLACEMENT_SCHEMA_VERSION,
+      currentVersion === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
+      currentVersion === DATABASE_MERGE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1852,7 +1855,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === STORE_VERSION_SCHEMA_VERSION ||
       currentVersion === DATABASE_EXPORT_SCHEMA_VERSION ||
       currentVersion === SCHEDULED_BACKUP_SCHEMA_VERSION ||
-      currentVersion === DATABASE_REPLACEMENT_SCHEMA_VERSION
+      currentVersion === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
+      currentVersion === DATABASE_MERGE_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2219,7 +2223,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === STORE_VERSION_SCHEMA_VERSION ||
       version === DATABASE_EXPORT_SCHEMA_VERSION ||
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
-      version === DATABASE_REPLACEMENT_SCHEMA_VERSION,
+      version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
+      version === DATABASE_MERGE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2261,7 +2266,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === STORE_VERSION_SCHEMA_VERSION ||
       version === DATABASE_EXPORT_SCHEMA_VERSION ||
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
-      version === DATABASE_REPLACEMENT_SCHEMA_VERSION) return;
+      version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
+      version === DATABASE_MERGE_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2395,7 +2401,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === STORE_VERSION_SCHEMA_VERSION ||
       version === DATABASE_EXPORT_SCHEMA_VERSION ||
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
-      version === DATABASE_REPLACEMENT_SCHEMA_VERSION,
+      version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
+      version === DATABASE_MERGE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2436,7 +2443,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === STORE_VERSION_SCHEMA_VERSION ||
       version === DATABASE_EXPORT_SCHEMA_VERSION ||
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
-      version === DATABASE_REPLACEMENT_SCHEMA_VERSION) return;
+      version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
+      version === DATABASE_MERGE_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2729,7 +2737,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== DATABASE_REPLACEMENT_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== DATABASE_MERGE_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2773,6 +2781,7 @@ function validateModelServiceSchema(
       version >= DATABASE_EXPORT_SCHEMA_VERSION,
       version >= SCHEDULED_BACKUP_SCHEMA_VERSION,
       version >= DATABASE_REPLACEMENT_SCHEMA_VERSION,
+      version >= DATABASE_MERGE_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2841,7 +2850,8 @@ function initializeModelServiceSchema(
       version === STORE_VERSION_SCHEMA_VERSION ||
       version === DATABASE_EXPORT_SCHEMA_VERSION ||
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
-      version === DATABASE_REPLACEMENT_SCHEMA_VERSION,
+      version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
+      version === DATABASE_MERGE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2882,7 +2892,8 @@ function initializeModelServiceSchema(
       version === STORE_VERSION_SCHEMA_VERSION ||
       version === DATABASE_EXPORT_SCHEMA_VERSION ||
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
-      version === DATABASE_REPLACEMENT_SCHEMA_VERSION) {
+      version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
+      version === DATABASE_MERGE_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3732,6 +3743,8 @@ export class EditorialStore {
   readonly #databaseReplacements: DatabaseReplacements;
   /** The software this store was opened by (Issue #433, S85a): read once from the package it ships in. */
   #softwareVersion = '';
+  /** The code this store was opened with: what opens a package's data as a store of its own (Issue #434, S86d). */
+  #codeRoot = '';
   /** ②C 评估 (Issue #429, S81a): each Book's versioned Evaluation Records. */
   readonly #evaluations: EvaluationRecords;
   /** ②A 分析反馈 (Issue #94, S38): the editor's judgments of analysis results. */
@@ -3798,13 +3811,26 @@ export class EditorialStore {
     this.#seriesKnowledge = new SeriesKnowledgeLedger(authority);
     this.#dataVersions = new DataVersionLedger(authority);
     this.#databaseExports = new DatabaseExports(authority, dataRoot, {
-      facts: () => ({ dataVersion: DATA_VERSION, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_REPLACEMENT_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: DATA_VERSION, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION }),
     });
     this.#scheduledBackups = new ScheduledBackups(authority, dataRoot, {
-      facts: () => ({ dataVersion: DATA_VERSION, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_REPLACEMENT_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: DATA_VERSION, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION }),
     });
     this.#databaseReplacements = new DatabaseReplacements(authority, dataRoot, {
-      facts: () => ({ dataVersion: DATA_VERSION, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_REPLACEMENT_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: DATA_VERSION, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION }),
+      // A package's data opens as a store of its own, with no launch control: brought to this revision and checked whole.
+      openPackage: async (root) => {
+        const opened = await EditorialStore.open(root, this.#codeRoot, {
+          induceUnprovableReconciliation: false,
+          persistLegacyReviewedDraft: false,
+          induceReimportProofTamper: false,
+          induceAbandonObjectRemovalFailure: false,
+          interruptAfterAbandonObjectRemoval: false,
+          baselineAnalysisRoute: null,
+          softwareVersion: this.#softwareVersion,
+        });
+        opened.close();
+      },
     });
     this.#evaluations = new EvaluationRecords(authority, { current: (bookId) => this.#evaluationManuscript(bookId) });
     this.#analysisFeedback = new AnalysisFeedbackLedger(authority);
@@ -3996,7 +4022,8 @@ export class EditorialStore {
       // and the house's evaluation preferences; revision 52 (Issue #63, S28a) the house's Series and their membership changes,
       // and revision 53 (Issue #63, S28b) Series Knowledge: candidates, items, revisions and promotion decisions; revision 54
       // (Issue #433, S85a) the versions that opened the store; revision 55 (Issue #434, S86a) the database exports; revision 56
-      // (Issue #434, S86b) the scheduled backups; and revision 57 (Issue #434, S86c) the replacements of the local data.
+      // (Issue #434, S86b) the scheduled backups; revision 57 (Issue #434, S86c) the replacements of the local data; and revision
+      // 58 (Issue #434, S86d) the merges of a package's Books.
       initializeBookPeopleSchema(authority);
       initializeReviewGuidelineSchema(authority);
       initializeLibraryMaterialSchema(authority);
@@ -4011,6 +4038,7 @@ export class EditorialStore {
       initializeDatabaseExportSchema(authority);
       initializeScheduledBackupSchema(authority);
       initializeDatabaseReplacementSchema(authority);
+      initializeDatabaseMergeSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -4054,10 +4082,11 @@ export class EditorialStore {
       store.#boundedCall(() => store.#boundedAuthority.startServiceLifetime(lifetimeId, new Date().toISOString()));
       // Every store records the versions that open it (Issue #433, S85a; DSTO-016): a new record only when one changed.
       store.#softwareVersion = softwareVersion;
+      store.#codeRoot = codeRoot;
       store.#dataVersionCall(() => store.#transaction(authority, () => store.#dataVersions.recordOpen({
         softwareVersion,
         dataVersion: DATA_VERSION,
-        schemaRevision: DATABASE_REPLACEMENT_SCHEMA_VERSION,
+        schemaRevision: DATABASE_MERGE_SCHEMA_VERSION,
       })));
       return store;
     } catch (error) {
@@ -11672,13 +11701,22 @@ export class EditorialStore {
       this.#databaseReplacements.freezing(() => this.#scheduledBackups.alone(() => this.#databaseReplacements.rollBack(replacementId, now))));
   }
 
+  /**
+   * `只导入其中的图书，与本机合并（重名的另存）` (Issue #434, S86d; ADR 0079 §1.5): the data backed up, and the previewed package's
+   * Books not already here merging, with every record they own, at AI7's next start. Its backup writes alone in the backup
+   * location, as a replacement's does.
+   */
+  async prepareDatabaseMerge(previewId: string, now: Date = new Date()): Promise<DatabaseReplacementsProjection> {
+    return this.#databaseReplacementCall(() => this.#scheduledBackups.alone(() => this.#databaseReplacements.prepareMerge(previewId, now)));
+  }
+
   async #databaseReplacementCall<T>(operation: () => Promise<T>): Promise<T> {
     this.#assertAvailable();
     try {
       return await operation();
     } catch (error) {
       if (error instanceof DatabaseReplacementError || error instanceof DatabasePackageError || error instanceof DatabaseExportError ||
-        error instanceof ScheduledBackupError) throw new StoreError(error.code, error.message);
+        error instanceof ScheduledBackupError || error instanceof DatabaseMergeError) throw new StoreError(error.code, error.message);
       throw error;
     }
   }

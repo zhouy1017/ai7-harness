@@ -462,7 +462,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     // Production Documents beside their ledgers, revision 38 adds their Delivery Records and revision 39 the Book's
     // 图书交付包 versions, so this pin moves with the terminal version the service stamps
     // (`BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION`).
-    requireJourney(version?.user_version === 57, 'credential-cleanup-metadata-version');
+    requireJourney(version?.user_version === 58, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, connection_name, provider_id, model_id,
               adapter_revision, configuration_revision, approved_fallback_chain,
@@ -1514,7 +1514,7 @@ async function main() {
     const packaged = unzipSync(await readFile(databaseExportPath));
     const manifest = JSON.parse(strFromU8(packaged['manifest.json']));
     requireJourney(
-      manifest.schema === 'ai7.database-package/1' && manifest.dataVersion === 1 && manifest.schemaRevision === 57 &&
+      manifest.schema === 'ai7.database-package/1' && manifest.dataVersion === 1 && manifest.schemaRevision === 58 &&
         manifest.credentials === 'excluded' && manifest.contents?.books === booksShown && Object.keys(packaged)[0] === 'store/ai7.sqlite',
       'database-export-manifest',
       { schema: manifest.schema, dataVersion: manifest.dataVersion, schemaRevision: manifest.schemaRevision, contents: manifest.contents },
@@ -1526,13 +1526,13 @@ async function main() {
     requireJourney(backupFiles.length === 1 && backupFiles[0].startsWith('AI7 自动备份 '), 'scheduled-backup-file', backupFiles);
     const backupPackage = unzipSync(await readFile(resolve(backupLocation, backupFiles[0])));
     const backupManifest = JSON.parse(strFromU8(backupPackage['manifest.json']));
-    requireJourney(backupManifest.origin === 'scheduled-backup' && backupManifest.schemaRevision === 57 && backupManifest.credentials === 'excluded',
+    requireJourney(backupManifest.origin === 'scheduled-backup' && backupManifest.schemaRevision === 58 && backupManifest.credentials === 'excluded',
       'scheduled-backup-manifest', { origin: backupManifest.origin, schemaRevision: backupManifest.schemaRevision });
     const backupMembersWithSecret = Object.entries(backupPackage).filter(([, bytes]) => [secretOne, secretTwo].some((secret) =>
       Buffer.from(bytes).includes(Buffer.from(secret, 'utf8')) || Buffer.from(bytes).includes(Buffer.from(secret, 'utf16le')))).map(([name]) => name);
     requireJourney(backupMembersWithSecret.length === 0, 'scheduled-backup-no-credential', backupMembersWithSecret);
 
-    at('database-import-replace-and-roll-back');
+    at('database-import-replace');
     // 导入数据库 (Issue #434, S86c; DSTO-017; ADR 0079 §1.3, §1.4): the file exported above is read and verified whole before
     // anything is chosen; 替换本机全部数据 — never preselected — backs the data up first and completes at AI7's next start, when
     // the data is the file's; and 回退到替换前的数据 brings back what it replaced, the data it replaces backed up first as well.
@@ -1560,7 +1560,7 @@ async function main() {
     const titlesBeforeReplace = await bookTitles();
     requireJourney(titlesBeforeReplace.length === booksShown + 1 && titlesBeforeReplace.includes('J12 替换前的图书'), 'database-import-titles-before', titlesBeforeReplace);
     await openDataAndStorage('database-import');
-    await assertRenderer(primary, `document.querySelector('.database-import')?.dataset.replacements === '0' && document.querySelector('.database-import-records summary')?.textContent === '替换记录（0）'`, 'database-import-no-records');
+    await assertRenderer(primary, `document.querySelector('.database-import')?.dataset.replacements === '0' && document.querySelector('.database-import-records summary')?.textContent === '导入记录（0）'`, 'database-import-no-records');
     await click(primary, '导入数据库…', 'database-import-choose');
     await waitFor(primary, `document.querySelector('.database-import-preview')?.dataset.previewId !== undefined`, 'database-import-previewed');
     const previewRows = await primary.evaluate(`Array.from(document.querySelectorAll('.database-import-preview dt')).map((term) => [term.textContent, term.nextElementSibling?.textContent ?? null])`);
@@ -1605,6 +1605,48 @@ async function main() {
     await openDataAndStorage('database-replaced');
     await waitFor(primary, `document.querySelector('.database-import')?.dataset.replacements === '1' && document.querySelector('.database-import')?.dataset.rollBackOf === ${JSON.stringify(replacementId)}`, 'database-replaced-recorded');
     await assertRenderer(primary, `(() => { const line = document.querySelector('.database-replacement-record')?.textContent ?? ''; return line.endsWith(${JSON.stringify(` · 已用「AI7 数据库.ai7db」替换本机全部数据 · 替换前备份「${replaceBackup}」`)}) && document.querySelector('.database-import-roll-back p')?.textContent === ${JSON.stringify(`上次用「AI7 数据库.ai7db」替换了本机全部数据；替换前的数据在「${replaceBackup}」里。`)}; })()`, 'database-replaced-words');
+    await close();
+
+    at('database-import-merge');
+    // 只导入其中的图书 (Issue #434, S86d; ADR 0079 §1.5): the backup the replacement made holds the Book it took away. Merged,
+    // that Book comes back with its records, the Books already here are not taken again, and nothing else of the data changes.
+    manager = await launch(resolve(backupLocation, replaceBackup));
+    [primary] = await waitForRendererCount(manager, 1, 'database-merge-window');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'database-merge-landing');
+    await openDataAndStorage('database-merge');
+    await click(primary, '导入数据库…', 'database-merge-choose');
+    await waitFor(primary, `document.querySelector('.database-import-preview')?.dataset.previewId !== undefined`, 'database-merge-previewed');
+    // Neither choice is preselected; the merge names each Book of the file as it would take it.
+    await assertRenderer(primary, `(() => { const choices = Array.from(document.querySelectorAll('input[name="database-import-choice"]')); return choices.length === 2 && choices.every((choice) => !choice.checked && !choice.disabled) && document.querySelector('[data-database-import-action="confirm"]').disabled && document.querySelector('.database-merge-plan')?.hidden === true; })()`, 'database-merge-not-preselected');
+    await assertRenderer(primary, `(() => { const choice = document.querySelector('input[name="database-import-choice"][value="merge"]'); if (!(choice instanceof HTMLInputElement)) return false; choice.click(); return choice.checked && document.querySelector('.database-merge-plan')?.hidden === false && document.querySelector('.database-import-consequence[data-choice="replace"]')?.hidden === true && !document.querySelector('[data-database-import-action="confirm"]').disabled; })()`, 'database-merge-choose-merge');
+    const planned = await primary.evaluate(`Array.from(document.querySelectorAll('.database-merge-book')).map((item) => [item.dataset.status, item.textContent])`);
+    requireJourney(
+      Array.isArray(planned) && planned.length === titlesBeforeReplace.length &&
+        planned.filter((entry) => entry[0] === 'new').map((entry) => entry[1]).join('|') === '《J12 替换前的图书》 · 将导入' &&
+        planned.filter((entry) => entry[0] === 'present').length === titlesBeforeReplace.length - 1,
+      'database-merge-plan-words',
+      planned,
+    );
+    await click(primary, '按所选方式导入', 'database-merge-confirm');
+    await waitFor(primary, `document.querySelector('.database-import-pending')?.dataset.kind === 'merge'`, 'database-merge-pending');
+    const mergeLines = await primary.evaluate(`Array.from(document.querySelectorAll('.database-import-pending p')).map((line) => line.textContent)`);
+    const mergeBackup = /^本机现在的数据已备份为「(AI7 合并前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(mergeLines) ? mergeLines[1] ?? '' : '')?.[1];
+    requireJourney(
+      Array.isArray(mergeLines) && mergeLines[0] === `已准备好把「${replaceBackup}」里的 1 本图书合并到本机。` && mergeBackup !== undefined &&
+        mergeLines[2] === 'AI7 下次启动时完成合并；在此之前做的修改都会保留。',
+      'database-merge-pending-words',
+      mergeLines,
+    );
+    await quitThroughProduct('database-merge');
+    manager = await launch();
+    [primary] = await waitForRendererCount(manager, 1, 'database-merged-window');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'database-merged-landing');
+    const titlesMerged = await bookTitles();
+    requireJourney(JSON.stringify(titlesMerged) === JSON.stringify(titlesBeforeReplace), 'database-merged-titles', titlesMerged);
+    await openDataAndStorage('database-merged');
+    // The merge is recorded beside the replacement, and 回退 still offers the replacement's backup.
+    await waitFor(primary, `document.querySelector('.database-import')?.dataset.replacements === '2' && document.querySelector('.database-import')?.dataset.rollBackOf === ${JSON.stringify(replacementId)} && (document.querySelector('.database-replacement-record')?.textContent ?? '').endsWith(${JSON.stringify(` · 已从「${replaceBackup}」合并 1 本图书：《J12 替换前的图书》 · 合并前备份「${mergeBackup}」`)})`, 'database-merged-recorded');
+    at('database-import-roll-back');
     // 回退到替换前的数据…, confirmed on its own: `不回退` holds the focus until the editor chooses.
     await click(primary, '回退到替换前的数据…', 'database-roll-back-open');
     await assertRenderer(primary, `document.activeElement?.dataset.databaseImportAction === 'keep' && document.querySelector('.database-import-roll-back-confirm .attention-note')?.textContent === ${JSON.stringify(`回退会用「${replaceBackup}」替换本机现在的全部数据。AI7 先把现在的数据也备份一次；回退在 AI7 下次启动时完成。`)}`, 'database-roll-back-confirmation');
@@ -1630,13 +1672,16 @@ async function main() {
     await waitFor(primary, `document.querySelector('.database-import')?.dataset.replacements === '1' && document.querySelector('.database-import')?.dataset.rollBackOf === undefined && (document.querySelector('.database-replacement-record')?.textContent ?? '').endsWith(${JSON.stringify(` · 已回退到「${replaceBackup}」 · 回退前备份「${rollBackBackup}」`)})`, 'database-rolled-back-recorded');
     await close();
     // Both backups wait in the backup location, each the database package of the data it replaced, neither with a credential.
-    const replaceBackups = (await readdir(backupLocation)).filter((name) => name.startsWith('AI7 替换前备份 ')).sort();
-    requireJourney(JSON.stringify(replaceBackups) === JSON.stringify([replaceBackup, rollBackBackup].sort()), 'database-replace-backups', replaceBackups);
+    // The replacement's and the roll-back's backups each hold the Book made before the replacement — the roll-back's because
+    // the merge brought it back — and the merge's holds the data it merged into.
+    const replaceBackups = (await readdir(backupLocation)).filter((name) => name.startsWith('AI7 替换前备份 ') || name.startsWith('AI7 合并前备份 ')).sort();
+    requireJourney(JSON.stringify(replaceBackups) === JSON.stringify([replaceBackup, rollBackBackup, mergeBackup].sort()), 'database-replace-backups', replaceBackups);
     for (const name of replaceBackups) {
       const replacedPackage = unzipSync(await readFile(resolve(backupLocation, name)));
       const replacedManifest = JSON.parse(strFromU8(replacedPackage['manifest.json']));
-      requireJourney(replacedManifest.origin === 'pre-replace-backup' && replacedManifest.schemaRevision === 57 && replacedManifest.credentials === 'excluded' &&
-        replacedManifest.contents?.books === (name === replaceBackup ? booksShown + 1 : booksShown), 'database-replace-backup-manifest', { name, contents: replacedManifest.contents });
+      requireJourney(replacedManifest.origin === (name === mergeBackup ? 'pre-merge-backup' : 'pre-replace-backup') && replacedManifest.schemaRevision === 58 &&
+        replacedManifest.credentials === 'excluded' && replacedManifest.contents?.books === (name === mergeBackup ? booksShown : booksShown + 1),
+      'database-replace-backup-manifest', { name, contents: replacedManifest.contents });
       const withSecret = Object.entries(replacedPackage).filter(([, bytes]) => [secretOne, secretTwo].some((secret) =>
         Buffer.from(bytes).includes(Buffer.from(secret, 'utf8')) || Buffer.from(bytes).includes(Buffer.from(secret, 'utf16le')))).map(([member]) => member);
       requireJourney(withSecret.length === 0, 'database-replace-backup-no-credential', withSecret);

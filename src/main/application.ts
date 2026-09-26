@@ -3082,6 +3082,16 @@ function registerRendererHandlers(
       });
     }),
   );
+  // 只导入其中的图书 (Issue #434, S86d): house-wide and serialized, like 替换本机全部数据.
+  ipcMain.handle(IPC_CHANNELS.prepareDatabaseMerge, (event, input: Parameters<RendererApi['prepareDatabaseMerge']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('prepareDatabaseMerge', { previewId: input.previewId });
+      });
+    }),
+  );
   // 现在关闭 AI7 (Issue #434, S86c): the whole application closes, after every effect already asked for, unless a window still
   // holds changes not yet saved — then nothing closes and that window says so, as when the editor closes AI7 themselves.
   ipcMain.handle(IPC_CHANNELS.quitApplication, (event) =>

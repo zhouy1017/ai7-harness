@@ -12,7 +12,7 @@ import { LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gat
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { reconnectPreflight } from '../../src/service/reconnect-preflight.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CLARIFICATION_SCHEMA_VERSION, DATABASE_REPLACEMENT_SCHEMA_VERSION, EXPORT_LEDGER_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { CLARIFICATION_SCHEMA_VERSION, DATABASE_MERGE_SCHEMA_VERSION, EXPORT_LEDGER_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
   type BaselineAnalysisProjection,
@@ -172,7 +172,7 @@ describe('schema revision 30 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_REPLACEMENT_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_MERGE_SCHEMA_VERSION);
       expect(analysisRunStatesShape(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_run_states ORDER BY rowid').all()).toEqual(before.states);
       const after = relationTruth(database);

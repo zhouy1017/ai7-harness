@@ -632,6 +632,8 @@ async function dispatch(
     case 'rollBackDatabaseReplacement':
       requireNothingRunning(store, jobs, analysisExecution, reviewRuns);
       return { id: request.id, ok: true, op: request.op, result: await store.rollBackDatabaseReplacement(request.input.replacementId) };
+    case 'prepareDatabaseMerge':
+      return { id: request.id, ok: true, op: request.op, result: await store.prepareDatabaseMerge(request.input.previewId) };
     case 'cancelDatabaseExport':
       return { id: request.id, ok: true, op: request.op, result: store.cancelDatabaseExport(request.input.activityId) };
     case 'proposeSeriesKnowledge':

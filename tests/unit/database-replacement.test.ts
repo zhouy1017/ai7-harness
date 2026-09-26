@@ -87,6 +87,8 @@ async function prepared(): Promise<ReplacementIntent> {
     backupFileName: preReplaceBackupFileName(T),
     backupSha256: 'b'.repeat(64),
     preparedAt: T.toISOString(),
+    mergeBooks: null,
+    mergeNotices: [],
     packageMembersSha256,
   };
   await writeReplacementIntent(dataRoot, intent);

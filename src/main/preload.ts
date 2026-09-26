@@ -388,6 +388,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectDatabaseReplacements']['output']>(IPC_CHANNELS.inspectDatabaseReplacements, {}),
   rollBackDatabaseReplacement: (input: Parameters<RendererApi['rollBackDatabaseReplacement']>[0]) =>
     invoke<ServiceOperationMap['rollBackDatabaseReplacement']['output']>(IPC_CHANNELS.rollBackDatabaseReplacement, input),
+  prepareDatabaseMerge: (input: Parameters<RendererApi['prepareDatabaseMerge']>[0]) =>
+    invoke<ServiceOperationMap['prepareDatabaseMerge']['output']>(IPC_CHANNELS.prepareDatabaseMerge, input),
   quitApplication: () => invoke<Awaited<ReturnType<RendererApi['quitApplication']>>>(IPC_CHANNELS.quitApplication, {}),
   cancelDatabaseExport: (input: Parameters<RendererApi['cancelDatabaseExport']>[0]) =>
     invoke<ServiceOperationMap['cancelDatabaseExport']['output']>(IPC_CHANNELS.cancelDatabaseExport, input),

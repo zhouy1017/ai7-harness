@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BUILTIN_EVALUATION_PROFILE, EVALUATION_RECORD_TRIGGER_SQL, emptyEvaluationContent } from '../../src/service/evaluation-records.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { DATABASE_REPLACEMENT_SCHEMA_VERSION, LIBRARY_MATERIAL_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { DATABASE_MERGE_SCHEMA_VERSION, LIBRARY_MATERIAL_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import type { EvaluationContent, EvaluationWorkspaceProjection } from '../../src/shared/protocol.js';
 import { importSample1Book, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -170,7 +170,7 @@ describe('②C 评估 over the real store', () => {
 
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_REPLACEMENT_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_MERGE_SCHEMA_VERSION);
       for (const table of ['evaluation_records', 'evaluation_record_entries']) {
         expect(() => database.exec(`UPDATE ${table} SET canonical_json = canonical_json`)).toThrowError(/EVALUATION_LEDGER_IMMUTABLE/u);
         expect(() => database.exec(`DELETE FROM ${table}`)).toThrowError(/EVALUATION_LEDGER_IMMUTABLE/u);
@@ -202,7 +202,7 @@ describe('②C 评估 over the real store', () => {
     }
     const plant = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      plant.exec(`DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; DROP TABLE learning_eligibility_decisions; DROP TABLE proposal_decision_feedback; DROP TABLE analysis_feedback_signals; DROP TABLE evaluation_record_entries; DROP TABLE evaluation_records; PRAGMA user_version = ${LIBRARY_MATERIAL_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; DROP TABLE learning_eligibility_decisions; DROP TABLE proposal_decision_feedback; DROP TABLE analysis_feedback_signals; DROP TABLE evaluation_record_entries; DROP TABLE evaluation_records; PRAGMA user_version = ${LIBRARY_MATERIAL_SCHEMA_VERSION};`);
     } finally {
       plant.close();
     }
@@ -215,7 +215,7 @@ describe('②C 评估 over the real store', () => {
     }
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_REPLACEMENT_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_MERGE_SCHEMA_VERSION);
       expect((database.prepare('SELECT count(*) count FROM evaluation_records').get() as { count: number }).count).toBe(0);
     } finally {
       database.close();
