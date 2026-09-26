@@ -219,6 +219,13 @@ interface RevisionRow {
   digest: string;
 }
 
+interface RevisionState {
+  latest: RevisionRow;
+  listed: RevisionRow[];
+  total: number;
+  steps: ReadonlySet<MaintenanceCaseStep>;
+}
+
 function revisionRecord(caseId: string, revision: Omit<RevisionRow, 'digest'>, prior: string | null) {
   return canonicalRecord({
     schema: REVISION_SCHEMA,
@@ -259,18 +266,20 @@ export class MaintenanceCases {
     if (!this.#present()) return { cases: [], total: 0, withdrawn: false, archived: false };
     const rows = this.#db.prepare(
       'SELECT case_id FROM maintenance_cases WHERE book_id = ? AND publication_version_id = ? ORDER BY ordinal DESC',
-    ).all(bookId, publicationVersionId) as SqlRow[];
+    ).iterate(bookId, publicationVersionId);
     const cases: MaintenanceCaseSummaryProjection[] = [];
+    let total = 0;
     let withdrawn = false;
     let archived = false;
     for (const row of rows) {
+      total += 1;
       const record = this.#case(bookId, text(row.case_id));
       if (record.classification === 'withdrawal') withdrawn = true;
       if (record.classification === 'archive') archived = true;
       if (cases.length >= MAX_MAINTENANCE_CASES_LISTED) continue;
       cases.push(this.#summary(record));
     }
-    return { cases, total: rows.length, withdrawn, archived };
+    return { cases, total, withdrawn, archived };
   }
 
   /**
@@ -298,7 +307,7 @@ export class MaintenanceCases {
   /** One case as its designation lists it. */
   #summary(record: CaseRow): MaintenanceCaseSummaryProjection {
     const revisions = this.#revisions(record);
-    const latest = revisions.at(-1)!;
+    const latest = revisions.latest;
     return {
       caseId: record.caseId,
       ordinal: record.ordinal,
@@ -307,7 +316,7 @@ export class MaintenanceCases {
       status: latest.status,
       statusLabel: MAINTENANCE_STATUS_LABELS[latest.status],
       nextStep: nextStepOf(record.classification, revisions),
-      revisions: revisions.length,
+      revisions: revisions.total,
       recordedAt: record.createdAt,
       latestAt: latest.recordedAt,
     };
@@ -398,7 +407,7 @@ export class MaintenanceCases {
     if (step.kind === 'link-proposal') {
       requireMaintenance(record.classification === 'correction', 'MAINTENANCE_STEP_INVALID', '只有更正可以关联修改建议。');
       requireMaintenance(typeof step.markId === 'string' && UUID_PATTERN.test(step.markId), 'MAINTENANCE_INVALID', '维护事项请求无效。');
-      requireMaintenance(this.#proposals(record, revisions).some((proposal) => proposal.markId === step.markId), 'MAINTENANCE_LINK_INVALID',
+      requireMaintenance(this.#proposals(record).some((proposal) => proposal.markId === step.markId), 'MAINTENANCE_LINK_INVALID',
         '所选修改建议不是这本书稿件在这个发稿版本之后提出的，或已经关联过。');
       this.#appendRevision(record.caseId, latest.digest, { ...next, step: 'proposal-linked', status: latest.status, markId: step.markId });
       return this.#result(record, MAINTENANCE_RECORDED);
@@ -408,7 +417,7 @@ export class MaintenanceCases {
         'MAINTENANCE_STEP_INVALID', '只有更正、替代和再版可以关联发稿版本。');
       requireMaintenance(typeof step.publicationVersionId === 'string' && UUID_PATTERN.test(step.publicationVersionId),
         'MAINTENANCE_INVALID', '维护事项请求无效。');
-      requireMaintenance(this.#successors(record, revisions).some((designation) => designation.publicationVersionId === step.publicationVersionId),
+      requireMaintenance(this.#successors(record, step.publicationVersionId).some((designation) => designation.publicationVersionId === step.publicationVersionId),
         'MAINTENANCE_LINK_INVALID', '只能关联在这个发稿版本之后另行设定的发稿版本，且每个只关联一次。');
       // The wait for a separately designated version ends; the case still waits for its conclusion (MAINT-007).
       this.#appendRevision(record.caseId, latest.digest, {
@@ -464,8 +473,8 @@ export class MaintenanceCases {
   }
 
   /** The newest revision, when it is the one the editor read and the case still takes a step. */
-  #open(revisions: RevisionRow[], expected: number): RevisionRow {
-    const latest = revisions.at(-1)!;
+  #open(revisions: RevisionState, expected: number): RevisionRow {
+    const latest = revisions.latest;
     requireMaintenance(latest.revision === expected, 'MAINTENANCE_CASE_CHANGED', '这个维护事项在查看后有了新的记录，请看过再继续。');
     requireMaintenance(latest.status !== 'complete', 'MAINTENANCE_CASE_COMPLETE', '这个维护事项已经完成，不再记录新的步骤。');
     return latest;
@@ -509,11 +518,14 @@ export class MaintenanceCases {
   }
 
   /** The case's revisions in order, each verified and chained to the one before it. */
-  #revisions(record: CaseRow): RevisionRow[] {
-    const rows = this.#db.prepare('SELECT * FROM maintenance_case_revisions WHERE case_id = ? ORDER BY revision').all(record.caseId) as SqlRow[];
-    requireMaintenance(rows.length > 0, 'MAINTENANCE_RECORD_INVALID', '维护事项缺少它的第一条记录。');
+  #revisions(record: CaseRow): RevisionState {
+    const rows = this.#db.prepare('SELECT * FROM maintenance_case_revisions WHERE case_id = ? ORDER BY revision').iterate(record.caseId);
     let prior: string | null = null;
-    return rows.map((row, index) => {
+    let total = 0;
+    let latest: RevisionRow | null = null;
+    const listed: RevisionRow[] = [];
+    const steps = new Set<MaintenanceCaseStep>();
+    for (const row of rows) {
       const revision: RevisionRow = {
         revision: integer(row.revision),
         step: text(row.step) as MaintenanceCaseStep,
@@ -527,11 +539,17 @@ export class MaintenanceCases {
         digest: text(row.sha256),
       };
       const expected = revisionRecord(record.caseId, revision, prior);
-      requireMaintenance(revision.revision === index + 1 && expected.json === text(row.canonical_json) && expected.digest === revision.digest,
+      requireMaintenance(revision.revision === total + 1 && expected.json === text(row.canonical_json) && expected.digest === revision.digest,
         'MAINTENANCE_RECORD_INVALID', '维护事项的记录与其摘要不一致。');
       prior = revision.digest;
-      return revision;
-    });
+      total += 1;
+      latest = revision;
+      steps.add(revision.step);
+      listed.push(revision);
+      if (listed.length > MAX_MAINTENANCE_REVISIONS_LISTED) listed.shift();
+    }
+    requireMaintenance(latest !== null, 'MAINTENANCE_RECORD_INVALID', '维护事项缺少它的第一条记录。');
+    return { latest, listed, total, steps };
   }
 
   /** The newest 勘误 version of a case, verified; `null` before the first. */
@@ -564,33 +582,34 @@ export class MaintenanceCases {
   }
 
   /** The Book's designations after the target, in order: what 关联发稿版本 may name, less the ones already linked. */
-  #successors(record: CaseRow, revisions: RevisionRow[]): Designation[] {
+  #successors(record: CaseRow, selectedId: string | null = null): Designation[] {
     const target = this.#designation(record.bookId, record.publicationVersionId)!;
-    const linked = new Set(revisions.flatMap((revision) => (revision.publicationVersionId === null ? [] : [revision.publicationVersionId])));
     return (this.#db.prepare(
       `SELECT pv.publication_version_id, pv.ordinal, pv.created_at, pv.revision_id, pv.scope, pv.sha256, mr.revision_label, mv.label milestone_label
        FROM publication_versions pv
        JOIN manuscript_revisions mr ON mr.revision_id = pv.revision_id
        JOIN milestone_versions mv ON mv.milestone_id = pv.milestone_id
-       WHERE pv.book_id = ? AND pv.ordinal > ? ORDER BY pv.ordinal`,
-    ).all(record.bookId, target.ordinal) as SqlRow[]).map(designationOf).filter((designation) => !linked.has(designation.publicationVersionId));
+       WHERE pv.book_id = ? AND pv.ordinal > ?
+         AND (? IS NULL OR pv.publication_version_id = ?)
+         AND NOT EXISTS (SELECT 1 FROM maintenance_case_revisions linked
+           WHERE linked.case_id = ? AND linked.link_publication_version_id = pv.publication_version_id)
+       ORDER BY pv.ordinal LIMIT ?`,
+    ).all(record.bookId, target.ordinal, selectedId, selectedId, record.caseId, MAX_MAINTENANCE_PUBLICATIONS_OFFERED) as SqlRow[]).map(designationOf);
   }
 
   /** The Book's manuscript's 修改建议 made after the designation, newest first: what 关联修改建议 may name, less the linked. */
-  #proposals(record: CaseRow, revisions: RevisionRow[]): Array<{ markId: string; label: string; stateLabel: string; createdAt: string }> {
+  #proposals(record: CaseRow): Array<{ markId: string; label: string; stateLabel: string; createdAt: string }> {
     const target = this.#designation(record.bookId, record.publicationVersionId)!;
-    const linked = new Set(revisions.flatMap((revision) => (revision.markId === null ? [] : [revision.markId])));
     return (this.#db.prepare(
       `SELECT em.mark_id, i.current_text, i.proposed_text, em.status, em.created_at
        FROM editorial_marks em
        JOIN manuscripts m ON m.manuscript_id = em.manuscript_id AND m.role = 'primary'
        JOIN proposal_change_items i ON i.mark_id = em.mark_id
        WHERE em.book_id = ? AND em.kind = 'change-suggestion' AND em.status IN ('open', 'applied', 'resolved') AND em.created_at > ?
+         AND NOT EXISTS (SELECT 1 FROM maintenance_case_revisions linked WHERE linked.case_id = ? AND linked.link_mark_id = em.mark_id)
        ORDER BY em.created_at DESC, em.rowid DESC LIMIT ?`,
-    ).all(record.bookId, target.createdAt, MAX_MAINTENANCE_PROPOSALS_OFFERED + linked.size) as SqlRow[])
-      .map((row) => proposalOf(row))
-      .filter((proposal) => !linked.has(proposal.markId))
-      .slice(0, MAX_MAINTENANCE_PROPOSALS_OFFERED);
+    ).all(record.bookId, target.createdAt, record.caseId, MAX_MAINTENANCE_PROPOSALS_OFFERED) as SqlRow[])
+      .map((row) => proposalOf(row));
   }
 
   /** A linked record in its own words as it stands now; linking it granted the case nothing. */
@@ -621,10 +640,10 @@ export class MaintenanceCases {
 
   #projection(record: CaseRow): MaintenanceCaseProjection {
     const revisions = this.#revisions(record);
-    const latest = revisions.at(-1)!;
+    const latest = revisions.latest;
     const target = this.#designation(record.bookId, record.publicationVersionId)!;
     const open = latest.status !== 'complete';
-    const listed = revisions.slice(-MAX_MAINTENANCE_REVISIONS_LISTED);
+    const listed = revisions.listed;
     return {
       bookId: record.bookId,
       caseId: record.caseId,
@@ -650,13 +669,13 @@ export class MaintenanceCases {
         recordedAt: revision.recordedAt,
         digest: revision.digest,
       })),
-      revisionsTotal: revisions.length,
+      revisionsTotal: revisions.total,
       errata: this.#errata(record.caseId),
       conclusions: !open ? [] : awaitsDesignation(record.classification, revisions) ? ['unresolved'] : ['unresolved', 'complete'],
       choices: {
-        proposals: open && record.classification === 'correction' ? this.#proposals(record, revisions) : [],
+        proposals: open && record.classification === 'correction' ? this.#proposals(record) : [],
         publications: open && (record.classification === 'correction' || record.classification === 'supersession' || record.classification === 'reissue')
-          ? this.#successors(record, revisions).slice(0, MAX_MAINTENANCE_PUBLICATIONS_OFFERED)
+          ? this.#successors(record)
             .map((designation) => ({ publicationVersionId: designation.publicationVersionId, label: designation.label }))
           : [],
       },
@@ -695,15 +714,15 @@ function proposalOf(row: SqlRow): { markId: string; label: string; stateLabel: s
 }
 
 /** A 替代 or 再版 with no later designation linked yet: it still waits for one (MAINT-007). */
-function awaitsDesignation(classification: MaintenanceClassification, revisions: ReadonlyArray<RevisionRow>): boolean {
-  return (classification === 'supersession' || classification === 'reissue') && !revisions.some((revision) => revision.step === 'publication-linked');
+function awaitsDesignation(classification: MaintenanceClassification, revisions: RevisionState): boolean {
+  return (classification === 'supersession' || classification === 'reissue') && !revisions.steps.has('publication-linked');
 }
 
 /** The step a case offers next (D5): none once complete. */
-function nextStepOf(classification: MaintenanceClassification, revisions: ReadonlyArray<RevisionRow>): MaintenanceNextStep | null {
-  const latest = revisions.at(-1)!;
+function nextStepOf(classification: MaintenanceClassification, revisions: RevisionState): MaintenanceNextStep | null {
+  const latest = revisions.latest;
   if (latest.status === 'complete') return null;
-  const has = (step: MaintenanceCaseStep): boolean => revisions.some((revision) => revision.step === step);
+  const has = (step: MaintenanceCaseStep): boolean => revisions.steps.has(step);
   if (classification === 'correction') return !has('proposal-linked') ? 'link-proposal' : !has('publication-linked') ? 'link-publication' : 'conclude';
   if (classification === 'errata') return has('errata-saved') ? 'conclude' : 'write-errata';
   if (classification === 'supersession' || classification === 'reissue') return has('publication-linked') ? 'conclude' : 'link-publication';

@@ -139,10 +139,11 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
   let draft: Draft | null = null;
   let open: OpenCase | null = null;
   /**
-   * The older cases `更早的维护事项…` read for each designation, below the ones 交付物 lists (MAINT-001). A step on one of
+   * One bounded older page from `更早的维护事项…`, below the cases 交付物 lists (MAINT-001). A step on one of
    * them updates its line from the step's answer; 交付物's own read refreshes the rest.
    */
   const older = new Map<string, MaintenanceCaseSummaryProjection[]>();
+  let olderHasMore = false;
   /** Where focus goes once 交付物 has drawn the surface again: a selector inside one designation's section. */
   let pendingFocus: { publicationVersionId: string; selector: string } | null = null;
 
@@ -180,7 +181,7 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     section.append(heading);
     if (maintenance.withdrawn) section.append(el('p', 'attention-note maintenance-withdrawn', `${MAINTENANCE_WITHDRAWN}：${MAINTENANCE_INTERNAL_ONLY}`));
     if (maintenance.archived) section.append(el('p', 'field-note maintenance-archived', MAINTENANCE_ARCHIVED));
-    // 交付物's newest cases, then the older ones read so far, each once.
+    // Keep one older page beside the newest cases; return to the start to revisit earlier pages.
     const listed = new Set(maintenance.cases.map((summary) => summary.caseId));
     const shown = [...maintenance.cases, ...(older.get(designation.publicationVersionId) ?? []).filter((summary) => !listed.has(summary.caseId))];
     if (shown.length > 0) {
@@ -188,13 +189,26 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
       for (const summary of shown) list.append(renderSummary(summary, designation.publicationVersionId));
       section.append(list);
     }
-    if (maintenance.total > shown.length) {
+    const olderPage = older.get(designation.publicationVersionId);
+    if (olderPage === undefined ? maintenance.total > shown.length : olderHasMore) {
       const more = el('div', 'maintenance-older');
       more.append(el('p', 'field-note', maintenanceOlderLine(maintenance.total - shown.length)));
       const read = actionButton('older', 'quiet', () => void loadOlder(designation.publicationVersionId, shown));
       read.disabled = working;
       more.append(read);
       section.append(more);
+    }
+    if (olderPage !== undefined) {
+      const restart = el('button', 'quiet', '返回最新维护事项');
+      restart.type = 'button';
+      restart.disabled = working;
+      restart.addEventListener('click', () => {
+        older.clear();
+        olderHasMore = false;
+        pendingFocus = { publicationVersionId: designation.publicationVersionId, selector: '[data-maintenance-action="older"]' };
+        options.redraw();
+      });
+      section.append(restart);
     }
     const drafting = draft !== null && draft.publicationVersionId === designation.publicationVersionId;
     const row = el('div', 'button-row compact-actions');
@@ -518,7 +532,9 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
       working = false;
       if (destroyed || request !== ticket) return;
       if (page.bookId !== bookId || page.publicationVersionId !== publicationVersionId) throw new Error(MAINTENANCE_STATUS_LINES.olderFailed);
-      older.set(publicationVersionId, [...(older.get(publicationVersionId) ?? []), ...page.cases]);
+      older.clear();
+      older.set(publicationVersionId, page.cases);
+      olderHasMore = page.more;
       const first = page.cases[0];
       pendingFocus = first === undefined ? null : { publicationVersionId, selector: caseSelector(first.caseId, '[data-maintenance-action="toggle-case"]') };
       options.redraw();

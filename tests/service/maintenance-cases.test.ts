@@ -319,6 +319,24 @@ describe('⑥ 维护事项 (S68a)', () => {
       }
       const offered = store.inspectMaintenanceCase({ bookId, caseId: ids[0]! }).choices.publications;
       expect([offered.length, offered[0]!.label, offered.at(-1)!.label]).toEqual([30, '第 2 次 · 「一审稿」 · r1 · 纸质版第 2 印', '第 31 次 · 「一审稿」 · r1 · 纸质版第 31 印']);
+      // A link older than the bounded timeline still governs completion and duplicate refusal.
+      let maintained = store.recordMaintenanceCase({ bookId, publicationVersionId: a,
+        classification: 'supersession', reason: '等待替代版本', evidence: null }).maintenanceCase;
+      const linkedId = offered[0]!.publicationVersionId;
+      maintained = store.appendMaintenanceCaseRevision({ bookId, caseId: maintained.caseId, expectedRevision: maintained.expectedRevision,
+        step: { kind: 'link-publication', publicationVersionId: linkedId } }).maintenanceCase;
+      for (let index = 0; index < 65; index += 1) {
+        maintained = store.appendMaintenanceCaseRevision({ bookId, caseId: maintained.caseId, expectedRevision: maintained.expectedRevision,
+          step: { kind: 'conclude', status: 'unresolved', outcome: `仍待确认 ${index}` } }).maintenanceCase;
+      }
+      expect(maintained.revisions).toHaveLength(60);
+      expect(maintained.revisionsTotal).toBe(67);
+      expect(maintained.nextStep).toBe('conclude');
+      expect(maintained.choices.publications.some((entry) => entry.publicationVersionId === linkedId)).toBe(false);
+      expect(code(() => store.appendMaintenanceCaseRevision({ bookId, caseId: maintained.caseId, expectedRevision: maintained.expectedRevision,
+        step: { kind: 'link-publication', publicationVersionId: linkedId } }))).toBe('MAINTENANCE_LINK_INVALID');
+      expect(store.appendMaintenanceCaseRevision({ bookId, caseId: maintained.caseId, expectedRevision: maintained.expectedRevision,
+        step: { kind: 'conclude', status: 'complete', outcome: '替代已经确认' } }).maintenanceCase.status).toBe('complete');
       store.markCleanShutdown();
     } finally {
       store.close();
