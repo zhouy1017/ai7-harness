@@ -154,7 +154,10 @@ describe('导入数据库 over the real store', () => {
       // 回退到替换前的数据: the backup waits to replace the data, which is backed up first as well.
       expect(code(await store.rollBackDatabaseReplacement('00000000-0000-4000-8000-000000000001', LATER).catch((error: unknown) => error)))
         .toBe('DATABASE_REPLACEMENT_ROLLBACK_STALE');
-      const rolling = await store.rollBackDatabaseReplacement(replacementId, LATER);
+      // Frozen from the moment it is asked for, as a replacement is (Issue #434 review).
+      const asked = store.rollBackDatabaseReplacement(replacementId, LATER);
+      expect(store.replacementFrozen()).toBe(true);
+      const rolling = await asked;
       expect(rolling.pending).toMatchObject({ kind: 'roll-back', packageFileName: preReplaceBackupFileName(T), packageOrigin: 'pre-replace-backup',
         backupFileName: preReplaceBackupFileName(LATER), contents: { books: 2 } });
       expect(rolling.rollBackOf).toBeNull();
@@ -405,6 +408,38 @@ describe('替换本机全部数据 at its second review (Issue #434 review)', ()
       await store.cancelDatabaseReplacement(waiting.pending!.replacementId);
       expect(store.replacementWaiting()).toBe(false);
       expect(await store.runScheduledBackupIfDue(dayOn)).toBe(true);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
+  it('freezes what may be admitted from the moment a replacement is asked for, until it is cancelled or refused (Issue #434 review)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      createBook(store, '甲书');
+      const packagePath = await exported(store, 'AI7 数据库.ai7db');
+      // Enough data that the backup takes many steps to write.
+      mkdirSync(join(roots.dataRoot, 'bulk'), { recursive: true });
+      await writeFile(join(roots.dataRoot, 'bulk', 'filler.bin'), Buffer.alloc(24 << 20, 7));
+      const preview = await store.inspectDatabaseImport(packagePath);
+      expect(store.replacementFrozen()).toBe(false);
+      const preparing = store.prepareDatabaseReplacement(preview.previewId, T);
+      // Frozen at once, before the backup is written, while nothing waits yet.
+      expect([store.replacementFrozen(), store.replacementWaiting()]).toEqual([true, false]);
+      const deadline = Date.now() + 60_000;
+      while (!(existsSync(backups()) && readdirSync(backups()).some((name) => /\.ai7db\.partial$/u.test(name)))) {
+        if (Date.now() > deadline) throw new Error('timed out waiting for the backup to be written');
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      expect([store.replacementFrozen(), store.replacementWaiting()]).toEqual([true, false]);
+      const waiting = await preparing;
+      expect([store.replacementFrozen(), store.replacementWaiting()]).toEqual([true, true]);
+      await store.cancelDatabaseReplacement(waiting.pending!.replacementId);
+      expect([store.replacementFrozen(), store.replacementWaiting()]).toEqual([false, false]);
+      // A preparation refused leaves nothing frozen: the preview it names is spent.
+      await expect(store.prepareDatabaseReplacement(preview.previewId, LATER)).rejects.toBeInstanceOf(StoreError);
+      expect(store.replacementFrozen()).toBe(false);
       store.markCleanShutdown();
     } finally {
       store.close();

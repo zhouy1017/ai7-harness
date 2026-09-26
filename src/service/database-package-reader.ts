@@ -60,7 +60,7 @@ interface ZipEntry {
 }
 
 const ORIGINS: ReadonlyArray<string> = ['database-export', 'scheduled-backup', 'pre-replace-backup', 'pre-merge-backup'];
-const MAX_MANIFEST_BYTES = 16 * 1024 * 1024;
+export const MAX_MANIFEST_BYTES = 16 * 1024 * 1024;
 /**
  * The most a package's central directory may take, checked before it is read (Issue #434 review): 65,534 entries with names of
  * two hundred bytes on average, far past any package AI7 writes.

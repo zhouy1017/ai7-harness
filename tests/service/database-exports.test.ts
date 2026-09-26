@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { strFromU8, unzipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
-import { DATABASE_EXPORT_TRIGGER_SQL, databasePackageSources, writeDatabasePackage, type DatabasePackageBounds } from '../../src/service/database-exports.js';
+import { DATABASE_EXPORT_TRIGGER_SQL, copyStore, databasePackageSources, writeDatabasePackage, type DatabasePackageBounds } from '../../src/service/database-exports.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { DATABASE_MERGE_SCHEMA_VERSION, STORE_VERSION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
@@ -481,45 +481,102 @@ describe('导出数据库 off the request (Issue #434 review, V2-UX-EXP-011)', (
 });
 
 describe('the database package (Issue #434 review)', () => {
-  it('counts what its copy of the store holds, whatever another request writes while it is made', async () => {
-    const path = join(roots.inputRoot, 'counted.sqlite');
+  /** A store of `rows` Books, each carrying a kilobyte, so that copying it takes many steps. */
+  function storeOfBooks(path: string, rows: number): DatabaseSync {
     const db = new DatabaseSync(path);
+    db.exec('PRAGMA journal_mode = WAL');
+    db.exec('CREATE TABLE books (book_id TEXT PRIMARY KEY, note TEXT NOT NULL)');
+    const insert = db.prepare('INSERT INTO books VALUES (?, ?)');
+    db.exec('BEGIN');
+    for (let index = 0; index < rows; index += 1) insert.run(randomUUID(), 'x'.repeat(1000));
+    db.exec('COMMIT');
+    return db;
+  }
+
+  const FACTS = (): { dataVersion: number; softwareVersion: string; schemaRevision: number; createdAt: string; origin: 'database-export' } => ({
+    dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 1, createdAt: new Date().toISOString(), origin: 'database-export',
+  });
+
+  it('counts what its copy of the store holds, whatever another request writes while it is made', async () => {
+    const db = storeOfBooks(join(roots.inputRoot, 'counted.sqlite'), 20_000);
     try {
-      db.exec('CREATE TABLE books (book_id TEXT PRIMARY KEY)');
-      db.prepare('INSERT INTO books VALUES (?)').run(randomUUID());
       const books = (): number => (db.prepare('SELECT count(*) count FROM books').get() as { count: number }).count;
-      const write = (): void => {
-        db.prepare('INSERT INTO books VALUES (?)').run(randomUUID());
-      };
       const dataRoot = join(roots.inputRoot, 'root');
       await mkdir(dataRoot);
       const packagePath = join(roots.inputRoot, 'counted.ai7db');
-      const written = await writeDatabasePackage(db, dataRoot, packagePath, () => {
-        // Another request's writes, queued as the facts are read: none may land before the store is copied.
-        queueMicrotask(write);
+      // Another request's writes through the same connection, one at every turn of the event loop once the copy has begun.
+      let writing = true;
+      let written = 0;
+      const write = (): void => {
+        if (!writing) return;
+        if (existsSync(`${packagePath}.store`)) {
+          db.prepare('INSERT INTO books VALUES (?, ?)').run(randomUUID(), 'written meanwhile');
+          written += 1;
+        }
         setImmediate(write);
-        return {
-          dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 1, createdAt: new Date().toISOString(), origin: 'database-export',
-          contents: { books: books(), sourceVersions: 0, libraryMaterials: 0, series: 0 },
-        };
-      });
-      expect(written.facts.contents.books).toBe(1);
+      };
+      setImmediate(write);
+      const made = await writeDatabasePackage(db, dataRoot, packagePath, FACTS);
+      writing = false;
+      expect(written).toBeGreaterThan(0);
       const packaged = unzipSync(await readFile(packagePath));
-      expect((parseCanonicalJson(strFromU8(packaged['manifest.json']!)) as { contents: { books: number } }).contents.books).toBe(1);
       const copyPath = join(roots.inputRoot, 'counted-copy.sqlite');
       writeFileSync(copyPath, packaged['store/ai7.sqlite']!);
       const copy = new DatabaseSync(copyPath, { readOnly: true });
       try {
-        expect((copy.prepare('SELECT count(*) count FROM books').get() as { count: number }).count).toBe(1);
+        const held = (copy.prepare('SELECT count(*) count FROM books').get() as { count: number }).count;
+        // The service answered while the store was copied, and what it wrote then is in the copy; the manifest states exactly
+        // what the copy holds.
+        expect(held).toBeGreaterThan(20_000);
+        expect([made.facts.contents.books, (parseCanonicalJson(strFromU8(packaged['manifest.json']!)) as { contents: { books: number } }).contents.books])
+          .toEqual([held, held]);
+        // The copy is a file of its own: no write-ahead log needed to read it.
+        expect((copy.prepare('PRAGMA journal_mode').get() as { journal_mode: string }).journal_mode).toBe('delete');
       } finally {
         copy.close();
       }
-      // The other writes landed, after the copy.
-      expect(books()).toBe(3);
+      expect(books()).toBe(20_000 + written);
     } finally {
       db.close();
     }
-  });
+  }, 180_000);
+
+  it('copies the store a few pages at a time, the event loop turning between steps, and stops at the next step when told', async () => {
+    const db = storeOfBooks(join(roots.inputRoot, 'copied.sqlite'), 40_000);
+    try {
+      const controller = new AbortController();
+      const copying = copyStore(db, join(roots.inputRoot, 'copied-copy.sqlite'), controller.signal);
+      let settled = false;
+      copying.then(() => { settled = true; }, () => { settled = true; });
+      // Three turns of the event loop pass while it copies: nothing waits on the whole copy.
+      for (let turn = 0; turn < 3; turn += 1) await new Promise((resolve) => setImmediate(resolve));
+      expect(settled).toBe(false);
+      controller.abort();
+      await expect(copying).rejects.toMatchObject({ name: 'AbortError' });
+    } finally {
+      db.close();
+    }
+  }, 180_000);
+
+  it('stops a package whose copy of the store is stopped, leaving nothing', async () => {
+    const db = storeOfBooks(join(roots.inputRoot, 'stopped.sqlite'), 40_000);
+    try {
+      const dataRoot = join(roots.inputRoot, 'root');
+      await mkdir(dataRoot);
+      const packagePath = join(roots.inputRoot, 'stopped.ai7db');
+      const controller = new AbortController();
+      let packed = 0;
+      const making = writeDatabasePackage(db, dataRoot, packagePath, FACTS, { signal: controller.signal, onProgress: () => { packed += 1; } });
+      // The event loop turns while the store is copied, and a stop asked for then is honoured before anything is packed.
+      await new Promise((resolve) => setImmediate(resolve));
+      controller.abort();
+      await expect(making).rejects.toMatchObject({ name: 'AbortError' });
+      expect(packed).toBe(0);
+      expect(readdirSync(roots.inputRoot).filter((name) => name.startsWith('stopped.ai7db'))).toEqual([]);
+    } finally {
+      db.close();
+    }
+  }, 180_000);
 
   it('walks the data root a directory at a time, refusing one it cannot package as soon as that is known', async () => {
     const root = join(roots.inputRoot, 'walk');

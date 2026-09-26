@@ -19,7 +19,7 @@ import {
 import { DIGEST_PATTERN, canonicalJson, canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
 import { DATABASE_PACKAGE_EXTENSION, DATABASE_PACKAGE_STORE_MEMBER, writeDatabasePackage, type DatabasePackageMember } from './database-exports.js';
 import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
-import { verifyDatabasePackage, type DatabasePackageManifest } from './database-package-reader.js';
+import { MAX_MANIFEST_BYTES, verifyDatabasePackage, type DatabasePackageManifest } from './database-package-reader.js';
 import {
   DatabaseMergeError,
   mergeIntoStoreFile,
@@ -344,11 +344,16 @@ export async function writeReplacementMembers(dataRoot: string, members: Readonl
 }
 
 /**
- * Whether what waits in `incoming/` is exactly what the preparation verified: every member it named, of its size and digest,
- * and nothing else — walked a directory at a time, each file read against its digest.
+ * Whether what waits is exactly what the preparation verified: every member it named, of its size and digest, and nothing else
+ * — walked a directory at a time, each file read against its digest. An apply resumed while moving the package in finds part
+ * of it in `incoming/` and part already in the Agent Data Root (`movedInto`, the places kept aside apart), and each member is
+ * read where it stands, once.
  */
-async function stagedAsVerified(staging: string, intent: ReplacementIntent): Promise<boolean> {
+async function stagedAsVerified(staging: string, intent: ReplacementIntent, movedInto: string | null = null): Promise<boolean> {
   try {
+    // The list is read only within the bound a package's own manifest has, before anything of it is held (Issue #434 review).
+    const listed = await lstat(join(staging, 'members.json'));
+    if (!listed.isFile() || listed.size > MAX_MANIFEST_BYTES) return false;
     const text = await readFile(join(staging, 'members.json'), 'utf8');
     if (sha256Hex(text) !== intent.packageMembersSha256) return false;
     const members = parseCanonicalJson(text);
@@ -358,24 +363,26 @@ async function stagedAsVerified(staging: string, intent: ReplacementIntent): Pro
       if (!isRecord(member) || typeof member.path !== 'string' || typeof member.bytes !== 'number' || typeof member.sha256 !== 'string') return false;
       expected.set(member.path, { bytes: member.bytes, sha256: member.sha256 });
     }
-    let found = 0;
-    const visit = async (directory: string, prefix: string): Promise<boolean> => {
+    const found = new Set<string>();
+    const visit = async (directory: string, prefix: string, kept: ReadonlySet<string>): Promise<boolean> => {
       for await (const entry of await opendir(directory)) {
+        if (prefix === '' && kept.has(entry.name.toLowerCase())) continue;
         const member = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
         const path = join(directory, entry.name);
         if (entry.isDirectory()) {
-          if (!(await visit(path, member))) return false;
+          if (!(await visit(path, member, kept))) return false;
           continue;
         }
         const named = expected.get(member);
-        if (!entry.isFile() || named === undefined) return false;
+        if (!entry.isFile() || named === undefined || found.has(member)) return false;
         const read = await fileDigest(path);
         if (read === null || read.bytes !== named.bytes || read.sha256 !== named.sha256) return false;
-        found += 1;
+        found.add(member);
       }
       return true;
     };
-    return (await visit(join(staging, 'incoming'), '')) && found === expected.size;
+    return (await visit(join(staging, 'incoming'), '', new Set())) &&
+      (movedInto === null || (await visit(movedInto, '', REPLACEMENT_KEPT_ROOTS))) && found.size === expected.size;
   } catch {
     return false;
   }
@@ -465,13 +472,24 @@ export async function openWithPendingReplacement<T>(
   }
   const staging = replacementStagingFor(dataRoot);
   let phase = await readPhase(staging);
-  // The intent is written before any apply begins and only ever read after, so an apply goes on whatever it says; it names
-  // the replacement only for its record.
+  // The intent is written before any apply begins and only ever read after; it names the replacement for its record, and the
+  // digest of the members the preparation verified.
   const intent = await readIntentAt(staging).catch(() => null);
   // What waits is verified again before anything moves, a merge's as a replacement's: a staging place emptied or changed
   // since the preparation replaces or merges nothing (Issue #434 review).
   if (phase === null && intent !== null && !(await stagedAsVerified(staging, intent))) {
     phase = 'refused';
+    await writePhase(staging, phase);
+  }
+  // An apply resumed while it moved the data aside or the package in verifies what waits again before it moves anything more
+  // (Issue #434 review): one no longer what the preparation verified — or whose intent no longer reads — puts the data back as
+  // it was, and the replacement is recorded as failed because what waited had changed.
+  if ((phase === 'moving-out' || phase === 'moving-in') &&
+    (intent === null || !(await stagedAsVerified(staging, intent, phase === 'moving-in' ? dataRoot : null)))) {
+    await writeAtomic(join(staging, REFUSAL_NOTE), JSON.stringify('changed'));
+    // Moving the data aside had not finished, so none of the package is in yet: the data comes back. Moving the package in had
+    // begun, so what came in goes out first.
+    phase = phase === 'moving-out' ? 'restoring' : 'discarding';
     await writePhase(staging, phase);
   }
   if (phase === 'refused') {
@@ -530,7 +548,8 @@ export async function openWithPendingReplacement<T>(
     phase = 'restored';
     await writePhase(staging, phase);
   }
-  return { store: await openStore(), replacement: intent === null ? null : { intent, outcome: 'failed', failure: 'unopenable' } };
+  const failure: DatabaseReplacementFailure = existsSync(join(staging, REFUSAL_NOTE)) ? 'changed' : 'unopenable';
+  return { store: await openStore(), replacement: intent === null ? null : { intent, outcome: 'failed', failure } };
 }
 
 const MERGE_PHASE_SET: ReadonlySet<string> = new Set(['saving-store', 'merging', 'opening-merge', 'merge-applied', 'restoring-store', 'store-restored']);
@@ -596,6 +615,9 @@ async function applyPendingMerge<T>(
   return { store: await openStore(), replacement: { intent, outcome: 'failed', failure: 'unopenable' } };
 }
 
+/** Written when a resumed apply found what waited changed: the data put back is then recorded as refused for that reason. */
+const REFUSAL_NOTE = 'refused.json';
+
 /**
  * After the store opened by `openWithPendingReplacement` has recorded the replacement: the staging place goes, with the data
  * moved aside — the backup the preparation made holds it — or the files that would not open. A place that will not go now is
@@ -633,12 +655,12 @@ interface StoredReplacement {
 }
 
 /**
- * What the store knows that a preview and a backup need: the versions it is at and what its data holds — and, for a merge,
- * how to open a package's data as a store of its own, which brings it to this AI7's revision and checks it whole.
+ * What the store knows that a preview and a backup need: the versions it is at — a backup counts what it holds from its own
+ * copy — and, for a merge, how to open a package's data as a store of its own, which brings it to this AI7's revision and
+ * checks it whole.
  */
 export interface DatabaseReplacementSources {
   facts(): { dataVersion: number; softwareVersion: string; schemaRevision: number };
-  contents(): DatabaseExportContentsProjection;
   openPackage(dataRoot: string): Promise<void>;
 }
 
@@ -662,6 +684,8 @@ export class DatabaseReplacements {
    * this owner exists, so none waits when it is made.
    */
   #waiting = false;
+  /** How many replacements are being prepared now: from the moment one is asked for, until it waits or is refused. */
+  #preparing = 0;
 
   constructor(db: DatabaseSync, dataRoot: string, sources: DatabaseReplacementSources) {
     this.#db = db;
@@ -799,6 +823,24 @@ export class DatabaseReplacements {
   /** Whether a replacement waits for AI7's next start: until then the service writes nothing (Issue #434 review). */
   get waiting(): boolean {
     return this.#waiting;
+  }
+
+  /**
+   * Whether a replacement is being prepared or waits (Issue #434 review): from the moment it is asked for, nothing may be
+   * admitted to run, since what a Run wrote after the backup was taken would be lost with the data it replaces.
+   */
+  get frozen(): boolean {
+    return this.#preparing > 0 || this.#waiting;
+  }
+
+  /** Run `operation`, a replacement's preparation, with the data frozen from its first step: before anything is awaited. */
+  async freezing<T>(operation: () => Promise<T>): Promise<T> {
+    this.#preparing += 1;
+    try {
+      return await operation();
+    } finally {
+      this.#preparing -= 1;
+    }
   }
 
   /** `取消替换`: the replacement waiting is removed and the data stays as it is; its backup stays in the backup location. */
@@ -993,7 +1035,6 @@ export class DatabaseReplacements {
         ...this.#sources.facts(),
         createdAt: now.toISOString(),
         origin,
-        contents: this.#sources.contents(),
       }));
       // Only ever a new file (Issue #434 review): the name is taken at the instant the backup is put there, as every export's.
       const taken = await takeFreeName(partial, target);

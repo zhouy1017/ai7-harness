@@ -3813,15 +3813,12 @@ export class EditorialStore {
     this.#dataVersions = new DataVersionLedger(authority);
     this.#databaseExports = new DatabaseExports(authority, dataRoot, {
       facts: () => ({ dataVersion: DATA_VERSION, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION }),
-      contents: () => this.#databaseContents(),
     });
     this.#scheduledBackups = new ScheduledBackups(authority, dataRoot, {
       facts: () => ({ dataVersion: DATA_VERSION, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION }),
-      contents: () => this.#databaseContents(),
     });
     this.#databaseReplacements = new DatabaseReplacements(authority, dataRoot, {
       facts: () => ({ dataVersion: DATA_VERSION, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION }),
-      contents: () => this.#databaseContents(),
       // A package's data opens as a store of its own, with no launch control: brought to this revision and checked whole.
       openPackage: async (root) => {
         const opened = await EditorialStore.open(root, this.#codeRoot, {
@@ -11670,7 +11667,8 @@ export class EditorialStore {
    * starting until it is written.
    */
   async prepareDatabaseReplacement(previewId: string, now: Date = new Date()): Promise<DatabaseReplacementsProjection> {
-    return this.#databaseReplacementCall(() => this.#scheduledBackups.alone(() => this.#databaseReplacements.prepare(previewId, now)));
+    return this.#databaseReplacementCall(() =>
+      this.#databaseReplacements.freezing(() => this.#scheduledBackups.alone(() => this.#databaseReplacements.prepare(previewId, now))));
   }
 
   /**
@@ -11679,6 +11677,14 @@ export class EditorialStore {
    */
   replacementWaiting(): boolean {
     return this.#databaseReplacements.waiting;
+  }
+
+  /**
+   * Whether a replacement is being prepared or waits (Issue #434 review): Reconnect Preflight admits nothing then, from the
+   * moment the replacement is asked for, and a preflight under way checks again before it admits or blocks a Run.
+   */
+  replacementFrozen(): boolean {
+    return this.#databaseReplacements.frozen;
   }
 
   /** `取消替换`: the replacement waiting is removed and the data stays as it is. */
@@ -11693,7 +11699,8 @@ export class EditorialStore {
 
   /** `回退到替换前的数据`: the latest replacement's backup waiting to replace the data, which is backed up first, alone too. */
   async rollBackDatabaseReplacement(replacementId: string, now: Date = new Date()): Promise<DatabaseReplacementsProjection> {
-    return this.#databaseReplacementCall(() => this.#scheduledBackups.alone(() => this.#databaseReplacements.rollBack(replacementId, now)));
+    return this.#databaseReplacementCall(() =>
+      this.#databaseReplacements.freezing(() => this.#scheduledBackups.alone(() => this.#databaseReplacements.rollBack(replacementId, now))));
   }
 
   /**
@@ -11714,13 +11721,6 @@ export class EditorialStore {
         error instanceof ScheduledBackupError || error instanceof DatabaseMergeError) throw new StoreError(error.code, error.message);
       throw error;
     }
-  }
-
-  /** What a database package holds, counted as it is made: the Books, their Source Versions, the 资料库's items and the Series. */
-  #databaseContents(): DatabaseExportContentsProjection {
-    const count = (table: 'books' | 'source_versions' | 'library_materials' | 'series'): number =>
-      Number((this.#authority.prepare(`SELECT count(*) count FROM ${table}`).get() as { count: number | bigint }).count);
-    return { books: count('books'), sourceVersions: count('source_versions'), libraryMaterials: count('library_materials'), series: count('series') };
   }
 
   #dataVersionCall<T>(operation: () => T): T {
