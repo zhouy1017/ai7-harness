@@ -1864,6 +1864,7 @@ async function main() {
     await clickSelector(renderer, historyEntry('[data-feedback-origin="proposal-decision"][data-reason-state="given"]'), 'open-rejection');
     await waitFor(renderer, `(document.querySelector('.editorial-mark-layer [data-mark-card] [data-mark-reason]')?.textContent ?? '').startsWith('你的原因：证据不足')`, 'open-rejection-card', 120_000);
     // After the handoff, the current reason belongs to the editor who revised it; the other three entries stay put.
+    await assertRenderer(renderer, MARK_HELPERS, 'history-mark-helpers-after-restart');
     await assertRenderer(renderer, `window.__j11.act('reason-revise')`, 'history-reason-revise');
     await readDecision(renderer, (card) => card.prompt?.mode === 'revise', 'history-reason-revising');
     await assertRenderer(renderer, `window.__j11.act('reason-own')`, 'history-reason-own');
