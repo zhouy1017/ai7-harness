@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
@@ -11,6 +12,11 @@ import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabl
 // the people are what it proves, recorded on 工作概览, shown on 书库's cards, found by 书名, 作者 and 责编, and kept across a
 // restart. Every name is an authored stand-in. Later J-11 slices (S38, S26, S27) add the feedback and learning records
 // that attribute by them.
+//
+// Since #429 (S81a) J-11 also walks ②C 评估 on a third Book made from the one admitted input, exact `sample1`, through the
+// product's own import: the editor's scores out of each item's 满分, a 不评 with its reason, the risk items capping 推荐出版,
+// 保存评估 and 定稿, and 重新评估 compared with the version before — then 知识库 › 评估方案 counting its use. Every score and
+// word is the Journey's own; nothing of the manuscript is read.
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -19,6 +25,8 @@ const FIRST = Object.freeze({ title: '人员旅程甲' });
 const SECOND = Object.freeze({ title: '人员旅程乙' });
 const PEOPLE = Object.freeze({ authors: '周一、吴二', editors: '郑三', relatedRole: 'proofreader', relatedName: '王四' });
 const PEOPLE_NOTE = '作者与责编用于标注和查找这本书，也是之后反馈与学习记录的归属；它们不是账号，也不决定谁能做什么。';
+const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
+const THIRD = Object.freeze({ title: '评估旅程丙' });
 let location = 'entry';
 let electronExecutable;
 
@@ -227,6 +235,84 @@ async function search(renderer, field, text, name, keyboard = false) {
   return renderer.evaluate(CARDS);
 }
 
+/** Exact `sample1` through the import flow, as a new Book with its first manuscript; the Book's identity. */
+async function importSample1(renderer, title, sample1, name) {
+  await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
+  await click(renderer, '导入稿件', `${name}-start`);
+  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, `${name}-target`);
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
+  await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, `${name}-relationship`);
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
+  await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, `${name}-title-screen`);
+  await assertRenderer(renderer, `document.querySelector('[data-source-sha256]')?.textContent===${JSON.stringify(sample1.sha256)} && document.querySelector('[data-source-bytes]')?.textContent===${JSON.stringify(String(sample1.bytes))}`, `${name}-exact-source`);
+  await fill(renderer, '#book-title', title, `${name}-title`);
+  await click(renderer, '确认书名并复核', `${name}-review`);
+  await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, `${name}-review-ready`);
+  await waitFor(renderer, `!document.querySelector('#accept-import-degradation')&&Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='新建图书并导入稿件'&&!button.disabled)`, `${name}-review-clean`);
+  await click(renderer, '新建图书并导入稿件', `${name}-commit`);
+  await waitFor(renderer, `document.querySelector('[data-screen="imported"] .book-overview[data-manuscript-state="populated"]')`, `${name}-completed`, 180_000);
+  await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged==='true'`, `${name}-acknowledged`, 180_000);
+  const bookId = await renderer.evaluate(`document.querySelector('.book-overview')?.dataset.bookId ?? null`);
+  requireJourney(UUID_PATTERN.test(bookId ?? ''), `${name}-book-identity`);
+  return bookId;
+}
+
+/** ②C 评估 as the editor reads it: its versions, the version on show, its form and its conclusion, and where focus is. */
+const READ_EVALUATION = `(() => {
+  const host = document.querySelector('[data-screen="book-evaluation"] .evaluation');
+  if (!(host instanceof HTMLElement)) return null;
+  const record = host.querySelector('.evaluation-record');
+  const active = document.activeElement;
+  return {
+    state: host.dataset.evaluation ?? null,
+    empty: host.querySelector('.evaluation-empty')?.textContent ?? null,
+    start: host.querySelector('[data-evaluation-action="start"]')?.textContent ?? null,
+    startReason: host.querySelector('.evaluation-start-reason')?.textContent ?? null,
+    versions: Array.from(host.querySelectorAll('.evaluation-version-list button'), (button) => button.textContent),
+    refusal: host.querySelector('.evaluation-refusal')?.textContent ?? null,
+    record: record === null ? null : {
+      state: record.dataset.evaluationState,
+      entries: record.dataset.entries,
+      heading: record.querySelector('h3')?.textContent ?? null,
+      revision: record.querySelector('.evaluation-revision')?.textContent ?? null,
+      finalized: record.querySelector('.evaluation-finalized')?.textContent ?? null,
+      ai7: record.querySelector('.evaluation-ai7')?.textContent ?? null,
+      total: record.querySelector('.evaluation-total')?.textContent ?? null,
+      comparison: record.querySelector('.evaluation-comparison') === null ? null
+        : [record.querySelector('.evaluation-comparison h4')?.textContent ?? null, ...Array.from(record.querySelectorAll('.evaluation-comparison li'), (item) => item.textContent)],
+      items: Array.from(record.querySelectorAll('.evaluation-item'), (item) => {
+        const band = item.querySelector('.evaluation-band');
+        return [item.dataset.itemId, item.querySelector('legend')?.textContent ?? null, item.querySelector('[data-evaluation-field="score"]')?.value ?? null,
+          band instanceof HTMLElement && !band.hidden ? band.textContent : null, item.querySelector('[data-evaluation-field="not-rated"]')?.checked ?? null];
+      }),
+      conclusions: Array.from(record.querySelectorAll('.evaluation-conclusion [data-conclusion]'), (choice) => [choice.dataset.conclusion, choice.querySelector('input')?.checked ?? null, choice.querySelector('input')?.disabled ?? null]),
+      blocked: record.querySelector('.evaluation-recommend-blocked')?.hidden === false,
+      allDisabled: Array.from(record.querySelectorAll('input, textarea')).every((control) => control.disabled),
+      actions: Array.from(record.querySelectorAll('.evaluation-actions button'), (button) => button.textContent),
+    },
+    focus: active instanceof HTMLElement ? (active.tagName === 'H3' ? 'heading' : active.dataset.evaluationAction ?? active.dataset.evaluationField ?? active.tagName) : null,
+  };
+})()`;
+async function readEvaluation(renderer, predicate, name) {
+  const deadline = Date.now() + 60_000;
+  let page = null;
+  while (Date.now() < deadline) {
+    page = await renderer.evaluate(READ_EVALUATION).catch(() => null);
+    if (page !== null && predicate(page)) return page;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  const error = new Error(`J-11/${name}`);
+  error.detail = page;
+  throw error;
+}
+/** Click a checkbox or a radio of the form, as a pointer would. */
+async function tick(renderer, selector, name) {
+  await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement) || input.disabled) return false; input.click(); return true; })()`, name);
+}
+const item = (itemId) => `[data-screen="book-evaluation"] .evaluation-item[data-item-id="${itemId}"]`;
+const risk = (riskId) => `[data-screen="book-evaluation"] .evaluation-risk[data-risk-id="${riskId}"]`;
+const ITEM_LEGENDS = ['文学品质与作者声音 · 满分 20', '主题、价值与社会文化语境 · 满分 20', '结构、叙事逻辑与连贯 · 满分 20', '中文语言与表达 · 满分 20', '读者与市场潜力 · 满分 20'];
+
 async function main() {
   parseJourney();
   let loopback;
@@ -279,11 +365,15 @@ async function main() {
     const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
+    const sample1Bytes = await readFile(SAMPLE1_PATH);
+    const sample1 = { sha256: createHash('sha256').update(sample1Bytes).digest('hex'), bytes: sample1Bytes.length };
     const launch = async () => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
         '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
         resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
+        // J-11's picker imports the manuscript its 评估 evaluates (Issue #429, S81a): one choice per window.
+        '--j11-picker-path', SAMPLE1_PATH,
       ];
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       cancellation.throwIfRequested();
@@ -444,6 +534,167 @@ async function main() {
     await assertRenderer(renderer, `JSON.stringify(Array.from(document.querySelectorAll(${JSON.stringify(`${peopleSection} dd[data-people-field]`)}), (dd) => dd.textContent)) === '["周一、吴二","郑三","校对 王四"]'`, 'restart-overview-people');
     const peopleAfter = await renderer.evaluate(`window.ai7.getBookOverview({ bookId: ${JSON.stringify(firstId)}, historyCursor: null }).then((overview) => JSON.stringify(overview.people))`);
     requireJourney(peopleAfter === peopleBefore, 'restart-people-moved-nothing');
+
+    // ---- ②C 评估 (Issue #429, plan slice S81a; editor-surfaces §5, V2-UX-EVAL-001 to EVAL-005, EVAL-007, EVAL-012) --------
+    at('evaluation-book-imported');
+    // A third Book from exact sample1: its 工作概览 says it has no 评估 yet, one step from the destination.
+    await click(renderer, '返回图书列表', 'evaluation-library');
+    const thirdId = await importSample1(renderer, THIRD.title, sample1, 'evaluation-import');
+    await waitFor(renderer, `document.querySelector('.book-evaluation-summary')?.dataset.evaluationState === 'empty'`, 'evaluation-summary-empty');
+    await assertRenderer(renderer, `(() => { const summary = document.querySelector('.book-evaluation-summary'); return summary?.querySelector('h3')?.textContent === '评估' && summary.querySelector('p')?.textContent === '还没有评估。' && summary.querySelector('[data-evaluation-action="open"]')?.textContent === '打开评估'; })()`, 'evaluation-summary-words');
+
+    at('evaluation-open');
+    await clickSelector(renderer, '.book-evaluation-summary [data-evaluation-action="open"]', 'evaluation-open');
+    const opened = await readEvaluation(renderer, (page) => page.state === 'ready', 'evaluation-ready');
+    requireJourney(opened.empty === '这本书还没有评估。开始评估后，按本社评估方案逐项打分，定稿后留作记录。' && opened.start === '开始评估' &&
+      opened.versions.length === 0 && opened.record === null, 'evaluation-empty', opened);
+
+    at('evaluation-start');
+    // 开始评估: version 1 on r1, AI7's 初评 not yet there, every item unscored and no conclusion chosen.
+    await clickSelector(renderer, '[data-evaluation-action="start"]', 'evaluation-start');
+    const started = await readEvaluation(renderer, (page) => page.record !== null && page.focus === 'heading', 'evaluation-started');
+    requireJourney(started.record.heading === '第 1 版 · 编辑评分中' && started.record.revision === '评估的是修订版 r1' &&
+      started.record.ai7 === 'AI7 初评尚未接通：这一版由你打分。' && started.record.total === '总分 0 / 100 · 还有 5 项没有打分' &&
+      JSON.stringify(started.record.items.map(([, legend, score]) => [legend, score])) === JSON.stringify(ITEM_LEGENDS.map((legend) => [legend, ''])) &&
+      started.record.conclusions.every(([, checked]) => checked === false) && JSON.stringify(started.record.actions) === JSON.stringify(['保存评估', '定稿']) &&
+      started.startReason === '第 1 版还没有定稿；定稿后才能重新评估。', 'evaluation-started-words', started);
+    await waitFor(renderer, `${status} === '已开始第 1 版评估。'`, 'evaluation-started-status', 10_000);
+
+    at('evaluation-score');
+    // Four items scored, half points allowed; the fifth 不评 with its reason, leaving the total out of 80; each band shown.
+    for (const [itemId, score] of [['literary-quality', '18'], ['theme-and-context', '16.5'], ['structure-and-coherence', '15'], ['chinese-language', '17']]) {
+      await fill(renderer, `${item(itemId)} [data-evaluation-field="score"]`, score, `evaluation-score-${itemId}`);
+    }
+    await tick(renderer, `${item('readers-and-market')} [data-evaluation-field="not-rated"]`, 'evaluation-not-rated');
+    await fill(renderer, `${item('readers-and-market')} [data-evaluation-field="not-rated-reason"]`, '市场资料尚未收集。', 'evaluation-not-rated-reason');
+    const scoredPage = await readEvaluation(renderer, (page) => page.record?.total === '总分 66.5 / 80 · 优秀（1 项不评）', 'evaluation-total');
+    requireJourney(JSON.stringify(scoredPage.record.items.map(([, , score, band, notRated]) => [score, band, notRated])) === JSON.stringify([
+      ['18', '卓越', false], ['16.5', '优秀', false], ['15', '优秀', false], ['17', '优秀', false], ['', null, true],
+    ]), 'evaluation-bands', scoredPage.record.items);
+    // A 高 risk nobody reviewed keeps 推荐出版 closed, with why; a person's review opens it.
+    await tick(renderer, `${risk('facts-and-sources')} input[value="low"]`, 'evaluation-risk-facts');
+    await tick(renderer, `${risk('law-rights-ethics-policy')} input[value="high"]`, 'evaluation-risk-legal');
+    await fill(renderer, `${risk('law-rights-ethics-policy')} [data-evaluation-field="statement"]`, '书中写到真实人物，需要法务看过。', 'evaluation-risk-statement');
+    const capped = await readEvaluation(renderer, (page) => page.record?.blocked === true, 'evaluation-capped');
+    requireJourney(JSON.stringify(capped.record.conclusions) === JSON.stringify([['recommend', false, true], ['revise', false, false], ['defer', false, false], ['reject', false, false]]),
+      'evaluation-recommend-waits', capped.record.conclusions);
+    await tick(renderer, `${risk('law-rights-ethics-policy')} [data-evaluation-field="reviewed"]`, 'evaluation-risk-reviewed');
+    const reviewed = await readEvaluation(renderer, (page) => page.record?.blocked === false, 'evaluation-uncapped');
+    requireJourney(reviewed.record.conclusions[0][2] === false, 'evaluation-recommend-open', reviewed.record.conclusions);
+    await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', 'evaluation-conclusion');
+    await fill(renderer, '[data-screen="book-evaluation"] .evaluation-lists [data-evaluation-field="readiness"]', '第三章结尾需要重写', 'evaluation-readiness');
+    await clickSelector(renderer, '[data-evaluation-action="save"]', 'evaluation-save');
+    await waitFor(renderer, `${status} === '评估已保存。'`, 'evaluation-saved-status');
+    const savedPage = await readEvaluation(renderer, (page) => page.record?.entries === '2', 'evaluation-saved');
+    requireJourney(JSON.stringify(savedPage.versions) === JSON.stringify(['第 1 版 · 编辑评分中 · 修订版 r1 · 总分 66.5 / 80 · 优秀（1 项不评） · 修改后再议']) &&
+      savedPage.record.conclusions[1][1] === true && savedPage.focus === 'save', 'evaluation-saved-words', savedPage);
+
+    at('evaluation-finalize');
+    await clickSelector(renderer, '[data-evaluation-action="finalize"]', 'evaluation-missing-low-statement');
+    await waitFor(renderer, `${status} === '定稿前，要写明「事实与来源」的风险说明。'`, 'evaluation-low-statement-refused');
+    await readEvaluation(renderer, (page) => page.record?.state === 'editing' && page.record.entries === '2', 'evaluation-refusal-keeps-draft');
+    await fill(renderer, `${risk('facts-and-sources')} [data-evaluation-field="statement"]`, '已核对事实和来源，未发现未解决问题。', 'evaluation-low-risk-statement');
+    // 定稿: the version reads as it was, with the actor and the time, and 重新评估 begins the next.
+    await clickSelector(renderer, '[data-evaluation-action="finalize"]', 'evaluation-finalize');
+    await waitFor(renderer, `${status} === '第 1 版评估已定稿。'`, 'evaluation-finalized-status');
+    const finalizedPage = await readEvaluation(renderer, (page) => page.record?.state === 'finalized', 'evaluation-finalized');
+    requireJourney(finalizedPage.record.heading === '第 1 版 · 定稿' && (finalizedPage.record.finalized ?? '').startsWith('定稿 · 本机编辑 · ') &&
+      finalizedPage.record.allDisabled === true && finalizedPage.record.actions.length === 0 && finalizedPage.start === '重新评估' &&
+      finalizedPage.record.total === '总分 66.5 / 80 · 优秀（1 项不评）', 'evaluation-finalized-words', finalizedPage.record);
+
+    at('evaluation-from-manuscript');
+    // 评估 is one of the manuscript's 工作 destinations (IA-012, editor-surfaces §0.3): from 评估's own 打开稿件, the manuscript's
+    // 工作 group reads 审阅 · 评估 · 交付物, and its 评估 opens the version just finalized.
+    await assertRenderer(renderer, `(() => { const open = Array.from(document.querySelectorAll('[data-screen="book-evaluation"] .workbench-actions button')).find((button) => button.textContent === '打开稿件'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'evaluation-open-manuscript');
+    await waitFor(renderer, `document.querySelector('.editor-shell [data-testid="manuscript-editor"] > [data-block-id]') !== null && document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]') !== null`, 'evaluation-manuscript-ready', 60_000);
+    await assertRenderer(renderer, `(() => { const group = document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const entries = Array.from(group?.querySelectorAll('button[data-work-destination]') ?? []).map((item) => item.dataset.workDestination + ':' + item.textContent); const open = group?.querySelector('button[data-work-destination="evaluation"]'); if (entries.join('|') !== 'review:审阅|evaluation:评估|deliverables:交付物' || !(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'evaluation-work-group-entry');
+    const returned = await readEvaluation(renderer, (page) => page.state === 'ready' && page.record?.state === 'finalized', 'evaluation-from-manuscript-ready');
+    requireJourney(returned.record.heading === '第 1 版 · 定稿' && returned.start === '重新评估' && returned.versions.length === 1, 'evaluation-from-manuscript-words', returned);
+
+    at('evaluation-reevaluate');
+    // 重新评估: version 2 begins from 定稿's scores but not its conclusion, which the editor decides again for this text; one
+    // moved item shows against version 1.
+    await clickSelector(renderer, '[data-evaluation-action="start"]', 'evaluation-again');
+    const again = await readEvaluation(renderer, (page) => page.record?.heading === '第 2 版 · 编辑评分中', 'evaluation-again-started');
+    requireJourney(JSON.stringify(again.record.items.map(([, , score]) => score)) === JSON.stringify(['18', '16.5', '15', '17', '']) &&
+      JSON.stringify(again.record.comparison) === JSON.stringify(['与第 1 版相比', '总分：66.5 / 80 → 66.5 / 80', '结论：修改后再议 → 结论未定']), 'evaluation-again-seeded', again.record);
+    await fill(renderer, `${item('literary-quality')} [data-evaluation-field="score"]`, '19', 'evaluation-again-score');
+    await clickSelector(renderer, '[data-evaluation-action="save"]', 'evaluation-again-save');
+    const compared = await readEvaluation(renderer, (page) => page.record?.entries === '2' && page.record.comparison?.length === 4, 'evaluation-compared');
+    requireJourney(JSON.stringify(compared.record.comparison) === JSON.stringify(['与第 1 版相比', '文学品质与作者声音：18 → 19', '总分：66.5 / 80 → 67.5 / 80', '结论：修改后再议 → 结论未定']) &&
+      compared.versions.length === 2 && compared.versions[1] === '第 1 版 · 定稿 · 修订版 r1 · 总分 66.5 / 80 · 优秀（1 项不评） · 修改后再议', 'evaluation-compared-words', compared);
+
+    at('j14-evaluation-reflow-forced-colors');
+    // At 200% the version, its items and risks reflow into the width; under forced colours each keeps its border.
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
+    await waitFor(renderer, `(() => { const root = document.documentElement; const parts = [document.querySelector('.evaluation-record'), ...document.querySelectorAll('.evaluation-item, .evaluation-risk, .evaluation-conclusion')]; return parts.length === 9 && parts.every((part) => part instanceof HTMLElement && part.scrollWidth <= part.clientWidth + 2) && root.scrollWidth <= root.clientWidth + 2; })()`, 'evaluation-reflow', 10_000);
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
+    await assertRenderer(renderer, `(() => {
+      if (!matchMedia('(forced-colors: active)').matches) return false;
+      const parts = [document.querySelector('.evaluation-record'), document.querySelector('.evaluation-item'), document.querySelector('.evaluation-risk'), document.querySelector('.evaluation-conclusion')];
+      return parts.every((part) => part instanceof HTMLElement && getComputedStyle(part).borderTopStyle === 'solid');
+    })()`, 'evaluation-forced-colors');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
+
+    at('evaluation-overview-and-profile');
+    // 工作概览 names the version on show in one line; 知识库 › 评估方案 names the profile and counts its use.
+    await assertRenderer(renderer, `(() => { const open = Array.from(document.querySelectorAll('[data-screen="book-evaluation"] .workbench-actions button')).find((button) => button.textContent === '工作概览'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'evaluation-overview');
+    await waitFor(renderer, `document.querySelector('.book-evaluation-summary')?.dataset.evaluationState === 'editing' && document.querySelector('.book-evaluation-summary p')?.textContent === '第 2 版 · 编辑评分中 · 修订版 r1 · 总分 67.5 / 80 · 优秀（1 项不评）'`, 'evaluation-overview-line');
+    await click(renderer, '返回图书列表', 'evaluation-profile-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'evaluation-profile-landing');
+    await click(renderer, '知识库', 'evaluation-profile-knowledge');
+    await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"] .knowledge-base')`, 'evaluation-profile-knowledge-open');
+    await click(renderer, '评估方案', 'evaluation-profile-tab');
+    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab === 'evaluation' && document.querySelector('.evaluation-profile') !== null`, 'evaluation-profile-painted');
+    const profile = await renderer.evaluate(`(() => { const card = document.querySelector('.evaluation-profile'); return { title: card.querySelector('h3')?.textContent, pill: card.querySelector('.evaluation-profile-pill')?.textContent, use: card.querySelector('.evaluation-profile-use')?.textContent, items: Array.from(card.querySelectorAll('.evaluation-profile-items li'), (item) => item.textContent), bands: card.querySelectorAll('.evaluation-profile-bands li').length, risks: card.querySelector('.evaluation-profile-risks')?.textContent, conclusions: card.querySelector('.evaluation-profile-conclusions')?.textContent }; })()`);
+    requireJourney(JSON.stringify(profile) === JSON.stringify({
+      title: '审稿评估方案', pill: '第 1 版 · AI7 内置默认', use: '已用于 1 本书的 2 版评估', items: ITEM_LEGENDS, bands: 5,
+      risks: '事实与来源、法律、权利、伦理与出版政策', conclusions: '推荐出版 · 修改后再议 · 暂缓 · 不推荐',
+    }), 'evaluation-profile-words', profile);
+    const service = await renderer.evaluate(`window.ai7.inspectEvaluationProfiles().then((projection) => projection.profiles.map((entry) => [entry.records, entry.books]))`);
+    requireJourney(JSON.stringify(service) === JSON.stringify([[2, 1]]) && typeof thirdId === 'string', 'evaluation-profile-service', service);
+
+    at('evaluation-reevaluate');
+    await click(renderer, '返回', 'evaluation-pages-return');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'evaluation-pages-library');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id="${thirdId}"]`, 'evaluation-pages-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell [data-work-destination="evaluation"]')`, 'evaluation-pages-manuscript');
+    await clickSelector(renderer, '.editor-shell [data-work-destination="evaluation"]', 'evaluation-pages-open');
+    await readEvaluation(renderer, (page) => page.record?.heading === '第 2 版 · 编辑评分中', 'evaluation-pages-second');
+    for (let ordinal = 2; ordinal <= 12; ordinal += 1) {
+      await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', 'evaluation-pages-conclusion');
+      await clickSelector(renderer, '[data-evaluation-action="finalize"]', 'evaluation-pages-finalize');
+      await readEvaluation(renderer, (page) => page.record?.heading === `第 ${ordinal} 版 · 定稿`, 'evaluation-pages-finalized');
+      await clickSelector(renderer, '[data-evaluation-action="start"]', 'evaluation-pages-next');
+      await readEvaluation(renderer, (page) => page.record?.heading === `第 ${ordinal + 1} 版 · 编辑评分中`, 'evaluation-pages-started');
+    }
+    await tick(renderer, `${risk('law-rights-ethics-policy')} input[value="low"]`, 'evaluation-pages-low-risk');
+    await assertRenderer(renderer, `(() => {
+      const original=Promise.prototype.then;
+      const held={release:null}; window.__j11HeldEvaluationPage=held;
+      try {
+        Promise.prototype.then=function(success,failure) {
+          Promise.prototype.then=original;
+          return original.call(this,
+            (value)=>new Promise((resolve)=>{held.release=()=>resolve(success(value));}),
+            (error)=>new Promise((_resolve,reject)=>{held.release=()=>reject(error);}));
+        };
+        document.querySelector('[data-evaluation-action="versions-older"]').click();
+      } finally { Promise.prototype.then=original; }
+      return true;
+    })()`, 'evaluation-pages-hold-completion');
+    await waitFor(renderer, `typeof window.__j11HeldEvaluationPage?.release==='function'`, 'evaluation-pages-completion-held');
+    await fill(renderer, `${item('literary-quality')} [data-evaluation-field="score"]`, '17.5', 'evaluation-pages-unsaved');
+    await assertRenderer(renderer, `(() => { window.__j11HeldEvaluationPage.release(); delete window.__j11HeldEvaluationPage; return true; })()`, 'evaluation-pages-release');
+    await waitFor(renderer, `document.querySelectorAll('.evaluation-version-list li').length===3 && document.querySelector('.evaluation-version-list button')?.textContent.startsWith('第 3 版') && document.activeElement===document.querySelector('.evaluation-versions h3')`, 'evaluation-pages-oldest');
+    await assertRenderer(renderer, `document.querySelector(${JSON.stringify(`${item('literary-quality')} [data-evaluation-field="score"]`)})?.value==='17.5' && document.querySelector('.evaluation-record')?.dataset.entries==='1' && document.querySelector('.evaluation-conclusion [data-conclusion="recommend"] input')?.disabled===false`, 'evaluation-pages-kept-input');
+    await clickSelector(renderer, '[data-evaluation-action="versions-latest"]', 'evaluation-pages-latest');
+    await waitFor(renderer, `document.querySelectorAll('.evaluation-version-list li').length===10 && document.querySelector('.evaluation-version-list button')?.textContent.startsWith('第 13 版') && document.activeElement===document.querySelector('.evaluation-versions h3')`, 'evaluation-pages-latest-focus');
+    await clickSelector(renderer, '[data-evaluation-action="save"]', 'evaluation-pages-save-input');
+    await readEvaluation(renderer, (page) => page.record?.entries === '2' && page.record.items[0][2] === '17.5', 'evaluation-pages-saved-input');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

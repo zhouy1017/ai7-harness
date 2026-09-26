@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 72 as const;
+export const SERVICE_PROTOCOL_VERSION = 73 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -84,6 +84,10 @@ export const IPC_CHANNELS = {
   addLibraryMaterial: 'ai7:j15:add-library-material',
   decideLibraryMaterial: 'ai7:j15:decide-library-material',
   inspectLibraryMaterial: 'ai7:j15:inspect-library-material',
+  inspectEvaluationProfiles: 'ai7:j11:inspect-evaluation-profiles',
+  inspectEvaluation: 'ai7:j11:inspect-evaluation',
+  startEvaluation: 'ai7:j11:start-evaluation',
+  saveEvaluation: 'ai7:j11:save-evaluation',
   inspectReviewWorkspace: 'ai7:j04:inspect-review-workspace',
   prepareReviewRun: 'ai7:j04:prepare-review-run',
   authorizeReviewRun: 'ai7:j04:authorize-review-run',
@@ -4881,6 +4885,130 @@ export interface LibraryMaterialsProjection {
   readonly nextCursor: LibraryMaterialCursor | null;
 }
 
+// ---- ②C 评估 (Issue #429, plan slice S81a; editor-surfaces §5, V2-UX-EVAL-001 to EVAL-005, EVAL-007, EVAL-012) ----------
+
+/** What the editor writes about one Evaluation Record at most. */
+export const MAX_EVALUATION_COMMENT_GRAPHEMES = 1000;
+export const MAX_EVALUATION_VERDICT_GRAPHEMES = 2000;
+export const MAX_EVALUATION_LINE_GRAPHEMES = 200;
+export const MAX_EVALUATION_LINES = 20;
+export const MAX_EVALUATION_RISK_STATEMENT_GRAPHEMES = 500;
+
+export type EvaluationBandLabel = '卓越' | '优秀' | '合格' | '薄弱' | '不宜';
+export type EvaluationConclusion = 'recommend' | 'revise' | 'defer' | 'reject';
+export const EVALUATION_CONCLUSIONS: readonly EvaluationConclusion[] = ['recommend', 'revise', 'defer', 'reject'];
+
+/**
+ * The house Evaluation Profile (EVAL-002, EVAL-003, EVAL-005; root ADR 0001): the scored items with their 满分 out of 100,
+ * the bands with their anchor wording, the risk items and the conclusions. Every Evaluation Record snapshots the one it used.
+ */
+export interface EvaluationProfileProjection {
+  readonly profileId: string;
+  readonly title: string;
+  readonly version: string;
+  readonly issuer: string;
+  readonly total: number;
+  readonly items: ReadonlyArray<{ readonly itemId: string; readonly label: string; readonly fullMarks: number }>;
+  readonly bands: ReadonlyArray<{ readonly band: 'excellent' | 'good' | 'adequate' | 'weak' | 'unsuitable'; readonly label: EvaluationBandLabel; readonly floor: number; readonly anchor: string }>;
+  readonly risks: ReadonlyArray<{ readonly riskId: string; readonly label: string }>;
+  readonly conclusions: ReadonlyArray<{ readonly conclusion: EvaluationConclusion; readonly label: string }>;
+  readonly sha256: string;
+}
+
+/** 知识库 › 评估方案: each profile, and how many Evaluation Records of how many Books used it. */
+export interface EvaluationProfilesProjection {
+  readonly profiles: ReadonlyArray<EvaluationProfileProjection & { readonly records: number; readonly books: number }>;
+}
+
+/** What the editor wrote about one version of an evaluation: every item, every risk, and the rest of the record. */
+export interface EvaluationContent {
+  readonly items: ReadonlyArray<{
+    readonly itemId: string;
+    /** A whole or half point from 0 to the item's 满分, or `null` while unscored or `不评`. */
+    readonly score: number | null;
+    /** `不评`, with its reason (EVAL-005). */
+    readonly notRated: string | null;
+    readonly comment: string | null;
+  }>;
+  readonly risks: ReadonlyArray<{
+    readonly riskId: string;
+    readonly level: 'low' | 'medium' | 'high' | null;
+    readonly statement: string | null;
+    /** A person reviewed a `高` risk: only then may the conclusion be `推荐出版` (EVAL-004). */
+    readonly reviewed: boolean;
+  }>;
+  /** 距离可出版还差什么, one line each. */
+  readonly readiness: ReadonlyArray<string>;
+  readonly strengths: ReadonlyArray<string>;
+  readonly weaknesses: ReadonlyArray<string>;
+  /** 总评. */
+  readonly verdict: string | null;
+  /** Chosen by the editor, never preselected (EVAL-007). */
+  readonly conclusion: EvaluationConclusion | null;
+}
+
+/** The total out of the 满分 still rated, and how many items are left `不评` or unscored. */
+export interface EvaluationTotalProjection {
+  readonly score: number;
+  readonly fullMarks: number;
+  readonly notRated: number;
+  readonly unscored: number;
+}
+
+export interface EvaluationRecordSummaryProjection {
+  readonly recordId: string;
+  readonly ordinal: number;
+  /** `editing` is the editor's calibration; `finalized` is 定稿 (EVAL-001). AI7's draft state arrives with its 初评. */
+  readonly state: 'editing' | 'finalized';
+  readonly revisionLabel: string;
+  readonly total: EvaluationTotalProjection;
+  readonly conclusion: EvaluationConclusion | null;
+  readonly createdAt: string;
+  readonly finalizedAt: string | null;
+}
+
+/** One version compared item by item with the version it re-evaluated (EVAL-012). */
+export interface EvaluationComparisonProjection {
+  readonly previousOrdinal: number;
+  readonly items: ReadonlyArray<{ readonly itemId: string; readonly previous: number | 'not-rated' | null; readonly current: number | 'not-rated' | null }>;
+  readonly risks: ReadonlyArray<{ readonly riskId: string; readonly previous: 'low' | 'medium' | 'high' | null; readonly current: 'low' | 'medium' | 'high' | null }>;
+  readonly total: { readonly previous: EvaluationTotalProjection; readonly current: EvaluationTotalProjection };
+  readonly conclusion: { readonly previous: EvaluationConclusion | null; readonly current: EvaluationConclusion | null };
+}
+
+export interface EvaluationRecordProjection extends EvaluationRecordSummaryProjection {
+  readonly revisionId: string;
+  /** The manuscript had edits in its journal not yet saved as a revision when this version began. */
+  readonly uncheckpointed: boolean;
+  /** The profile this version snapshotted. */
+  readonly profile: EvaluationProfileProjection;
+  readonly content: EvaluationContent;
+  /** How many entries its chain holds: a save names it, and is refused when another window saved first. */
+  readonly entries: number;
+  readonly savedAt: string;
+  readonly finalized: null | { readonly actor: string; readonly at: string };
+  /** `推荐出版` waits for a person's review of every `高` risk (EVAL-004). */
+  readonly recommendationBlocked: boolean;
+  readonly comparison: EvaluationComparisonProjection | null;
+}
+
+/** ②C 评估 of one Book: its versions newest first, the one on show, and whether a version can begin. */
+export interface EvaluationWorkspaceProjection {
+  readonly bookId: string;
+  readonly bookTitle: string;
+  /** The Book's manuscript as a new version would bind it, or `null` when the Book has none. */
+  readonly manuscript: null | { readonly revisionId: string; readonly revisionLabel: string; readonly uncheckpointed: boolean };
+  /** The profile a new version would snapshot. */
+  readonly profile: EvaluationProfileProjection;
+  readonly records: ReadonlyArray<EvaluationRecordSummaryProjection>;
+  readonly recordCount: number;
+  readonly recordsBefore: number | null;
+  readonly recordsNext: number | null;
+  readonly record: EvaluationRecordProjection | null;
+  /** `开始评估` or `重新评估`, or why neither can begin now. */
+  readonly start: { readonly allowed: true; readonly kind: 'first' | 'again' } | { readonly allowed: false; readonly reason: string };
+}
+
 /** The drawer's `设为快速开始默认…` for one plan, and the rule that started its Task, when one did. */
 export interface TaskPlanDefaultRuleProjection {
   canSet: boolean;
@@ -7120,6 +7248,26 @@ export interface ServiceOperationMap {
     input: { materialId: string; expectedDecisions: number; decision: LibraryMaterialDecisionInput };
     output: LibraryMaterialProjection;
   };
+  /** 知识库 › 评估方案 (Issue #429, S81a): the house Evaluation Profile and its use. */
+  inspectEvaluationProfiles: {
+    input: Record<string, never>;
+    output: EvaluationProfilesProjection;
+  };
+  /** ②C 评估 of the route's Book (Issue #429, S81a): one version by its identity, or the latest when `null`. */
+  inspectEvaluation: {
+    input: { bookId: string; recordId: string | null; recordsBefore?: number | null };
+    output: EvaluationWorkspaceProjection;
+  };
+  /** 开始评估 or 重新评估: a new version bound to the manuscript's current revision. */
+  startEvaluation: {
+    input: { bookId: string };
+    output: EvaluationWorkspaceProjection;
+  };
+  /** 保存评估 or 定稿: the editor's content appended to the version's chain, refused when the chain moved since it was read. */
+  saveEvaluation: {
+    input: { bookId: string; recordId: string; expectedEntries: number; content: EvaluationContent; finalize: boolean };
+    output: EvaluationWorkspaceProjection;
+  };
   /**
    * 审阅 (Issue #417, plan slice S69). The workspace is one read; preparing a Review Run is a
    * cooperative job; the one approval records the Run's authorization and starts its drive loop at once,
@@ -7506,6 +7654,12 @@ export interface RendererApi {
   previewLibraryMaterial(): Promise<LibraryMaterialPreviewProjection | null>;
   addLibraryMaterial(input: { previewId: string; title: string; kind: LibraryMaterialKind }): Promise<LibraryMaterialProjection>;
   decideLibraryMaterial(input: { materialId: string; expectedDecisions: number; decision: LibraryMaterialDecisionInput }): Promise<LibraryMaterialProjection>;
+  /** 知识库 › 评估方案 (Issue #429, S81a): names no Book. */
+  inspectEvaluationProfiles(): Promise<EvaluationProfilesProjection>;
+  /** ②C 评估 of the Book the window is showing (Issue #429, S81a); the renderer never names the Book. */
+  inspectEvaluation(input: { recordId: string | null; recordsBefore?: number | null }): Promise<EvaluationWorkspaceProjection>;
+  startEvaluation(): Promise<EvaluationWorkspaceProjection>;
+  saveEvaluation(input: { recordId: string; expectedEntries: number; content: EvaluationContent; finalize: boolean }): Promise<EvaluationWorkspaceProjection>;
   /**
    * 审阅 of the Book the window is showing (Issue #417). Inspecting without a Run opens the latest; a
    * running Run is followed by inspecting it again, and its executing category carries its progress.

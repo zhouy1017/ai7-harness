@@ -592,6 +592,28 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .exemplar-book { display: grid; gap: .4rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
 .exemplar-book h3, .exemplar-book p { margin: 0; overflow-wrap: anywhere; }
 .exemplar-items { display: grid; gap: .3rem; margin: 0; padding-left: 1.2rem; overflow-wrap: anywhere; }
+/* ②C 评估 (S81a): the versions, then the version on show as a form; each item and risk a fieldset that reflows to one column. */
+.book-evaluation-summary { margin-top: 1rem; }
+.evaluation { display: grid; gap: .9rem; min-width: 0; }
+.evaluation-version-list { display: grid; gap: .3rem; margin: .3rem 0 0; padding-left: 1.4rem; }
+.evaluation-version-list button { text-align: left; overflow-wrap: anywhere; }
+.evaluation-version-list button[aria-current="true"] { font-weight: 800; }
+.evaluation-record { display: grid; gap: .6rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
+.evaluation-record h3, .evaluation-record h4, .evaluation-record p { margin: 0; overflow-wrap: anywhere; }
+.evaluation-total { font-size: 1.1rem; font-weight: 800; }
+.evaluation-items, .evaluation-risks, .evaluation-lists { display: grid; gap: .6rem; min-width: 0; }
+.evaluation-item, .evaluation-risk, .evaluation-conclusion { display: grid; gap: .4rem; min-width: 0; margin: 0; padding: .6rem .8rem; border: 1px solid #ded9cd; border-radius: 8px; }
+.evaluation-item legend, .evaluation-risk legend, .evaluation-conclusion legend { font-weight: 700; overflow-wrap: anywhere; }
+.evaluation-score-row, .evaluation-levels { display: flex; flex-wrap: wrap; align-items: end; gap: .6rem; }
+.evaluation-field { display: grid; gap: .3rem; min-width: 0; }
+.evaluation-field input[type="number"] { width: 6rem; }
+.evaluation-field input[type="text"], .evaluation-field textarea { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; }
+.evaluation-choice { display: inline-flex; align-items: center; gap: .35rem; }
+.evaluation-comparison { padding: .6rem .8rem; border-left: 3px solid #2c463b; background: #f6f8f2; }
+.evaluation-comparison ul { margin: .3rem 0 0; padding-left: 1.2rem; }
+.evaluation-profile { display: grid; gap: .45rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
+.evaluation-profile h3, .evaluation-profile h4, .evaluation-profile p { margin: 0; overflow-wrap: anywhere; }
+.evaluation-profile ul { display: grid; gap: .25rem; margin: 0; padding-left: 1.2rem; overflow-wrap: anywhere; }
 /* 知识库 › 资料库 (S79c): one card per collected item; the arrival form and each decision open inside the page, never a modal. */
 .library-list { display: grid; gap: .8rem; }
 .library-material, .library-preview { display: grid; gap: .45rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
@@ -1207,6 +1229,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .manuscript-export, .export-format-option, .export-option, .export-fidelity-row, .export-receipt, .export-records > li,
   .task-plan-default-rule-confirm, .default-rule-card, .guideline-card, .guideline-preview, .exemplar-book, .task-plan-activity, .task-bar-cancel-impact,
   .library-material, .library-preview, .library-chooser, .library-chooser fieldset, .library-kinds,
+  .evaluation-record, .evaluation-item, .evaluation-risk, .evaluation-conclusion, .evaluation-comparison, .evaluation-profile,
   .task-plan-clarification, .task-plan-choice, .task-plan-choice-recommended, .task-plan-clarification-deferred, .task-plan-edit-ask-first,
   .task-plan-budget-form, .task-plan-budget-input {
     color: CanvasText;

@@ -1122,6 +1122,47 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
+  it('accepts ②C 评估: the profile read naming nothing, a version by the route\'s Book, a start, and a save of the closed content shape (Issue #429, S81a)', () => {
+    const bookId = randomUUID();
+    const recordId = randomUUID();
+    const content = {
+      items: [{ itemId: 'literary-quality', score: 16.5, notRated: null, comment: '评语' }, { itemId: 'readers-and-market', score: null, notRated: '资料不足', comment: null }],
+      risks: [{ riskId: 'facts-and-sources', level: 'high', statement: '需法务看过', reviewed: true }],
+      readiness: ['第三章结尾需要重写'], strengths: [], weaknesses: ['节奏偏慢'], verdict: null, conclusion: 'revise',
+    };
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'inspectEvaluationProfiles', input: {} },
+      { op: 'inspectEvaluation', input: { bookId, recordId: null } },
+      { op: 'inspectEvaluation', input: { bookId, recordId: null, recordsBefore: 11 } },
+      { op: 'inspectEvaluation', input: { bookId, recordId: null, recordsBefore: null } },
+      { op: 'inspectEvaluation', input: { bookId, recordId } },
+      { op: 'startEvaluation', input: { bookId } },
+      { op: 'saveEvaluation', input: { bookId, recordId, expectedEntries: 1, content, finalize: false } },
+      { op: 'saveEvaluation', input: { bookId, recordId, expectedEntries: 3, content, finalize: true } },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    for (const [op, input] of [
+      ['inspectEvaluationProfiles', { bookId }],
+      ['inspectEvaluation', { bookId }],
+      ['inspectEvaluation', { bookId, recordId: null, recordsBefore: 1 }],
+      ['inspectEvaluation', { bookId, recordId: null, recordsBefore: 2.5 }],
+      ['inspectEvaluation', { bookId, recordId: null, recordsBefore: '11' }],
+      ['inspectEvaluation', { bookId: 'book', recordId: null }],
+      ['startEvaluation', { bookId, recordId }],
+      ['saveEvaluation', { bookId, recordId, expectedEntries: 0, content, finalize: false }],
+      ['saveEvaluation', { bookId, recordId, expectedEntries: 1, content, finalize: 'yes' }],
+      ['saveEvaluation', { bookId, recordId, expectedEntries: 1, content: { ...content, weight: 1 }, finalize: false }],
+      ['saveEvaluation', { bookId, recordId, expectedEntries: 1, content: { ...content, conclusion: 'publish' }, finalize: false }],
+      ['saveEvaluation', { bookId, recordId, expectedEntries: 1, content: { ...content, items: [{ itemId: 'x', score: '18', notRated: null, comment: null }] }, finalize: false }],
+      ['saveEvaluation', { bookId, recordId, expectedEntries: 1, content: { ...content, risks: [{ riskId: 'x', level: 'severe', statement: null, reviewed: false }] }, finalize: false }],
+    ] as const) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('accepts 知识库 › 资料库: the read naming nothing, a preview by absolute path, an arrival, and a decision of a closed shape (Issue #427, S79c)', () => {
     const materialId = randomUUID();
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [

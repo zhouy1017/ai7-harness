@@ -48,6 +48,8 @@ import type {
   LibraryMaterialPreviewProjection,
   LibraryMaterialProjection,
   LibraryMaterialsProjection,
+  EvaluationProfilesProjection,
+  EvaluationWorkspaceProjection,
   ExemplarsProjection,
   KnowledgeProceduresProjection,
   AppendMaintenanceCaseRevisionInput,
@@ -294,6 +296,7 @@ import { MaintenanceCaseError, MaintenanceCases, initializeMaintenanceCaseSchema
 import { BookPeople, BookPeopleError, initializeBookPeopleSchema } from './book-people.js';
 import { ReviewGuidelineError, ReviewGuidelineLedger, initializeReviewGuidelineSchema, readGuidelineFile } from './review-guidelines.js';
 import { LibraryMaterialError, LibraryMaterialLedger, initializeLibraryMaterialSchema, libraryMaterialTitle } from './library-materials.js';
+import { EvaluationError, EvaluationRecords, initializeEvaluationRecordSchema } from './evaluation-records.js';
 import { readExemplars } from './exemplars.js';
 import { readKnowledgeProcedures } from './knowledge-procedures.js';
 import {
@@ -394,6 +397,7 @@ import {
   BOOK_PEOPLE_SCHEMA_VERSION,
   REVIEW_GUIDELINE_SCHEMA_VERSION,
   LIBRARY_MATERIAL_SCHEMA_VERSION,
+  EVALUATION_RECORD_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1616,7 +1620,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === MAINTENANCE_CASE_SCHEMA_VERSION ||
       currentVersion === BOOK_PEOPLE_SCHEMA_VERSION ||
       currentVersion === REVIEW_GUIDELINE_SCHEMA_VERSION ||
-      currentVersion === LIBRARY_MATERIAL_SCHEMA_VERSION,
+      currentVersion === LIBRARY_MATERIAL_SCHEMA_VERSION ||
+      currentVersion === EVALUATION_RECORD_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1658,7 +1663,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === MAINTENANCE_CASE_SCHEMA_VERSION ||
       currentVersion === BOOK_PEOPLE_SCHEMA_VERSION ||
       currentVersion === REVIEW_GUIDELINE_SCHEMA_VERSION ||
-      currentVersion === LIBRARY_MATERIAL_SCHEMA_VERSION
+      currentVersion === LIBRARY_MATERIAL_SCHEMA_VERSION ||
+      currentVersion === EVALUATION_RECORD_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2014,7 +2020,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === MAINTENANCE_CASE_SCHEMA_VERSION ||
       version === BOOK_PEOPLE_SCHEMA_VERSION ||
       version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
-      version === LIBRARY_MATERIAL_SCHEMA_VERSION,
+      version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
+      version === EVALUATION_RECORD_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2045,7 +2052,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === MAINTENANCE_CASE_SCHEMA_VERSION ||
       version === BOOK_PEOPLE_SCHEMA_VERSION ||
       version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
-      version === LIBRARY_MATERIAL_SCHEMA_VERSION) return;
+      version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
+      version === EVALUATION_RECORD_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2168,7 +2176,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === MAINTENANCE_CASE_SCHEMA_VERSION ||
       version === BOOK_PEOPLE_SCHEMA_VERSION ||
       version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
-      version === LIBRARY_MATERIAL_SCHEMA_VERSION,
+      version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
+      version === EVALUATION_RECORD_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2198,7 +2207,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === MAINTENANCE_CASE_SCHEMA_VERSION ||
       version === BOOK_PEOPLE_SCHEMA_VERSION ||
       version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
-      version === LIBRARY_MATERIAL_SCHEMA_VERSION) return;
+      version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
+      version === EVALUATION_RECORD_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2491,7 +2501,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== LIBRARY_MATERIAL_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== EVALUATION_RECORD_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2524,6 +2534,7 @@ function validateModelServiceSchema(
       version >= BOOK_PEOPLE_SCHEMA_VERSION,
       version >= REVIEW_GUIDELINE_SCHEMA_VERSION,
       version >= LIBRARY_MATERIAL_SCHEMA_VERSION,
+      version >= EVALUATION_RECORD_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2581,7 +2592,8 @@ function initializeModelServiceSchema(
       version === MAINTENANCE_CASE_SCHEMA_VERSION ||
       version === BOOK_PEOPLE_SCHEMA_VERSION ||
       version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
-      version === LIBRARY_MATERIAL_SCHEMA_VERSION,
+      version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
+      version === EVALUATION_RECORD_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2611,7 +2623,8 @@ function initializeModelServiceSchema(
       version === MAINTENANCE_CASE_SCHEMA_VERSION ||
       version === BOOK_PEOPLE_SCHEMA_VERSION ||
       version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
-      version === LIBRARY_MATERIAL_SCHEMA_VERSION) {
+      version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
+      version === EVALUATION_RECORD_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3426,6 +3439,8 @@ export class EditorialStore {
   readonly #reviewGuidelines: ReviewGuidelineLedger;
   /** 知识库 › 资料库 (Issue #427, S79c): the items an editor collected and the decisions about them. */
   readonly #libraryMaterials: LibraryMaterialLedger;
+  /** ②C 评估 (Issue #429, S81a): each Book's versioned Evaluation Records. */
+  readonly #evaluations: EvaluationRecords;
   readonly #productionDocuments: ProductionDocuments;
   /** Each Production Document's Deliverable Workflow (Issue #415, S66c). */
   readonly #documentWorkflow: ProductionDocumentWorkflow;
@@ -3482,6 +3497,7 @@ export class EditorialStore {
     // 知识库 › 审阅规范文件 (Issue #427, S79a): a Review Run prepared now applies each guideline document at its latest version.
     this.#reviewGuidelines = new ReviewGuidelineLedger(authority);
     this.#libraryMaterials = new LibraryMaterialLedger(authority, dataRoot);
+    this.#evaluations = new EvaluationRecords(authority, { current: (bookId) => this.#evaluationManuscript(bookId) });
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
       ledgerOf: (entry) => this.#reviewLedgerOf(entry),
       baseline: () => this.#baselineAnalysis,
@@ -3628,10 +3644,12 @@ export class EditorialStore {
       initializeProductionDocumentOriginSchema(authority);
       initializeMaintenanceCaseSchema(authority);
       // Revision 44 (Issue #431, S83) adds each Book's people, revision 45 (Issue #427, S79a) the versions a house imports
-      // of its review guideline documents, and revision 46 (Issue #427, S79c) the items put into 资料库 and their decisions.
+      // of its review guideline documents, and revision 46 (Issue #427, S79c) the items put into 资料库 and their decisions;
+      // revision 47 (Issue #429, S81a) each Book's Evaluation Records.
       initializeBookPeopleSchema(authority);
       initializeReviewGuidelineSchema(authority);
       initializeLibraryMaterialSchema(authority);
+      initializeEvaluationRecordSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -5562,6 +5580,77 @@ export class EditorialStore {
     this.#libraryCall(() => this.#transaction(this.#authority, () =>
       this.#libraryMaterials.decide(input.materialId, input.expectedDecisions, input.decision)));
     return this.inspectLibraryMaterial(input.materialId);
+  }
+
+  /** 知识库 › 评估方案 (Issue #429, S81a; KB-001, EVAL-003): the profile a new 评估 version snapshots, and its use. */
+  inspectEvaluationProfiles(): EvaluationProfilesProjection {
+    return this.#evaluationCall(() => this.#evaluations.profiles());
+  }
+
+  /** ②C 评估 of one Book (Issue #429, S81a; EVAL-001, EVAL-012): its versions, one on show, and whether one can begin. */
+  inspectEvaluation(bookId: string, recordId: string | null, recordsBefore?: number | null): EvaluationWorkspaceProjection {
+    return this.#evaluationCall(() => this.#evaluations.workspace(bookId, this.#evaluationBookTitle(bookId), recordId, recordsBefore));
+  }
+
+  /** 开始评估 or 重新评估: a new version bound to the manuscript's current revision, and the page with it on show. */
+  startEvaluation(bookId: string): EvaluationWorkspaceProjection {
+    return this.#evaluationCall(() => {
+      const title = this.#evaluationBookTitle(bookId);
+      const recordId = this.#transaction(this.#authority, () => this.#evaluations.start(bookId));
+      return this.#evaluations.workspace(bookId, title, recordId);
+    });
+  }
+
+  /** 保存评估 or 定稿: the editor's content appended to the version's chain, and the page as it now reads. */
+  saveEvaluation(input: { bookId: string; recordId: string; expectedEntries: number; content: unknown; finalize: boolean }): EvaluationWorkspaceProjection {
+    return this.#evaluationCall(() => {
+      const title = this.#evaluationBookTitle(input.bookId);
+      this.#transaction(this.#authority, () => this.#evaluations.save(input.bookId, input.recordId, input.expectedEntries, input.content, input.finalize));
+      return this.#evaluations.workspace(input.bookId, title, input.recordId);
+    });
+  }
+
+  #evaluationBookTitle(bookId: string): string {
+    requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+    return asString(one(this.#authority.prepare('SELECT title FROM books WHERE book_id = ?').all(bookId) as SqlRow[], 'BOOK_NOT_FOUND', '图书不存在。').title);
+  }
+
+  /**
+   * Where a new 评估 version binds (Issue #429, S81a; EVAL-001): the Book's primary manuscript at its branch's current revision,
+   * and whether edits wait in its journal beyond it; `null` for a Book without a manuscript.
+   */
+  #evaluationManuscript(bookId: string): { manuscriptId: string; revisionId: string; revisionLabel: string; uncheckpointed: boolean } | null {
+    const rows = this.#authority.prepare(
+      `SELECT m.manuscript_id, bws.base_revision_id, mr.revision_label, bws.journal_sequence, bws.last_checkpoint_sequence
+       FROM manuscripts m
+       JOIN manuscript_branches mb ON mb.manuscript_id = m.manuscript_id
+       JOIN branch_working_state bws ON bws.manuscript_id = m.manuscript_id AND bws.branch_id = mb.branch_id
+       JOIN manuscript_revisions mr ON mr.revision_id = bws.base_revision_id
+       WHERE m.book_id = ? AND m.role = 'primary'`,
+    ).all(bookId) as SqlRow[];
+    requireStore(rows.length <= 1, 'BOOK_MANUSCRIPT_STATE_INVALID', '图书主稿件关系或记录图不完整。');
+    const row = rows[0];
+    if (row === undefined) return null;
+    return {
+      manuscriptId: asString(row.manuscript_id),
+      revisionId: asString(row.base_revision_id),
+      revisionLabel: asString(row.revision_label),
+      uncheckpointed: asNumber(row.journal_sequence) > asNumber(row.last_checkpoint_sequence),
+    };
+  }
+
+  #evaluationCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof EvaluationError) throw new StoreError(error.code, error.message);
+      if (error instanceof AggregateError) {
+        this.#poisoned = true;
+        throw new StoreFatalError(error);
+      }
+      throw error;
+    }
   }
 
   #libraryCall<T>(operation: () => T): T {

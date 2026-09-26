@@ -46,8 +46,8 @@ export const KNOWLEDGE_BASE_TAB_VIEWS: ReadonlyArray<KnowledgeBaseTabView> = [
   {
     tab: 'evaluation',
     label: '评估方案',
-    holds: '审稿评估用的方案：百分制的评分项、风险项与预测。',
-    pending: '尚未提供：评估方案随「评估与审稿意见」一起到来。',
+    holds: '评估按这里的评分项、满分、档位、风险项与结论打分；每一版评估都记下它用的方案版本。',
+    pending: null,
   },
   { tab: 'rules', label: '工序与规则', holds: '专家经验工序与「快速开始」的默认执行规则。', pending: null },
   {
