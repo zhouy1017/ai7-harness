@@ -235,7 +235,7 @@ describe('数据版本 over the real store', () => {
     await reopened(() => undefined);
     const plant = new DatabaseSync(databasePath());
     try {
-      plant.exec(`DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; PRAGMA user_version = ${SERIES_KNOWLEDGE_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; PRAGMA user_version = ${SERIES_KNOWLEDGE_SCHEMA_VERSION};`);
     } finally {
       plant.close();
     }

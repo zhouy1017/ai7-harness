@@ -199,6 +199,7 @@ describe('作者 · 责编 · 相关人 (S83)', () => {
     const planted = new DatabaseSync(path);
     try {
       planted.exec(`BEGIN IMMEDIATE;
+        DROP TABLE database_merge_books;
         DROP TABLE database_merges;
         DROP TABLE database_replacements;
         DROP TABLE scheduled_backup_removals;

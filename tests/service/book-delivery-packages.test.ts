@@ -269,6 +269,7 @@ describe('图书交付包 (S67a)', () => {
     try {
       planted.exec('PRAGMA foreign_keys = OFF');
       planted.exec(`BEGIN IMMEDIATE;
+        DROP TABLE database_merge_books;
         DROP TABLE database_merges;
         DROP TABLE database_replacements;
         DROP TABLE scheduled_backup_removals;

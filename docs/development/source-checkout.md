@@ -283,19 +283,21 @@ A few references the store keeps by value — each import record's commit, each 
 A Book's enablement of the 编辑工作区方案 and the 权限侧车 revisions it pinned are its own, because its prepared Tasks name them (Issue #434 review). The 方案 itself is the one every AI7 carries, fixed to its bytes. Data that has not installed it gains it whole from a Book that enabled it: its installation, both sidecar revisions as installing writes them, and the carrier it retains. Data that has installed it keeps its own. A J-03 Task's plan is read against the credential reference that plan froze, as against its pin, never against this computer's connection. So a Book from another computer opens with its Tasks as recorded, and any new Run still needs this computer's own connection.
 
 A merge uses the replacement's staging place:
-- **Prepare:** extract the package, open it there as a store of its own (which brings it to this revision and checks it whole), and write the members as they then stand to `members.json`. Then plan which of its Books are new, already here or same-titled, back up the data as it is (`AI7 合并前备份 …`, origin `pre-merge-backup`), and write an intent of kind `merge` naming the digest of `members.json`. Unlike a replacement, a waiting merge refuses nothing: it applies onto the data as it is at the next open, so a change made meanwhile stays.
+- **Prepare:** extract the package, open it there as a store of its own (which brings it to this revision and checks it whole), make that store a file of its own with a rollback journal, and write the members as they then stand to `members.json`. Then plan which of its Books are new, already here or same-titled. The Books merging takes are written to `merging.jsonl`, one canonical line each, as the plan streams them. Back up the data as it is (`AI7 合并前备份 …`, origin `pre-merge-backup`), and write an intent of kind `merge` naming the digest of `members.json` and the digest and count of `merging.jsonl` (Issue #434 review). Unlike a replacement, a waiting merge refuses nothing: it applies onto the data as it is at the next open, so a change made meanwhile stays.
 - **Apply,** at the next open, onto the data as it is then:
   - `incoming/` is first verified against `members.json`, as for a replacement. A staging place changed since is `refused`, and the merge is recorded failed with `failure: 'changed'`.
   - Otherwise the store's files are copied aside, the Books are merged into the closed store, and the store opens.
   - A merge or an open that fails puts the saved files back, and the data opens as it was.
   - An interruption after the merge's commit finds its Books there and merges nothing twice.
   - A merge resumed before its Books went in (`saving-store` or `merging`) verifies what waits again first, leaving aside the journals SQLite keeps beside the package's store while a merge reads it (Issue #434 review). One that changed merges nothing, and the saved files go back. It is recorded failed with `failure: 'changed'`.
-- **Recording:** `database_merges` records each merge, applied or failed, with its Books and notices, and a failure's reason in its canonical record only. 导入记录 lists merges beside replacements, the two ledgers read as streams merged newest first. 回退 reads the replacements alone.
+- **Recording:** `database_merges` records each merge, applied or failed, with its notices, the count and digest of its Books, and a failure's reason in its canonical record only. `database_merge_books` keeps the Books as rows of their own, in the list's order, and a read verifies them against the record's count and digest as a stream. 导入记录 lists merges beside replacements, the two ledgers read as streams merged newest first. 回退 reads the replacements alone.
 - **Bounded (Issue #434 review):**
-  - The plan streams the package's Books. The preview lists the first fifty and counts them all as new, already here or same-titled.
-  - A waiting merge lists fifty and counts every Book it takes.
-  - A record names ten titles and counts the rest.
+  - The plan streams the package's Books. The preview lists the first fifty and counts them all as new, already here or same-titled, and asks the store what stays behind, over the Books merging would take.
+  - A waiting merge lists fifty from its list and counts every Book it takes.
+  - The merge seeds from its list through a table of its connection's own. A list that is no longer the one its intent names merges nothing and is recorded as changed.
+  - A record names ten titles from its rows and counts the rest.
   - The file references a merge copies are read as streams.
+- **The package's store as verified (Issue #434 review):** before a merge reads the package's store, every journal beside it is removed. Since the store stands alone with a rollback journal, a write-ahead log put beside it is never read either. Only the verified file reaches the merge.
 
 
 

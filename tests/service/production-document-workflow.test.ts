@@ -235,6 +235,7 @@ describe('the Deliverable Workflow of a Production Document (Issue #415, S66c)',
     try {
       planted.exec('PRAGMA foreign_keys = OFF');
       planted.exec(`BEGIN IMMEDIATE;
+        DROP TABLE database_merge_books;
         DROP TABLE database_merges;
         DROP TABLE database_replacements;
         DROP TABLE scheduled_backup_removals;

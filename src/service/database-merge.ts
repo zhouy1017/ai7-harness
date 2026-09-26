@@ -1,6 +1,8 @@
-import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
+import { DIGEST_PATTERN, canonicalJson, isRecord, parseCanonicalJson } from './analysis/canonical.js';
 
 /**
  * 只导入其中的图书，与本机合并（重名的另存） (Issue #434, plan slice S86d; V2-UX-DSTO-017; ADR 0079 §1.5). A Book merges with
@@ -28,12 +30,22 @@ export const DATABASE_MERGE_SCHEMA_SQL = {
   package_sha256 TEXT NOT NULL CHECK(length(package_sha256) = 64),
   backup_file_name TEXT NOT NULL CHECK(length(backup_file_name) BETWEEN 1 AND 255),
   backup_sha256 TEXT NOT NULL CHECK(length(backup_sha256) = 64),
-  books_json TEXT NOT NULL,
+  books_count INTEGER NOT NULL CHECK(books_count >= 0),
+  books_sha256 TEXT NOT NULL CHECK(length(books_sha256) = 64),
   notices_json TEXT NOT NULL,
   prepared_at TEXT NOT NULL,
   recorded_at TEXT NOT NULL,
   canonical_json TEXT NOT NULL,
   sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
+) STRICT`,
+  database_merge_books: `CREATE TABLE database_merge_books (
+  merge_id TEXT NOT NULL REFERENCES database_merges(merge_id),
+  ordinal INTEGER NOT NULL CHECK(ordinal >= 1),
+  book_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('new', 'same-title')),
+  internal_number_cleared INTEGER NOT NULL CHECK(internal_number_cleared IN (0, 1)),
+  PRIMARY KEY (merge_id, ordinal)
 ) STRICT`,
 } as const;
 
@@ -48,11 +60,23 @@ export const DATABASE_MERGE_TRIGGER_SQL: Readonly<Record<string, string>> = {
     BEGIN
       SELECT RAISE(ABORT, 'DATABASE_MERGE_LEDGER_IMMUTABLE');
     END`,
+  database_merge_books_no_update: `CREATE TRIGGER database_merge_books_no_update
+    BEFORE UPDATE ON database_merge_books
+    BEGIN
+      SELECT RAISE(ABORT, 'DATABASE_MERGE_LEDGER_IMMUTABLE');
+    END`,
+  database_merge_books_no_delete: `CREATE TRIGGER database_merge_books_no_delete
+    BEFORE DELETE ON database_merge_books
+    BEGIN
+      SELECT RAISE(ABORT, 'DATABASE_MERGE_LEDGER_IMMUTABLE');
+    END`,
 };
 
-export const DATABASE_MERGE_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {};
+export const DATABASE_MERGE_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
+  database_merge_books: ['merge_id>database_merges.merge_id:NO ACTION/NO ACTION/NONE'],
+};
 
-/** Revision 58's relation, created once: a store that predates it gains an empty ledger and nothing existing moves. */
+/** Revision 58's relations, created once: a store that predates them gains an empty ledger and nothing existing moves. */
 export function initializeDatabaseMergeSchema(db: DatabaseSync): void {
   if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'database_merges'").get() !== undefined) return;
   db.exec('BEGIN IMMEDIATE');
@@ -249,6 +273,7 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   scheduled_backup_removals: 'house',
   database_replacements: 'house',
   database_merges: 'house',
+  database_merge_books: 'house',
   // The search index over the working text, and its own relations.
   working_block_search: 'derived',
   working_block_search_config: 'derived',
@@ -375,19 +400,21 @@ export interface MergePlan {
   readonly books: ReadonlyArray<MergeBookPlan>;
   /** How many of the package's Books merging would take as new, leave as already here, or take beside one of the same title. */
   readonly counts: { readonly new: number; readonly present: number; readonly sameTitle: number };
-  /** Every Book merging would take, in the same order: what the merge names and takes. */
-  readonly merging: ReadonlyArray<MergeBookPlan>;
   readonly notices: ReadonlyArray<MergeNotice>;
 }
 
+/** A Book of `src` merging would take: none of this store's Books has its id or its identity. */
+const MERGING_BOOK = 'NOT EXISTS (SELECT 1 FROM main.books m WHERE m.book_id = b.book_id OR m.stable_identity = b.stable_identity)';
+
 /**
  * The Books of the store attached as `src`, as merging them into `main` would take them: new, already here, or with a title
- * already here — and what would stay behind. A read of both.
+ * already here — and what would stay behind. A read of both, as a stream (Issue #434 review): it keeps the page listed and
+ * the counts, and hands each Book merging would take, in order, to `merging`, never holding them all.
  */
-export function planMerge(db: DatabaseSync, listed = MAX_MERGE_BOOKS_LISTED): MergePlan {
+export function planMerge(db: DatabaseSync, listed = MAX_MERGE_BOOKS_LISTED, merging?: (book: MergeBookPlan) => void): MergePlan {
   const counts = { new: 0, present: 0, sameTitle: 0 };
   // A store with no Books offers none to merge.
-  if (!tableExists(db, 'src', 'books')) return { books: [], counts, merging: [], notices: [] };
+  if (!tableExists(db, 'src', 'books')) return { books: [], counts, notices: [] };
   const internal = columnsOf(db, 'src', 'books').includes('internal_number');
   // Read as a stream (Issue #434 review): the page listed and the Books merging would take, never every Book whole.
   const rows = db.prepare(
@@ -397,7 +424,6 @@ export function planMerge(db: DatabaseSync, listed = MAX_MERGE_BOOKS_LISTED): Me
   const sameTitle = db.prepare('SELECT 1 FROM main.books WHERE title = ?');
   const numberTaken = db.prepare('SELECT 1 FROM main.books WHERE internal_number = ?');
   const books: MergeBookPlan[] = [];
-  const merging: MergeBookPlan[] = [];
   let numberCleared = false;
   for (const row of rows) {
     const bookId = String(row.book_id);
@@ -414,19 +440,137 @@ export function planMerge(db: DatabaseSync, listed = MAX_MERGE_BOOKS_LISTED): Me
     else if (status === 'same-title') counts.sameTitle += 1;
     else counts.new += 1;
     if (books.length < listed) books.push(book);
-    if (status !== 'present') merging.push(book);
+    if (status !== 'present') merging?.(book);
     numberCleared ||= book.internalNumberCleared;
   }
-  const mergingIds = JSON.stringify(merging.map((book) => book.bookId));
+  // What stays behind is asked of the store, over the Books merging would take, never of a list of them.
   const notices = new Set<MergeNotice>();
   for (const [table, { notice, bookColumn }] of Object.entries(EXCLUSION_NOTICES)) {
-    if (merging.length === 0 || !tableExists(db, 'src', table)) continue;
-    const found = db.prepare(`SELECT 1 FROM src.${quoted(table)} WHERE ${quoted(bookColumn)} IN (SELECT value FROM json_each(?)) LIMIT 1`)
-      .get(mergingIds);
+    if (counts.new + counts.sameTitle === 0 || !tableExists(db, 'src', table)) continue;
+    const found = db.prepare(
+      `SELECT 1 FROM src.${quoted(table)} t WHERE t.${quoted(bookColumn)} IN (SELECT b.book_id FROM src.books b WHERE ${MERGING_BOOK}) LIMIT 1`,
+    ).get();
     if (found !== undefined) notices.add(notice);
   }
   if (numberCleared) notices.add('internal-number');
-  return { books, counts, merging, notices: [...notices].sort() };
+  return { books, counts, notices: [...notices].sort() };
+}
+
+// ---- the list of the Books a merge takes ---------------------------------------------------------------
+
+/** The staged list of the Books a merge takes (Issue #434 review): one canonical line each, in order, never held whole. */
+export const MERGING_BOOKS_FILE = 'merging.jsonl';
+
+/** What a merge's intent names of its list: the digest of its lines and how many there are. */
+export interface MergingBooks {
+  readonly sha256: string;
+  readonly count: number;
+}
+
+const LIST_CHUNK_BYTES = 64 * 1024;
+
+function mergingLine(book: MergeBookPlan): string {
+  return `${canonicalJson({ bookId: book.bookId, internalNumberCleared: book.internalNumberCleared, status: book.status, title: book.title })}\n`;
+}
+
+/** Writes the list a line at a time as the plan hands each Book over, hashing and counting it; nothing is held but a chunk. */
+export class MergingBooksWriter {
+  readonly #fd: number;
+  readonly #hash = createHash('sha256');
+  #count = 0;
+  #pending = '';
+
+  constructor(path: string) {
+    this.#fd = openSync(path, 'wx');
+  }
+
+  add(book: MergeBookPlan): void {
+    const line = mergingLine(book);
+    this.#hash.update(line);
+    this.#count += 1;
+    this.#pending += line;
+    if (this.#pending.length >= LIST_CHUNK_BYTES) this.#flush();
+  }
+
+  /** The list whole, synced, and what the intent names of it. */
+  finish(): MergingBooks {
+    this.#flush();
+    fsyncSync(this.#fd);
+    closeSync(this.#fd);
+    return { sha256: this.#hash.digest('hex'), count: this.#count };
+  }
+
+  abort(): void {
+    try { closeSync(this.#fd); } catch { /* already closed */ }
+  }
+
+  #flush(): void {
+    if (this.#pending.length > 0) writeSync(this.#fd, this.#pending);
+    this.#pending = '';
+  }
+}
+
+function isMergingBook(value: unknown): value is MergeBookPlan {
+  return isRecord(value) && Object.keys(value).length === 4 && typeof value.bookId === 'string' && typeof value.title === 'string' &&
+    (value.status === 'new' || value.status === 'same-title') && typeof value.internalNumberCleared === 'boolean';
+}
+
+/** Whether `value` is what an intent names of its list. */
+export function isMergingBooks(value: unknown): value is MergingBooks {
+  return isRecord(value) && Object.keys(value).length === 2 && typeof value.sha256 === 'string' && DIGEST_PATTERN.test(value.sha256) &&
+    typeof value.count === 'number' && Number.isSafeInteger(value.count) && value.count >= 1;
+}
+
+/**
+ * Each Book the staged list at `path` names, in order, read a chunk at a time; the list must be exactly what `expected` names —
+ * its digest and its count — or reading it throws `DATABASE_MERGE_BOOKS_CHANGED` once that is known.
+ */
+export function* readMergingBooks(path: string, expected: MergingBooks): Generator<MergeBookPlan> {
+  const changed = (): DatabaseMergeError => new DatabaseMergeError('DATABASE_MERGE_BOOKS_CHANGED', '准备好的图书清单已不完整或被改动。');
+  let fd: number;
+  try {
+    fd = openSync(path, 'r');
+  } catch {
+    throw changed();
+  }
+  const hash = createHash('sha256');
+  const buffer = Buffer.alloc(LIST_CHUNK_BYTES);
+  let rest = '';
+  let count = 0;
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  try {
+    for (;;) {
+      const read = readSync(fd, buffer, 0, buffer.length, null);
+      if (read === 0) break;
+      const chunk = buffer.subarray(0, read);
+      hash.update(chunk);
+      let text: string;
+      try {
+        text = rest + decoder.decode(chunk, { stream: true });
+      } catch {
+        throw changed();
+      }
+      const lines = text.split('\n');
+      rest = lines.pop()!;
+      // No one line may outgrow a chunk many times over: a list that does is not one AI7 wrote.
+      if (rest.length > LIST_CHUNK_BYTES * 4) throw changed();
+      for (const line of lines) {
+        let book: unknown;
+        try {
+          book = parseCanonicalJson(line);
+        } catch {
+          throw changed();
+        }
+        if (!isMergingBook(book) || `${line}\n` !== mergingLine(book)) throw changed();
+        count += 1;
+        if (count > expected.count) throw changed();
+        yield book;
+      }
+    }
+  } finally {
+    closeSync(fd);
+  }
+  if (rest !== '' || count !== expected.count || hash.digest('hex') !== expected.sha256) throw changed();
 }
 
 // ---- the merge -----------------------------------------------------------------------------------------
@@ -460,7 +604,39 @@ function copyStoredFile(sourceRoot: string, targetRoot: string, place: string, k
  * the transaction then does not keep is removed by the store's own sweep at its next open. Both stores must be at the same
  * schema revision.
  */
-export function mergeBooks(db: DatabaseSync, bookIds: ReadonlyArray<string>, roots: { readonly source: string; readonly target: string }): MergeCounts {
+export function mergeBooks(db: DatabaseSync, bookIds: Iterable<string>, roots: { readonly source: string; readonly target: string }): MergeCounts {
+  const count = listBooks(db, bookIds);
+  try {
+    return mergeListedBooks(db, count, roots);
+  } finally {
+    db.exec('DROP TABLE IF EXISTS temp.merge_books');
+  }
+}
+
+/** The Books a merge takes, into a table of the connection's own (`temp.merge_books`), one row each: how many. */
+function listBooks(db: DatabaseSync, bookIds: Iterable<string>): number {
+  db.exec('DROP TABLE IF EXISTS temp.merge_books');
+  db.exec('CREATE TEMP TABLE merge_books (book_id TEXT PRIMARY KEY) WITHOUT ROWID');
+  const insert = db.prepare('INSERT INTO temp.merge_books (book_id) VALUES (?)');
+  let count = 0;
+  db.exec('BEGIN');
+  try {
+    for (const bookId of bookIds) {
+      insert.run(bookId);
+      count += 1;
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch { /* nothing began */ }
+    db.exec('DROP TABLE IF EXISTS temp.merge_books');
+    if (error instanceof DatabaseMergeError) throw error;
+    throw new DatabaseMergeError('DATABASE_MERGE_BOOKS_CHANGED', '准备好的图书清单已不完整或被改动。');
+  }
+  return count;
+}
+
+/** Merge the `count` Books listed in `temp.merge_books`, as `mergeBooks` describes. */
+function mergeListedBooks(db: DatabaseSync, count: number, roots: { readonly source: string; readonly target: string }): MergeCounts {
   const version = (schema: 'main' | 'src'): number => Number((db.prepare(`PRAGMA ${schema}.user_version`).get() as SqlRow).user_version);
   requireMerge(version('main') === version('src'), 'DATABASE_MERGE_REVISION_MISMATCH', '本机数据与数据库文件的结构版本不同，不能合并。');
   const tables = catalogue(db);
@@ -477,10 +653,10 @@ export function mergeBooks(db: DatabaseSync, bookIds: ReadonlyArray<string>, roo
     db.exec('CREATE TEMP TABLE merge_rows (tbl TEXT NOT NULL, r INTEGER NOT NULL, PRIMARY KEY (tbl, r)) WITHOUT ROWID');
     const seeded = db.prepare(
       `INSERT INTO temp.merge_rows (tbl, r) SELECT 'books', rowid FROM src.books
-       WHERE book_id IN (SELECT value FROM json_each(?)) AND book_id NOT IN (SELECT book_id FROM main.books)
+       WHERE book_id IN (SELECT book_id FROM temp.merge_books) AND book_id NOT IN (SELECT book_id FROM main.books)
          AND stable_identity NOT IN (SELECT stable_identity FROM main.books)`,
-    ).run(JSON.stringify(bookIds)).changes;
-    requireMerge(Number(seeded) === bookIds.length, 'DATABASE_MERGE_BOOK_PRESENT', '要合并的图书已在本机，或不在数据库文件里。');
+    ).run().changes;
+    requireMerge(Number(seeded) === count, 'DATABASE_MERGE_BOOK_PRESENT', '要合并的图书已在本机，或不在数据库文件里。');
     const pull = (into: string, where: string): number =>
       Number(db.prepare(
         `INSERT OR IGNORE INTO temp.merge_rows (tbl, r) SELECT ?, x.rowid FROM src.${quoted(into)} x WHERE ${where}`,
@@ -565,7 +741,7 @@ export function mergeBooks(db: DatabaseSync, bookIds: ReadonlyArray<string>, roo
     ).run();
     db.exec('DROP TABLE temp.merge_rows');
     db.exec('COMMIT');
-    return { books: bookIds.length, rows, files };
+    return { books: count, rows, files };
   } catch (error) {
     try { db.exec('ROLLBACK'); } catch { /* the transaction is already gone */ }
     try { db.exec('DROP TABLE IF EXISTS temp.merge_rows'); } catch { /* nothing to drop */ }
@@ -606,20 +782,29 @@ export function restoreStoreFiles(dataRoot: string, from: string): void {
   }
 }
 
+/** What SQLite may keep beside a store while it is read or written: none of it is the store a package verified. */
+export const STORE_JOURNALS: ReadonlyArray<string> = ['-journal', '-wal', '-shm'];
+
 /**
- * Merge the Books `bookIds` of the package data at `packageRoot` into the store at `dataRoot`, with the store closed. Answers
- * `already` when every Book is there — a merge that committed before an interruption — and never merges part of them.
+ * Merge the Books the staged list at `books.path` names — exactly what `books` names of it — of the package data at
+ * `packageRoot` into the store at `dataRoot`, with the store closed. Answers `already` when every Book is there — a merge that
+ * committed before an interruption — and never merges part of them. The package's store is read as the verified file alone:
+ * whatever journal lies beside it, an interrupted merge's or one put there, is removed first, so no page SQLite would read from
+ * a journal reaches the merge (Issue #434 review).
  */
-export function mergeIntoStoreFile(dataRoot: string, packageRoot: string, bookIds: ReadonlyArray<string>): 'merged' | 'already' {
+export function mergeIntoStoreFile(dataRoot: string, packageRoot: string, books: MergingBooks & { readonly path: string }): 'merged' | 'already' {
+  for (const suffix of STORE_JOURNALS) rmSync(join(packageRoot, 'store', `ai7.sqlite${suffix}`), { force: true });
   const db = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'));
   try {
-    const present = Number((db.prepare('SELECT count(*) AS n FROM books WHERE book_id IN (SELECT value FROM json_each(?))')
-      .get(JSON.stringify(bookIds)) as SqlRow).n);
-    if (present === bookIds.length) return 'already';
+    const count = listBooks(db, (function* ids(): Generator<string> {
+      for (const book of readMergingBooks(books.path, books)) yield book.bookId;
+    })());
+    const present = Number((db.prepare('SELECT count(*) AS n FROM main.books WHERE book_id IN (SELECT book_id FROM temp.merge_books)').get() as SqlRow).n);
+    if (present === count) return 'already';
     requireMerge(present === 0, 'DATABASE_MERGE_BOOK_PRESENT', '要合并的图书已有一部分在本机。');
     db.prepare('ATTACH DATABASE ? AS src').run(join(packageRoot, 'store', 'ai7.sqlite'));
     try {
-      mergeBooks(db, bookIds, { source: packageRoot, target: dataRoot });
+      mergeListedBooks(db, count, { source: packageRoot, target: dataRoot });
     } finally {
       db.exec('DETACH DATABASE src');
     }

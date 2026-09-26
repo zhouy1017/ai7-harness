@@ -7,9 +7,11 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord, parseCanonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import {
+  DATABASE_MERGE_TRIGGER_SQL,
   DatabaseMergeError,
   MAX_MERGE_BOOKS_LISTED,
   MERGE_TABLE_POLICY,
+  MERGING_BOOKS_FILE,
   mergeBooks,
   mergeIntoStoreFile,
   planMerge,
@@ -419,9 +421,13 @@ describe('只导入其中的图书 over the store', () => {
     }
     const staging = replacementStagingFor(otherRoot);
     const intent = JSON.parse(await readFile(join(staging, 'intent.json'), 'utf8')) as { json: string };
-    const bookIds = (parseCanonicalJson(intent.json) as { mergeBooks: Array<{ bookId: string }> }).mergeBooks.map((entry) => entry.bookId);
+    const listed = { ...(parseCanonicalJson(intent.json) as { mergeBooks: { sha256: string; count: number } }).mergeBooks, path: join(staging, MERGING_BOOKS_FILE) };
     saveStoreFiles(otherRoot, join(staging, 'store-before'));
-    expect(mergeIntoStoreFile(otherRoot, join(staging, 'incoming'), bookIds)).toBe('merged');
+    // Journals beside the package's store are not the package: they are gone before the merge reads it (Issue #434 review).
+    const journals = ['-journal', '-wal', '-shm'].map((suffix) => join(staging, 'incoming', 'store', `ai7.sqlite${suffix}`));
+    for (const journal of journals) await writeFile(journal, 'not the verified store');
+    expect(mergeIntoStoreFile(otherRoot, join(staging, 'incoming'), listed)).toBe('merged');
+    expect(journals.filter((journal) => existsSync(journal))).toEqual([]);
     await writeFile(join(staging, 'phase.json'), JSON.stringify('merging'));
     target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
@@ -528,8 +534,8 @@ describe('what a merge refuses, puts back and brings forward', () => {
     saveStoreFiles(otherRoot, join(staging, 'store-before'));
     await phase(staging, 'merging');
     const intent = JSON.parse(await readFile(join(staging, 'intent.json'), 'utf8')) as { json: string };
-    const bookIds = (parseCanonicalJson(intent.json) as { mergeBooks: Array<{ bookId: string }> }).mergeBooks.map((entry) => entry.bookId);
-    expect(mergeIntoStoreFile(otherRoot, join(staging, 'incoming'), bookIds)).toBe('merged');
+    const listed = { ...(parseCanonicalJson(intent.json) as { mergeBooks: { sha256: string; count: number } }).mergeBooks, path: join(staging, MERGING_BOOKS_FILE) };
+    expect(mergeIntoStoreFile(otherRoot, join(staging, 'incoming'), listed)).toBe('merged');
     const member = join(staging, 'incoming', 'store', 'ai7.sqlite');
     const bytes = await readFile(member);
     await writeFile(member, Buffer.concat([bytes, Buffer.from('changed')]));
@@ -540,11 +546,23 @@ describe('what a merge refuses, puts back and brings forward', () => {
     } finally {
       target.close();
     }
-    // The journals SQLite keeps beside the package's store while a merge reads it are not the package's: the merge goes on.
+    // The journals SQLite keeps beside the package's store while a merge reads it are not the package's: the merge goes on — and
+    // a write-ahead log put there with committed rows, as another program could leave one, never reaches it (Issue #434 review).
     staging = await prepared(LATEST);
     saveStoreFiles(otherRoot, join(staging, 'store-before'));
     await phase(staging, 'merging');
-    for (const suffix of ['-wal', '-shm']) await writeFile(join(staging, 'incoming', 'store', `ai7.sqlite${suffix}`), '');
+    const packageStore = join(staging, 'incoming', 'store', 'ai7.sqlite');
+    const clone = join(roots.inputRoot, 'clone.sqlite');
+    copyFileSync(packageStore, clone);
+    const writer = new DatabaseSync(clone);
+    try {
+      writer.exec('PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0;');
+      writer.prepare("UPDATE books SET title = '改过的书名'").run();
+      copyFileSync(`${clone}-wal`, `${packageStore}-wal`);
+      copyFileSync(`${clone}-shm`, `${packageStore}-shm`);
+    } finally {
+      writer.close();
+    }
     target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
       expect(titles(target)).toEqual([TITLE, '本机之书'].sort());
@@ -568,7 +586,7 @@ describe('what a merge refuses, puts back and brings forward', () => {
     const packagePath = join(roots.inputRoot, 'AI7 旧版数据库.ai7db');
     const db = new DatabaseSync(older);
     try {
-      db.exec('DROP TABLE database_merges; PRAGMA user_version = 57;');
+      db.exec('DROP TABLE database_merge_books; DROP TABLE database_merges; PRAGMA user_version = 57;');
       await writeDatabasePackage(db, roots.dataRoot, packagePath, () => ({
         dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 57, createdAt: T.toISOString(), origin: 'database-export',
         contents: { books: 1, sourceVersions: 1, libraryMaterials: 0, series: 0 },
@@ -624,14 +642,17 @@ describe('what a merge refuses, puts back and brings forward', () => {
       source.close();
     }
     const target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    // The order is the package's own — Books made in the same millisecond follow their ids — and every list keeps it.
+    let listed: string[];
     try {
       const preview = await target.inspectDatabaseImport(packagePath);
       expect(preview.books).toHaveLength(MAX_MERGE_BOOKS_LISTED);
-      expect(preview.books[0]!.title).toBe('书 001');
+      listed = preview.books.map((book) => book.title);
+      expect(new Set(listed).size).toBe(MAX_MERGE_BOOKS_LISTED);
       expect(preview.bookCounts).toEqual({ new: MAX_MERGE_BOOKS_LISTED + 5, present: 0, sameTitle: 0 });
       const waiting = await target.prepareDatabaseMerge(preview.previewId, LATER);
       expect(waiting.pending).toMatchObject({ kind: 'merge', mergeBooksTotal: MAX_MERGE_BOOKS_LISTED + 5 });
-      expect(waiting.pending!.mergeBooks).toHaveLength(MAX_MERGE_BOOKS_LISTED);
+      expect(waiting.pending!.mergeBooks!.map((book) => book.title)).toEqual(listed);
       target.markCleanShutdown();
     } finally {
       target.close();
@@ -641,7 +662,7 @@ describe('what a merge refuses, puts back and brings forward', () => {
       expect(merged.listBooks(null).items.length).toBeGreaterThan(0);
       const read = await merged.inspectDatabaseReplacements();
       expect(read.replacements[0]).toMatchObject({ kind: 'merge', outcome: 'applied', mergedCount: MAX_MERGE_BOOKS_LISTED + 5 });
-      expect(read.replacements[0]!.mergedTitles).toEqual(Array.from({ length: 10 }, (_, index) => `书 ${String(index + 1).padStart(3, '0')}`));
+      expect(read.replacements[0]!.mergedTitles).toEqual(listed!.slice(0, 10));
       merged.markCleanShutdown();
     } finally {
       merged.close();
@@ -777,5 +798,99 @@ describe('what a merge refuses, puts back and brings forward', () => {
       expect([read.total, read.replacements[1]!.replacementId, read.rollBackOf]).toEqual([3, latest, latest]);
       expect(titles(store)).toEqual(['合并来的书', '替换来的书']);
     });
+  }, 180_000);
+
+  it("merges only the Books its staged list names, as its intent names the list, and keeps each merge's Books as rows it verifies (Issue #434 review)", async () => {
+    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let packagePath: string;
+    try {
+      emptyBook(source, '甲书');
+      emptyBook(source, '乙书');
+      packagePath = await exportedFrom(source, 'AI7 数据库.ai7db');
+    } finally {
+      source.close();
+    }
+    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      const waiting = await target.prepareDatabaseMerge((await target.inspectDatabaseImport(packagePath)).previewId, T);
+      expect(waiting.pending).toMatchObject({ kind: 'merge', mergeBooksTotal: 2 });
+      // A list changed since it was written lists no Book while it waits, though the count its intent names stays.
+      const list = join(replacementStagingFor(otherRoot), MERGING_BOOKS_FILE);
+      const lines = (await readFile(list, 'utf8')).split('\n');
+      await writeFile(list, lines.map((line) => line.replace('乙书', '丙书')).join('\n'));
+      expect((await target.inspectDatabaseReplacements()).pending).toMatchObject({ mergeBooks: [], mergeBooksTotal: 2 });
+    } finally {
+      target.close();
+    }
+    // At the next start it merges nothing, and says what waited had changed.
+    target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      expect(titles(target)).toEqual([]);
+      expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'failed', failure: 'changed', mergedCount: 0, mergedTitles: [] });
+      // Prepared again and merged: its record names both Books, from rows of its own.
+      await target.prepareDatabaseMerge((await target.inspectDatabaseImport(packagePath)).previewId, LATER);
+    } finally {
+      target.close();
+    }
+    target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      expect(titles(target)).toEqual(['乙书', '甲书']);
+      const record = (await target.inspectDatabaseReplacements()).replacements[0]!;
+      expect([record.outcome, record.mergedCount, [...record.mergedTitles!].sort()]).toEqual(['applied', 2, ['乙书', '甲书']]);
+      target.markCleanShutdown();
+    } finally {
+      target.close();
+    }
+    // A row rewritten by hand is not the list the record names: 导入记录 does not read.
+    const ledger = new DatabaseSync(storeOf(otherRoot));
+    try {
+      ledger.exec('DROP TRIGGER database_merge_books_no_update');
+      ledger.prepare("UPDATE database_merge_books SET title = '丁书' WHERE title = '乙书'").run();
+      ledger.exec(DATABASE_MERGE_TRIGGER_SQL.database_merge_books_no_update!);
+    } finally {
+      ledger.close();
+    }
+    target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      expect(code(await target.inspectDatabaseReplacements().catch((error: unknown) => error))).toBe('DATABASE_REPLACEMENT_RECORD_INVALID');
+      target.markCleanShutdown();
+    } finally {
+      target.close();
+    }
+  }, 180_000);
+
+  it('says what stays behind only of the Books merging would take, never of a Book already here (Issue #434 review)', async () => {
+    // A Book in a Series, exported alone; then the same data with another Book beside it.
+    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let first: string;
+    let both: string;
+    try {
+      const bookId = emptyBook(source, '甲书');
+      const series = source.createSeries({ title: '合并书系', note: '' });
+      const change = source.previewSeriesMembershipChange({ seriesId: series.seriesId, bookId, kind: 'add' });
+      source.changeSeriesMembership({ seriesId: series.seriesId, bookId, kind: 'add', previewDigest: change.previewDigest });
+      first = await exportedFrom(source, 'AI7 甲书.ai7db');
+      emptyBook(source, '乙书');
+      both = await exportedFrom(source, 'AI7 两本.ai7db');
+    } finally {
+      source.close();
+    }
+    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      const alone = await target.inspectDatabaseImport(first);
+      expect(alone.mergeNotices).toEqual(['series']);
+      await target.prepareDatabaseMerge(alone.previewId, T);
+    } finally {
+      target.close();
+    }
+    target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      // 甲书 is here now, its Series left behind; 乙书, the one Book merging would take, is in no Series.
+      const next = await target.inspectDatabaseImport(both);
+      expect([next.books.map((book) => [book.title, book.status]), next.mergeNotices]).toEqual([[['甲书', 'present'], ['乙书', 'new']], []]);
+      target.markCleanShutdown();
+    } finally {
+      target.close();
+    }
   }, 180_000);
 });

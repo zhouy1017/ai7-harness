@@ -1,8 +1,8 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { lstat, mkdir, open, opendir, readFile, readdir, realpath, rename, rm, type FileHandle } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join } from 'node:path';
-import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
+import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import {
   MAX_DATABASE_REPLACEMENTS_LISTED,
   type DatabaseExportContentsProjection,
@@ -22,13 +22,20 @@ import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
 import { MAX_MANIFEST_BYTES, verifyDatabasePackage, type DatabasePackageManifest } from './database-package-reader.js';
 import {
   DatabaseMergeError,
+  MERGING_BOOKS_FILE,
+  MergingBooksWriter,
+  STORE_JOURNALS,
+  isMergingBooks,
   mergeIntoStoreFile,
   planMerge,
+  readMergingBooks,
   restoreStoreFiles,
   saveStoreFiles,
   storeFilesSaved,
   MAX_MERGE_BOOKS_LISTED,
+  type MergeBookPlan,
   type MergePlan,
+  type MergingBooks,
 } from './database-merge.js';
 import { EXPORT_STAGING_DIRECTORY, fileDigest, takeFreeName } from './manuscript-export.js';
 import { backupLocationFor, ensureBackupLocation } from './scheduled-backups.js';
@@ -154,7 +161,8 @@ export function importCompatibility(manifest: Pick<DatabasePackageManifest, 'dat
 
 /**
  * What a prepared replacement or merge is: which package, from where, and the backup made of the data it changes — and, for a
- * merge (S86d), the Books it takes and what stays behind.
+ * merge (S86d), what stays behind and the list of the Books it takes, kept beside it in the staging place and named here by its
+ * digest and count (Issue #434 review), so the intent stays small however many Books a package holds.
  */
 export interface ReplacementIntent {
   readonly replacementId: string;
@@ -167,7 +175,7 @@ export interface ReplacementIntent {
   readonly backupFileName: string;
   readonly backupSha256: string;
   readonly preparedAt: string;
-  readonly mergeBooks: ReadonlyArray<DatabaseImportBookProjection> | null;
+  readonly mergeBooks: MergingBooks | null;
   readonly mergeNotices: ReadonlyArray<DatabaseMergeNotice>;
   /** The digest of the members the preparation verified, kept beside what it extracted (Issue #434 review). */
   readonly packageMembersSha256: string;
@@ -208,7 +216,7 @@ function isIntent(value: unknown): value is ReplacementIntent {
   const merge = isRecord(value) && value.kind === 'merge';
   return isRecord(value) && Object.keys(value).length === 13 && typeof value.replacementId === 'string' &&
     (value.kind === 'replace' || value.kind === 'roll-back' || value.kind === 'merge') &&
-    (merge ? Array.isArray(value.mergeBooks) && value.mergeBooks.length > 0 && value.mergeBooks.every(isBook) : value.mergeBooks === null) &&
+    (merge ? isMergingBooks(value.mergeBooks) : value.mergeBooks === null) &&
     Array.isArray(value.mergeNotices) && value.mergeNotices.every((notice) => typeof notice === 'string' && MERGE_NOTICES.includes(notice)) &&
     typeof value.packageFileName === 'string' && value.packageFileName.length > 0 && value.packageFileName.length <= 255 &&
     typeof value.packageSha256 === 'string' && DIGEST_PATTERN.test(value.packageSha256) && typeof value.packageCreatedAt === 'string' &&
@@ -590,7 +598,7 @@ async function applyPendingMerge<T>(
     await writePhase(staging, 'store-restored');
     return { store: await openStore(), replacement: null };
   }
-  const bookIds = intent.mergeBooks.map((book) => book.bookId);
+  const books = { ...intent.mergeBooks, path: join(staging, MERGING_BOOKS_FILE) };
   // A merge resumed before its Books went in verifies what waits again first (Issue #434 review), as a resumed replacement does:
   // one no longer what the preparation verified merges nothing, and the store's files go back once they were saved whole. The
   // journals SQLite keeps beside the package's store while a merge reads it are its own, never the package's.
@@ -607,9 +615,13 @@ async function applyPendingMerge<T>(
   }
   if (phase === 'merging') {
     try {
-      mergeIntoStoreFile(dataRoot, join(staging, 'incoming'), bookIds);
+      mergeIntoStoreFile(dataRoot, join(staging, 'incoming'), books);
       phase = 'opening-merge';
-    } catch {
+    } catch (error) {
+      // A list of its Books no longer the one the preparation wrote is what waited having changed, not data that would not open.
+      if (error instanceof DatabaseMergeError && error.code === 'DATABASE_MERGE_BOOKS_CHANGED') {
+        await writeAtomic(join(staging, REFUSAL_NOTE), JSON.stringify('changed'));
+      }
       phase = 'restoring-store';
     }
     await writePhase(staging, phase);
@@ -639,8 +651,11 @@ async function applyPendingMerge<T>(
   return { store: await openStore(), replacement: { intent, outcome: 'failed', failure } };
 }
 
-/** What SQLite keeps beside the package's store while a merge reads it: never counted among the package's members. */
-const PACKAGE_STORE_JOURNALS: ReadonlySet<string> = new Set(['-journal', '-wal', '-shm'].map((suffix) => `${DATABASE_PACKAGE_STORE_MEMBER}${suffix}`));
+/**
+ * What SQLite keeps beside the package's store while a merge reads it: never counted among the package's members, and removed
+ * before the merge reads the store, so none of it can reach the merge.
+ */
+const PACKAGE_STORE_JOURNALS: ReadonlySet<string> = new Set(STORE_JOURNALS.map((suffix) => `${DATABASE_PACKAGE_STORE_MEMBER}${suffix}`));
 
 /**
  * Written when a resumed apply put the data back because what waited had changed, or because an open of the data it moved in
@@ -687,8 +702,8 @@ interface StoredReplacement {
   readonly backupSha256: string;
   readonly preparedAt: string;
   readonly recordedAt: string;
-  /** A merge's Books and what stayed behind; none for a replacement. */
-  readonly mergeBooks: ReadonlyArray<DatabaseImportBookProjection> | null;
+  /** How many Books a merge took and the digest of their list, whose rows its ledger keeps; none for a replacement. */
+  readonly mergeBooks: MergingBooks | null;
   readonly mergeNotices: ReadonlyArray<DatabaseMergeNotice>;
   /** Why a failed replacement failed, as its record says; named only in the record of one that failed. */
   readonly failure?: DatabaseReplacementFailure;
@@ -760,7 +775,7 @@ export class DatabaseReplacements {
       try {
         plan = this.#plan(copy);
       } catch {
-        plan = { books: [], counts: { new: 0, present: 0, sameTitle: 0 }, merging: [], notices: [] };
+        plan = { books: [], counts: { new: 0, present: 0, sameTitle: 0 }, notices: [] };
       }
     } finally {
       await handle?.close().catch(() => undefined);
@@ -803,11 +818,24 @@ export class DatabaseReplacements {
       const facts = this.#sources.facts();
       requireReplacement(importCompatibility(manifest, facts.dataVersion, facts.schemaRevision) === 'compatible',
         'DATABASE_IMPORT_INCOMPATIBLE', '这个数据库文件与本机 AI7 的数据版本不兼容，不能合并。');
-      const incoming = join(replacementStagingFor(this.#dataRoot), 'incoming');
+      const staging = replacementStagingFor(this.#dataRoot);
+      const incoming = join(staging, 'incoming');
       await this.#sources.openPackage(incoming);
-      const plan = this.#plan(join(incoming, 'store', 'ai7.sqlite'));
-      const merging = plan.merging;
-      requireReplacement(merging.length > 0, 'DATABASE_MERGE_NOTHING', '这个文件里的图书本机都已经有了。');
+      // The package's store stands alone once it has been opened (Issue #434 review): a rollback journal, and nothing beside it
+      // that the members verified below would not cover.
+      standaloneStore(join(incoming, 'store', 'ai7.sqlite'));
+      // The Books merging takes are written to the staged list as the plan streams them, never held (Issue #434 review).
+      const writer = new MergingBooksWriter(join(staging, MERGING_BOOKS_FILE));
+      let plan: MergePlan;
+      let merging: MergingBooks;
+      try {
+        plan = this.#plan(join(incoming, 'store', 'ai7.sqlite'), (book) => writer.add(book));
+        merging = writer.finish();
+      } catch (error) {
+        writer.abort();
+        throw error;
+      }
+      requireReplacement(merging.count > 0, 'DATABASE_MERGE_NOTHING', '这个文件里的图书本机都已经有了。');
       const packageMembersSha256 = await writeReplacementMembers(this.#dataRoot, await stagedMembers(incoming));
       const backup = await this.#backUp(now, 'pre-merge-backup');
       await writeReplacementIntent(this.#dataRoot, {
@@ -836,11 +864,11 @@ export class DatabaseReplacements {
     return this.projection();
   }
 
-  /** The plan of merging the Books of the store at `path` into this one: a read of both. */
-  #plan(path: string): MergePlan {
+  /** The plan of merging the Books of the store at `path` into this one, each Book it would take handed to `merging`: a read of both. */
+  #plan(path: string, merging?: (book: MergeBookPlan) => void): MergePlan {
     this.#db.prepare('ATTACH DATABASE ? AS src').run(path);
     try {
-      return planMerge(this.#db);
+      return planMerge(this.#db, MAX_MERGE_BOOKS_LISTED, merging);
     } finally {
       this.#db.exec('DETACH DATABASE src');
     }
@@ -908,7 +936,7 @@ export class DatabaseReplacements {
     const { records, total, latestReplacement } = this.#scan(MAX_DATABASE_REPLACEMENTS_LISTED);
     const location = backupLocationFor(this.#dataRoot);
     return {
-      pending: pending === null ? null : pendingProjection(pending),
+      pending: pending === null ? null : pendingProjection(pending, replacementStagingFor(this.#dataRoot)),
       replacements: records.map((record): DatabaseReplacementRecordProjection => ({
         replacementId: record.replacementId,
         kind: record.kind,
@@ -918,9 +946,9 @@ export class DatabaseReplacements {
         preparedAt: record.preparedAt,
         recordedAt: record.recordedAt,
         backupPresent: existsSync(join(location, record.backupFileName)),
-        // A merge names its first titles and counts the rest (Issue #434 review).
-        mergedTitles: record.mergeBooks === null ? null : record.mergeBooks.slice(0, MAX_MERGED_TITLES_LISTED).map((book) => book.title),
-        mergedCount: record.mergeBooks === null ? null : record.mergeBooks.length,
+        // A merge names its first titles, read from its own rows, and counts the rest (Issue #434 review).
+        mergedTitles: record.mergeBooks === null ? null : this.#mergedTitles(record.replacementId, record.mergeBooks),
+        mergedCount: record.mergeBooks === null ? null : record.mergeBooks.count,
         failure: record.failure ?? null,
       })),
       total,
@@ -963,6 +991,18 @@ export class DatabaseReplacements {
 
   #recordMerge(intent: ReplacementIntent, outcome: 'applied' | 'failed', failure: DatabaseReplacementFailure | undefined, now: Date): void {
     if (this.#db.prepare('SELECT 1 FROM database_merges WHERE merge_id = ?').get(intent.replacementId) !== undefined) return;
+    // The Books it names are its staged list's, read a line at a time (Issue #434 review). A list no longer the one its intent
+    // names — a merge refused for it took nothing — leaves the record naming none.
+    const list = intent.mergeBooks === null ? null : { ...intent.mergeBooks, path: join(replacementStagingFor(this.#dataRoot), MERGING_BOOKS_FILE) };
+    const readable = list !== null && (() => {
+      try {
+        for (const _book of readMergingBooks(list.path, list)) { /* read whole, to know it is the one named */ }
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    const books: MergingBooks = readable ? intent.mergeBooks! : { sha256: sha256Hex(''), count: 0 };
     const stored = {
       mergeId: intent.replacementId,
       outcome,
@@ -970,7 +1010,8 @@ export class DatabaseReplacements {
       packageSha256: intent.packageSha256,
       backupFileName: intent.backupFileName,
       backupSha256: intent.backupSha256,
-      books: intent.mergeBooks ?? [],
+      booksCount: books.count,
+      booksSha256: books.sha256,
       notices: intent.mergeNotices,
       preparedAt: intent.preparedAt,
       recordedAt: now.toISOString(),
@@ -979,10 +1020,42 @@ export class DatabaseReplacements {
     };
     const record = canonicalRecord({ schema: MERGE_RECORD_SCHEMA, ...stored });
     this.#db.prepare(
-      `INSERT INTO database_merges(merge_id, outcome, package_file_name, package_sha256, backup_file_name, backup_sha256, books_json, notices_json, prepared_at, recorded_at, canonical_json, sha256)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO database_merges(merge_id, outcome, package_file_name, package_sha256, backup_file_name, backup_sha256, books_count, books_sha256, notices_json, prepared_at, recorded_at, canonical_json, sha256)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(stored.mergeId, stored.outcome, stored.packageFileName, stored.packageSha256, stored.backupFileName, stored.backupSha256,
-      canonicalJson(stored.books), canonicalJson(stored.notices), stored.preparedAt, stored.recordedAt, record.json, record.digest);
+      stored.booksCount, stored.booksSha256, canonicalJson(stored.notices), stored.preparedAt, stored.recordedAt, record.json, record.digest);
+    if (!readable) return;
+    const insert = this.#db.prepare(
+      `INSERT INTO database_merge_books(merge_id, ordinal, book_id, title, status, internal_number_cleared) VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    let ordinal = 0;
+    for (const book of readMergingBooks(list.path, list)) {
+      ordinal += 1;
+      insert.run(stored.mergeId, ordinal, book.bookId, book.title, book.status, book.internalNumberCleared ? 1 : 0);
+    }
+  }
+
+  /**
+   * A merge record's first titles, read from its own rows (Issue #434 review): every row is read, as a stream, to know they are
+   * exactly the list its record names — its count and digest — and only the first few titles are kept.
+   */
+  #mergedTitles(mergeId: string, books: MergingBooks): string[] {
+    const hash = createHash('sha256');
+    const titles: string[] = [];
+    let count = 0;
+    for (const row of this.#db.prepare(
+      'SELECT ordinal, book_id, title, status, internal_number_cleared FROM database_merge_books WHERE merge_id = ? ORDER BY ordinal',
+    ).iterate(mergeId) as Iterable<SqlRow>) {
+      count += 1;
+      const status = text(row.status);
+      requireReplacement(row.ordinal === count && (status === 'new' || status === 'same-title') &&
+        (row.internal_number_cleared === 0 || row.internal_number_cleared === 1), 'DATABASE_REPLACEMENT_RECORD_INVALID', INVALID);
+      const title = text(row.title);
+      hash.update(`${canonicalJson({ bookId: text(row.book_id), internalNumberCleared: row.internal_number_cleared === 1, status, title })}\n`);
+      if (titles.length < MAX_MERGED_TITLES_LISTED) titles.push(title);
+    }
+    requireReplacement(count === books.count && hash.digest('hex') === books.sha256, 'DATABASE_REPLACEMENT_RECORD_INVALID', INVALID);
+    return titles;
   }
 
   /** The merges this data records, newest first, each verified against its row as it is read. */
@@ -990,10 +1063,11 @@ export class DatabaseReplacements {
     for (const row of this.#db.prepare('SELECT * FROM database_merges ORDER BY rowid DESC').iterate() as Iterable<SqlRow>) {
       const outcome = text(row.outcome);
       requireReplacement(outcome === 'applied' || outcome === 'failed', 'DATABASE_REPLACEMENT_RECORD_INVALID', INVALID);
-      const books: unknown = parseCanonicalJson(text(row.books_json));
       const notices: unknown = parseCanonicalJson(text(row.notices_json));
-      requireReplacement(Array.isArray(books) && books.every(isBook) && Array.isArray(notices) &&
-        notices.every((notice) => typeof notice === 'string' && MERGE_NOTICES.includes(notice)), 'DATABASE_REPLACEMENT_RECORD_INVALID', INVALID);
+      const booksCount = row.books_count;
+      const booksSha256 = text(row.books_sha256);
+      requireReplacement(typeof booksCount === 'number' && Number.isSafeInteger(booksCount) && booksCount >= 0 && DIGEST_PATTERN.test(booksSha256) &&
+        Array.isArray(notices) && notices.every((notice) => typeof notice === 'string' && MERGE_NOTICES.includes(notice)), 'DATABASE_REPLACEMENT_RECORD_INVALID', INVALID);
       const stored = {
         mergeId: text(row.merge_id),
         outcome,
@@ -1001,7 +1075,8 @@ export class DatabaseReplacements {
         packageSha256: text(row.package_sha256),
         backupFileName: text(row.backup_file_name),
         backupSha256: text(row.backup_sha256),
-        books,
+        booksCount,
+        booksSha256,
         notices,
         preparedAt: text(row.prepared_at),
         recordedAt: text(row.recorded_at),
@@ -1023,7 +1098,7 @@ export class DatabaseReplacements {
         backupSha256: stored.backupSha256,
         preparedAt: stored.preparedAt,
         recordedAt: stored.recordedAt,
-        mergeBooks: books as DatabaseImportBookProjection[],
+        mergeBooks: { count: booksCount, sha256: booksSha256 },
         mergeNotices: notices as DatabaseMergeNotice[],
         ...(failure === undefined ? {} : { failure }),
       };
@@ -1162,7 +1237,33 @@ function failureOf(record: Record<string, unknown>, outcome: string): DatabaseRe
   return failure as DatabaseReplacementFailure | undefined;
 }
 
-function pendingProjection(intent: ReplacementIntent): DatabasePendingReplacementProjection {
+/**
+ * A waiting merge's first Books, read from its staged list as a stream that is read whole, to know it is the one its intent
+ * names (Issue #434 review); a list no longer that one lists none.
+ */
+function mergingBooksListed(staging: string, books: MergingBooks): DatabaseImportBookProjection[] {
+  const listed: DatabaseImportBookProjection[] = [];
+  try {
+    for (const book of readMergingBooks(join(staging, MERGING_BOOKS_FILE), books)) {
+      if (listed.length < MAX_MERGE_BOOKS_LISTED) listed.push(book);
+    }
+    return listed;
+  } catch {
+    return [];
+  }
+}
+
+/** A package's store once it has been opened as a store of its own: made to stand alone, with a rollback journal. */
+function standaloneStore(path: string): void {
+  const db = new DatabaseSync(path);
+  try {
+    db.exec('PRAGMA journal_mode = DELETE');
+  } finally {
+    db.close();
+  }
+}
+
+function pendingProjection(intent: ReplacementIntent, staging: string): DatabasePendingReplacementProjection {
   return {
     replacementId: intent.replacementId,
     kind: intent.kind,
@@ -1173,8 +1274,8 @@ function pendingProjection(intent: ReplacementIntent): DatabasePendingReplacemen
     backupFileName: intent.backupFileName,
     preparedAt: intent.preparedAt,
     // A waiting merge lists its first Books and counts them all (Issue #434 review).
-    mergeBooks: intent.mergeBooks === null ? null : intent.mergeBooks.slice(0, MAX_MERGE_BOOKS_LISTED),
-    mergeBooksTotal: intent.mergeBooks === null ? null : intent.mergeBooks.length,
+    mergeBooks: intent.mergeBooks === null ? null : mergingBooksListed(staging, intent.mergeBooks),
+    mergeBooksTotal: intent.mergeBooks === null ? null : intent.mergeBooks.count,
     mergeNotices: intent.mergeNotices,
   };
 }
