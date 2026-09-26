@@ -109,9 +109,11 @@ describe('the words of 交付 · 生产文档', () => {
     // restore stands, after the choices close and before the reopen is offered.
     const source = readFileSync(join(ROOT, 'src', 'renderer', 'index.ts'), 'utf8').replace(/\r\n/gu, '\n');
     // The call is a statement of the catch itself: on its own line at the catch's indentation, after the choices close and
-    // before the reopen is offered — so neither a guard around it nor a handler it moved into passes, whatever order its
-    // parts are named in (#609). A comment that names the function is not a call.
-    expect(source).toMatch(/^( +)choices\.disabled = true;$[\s\S]*?^\1showRestoreStands\(\{ [^}\n]+ \}\);$[\s\S]*?^\1actions\.replaceChildren\(reopen\);$/mu);
+    // before the reopen is offered — so neither a guard around it nor a handler it moved into passes (#609). A comment that
+    // names the function is not a call. It passes the four parts by their own names, in whatever order: a part given in
+    // another's place is typed alike and compiles, and would leave the choice's words on screen (#616).
+    const call = /^( +)choices\.disabled = true;$[\s\S]*?^\1showRestoreStands\(\{ ([^}\n]+) \}\);$[\s\S]*?^\1actions\.replaceChildren\(reopen\);$/mu.exec(source);
+    expect(call?.[2]?.split(', ').sort()).toEqual(['heading', 'lede', 'legend', 'sectionLabel']);
     expect(source.split('showRestoreStands({').length - 1).toBe(1);
   });
 
