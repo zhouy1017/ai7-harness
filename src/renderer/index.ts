@@ -4544,10 +4544,6 @@ function renderExemplars(root: HTMLElement, projection: ExemplarsProjection): vo
 }
 
 /**
- * 知识库's page on screen: its heading, the seven classes as a tab list — arrow keys move between them — and the chosen
- * class's panel, which says what the class holds and, for a class a later slice brings, why it shows nothing yet.
- */
-/**
  * 质量与学习 (Issue #61, plan slice S26b; LEARN-002, FDBK-010): a house-wide destination beside 知识库, opened from the
  * landing or from a Book's 学习准入待处理 in 待我处理 — then for that Book, with the way to every Book one step away.
  */
@@ -4583,6 +4579,10 @@ async function renderQualityLearning(bookId: string | null): Promise<void> {
   }
 }
 
+/**
+ * 知识库's page on screen: its heading, the seven classes as a tab list — arrow keys move between them — and the chosen
+ * class's panel, which says what the class holds and, for a class a later slice brings, why it shows nothing yet.
+ */
 function knowledgeBasePage(tab: KnowledgeBaseTab, tabFocused: boolean): { content: HTMLElement; panelNode: HTMLElement } {
   const view = knowledgeBaseTabView(tab);
   const content = panel();

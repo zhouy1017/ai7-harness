@@ -2775,7 +2775,15 @@ function registerRendererHandlers(
       requireSender(event);
       requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
       requireAuthority();
-      return service.call('inspectLearningMaterials', { bookId: input.bookId });
+      return service.call('inspectLearningMaterials', { bookId: input.bookId, after: input.after ?? null });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectLearningMaterial, (event, input: ServiceOperationMap['inspectLearningMaterial']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectLearningMaterial', { bookId: input.bookId, materialKey: input.materialKey });
     }),
   );
   ipcMain.handle(IPC_CHANNELS.decideLearningMaterial, (event, input: ServiceOperationMap['decideLearningMaterial']['input']) =>

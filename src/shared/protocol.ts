@@ -122,6 +122,7 @@ export const IPC_CHANNELS = {
   recordProposalDecisionFeedback: 'ai7:j11:record-proposal-decision-feedback',
   inspectLearningMaterials: 'ai7:j11:inspect-learning-materials',
   decideLearningMaterial: 'ai7:j11:decide-learning-material',
+  inspectLearningMaterial: 'ai7:j11:inspect-learning-material',
   applyChangeSuggestion: 'ai7:j05:apply-change-suggestion',
   applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
   reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
@@ -5117,6 +5118,31 @@ export interface RecordAnalysisFeedbackInput {
 export type LearningMaterialKind = 'proposal-decision' | 'analysis-feedback' | 'review-disposition';
 export const LEARNING_MATERIAL_KINDS: readonly LearningMaterialKind[] = ['proposal-decision', 'analysis-feedback', 'review-disposition'];
 
+const LEARNING_UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
+/**
+ * A material's place, by its kind (Issue #61 review): a 修改建议's decision, an analysis item of a Result Set Revision, or a
+ * 审阅 finding of a Review Run — each exactly as the store names it, a finding's `rvf_` identity included.
+ */
+export const LEARNING_MATERIAL_KEY_PATTERN = new RegExp(
+  `^(?:proposal-decision:${LEARNING_UUID}|analysis-feedback:${LEARNING_UUID}/(?:synopsis|(?:entities|events|relationships|settings)/\\d{1,6})` +
+  `|review-disposition:${LEARNING_UUID}/rvf_[0-9a-f]{24})$`,
+  'u',
+);
+
+/** The materials one answer of 学习准入 carries, Book by Book; `更多学习材料…` reads the next (Issue #61 review). */
+export const MAX_LEARNING_MATERIALS_PAGE = 40;
+
+/**
+ * Where the next page of 学习准入 starts: after this material of this Book — Books by title, a Book's materials by kind, then
+ * by when each came to be (a later reason never moves one), then by place.
+ */
+export interface LearningMaterialCursor {
+  readonly bookTitle: string;
+  readonly bookId: string;
+  readonly orderedAt: string;
+  readonly materialKey: string;
+}
+
 /**
  * Where a material stands (LEARN-006, LEARN-007): waiting for a decision; changed since the decision it had, which no longer
  * binds it; left for later; or decided.
@@ -5151,14 +5177,22 @@ export interface LearningMaterialsBookProjection {
   readonly title: string;
   readonly authors: ReadonlyArray<string>;
   readonly editors: ReadonlyArray<string>;
+  /** How many materials the Book has in all, whichever page shows them. */
+  readonly materialCount: number;
+  /** Those this page shows. */
   readonly materials: ReadonlyArray<LearningMaterialProjection>;
 }
 
-/** 质量与学习 › 学习准入: the Books with Learning Material, one Book at a time when a Book is named. */
+/**
+ * 质量与学习 › 学习准入: one page of the Books with Learning Material, one Book when a Book is named — at most
+ * `MAX_LEARNING_MATERIALS_PAGE` materials, a Book whose materials run on repeated at the top of the next page.
+ */
 export interface LearningMaterialsProjection {
   /** The governing basis every decision here records, in plain words (LEARN-003, LEARN-008). */
   readonly basis: string;
   readonly books: ReadonlyArray<LearningMaterialsBookProjection>;
+  /** Where the next page starts; `null` when this is the last. */
+  readonly nextCursor: LearningMaterialCursor | null;
 }
 
 /**
@@ -7563,8 +7597,11 @@ export interface ServiceOperationMap {
   recordChangeSuggestionDecision: { input: RecordChangeSuggestionDecisionInput; output: EditorialMarkCommandProjection };
   recordProposalDecisionReason: { input: RecordProposalDecisionReasonInput; output: EditorialMarkCommandProjection };
   recordProposalDecisionFeedback: { input: RecordProposalDecisionFeedbackInput; output: EditorialMarkCommandProjection };
-  inspectLearningMaterials: { input: { bookId: string | null }; output: LearningMaterialsProjection };
-  decideLearningMaterial: { input: DecideLearningMaterialInput; output: LearningMaterialsProjection };
+  inspectLearningMaterials: { input: { bookId: string | null; after: LearningMaterialCursor | null }; output: LearningMaterialsProjection };
+  /** One material as its Review Card reads it, by its Book and place. */
+  inspectLearningMaterial: { input: { bookId: string; materialKey: string }; output: LearningMaterialProjection };
+  /** 记录学习准入决定, answered with the one material it decided. */
+  decideLearningMaterial: { input: DecideLearningMaterialInput; output: LearningMaterialProjection };
   /**
    * AI7 Apply for Change Suggestions (Issue #408). The batch form is 确认应用 on 审阅's confirmation
    * strip (Issue #417): one Effect over exactly the suggestions the strip named, all or none.
@@ -7892,8 +7929,9 @@ export interface RendererApi {
   recordChangeSuggestionDecision(input: RecordChangeSuggestionDecisionInput): Promise<EditorialMarkCommandProjection>;
   recordProposalDecisionReason(input: RecordProposalDecisionReasonInput): Promise<EditorialMarkCommandProjection>;
   recordProposalDecisionFeedback(input: RecordProposalDecisionFeedbackInput): Promise<EditorialMarkCommandProjection>;
-  inspectLearningMaterials(input: { bookId: string | null }): Promise<LearningMaterialsProjection>;
-  decideLearningMaterial(input: DecideLearningMaterialInput): Promise<LearningMaterialsProjection>;
+  inspectLearningMaterials(input: { bookId: string | null; after?: LearningMaterialCursor | null }): Promise<LearningMaterialsProjection>;
+  inspectLearningMaterial(input: { bookId: string; materialKey: string }): Promise<LearningMaterialProjection>;
+  decideLearningMaterial(input: DecideLearningMaterialInput): Promise<LearningMaterialProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */
   applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): Promise<ManuscriptApplyCommandProjection>;

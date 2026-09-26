@@ -339,6 +339,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['recordProposalDecisionFeedback']['output']>(IPC_CHANNELS.recordProposalDecisionFeedback, input),
   inspectLearningMaterials: (input: ServiceOperationMap['inspectLearningMaterials']['input']) =>
     invoke<ServiceOperationMap['inspectLearningMaterials']['output']>(IPC_CHANNELS.inspectLearningMaterials, input),
+  inspectLearningMaterial: (input: ServiceOperationMap['inspectLearningMaterial']['input']) =>
+    invoke<ServiceOperationMap['inspectLearningMaterial']['output']>(IPC_CHANNELS.inspectLearningMaterial, input),
   decideLearningMaterial: (input: ServiceOperationMap['decideLearningMaterial']['input']) =>
     invoke<ServiceOperationMap['decideLearningMaterial']['output']>(IPC_CHANNELS.decideLearningMaterial, input),
   applyChangeSuggestion: (input: ServiceOperationMap['applyChangeSuggestion']['input']) =>

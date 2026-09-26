@@ -281,6 +281,10 @@ describe('each item', () => {
     expect(globalAttentionObjectLabel({ kind: 'maintenance', classification: 'supersession', ordinal: 3, publicationOrdinal: 1 })).toBe('维护事项 · 第 3 项 · 替代 · 第 1 次发稿版本');
     // Issue #427 (S79c): a 资料库 item by its kind and title.
     expect(globalAttentionObjectLabel({ kind: 'library-material', title: 'sample1', materialKind: 'book', scope: 'none' })).toBe('资料库 · 图书「sample1」');
+    // Issue #61 review: only what there is — a Book whose material was all left for later says no 0 条待定.
+    expect(globalAttentionObjectLabel({ kind: 'learning-materials', pending: 2, deferred: 0 })).toBe('学习材料 · 2 条待定');
+    expect(globalAttentionObjectLabel({ kind: 'learning-materials', pending: 2, deferred: 1 })).toBe('学习材料 · 2 条待定，1 条稍后决定');
+    expect(globalAttentionObjectLabel({ kind: 'learning-materials', pending: 0, deferred: 1 })).toBe('学习材料 · 1 条稍后决定');
   });
 
   it('gives each state its reason, from the record\'s own facts', () => {

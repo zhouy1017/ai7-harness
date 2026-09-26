@@ -45,7 +45,10 @@ export const LEARNING_STATUS = {
   recording: '正在记录学习准入决定…',
   recorded: '学习准入决定已记录。',
   failed: '无法记录这个决定。',
+  loadingMore: '正在读取更多学习材料…',
 } as const;
+/** Reads the next page of materials (Issue #61 review). */
+export const LEARNING_MORE = '更多学习材料…';
 
 export const LEARNING_STATE_LABELS: Readonly<Record<LearningMaterialState, string>> = {
   pending: '待定',
@@ -81,8 +84,9 @@ export function learningChoiceConsequence(choice: LearningEligibilityChoice, boo
 }
 
 /** A Book's heading in the list. */
-export function learningBookHeading(book: Pick<LearningMaterialsBookProjection, 'title' | 'materials'>): string {
-  return `《${book.title}》 · ${book.materials.length} 条`;
+/** A Book's heading: its title and how many materials it has in all, whichever page shows them. */
+export function learningBookHeading(book: Pick<LearningMaterialsBookProjection, 'title' | 'materialCount'>): string {
+  return `《${book.title}》 · ${book.materialCount} 条`;
 }
 
 /** Who the Book's decisions are attributed to (FDBK-013). */

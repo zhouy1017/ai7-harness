@@ -298,7 +298,8 @@ export function globalAttentionObjectLabel(object: GlobalAttentionObjectProjecti
     case 'library-material':
       return `资料库 · ${LIBRARY_KIND_LABELS[object.materialKind]}「${object.title}」`;
     case 'learning-materials':
-      return `学习材料 · ${object.pending} 条待定${object.deferred > 0 ? `，${object.deferred} 条稍后决定` : ''}`;
+      // Only what there is: a Book whose material was all left for later says no 0 条待定 (Issue #61 review).
+      return `学习材料 · ${[...(object.pending > 0 ? [`${object.pending} 条待定`] : []), ...(object.deferred > 0 ? [`${object.deferred} 条稍后决定`] : [])].join('，')}`;
   }
 }
 

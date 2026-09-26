@@ -1686,7 +1686,7 @@ async function main() {
     await clickSelector(renderer, '#global-attention-entry', 'learning-deferred-attention');
     await waitFor(renderer, `document.querySelector(${JSON.stringify(learningSelector)})?.dataset.attentionState === 'learning-materials-deferred'`, 'learning-deferred-listed', 30_000);
     const deferredListed = await renderer.evaluate(readAttentionItem(learningSelector));
-    requireJourney(deferredListed?.object === '学习材料 · 0 条待定，1 条稍后决定' && deferredListed.pill === '学习准入待处理 · 稍后决定', 'learning-deferred-attention-words', deferredListed);
+    requireJourney(deferredListed?.object === '学习材料 · 1 条稍后决定' && deferredListed.pill === '学习准入待处理 · 稍后决定', 'learning-deferred-attention-words', deferredListed);
     await clickSelector(renderer, `${learningSelector} button.global-attention-open`, 'learning-deferred-open');
     await readLearning(renderer, (page) => page.books.length === 1 && page.books[0].materials[1]?.[1] === 'deferred', 'learning-deferred-reopened');
 

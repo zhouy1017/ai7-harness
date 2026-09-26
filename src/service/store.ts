@@ -3,7 +3,7 @@ import { closeSync, constants, createReadStream, fstatSync, lstatSync, openSync,
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { J03_TASK_GOAL, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
+import { J03_TASK_GOAL, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
   InspectTaskPlanInput,
   TaskPlanProjection,
@@ -109,6 +109,8 @@ import type {
   RecordChangeSuggestionDecisionInput,
   RecordProposalDecisionFeedbackInput,
   DecideLearningMaterialInput,
+  LearningMaterialCursor,
+  LearningMaterialProjection,
   LearningMaterialsBookProjection,
   LearningMaterialsProjection,
   RecordProposalDecisionReasonInput,
@@ -314,6 +316,7 @@ import {
   analysisFeedbackCandidate,
   initializeLearningEligibilitySchema,
   learningMaterialDigest,
+  learningMaterialOrder,
   proposalDecisionCandidate,
   reviewDispositionCandidate,
   type LearningMaterialCandidate,
@@ -5738,28 +5741,69 @@ export class EditorialStore {
   }
 
   /**
-   * 质量与学习 › 学习准入 (Issue #61, plan slice S26b; LEARN-001 to LEARN-012, FDBK-013): the Learning Material of every Book
-   * that has any, or of the one Book named, each with its Review Card's excerpt and where it stands. A read.
+   * 质量与学习 › 学习准入 (Issue #61, plan slice S26b; LEARN-001 to LEARN-012, FDBK-013): one page of the Learning Material of
+   * every Book that has any, or of the one Book named — Books by title, a Book's materials by kind and then by when — each with
+   * its Review Card's excerpt and where it stands, at most `MAX_LEARNING_MATERIALS_PAGE` materials an answer (Issue #61
+   * review). A read.
    */
-  inspectLearningMaterials(bookId: string | null): LearningMaterialsProjection {
+  inspectLearningMaterials(bookId: string | null, after: LearningMaterialCursor | null = null): LearningMaterialsProjection {
     return this.#learningCall(() => {
       requireStore(bookId === null || UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
-      const books = bookId === null
-        ? (this.#authority.prepare('SELECT book_id FROM books ORDER BY title, book_id').all() as SqlRow[]).map((row) => asString(row.book_id))
-        : [bookId];
+      requireStore(after === null || (UUID_PATTERN.test(after.bookId) && after.bookTitle === safeTitle(after.bookTitle) &&
+        !Number.isNaN(Date.parse(after.orderedAt)) && LEARNING_MATERIAL_KEY_PATTERN.test(after.materialKey)),
+      'LEARNING_CURSOR_INVALID', '学习准入列表位置无效。');
+      const rows = (bookId === null
+        ? after === null
+          ? this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').all()
+          : this.#authority.prepare('SELECT book_id, title FROM books WHERE title > ? OR (title = ? AND book_id >= ?) ORDER BY title, book_id')
+            .all(after.bookTitle, after.bookTitle, after.bookId)
+        : this.#authority.prepare('SELECT book_id, title FROM books WHERE book_id = ?').all(bookId)) as SqlRow[];
+      // Up to one material beyond the page, so the page knows whether another follows.
+      const collected: Array<{ bookId: string; title: string; material: LearningMaterialProjection; orderedAt: string }> = [];
+      for (const row of rows) {
+        const id = asString(row.book_id);
+        const title = asString(row.title);
+        const materials = this.#learningMaterialsOf(id, true)
+          .filter((entry) => after === null || id !== after.bookId || learningMaterialOrder({ materialKey: entry.material.materialKey, orderedAt: entry.orderedAt }, after) > 0);
+        for (const { material, orderedAt } of materials) {
+          collected.push({ bookId: id, title, material, orderedAt });
+          if (collected.length > MAX_LEARNING_MATERIALS_PAGE) break;
+        }
+        if (collected.length > MAX_LEARNING_MATERIALS_PAGE) break;
+      }
+      const shown = collected.slice(0, MAX_LEARNING_MATERIALS_PAGE);
+      const books: LearningMaterialsBookProjection[] = [];
+      for (const entry of shown) {
+        const book = books.at(-1);
+        if (book !== undefined && book.bookId === entry.bookId) (book.materials as LearningMaterialProjection[]).push(entry.material);
+        else books.push({ ...this.#learningBookOf(entry.bookId, entry.title), materials: [entry.material] });
+      }
+      // A Book named by itself is shown even while it has no material.
+      if (bookId !== null && after === null && books.length === 0 && rows.length === 1) books.push({ ...this.#learningBookOf(bookId, asString(rows[0]!.title)), materials: [] });
+      const last = shown.at(-1);
       return {
         basis: LEARNING_ELIGIBILITY_BASIS,
-        books: books.flatMap((id) => {
-          const book = this.#learningBook(id, true);
-          return book.materials.length === 0 && bookId === null ? [] : [book];
-        }),
+        books,
+        nextCursor: collected.length > MAX_LEARNING_MATERIALS_PAGE && last !== undefined
+          ? { bookTitle: last.title, bookId: last.bookId, orderedAt: last.orderedAt, materialKey: last.material.materialKey }
+          : null,
       };
     });
   }
 
-  /** 记录学习准入决定 for the exact version the editor read, attributed to the Book's people as they stand (FDBK-013). */
-  decideLearningMaterial(input: DecideLearningMaterialInput): LearningMaterialsProjection {
+  /** One Learning Material as its Review Card reads it: what a decision answers with, and what a refusal reads again. */
+  inspectLearningMaterial(bookId: string, materialKey: string): LearningMaterialProjection {
     return this.#learningCall(() => {
+      requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+      const found = this.#learningMaterialsOf(bookId, true).find((entry) => entry.material.materialKey === materialKey);
+      requireStore(found !== undefined, 'LEARNING_MATERIAL_NOT_FOUND', '这条材料已经不在学习准入之列。');
+      return found.material;
+    });
+  }
+
+  /** 记录学习准入决定 for the exact version the editor read, attributed to the Book's people as they stand (FDBK-013). */
+  decideLearningMaterial(input: DecideLearningMaterialInput): LearningMaterialProjection {
+    this.#learningCall(() => {
       requireStore(UUID_PATTERN.test(input.bookId), 'BOOK_INVALID', '图书标识无效。');
       this.#transaction(this.#authority, () => {
         const candidate = this.#learningCandidates(input.bookId, false).find((entry) => entry.materialKey === input.materialKey);
@@ -5775,20 +5819,21 @@ export class EditorialStore {
           attribution: { peopleVersion: people.version, authors: people.authors, editors: people.editors },
         });
       });
-      return { basis: LEARNING_ELIGIBILITY_BASIS, books: [this.#learningBook(input.bookId, true)] };
     });
+    // The one material it decided: the page it sits on is never re-sent whole.
+    return this.inspectLearningMaterial(input.bookId, input.materialKey);
   }
 
-  #learningBook(bookId: string, withExcerpt: boolean): LearningMaterialsBookProjection {
-    const title = this.#evaluationBookTitle(bookId);
+  /** A Book's heading on the page: its title, its people, and how many materials it has in all. */
+  #learningBookOf(bookId: string, title: string): Omit<LearningMaterialsBookProjection, 'materials'> {
     const people = this.#bookPeople.current(bookId);
-    return {
-      bookId,
-      title,
-      authors: people.authors,
-      editors: people.editors,
-      materials: this.#learningEligibility.project(bookId, this.#learningCandidates(bookId, withExcerpt)),
-    };
+    return { bookId, title, authors: people.authors, editors: people.editors, materialCount: this.#learningCandidates(bookId, false).length };
+  }
+
+  /** A Book's Learning Material as the page orders it — by kind, then by when each came to be, then by place — with that time. */
+  #learningMaterialsOf(bookId: string, withExcerpt: boolean): Array<{ material: LearningMaterialProjection; orderedAt: string }> {
+    const candidates = this.#learningCandidates(bookId, withExcerpt).sort((a, b) => learningMaterialOrder(a, b));
+    return this.#learningEligibility.project(bookId, candidates).map((material, index) => ({ material, orderedAt: candidates[index]!.orderedAt }));
   }
 
   /**
@@ -5829,6 +5874,7 @@ export class EditorialStore {
         reason: standing.reason,
         reasonSource: standing.reasonSource,
         recordedAt: standing.reasonRevisedAt ?? asString(row.recorded_at),
+        decidedAt: asString(row.recorded_at),
       }, withExcerpt));
     }
     const labels = new Map<string, BaselineAnalysisResultSetRevisionProjection | null>();

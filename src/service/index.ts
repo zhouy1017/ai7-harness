@@ -541,7 +541,9 @@ async function dispatch(
     case 'decideLibraryMaterial':
       return { id: request.id, ok: true, op: request.op, result: store.decideLibraryMaterial(request.input) };
     case 'inspectLearningMaterials':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectLearningMaterials(request.input.bookId) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectLearningMaterials(request.input.bookId, request.input.after) };
+    case 'inspectLearningMaterial':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectLearningMaterial(request.input.bookId, request.input.materialKey) };
     case 'decideLearningMaterial':
       return { id: request.id, ok: true, op: request.op, result: store.decideLearningMaterial(request.input) };
     case 'inspectEvaluationProfiles':
