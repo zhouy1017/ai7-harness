@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, open, opendir, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
+import { DatabaseSync, backup, type SQLOutputValue } from 'node:sqlite';
 import { Zip, ZipDeflate, ZipPassThrough, strToU8 } from 'fflate';
 import {
   MAX_DATABASE_EXPORTS_LISTED,
@@ -34,7 +34,8 @@ import {
  * live in the platform's protected store, never under the Agent Data Root, and the package reads nothing else.
  *
  * The package (`ai7.database-package/1`) is a ZIP of:
- * - `store/ai7.sqlite`, a consistent copy of the store made by `VACUUM INTO`;
+ * - `store/ai7.sqlite`, a copy of the store made by SQLite's online backup a few pages at a time, so the service answers other
+ *   requests while it is made (Issue #434 review);
  * - every other file under the Agent Data Root, except the live store, the export staging area and the shell's browser
  *   profile;
  * - `manifest.json`, last: the Data Version, the software version and schema revision, when and why it was made, what it
@@ -240,6 +241,41 @@ export async function databasePackageSources(dataRoot: string, bounds: DatabaseP
   return found;
 }
 
+/** How many pages of the store each step of its copy takes: few enough that the service answers between two steps. */
+const SNAPSHOT_PAGES_PER_STEP = 256;
+
+/**
+ * Copy the store open on `db` to `path` with SQLite's online backup, a few pages at a time (Issue #434 review): the event loop
+ * turns between two steps, so the service answers other requests meanwhile, and a stop is honoured at the next step. A write
+ * this connection makes meanwhile lands in the copy too.
+ */
+export async function copyStore(db: DatabaseSync, path: string, signal?: AbortSignal): Promise<void> {
+  await backup(db, path, { rate: SNAPSHOT_PAGES_PER_STEP, progress: () => signal?.throwIfAborted() });
+}
+
+/** The copy of the store and whatever journal SQLite may leave beside it. */
+async function removeCopy(path: string): Promise<void> {
+  for (const suffix of ['', '-journal', '-wal', '-shm']) await rm(`${path}${suffix}`, { force: true });
+}
+
+/**
+ * What a copy of the store holds, counted from the copy itself over the relations it has, once it is whole; the copy is made a
+ * file of its own first, with a rollback journal and no write-ahead log beside it.
+ */
+function contentsOfCopy(path: string): DatabaseExportContentsProjection {
+  const copy = new DatabaseSync(path);
+  try {
+    copy.exec('PRAGMA journal_mode = DELETE');
+    const count = (table: 'books' | 'source_versions' | 'library_materials' | 'series'): number =>
+      copy.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) === undefined
+        ? 0
+        : Number((copy.prepare(`SELECT count(*) AS count FROM ${table}`).get() as { count: number | bigint }).count);
+    return { books: count('books'), sourceVersions: count('source_versions'), libraryMaterials: count('library_materials'), series: count('series') };
+  } finally {
+    copy.close();
+  }
+}
+
 /** How far writing a package has come: the bytes read of the files it carries, the store's copy among them. */
 export interface DatabasePackageProgress {
   readonly completedBytes: number;
@@ -254,27 +290,28 @@ export interface DatabasePackageOptions {
 
 /**
  * Write the package for `db` and the files under `dataRoot` to `packagePath`, which must not exist yet, streaming each
- * member so no file is held whole. `facts` is read in the same step as the store's copy is made, with nothing awaited
- * between them, so no other request can write in between: what the manifest says the package holds is what its copy of
- * the store holds (Issue #434 review). Answers the package's size and digest, its members, and those facts.
+ * member so no file is held whole. The store is copied a few pages at a time with SQLite's online backup, so the service
+ * answers other requests while it is copied and a stop is honoured between any two steps (Issue #434 review). A write this
+ * connection makes meanwhile lands in the copy too, so what the package holds is counted from the finished copy itself: the
+ * manifest states what its copy of the store holds, whatever was written while it was made. Answers the package's size and
+ * digest, its members, and its facts.
  */
 export async function writeDatabasePackage(
   db: DatabaseSync,
   dataRoot: string,
   packagePath: string,
-  facts: () => DatabasePackageFacts,
+  facts: () => Omit<DatabasePackageFacts, 'contents'>,
   options: DatabasePackageOptions = {},
 ): Promise<{ bytes: number; sha256: string; members: DatabasePackageMember[]; facts: DatabasePackageFacts }> {
   const { signal, onProgress } = options;
   signal?.throwIfAborted();
   const snapshotPath = `${packagePath}.store`;
-  await rm(snapshotPath, { force: true });
+  await removeCopy(snapshotPath);
   signal?.throwIfAborted();
-  // A consistent copy of the store, taken between two statements of the one connection that writes it.
-  const packageFacts = facts();
-  db.prepare('VACUUM INTO ?').run(snapshotPath);
   let output;
   try {
+    await copyStore(db, snapshotPath, signal);
+    const packageFacts: DatabasePackageFacts = { ...facts(), contents: contentsOfCopy(snapshotPath) };
     const sources = await databasePackageSources(dataRoot);
     const totalBytes = sources.reduce((sum, source) => sum + source.bytes, (await lstat(snapshotPath)).size);
     let completedBytes = 0;
@@ -369,7 +406,7 @@ export async function writeDatabasePackage(
     throw error;
   } finally {
     await output?.close().catch(() => undefined);
-    await rm(snapshotPath, { force: true }).catch(() => undefined);
+    await removeCopy(snapshotPath).catch(() => undefined);
   }
 }
 
@@ -380,10 +417,9 @@ const PREPARATION_SCHEMA = 'ai7.database-export.preparation/1' as const;
 const APPROVAL_SCHEMA = 'ai7.database-export.approval/1' as const;
 const RECEIPT_SCHEMA = 'ai7.database-export.receipt/1' as const;
 
-/** What the store knows that a database export records: the versions and what the package holds. */
+/** What the store knows that a database export records: its versions. What the package holds is counted from its own copy. */
 export interface DatabaseExportSources {
   facts(): { dataVersion: number; softwareVersion: string; schemaRevision: number };
-  contents(): DatabaseExportContentsProjection;
 }
 
 function text(value: SQLOutputValue | undefined): string {
@@ -590,7 +626,6 @@ export class DatabaseExports {
         ...this.#sources.facts(),
         createdAt: new Date().toISOString(),
         origin: 'database-export',
-        contents: this.#sources.contents(),
       }), {
         signal,
         onProgress: (progress) => {
