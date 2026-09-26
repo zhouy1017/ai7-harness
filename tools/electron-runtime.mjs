@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { setTimeout as delay } from 'node:timers/promises';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const RUNTIME_ROOT = resolve(ROOT, '.runtime');
@@ -128,7 +129,7 @@ async function validateCarrier(runtimeRoot, artifact) {
   return executable;
 }
 
-export function verifyElectronNodeMode(executable, environment) {
+export async function verifyElectronNodeMode(executable, environment) {
   const probe = [
     "const { DatabaseSync } = require('node:sqlite');",
     "const db = new DatabaseSync(':memory:');",
@@ -137,7 +138,7 @@ export function verifyElectronNodeMode(executable, environment) {
     'db.close();',
     "console.log(JSON.stringify({ electron: process.versions.electron, node: process.versions.node, modules: process.versions.modules, sqlite, fts5 }));",
   ].join('');
-  const output = spawnSync(executable, ['-e', probe], {
+  const launch = () => spawnSync(executable, ['-e', probe], {
     cwd: ROOT,
     env: { ...environment, ELECTRON_RUN_AS_NODE: '1' },
     encoding: 'utf8',
@@ -145,6 +146,16 @@ export function verifyElectronNodeMode(executable, environment) {
     windowsHide: true,
     maxBuffer: 1024 * 1024,
   });
+  // Issue #636: Windows can briefly deny process creation while the freshly extracted executable is shared exclusively.
+  // EBUSY with no child status is a failed launch, not a failed probe. Retry only it, at most four times / 1.5 seconds.
+  // A child that ran, another system error, or invalid runtime evidence is never retried.
+  let output = launch();
+  for (const milliseconds of [100, 200, 400, 800]) {
+    if (process.platform !== 'win32' || output.status !== null || output.error?.code !== 'EBUSY') break;
+    await delay(milliseconds);
+    output = launch();
+  }
+  if (output.error) throw output.error;
   requireRuntime(output.status === 0, 'Electron Node-mode probe failed.');
   const evidence = JSON.parse(output.stdout.trim());
   requireRuntime(evidence.electron === ELECTRON_VERSION, 'Electron carrier version drifted.');
@@ -170,7 +181,7 @@ export async function materializeElectronRuntime({ archive, artifact, environmen
     phase = 'validate';
     const executable = await validateCarrier(stagingRoot, artifact);
     phase = 'probe';
-    const evidence = verifyElectronNodeMode(executable, environment);
+    const evidence = await verifyElectronNodeMode(executable, environment);
     phase = 'write-evidence';
     await writeFile(
       resolve(stagingRoot, '.ai7-runtime.json'),
