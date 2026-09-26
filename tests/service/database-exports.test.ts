@@ -352,7 +352,9 @@ describe('导出数据库 off the request (Issue #434 review, V2-UX-EXP-011)', (
       const started = store.startDatabaseExportPreparation(destination, true);
       expect(started).toMatchObject({ kind: 'prepare', state: 'running', step: 'packing', cancellable: true, preparation: null, receipt: null, failure: null });
       expect(refusal(() => store.startDatabaseExportPreparation(join(roots.inputRoot, '另一个.ai7db'), true))).toBe('DATABASE_EXPORT_BUSY');
+      expect(store.databaseExportRunning()).toBe(true);
       await store.databaseExportSettled();
+      expect(store.databaseExportRunning()).toBe(false);
       const prepared = store.inspectDatabaseExports().activity!;
       expect(prepared).toMatchObject({ activityId: started.activityId, state: 'prepared', step: null, cancellable: false, receipt: null, failure: null });
       expect(prepared.totalBytes).toBeGreaterThan(0);

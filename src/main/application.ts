@@ -507,7 +507,11 @@ function registerRendererHandlers(
   printExportPage: (pagePath: string, pdfPath: string) => Promise<void>,
   consumeInjectedFolderPath: () => string | undefined,
   quitApplication: () => 'quitting' | 'blocked',
+  unsavedWindows: () => boolean,
 ): () => void {
+  const requireNothingUnsaved = (): void => {
+    if (unsavedWindows()) throw new ServiceCallError('DATABASE_REPLACEMENT_UNSAVED', '还有窗口里的修改没有保存；请先保存或关闭那个窗口，再替换本机数据。');
+  };
   const AMBIGUOUS_SERVICE_FAILURES = new Set([
     'COMMIT_PROOF_INCONCLUSIVE',
     'IMPORT_COMMIT_OUTCOME_UNCERTAIN',
@@ -3046,6 +3050,8 @@ function registerRendererHandlers(
       requireSender(event);
       return serializeEffect(async () => {
         requireAuthority();
+        // Once a replacement waits nothing more is saved (Issue #434 review), so no window may still hold changes not yet saved.
+        requireNothingUnsaved();
         return service.call('prepareDatabaseReplacement', { previewId: input.previewId });
       });
     }),
@@ -3071,6 +3077,7 @@ function registerRendererHandlers(
       requireSender(event);
       return serializeEffect(async () => {
         requireAuthority();
+        requireNothingUnsaved();
         return service.call('rollBackDatabaseReplacement', { replacementId: input.replacementId });
       });
     }),
@@ -4777,6 +4784,7 @@ export async function runApplication(): Promise<void> {
         setImmediate(() => app.quit());
         return 'quitting';
       },
+      () => [...ownedWindows.values()].some((owned) => owned.closeRisk && !owned.window.isDestroyed()),
     );
     startupLocation = reachStartup('renderer-first-paint');
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);

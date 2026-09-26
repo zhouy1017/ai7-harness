@@ -49,6 +49,7 @@ const record: DatabaseReplacementRecordProjection = {
   preparedAt: '2026-09-25T02:00:00.000Z',
   recordedAt: '2026-09-25T02:05:00.000Z',
   backupPresent: true,
+  failure: null,
 };
 
 describe('导入数据库\'s words', () => {
@@ -105,12 +106,12 @@ describe('导入数据库\'s words', () => {
     expect(databasePendingLines({ kind: 'replace', packageFileName: 'AI7 数据库.ai7db', backupFileName: 'AI7 替换前备份 1.ai7db' })).toEqual([
       '已准备好用「AI7 数据库.ai7db」替换本机全部数据。',
       '本机现在的数据已备份为「AI7 替换前备份 1.ai7db」，放在备份位置。',
-      'AI7 下次启动时完成替换；在此之前再做的修改不会保留。',
+      'AI7 下次启动时完成替换；在此之前不能再做修改，要继续修改请先取消替换。',
     ]);
     expect(databasePendingLines({ kind: 'roll-back', packageFileName: 'AI7 替换前备份 1.ai7db', backupFileName: 'AI7 替换前备份 2.ai7db' })).toEqual([
       '已准备好回退到「AI7 替换前备份 1.ai7db」。',
       '本机现在的数据已备份为「AI7 替换前备份 2.ai7db」，放在备份位置。',
-      'AI7 下次启动时完成回退；在此之前再做的修改不会保留。',
+      'AI7 下次启动时完成回退；在此之前不能再做修改，要继续修改请先取消回退。',
     ]);
     expect([
       databaseReplacementRecordLine(record, instant),
@@ -122,6 +123,14 @@ describe('导入数据库\'s words', () => {
       '〔09-25T02:05〕 · 未能用「AI7 数据库.ai7db」替换：它无法打开，本机数据保持原样 · 替换前备份「AI7 替换前备份 2026-09-25 10-00-00.ai7db」（文件不在备份位置）',
       '〔09-25T02:05〕 · 已回退到「AI7 替换前备份 1.ai7db」 · 回退前备份「AI7 替换前备份 2026-09-25 10-00-00.ai7db」',
       '〔09-25T02:05〕 · 未能回退到「AI7 替换前备份 1.ai7db」：它无法打开，本机数据保持原样 · 回退前备份「AI7 替换前备份 2026-09-25 10-00-00.ai7db」',
+    ]);
+    // One refused because what waited had changed since it was prepared says so (Issue #434 review).
+    expect([
+      databaseReplacementRecordLine({ ...record, outcome: 'failed', failure: 'changed' }, instant),
+      databaseReplacementRecordLine({ ...record, kind: 'roll-back', outcome: 'failed', failure: 'changed', packageFileName: 'AI7 替换前备份 1.ai7db' }, instant),
+    ]).toEqual([
+      '〔09-25T02:05〕 · 未能用「AI7 数据库.ai7db」替换：准备好的文件已不完整或被改动，本机数据保持原样 · 替换前备份「AI7 替换前备份 2026-09-25 10-00-00.ai7db」',
+      '〔09-25T02:05〕 · 未能回退到「AI7 替换前备份 1.ai7db」：准备好的文件已不完整或被改动，本机数据保持原样 · 回退前备份「AI7 替换前备份 2026-09-25 10-00-00.ai7db」',
     ]);
     expect([databaseReplacementRecordsLabel(0, 0), databaseReplacementRecordsLabel(2, 2), databaseReplacementRecordsLabel(20, 23)])
       .toEqual(['替换记录（0）', '替换记录（2）', '替换记录（最近 20 次，共 23 次）']);

@@ -5995,7 +5995,15 @@ export interface DatabaseReplacementRecordProjection {
   readonly recordedAt: string;
   /** Whether its backup is still in the backup location. */
   readonly backupPresent: boolean;
+  /**
+   * Why one that failed failed: its data would not open, or what waited was no longer the package the preparation verified
+   * (Issue #434 review). `null` for one applied, and for one that failed before this was recorded.
+   */
+  readonly failure: DatabaseReplacementFailure | null;
 }
+
+/** Why a replacement failed, as its record says. */
+export type DatabaseReplacementFailure = 'unopenable' | 'changed';
 
 /** 替换本机全部数据: the replacement waiting for AI7's next start, if any, and the replacements this data records. */
 export interface DatabaseReplacementsProjection {

@@ -1581,11 +1581,17 @@ async function main() {
     const replaceBackup = /^本机现在的数据已备份为「(AI7 替换前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(pendingLines) ? pendingLines[1] ?? '' : '')?.[1];
     requireJourney(
       Array.isArray(pendingLines) && pendingLines.length === 3 && pendingLines[0] === '已准备好用「AI7 数据库.ai7db」替换本机全部数据。' &&
-        replaceBackup !== undefined && pendingLines[2] === 'AI7 下次启动时完成替换；在此之前再做的修改不会保留。',
+        replaceBackup !== undefined && pendingLines[2] === 'AI7 下次启动时完成替换；在此之前不能再做修改，要继续修改请先取消替换。',
       'database-import-pending-words',
       pendingLines,
     );
     await assertRenderer(primary, `document.activeElement?.dataset.databaseImportAction === 'quit' && document.querySelector('[data-database-import-action="choose"]').disabled && document.querySelector('.database-import-preview').hidden`, 'database-import-quit-focused');
+    // Nothing more is written while the replacement waits (Issue #434 review): a change is refused in those words, and a read
+    // still answers.
+    const whileWaiting = await primary.evaluate(`window.ai7.setScheduledBackup({ enabled: true, expectedOrdinal: 0 }).then(() => null, (error) => [error?.code ?? null, error?.message ?? null])`);
+    requireJourney(Array.isArray(whileWaiting) && whileWaiting[0] === 'DATABASE_REPLACEMENT_WAITING' &&
+      whileWaiting[1] === '本机数据正在等 AI7 重新启动后被替换；在此之前不能再做修改。要继续修改，请先取消替换。', 'database-import-writes-refused', whileWaiting);
+    requireJourney(JSON.stringify(await bookTitles()) === JSON.stringify(titlesBeforeReplace), 'database-import-reads-while-waiting');
     const replacementId = await primary.evaluate(`document.querySelector('.database-import-pending').dataset.replacementId`);
     await quitThroughProduct('database-import');
 
@@ -1608,7 +1614,7 @@ async function main() {
     const rollBackBackup = /^本机现在的数据已备份为「(AI7 替换前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(rollBackLines) ? rollBackLines[1] ?? '' : '')?.[1];
     requireJourney(
       Array.isArray(rollBackLines) && rollBackLines[0] === `已准备好回退到「${replaceBackup}」。` && rollBackBackup !== undefined && rollBackBackup !== replaceBackup &&
-        rollBackLines[2] === 'AI7 下次启动时完成回退；在此之前再做的修改不会保留。',
+        rollBackLines[2] === 'AI7 下次启动时完成回退；在此之前不能再做修改，要继续修改请先取消回退。',
       'database-roll-back-pending-words',
       rollBackLines,
     );

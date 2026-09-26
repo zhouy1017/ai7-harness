@@ -100,15 +100,17 @@ export function databasePendingLines(pending: Pick<DatabasePendingReplacementPro
   return [
     rollBack ? `已准备好回退到「${pending.packageFileName}」。` : `已准备好用「${pending.packageFileName}」替换本机全部数据。`,
     `本机现在的数据已备份为「${pending.backupFileName}」，放在备份位置。`,
-    `AI7 下次启动时完成${rollBack ? '回退' : '替换'}；在此之前再做的修改不会保留。`,
+    `AI7 下次启动时完成${rollBack ? '回退' : '替换'}；在此之前不能再做修改，要继续修改请先${rollBack ? DATABASE_IMPORT_ACTIONS.cancelRollBack : DATABASE_IMPORT_ACTIONS.cancelReplacement}。`,
   ];
 }
 
 /** One replacement as 替换记录 lists it: when, what it came to, and the backup it made. */
 export function databaseReplacementRecordLine(record: DatabaseReplacementRecordProjection, instant: (iso: string) => string): string {
+  // Why one failed (Issue #434 review): what waited had changed since it was prepared, or its data would not open.
+  const why = record.failure === 'changed' ? '准备好的文件已不完整或被改动' : '它无法打开';
   const what = record.kind === 'roll-back'
-    ? record.outcome === 'applied' ? `已回退到「${record.packageFileName}」` : `未能回退到「${record.packageFileName}」：它无法打开，本机数据保持原样`
-    : record.outcome === 'applied' ? `已用「${record.packageFileName}」替换本机全部数据` : `未能用「${record.packageFileName}」替换：它无法打开，本机数据保持原样`;
+    ? record.outcome === 'applied' ? `已回退到「${record.packageFileName}」` : `未能回退到「${record.packageFileName}」：${why}，本机数据保持原样`
+    : record.outcome === 'applied' ? `已用「${record.packageFileName}」替换本机全部数据` : `未能用「${record.packageFileName}」替换：${why}，本机数据保持原样`;
   return `${instant(record.recordedAt)} · ${what} · ${record.kind === 'roll-back' ? '回退前备份' : '替换前备份'}「${record.backupFileName}」${record.backupPresent ? '' : '（文件不在备份位置）'}`;
 }
 

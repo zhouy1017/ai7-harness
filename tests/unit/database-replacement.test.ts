@@ -14,6 +14,7 @@ import {
   readPendingReplacement,
   replacementStagingFor,
   writeReplacementIntent,
+  writeReplacementMembers,
   type ReplacementIntent,
 } from '../../src/service/database-replacement.js';
 
@@ -73,6 +74,7 @@ async function otherPackage(): Promise<{ path: string; sha256: string }> {
 async function prepared(): Promise<ReplacementIntent> {
   const { path, sha256 } = await otherPackage();
   const { manifest } = await extractReplacement(dataRoot, path, sha256);
+  const packageMembersSha256 = await writeReplacementMembers(dataRoot, manifest.members);
   const intent: ReplacementIntent = {
     replacementId: '5f0c3c1e-9a8b-4c2d-8e1f-0a1b2c3d4e5f',
     kind: 'replace',
@@ -84,6 +86,7 @@ async function prepared(): Promise<ReplacementIntent> {
     backupFileName: preReplaceBackupFileName(T),
     backupSha256: 'b'.repeat(64),
     preparedAt: T.toISOString(),
+    packageMembersSha256,
   };
   await writeReplacementIntent(dataRoot, intent);
   return intent;
@@ -152,12 +155,41 @@ describe('applying a replacement of the local data', () => {
   it('moves data that will not open out again and the data it would have replaced back, and says the replacement failed', async () => {
     const intent = await prepared();
     const opened = await openWithPendingReplacement(dataRoot, refuseThePackage);
-    expect(opened).toEqual({ store: 'original', replacement: { intent, outcome: 'failed' } });
+    expect(opened).toEqual({ store: 'original', replacement: { intent, outcome: 'failed', failure: 'unopenable' } });
     expect(entries(dataRoot)).toEqual(['export-staging', 'objects', 'recovery-objects', 'shell', 'store']);
     expect(readFileSync(join(dataRoot, 'store', 'ai7.sqlite'), 'utf8')).toBe('the store as it is');
     expect(entries(join(staging(), 'discarded'))).toEqual(['objects', 'store']);
     await completeReplacement(dataRoot);
     expect(existsSync(staging())).toBe(false);
+  });
+
+  it('replaces nothing when what waits is no longer what its preparation verified, and says so (Issue #434 review)', async () => {
+    const changes: ReadonlyArray<() => void> = [
+      // A member gone, one changed in place, a file it never held, nothing extracted at all, and the members' list rewritten.
+      () => rmSync(join(staging(), 'incoming', 'objects'), { recursive: true, force: true }),
+      () => {
+        const path = join(staging(), 'incoming', 'store', 'ai7.sqlite');
+        const bytes = readFileSync(path);
+        bytes[bytes.length - 1] = bytes[bytes.length - 1]! ^ 0xff;
+        writeFileSync(path, bytes);
+      },
+      () => writeFileSync(join(staging(), 'incoming', 'objects', 'extra.bin'), 'extra'),
+      () => rmSync(join(staging(), 'incoming'), { recursive: true, force: true }),
+      () => writeFileSync(join(staging(), 'members.json'), '[]'),
+    ];
+    for (const change of changes) {
+      const intent = await prepared();
+      change();
+      const refused = { store: 'original', replacement: { intent, outcome: 'failed', failure: 'changed' } };
+      expect(await openWithPendingReplacement(dataRoot, open)).toEqual(refused);
+      expect(entries(dataRoot)).toEqual(['export-staging', 'objects', 'recovery-objects', 'shell', 'store']);
+      expect(readFileSync(join(dataRoot, 'store', 'ai7.sqlite'), 'utf8')).toBe('the store as it is');
+      // An open interrupted before the failure was recorded finds it refused again, and still moves nothing.
+      expect(await openWithPendingReplacement(dataRoot, open)).toEqual(refused);
+      expect(marker()).toBe('original');
+      await completeReplacement(dataRoot);
+      expect(existsSync(staging())).toBe(false);
+    }
   });
 
   it('resumes moving the data back, however far it had come', async () => {
