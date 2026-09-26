@@ -240,8 +240,10 @@ describe('反馈历史 over the real store (Issue #61, S26c review)', () => {
     // A corrupted old, undisplayed predecessor must still fail the read rather than hide behind the response bound.
     const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
+      const trigger = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND name = 'proposal_decision_feedback_no_update'").get()!;
       db.exec('DROP TRIGGER proposal_decision_feedback_no_update');
       db.exec("UPDATE proposal_decision_feedback SET canonical_json = '{}' WHERE ordinal = 1");
+      db.exec(String(trigger.sql));
     } finally { db.close(); }
     const damaged = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
