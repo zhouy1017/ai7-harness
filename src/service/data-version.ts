@@ -100,8 +100,8 @@ export function compareSoftwareVersions(left: string, right: string): number {
     if (x === undefined || y === undefined) return x === undefined ? -1 : 1;
     const numeric = /^\d+$/u;
     if (numeric.test(x) && numeric.test(y)) {
-      const difference = Number(x) - Number(y);
-      if (difference !== 0) return Math.sign(difference);
+      const difference = BigInt(x) - BigInt(y);
+      if (difference !== 0n) return difference > 0n ? 1 : -1;
     } else if (numeric.test(x) !== numeric.test(y)) {
       return numeric.test(x) ? -1 : 1;
     } else if (x !== y) {
@@ -158,10 +158,10 @@ export class DataVersionLedger {
   }
 
   /** Every record in order, each verified: its digest, its record against its row, and its place in the chain. */
-  history(): StoredVersion[] {
-    const rows = this.#db.prepare('SELECT * FROM store_versions ORDER BY ordinal').all() as SqlRow[];
+  *history(): IterableIterator<StoredVersion> {
+    const rows = this.#db.prepare('SELECT * FROM store_versions ORDER BY ordinal').iterate() as IterableIterator<SqlRow>;
     let before: StoredVersion | null = null;
-    return rows.map((row) => {
+    for (const row of rows) {
       const json = String(row.canonical_json);
       requireDataVersion(sha256Hex(json) === String(row.sha256), 'STORE_VERSION_RECORD_INVALID', INVALID);
       const record = JSON.parse(json) as unknown;
@@ -181,8 +181,22 @@ export class DataVersionLedger {
         recordedAt: String(row.recorded_at),
       };
       before = entry;
-      return entry;
-    });
+      yield entry;
+    }
+  }
+
+  /** Validate the whole ledger, retaining only the current record, latest software transition and newest twenty. */
+  standing(): { latest: StoredVersion | null; recent: StoredVersion[]; update: ReturnType<typeof latestSoftwareUpdate>; count: number } {
+    let latest: StoredVersion | null = null;
+    let update: ReturnType<typeof latestSoftwareUpdate> = null;
+    const recent: StoredVersion[] = [];
+    for (const entry of this.history()) {
+      if (latest !== null && latest.softwareVersion !== entry.softwareVersion) update = latestSoftwareUpdate([latest, entry]);
+      latest = entry;
+      recent.push(entry);
+      if (recent.length > MAX_STORE_VERSIONS_LISTED) recent.shift();
+    }
+    return { latest, recent: recent.reverse(), update, count: latest?.ordinal ?? 0 };
   }
 
   /**
@@ -192,12 +206,11 @@ export class DataVersionLedger {
   recordOpen(input: { readonly softwareVersion: string; readonly dataVersion: number; readonly schemaRevision: number }): boolean {
     requireDataVersion(SOFTWARE_VERSION.test(input.softwareVersion) && Number.isSafeInteger(input.dataVersion) && input.dataVersion >= 1 &&
       Number.isSafeInteger(input.schemaRevision) && input.schemaRevision >= 1, 'STORE_VERSION_INVALID', '数据版本记录无效。');
-    const history = this.history();
-    const latest = history.at(-1) ?? null;
+    const { latest, count } = this.standing();
     if (latest !== null && latest.softwareVersion === input.softwareVersion && latest.dataVersion === input.dataVersion &&
       latest.schemaRevision === input.schemaRevision) return false;
     const recordId = randomUUID();
-    const ordinal = history.length + 1;
+    const ordinal = count + 1;
     const recordedAt = new Date().toISOString();
     const record = canonicalRecord({
       schema: RECORD_SCHEMA,
