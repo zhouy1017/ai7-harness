@@ -140,6 +140,12 @@ describe('学习准入 over the real store', () => {
       expect(found.books.map((entry) => [entry.bookId, entry.authors, entry.editors, entry.materials.length])).toEqual([[book.bookId, ['周一'], ['郑三'], 2]]);
       const [reasoned, edited] = found.books[0]!.materials as [LearningMaterialProjection, LearningMaterialProjection];
       expect([reasoned.kind, reasoned.originLabel, reasoned.state, reasoned.decision, reasoned.decisions]).toEqual(['proposal-decision', '修改建议 · 拒绝', 'pending', null, 0]);
+      expect(reasoned.target).toMatchObject({ kind: 'mark', bookId: book.bookId, manuscriptId: book.manuscriptId,
+        branchId: book.branchId, markId: rejectedMark, detached: false });
+      const sourceRoute = store.resolveBookWorkbenchRoute({ kind: 'book', bookId: book.bookId, learningMaterialKey: reasoned.materialKey });
+      expect(sourceRoute).toMatchObject({ kind: 'book', bookId: book.bookId, learningMaterialTarget: reasoned.target });
+      expect(() => store.resolveBookWorkbenchRoute({ kind: 'book', bookId: book.bookId,
+        learningMaterialKey: `proposal-decision:${randomUUID()}` })).toThrow();
       expect(reasoned.excerpt.map((line) => line.split('：')[0])).toEqual(['原文', '建议', '你的原因']);
       expect(reasoned.excerpt.at(-1)).toBe('你的原因：证据不足');
       expect(reasoned.rationale).toBe('你说明了为什么这样处理：它可以帮 AI7 以后的建议更接近你的判断。');
@@ -394,6 +400,7 @@ describe('学习准入 over the real store', () => {
       store.recordReviewFindingDisposition(bookId, run.reviewRunId, finding.findingId, '本书体例允许这种写法');
       const material = store.inspectLearningMaterials(bookId).books[0]!.materials.find((entry) => entry.kind === 'review-disposition')!;
       expect(material.materialKey).toBe(`review-disposition:${run.reviewRunId}/${finding.findingId}`);
+      expect(material.target).toEqual({ kind: 'review', bookId, reviewRunId: run.reviewRunId, findingId: finding.findingId });
       // The frame the page sends is accepted as it is, underscore and all (Issue #61 review), and the store records it.
       const input = { bookId, materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: 0, choice: 'excluded' as const, note: null };
       const request = { id: randomUUID(), op: 'decideLearningMaterial', input };

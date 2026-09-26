@@ -328,7 +328,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!isRecord(value.input)) throw new ProtocolError(tentativeId);
       const input = value.input;
       const valid = input.kind === 'book'
-        ? hasExactKeys(input, ['kind', 'bookId']) &&
+        ? (hasExactKeys(input, ['kind', 'bookId']) ||
+            (hasExactKeys(input, ['kind', 'bookId', 'learningMaterialKey']) && validLearningMaterialKey(input.learningMaterialKey))) &&
           isBoundedString(input.bookId, 36) && UUID_PATTERN.test(input.bookId)
         : input.kind === 'revision' &&
           hasExactKeys(input, ['kind', 'revisionId']) &&

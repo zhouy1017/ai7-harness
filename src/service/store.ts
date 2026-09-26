@@ -111,6 +111,7 @@ import type {
   DecideLearningMaterialInput,
   LearningMaterialCursor,
   LearningMaterialProjection,
+  LearningMaterialTarget,
   LearningMaterialsBookProjection,
   LearningMaterialsProjection,
   RecordProposalDecisionReasonInput,
@@ -5844,7 +5845,20 @@ export class EditorialStore {
   /** A Book's Learning Material as the page orders it — by kind, then by when each came to be, then by place — with that time. */
   #learningMaterialsOf(bookId: string, withExcerpt: boolean): Array<{ material: LearningMaterialProjection; orderedAt: string }> {
     const candidates = this.#learningCandidates(bookId, withExcerpt).sort((a, b) => learningMaterialOrder(a, b));
-    return this.#learningEligibility.project(bookId, candidates).map((material, index) => ({ material, orderedAt: candidates[index]!.orderedAt }));
+    return this.#learningEligibility.project(bookId, candidates).map((material, index) => ({ material: { ...material, target: this.#learningMaterialTarget(bookId, candidates[index]!) }, orderedAt: candidates[index]!.orderedAt }));
+  }
+
+  /** Resolve service-owned source identities; navigation never changes the material digest or eligibility. */
+  #learningMaterialTarget(bookId: string, candidate: LearningMaterialCandidate): LearningMaterialTarget {
+    const source = candidate.source;
+    if (source.kind !== 'decision') return { ...source, bookId };
+    const row = one(this.#authority.prepare(
+      `SELECT m.mark_id, m.manuscript_id, m.branch_id, m.block_id, m.anchor_state
+       FROM proposal_item_decisions d JOIN proposal_change_items i ON i.item_id = d.item_id
+       JOIN editorial_marks m ON m.mark_id = i.mark_id WHERE d.decision_id = ? AND m.book_id = ?`,
+    ).all(source.decisionId, bookId) as SqlRow[], 'LEARNING_MATERIAL_NOT_FOUND', '这份学习材料的来源记录不存在。');
+    return { kind: 'mark', bookId, manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id),
+      blockId: asString(row.block_id), markId: asString(row.mark_id), detached: row.anchor_state === 'detached' };
   }
 
   /**
@@ -10162,7 +10176,15 @@ export class EditorialStore {
   }
 
   resolveBookWorkbenchRoute(route: BookWorkbenchRoute): ResolvedBookWorkbenchRoute {
-    return this.#boundedCall(() => this.#bounded.resolveBookWorkbenchRoute(route));
+    return this.#boundedCall(() => {
+      const resolved = this.#bounded.resolveBookWorkbenchRoute(route);
+      if (route.kind !== 'book' || route.learningMaterialKey === undefined) return resolved;
+      const material = this.inspectLearningMaterial(route.bookId, route.learningMaterialKey);
+      requireStore(resolved.kind === 'book', 'LEARNING_MATERIAL_NOT_FOUND', '无法打开学习材料的来源记录。');
+      requireStore(material.target.kind !== 'mark' || !material.target.detached,
+        'LEARNING_SOURCE_DETACHED', '来源修改建议所在的段落已不在稿件中。');
+      return { ...resolved, learningMaterialTarget: material.target };
+    });
   }
 
   getHistoricalRevision(revisionId: string, cursor: string | null): HistoricalRevisionProjection {

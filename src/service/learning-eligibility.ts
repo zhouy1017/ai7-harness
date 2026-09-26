@@ -11,6 +11,7 @@ import {
   type LearningEligibilityChoice,
   type LearningMaterialKind,
   type LearningMaterialProjection,
+  type LearningMaterialTarget,
 } from '../shared/protocol.js';
 import { canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
 import { graphemeCount } from './analysis/factual-review-contract.js';
@@ -134,6 +135,7 @@ export function initializeLearningEligibilitySchema(db: DatabaseSync): void {
 
 /** A Learning Material as the store identifies it; the ledger decides nothing about it but its eligibility. */
 export interface LearningMaterialCandidate {
+  readonly source: { readonly kind: 'decision'; readonly decisionId: string } | Omit<Extract<LearningMaterialTarget, { kind: 'analysis' }>, 'bookId'> | Omit<Extract<LearningMaterialTarget, { kind: 'review' }>, 'bookId'>;
   readonly materialKey: string;
   readonly kind: LearningMaterialKind;
   readonly originLabel: string;
@@ -208,6 +210,7 @@ export function proposalDecisionCandidate(decision: {
     if (decision.reason !== null) excerpt.push(`你的原因：${bounded(decision.reason)}`);
   }
   return {
+    source: { kind: 'decision', decisionId: decision.decisionId },
     materialKey: `proposal-decision:${decision.decisionId}`,
     kind: 'proposal-decision',
     originLabel: `修改建议 · ${DISPOSITION_LABELS[decision.disposition] ?? decision.disposition}`,
@@ -261,6 +264,7 @@ export function analysisFeedbackCandidate(signal: {
     if (signal.correction !== null) excerpt.push(`你的修正：${bounded(signal.correction)}`);
   }
   return {
+    source: { kind: 'analysis', revisionId: signal.revisionId, itemKey: signal.itemKey, dimension: signal.dimension },
     materialKey: `analysis-feedback:${signal.revisionId}/${signal.itemKey}`,
     kind: 'analysis-feedback',
     originLabel: `分析反馈 · ${DIMENSION_LABELS[signal.dimension]}`,
@@ -282,6 +286,7 @@ export function reviewDispositionCandidate(signal: {
   readonly recordedAt: string;
 }, withExcerpt: boolean): LearningMaterialCandidate {
   return {
+    source: { kind: 'review', reviewRunId: signal.reviewRunId, findingId: signal.findingId },
     materialKey: `review-disposition:${signal.reviewRunId}/${signal.findingId}`,
     kind: 'review-disposition',
     originLabel: `审阅 · ${signal.categoryLabel}`,
@@ -380,7 +385,7 @@ export class LearningEligibilityLedger {
   }
 
   /** Each candidate as its Review Card shows it, and where it stands. */
-  project(bookId: string, candidates: ReadonlyArray<LearningMaterialCandidate>): LearningMaterialProjection[] {
+  project(bookId: string, candidates: ReadonlyArray<LearningMaterialCandidate>): Array<Omit<LearningMaterialProjection, 'target'>> {
     this.#validateBook(bookId);
     return candidates.map((candidate) => {
       const latest = this.#latest(bookId, candidate.materialKey);

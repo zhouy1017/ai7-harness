@@ -1,5 +1,6 @@
 import type {
   AnalysisReusePlanCounts,
+  AnalysisFeedbackDimension,
   AnalysisReusePlanProjection,
   BaselineAnalysisPlanRevisionProjection,
   BaselineAnalysisGoal,
@@ -76,6 +77,7 @@ import { mountReviewGuidelines } from './review-guidelines.js';
 import { mountLibraryMaterials } from './library-materials.js';
 import { mountEvaluation } from './evaluation.js';
 import { analysisFeedbackEngaged, mountAnalysisFeedback } from './analysis-feedback.js';
+import type { LearningMaterialTarget } from '../shared/protocol.js';
 import { mountLearningMaterials } from './quality-learning.js';
 import { LEARNING_HEADING, LEARNING_STATUS, QUALITY_LEARNING_LEDE, QUALITY_LEARNING_TITLE } from './quality-learning-labels.js';
 import {
@@ -767,6 +769,27 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget): Promise
   }
 }
 
+async function openLearningMaterialSource(bookId: string, materialKey: string): Promise<void> {
+  await requestBookWorkbenchRoute({ kind: 'book', bookId, learningMaterialKey: materialKey });
+}
+
+/** The service-owned arrival travels with the route to whichever workbench owns the Book. */
+async function renderLearningMaterialTarget(target: LearningMaterialTarget, bookTitle: string): Promise<void> {
+  switch (target.kind) {
+    case 'mark': {
+      const opened = await window.ai7.getManuscriptWindowAt({ manuscriptId: target.manuscriptId, branchId: target.branchId, target: { kind: 'block', blockId: target.blockId } });
+      await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId);
+      return;
+    }
+    case 'analysis':
+      renderBookAnalysis(target.bookId, bookTitle, { revisionId: target.revisionId, itemKey: target.itemKey, dimension: target.dimension });
+      return;
+    case 'review':
+      renderBookReview(target.bookId, bookTitle, { reviewRunId: target.reviewRunId, findingId: target.findingId });
+      return;
+  }
+}
+
 function panel(): HTMLElement {
   return element('section', 'panel');
 }
@@ -824,6 +847,10 @@ async function renderResolvedBookWorkbenchRoute(
   recoveryReturn?: RecoveryReturnContext,
 ): Promise<void> {
   if (route.kind === 'book') {
+    if (route.learningMaterialTarget !== undefined) {
+      await renderLearningMaterialTarget(route.learningMaterialTarget, route.bookTitle);
+      return;
+    }
     const overview = await window.ai7.getBookOverview({ bookId: route.bookId, historyCursor: null });
     const anchor = overview.manuscriptAnchor;
     if (anchor === null) {
@@ -1963,7 +1990,7 @@ async function renderBookWorkbenchChooser(
  * The way back to the manuscript and to the overview sits in a persistent region, because a settled
  * result set is the longest thing this product renders and its way out must survive it (LAYER-005).
  */
-function renderBookAnalysis(bookId: string, bookTitle: string): void {
+function renderBookAnalysis(bookId: string, bookTitle: string, judged?: JudgedAnalysisItem): void {
   const content = panel();
   content.classList.add('book-analysis');
   content.dataset['bookId'] = bookId;
@@ -2000,9 +2027,15 @@ function renderBookAnalysis(bookId: string, bookTitle: string): void {
   replaceScreen('book-analysis', content);
   setStatus('分析已打开');
   const inspect = (first: boolean): void => {
-    void window.ai7.inspectBaselineAnalysis().then(
+    // A 学习材料 entry opens ②A on the revision it judged (Issue #61, S26b): read-only when that is no longer the current one.
+    const read = first && judged !== undefined
+      ? window.ai7.inspectBaselineAnalysis().then((current) => current.resultSetRevision?.revisionId === judged.revisionId ? current : window.ai7.inspectBaselineAnalysis({ revisionId: judged.revisionId }))
+      : window.ai7.inspectBaselineAnalysis();
+    void read.then(
       (projection) => {
-        if (host.isConnected && projection.bookId === host.dataset['analysisBookId']) renderBaselineAnalysis(host, projection, bookTitle);
+        if (!host.isConnected || projection.bookId !== host.dataset['analysisBookId']) return;
+        renderBaselineAnalysis(host, projection, bookTitle);
+        if (first && judged !== undefined) showJudgedAnalysisItem(host, judged.itemKey);
       },
       (error) => {
         if (!host.isConnected) return;
@@ -2022,7 +2055,28 @@ function renderBookAnalysis(bookId: string, bookTitle: string): void {
   };
   // The drawer's bar started this Task or reconfirmed its plan (Issue #420): ②A reads it again.
   taskSurfaceRefresh = { 'baseline-analysis': () => inspect(false) };
+  // The item a 学习材料 entry judged opens on its own tab (Issue #61 review), the tab the card is drawn with.
+  if (judged !== undefined) analysisTabChoice.set(bookId, judged.dimension);
   inspect(true);
+}
+
+/** The item of ②A a 学习材料 entry judged: its revision, its place, and the tab it sits on. */
+interface JudgedAnalysisItem {
+  readonly revisionId: string;
+  readonly itemKey: string;
+  readonly dimension: AnalysisFeedbackDimension;
+}
+
+/**
+ * The judged item in view (Issue #61 review): its tab already chosen, the item is scrolled to and takes focus, so the
+ * judgment 打开… led to is what the editor sees and a screen reader reads first.
+ */
+function showJudgedAnalysisItem(host: HTMLElement, itemKey: string): void {
+  const item = host.querySelector<HTMLElement>(`[data-analysis-item-key="${CSS.escape(itemKey)}"]`);
+  if (item === null) return;
+  item.tabIndex = -1;
+  item.scrollIntoView({ block: 'center' });
+  item.focus({ preventScroll: true });
 }
 
 /**
@@ -4570,7 +4624,7 @@ async function renderQualityLearning(bookId: string | null): Promise<void> {
   );
   replaceScreen('quality-learning', content);
   setStatus(LEARNING_STATUS.loading, 'busy');
-  const surface = mountLearningMaterials({ root: host, bookId, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, technicalDetails });
+  const surface = mountLearningMaterials({ root: host, bookId, api: window.ai7, openSource: openLearningMaterialSource, setStatus, errorMessage: rendererErrorMessage, technicalDetails });
   try {
     await surface.load();
     if (content.isConnected) setStatus(LEARNING_STATUS.opened);

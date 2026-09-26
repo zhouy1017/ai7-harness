@@ -1062,6 +1062,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-learning-keyboard',
     'j14-learning-reflow-forced-colors',
     'learning-restart',
+    'learning-source-records',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',

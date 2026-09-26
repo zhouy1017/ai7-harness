@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 76 as const;
+export const SERVICE_PROTOCOL_VERSION = 77 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -1591,12 +1591,13 @@ export interface ManuscriptEntryPositionProjection {
 }
 
 export type BookWorkbenchRoute =
-  | { kind: 'book'; bookId: string }
+  | { kind: 'book'; bookId: string; learningMaterialKey?: string }
   | { kind: 'revision'; revisionId: string };
 
 export type ResolvedBookWorkbenchRoute =
   | {
       kind: 'book';
+      learningMaterialTarget?: LearningMaterialTarget;
       bookId: string;
       bookTitle: string;
     }
@@ -5149,8 +5150,31 @@ export interface LearningMaterialCursor {
  */
 export type LearningMaterialState = 'pending' | 'changed' | 'deferred' | 'decided';
 
+/** The exact source record reached from a Learning Material review (LEARN-003). */
+export type LearningMaterialTarget =
+  | {
+    readonly kind: 'mark';
+    readonly bookId: string;
+    readonly manuscriptId: string;
+    readonly branchId: string;
+    readonly blockId: string;
+    readonly markId: string;
+    /** Whether the paragraph it was made on is gone from the manuscript, so there is nowhere to open it (Issue #61 review). */
+    readonly detached: boolean;
+  }
+  | {
+    readonly kind: 'analysis';
+    readonly bookId: string;
+    readonly revisionId: string;
+    /** The item judged, and the tab of ②A it sits on (Issue #61 review). */
+    readonly itemKey: string;
+    readonly dimension: AnalysisFeedbackDimension;
+  }
+  | { readonly kind: 'review'; readonly bookId: string; readonly reviewRunId: string; readonly findingId: string };
+
 /** One Learning Material as its Review Card shows it (LEARN-003). */
 export interface LearningMaterialProjection {
+  readonly target: LearningMaterialTarget;
   /** The material's place: its kind and the record it comes from. */
   readonly materialKey: string;
   readonly kind: LearningMaterialKind;

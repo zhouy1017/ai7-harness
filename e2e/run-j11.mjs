@@ -1740,6 +1740,28 @@ async function main() {
     const learningAfter = await renderer.evaluate(`window.ai7.inspectLearningMaterials({ bookId: null }).then((projection) => JSON.stringify(projection))`);
     requireJourney(typeof learningBefore === 'string' && learningAfter === learningBefore, 'learning-restart-unmoved');
 
+    at('learning-source-records');
+    await clickSelector(renderer, `${learningRow('proposal-decision')} [data-learning-action="open"]`, 'learning-source-proposal-card');
+    await readLearning(renderer, (page) => page.card?.material === 'proposal-decision', 'learning-source-proposal-ready');
+    await clickSelector(renderer, '[data-learning-action="source"]', 'learning-source-proposal');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(thirdId)}]') && document.querySelector('.mark-card')`, 'learning-source-mark-open', 120_000);
+    await assertRenderer(renderer, `document.querySelector('.mark-card')?.textContent.includes(${JSON.stringify('证据不足')}) === true`, 'learning-source-mark-reason');
+    await click(renderer, '返回图书工作概览', 'learning-source-overview');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'learning-source-overview-ready');
+    await click(renderer, '返回图书列表', 'learning-source-books');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'learning-source-landing');
+    await click(renderer, '质量与学习', 'learning-source-learning');
+    await readLearning(renderer, (page) => page.books.length === 1, 'learning-source-page');
+    await clickSelector(renderer, `${learningRow('analysis-feedback')} [data-learning-action="open"]`, 'learning-source-analysis-card');
+    await readLearning(renderer, (page) => page.card?.material === 'analysis-feedback', 'learning-source-analysis-ready');
+    await clickSelector(renderer, '[data-learning-action="source"]', 'learning-source-analysis');
+    await waitFor(renderer, `(() => {
+      const card = document.querySelector('.baseline-analysis-card');
+      const item = document.querySelector('[data-analysis-item-key="synopsis"]');
+      return card?.dataset.resultRevisionId === ${JSON.stringify(revisionId)} && card.dataset.analysisTab === 'synopsis' &&
+        item instanceof HTMLElement && item.getClientRects().length > 0 && document.activeElement === item;
+    })()`, 'learning-source-analysis-exact', 60_000);
+
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
 

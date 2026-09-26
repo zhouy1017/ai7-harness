@@ -45,6 +45,7 @@ export interface MountLearningMaterialsOptions {
   /** The one Book to show, when the page was opened for it; `null` lists every Book with material. */
   readonly bookId: string | null;
   readonly api: Pick<RendererApi, 'inspectLearningMaterials' | 'inspectLearningMaterial' | 'decideLearningMaterial'>;
+  readonly openSource: (bookId: string, materialKey: string) => Promise<void>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
   readonly technicalDetails: (key: string, ...rows: HTMLElement[]) => HTMLElement;
@@ -202,6 +203,25 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
     fact(LEARNING_CARD_TERMS.influence, LEARNING_INFLUENCE, 'influence');
     fact(LEARNING_CARD_TERMS.decision, learningDecisionLine(material, localInstantLabel), 'decision');
     card.append(heading, facts);
+    if (material.target.kind === 'mark' && material.target.detached) {
+      card.append(el('p', 'field-note', '来源修改建议所在的段落已不在稿件中。'));
+    } else {
+      const source = action('打开来源记录', 'secondary', 'source', () => void (async () => {
+        if (busy) return;
+        busy = true;
+        paint(null);
+        setStatus('正在打开来源记录…', 'busy');
+        try { await options.openSource(book.bookId, material.materialKey); }
+        catch (error) {
+          if (root.isConnected) setStatus(errorMessage(error, '无法打开来源记录。'), 'error');
+        } finally {
+          busy = false;
+          if (root.isConnected) paint(`${materialSelector(material.materialKey)} [data-learning-action="source"]`);
+        }
+      })());
+      source.disabled = busy;
+      card.append(source);
+    }
     if (material.state === 'changed') card.append(el('p', 'attention-note learning-changed', LEARNING_CHANGED_NOTE));
 
     // The choice, none selected; the recommendation is a pill beside it, never a checked box (LEARN-004).
