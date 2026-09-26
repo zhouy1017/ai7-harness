@@ -183,6 +183,12 @@ describe('学习准入 over the real store', () => {
       const excluded = choose(deferred, { choice: 'excluded', note: '不代表我的一贯做法' });
       expect([excluded.state, excluded.decision?.choice]).toEqual(['decided', 'excluded']);
       expect(attention(store)).toEqual([]);
+      let latestEligibility = house;
+      for (let index = 0; index < 64; index += 1) {
+        latestEligibility = choose(latestEligibility, { choice: index % 2 === 0 ? 'book' : 'house' });
+      }
+      expect(latestEligibility.decisions).toBe(66);
+      expect(refusal(() => choose(house, { choice: 'book' }))).toBe('LEARNING_ELIGIBILITY_MOVED:这条材料的学习准入刚被改过；请看过现在的决定再定。');
       // Deciding changes nothing it came from: the decision and its reason read as they were.
       expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, rejectedMark).suggestion!.decision).toMatchObject({ disposition: 'rejected', reason: '方向不合适', reasonState: 'given' });
       store.markCleanShutdown();
@@ -194,7 +200,7 @@ describe('学习准入 over the real store', () => {
     const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       expect(reopened.inspectLearningMaterials(book!.bookId).books[0]!.materials.map((entry) => [entry.state, entry.decision?.choice, entry.decisions])).toEqual([
-        ['decided', 'house', 2], ['decided', 'excluded', 2],
+        ['decided', 'house', 66], ['decided', 'excluded', 2],
       ]);
       reopened.markCleanShutdown();
     } finally {
@@ -205,7 +211,8 @@ describe('学习准入 over the real store', () => {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LEARNING_ELIGIBILITY_SCHEMA_VERSION);
       const records = (database.prepare('SELECT canonical_json FROM learning_eligibility_decisions ORDER BY recorded_at').all() as Array<{ canonical_json: string }>)
         .map((row) => JSON.parse(row.canonical_json) as { attribution: unknown; basis: unknown; choice: string });
-      expect(records.map((record) => record.choice)).toEqual(['book', 'deferred', 'house', 'excluded']);
+      expect(records).toHaveLength(68);
+      expect(records.slice(0, 4).map((record) => record.choice)).toEqual(['book', 'deferred', 'house', 'excluded']);
       // Each names the policy it was made under by identity, mode and version, with its words (Issue #61 review).
       for (const record of records) {
         expect(record.basis).toEqual(LEARNING_ELIGIBILITY_POLICY_BASIS);
