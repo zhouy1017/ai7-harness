@@ -5853,7 +5853,8 @@ export interface DatabaseExportReceiptProjection {
 
 /**
  * The database export under way, or how the last one in this launch ended (Issue #434 review; V2-UX-EXP-011). A preparation
- * packs the store; an approval reads the prepared file, writes it, and reads it back — `completedBytes` of `totalBytes` —
+ * copies the store — the bytes of the pages copied — and then packs it with every other file; an approval reads the prepared
+ * file, writes it, and reads it back — `completedBytes` of `totalBytes` in each step —
  * and `cancellable` says whether 取消导出 still stops it, which it does until the file is being put in place. Once it ends:
  * `prepared` with the preparation, `finished` with the approval's receipt, `cancelled` with nothing recorded, or `failed`
  * with why.
@@ -5862,7 +5863,7 @@ export interface DatabaseExportActivityProjection {
   readonly activityId: string;
   readonly kind: 'prepare' | 'approve';
   readonly state: 'running' | 'prepared' | 'finished' | 'cancelled' | 'failed';
-  readonly step: 'packing' | 'verifying' | 'writing' | 'committing' | null;
+  readonly step: 'copying' | 'packing' | 'verifying' | 'writing' | 'committing' | null;
   readonly completedBytes: number;
   readonly totalBytes: number;
   readonly cancellable: boolean;

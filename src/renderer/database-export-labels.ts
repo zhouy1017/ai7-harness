@@ -40,6 +40,7 @@ export const DATABASE_EXPORT_STATUS_LINES = {
 } as const;
 /** What an export under way is doing, step by step (V2-UX-EXP-011). */
 export const DATABASE_EXPORT_STEPS = {
+  copying: '正在复制本机数据',
   packing: '正在打包数据库',
   verifying: '正在核对准备好的文件',
   writing: '正在写入所选位置',
