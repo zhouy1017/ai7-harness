@@ -386,11 +386,16 @@ export class LearningEligibilityLedger {
 
   /** Each candidate as its Review Card shows it, and where it stands. */
   project(bookId: string, candidates: ReadonlyArray<LearningMaterialCandidate>): Array<Omit<LearningMaterialProjection, 'target'>> {
+    return Array.from(this.projectEntries(bookId, candidates));
+  }
+
+  /** Stream current standings after validating the complete Book ledger, retaining one candidate at a time. */
+  *projectEntries(bookId: string, candidates: Iterable<LearningMaterialCandidate>): IterableIterator<Omit<LearningMaterialProjection, 'target'>> {
     this.#validateBook(bookId);
-    return candidates.map((candidate) => {
+    for (const candidate of candidates) {
       const latest = this.#latest(bookId, candidate.materialKey);
       const digest = learningMaterialDigest(candidate);
-      return {
+      yield {
         materialKey: candidate.materialKey,
         kind: candidate.kind,
         digest,
@@ -402,7 +407,7 @@ export class LearningEligibilityLedger {
         decision: latest === null ? null : { choice: latest.choice, note: latest.note, decidedAt: latest.recordedAt },
         decisions: latest?.ordinal ?? 0,
       };
-    });
+    }
   }
 
   /**

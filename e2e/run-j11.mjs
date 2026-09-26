@@ -1786,6 +1786,41 @@ async function main() {
       document.querySelector('[data-learning-action="record"]')?.disabled === false &&
       document.activeElement === document.querySelector('[data-learning-action="source"]')`, 'learning-source-draft-restored');
 
+    at('learning-material-pages');
+    const learningSeeded = await renderer.evaluate(`(async () => {
+      const materials = await window.ai7.inspectLearningMaterials({ bookId: ${JSON.stringify(thirdId)}, after: null });
+      const target = materials.books[0].materials.find((entry) => entry.target.kind === 'mark').target;
+      const view = await window.ai7.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null });
+      const block = view.blocks.find((candidate) => candidate.kind === 'paragraph' && candidate.text.length > 0);
+      const selected = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(block.text)[Symbol.iterator]().next().value.segment;
+      const binding = { manuscriptId: target.manuscriptId, branchId: target.branchId, windowStartBlockId: view.blocks[0].blockId };
+      for (let index = 0; index < 40; index += 1) {
+        const mark = await window.ai7.createEditorialMark({ ...binding, clientMarkId: crypto.randomUUID(),
+          baseRevisionId: view.revisionId, expectedJournalSequence: view.journalSequence, blockId: block.blockId,
+          baseBlockDigest: block.digest, fromGrapheme: 0, toGrapheme: 1, selectedText: selected,
+          kind: 'change-suggestion', highlightColor: null, body: '', proposedText: '分页建议' + index, rationale: '分页检查' });
+        await window.ai7.recordChangeSuggestionDecision({ ...binding, markId: mark.markId, clientDecisionId: crypto.randomUUID(),
+          disposition: 'rejected', editedText: null, reason: '分页原因' + index });
+      }
+      return true;
+    })()`);
+    requireJourney(learningSeeded === true, 'learning-pages-seeded');
+    await clickSelector(otherRenderer, '[data-learning-action="cancel"]', 'learning-pages-close-draft');
+    await click(otherRenderer, '返回', 'learning-pages-back');
+    await waitFor(otherRenderer, `document.querySelector('[data-screen="landing"]')`, 'learning-pages-landing');
+    await click(otherRenderer, '质量与学习', 'learning-pages-open');
+    await waitFor(otherRenderer, `document.querySelectorAll('.learning-material').length === 40`, 'learning-pages-first');
+    await clickSelector(otherRenderer, '[data-learning-action="open"]', 'learning-pages-card');
+    await fill(otherRenderer, '[data-learning-field="note"]', '翻页前保留', 'learning-pages-draft');
+    await assertRenderer(otherRenderer, `document.querySelector('[data-learning-action="more"]')?.disabled === true && document.querySelector('[data-learning-field="note"]')?.value === '翻页前保留'`, 'learning-pages-open-protected');
+    await clickSelector(otherRenderer, '[data-learning-action="cancel"]', 'learning-pages-close');
+    for (let pass = 0; pass < 2; pass += 1) {
+      await clickSelector(otherRenderer, '[data-learning-action="more"]', 'learning-pages-next');
+      await waitFor(otherRenderer, `document.querySelectorAll('.learning-material').length === 2 && document.querySelector('[data-learning-action="more"]') === null && document.querySelector('[data-learning-action="reset"]')?.disabled === false && document.activeElement === document.querySelector('[data-learning-action="open"]')`, 'learning-pages-last');
+      await clickSelector(otherRenderer, '[data-learning-action="reset"]', 'learning-pages-reset');
+      await waitFor(otherRenderer, `document.querySelectorAll('.learning-material').length === 40 && document.querySelector('[data-learning-action="reset"]') === null && document.querySelector('[data-learning-action="more"]')?.disabled === false && document.activeElement === document.querySelector('[data-learning-action="open"]')`, 'learning-pages-reset-ready');
+    }
+
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
 

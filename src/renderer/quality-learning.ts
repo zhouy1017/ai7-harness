@@ -38,7 +38,7 @@ import { localInstantLabel } from './plan-preview-labels.js';
  * `记录学习准入决定`. Nothing here counts or reminds.
  *
  * Nothing is read whole (Issue #61 review): the materials come forty at a time, `更多学习材料…` reading the next and a Book
- * that runs on continuing its section; a decision answers with its one material, and a refusal reads that material again.
+ * replacing the previous page; a decision answers with its one material, and a refusal reads that material again.
  */
 export interface MountLearningMaterialsOptions {
   readonly root: HTMLElement;
@@ -76,26 +76,12 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
   root.classList.add('learning-materials');
   let projection: LearningMaterialsProjection | null = null;
   let busy = false;
+  let laterPage = false;
   /** The one card open, by Book and material, with what the editor chose and wrote so far. */
   let open: { readonly bookId: string; readonly materialKey: string; readonly draft: Draft } | null = null;
   let refusal: string | null = null;
 
   const materialSelector = (key: string): string => `[data-material-key="${CSS.escape(key)}"]`;
-
-  /** A page read after the first: a Book that runs on continues its section, and the next Book begins its own. */
-  const merge = (page: LearningMaterialsProjection): void => {
-    if (projection === null) {
-      projection = page;
-      return;
-    }
-    const books = [...projection.books];
-    for (const book of page.books) {
-      const last = books.at(-1);
-      if (last !== undefined && last.bookId === book.bookId) books[books.length - 1] = { ...last, materials: [...last.materials, ...book.materials] };
-      else books.push(book);
-    }
-    projection = { basis: page.basis, books, nextCursor: page.nextCursor };
-  };
 
   /** One material as it now reads, wherever its Book's section shows it. */
   const replace = (bookKey: string, next: LearningMaterialProjection): void => {
@@ -109,23 +95,26 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
     };
   };
 
-  const loadMore = async (): Promise<void> => {
-    if (busy || projection?.nextCursor == null) return;
+  const loadPage = async (reset: boolean): Promise<void> => {
+    if (busy || open !== null || (!reset && projection?.nextCursor == null)) return;
+    const after = reset ? null : projection!.nextCursor;
     busy = true;
-    const known = new Set(projection.books.flatMap((book) => book.materials.map((material) => material.materialKey)));
+    paint(null);
     setStatus(LEARNING_STATUS.loadingMore, 'busy');
     try {
-      const page = await api.inspectLearningMaterials({ bookId, after: projection.nextCursor });
+      const page = await api.inspectLearningMaterials({ bookId, after });
       if (!root.isConnected) return;
-      merge(page);
+      projection = page;
+      laterPage = !reset;
       busy = false;
       setStatus(LEARNING_STATUS.opened);
-      const first = page.books.flatMap((book) => book.materials).find((material) => !known.has(material.materialKey));
-      paint(first === undefined ? null : `${materialSelector(first.materialKey)} [data-learning-action="open"]`);
+      const first = page.books.find((book) => book.materials.length > 0)?.materials[0];
+      paint(first === undefined ? '[data-learning-action="reset"]' : `${materialSelector(first.materialKey)} [data-learning-action="open"]`);
     } catch (error) {
       busy = false;
+      if (!root.isConnected) return;
       setStatus(errorMessage(error, LEARNING_STATUS.unavailable), 'error');
-      paint('[data-learning-action="more"]');
+      paint(reset ? '[data-learning-action="reset"]' : '[data-learning-action="more"]');
     }
   };
 
@@ -136,12 +125,20 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
     const books = projection.books.filter((book) => book.materials.length > 0);
     if (books.length === 0) parts.push(el('p', 'field-note learning-empty', LEARNING_EMPTY));
     for (const book of books) parts.push(bookNode(book));
-    if (projection.nextCursor !== null) {
+    if (projection.nextCursor !== null || laterPage) {
       const row = el('div', 'button-row learning-more');
-      const more = action(LEARNING_MORE, 'secondary', 'more', () => void loadMore());
-      more.disabled = busy;
-      row.append(more);
+      if (projection.nextCursor !== null) {
+        const more = action(LEARNING_MORE, 'secondary', 'more', () => void loadPage(false));
+        more.disabled = busy || open !== null;
+        row.append(more);
+      }
+      if (laterPage) {
+        const reset = action('回到首批学习材料', 'secondary', 'reset', () => void loadPage(true));
+        reset.disabled = busy || open !== null;
+        row.append(reset);
+      }
       parts.push(row);
+      if (open !== null) parts.push(el('p', 'field-note', '请先记录或关闭当前审阅卡，再翻阅其他学习材料。'));
     }
     root.replaceChildren(...parts);
     if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();
@@ -336,7 +333,8 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
     async load(): Promise<void> {
       root.replaceChildren(el('p', 'field-note', LEARNING_STATUS.loading));
       projection = null;
-      merge(await api.inspectLearningMaterials({ bookId, after: null }));
+      laterPage = false;
+      projection = await api.inspectLearningMaterials({ bookId, after: null });
       paint(null);
     },
   };
