@@ -499,13 +499,21 @@ const REFUSAL_NOTE = 'refused.json';
 
 /** Why a resumed apply put the data back, as its note says; `null` when none was written, or what is there is not one. */
 async function refusalOf(staging: string): Promise<'changed' | 'interrupted' | null> {
+  const path = join(staging, REFUSAL_NOTE);
   try {
-    const noted: unknown = JSON.parse(await readFile(join(staging, REFUSAL_NOTE), 'utf8'));
-    return noted === 'changed' || noted === 'interrupted' ? noted : null;
-  } catch {
-    return null;
+    // Its size is known before any of it is read (Issue #434 review). A note there that is not AI7's — not a file, larger than
+    // any AI7 writes, or saying something else — still tells a refusal from data that would not open: what waited had changed.
+    const found = await lstat(path);
+    if (!found.isFile() || found.size > MAX_REFUSAL_NOTE_BYTES) return 'changed';
+    const noted: unknown = JSON.parse(await readFile(path, 'utf8'));
+    return noted === 'changed' || noted === 'interrupted' ? noted : 'changed';
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? null : 'changed';
   }
 }
+
+/** No refusal note AI7 writes comes near this: `"interrupted"` is thirteen bytes. */
+const MAX_REFUSAL_NOTE_BYTES = 64;
 
 /**
  * After the store opened by `openWithPendingReplacement` has recorded the replacement: the staging place goes, with the data
