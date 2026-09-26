@@ -53,7 +53,10 @@ export function requestTimeoutMs(operation: ServiceOperation): number {
     operation === 'approveBookDeliveryPackageExport' ||
     // 资料库 (Issue #427, S79c) reads a file of up to 1 GiB whole to digest it, and 放入资料库 copies, syncs and checks
     // it; from a slow disk or share that takes minutes, and a timeout would stop the service mid-copy.
-    operation === 'previewLibraryMaterial' || operation === 'addLibraryMaterial';
+    operation === 'previewLibraryMaterial' || operation === 'addLibraryMaterial' ||
+    // 导出数据库 (Issue #434, S86a review) copies, compresses and digests the whole store for its preparation, and writes that
+    // file to the chosen place for its approval: a large store takes minutes, and a timeout would stop the service mid-write.
+    operation === 'prepareDatabaseExport' || operation === 'approveDatabaseExport';
   return long ? LONG_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
 }
 

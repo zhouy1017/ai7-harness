@@ -578,10 +578,17 @@ async function dispatch(
       };
     case 'inspectDataVersion':
       return { id: request.id, ok: true, op: request.op, result: store.inspectDataVersion() };
+    // Only under this launch's verified External Export Policy, as every other export (Issue #434, S86a review).
     case 'prepareDatabaseExport':
-      return { id: request.id, ok: true, op: request.op, result: await store.prepareDatabaseExport(request.input.destination) };
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: await store.prepareDatabaseExport(request.input.destination, launchPolicy.externalExport.currentExportEffectAvailable),
+      };
     case 'approveDatabaseExport':
-      return { id: request.id, ok: true, op: request.op, result: await store.approveDatabaseExport(request.input.preparationId) };
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: await store.approveDatabaseExport(request.input.preparationId, launchPolicy.externalExport.currentExportEffectAvailable),
+      };
     case 'inspectDatabaseExports':
       return { id: request.id, ok: true, op: request.op, result: store.inspectDatabaseExports() };
     case 'proposeSeriesKnowledge':

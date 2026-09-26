@@ -3974,6 +3974,8 @@ export class EditorialStore {
         store.#boundedCall(() => store.#boundedAuthority.isRecoveryObjectReferenced(relativeKey)));
       // What an interrupted 放入资料库 left beside the kept originals (Issue #427 review).
       await store.#libraryMaterials.sweep();
+      // A database package staged and never approved, or cut off mid-write, is a whole copy of the data (Issue #434 review).
+      await store.#databaseExports.sweep();
       store.#boundedCall(() => store.#boundedAuthority.startServiceLifetime(lifetimeId, new Date().toISOString()));
       // Every store records the versions that open it (Issue #433, S85a; DSTO-016): a new record only when one changed.
       store.#softwareVersion = softwareVersion;
@@ -11423,14 +11425,17 @@ export class EditorialStore {
 
   // ---- 设置 › 数据与存储 › 导出数据库 (Issue #434, plan slice S86a; V2-UX-DSTO-017; ADR 0079 §1.4, §1.6, §1.7) ----------------
 
-  /** The destination the Save dialog answered becomes one preparation of the database package. */
-  async prepareDatabaseExport(destination: string): Promise<DatabaseExportPreparationProjection> {
-    return this.#databaseExportCall(() => this.#databaseExports.prepare(destination));
+  /**
+   * The destination the Save dialog answered becomes one preparation of the database package — only under this launch's
+   * verified External Export Policy (Issue #434, S86a review).
+   */
+  async prepareDatabaseExport(destination: string, available: boolean): Promise<DatabaseExportPreparationProjection> {
+    return this.#databaseExportCall(() => this.#databaseExports.prepare(destination, available));
   }
 
-  /** `按上述方式导出`: the one approval of one unchanged preparation, and the write it permits. */
-  async approveDatabaseExport(preparationId: string): Promise<DatabaseExportReceiptProjection> {
-    return this.#databaseExportCall(() => this.#databaseExports.approve(preparationId));
+  /** `按上述方式导出`: the one approval of one unchanged preparation, and the write it permits, under the same policy. */
+  async approveDatabaseExport(preparationId: string, available: boolean): Promise<DatabaseExportReceiptProjection> {
+    return this.#databaseExportCall(() => this.#databaseExports.approve(preparationId, available));
   }
 
   /** The approved database exports, newest first. A read. */

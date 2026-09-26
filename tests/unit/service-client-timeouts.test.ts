@@ -15,4 +15,10 @@ describe('the service request deadlines', () => {
     expect(requestTimeoutMs('decideLibraryMaterial')).toBe(ordinary);
     expect(requestTimeoutMs('inspectLibraryMaterial')).toBe(ordinary);
   });
+
+  it('gives 导出数据库 the long budget, since it copies, compresses and writes the whole store (Issue #434, S86a review)', () => {
+    const long = requestTimeoutMs('approveManuscriptExport');
+    expect([requestTimeoutMs('prepareDatabaseExport'), requestTimeoutMs('approveDatabaseExport')]).toEqual([long, long]);
+    expect(requestTimeoutMs('inspectDatabaseExports')).toBe(requestTimeoutMs('inspectLibraryMaterials'));
+  });
 });

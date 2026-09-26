@@ -217,7 +217,7 @@ The package, `ai7.database-package/1`, is a ZIP of:
 
 It is not encrypted (ADR 0079 §1.6). It holds no Model Service credential, because those live in the platform's protected store. fflate writes no ZIP64, so a package over 4 GB or over 65,534 files is refused with the reason.
 
-`导出数据库…` opens the system's Save dialog; J-12 answers it with `--j12-save-path`. Choosing the file stages the package in `export-staging/` and records the preparation. `按上述方式导出` writes exactly that package with the export ledger's atomic writer, which now also copies a staged file, and records the receipt. The export runs through External Export Policy v2 as its own target kind, `database-export-package`. The backups of S86b and S85b will be the same package.
+`导出数据库…` opens the system's Save dialog; J-12 answers it with `--j12-save-path`. Choosing the file stages the package in `export-staging/` and records the preparation. `按上述方式导出` writes exactly that package with the export ledger's atomic writer, which now also copies a staged file, and records the receipt. The export runs through External Export Policy v2 as its own target kind, `database-export-package`, and both steps are refused (`EXPORT_POLICY_UNAVAILABLE`) at a launch whose policy was not verified, before anything is staged (Issue #434 review). Both take main's long request budget, since a large store takes minutes. A staged package no approval takes is swept when the store next opens, and every entry of the package carries the one fixed archive time, the export's own time being the manifest's `createdAt`. The backups of S86b and S85b will be the same package.
 
 
 
