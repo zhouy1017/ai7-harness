@@ -5327,6 +5327,11 @@ export interface EvaluationCalibrationProjection {
   readonly calibration: {
     /** The editor's adjustments of AI7's starting scores; AI7's 初评 arrives with S81b, so there are none yet. */
     readonly adjustments: number;
+    /**
+     * Whether AI7 gives 初评 scores the editor can adjust at all (Issue #430 review): not before S81b. Until then the page says
+     * so, whatever the count.
+     */
+    readonly initialScoresConnected: boolean;
     readonly threshold: number;
     readonly enabled: boolean;
     readonly active: boolean;
@@ -5344,6 +5349,8 @@ export interface EvaluationCalibrationProjection {
 
 export interface RecordPublicationActualsInput {
   readonly bookId: string;
+  /** The 发稿版本 the page listed: one designated since refuses the save, so numbers never land on a version nobody saw. */
+  readonly publicationVersionId: string;
   readonly expectedEntries: number;
   readonly priceFen: number;
   readonly firstPrint: number;

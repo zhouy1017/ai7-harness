@@ -2802,7 +2802,8 @@ function registerRendererHandlers(
       return serializeEffect(async () => {
         requireAuthority();
         return service.call('recordPublicationActuals', {
-          bookId: input.bookId, expectedEntries: input.expectedEntries, priceFen: input.priceFen, firstPrint: input.firstPrint,
+          bookId: input.bookId, publicationVersionId: input.publicationVersionId, expectedEntries: input.expectedEntries, priceFen: input.priceFen,
+          firstPrint: input.firstPrint,
         });
       });
     }),

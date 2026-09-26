@@ -1263,7 +1263,7 @@ describe('decodeRequest rejects malformed frames', () => {
 
   it('accepts 设置 › 评估校准与预测: the read naming nothing, 定价与首印 in whole 分 and copies, and the two switches (Issue #430, S82)', () => {
     const bookId = randomUUID();
-    const actuals = { bookId, expectedEntries: 0, priceFen: 4500, firstPrint: 3000 };
+    const actuals = { bookId, publicationVersionId: randomUUID(), expectedEntries: 0, priceFen: 4500, firstPrint: 3000 };
     const preferences = { expectedEntries: 2, predictionEnabled: false, calibrationEnabled: true };
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
       { op: 'inspectEvaluationCalibration', input: {} },
@@ -1285,7 +1285,10 @@ describe('decodeRequest rejects malformed frames', () => {
       ['recordPublicationActuals', { ...actuals, priceFen: '4500' }],
       ['recordPublicationActuals', { ...actuals, firstPrint: 0 }],
       ['recordPublicationActuals', { ...actuals, firstPrint: 3000.5 }],
-      ['recordPublicationActuals', { ...actuals, publicationVersionId: randomUUID() }],
+      // The 发稿版本 the page listed, always (Issue #430 review).
+      ['recordPublicationActuals', { ...actuals, publicationVersionId: 'version' }],
+      ['recordPublicationActuals', { bookId, expectedEntries: 0, priceFen: 4500, firstPrint: 3000 }],
+      ['recordPublicationActuals', { ...actuals, publicationOrdinal: 1 }],
       ['recordPublicationActuals', { bookId, expectedEntries: 0, priceFen: 4500 }],
       ['setEvaluationPreferences', { ...preferences, predictionEnabled: 'on' }],
       ['setEvaluationPreferences', { ...preferences, calibrationEnabled: 1 }],

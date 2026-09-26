@@ -10560,7 +10560,10 @@ export class EditorialStore {
     return this.#calibrationCall(() => this.#evaluationCalibrationProjection());
   }
 
-  /** 录入定价与首印 for a Book's current 发稿版本 (EVAL-010). */
+  /**
+   * 录入定价与首印 for a Book's current 发稿版本 (EVAL-010) — the one the page listed: a 发稿版本 designated since refuses the
+   * save (Issue #430 review), so an open form never puts its numbers on a version the editor did not see.
+   */
   recordPublicationActuals(input: RecordPublicationActualsInput): EvaluationCalibrationProjection {
     return this.#calibrationCall(() => {
       requireStore(UUID_PATTERN.test(input.bookId), 'BOOK_INVALID', '图书标识无效。');
@@ -10568,6 +10571,8 @@ export class EditorialStore {
         one(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').all(input.bookId) as SqlRow[], 'BOOK_NOT_FOUND', '图书不存在。');
         const current = this.#publicationCall(() => this.#publicationVersions.current(input.bookId));
         requireStore(current !== null, 'PUBLICATION_REQUIRED', '这本书还没有发稿版本；设为发稿版本后才能录入定价与首印。');
+        requireStore(current.projection.publicationVersionId === input.publicationVersionId, 'ACTUALS_MOVED',
+          '这本书刚设了新的发稿版本；请看过现在的发稿版本再录入。');
         this.#evaluationCalibration.recordActuals({
           bookId: input.bookId,
           publicationVersionId: current.projection.publicationVersionId,
@@ -10620,6 +10625,7 @@ export class EditorialStore {
     return {
       calibration: {
         adjustments,
+        initialScoresConnected: false,
         threshold: CALIBRATION_MIN_ADJUSTMENTS,
         enabled: preferences.calibrationEnabled,
         active: calibrationActive(adjustments, preferences.calibrationEnabled),

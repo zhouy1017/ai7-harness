@@ -722,8 +722,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     // 录入定价与首印: the Book, how many entries the editor saw, and two whole positive numbers, the price in 分.
     case 'recordPublicationActuals': {
-      const input = requireInput(value.input, ['bookId', 'expectedEntries', 'priceFen', 'firstPrint'], tentativeId);
-      if (!validUuid(input.bookId) || !Number.isSafeInteger(input.expectedEntries) || (input.expectedEntries as number) < 0 ||
+      const input = requireInput(value.input, ['bookId', 'publicationVersionId', 'expectedEntries', 'priceFen', 'firstPrint'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.publicationVersionId) || !Number.isSafeInteger(input.expectedEntries) || (input.expectedEntries as number) < 0 ||
           !Number.isSafeInteger(input.priceFen) || (input.priceFen as number) < 1 ||
           !Number.isSafeInteger(input.firstPrint) || (input.firstPrint as number) < 1) {
         throw new ProtocolError(tentativeId);
