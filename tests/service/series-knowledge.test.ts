@@ -122,7 +122,7 @@ describe('书系知识 over the real store', () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       const member = await importBook(store, MEMBER);
-      seriesId = store.createSeries('来源边界').seriesId;
+      seriesId = store.createSeries({ title: '来源边界', note: '' }).seriesId;
       join2(store, seriesId, member.bookId, 'add');
       const edit = () => {
         const window = store.getManuscriptWindow(member.manuscriptId, member.branchId, null);
