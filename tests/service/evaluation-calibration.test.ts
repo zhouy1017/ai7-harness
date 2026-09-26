@@ -10,7 +10,7 @@ import {
   initializeEvaluationCalibrationSchema,
 } from '../../src/service/evaluation-calibration.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { EVALUATION_CALIBRATION_SCHEMA_VERSION, LEARNING_ELIGIBILITY_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { SERIES_SCHEMA_VERSION, LEARNING_ELIGIBILITY_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { MAX_FIRST_PRINT, MAX_PRICE_FEN } from '../../src/shared/evaluation-calibration.js';
 import { PUBLICATION_FORBIDDEN_WORDS, type DesignatePublicationVersionInput, type EvaluationCalibrationProjection } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, type ComposedManuscriptRequest } from '../support/composed-fixture.js';
@@ -207,7 +207,7 @@ describe('设置 › 评估校准与预测 over the real store', () => {
     }
     const database = new DatabaseSync(databasePath());
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EVALUATION_CALIBRATION_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SERIES_SCHEMA_VERSION);
       const records = (database.prepare('SELECT canonical_json FROM publication_actuals ORDER BY ordinal').all() as Array<{ canonical_json: string }>)
         .map((row) => JSON.parse(row.canonical_json) as { schema: string; priceFen: number; publicationOrdinal: number; supersedes: string | null; actor: string });
       expect(records).toHaveLength(67);
@@ -375,7 +375,7 @@ describe('设置 › 评估校准与预测 over the real store', () => {
     const plant = new DatabaseSync(databasePath());
     let before: Array<{ name: string; sql: string }>;
     try {
-      plant.exec(`DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; PRAGMA user_version = ${LEARNING_ELIGIBILITY_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; PRAGMA user_version = ${LEARNING_ELIGIBILITY_SCHEMA_VERSION};`);
       before = tablesOf(plant);
     } finally {
       plant.close();
@@ -391,9 +391,10 @@ describe('设置 › 评估校准与预测 over the real store', () => {
     }
     const database = new DatabaseSync(databasePath(), { readOnly: true });
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EVALUATION_CALIBRATION_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SERIES_SCHEMA_VERSION);
       const after = tablesOf(database);
-      expect(after.filter((entry) => !/^(publication_actuals|evaluation_preferences)/u.test(entry.name))).toEqual(before!);
+      // Revision 52's Series relations (Issue #63, S28a) return with it, as the planted store lacked them too.
+      expect(after.filter((entry) => !/^(publication_actuals|evaluation_preferences|series)/u.test(entry.name))).toEqual(before!);
       expect(after.filter((entry) => ACTUALS_TABLES.includes(entry.name)).map((entry) => entry.sql))
         .toEqual(ACTUALS_TABLES.slice().sort().map((table) => EVALUATION_CALIBRATION_SCHEMA_SQL[table as keyof typeof EVALUATION_CALIBRATION_SCHEMA_SQL]));
       expect(counts()).toEqual({ publication_actuals: 0, evaluation_preferences: 0 });

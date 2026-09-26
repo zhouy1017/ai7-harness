@@ -32,12 +32,12 @@ describe('the words of 人员', () => {
     expect(labels.bookCardRelatedLine(people)).toBe('相关人：校对 王四');
     expect(labels.bookCardRelatedLine({ ...people, related: [] })).toBeNull();
     expect(labels.BOOK_FILTER_LEGEND).toBe('查找图书');
-    expect(labels.BOOK_FILTER_FIELDS).toEqual({ all: '全部', title: '书名', author: '作者', editor: '责编' });
+    expect(labels.BOOK_FILTER_FIELDS).toEqual({ all: '全部', title: '书名', author: '作者', editor: '责编', series: '书系' });
     expect([labels.BOOK_FILTER_FIELD_LABEL, labels.BOOK_FILTER_TEXT_LABEL]).toEqual(['查找范围', '字词']);
     expect(labels.BOOK_FILTER_ACTIONS).toEqual({ find: '查找', clear: '显示全部图书' });
     expect(labels.BOOK_FILTER_NONE).toBe('没有找到符合的图书。');
     expect(labels.bookFilterLine({ field: 'author', text: '吴二' })).toBe('按作者查找「吴二」');
-    expect(labels.bookFilterLine({ field: 'all', text: '郑' })).toBe('按书名、作者或责编查找「郑」');
+    expect(labels.bookFilterLine({ field: 'all', text: '郑' })).toBe('按书名、作者、责编或书系查找「郑」');
     expect(labels.BOOK_FILTER_STATUS_LINES).toEqual({ finding: '正在查找图书…', found: '已列出找到的图书', findFailed: '无法查找图书。', cleared: '已显示全部图书' });
   });
 

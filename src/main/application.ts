@@ -2821,6 +2821,94 @@ function registerRendererHandlers(
       });
     }),
   );
+  // 书系 (Issue #63, S28a): house-wide, bound to no Book route; 新建书系, 加入书系 and 移出书系 are serialized with every other
+  // effect. A Book's side of it reads the Book this window shows, or any Book from a window that shows none.
+  ipcMain.handle(IPC_CHANNELS.inspectSeriesList, (event, input: { after?: ServiceOperationMap['inspectSeriesList']['input']['after'] } | undefined) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input === undefined || (input !== null && typeof input === 'object'), 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectSeriesList', { after: input?.after ?? null });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.createSeries, (event, input: ServiceOperationMap['createSeries']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('createSeries', { title: input.title, note: input.note });
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectSeries, (event, input: ServiceOperationMap['inspectSeries']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectSeries', { seriesId: input.seriesId });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.previewSeriesMembershipChange, (event, input: ServiceOperationMap['previewSeriesMembershipChange']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('previewSeriesMembershipChange', { seriesId: input.seriesId, bookId: input.bookId, kind: input.kind });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.changeSeriesMembership, (event, input: ServiceOperationMap['changeSeriesMembership']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('changeSeriesMembership', {
+          seriesId: input.seriesId, bookId: input.bookId, kind: input.kind, previewDigest: input.previewDigest,
+        });
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectBookSeries, (event, input: ServiceOperationMap['inspectBookSeries']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      const route = owned.route;
+      requireDesktop(route === null || (route.kind === 'book' && route.bookId === input.bookId), 'AI7_RENDERER_BOUNDARY_INVALID');
+      const result = await service.call('inspectBookSeries', { bookId: input.bookId });
+      requireDesktop(result.bookId === input.bookId, 'AI7_SERVICE_ROUTE_INVALID');
+      return result;
+    }),
+  );
+  // 书系's further pages (Issue #63 review): more members, the Books 加入书系… offers, and older change records.
+  ipcMain.handle(IPC_CHANNELS.inspectSeriesMembers, (event, input: ServiceOperationMap['inspectSeriesMembers']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectSeriesMembers', { seriesId: input.seriesId, after: input.after ?? null });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectSeriesCandidates, (event, input: ServiceOperationMap['inspectSeriesCandidates']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectSeriesCandidates', { seriesId: input.seriesId, text: input.text, after: input.after ?? null });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectSeriesHistory, (event, input: ServiceOperationMap['inspectSeriesHistory']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      // A Book's records are read from that Book's window, as its first page is.
+      const route = owned.route;
+      requireDesktop(input.bookId === null || route === null || (route.kind === 'book' && route.bookId === input.bookId), 'AI7_RENDERER_BOUNDARY_INVALID');
+      return service.call('inspectSeriesHistory', { seriesId: input.seriesId ?? null, bookId: input.bookId ?? null, after: input.after ?? null });
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.inspectFeedbackHistory, (event) =>
     envelope(async () => {
       requireSender(event);

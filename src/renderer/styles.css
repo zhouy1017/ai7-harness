@@ -629,6 +629,32 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .analysis-feedback-metric { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #d5dcd9; }
 .analysis-feedback-metric h5, .analysis-feedback-metric p { margin: 0 0 .4rem; overflow-wrap: anywhere; }
 .analysis-feedback-total { font-weight: 700; }
+/* 书系 (S28a): the list, 成员与共享范围 with its member table, the four-part impact preview, and the change records. */
+.series-list-page, .series-page { display: grid; gap: .8rem; }
+.series-list { display: grid; gap: .5rem; margin: 0; padding: 0; list-style: none; }
+.series-item { display: grid; gap: .25rem; min-width: 0; }
+.series-item p { margin: 0; overflow-wrap: anywhere; }
+.series-create-form { display: grid; gap: .6rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
+.series-field { display: grid; gap: .25rem; min-width: 0; }
+.series-field input, .series-field textarea { width: 100%; max-width: 32rem; box-sizing: border-box; font: inherit; }
+.series-members, .series-history-section { display: grid; gap: .6rem; min-width: 0; }
+.series-members h3, .series-history-section h3, .series-members p { margin: 0; overflow-wrap: anywhere; }
+.series-member-table { width: 100%; border-collapse: collapse; }
+.series-member-table th, .series-member-table td { padding: .4rem .6rem; border-bottom: 1px solid #e4dfd3; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.series-add-chooser { display: grid; gap: .4rem; min-width: 0; margin: 0; padding: .8rem 1rem; border: 1px solid #ded9cd; border-radius: 12px; }
+.series-add-choice { display: flex; align-items: center; gap: .45rem; }
+.series-preview { display: grid; gap: .6rem; min-width: 0; padding: 1rem; border: 1px solid #c9d6d2; border-radius: 12px; background: #f7faf9; }
+.series-preview h4, .series-preview p { margin: 0; overflow-wrap: anywhere; }
+.series-preview-identity { font-weight: 700; }
+.series-impact-group { display: grid; gap: .25rem; min-width: 0; padding-left: .7rem; border-left: 3px solid #c9d6d2; }
+.series-impact-group h4, .series-impact-group h5, .series-impact-group p, .series-impact-group ul { margin: 0; overflow-wrap: anywhere; }
+.series-impact-group ul { padding-left: 1.2rem; }
+.series-impact-label { font-size: .85rem; color: #5b6158; }
+.series-history { display: grid; gap: .6rem; margin: 0; padding-left: 1.4rem; }
+.series-change p { margin: 0; overflow-wrap: anywhere; }
+.series-change-impact { display: grid; gap: .4rem; }
+.book-series p { margin: 0; overflow-wrap: anywhere; }
+.book-series-history ol { display: grid; gap: .5rem; margin: .4rem 0 0; padding-left: 1.4rem; }
 /* 设置 › 评估校准与预测 (S82): two switches with what each waits for, then each published Book's 定价与首印. */
 .evaluation-calibration { display: grid; gap: .8rem; }
 .calibration-section { display: grid; gap: .4rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
@@ -1239,6 +1265,12 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .review-coverage tr, .review-report-table tr { padding: .5rem 0; border-bottom: 1px solid #d5dcd9; }
   .review-coverage th, .review-coverage td, .review-report-table th, .review-report-table td { padding: .15rem 0; border-bottom: 0; }
   .review-coverage td[data-label]::before, .review-report-table td[data-label]::before { content: attr(data-label) "："; color: #6b7068; font-size: .84rem; }
+  /* 书系's member table (S28a) stacks the same way, each cell saying its column. */
+  .series-member-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .series-member-table, .series-member-table tbody, .series-member-table tr, .series-member-table th, .series-member-table td { display: block; width: 100%; }
+  .series-member-table tr { padding: .5rem 0; border-bottom: 1px solid #e4dfd3; }
+  .series-member-table th, .series-member-table td { padding: .15rem 0; border-bottom: 0; }
+  .series-member-table td[data-label]::before { content: attr(data-label) "："; color: #6b7068; font-size: .84rem; }
   .review-group-heading > button { margin-left: 0; }
   .review-sheet { padding: 1rem; }
   /* 稿件冲突's panes stack, each cell saying its pane; the header row stays for assistive technology. */
@@ -1292,6 +1324,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .evaluation-record, .evaluation-item, .evaluation-risk, .evaluation-conclusion, .evaluation-comparison, .evaluation-profile,
   .analysis-feedback-card, .analysis-feedback-card fieldset,
   .learning-book, .learning-card, .learning-choices, .feedback-book, .calibration-section,
+  .series-create-form, .series-add-chooser, .series-preview,
   .task-plan-clarification, .task-plan-choice, .task-plan-choice-recommended, .task-plan-clarification-deferred, .task-plan-edit-ask-first,
   .task-plan-budget-form, .task-plan-budget-input {
     color: CanvasText;

@@ -144,4 +144,45 @@ Not proven here: a Review Run's cards — prepared, under way and on the manuscr
 
 ## J-14 accessibility obligations
 
-J-14 has no runner of its own. Its keyboard, IME, focus, 200% reflow, and forced-colors obligations are asserted inside the Journeys above where they apply; the Mark surface's are J-05's `j14-marks-*` and `marks-keyboard-menu-*` stages, 稿件冲突's are J-06's `j14-conflict-keyboard`, `j14-conflict-zoom-200-reflow` and `j14-conflict-forced-colors`, 交付物's are J-07's `j14-designate-keyboard`, `j14-deliverables-zoom-200-reflow` and `j14-deliverables-forced-colors`, with the export card's `j14-export-keyboard`, `j14-export-zoom-200-reflow` and `j14-export-forced-colors`, 待我处理's are J-09's `j14-attention-keyboard`, `j14-attention-zoom-200-reflow` and `j14-attention-forced-colors`, `等待运行名额`'s is J-09's `j14-queued-forced-colors`, 取消任务's are J-10's `j14-cancel-keyboard` and `j14-cancelling-forced-colors`, 改计划重做's is J-10's `j14-redo-keyboard`, the question card's is J-10's `j14-clarification-keyboard`, `设置上限…`'s is J-10's `j14-budget-keyboard`, the editable plan's is J-04's `j14-plan-edit-keyboard`, 人员's are J-11's `j14-people-keyboard`, `j14-people-zoom-200-reflow` and `j14-people-forced-colors`, 评估's is J-11's `j14-evaluation-reflow-forced-colors`, 分析反馈's are J-11's `j14-feedback-keyboard` and `j14-feedback-reflow-forced-colors`, a decision's reason row's is J-11's `j14-decision-feedback-keyboard`, 学习准入's are J-11's `j14-learning-keyboard` and `j14-learning-reflow-forced-colors`, 知识库's are J-15's `j14-knowledge-keyboard` and `j14-knowledge-reflow-forced-colors`, with 资料库's `j14-library-reflow-forced-colors`, the 任务 panel's are J-16's `j14-panel-keyboard`, `j14-panel-zoom-200-reflow` and `j14-panel-forced-colors`, and the Task Drawer's are J-03's `drawer-keyboard`, `drawer-push-overlay` and `drawer-reflow-forced-colors`.
+## J-13 书系: Series membership
+
+J-13's first slice (Issue #63, plan slice S28a). Series Knowledge, its candidates and promotion, come with S28b. Series-scope pins and retrieval exclusions come with S29 (#64).
+
+The runner creates three empty Books, 星河之一, 星河之二 and 书系之外. It uses no manuscript, credential or Provider; every name is the runner's own. Each Book's 工作概览 reads `不在任何书系中。`.
+
+**Creating a Series.** `书系` on the landing opens the house's Series. The page says membership only lets later Tasks explicitly choose the Series' scope, reads `还没有书系。`, and offers `新建书系…`. The form opens with focus on `书系名称`, and `新建书系` stays unavailable until there is a name. A 41-character name is refused in place with `书系名称要 1–40 个字，写在一行里。`. 星河三部曲, with a 说明, is created and answers `已新建书系「星河三部曲」`. Its entry reads `书系「星河三部曲」 · 成员 0 本` and takes focus, and `inspectSeriesList()` agrees.
+
+**The Series page.** Opening it shows 成员与共享范围: its scope note, `书系里还没有图书。`, `加入书系…` and `还没有成员变更。`.
+
+**Adding a Book.**
+- `加入书系…` offers all three Books, none chosen, with focus on the first. 查看影响 stays unavailable until one is chosen.
+- For 星河之一, the preview's heading takes focus. It reads `加入书系的影响` and `图书《星河之一》 · 书系「星河三部曲」`.
+- The four groups follow in their order: 未来任务, 已授权或正在运行, 书系知识与学习, 历史记录. Each says what changes and what stays as it is: only later explicit selection changes; there is no Run with a Series scope; the Book has no Learning Material; one change record will be added.
+- Its only actions are `加入书系` and `取消`. The service shows that nothing was recorded by looking.
+- `加入书系` answers `已加入书系「星河三部曲」：《星河之一》`. The member table reads 图书 · 作者 · 责编 · 加入时间 · 书系一致性审阅 · 操作, with `未填写` twice and `尚未审阅`. Focus sits on the row's `移出书系…`.
+- One record, `加入书系 · 《星河之一》`, keeps the four groups it showed. The service and the Book's own side agree.
+
+**A stale preview.** While the preview for 星河之二 is open, the runner adds and removes 星河之二 through the service, as another window could. `加入书系` is then refused with `预览之后，书系成员或相关记录有了变化；请重新查看影响，再决定。`. The preview is withdrawn, and focus moves to `重新查看影响`, which reads it again. Only then does `加入书系` go through. The member table now lists 星河之二 above 星河之一, newest joined first. The records now read, newest first: 加入, 移出, 加入 for 星河之二, and 加入 for 星河之一.
+
+**Finding by 书系.** 书库's search by `书系` for 星河三部曲 finds exactly 星河之一 and 星河之二, and the line reads `按书系查找「星河三部曲」`.
+
+**Each Book's side.** 星河之一's 工作概览 lists `书系「星河三部曲」 · … 加入` and its one record. 星河之二's lists three records, and 书系之外 is in no Series.
+
+**Removing a Book.** `移出书系…` on 星河之一's row opens `移出书系的影响`. Its groups say the Series' scope no longer includes the Book and that frozen Runs are neither changed nor cancelled. Its only committing action is `移出书系`. It answers `已移出书系「星河三部曲」：《星河之一》`, focus returns to `加入书系…`, and the list reads `成员 1 本`.
+
+**After a restart** everything reads as before, and 星河之一 is in no Series, with both of its records.
+
+J-13 additionally records twenty real membership changes, creates 51 empty Books and 51 Series through the real service, and exercises the visible next/reset controls repeatedly: Book history 20→2→20, Series list 50→2→50, candidates 50→3 with at most one explicitly selected Book retained, members 50→2→50, and Series history 20→20→20→16→20. Each screen retains one page; arrival focus remains on a visible item or history heading. The candidate reset starts a fresh choice. `查找书名` remains covered below the Journey.
+
+**Keyboard and display (J-14).** From the keyboard:
+- Enter on `加入书系…` opens the chooser at its first Book, and Escape closes it back onto the opener.
+- An arrow key chooses, Tab reaches `查看影响` with visible focus, and Enter shows the preview with focus on its heading.
+- Escape closes it with nothing recorded.
+
+At 200% the member table stacks, each cell naming its column, and the preview and records wrap within the width. Under forced colours the preview keeps its border.
+
+Not proven here:
+- Learning Material counted in the preview, proven over the real store in `tests/service/series.test.ts` and by the unit suites;
+- the 书系一致性 category's reason for a member Book, proven over the real store.
+
+J-14 has no runner of its own. Its keyboard, IME, focus, 200% reflow, and forced-colors obligations are asserted inside the Journeys above where they apply; the Mark surface's are J-05's `j14-marks-*` and `marks-keyboard-menu-*` stages, 稿件冲突's are J-06's `j14-conflict-keyboard`, `j14-conflict-zoom-200-reflow` and `j14-conflict-forced-colors`, 交付物's are J-07's `j14-designate-keyboard`, `j14-deliverables-zoom-200-reflow` and `j14-deliverables-forced-colors`, with the export card's `j14-export-keyboard`, `j14-export-zoom-200-reflow` and `j14-export-forced-colors`, 待我处理's are J-09's `j14-attention-keyboard`, `j14-attention-zoom-200-reflow` and `j14-attention-forced-colors`, `等待运行名额`'s is J-09's `j14-queued-forced-colors`, 取消任务's are J-10's `j14-cancel-keyboard` and `j14-cancelling-forced-colors`, 改计划重做's is J-10's `j14-redo-keyboard`, the question card's is J-10's `j14-clarification-keyboard`, `设置上限…`'s is J-10's `j14-budget-keyboard`, the editable plan's is J-04's `j14-plan-edit-keyboard`, 人员's are J-11's `j14-people-keyboard`, `j14-people-zoom-200-reflow` and `j14-people-forced-colors`, 评估's is J-11's `j14-evaluation-reflow-forced-colors`, 分析反馈's are J-11's `j14-feedback-keyboard` and `j14-feedback-reflow-forced-colors`, a decision's reason row's is J-11's `j14-decision-feedback-keyboard`, 学习准入's are J-11's `j14-learning-keyboard` and `j14-learning-reflow-forced-colors`, 知识库's are J-15's `j14-knowledge-keyboard` and `j14-knowledge-reflow-forced-colors`, with 资料库's `j14-library-reflow-forced-colors`, the 任务 panel's are J-16's `j14-panel-keyboard`, `j14-panel-zoom-200-reflow` and `j14-panel-forced-colors`, 书系's are J-13's `j14-series-keyboard` and `j14-series-reflow-forced-colors`, and the Task Drawer's are J-03's `drawer-keyboard`, `drawer-push-overlay` and `drawer-reflow-forced-colors`.

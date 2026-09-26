@@ -61,6 +61,7 @@ import { EXECUTION_SLOT_BUSY, EXECUTION_SLOT_BUSY_REASON } from '../analysis/exe
 import { graphemeCount, sliceGraphemes } from '../analysis/factual-review-contract.js';
 import type { PackageReviewRunReading } from '../book-delivery-packages.js';
 import type { EditorialMarkStore, ProducedEditorialMarkInput } from '../editorial-marks.js';
+import { SeriesLedger, seriesConsistencyWaitingReason } from '../series.js';
 import type { ReviewRunAttentionReading } from '../global-attention.js';
 import {
   BUILTIN_REVIEW_CATEGORY_CONFIGURATION,
@@ -1978,10 +1979,22 @@ export class ReviewRunStore {
     }
   }
 
+  /**
+   * Why a category no executor serves cannot be chosen. A Book already in a Series is told so (Issue #63, S28a): 书系一致性
+   * still waits for Series Knowledge to reach review.
+   */
+  #unavailableReason(bookId: string, entry: ReviewCategoryConfigurationEntry): string {
+    if (entry.categoryId === 'series-consistency') {
+      const series = new SeriesLedger(this.#db).seriesOf(bookId);
+      if (series.count > 0) return seriesConsistencyWaitingReason(series.memberships.map((entry) => entry.title), series.count);
+    }
+    return entry.unavailableReason ?? '这一类暂不可用。';
+  }
+
   /** What one category can do now: from its own ledger for a Task-backed one, from the baseline for the leads. */
   #readCategory(bookId: string, head: ManuscriptHead | null, entry: ReviewCategoryConfigurationEntry, baseline: BaselineReading, progress: ProgressReader | undefined): CategoryReading {
     const none: ReviewCategoryLedgerFacts = { hasRevision: false, stale: false, syncUnavailableReason: null, baselineRevision: baseline.revision !== null };
-    if (entry.executor === 'unavailable') return { entry, unavailableReason: entry.unavailableReason ?? '这一类暂不可用。', facts: none, projection: null };
+    if (entry.executor === 'unavailable') return { entry, unavailableReason: this.#unavailableReason(bookId, entry), facts: none, projection: null };
     if (head === null) return { entry, unavailableReason: NO_MANUSCRIPT_REASON, facts: none, projection: null };
     if (entry.executor === 'baseline-leads') {
       return { entry, unavailableReason: baseline.error ?? (baseline.revision === null ? LEADS_ABSENT_REASON : null), facts: none, projection: null };

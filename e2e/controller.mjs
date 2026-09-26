@@ -93,7 +93,7 @@ if (isJourneyRunner) {
   }
 }
 
-export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15', 'J-03', 'J-04', 'J-05', 'J-06', 'J-07', 'J-09', 'J-10', 'J-11', 'J-16']);
+export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15', 'J-03', 'J-04', 'J-05', 'J-06', 'J-07', 'J-09', 'J-10', 'J-11', 'J-16', 'J-13']);
 
 // The bounded pull-request subset of ADMITTED_JOURNEYS under ADR 0075. Every member launches the
 // same production-shaped subject, so a broken build, launch, IPC, data root, or service still fails
@@ -189,6 +189,7 @@ const JOURNEY_MODULES = Object.freeze({
   'J-10': new URL('./run-j10.mjs', import.meta.url),
   'J-11': new URL('./run-j11.mjs', import.meta.url),
   'J-16': new URL('./run-j16.mjs', import.meta.url),
+  'J-13': new URL('./run-j13.mjs', import.meta.url),
 });
 
 const J01_LAUNCH_SCENARIOS = Object.freeze([
@@ -1102,6 +1103,30 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',
+  ]),
+  // J-13 (Issue #63, plan slice S28a): 书系 — 新建书系, 成员与共享范围, 加入书系 and 移出书系 through the four-part impact
+  // preview, a stale preview refused, 书库's search by 书系, each Book's own records, and a restart.
+  'J-13': Object.freeze([
+    'entry',
+    'controller-loopback',
+    'controller-imports',
+    'empty-books',
+    'series-empty',
+    'series-create',
+    'series-open',
+    'membership-add-preview',
+    'membership-added',
+    'membership-stale-preview',
+    'library-by-series',
+    'book-series-records',
+    'membership-remove',
+    'series-restart',
+    'series-bounded-pages',
+    'series-bounded-seed',
+    'series-bounded-navigation',
+    'j14-series-keyboard',
+    'j14-series-reflow-forced-colors',
+    'zero-activity',
   ]),
 });
 

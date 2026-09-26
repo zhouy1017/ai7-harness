@@ -31,6 +31,7 @@ const RUNNER_FILES: Readonly<Record<string, string>> = Object.freeze({
   'J-10': 'run-j10.mjs',
   'J-11': 'run-j11.mjs',
   'J-16': 'run-j16.mjs',
+  'J-13': 'run-j13.mjs',
 });
 
 /*

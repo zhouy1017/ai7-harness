@@ -1,0 +1,431 @@
+import { createHash, randomUUID } from 'node:crypto';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { SERIES_SCHEMA_SQL, SERIES_TRIGGER_SQL, SeriesError, SeriesLedger, initializeSeriesSchema, seriesMembershipImpact } from '../../src/service/series.js';
+import { EditorialStore, StoreError } from '../../src/service/store.js';
+import { EVALUATION_CALIBRATION_SCHEMA_VERSION, SERIES_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import {
+  MAX_FRAME_BYTES,
+  MAX_BOOK_SERIES_MEMBERSHIPS,
+  MAX_SERIES_CANDIDATES_PAGE,
+  MAX_SERIES_HISTORY_PAGE,
+  MAX_SERIES_LIST_PAGE,
+  MAX_SERIES_MEMBERS_PAGE,
+  type SeriesImpactGroupProjection,
+} from '../../src/shared/protocol.js';
+import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+// Service-integration suite (L2) for 书系 › 成员与共享范围 (Issue #63, plan slice S28a; V2-UX-SER-001 to SER-012; ADR 0002,
+// ADR 0036) over the real store: 新建书系, the four-part Series Membership Impact Preview, 加入书系 and 移出书系 against the
+// exact preview, a stale preview refused, the change records on both sides, 书库's search by 书系, the 书系一致性 category's
+// reason for a member Book, the ledger across a restart refusing to be rewritten, and revision 52 added to a revision-51
+// store. Every Book is empty and every name is the suite's own.
+
+const SERIES_TABLES = Object.keys(SERIES_SCHEMA_SQL);
+
+let roots: ServiceTestRoots;
+
+beforeEach(async () => {
+  roots = await createServiceTestRoots('ai7-service-series-');
+});
+
+afterEach(async () => {
+  await roots.dispose();
+});
+
+function emptyBook(store: EditorialStore, title: string): string {
+  const creation = store.prepareBookCreation(title, null);
+  return store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
+}
+
+function refusal(operation: () => unknown): string {
+  try {
+    operation();
+  } catch (error) {
+    if (error instanceof StoreError) return `${error.code}:${error.message}`;
+    throw error;
+  }
+  return 'no-error';
+}
+
+function databasePath(): string {
+  return join(roots.dataRoot, 'store', 'ai7.sqlite');
+}
+
+function counts(): Record<string, number> {
+  const database = new DatabaseSync(databasePath(), { readOnly: true });
+  try {
+    return Object.fromEntries(SERIES_TABLES.map((table) => [table, (database.prepare(`SELECT count(*) count FROM ${table}`).get() as { count: number }).count]));
+  } finally {
+    database.close();
+  }
+}
+
+/** The groups as their keys, titles and lines: what the editor reads. */
+function groupsOf(groups: ReadonlyArray<SeriesImpactGroupProjection>): unknown[] {
+  return groups.map((group) => [group.key, group.title, group.changes, group.unchanged]);
+}
+
+/** Members and the Books 加入书系… offers, by title, and the history as change and Book, newest first — each list's first page. */
+function pageOf(store: EditorialStore, seriesId: string): { members: unknown[]; candidates: string[]; history: unknown[] } {
+  const series = store.inspectSeries(seriesId);
+  return {
+    members: series.members.map((member) => [member.title, member.seriesConsistencyReview]),
+    candidates: store.inspectSeriesCandidates(seriesId, '', null).candidates.map((candidate) => candidate.title),
+    history: series.history.map((change) => [change.label, change.bookTitle, change.priorMember, change.newMember]),
+  };
+}
+
+/** 加入书系 of one Book against its own preview. */
+function add(store: EditorialStore, seriesId: string, bookId: string): void {
+  const preview = store.previewSeriesMembershipChange({ seriesId, bookId, kind: 'add' });
+  store.changeSeriesMembership({ seriesId, bookId, kind: 'add', previewDigest: preview.previewDigest });
+}
+
+const wire = (value: unknown): number => Buffer.byteLength(JSON.stringify(value), 'utf8');
+/** A moment later: records a step apart never share an instant, so which came first is never a tie. */
+const later = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 3));
+
+const ADD_GROUPS = (book: string, series: string): unknown[] => [
+  ['future-tasks', '未来任务', [`以后新建任务时，可以明确选用书系「${series}」的范围，其中会包括《${book}》。`],
+    [`不会把《${book}》自动加进任何任务，也不会因此授权运行、让其他图书读到它的原文或发给模型服务。`]],
+  ['runs', '已授权或正在运行', [], [`现在没有使用书系「${series}」范围、已授权或正在运行的任务。`, '已授权或正在运行的任务按各自冻结的范围继续，计划不会被改动。']],
+  ['knowledge-learning', '书系知识与学习', [], [`《${book}》还没有学习材料。`, '书系知识、学习准入和学习记录各有自己的决定；加入书系不会纳入、启用或删除它们。']],
+  ['history', '历史记录', ['追加一条书系成员变更记录，书系和图书两边都能查看。'], ['已完成的任务、结果、决定和以前的记录都保持原样。']],
+];
+
+describe('书系 over the real store', () => {
+  it('creates a Series, previews and records 加入书系 and 移出书系 against the exact preview, and shows each record on both sides', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(store.inspectSeriesList()).toEqual({ series: [], nextCursor: null });
+      // 新建书系: a name on one line within its bound, not a name the house already has however it is spaced or cased.
+      for (const [title, note, expected] of [
+        ['', '', 'SERIES_TITLE_INVALID:书系名称要 1–40 个字，写在一行里。'],
+        ['   ', '', 'SERIES_TITLE_INVALID:书系名称要 1–40 个字，写在一行里。'],
+        ['星'.repeat(41), '', 'SERIES_TITLE_INVALID:书系名称要 1–40 个字，写在一行里。'],
+        ['星河\n三部曲', '', 'SERIES_TITLE_INVALID:书系名称要 1–40 个字，写在一行里。'],
+        ['星河三部曲', '说'.repeat(501), 'SERIES_NOTE_INVALID:说明最多 500 个字。'],
+      ] as const) {
+        expect(refusal(() => store.createSeries({ title, note }))).toBe(expected);
+      }
+      const created = store.createSeries({ title: '  星河三部曲 ', note: '同一个宇宙里的三部长篇。' });
+      // The answer is the new Series alone (Issue #63 review).
+      expect([created.completionLabel, [created.series.title, created.series.note, created.series.memberCount]])
+        .toEqual(['已新建书系「星河三部曲」', ['星河三部曲', '同一个宇宙里的三部长篇。', 0]]);
+      expect(refusal(() => store.createSeries({ title: '星河 三部曲', note: '' }))).toBe('SERIES_TITLE_TAKEN:已经有名为「星河 三部曲」的书系了。');
+      expect(refusal(() => store.createSeries({ title: '星'.repeat(40), note: '' }))).toBe('no-error');
+      const seriesId = created.seriesId;
+
+      const first = emptyBook(store, '星河之一');
+      const second = emptyBook(store, '星河之二');
+      expect(pageOf(store, seriesId)).toEqual({ members: [], candidates: ['星河之一', '星河之二'], history: [] });
+      expect([store.inspectSeries(seriesId).memberCount, store.inspectSeries(seriesId).bookCount]).toEqual([0, 2]);
+      expect(refusal(() => store.inspectSeries('series'))).toBe('SERIES_INVALID:书系标识无效。');
+      expect(refusal(() => store.inspectSeries(randomUUID()))).toBe('SERIES_NOT_FOUND:书系不存在。');
+
+      // The preview names the exact Book and Series and its four groups, and records nothing.
+      const preview = store.previewSeriesMembershipChange({ seriesId, bookId: first, kind: 'add' });
+      expect([preview.bookTitle, preview.seriesTitle, preview.actionLabel, groupsOf(preview.groups)])
+        .toEqual(['星河之一', '星河三部曲', '加入书系', ADD_GROUPS('星河之一', '星河三部曲')]);
+      expect(preview.previewDigest).toMatch(/^[0-9a-f]{64}$/u);
+      expect(store.previewSeriesMembershipChange({ seriesId, bookId: first, kind: 'add' }).previewDigest).toBe(preview.previewDigest);
+      expect(refusal(() => store.previewSeriesMembershipChange({ seriesId, bookId: first, kind: 'remove' }))).toBe('SERIES_MEMBER_ABSENT:《星河之一》不在书系「星河三部曲」中。');
+      expect(refusal(() => store.previewSeriesMembershipChange({ seriesId, bookId: randomUUID(), kind: 'add' }))).toBe('BOOK_NOT_FOUND:图书不存在。');
+      expect(counts()).toEqual({ series: 2, series_membership_changes: 0 });
+
+      // 加入书系 against the preview: the record keeps what it showed, and both sides list it.
+      const added = store.changeSeriesMembership({ seriesId, bookId: first, kind: 'add', previewDigest: preview.previewDigest });
+      expect(added.completionLabel).toBe('已加入书系「星河三部曲」：《星河之一》');
+      expect(pageOf(store, seriesId)).toEqual({ members: [['星河之一', null]], candidates: ['星河之二'], history: [['加入书系', '星河之一', false, true]] });
+      // The answer is the record it made (Issue #63 review), with what the preview showed.
+      expect([added.change.changeId, added.change.label, added.change.bookTitle, added.change.seriesTitle, added.change.impact])
+        .toEqual([added.changeId, '加入书系', '星河之一', '星河三部曲', preview.groups]);
+      const firstSide = store.inspectBookSeries(first);
+      expect([firstSide.memberships.map((entry) => entry.title), firstSide.history.map((change) => [change.label, change.seriesTitle, change.changeId])])
+        .toEqual([['星河三部曲'], [['加入书系', '星河三部曲', added.changeId]]]);
+      expect(store.inspectBookSeries(second)).toEqual({ bookId: second, memberships: [], membershipCount: 0, history: [], historyCount: 0, historyNext: null });
+      expect(refusal(() => store.previewSeriesMembershipChange({ seriesId, bookId: first, kind: 'add' }))).toBe('SERIES_MEMBER_ALREADY:《星河之一》已经在书系「星河三部曲」中。');
+      expect(refusal(() => store.changeSeriesMembership({ seriesId, bookId: first, kind: 'add', previewDigest: preview.previewDigest })))
+        .toBe('SERIES_MEMBER_ALREADY:《星河之一》已经在书系「星河三部曲」中。');
+      expect(store.inspectSeriesList().series.map((entry) => [entry.title, entry.memberCount])).toEqual([['星'.repeat(40), 0], ['星河三部曲', 1]]);
+
+      // A preview the chain moved past is refused and records nothing; the preview read again goes through.
+      const stale = store.previewSeriesMembershipChange({ seriesId, bookId: second, kind: 'add' });
+      const around = store.previewSeriesMembershipChange({ seriesId, bookId: second, kind: 'add' });
+      store.changeSeriesMembership({ seriesId, bookId: second, kind: 'add', previewDigest: around.previewDigest });
+      const back = store.previewSeriesMembershipChange({ seriesId, bookId: second, kind: 'remove' });
+      store.changeSeriesMembership({ seriesId, bookId: second, kind: 'remove', previewDigest: back.previewDigest });
+      expect(refusal(() => store.changeSeriesMembership({ seriesId, bookId: second, kind: 'add', previewDigest: stale.previewDigest })))
+        .toBe('SERIES_PREVIEW_STALE:预览之后，书系成员或相关记录有了变化；请重新查看影响，再决定。');
+      expect(counts()).toEqual({ series: 2, series_membership_changes: 3 });
+      const fresh = store.previewSeriesMembershipChange({ seriesId, bookId: second, kind: 'add' });
+      expect(fresh.previewDigest).not.toBe(stale.previewDigest);
+      expect(groupsOf(fresh.groups)).toEqual(groupsOf(stale.groups));
+      store.changeSeriesMembership({ seriesId, bookId: second, kind: 'add', previewDigest: fresh.previewDigest });
+
+      // 书库 finds the members by 书系, alone or among every field.
+      const found = (field: 'series' | 'all' | 'title', text: string): string[] => store.listBooks(null, { field, text }).items.map((item) => item.title);
+      expect([found('series', '星河'), found('all', '三部曲'), found('title', '三部曲')]).toEqual([['星河之一', '星河之二'], ['星河之一', '星河之二'], []]);
+
+      // 书系一致性 still waits, and says the Book is in the Series.
+      const category = (bookId: string): unknown => store.inspectReviewWorkspace(bookId, null).categories
+        .filter((entry) => entry.categoryId === 'series-consistency').map((entry) => [entry.available, entry.unavailableReason]);
+      expect(category(first)).toEqual([[false, '这本书已在书系「星河三部曲」中；书系知识接入审阅后才能选。']]);
+      const outside = emptyBook(store, '书系之外');
+      expect(category(outside)).toEqual([[false, '这本书不在任何书系中，也还没有书系知识；加入书系、且书系知识接入审阅后才能选。']]);
+
+      // 移出书系: prospective, its own four groups, and the record on both sides; the Book's own history keeps both.
+      const leave = store.previewSeriesMembershipChange({ seriesId, bookId: first, kind: 'remove' });
+      expect([leave.actionLabel, groupsOf(leave.groups)]).toEqual(['移出书系', [
+        ['future-tasks', '未来任务', ['以后新建任务时，书系「星河三部曲」的范围不再包括《星河之一》。'], ['《星河之一》自己的任务照旧。']],
+        ['runs', '已授权或正在运行', [], ['现在没有使用书系「星河三部曲」范围、已授权或正在运行的任务。', '已经冻结的任务范围不会因移出而改变，任务也不会被取消。']],
+        ['knowledge-learning', '书系知识与学习', [], ['《星河之一》还没有学习材料。', '书系知识、学习准入和学习记录各有自己的决定；移出书系不会删除或改动它们。']],
+        ['history', '历史记录', ['追加一条书系成员变更记录，书系和图书两边都能查看。'], ['《星河之一》和书系以前的记录都不会删除。']],
+      ]]);
+      const removed = store.changeSeriesMembership({ seriesId, bookId: first, kind: 'remove', previewDigest: leave.previewDigest });
+      expect(removed.completionLabel).toBe('已移出书系「星河三部曲」：《星河之一》');
+      expect(pageOf(store, seriesId)).toEqual({
+        members: [['星河之二', null]],
+        candidates: ['书系之外', '星河之一'],
+        history: [['移出书系', '星河之一', true, false], ['加入书系', '星河之二', false, true], ['移出书系', '星河之二', true, false],
+          ['加入书系', '星河之二', false, true], ['加入书系', '星河之一', false, true]],
+      });
+      expect(store.inspectBookSeries(first).history.map((change) => change.label)).toEqual(['移出书系', '加入书系']);
+      expect(store.inspectBookSeries(first).memberships).toEqual([]);
+      expect(found('series', '星河')).toEqual(['星河之二']);
+      expect(category(first)).toEqual([[false, '这本书不在任何书系中，也还没有书系知识；加入书系、且书系知识接入审阅后才能选。']]);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+
+    // A restart keeps every Series and record; the ledger refuses to be rewritten, and records rewritten by hand no longer read.
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let seriesId: string;
+    try {
+      const series = reopened.inspectSeriesList().series.find((entry) => entry.title === '星河三部曲')!;
+      seriesId = series.seriesId;
+      expect(pageOf(reopened, seriesId).members).toEqual([['星河之二', null]]);
+      reopened.markCleanShutdown();
+    } finally {
+      reopened.close();
+    }
+    const database = new DatabaseSync(databasePath());
+    try {
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SERIES_SCHEMA_VERSION);
+      for (const table of SERIES_TABLES) {
+        expect(() => database.exec(`UPDATE ${table} SET recorded_at = recorded_at`)).toThrowError(/SERIES_LEDGER_IMMUTABLE|no such column/u);
+        expect(() => database.exec(`DELETE FROM ${table}`)).toThrowError(/SERIES_LEDGER_IMMUTABLE/u);
+      }
+      expect(() => database.exec("UPDATE series SET note = ''")).toThrowError(/SERIES_LEDGER_IMMUTABLE/u);
+      // The first change of a pair is always 加入书系: a 移出书系 in its place is refused by the relation itself.
+      const bookId = (database.prepare('SELECT book_id FROM books ORDER BY title LIMIT 1').get() as { book_id: string }).book_id;
+      expect(() => database.prepare(`INSERT INTO series_membership_changes(change_id, series_id, book_id, ordinal, kind, preview_digest, supersedes_change_id, recorded_at, canonical_json, sha256)
+        VALUES (?, ?, ?, 1, 'remove', ?, NULL, '2026-09-25T00:00:00.000Z', '{}', ?)`).run(randomUUID(), seriesId!, bookId, 'a'.repeat(64), 'b'.repeat(64))).toThrowError(/CHECK constraint failed/u);
+      // A record whose shown impact is rewritten, with a digest that matches, no longer agrees with itself.
+      database.exec('DROP TRIGGER series_membership_changes_no_update');
+      const row = database.prepare("SELECT change_id, canonical_json FROM series_membership_changes WHERE kind = 'remove' ORDER BY recorded_at DESC LIMIT 1").get() as { change_id: string; canonical_json: string };
+      const rewritten = row.canonical_json.replace('"history"', '"historyX"');
+      expect(rewritten).not.toBe(row.canonical_json);
+      database.prepare('UPDATE series_membership_changes SET canonical_json = ?, sha256 = ? WHERE change_id = ?')
+        .run(rewritten, createHash('sha256').update(rewritten).digest('hex'), row.change_id);
+      database.exec(SERIES_TRIGGER_SQL.series_membership_changes_no_update!);
+    } finally {
+      database.close();
+    }
+    const tampered = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(refusal(() => tampered.inspectSeries(seriesId!))).toBe('SERIES_RECORD_INVALID:书系记录已损坏。');
+      tampered.markCleanShutdown();
+    } finally {
+      tampered.close();
+    }
+  }, 180_000);
+
+  it('keeps a chain that alternates 加入书系 and 移出书系, whoever calls the ledger', () => {
+    // The ledger alone, over the one relation it references, as a second guard behind the store's preview.
+    const database = new DatabaseSync(':memory:');
+    try {
+      database.exec('CREATE TABLE books (book_id TEXT PRIMARY KEY) STRICT;');
+      initializeSeriesSchema(database);
+      initializeSeriesSchema(database);
+      const ledger = new SeriesLedger(database);
+      const bookId = randomUUID();
+      database.prepare('INSERT INTO books(book_id) VALUES (?)').run(bookId);
+      const series = ledger.create({ title: '晨光文丛', note: '' });
+      const names = { book: '晨光之书', series: '晨光文丛' };
+      const facts = { seriesTitle: names.series, bookTitle: names.book, seriesScopedRuns: 0, learningMaterials: 0, learningDecided: 0 };
+      const change = (kind: 'add' | 'remove', impact = seriesMembershipImpact(kind, facts), previewDigest = 'd'.repeat(64)): string => {
+        try {
+          ledger.record({ seriesId: series.seriesId, bookId, kind, previewDigest, impact, names });
+        } catch (error) {
+          if (error instanceof SeriesError) return `${error.code}:${error.message}`;
+          throw error;
+        }
+        return 'recorded';
+      };
+      expect(change('remove')).toBe('SERIES_MEMBER_ABSENT:《晨光之书》不在书系「晨光文丛」中。');
+      // A change carries the four groups its preview showed and that preview's digest, or it is no change at all.
+      expect(change('add', [])).toBe('SERIES_CHANGE_INVALID:书系成员变更无效。');
+      expect(change('add', seriesMembershipImpact('add', facts).slice(0, 3))).toBe('SERIES_CHANGE_INVALID:书系成员变更无效。');
+      expect(change('add', undefined, 'D'.repeat(64))).toBe('SERIES_CHANGE_INVALID:书系成员变更无效。');
+      expect(change('add')).toBe('recorded');
+      expect(change('add')).toBe('SERIES_MEMBER_ALREADY:《晨光之书》已经在书系「晨光文丛」中。');
+      expect(change('remove')).toBe('recorded');
+      expect(ledger.latest(series.seriesId, bookId)).toMatchObject({ ordinal: 2, kind: 'remove' });
+      expect([...ledger.members(series.seriesId)]).toEqual([]);
+      // The current membership and every history page still validate records far behind the visible page.
+      for (let index = 0; index < 32; index += 1) {
+        expect(change('add')).toBe('recorded');
+        expect(change('remove')).toBe('recorded');
+      }
+      expect(ledger.latest(series.seriesId, bookId)).toMatchObject({ ordinal: 66, kind: 'remove' });
+      const ordinals: number[] = [];
+      let cursor: { recordedAt: string; seriesId: string; bookId: string; ordinal: number } | null = null;
+      for (let guard = 0; guard < 4; guard += 1) {
+        const page = ledger.historyPage({ seriesId: series.seriesId }, cursor, 20);
+        expect(page.count).toBe(66);
+        expect(page.entries.length).toBeLessThanOrEqual(20);
+        ordinals.push(...page.entries.map((entry) => entry.ordinal));
+        cursor = page.entries.at(-1) ?? null;
+      }
+      expect(ordinals).toEqual(Array.from({ length: 66 }, (_, index) => 66 - index));
+      database.exec('DROP TRIGGER series_membership_changes_no_update');
+      database.prepare("UPDATE series_membership_changes SET sha256 = ? WHERE series_id = ? AND book_id = ? AND ordinal = 1")
+        .run('0'.repeat(64), series.seriesId, bookId);
+      expect(() => ledger.latest(series.seriesId, bookId)).toThrowError('书系记录已损坏。');
+      expect(() => ledger.historyPage({ bookId }, null, 20)).toThrowError('书系记录已损坏。');
+    } finally {
+      database.close();
+    }
+  });
+
+  it('refuses a Series whose name was rewritten by hand', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      store.createSeries({ title: '晨光文丛', note: '' });
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    const database = new DatabaseSync(databasePath());
+    try {
+      database.exec('DROP TRIGGER series_no_update');
+      database.exec("UPDATE series SET title = '暮色文丛', title_key = '暮色文丛'");
+      database.exec(SERIES_TRIGGER_SQL.series_no_update!);
+    } finally {
+      database.close();
+    }
+    const tampered = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(refusal(() => tampered.inspectSeriesList())).toBe('SERIES_RECORD_INVALID:书系记录已损坏。');
+      tampered.markCleanShutdown();
+    } finally {
+      tampered.close();
+    }
+  }, 120_000);
+
+  it('adds revision 52 to a revision-51 store with nothing else moved', async () => {
+    const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      emptyBook(first, '早先的图书');
+      first.markCleanShutdown();
+    } finally {
+      first.close();
+    }
+    const schemaOf = (database: DatabaseSync): Array<{ name: string; sql: string }> =>
+      database.prepare("SELECT name, sql FROM sqlite_schema WHERE type IN ('table', 'trigger', 'index') AND sql IS NOT NULL ORDER BY name").all() as Array<{ name: string; sql: string }>;
+    const plant = new DatabaseSync(databasePath());
+    let before: Array<{ name: string; sql: string }>;
+    try {
+      plant.exec(`DROP TABLE series_membership_changes; DROP TABLE series; PRAGMA user_version = ${EVALUATION_CALIBRATION_SCHEMA_VERSION};`);
+      before = schemaOf(plant);
+    } finally {
+      plant.close();
+    }
+    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(migrated.inspectSeriesList()).toEqual({ series: [], nextCursor: null });
+      migrated.markCleanShutdown();
+    } finally {
+      migrated.close();
+    }
+    const database = new DatabaseSync(databasePath(), { readOnly: true });
+    try {
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SERIES_SCHEMA_VERSION);
+      const after = schemaOf(database);
+      expect(after.filter((entry) => !/^series/u.test(entry.name))).toEqual(before!);
+      expect(after.filter((entry) => SERIES_TABLES.includes(entry.name)).map((entry) => entry.sql))
+        .toEqual(SERIES_TABLES.slice().sort().map((table) => SERIES_SCHEMA_SQL[table as keyof typeof SERIES_SCHEMA_SQL]));
+      expect(counts()).toEqual({ series: 0, series_membership_changes: 0 });
+    } finally {
+      database.close();
+    }
+  }, 120_000);
+
+  it('reads every list a page at a time, so every Book can be found and added and every member and record reached (Issue #63 review)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      // More Series than a page: 更多书系… reads the rest, by name, each once.
+      for (let index = 0; index < MAX_SERIES_LIST_PAGE + 2; index += 1) store.createSeries({ title: `书系${String(index).padStart(3, '0')}`, note: '说'.repeat(500) });
+      const firstList = store.inspectSeriesList();
+      expect([firstList.series.length, firstList.series[0]!.title, firstList.nextCursor?.title]).toEqual([MAX_SERIES_LIST_PAGE, '书系000', '书系049']);
+      const secondList = store.inspectSeriesList(firstList.nextCursor);
+      expect([secondList.series.map((entry) => entry.title), secondList.nextCursor]).toEqual([['书系050', '书系051'], null]);
+      expect(refusal(() => store.inspectSeriesList({ title: '', seriesId: randomUUID() }))).toBe('SERIES_CURSOR_INVALID:书系列表位置无效。');
+      const seriesId = firstList.series[0]!.seriesId;
+
+      // More Books than 加入书系… shows at once, with titles as long as a title may be: every one is offered a page at a time,
+      // 查找书名 finds the last directly, and a member is never offered.
+      const long = (index: number): string => `${String(index).padStart(3, '0')}${'长'.repeat(177)}`;
+      const books = Array.from({ length: MAX_SERIES_CANDIDATES_PAGE + 10 }, (_, index) => emptyBook(store, long(index)));
+      const offered = store.inspectSeriesCandidates(seriesId, '', null);
+      expect([offered.candidates.length, offered.candidates[0]!.title, offered.nextCursor?.bookId]).toEqual([MAX_SERIES_CANDIDATES_PAGE, long(0), books[MAX_SERIES_CANDIDATES_PAGE - 1]]);
+      const rest = store.inspectSeriesCandidates(seriesId, '', offered.nextCursor);
+      expect([rest.candidates.map((candidate) => candidate.bookId), rest.nextCursor]).toEqual([books.slice(MAX_SERIES_CANDIDATES_PAGE), null]);
+      expect(store.inspectSeriesCandidates(seriesId, ' 059 ', null).candidates.map((candidate) => candidate.bookId)).toEqual([books[59]]);
+      expect(store.inspectSeriesCandidates(seriesId, '书系之外', null)).toEqual({ candidates: [], nextCursor: null });
+      expect(refusal(() => store.inspectSeriesCandidates(seriesId, '字'.repeat(41), null))).toBe('SERIES_QUERY_INVALID:查找的书名字词最多 40 个字，写在一行里。');
+
+      // Every Book added, one after another: the newest joined heads the members, the rest a page further; the records come
+      // newest first, twenty at a time; and no answer comes near a frame.
+      for (const bookId of books) {
+        add(store, seriesId, bookId);
+        await later();
+      }
+      expect(store.inspectSeriesCandidates(seriesId, '059', null).candidates).toEqual([]);
+      const series = store.inspectSeries(seriesId);
+      expect([series.memberCount, series.bookCount, series.members.length, series.members[0]!.bookId, series.historyCount, series.history.length])
+        .toEqual([books.length, books.length, MAX_SERIES_MEMBERS_PAGE, books.at(-1), books.length, MAX_SERIES_HISTORY_PAGE]);
+      expect(wire(series)).toBeLessThan(MAX_FRAME_BYTES / 2);
+      const moreMembers = store.inspectSeriesMembers(seriesId, series.membersNext);
+      expect([moreMembers.members.map((member) => member.bookId), moreMembers.nextCursor]).toEqual([books.slice(0, books.length - MAX_SERIES_MEMBERS_PAGE).reverse(), null]);
+      const records: string[] = series.history.map((change) => change.bookId);
+      let next = series.historyNext;
+      // Bounded, so a page that never moves on fails here rather than reading forever.
+      for (let guard = 0; next !== null && guard < books.length; guard += 1) {
+        const page = store.inspectSeriesHistory({ seriesId, bookId: null }, next);
+        records.push(...page.history.map((change) => change.bookId));
+        next = page.nextCursor;
+      }
+      expect(records).toEqual([...books].reverse());
+      expect(refusal(() => store.inspectSeriesHistory({ seriesId, bookId: books[0]! }, null))).toBe('SERIES_HISTORY_INVALID:成员变更记录要按一个书系或一本书读取。');
+      expect(refusal(() => store.inspectSeriesMembers(seriesId, { joinedAt: 'yesterday', bookId: books[0]! }))).toBe('SERIES_CURSOR_INVALID:书系列表位置无效。');
+      // A Book's own side counts its records, and pages them the same way.
+      const side = store.inspectBookSeries(books[0]!);
+      expect([side.membershipCount, side.historyCount, side.historyNext]).toEqual([1, 1, null]);
+      // One Book in more Series than its bounded summary can name: exact total, bounded names and an honest review reason.
+      for (const entry of [...firstList.series, ...secondList.series].slice(1)) add(store, entry.seriesId, books[0]!);
+      const many = store.inspectBookSeries(books[0]!);
+      expect([many.memberships.length, many.membershipCount, many.historyCount]).toEqual([MAX_BOOK_SERIES_MEMBERSHIPS, 52, 52]);
+      const reason = store.inspectReviewWorkspace(books[0]!, null).categories.find((entry) => entry.categoryId === 'series-consistency')!.unavailableReason;
+      expect(reason).toContain('已加入 52 个书系，包括');
+      expect(reason).not.toContain('书系051');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 300_000);
+});
