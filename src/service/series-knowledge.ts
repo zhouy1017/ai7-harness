@@ -1,7 +1,8 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   MAX_SERIES_KNOWLEDGE_CONTENT_CHARACTERS,
+  MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN,
   MAX_SERIES_KNOWLEDGE_QUOTE_GRAPHEMES,
   MAX_SERIES_KNOWLEDGE_SUBJECT_CHARACTERS,
   SERIES_KNOWLEDGE_CLASSES,
@@ -279,28 +280,27 @@ function isConflicts(value: unknown): value is SeriesKnowledgeConflictProjection
  * the same item or the same name. Each line names the item or the candidate and its version, never their words (Issue #63
  * review), so a review stays small however many there are.
  */
-export function seriesKnowledgeConflicts(
+export function* seriesKnowledgeConflicts(
   candidate: Pick<StoredCandidate, 'candidateId' | 'target'>,
   items: Iterable<StoredItem>,
   open: Iterable<Pick<StoredCandidate, 'candidateId' | 'versionId' | 'version' | 'target'>>,
-): FoundConflict[] {
+): IterableIterator<FoundConflict> {
   const key = seriesKnowledgeSubjectKey(candidate.target.subject);
-  const found: FoundConflict[] = [];
   if (candidate.target.kind === 'new') {
     for (const item of items) {
       if (seriesKnowledgeSubjectKey(item.subject) !== key) continue;
       const current = item.current;
-      found.push({
+      yield {
         kind: 'existing-item',
         ref: current.revisionId,
         line: `书系知识里已有「${item.subject}」（${SERIES_KNOWLEDGE_CLASS_LABELS[item.knowledgeClass]}）第 ${current.ordinal} 版。`,
-      });
+      };
     }
   } else {
     const target = candidate.target;
     for (const item of items) {
       if (item.itemId === target.itemId && item.current.revisionId !== target.baseRevisionId) {
-        found.push({ kind: 'item-updated', ref: item.current.revisionId, line: `「${item.subject}」在提议之后已更新为第 ${item.current.ordinal} 版。` });
+        yield { kind: 'item-updated', ref: item.current.revisionId, line: `「${item.subject}」在提议之后已更新为第 ${item.current.ordinal} 版。` };
       }
     }
   }
@@ -308,27 +308,37 @@ export function seriesKnowledgeConflicts(
     if (other.candidateId === candidate.candidateId) continue;
     const sameItem = candidate.target.kind === 'existing' && other.target.kind === 'existing' && other.target.itemId === candidate.target.itemId;
     if (!sameItem && seriesKnowledgeSubjectKey(other.target.subject) !== key) continue;
-    found.push({ kind: 'competing-candidate', ref: other.versionId, line: `另一个候选项也在提议「${other.target.subject}」（第 ${other.version} 版）。` });
+    yield { kind: 'competing-candidate', ref: other.versionId, line: `另一个候选项也在提议「${other.target.subject}」（第 ${other.version} 版）。` };
   }
-  return found;
 }
 
-/** The digest a review carries: the candidate's version, the item's current revision, the conflicts and any blocker. */
-export function seriesKnowledgeReviewDigest(input: {
+/** Stream the complete identity list into its existing canonical digest, retaining only the disclosed preview and count. */
+export function seriesKnowledgeReviewSummary(input: {
   readonly seriesId: string;
   readonly candidateVersionId: string;
   readonly currentRevisionId: string | null;
-  readonly conflicts: ReadonlyArray<Pick<FoundConflict, 'kind' | 'ref'>>;
+  readonly conflicts: Iterable<FoundConflict>;
   readonly blocked: string | null;
-}): string {
-  return sha256Hex(canonicalJson({
-    schema: REVIEW_SCHEMA,
-    seriesId: input.seriesId,
-    candidateVersionId: input.candidateVersionId,
-    currentRevisionId: input.currentRevisionId,
-    conflicts: input.conflicts.map((entry) => ({ kind: entry.kind, ref: entry.ref })),
-    blocked: input.blocked,
-  }));
+}): { readonly digest: string; readonly count: number; readonly preview: FoundConflict[] } {
+  const hash = createHash('sha256');
+  hash.update('{"blocked":' + canonicalJson(input.blocked) + ',"candidateVersionId":' + canonicalJson(input.candidateVersionId) + ',"conflicts":[');
+  let count = 0;
+  const preview: FoundConflict[] = [];
+  for (const conflict of input.conflicts) {
+    if (count > 0) hash.update(',');
+    hash.update(canonicalJson({ kind: conflict.kind, ref: conflict.ref }));
+    count += 1;
+    if (preview.length < MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN) preview.push(conflict);
+  }
+  hash.update('],"currentRevisionId":' + canonicalJson(input.currentRevisionId) + ',"schema":' + canonicalJson(REVIEW_SCHEMA) + ',"seriesId":' + canonicalJson(input.seriesId) + '}');
+  return { digest: hash.digest('hex'), count, preview };
+}
+
+/** Candidate list badges need only the exact count, never the complete conflict list. */
+export function countSeriesKnowledgeConflicts(conflicts: Iterable<FoundConflict>): number {
+  let count = 0;
+  for (const _conflict of conflicts) count += 1;
+  return count;
 }
 
 export class SeriesKnowledgeLedger {

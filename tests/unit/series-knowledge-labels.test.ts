@@ -28,17 +28,22 @@ import {
   knowledgeQuoteExcerpt,
   seriesKnowledgeConflicts,
   seriesKnowledgeContent,
-  seriesKnowledgeReviewDigest,
+  seriesKnowledgeReviewSummary,
   seriesKnowledgeSubject,
   seriesKnowledgeSubjectKey,
+  type FoundConflict,
   type StoredCandidate,
   type StoredItem,
 } from '../../src/service/series-knowledge.js';
+import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { SERIES_KNOWLEDGE_CLASSES, SERIES_KNOWLEDGE_CLASS_LABELS, SERIES_KNOWLEDGE_REUSE_LABELS } from '../../src/shared/protocol.js';
 
 // Unit suite for 书系知识 (Issue #63, plan slice S28b; V2-UX-SER-013 to SER-019): the classes and uses, the names an item may
 // take, the conflicts found by identity alone — the same item or the same name, never what the words mean — the review's
 // digest, and every line the Series page and the manuscript's menu state. Every word is the suite's own.
+
+const seriesKnowledgeReviewDigest = (input: Omit<Parameters<typeof seriesKnowledgeReviewSummary>[0], 'conflicts'> & { conflicts: ReadonlyArray<Pick<FoundConflict, 'kind' | 'ref'>> }): string =>
+  seriesKnowledgeReviewSummary({ ...input, conflicts: input.conflicts.map((entry) => ({ ...entry, line: '冲突行' })) }).digest;
 
 const revision = (ordinal: number, content: string): StoredItem['current'] => ({
   revisionId: `revision-${ordinal}`, itemId: 'item', ordinal, content, authoring: 'editor', provenance: null, conflicts: [], reuseScope: 'series-tasks',
@@ -66,15 +71,15 @@ describe('书系知识 names and classes', () => {
 
 describe('书系知识 conflicts, by identity alone', () => {
   it('finds an item of the same name for a new one, however it is spaced, and nothing for another name', () => {
-    const found = seriesKnowledgeConflicts(candidate('a', { kind: 'new', subject: '林 默', knowledgeClass: 'places' }), [item], []);
+    const found = [...seriesKnowledgeConflicts(candidate('a', { kind: 'new', subject: '林 默', knowledgeClass: 'places' }), [item], [])];
     expect(found).toEqual([{ kind: 'existing-item', ref: 'revision-2', line: '书系知识里已有「林默」（人物）第 2 版。' }]);
-    expect(seriesKnowledgeConflicts(candidate('a', { kind: 'new', subject: '苏晴', knowledgeClass: 'characters' }), [item], [])).toEqual([]);
+    expect([...seriesKnowledgeConflicts(candidate('a', { kind: 'new', subject: '苏晴', knowledgeClass: 'characters' }), [item], [])]).toEqual([]);
   });
 
   it('finds a revision appended since an existing item was read, and not the one it was read at', () => {
     const read = (baseRevisionId: string): StoredCandidate['target'] => ({ kind: 'existing', itemId: 'item', subject: '林默', knowledgeClass: 'characters', baseRevisionId });
-    expect(seriesKnowledgeConflicts(candidate('a', read('revision-2')), [item], [])).toEqual([]);
-    expect(seriesKnowledgeConflicts(candidate('a', read('revision-1')), [item], []))
+    expect([...seriesKnowledgeConflicts(candidate('a', read('revision-2')), [item], [])]).toEqual([]);
+    expect([...seriesKnowledgeConflicts(candidate('a', read('revision-1')), [item], [])])
       .toEqual([{ kind: 'item-updated', ref: 'revision-2', line: '「林默」在提议之后已更新为第 2 版。' }]);
   });
 
@@ -82,11 +87,11 @@ describe('书系知识 conflicts, by identity alone', () => {
     const self = candidate('a', { kind: 'new', subject: '苏晴', knowledgeClass: 'characters' });
     const rival = candidate('b', { kind: 'new', subject: ' 苏 晴', knowledgeClass: 'places' }, '另一种说法');
     const unrelated = candidate('c', { kind: 'new', subject: '海城', knowledgeClass: 'places' });
-    expect(seriesKnowledgeConflicts(self, [], [self, rival, unrelated]))
+    expect([...seriesKnowledgeConflicts(self, [], [self, rival, unrelated])])
       .toEqual([{ kind: 'competing-candidate', ref: 'b-v1', line: '另一个候选项也在提议「 苏 晴」（第 1 版）。' }]);
     const onItem = candidate('d', { kind: 'existing', itemId: 'item', subject: '林默', knowledgeClass: 'characters', baseRevisionId: 'revision-2' });
     const alsoOnItem = candidate('e', { kind: 'existing', itemId: 'item', subject: '林默', knowledgeClass: 'characters', baseRevisionId: 'revision-2' });
-    expect(seriesKnowledgeConflicts(onItem, [item], [onItem, alsoOnItem]).map((entry) => entry.kind)).toEqual(['competing-candidate']);
+    expect([...seriesKnowledgeConflicts(onItem, [item], [onItem, alsoOnItem])].map((entry) => entry.kind)).toEqual(['competing-candidate']);
   });
 
   it('moves the review digest with the candidate\'s version, the current revision, any conflict and any blocker', () => {
@@ -102,6 +107,15 @@ describe('书系知识 conflicts, by identity alone', () => {
       expect(seriesKnowledgeReviewDigest(moved)).not.toBe(digest);
     }
   });
+});
+
+it('keeps the review digest byte-identical while consuming a single-pass conflict stream', () => {
+  const conflicts: FoundConflict[] = Array.from({ length: 73 }, (_, index) => ({ kind: 'competing-candidate', ref: '版本-' + index, line: '冲突-' + index }));
+  const base = { seriesId: '书系', candidateVersionId: '候选', currentRevisionId: null, blocked: '阻止原因' };
+  const summary = seriesKnowledgeReviewSummary({ ...base, conflicts: conflicts.values() });
+  expect(summary.digest).toBe(sha256Hex(canonicalJson({ ...base, schema: 'ai7.series-knowledge-review/1', conflicts: conflicts.map(({ kind, ref }) => ({ kind, ref })) })));
+  expect(summary.count).toBe(73);
+  expect(summary.preview).toEqual(conflicts.slice(0, 50));
 });
 
 describe('书系知识 words', () => {

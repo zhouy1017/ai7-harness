@@ -418,7 +418,8 @@ import {
   knowledgeQuoteExcerpt,
   seriesKnowledgeConflicts,
   seriesKnowledgeContent,
-  seriesKnowledgeReviewDigest,
+  seriesKnowledgeReviewSummary,
+  countSeriesKnowledgeConflicts,
   seriesKnowledgeSubject,
   type FoundConflict,
   type ResolvedTarget,
@@ -11049,7 +11050,7 @@ export class EditorialStore {
       return {
         candidateId: created.candidateId,
         completionLabel: `已提议为书系「${series.title}」的知识候选项`,
-        candidate: this.#knowledgeCandidateProjection(created, seriesKnowledgeConflicts(created, items, open).length),
+        candidate: this.#knowledgeCandidateProjection(created, countSeriesKnowledgeConflicts(seriesKnowledgeConflicts(created, items, open))),
       };
     });
   }
@@ -11088,13 +11089,13 @@ export class EditorialStore {
           'SERIES_KNOWLEDGE_REVIEW_STALE', '候选项、条目或冲突在审阅之后有了变化；请重新审阅。');
         requireStore(review.projection.blocked === null, 'SERIES_KNOWLEDGE_BLOCKED', review.projection.blocked ?? '');
         requireStore(isSeriesKnowledgeReuseScope(input.reuseScope), 'SERIES_KNOWLEDGE_REUSE_INVALID', '请选择以后的用途。');
-        if (review.conflicts.length > 0) {
+        if (review.projection.conflictCount > 0) {
           requireStore(input.conflictDisposition === 'preserved', 'SERIES_KNOWLEDGE_CONFLICT_UNRESOLVED',
             `${SERIES_KNOWLEDGE_CONFLICT_LABEL}：请编辑候选项，或选择保留已披露冲突。`);
         } else {
           requireStore(input.conflictDisposition === 'none', 'SERIES_KNOWLEDGE_DISPOSITION_INVALID', '没有已披露的冲突可以保留。');
         }
-        return this.#seriesKnowledge.promote({ candidate: review.candidate, conflicts: review.conflicts, reuseScope: input.reuseScope, reviewDigest: input.reviewDigest });
+        return this.#seriesKnowledge.promote({ candidate: review.candidate, conflicts: Array.from(review.conflicts()), reuseScope: input.reuseScope, reviewDigest: input.reviewDigest });
       });
       return {
         itemId: promoted.itemId,
@@ -11172,7 +11173,7 @@ export class EditorialStore {
   /** One page of a Series' open candidates after the one named, oldest proposed first, each with how many conflicts it discloses. */
   #knowledgeCandidatesPage(seriesId: string, after: SeriesKnowledgeCandidatesCursor | null): SeriesKnowledgeCandidatesPageProjection {
     const read = this.#seriesKnowledge.openPage(seriesId, after, MAX_SERIES_KNOWLEDGE_CANDIDATES_PAGE + 1);
-    const projected = read.map(({ candidate }) => this.#knowledgeCandidateProjection(candidate, seriesKnowledgeConflicts(candidate, this.#seriesKnowledge.items(seriesId), this.#seriesKnowledge.open(seriesId)).length));
+    const projected = read.map(({ candidate }) => this.#knowledgeCandidateProjection(candidate, countSeriesKnowledgeConflicts(seriesKnowledgeConflicts(candidate, this.#seriesKnowledge.items(seriesId), this.#seriesKnowledge.open(seriesId)))));
     const { page, more } = weighedPage(projected, MAX_SERIES_KNOWLEDGE_CANDIDATES_PAGE, SERIES_KNOWLEDGE_PAGE_BYTES);
     const last = read[page.length - 1];
     return { candidates: page, nextCursor: more && last !== undefined ? { firstAt: last.firstAt, candidateId: last.candidate.candidateId } : null };
@@ -11218,35 +11219,35 @@ export class EditorialStore {
   #seriesKnowledgeReview(seriesId: string, candidateId: string): {
     readonly projection: SeriesKnowledgeReviewProjection;
     readonly candidate: StoredCandidate;
-    readonly conflicts: FoundConflict[];
+    readonly conflicts: () => IterableIterator<FoundConflict>;
   } {
     const series = this.#requireSeries(seriesId);
     requireStore(typeof candidateId === 'string' && UUID_PATTERN.test(candidateId), 'SERIES_KNOWLEDGE_CANDIDATE_INVALID', '候选项标识无效。');
     const candidate = this.#seriesKnowledge.candidate(candidateId);
     requireStore(candidate !== null && candidate.seriesId === series.seriesId, 'SERIES_KNOWLEDGE_CANDIDATE_NOT_FOUND', '这个候选项不存在。');
     requireStore(!candidate.promoted, 'SERIES_KNOWLEDGE_ALREADY_PROMOTED', '这个候选项已经纳入书系知识。');
-    const items = this.#seriesKnowledge.items(series.seriesId);
-    const conflicts = seriesKnowledgeConflicts(candidate, items, this.#seriesKnowledge.open(series.seriesId));
+    const conflicts = (): IterableIterator<FoundConflict> => seriesKnowledgeConflicts(candidate, this.#seriesKnowledge.items(series.seriesId), this.#seriesKnowledge.open(series.seriesId));
     const target = candidate.target;
     const current = target.kind === 'existing' ? this.#seriesKnowledge.item(target.itemId)?.current ?? null : null;
     // A provenance-bound candidate cites a member Book's manuscript: once the Book has left the Series it cannot be taken in.
     const blocked = candidate.provenance !== null && !this.#series.seriesOf(candidate.provenance.bookId).some((entry) => entry.seriesId === series.seriesId)
       ? `《${this.#evaluationBookTitle(candidate.provenance.bookId)}》已不在书系「${series.title}」中；来自它的候选项不能纳入。`
       : null;
+    const summary = seriesKnowledgeReviewSummary({ seriesId: series.seriesId, candidateVersionId: candidate.versionId, currentRevisionId: current?.revisionId ?? null, conflicts: conflicts(), blocked });
     return {
       candidate,
       conflicts,
       projection: {
         seriesId: series.seriesId,
         seriesTitle: series.title,
-        candidate: this.#knowledgeCandidateProjection(candidate, conflicts.length),
+        candidate: this.#knowledgeCandidateProjection(candidate, summary.count),
         current: current === null ? null : this.#knowledgeRevisionProjection(current),
-        conflicts: conflicts.slice(0, MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN).map((entry) => ({ kind: entry.kind, line: entry.line })),
-        conflictCount: conflicts.length,
-        conflictLabel: conflicts.length === 0 ? null : SERIES_KNOWLEDGE_CONFLICT_LABEL,
+        conflicts: summary.preview.map((entry) => ({ kind: entry.kind, line: entry.line })),
+        conflictCount: summary.count,
+        conflictLabel: summary.count === 0 ? null : SERIES_KNOWLEDGE_CONFLICT_LABEL,
         reuseScopes: SERIES_KNOWLEDGE_REUSE_SCOPES.map((scope) => ({ scope, label: SERIES_KNOWLEDGE_REUSE_LABELS[scope] })),
         blocked,
-        reviewDigest: seriesKnowledgeReviewDigest({ seriesId: series.seriesId, candidateVersionId: candidate.versionId, currentRevisionId: current?.revisionId ?? null, conflicts, blocked }),
+        reviewDigest: summary.digest,
         actionLabel: '纳入书系知识',
       },
     };
