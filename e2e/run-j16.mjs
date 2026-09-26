@@ -962,21 +962,30 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'chip-overview', 60_000);
     await click(renderer, '打开稿件', 'chip-reopen');
     await waitFor(renderer, `${CHIP} !== null && ${CHIP}.dataset.returnChip === ${JSON.stringify(chip.blockId)}`, 'chip-still-there', 60_000);
-
-    // One unused way back survives visiting another Book; later navigation cannot evict it.
-    await click(renderer, '返回图书工作概览', 'chip-other-overview');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'chip-other-overview-ready');
-    await click(renderer, '返回图书列表', 'chip-other-library');
-    const otherBookId = await importSample1(renderer, 'J-16 返回位置的另一图书', true, 'chip-other-import');
-    await click(renderer, '打开稿件', 'chip-other-open');
-    await waitFor(renderer, `document.querySelector('.editor-shell')?.dataset.bookId === ${JSON.stringify(otherBookId)}`, 'chip-other-editor');
-    await assertRenderer(renderer, `${CHIP}?.dataset.returnChip === ${JSON.stringify(chip.blockId)}`, 'chip-preserved-across-books');
+    // The exact-key navigation hint survives a renderer restart without reconstructing every Book's positions.
+    await closeOwnedBrowser();
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'chip-restart-ready');
+    await openManuscriptOf(renderer, bookId, 'chip-restart');
+    await waitFor(renderer, `${CHIP}?.dataset.returnChip === ${JSON.stringify(chip.blockId)}`, 'chip-restart-retained');
 
     at('chip-return');
     // 回到<位置>: the manuscript is back where the editor was reading before the jump, and the chip is gone.
     await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'chip-use');
     await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)} && (document.querySelector('#persistence-status')?.textContent ?? '').startsWith('已回到')`, 'chip-returned', 60_000);
     await waitFor(renderer, `document.querySelector('.rail-marker[data-rail-kind="annotation"]') !== null`, 'mark-rail-ready');
+    // A storage failure must refuse the jump, rather than lose the editor's way back.
+    await renderer.evaluate(`(() => {
+      globalThis.__j16Transaction = IDBDatabase.prototype.transaction;
+      IDBDatabase.prototype.transaction = function(names, mode, options) {
+        if (this.name === 'ai7-reading-return' && mode === 'readwrite') throw new DOMException('', 'QuotaExceededError');
+        return globalThis.__j16Transaction.call(this, names, mode, options);
+      };
+    })()`);
+    await clickSelector(renderer, '.rail-marker[data-rail-kind="annotation"]', 'mark-rail-storage-failure');
+    await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '').startsWith('无法保存或读取返回位置')`, 'mark-rail-storage-refused');
+    await assertRenderer(renderer, `${CHIP} === null && ${blockInView(chip.blockId)}`, 'mark-rail-storage-keeps-position');
+    await renderer.evaluate(`(() => { IDBDatabase.prototype.transaction = globalThis.__j16Transaction; delete globalThis.__j16Transaction; })()`);
     await clickSelector(renderer, '.rail-marker[data-rail-kind="annotation"]', 'mark-rail-jump');
     await waitFor(renderer, `${blockInView(railTarget)} && ${CHIP}?.dataset.returnChip === ${JSON.stringify(chip.blockId)}`, 'mark-rail-return-chip', 60_000);
     await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'mark-rail-return');
