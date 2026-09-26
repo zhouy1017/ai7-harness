@@ -347,6 +347,7 @@ async function leaveReturnChip(bookId: string, manuscriptId: string, branchId: s
 
 /** 跳到 (TASK-045): the manuscript at that paragraph — moved in place while it is on screen — leaving 回到<位置>. */
 async function jumpToManuscript(bookId: string, target: { manuscriptId: string | null; blockId: string; markId: string | null }): Promise<void> {
+  const origin = screen.firstElementChild;
   const showing = manuscriptOnScreen;
   if (showing !== null && showing.bookId === bookId && (target.manuscriptId === null || target.manuscriptId === showing.manuscriptId)) {
     await showing.jump(target);
@@ -359,8 +360,10 @@ async function jumpToManuscript(bookId: string, target: { manuscriptId: string |
     if (anchor === null || (target.manuscriptId !== null && target.manuscriptId !== anchor.manuscriptId)) throw new Error('这项结果所在的稿件已不在这本书中。');
     const opened = await window.ai7.getManuscriptWindowAt({ manuscriptId: anchor.manuscriptId, branchId: anchor.branchId, target: { kind: 'block', blockId: target.blockId } });
     await leaveReturnChip(bookId, anchor.manuscriptId, anchor.branchId);
+    if (screen.firstElementChild !== origin) return;
     await openEditorWindow(opened, overview.book.title, undefined, undefined, target.markId ?? undefined);
   } catch (error) {
+    if (screen.firstElementChild !== origin) return;
     setStatus(rendererErrorMessage(error, '无法打开对应稿件位置。'), 'error');
   }
 }
@@ -2003,12 +2006,14 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
       }
     },
     goToText: async (target) => {
+      const origin = screen.firstElementChild;
       const opened = await window.ai7.getManuscriptWindowAt({
         manuscriptId: target.manuscriptId,
         branchId: target.branchId,
         target: { kind: 'block', blockId: target.blockId },
       });
       await leaveReturnChip(bookId, target.manuscriptId, target.branchId);
+      if (screen.firstElementChild !== origin) return;
       await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId ?? undefined);
     },
     openPlan: (reviewRunId) => openTaskPlan(bookId, 'review-run', reviewRunId),
@@ -2550,11 +2555,13 @@ function analysisReturnButton(
   bookTitle: string,
 ): HTMLButtonElement {
   const returnToRange = button('回到稿件范围', 'quiet', async () => {
+    const origin = screen.firstElementChild;
     returnToRange.disabled = true;
     setStatus('正在打开对应稿件范围…', 'busy');
     try {
       const opened = await window.ai7.getManuscriptWindowAt({ manuscriptId, branchId, target: { kind: 'block', blockId } });
       await leaveReturnChip(opened.bookId, manuscriptId, branchId);
+      if (screen.firstElementChild !== origin) return;
       await openEditorWindow(opened, bookTitle);
     } catch (error) {
       returnToRange.disabled = false;
@@ -6932,16 +6939,20 @@ function renderEditorWindow(
   // 回到<位置> (Issue #423, S77a; TASK-045): where this manuscript is read, the chip that goes back, and a result's jump.
   let returnPlace: ReadingPlace | null = null;
   let returnReadFailed = false;
+  let returnRequest = 0;
   const loadReturnPlace = async (): Promise<void> => {
+    const request = ++returnRequest;
     try {
-      returnPlace = await readReturnPlace(initialWindow.manuscriptId, initialWindow.branchId);
+      const retained = await readReturnPlace(initialWindow.manuscriptId, initialWindow.branchId);
+      if (!chipHost.isConnected || request !== returnRequest) return;
+      returnPlace = retained;
       returnReadFailed = false;
     } catch (error) {
+      if (!chipHost.isConnected || request !== returnRequest) return;
       returnReadFailed = true;
       setStatus(rendererErrorMessage(error, '无法读取返回位置。'), 'error');
     }
   };
-  await loadReturnPlace();
   const readingPlace = (): ReadingPlace | null => {
     if (!editor) return null;
     const windowNow = editor.currentWindow();
@@ -6991,12 +7002,15 @@ function renderEditorWindow(
         return;
       }
       try {
+        ++returnRequest;
         returnPlace = await consumeReturnPlace(chip);
       } catch (error) {
+        if (!chipHost.isConnected) return;
         back.disabled = false;
         setStatus(rendererErrorMessage(error, '已到达原位置，但未能清除返回位置；可以重试。'), 'error');
         return;
       }
+      if (!chipHost.isConnected) return;
       paintReturnChip();
       setStatus(returnChipArrived(chip.place), 'success');
       landAt(chip.blockId);
@@ -7006,7 +7020,7 @@ function renderEditorWindow(
     back.title = RETURN_CHIP_TITLE;
     chipHost.replaceChildren(back);
   }
-  paintReturnChip();
+  void loadReturnPlace().then(() => { if (chipHost.isConnected) paintReturnChip(); });
   manuscriptOnScreen = {
     bookId: initialWindow.bookId,
     manuscriptId: initialWindow.manuscriptId,
@@ -7015,15 +7029,20 @@ function renderEditorWindow(
     jump: async (target) => {
       const here = readingPlace();
       if (here !== null && here.blockId !== target.blockId) {
+        const request = ++returnRequest;
         try {
-          returnPlace = await preserveReturnPlace(here);
+          const retained = await preserveReturnPlace(here);
+          if (!chipHost.isConnected || request !== returnRequest) return;
+          returnPlace = retained;
           returnReadFailed = false;
         } catch (error) {
+          if (!chipHost.isConnected || request !== returnRequest) return;
           setStatus(rendererErrorMessage(error, '无法保存返回位置，尚未跳转。'), 'error');
           return;
         }
       }
       if (!(await navigate({ kind: 'block', blockId: target.blockId }))) { paintReturnChip(); return; }
+      if (!chipHost.isConnected) return;
       paintReturnChip();
       if (target.markId !== null && editorialMarks !== undefined) await editorialMarks.openMark(target.markId);
       else landAt(target.blockId);

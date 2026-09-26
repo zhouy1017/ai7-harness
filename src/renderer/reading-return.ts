@@ -12,10 +12,10 @@ let connection: Promise<IDBDatabase> | null = null;
 
 function database(): Promise<IDBDatabase> {
   if (connection !== null) return connection;
-  connection = new Promise<IDBDatabase>((resolve, reject) => {
+  const opened = new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open('ai7-reading-return', 1);
     let failed = false;
-    const fail = (): void => { failed = true; connection = null; reject(new Error(UNAVAILABLE)); };
+    const fail = (): void => { failed = true; reject(new Error(UNAVAILABLE)); };
     request.onupgradeneeded = () => request.result.createObjectStore(STORE);
     request.onerror = fail;
     request.onblocked = fail;
@@ -26,7 +26,9 @@ function database(): Promise<IDBDatabase> {
       resolve(db);
     };
   });
-  return connection;
+  connection = opened;
+  void opened.catch(() => { if (connection === opened) connection = null; });
+  return opened;
 }
 
 function key(manuscriptId: string, branchId: string): string {

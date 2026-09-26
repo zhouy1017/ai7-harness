@@ -986,6 +986,28 @@ async function main() {
     await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '').startsWith('无法保存或读取返回位置')`, 'mark-rail-storage-refused');
     await assertRenderer(renderer, `${CHIP} === null && ${blockInView(chip.blockId)}`, 'mark-rail-storage-keeps-position');
     await renderer.evaluate(`(() => { IDBDatabase.prototype.transaction = globalThis.__j16Transaction; delete globalThis.__j16Transaction; })()`);
+    // Hold the real committed storage completion, replace the editor, then release the old click.
+    await renderer.evaluate(`(() => {
+      const original = IDBDatabase.prototype.transaction;
+      IDBDatabase.prototype.transaction = function(names, mode, options) {
+        const transaction = original.call(this, names, mode, options);
+        if (this.name === 'ai7-reading-return' && mode === 'readwrite') {
+          IDBDatabase.prototype.transaction = original;
+          Object.defineProperty(transaction, 'oncomplete', { set(callback) {
+            transaction.addEventListener('complete', (event) => { globalThis.__j16ReleaseReturn = () => callback.call(transaction, event); });
+          } });
+        }
+        return transaction;
+      };
+    })()`);
+    await clickSelector(renderer, '.rail-marker[data-rail-kind="annotation"]', 'mark-rail-delayed-storage');
+    await waitFor(renderer, `typeof globalThis.__j16ReleaseReturn === 'function'`, 'mark-rail-storage-held');
+    await click(renderer, '返回图书工作概览', 'mark-rail-held-leave');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'mark-rail-held-overview');
+    await click(renderer, '打开稿件', 'mark-rail-held-reopen');
+    await waitFor(renderer, `${blockInView(chip.blockId)} && ${CHIP} !== null`, 'mark-rail-replacement-editor');
+    await renderer.evaluate(`(() => { globalThis.__j16ReleaseReturn(); delete globalThis.__j16ReleaseReturn; return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); })()`);
+    await assertRenderer(renderer, `${blockInView(chip.blockId)}`, 'mark-rail-old-click-cannot-move-replacement');
     await clickSelector(renderer, '.rail-marker[data-rail-kind="annotation"]', 'mark-rail-jump');
     await waitFor(renderer, `${blockInView(railTarget)} && ${CHIP}?.dataset.returnChip === ${JSON.stringify(chip.blockId)}`, 'mark-rail-return-chip', 60_000);
     await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'mark-rail-return');
