@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+  LIBRARY_EMPTY,
+  LIBRARY_HOUSE_CONSEQUENCE,
+  eligibilityChoiceLabel,
+  libraryAttributionLine,
+  libraryBytes,
+  libraryDecisionLine,
+  libraryEligibilityLine,
+  libraryPreviewFacts,
+  libraryPreviewHeading,
+  libraryReferenceLine,
+  librarySourceLine,
   artifactLine,
   procedureLine,
   EXEMPLARS_LATER,
@@ -21,7 +32,7 @@ import {
   guidelineVersionPill,
 } from '../../src/renderer/knowledge-base-labels.js';
 import { MAX_GUIDELINE_CLAUSES, parseGuidelineClauses } from '../../src/service/review-guidelines.js';
-import type { ReviewGuidelineVersionProjection } from '../../src/shared/protocol.js';
+import type { LibraryMaterialProjection, ReviewGuidelineVersionProjection } from '../../src/shared/protocol.js';
 
 // Unit suite for 知识库's words (Issue #427, plan slice S79a; editor-surfaces §8.4, V2-UX-KB-001 to KB-010) and the reading
 // of a guideline file's numbered clauses (KB-003).
@@ -29,7 +40,7 @@ import type { ReviewGuidelineVersionProjection } from '../../src/shared/protocol
 describe('知识库', () => {
   it('names its seven classes in the specification\'s order, and says which arrive later', () => {
     expect(KNOWLEDGE_BASE_TAB_VIEWS.map((view) => view.label)).toEqual(['审阅规范文件', '评估方案', '工序与规则', '社级编辑记忆', '范例', '资料库', '外部来源留存']);
-    expect(KNOWLEDGE_BASE_TAB_VIEWS.filter((view) => view.pending === null).map((view) => view.tab)).toEqual(['guidelines', 'rules', 'exemplars']);
+    expect(KNOWLEDGE_BASE_TAB_VIEWS.filter((view) => view.pending === null).map((view) => view.tab)).toEqual(['guidelines', 'rules', 'exemplars', 'library']);
     for (const view of KNOWLEDGE_BASE_TAB_VIEWS) {
       expect(view.holds.length).toBeGreaterThan(0);
       if (view.pending !== null) expect(view.pending.startsWith('尚未提供')).toBe(true);
@@ -112,6 +123,50 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
     expect(artifactLine({ ...artifact, enabledBooks: 0 })).toBe('本社方案 v2 · 已安装 · 还没有图书启用');
     expect(artifactLine({ ...artifact, revision: null, state: 'available-to-install' })).toBe('本社方案 · 可获取 · 尚未安装');
     expect(artifactLine({ ...artifact, state: 'unavailable-needs-attention' })).toBe('本社方案 v2 · 不可用 · 需要处理');
+  });
+
+  it('says a 资料库 item in the editor\'s words: what arrived, where it belongs, its eligibility, and whose Tasks may list it', () => {
+    const instant = (iso: string): string => `〔${iso.slice(0, 10)}〕`;
+    const source = { displayName: 'sample1.docx', format: 'DOCX' as const, bytes: 29_550, sha256: 'a'.repeat(64) };
+    expect([libraryBytes(512), libraryBytes(29_550), libraryBytes(5 * 1024 * 1024), libraryBytes(3 * 1024 * 1024 * 1024)])
+      .toEqual(['512 字节', '28.9 KB', '5.0 MB', '3.00 GB']);
+    expect(libraryPreviewHeading({ source })).toBe('放入资料库：sample1.docx');
+    expect(libraryPreviewFacts({ source })).toBe('Word · 28.9 KB · 原件原样保存在本机，不会改动');
+    const pending: LibraryMaterialProjection = {
+      materialId: 'm', title: '样书一', kind: 'book', source, recordedAt: '2026-09-25T01:00:00.000Z', digest: 'b'.repeat(64),
+      attribution: null, eligibility: null, eligibilityReset: false, reference: { state: 'pending' }, decisionCount: 0, decisions: [],
+    };
+    expect(librarySourceLine(pending, instant)).toBe('sample1.docx · Word · 28.9 KB · 放入于 〔2026-09-25〕');
+    expect([libraryAttributionLine(pending), libraryEligibilityLine(pending), libraryReferenceLine(pending)])
+      .toEqual(['尚未定归属', '尚未定', '定了归属与学习准入，任务才能把它列进「允许参考」。']);
+    const book = { ...pending, attribution: { scope: 'book' as const, bookId: 'b', bookTitle: '甲书', decidedAt: '2026-09-25T02:00:00.000Z' } };
+    const deferred = { ...book, eligibility: { reasonHasMore: false, ordinal: 2, choice: 'deferred' as const, bookTitle: null, reason: null, decidedAt: '2026-09-25T03:00:00.000Z' } };
+    expect([libraryAttributionLine(book), libraryEligibilityLine(deferred), libraryReferenceLine(deferred)])
+      .toEqual(['《甲书》', '稍后决定', '学习准入记为稍后决定：决定之前，任务还不能把它列进「允许参考」。']);
+    const own = {
+      ...book,
+      eligibility: { reasonHasMore: false, ordinal: 2, choice: 'book' as const, bookTitle: '甲书', reason: '责编确认', decidedAt: '2026-09-25T03:00:00.000Z' },
+      reference: { state: 'available' as const, scope: 'book' as const, bookTitle: '甲书' },
+    };
+    expect([libraryEligibilityLine(own), libraryReferenceLine(own)]).toEqual(['仅纳入《甲书》（说明：责编确认）', '《甲书》的任务可以把它列进「允许参考」。']);
+    const house = {
+      ...pending,
+      attribution: { scope: 'house' as const, decidedAt: '2026-09-25T02:00:00.000Z' },
+      eligibility: { reasonHasMore: false, ordinal: 2, choice: 'house' as const, bookTitle: null, reason: null, decidedAt: '2026-09-25T03:00:00.000Z' },
+      reference: { state: 'available' as const, scope: 'house' as const },
+    };
+    expect([libraryAttributionLine(house), libraryEligibilityLine(house), libraryReferenceLine(house)])
+      .toEqual(['社级', '纳入出版社经验', '每本书的任务都可以把它列进「允许参考」。']);
+    // The choices as LEARN-004 to LEARN-006 name them, and the wider one's consequence said where it is chosen.
+    expect((['book', 'house', 'excluded', 'deferred'] as const).map((choice) => eligibilityChoiceLabel(choice, '甲书')))
+      .toEqual(['仅纳入《甲书》', '纳入出版社经验', '明确排除', '稍后决定']);
+    expect(LIBRARY_HOUSE_CONSEQUENCE).toBe('纳入出版社经验：全社以后的图书都可能从它学习。');
+    expect(LIBRARY_EMPTY).toContain('「允许参考」');
+    // Each decision on record, by its ordinal, what it decided, who and when.
+    expect(libraryDecisionLine({ ordinal: 1, recordedAt: '2026-09-25T02:00:00.000Z', decision: { kind: 'attribution', scope: 'book', bookId: 'b', bookTitle: '甲书' } }, instant))
+      .toBe('第 1 条 · 归属：《甲书》 · 本机编辑 · 〔2026-09-25〕');
+    expect(libraryDecisionLine({ ordinal: 2, recordedAt: '2026-09-25T03:00:00.000Z', decision: { kind: 'eligibility', reasonHasMore: false, choice: 'excluded', bookTitle: null, reason: '版权未清' } }, instant))
+      .toBe('第 2 条 · 学习准入：明确排除（说明：版权未清） · 本机编辑 · 〔2026-09-25〕');
   });
 });
 

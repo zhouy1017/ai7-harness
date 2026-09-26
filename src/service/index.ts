@@ -530,6 +530,18 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectExemplars(request.input.after) };
     case 'inspectKnowledgeProcedures':
       return { id: request.id, ok: true, op: request.op, result: await store.inspectKnowledgeProcedures() };
+    case 'inspectLibraryMaterials':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterials(request.input.after) };
+    case 'inspectLibraryMaterial':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterial(request.input.materialId) };
+    case 'readLibraryDecisionReason':
+      return { id: request.id, ok: true, op: request.op, result: store.readLibraryDecisionReason(request.input) };
+    case 'previewLibraryMaterial':
+      return { id: request.id, ok: true, op: request.op, result: await store.previewLibraryMaterial(request.input.path) };
+    case 'addLibraryMaterial':
+      return { id: request.id, ok: true, op: request.op, result: await store.addLibraryMaterial(request.input) };
+    case 'decideLibraryMaterial':
+      return { id: request.id, ok: true, op: request.op, result: store.decideLibraryMaterial(request.input) };
     case 'deactivateDefaultExecutionRule':
       return { id: request.id, ok: true, op: request.op, result: store.deactivateDefaultExecutionRule(request.input.ruleId) };
     // 审阅 (Issue #417, plan slice S69). Every answer that shows a Run reads the one owner's progress, so

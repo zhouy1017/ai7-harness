@@ -1160,6 +1160,30 @@ function registerRendererHandlers(
     return selectedPath;
   };
   /**
+   * 放入资料… (Issue #427, S79c): the platform's own open dialog. 资料库 keeps a file whole whatever it is and names its format
+   * from its content, so the dialog suggests the usual ones without restricting to them. J-15 alone answers it through its
+   * picker control, which serves one choice per window as the manuscript picker's.
+   */
+  const chooseLibraryMaterialFile = async (owned: OwnedRendererWindow): Promise<string | undefined> => {
+    let selectedPath = owned.injectedPickerPath;
+    owned.injectedPickerPath = undefined;
+    if (!selectedPath) {
+      const selected = await dialog.showOpenDialog(owned.window, {
+        title: '选择要放入资料库的文件',
+        buttonLabel: '放入资料库',
+        properties: ['openFile'],
+        filters: [
+          { name: '图书、论文、资料与网页', extensions: ['pdf', 'epub', 'docx', 'doc', 'odt', 'rtf', 'txt', 'md', 'html', 'htm'] },
+          { name: '所有文件', extensions: ['*'] },
+        ],
+      });
+      if (selected.canceled || selected.filePaths.length !== 1) return undefined;
+      selectedPath = selected.filePaths[0];
+    }
+    requireDesktop(selectedPath !== undefined && isAbsolute(selectedPath));
+    return selectedPath;
+  };
+  /**
    * 选择保存位置… (Issue #413): the platform's own Save dialog, which owns an existing file's replace-or-rename
    * choice (V2-UX-EXP-019), offering the review's file name in the documents folder. J-07 alone may answer it
    * once with a launch control instead, exactly as it answers the picker; `undefined` is a cancelled dialog.
@@ -2587,6 +2611,70 @@ function registerRendererHandlers(
       requireAuthority();
       return service.call('inspectKnowledgeProcedures', {});
     }),
+  );
+  // 知识库 › 资料库 (Issue #427, S79c): the renderer names no path — main's picker chooses the file — and names an item and a
+  // decision only in the closed shapes the service checks again.
+  ipcMain.handle(IPC_CHANNELS.inspectLibraryMaterials, (event, input: ServiceOperationMap['inspectLibraryMaterials']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('inspectLibraryMaterials', { after: input?.after ?? null });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectLibraryMaterial, (event, input: ServiceOperationMap['inspectLibraryMaterial']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectLibraryMaterial', { materialId: input.materialId });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.readLibraryDecisionReason, (event, input: ServiceOperationMap['readLibraryDecisionReason']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('readLibraryDecisionReason', { materialId: input.materialId, ordinal: input.ordinal, offset: input.offset });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.previewLibraryMaterial, (event) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const path = await chooseLibraryMaterialFile(owned);
+        if (path === undefined) return null;
+        return service.call('previewLibraryMaterial', { path });
+      });
+    }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.addLibraryMaterial,
+    (event, input: ServiceOperationMap['addLibraryMaterial']['input']) =>
+      envelope(async () => {
+        requireSender(event);
+        requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+        return serializeEffect(async () => {
+          requireAuthority();
+          return service.call('addLibraryMaterial', { previewId: input.previewId, title: input.title, kind: input.kind });
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.decideLibraryMaterial,
+    (event, input: ServiceOperationMap['decideLibraryMaterial']['input']) =>
+      envelope(async () => {
+        requireSender(event);
+        requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+        return serializeEffect(async () => {
+          requireAuthority();
+          return service.call('decideLibraryMaterial', {
+            materialId: input.materialId,
+            expectedDecisions: input.expectedDecisions,
+            decision: input.decision,
+          });
+        });
+      }),
   );
   ipcMain.handle(
     IPC_CHANNELS.previewReviewGuidelineVersion,

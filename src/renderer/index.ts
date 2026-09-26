@@ -72,6 +72,7 @@ import { MARK_KIND_LABELS } from './editorial-mark-labels.js';
 import { mountDeliverables, type DeliverablesSurface } from './deliverables.js';
 import { mountBookPeople } from './book-people.js';
 import { mountReviewGuidelines } from './review-guidelines.js';
+import { mountLibraryMaterials } from './library-materials.js';
 import {
   PROCEDURES_HEADING,
   PROCEDURE_STATE_LABELS,
@@ -87,6 +88,7 @@ import {
   exemplarDesignation,
   exemplarLine,
   GUIDELINE_STATUS,
+  LIBRARY_STATUS,
   KNOWLEDGE_BASE_LEDE,
   KNOWLEDGE_BASE_TABS_LABEL,
   KNOWLEDGE_BASE_TAB_VIEWS,
@@ -738,6 +740,11 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget): Promise
     case 'maintenance':
       await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>
         renderBookDeliverables(route.bookId, route.bookTitle, { caseId: target.caseId, publicationVersionId: target.publicationVersionId }));
+      return;
+    // A 资料库 item waiting for a decision (Issue #427, S79c): 知识库 › 资料库, with the decision it waits for in focus. 知识库 is
+    // no Book's, so no Book route is asked for.
+    case 'library-material':
+      await renderKnowledgeBase('library', false, target.materialId);
       return;
   }
 }
@@ -4266,9 +4273,10 @@ async function renderDataAndStorage(): Promise<void> {
 
 /**
  * 知识库 (Issue #427, plan slice S79a; editor-surfaces §8.4): its seven classes as tabs, in the specification's order, and the
- * chosen class below them. `tabFocused` keeps the keyboard on the tab list when a class was chosen from it.
+ * chosen class below them. `tabFocused` keeps the keyboard on the tab list when a class was chosen from it; `materialId` is
+ * the 资料库 item 待我处理 opened (Issue #427, S79c), shown with the decision it waits for in focus.
  */
-async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocused = false): Promise<void> {
+async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocused = false, materialId: string | null = null): Promise<void> {
   if (tab === 'rules') {
     setStatus('正在读取工序与规则…', 'busy');
     try {
@@ -4288,6 +4296,20 @@ async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocu
       if (content.isConnected) setStatus(EXEMPLARS_STATUS.opened);
     } catch (error) {
       setStatus(rendererErrorMessage(error, EXEMPLARS_STATUS.unavailable), 'error');
+    }
+    return;
+  }
+  // 资料库 (Issue #427, S79c; KB-007): the items the editor collected, their attribution and Learning Eligibility.
+  if (tab === 'library') {
+    setStatus(LIBRARY_STATUS.loading, 'busy');
+    const surface = mountLibraryMaterials({
+      root: panelNode, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, technicalDetails, focusMaterialId: materialId,
+    });
+    try {
+      await surface.load();
+      if (content.isConnected) setStatus(LIBRARY_STATUS.opened);
+    } catch (error) {
+      setStatus(rendererErrorMessage(error, LIBRARY_STATUS.unavailable), 'error');
     }
     return;
   }
