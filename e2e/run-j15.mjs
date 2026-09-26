@@ -1000,6 +1000,74 @@ async function main() {
     await clickSelector(renderer, '[data-library-action="cancel-decision"]', 'library-reflow-cancel');
     await readLibrary(renderer, (page) => page.cards[0]?.chooser === null && page.focus?.action === 'attribute', 'library-reflow-cancelled');
 
+    at('knowledge-library-bounded-readers');
+    const longReason = '👨‍👩‍👧‍👦'.repeat(300);
+    await clickSelector(renderer, '[data-library-action="eligibility"]', 'library-long-note-open');
+    await readLibrary(renderer, (page) => page.cards[0]?.chooser?.kind === 'eligibility', 'library-long-note-ready');
+    await clickSelector(renderer, '.library-eligibility-chooser [data-library-choice="book"]', 'library-long-note-choice');
+    await fill(renderer, '[data-library-field="reason"]', longReason, 'library-long-note');
+    await clickSelector(renderer, '[data-library-action="confirm-eligibility"]', 'library-long-note-save');
+    await readLibrary(renderer, (page) => page.cards[0]?.decisions === '3' && page.cards[0].chooser === null, 'library-long-note-saved');
+    const reader = 'article.library-material > .library-reason-reader';
+    await clickSelector(renderer, `${reader} [data-library-action="read-reason"]`, 'library-full-note-open');
+    let reconstructed = '';
+    for (let part = 0; part < 4; part += 1) {
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${reader} .library-reason-text`)}) === document.activeElement`, 'library-note-fragment-focus');
+      const fragment = await renderer.evaluate(`(() => { const root=document.querySelector(${JSON.stringify(reader)}); return {text:root.querySelector('.library-reason-text').textContent,next:root.querySelector('[data-library-action="reason-next"]')!==null}; })()`);
+      reconstructed += fragment.text;
+      if (!fragment.next) break;
+      await clickSelector(renderer, `${reader} [data-library-action="reason-next"]`, 'library-note-next');
+    }
+    requireJourney(reconstructed === longReason, 'library-complete-note-readable');
+    await clickSelector(renderer, `${reader} [data-library-action="reason-close"]`, 'library-note-close');
+    await waitFor(renderer, `document.activeElement === document.querySelector(${JSON.stringify(`${reader} [data-library-action="read-reason"]`)})`, 'library-note-close-focus');
+
+    // These are the runner's reference-file labels, never manuscript content. Every arrival goes through the real picker,
+    // review and commit; each launch grants exactly one picker choice. Twenty more arrivals cross the twenty-card boundary.
+    for (let index = 0; index < 20; index += 1) {
+      await closeBrowser();
+      const referencePath = resolve(runRoot, `library-reference-${index}.txt`);
+      await writeFile(referencePath, `AI7 library paging reference ${index}`, 'utf8');
+      manager = await launch(referencePath);
+      renderer = await waitForRenderer(manager, 'library-page-window');
+      await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'library-page-ready');
+      await click(renderer, '知识库', 'library-page-knowledge');
+      await click(renderer, '资料库', 'library-page-tab');
+      await readLibrary(renderer, (page) => page.state === 'ready', 'library-page-loaded');
+      await clickSelector(renderer, '[data-library-action="add"]', 'library-page-add');
+      await readLibrary(renderer, (page) => page.preview !== null, 'library-page-preview');
+      await fill(renderer, '[data-library-field="title"]', `分页资料${index}`, 'library-page-title');
+      await clickSelector(renderer, '[data-library-choice="document"]', 'library-page-kind');
+      await clickSelector(renderer, '[data-library-action="confirm-add"]', 'library-page-confirm');
+      await readLibrary(renderer, (page) => page.preview === null && page.cards.length === Math.min(index + 2, 20), 'library-page-arrival');
+    }
+    for (let repeat = 0; repeat < 2; repeat += 1) {
+      await clickSelector(renderer, '[data-library-action="more"]', 'library-page-next');
+      await readLibrary(renderer, (page) => page.cards.length === 1 && page.cards[0].id === materialId && page.focus?.tag === 'H3', 'library-page-oldest');
+      await clickSelector(renderer, '[data-library-action="first"]', 'library-page-first');
+      await readLibrary(renderer, (page) => page.cards.length === 20 && page.focus?.tag === 'H3', 'library-page-newest');
+    }
+
+    // Populate the Book chooser through the ordinary creation form, then retain one explicit choice across replacement pages.
+    await click(renderer, '返回图书列表', 'library-books-landing');
+    for (let index = 0; index < 19; index += 1) {
+      await createEmptyBook(renderer, `J15 分页图书${String(index).padStart(2, '0')}`);
+      await click(renderer, '返回图书列表', 'library-books-return');
+    }
+    await click(renderer, '知识库', 'library-books-knowledge');
+    await click(renderer, '资料库', 'library-books-tab');
+    await readLibrary(renderer, (page) => page.state === 'ready', 'library-books-ready');
+    await clickSelector(renderer, 'article.library-material [data-library-action="attribute"]', 'library-books-open');
+    await waitFor(renderer, `document.querySelectorAll('.library-attribution-chooser [data-library-choice^="book:"]').length===20`, 'library-books-first-page');
+    const picked = await renderer.evaluate(`document.querySelector('.library-attribution-chooser [data-library-choice^="book:"]').value`);
+    await clickSelector(renderer, `.library-attribution-chooser [data-library-choice="${picked}"]`, 'library-books-select');
+    await clickSelector(renderer, '[data-library-action="more-books"]', 'library-books-next');
+    await waitFor(renderer, `document.querySelectorAll('.library-attribution-chooser [data-library-choice^="book:"]').length===2 && document.querySelector('.library-attribution-chooser [data-library-choice="${picked}"]')?.checked===true`, 'library-books-retained');
+    await clickSelector(renderer, '[data-library-action="first-books"]', 'library-books-first');
+    await waitFor(renderer, `document.querySelectorAll('.library-attribution-chooser [data-library-choice^="book:"]').length===20 && document.querySelector('.library-attribution-chooser [data-library-choice="${picked}"]')?.checked===true`, 'library-books-first-retained');
+    await clickSelector(renderer, '[data-library-action="confirm-attribution"]', 'library-books-commit');
+    await readLibrary(renderer, (page) => page.cards[0]?.attribution === 'book' && page.cards[0].chooser === null, 'library-books-committed');
+
     at('zero-activity');
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key))`, 'exact-service-readiness-remained-zero');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-network-provider-session');

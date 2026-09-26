@@ -578,6 +578,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'knowledge-library-attention',
     'knowledge-library-decide',
     'j14-library-reflow-forced-colors',
+    'knowledge-library-bounded-readers',
     'zero-activity',
   ]),
   'J-03': Object.freeze([

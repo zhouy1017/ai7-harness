@@ -140,19 +140,19 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
     expect([libraryAttributionLine(pending), libraryEligibilityLine(pending), libraryReferenceLine(pending)])
       .toEqual(['尚未定归属', '尚未定', '定了归属与学习准入，任务才能把它列进「允许参考」。']);
     const book = { ...pending, attribution: { scope: 'book' as const, bookId: 'b', bookTitle: '甲书', decidedAt: '2026-09-25T02:00:00.000Z' } };
-    const deferred = { ...book, eligibility: { choice: 'deferred' as const, bookTitle: null, reason: null, decidedAt: '2026-09-25T03:00:00.000Z' } };
+    const deferred = { ...book, eligibility: { reasonHasMore: false, ordinal: 2, choice: 'deferred' as const, bookTitle: null, reason: null, decidedAt: '2026-09-25T03:00:00.000Z' } };
     expect([libraryAttributionLine(book), libraryEligibilityLine(deferred), libraryReferenceLine(deferred)])
       .toEqual(['《甲书》', '稍后决定', '学习准入记为稍后决定：决定之前，任务还不能把它列进「允许参考」。']);
     const own = {
       ...book,
-      eligibility: { choice: 'book' as const, bookTitle: '甲书', reason: '责编确认', decidedAt: '2026-09-25T03:00:00.000Z' },
+      eligibility: { reasonHasMore: false, ordinal: 2, choice: 'book' as const, bookTitle: '甲书', reason: '责编确认', decidedAt: '2026-09-25T03:00:00.000Z' },
       reference: { state: 'available' as const, scope: 'book' as const, bookTitle: '甲书' },
     };
     expect([libraryEligibilityLine(own), libraryReferenceLine(own)]).toEqual(['仅纳入《甲书》（说明：责编确认）', '《甲书》的任务可以把它列进「允许参考」。']);
     const house = {
       ...pending,
       attribution: { scope: 'house' as const, decidedAt: '2026-09-25T02:00:00.000Z' },
-      eligibility: { choice: 'house' as const, bookTitle: null, reason: null, decidedAt: '2026-09-25T03:00:00.000Z' },
+      eligibility: { reasonHasMore: false, ordinal: 2, choice: 'house' as const, bookTitle: null, reason: null, decidedAt: '2026-09-25T03:00:00.000Z' },
       reference: { state: 'available' as const, scope: 'house' as const },
     };
     expect([libraryAttributionLine(house), libraryEligibilityLine(house), libraryReferenceLine(house)])
@@ -165,7 +165,7 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
     // Each decision on record, by its ordinal, what it decided, who and when.
     expect(libraryDecisionLine({ ordinal: 1, recordedAt: '2026-09-25T02:00:00.000Z', decision: { kind: 'attribution', scope: 'book', bookId: 'b', bookTitle: '甲书' } }, instant))
       .toBe('第 1 条 · 归属：《甲书》 · 本机编辑 · 〔2026-09-25〕');
-    expect(libraryDecisionLine({ ordinal: 2, recordedAt: '2026-09-25T03:00:00.000Z', decision: { kind: 'eligibility', choice: 'excluded', bookTitle: null, reason: '版权未清' } }, instant))
+    expect(libraryDecisionLine({ ordinal: 2, recordedAt: '2026-09-25T03:00:00.000Z', decision: { kind: 'eligibility', reasonHasMore: false, choice: 'excluded', bookTitle: null, reason: '版权未清' } }, instant))
       .toBe('第 2 条 · 学习准入：明确排除（说明：版权未清） · 本机编辑 · 〔2026-09-25〕');
   });
 });

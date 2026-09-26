@@ -480,6 +480,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       const page = await api.inspectLibraryMaterials({ after: restart ? null : cursor });
       if (!root.isConnected) return;
       materials = [...page.materials];
+      if (pinned !== null) pinned = materials.find((material) => material.materialId === pinned!.materialId) ?? pinned;
       onFirstPage = restart;
       cursor = page.nextCursor;
       busy = false;
@@ -535,6 +536,19 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       if (!root.isConnected) return;
       // Keep the completed arrival as the one exact card above the current bounded page.
       pinned = added;
+      // Refresh the catalogue independently of the committed arrival. A failed read leaves an explicit reset available.
+      onFirstPage = false;
+      try {
+        const page = await api.inspectLibraryMaterials({ after: null });
+        if (!root.isConnected) return;
+        materials = [...page.materials];
+        cursor = page.nextCursor;
+        onFirstPage = true;
+        if (materials.some((material) => material.materialId === added.materialId)) pinned = null;
+      } catch {
+        // The arrival succeeded. Its card and 回到最新资料 remain usable; never report it as a failed import.
+      }
+      if (!root.isConnected) return;
       busy = false;
       preview = null;
       setStatus(libraryAdded(added.title), 'success');
