@@ -1381,6 +1381,13 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'editSeriesKnowledgeCandidate', input: { seriesId, candidateId, expectedVersion: 1, target: newItem, content: '改过' } },
       { op: 'promoteSeriesKnowledge', input: promote },
       { op: 'promoteSeriesKnowledge', input: { ...promote, reuseScope: 'consistency-review', conflictDisposition: 'preserved' } },
+      // Its further pages (Issue #63 review): items by name or 查找条目, open candidates, and one item's 历次版本.
+      { op: 'inspectSeriesKnowledgeItems', input: { seriesId, text: '', after: null } },
+      { op: 'inspectSeriesKnowledgeItems', input: { seriesId, text: '林', after: { subject: '林默', itemId: randomUUID() } } },
+      { op: 'inspectSeriesKnowledgeCandidates', input: { seriesId, after: null } },
+      { op: 'inspectSeriesKnowledgeCandidates', input: { seriesId, after: { firstAt: '2026-09-26T01:02:03.004Z', candidateId } } },
+      { op: 'inspectSeriesKnowledgeRevisions', input: { seriesId, itemId: randomUUID(), before: null } },
+      { op: 'inspectSeriesKnowledgeRevisions', input: { seriesId, itemId: randomUUID(), before: 3 } },
     ];
     for (const { op, input } of inputs) {
       const request = { id: randomUUID(), op, input };
@@ -1399,6 +1406,12 @@ describe('decodeRequest rejects malformed frames', () => {
       ['promoteSeriesKnowledge', { ...promote, reuseScope: 'everywhere' }],
       ['promoteSeriesKnowledge', { ...promote, conflictDisposition: 'resolved' }],
       ['promoteSeriesKnowledge', { ...promote, reviewDigest: 'D'.repeat(64) }],
+      ['inspectSeriesKnowledgeItems', { seriesId, text: '林\n默', after: null }],
+      ['inspectSeriesKnowledgeItems', { seriesId, after: null }],
+      ['inspectSeriesKnowledgeItems', { seriesId, text: '', after: { subject: '', itemId: randomUUID() } }],
+      ['inspectSeriesKnowledgeCandidates', { seriesId, after: { firstAt: 'yesterday', candidateId } }],
+      ['inspectSeriesKnowledgeRevisions', { seriesId, itemId: randomUUID(), before: 0 }],
+      ['inspectSeriesKnowledgeRevisions', { seriesId, itemId: 'item', before: null }],
     ] as const) {
       expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
     }

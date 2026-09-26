@@ -43,8 +43,29 @@ export const KNOWLEDGE_STATUS = {
   saving: '正在保存候选项…',
   promoting: '正在纳入书系知识…',
   edited: '候选项已更新，请重新审阅。',
+  loadingMore: '正在读取更多…',
   failed: '无法完成。',
 } as const;
+
+/** Each list's next page and the items' search (Issue #63 review): every item and candidate is reachable, however many. */
+export const KNOWLEDGE_ITEMS_MORE = '更多条目…';
+export const KNOWLEDGE_CANDIDATES_MORE = '更多候选项…';
+export const KNOWLEDGE_REVISIONS_MORE = '更早的版本…';
+export const KNOWLEDGE_SEARCH_LABEL = '查找条目';
+export const KNOWLEDGE_SEARCH = '查找';
+export const KNOWLEDGE_SEARCH_NONE = '没有名称含这些字词的条目。';
+/** On each item: a candidate that updates exactly this item, whichever page it was found on. */
+export const KNOWLEDGE_PROPOSE_FOR_ITEM = '提议修改…';
+
+/** An item's earlier revisions, read when the editor opens them. */
+export function knowledgeRevisionsSummary(count: number): string {
+  return `历次版本（${count}）`;
+}
+
+/** A review that discloses more conflicts than it lists says how many more there are. */
+export function knowledgeConflictsMoreLine(shown: number, total: number): string | null {
+  return total > shown ? `另有 ${total - shown} 处冲突未列出。` : null;
+}
 
 /** What the manuscript's selection menu offers for each Series the Book is in. */
 export function knowledgeMenuLabel(seriesTitle: string): string {
@@ -60,15 +81,22 @@ export function knowledgeTargetLine(candidate: Pick<SeriesKnowledgeCandidateProj
   return `更新「${target.subject}」（${target.classLabel}，基于第 ${target.baseRevisionOrdinal ?? '?'} 版）`;
 }
 
-/** Where a candidate or revision came from: the editor's own words, or a member Book's manuscript at an exact revision. */
+/**
+ * Where a candidate or revision came from: the editor's own words, or a member Book's manuscript at an exact revision — or,
+ * when changes waited in the journal beyond that revision, the manuscript as it then stood (Issue #63 review), since the words
+ * may come from those changes.
+ */
 export function knowledgeProvenanceLine(provenance: SeriesKnowledgeProvenanceProjection | null): string {
   if (provenance === null) return '编辑撰写';
+  if (provenance.uncheckpointed) {
+    return `来自《${provenance.bookTitle}》的稿件（${provenance.revisionLabel} 之后另有尚未保存为修订版的改动）：「${provenance.quote}」`;
+  }
   return `来自《${provenance.bookTitle}》${provenance.revisionLabel} 的原文：「${provenance.quote}」`;
 }
 
 /** An item as the list heads it: its name, class and current version. */
-export function knowledgeItemLine(item: { readonly subject: string; readonly classLabel: string; readonly revisions: ReadonlyArray<Pick<SeriesKnowledgeRevisionProjection, 'ordinal'>> }): string {
-  return `「${item.subject}」 · ${item.classLabel} · 第 ${item.revisions[0]?.ordinal ?? 0} 版`;
+export function knowledgeItemLine(item: { readonly subject: string; readonly classLabel: string; readonly current: Pick<SeriesKnowledgeRevisionProjection, 'ordinal'> }): string {
+  return `「${item.subject}」 · ${item.classLabel} · 第 ${item.current.ordinal} 版`;
 }
 
 /** One revision in an item's history. */
@@ -100,9 +128,9 @@ export function knowledgeSupersededLine(current: Pick<SeriesKnowledgeRevisionPro
 }
 
 /** Why `纳入书系知识` waits, or `null` when it may go (SER-015, SER-016). */
-export function knowledgePromoteWaits(review: Pick<SeriesKnowledgeReviewProjection, 'conflicts' | 'blocked'>, reuseChosen: boolean, preserved: boolean): string | null {
+export function knowledgePromoteWaits(review: Pick<SeriesKnowledgeReviewProjection, 'conflictCount' | 'blocked'>, reuseChosen: boolean, preserved: boolean): string | null {
   if (review.blocked !== null) return review.blocked;
-  if (review.conflicts.length > 0 && !preserved) return KNOWLEDGE_WAIT_CONFLICT;
+  if (review.conflictCount > 0 && !preserved) return KNOWLEDGE_WAIT_CONFLICT;
   if (!reuseChosen) return KNOWLEDGE_WAIT_REUSE;
   return null;
 }

@@ -2963,6 +2963,31 @@ function registerRendererHandlers(
       });
     }),
   );
+  // 书系知识's further pages (Issue #63 review): items by name or 查找条目, open candidates, and one item's 历次版本.
+  ipcMain.handle(IPC_CHANNELS.inspectSeriesKnowledgeItems, (event, input: ServiceOperationMap['inspectSeriesKnowledgeItems']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectSeriesKnowledgeItems', { seriesId: input.seriesId, text: input.text, after: input.after ?? null });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectSeriesKnowledgeCandidates, (event, input: ServiceOperationMap['inspectSeriesKnowledgeCandidates']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectSeriesKnowledgeCandidates', { seriesId: input.seriesId, after: input.after ?? null });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectSeriesKnowledgeRevisions, (event, input: ServiceOperationMap['inspectSeriesKnowledgeRevisions']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectSeriesKnowledgeRevisions', { seriesId: input.seriesId, itemId: input.itemId, before: input.before ?? null });
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.inspectFeedbackHistory, (event) =>
     envelope(async () => {
       requireSender(event);

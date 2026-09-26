@@ -9,6 +9,8 @@ import {
   MAX_MILESTONE_PURPOSE_CODE_UNITS,
   MAX_PROPOSAL_CONFLICT_UNITS,
   MAX_SERIES_CANDIDATE_QUERY_CHARACTERS,
+  MAX_SERIES_KNOWLEDGE_SUBJECT_CHARACTERS,
+  MAX_SERIES_KNOWLEDGE_QUERY_CHARACTERS,
   MAX_PUBLICATION_BASIS_CHARACTERS,
   MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS,
   MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS,
@@ -865,6 +867,31 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           (input.conflictDisposition !== 'none' && input.conflictDisposition !== 'preserved')) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    // 书系知识's further pages (Issue #63 review): each starts after one item of its own list, and 查找条目 names a line of words.
+    case 'inspectSeriesKnowledgeItems': {
+      const input = requireInput(value.input, ['seriesId', 'text', 'after'], tentativeId);
+      const after = input.after;
+      if (!validUuid(input.seriesId) || !isBoundedString(input.text, 2 * MAX_SERIES_KNOWLEDGE_QUERY_CHARACTERS, true) || /[\r\n]/u.test(input.text) ||
+          !(after === null || (isRecord(after) && hasExactKeys(after, ['subject', 'itemId']) && isBoundedString(after.subject, 2 * MAX_SERIES_KNOWLEDGE_SUBJECT_CHARACTERS) &&
+            validUuid(after.itemId)))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'inspectSeriesKnowledgeCandidates': {
+      const input = requireInput(value.input, ['seriesId', 'after'], tentativeId);
+      const after = input.after;
+      if (!validUuid(input.seriesId) || !(after === null || (isRecord(after) && hasExactKeys(after, ['firstAt', 'candidateId']) &&
+          isBoundedString(after.firstAt, 40) && CURSOR_INSTANT.test(after.firstAt) && validUuid(after.candidateId)))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'inspectSeriesKnowledgeRevisions': {
+      const input = requireInput(value.input, ['seriesId', 'itemId', 'before'], tentativeId);
+      if (!validUuid(input.seriesId) || !validUuid(input.itemId) || !(input.before === null || isSafeInteger(input.before, 1))) throw new ProtocolError(tentativeId);
       break;
     }
     // 质量与学习 › 学习准入 (Issue #61, S26b): every Book's Learning Material, or one Book's.

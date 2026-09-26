@@ -290,7 +290,8 @@ export interface MountSeriesOptions {
   readonly seriesId: string;
   readonly api: Pick<RendererApi, 'inspectSeries' | 'inspectSeriesMembers' | 'inspectSeriesCandidates' | 'inspectSeriesHistory' |
     'previewSeriesMembershipChange' | 'changeSeriesMembership' | 'proposeSeriesKnowledge' | 'inspectSeriesKnowledgeReview' |
-    'editSeriesKnowledgeCandidate' | 'promoteSeriesKnowledge'>;
+    'editSeriesKnowledgeCandidate' | 'promoteSeriesKnowledge' | 'inspectSeriesKnowledgeItems' | 'inspectSeriesKnowledgeCandidates' |
+    'inspectSeriesKnowledgeRevisions'>;
   readonly setStatus: Status;
   readonly errorMessage: (error: unknown, fallback: string) => string;
 }

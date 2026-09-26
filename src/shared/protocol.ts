@@ -140,6 +140,9 @@ export const IPC_CHANNELS = {
   inspectSeriesKnowledgeReview: 'ai7:j13:inspect-series-knowledge-review',
   editSeriesKnowledgeCandidate: 'ai7:j13:edit-series-knowledge-candidate',
   promoteSeriesKnowledge: 'ai7:j13:promote-series-knowledge',
+  inspectSeriesKnowledgeItems: 'ai7:j13:inspect-series-knowledge-items',
+  inspectSeriesKnowledgeCandidates: 'ai7:j13:inspect-series-knowledge-candidates',
+  inspectSeriesKnowledgeRevisions: 'ai7:j13:inspect-series-knowledge-revisions',
   applyChangeSuggestion: 'ai7:j05:apply-change-suggestion',
   applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
   reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
@@ -5509,8 +5512,31 @@ export const SERIES_KNOWLEDGE_REUSE_LABELS: Readonly<Record<SeriesKnowledgeReuse
 };
 export const MAX_SERIES_KNOWLEDGE_SUBJECT_CHARACTERS = 40;
 export const MAX_SERIES_KNOWLEDGE_CONTENT_CHARACTERS = 2_000;
-/** How many items and open candidates one Series answer lists at most. */
-export const MAX_SERIES_KNOWLEDGE_LISTED = 200;
+/**
+ * How many knowledge items, open candidates and one item's revisions an answer carries at most (Issue #63 review): each list
+ * is read a page at a time and weighed as well, and an item comes with its current revision only.
+ */
+export const MAX_SERIES_KNOWLEDGE_ITEMS_PAGE = 30;
+export const MAX_SERIES_KNOWLEDGE_CANDIDATES_PAGE = 30;
+export const MAX_SERIES_KNOWLEDGE_REVISIONS_PAGE = 10;
+/** How much of a cited passage a list or a review shows; the record keeps all of it. */
+export const MAX_SERIES_KNOWLEDGE_QUOTE_GRAPHEMES = 200;
+/** How many disclosed conflicts a review lists; it says how many there are in all. */
+export const MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN = 50;
+/** The words 查找条目 matches in an item's name, at most. */
+export const MAX_SERIES_KNOWLEDGE_QUERY_CHARACTERS = 40;
+
+/** Where the next page of a Series' knowledge items starts: after this item, by name. */
+export interface SeriesKnowledgeItemsCursor {
+  readonly subject: string;
+  readonly itemId: string;
+}
+
+/** Where the next page of open candidates starts: after this candidate, oldest proposed first. */
+export interface SeriesKnowledgeCandidatesCursor {
+  readonly firstAt: string;
+  readonly candidateId: string;
+}
 export const SERIES_KNOWLEDGE_CONFLICT_LABEL = '存在书系知识冲突 · 需要处理' as const;
 
 /** The Series Knowledge Item a candidate proposes: a new one, named and classed, or one exact existing item. */
@@ -5552,10 +5578,19 @@ export interface SeriesKnowledgeProvenanceProjection {
   readonly blockId: string;
   readonly fromGrapheme: number;
   readonly toGrapheme: number;
+  /** The cited words — whole up to `MAX_SERIES_KNOWLEDGE_QUOTE_GRAPHEMES`, beyond that their opening and `…`. */
   readonly quote: string;
+  /**
+   * Whether the manuscript held changes beyond that revision, not yet saved as one, when the words were cited (Issue #63
+   * review): the words may come from those changes rather than the revision itself.
+   */
+  readonly uncheckpointed: boolean;
 }
 
-/** A disclosed conflict (SER-016), found by identity: the same item or name, never by meaning. */
+/**
+ * A disclosed conflict (SER-016), found by identity: the same item or name, never by meaning. Its line names the item or the
+ * candidate and its version, never their words (Issue #63 review).
+ */
 export interface SeriesKnowledgeConflictProjection {
   readonly kind: 'existing-item' | 'competing-candidate' | 'item-updated';
   readonly line: string;
@@ -5599,21 +5634,50 @@ export interface SeriesKnowledgeRevisionProjection {
   readonly recordedAt: string;
 }
 
-/** A stable Series Knowledge Item and its revisions, newest first. */
+/**
+ * A stable Series Knowledge Item with its current revision and how many it holds in all: the earlier ones are read on demand
+ * (历次版本, Issue #63 review).
+ */
 export interface SeriesKnowledgeItemProjection {
   readonly itemId: string;
   readonly subject: string;
   readonly knowledgeClass: SeriesKnowledgeClass;
   readonly classLabel: string;
   readonly createdAt: string;
-  readonly revisions: ReadonlyArray<SeriesKnowledgeRevisionProjection>;
+  readonly current: SeriesKnowledgeRevisionProjection;
+  readonly revisionCount: number;
 }
 
+/**
+ * A Series' knowledge as its page first shows it (Issue #63 review): the first page of items by name and of open candidates
+ * oldest first, how many each holds in all, and where each next page starts.
+ */
 export interface SeriesKnowledgeProjection {
   readonly items: ReadonlyArray<SeriesKnowledgeItemProjection>;
-  readonly itemsTruncated: boolean;
+  readonly itemCount: number;
+  readonly itemsNext: SeriesKnowledgeItemsCursor | null;
   readonly candidates: ReadonlyArray<SeriesKnowledgeCandidateProjection>;
-  readonly candidatesTruncated: boolean;
+  readonly candidateCount: number;
+  readonly candidatesNext: SeriesKnowledgeCandidatesCursor | null;
+}
+
+/** A page of a Series' knowledge items by name, narrowed by 查找条目 when words are given (`更多条目…`). */
+export interface SeriesKnowledgeItemsPageProjection {
+  readonly items: ReadonlyArray<SeriesKnowledgeItemProjection>;
+  readonly nextCursor: SeriesKnowledgeItemsCursor | null;
+}
+
+/** A further page of open candidates (`更多候选项…`). */
+export interface SeriesKnowledgeCandidatesPageProjection {
+  readonly candidates: ReadonlyArray<SeriesKnowledgeCandidateProjection>;
+  readonly nextCursor: SeriesKnowledgeCandidatesCursor | null;
+}
+
+/** A page of one item's revisions, newest first, and the ordinal the next page reads below (历次版本). */
+export interface SeriesKnowledgeRevisionsProjection {
+  readonly itemId: string;
+  readonly revisions: ReadonlyArray<SeriesKnowledgeRevisionProjection>;
+  readonly nextBefore: number | null;
 }
 
 /**
@@ -5659,7 +5723,8 @@ export interface SeriesKnowledgeProposalProjection {
   readonly candidateId: string;
   /** `已提议为书系「…」的知识候选项`. */
   readonly completionLabel: string;
-  readonly series: SeriesProjection;
+  /** The candidate as it now stands: the answer carries it alone, and the page reads its lists again (Issue #63 review). */
+  readonly candidate: SeriesKnowledgeCandidateProjection;
 }
 
 /**
@@ -5671,7 +5736,9 @@ export interface SeriesKnowledgeReviewProjection {
   readonly seriesTitle: string;
   readonly candidate: SeriesKnowledgeCandidateProjection;
   readonly current: SeriesKnowledgeRevisionProjection | null;
+  /** At most `MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN` of them, with how many there are in all. */
   readonly conflicts: ReadonlyArray<SeriesKnowledgeConflictProjection>;
+  readonly conflictCount: number;
   readonly conflictLabel: typeof SERIES_KNOWLEDGE_CONFLICT_LABEL | null;
   readonly reuseScopes: ReadonlyArray<{ readonly scope: SeriesKnowledgeReuseScope; readonly label: string }>;
   /** Why the candidate cannot be taken in at all now, or `null`. */
@@ -5702,7 +5769,8 @@ export interface SeriesKnowledgePromotionProjection {
   readonly itemId: string;
   readonly revisionId: string;
   readonly completionLabel: '书系知识已纳入' | '书系知识已更新';
-  readonly series: SeriesProjection;
+  /** The item as it now stands: the answer carries it alone (Issue #63 review). */
+  readonly item: SeriesKnowledgeItemProjection;
 }
 
 export interface PreviewSeriesMembershipChangeInput {
@@ -8171,6 +8239,9 @@ export interface ServiceOperationMap {
   inspectSeriesKnowledgeReview: { input: { seriesId: string; candidateId: string }; output: SeriesKnowledgeReviewProjection };
   editSeriesKnowledgeCandidate: { input: EditSeriesKnowledgeCandidateInput; output: SeriesKnowledgeReviewProjection };
   promoteSeriesKnowledge: { input: PromoteSeriesKnowledgeInput; output: SeriesKnowledgePromotionProjection };
+  inspectSeriesKnowledgeItems: { input: { seriesId: string; text: string; after: SeriesKnowledgeItemsCursor | null }; output: SeriesKnowledgeItemsPageProjection };
+  inspectSeriesKnowledgeCandidates: { input: { seriesId: string; after: SeriesKnowledgeCandidatesCursor | null }; output: SeriesKnowledgeCandidatesPageProjection };
+  inspectSeriesKnowledgeRevisions: { input: { seriesId: string; itemId: string; before: number | null }; output: SeriesKnowledgeRevisionsProjection };
   /**
    * AI7 Apply for Change Suggestions (Issue #408). The batch form is 确认应用 on 审阅's confirmation
    * strip (Issue #417): one Effect over exactly the suggestions the strip named, all or none.
@@ -8518,6 +8589,9 @@ export interface RendererApi {
   inspectSeriesKnowledgeReview(input: { seriesId: string; candidateId: string }): Promise<SeriesKnowledgeReviewProjection>;
   editSeriesKnowledgeCandidate(input: EditSeriesKnowledgeCandidateInput): Promise<SeriesKnowledgeReviewProjection>;
   promoteSeriesKnowledge(input: PromoteSeriesKnowledgeInput): Promise<SeriesKnowledgePromotionProjection>;
+  inspectSeriesKnowledgeItems(input: { seriesId: string; text: string; after: SeriesKnowledgeItemsCursor | null }): Promise<SeriesKnowledgeItemsPageProjection>;
+  inspectSeriesKnowledgeCandidates(input: { seriesId: string; after: SeriesKnowledgeCandidatesCursor | null }): Promise<SeriesKnowledgeCandidatesPageProjection>;
+  inspectSeriesKnowledgeRevisions(input: { seriesId: string; itemId: string; before: number | null }): Promise<SeriesKnowledgeRevisionsProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */
   applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): Promise<ManuscriptApplyCommandProjection>;

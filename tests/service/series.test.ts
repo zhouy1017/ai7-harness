@@ -171,9 +171,9 @@ describe('书系 over the real store', () => {
       // 书系一致性 still waits, and says the Book is in the Series.
       const category = (bookId: string): unknown => store.inspectReviewWorkspace(bookId, null).categories
         .filter((entry) => entry.categoryId === 'series-consistency').map((entry) => [entry.available, entry.unavailableReason]);
-      expect(category(first)).toEqual([[false, '这本书已在书系「星河三部曲」中；书系知识接入审阅后才能选。']]);
+      expect(category(first)).toEqual([[false, '这本书已在书系「星河三部曲」中；书系一致性审阅还没有接入书系知识，暂不能选。']]);
       const outside = emptyBook(store, '书系之外');
-      expect(category(outside)).toEqual([[false, '这本书不在任何书系中，也还没有书系知识；加入书系、且书系知识接入审阅后才能选。']]);
+      expect(category(outside)).toEqual([[false, '这本书不在任何书系中；书系一致性审阅还没有接入书系知识，暂不能选。']]);
 
       // 移出书系: prospective, its own four groups, and the record on both sides; the Book's own history keeps both.
       const leave = store.previewSeriesMembershipChange({ seriesId, bookId: first, kind: 'remove' });
@@ -194,7 +194,7 @@ describe('书系 over the real store', () => {
       expect(store.inspectBookSeries(first).history.map((change) => change.label)).toEqual(['移出书系', '加入书系']);
       expect(store.inspectBookSeries(first).memberships).toEqual([]);
       expect(found('series', '星河')).toEqual(['星河之二']);
-      expect(category(first)).toEqual([[false, '这本书不在任何书系中，也还没有书系知识；加入书系、且书系知识接入审阅后才能选。']]);
+      expect(category(first)).toEqual([[false, '这本书不在任何书系中；书系一致性审阅还没有接入书系知识，暂不能选。']]);
       store.markCleanShutdown();
     } finally {
       store.close();

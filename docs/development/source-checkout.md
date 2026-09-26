@@ -182,7 +182,7 @@ Membership creates no Task, Run Authorization, source scope, Learning Eligibilit
 
 `proposeSeriesKnowledge` records a candidate for a new or an exact existing item. It is either in the editor's own words, or the exact span of a member Book's working manuscript, verified as a mark's range is: from the window that holds that manuscript's capability, and refused for a Book the Series does not hold.
 
-`inspectSeriesKnowledgeReview` answers 书系知识纳入审阅. Conflicts are found by identity only:
+`inspectSeriesKnowledgeReview` answers 书系知识纳入审阅. Conflicts are found by identity only, and each line names the item or candidate and its version, never its words (Issue #63 review); a review lists at most 50 and says how many there are:
 - an item of the same name;
 - a revision appended since an existing item was read;
 - another open candidate for the same item or name.
@@ -192,7 +192,9 @@ Membership creates no Task, Run Authorization, source scope, Learning Eligibilit
 - while a conflict is not kept by `保留已披露冲突`;
 - without a use.
 
-A promotion creates the item with its first revision, or appends the next revision. It creates no Run Source Scope, performs no retrieval and permits no transmission. The manuscript's selection menu offers a member Book's words to each Series it is in; a Production Document offers nothing of 书系. 移出书系's preview names the items taken from the Book.
+A promotion creates the item with its first revision, or appends the next revision. It creates no Run Source Scope, performs no retrieval and permits no transmission. The manuscript's selection menu offers a member Book's words to each Series it is in; a Production Document offers nothing of 书系. 移出书系's preview names the items taken from the Book, and the Book's open candidates it holds back until the Book rejoins; 加入书系's says they can be reviewed again.
+
+Nothing of 书系知识 is read whole (Issue #63 review). The Series answer carries the first page of items, by name, each with its current revision only and how many revisions it holds, and the first page of open candidates, oldest proposed first, with the counts. `inspectSeriesKnowledgeItems` reads further pages of items, narrowed to names holding the words `查找条目` gives; `inspectSeriesKnowledgeCandidates` further candidates; and `inspectSeriesKnowledgeRevisions` an item's 历次版本, ten at a time, newest first. Each page is bounded by count and by 64 KiB. A cited passage is shown whole up to 200 graphemes and beyond that as its opening, the record keeping all of it; one cited while changes waited in the journal beyond its revision says so. `proposeSeriesKnowledge` answers with the candidate alone and `promoteSeriesKnowledge` with the item alone, and the page reads the Series again.
 
 
 

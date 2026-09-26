@@ -133,7 +133,12 @@ import type {
   PromoteSeriesKnowledgeInput,
   ProposeSeriesKnowledgeInput,
   SeriesKnowledgeCandidateProjection,
+  SeriesKnowledgeCandidatesCursor,
+  SeriesKnowledgeCandidatesPageProjection,
   SeriesKnowledgeItemProjection,
+  SeriesKnowledgeItemsCursor,
+  SeriesKnowledgeItemsPageProjection,
+  SeriesKnowledgeRevisionsProjection,
   SeriesKnowledgePromotionProjection,
   SeriesKnowledgeProposalProjection,
   SeriesKnowledgeProvenanceProjection,
@@ -390,7 +395,11 @@ import {
   MAX_SERIES_MEMBERS_PAGE,
   MAX_SERIES_TITLE_CHARACTERS,
   MAX_SERIES_KNOWLEDGE_CONTENT_CHARACTERS,
-  MAX_SERIES_KNOWLEDGE_LISTED,
+  MAX_SERIES_KNOWLEDGE_CANDIDATES_PAGE,
+  MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN,
+  MAX_SERIES_KNOWLEDGE_ITEMS_PAGE,
+  MAX_SERIES_KNOWLEDGE_QUERY_CHARACTERS,
+  MAX_SERIES_KNOWLEDGE_REVISIONS_PAGE,
   MAX_SERIES_KNOWLEDGE_SUBJECT_CHARACTERS,
   PUBLICATION_ACTUALS_RECORDED_STATE,
   SERIES_KNOWLEDGE_CLASS_LABELS,
@@ -404,6 +413,8 @@ import {
   initializeSeriesKnowledgeSchema,
   isSeriesKnowledgeClass,
   isSeriesKnowledgeReuseScope,
+  SERIES_KNOWLEDGE_PAGE_BYTES,
+  knowledgeQuoteExcerpt,
   seriesKnowledgeConflicts,
   seriesKnowledgeContent,
   seriesKnowledgeReviewDigest,
@@ -10920,6 +10931,7 @@ export class EditorialStore {
       seriesScopedRuns: 0,
       ...seriesLearningFacts(materials),
       knowledgeFromBook: this.#seriesKnowledge.itemsFromBook(series.seriesId, input.bookId),
+      knowledgeCandidatesFromBook: this.#seriesKnowledge.openFromBook(series.seriesId, input.bookId),
     });
     return {
       seriesId: series.seriesId,
@@ -10945,7 +10957,7 @@ export class EditorialStore {
       history: history.history,
       historyCount: history.count,
       historyNext: history.nextCursor,
-      knowledge: this.#seriesKnowledgeProjection(series.seriesId, this.#bookTitles()),
+      knowledge: this.#seriesKnowledgeProjection(series.seriesId),
     };
   }
 
@@ -11030,7 +11042,14 @@ export class EditorialStore {
         return this.#seriesKnowledge.propose({ seriesId: series.seriesId, target, content, provenance });
       });
       const series = this.#requireSeries(input.seriesId);
-      return { candidateId: created.candidateId, completionLabel: `已提议为书系「${series.title}」的知识候选项`, series: this.#seriesProjection(series) };
+      // The answer is the candidate alone (Issue #63 review): the page reads its lists again, each a page at a time.
+      const items = this.#seriesKnowledge.items(series.seriesId);
+      const open = this.#seriesKnowledge.open(series.seriesId);
+      return {
+        candidateId: created.candidateId,
+        completionLabel: `已提议为书系「${series.title}」的知识候选项`,
+        candidate: this.#knowledgeCandidateProjection(created, items, seriesKnowledgeConflicts(created, items, open).length, this.#bookTitles()),
+      };
     });
   }
 
@@ -11080,9 +11099,70 @@ export class EditorialStore {
         itemId: promoted.itemId,
         revisionId: promoted.revisionId,
         completionLabel: promoted.outcome === 'created' ? '书系知识已纳入' as const : '书系知识已更新' as const,
-        series: this.#seriesProjection(this.#requireSeries(input.seriesId)),
+        item: this.#knowledgeItemProjection(this.#seriesKnowledge.item(promoted.itemId)!, this.#bookTitles()),
       };
     });
+  }
+
+  /** `查找条目` and `更多条目…`: a page of a Series' knowledge items by name, narrowed to names holding the words (Issue #63 review). A read. */
+  inspectSeriesKnowledgeItems(seriesId: string, text: string, after: SeriesKnowledgeItemsCursor | null): SeriesKnowledgeItemsPageProjection {
+    return this.#seriesCall(() => {
+      const series = this.#requireSeries(seriesId);
+      const words = typeof text === 'string' && text.isWellFormed() ? text.normalize('NFC').trim() : null;
+      requireStore(words !== null && [...words].length <= MAX_SERIES_KNOWLEDGE_QUERY_CHARACTERS && !/[\r\n]/u.test(words), 'SERIES_KNOWLEDGE_QUERY_INVALID',
+        `查找的条目字词最多 ${MAX_SERIES_KNOWLEDGE_QUERY_CHARACTERS} 个字，写在一行里。`);
+      requireStore(after === null || (typeof after.itemId === 'string' && UUID_PATTERN.test(after.itemId) && typeof after.subject === 'string' &&
+        after.subject.length >= 1 && after.subject.length <= 2 * MAX_SERIES_KNOWLEDGE_SUBJECT_CHARACTERS), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      return this.#knowledgeItemsPage(series.seriesId, words, after);
+    });
+  }
+
+  /** `更多候选项…`: the next page of a Series' open candidates, oldest proposed first (Issue #63 review). A read. */
+  inspectSeriesKnowledgeCandidates(seriesId: string, after: SeriesKnowledgeCandidatesCursor | null): SeriesKnowledgeCandidatesPageProjection {
+    return this.#seriesCall(() => {
+      const series = this.#requireSeries(seriesId);
+      requireStore(after === null || (typeof after.candidateId === 'string' && UUID_PATTERN.test(after.candidateId) && typeof after.firstAt === 'string' &&
+        !Number.isNaN(Date.parse(after.firstAt))), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      const { candidates, nextCursor } = this.#knowledgeCandidatesPage(series.seriesId, after);
+      return { candidates, nextCursor };
+    });
+  }
+
+  /** 历次版本: a page of one item's revisions, newest first, below the ordinal named (Issue #63 review). A read. */
+  inspectSeriesKnowledgeRevisions(seriesId: string, itemId: string, before: number | null): SeriesKnowledgeRevisionsProjection {
+    return this.#seriesCall(() => {
+      const series = this.#requireSeries(seriesId);
+      requireStore(typeof itemId === 'string' && UUID_PATTERN.test(itemId), 'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识条目不存在。');
+      const item = this.#seriesKnowledge.item(itemId);
+      requireStore(item !== null && item.seriesId === series.seriesId, 'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识条目不存在。');
+      requireStore(before === null || (Number.isSafeInteger(before) && before >= 1), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      const titles = this.#bookTitles();
+      const rest = [...item.revisions].reverse().filter((revision) => before === null || revision.ordinal < before);
+      const { page, more } = weighedPage(rest.slice(0, MAX_SERIES_KNOWLEDGE_REVISIONS_PAGE + 1).map((revision) => this.#knowledgeRevisionProjection(revision, titles)),
+        MAX_SERIES_KNOWLEDGE_REVISIONS_PAGE, SERIES_KNOWLEDGE_PAGE_BYTES);
+      return { itemId: item.itemId, revisions: page, nextBefore: more ? page.at(-1)!.ordinal : null };
+    });
+  }
+
+  /** One page of a Series' knowledge items after the one named, each with its current revision only. */
+  #knowledgeItemsPage(seriesId: string, words: string, after: SeriesKnowledgeItemsCursor | null): SeriesKnowledgeItemsPageProjection {
+    const titles = this.#bookTitles();
+    const items = this.#seriesKnowledge.itemsPage(seriesId, words, after, MAX_SERIES_KNOWLEDGE_ITEMS_PAGE + 1).map((item) => this.#knowledgeItemProjection(item, titles));
+    const { page, more } = weighedPage(items, MAX_SERIES_KNOWLEDGE_ITEMS_PAGE, SERIES_KNOWLEDGE_PAGE_BYTES);
+    const last = page.at(-1);
+    return { items: page, nextCursor: more && last !== undefined ? { subject: last.subject, itemId: last.itemId } : null };
+  }
+
+  /** One page of a Series' open candidates after the one named, oldest proposed first, each with how many conflicts it discloses. */
+  #knowledgeCandidatesPage(seriesId: string, after: SeriesKnowledgeCandidatesCursor | null): SeriesKnowledgeCandidatesPageProjection {
+    const titles = this.#bookTitles();
+    const items = this.#seriesKnowledge.items(seriesId);
+    const open = this.#seriesKnowledge.open(seriesId);
+    const read = this.#seriesKnowledge.openPage(seriesId, after, MAX_SERIES_KNOWLEDGE_CANDIDATES_PAGE + 1);
+    const projected = read.map(({ candidate }) => this.#knowledgeCandidateProjection(candidate, items, seriesKnowledgeConflicts(candidate, items, open).length, titles));
+    const { page, more } = weighedPage(projected, MAX_SERIES_KNOWLEDGE_CANDIDATES_PAGE, SERIES_KNOWLEDGE_PAGE_BYTES);
+    const last = read[page.length - 1];
+    return { candidates: page, nextCursor: more && last !== undefined ? { firstAt: last.firstAt, candidateId: last.candidate.candidateId } : null };
   }
 
   /** The item a candidate proposes, resolved against the Series as it stands: a new name and class, or the exact item now. */
@@ -11149,7 +11229,8 @@ export class EditorialStore {
         seriesTitle: series.title,
         candidate: this.#knowledgeCandidateProjection(candidate, items, conflicts.length, titles),
         current: current === null ? null : this.#knowledgeRevisionProjection(current, titles),
-        conflicts: conflicts.map((entry) => ({ kind: entry.kind, line: entry.line })),
+        conflicts: conflicts.slice(0, MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN).map((entry) => ({ kind: entry.kind, line: entry.line })),
+        conflictCount: conflicts.length,
         conflictLabel: conflicts.length === 0 ? null : SERIES_KNOWLEDGE_CONFLICT_LABEL,
         reuseScopes: SERIES_KNOWLEDGE_REUSE_SCOPES.map((scope) => ({ scope, label: SERIES_KNOWLEDGE_REUSE_LABELS[scope] })),
         blocked,
@@ -11159,15 +11240,17 @@ export class EditorialStore {
     };
   }
 
-  #seriesKnowledgeProjection(seriesId: string, titles: ReadonlyMap<string, string>): SeriesProjection['knowledge'] {
-    const items = this.#seriesKnowledge.items(seriesId);
-    const open = this.#seriesKnowledge.open(seriesId);
+  /** A Series' knowledge as its page first shows it (Issue #63 review): the first page of items and of open candidates, and the counts. */
+  #seriesKnowledgeProjection(seriesId: string): SeriesProjection['knowledge'] {
+    const items = this.#knowledgeItemsPage(seriesId, '', null);
+    const candidates = this.#knowledgeCandidatesPage(seriesId, null);
     return {
-      items: items.slice(0, MAX_SERIES_KNOWLEDGE_LISTED).map((item) => this.#knowledgeItemProjection(item, titles)),
-      itemsTruncated: items.length > MAX_SERIES_KNOWLEDGE_LISTED,
-      candidates: open.slice(0, MAX_SERIES_KNOWLEDGE_LISTED)
-        .map((candidate) => this.#knowledgeCandidateProjection(candidate, items, seriesKnowledgeConflicts(candidate, items, open).length, titles)),
-      candidatesTruncated: open.length > MAX_SERIES_KNOWLEDGE_LISTED,
+      items: items.items,
+      itemCount: this.#seriesKnowledge.itemCount(seriesId),
+      itemsNext: items.nextCursor,
+      candidates: candidates.candidates,
+      candidateCount: this.#seriesKnowledge.openCount(seriesId),
+      candidatesNext: candidates.nextCursor,
     };
   }
 
@@ -11188,7 +11271,9 @@ export class EditorialStore {
       blockId: provenance.blockId,
       fromGrapheme: provenance.fromGrapheme,
       toGrapheme: provenance.toGrapheme,
-      quote: provenance.quote,
+      quote: knowledgeQuoteExcerpt(provenance.quote),
+      // Changes waited in the journal beyond the revision when the words were cited (Issue #63 review).
+      uncheckpointed: provenance.journalSequence > 0,
     };
   }
 
@@ -11244,7 +11329,8 @@ export class EditorialStore {
       knowledgeClass: item.knowledgeClass,
       classLabel: SERIES_KNOWLEDGE_CLASS_LABELS[item.knowledgeClass],
       createdAt: item.createdAt,
-      revisions: [...item.revisions].reverse().map((revision) => this.#knowledgeRevisionProjection(revision, titles)),
+      current: this.#knowledgeRevisionProjection(item.revisions.at(-1)!, titles),
+      revisionCount: item.revisions.length,
     };
   }
 
