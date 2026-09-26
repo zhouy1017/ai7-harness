@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { SERIES_KNOWLEDGE_PAGE_BYTES, SERIES_KNOWLEDGE_SCHEMA_SQL, SERIES_KNOWLEDGE_TRIGGER_SQL } from '../../src/service/series-knowledge.js';
+import { SeriesKnowledgeLedger, SERIES_KNOWLEDGE_PAGE_BYTES, SERIES_KNOWLEDGE_SCHEMA_SQL, SERIES_KNOWLEDGE_TRIGGER_SQL } from '../../src/service/series-knowledge.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { SERIES_KNOWLEDGE_SCHEMA_VERSION, SERIES_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
@@ -115,6 +115,30 @@ const wire = (value: unknown): number => Buffer.byteLength(JSON.stringify(value)
 const later = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 3));
 
 describe('书系知识 over the real store', () => {
+  it('returns a bounded promotion response when the editor preserves thousands of disclosed conflicts', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const seriesId = store.createSeries({ title: '冲突分页', note: '' }).seriesId;
+      const subject = '同名条目'.repeat(10);
+      const proposed = store.proposeSeriesKnowledge({ seriesId, target: { kind: 'new', subject, knowledgeClass: 'canon' }, content: '保留冲突的条目', span: null });
+      // Setup uses the same canonical ledger writer in one transaction; the asserted operation is the real store promotion.
+      const database = new DatabaseSync(databasePath());
+      try {
+        const ledger = new SeriesKnowledgeLedger(database);
+        database.exec('BEGIN IMMEDIATE');
+        for (let index = 0; index < 2500; index += 1) ledger.propose({ seriesId,
+          target: { kind: 'new', subject, knowledgeClass: 'canon' }, content: '另一个候选项', provenance: null });
+        database.exec('COMMIT');
+      } finally { database.close(); }
+      const review = store.inspectSeriesKnowledgeReview({ seriesId, candidateId: proposed.candidate.candidateId });
+      expect(review.conflictCount).toBe(2500);
+      const promoted = store.promoteSeriesKnowledge({ seriesId, candidateId: proposed.candidate.candidateId, candidateVersion: 1,
+        reviewDigest: review.reviewDigest, reuseScope: 'series-tasks', conflictDisposition: 'preserved' });
+      expect(wire(promoted)).toBeLessThan(MAX_FRAME_BYTES);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  }, 180_000);
+
   it('keeps saved-revision provenance checkpoint-relative across later edits, saves and restart', async () => {
     let seriesId: string;
     let savedId: string;
