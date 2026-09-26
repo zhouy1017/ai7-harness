@@ -972,7 +972,22 @@ async function main() {
     at('chip-return');
     // 回到<位置>: the manuscript is back where the editor was reading before the jump, and the chip is gone.
     await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'chip-use');
-    await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)} && (document.querySelector('#persistence-status')?.textContent ?? '').startsWith('已回到')`, 'chip-returned', 60_000);
+    try {
+      await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)} && (document.querySelector('#persistence-status')?.textContent ?? '').startsWith('已回到')`, 'chip-returned', 60_000);
+    } catch (error) {
+      // Failure-only closed state: never emit manuscript text, identifiers or arbitrary status words.
+      const state = await renderer.evaluate(`(() => { const chip = ${CHIP}; return {
+        present: chip !== null, disabled: chip?.disabled === true, target: ${blockInView(chip.blockId)},
+        arrived: (document.querySelector('#persistence-status')?.textContent ?? '').startsWith('已回到'),
+      }; })()`).catch(() => null);
+      if (state === null) at('chip-return-state-unavailable');
+      else if (state.present && state.disabled) at('chip-return-retained-busy');
+      else if (state.present) at('chip-return-retained-ready');
+      else if (!state.target) at('chip-return-target-missing');
+      else if (!state.arrived) at('chip-return-status-replaced');
+      else at('chip-return-late-completion');
+      throw error;
+    }
     await waitFor(renderer, `document.querySelector('.rail-marker[data-rail-kind="annotation"]') !== null`, 'mark-rail-ready');
     // A storage failure must refuse the jump, rather than lose the editor's way back.
     await renderer.evaluate(`(() => {
