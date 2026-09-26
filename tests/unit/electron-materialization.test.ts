@@ -1,7 +1,8 @@
 import { resolve } from 'node:path';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 const faults = vi.hoisted(() => ({
+  busy: 0, probeCalls: 0, errorCode: '', waits: [] as number[],
   probe: false, promote: false, rollback: false, cleanup: false, finalExists: false, backedUp: false,
 }));
 vi.mock('node:fs', () => ({
@@ -27,16 +28,24 @@ vi.mock('node:fs/promises', () => ({
     faults.finalExists = true;
   },
 }));
+vi.mock('node:timers/promises', () => ({ setTimeout: async (milliseconds: number) => { faults.waits.push(milliseconds); } }));
 vi.mock('node:child_process', () => ({
-  spawnSync: (_executable: string, args: string[]) => args[0] !== '-e' ? { status: 0 } : {
-    status: faults.probe ? 1 : 0,
-    stdout: JSON.stringify({ electron: '43.4.1', node: '24.18.1', modules: '148', sqlite: '3.50.0', fts5: true }),
-    stderr: 'private child output',
+  spawnSync: (_executable: string, args: string[]) => {
+    if (args[0] !== '-e') return { status: 0 };
+    faults.probeCalls += 1;
+    if (faults.busy > 0) { faults.busy -= 1; return { status: null, error: Object.assign(new Error('private launch path'), { code: 'EBUSY' }) }; }
+    if (faults.errorCode !== '') return { status: null, error: Object.assign(new Error('private launch path'), { code: faults.errorCode }) };
+    return {
+      status: faults.probe ? 1 : 0,
+      stdout: JSON.stringify({ electron: '43.4.1', node: '24.18.1', modules: '148', sqlite: '3.50.0', fts5: true }),
+      stderr: 'private child output',
+    };
   },
 }));
 
 const runtimeModule = '../../tools/electron-runtime.mjs';
 const runtime = await import(runtimeModule) as {
+  verifyElectronNodeMode(executable: string, environment: NodeJS.ProcessEnv): Promise<unknown>;
   materializeElectronRuntime(input: { archive: string; artifact: unknown; environment: NodeJS.ProcessEnv }): Promise<{ adapter: string }>;
 };
 const input = () => ({
@@ -46,7 +55,8 @@ const input = () => ({
     { id: 'electron-chromium-notices', relativePath: 'LICENSES.chromium.html' },
   ] },
 });
-beforeEach(() => Object.assign(faults, { probe: false, promote: false, rollback: false, cleanup: false, finalExists: false, backedUp: false }));
+afterEach(() => vi.unstubAllGlobals());
+beforeEach(() => Object.assign(faults, { busy: 0, probeCalls: 0, errorCode: '', waits: [], probe: false, promote: false, rollback: false, cleanup: false, finalExists: false, backedUp: false }));
 
 it('retains the initiating probe failure when staging cleanup also fails', async () => {
   faults.probe = true;
@@ -68,4 +78,38 @@ it('reports promotion, rollback and cleanup separately without masking promotion
 
 it('keeps successful materialization successful', async () => {
   await expect(runtime.materializeElectronRuntime(input())).resolves.toMatchObject({ adapter: process.platform === 'win32' ? 'windows-system-tar' : 'macos-system-ditto' });
+});
+
+
+it('waits only for Windows spawn-time EBUSY and then verifies the same pinned runtime', async () => {
+  vi.stubGlobal('process', { ...process, platform: 'win32' });
+  faults.busy = 3;
+  await expect(runtime.verifyElectronNodeMode(resolve('electron.exe'), {})).resolves.toMatchObject({ electron: '43.4.1', modules: '148', fts5: true });
+  expect(faults.probeCalls).toBe(4);
+  expect(faults.waits).toEqual([100, 200, 400]);
+});
+
+it('keeps a permanent Windows lock fatal after the fixed wait budget', async () => {
+  vi.stubGlobal('process', { ...process, platform: 'win32' });
+  faults.busy = 99;
+  await expect(runtime.verifyElectronNodeMode(resolve('electron.exe'), {})).rejects.toMatchObject({ code: 'EBUSY' });
+  expect(faults.probeCalls).toBe(5);
+  expect(faults.waits).toEqual([100, 200, 400, 800]);
+});
+
+it('never retries a child failure, other launch error or a non-Windows EBUSY', async () => {
+  vi.stubGlobal('process', { ...process, platform: 'win32' });
+  faults.probe = true;
+  await expect(runtime.verifyElectronNodeMode(resolve('electron.exe'), {})).rejects.toThrow('Electron Node-mode probe failed.');
+  expect(faults.probeCalls).toBe(1);
+  faults.probe = false;
+  faults.errorCode = 'EACCES';
+  await expect(runtime.verifyElectronNodeMode(resolve('electron.exe'), {})).rejects.toMatchObject({ code: 'EACCES' });
+  expect(faults.probeCalls).toBe(2);
+  faults.errorCode = '';
+  faults.busy = 1;
+  vi.stubGlobal('process', { ...process, platform: 'darwin' });
+  await expect(runtime.verifyElectronNodeMode(resolve('Electron'), {})).rejects.toMatchObject({ code: 'EBUSY' });
+  expect(faults.probeCalls).toBe(3);
+  expect(faults.waits).toEqual([]);
 });
