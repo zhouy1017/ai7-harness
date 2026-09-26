@@ -70,7 +70,7 @@ describe('the words of 稿件冲突', () => {
   it('offers the four paths in their order, none preselected, and regenerating waits for the Task surface', () => {
     expect(CONFLICT_PATHS).toEqual(['keep-current', 'edit-draft', 'regenerate', 'defer']);
     expect(CONFLICT_PATHS.map((path) => CONFLICT_PATH_LABELS[path])).toEqual(['保留当前稿件', '自行编辑解决草稿', '基于当前稿件重新生成建议', '暂不处理']);
-    expect(CONFLICT_REGENERATE_REASON).toBe('任务面接通后可用');
+    expect(CONFLICT_REGENERATE_REASON).toBe('重新生成建议尚未接通');
     expect(CONFLICT_CONFIRM_LABELS).toEqual({ keepCurrent: '确认保留当前稿件', defer: '暂不处理，返回稿件' });
     expect(conflictPathNote('keep-current', 'suggestion')).toBe('稿件不变；这条修改建议记为拒绝，原因「保留当前稿件」。');
     expect(conflictPathNote('keep-current', 'reversal')).toBe('稿件不变；这次应用保持有效，只记下这处冲突已按「保留当前稿件」处理。');

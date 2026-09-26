@@ -2179,7 +2179,13 @@ export class ReviewRunStore {
    * category a stopped service left dispatched is reported as `#runView` derives it, never recorded.
    * `progress` is the execution owner's reader, so a category executing now carries its progress.
    */
-  attentionReadings(progress: ProgressReader, since: string, limit: number): {
+  attentionReadings(
+    progress: ProgressReader,
+    since: string,
+    limit: number,
+    // A Book's 任务 panel (Issue #423, S77a): that Book alone, and its latest Run even when it was prepared and not started.
+    scope: { bookId: string; prepared: boolean } | null = null,
+  ): {
     latest: ReviewRunAttentionReading[];
     completed: ReviewRunAttentionReading[];
   } {
@@ -2220,16 +2226,18 @@ export class ReviewRunStore {
     const latest = (this.#db.prepare(
       `SELECT r.*, b.title book_title FROM review_runs r JOIN books b ON b.book_id = r.book_id
        WHERE r.ordinal = (SELECT max(r2.ordinal) FROM review_runs r2 WHERE r2.book_id = r.book_id)
-         AND EXISTS (SELECT 1 FROM review_run_authorizations a WHERE a.review_run_id = r.review_run_id)
+         AND (? = 1 OR EXISTS (SELECT 1 FROM review_run_authorizations a WHERE a.review_run_id = r.review_run_id))
          AND ${materialized} < ${categories}
+         AND (? IS NULL OR r.book_id = ?)
        ORDER BY r.created_at, r.review_run_id LIMIT ?`,
-    ).all(limit) as SqlRow[]).map(read);
+    ).all(scope?.prepared === true ? 1 : 0, scope?.bookId ?? null, scope?.bookId ?? null, limit) as SqlRow[]).map(read);
     // Every Run on the manuscript in every category whose last category finished within the window.
     const completed = (this.#db.prepare(
       `SELECT r.*, b.title book_title FROM review_runs r JOIN books b ON b.book_id = r.book_id
        WHERE ${materialized} = ${categories} AND ${lastEvent} >= ?
+         AND (? IS NULL OR r.book_id = ?)
        ORDER BY ${lastEvent} DESC, r.review_run_id LIMIT ?`,
-    ).all(since, limit) as SqlRow[]).map(read).filter((reading) => reading.state === 'settled');
+    ).all(since, scope?.bookId ?? null, scope?.bookId ?? null, limit) as SqlRow[]).map(read).filter((reading) => reading.state === 'settled');
     return { latest, completed };
   }
 
