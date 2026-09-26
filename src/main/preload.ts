@@ -381,6 +381,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectSeriesKnowledgeItems']['output']>(IPC_CHANNELS.inspectSeriesKnowledgeItems, input),
   inspectSeriesKnowledgeCandidates: (input: ServiceOperationMap['inspectSeriesKnowledgeCandidates']['input']) =>
     invoke<ServiceOperationMap['inspectSeriesKnowledgeCandidates']['output']>(IPC_CHANNELS.inspectSeriesKnowledgeCandidates, input),
+  inspectSeriesKnowledgeConflicts: (input: ServiceOperationMap['inspectSeriesKnowledgeConflicts']['input']) =>
+    invoke<ServiceOperationMap['inspectSeriesKnowledgeConflicts']['output']>(IPC_CHANNELS.inspectSeriesKnowledgeConflicts, input),
   inspectSeriesKnowledgeRevisions: (input: ServiceOperationMap['inspectSeriesKnowledgeRevisions']['input']) =>
     invoke<ServiceOperationMap['inspectSeriesKnowledgeRevisions']['output']>(IPC_CHANNELS.inspectSeriesKnowledgeRevisions, input),
   applyChangeSuggestion: (input: ServiceOperationMap['applyChangeSuggestion']['input']) =>

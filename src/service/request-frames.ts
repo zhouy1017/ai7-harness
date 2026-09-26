@@ -889,6 +889,11 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'inspectSeriesKnowledgeConflicts': {
+      const input = requireInput(value.input, ['seriesId', 'itemId', 'revisionId', 'after'], tentativeId);
+      if (!validUuid(input.seriesId) || !validUuid(input.itemId) || !validUuid(input.revisionId) || !isSafeInteger(input.after, 0)) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'inspectSeriesKnowledgeRevisions': {
       const input = requireInput(value.input, ['seriesId', 'itemId', 'before'], tentativeId);
       if (!validUuid(input.seriesId) || !validUuid(input.itemId) || !(input.before === null || isSafeInteger(input.before, 1))) throw new ProtocolError(tentativeId);

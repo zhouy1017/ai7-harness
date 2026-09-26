@@ -291,7 +291,7 @@ export interface MountSeriesOptions {
   readonly api: Pick<RendererApi, 'inspectSeries' | 'inspectSeriesMembers' | 'inspectSeriesCandidates' | 'inspectSeriesHistory' |
     'previewSeriesMembershipChange' | 'changeSeriesMembership' | 'proposeSeriesKnowledge' | 'inspectSeriesKnowledgeReview' |
     'editSeriesKnowledgeCandidate' | 'promoteSeriesKnowledge' | 'inspectSeriesKnowledgeItems' | 'inspectSeriesKnowledgeCandidates' |
-    'inspectSeriesKnowledgeRevisions'>;
+    'inspectSeriesKnowledgeRevisions' | 'inspectSeriesKnowledgeConflicts'>;
   readonly setStatus: Status;
   readonly errorMessage: (error: unknown, fallback: string) => string;
 }

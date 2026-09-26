@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 80 as const;
+export const SERVICE_PROTOCOL_VERSION = 81 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -143,6 +143,7 @@ export const IPC_CHANNELS = {
   inspectSeriesKnowledgeItems: 'ai7:j13:inspect-series-knowledge-items',
   inspectSeriesKnowledgeCandidates: 'ai7:j13:inspect-series-knowledge-candidates',
   inspectSeriesKnowledgeRevisions: 'ai7:j13:inspect-series-knowledge-revisions',
+  inspectSeriesKnowledgeConflicts: 'ai7:j13:inspect-series-knowledge-conflicts',
   applyChangeSuggestion: 'ai7:j05:apply-change-suggestion',
   applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
   reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
@@ -5625,8 +5626,9 @@ export interface SeriesKnowledgeRevisionProjection {
   readonly content: string;
   readonly authoring: 'editor' | 'manuscript-revision';
   readonly provenance: SeriesKnowledgeProvenanceProjection | null;
-  /** The conflicts the editor chose to keep with this revision; never a verification. */
+  /** The first bounded page of conflicts kept with this revision; never a verification. */
   readonly conflicts: ReadonlyArray<SeriesKnowledgeConflictProjection>;
+  readonly conflictCount: number;
   readonly reuseScope: SeriesKnowledgeReuseScope;
   readonly reuseLabel: string;
   readonly decisionId: string;
@@ -5674,6 +5676,15 @@ export interface SeriesKnowledgeCandidatesPageProjection {
 }
 
 /** A page of one item's revisions, newest first, and the ordinal the next page reads below (历次版本). */
+/** A bounded page of the conflicts preserved on one exact immutable revision. */
+export interface SeriesKnowledgeConflictsProjection {
+  readonly itemId: string;
+  readonly revisionId: string;
+  readonly conflicts: ReadonlyArray<SeriesKnowledgeConflictProjection>;
+  readonly total: number;
+  readonly nextAfter: number | null;
+}
+
 export interface SeriesKnowledgeRevisionsProjection {
   readonly itemId: string;
   readonly revisions: ReadonlyArray<SeriesKnowledgeRevisionProjection>;
@@ -8241,6 +8252,7 @@ export interface ServiceOperationMap {
   promoteSeriesKnowledge: { input: PromoteSeriesKnowledgeInput; output: SeriesKnowledgePromotionProjection };
   inspectSeriesKnowledgeItems: { input: { seriesId: string; text: string; after: SeriesKnowledgeItemsCursor | null }; output: SeriesKnowledgeItemsPageProjection };
   inspectSeriesKnowledgeCandidates: { input: { seriesId: string; after: SeriesKnowledgeCandidatesCursor | null }; output: SeriesKnowledgeCandidatesPageProjection };
+  inspectSeriesKnowledgeConflicts: { input: { seriesId: string; itemId: string; revisionId: string; after: number }; output: SeriesKnowledgeConflictsProjection };
   inspectSeriesKnowledgeRevisions: { input: { seriesId: string; itemId: string; before: number | null }; output: SeriesKnowledgeRevisionsProjection };
   /**
    * AI7 Apply for Change Suggestions (Issue #408). The batch form is 确认应用 on 审阅's confirmation
@@ -8591,6 +8603,7 @@ export interface RendererApi {
   promoteSeriesKnowledge(input: PromoteSeriesKnowledgeInput): Promise<SeriesKnowledgePromotionProjection>;
   inspectSeriesKnowledgeItems(input: { seriesId: string; text: string; after: SeriesKnowledgeItemsCursor | null }): Promise<SeriesKnowledgeItemsPageProjection>;
   inspectSeriesKnowledgeCandidates(input: { seriesId: string; after: SeriesKnowledgeCandidatesCursor | null }): Promise<SeriesKnowledgeCandidatesPageProjection>;
+  inspectSeriesKnowledgeConflicts(input: { seriesId: string; itemId: string; revisionId: string; after: number }): Promise<SeriesKnowledgeConflictsProjection>;
   inspectSeriesKnowledgeRevisions(input: { seriesId: string; itemId: string; before: number | null }): Promise<SeriesKnowledgeRevisionsProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */

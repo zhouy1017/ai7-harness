@@ -2980,6 +2980,14 @@ function registerRendererHandlers(
       return service.call('inspectSeriesKnowledgeCandidates', { seriesId: input.seriesId, after: input.after ?? null });
     }),
   );
+  ipcMain.handle(IPC_CHANNELS.inspectSeriesKnowledgeConflicts, (event, input: ServiceOperationMap['inspectSeriesKnowledgeConflicts']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectSeriesKnowledgeConflicts', { seriesId: input.seriesId, itemId: input.itemId, revisionId: input.revisionId, after: input.after });
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.inspectSeriesKnowledgeRevisions, (event, input: ServiceOperationMap['inspectSeriesKnowledgeRevisions']['input']) =>
     envelope(async () => {
       requireSender(event);

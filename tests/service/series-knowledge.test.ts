@@ -116,6 +116,7 @@ const later = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 
 
 describe('书系知识 over the real store', () => {
   it('returns a bounded promotion response when the editor preserves thousands of disclosed conflicts', async () => {
+    let saved: { seriesId: string; itemId: string; revisionId: string } | null = null;
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       const seriesId = store.createSeries({ title: '冲突分页', note: '' }).seriesId;
@@ -135,8 +136,39 @@ describe('书系知识 over the real store', () => {
       const promoted = store.promoteSeriesKnowledge({ seriesId, candidateId: proposed.candidate.candidateId, candidateVersion: 1,
         reviewDigest: review.reviewDigest, reuseScope: 'series-tasks', conflictDisposition: 'preserved' });
       expect(wire(promoted)).toBeLessThan(MAX_FRAME_BYTES);
+      expect(promoted.item.current.conflictCount).toBe(2500);
+      expect(promoted.item.current.conflicts).toHaveLength(50);
+      saved = { seriesId, itemId: promoted.itemId, revisionId: promoted.revisionId };
+      let after: number | null = 0;
+      let read = 0;
+      while (after !== null) {
+        const page = store.inspectSeriesKnowledgeConflicts({ ...saved, after });
+        expect(wire(page)).toBeLessThan(SERIES_KNOWLEDGE_PAGE_BYTES + 1024);
+        expect(page.conflicts).toHaveLength(50);
+        expect(page.total).toBe(2500);
+        read += page.conflicts.length;
+        after = page.nextAfter;
+      }
+      expect(read).toBe(2500);
+      const other = store.createSeries({ title: '另一个书系', note: '' });
+      expect(refusal(() => store.inspectSeriesKnowledgeConflicts({ ...saved!, seriesId: other.seriesId, after: 0 }))).toMatch(/^SERIES_KNOWLEDGE_ITEM_NOT_FOUND:/);
+      expect(refusal(() => store.inspectSeriesKnowledgeConflicts({ ...saved!, revisionId: randomUUID(), after: 0 }))).toMatch(/^SERIES_KNOWLEDGE_ITEM_NOT_FOUND:/);
+      expect(refusal(() => store.inspectSeriesKnowledgeConflicts({ ...saved!, after: 2501 }))).toMatch(/^SERIES_CURSOR_INVALID:/);
+      const next = store.proposeSeriesKnowledge({ seriesId, target: { kind: 'existing', itemId: promoted.itemId }, content: '后来的版本', span: null });
+      const nextReview = store.inspectSeriesKnowledgeReview({ seriesId, candidateId: next.candidate.candidateId });
+      const updated = store.promoteSeriesKnowledge({ seriesId, candidateId: next.candidate.candidateId, candidateVersion: 1,
+        reviewDigest: nextReview.reviewDigest, reuseScope: 'series-tasks', conflictDisposition: 'preserved' });
+      expect(updated.revisionId).not.toBe(saved.revisionId);
+      expect(wire(store.inspectSeriesKnowledgeRevisions(seriesId, promoted.itemId, null))).toBeLessThan(MAX_FRAME_BYTES);
+      expect(store.inspectSeriesKnowledgeConflicts({ ...saved, after: 2450 }).conflicts).toHaveLength(50);
       store.markCleanShutdown();
     } finally { store.close(); }
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const old = reopened.inspectSeriesKnowledgeConflicts({ ...saved!, after: 2450 });
+      expect([old.revisionId, old.total, old.conflicts.length, old.nextAfter]).toEqual([saved!.revisionId, 2500, 50, null]);
+      reopened.markCleanShutdown();
+    } finally { reopened.close(); }
   }, 180_000);
 
   it('keeps saved-revision provenance checkpoint-relative across later edits, saves and restart', async () => {

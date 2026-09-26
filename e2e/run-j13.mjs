@@ -1010,6 +1010,41 @@ async function main() {
       await waitFor(renderer, `document.querySelectorAll('.knowledge-item-history ol li').length === 10 && document.querySelector('[data-knowledge-action="revisions-reset"]') === null`, 'knowledge-pages-history-reset-ready');
     }
 
+    // A separate Series keeps the existing list assertions unchanged while exercising one immutable conflict reader.
+    const conflictSeed = await renderer.evaluate(`(async () => {
+      const seriesId = (await window.ai7.createSeries({ title: '冲突读取书系', note: '' })).seriesId;
+      let first;
+      for (let index = 0; index < 52; index += 1) {
+        const candidate = await window.ai7.proposeSeriesKnowledge({ seriesId,
+          target: { kind: 'new', subject: '同名冲突条目', knowledgeClass: 'canon' }, content: '候选内容' + index, span: null });
+        first ??= candidate;
+      }
+      const review = await window.ai7.inspectSeriesKnowledgeReview({ seriesId, candidateId: first.candidateId });
+      const promoted = await window.ai7.promoteSeriesKnowledge({ seriesId, candidateId: first.candidateId, candidateVersion: 1,
+        reviewDigest: review.reviewDigest, reuseScope: 'series-tasks', conflictDisposition: 'preserved' });
+      const candidate = await window.ai7.proposeSeriesKnowledge({ seriesId, target: { kind: 'existing', itemId: promoted.itemId }, content: '后来的冲突版本', span: null });
+      const next = await window.ai7.inspectSeriesKnowledgeReview({ seriesId, candidateId: candidate.candidateId });
+      await window.ai7.promoteSeriesKnowledge({ seriesId, candidateId: candidate.candidateId, candidateVersion: 1,
+        reviewDigest: next.reviewDigest, reuseScope: 'series-tasks', conflictDisposition: 'preserved' });
+      return { seriesId, revisionId: promoted.revisionId };
+    })()`);
+    requireJourney(typeof conflictSeed?.seriesId === 'string' && typeof conflictSeed?.revisionId === 'string', 'knowledge-conflicts-seeded');
+    await leaveSeries(renderer, 'knowledge-conflicts-leave');
+    await openSeries(renderer, conflictSeed.seriesId, 'knowledge-conflicts-open');
+    await clickSelector(renderer, '.knowledge-item-history summary', 'knowledge-conflicts-history');
+    const olderConflict = '[data-knowledge-action="conflicts-read"][data-revision-id="' + conflictSeed.revisionId + '"]';
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(olderConflict)})?.disabled === false`, 'knowledge-conflicts-old-ready');
+    await clickSelector(renderer, olderConflict, 'knowledge-conflicts-old');
+    for (let pass = 0; pass < 2; pass += 1) {
+      await waitFor(renderer, `document.querySelectorAll('.knowledge-conflicts-page li').length === 50 && document.querySelector('.knowledge-conflicts-heading')?.textContent === '第 1 版保留的冲突（共 51 项）' && document.activeElement === document.querySelector('.knowledge-conflicts-heading')`, 'knowledge-conflicts-first');
+      await clickSelector(renderer, '[data-knowledge-action="conflicts-more"]', 'knowledge-conflicts-next');
+      await waitFor(renderer, `document.querySelectorAll('.knowledge-conflicts-page li').length === 1 && document.querySelector('[data-knowledge-action="conflicts-reset"]')?.disabled === false && document.activeElement === document.querySelector('.knowledge-conflicts-heading')`, 'knowledge-conflicts-last');
+      await clickSelector(renderer, '[data-knowledge-action="conflicts-reset"]', 'knowledge-conflicts-reset');
+    }
+    await waitFor(renderer, `document.querySelectorAll('.knowledge-conflicts-page li').length === 50 && document.querySelector('[data-knowledge-action="conflicts-close"]')?.disabled === false`, 'knowledge-conflicts-reset-ready');
+    await clickSelector(renderer, '[data-knowledge-action="conflicts-close"]', 'knowledge-conflicts-close');
+    await waitFor(renderer, `document.querySelector('.knowledge-conflicts-reader') === null && document.activeElement === document.querySelector(${JSON.stringify(olderConflict)})`, 'knowledge-conflicts-closed-focus');
+
     at('zero-activity');
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key))`, 'exact-service-readiness-remained-zero');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-network-provider-session');

@@ -139,6 +139,7 @@ import type {
   SeriesKnowledgeItemsCursor,
   SeriesKnowledgeItemsPageProjection,
   SeriesKnowledgeRevisionsProjection,
+  SeriesKnowledgeConflictsProjection,
   SeriesKnowledgePromotionProjection,
   SeriesKnowledgeProposalProjection,
   SeriesKnowledgeProvenanceProjection,
@@ -11129,6 +11130,23 @@ export class EditorialStore {
   }
 
   /** 历次版本: a page of one item's revisions, newest first, below the ordinal named (Issue #63 review). A read. */
+  inspectSeriesKnowledgeConflicts(input: { seriesId: string; itemId: string; revisionId: string; after: number }): SeriesKnowledgeConflictsProjection {
+    return this.#seriesCall(() => {
+      const series = this.#requireSeries(input.seriesId);
+      requireStore(typeof input.itemId === 'string' && UUID_PATTERN.test(input.itemId) && typeof input.revisionId === 'string' && UUID_PATTERN.test(input.revisionId),
+        'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识条目或版本不存在。');
+      const item = this.#seriesKnowledge.item(input.itemId);
+      requireStore(item !== null && item.seriesId === series.seriesId, 'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识条目不存在。');
+      const revision = this.#seriesKnowledge.revision(input.itemId, input.revisionId);
+      requireStore(revision !== null, 'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识版本不存在。');
+      requireStore(Number.isSafeInteger(input.after) && input.after >= 0 && input.after <= revision.conflicts.length, 'SERIES_CURSOR_INVALID', '冲突列表位置无效。');
+      const { page, more } = weighedPage(revision.conflicts.slice(input.after, input.after + MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN + 1),
+        MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN, SERIES_KNOWLEDGE_PAGE_BYTES);
+      return { itemId: input.itemId, revisionId: input.revisionId, conflicts: page, total: revision.conflicts.length,
+        nextAfter: more ? input.after + page.length : null };
+    });
+  }
+
   inspectSeriesKnowledgeRevisions(seriesId: string, itemId: string, before: number | null): SeriesKnowledgeRevisionsProjection {
     return this.#seriesCall(() => {
       const series = this.#requireSeries(seriesId);
@@ -11306,7 +11324,8 @@ export class EditorialStore {
       content: revision.content,
       authoring: revision.authoring,
       provenance: this.#knowledgeProvenance(revision.provenance),
-      conflicts: revision.conflicts,
+      conflicts: revision.conflicts.slice(0, MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN),
+      conflictCount: revision.conflicts.length,
       reuseScope: revision.reuseScope,
       reuseLabel: SERIES_KNOWLEDGE_REUSE_LABELS[revision.reuseScope],
       decisionId: revision.decisionId,

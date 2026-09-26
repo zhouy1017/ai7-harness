@@ -146,6 +146,8 @@ Not proven here: a Review Run's cards — prepared, under way and on the manuscr
 
 J-13 covers two slices of Issue #63: S28a, Series membership, and S28b, Series Knowledge. Series-scope pins and retrieval exclusions come with S29 (#64).
 
+The `knowledge-bounded-pages` stage also preserves 51 conflicts on a revision, adds a later revision, and reads the older revision through repeated 50 → 1 → 50 conflict pages with exact-revision labeling and keyboard focus. The service regression preserves 2,500 conflicts and verifies bounded responses, complete page traversal, cross-Series refusal and restart reads.
+
 The `knowledge-bounded-pages` stage adds thirty promoted items, thirty-one open candidates and ten revisions through real service calls. Repeated 30 → 1 → 30 item/candidate pages and 10 → 2 → 10 revision pages replace previous pages, preserve selected off-page targets and typed drafts, and restore keyboard focus.
 
 The runner creates three empty Books, 星河之一, 星河之二 and 书系之外. It uses no manuscript, credential or Provider; every name is the runner's own. Each Book's 工作概览 reads `不在任何书系中。`.

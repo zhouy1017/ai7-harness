@@ -587,6 +587,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeItems(request.input.seriesId, request.input.text, request.input.after) };
     case 'inspectSeriesKnowledgeCandidates':
       return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeCandidates(request.input.seriesId, request.input.after) };
+    case 'inspectSeriesKnowledgeConflicts':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeConflicts(request.input) };
     case 'inspectSeriesKnowledgeRevisions':
       return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeRevisions(request.input.seriesId, request.input.itemId, request.input.before) };
     case 'inspectEvaluationProfiles':

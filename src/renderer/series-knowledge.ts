@@ -3,6 +3,7 @@ import {
   SERIES_KNOWLEDGE_CLASS_LABELS,
   type RendererApi,
   type SeriesKnowledgeCandidateProjection,
+  type SeriesKnowledgeConflictsProjection,
   type SeriesKnowledgeClass,
   type SeriesKnowledgeItemProjection,
   type SeriesKnowledgeProjection,
@@ -124,7 +125,7 @@ export interface MountSeriesKnowledgeOptions {
   readonly root: HTMLElement;
   readonly seriesId: string;
   readonly api: Pick<RendererApi, 'inspectSeries' | 'proposeSeriesKnowledge' | 'inspectSeriesKnowledgeReview' | 'editSeriesKnowledgeCandidate' |
-    'promoteSeriesKnowledge' | 'inspectSeriesKnowledgeItems' | 'inspectSeriesKnowledgeCandidates' | 'inspectSeriesKnowledgeRevisions'>;
+    'promoteSeriesKnowledge' | 'inspectSeriesKnowledgeItems' | 'inspectSeriesKnowledgeCandidates' | 'inspectSeriesKnowledgeRevisions' | 'inspectSeriesKnowledgeConflicts'>;
   readonly setStatus: Status;
   readonly errorMessage: (error: unknown, fallback: string) => string;
   /** The page's own read, when a write here has read the Series again. */
@@ -151,6 +152,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
   let historyEpoch = 0;
   let itemsLater = false;
   let candidatesLater = false;
+  let conflictReader: { page: SeriesKnowledgeConflictsProjection; ordinal: number; after: number; requestedAfter: number; failed: boolean } | null = null;
 
   const paint = (focus: string | null): void => {
     if (knowledge === null) return;
@@ -182,6 +184,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     }
     if (knowledge.itemsNext !== null) nodes.push(moreRow(KNOWLEDGE_ITEMS_MORE, 'items-more', () => void loadItems(false)));
     if (itemsLater) nodes.push(moreRow('回到首批条目', 'items-reset', () => void loadItems(true, true)));
+    if (conflictReader !== null) nodes.push(conflictReaderNode());
     nodes.push(el('h4', undefined, KNOWLEDGE_CANDIDATES_HEADING));
     if (knowledge.candidates.length === 0) nodes.push(el('p', 'field-note knowledge-candidates-empty', KNOWLEDGE_CANDIDATES_EMPTY));
     else {
@@ -239,8 +242,8 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     title.tabIndex = -1;
     node.append(title, el('p', 'knowledge-item-content', current.content),
       el('p', 'field-note knowledge-item-provenance', knowledgeProvenanceLine(current.provenance)), el('p', 'field-note knowledge-item-reuse', knowledgeReuseLine(current)));
-    const kept = knowledgeKeptConflictsLine(current.conflicts.length);
-    if (kept !== null) node.append(el('p', 'field-note knowledge-item-conflicts', kept));
+    const kept = knowledgeKeptConflictsLine(current.conflictCount);
+    if (kept !== null) node.append(el('p', 'field-note knowledge-item-conflicts', kept), conflictButton(item.itemId, current));
     const forItem = action(KNOWLEDGE_PROPOSE_FOR_ITEM, 'quiet', 'propose-item', () => {
       if (busy) return;
       propose = { target: item.itemId, targetLabel: `「${item.subject}」（${item.classLabel}）`, subject: '', knowledgeClass: '', content: '' };
@@ -264,7 +267,11 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       if (state.open && !state.failed) details.append(el('p', 'field-note', KNOWLEDGE_STATUS.loadingMore));
     } else {
       const list = el('ol');
-      for (const revision of state.revisions) list.append(el('li', undefined, knowledgeRevisionLine(revision)));
+      for (const revision of state.revisions) {
+        const row = el('li', undefined, knowledgeRevisionLine(revision));
+        if (revision.conflictCount > 0) row.append(conflictButton(item.itemId, revision));
+        list.append(row);
+      }
       details.append(list);
       if (state.nextBefore !== null) details.append(moreRow(KNOWLEDGE_REVISIONS_MORE, 'revisions-more', () => void loadRevisions(item.itemId, false)));
       if (state.later) details.append(moreRow('回到最新版本', 'revisions-reset', () => void loadRevisions(item.itemId, true)));
@@ -283,6 +290,67 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       if (opening && known.revisions === null) void loadRevisions(item.itemId, true);
     });
     return details;
+  };
+
+  /** One reader names an immutable revision; paging replaces its page and never follows the latest revision. */
+  const conflictButton = (itemId: string, revision: SeriesKnowledgeRevisionProjection): HTMLButtonElement => {
+    const button = action('查看第 ' + revision.ordinal + ' 版保留的冲突（' + revision.conflictCount + '）', 'quiet', 'conflicts-read', () => {
+      if (busy) return;
+      conflictReader = { page: { itemId, revisionId: revision.revisionId, conflicts: [], total: revision.conflictCount, nextAfter: null },
+        ordinal: revision.ordinal, after: 0, requestedAfter: 0, failed: false };
+      void loadConflicts(0);
+    });
+    button.dataset['revisionId'] = revision.revisionId;
+    button.disabled = busy;
+    return button;
+  };
+
+  const conflictReaderNode = (): HTMLElement => {
+    const reader = conflictReader!;
+    const section = el('section', 'knowledge-conflicts-reader');
+    const title = el('h4', 'knowledge-conflicts-heading', '第 ' + reader.ordinal + ' 版保留的冲突（共 ' + reader.page.total + ' 项）');
+    title.tabIndex = -1;
+    const list = el('ol', 'knowledge-conflicts-page');
+    list.start = reader.after + 1;
+    for (const entry of reader.page.conflicts) list.append(el('li', undefined, entry.line));
+    section.append(title, list);
+    if (reader.failed) {
+      section.append(el('p', 'field-note', '冲突未能读取。已有页面保留，可以重试。'));
+      section.append(moreRow('重试读取冲突', 'conflicts-retry', () => void loadConflicts(reader.requestedAfter)));
+    }
+    if (reader.page.nextAfter !== null) section.append(moreRow('下一批冲突', 'conflicts-more', () => void loadConflicts(reader.page.nextAfter!)));
+    if (reader.after > 0) section.append(moreRow('回到首批冲突', 'conflicts-reset', () => void loadConflicts(0)));
+    section.append(moreRow('关闭冲突', 'conflicts-close', () => {
+      conflictReader = null;
+      paint('[data-knowledge-action="conflicts-read"][data-revision-id="' + reader.page.revisionId + '"]');
+    }));
+    return section;
+  };
+
+  const loadConflicts = async (after: number): Promise<void> => {
+    if (busy || conflictReader === null) return;
+    const reader = conflictReader;
+    const epoch = historyEpoch;
+    reader.requestedAfter = after;
+    reader.failed = false;
+    busy = true;
+    paint(null);
+    try {
+      const page = await api.inspectSeriesKnowledgeConflicts({ seriesId: options.seriesId,
+        itemId: reader.page.itemId, revisionId: reader.page.revisionId, after });
+      busy = false;
+      if (!root.isConnected) return;
+      if (epoch !== historyEpoch || conflictReader !== reader) { paint('.knowledge-heading'); return; }
+      reader.page = page;
+      reader.after = after;
+      paint('.knowledge-conflicts-heading');
+    } catch (error) {
+      busy = false;
+      if (!root.isConnected) return;
+      if (epoch === historyEpoch && conflictReader === reader) reader.failed = true;
+      setStatus(errorMessage(error, KNOWLEDGE_STATUS.failed), 'error');
+      paint('.knowledge-conflicts-heading');
+    }
   };
 
   const loadRevisions = async (itemId: string, fresh: boolean): Promise<void> => {
@@ -325,6 +393,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       if (!root.isConnected) return;
       knowledge = { ...shown, items: [...page.items], itemsNext: page.nextCursor };
       histories.clear();
+      conflictReader = null;
       historyEpoch += 1;
       itemsLater = !fresh;
       searched = words;
@@ -370,6 +439,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     candidatesLater = false;
     historyEpoch += 1;
     histories.clear();
+    conflictReader = null;
     options.seriesChanged(series);
   };
 
@@ -706,6 +776,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       candidatesLater = false;
       historyEpoch += 1;
       histories.clear();
+      conflictReader = null;
       if (!busy) paint(focus);
     },
   };

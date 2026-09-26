@@ -1388,6 +1388,8 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'inspectSeriesKnowledgeCandidates', input: { seriesId, after: { firstAt: '2026-09-26T01:02:03.004Z', candidateId } } },
       { op: 'inspectSeriesKnowledgeRevisions', input: { seriesId, itemId: randomUUID(), before: null } },
       { op: 'inspectSeriesKnowledgeRevisions', input: { seriesId, itemId: randomUUID(), before: 3 } },
+      { op: 'inspectSeriesKnowledgeConflicts', input: { seriesId, itemId: randomUUID(), revisionId: randomUUID(), after: 0 } },
+      { op: 'inspectSeriesKnowledgeConflicts', input: { seriesId, itemId: randomUUID(), revisionId: randomUUID(), after: 50 } },
     ];
     for (const { op, input } of inputs) {
       const request = { id: randomUUID(), op, input };
@@ -1412,6 +1414,9 @@ describe('decodeRequest rejects malformed frames', () => {
       ['inspectSeriesKnowledgeCandidates', { seriesId, after: { firstAt: 'yesterday', candidateId } }],
       ['inspectSeriesKnowledgeRevisions', { seriesId, itemId: randomUUID(), before: 0 }],
       ['inspectSeriesKnowledgeRevisions', { seriesId, itemId: 'item', before: null }],
+      ['inspectSeriesKnowledgeConflicts', { seriesId, itemId: randomUUID(), revisionId: randomUUID(), after: -1 }],
+      ['inspectSeriesKnowledgeConflicts', { seriesId, itemId: randomUUID(), revisionId: 'latest', after: 0 }],
+      ['inspectSeriesKnowledgeConflicts', { seriesId, itemId: randomUUID(), revisionId: randomUUID(), after: 0, all: true }],
     ] as const) {
       expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
     }
