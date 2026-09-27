@@ -282,6 +282,45 @@ const J01_LAUNCH_LOCATIONS = Object.freeze(
   ]),
 );
 
+// Failure-only classification of J07's package-export assertions. Only these closed runner
+// names can reach hosted output; exception detail, paths and renderer values remain excluded.
+const J07_PACKAGE_EXPORT_ASSERTIONS = Object.freeze([
+  'package-export-open', 'package-export-reviewed', 'package-export-lists-the-files',
+  'package-export-service-review', 'package-export-fidelity-and-switches',
+  'package-export-annotations-off', 'package-export-reviewed-without-annotations',
+  'package-export-annotations-on', 'package-export-reviewed-with-annotations',
+  'package-export-select-member', 'package-export-choose', 'package-export-prepared',
+  'package-export-bound-to-the-folder', 'package-export-prepared-writes-nothing',
+  'package-export-approve', 'package-export-written', 'package-export-history',
+  'package-export-selected-subset-only', 'package-export-subset-close',
+  'package-export-remaining-open', 'package-export-remaining-reviewed',
+  'package-export-remaining-choose', 'package-export-remaining-prepared',
+  'package-export-one-prepared-member', 'package-export-remaining-approve',
+  'package-export-remaining-written', 'package-export-two-subset-receipts',
+  'package-export-folder-files', 'package-export-docx-publication',
+  'package-export-manifest-words', 'package-export-not-in-export-records',
+  'package-export-close', 'package-export-closed', 'package-export-without-forbidden-words',
+]);
+const J07_PACKAGE_EXPORT_FAILURES = new Map([
+  ...J07_PACKAGE_EXPORT_ASSERTIONS.map((name) => ['J-07/' + name, name]),
+  ['J-07/package-export-docx-document:news-release', 'package-export-docx-news-release'],
+  ['J-07/renderer-evaluate', 'package-export-renderer-evaluate'],
+]);
+const J07_PACKAGE_EXPORT_IO = Object.freeze({
+  ENOENT: 'package-export-io-absent', EEXIST: 'package-export-io-exists',
+  EACCES: 'package-export-io-access', EPERM: 'package-export-io-permission',
+  EBUSY: 'package-export-io-busy',
+});
+const J07_PACKAGE_EXPORT_FAILURE_LOCATIONS = Object.freeze([
+  ...J07_PACKAGE_EXPORT_FAILURES.values(), ...Object.values(J07_PACKAGE_EXPORT_IO),
+]);
+
+export function j07PackageExportFailureLocation(location, error) {
+  if (location !== 'package-export' || !(error instanceof Error)) return location;
+  return J07_PACKAGE_EXPORT_FAILURES.get(error.message) ??
+    (typeof error.code === 'string' && Object.hasOwn(J07_PACKAGE_EXPORT_IO, error.code) ? J07_PACKAGE_EXPORT_IO[error.code] : location);
+}
+
 export const JOURNEY_LOCATIONS = Object.freeze({
   'J-01': Object.freeze([
     'entry',
@@ -923,6 +962,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'package-v2',
     // Issue #416 (S67b): v2 exported into a chosen folder, file by file with receipts, and its history.
     'package-export',
+    ...J07_PACKAGE_EXPORT_FAILURE_LOCATIONS,
     // Issue #426 (S68a): 维护事项 — a 勘误 recorded, written and concluded, and 撤回 of the current designation.
     'maintenance-cases',
     // Issue #426 (S68b): 维护事项待处理 — a waiting 替代 in 待我处理, opened back at its case, and cleared by an 归档.
