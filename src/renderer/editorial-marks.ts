@@ -896,7 +896,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const wrap = el('div', 'editorial-mark-reasons');
     wrap.dataset['markReasons'] = disposition;
     wrap.dataset['markReasonMode'] = mode;
-    wrap.append(el('p', 'muted', DECISION_REASON_PROMPTS[disposition]));
+    const question = el('p', 'muted', DECISION_REASON_PROMPTS[disposition]);
+    question.id = `mark-reason-question-${crypto.randomUUID()}`;
+    wrap.setAttribute('role', 'group');
+    wrap.setAttribute('aria-labelledby', question.id);
+    wrap.append(question);
     const row = el('div', 'button-row');
     const finish = (result: EditorialMarkCommandProjection, status: string): void => {
       promptFor = null;
