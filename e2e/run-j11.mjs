@@ -307,6 +307,7 @@ async function readEvaluation(renderer, predicate, name) {
 }
 /** Hold one save/finalization response, including a refusal, while real input attempts meet the pending form. */
 async function submitHeldEvaluation(renderer, action, name) {
+  at('evaluation-pending-submit');
   await assertRenderer(renderer, `(() => {
     const record = document.querySelector('.evaluation-record');
     const button = record?.querySelector('[data-evaluation-action="${action}"]');
@@ -326,7 +327,9 @@ async function submitHeldEvaluation(renderer, action, name) {
     } finally { Promise.prototype.then = original; }
     return true;
   })()`, `${name}-hold`);
+  at('evaluation-response-held');
   await waitFor(renderer, `typeof window.__j11HeldEvaluationSubmit?.release === 'function'`, `${name}-response-held`);
+  at('evaluation-controls-locked');
   await assertRenderer(renderer, `(() => {
     const record = document.querySelector('.evaluation-record');
     const controls = Array.from(record.querySelectorAll('input, select, textarea, button'));
@@ -335,6 +338,7 @@ async function submitHeldEvaluation(renderer, action, name) {
     record.querySelector('input[type="radio"]')?.click();
     return controls.length > 0 && controls.every((control) => control.disabled) && document.activeElement !== score;
   })()`, `${name}-controls-locked`);
+  at('evaluation-input-blocked');
   await renderer.send('Input.insertText', { text: '9' });
   await assertRenderer(renderer, `(() => {
     const held = window.__j11HeldEvaluationSubmit;
@@ -347,6 +351,7 @@ async function submitHeldEvaluation(renderer, action, name) {
 
 /** A response keeps the submitted values; a save or refusal also restores each field's prior availability. */
 async function assertSubmittedEvaluation(renderer, restoreDisabled, name) {
+  at('evaluation-submitted-values');
   await assertRenderer(renderer, `(() => {
     const held = window.__j11HeldEvaluationSubmit;
     const after = Array.from(document.querySelectorAll('.evaluation-record input, .evaluation-record select, .evaluation-record textarea'), (control) => [control.value, control.checked ?? null, control.disabled]);

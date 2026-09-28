@@ -1112,6 +1112,11 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'evaluation-open',
     'evaluation-start',
     'evaluation-score',
+    'evaluation-pending-submit',
+    'evaluation-response-held',
+    'evaluation-controls-locked',
+    'evaluation-input-blocked',
+    'evaluation-submitted-values',
     'evaluation-finalize',
     // Issue #429 review: 评估 is reached from the manuscript's 工作 group, between 审阅 and 交付物.
     'evaluation-from-manuscript',
