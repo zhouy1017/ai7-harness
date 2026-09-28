@@ -20,7 +20,7 @@ import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { REVIEW_GUIDELINE_TRIGGER_SQL } from '../../src/service/review-guidelines.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { BOOK_PEOPLE_SCHEMA_VERSION, DATABASE_REPLACEMENT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { BOOK_PEOPLE_SCHEMA_VERSION, DATABASE_MERGE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { buildManuscriptPackage } from '../../src/service/text-manuscript.js';
 import {
   MAX_GUIDELINE_OLDER_BOOKS_SHOWN,
@@ -264,7 +264,7 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       expect(after.clauses.map((clause) => clause.citations)).toEqual([0, 0, 0, 0, 0]);
       expect(after.versions.map((version) => [version.ordinal, version.issuer, version.clauseCount, version.usedByCount])).toEqual([[2, '本社', 5, 0], [1, 'AI7 内置默认', 4, 2]]);
       expect(after.versions[0]!.source).toMatchObject({ displayName: '本社文字规范.txt', format: 'text', bytes: Buffer.byteLength(HOUSE_CLAUSES) });
-      expect(after.olderVersionBooks).toEqual([{ bookId: imported.bookId, bookTitle: 'L2 审阅规范', ordinal: 1 }]);
+      expect(after.olderVersionBooks).toEqual([{ bookId: imported.bookId, bookTitle: 'L2 审阅规范', ordinal: 1, merged: false }]);
       expect(after.olderVersionBookCount).toBe(1);
       // The same preview again is spent; the same file again is no new version.
       expect(await refusal(() => store.importReviewGuidelineVersion(preview.previewId))).toMatch(/^REVIEW_GUIDELINE_PREVIEW_EXPIRED:/u);
@@ -283,7 +283,7 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       expect(workspace.categories.find((category) => category.categoryId === TYPOS)!.basisStatement).toContain('本社 · 文字规范条款（第 2 版）');
       // Its Book reads under version 1 until a review under version 2 forms its findings.
       const now = typosDocument(store.inspectReviewGuidelines());
-      expect(now.olderVersionBooks).toEqual([{ bookId: imported.bookId, bookTitle: 'L2 审阅规范', ordinal: 1 }]);
+      expect(now.olderVersionBooks).toEqual([{ bookId: imported.bookId, bookTitle: 'L2 审阅规范', ordinal: 1, merged: false }]);
       expect(now.versions.map((version) => version.usedBy.map((run) => run.reviewOrdinal))).toEqual([[], [2, 1]]);
       // 已用于 counts the two approved reviews, never the two only prepared.
       expect((await store.inspectKnowledgeProcedures()).procedures.find((procedure) => procedure.categoryId === TYPOS)!.reviewRuns).toBe(2);
@@ -352,7 +352,7 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
     // A revision-44 store never held the relation: planted by dropping it, it gains it again empty.
     const plant = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      plant.exec(`DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; DROP TABLE learning_eligibility_decisions; DROP TABLE proposal_decision_feedback; DROP TABLE analysis_feedback_signals; DROP TABLE evaluation_record_entries; DROP TABLE evaluation_records; DROP TABLE library_material_decisions; DROP TABLE library_materials; DROP TABLE review_guideline_versions; PRAGMA user_version = ${BOOK_PEOPLE_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; DROP TABLE learning_eligibility_decisions; DROP TABLE proposal_decision_feedback; DROP TABLE analysis_feedback_signals; DROP TABLE evaluation_record_entries; DROP TABLE evaluation_records; DROP TABLE library_material_decisions; DROP TABLE library_materials; DROP TABLE review_guideline_versions; PRAGMA user_version = ${BOOK_PEOPLE_SCHEMA_VERSION};`);
     } finally {
       plant.close();
     }
@@ -366,7 +366,7 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
     }
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_REPLACEMENT_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_MERGE_SCHEMA_VERSION);
       expect(() => database.exec("UPDATE review_guideline_versions SET recorded_at = recorded_at")).toThrowError(/REVIEW_GUIDELINE_LEDGER_IMMUTABLE/u);
       expect(() => database.exec('DELETE FROM review_guideline_versions')).toThrowError(/REVIEW_GUIDELINE_LEDGER_IMMUTABLE/u);
       // A later build that rewords a built-in clause moves the digest of AI7's version 1; the house's version still reads,

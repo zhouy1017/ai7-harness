@@ -10,6 +10,7 @@ import type {
   ExemplarBookProjection,
   ExemplarProjection,
   ReviewGuidelineDocumentProjection,
+  ReviewGuidelineMergedVersionProjection,
   ReviewGuidelinePreviewProjection,
   ReviewGuidelineVersionProjection,
 } from '../shared/protocol.js';
@@ -122,7 +123,8 @@ export function guidelineFixedStatement(document: Pick<ReviewGuidelineDocumentPr
 /** The Books that will read under a newer version at their next review, or `null` when none still reads an older one. */
 export function guidelineOlderBooks(document: Pick<ReviewGuidelineDocumentProjection, 'olderVersionBooks' | 'olderVersionBookCount' | 'currentOrdinal'>): string | null {
   if (document.olderVersionBookCount === 0) return null;
-  const books = document.olderVersionBooks.map((book) => `《${book.bookTitle}》第 ${book.ordinal} 版`).join('、');
+  // A Book whose version came with it when it was merged here says so (Issue #434 review).
+  const books = document.olderVersionBooks.map((book) => `《${book.bookTitle}》${book.merged ? '随图书带来的' : ''}第 ${book.ordinal} 版`).join('、');
   const more = document.olderVersionBookCount > document.olderVersionBooks.length ? ` 等 ${document.olderVersionBookCount} 本书` : '';
   return `还在用旧版：${books}${more}；这些书下次审阅会按第 ${document.currentOrdinal} 版。`;
 }
@@ -150,6 +152,23 @@ export function guidelineVersionLine(version: ReviewGuidelineVersionProjection, 
     ? GUIDELINE_UNUSED
     : version.usedByCount > version.usedBy.length ? `用于 ${version.usedByCount} 次审阅，最近：${named}` : `用于 ${named}`;
   return `第 ${version.ordinal} 版 · ${version.issuer} · ${origin} · ${version.clauseCount} 条 · ${used}`;
+}
+
+/** The versions merged Books were reviewed under and this data never had (Issue #434 review): read-only, and how many. */
+export function guidelineMergedVersionsSummary(count: number): string {
+  return `随合并的图书带来的版本（${count}，只读）`;
+}
+
+/** One such version: its number and issuer, how many clauses, and the reviews that used it. */
+export function guidelineMergedVersionLine(version: ReviewGuidelineMergedVersionProjection): string {
+  const named = version.usedBy.map((run) => `《${run.bookTitle}》第 ${run.reviewOrdinal} 次审阅`).join('、');
+  const used = version.usedByCount > version.usedBy.length ? `用于 ${version.usedByCount} 次审阅，最近：${named}` : `用于 ${named}`;
+  return `第 ${version.ordinal} 版 · ${version.issuer} · ${version.clauses.length} 条 · 随图书带来 · ${used}`;
+}
+
+/** When more such versions exist than are named. */
+export function guidelineMergedVersionsMore(shown: number, total: number): string {
+  return `只列出 ${shown} 个，共 ${total} 个。`;
 }
 
 export function guidelinePreviewHeading(preview: Pick<ReviewGuidelinePreviewProjection, 'ordinal' | 'title'>): string {

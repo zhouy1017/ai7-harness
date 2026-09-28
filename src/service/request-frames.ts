@@ -764,8 +764,9 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
-    // 替换本机全部数据: the one preview it takes the package of.
-    case 'prepareDatabaseReplacement': {
+    // 替换本机全部数据, and 只导入其中的图书 (Issue #434, S86d): the one preview each takes the package of.
+    case 'prepareDatabaseReplacement':
+    case 'prepareDatabaseMerge': {
       const input = requireInput(value.input, ['previewId'], tentativeId);
       if (!validUuid(input.previewId)) throw new ProtocolError(tentativeId);
       break;

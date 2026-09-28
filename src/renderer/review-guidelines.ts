@@ -9,6 +9,9 @@ import {
   guidelineClausesSummary,
   guidelineFixedStatement,
   guidelineImported,
+  guidelineMergedVersionLine,
+  guidelineMergedVersionsMore,
+  guidelineMergedVersionsSummary,
   guidelineOlderBooks,
   guidelinePreviewChanges,
   guidelinePreviewHeading,
@@ -110,6 +113,31 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
       el('dt', undefined, '文件'), el('dd', 'technical-identity', document.documentId),
       el('dt', undefined, '各版本摘要'), el('dd', 'technical-identity', document.versions.map((version) => `第 ${version.ordinal} 版 ${version.digest}`).join('；'))));
     node.append(clauses, versions);
+    // The versions merged Books were reviewed under and this data never had, each with its clauses: read-only (Issue #434
+    // review; ADR 0079 §1.5).
+    if (document.mergedVersionCount > 0) {
+      const merged = el('details', 'guideline-merged-versions');
+      merged.append(el('summary', undefined, guidelineMergedVersionsSummary(document.mergedVersionCount)));
+      const mergedRows = el('ul', 'guideline-version-list');
+      for (const version of document.mergedVersions) {
+        const row = el('li', undefined, guidelineMergedVersionLine(version));
+        row.dataset['guidelineMergedVersion'] = String(version.ordinal);
+        row.dataset['guidelineUsedBy'] = String(version.usedByCount);
+        const mergedClauses = el('ol', 'guideline-clause-list');
+        for (const clause of version.clauses) {
+          const item = el('li', 'guideline-clause-text', clause.text);
+          item.value = clause.number;
+          mergedClauses.append(item);
+        }
+        row.append(mergedClauses);
+        mergedRows.append(row);
+      }
+      merged.append(mergedRows);
+      if (document.mergedVersionCount > document.mergedVersions.length) {
+        merged.append(el('p', 'field-note', guidelineMergedVersionsMore(document.mergedVersions.length, document.mergedVersionCount)));
+      }
+      node.append(merged);
+    }
     if (refusal?.documentId === document.documentId) {
       const note = el('p', 'attention-note guideline-refusal', refusal.message);
       note.setAttribute('role', 'alert');

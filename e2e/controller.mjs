@@ -552,8 +552,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'model-service-restart-and-replace',
     // Issue #434 (S86a): 导出数据库 with a credential protected.
     'database-export',
-    // Issue #434 (S86c): 导入数据库, 替换本机全部数据 and 回退到替换前的数据, each completed at AI7's next start.
-    'database-import-replace-and-roll-back',
+    // Issue #434 (S86c, S86d): 导入数据库 — 替换本机全部数据, 只导入其中的图书 and 回退到替换前的数据, each completed at AI7's next start.
+    'database-import-replace',
+    'database-import-merge',
+    'database-import-roll-back',
     'model-service-remove-and-restart',
     'evaluation-calibration-settings',
   ]),

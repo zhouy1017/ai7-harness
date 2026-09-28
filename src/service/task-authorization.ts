@@ -331,10 +331,15 @@ export const SCHEDULED_BACKUP_SCHEMA_VERSION = 56;
 /**
  * The database-replacement revision (Issue #434, S86c; V2-UX-DSTO-017; ADR 0079 §1.3, §1.4): one additive, append-only relation
  * owned by `database-replacement.ts` and created before this version is stamped — each replacement of the local data by a
- * database package, recorded applied in the data it brought in or failed in the data it spared. No existing row changes. This
- * is the terminal version.
+ * database package, recorded applied in the data it brought in or failed in the data it spared. No existing row changes.
  */
 export const DATABASE_REPLACEMENT_SCHEMA_VERSION = 57;
+/**
+ * The database-merge revision (Issue #434, S86d; V2-UX-DSTO-017; ADR 0079 §1.5): one additive, append-only relation owned by
+ * `database-merge.ts` and created before this version is stamped — each merge of a database package's Books into the local
+ * data, recorded applied or failed in the data that opened after it. No existing row changes. This is the terminal version.
+ */
+export const DATABASE_MERGE_SCHEMA_VERSION = 58;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
@@ -1186,7 +1191,6 @@ function validateStoredCanonicalRows(db: DatabaseSync): void {
             mr.source_version_id, sv.source_digest, m.manuscript_id joined_manuscript_id,
             mb.branch_id joined_branch_id, pin.book_id artifact_pin_book_id,
             installation.content_sha256 native_carrier_sha256,
-            connection.credential_reference,
             ra.task_intent_id authorization_task_id, ra.authorization_id, ra.plan_envelope_sha256,
             ra.origin, ra.authorized_at, ra.canonical_json authorization_json,
             rr.task_intent_id run_task_id, rr.run_record_id, rr.authorization_id run_authorization_id,
@@ -1212,9 +1216,7 @@ function validateStoredCanonicalRows(db: DatabaseSync): void {
        AND pin.sidecar_id = 'ai7.editorial-workspace-profile.authority'
        AND pin.sidecar_revision = 2 AND pin.sidecar_sha256 = '${SIDECAR_DIGEST}'
      LEFT JOIN native_artifact_installations installation
-       ON installation.artifact_id = pin.native_artifact_id
-     LEFT JOIN model_service_connections connection
-       ON connection.connection_id = 'main-editorial-deepseek-v4-pro'`,
+       ON installation.artifact_id = pin.native_artifact_id`,
   ).all() as SqlRow[];
   for (const row of rows) {
     const taskIntentId = asString(row.task_intent_id);
@@ -1241,7 +1243,11 @@ function validateStoredCanonicalRows(db: DatabaseSync): void {
       const journalSequence = asNumber(row.journal_sequence);
       const createdForDirtyJournal = asNumber(row.created_for_dirty_journal);
       const sourceVersionId = asString(row.source_version_id);
-      const credentialReference = asString(row.credential_reference);
+      // The plan is read against the credential reference it froze, never this computer's connection: a Book merged from
+      // another computer brings its plans and not that computer's connection (Issue #434 review), and each plan still has
+      // to be exactly what its own reference and pin derive.
+      const plan = parseCanonicalJson(row.provider_plan_json) as { providerProcessing?: unknown; credentialReference?: unknown };
+      const credentialReference = typeof plan.credentialReference === 'string' ? plan.credentialReference : '';
       requireTask(
         row.checkpoint_id === taskIntentId && UUID_PATTERN.test(manuscriptId) && UUID_PATTERN.test(branchId) &&
         UUID_PATTERN.test(revisionId) && /^r[1-9][0-9]*$/.test(revisionLabel) && DIGEST_PATTERN.test(revisionDigest) &&
@@ -1292,8 +1298,7 @@ function validateStoredCanonicalRows(db: DatabaseSync): void {
       // The plan is validated against the pin it froze, not against the launch reading it now: the
       // row states its own scope, and the Execution Plan and Plan Envelope must be the derivations
       // of that same pin. Under `development-ci` this is byte for byte the check it always was.
-      const pin = providerProcessingPinOf(
-        (parseCanonicalJson(row.provider_plan_json) as { providerProcessing?: unknown }).providerProcessing);
+      const pin = providerProcessingPinOf(plan.providerProcessing);
       requireTask(pin !== null, 'TASK_RECORD_INVALID', 'Provider Resolution Plan 的 Provider Processing pin 无效。');
       requireTask(row.provider_plan_json === canonicalJson(providerResolutionPlanValue(credentialReference, pin)),
         'TASK_RECORD_INVALID', 'Provider Resolution Plan 无效。');
@@ -1390,7 +1395,7 @@ function validateRevision16AnalysisLedgerSchema(db: DatabaseSync): void {
 
 export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
-  requireTask(version === DATABASE_REPLACEMENT_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
+  requireTask(version === DATABASE_MERGE_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
   validateJ03TaskAuthorizationSchema(db);
   validateAnalysisLedgerSchema(db);
 }
@@ -1588,7 +1593,7 @@ function migrateAnalysisLedgerToRevision17(db: DatabaseSync, from: typeof J04_BA
         db.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_delete`]!);
       }
       seedInitialPlanVersions(db);
-      db.exec(`PRAGMA user_version = ${DATABASE_REPLACEMENT_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -1653,7 +1658,7 @@ function migrateAnalysisLedgerToRevision24(db: DatabaseSync): void {
  * terminal shape first.
  */
 function advanceToTerminalRevision(db: DatabaseSync): void {
-  migrateInTransaction(db, `PRAGMA user_version = ${DATABASE_REPLACEMENT_SCHEMA_VERSION};`, 'Terminal version');
+  migrateInTransaction(db, `PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION};`, 'Terminal version');
 }
 
 /**
@@ -1678,7 +1683,7 @@ function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24
                   mode, predecessor_revision_id, selected_start_position, selected_end_position
            FROM temp.migrate_analysis_task_intents ORDER BY migrate_rowid`);
       rebuildResultSetRelations(db);
-      db.exec(`PRAGMA user_version = ${DATABASE_REPLACEMENT_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -1732,10 +1737,10 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === ANALYSIS_FEEDBACK_SCHEMA_VERSION || version === DECISION_FEEDBACK_SCHEMA_VERSION || version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION || version === SERIES_SCHEMA_VERSION || version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
       version === STORE_VERSION_SCHEMA_VERSION || version === DATABASE_EXPORT_SCHEMA_VERSION || version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
-      version === DATABASE_REPLACEMENT_SCHEMA_VERSION,
+      version === DATABASE_REPLACEMENT_SCHEMA_VERSION || version === DATABASE_MERGE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === DATABASE_REPLACEMENT_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === DATABASE_MERGE_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
   // Revisions 30 to 32 widen the Run states, the Run Authorizations' origin and the Task Outcomes first, for every
   // store that has an analysis ledger: each revision from 15 up carries them as revision 15 created them or as an
   // earlier one of these widenings left them, so once widened, every older revision's own validation below reads
@@ -1767,9 +1772,9 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === EVALUATION_RECORD_SCHEMA_VERSION || version === ANALYSIS_FEEDBACK_SCHEMA_VERSION || version === DECISION_FEEDBACK_SCHEMA_VERSION ||
       version === LEARNING_ELIGIBILITY_SCHEMA_VERSION || version === EVALUATION_CALIBRATION_SCHEMA_VERSION || version === SERIES_SCHEMA_VERSION ||
       version === SERIES_KNOWLEDGE_SCHEMA_VERSION || version === STORE_VERSION_SCHEMA_VERSION || version === DATABASE_EXPORT_SCHEMA_VERSION ||
-      version === SCHEDULED_BACKUP_SCHEMA_VERSION) {
+      version === SCHEDULED_BACKUP_SCHEMA_VERSION || version === DATABASE_REPLACEMENT_SCHEMA_VERSION) {
     // Revisions 25 to 29 add no task-authorization or analysis relation, revisions 30 to 35 have just widened the
-    // four they move, and revisions 36 to 57 add none, so the ledger a revision-24 to revision-56 store carries is
+    // four they move, and revisions 36 to 58 add none, so the ledger a revision-24 to revision-57 store carries is
     // already the terminal one: it is validated as the terminal shape, and nothing but the version moves.
     validateJ03TaskAuthorizationSchema(db);
     validateAnalysisLedgerSchema(db);
@@ -1805,7 +1810,7 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   }
   const analysisStatements = `${Object.values(ANALYSIS_LEDGER_SCHEMA_SQL).join(';\n')};
       ${Object.values(ANALYSIS_LEDGER_TRIGGER_SQL).join(';\n')};
-      PRAGMA user_version = ${DATABASE_REPLACEMENT_SCHEMA_VERSION};`;
+      PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION};`;
   if (version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION) {
     validateJ03TaskAuthorizationSchema(db);
     return migrateInTransaction(db, analysisStatements, 'Analysis ledger');

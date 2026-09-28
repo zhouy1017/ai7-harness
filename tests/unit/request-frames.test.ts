@@ -1413,6 +1413,8 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'cancelDatabaseReplacement', input: { replacementId: randomUUID() } },
       { op: 'rollBackDatabaseReplacement', input: { replacementId: randomUUID() } },
       { op: 'inspectDatabaseReplacements', input: {} },
+      // 只导入其中的图书 (Issue #434, S86d): the one preview it merges from.
+      { op: 'prepareDatabaseMerge', input: { previewId: randomUUID() } },
     ];
     for (const { op, input } of inputs) {
       const request = { id: randomUUID(), op, input };
@@ -1432,6 +1434,9 @@ describe('decodeRequest rejects malformed frames', () => {
       ['rollBackDatabaseReplacement', { replacementId: 7 }],
       ['rollBackDatabaseReplacement', {}],
       ['inspectDatabaseReplacements', { pending: true }],
+      ['prepareDatabaseMerge', { previewId: 'preview' }],
+      ['prepareDatabaseMerge', { previewId: randomUUID(), bookIds: [] }],
+      ['prepareDatabaseMerge', {}],
     ] as const) {
       expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
     }

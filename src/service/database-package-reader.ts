@@ -59,7 +59,7 @@ interface ZipEntry {
   readonly offset: number;
 }
 
-const ORIGINS: ReadonlyArray<string> = ['database-export', 'scheduled-backup', 'pre-replace-backup'];
+const ORIGINS: ReadonlyArray<string> = ['database-export', 'scheduled-backup', 'pre-replace-backup', 'pre-merge-backup'];
 export const MAX_MANIFEST_BYTES = 16 * 1024 * 1024;
 /**
  * The most a package's central directory may take, checked before it is read (Issue #434 review): 65,534 entries with names of
