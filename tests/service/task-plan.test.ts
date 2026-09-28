@@ -307,26 +307,15 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
       // — the Book's is `missing` — and the bar binds the exact envelope version 1 froze.
       expect(firstPlan.start).toEqual({ readiness: 'ready', needsModelConnection: false, planEnvelopeDigest: first.planEnvelope!.digest, categoryDigests: [], reconfirm: null });
       expect(await barPlan(store, bookId, 'baseline-analysis', null, 'missing')).toEqual({ plan: firstPlan, asked: 0 });
-      // One slot, no queue (S74a A2): while a Run holds the slot the start is refused before anything is
-      // recorded, with the bar's own reason; nothing waits for the slot to free.
-      const beforeBusy = relationDigests();
-      let busy: unknown = null;
-      try {
-        store.authorizeBaselineAnalysis(bookId, first.taskIntent!.taskIntentId, firstPlan.start.planEnvelopeDigest!, true);
-      } catch (error) {
-        busy = error;
-      }
-      expect(busy).toBeInstanceOf(StoreError);
-      expect(busy).toMatchObject({ code: 'EXECUTION_BUSY', message: EXECUTION_SLOT_BUSY_REASON });
-      expect(relationDigests()).toEqual(beforeBusy);
-      expect(plan(store, bookId, 'baseline-analysis').start.readiness).toBe('ready');
-
       expect(owner.busy).toBe(false);
-      const authorized = store.authorizeBaselineAnalysis(bookId, first.taskIntent!.taskIntentId, firstPlan.start.planEnvelopeDigest!, owner.busy);
+      // The instance's governor (Issue #49, S14; CONC-007): the start is recorded, and until the owner admits it the Run
+      // waits for a place — 等待运行名额, with 取消 — whatever else runs; nothing refuses it for a busy instance.
+      const authorized = store.authorizeBaselineAnalysis(bookId, first.taskIntent!.taskIntentId, firstPlan.start.planEnvelopeDigest!);
+      expect(authorized.projection.state).toBe('queued');
+      expect(plan(store, bookId, 'baseline-analysis').state).toEqual({ key: 'queued', label: '等待运行名额' });
       owner.admitAndDispatch(authorized.dispatchRunRecordId!);
-      expect(owner.busy).toBe(true);
-      // The Run holds the slot now; the same start again is its own authorization, answered as it always was.
-      expect(store.authorizeBaselineAnalysis(bookId, first.taskIntent!.taskIntentId, first.planEnvelope!.digest, owner.busy).dispatchRunRecordId).toBeNull();
+      // The same start again is its own authorization, answered as it always was.
+      expect(store.authorizeBaselineAnalysis(bookId, first.taskIntent!.taskIntentId, first.planEnvelope!.digest).dispatchRunRecordId).toBeNull();
       await owner.whenIdle();
       expect(owner.busy).toBe(false);
       // A development-ci owner holds no credential of a route that sends: it reads none.
@@ -513,8 +502,8 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
       const drawer = plan(store, bookId, 'baseline-analysis');
       // No local route is bound and the remote one is denied: the bar says the start only records.
       expect(drawer.start).toEqual({ readiness: 'no-route', needsModelConnection: false, planEnvelopeDigest: prepared.planEnvelope!.digest, categoryDigests: [], reconfirm: null });
-      // Such a Run never takes the slot, so a busy slot does not refuse it.
-      const authorized = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, drawer.start.planEnvelopeDigest!, true);
+      // Such a Run never waits on the governor: it is recorded blocked before dispatch.
+      const authorized = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, drawer.start.planEnvelopeDigest!);
       expect(authorized.dispatchRunRecordId).toBeNull();
       expect(authorized.projection.state).toBe('authorized-blocked');
       const recorded = plan(store, bookId, 'baseline-analysis');

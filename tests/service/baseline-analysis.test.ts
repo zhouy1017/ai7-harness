@@ -18,7 +18,7 @@ import {
   ANALYSIS_LEDGER_TRIGGER_SQL,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
-  CLARIFICATION_SCHEMA_VERSION, BOOK_PEOPLE_SCHEMA_VERSION,
+  CLARIFICATION_SCHEMA_VERSION, LIBRARY_MATERIAL_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
 } from '../../src/service/task-authorization.js';
@@ -382,7 +382,8 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       const admitted = store.inspectBaselineAnalysis(bookId, (runRecordId) => owner.progressFor(runRecordId));
       expect(['admitted', 'executing']).toContain(admitted.state);
       expect(admitted.run?.progress).toMatchObject({ unitsTotal: SAMPLE1_UNITS });
-      expect(() => owner.admitAndDispatch(authorized.dispatchRunRecordId!)).toThrowError(/EXECUTION_BUSY|一次只执行一个运行/u);
+      // A Run already executing takes no second place (Issue #49, S14).
+      expect(() => owner.admitAndDispatch(authorized.dispatchRunRecordId!)).toThrowError(/已经在执行/u);
 
       const settled = await settle(owner, store, bookId);
       expect(settled.state).toBe('settled');
@@ -606,7 +607,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     // drift or a retry-safe failure leaves the Plan Revision and Plan Adaptation relations empty.
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BOOK_PEOPLE_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LIBRARY_MATERIAL_SCHEMA_VERSION);
       const expectedEmpty = new Set(['analysis_plan_revisions', 'analysis_plan_adaptations']);
       for (const table of Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL)) {
         const total = (database.prepare(`SELECT count(*) total FROM ${table}`).get() as { total: number }).total;
@@ -1426,7 +1427,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       try {
         const after = new DatabaseSync(databasePath, { readOnly: true });
         try {
-          expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BOOK_PEOPLE_SCHEMA_VERSION);
+          expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LIBRARY_MATERIAL_SCHEMA_VERSION);
           for (const table of j03Tables) expect(tableRows(after, table)).toEqual(j03Before[table]);
           for (const table of analysisTables) {
             expect(tableRows(after, table, table === 'analysis_task_intents' ? REVISION_15_INTENT_COLUMNS : '*')).toEqual(analysisBefore[table]);
@@ -1511,7 +1512,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     try {
       const after = new DatabaseSync(databasePath, { readOnly: true });
       try {
-        expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BOOK_PEOPLE_SCHEMA_VERSION);
+        expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LIBRARY_MATERIAL_SCHEMA_VERSION);
         for (const table of j03Tables) expect(tableRows(after, table)).toEqual(j03Before[table]);
         for (const table of analysisTables) expect(tableRows(after, table)).toEqual(analysisBefore[table]);
         // The widened CHECKs are in place: the second kind is admissible where it was not before.
@@ -1557,7 +1558,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     }
     const verify = new DatabaseSync(databasePath);
     try {
-      expect((verify.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BOOK_PEOPLE_SCHEMA_VERSION);
+      expect((verify.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LIBRARY_MATERIAL_SCHEMA_VERSION);
       for (const table of Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL)) {
         expect((verify.prepare(`SELECT count(*) total FROM ${table}`).get() as { total: number }).total).toBe(0);
       }

@@ -185,6 +185,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j09-picker-path' ||
           key === '--j10-picker-path' ||
           key === '--j16-picker-path' ||
+          key === '--j15-picker-path' ||
           key === '--j07-save-path' ||
           key === '--j07-folder-path' ||
           key === '--j04-save-path' ||
@@ -225,9 +226,11 @@ function parseArguments(argv: string[]): LaunchArguments {
   const j09PickerPath = values.get('--j09-picker-path');
   const j10PickerPath = values.get('--j10-picker-path');
   const j16PickerPath = values.get('--j16-picker-path');
+  // J-15's picker serves 导入新版本 of a review guideline document (Issue #427, S79a).
+  const j15PickerPath = values.get('--j15-picker-path');
   requireDesktop(
     [j01PickerPath, j02PickerPath, j08PickerPath, j12PickerPath, j03PickerPath, j04PickerPath, j05PickerPath, j06PickerPath, j07PickerPath, j09PickerPath,
-      j10PickerPath, j16PickerPath].filter(Boolean).length <= 1,
+      j10PickerPath, j16PickerPath, j15PickerPath].filter(Boolean).length <= 1,
   );
   // The picker-path launch controls carry whatever their Journey selects, in any recognised format
   // or none, so each one asks only that it is its own Journey's absolute path.
@@ -267,9 +270,12 @@ function parseArguments(argv: string[]): LaunchArguments {
   requireDesktop(
     j16PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-16' && isAbsolute(j16PickerPath)),
   );
+  requireDesktop(
+    j15PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-15' && isAbsolute(j15PickerPath)),
+  );
   const injectedPickerPath =
     j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath ?? j04PickerPath ?? j05PickerPath ?? j06PickerPath ??
-      j07PickerPath ?? j09PickerPath ?? j10PickerPath ?? j16PickerPath;
+      j07PickerPath ?? j09PickerPath ?? j10PickerPath ?? j16PickerPath ?? j15PickerPath;
   // The Save dialog's launch control is guarded exactly as the picker controls are: each Journey's own, and absolute —
   // J-07's for its exports, J-04's for the 审阅报告's (Issue #500, S64b part 2).
   const j07SavePath = values.get('--j07-save-path');
@@ -333,11 +339,11 @@ function parseArguments(argv: string[]): LaunchArguments {
   // simulates whether the adapter's route has a network, it sits beside the adapter rather than excluding it.
   const connectivityPath = values.get('--j04-connectivity-path');
   requireDesktop(connectivityPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && isAbsolute(connectivityPath)));
-  // J-10's unit hold (Issue #422) is guarded the same way — J-10's own, and J-16's to hold a Run in its 任务 panel (Issue
-  // #423), and absolute — and sits beside the adapter.
+  // J-10's unit hold (Issue #422) is guarded the same way — J-10's own, J-16's to hold a Run in its 任务 panel (Issue
+  // #423), and J-09's to hold several Books' Runs at once (Issue #49), and absolute — and sits beside the adapter.
   const unitHoldPath = values.get('--j10-unit-hold-path');
   requireDesktop(unitHoldPath === undefined ||
-    ((process.env.AI7_E2E_JOURNEY === 'J-10' || process.env.AI7_E2E_JOURNEY === 'J-16') && isAbsolute(unitHoldPath)));
+    ((process.env.AI7_E2E_JOURNEY === 'J-09' || process.env.AI7_E2E_JOURNEY === 'J-10' || process.env.AI7_E2E_JOURNEY === 'J-16') && isAbsolute(unitHoldPath)));
   requireDesktop(
     observeJ12RevealValue === undefined ||
       (process.env.AI7_E2E_JOURNEY === 'J-12' && observeJ12RevealValue === 'true'),
@@ -1121,6 +1127,53 @@ function registerRendererHandlers(
         properties: ['openFile'],
         filters: [
           { name: '稿件文件', extensions: ['docx', 'doc', 'pdf', 'odt', 'rtf', 'txt', 'md'] },
+          { name: '所有文件', extensions: ['*'] },
+        ],
+      });
+      if (selected.canceled || selected.filePaths.length !== 1) return undefined;
+      selectedPath = selected.filePaths[0];
+    }
+    requireDesktop(selectedPath !== undefined && isAbsolute(selectedPath));
+    return selectedPath;
+  };
+  /**
+   * 导入新版本 of a review guideline document (Issue #427, S79a): the platform's own open dialog, suggesting Word and plain
+   * text. J-15 alone answers it through its picker control, which serves one choice per window as the manuscript picker's.
+   */
+  const chooseGuidelineFile = async (owned: OwnedRendererWindow): Promise<string | undefined> => {
+    let selectedPath = owned.injectedPickerPath;
+    owned.injectedPickerPath = undefined;
+    if (!selectedPath) {
+      const selected = await dialog.showOpenDialog(owned.window, {
+        title: '选择审阅规范文件',
+        buttonLabel: '选择文件',
+        properties: ['openFile'],
+        filters: [
+          { name: '审阅规范文件', extensions: ['docx', 'txt', 'md'] },
+          { name: '所有文件', extensions: ['*'] },
+        ],
+      });
+      if (selected.canceled || selected.filePaths.length !== 1) return undefined;
+      selectedPath = selected.filePaths[0];
+    }
+    requireDesktop(selectedPath !== undefined && isAbsolute(selectedPath));
+    return selectedPath;
+  };
+  /**
+   * 放入资料… (Issue #427, S79c): the platform's own open dialog. 资料库 keeps a file whole whatever it is and names its format
+   * from its content, so the dialog suggests the usual ones without restricting to them. J-15 alone answers it through its
+   * picker control, which serves one choice per window as the manuscript picker's.
+   */
+  const chooseLibraryMaterialFile = async (owned: OwnedRendererWindow): Promise<string | undefined> => {
+    let selectedPath = owned.injectedPickerPath;
+    owned.injectedPickerPath = undefined;
+    if (!selectedPath) {
+      const selected = await dialog.showOpenDialog(owned.window, {
+        title: '选择要放入资料库的文件',
+        buttonLabel: '放入资料库',
+        properties: ['openFile'],
+        filters: [
+          { name: '图书、论文、资料与网页', extensions: ['pdf', 'epub', 'docx', 'doc', 'odt', 'rtf', 'txt', 'md', 'html', 'htm'] },
           { name: '所有文件', extensions: ['*'] },
         ],
       });
@@ -2531,6 +2584,126 @@ function registerRendererHandlers(
         return serializeEffect(async () => {
           requireAuthority();
           return service.call('deactivateDefaultExecutionRule', { ruleId: input.ruleId });
+        });
+      }),
+  );
+  // 知识库 › 审阅规范文件 (Issue #427, S79a) names no Book: it reads every Book's Review Runs. 导入新版本 opens the picker and
+  // hands the service the path it returned; confirming records the version, serialized with every other effect.
+  ipcMain.handle(IPC_CHANNELS.inspectReviewGuidelines, (event, input?: ServiceOperationMap['inspectReviewGuidelines']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('inspectReviewGuidelines', input?.page === undefined ? {} : { page: input.page });
+    }),
+  );
+  // 知识库 › 范例 (Issue #427, S79b) names no Book either: it reads the published Books' delivered documents, a page at a
+  // time, starting where the renderer's cursor says; the service checks the cursor.
+  ipcMain.handle(IPC_CHANNELS.inspectExemplars, (event, input: ServiceOperationMap['inspectExemplars']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('inspectExemplars', { after: input?.after ?? null });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectKnowledgeProcedures, (event) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('inspectKnowledgeProcedures', {});
+    }),
+  );
+  // 知识库 › 资料库 (Issue #427, S79c): the renderer names no path — main's picker chooses the file — and names an item and a
+  // decision only in the closed shapes the service checks again.
+  ipcMain.handle(IPC_CHANNELS.inspectLibraryMaterials, (event, input: ServiceOperationMap['inspectLibraryMaterials']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('inspectLibraryMaterials', { after: input?.after ?? null });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectLibraryMaterial, (event, input: ServiceOperationMap['inspectLibraryMaterial']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectLibraryMaterial', { materialId: input.materialId });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.readLibraryDecisionReason, (event, input: ServiceOperationMap['readLibraryDecisionReason']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('readLibraryDecisionReason', { materialId: input.materialId, ordinal: input.ordinal, offset: input.offset });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.previewLibraryMaterial, (event) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const path = await chooseLibraryMaterialFile(owned);
+        if (path === undefined) return null;
+        return service.call('previewLibraryMaterial', { path });
+      });
+    }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.addLibraryMaterial,
+    (event, input: ServiceOperationMap['addLibraryMaterial']['input']) =>
+      envelope(async () => {
+        requireSender(event);
+        requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+        return serializeEffect(async () => {
+          requireAuthority();
+          return service.call('addLibraryMaterial', { previewId: input.previewId, title: input.title, kind: input.kind });
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.decideLibraryMaterial,
+    (event, input: ServiceOperationMap['decideLibraryMaterial']['input']) =>
+      envelope(async () => {
+        requireSender(event);
+        requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+        return serializeEffect(async () => {
+          requireAuthority();
+          return service.call('decideLibraryMaterial', {
+            materialId: input.materialId,
+            expectedDecisions: input.expectedDecisions,
+            decision: input.decision,
+          });
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.previewReviewGuidelineVersion,
+    (event, input: { documentId: string; previewId?: string; clausePage?: number }) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        requireDesktop(input !== null && typeof input === 'object' && typeof input.documentId === 'string' && input.documentId.length > 0 && input.documentId.length <= 64,
+          'AI7_RENDERER_BOUNDARY_INVALID');
+        return serializeEffect(async () => {
+          requireAuthority();
+          if (input.previewId !== undefined) {
+            requireDesktop(typeof input.previewId === 'string' && input.previewId.length <= 64, 'AI7_RENDERER_BOUNDARY_INVALID');
+            return service.call('previewReviewGuidelineVersion', { documentId: input.documentId, previewId: input.previewId,
+              ...(input.clausePage === undefined ? {} : { clausePage: input.clausePage }) });
+          }
+          const path = await chooseGuidelineFile(owned);
+          if (path === undefined) return null;
+          return service.call('previewReviewGuidelineVersion', { documentId: input.documentId, path });
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.importReviewGuidelineVersion,
+    (event, input: ServiceOperationMap['importReviewGuidelineVersion']['input']) =>
+      envelope(async () => {
+        requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          return service.call('importReviewGuidelineVersion', { previewId: input.previewId });
         });
       }),
   );

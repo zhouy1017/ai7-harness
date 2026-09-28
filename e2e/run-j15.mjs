@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstat, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -181,7 +181,7 @@ async function clickBook(renderer, bookId, name) {
 }
 
 async function fill(renderer, selector, value, name) {
-  await assertRenderer(renderer, `(() => { const input=document.querySelector(${JSON.stringify(selector)}); if(!(input instanceof HTMLInputElement))return false; input.value=${JSON.stringify(value)}; input.dispatchEvent(new Event('input',{bubbles:true})); return true; })()`, name);
+  await assertRenderer(renderer, `(() => { const input=document.querySelector(${JSON.stringify(selector)}); if(!(input instanceof HTMLInputElement)&&!(input instanceof HTMLTextAreaElement))return false; input.value=${JSON.stringify(value)}; input.dispatchEvent(new Event('input',{bubbles:true})); return true; })()`, name);
 }
 
 async function createEmptyBook(renderer, title) {
@@ -195,6 +195,127 @@ async function createEmptyBook(renderer, title) {
   const bookId = await renderer.evaluate(`document.querySelector('.book-overview')?.dataset.bookId`);
   requireJourney(UUID_PATTERN.test(bookId), 'empty-book-id');
   return bookId;
+}
+
+// 知识库 › 审阅规范文件 (Issue #427, plan slice S79a): the house's own next version of 文字规范条款, written by the runner —
+// AI7's own words, never a manuscript — and handed to the product through J-15's picker control.
+const HOUSE_GUIDELINE_NAME = '本社文字规范.txt';
+const HOUSE_GUIDELINE = ['本社文字规范（J-15）', '', '1. 指出错字、别字、多字与漏字，给出改正后的文字。', '2. 指出成分残缺与搭配不当，给出通顺的改法。',
+  '3. 数字与标点按本社体例手册统一，', '体例手册未写到的，按国家现行规范。', '4. 专名在全书前后写法一致。', '5. 引文与原文核对后再改，不凭记忆改动。'].join('\n');
+const KNOWLEDGE_TABS = ['审阅规范文件', '评估方案', '工序与规则', '社级编辑记忆', '范例', '资料库', '外部来源留存'];
+const GUIDELINE_TITLES = ['文字规范条款', '体例条款', '线索条款', '事实核查契约', '引用与学术规范条款', '出版风险提示条款', '表达改进条款'];
+// 线索条款 and 事实核查契约 are AI7's fixed statements (Issue #427 review): their categories read no clause of theirs, so
+// they say so where the others offer 导入新版本….
+const GUIDELINE_FIXED = new Map([
+  [2, '「情节逻辑与前后一致」把基线分析里的线索变成批注，不按这里的条款找问题。这是 AI7 的固定说明，不能导入新版本。'],
+  [3, '「事实核查」按 AI7 固定的事实核查契约执行，不读取这里的条款。这是 AI7 的固定说明，不能导入新版本。'],
+]);
+/** The 知识库 page as an editor reads it: its tabs, the chosen one, and each guideline card's words. */
+const READ_KNOWLEDGE = `(() => {
+  const page = document.querySelector('[data-screen="knowledge-base"] .knowledge-base');
+  if (!(page instanceof HTMLElement)) return null;
+  return {
+    tab: page.dataset.knowledgeTab ?? null,
+    tabs: Array.from(page.querySelectorAll('[role="tab"]'), (tab) => [tab.textContent, tab.getAttribute('aria-selected')]),
+    pending: page.querySelector('.knowledge-pending')?.textContent ?? null,
+    guidelines: page.querySelector('.review-guidelines')?.dataset.guidelines ?? null,
+    cards: Array.from(page.querySelectorAll('.guideline-card'), (card) => ({
+      id: card.dataset.guidelineDocument,
+      title: card.querySelector('h3')?.textContent ?? null,
+      pill: card.querySelector('.guideline-version-pill')?.textContent ?? null,
+      applied: card.querySelector('.guideline-applied')?.textContent ?? null,
+      clauses: Array.from(card.querySelectorAll('.guideline-clauses li'), (item) => [item.dataset.clauseId, item.querySelector('.guideline-citations')?.textContent ?? null]),
+      versions: Array.from(card.querySelectorAll('.guideline-version-list li'), (item) => item.textContent),
+      older: card.querySelector('.guideline-older')?.textContent ?? null,
+      fixed: card.querySelector('.guideline-fixed')?.textContent ?? null,
+      importable: card.querySelector('[data-guideline-action="import"]') instanceof HTMLButtonElement,
+      preview: card.querySelector('.guideline-preview h4')?.textContent ?? null,
+      changes: card.querySelector('.guideline-preview-changes')?.textContent ?? null,
+      previewClauses: card.querySelectorAll('.guideline-preview li').length,
+      refusal: card.querySelector('.guideline-refusal')?.textContent ?? null,
+    })),
+  };
+})()`;
+async function readKnowledge(renderer, predicate, name) {
+  const deadline = Date.now() + 60_000;
+  let page = null;
+  while (Date.now() < deadline) {
+    page = await renderer.evaluate(READ_KNOWLEDGE).catch(() => null);
+    if (page !== null && predicate(page)) return page;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  const error = new Error(`J-15/${name}`);
+  error.detail = page;
+  throw error;
+}
+// 知识库 › 资料库 (Issue #427, plan slice S79c): the admitted Public SampleBook `sample1`, collected by the editor as a reference
+// book, handed to 放入资料… through the picker control of the relaunched window.
+const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
+const LIBRARY_TITLE = '样书一';
+const LIBRARY_EMPTY = '资料库里还没有资料。放进来以后，先定归属与学习准入，任务才能把它列进「允许参考」。';
+/** 资料库 as an editor reads it: the arrival form, and each item's words, decisions and open choice. */
+const READ_LIBRARY = `(() => {
+  const root = document.querySelector('[data-screen="knowledge-base"] .library-materials');
+  if (!(root instanceof HTMLElement)) return null;
+  const preview = root.querySelector('.library-preview');
+  const active = document.activeElement;
+  return {
+    state: root.dataset.library ?? null,
+    count: root.dataset.materialCount ?? null,
+    empty: root.querySelector('.library-empty')?.textContent ?? null,
+    refusal: root.querySelector('.library-refusal')?.textContent ?? null,
+    preview: preview === null ? null : {
+      heading: preview.querySelector('h3')?.textContent ?? null,
+      facts: preview.querySelector('.library-preview-facts')?.textContent ?? null,
+      title: preview.querySelector('[data-library-field="title"]')?.value ?? null,
+      kinds: Array.from(preview.querySelectorAll('[data-library-choice]'), (input) => [input.value, input.checked]),
+      confirmDisabled: preview.querySelector('[data-library-action="confirm-add"]')?.disabled ?? null,
+    },
+    cards: Array.from(root.querySelectorAll('article.library-material'), (card) => {
+      const chooser = card.querySelector('.library-chooser');
+      const consequence = card.querySelector('.library-house-consequence');
+      return {
+        id: card.dataset.materialId,
+        attribution: card.dataset.attribution,
+        eligibility: card.dataset.eligibility,
+        reference: card.dataset.reference,
+        decisions: card.dataset.decisions,
+        title: card.querySelector('h3')?.textContent ?? null,
+        kind: card.querySelector('.library-kind')?.textContent ?? null,
+        attributionLine: card.querySelector('.library-attribution')?.textContent ?? null,
+        eligibilityLine: card.querySelector('.library-eligibility')?.textContent ?? null,
+        referenceLine: card.querySelector('.library-reference')?.textContent ?? null,
+        chooser: chooser === null ? null : {
+          kind: chooser.classList.contains('library-attribution-chooser') ? 'attribution' : 'eligibility',
+          choices: Array.from(chooser.querySelectorAll('[data-library-choice]'), (input) => [input.value, input.checked, input.disabled, input.closest('label')?.textContent ?? null]),
+          consequenceShown: consequence instanceof HTMLElement ? !consequence.hidden : null,
+          confirmDisabled: chooser.querySelector('[data-library-action^="confirm-"]')?.disabled ?? null,
+        },
+        history: Array.from(card.querySelectorAll('.library-decision-list > li'), (item) => item.textContent),
+      };
+    }),
+    focus: active instanceof HTMLElement ? { tag: active.tagName, action: active.dataset.libraryAction ?? null, choice: active.dataset.libraryChoice ?? null } : null,
+  };
+})()`;
+async function readLibrary(renderer, predicate, name) {
+  const deadline = Date.now() + 60_000;
+  let page = null;
+  while (Date.now() < deadline) {
+    page = await renderer.evaluate(READ_LIBRARY).catch(() => null);
+    if (page !== null && predicate(page)) return page;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  const error = new Error(`J-15/${name}`);
+  error.detail = page;
+  throw error;
+}
+async function clickSelector(renderer, selector, name) {
+  await assertRenderer(renderer, `(() => { const node=document.querySelector(${JSON.stringify(selector)}); if(!(node instanceof HTMLElement)||node.disabled)return false; node.click(); return true; })()`, name);
+}
+async function pressKey(renderer, key) {
+  const codes = { ArrowRight: 39, ArrowLeft: 37, Enter: 13 };
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: codes[key] });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: codes[key] });
 }
 
 async function focusAction(renderer, action, name) {
@@ -245,6 +366,9 @@ async function constructPredecessorV12(dataRoot, bookId) {
     database.exec(`
       PRAGMA foreign_keys = OFF;
       BEGIN IMMEDIATE;
+      DROP TABLE library_material_decisions;
+      DROP TABLE library_materials;
+      DROP TABLE review_guideline_versions;
       DROP TABLE book_people_versions;
       DROP TABLE maintenance_case_revisions;
       DROP TABLE maintenance_errata_versions;
@@ -404,11 +528,16 @@ async function main() {
     const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
-    const launch = async () => {
+    const guidelinePath = resolve(runRoot, HOUSE_GUIDELINE_NAME);
+    await writeFile(guidelinePath, HOUSE_GUIDELINE, 'utf8');
+    const launch = async (pickerPath = guidelinePath) => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
         '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
         resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
+        // J-15's picker serves 导入新版本 of a review guideline document (Issue #427, S79a), and in the window relaunched after
+        // it 放入资料… (Issue #427, S79c): one choice per window.
+        '--j15-picker-path', pickerPath,
       ];
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       cancellation.throwIfRequested();
@@ -642,6 +771,348 @@ async function main() {
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await renderer.send('Emulation.clearDeviceMetricsOverride');
+
+    // ---- 知识库 › 审阅规范文件 (Issue #427, plan slice S79a; editor-surfaces §8.4, V2-UX-KB-001 to KB-003) ------------------
+    at('knowledge-guidelines');
+    // 知识库 from 书库: its seven classes as tabs, opening at 审阅规范文件 — every guideline document the review categories apply,
+    // at AI7's built-in first version, with its numbered clauses and a version no review has used yet.
+    await click(renderer, '返回图书列表', 'knowledge-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'knowledge-landing');
+    await click(renderer, '知识库', 'knowledge-open');
+    const opened = await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-guidelines-ready');
+    requireJourney(opened.tab === 'guidelines' && JSON.stringify(opened.tabs) === JSON.stringify(KNOWLEDGE_TABS.map((label, index) => [label, String(index === 0)])) &&
+      JSON.stringify(opened.cards.map((card) => card.title)) === JSON.stringify(GUIDELINE_TITLES) && opened.cards.every((card) => card.pill === '第 1 版 · AI7 内置默认') &&
+      opened.cards[0].applied === '用于：错别字与规范用语' && opened.cards[0].clauses.length === 4 &&
+      opened.cards[0].clauses.every(([clauseId, citations], index) => clauseId === `typos-and-usage/${index + 1}` && citations === '未被引用') &&
+      JSON.stringify(opened.cards[0].versions) === JSON.stringify(['第 1 版 · AI7 内置默认 · 内置 · 4 条 · 还没有审阅用过']) && opened.cards.every((card) => card.older === null) &&
+      opened.cards.every((card, index) => card.fixed === (GUIDELINE_FIXED.get(index) ?? null) && card.importable === !GUIDELINE_FIXED.has(index)),
+    'knowledge-guidelines-cards', opened);
+    // A class a later slice brings says what it will hold and that it is not there yet.
+    await click(renderer, '社级编辑记忆', 'knowledge-memory-tab');
+    const memory = await readKnowledge(renderer, (page) => page.tab === 'memory', 'knowledge-memory-tab-open');
+    requireJourney(memory.pending === '尚未提供：社级编辑记忆还没有接通。' && memory.cards.length === 0, 'knowledge-pending', memory);
+    await click(renderer, '审阅规范文件', 'knowledge-back-to-guidelines');
+    await readKnowledge(renderer, (page) => page.tab === 'guidelines' && page.guidelines === 'ready', 'knowledge-guidelines-again');
+
+    at('knowledge-guideline-import');
+    // 导入新版本… on 文字规范条款: the picker's file is read as the next version would read it — five clauses, how they differ —
+    // and 确认导入 records 第 2 版, issued by the house; version 1 stays listed beneath it.
+    await assertRenderer(renderer, `(() => { const start=document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] [data-guideline-action="import"]'); if(!(start instanceof HTMLButtonElement)||start.disabled||start.textContent!=='导入新版本…')return false; start.click(); return true; })()`, 'knowledge-import-start');
+    const previewed = await readKnowledge(renderer, (page) => page.cards[0]?.preview !== null, 'knowledge-import-preview');
+    requireJourney(previewed.cards[0].preview === '将导入为《文字规范条款》第 2 版' &&
+      previewed.cards[0].changes === `${HOUSE_GUIDELINE_NAME} · 5 条 · 与第 1 版相比：改动 4 条，新增 1 条，删去 0 条` && previewed.cards[0].previewClauses === 5 &&
+      previewed.cards[0].pill === '第 1 版 · AI7 内置默认', 'knowledge-import-preview-words', previewed.cards[0]);
+    await waitFor(renderer, `document.activeElement === document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] .guideline-preview h4')`, 'knowledge-import-preview-focused', 10_000);
+    await assertRenderer(renderer, `(() => { const confirm=document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] [data-guideline-action="confirm"]'); if(!(confirm instanceof HTMLButtonElement)||confirm.disabled)return false; confirm.click(); return true; })()`, 'knowledge-import-confirm');
+    const importedPage = await readKnowledge(renderer, (page) => page.cards[0]?.pill === '第 2 版 · 本社', 'knowledge-imported');
+    requireJourney(importedPage.cards[0].preview === null && importedPage.cards[0].clauses.length === 5 && importedPage.cards[0].versions.length === 2 &&
+      importedPage.cards[0].versions[0].startsWith('第 2 版 · 本社 · 导入于 ') && importedPage.cards[0].versions[0].endsWith(` · ${HOUSE_GUIDELINE_NAME} · 5 条 · 还没有审阅用过`) &&
+      importedPage.cards[0].versions[1] === '第 1 版 · AI7 内置默认 · 内置 · 4 条 · 还没有审阅用过' &&
+      importedPage.cards.slice(1).every((card) => card.pill === '第 1 版 · AI7 内置默认'), 'knowledge-imported-card', importedPage.cards[0]);
+    await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '')==='已导入《文字规范条款》第 2 版；新准备的审阅按第 2 版；已准备的审阅仍用原版本。'`, 'knowledge-imported-status', 10_000);
+    const service = await renderer.evaluate(`window.ai7.inspectReviewGuidelines().then((projection)=>projection.documents.map((document)=>[document.documentId, document.currentOrdinal, document.issuer]))`);
+    requireJourney(JSON.stringify(service?.[0]) === JSON.stringify(['ai7-builtin/typos-and-usage', 2, '本社']) && service.slice(1).every(([, ordinal]) => ordinal === 1), 'knowledge-imported-service', service);
+
+    at('j14-knowledge-keyboard');
+    // Without a pointer: the chosen tab takes focus, ArrowRight and ArrowLeft move between the classes, and each moved to is
+    // chosen with its focus visible.
+    await assertRenderer(renderer, `(() => { const tab=document.querySelector('#knowledge-tab-guidelines'); if(!(tab instanceof HTMLButtonElement))return false; tab.focus(); return document.activeElement===tab; })()`, 'knowledge-tab-focus');
+    await pressKey(renderer, 'ArrowRight');
+    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='evaluation' && document.activeElement?.id==='knowledge-tab-evaluation' && document.activeElement.getAttribute('aria-selected')==='true'`, 'knowledge-arrow-right', 10_000);
+    await pressKey(renderer, 'ArrowLeft');
+    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='guidelines' && document.activeElement?.id==='knowledge-tab-guidelines' && document.querySelector('.review-guidelines')?.dataset.guidelines==='ready'`, 'knowledge-arrow-left', 10_000);
+
+    at('j14-knowledge-reflow-forced-colors');
+    // At 200% the tabs, the cards and their clauses reflow into the width; under forced colours a card keeps its border and the
+    // chosen tab its heavier underline.
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
+    await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[document.querySelector('.knowledge-tabs'), ...document.querySelectorAll('.guideline-card')]; return parts.length===8 && parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2; })()`, 'knowledge-reflow', 10_000);
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
+    await assertRenderer(renderer, `(() => {
+      if (!matchMedia('(forced-colors: active)').matches) return false;
+      const card = document.querySelector('.guideline-card');
+      const chosen = document.querySelector('#knowledge-tab-guidelines');
+      const other = document.querySelector('#knowledge-tab-evaluation');
+      return card instanceof HTMLElement && getComputedStyle(card).borderTopStyle === 'solid' &&
+        chosen instanceof HTMLElement && other instanceof HTMLElement && parseFloat(getComputedStyle(chosen).borderBottomWidth) >= 3 &&
+        parseFloat(getComputedStyle(chosen).borderBottomWidth) > parseFloat(getComputedStyle(other).borderBottomWidth);
+    })()`, 'knowledge-forced-colors');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
+
+    at('knowledge-guideline-restart');
+    // A restart keeps the house's version; keep this window's picker for the subsequent guideline imports.
+    await closeBrowser();
+    manager = await launch();
+    renderer = await waitForRenderer(manager, 'knowledge-restart-window');
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'knowledge-restart-ready');
+    await click(renderer, '知识库', 'knowledge-restart-open');
+    const restarted = await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-restart-ready-page');
+    requireJourney(restarted.cards[0].pill === '第 2 版 · 本社' && restarted.cards[0].versions.length === 2 && restarted.cards[0].clauses.length === 5, 'knowledge-restart-kept', restarted.cards[0]);
+
+    at('knowledge-guideline-import');
+    // Real picker/service/UI pages: later clauses remain reachable in preview and after import; history reaches version 1.
+    const cardSelector = '[data-guideline-document="ai7-builtin/typos-and-usage"]';
+    const activateGuideline = async (selector, name) => assertRenderer(renderer, `(() => {
+      const button=document.querySelector(${JSON.stringify(`${cardSelector} ${selector}`)});
+      if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+      button.focus(); button.click(); return true;
+    })()`, name);
+    for (let version = 3; version <= 8; version += 1) {
+      await writeFile(guidelinePath, Array.from({ length: 9 }, (_, index) => `${index + 1}. 检查第 ${version} 版的第 ${index + 1} 项规范。`).join('\n'), 'utf8');
+      // The existing picker control supplies one choice per window; restart rather than adding a repeatable bypass.
+      if (version > 3) {
+        await closeBrowser();
+        manager = await launch();
+        renderer = await waitForRenderer(manager, 'knowledge-page-window');
+        await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'knowledge-page-ready');
+        await click(renderer, '知识库', 'knowledge-page-open');
+        await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-page-loaded');
+      }
+      await activateGuideline('[data-guideline-action="import"]', 'knowledge-page-import-start');
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${cardSelector} .guideline-preview`)})?.dataset.guidelinePreview==='${version}'`, 'knowledge-page-preview');
+      if (version === 8) {
+        await activateGuideline('.guideline-preview [data-guideline-action="clauses-next"]', 'knowledge-preview-next');
+        await waitFor(renderer, `(() => { const area=document.querySelector(${JSON.stringify(`${cardSelector} .guideline-preview`)}); return area?.querySelectorAll('li').length===1 && area.querySelector('li')?.value===9 && document.activeElement===area.querySelector('h4'); })()`, 'knowledge-preview-last-focus');
+        await activateGuideline('.guideline-preview [data-guideline-action="clauses-previous"]', 'knowledge-preview-previous');
+        await waitFor(renderer, `(() => { const area=document.querySelector(${JSON.stringify(`${cardSelector} .guideline-preview`)}); return area?.querySelectorAll('li').length===8 && document.activeElement===area.querySelector('h4'); })()`, 'knowledge-preview-first-focus');
+      }
+      await activateGuideline('[data-guideline-action="confirm"]', 'knowledge-page-import-confirm');
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(cardSelector)})?.dataset.guidelineVersion==='${version}' && !document.querySelector(${JSON.stringify(`${cardSelector} .guideline-preview`)})`, 'knowledge-page-imported');
+    }
+    await assertRenderer(renderer, `(() => { const card=document.querySelector(${JSON.stringify(cardSelector)}); card.querySelector('.guideline-clauses').open=true; card.querySelector('.guideline-versions').open=true; return card.querySelectorAll('.guideline-version-list li').length===5; })()`, 'knowledge-pages-open');
+    await activateGuideline('.guideline-clauses [data-guideline-action="clauses-next"]', 'knowledge-clauses-next');
+    await waitFor(renderer, `(() => { const area=document.querySelector(${JSON.stringify(`${cardSelector} .guideline-clauses`)}); return area?.open && area.querySelectorAll('li').length===1 && area.querySelector('li')?.value===9 && document.activeElement===area.querySelector('summary'); })()`, 'knowledge-clauses-last-focus');
+    await activateGuideline('[data-guideline-action="versions-older"]', 'knowledge-versions-older');
+    await waitFor(renderer, `(() => { const area=document.querySelector(${JSON.stringify(`${cardSelector} .guideline-versions`)}); return area?.open && area.querySelector('[data-guideline-version-row="1"]') && area.querySelectorAll('.guideline-version-list li').length===3 && document.activeElement===area.querySelector('summary'); })()`, 'knowledge-versions-oldest-focus');
+    await activateGuideline('[data-guideline-action="versions-latest"]', 'knowledge-versions-latest');
+    await waitFor(renderer, `(() => { const area=document.querySelector(${JSON.stringify(`${cardSelector} .guideline-versions`)}); return area?.querySelector('[data-guideline-version-row="8"]') && area.querySelectorAll('.guideline-version-list li').length===5 && document.activeElement===area.querySelector('summary'); })()`, 'knowledge-versions-latest-focus');
+
+    at('knowledge-procedures');
+    // 工序与规则 (Issue #427, S79d): the nine review 工序 by what each does — seven 已启用 drawn solid, the two whose basis does
+    // not exist yet 尚未接通 drawn dashed, with why said of the house — none used by a review in this Journey, and the 方案
+    // in the house's words, 本社方案 v2, installed and enabled for the one Book that enabled it. Both layers (LAYER-008): the
+    // words carry no identifier, and 查看技术详情, closed, holds the carrier's and the 权限侧车's identities and each 工序's id.
+    await click(renderer, '工序与规则', 'knowledge-procedures-tab');
+    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='rules' && document.querySelector('.knowledge-procedures')?.dataset.procedureCount==='9'`, 'knowledge-procedures-painted');
+    const procedures = await renderer.evaluate(`(() => {
+      const section = document.querySelector('.knowledge-procedures');
+      const details = section?.querySelector(':scope > details.technical-details') ?? null;
+      const decision = Array.from(section?.children ?? []).filter((child) => child !== details).map((child) => child.textContent).join('\\n');
+      return {
+        states: Array.from(document.querySelectorAll('.knowledge-procedure-list > li'), (item) => {
+          const pill = item.querySelector('.status-pill');
+          return [item.dataset.procedureState, pill?.textContent ?? null, item.dataset.procedureRuns, pill instanceof HTMLElement ? getComputedStyle(pill).borderTopStyle : null];
+        }),
+        first: document.querySelector('.knowledge-procedure-list > li')?.textContent ?? null,
+        reasons: Array.from(document.querySelectorAll('.knowledge-procedure-list .procedure-reason'), (reason) => reason.textContent),
+        artifact: document.querySelector('.knowledge-artifact-list > li')?.textContent ?? null,
+        identifierInWords: /1\\.0\\.0|@ai7\\/|[0-9a-f]{64}|ai7-review-procedure/u.test(decision),
+        detailsOpen: details === null ? null : details.open,
+        summary: details?.querySelector('summary')?.textContent ?? null,
+        technical: Array.from(details?.querySelectorAll(':scope > dl > dt') ?? [], (term) => [term.textContent, term.nextElementSibling?.textContent ?? null]),
+      };
+    })()`);
+    const technical = new Map(procedures?.technical ?? []);
+    requireJourney(JSON.stringify(procedures?.states) === JSON.stringify([...Array(7).fill(['enabled', '已启用', '0', 'solid']), ['unavailable', '尚未接通', '0', 'dashed'], ['unavailable', '尚未接通', '0', 'dashed']]) &&
+      procedures.first === '已启用 错别字与规范用语审阅工序 · 第 1 版 · 内置 · 用于「错别字与规范用语」 · 还没有审阅用过' &&
+      JSON.stringify(procedures.reasons) === JSON.stringify([' · 书系知识还没有接通。', ' · 生产文档之间的一致性核对还没有接通。']) &&
+      procedures.artifact === '本社方案 v2 · 已安装 · 已为 1 本书启用' && procedures.identifierInWords === false &&
+      procedures.detailsOpen === false && procedures.summary === '查看技术详情' &&
+      technical.get('原生载体身份') === '@ai7/editorial-workspace-profile' && technical.get('原生载体版本') === '1.0.0' &&
+      /^[0-9a-f]{64}$/u.test(technical.get('SHA-256') ?? '') && technical.get('权限侧车') === 'ai7.editorial-workspace-profile.authority' &&
+      /^[0-9a-f]{64}$/u.test(technical.get('权限侧车 SHA-256') ?? '') && procedures.technical.length === 5 + 9 &&
+      procedures.technical.slice(5).every(([, procedureId]) => /^ai7-review-procedure\//u.test(procedureId ?? '')),
+    'knowledge-procedures-list', procedures);
+
+    // ---- 知识库 › 资料库 (Issue #427, plan slice S79c; editor-surfaces §8.4, V2-UX-KB-007, ATTN-009, LEARN-004 to LEARN-007) ----
+    at('knowledge-library-add');
+    // Guideline imports consumed their picker; library intake owns a separate launch and picker answer.
+    await closeBrowser();
+    manager = await launch(SAMPLE1_PATH);
+    renderer = await waitForRenderer(manager, 'library-picker-window');
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'library-picker-ready');
+    await click(renderer, '知识库', 'library-picker-knowledge');
+    await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'library-picker-knowledge-ready');
+    // 放入资料… with sample1 as a book the editor collected: the file as it will arrive, named and said to be a 图书 by the
+    // editor, then kept whole — deciding nothing: no attribution, no eligibility, and no Task may list it under 允许参考 yet.
+    await click(renderer, '资料库', 'library-tab');
+    const emptyLibrary = await readLibrary(renderer, (page) => page.state === 'ready', 'library-ready');
+    requireJourney(emptyLibrary.count === '0' && emptyLibrary.empty === LIBRARY_EMPTY && emptyLibrary.cards.length === 0 && emptyLibrary.preview === null,
+      'library-empty', emptyLibrary);
+    const sample1 = await readFile(SAMPLE1_PATH);
+    const sample1Digest = createHash('sha256').update(sample1).digest('hex');
+    const libraryObjects = resolve(dataRoot, 'library-objects');
+    await clickSelector(renderer, '[data-library-action="add"]', 'library-add');
+    const libraryPreview = await readLibrary(renderer, (page) => page.preview !== null, 'library-preview');
+    requireJourney(libraryPreview.preview.heading === '放入资料库：sample1.docx' &&
+      libraryPreview.preview.facts === `Word · ${(sample1.length / 1024).toFixed(1)} KB · 原件原样保存在本机，不会改动` && libraryPreview.preview.title === 'sample1' &&
+      JSON.stringify(libraryPreview.preview.kinds) === JSON.stringify([['book', false], ['paper', false], ['document', false], ['web', false]]) &&
+      libraryPreview.preview.confirmDisabled === true, 'library-preview-words', libraryPreview.preview);
+    await waitFor(renderer, `document.activeElement === document.querySelector('.library-preview h3')`, 'library-preview-focused', 10_000);
+    requireJourney(await lstat(libraryObjects).then(() => false, () => true), 'library-preview-keeps-nothing');
+    await fill(renderer, '.library-preview [data-library-field="title"]', LIBRARY_TITLE, 'library-title');
+    await clickSelector(renderer, '.library-preview [data-library-choice="book"]', 'library-kind-book');
+    await waitFor(renderer, `document.querySelector('[data-library-action="confirm-add"]')?.disabled === false`, 'library-confirm-enabled', 10_000);
+    await clickSelector(renderer, '[data-library-action="confirm-add"]', 'library-confirm');
+    const libraryAdded = await readLibrary(renderer, (page) => page.preview === null && page.cards.length === 1, 'library-added');
+    const [libraryCard] = libraryAdded.cards;
+    requireJourney(libraryCard.title === LIBRARY_TITLE && libraryCard.kind === '图书' && libraryCard.attribution === 'none' && libraryCard.eligibility === 'none' &&
+      libraryCard.reference === 'pending' && libraryCard.decisions === '0' && libraryCard.attributionLine === '尚未定归属' && libraryCard.eligibilityLine === '尚未定' &&
+      libraryCard.referenceLine === '定了归属与学习准入，任务才能把它列进「允许参考」。' && libraryCard.history.length === 0, 'library-added-card', libraryCard);
+    await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '')===${JSON.stringify(`已放入资料库：「${LIBRARY_TITLE}」；请定归属与学习准入。`)} && document.activeElement === document.querySelector('article.library-material h3')`, 'library-added-status', 10_000);
+    // The original is kept byte for byte under its digest in the Agent Data Root, and the service reads it as the page does.
+    const libraryKept = await readFile(resolve(libraryObjects, 'sha256', sample1Digest.slice(0, 2), `${sample1Digest}.docx`));
+    requireJourney(libraryKept.equals(sample1), 'library-original-kept-whole');
+    const materialId = libraryCard.id;
+    const libraryService = await renderer.evaluate(`window.ai7.inspectLibraryMaterials().then((projection)=>projection.materials.map((material)=>[material.materialId, material.title, material.kind, material.source.format, material.source.sha256, material.attribution, material.eligibility]))`);
+    requireJourney(JSON.stringify(libraryService) === JSON.stringify([[materialId, LIBRARY_TITLE, 'book', 'DOCX', sample1Digest, null, null]]), 'library-added-service', libraryService);
+
+    at('knowledge-library-attention');
+    // 待我处理 lists it in 等待你的决定, under no Book yet, with the decision it waits for; opening it returns to 资料库 with that
+    // decision in focus.
+    const libraryItem = `library-material:${materialId}`;
+    const itemSelector = `[data-screen="global-attention"] li.global-attention-item[data-attention-item=${JSON.stringify(libraryItem)}]`;
+    await clickSelector(renderer, '#global-attention-entry', 'library-attention-entry');
+    await waitFor(renderer, `document.querySelectorAll('[data-screen="global-attention"] section.global-attention-group').length === 4 && document.querySelector(${JSON.stringify(itemSelector)}) !== null`, 'library-attention-listed', 30_000);
+    const libraryListed = await renderer.evaluate(`(() => { const item=document.querySelector(${JSON.stringify(itemSelector)}); return { group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null, state: item.dataset.attentionState, book: item.querySelector('.global-attention-book')?.textContent ?? null, object: item.querySelector('button.global-attention-open')?.textContent ?? null, pill: item.querySelector('.global-attention-pill')?.textContent ?? null, next: item.querySelector('.global-attention-next')?.textContent ?? null, count: document.querySelector('#global-attention-entry')?.dataset.attentionCount ?? null }; })()`);
+    requireJourney(libraryListed.group === 'decisions' && libraryListed.state === 'library-attribution-pending' && libraryListed.book === '尚未定归属' &&
+      libraryListed.object === `资料库 · 图书「${LIBRARY_TITLE}」` && libraryListed.pill === '资料库归属待定' && libraryListed.next === '安全的下一步：定归属…' && libraryListed.count === '1',
+    'library-attention-words', libraryListed);
+    await clickSelector(renderer, `${itemSelector} button.global-attention-open`, 'library-attention-open');
+    const libraryReopened = await readLibrary(renderer, (page) => page.state === 'ready' && page.focus?.action === 'attribute', 'library-attention-opened');
+    requireJourney(libraryReopened.cards.length === 1 && libraryReopened.cards[0].id === materialId && libraryReopened.cards[0].attribution === 'none', 'library-attention-card', libraryReopened);
+
+    at('knowledge-library-decide');
+    // 定归属 to the first Book — a Series cannot be named until Series exist — then 定学习准入 under it: the choices start
+    // unselected, the house's states its consequence where it is chosen, and the Book's own with the editor's note is recorded.
+    await clickSelector(renderer, '[data-library-action="attribute"]', 'library-attribute');
+    const libraryAttributing = await readLibrary(renderer, (page) => page.cards[0]?.chooser?.kind === 'attribution', 'library-attribution-chooser');
+    // The Books by title as 书库 orders them (乙 before 甲 by code point), a Series not yet there, and the house; the first
+    // choice takes focus and none is chosen.
+    requireJourney(JSON.stringify(libraryAttributing.cards[0].chooser.choices) === JSON.stringify([
+      [`book:${bookB}`, false, false, '《J15 空图书乙》'], [`book:${bookA}`, false, false, '《J15 空图书甲》'], ['series', false, true, '书系'], ['house', false, false, '社级'],
+    ]) && libraryAttributing.cards[0].chooser.confirmDisabled === true && libraryAttributing.focus?.choice === `book:${bookB}`, 'library-attribution-choices', libraryAttributing.cards[0].chooser);
+    await clickSelector(renderer, `.library-attribution-chooser [data-library-choice="book:${bookA}"]`, 'library-attribution-book-a');
+    await waitFor(renderer, `document.querySelector('[data-library-action="confirm-attribution"]')?.disabled === false`, 'library-attribution-confirm-enabled', 10_000);
+    await clickSelector(renderer, '[data-library-action="confirm-attribution"]', 'library-attribution-confirm');
+    const libraryAttributed = await readLibrary(renderer, (page) => page.cards[0]?.attribution === 'book' && page.cards[0].chooser === null, 'library-attributed');
+    requireJourney(libraryAttributed.cards[0].attributionLine === '《J15 空图书甲》' && libraryAttributed.cards[0].eligibility === 'none' && libraryAttributed.cards[0].reference === 'pending' &&
+      libraryAttributed.focus?.action === 'eligibility' && libraryAttributed.cards[0].history.length === 1, 'library-attributed-card', libraryAttributed.cards[0]);
+    await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '')===${JSON.stringify(`已记录归属：「${LIBRARY_TITLE}」归到《J15 空图书甲》。`)}`, 'library-attributed-status', 10_000);
+    await clickSelector(renderer, '[data-library-action="eligibility"]', 'library-eligibility');
+    const libraryChoosing = await readLibrary(renderer, (page) => page.cards[0]?.chooser?.kind === 'eligibility', 'library-eligibility-chooser');
+    requireJourney(JSON.stringify(libraryChoosing.cards[0].chooser.choices) === JSON.stringify([
+      ['book', false, false, '仅纳入《J15 空图书甲》建议'], ['series', false, true, '纳入当前书系'], ['house', false, false, '纳入出版社经验'],
+      ['excluded', false, false, '明确排除'], ['deferred', false, false, '稍后决定'],
+    ]) && libraryChoosing.cards[0].chooser.consequenceShown === false && libraryChoosing.cards[0].chooser.confirmDisabled === true && libraryChoosing.focus?.choice === 'book',
+    'library-eligibility-unselected', libraryChoosing.cards[0].chooser);
+    await clickSelector(renderer, '.library-eligibility-chooser [data-library-choice="house"]', 'library-eligibility-house');
+    await readLibrary(renderer, (page) => page.cards[0]?.chooser?.consequenceShown === true, 'library-house-consequence');
+    await clickSelector(renderer, '.library-eligibility-chooser [data-library-choice="book"]', 'library-eligibility-book');
+    await readLibrary(renderer, (page) => page.cards[0]?.chooser?.consequenceShown === false && page.cards[0].chooser.confirmDisabled === false, 'library-eligibility-book-chosen');
+    await assertRenderer(renderer, `(() => { const text=document.querySelector('.library-eligibility-chooser [data-library-field="reason"]'); if(!(text instanceof HTMLTextAreaElement))return false; text.value='责编确认可作本书参考。'; text.dispatchEvent(new Event('input',{bubbles:true})); return true; })()`, 'library-eligibility-reason');
+    await clickSelector(renderer, '[data-library-action="confirm-eligibility"]', 'library-eligibility-confirm');
+    const libraryDecided = await readLibrary(renderer, (page) => page.cards[0]?.eligibility === 'book' && page.cards[0].chooser === null, 'library-decided');
+    requireJourney(libraryDecided.cards[0].eligibilityLine === '仅纳入《J15 空图书甲》（说明：责编确认可作本书参考。）' && libraryDecided.cards[0].reference === 'available' &&
+      libraryDecided.cards[0].referenceLine === '《J15 空图书甲》的任务可以把它列进「允许参考」。' && libraryDecided.cards[0].history.length === 2, 'library-decided-card', libraryDecided.cards[0]);
+    await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '')===${JSON.stringify(`已记录学习准入：「${LIBRARY_TITLE}」 · 仅纳入《J15 空图书甲》。`)}`, 'library-decided-status', 10_000);
+    // 待我处理 lets it go once both are decided.
+    const attentionAfter = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection)=>[projection.actionableCount, projection.groups.flatMap((group)=>group.items).filter((item)=>item.object.kind==='library-material').length])`);
+    requireJourney(JSON.stringify(attentionAfter) === JSON.stringify([0, 0]), 'library-attention-resolved', attentionAfter);
+
+    at('j14-library-reflow-forced-colors');
+    // At 200% the item, its decisions and an open choice reflow into the width; under forced colours the card and the choice keep
+    // their borders.
+    await clickSelector(renderer, '[data-library-action="attribute"]', 'library-reflow-chooser');
+    await readLibrary(renderer, (page) => page.cards[0]?.chooser?.kind === 'attribution', 'library-reflow-chooser-open');
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
+    await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[document.querySelector('article.library-material'), document.querySelector('.library-chooser'), document.querySelector('.library-facts')]; return parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2; })()`, 'library-reflow', 10_000);
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
+    await assertRenderer(renderer, `(() => {
+      if (!matchMedia('(forced-colors: active)').matches) return false;
+      const card = document.querySelector('article.library-material');
+      const chooser = document.querySelector('.library-chooser');
+      return card instanceof HTMLElement && getComputedStyle(card).borderTopStyle === 'solid' && chooser instanceof HTMLElement && getComputedStyle(chooser).borderTopStyle === 'solid';
+    })()`, 'library-forced-colors');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
+    await clickSelector(renderer, '[data-library-action="cancel-decision"]', 'library-reflow-cancel');
+    await readLibrary(renderer, (page) => page.cards[0]?.chooser === null && page.focus?.action === 'attribute', 'library-reflow-cancelled');
+
+    at('knowledge-library-bounded-readers');
+    const longReason = '👨‍👩‍👧‍👦'.repeat(300);
+    await clickSelector(renderer, '[data-library-action="eligibility"]', 'library-long-note-open');
+    await readLibrary(renderer, (page) => page.cards[0]?.chooser?.kind === 'eligibility', 'library-long-note-ready');
+    await clickSelector(renderer, '.library-eligibility-chooser [data-library-choice="book"]', 'library-long-note-choice');
+    await fill(renderer, '[data-library-field="reason"]', longReason, 'library-long-note');
+    await clickSelector(renderer, '[data-library-action="confirm-eligibility"]', 'library-long-note-save');
+    await readLibrary(renderer, (page) => page.cards[0]?.decisions === '3' && page.cards[0].chooser === null, 'library-long-note-saved');
+    const reader = 'article.library-material > .library-reason-reader';
+    await clickSelector(renderer, `${reader} [data-library-action="read-reason"]`, 'library-full-note-open');
+    let reconstructed = '';
+    for (let part = 0; part < 4; part += 1) {
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(reader)})?.dataset.reasonOffset === '${part * 1024}' && document.querySelector(${JSON.stringify(`${reader} .library-reason-text`)}) === document.activeElement`, 'library-note-fragment-focus');
+      const fragment = await renderer.evaluate(`(() => { const root=document.querySelector(${JSON.stringify(reader)}); return {text:root.querySelector('.library-reason-text').textContent,next:root.querySelector('[data-library-action="reason-next"]')!==null}; })()`);
+      reconstructed += fragment.text;
+      if (!fragment.next) break;
+      await clickSelector(renderer, `${reader} [data-library-action="reason-next"]`, 'library-note-next');
+    }
+    requireJourney(reconstructed === longReason, 'library-complete-note-readable');
+    await clickSelector(renderer, `${reader} [data-library-action="reason-close"]`, 'library-note-close');
+    await waitFor(renderer, `document.activeElement === document.querySelector(${JSON.stringify(`${reader} [data-library-action="read-reason"]`)})`, 'library-note-close-focus');
+
+    // These are the runner's reference-file labels, never manuscript content. Every arrival goes through the real picker,
+    // review and commit; each launch grants exactly one picker choice. Twenty more arrivals cross the twenty-card boundary.
+    for (let index = 0; index < 20; index += 1) {
+      await closeBrowser();
+      const referencePath = resolve(runRoot, `library-reference-${index}.txt`);
+      await writeFile(referencePath, `AI7 library paging reference ${index}`, 'utf8');
+      manager = await launch(referencePath);
+      renderer = await waitForRenderer(manager, 'library-page-window');
+      await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'library-page-ready');
+      await click(renderer, '知识库', 'library-page-knowledge');
+      await click(renderer, '资料库', 'library-page-tab');
+      await readLibrary(renderer, (page) => page.state === 'ready', 'library-page-loaded');
+      await clickSelector(renderer, '[data-library-action="add"]', 'library-page-add');
+      await readLibrary(renderer, (page) => page.preview !== null, 'library-page-preview');
+      await fill(renderer, '[data-library-field="title"]', `分页资料${index}`, 'library-page-title');
+      await clickSelector(renderer, '[data-library-choice="document"]', 'library-page-kind');
+      await clickSelector(renderer, '[data-library-action="confirm-add"]', 'library-page-confirm');
+      await readLibrary(renderer, (page) => page.preview === null && page.cards.length === Math.min(index + 2, 20), 'library-page-arrival');
+    }
+    for (let repeat = 0; repeat < 2; repeat += 1) {
+      await clickSelector(renderer, '[data-library-action="more"]', 'library-page-next');
+      await readLibrary(renderer, (page) => page.cards.length === 1 && page.cards[0].id === materialId && page.focus?.tag === 'H3', 'library-page-oldest');
+      await clickSelector(renderer, '[data-library-action="first"]', 'library-page-first');
+      await readLibrary(renderer, (page) => page.cards.length === 20 && page.focus?.tag === 'H3', 'library-page-newest');
+    }
+
+    // Populate the Book chooser through the ordinary creation form, then retain one explicit choice across replacement pages.
+    await click(renderer, '返回', 'library-books-landing');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'library-books-landed');
+    for (let index = 0; index < 19; index += 1) {
+      await createEmptyBook(renderer, `J15 分页图书${String(index).padStart(2, '0')}`);
+      await click(renderer, '返回图书列表', 'library-books-return');
+      await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'library-books-returned');
+    }
+    await click(renderer, '知识库', 'library-books-knowledge');
+    await click(renderer, '资料库', 'library-books-tab');
+    await readLibrary(renderer, (page) => page.state === 'ready', 'library-books-ready');
+    await clickSelector(renderer, 'article.library-material [data-library-action="attribute"]', 'library-books-open');
+    await waitFor(renderer, `document.querySelectorAll('.library-attribution-chooser [data-library-choice^="book:"]').length===20`, 'library-books-first-page');
+    const picked = await renderer.evaluate(`document.querySelector('.library-attribution-chooser [data-library-choice^="book:"]').value`);
+    await clickSelector(renderer, `.library-attribution-chooser [data-library-choice="${picked}"]`, 'library-books-select');
+    await clickSelector(renderer, '[data-library-action="more-books"]', 'library-books-next');
+    await waitFor(renderer, `document.querySelectorAll('.library-attribution-chooser [data-library-choice^="book:"]').length===2 && document.querySelector('.library-attribution-chooser [data-library-choice="${picked}"]')?.checked===true`, 'library-books-retained');
+    await clickSelector(renderer, '[data-library-action="first-books"]', 'library-books-first');
+    await waitFor(renderer, `document.querySelectorAll('.library-attribution-chooser [data-library-choice^="book:"]').length===20 && document.querySelector('.library-attribution-chooser [data-library-choice="${picked}"]')?.checked===true`, 'library-books-first-retained');
+    await clickSelector(renderer, '[data-library-action="confirm-attribution"]', 'library-books-commit');
+    await readLibrary(renderer, (page) => page.cards[0]?.attribution === 'book' && page.cards[0].chooser === null, 'library-books-committed');
 
     at('zero-activity');
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key))`, 'exact-service-readiness-remained-zero');

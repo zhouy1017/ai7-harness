@@ -16,6 +16,8 @@ import {
   TASK_BAR_SAVED,
   TASK_BAR_REVIEW_OFFLINE,
   TASK_BAR_SAVE_DRAFT_ONLY,
+  TASK_BAR_QUEUED_NOTE,
+  TASK_BAR_QUEUED_STATUS,
   TASK_BAR_SLOT_BUSY,
   TASK_BAR_START,
   TASK_BAR_START_WHEN_ONLINE,
@@ -213,7 +215,7 @@ describe('the drawer', () => {
 
   it('gives every state a tone and a shape, so the pill never speaks by colour alone', () => {
     const keys: TaskPlanStateKey[] = [
-      'ready', 'changed', 'unconnected', 'offline', 'recorded', 'blocked', 'waiting', 'running', 'settled', 'stopped', 'cancelled',
+      'ready', 'changed', 'unconnected', 'offline', 'recorded', 'blocked', 'waiting', 'queued', 'running', 'settled', 'stopped', 'cancelled',
       'cancelling', 'cancelled-after-start', 'pausing', 'paused', 'resumable', 'awaiting-clarification', 'budget-reached', 'account-limit',
       'plan-moved',
     ];
@@ -343,7 +345,8 @@ describe('the authorization bar (S74a)', () => {
     expect(TASK_BAR_STATEMENT).toBe('只是让 AI7 按这份计划做这一次；接受修改建议、批准受控动作、保存里程碑版本、设为发稿版本都仍由你另行决定');
     expect(TASK_BAR_CONNECT).toBe('去设置连接');
     expect(TASK_BAR_RECONFIRM).toBe('重新确认计划');
-    expect(TASK_BAR_SLOT_BUSY).toBe('另一项任务正在运行；它结束后再开始');
+    expect(TASK_BAR_SLOT_BUSY).toBe('运行名额已满：正在运行的任务结束后再开始');
+    expect(TASK_BAR_QUEUED_STATUS).toBe('已记录任务 · 等待运行名额');
     expect(TASK_BAR_RECORDED).toBe('已记录（不派发）');
     expect(TASK_BAR_NOTES).toEqual({
       'record-only': '此任务只记录运行，不会派发',
@@ -456,6 +459,18 @@ describe('the authorization bar (S74a)', () => {
     }
   });
 
+  it('says a start waiting on the governor waits for a place, that nothing has begun, and offers its 取消 (Issue #49, S14; CONC-007)', () => {
+    const started = { readiness: 'started' as const, planEnvelopeDigest: null };
+    const queued = taskBarView(barOf(started, { state: { key: 'queued', label: '等待运行名额' } }));
+    expect(queued).toMatchObject({ readiness: 'started', statement: null, note: TASK_BAR_QUEUED_NOTE, status: '等待运行名额' });
+    expect(TASK_BAR_QUEUED_NOTE).toBe('运行名额已满：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送，也不产生用量');
+    expect(names(queued)).toEqual(['cancel-wait', 'run-link']);
+    expect(action(queued, 'cancel-wait')).toEqual({ name: 'cancel-wait', label: '取消', tone: 'secondary', disabledReason: null });
+    // Never an estimate of how long: CONC-007 forbids one.
+    expect(queued.note).not.toMatch(/分钟|秒|预计|第 \d+ 位/u);
+    expect(TASK_PLAN_STATE_PILLS.queued).toEqual({ tone: 'progress', shape: 'ring' });
+  });
+
   it('offers a Run under way 暂停, 取消任务 — which only opens its summary — and 改计划重做 with why it waits (Issue #422; AUTH-010, CTRL-001, CTRL-004)', () => {
     expect([TASK_BAR_PAUSE, TASK_BAR_CANCEL_RUN, TASK_BAR_REDO]).toEqual(['暂停', '取消任务', '改计划重做']);
     expect([TASK_BAR_CANCEL_IMPACT_HEADING, TASK_BAR_CANCEL_CONFIRM, TASK_BAR_CANCEL_KEEP]).toEqual(['取消影响摘要', '确认取消任务', '继续运行']);
@@ -534,10 +549,10 @@ describe('the authorization bar (S74a)', () => {
     ]);
     const blocked = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
       state: { key: 'resumable', label: '任务已中断 · 可续行' },
-      runControl: { ...stoppedControl, resume: { reason: '另一项任务正在运行；它结束后再续行。' } },
+      runControl: { ...stoppedControl, resume: { reason: '运行名额已满：正在运行的任务结束后再续行。' } },
     }));
     expect(blocked.status).toBe('任务已中断 · 可续行');
-    expect(blocked.actions[0]).toEqual({ name: 'resume', label: '续行', tone: 'primary', disabledReason: '另一项任务正在运行；它结束后再续行。' });
+    expect(blocked.actions[0]).toEqual({ name: 'resume', label: '续行', tone: 'primary', disabledReason: '运行名额已满：正在运行的任务结束后再续行。' });
     expect(taskBarContinuationNote(8, 8)).toBe('已读完全部 8 个阅读范围，结果都已保存；续行时接着做之后的归纳与抽样');
     // Kept progress that no longer reads back is never stated as a count.
     expect(taskBarContinuationNote(null, 8)).toBe('已保存的阅读进度无法核对，这次运行不能续行；可以取消它，再重新开始');
@@ -781,9 +796,9 @@ describe('模型服务账户限额 in the drawer (S16b)', () => {
     ]);
     // 续行 still waits for what the service reads — the slot, the connection — and says so.
     const busy = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
-      state: { key: 'account-limit', label: '模型服务账户限额' }, runControl: { ...control, resume: { reason: '另一项任务正在运行；它结束后再续行。' } },
+      state: { key: 'account-limit', label: '模型服务账户限额' }, runControl: { ...control, resume: { reason: '运行名额已满：正在运行的任务结束后再续行。' } },
     }));
-    expect(busy.actions.find((entry) => entry.name === 'resume')?.disabledReason).toBe('另一项任务正在运行；它结束后再续行。');
+    expect(busy.actions.find((entry) => entry.name === 'resume')?.disabledReason).toBe('运行名额已满：正在运行的任务结束后再续行。');
   });
 });
 

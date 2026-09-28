@@ -5,6 +5,7 @@ import { basename, extname, isAbsolute, posix, relative, resolve, sep } from 'no
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { J03_TASK_GOAL, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
+  ServiceOperationMap,
   InspectTaskPlanInput,
   TaskPlanProjection,
   GlobalAttentionProjection,
@@ -39,6 +40,18 @@ import type {
   BookPeopleResultProjection,
   BookSummaryFilter,
   UpdateBookPeopleInput,
+  ReviewGuidelinePreviewProjection,
+  ReviewGuidelinesProjection,
+  ExemplarBookCursor,
+  LibraryMaterialCursor,
+  LibraryMaterialDecisionInput,
+  LibraryMaterialKind,
+  LibraryMaterialPreviewProjection,
+  LibraryMaterialProjection,
+  LibraryMaterialsProjection,
+  ExemplarsProjection,
+  KnowledgeProceduresProjection,
+  ReviewGuidelinesPage,
   AppendMaintenanceCaseRevisionInput,
   InspectMaintenanceCaseInput,
   ListMaintenanceCasesInput,
@@ -281,6 +294,10 @@ import { initializeProductionDocumentDeliverySchema, initializeProductionDocumen
 import { BookDeliveryPackageError, BookDeliveryPackages, initializeBookDeliveryPackageSchema } from './book-delivery-packages.js';
 import { MaintenanceCaseError, MaintenanceCases, initializeMaintenanceCaseSchema } from './maintenance-cases.js';
 import { BookPeople, BookPeopleError, initializeBookPeopleSchema } from './book-people.js';
+import { ReviewGuidelineError, ReviewGuidelineLedger, initializeReviewGuidelineSchema, readGuidelineFile } from './review-guidelines.js';
+import { LibraryMaterialError, LibraryMaterialLedger, initializeLibraryMaterialSchema, libraryMaterialTitle } from './library-materials.js';
+import { readExemplars } from './exemplars.js';
+import { readKnowledgeProcedures } from './knowledge-procedures.js';
 import {
   ProductionDocumentOriginError,
   initializeProductionDocumentOriginSchema,
@@ -377,6 +394,8 @@ import {
   PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
   MAINTENANCE_CASE_SCHEMA_VERSION,
   BOOK_PEOPLE_SCHEMA_VERSION,
+  REVIEW_GUIDELINE_SCHEMA_VERSION,
+  LIBRARY_MATERIAL_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1597,7 +1616,9 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       currentVersion === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
       currentVersion === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      currentVersion === BOOK_PEOPLE_SCHEMA_VERSION,
+      currentVersion === BOOK_PEOPLE_SCHEMA_VERSION ||
+      currentVersion === REVIEW_GUIDELINE_SCHEMA_VERSION ||
+      currentVersion === LIBRARY_MATERIAL_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1637,7 +1658,9 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       currentVersion === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
       currentVersion === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      currentVersion === BOOK_PEOPLE_SCHEMA_VERSION
+      currentVersion === BOOK_PEOPLE_SCHEMA_VERSION ||
+      currentVersion === REVIEW_GUIDELINE_SCHEMA_VERSION ||
+      currentVersion === LIBRARY_MATERIAL_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1991,7 +2014,9 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
       version === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      version === BOOK_PEOPLE_SCHEMA_VERSION,
+      version === BOOK_PEOPLE_SCHEMA_VERSION ||
+      version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
+      version === LIBRARY_MATERIAL_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2020,7 +2045,9 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
       version === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      version === BOOK_PEOPLE_SCHEMA_VERSION) return;
+      version === BOOK_PEOPLE_SCHEMA_VERSION ||
+      version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
+      version === LIBRARY_MATERIAL_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2141,7 +2168,9 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
       version === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      version === BOOK_PEOPLE_SCHEMA_VERSION,
+      version === BOOK_PEOPLE_SCHEMA_VERSION ||
+      version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
+      version === LIBRARY_MATERIAL_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2169,7 +2198,9 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
       version === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      version === BOOK_PEOPLE_SCHEMA_VERSION) return;
+      version === BOOK_PEOPLE_SCHEMA_VERSION ||
+      version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
+      version === LIBRARY_MATERIAL_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2462,7 +2493,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== BOOK_PEOPLE_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== LIBRARY_MATERIAL_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2493,6 +2524,8 @@ function validateModelServiceSchema(
       version >= PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
       version >= MAINTENANCE_CASE_SCHEMA_VERSION,
       version >= BOOK_PEOPLE_SCHEMA_VERSION,
+      version >= REVIEW_GUIDELINE_SCHEMA_VERSION,
+      version >= LIBRARY_MATERIAL_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2548,7 +2581,9 @@ function initializeModelServiceSchema(
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
       version === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      version === BOOK_PEOPLE_SCHEMA_VERSION,
+      version === BOOK_PEOPLE_SCHEMA_VERSION ||
+      version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
+      version === LIBRARY_MATERIAL_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2576,7 +2611,9 @@ function initializeModelServiceSchema(
       version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
       version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
       version === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      version === BOOK_PEOPLE_SCHEMA_VERSION) {
+      version === BOOK_PEOPLE_SCHEMA_VERSION ||
+      version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
+      version === LIBRARY_MATERIAL_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3388,6 +3425,9 @@ export class EditorialStore {
   readonly #publicationVersions: PublicationVersionStore;
   readonly #maintenanceCases: MaintenanceCases;
   readonly #bookPeople: BookPeople;
+  readonly #reviewGuidelines: ReviewGuidelineLedger;
+  /** 知识库 › 资料库 (Issue #427, S79c): the items an editor collected and the decisions about them. */
+  readonly #libraryMaterials: LibraryMaterialLedger;
   readonly #productionDocuments: ProductionDocuments;
   /** Each Production Document's Deliverable Workflow (Issue #415, S66c). */
   readonly #documentWorkflow: ProductionDocumentWorkflow;
@@ -3441,10 +3481,13 @@ export class EditorialStore {
     this.#editorialMarks = new EditorialMarkStore(authority);
     this.#rules = new DefaultExecutionRuleLedger(authority);
     this.#manuscriptApply = new ManuscriptApplyStore(authority, boundedAuthority, this.#editorialMarks, lifetimeId);
+    // 知识库 › 审阅规范文件 (Issue #427, S79a): a Review Run prepared now applies each guideline document at its latest version.
+    this.#reviewGuidelines = new ReviewGuidelineLedger(authority);
+    this.#libraryMaterials = new LibraryMaterialLedger(authority, dataRoot);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
       ledgerOf: (entry) => this.#reviewLedgerOf(entry),
       baseline: () => this.#baselineAnalysis,
-    });
+    }, () => this.#reviewGuidelines.configuration());
     this.#manuscriptExport = new ManuscriptExportStore(authority, {
       readObject: (objectDigest) => this.#readContentObject(objectDigest),
       dataRoot,
@@ -3465,6 +3508,7 @@ export class EditorialStore {
     this.#publicationVersions = new PublicationVersionStore(authority, (bookId) => this.#manuscriptExport.records(bookId), {
       summaries: (bookId, publicationVersionId) => this.#maintenanceCases.summaries(bookId, publicationVersionId),
       withdrawn: (publicationVersionId) => this.#maintenanceCases.withdrawn(publicationVersionId),
+      withdrawnAt: (publicationVersionId) => this.#maintenanceCases.withdrawnAt(publicationVersionId),
     });
     // 图书交付包 (Issue #416) reads the Book's current 发稿版本, each house type's Delivery Records and its Review Runs.
     this.#bookDeliveryPackages = new BookDeliveryPackages(authority, {
@@ -3585,8 +3629,11 @@ export class EditorialStore {
       // 维护事项 of each 发稿版本.
       initializeProductionDocumentOriginSchema(authority);
       initializeMaintenanceCaseSchema(authority);
-      // Revision 44 (Issue #431, S83) adds each Book's people.
+      // Revision 44 (Issue #431, S83) adds each Book's people, revision 45 (Issue #427, S79a) the versions a house imports
+      // of its review guideline documents, and revision 46 (Issue #427, S79c) the items put into 资料库 and their decisions.
       initializeBookPeopleSchema(authority);
+      initializeReviewGuidelineSchema(authority);
+      initializeLibraryMaterialSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -3623,6 +3670,8 @@ export class EditorialStore {
       await store.#sweepUnreferencedContentObjects();
       await recoveryObjects.cleanup((relativeKey) =>
         store.#boundedCall(() => store.#boundedAuthority.isRecoveryObjectReferenced(relativeKey)));
+      // What an interrupted 放入资料库 left beside the kept originals (Issue #427 review).
+      await store.#libraryMaterials.sweep();
       store.#boundedCall(() => store.#boundedAuthority.startServiceLifetime(lifetimeId, new Date().toISOString()));
       return store;
     } catch (error) {
@@ -3897,8 +3946,8 @@ export class EditorialStore {
   /**
    * The editor's one approval of a prepared Review Run, naming the exact plan digest of every
    * Task-backed category (B1). The caller then hands the Run to the drive loop. `slotBusy` is the
-   * execution owner's word that another Run holds its one slot: a new approval is refused with
-   * `EXECUTION_BUSY` before anything is written (Issue #420, S74a A2).
+   * execution owner's word that other Runs hold every place of its governor: a new approval is refused with
+   * `EXECUTION_BUSY` before anything is written (Issue #420, S74a A2; Issue #49, S14).
    */
   authorizeReviewRun(
     bookId: string,
@@ -4119,17 +4168,15 @@ export class EditorialStore {
   }
 
   /**
-   * Records the standard-direct authorization and the Run; the caller admits the Run when dispatch is
-   * allowed. `slotBusy` is the execution owner's word that another Run holds its one slot: a Run that would
-   * dispatch is then refused with `EXECUTION_BUSY` before anything is recorded (Issue #420, S74a A2).
+   * Records the standard-direct authorization and the Run; the caller hands the Run to the execution owner when
+   * dispatch is allowed, which admits it or queues it on the governor (Issue #49, S14; CONC-007).
    */
   authorizeBaselineAnalysis(
     bookId: string,
     taskIntentId: string,
     planEnvelopeDigest: string,
-    slotBusy = false,
   ): { projection: BaselineAnalysisProjection; dispatchRunRecordId: string | null } {
-    const authorized = this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, slotBusy));
+    const authorized = this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest));
     return { projection: authorized.projection as BaselineAnalysisProjection, dispatchRunRecordId: authorized.dispatchRunRecordId };
   }
 
@@ -4138,7 +4185,7 @@ export class EditorialStore {
    * authorize it, and its Run waits in Connectivity Wait — nothing sent, no usage, nothing begun.
    */
   startBaselineAnalysisWhenOnline(bookId: string, taskIntentId: string, planEnvelopeDigest: string): BaselineAnalysisProjection {
-    return this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, false, 'when-online')).projection as BaselineAnalysisProjection;
+    return this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, 'when-online')).projection as BaselineAnalysisProjection;
   }
 
   /** 取消 while the Book's baseline Run waits (OFF-010): terminal, before any dispatch, without provider work. */
@@ -4462,7 +4509,7 @@ export class EditorialStore {
         return fellBack(QUICK_START_NOT_READY);
     }
     if (envelope.dispatchAllowed && runtime.connectivity.slotBusy()) return fellBack(QUICK_START_SLOT_BUSY);
-    const authorized = this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, false, 'now',
+    const authorized = this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, 'now',
       { kind: 'default-execution-rule', ruleVersionId }));
     return { outcome: 'started', reasons: [], dispatchRunRecordId: authorized.dispatchRunRecordId };
   }
@@ -5418,6 +5465,142 @@ export class EditorialStore {
         ? { title: last.title, bookId: last.bookId }
         : null,
     };
+  }
+
+  /** 知识库 › 审阅规范文件 (Issue #427, S79a; KB-001 to KB-003): every guideline document with its versions and their use. */
+  inspectReviewGuidelines(page?: ReviewGuidelinesPage): ReviewGuidelinesProjection {
+    return this.#guidelineCall(() => this.#reviewGuidelines.projection(page));
+  }
+
+  readReviewGuidelinePreview(documentId: string, previewId: string, page?: number): ReviewGuidelinePreviewProjection {
+    return this.#guidelineCall(() => this.#reviewGuidelines.readPreview(documentId, previewId, page));
+  }
+
+  /**
+   * 知识库 › 范例 (Issue #427, S79b; KB-004, KB-006): one page of the published Books' delivered documents, each record read
+   * through its owner — the designations and their 撤回 through 发稿版本's, the Delivery Records through the documents'.
+   */
+  inspectExemplars(after: ExemplarBookCursor | null): ExemplarsProjection {
+    if (after !== null) {
+      requireStore(UUID_PATTERN.test(after.bookId) && after.title === safeTitle(after.title), 'EXEMPLAR_CURSOR_INVALID', '范例列表位置无效。');
+    }
+    return this.#documentCall(() => this.#publicationCall(() => readExemplars({
+      books: (cursor, limit) => this.#publicationVersions.designatedBooks(cursor, limit),
+      archive: (bookId) => this.#publicationVersions.exemplarArchive(bookId),
+      documents: (bookId) => this.#productionDocuments.deliveryReadings(bookId),
+      people: (bookId) => this.#peopleCall(() => this.#bookPeople.current(bookId)),
+    }, after)));
+  }
+
+  /**
+   * 知识库 › 工序与规则 (Issue #427, S79d; KB-010): the review categories' 工序 as they apply now, and the native artifact as
+   * its owner reads it for the house.
+   */
+  async inspectKnowledgeProcedures(): Promise<KnowledgeProceduresProjection> {
+    const profile = await this.#artifactCall(() => this.#editorialWorkspaceProfile.house());
+    return this.#guidelineCall(() => readKnowledgeProcedures(this.#authority, this.#reviewGuidelines.configuration(), profile));
+  }
+
+  /** 导入新版本's first step: the picked file's clauses as the next version of one document would read them; nothing is recorded. */
+  async previewReviewGuidelineVersion(documentId: string, path: string | undefined): Promise<ReviewGuidelinePreviewProjection> {
+    this.#assertAvailable();
+    if (typeof path !== 'string' || path.length === 0) throw new StoreError('REVIEW_GUIDELINE_FILE_UNREADABLE', '请重新选择文件。');
+    let read: Awaited<ReturnType<typeof readGuidelineFile>>;
+    try {
+      read = await readGuidelineFile(path);
+    } catch (error) {
+      if (error instanceof ReviewGuidelineError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
+    return this.#guidelineCall(() => this.#reviewGuidelines.preview(documentId, read));
+  }
+
+  /** 确认导入: the previewed version recorded, and the page as it now reads. */
+  importReviewGuidelineVersion(previewId: string): ReviewGuidelinesProjection {
+    this.#guidelineCall(() => this.#transaction(this.#authority, () => this.#reviewGuidelines.commit(previewId)));
+    return this.inspectReviewGuidelines();
+  }
+
+  /**
+   * 知识库 › 资料库 (Issue #427, S79c; KB-007): one page of the items the editor collected — where each belongs, whether it may
+   * teach, and whose Tasks may list it under 允许参考 — newest first, after the cursor.
+   */
+  inspectLibraryMaterials(after: LibraryMaterialCursor | null): LibraryMaterialsProjection {
+    return this.#libraryCall(() => this.#libraryMaterials.page(after));
+  }
+
+  /** One 资料库 item as its card reads it. */
+  inspectLibraryMaterial(materialId: string): LibraryMaterialProjection {
+    return this.#libraryCall(() => this.#libraryMaterials.item(materialId));
+  }
+
+  readLibraryDecisionReason(input: ServiceOperationMap['readLibraryDecisionReason']['input']): ServiceOperationMap['readLibraryDecisionReason']['output'] {
+    return this.#libraryCall(() => this.#libraryMaterials.reasonPage(input.materialId, input.ordinal, input.offset));
+  }
+
+  /** 放入资料…'s first step: the picked file identified, measured and digested as it would arrive; nothing is kept. */
+  async previewLibraryMaterial(path: string): Promise<LibraryMaterialPreviewProjection> {
+    this.#assertAvailable();
+    try {
+      return await this.#libraryMaterials.preview(path);
+    } catch (error) {
+      if (error instanceof LibraryMaterialError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * 放入资料库: the previewed file kept whole in the Agent Data Root by its digest, then its arrival recorded with the title and
+   * kind the editor gave it. A title that cannot stand is refused before anything is copied.
+   */
+  async addLibraryMaterial(input: { previewId: string; title: string; kind: LibraryMaterialKind }): Promise<LibraryMaterialProjection> {
+    this.#assertAvailable();
+    let kept: Awaited<ReturnType<LibraryMaterialLedger['keep']>>;
+    try {
+      libraryMaterialTitle(input.title);
+      kept = await this.#libraryMaterials.keep(input.previewId);
+    } catch (error) {
+      if (error instanceof LibraryMaterialError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
+    const materialId = this.#libraryCall(() => this.#transaction(this.#authority, () => this.#libraryMaterials.record(kept, input.title, input.kind)));
+    // The one item it made: the page it joins is read again by the renderer's own paging, never re-sent whole.
+    return this.inspectLibraryMaterial(materialId);
+  }
+
+  /** 定归属 or 定学习准入 (KB-007, LEARN-007): one decision appended to the item's chain, and the item as it now reads. */
+  decideLibraryMaterial(input: { materialId: string; expectedDecisions: number; decision: LibraryMaterialDecisionInput }): LibraryMaterialProjection {
+    this.#libraryCall(() => this.#transaction(this.#authority, () =>
+      this.#libraryMaterials.decide(input.materialId, input.expectedDecisions, input.decision)));
+    return this.inspectLibraryMaterial(input.materialId);
+  }
+
+  #libraryCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof LibraryMaterialError) throw new StoreError(error.code, error.message);
+      if (error instanceof AggregateError) {
+        this.#poisoned = true;
+        throw new StoreFatalError(error);
+      }
+      throw error;
+    }
+  }
+
+  #guidelineCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof ReviewGuidelineError) throw new StoreError(error.code, error.message);
+      if (error instanceof AggregateError) {
+        this.#poisoned = true;
+        throw new StoreFatalError(error);
+      }
+      throw error;
+    }
   }
 
   /** `保存人员` (Issue #431, S83; BOOK-006): the Book's next people version, or none when nothing changed. */
@@ -10268,11 +10451,14 @@ export class EditorialStore {
           reviewRuns: review.latest,
           reviewCompletions: review.completed,
           maintenance: this.#maintenanceCases.attentionReadings(limit),
+          libraryMaterials: this.#libraryMaterials.attentionReadings(limit),
           busy,
           waitingFor,
         }, now);
       } catch (error) {
-        if (error instanceof GlobalAttentionError || error instanceof MaintenanceCaseError) throw new StoreError(error.code, error.message);
+        if (error instanceof GlobalAttentionError || error instanceof MaintenanceCaseError || error instanceof LibraryMaterialError) {
+          throw new StoreError(error.code, error.message);
+        }
         throw error;
       }
     });
@@ -13537,7 +13723,9 @@ export class EditorialStore {
     try {
       return operation();
     } catch (error) {
-      if (error instanceof ReviewRunError || error instanceof AnalysisError || error instanceof EditorialMarkError || error instanceof ProposalConflictError) {
+      // A guideline version that no longer reads refuses the review's configuration in its own words (Issue #427 review).
+      if (error instanceof ReviewRunError || error instanceof AnalysisError || error instanceof EditorialMarkError || error instanceof ProposalConflictError ||
+        error instanceof ReviewGuidelineError) {
         throw new StoreError(error.code, error.message);
       }
       if (error instanceof BoundedStoreFatalError) {

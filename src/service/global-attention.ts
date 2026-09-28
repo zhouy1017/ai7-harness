@@ -28,6 +28,7 @@ import {
 } from '../shared/protocol.js';
 import type { ProgressReader, RunProgress } from './analysis/baseline-analysis-store.js';
 import type { WaitingFor } from './task-plan.js';
+import type { LibraryMaterialAttentionReading } from './library-materials.js';
 import { REVIEW_RUN_CATEGORY_STATE_LABELS } from './review/review-run-state.js';
 
 /**
@@ -213,7 +214,9 @@ export interface GlobalAttentionReadings {
   readonly reviewCompletions: ReadonlyArray<ReviewRunAttentionReading>;
   /** Every 维护事项 still waiting on the editor (Issue #426, S68b). */
   readonly maintenance: ReadonlyArray<MaintenanceAttentionReading>;
-  /** Whether a Run holds the execution owner's one slot now. */
+  /** Every 资料库 item still waiting for its attribution or Learning Eligibility (Issue #427, S79c; ATTN-009). */
+  readonly libraryMaterials: ReadonlyArray<LibraryMaterialAttentionReading>;
+  /** Whether Runs hold every place of the execution owner's governor now (Issue #49, S14). */
   readonly busy: boolean;
   /**
    * What a Run in Connectivity Wait waits for now, as the drawer reads it (Issue #502): the device's reading, the
@@ -421,6 +424,11 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading, waitingFor: Wai
       technical: [...technical, { key: 'clarification', label: '澄清请求', value: `${asked.requestId} · 第 ${asked.unitOrdinal} 个阅读范围` }],
     });
   }
+  // 等待运行名额 (Issue #49, S14; CONC-007): a start waiting on the governor for a place — 运行中与已暂停's, never an
+  // exception, and never a ceiling's or an account limit's.
+  if (run.state === 'authorized') {
+    return item('active', 'analysis-waiting-capacity', { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
+  }
   if (ACTIVE_RUN_STATES.has(run.state)) {
     if (run.progress !== null) {
       // 正在取消 stays visible wherever the editor looks until the Run has stopped (Issue #422, CTRL-005).
@@ -604,6 +612,28 @@ function maintenanceItem(reading: MaintenanceAttentionReading): GlobalAttentionI
   });
 }
 
+/**
+ * A 资料库 item waiting for the editor (ATTN-009, KB-007): no attribution yet, no Learning Eligibility decided under the one it
+ * has, or eligibility left for later. It stops no other work, so it never blocks; the Book is the one it belongs to, when it
+ * belongs to one.
+ */
+function libraryMaterialItem(reading: LibraryMaterialAttentionReading): GlobalAttentionItemProjection {
+  return item('decisions', reading.state, {
+    itemId: `library-material:${reading.materialId}`,
+    blocked: false,
+    at: reading.at,
+    book: reading.book === null ? { bookId: null, title: null } : { bookId: reading.book.bookId, title: reading.book.title },
+    object: { kind: 'library-material', title: reading.title, materialKind: reading.kind, scope: reading.scope },
+    nextStep: reading.state === 'library-attribution-pending' ? 'set-library-attribution' : 'set-learning-eligibility',
+    target: { kind: 'library-material', materialId: reading.materialId },
+    technical: [
+      { key: 'library-material', label: '资料', value: reading.materialId },
+      { key: 'library-object', label: '文件摘要', value: reading.objectSha256 },
+      { key: 'state-at', label: '状态开始时间', value: reading.at },
+    ],
+  });
+}
+
 // ---- ordering ------------------------------------------------------------------------------------------
 
 /** Code-point order, the same on every host; a missing title sorts first. */
@@ -661,6 +691,7 @@ export function composeGlobalAttention(readings: GlobalAttentionReadings, now: D
       .filter((reading) => reading.state === 'settled' && (reading.lastEventAt ?? '') >= since)
       .map(reviewCompletionItem),
     ...readings.maintenance.map(maintenanceItem),
+    ...readings.libraryMaterials.map(libraryMaterialItem),
   ];
   // One record is one item: a Review Run read both as a Book's latest and as a completion is listed once.
   const unique = Array.from(new Map(all.map((entry) => [`${entry.group}\n${entry.itemId}`, entry] as const)).values());
@@ -672,10 +703,10 @@ export function composeGlobalAttention(readings: GlobalAttentionReadings, now: D
   return {
     groups,
     actionableCount: groups.filter((group) => GLOBAL_ATTENTION_COUNTED_GROUPS.includes(group.key)).reduce((sum, group) => sum + group.total, 0),
-    // A Run holds the slot, or a Review Run is being driven — between two categories it holds none — or a Run waits to
-    // start once online, which a reader follows until it starts (Issue #502).
+    // A Run holds a place of the governor's, or waits for one (Issue #49, S14), or a Review Run is being driven — between
+    // two categories it holds none — or a Run waits to start once online, which a reader follows until it starts (Issue #502).
     running: readings.busy || readings.reviewRuns.some((reading) => reading.state === 'running') ||
-      readings.analysisTasks.some((reading) => reading.run?.state === 'awaiting-connectivity'),
+      readings.analysisTasks.some((reading) => reading.run !== null && followedRun(reading.run)),
   };
 }
 
@@ -736,10 +767,14 @@ function preparedReviewItem(reading: ReviewRunAttentionReading): GlobalAttention
 }
 
 /**
- * The Run states the panel follows until they end: in flight, stopping, waiting to start once online, or answered and
- * waiting its turn to go on.
+ * Whether a reader follows a Run until it ends: one the execution owner holds — in flight, stopping, or stopped with its
+ * cancellation waiting for a place — one waiting on the governor for a place (Issue #49, S14), one waiting to start
+ * once online, and one answered and waiting its turn to go on (Issue #423 review). A Run left executing that nothing
+ * holds is an exception's to name, and nothing moves it.
  */
-const FOLLOWED_RUN_STATES: ReadonlySet<BaselineAnalysisRunState> = new Set([...ACTIVE_RUN_STATES, 'awaiting-connectivity', 'awaiting-clarification']);
+function followedRun(run: NonNullable<AnalysisTaskAttentionReading['run']>): boolean {
+  return run.progress !== null || run.state === 'authorized' || run.state === 'awaiting-connectivity' || run.state === 'awaiting-clarification';
+}
 
 /**
  * A Task the editor cancelled while it waited to start (Issue #423 review): its Run never ran, so no Task Outcome names it,
@@ -808,7 +843,7 @@ export function composeBookTasks(readings: BookTaskReadings): BookTasksProjectio
   return {
     bookId: readings.bookId,
     groups,
-    running: own(readings.analysisTasks).some((reading) => reading.run !== null && FOLLOWED_RUN_STATES.has(reading.run.state)) ||
+    running: own(readings.analysisTasks).some((reading) => reading.run !== null && followedRun(reading.run)) ||
       own(readings.reviewRuns).some((reading) => reading.state === 'running'),
   };
 }

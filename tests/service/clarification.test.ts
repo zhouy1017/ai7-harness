@@ -17,7 +17,7 @@ import { PLAN_EDIT_ADAPTATION_LABELS } from '../../src/service/analysis/plan-edi
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CLARIFICATION_SCHEMA_VERSION, BOOK_PEOPLE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { CLARIFICATION_SCHEMA_VERSION, LIBRARY_MATERIAL_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
   ANSWER_BLOCKED_OFFLINE,
   RESUME_BLOCKED_BINDING,
@@ -81,13 +81,15 @@ function openWithRoute(fixture: ResolvedModelFixture): Promise<EditorialStore> {
   });
 }
 
-function owner(store: EditorialStore, fixture: ResolvedModelFixture, held = false): BaselineAnalysisExecutionOwner {
+/** `capacity` 1 is the governor with one place (Issue #49, S14), for the cases where another Run takes every place. */
+function owner(store: EditorialStore, fixture: ResolvedModelFixture, held = false, capacity?: number): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
     ledger: store.baselineAnalysisLedger,
     launchPolicy,
     fixture,
     secretResolver: { resolve: async () => null },
     ...(held ? { unitHold: controlledUnitHold(holdPath, { pollMs: 5 }) } : {}),
+    ...(capacity === undefined ? {} : { capacity }),
   });
 }
 
@@ -188,7 +190,7 @@ describe('schema revision 35 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BOOK_PEOPLE_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LIBRARY_MATERIAL_SCHEMA_VERSION);
       expect(runStatesShapeAt34(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_run_states ORDER BY rowid').all()).toEqual(before.states);
       const after = relationTruth(database);
@@ -487,7 +489,7 @@ describe('Clarification Requests over the real store', () => {
 
   it('takes a Run answered while another holds the slot on once it is free, and after AI7 closes before that', async () => {
     const store = await openWithRoute(transient);
-    const execution = owner(store, transient, true);
+    const execution = owner(store, transient, true, 1);
     let next: BaselineAnalysisExecutionOwner | null = null;
     try {
       const first = await importedBook(store, 'L2 sample1 澄清排队甲');
@@ -564,7 +566,7 @@ describe('Clarification Requests over the real store', () => {
 
   it('names an answer a cancellation leaves unapplied, and ends its range as a gap in those words', async () => {
     const store = await openWithRoute(transient);
-    const execution = owner(store, transient, true);
+    const execution = owner(store, transient, true, 1);
     try {
       const first = await importedBook(store, 'L2 sample1 已答未接着做甲');
       const second = await importedBook(store, 'L2 sample1 已答未接着做乙', false);

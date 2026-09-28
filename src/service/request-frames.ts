@@ -18,6 +18,10 @@ import {
   MAX_BOOK_RELATED_PEOPLE,
   MAX_BOOK_SUMMARY_FILTER_CHARACTERS,
   MAINTENANCE_CLASSIFICATIONS,
+  LIBRARY_MATERIAL_KINDS,
+  MAX_FRAME_BYTES,
+  LIBRARY_REASON_PAGE_UNITS,
+  type LibraryMaterialKind,
   MAX_MAINTENANCE_ERRATA_CHARACTERS,
   MAX_MAINTENANCE_EVIDENCE_CHARACTERS,
   MAX_MAINTENANCE_REASON_CHARACTERS,
@@ -104,6 +108,25 @@ function optionalOrNull(input: Record<string, unknown>, key: string, check: (val
 }
 
 const MARK_BLOCK_PATTERN = /^blk_[0-9a-f]{24}$/;
+
+/**
+ * One 资料库 decision (Issue #427, S79c): an attribution to one Book or to the house, or a Learning Eligibility choice with
+ * its optional note — each of exactly its own keys. Whether the Book exists and the choice fits the attribution is the store's.
+ */
+function validLibraryDecision(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (value.kind === 'attribution') {
+    if (!hasExactKeys(value, ['kind', 'attribution']) || !isRecord(value.attribution)) return false;
+    const attribution = value.attribution;
+    return attribution.scope === 'house'
+      ? hasExactKeys(attribution, ['scope'])
+      : attribution.scope === 'book' && hasExactKeys(attribution, ['scope', 'bookId']) &&
+        isBoundedString(attribution.bookId, 36) && UUID_PATTERN.test(attribution.bookId);
+  }
+  return value.kind === 'eligibility' && hasExactKeys(value, ['kind', 'choice', 'reason']) &&
+    (value.choice === 'book' || value.choice === 'house' || value.choice === 'excluded' || value.choice === 'deferred') &&
+    (value.reason === null || isBoundedString(value.reason, MAX_FRAME_BYTES, true));
+}
 
 function validMarkBinding(input: Record<string, unknown>): boolean {
   return isBoundedString(input.manuscriptId, 36) && UUID_PATTERN.test(input.manuscriptId) &&
@@ -225,6 +248,9 @@ function validRecoveryWindowTarget(value: unknown): boolean {
   );
 }
 
+/** The instant a 资料库 page starts after: an arrival's own, as the store writes it. */
+const LIBRARY_CURSOR_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+
 export function decodeRequest(frame: Uint8Array): ServiceRequest {
   let value: unknown;
   try {
@@ -249,6 +275,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectGlobalAttention':
     case 'runReconnectPreflight':
     case 'inspectDefaultExecutionRules':
+    // 知识库 › 工序与规则's 工序 (Issue #427, S79d) are the house's, so the read names no Book.
+    case 'inspectKnowledgeProcedures':
     case 'shutdown': {
       requireInput(value.input, [], tentativeId);
       break;
@@ -290,6 +318,16 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       const input = requireInput(value.input, ['credentialReference', 'credentialOperationState'], tentativeId);
       if (!isBoundedString(input.credentialReference, 36) || !UUID_PATTERN.test(input.credentialReference) ||
           !['ready', 'missing', 'needs-attention'].includes(input.credentialOperationState as string)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // 知识库 › 范例 (Issue #427, S79b) reads the published Books a page at a time, so it names none: only where the page
+    // starts, as 书库's does.
+    case 'inspectExemplars': {
+      const after = requireInput(value.input, ['after'], tentativeId).after;
+      if (!(after === null || (isRecord(after) && hasExactKeys(after, ['title', 'bookId']) &&
+          isBoundedString(after.title, 180) && isBoundedString(after.bookId, 36) && UUID_PATTERN.test(after.bookId)))) {
         throw new ProtocolError(tentativeId);
       }
       break;
@@ -545,6 +583,77 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       const input = requireInput(value.input, ['bookId', 'taskIntentId', 'planEnvelopeDigest', 'ruleVersionId'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.taskIntentId) || !validUuid(input.ruleVersionId) ||
           !isBoundedString(input.planEnvelopeDigest, 64) || !HEX_DIGEST_PATTERN.test(input.planEnvelopeDigest)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'inspectReviewGuidelines': {
+      const input = requireInputWithOptional(value.input, [], ['page'], tentativeId);
+      if (Object.hasOwn(input, 'page')) {
+        const page = requireInputWithOptional(input.page, ['documentId'], ['versionsBefore', 'clausePage'], tentativeId);
+        if (!isBoundedString(page.documentId, 64) || !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/u.test(page.documentId) ||
+            !optionalOrNull(page, 'versionsBefore', (cursor) => isSafeInteger(cursor, 2)) ||
+            (Object.hasOwn(page, 'clausePage') && !isSafeInteger(page.clausePage))) throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // The picker path starts a preview; an exact preview ID reads another bounded clause page.
+    case 'previewReviewGuidelineVersion': {
+      const input = requireInputWithOptional(value.input, ['documentId'], ['path', 'previewId', 'clausePage'], tentativeId);
+      const validSource = Object.hasOwn(input, 'previewId')
+        ? !Object.hasOwn(input, 'path') && validUuid(input.previewId) &&
+          (!Object.hasOwn(input, 'clausePage') || isSafeInteger(input.clausePage))
+        : !Object.hasOwn(input, 'clausePage') && isBoundedString(input.path, 32_767) && isAbsolute(input.path);
+      if (!isBoundedString(input.documentId, 64) || !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/u.test(input.documentId) || !validSource) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'importReviewGuidelineVersion': {
+      const input = requireInput(value.input, ['previewId'], tentativeId);
+      if (!validUuid(input.previewId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 知识库 › 资料库 (Issue #427, S79c) names no Book: only where its page starts, after one item, newest first.
+    case 'inspectLibraryMaterials': {
+      const after = requireInput(value.input, ['after'], tentativeId).after;
+      if (!(after === null || (isRecord(after) && hasExactKeys(after, ['recordedAt', 'materialId']) &&
+          isBoundedString(after.recordedAt, 40) && LIBRARY_CURSOR_INSTANT.test(after.recordedAt) && validUuid(after.materialId)))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // One 资料库 item, by its identity.
+    case 'inspectLibraryMaterial': {
+      const input = requireInput(value.input, ['materialId'], tentativeId);
+      if (!validUuid(input.materialId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'readLibraryDecisionReason': {
+      const input = requireInput(value.input, ['materialId', 'ordinal', 'offset'], tentativeId);
+      if (!validUuid(input.materialId) || !isSafeInteger(input.ordinal, 1) || !isSafeInteger(input.offset, 0) ||
+          Number(input.offset) % LIBRARY_REASON_PAGE_UNITS !== 0) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 放入资料… (Issue #427, S79c): the absolute path main's picker returned.
+    case 'previewLibraryMaterial': {
+      const input = requireInput(value.input, ['path'], tentativeId);
+      if (!isBoundedString(input.path, 32_767) || !isAbsolute(input.path)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 放入资料库: the preview, and the title and kind the editor gave it; the store holds the title to its bounds.
+    case 'addLibraryMaterial': {
+      const input = requireInput(value.input, ['previewId', 'title', 'kind'], tentativeId);
+      if (!validUuid(input.previewId) || !isBoundedString(input.title, 2_000) || !LIBRARY_MATERIAL_KINDS.includes(input.kind as LibraryMaterialKind)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // 定归属 or 定学习准入: the item, how many decisions the editor saw, and one decision of the closed shapes.
+    case 'decideLibraryMaterial': {
+      const input = requireInput(value.input, ['materialId', 'expectedDecisions', 'decision'], tentativeId);
+      if (!validUuid(input.materialId) || !Number.isSafeInteger(input.expectedDecisions) || (input.expectedDecisions as number) < 0 ||
+          !validLibraryDecision(input.decision)) {
         throw new ProtocolError(tentativeId);
       }
       break;

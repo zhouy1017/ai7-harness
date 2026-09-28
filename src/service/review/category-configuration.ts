@@ -258,6 +258,14 @@ export function reviewCategoryContractInput(entry: ReviewCategoryConfigurationEn
 }
 
 /**
+ * The guideline documents of a category that the house issued rather than AI7 (Issue #427, S79a review): their clauses are
+ * the house's own text, which the category's prompt would carry to the model.
+ */
+export function houseGuidelineDocuments(entry: ReviewCategoryConfigurationEntry): ReviewGuidelineDocument[] {
+  return entry.guidelineDocuments.filter((document) => document.issuer !== BUILTIN_GUIDELINE_ISSUER);
+}
+
+/**
  * The category's basis in one line, stated once on the sheet and snapshotted into the Review Run
  * (REV-010, REV-012). Search-engine use is said here and nowhere else; before the research path exists
  * (S70, #425) a category that would search says what its findings carry instead.

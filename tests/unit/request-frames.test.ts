@@ -1109,6 +1109,109 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
+  it('accepts 知识库 › 审阅规范文件: the read naming nothing, a preview by document and absolute path, a confirmation by preview (Issue #427)', () => {
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'inspectReviewGuidelines', input: {} },
+      { op: 'inspectReviewGuidelines', input: { page: { documentId: 'ai7-builtin/typos-and-usage', versionsBefore: 9, clausePage: 2 } } },
+      { op: 'inspectReviewGuidelines', input: { page: { documentId: 'ai7-builtin/typos-and-usage', versionsBefore: null } } },
+      { op: 'previewReviewGuidelineVersion', input: { documentId: 'ai7-builtin/typos-and-usage', previewId: randomUUID(), clausePage: 3 } },
+      { op: 'previewReviewGuidelineVersion', input: { documentId: 'ai7-builtin/typos-and-usage', path: `${process.cwd()}/规范/文字.docx` } },
+      { op: 'importReviewGuidelineVersion', input: { previewId: randomUUID() } },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    const absolute = `${process.cwd()}/规范/文字.docx`;
+    for (const [op, input] of [
+      ['inspectReviewGuidelines', { bookId: randomUUID() }],
+      ['inspectReviewGuidelines', { page: { documentId: 'ai7-builtin/typos-and-usage', versionsBefore: 1 } }],
+      ['inspectReviewGuidelines', { page: { documentId: 'ai7-builtin/typos-and-usage', clausePage: -1 } }],
+      ['inspectReviewGuidelines', { page: { documentId: 'ai7-builtin/typos-and-usage', clausePage: null } }],
+      ['inspectReviewGuidelines', { page: { documentId: 'ai7-builtin/typos-and-usage', clauses: [] } }],
+      ['previewReviewGuidelineVersion', { documentId: 'ai7-builtin/typos-and-usage', previewId: randomUUID(), path: absolute }],
+      ['previewReviewGuidelineVersion', { documentId: 'ai7-builtin/typos-and-usage', previewId: randomUUID(), clausePage: -1 }],
+      ['previewReviewGuidelineVersion', { documentId: 'ai7-builtin/typos-and-usage' }],
+      ['previewReviewGuidelineVersion', { documentId: 'ai7-builtin/typos-and-usage', path: '规范/文字.docx' }],
+      ['previewReviewGuidelineVersion', { documentId: '../escape', path: absolute }],
+      ['previewReviewGuidelineVersion', { documentId: 'x'.repeat(65), path: absolute }],
+      ['previewReviewGuidelineVersion', { documentId: 'ai7-builtin/typos-and-usage', path: absolute, clauses: [] }],
+      ['importReviewGuidelineVersion', { previewId: 'latest' }],
+      ['importReviewGuidelineVersion', {}],
+    ] as const) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
+  it('accepts 知识库 › 范例 only as a page start: none, or a title and Book as 书库 pages (Issue #427)', () => {
+    for (const input of [{ after: null }, { after: { title: '出版之书', bookId: randomUUID() } }]) {
+      const request = { id: randomUUID(), op: 'inspectExemplars', input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    for (const input of [
+      {},
+      { after: null, bookId: randomUUID() },
+      { after: { title: '出版之书' } },
+      { after: { title: '出版之书', bookId: 'not-a-book' } },
+      { after: { title: 'x'.repeat(181), bookId: randomUUID() } },
+      { after: '出版之书' },
+    ]) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op: 'inspectExemplars', input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
+  it('accepts 知识库 › 资料库: the read naming nothing, a preview by absolute path, an arrival, and a decision of a closed shape (Issue #427, S79c)', () => {
+    const materialId = randomUUID();
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'inspectLibraryMaterials', input: { after: null } },
+      { op: 'inspectLibraryMaterials', input: { after: { recordedAt: '2026-09-26T01:02:03.004Z', materialId: randomUUID() } } },
+      { op: 'inspectLibraryMaterial', input: { materialId } },
+      { op: 'readLibraryDecisionReason', input: { materialId, ordinal: 2, offset: 1024 } },
+      { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'house', reason: '👨‍👩‍👧‍👦'.repeat(300) } } },
+      { op: 'previewLibraryMaterial', input: { path: `${process.cwd()}/资料/样书.pdf` } },
+      { op: 'addLibraryMaterial', input: { previewId: randomUUID(), title: '样书一', kind: 'book' } },
+      { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId: randomUUID() } } } },
+      { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 1, decision: { kind: 'attribution', attribution: { scope: 'house' } } } },
+      { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } } },
+      { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 3, decision: { kind: 'eligibility', choice: 'excluded', reason: '版权未清' } } },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    const house = { kind: 'attribution', attribution: { scope: 'house' } };
+    for (const [op, input] of [
+      ['inspectLibraryMaterials', { bookId: randomUUID() }],
+      ['inspectLibraryMaterials', {}],
+      ['inspectLibraryMaterials', { after: { recordedAt: 'yesterday', materialId } }],
+      ['inspectLibraryMaterials', { after: { recordedAt: '2026-09-26T01:02:03.004Z', materialId: 'first' } }],
+      ['inspectLibraryMaterials', { after: { recordedAt: '2026-09-26T01:02:03.004Z' } }],
+      ['inspectLibraryMaterial', { materialId: 'first' }],
+      ['inspectLibraryMaterial', {}],
+      ['readLibraryDecisionReason', { materialId, ordinal: 0, offset: 0 }],
+      ['readLibraryDecisionReason', { materialId, ordinal: 2, offset: -1024 }],
+      ['readLibraryDecisionReason', { materialId, ordinal: 2, offset: 1 }],
+      ['readLibraryDecisionReason', { materialId: 'first', ordinal: 2, offset: 0 }],
+      ['readLibraryDecisionReason', { materialId, ordinal: 2, offset: 0, extra: true }],
+      ['previewLibraryMaterial', { path: '资料/样书.pdf' }],
+      ['previewLibraryMaterial', {}],
+      ['addLibraryMaterial', { previewId: randomUUID(), title: '样书一', kind: 'magazine' }],
+      ['addLibraryMaterial', { previewId: 'latest', title: '样书一', kind: 'book' }],
+      ['addLibraryMaterial', { previewId: randomUUID(), title: '样书一' }],
+      ['decideLibraryMaterial', { materialId, expectedDecisions: -1, decision: house }],
+      ['decideLibraryMaterial', { materialId, expectedDecisions: 0.5, decision: house }],
+      ['decideLibraryMaterial', { materialId: 'm', expectedDecisions: 0, decision: house }],
+      ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'series', seriesId: randomUUID() } } }],
+      ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'house', bookId: randomUUID() } } }],
+      ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId: 'first' } } }],
+      ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'eligibility', choice: 'series', reason: null } }],
+      ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'eligibility', choice: 'house' } }],
+      ['decideLibraryMaterial', { materialId, expectedDecisions: 0, decision: { kind: 'eligibility', choice: 'house', reason: null, inferred: true } }],
+    ] as const) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('rejects a 待我处理 read that names a Book, a group, a filter or anything else', () => {
     const id = randomUUID();
     const refused: ReadonlyArray<unknown> = [

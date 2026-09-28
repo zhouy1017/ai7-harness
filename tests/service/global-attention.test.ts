@@ -314,7 +314,11 @@ class RefusingOwner implements ReviewRunExecutionOwner {
     throw Object.assign(new Error('没有可执行的本地确定性路由。'), { code: 'EXECUTION_ROUTE_ABSENT' });
   }
 
-  whenIdle(): Promise<void> {
+  whenPlaceFree(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  whenDone(_runRecordId: string): Promise<void> {
     return Promise.resolve();
   }
 }

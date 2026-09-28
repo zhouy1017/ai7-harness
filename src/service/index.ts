@@ -348,17 +348,17 @@ async function dispatch(
         result: jobs.startBaselineAnalysisPreparation(request.input.bookId, request.input.goal, request.input.update, launchPolicy, request.input.reconfirm, request.input.redoOf ?? null),
       };
     case 'authorizeBaselineAnalysis': {
-      // One slot, no queue (Issue #420, S74a A2): while a Run holds the slot, a start that would dispatch is
-      // refused before anything is recorded. Nothing runs between this read and the admission below.
+      // The instance's concurrency governor (Issue #49, S14; CONC-007): the start is recorded, and the Run is admitted
+      // at once while a place is free, or waits for one — 等待运行名额 — and is admitted in its turn. One this launch cannot
+      // admit is blocked before dispatch with the reason, and the refusal answers the start as it always did.
       const authorized = store.authorizeBaselineAnalysis(
         request.input.bookId,
         request.input.taskIntentId,
         request.input.planEnvelopeDigest,
-        analysisExecution.busy,
       );
       if (authorized.dispatchRunRecordId !== null) {
         try {
-          analysisExecution.admitAndDispatch(authorized.dispatchRunRecordId);
+          analysisExecution.admitOrQueue(authorized.dispatchRunRecordId);
         } catch (error) {
           const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
           throw new StoreErrorClass(code, error instanceof Error ? error.message : '运行未能进入调度。');
@@ -384,14 +384,18 @@ async function dispatch(
         result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress),
       };
     }
-    case 'cancelWaitingBaselineAnalysis':
+    case 'cancelWaitingBaselineAnalysis': {
+      // A Run waiting on the governor leaves its queue as it is cancelled (Issue #49, S14): nothing of it ran.
+      const waiting = store.inspectBaselineAnalysis(request.input.bookId, analysisProgress).run;
       store.cancelWaitingBaselineAnalysis(request.input.bookId, request.input.taskIntentId);
+      if (waiting !== null && waiting.state === 'authorized') analysisExecution.dequeue(waiting.runRecordId);
       return {
         id: request.id,
         ok: true,
         op: request.op,
         result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress),
       };
+    }
     // 更新计划 (Issue #419, plan slice S73; PLAN-009, PLAN-011): the next plan version, as the editor left the plan.
     case 'editBaselineAnalysisPlan':
       return { id: request.id, ok: true, op: request.op, result: store.editBaselineAnalysisPlan(request.input, analysisProgress) };
@@ -489,8 +493,10 @@ async function dispatch(
         { credentialReadiness: () => analysisExecution.liveCredentialReadiness(), connectivity: connectivity.planConnectivity },
       );
       if (started.dispatchRunRecordId !== null) {
+        // Through the governor as 开始任务's start goes (Issue #49, S14): a quick start falls back while every place is
+        // taken, so it is admitted at once, and one this launch cannot admit is blocked before dispatch with the reason.
         try {
-          analysisExecution.admitAndDispatch(started.dispatchRunRecordId);
+          analysisExecution.admitOrQueue(started.dispatchRunRecordId);
         } catch (error) {
           const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
           throw new StoreErrorClass(code, error instanceof Error ? error.message : '运行未能进入调度。');
@@ -512,6 +518,32 @@ async function dispatch(
       };
     case 'inspectDefaultExecutionRules':
       return { id: request.id, ok: true, op: request.op, result: store.inspectDefaultExecutionRules() };
+    // 知识库 › 审阅规范文件 (Issue #427, S79a).
+    case 'inspectReviewGuidelines':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectReviewGuidelines(request.input.page) };
+    case 'previewReviewGuidelineVersion':
+      return { id: request.id, ok: true, op: request.op, result: request.input.previewId !== undefined
+        ? store.readReviewGuidelinePreview(request.input.documentId, request.input.previewId, request.input.clausePage)
+        : await store.previewReviewGuidelineVersion(request.input.documentId, request.input.path) };
+    case 'importReviewGuidelineVersion':
+      return { id: request.id, ok: true, op: request.op, result: store.importReviewGuidelineVersion(request.input.previewId) };
+    // 知识库 › 范例 (Issue #427, S79b).
+    case 'inspectExemplars':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectExemplars(request.input.after) };
+    case 'inspectKnowledgeProcedures':
+      return { id: request.id, ok: true, op: request.op, result: await store.inspectKnowledgeProcedures() };
+    case 'inspectLibraryMaterials':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterials(request.input.after) };
+    case 'inspectLibraryMaterial':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterial(request.input.materialId) };
+    case 'readLibraryDecisionReason':
+      return { id: request.id, ok: true, op: request.op, result: store.readLibraryDecisionReason(request.input) };
+    case 'previewLibraryMaterial':
+      return { id: request.id, ok: true, op: request.op, result: await store.previewLibraryMaterial(request.input.path) };
+    case 'addLibraryMaterial':
+      return { id: request.id, ok: true, op: request.op, result: await store.addLibraryMaterial(request.input) };
+    case 'decideLibraryMaterial':
+      return { id: request.id, ok: true, op: request.op, result: store.decideLibraryMaterial(request.input) };
     case 'deactivateDefaultExecutionRule':
       return { id: request.id, ok: true, op: request.op, result: store.deactivateDefaultExecutionRule(request.input.ruleId) };
     // 审阅 (Issue #417, plan slice S69). Every answer that shows a Run reads the one owner's progress, so
@@ -539,8 +571,8 @@ async function dispatch(
       };
     case 'authorizeReviewRun':
       // The one approval, then the drive loop at once: an approved Run nobody drives reads `partial`, so
-      // the answer is read only after the loop has taken the Run and reads it `running`. While another Run
-      // holds the one slot, a new approval is refused before it is written (Issue #420, S74a A2).
+      // the answer is read only after the loop has taken the Run and reads it `running`. While other Runs hold
+      // every place of the governor, a new approval is refused before it is written (Issue #420, S74a A2; #49, S14).
       store.authorizeReviewRun(request.input.bookId, request.input.reviewRunId, request.input.planDigests, analysisExecution.busy);
       driveReviewRun(reviewRuns, request.input.reviewRunId);
       return {
@@ -1026,7 +1058,8 @@ function parseArguments(argv: string[]): {
   // J-04's connectivity control (Issue #502): a file the Journey writes, read at each reading. It rides beside the
   // model adapter — it simulates only whether that route's network is there — so it is exclusive of nothing.
   const connectivityPath = values.get('--j04-connectivity-path');
-  // J-10's unit hold (Issue #422): a file the Journey writes, read before a unit settles; beside the adapter too.
+  // J-10's unit hold (Issue #422): a file the Journey writes, read before a unit settles; beside the adapter too. J-16
+  // holds a Run in its 任务 panel with it (Issue #423), and J-09 several Books' Runs at once (Issue #49).
   const unitHoldPath = values.get('--j10-unit-hold-path');
   if (
     !dataRoot ||
@@ -1047,7 +1080,8 @@ function parseArguments(argv: string[]): {
         (process.env.AI7_E2E_JOURNEY !== 'J-04' && process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' &&
           process.env.AI7_E2E_JOURNEY !== 'J-16'))) ||
     (connectivityPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-04' || !isAbsolute(connectivityPath))) ||
-    (unitHoldPath !== undefined && ((process.env.AI7_E2E_JOURNEY !== 'J-10' && process.env.AI7_E2E_JOURNEY !== 'J-16') || !isAbsolute(unitHoldPath))) ||
+    (unitHoldPath !== undefined && ((process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' && process.env.AI7_E2E_JOURNEY !== 'J-16') ||
+      !isAbsolute(unitHoldPath))) ||
     [importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length > 1 ||
     // developer-live is a human-attended developer-host launch: never a Journey launch, never with a Journey control.
     (launchForm.trustedOperationalScope !== 'development-ci' &&
@@ -1203,7 +1237,9 @@ async function run(): Promise<void> {
         // It stays 任务等待你的说明 with its answer; the next launch takes it on again.
       }
     }
-    // A Review Run's categories take the one owner's single slot one after another.
+    // Starts the governor had not admitted when AI7 closed were blocked with why by the reconciliation: nothing starts by
+    // itself after a restart (ADR 0034), and the editor starts them again when they choose.
+    // A Review Run's categories take a place of the one owner's governor one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);
     // Connectivity Wait (Issue #502). The reading is the device's own unless J-04's control names a file; the
     // live route reaches its model over the network, and so — under that control only — does J-04's route.

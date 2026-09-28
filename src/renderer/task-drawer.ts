@@ -44,6 +44,7 @@ import {
   taskBarContinuationNote,
   taskPlanActivityIsStale,
   taskPlanActivityRows,
+  TASK_BAR_QUEUED_STATUS,
   TASK_BAR_SLOT_BUSY,
   TASK_BAR_START_FAILED,
   TASK_BAR_SAVED,
@@ -471,7 +472,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     // read again slowly, so 续行 is offered once what it waits for — the slot, the network, the provider's account limit
     // — is back, and so is one waiting for the editor's answer, which the service takes on by itself once the slot is
     // free (S76d).
-    const stopped = next.state.key === 'paused' || next.state.key === 'resumable' || next.state.key === 'account-limit' || next.state.key === 'awaiting-clarification';
+    // A start waiting on the governor (Issue #49, S14) is read again slowly too, so the bar shows it once it is admitted.
+    const stopped = next.state.key === 'paused' || next.state.key === 'resumable' || next.state.key === 'account-limit' || next.state.key === 'awaiting-clarification' ||
+      next.state.key === 'queued';
     const followed = next.state.key === 'running' || next.state.key === 'cancelling' || next.state.key === 'pausing';
     if ((!followed && !waiting && !stopped) || interrupted || root.hidden) return;
     pollTimer = window.setTimeout(() => {
@@ -1451,8 +1454,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   /**
    * 开始任务 (AUTH-002, AUTH-004): one activation records the Run Authorization and the Run Record for exactly
    * the plan on show — the digests the bar read with it — through the kind's own authorization: J-03's
-   * record-only, the analysis into the one slot, a Review Run's one approval into its drive loop. A refusal
-   * is said beside the actions — the one slot busy in the bar's own words — and nothing waits in a queue.
+   * record-only, the analysis into the execution owner's governor, which admits it or has it wait for a place
+   * (等待运行名额, Issue #49, S14), a Review Run's one approval into its drive loop. A refusal is said beside the
+   * actions — every place taken, in the bar's own words.
    */
   async function start(): Promise<void> {
     const current = plan;
@@ -1461,16 +1465,18 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const recordOnly = current.start.readiness === 'record-only' || current.start.readiness === 'no-route';
     options.setStatus(recordOnly ? '正在记录运行…' : '正在开始任务…', 'busy');
     try {
+      let queued = false;
       if (current.kind === 'review-run') {
         await api.authorizeReviewRun({ reviewRunId: current.ref, planDigests: current.start.categoryDigests });
       } else {
         const planEnvelopeDigest = current.start.planEnvelopeDigest;
         if (planEnvelopeDigest === null) throw new Error(TASK_BAR_START_FAILED);
         if (current.kind === 'fixed-task') await api.authorizeTaskAuthorization({ taskIntentId: current.ref, planEnvelopeDigest });
-        else await api.authorizeBaselineAnalysis({ taskIntentId: current.ref, planEnvelopeDigest });
+        else queued = (await api.authorizeBaselineAnalysis({ taskIntentId: current.ref, planEnvelopeDigest })).state === 'queued';
       }
-      // The status line names the event, never a state the Run will leave (V2-UX-LIVE-004): the bar shows the state.
-      options.setStatus(current.kind === 'fixed-task' ? '已记录授权 · 未派发' : recordOnly ? '已记录运行；派发前会被阻止' : '已开始任务', 'success');
+      // The status line names the event, never a state the Run will leave (V2-UX-LIVE-004): the bar shows the state. A
+      // start waiting for a place is recorded, and nothing has begun (CONC-007).
+      options.setStatus(current.kind === 'fixed-task' ? '已记录授权 · 未派发' : recordOnly ? '已记录运行；派发前会被阻止' : queued ? TASK_BAR_QUEUED_STATUS : '已开始任务', 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId);
     } catch (error) {
