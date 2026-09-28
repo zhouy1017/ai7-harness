@@ -305,59 +305,37 @@ async function readEvaluation(renderer, predicate, name) {
   error.detail = page;
   throw error;
 }
-/** Hold one save/finalization response, including a refusal, while real input attempts meet the pending form. */
-async function submitHeldEvaluation(renderer, action, name) {
+/** Check pending input in the click's own turn, before the awaited save can repaint or refuse. */
+async function submitEvaluationWithPendingInput(renderer, action, name) {
   at('evaluation-pending-submit');
   await assertRenderer(renderer, `(() => {
     const record = document.querySelector('.evaluation-record');
     const button = record?.querySelector('[data-evaluation-action="${action}"]');
     if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
     const before = Array.from(record.querySelectorAll('input, select, textarea'), (control) => [control.value, control.checked ?? null, control.disabled]);
-    const held = { release: null, before }; window.__j11HeldEvaluationSubmit = held;
-    const original = Promise.prototype.then;
-    try {
-      Promise.prototype.then = function(success, failure) {
-        Promise.prototype.then = original;
-        const delayed = new Promise((resolve, reject) => original.call(this,
-          (value) => { held.release = () => resolve(value); },
-          (error) => { held.release = () => reject(error); }));
-        return original.call(delayed, success, failure);
-      };
-      button.click();
-    } finally { Promise.prototype.then = original; }
-    return true;
-  })()`, `${name}-hold`);
-  at('evaluation-response-held');
-  await waitFor(renderer, `typeof window.__j11HeldEvaluationSubmit?.release === 'function'`, `${name}-response-held`);
-  at('evaluation-controls-locked');
-  await assertRenderer(renderer, `(() => {
-    const record = document.querySelector('.evaluation-record');
+    window.__j11EvaluationSubmit = { before };
+    button.click();
+    // This synchronous turn cannot run the save's await continuation, including an immediate refusal.
     const controls = Array.from(record.querySelectorAll('input, select, textarea, button'));
     const score = record.querySelector('[data-evaluation-field="score"]');
     score.focus();
     record.querySelector('input[type="radio"]')?.click();
-    return controls.length > 0 && controls.every((control) => control.disabled) && document.activeElement !== score;
-  })()`, `${name}-controls-locked`);
-  at('evaluation-input-blocked');
-  await renderer.send('Input.insertText', { text: '9' });
-  await assertRenderer(renderer, `(() => {
-    const held = window.__j11HeldEvaluationSubmit;
-    const values = Array.from(document.querySelectorAll('.evaluation-record input, .evaluation-record select, .evaluation-record textarea'), (control) => [control.value, control.checked ?? null]);
-    if (JSON.stringify(values) !== JSON.stringify(held.before.map((entry) => entry.slice(0, 2)))) return false;
-    held.release();
-    return true;
-  })()`, `${name}-input-blocked-release`);
+    document.execCommand('insertText', false, '9');
+    const values = Array.from(record.querySelectorAll('input, select, textarea'), (control) => [control.value, control.checked ?? null]);
+    return controls.length > 0 && controls.every((control) => control.disabled) && document.activeElement !== score &&
+      JSON.stringify(values) === JSON.stringify(before.map((entry) => entry.slice(0, 2)));
+  })()`, `${name}-pending-input-blocked`);
 }
 
 /** A response keeps the submitted values; a save or refusal also restores each field's prior availability. */
 async function assertSubmittedEvaluation(renderer, restoreDisabled, name) {
   at('evaluation-submitted-values');
   await assertRenderer(renderer, `(() => {
-    const held = window.__j11HeldEvaluationSubmit;
+    const submitted = window.__j11EvaluationSubmit;
     const after = Array.from(document.querySelectorAll('.evaluation-record input, .evaluation-record select, .evaluation-record textarea'), (control) => [control.value, control.checked ?? null, control.disabled]);
-    const same = JSON.stringify(after.map((entry) => entry.slice(0, 2))) === JSON.stringify(held.before.map((entry) => entry.slice(0, 2)));
-    const restored = ${JSON.stringify(restoreDisabled)} === false || JSON.stringify(after.map((entry) => entry[2])) === JSON.stringify(held.before.map((entry) => entry[2]));
-    delete window.__j11HeldEvaluationSubmit;
+    const same = JSON.stringify(after.map((entry) => entry.slice(0, 2))) === JSON.stringify(submitted.before.map((entry) => entry.slice(0, 2)));
+    const restored = ${JSON.stringify(restoreDisabled)} === false || JSON.stringify(after.map((entry) => entry[2])) === JSON.stringify(submitted.before.map((entry) => entry[2]));
+    delete window.__j11EvaluationSubmit;
     return same && restored;
   })()`, name);
 }
@@ -672,7 +650,7 @@ async function main() {
     requireJourney(reviewed.record.conclusions[0][2] === false, 'evaluation-recommend-open', reviewed.record.conclusions);
     await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', 'evaluation-conclusion');
     await fill(renderer, '[data-screen="book-evaluation"] .evaluation-lists [data-evaluation-field="readiness"]', '第三章结尾需要重写', 'evaluation-readiness');
-    await submitHeldEvaluation(renderer, 'save', 'evaluation-save');
+    await submitEvaluationWithPendingInput(renderer, 'save', 'evaluation-save');
     await waitFor(renderer, `${status} === '评估已保存。'`, 'evaluation-saved-status');
     await assertSubmittedEvaluation(renderer, true, 'evaluation-save-keeps-submitted-draft');
     const savedPage = await readEvaluation(renderer, (page) => page.record?.entries === '2', 'evaluation-saved');
@@ -680,13 +658,13 @@ async function main() {
       savedPage.record.conclusions[1][1] === true && savedPage.focus === 'save', 'evaluation-saved-words', savedPage);
 
     at('evaluation-finalize');
-    await submitHeldEvaluation(renderer, 'finalize', 'evaluation-missing-low-statement');
+    await submitEvaluationWithPendingInput(renderer, 'finalize', 'evaluation-missing-low-statement');
     await waitFor(renderer, `${status} === '定稿前，要写明「事实与来源」的风险说明。'`, 'evaluation-low-statement-refused');
     await assertSubmittedEvaluation(renderer, true, 'evaluation-refusal-restores-draft-controls');
     await readEvaluation(renderer, (page) => page.record?.state === 'editing' && page.record.entries === '2', 'evaluation-refusal-keeps-draft');
     await fill(renderer, `${risk('facts-and-sources')} [data-evaluation-field="statement"]`, '已核对事实和来源，未发现未解决问题。', 'evaluation-low-risk-statement');
     // 定稿: the version reads as it was, with the actor and the time, and 重新评估 begins the next.
-    await submitHeldEvaluation(renderer, 'finalize', 'evaluation-finalize');
+    await submitEvaluationWithPendingInput(renderer, 'finalize', 'evaluation-finalize');
     await waitFor(renderer, `${status} === '第 1 版评估已定稿。'`, 'evaluation-finalized-status');
     await assertSubmittedEvaluation(renderer, false, 'evaluation-finalize-keeps-submitted-draft');
     const finalizedPage = await readEvaluation(renderer, (page) => page.record?.state === 'finalized', 'evaluation-finalized');
