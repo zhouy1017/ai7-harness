@@ -385,12 +385,12 @@ export class LearningEligibilityLedger {
   }
 
   /** Each candidate as its Review Card shows it, and where it stands. */
-  project(bookId: string, candidates: ReadonlyArray<LearningMaterialCandidate>): Array<Omit<LearningMaterialProjection, 'target'>> {
+  project(bookId: string, candidates: ReadonlyArray<LearningMaterialCandidate>): Array<Omit<LearningMaterialProjection, 'target' | 'sourceTask'>> {
     return Array.from(this.projectEntries(bookId, candidates));
   }
 
   /** Stream current standings after validating the complete Book ledger, retaining one candidate at a time. */
-  *projectEntries(bookId: string, candidates: Iterable<LearningMaterialCandidate>): IterableIterator<Omit<LearningMaterialProjection, 'target'>> {
+  *projectEntries(bookId: string, candidates: Iterable<LearningMaterialCandidate>): IterableIterator<Omit<LearningMaterialProjection, 'target' | 'sourceTask'>> {
     this.#validateBook(bookId);
     for (const candidate of candidates) {
       const latest = this.#latest(bookId, candidate.materialKey);

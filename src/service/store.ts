@@ -5811,7 +5811,7 @@ export class EditorialStore {
       requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
       const candidate = this.#learningCandidateOf(bookId, materialKey, true);
       requireStore(candidate !== null, 'LEARNING_MATERIAL_NOT_FOUND', '这条材料已经不在学习准入之列。');
-      return { ...this.#learningEligibility.project(bookId, [candidate])[0]!, target: this.#learningMaterialTarget(bookId, candidate) };
+      return { ...this.#learningEligibility.project(bookId, [candidate])[0]!, ...this.#learningMaterialSource(bookId, candidate) };
     });
   }
 
@@ -5860,7 +5860,7 @@ export class EditorialStore {
       }
     }
     return this.#learningEligibility.project(bookId, candidates).map((material, index) => ({
-      material: { ...material, target: this.#learningMaterialTarget(bookId, candidates[index]!) },
+      material: { ...material, ...this.#learningMaterialSource(bookId, candidates[index]!) },
       orderedAt: candidates[index]!.orderedAt,
     }));
   }
@@ -5874,17 +5874,42 @@ export class EditorialStore {
     return found;
   }
 
-  /** Resolve service-owned source identities; navigation never changes the material digest or eligibility. */
-  #learningMaterialTarget(bookId: string, candidate: LearningMaterialCandidate): LearningMaterialTarget {
+  /** Resolve the exact source and its originating Task; neither display fact changes the material digest or eligibility. */
+  #learningMaterialSource(bookId: string, candidate: LearningMaterialCandidate): Pick<LearningMaterialProjection, 'target' | 'sourceTask'> {
     const source = candidate.source;
-    if (source.kind !== 'decision') return { ...source, bookId };
+    if (source.kind === 'analysis') {
+      // The judged revision owns this Task, even after a newer analysis becomes current.
+      const row = one(this.#authority.prepare(
+        `SELECT t.task_intent_id, t.goal FROM analysis_result_set_revisions r
+         JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
+         JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id
+         WHERE r.revision_id = ? AND s.book_id = ? AND t.book_id = ?`,
+      ).all(source.revisionId, bookId, bookId) as SqlRow[], 'LEARNING_MATERIAL_NOT_FOUND', '这份学习材料的来源任务不存在。');
+      return { target: { ...source, bookId }, sourceTask: { taskIntentId: asString(row.task_intent_id), label: asString(row.goal) } };
+    }
+    if (source.kind === 'review') {
+      // A finding can have no mark. Its own category in the frozen Review Run still identifies its Task.
+      const row = one(this.#authority.prepare(
+        'SELECT category_id FROM review_findings WHERE review_run_id = ? AND finding_id = ?',
+      ).all(source.reviewRunId, source.findingId) as SqlRow[], 'LEARNING_MATERIAL_NOT_FOUND', '这份学习材料的来源发现不存在。');
+      const facts = this.#reviewCall(() => this.#reviewRuns.planFacts(bookId, source.reviewRunId));
+      const category = facts.categories.find((entry) => entry.categoryId === asString(row.category_id));
+      requireStore(category !== undefined, 'LEARNING_MATERIAL_NOT_FOUND', '这份学习材料的来源审阅类别不存在。');
+      return {
+        target: { ...source, bookId },
+        sourceTask: category.task === null ? null : { taskIntentId: category.task.taskIntentId, label: `${category.label} · ${category.task.modeLabel}` },
+      };
+    }
     const row = one(this.#authority.prepare(
-      `SELECT m.mark_id, m.manuscript_id, m.branch_id, m.block_id, m.anchor_state
+      `SELECT m.mark_id, m.manuscript_id, m.branch_id, m.block_id, m.anchor_state, m.source_task_id, m.source_label
        FROM proposal_item_decisions d JOIN proposal_change_items i ON i.item_id = d.item_id
        JOIN editorial_marks m ON m.mark_id = i.mark_id WHERE d.decision_id = ? AND m.book_id = ?`,
     ).all(source.decisionId, bookId) as SqlRow[], 'LEARNING_MATERIAL_NOT_FOUND', '这份学习材料的来源记录不存在。');
-    return { kind: 'mark', bookId, manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id),
-      blockId: asString(row.block_id), markId: asString(row.mark_id), detached: row.anchor_state === 'detached' };
+    return {
+      target: { kind: 'mark', bookId, manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id),
+        blockId: asString(row.block_id), markId: asString(row.mark_id), detached: row.anchor_state === 'detached' },
+      sourceTask: row.source_task_id === null ? null : { taskIntentId: asString(row.source_task_id), label: asString(row.source_label) },
+    };
   }
 
   /**

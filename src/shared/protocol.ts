@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 77 as const;
+export const SERVICE_PROTOCOL_VERSION = 78 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -5175,6 +5175,8 @@ export type LearningMaterialTarget =
 /** One Learning Material as its Review Card shows it (LEARN-003). */
 export interface LearningMaterialProjection {
   readonly target: LearningMaterialTarget;
+  /** The exact originating Task, when the source record has one (LEARN-003); editor-authored material has none. */
+  readonly sourceTask: null | { readonly taskIntentId: string; readonly label: string };
   /** The material's place: its kind and the record it comes from. */
   readonly materialKey: string;
   readonly kind: LearningMaterialKind;

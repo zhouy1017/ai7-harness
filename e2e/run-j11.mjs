@@ -1653,6 +1653,7 @@ async function main() {
     requireJourney(learningCard.card.heading === '修改建议 · 拒绝' && JSON.stringify(learningCard.card.excerptHeads) === JSON.stringify(['原文', '建议', '你的原因']) &&
       learningCard.card.excerptTail === '你的原因：证据不足' && learningCard.card.facts.rationale === '你说明了为什么这样处理：它可以帮 AI7 以后的建议更接近你的判断。' &&
       learningCard.card.facts.basis === LEARNING_BASIS && learningCard.card.facts.influence === LEARNING_INFLUENCE && learningCard.card.facts.decision === '还没有决定。' &&
+      learningCard.card.facts.task === undefined &&
       JSON.stringify(learningCard.card.choices) === JSON.stringify([['book', false, false], ['series', false, true], ['house', false, false], ['excluded', false, false], ['deferred', false, false]]) &&
       learningCard.card.recommended === 'book' && learningCard.card.seriesReason === '还没有书系：书系接通后，才能把材料纳入书系。' &&
       learningCard.card.consequence === null && learningCard.card.record === 'disabled' && JSON.stringify(learningCard.focus) === JSON.stringify(['proposal-decision', 'H4']),
@@ -1682,8 +1683,10 @@ async function main() {
     // Book once, as left for later.
     await clickSelector(renderer, `${learningRow('analysis-feedback')} [data-learning-action="open"]`, 'learning-open-analysis');
     const analysisCard = await readLearning(renderer, (page) => page.card?.material === 'analysis-feedback', 'learning-analysis-card');
+    const analysisSourceTask = await renderer.evaluate(`window.ai7.inspectLearningMaterials({ bookId: ${JSON.stringify(thirdId)} }).then((projection) => projection.books[0].materials.find((material) => material.kind === 'analysis-feedback')?.sourceTask ?? null)`);
     requireJourney(analysisCard.card.heading === '分析反馈 · 全书梗概' && JSON.stringify(analysisCard.card.excerptHeads) === JSON.stringify(['全书梗概', '你的判断']) &&
-      analysisCard.card.excerptTail === `你的判断：不完整 · ${SYNOPSIS_REASON}`, 'learning-analysis-card-words', analysisCard.card);
+      analysisCard.card.excerptTail === `你的判断：不完整 · ${SYNOPSIS_REASON}` && analysisSourceTask !== null &&
+      analysisCard.card.facts.task === `${analysisSourceTask.label} · ${analysisSourceTask.taskIntentId}`, 'learning-analysis-card-words', analysisCard.card);
     await tick(renderer, `${learningRow('analysis-feedback')} .learning-choices input[value="deferred"]`, 'learning-choose-deferred');
     await clickSelector(renderer, `${learningRow('analysis-feedback')} [data-learning-action="record"]`, 'learning-defer-record');
     const learningDeferred = await readLearning(renderer, (page) => page.card === null && page.books[0]?.materials[1]?.[1] === 'deferred', 'learning-deferred');

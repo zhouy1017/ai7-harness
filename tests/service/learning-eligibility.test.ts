@@ -139,6 +139,7 @@ describe('学习准入 over the real store', () => {
       const found = store.inspectLearningMaterials(null);
       expect(found.books.map((entry) => [entry.bookId, entry.authors, entry.editors, entry.materials.length])).toEqual([[book.bookId, ['周一'], ['郑三'], 2]]);
       const [reasoned, edited] = found.books[0]!.materials as [LearningMaterialProjection, LearningMaterialProjection];
+      expect([reasoned.sourceTask, edited.sourceTask]).toEqual([null, null]);
       expect([reasoned.kind, reasoned.originLabel, reasoned.state, reasoned.decision, reasoned.decisions]).toEqual(['proposal-decision', '修改建议 · 拒绝', 'pending', null, 0]);
       expect(reasoned.target).toMatchObject({ kind: 'mark', bookId: book.bookId, manuscriptId: book.manuscriptId,
         branchId: book.branchId, markId: rejectedMark, detached: false });
@@ -401,12 +402,20 @@ describe('学习准入 over the real store', () => {
       const material = store.inspectLearningMaterials(bookId).books[0]!.materials.find((entry) => entry.kind === 'review-disposition')!;
       expect(material.materialKey).toBe(`review-disposition:${run.reviewRunId}/${finding.findingId}`);
       expect(material.target).toEqual({ kind: 'review', bookId, reviewRunId: run.reviewRunId, findingId: finding.findingId });
+      const sourceCategory = run.categories.find((category) => category.categoryId === finding.categoryId)!;
+      expect(sourceCategory.taskIntentId).not.toBeNull();
+      expect(material.sourceTask).toEqual({ taskIntentId: sourceCategory.taskIntentId, label: `${sourceCategory.label} · ${sourceCategory.modeLabel}` });
       // The frame the page sends is accepted as it is, underscore and all (Issue #61 review), and the store records it.
       const input = { bookId, materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: 0, choice: 'excluded' as const, note: null };
       const request = { id: randomUUID(), op: 'decideLearningMaterial', input };
       expect(decodeRequest(new TextEncoder().encode(JSON.stringify(request)))).toEqual(request);
       const decided = store.decideLearningMaterial(input);
       expect([decided.materialKey, decided.state, decided.decision?.choice, decided.decisions]).toEqual([material.materialKey, 'decided', 'excluded', 1]);
+      expect(store.inspectLearningMaterial(bookId, material.materialKey)).toEqual(decided);
+      // A newer Task must not replace the historical finding's provenance or invalidate its eligibility decision.
+      let newer = store.createReviewRunPreparationWork(bookId, [TYPOS_AND_USAGE.categoryId], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, launchPolicy);
+      while (!newer.done) newer = store.advanceReviewRunPreparationWork(newer.workId!);
+      expect(newer.projection!.run!.categories[0]!.taskIntentId).not.toBe(sourceCategory.taskIntentId);
       expect(store.inspectLearningMaterial(bookId, material.materialKey)).toEqual(decided);
       store.markCleanShutdown();
     } finally {

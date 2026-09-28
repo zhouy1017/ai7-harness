@@ -199,6 +199,7 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
     };
     fact(LEARNING_CARD_TERMS.excerpt, excerpt, 'excerpt');
     fact(LEARNING_CARD_TERMS.origin, learningOriginLine(material, localInstantLabel), 'origin');
+    if (material.sourceTask !== null) fact('来源任务', `${material.sourceTask.label} · ${material.sourceTask.taskIntentId}`, 'task');
     fact(LEARNING_CARD_TERMS.rationale, material.rationale, 'rationale');
     fact(LEARNING_CARD_TERMS.basis, projection?.basis ?? '', 'basis');
     fact(LEARNING_CARD_TERMS.influence, LEARNING_INFLUENCE, 'influence');
