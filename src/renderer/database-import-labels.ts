@@ -47,7 +47,6 @@ export const DATABASE_MERGE_NOTHING = '这个文件里的图书本机都已经�
 /** What stays behind when the Books merge. */
 export const DATABASE_MERGE_NOTICE_LINES: Readonly<Record<DatabaseMergeNotice, string>> = {
   series: '书系关系与书系知识不随图书合并。',
-  'library-materials': '资料库的条目不随图书合并。',
   'internal-number': '内部编号已被本机其他图书使用的，合并后不带内部编号。',
 };
 export const DATABASE_IMPORT_STATUS_LINES = {
@@ -146,9 +145,10 @@ export function databasePendingLines(
 /** One replacement or merge as 导入记录 lists it: when, what it came to, and the backup it made. */
 export function databaseReplacementRecordLine(record: DatabaseReplacementRecordProjection, instant: (iso: string) => string): string {
   // Why one failed (Issue #434 review): what waited had changed since it was prepared, an open of the data it brought in was
-  // interrupted, or its data would not open.
+  // interrupted, the Books' records conflict with what this data holds now, or its data would not open.
   const why = record.failure === 'changed' ? '准备好的文件已不完整或被改动'
-    : record.failure === 'interrupted' ? '上次启动时打开替换来的数据被中断' : '它无法打开';
+    : record.failure === 'interrupted' ? '上次启动时打开替换来的数据被中断'
+      : record.failure === 'conflict' ? '它的记录与本机现在的数据冲突' : '它无法打开';
   if (record.kind === 'merge') {
     const named = record.mergedTitles ?? [];
     const count = record.mergedCount ?? named.length;
@@ -156,7 +156,7 @@ export function databaseReplacementRecordLine(record: DatabaseReplacementRecordP
     const titles = `${named.map((title) => `《${title}》`).join('、')}${count > named.length ? ' 等' : ''}`;
     const what = record.outcome === 'applied'
       ? `已从「${record.packageFileName}」合并 ${count} 本图书：${titles}`
-      : `未能从「${record.packageFileName}」合并图书：${record.failure === 'changed' ? `${why}，` : ''}本机数据保持原样`;
+      : `未能从「${record.packageFileName}」合并图书：${record.failure === 'changed' || record.failure === 'conflict' ? `${why}，` : ''}本机数据保持原样`;
     return `${instant(record.recordedAt)} · ${what} · 合并前备份「${record.backupFileName}」${record.backupPresent ? '' : '（文件不在备份位置）'}`;
   }
   const what = record.kind === 'roll-back'

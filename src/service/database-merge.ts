@@ -3,11 +3,13 @@ import { closeSync, constants, copyFileSync, existsSync, fstatSync, fsyncSync, m
 import { dirname, join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { DIGEST_PATTERN, canonicalJson, isRecord, parseCanonicalJson } from './analysis/canonical.js';
+import { LIBRARY_OBJECT_DIRECTORY } from './library-materials.js';
 
 /**
  * 只导入其中的图书，与本机合并（重名的另存） (Issue #434, plan slice S86d; V2-UX-DSTO-017; ADR 0079 §1.5). A Book merges with
- * every record it owns; house settings and credentials never merge; a Book already here is not taken again; a Book with a
- * title already here is stored beside it.
+ * every record it owns — its 资料库 items with their whole history and originals among them (the Owner, 2026-09-28) — and
+ * the Knowledge Base versions it references come as the read-only snapshots its Runs already hold (KB-002); house settings
+ * and credentials never merge; a Book already here is not taken again; a Book with a title already here is stored beside it.
  *
  * What a Book owns is read from the store's own foreign keys, over a policy every relation has:
  * - `seed`: `books`, fixed to the Books chosen — a reference to any other Book is refused, never followed;
@@ -15,8 +17,7 @@ import { DIGEST_PATTERN, canonicalJson, isRecord, parseCanonicalJson } from './a
  * - `dependent`: a row taken only because an owned row references it (an import draft a reimport compared against);
  * - `shared`: a house row an owned row references, taken when this store lacks it (a content object, a workflow profile,
  *   the service lifetime a journal entry was written in, the 编辑工作区方案 a Book enabled);
- * - `excluded`: a Book's row that stays behind, said as a notice — its Series membership and Series knowledge, its 资料库
- *   decisions;
+ * - `excluded`: a Book's row that stays behind, said as a notice — its Series membership and Series knowledge;
  * - `transient`: working state of a session, never taken — import drafts in progress, searches, replacement previews;
  * - `house`: the house's own records, never taken;
  * - `derived`: the search index, rebuilt for the rows taken.
@@ -231,6 +232,10 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   // Its enablement of the 编辑工作区方案 and the 权限侧车 revisions it pinned, which its prepared Tasks name (Issue #434 review).
   native_artifact_book_enablements: 'owned',
   editorial_workspace_profile_book_pins: 'owned',
+  // Its 资料库 items (Issue #434 review; ADR 0079 §1.5): an item a decision of its names comes with every decision of the item's
+  // chain and its original, unless this data already holds it (`libraryRefusal`).
+  library_materials: 'owned',
+  library_material_decisions: 'owned',
   // House rows a Book's records reference: taken when this store lacks them. The 方案 is the one every AI7 carries, fixed to
   // its bytes: a Book that enabled it brings it, whole, to data that has not installed it.
   content_objects: 'shared',
@@ -242,7 +247,6 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   series_membership_changes: 'excluded',
   series_knowledge_candidates: 'excluded',
   series_knowledge_revisions: 'excluded',
-  library_material_decisions: 'excluded',
   // Working state of a session.
   import_commit_attempts: 'transient',
   import_abandonment_cleanup_intents: 'transient',
@@ -258,8 +262,8 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   manuscript_replacement_matches: 'transient',
   // The house's own records.
   model_service_connections: 'house',
+  // The house's own versions of its guideline documents: a Book brings those its Runs applied as the snapshots they hold.
   review_guideline_versions: 'house',
-  library_materials: 'house',
   series: 'house',
   series_knowledge_items: 'house',
   series_knowledge_promotions: 'house',
@@ -284,13 +288,12 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
 };
 
 /** What stays behind when a Book merges, said to the editor. */
-export type MergeNotice = 'series' | 'library-materials' | 'internal-number';
+export type MergeNotice = 'series' | 'internal-number';
 
 const EXCLUSION_NOTICES: Readonly<Record<string, { notice: MergeNotice; bookColumn: string }>> = {
   series_membership_changes: { notice: 'series', bookColumn: 'book_id' },
   series_knowledge_candidates: { notice: 'series', bookColumn: 'source_book_id' },
   series_knowledge_revisions: { notice: 'series', bookColumn: 'source_book_id' },
-  library_material_decisions: { notice: 'library-materials', bookColumn: 'book_id' },
 };
 
 export class DatabaseMergeError extends Error {
@@ -401,6 +404,8 @@ export interface MergePlan {
   /** How many of the package's Books merging would take as new, leave as already here, or take beside one of the same title. */
   readonly counts: { readonly new: number; readonly present: number; readonly sameTitle: number };
   readonly notices: ReadonlyArray<MergeNotice>;
+  /** Why merging would be refused over a 资料库 item the Books bring, said before anything is prepared; `null` when none. */
+  readonly refusal: MergeRefusal | null;
 }
 
 /** A Book of `src` merging would take: none of this store's Books has its id or its identity. */
@@ -414,7 +419,7 @@ const MERGING_BOOK = 'NOT EXISTS (SELECT 1 FROM main.books m WHERE m.book_id = b
 export function planMerge(db: DatabaseSync, listed = MAX_MERGE_BOOKS_LISTED, merging?: (book: MergeBookPlan) => void): MergePlan {
   const counts = { new: 0, present: 0, sameTitle: 0 };
   // A store with no Books offers none to merge.
-  if (!tableExists(db, 'src', 'books')) return { books: [], counts, notices: [] };
+  if (!tableExists(db, 'src', 'books')) return { books: [], counts, notices: [], refusal: null };
   const internal = columnsOf(db, 'src', 'books').includes('internal_number');
   // Read as a stream (Issue #434 review): the page listed and the Books merging would take, never every Book whole.
   const rows = db.prepare(
@@ -453,7 +458,64 @@ export function planMerge(db: DatabaseSync, listed = MAX_MERGE_BOOKS_LISTED, mer
     if (found !== undefined) notices.add(notice);
   }
   if (numberCleared) notices.add('internal-number');
-  return { books, counts, notices: [...notices].sort() };
+  const refusal = counts.new + counts.sameTitle === 0 ? null : libraryRefusal(db, `SELECT b.book_id FROM src.books b WHERE ${MERGING_BOOK}`);
+  return { books, counts, notices: [...notices].sort(), refusal };
+}
+
+// ---- 资料库 items ----------------------------------------------------------------------------------------
+
+/** Where a 资料库 item keeps its original, as its arrival record names it: under its content's digest. */
+const LIBRARY_OBJECT_KEY = /^sha256\/([0-9a-f]{2})\/([0-9a-f]{64})\.[a-z]+$/u;
+
+/** Why a merge would be refused over a 资料库 item its Books bring, said of that item. */
+export interface MergeRefusal {
+  readonly code: 'DATABASE_MERGE_LIBRARY_DUPLICATE' | 'DATABASE_MERGE_LIBRARY_CONFLICT' | 'DATABASE_MERGE_CROSS_BOOK';
+  readonly message: string;
+}
+
+/**
+ * The 资料库 items the merging Books bring (Issue #434 review; ADR 0079 §1.5): each item a decision of theirs names comes whole
+ * — its arrival record, every decision of its chain and its original — or, when this data already holds the item, the part of
+ * its chain this data does not hold yet, added after the part it does. The first reason one of them cannot come, or `null`:
+ * - the same file is here as another item, and 资料库 keeps one item per file;
+ * - the same item is here, but not as the package holds it: another arrival record, or decisions its chain does not have;
+ * - a decision to be added names a Book that is not merging, and would reference a Book this data does not take with it.
+ * `merging` is a query of the merging Books' ids. Asked when a merge is prepared, and again as it applies.
+ */
+export function libraryRefusal(db: DatabaseSync, merging: string): MergeRefusal | null {
+  if (!tableExists(db, 'src', 'library_materials') || !tableExists(db, 'main', 'library_materials')) return null;
+  const items = db.prepare(
+    `SELECT x.material_id, x.object_sha256, x.sha256, json_extract(x.canonical_json, '$.title') AS title FROM src.library_materials x
+     WHERE x.material_id IN (SELECT d.material_id FROM src.library_material_decisions d WHERE d.book_id IN (${merging}))
+     ORDER BY x.recorded_at, x.material_id`,
+  ).iterate() as Iterable<SqlRow>;
+  const here = db.prepare('SELECT sha256 FROM main.library_materials WHERE material_id = ?');
+  const sameFile = db.prepare('SELECT 1 FROM main.library_materials WHERE object_sha256 = ? AND material_id <> ?');
+  // A decision this data holds of the item that the package's chain does not hold at the same place.
+  const diverged = db.prepare(
+    `SELECT 1 FROM main.library_material_decisions h WHERE h.material_id = ? AND NOT EXISTS (
+       SELECT 1 FROM src.library_material_decisions s WHERE s.material_id = h.material_id AND s.ordinal = h.ordinal AND s.sha256 = h.sha256) LIMIT 1`,
+  );
+  // A decision to be added that names a Book not merging.
+  const stray = db.prepare(
+    `SELECT 1 FROM src.library_material_decisions s WHERE s.material_id = ? AND s.book_id IS NOT NULL AND s.book_id NOT IN (${merging})
+       AND s.decision_id NOT IN (SELECT decision_id FROM main.library_material_decisions) LIMIT 1`,
+  );
+  for (const item of items) {
+    const title = String(item.title);
+    const materialId = String(item.material_id);
+    const known = here.get(materialId) as SqlRow | undefined;
+    if (known === undefined && sameFile.get(String(item.object_sha256), materialId) !== undefined) {
+      return { code: 'DATABASE_MERGE_LIBRARY_DUPLICATE', message: `图书带来的资料《${title}》，本机资料库里已经有同一份文件，不能合并。` };
+    }
+    if (known !== undefined && (String(known.sha256) !== String(item.sha256) || diverged.get(materialId) !== undefined)) {
+      return { code: 'DATABASE_MERGE_LIBRARY_CONFLICT', message: `图书带来的资料《${title}》在本机资料库里也有，但两边的记录不同，不能合并。` };
+    }
+    if (stray.get(materialId) !== undefined) {
+      return { code: 'DATABASE_MERGE_CROSS_BOOK', message: `图书带来的资料《${title}》也归属过没有一起合并的图书，不能合并。` };
+    }
+  }
+  return null;
 }
 
 // ---- the list of the Books a merge takes ---------------------------------------------------------------
@@ -697,6 +759,14 @@ function mergeListedBooks(
         }
       }
     }
+    // The 资料库 items the Books bring, refused as the plan was (Issue #434 review). What this data already holds of an item —
+    // the item, and the decisions of its chain it has — stays as it is, and only the rest of the chain is added after it.
+    const refused = libraryRefusal(db, 'SELECT book_id FROM temp.merge_books');
+    if (refused !== null) throw new DatabaseMergeError(refused.code, refused.message);
+    db.exec(`DELETE FROM temp.merge_rows WHERE tbl = 'library_materials' AND r IN (
+      SELECT x.rowid FROM src.library_materials x WHERE x.material_id IN (SELECT material_id FROM main.library_materials))`);
+    db.exec(`DELETE FROM temp.merge_rows WHERE tbl = 'library_material_decisions' AND r IN (
+      SELECT x.rowid FROM src.library_material_decisions x WHERE x.decision_id IN (SELECT decision_id FROM main.library_material_decisions))`);
     // A reference from the Book's rows to a Book not chosen is refused, never followed.
     for (const key of keys) {
       if (policy(key.parent) !== 'seed' || !['owned', 'dependent'].includes(policy(key.table))) continue;
@@ -723,6 +793,14 @@ function mergeListedBooks(
     }
     for (const row of db.prepare(`SELECT x.object_relative_key AS k FROM src.recovery_snapshots x ${owned('recovery_snapshots', 'x')}`).iterate() as Iterable<SqlRow>) {
       if (copyStoredFile(roots.source, roots.target, 'recovery-objects', String(row.k), RECOVERY_KEY)) files += 1;
+    }
+    // The originals of the 资料库 items the Books bring, each under its content's digest, as its arrival record names it.
+    for (const row of db.prepare(
+      `SELECT json_extract(x.canonical_json, '$.objectKey') AS k, x.object_sha256 AS digest FROM src.library_materials x ${owned('library_materials', 'x')}`,
+    ).iterate() as Iterable<SqlRow>) {
+      const key = LIBRARY_OBJECT_KEY.exec(String(row.k));
+      requireMerge(key !== null && key[2] === String(row.digest) && key[1] === key[2]!.slice(0, 2), 'DATABASE_MERGE_FILE_INVALID', '合并所需的文件名无效。');
+      if (copyStoredFile(roots.source, roots.target, LIBRARY_OBJECT_DIRECTORY, key[0], LIBRARY_OBJECT_KEY)) files += 1;
     }
     // And the carrier a 方案 installed here by the merge keeps, as installing it retains it.
     for (const row of db.prepare(

@@ -272,16 +272,37 @@ The reader holds every entry to the size its central directory declares (Issue #
 
 The backup before a replacement or a merge and the 定期自动备份 check write into the same backup location, with the same `.<uuid>.ai7db.partial` files, so they never write at once. The backup waits for a check under way, and no check starts until it is written. A check's sweep therefore never takes a file the backup is making, and still removes one a cut-off backup left.
 
-只导入其中的图书 (Issue #434, S86d; ADR 0079 §1.5) is service protocol version 85 and schema revision 58. `src/service/database-merge.ts` merges a Book with every record it owns, read from the store's own foreign keys over a policy that every relation has, and that a test pins against the store's catalogue:
+只导入其中的图书 (Issue #434, S86d; ADR 0079 §1.5) is service protocol version 86 and schema revision 58. `src/service/database-merge.ts` merges a Book with every record it owns, read from the store's own foreign keys over a policy that every relation has, and that a test pins against the store's catalogue:
 - `seed`: `books`, fixed to the Books chosen. A reference to another Book is refused.
 - `owned`: a row that references an owned row, or that an owned row references.
 - `dependent`: an import draft a committed import names.
 - `shared`: a house row an owned row references, taken when this store lacks it — a content object, a workflow profile, the service lifetime a journal entry was written in, the 编辑工作区方案 a Book enabled.
-- `excluded`: said as a notice — Series membership and Series knowledge, 资料库 decisions.
+- `excluded`: said as a notice — Series membership and Series knowledge.
 - `transient` and `house`: never taken.
 - `derived`: the search index, filled for the working text taken.
 
 A few references the store keeps by value — each import record's commit, each journal entry's lifetime — are followed as if they were foreign keys. The relations go in one transaction, in any order: foreign keys are checked at commit, and the store's insert triggers look only for a conflicting row, never for a parent. The rows of each relation go in the order they were written, which is what the one trigger comparing rows of its own relation asks for: a Book's 方案 pins, Revision 1 before Revision 2. The stored files they name are copied first. A Book whose 内部编号 is another Book's here merges without one.
+
+**The Book's 资料库 items and the Knowledge Base versions it references (the Owner, 2026-09-28: follow ADR 0079 §1.5):**
+- **资料库 items come with the Book.** `library_materials` and `library_material_decisions` are `owned`. An item that one of the merging Books' decisions names comes whole: its arrival record, every decision of its chain, and its original under `library-objects/sha256/`.
+  - An item this data already holds gains only the part of its chain it does not hold yet, added after the part it does. Its arrival record must be the same, and this data's chain must be the start of the package's.
+  - Refused otherwise, because 资料库 keeps one item per file and one history per item:
+    - the same file is here as another item (`DATABASE_MERGE_LIBRARY_DUPLICATE`);
+    - the same item is here with another history (`DATABASE_MERGE_LIBRARY_CONFLICT`);
+    - a decision to be added names a Book that is not merging (`DATABASE_MERGE_CROSS_BOOK`).
+  - `libraryRefusal` asks this of both stores:
+    - The preview answers the reason in `mergeRefusal`, and the merge choice is disabled with it.
+    - `prepareDatabaseMerge` refuses in the same words before anything is backed up.
+    - The merge asks again as it applies. A merge the rules refuse there, over data that changed meanwhile or a Book already here, is recorded failed with `failure: 'conflict'` (「它的记录与本机现在的数据冲突」).
+  - The `library-materials` notice is gone.
+- **Guideline documents come as the snapshots the Book's Runs hold.** A Review Run snapshots each guideline document it applies, clauses included (KB-002), so the house's own versions stay the house's (`review_guideline_versions` is `house`).
+  - 知识库 › 审阅规范文件 tells versions apart by content: the number, issuer, title and clauses as the Run holds them, against this data's own version of that number.
+  - A Run of a Book an applied merge took, which applied a version this data never had, counts under none of this data's versions. The page lists it read-only, with its clauses and the reviews that used it, in `mergedVersions`: highest number first, ten named, all counted.
+  - Such a Book is among those not on the current version (`olderVersionBooks`, `merged: true`), and its findings cite no clause of this data's version.
+  - The house's own Runs are read by number as ever, so a build that rewords a built-in version never splits them.
+- **工序 and 范例:**
+  - 工序 are AI7's own, named alike on every computer, and each Run keeps naming the exact version it applied.
+  - 范例 are the Book's own delivered documents, which come with it.
 
 A Book's enablement of the 编辑工作区方案 and the 权限侧车 revisions it pinned are its own, because its prepared Tasks name them (Issue #434 review). The 方案 itself is the one every AI7 carries, fixed to its bytes. Data that has not installed it gains it whole from a Book that enabled it: its installation, both sidecar revisions as installing writes them, and the carrier it retains. Data that has installed it keeps its own. A J-03 Task's plan is read against the credential reference that plan froze, as against its pin, never against this computer's connection. So a Book from another computer opens with its Tasks as recorded, and any new Run still needs this computer's own connection.
 
@@ -299,6 +320,7 @@ A merge uses the replacement's staging place:
   - A merge that failed took nothing, and its one-row record names no Book. An applied merge found without its receipt, which only something other than AI7 could leave, refuses the open with `DATABASE_MERGE_RECEIPT_MISSING`.
   - Every read verifies every record's rows against its count and digest as a stream, listed or not, keeping only the first titles. 导入记录 lists merges beside replacements, the two ledgers read as streams merged newest first. 回退 reads the replacements alone.
 - **Bounded (Issue #434 review):**
+  - `libraryRefusal` reads the items the merging Books name as a stream, one at a time.
   - The plan streams the package's Books. The preview lists the first fifty and counts them all as new, already here or same-titled, and asks the store what stays behind, over the Books merging would take.
   - A waiting merge lists fifty from its list and counts every Book it takes.
   - The merge seeds from its list through a table of its connection's own. A list that is no longer the one its intent names merges nothing and is recorded as changed.

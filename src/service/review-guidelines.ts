@@ -3,11 +3,13 @@ import { readFile, stat } from 'node:fs/promises';
 import { basename } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
+  MAX_GUIDELINE_MERGED_VERSIONS_SHOWN,
   MAX_GUIDELINE_OLDER_BOOKS_SHOWN,
   MAX_GUIDELINE_VERSION_RUNS_SHOWN,
   MAX_REVIEW_GUIDELINE_FILE_BYTES,
   type ReviewGuidelineDocumentProjection,
   type ReviewGuidelineDocumentUse,
+  type ReviewGuidelineMergedVersionProjection,
   type ReviewGuidelinePreviewProjection,
   type ReviewGuidelineSourceProjection,
   type ReviewGuidelinesProjection,
@@ -279,6 +281,24 @@ function clauseChanges(current: ReadonlyArray<ReviewGuidelineClause>, next: Read
   return { changed, added: Math.max(0, next.length - current.length), removed: Math.max(0, current.length - next.length) };
 }
 
+/**
+ * A guideline document as a Review Run applies it, told apart by its content (Issue #434 review): its number, who issued it,
+ * its title and its clauses, as the Run's snapshot holds them and as this data's own version of that number reads.
+ */
+function documentContent(document: { readonly documentId: unknown; readonly title: unknown; readonly issuer: unknown; readonly version: unknown; readonly clauses: unknown }): string {
+  return sha256Hex(canonicalJson({ documentId: document.documentId, title: document.title, issuer: document.issuer, version: document.version, clauses: document.clauses }));
+}
+
+/** One guideline document as a Run applied it. */
+interface AppliedDocument {
+  readonly version: number;
+  readonly categoryIds: string[];
+  readonly content: string;
+  readonly title: string;
+  readonly issuer: string;
+  readonly clauses: ReadonlyArray<ReviewGuidelineClause>;
+}
+
 /** What a Review Run's snapshot says about the guideline documents its categories applied, and at which version. */
 interface RunReading {
   readonly reviewRunId: string;
@@ -286,8 +306,10 @@ interface RunReading {
   readonly bookTitle: string;
   readonly ordinal: number;
   readonly createdAt: string;
+  /** Whether its Book came here by 只导入其中的图书 (Issue #434 review): its versions may be another house's. */
+  readonly merged: boolean;
   /** documentId → version, and the categories of this Run that applied it. */
-  readonly documents: ReadonlyMap<string, { version: number; categoryIds: string[] }>;
+  readonly documents: ReadonlyMap<string, AppliedDocument>;
 }
 
 function integer(value: SQLOutputValue | undefined): number {
@@ -439,14 +461,20 @@ export class ReviewGuidelineLedger {
     const materialized = new Set((this.#db.prepare(
       "SELECT DISTINCT review_run_id, category_id FROM review_run_category_events WHERE state = 'materialized'",
     ).all() as SqlRow[]).map((row) => `${String(row.review_run_id)}\n${String(row.category_id)}`));
+    // A Book an applied merge took (Issue #434 review), asked of the merge ledger where the store has one.
+    const ledgered = this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'database_merge_books'").get() !== undefined;
+    const merged = ledgered
+      ? `EXISTS (SELECT 1 FROM database_merge_books mb JOIN database_merges m ON m.merge_id = mb.merge_id
+           WHERE mb.book_id = r.book_id AND m.outcome = 'applied')`
+      : '0';
     const rows = this.#db.prepare(
-      `SELECT r.review_run_id, r.book_id, r.ordinal, r.created_at, r.canonical_json, b.title
+      `SELECT r.review_run_id, r.book_id, r.ordinal, r.created_at, r.canonical_json, b.title, ${merged} AS merged
        FROM review_runs r JOIN books b ON b.book_id = r.book_id
        ORDER BY r.created_at, r.review_run_id`,
     ).all() as SqlRow[];
     return rows.map((row) => {
       const snapshot = JSON.parse(String(row.canonical_json)) as unknown;
-      const documents = new Map<string, { version: number; categoryIds: string[] }>();
+      const documents = new Map<string, AppliedDocument>();
       const categories = isRecord(snapshot) && Array.isArray(snapshot.categories) ? snapshot.categories : [];
       for (const category of categories) {
         if (!isRecord(category) || !isRecord(category.entry) || !Array.isArray(category.entry.guidelineDocuments)) continue;
@@ -454,7 +482,16 @@ export class ReviewGuidelineLedger {
         for (const document of category.entry.guidelineDocuments) {
           if (!isRecord(document) || typeof document.documentId !== 'string') continue;
           const version = Number(document.version);
-          const known = documents.get(document.documentId) ?? { version, categoryIds: [] };
+          const known = documents.get(document.documentId) ?? {
+            version,
+            categoryIds: [],
+            content: documentContent({
+              documentId: document.documentId, title: document.title, issuer: document.issuer, version: document.version, clauses: document.clauses,
+            }),
+            title: String(document.title),
+            issuer: String(document.issuer),
+            clauses: Array.isArray(document.clauses) ? document.clauses as ReviewGuidelineClause[] : [],
+          };
           known.categoryIds.push(String(category.categoryId));
           documents.set(document.documentId, known);
         }
@@ -465,6 +502,7 @@ export class ReviewGuidelineLedger {
         bookTitle: String(row.title),
         ordinal: integer(row.ordinal),
         createdAt: String(row.created_at),
+        merged: integer(row.merged) === 1,
         documents,
       };
     });
@@ -487,30 +525,45 @@ export class ReviewGuidelineLedger {
       const stored = use === 'clauses' ? this.#versions(builtin) : [];
       const current = this.#current(builtin, stored);
       const currentOrdinal = Number(current.document.version);
-      // The Runs that used each version, oldest first as they were read.
+      // What this data's own version of each number says (Issue #434 review). A Run of a Book merged here that applied a version
+      // whose content is not this data's version of that number — another house's, or another AI7's wording — applied the
+      // snapshot its Run holds (ADR 0079 §1.5): read-only, and never taken for this data's version of the same number.
+      const own = new Map<number, string>([
+        [1, documentContent(builtin)],
+        ...stored.map((version) => [version.ordinal, documentContent({
+          documentId: builtin.documentId, title: version.title, issuer: version.issuer, version: String(version.ordinal), clauses: version.clauses,
+        })] as const),
+      ]);
+      const snapshotted = (run: RunReading, applied: AppliedDocument): boolean => run.merged && own.get(applied.version) !== applied.content;
+      // The Runs that used each version, oldest first as they were read, and those that used a merged Book's own.
       const byVersion = new Map<number, RunReading[]>();
+      const bySnapshot = new Map<string, { applied: AppliedDocument; used: RunReading[] }>();
       for (const run of runs) {
         const applied = run.documents.get(builtin.documentId);
         if (applied === undefined) continue;
+        if (snapshotted(run, applied)) {
+          const known = bySnapshot.get(applied.content) ?? { applied, used: [] };
+          known.used.push(run);
+          bySnapshot.set(applied.content, known);
+          continue;
+        }
         const used = byVersion.get(applied.version) ?? [];
         used.push(run);
         byVersion.set(applied.version, used);
       }
-      const usedByOf = (ordinal: number): Pick<ReviewGuidelineVersionProjection, 'usedByCount' | 'usedBy'> => {
-        const used = byVersion.get(ordinal) ?? [];
-        return {
-          usedByCount: used.length,
-          usedBy: used.slice(-MAX_GUIDELINE_VERSION_RUNS_SHOWN).reverse()
-            .map((run) => ({ bookId: run.bookId, bookTitle: run.bookTitle, reviewRunId: run.reviewRunId, reviewOrdinal: run.ordinal, createdAt: run.createdAt })),
-        };
-      };
+      const usedByOf = (used: ReadonlyArray<RunReading>): Pick<ReviewGuidelineVersionProjection, 'usedByCount' | 'usedBy'> => ({
+        usedByCount: used.length,
+        usedBy: used.slice(-MAX_GUIDELINE_VERSION_RUNS_SHOWN).reverse()
+          .map((run) => ({ bookId: run.bookId, bookTitle: run.bookTitle, reviewRunId: run.reviewRunId, reviewOrdinal: run.ordinal, createdAt: run.createdAt })),
+      });
       // A finding cites a clause of the version its Run applied. The same finding found again by a later Run of its Book —
       // the same category's finding of the same words, which keeps its mark — counts once (Issue #427 review).
       const citing = new Map<string, Set<string>>();
       for (const row of citations) {
         const run = runsById.get(String(row.review_run_id));
         const applied = run?.documents.get(builtin.documentId);
-        if (run === undefined || applied === undefined || applied.version !== currentOrdinal || !applied.categoryIds.includes(String(row.category_id))) continue;
+        if (run === undefined || applied === undefined || snapshotted(run, applied) || applied.version !== currentOrdinal ||
+          !applied.categoryIds.includes(String(row.category_id))) continue;
         const clauseId = String(row.clause_ref);
         const findings = citing.get(clauseId) ?? new Set<string>();
         findings.add(`${run.bookId}\n${String(row.category_id)}\n${String(row.kind_ref)}`);
@@ -525,7 +578,7 @@ export class ReviewGuidelineLedger {
           source: null,
           clauseCount: builtin.clauses.length,
           digest: builtinDigest(builtin),
-          ...usedByOf(1),
+          ...usedByOf(byVersion.get(1) ?? []),
         },
         ...stored.map((version) => ({
           ordinal: version.ordinal,
@@ -535,9 +588,20 @@ export class ReviewGuidelineLedger {
           source: version.source,
           clauseCount: version.clauses.length,
           digest: version.sha256,
-          ...usedByOf(version.ordinal),
+          ...usedByOf(byVersion.get(version.ordinal) ?? []),
         })),
       ].reverse();
+      // The versions merged Books were reviewed under and this data never had, highest number first.
+      const merged: ReviewGuidelineMergedVersionProjection[] = Array.from(bySnapshot.values())
+        .sort((a, b) => b.applied.version - a.applied.version || (a.applied.content < b.applied.content ? -1 : 1))
+        .map(({ applied, used }) => ({
+          ordinal: applied.version,
+          issuer: applied.issuer,
+          title: applied.title,
+          clauses: applied.clauses.map((clause, index) => ({ number: index + 1, text: String(clause.text) })),
+          digest: applied.content,
+          ...usedByOf(used),
+        }));
       // A Book's latest Review Run that used this document names the version it still reads under.
       const latestByBook = new Map<string, RunReading>();
       for (const run of runs) {
@@ -545,9 +609,15 @@ export class ReviewGuidelineLedger {
         const known = latestByBook.get(run.bookId);
         if (known === undefined || run.ordinal > known.ordinal) latestByBook.set(run.bookId, run);
       }
+      // One that applied a version the Book brought with it when it was merged here is not on the current one either.
       const olderVersionBooks = Array.from(latestByBook.values())
-        .filter((run) => run.documents.get(builtin.documentId)!.version < currentOrdinal)
-        .map((run) => ({ bookId: run.bookId, bookTitle: run.bookTitle, ordinal: run.documents.get(builtin.documentId)!.version }))
+        .filter((run) => snapshotted(run, run.documents.get(builtin.documentId)!) || run.documents.get(builtin.documentId)!.version < currentOrdinal)
+        .map((run) => ({
+          bookId: run.bookId,
+          bookTitle: run.bookTitle,
+          ordinal: run.documents.get(builtin.documentId)!.version,
+          merged: snapshotted(run, run.documents.get(builtin.documentId)!),
+        }))
         .sort((a, b) => (a.bookTitle < b.bookTitle ? -1 : a.bookTitle > b.bookTitle ? 1 : a.bookId < b.bookId ? -1 : 1));
       return {
         documentId: builtin.documentId,
@@ -563,6 +633,8 @@ export class ReviewGuidelineLedger {
           citations: citing.get(clause.clauseId)?.size ?? 0,
         })),
         versions,
+        mergedVersions: merged.slice(0, MAX_GUIDELINE_MERGED_VERSIONS_SHOWN),
+        mergedVersionCount: merged.length,
         olderVersionBookCount: olderVersionBooks.length,
         olderVersionBooks: olderVersionBooks.slice(0, MAX_GUIDELINE_OLDER_BOOKS_SHOWN),
       };

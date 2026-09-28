@@ -25,6 +25,9 @@ import {
   guidelineCitations,
   guidelineFixedStatement,
   guidelineImported,
+  guidelineMergedVersionLine,
+  guidelineMergedVersionsMore,
+  guidelineMergedVersionsSummary,
   guidelineOlderBooks,
   guidelinePreviewChanges,
   guidelinePreviewHeading,
@@ -55,11 +58,16 @@ describe('知识库', () => {
     expect(guidelineVersionPill({ currentOrdinal: 2, issuer: '本社' })).toBe('第 2 版 · 本社');
     expect(guidelineAppliedBy({ appliedBy: [{ categoryId: 'a', label: '错别字与规范用语' }, { categoryId: 'b', label: '体例与格式' }] })).toBe('用于：错别字与规范用语、体例与格式');
     expect(guidelineOlderBooks({ olderVersionBooks: [], olderVersionBookCount: 0, currentOrdinal: 2 })).toBeNull();
-    expect(guidelineOlderBooks({ olderVersionBooks: [{ bookId: 'x', bookTitle: '甲书', ordinal: 1 }], olderVersionBookCount: 1, currentOrdinal: 3 }))
+    expect(guidelineOlderBooks({ olderVersionBooks: [{ bookId: 'x', bookTitle: '甲书', ordinal: 1, merged: false }], olderVersionBookCount: 1, currentOrdinal: 3 }))
       .toBe('还在用旧版：《甲书》第 1 版；这些书下次审阅会按第 3 版。');
     // Past the Books it names, the line says how many there are.
-    expect(guidelineOlderBooks({ olderVersionBooks: [{ bookId: 'x', bookTitle: '甲书', ordinal: 1 }, { bookId: 'y', bookTitle: '乙书', ordinal: 2 }], olderVersionBookCount: 14, currentOrdinal: 3 }))
-      .toBe('还在用旧版：《甲书》第 1 版、《乙书》第 2 版 等 14 本书；这些书下次审阅会按第 3 版。');
+    expect(guidelineOlderBooks({
+      olderVersionBooks: [{ bookId: 'x', bookTitle: '甲书', ordinal: 1, merged: false }, { bookId: 'y', bookTitle: '乙书', ordinal: 2, merged: false }],
+      olderVersionBookCount: 14, currentOrdinal: 3,
+    })).toBe('还在用旧版：《甲书》第 1 版、《乙书》第 2 版 等 14 本书；这些书下次审阅会按第 3 版。');
+    // A Book merged here that was reviewed under a version it brought says so (Issue #434 review).
+    expect(guidelineOlderBooks({ olderVersionBooks: [{ bookId: 'z', bookTitle: '丙书', ordinal: 4, merged: true }], olderVersionBookCount: 1, currentOrdinal: 2 }))
+      .toBe('还在用旧版：《丙书》随图书带来的第 4 版；这些书下次审阅会按第 2 版。');
     // A document AI7 fixes says why it takes no house version; one whose clauses the categories read says nothing.
     expect(guidelineFixedStatement({ use: 'clauses', appliedBy: [{ categoryId: 'a', label: '错别字与规范用语' }] })).toBeNull();
     expect(guidelineFixedStatement({ use: 'leads', appliedBy: [{ categoryId: 'p', label: '情节逻辑与前后一致' }] }))
@@ -83,6 +91,13 @@ describe('知识库', () => {
         { bookId: 'y', bookTitle: '乙书', reviewRunId: 'r1', reviewOrdinal: 3, createdAt: '2026-09-24T00:00:00.000Z' },
       ],
     }), () => 'T')).toBe('第 1 版 · AI7 内置默认 · 内置 · 4 条 · 用于 12 次审阅，最近：《甲书》第 7 次审阅、《乙书》第 3 次审阅');
+    // A version merged Books brought, read-only, with the reviews that used it (Issue #434 review).
+    expect(guidelineMergedVersionsSummary(2)).toBe('随合并的图书带来的版本（2，只读）');
+    expect(guidelineMergedVersionLine({
+      ordinal: 3, issuer: '本社', title: '文字规范条款', clauses: [{ number: 1, text: '一' }, { number: 2, text: '二' }], digest: 'd'.repeat(64),
+      usedByCount: 1, usedBy: [{ bookId: 'z', bookTitle: '丙书', reviewRunId: 'r', reviewOrdinal: 1, createdAt: '2026-09-25T00:00:00.000Z' }],
+    })).toBe('第 3 版 · 本社 · 2 条 · 随图书带来 · 用于 《丙书》第 1 次审阅');
+    expect(guidelineMergedVersionsMore(10, 12)).toBe('只列出 10 个，共 12 个。');
     expect(guidelinePreviewHeading({ ordinal: 2, title: '文字规范条款' })).toBe('将导入为《文字规范条款》第 2 版');
     expect(guidelinePreviewChanges({
       source: { displayName: '规范.txt', format: 'text', sha256: 'c'.repeat(64), bytes: 3 }, currentOrdinal: 1,

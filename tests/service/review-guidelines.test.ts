@@ -264,7 +264,7 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       expect(after.clauses.map((clause) => clause.citations)).toEqual([0, 0, 0, 0, 0]);
       expect(after.versions.map((version) => [version.ordinal, version.issuer, version.clauseCount, version.usedByCount])).toEqual([[2, '本社', 5, 0], [1, 'AI7 内置默认', 4, 2]]);
       expect(after.versions[0]!.source).toMatchObject({ displayName: '本社文字规范.txt', format: 'text', bytes: Buffer.byteLength(HOUSE_CLAUSES) });
-      expect(after.olderVersionBooks).toEqual([{ bookId: imported.bookId, bookTitle: 'L2 审阅规范', ordinal: 1 }]);
+      expect(after.olderVersionBooks).toEqual([{ bookId: imported.bookId, bookTitle: 'L2 审阅规范', ordinal: 1, merged: false }]);
       expect(after.olderVersionBookCount).toBe(1);
       // The same preview again is spent; the same file again is no new version.
       expect(await refusal(() => store.importReviewGuidelineVersion(preview.previewId))).toMatch(/^REVIEW_GUIDELINE_PREVIEW_EXPIRED:/u);
@@ -283,7 +283,7 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       expect(workspace.categories.find((category) => category.categoryId === TYPOS)!.basisStatement).toContain('本社 · 文字规范条款（第 2 版）');
       // Its Book reads under version 1 until a review under version 2 forms its findings.
       const now = typosDocument(store.inspectReviewGuidelines());
-      expect(now.olderVersionBooks).toEqual([{ bookId: imported.bookId, bookTitle: 'L2 审阅规范', ordinal: 1 }]);
+      expect(now.olderVersionBooks).toEqual([{ bookId: imported.bookId, bookTitle: 'L2 审阅规范', ordinal: 1, merged: false }]);
       expect(now.versions.map((version) => version.usedBy.map((run) => run.reviewOrdinal))).toEqual([[], [2, 1]]);
       // 已用于 counts the two approved reviews, never the two only prepared.
       expect((await store.inspectKnowledgeProcedures()).procedures.find((procedure) => procedure.categoryId === TYPOS)!.reviewRuns).toBe(2);

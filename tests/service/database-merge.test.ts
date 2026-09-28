@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -966,4 +966,183 @@ describe('what a merge refuses, puts back and brings forward', () => {
       return null;
     }, (error: unknown) => error))).toBe('DATABASE_MERGE_RECEIPT_MISSING');
   }, 180_000);
+
+  /** A 资料库 item made of a file the suite writes itself — AI7's own words, never a manuscript. */
+  async function libraryItem(store: EditorialStore, title: string, text: string): Promise<string> {
+    const path = join(roots.inputRoot, `${title}-${randomUUID()}.txt`);
+    await writeFile(path, text);
+    const preview = await store.previewLibraryMaterial(path);
+    return (await store.addLibraryMaterial({ previewId: preview.previewId, title, kind: 'book' })).materialId;
+  }
+
+  function attribute(store: EditorialStore, materialId: string, expectedDecisions: number, bookId: string | null): void {
+    store.decideLibraryMaterial({
+      materialId, expectedDecisions, decision: { kind: 'attribution', attribution: bookId === null ? { scope: 'house' } : { scope: 'book', bookId } },
+    });
+  }
+
+  it("brings a Book's 资料库 items with their whole history and originals, and nothing of the house's (Issue #434 review; ADR 0079 §1.5)", async () => {
+    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let packagePath: string;
+    let itemId: string;
+    try {
+      const bookId = emptyBook(source, '甲书');
+      itemId = await libraryItem(source, '甲书参考', '甲书的参考资料');
+      attribute(source, itemId, 0, bookId);
+      source.decideLibraryMaterial({ materialId: itemId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: '只用于本书' } });
+      // The house's own item stays with the house.
+      attribute(source, await libraryItem(source, '本社参考', '本社的参考资料'), 0, null);
+      packagePath = await exportedFrom(source, 'AI7 数据库.ai7db');
+    } finally {
+      source.close();
+    }
+    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      const preview = await target.inspectDatabaseImport(packagePath);
+      expect([preview.mergeNotices, preview.mergeRefusal]).toEqual([[], null]);
+      await target.prepareDatabaseMerge(preview.previewId, T);
+    } finally {
+      target.close();
+    }
+    target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      const item = target.inspectLibraryMaterial(itemId);
+      expect([item.attribution, item.eligibility?.choice, item.eligibility?.reason, item.decisionCount]).toEqual([
+        expect.objectContaining({ scope: 'book', bookTitle: '甲书' }), 'book', '只用于本书', 2,
+      ]);
+      expect(target.inspectLibraryMaterials(null).materials.map((entry) => entry.title)).toEqual(['甲书参考']);
+      // Its original came with it, whole, under its content's digest.
+      const digest = item.source.sha256;
+      expect(await readFile(join(otherRoot, 'library-objects', 'sha256', digest.slice(0, 2), `${digest}.txt`), 'utf8')).toBe('甲书的参考资料');
+      target.markCleanShutdown();
+    } finally {
+      target.close();
+    }
+  }, 180_000);
+
+  it('refuses a merge whose 资料库 item is here already as another, says so before anything is prepared, and records one the data came to refuse meanwhile (Issue #434 review)', async () => {
+    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let packagePath: string;
+    try {
+      const bookId = emptyBook(source, '甲书');
+      attribute(source, await libraryItem(source, '甲书参考', '甲书的参考资料'), 0, bookId);
+      packagePath = await exportedFrom(source, 'AI7 数据库.ai7db');
+    } finally {
+      source.close();
+    }
+    // Prepared while this data lacked the file, which its 资料库 then took as an item of its own meanwhile: at the next start
+    // nothing is merged, and the record says the Book's records conflict with the data as it is.
+    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      await target.prepareDatabaseMerge((await target.inspectDatabaseImport(packagePath)).previewId, T);
+      await libraryItem(target, '本机的同一份', '甲书的参考资料');
+    } finally {
+      target.close();
+    }
+    target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    const refusedWords = '图书带来的资料《甲书参考》，本机资料库里已经有同一份文件，不能合并。';
+    try {
+      expect(titles(target)).toEqual([]);
+      expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'failed', failure: 'conflict', mergedCount: 0 });
+      expect(target.inspectLibraryMaterials(null).materials.map((entry) => entry.title)).toEqual(['本机的同一份']);
+      // Previewed now, the merge says why it cannot be taken, and preparing it is refused in the same words.
+      const preview = await target.inspectDatabaseImport(packagePath);
+      expect(preview.mergeRefusal).toBe(refusedWords);
+      const refused = await target.prepareDatabaseMerge(preview.previewId, LATER).catch((error: unknown) => error);
+      expect([code(refused), (refused as Error).message]).toEqual(['DATABASE_MERGE_LIBRARY_DUPLICATE', refusedWords]);
+      expect(existsSync(replacementStagingFor(otherRoot))).toBe(false);
+      target.markCleanShutdown();
+    } finally {
+      target.close();
+    }
+  }, 180_000);
+
+  it('adds to an item this data already holds only the rest of its history, and refuses one whose history went another way or that a Book not merging held (Issue #434 review)', async () => {
+    // Both data folders hold the same 资料库 items, and 丙书: this one's copy was taken from the other, whole.
+    let source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let shared: string;
+    let held: string;
+    let third: string;
+    try {
+      third = emptyBook(source, '丙书');
+      shared = await libraryItem(source, '共同的资料', '两边都有的资料');
+      held = await libraryItem(source, '丙书用过的资料', '丙书用过的资料');
+      source.markCleanShutdown();
+    } finally {
+      source.close();
+    }
+    const diverged = join(dirname(roots.dataRoot), 'diverged-data');
+    const fresh = join(dirname(roots.dataRoot), 'fresh-data');
+    for (const copyRoot of [otherRoot, diverged, fresh]) cpSync(roots.dataRoot, copyRoot, { recursive: true });
+    // Afterwards the shared item goes to a new Book there, and here, in the other copy, to the house.
+    source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let packagePath: string;
+    try {
+      const bookId = emptyBook(source, '乙书');
+      attribute(source, shared, 0, bookId);
+      packagePath = await exportedFrom(source, 'AI7 数据库.ai7db');
+      // The other item goes first to 丙书, which both copies hold, and then to 乙书.
+      attribute(source, held, 0, third);
+      attribute(source, held, 1, bookId);
+    } finally {
+      source.close();
+    }
+    let copy = await EditorialStore.open(diverged, roots.codeRoot);
+    try {
+      attribute(copy, shared, 0, null);
+      copy.markCleanShutdown();
+    } finally {
+      copy.close();
+    }
+    // Merged into the copy whose item has no decision since: the item gains the rest of its history, and is 乙书's.
+    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      const preview = await target.inspectDatabaseImport(packagePath);
+      expect([preview.bookCounts, preview.mergeRefusal]).toEqual([{ new: 1, present: 1, sameTitle: 0 }, null]);
+      await target.prepareDatabaseMerge(preview.previewId, T);
+    } finally {
+      target.close();
+    }
+    target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      expect(titles(target)).toEqual(['丙书', '乙书']);
+      const item = target.inspectLibraryMaterial(shared);
+      expect([item.attribution, item.decisionCount]).toEqual([expect.objectContaining({ scope: 'book', bookTitle: '乙书' }), 1]);
+      expect(target.inspectLibraryMaterials(null).materials.map((entry) => entry.title).sort()).toEqual(['丙书用过的资料', '共同的资料']);
+      target.markCleanShutdown();
+    } finally {
+      target.close();
+    }
+    // Into the copy where the item went to the house instead: its history went another way, and nothing is prepared.
+    copy = await EditorialStore.open(diverged, roots.codeRoot);
+    try {
+      expect((await copy.inspectDatabaseImport(packagePath)).mergeRefusal).toBe('图书带来的资料《共同的资料》在本机资料库里也有，但两边的记录不同，不能合并。');
+      copy.markCleanShutdown();
+    } finally {
+      copy.close();
+    }
+    // A package whose item also went to 丙书, a Book that stays here and does not merge, cannot bring that decision.
+    source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      packagePath = await exportedFrom(source, 'AI7 数据库 2.ai7db');
+    } finally {
+      source.close();
+    }
+    copy = await EditorialStore.open(diverged, roots.codeRoot);
+    try {
+      const refused = await copy.prepareDatabaseMerge((await copy.inspectDatabaseImport(packagePath)).previewId, T).catch((error: unknown) => error);
+      expect(code(refused)).toBe('DATABASE_MERGE_LIBRARY_CONFLICT');
+      copy.markCleanShutdown();
+    } finally {
+      copy.close();
+    }
+    // Into a copy that took nothing since: the shared item could come, but not the one that also went to 丙书.
+    copy = await EditorialStore.open(fresh, roots.codeRoot);
+    try {
+      expect((await copy.inspectDatabaseImport(packagePath)).mergeRefusal).toBe('图书带来的资料《丙书用过的资料》也归属过没有一起合并的图书，不能合并。');
+      copy.markCleanShutdown();
+    } finally {
+      copy.close();
+    }
+  }, 240_000);
 });
