@@ -7,6 +7,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx } from './composed-docx.mjs';
 import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect } from './controller.mjs';
+import { openRemainingPackageExport } from './package-export-readiness.mjs';
 
 // J-07 (Issue #414, plan slice S65): ⑥ 发稿. An editor saves Milestone Versions of the manuscript — each
 // purpose chosen from an unselected card set, never typed and never preselected — finds them on 交付物 with
@@ -1947,7 +1948,7 @@ async function main() {
     await close();
     renderer = await launch({ folder: packageFolder });
     await reopenDeliverables(renderer, 'package-export-second-batch');
-    await clickSelector(renderer, packageAction('export'), 'package-export-remaining-open');
+    await openRemainingPackageExport(renderer);
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'ready'`, 'package-export-remaining-reviewed', 60_000);
     await selectPackageMember('document:news-release');
     await clickSelector(renderer, packageAction('export-choose'), 'package-export-remaining-choose');
