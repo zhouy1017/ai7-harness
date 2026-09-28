@@ -435,7 +435,11 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     busy = true;
     refusal = null;
     setStatus(finalize ? EVALUATION_STATUS.finalizing : EVALUATION_STATUS.saving, 'busy');
-    for (const button of node.querySelectorAll<HTMLButtonElement>('[data-evaluation-action]')) button.disabled = true;
+    // The submitted content is now fixed. Keep later typing out of the pending save, and retain each control's own
+    // disabled state so a refusal restores the draft without enabling a score marked 不评 or another closed choice.
+    const controls = Array.from(node.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input, select, textarea, button'),
+      (control) => ({ control, disabled: control.disabled }));
+    for (const { control } of controls) control.disabled = true;
     try {
       workspace = await api.saveEvaluation({ recordId: record.recordId, expectedEntries: record.entries, content, finalize });
       busy = false;
@@ -446,7 +450,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       busy = false;
       refusal = errorMessage(error, EVALUATION_STATUS.failed);
       setStatus(refusal, 'error');
-      for (const button of node.querySelectorAll<HTMLButtonElement>('[data-evaluation-action]')) button.disabled = false;
+      for (const { control, disabled } of controls) control.disabled = disabled;
       const note = el('p', 'attention-note evaluation-refusal', refusal);
       note.setAttribute('role', 'alert');
       root.querySelector('.evaluation-refusal')?.remove();

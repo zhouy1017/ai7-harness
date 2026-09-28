@@ -305,6 +305,58 @@ async function readEvaluation(renderer, predicate, name) {
   error.detail = page;
   throw error;
 }
+/** Hold one save/finalization response, including a refusal, while real input attempts meet the pending form. */
+async function submitHeldEvaluation(renderer, action, name) {
+  await assertRenderer(renderer, `(() => {
+    const record = document.querySelector('.evaluation-record');
+    const button = record?.querySelector('[data-evaluation-action="${action}"]');
+    if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+    const before = Array.from(record.querySelectorAll('input, select, textarea'), (control) => [control.value, control.checked ?? null, control.disabled]);
+    const held = { release: null, before }; window.__j11HeldEvaluationSubmit = held;
+    const original = Promise.prototype.then;
+    try {
+      Promise.prototype.then = function(success, failure) {
+        Promise.prototype.then = original;
+        const delayed = new Promise((resolve, reject) => original.call(this,
+          (value) => { held.release = () => resolve(value); },
+          (error) => { held.release = () => reject(error); }));
+        return original.call(delayed, success, failure);
+      };
+      button.click();
+    } finally { Promise.prototype.then = original; }
+    return true;
+  })()`, `${name}-hold`);
+  await waitFor(renderer, `typeof window.__j11HeldEvaluationSubmit?.release === 'function'`, `${name}-response-held`);
+  await assertRenderer(renderer, `(() => {
+    const record = document.querySelector('.evaluation-record');
+    const controls = Array.from(record.querySelectorAll('input, select, textarea, button'));
+    const score = record.querySelector('[data-evaluation-field="score"]');
+    score.focus();
+    record.querySelector('input[type="radio"]')?.click();
+    return controls.length > 0 && controls.every((control) => control.disabled) && document.activeElement !== score;
+  })()`, `${name}-controls-locked`);
+  await renderer.send('Input.insertText', { text: '9' });
+  await assertRenderer(renderer, `(() => {
+    const held = window.__j11HeldEvaluationSubmit;
+    const values = Array.from(document.querySelectorAll('.evaluation-record input, .evaluation-record select, .evaluation-record textarea'), (control) => [control.value, control.checked ?? null]);
+    if (JSON.stringify(values) !== JSON.stringify(held.before.map((entry) => entry.slice(0, 2)))) return false;
+    held.release();
+    return true;
+  })()`, `${name}-input-blocked-release`);
+}
+
+/** A response keeps the submitted values; a save or refusal also restores each field's prior availability. */
+async function assertSubmittedEvaluation(renderer, restoreDisabled, name) {
+  await assertRenderer(renderer, `(() => {
+    const held = window.__j11HeldEvaluationSubmit;
+    const after = Array.from(document.querySelectorAll('.evaluation-record input, .evaluation-record select, .evaluation-record textarea'), (control) => [control.value, control.checked ?? null, control.disabled]);
+    const same = JSON.stringify(after.map((entry) => entry.slice(0, 2))) === JSON.stringify(held.before.map((entry) => entry.slice(0, 2)));
+    const restored = ${JSON.stringify(restoreDisabled)} === false || JSON.stringify(after.map((entry) => entry[2])) === JSON.stringify(held.before.map((entry) => entry[2]));
+    delete window.__j11HeldEvaluationSubmit;
+    return same && restored;
+  })()`, name);
+}
+
 /** Click a checkbox or a radio of the form, as a pointer would. */
 async function tick(renderer, selector, name) {
   await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement) || input.disabled) return false; input.click(); return true; })()`, name);
@@ -615,20 +667,23 @@ async function main() {
     requireJourney(reviewed.record.conclusions[0][2] === false, 'evaluation-recommend-open', reviewed.record.conclusions);
     await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', 'evaluation-conclusion');
     await fill(renderer, '[data-screen="book-evaluation"] .evaluation-lists [data-evaluation-field="readiness"]', '第三章结尾需要重写', 'evaluation-readiness');
-    await clickSelector(renderer, '[data-evaluation-action="save"]', 'evaluation-save');
+    await submitHeldEvaluation(renderer, 'save', 'evaluation-save');
     await waitFor(renderer, `${status} === '评估已保存。'`, 'evaluation-saved-status');
+    await assertSubmittedEvaluation(renderer, true, 'evaluation-save-keeps-submitted-draft');
     const savedPage = await readEvaluation(renderer, (page) => page.record?.entries === '2', 'evaluation-saved');
     requireJourney(JSON.stringify(savedPage.versions) === JSON.stringify(['第 1 版 · 编辑评分中 · 修订版 r1 · 总分 66.5 / 80 · 优秀（1 项不评） · 修改后再议']) &&
       savedPage.record.conclusions[1][1] === true && savedPage.focus === 'save', 'evaluation-saved-words', savedPage);
 
     at('evaluation-finalize');
-    await clickSelector(renderer, '[data-evaluation-action="finalize"]', 'evaluation-missing-low-statement');
+    await submitHeldEvaluation(renderer, 'finalize', 'evaluation-missing-low-statement');
     await waitFor(renderer, `${status} === '定稿前，要写明「事实与来源」的风险说明。'`, 'evaluation-low-statement-refused');
+    await assertSubmittedEvaluation(renderer, true, 'evaluation-refusal-restores-draft-controls');
     await readEvaluation(renderer, (page) => page.record?.state === 'editing' && page.record.entries === '2', 'evaluation-refusal-keeps-draft');
     await fill(renderer, `${risk('facts-and-sources')} [data-evaluation-field="statement"]`, '已核对事实和来源，未发现未解决问题。', 'evaluation-low-risk-statement');
     // 定稿: the version reads as it was, with the actor and the time, and 重新评估 begins the next.
-    await clickSelector(renderer, '[data-evaluation-action="finalize"]', 'evaluation-finalize');
+    await submitHeldEvaluation(renderer, 'finalize', 'evaluation-finalize');
     await waitFor(renderer, `${status} === '第 1 版评估已定稿。'`, 'evaluation-finalized-status');
+    await assertSubmittedEvaluation(renderer, false, 'evaluation-finalize-keeps-submitted-draft');
     const finalizedPage = await readEvaluation(renderer, (page) => page.record?.state === 'finalized', 'evaluation-finalized');
     requireJourney(finalizedPage.record.heading === '第 1 版 · 定稿' && (finalizedPage.record.finalized ?? '').startsWith('定稿 · 本机编辑 · ') &&
       finalizedPage.record.allDisabled === true && finalizedPage.record.actions.length === 0 && finalizedPage.start === '重新评估' &&
