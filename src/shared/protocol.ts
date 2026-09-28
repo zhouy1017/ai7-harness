@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 73 as const;
+export const SERVICE_PROTOCOL_VERSION = 74 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -2798,11 +2798,33 @@ export interface BaselineAnalysisPlanAdaptationProjection {
   failureStatus: number | null;
   requestDigest: string;
   firstPayloadDigest: string | null;
+  /**
+   * The digest of the unit message the first attempt submitted — the range's manuscript text as the model reads it —
+   * which the retry must repeat byte for byte (Issue #286). `null` on an adaptation recorded before it was kept.
+   */
+  firstUnitMessageDigest: string | null;
   planEnvelopeDigest: string;
   bindingDigest: string;
   recordedAt: string;
+  /**
+   * The retry's own turn, found by the span that names this adaptation (Issue #286): the digest of the unit message it
+   * submitted, and the gate's digest of its whole payload — which on a single-Session route also holds the turns before
+   * it, so it differs from the first attempt's by construction. For older records, the one legacy adaptation and the
+   * one legacy second attempt of the same unit and execution attempt may supply the payload digest without a unit-message
+   * digest. `null` until the retry's turn is recorded or when no unambiguous association can be made.
+   */
+  retry: null | { spanOrdinal: number; unitMessageDigest: string | null; payloadDigest: string | null };
+  /**
+   * Whether the retry repeated the first attempt's unit message byte for byte, the one property `safe-retry` promises
+   * (Issue #286): `byte-identical`; `differs`, a violation the label names; or `unrecorded` when either digest was not
+   * kept — an adaptation recorded before them, or a retry not yet recorded.
+   */
+  repetition: SafeRetryRepetition;
   label: string;
 }
+
+/** How a safe retry's unit message compares with its first attempt's (Issue #286). */
+export type SafeRetryRepetition = 'byte-identical' | 'differs' | 'unrecorded';
 
 export interface BaselineAnalysisExecutionBindingProjection {
   attemptId: string;
@@ -3145,7 +3167,20 @@ export interface BaselineAnalysisProjection {
       startedAt: string;
       credentialReadinessCheck: { slot: CredentialSlotId; readiness: 'present' | 'missing'; valueReleased: false };
       executionBinding: BaselineAnalysisExecutionBindingProjection | null;
-      spans: ReadonlyArray<{ ordinal: number; harnessSessionId: string; startSeq: number; endSeq: number; unitOrdinal: number | null; attemptIndex: number; payloadDigest: string | null }>;
+      /**
+       * Each technical turn by reference. `unitMessageDigest` is the digest of the unit message the turn submitted (Issue
+       * #286), `null` on a turn recorded before it was kept.
+       */
+      spans: ReadonlyArray<{
+        ordinal: number;
+        harnessSessionId: string;
+        startSeq: number;
+        endSeq: number;
+        unitOrdinal: number | null;
+        attemptIndex: number;
+        payloadDigest: string | null;
+        unitMessageDigest: string | null;
+      }>;
     };
   };
   /** The latest revision of the Book's Result Set; the current truth candidate, never an older one. */
