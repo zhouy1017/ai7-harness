@@ -69,6 +69,8 @@ describe('数据版本 over the real store', () => {
       update: null,
       history: [{ softwareVersion: version, dataVersion: 1, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION, recordedAt: first.history[0]!.recordedAt }],
       historyTruncated: false,
+      upgrades: [],
+      backupLocation: `${roots.dataRoot}-backups`,
     });
     // The same software opening the same data again records nothing.
     expect((await reopened((store) => store.inspectDataVersion())).history).toHaveLength(1);
