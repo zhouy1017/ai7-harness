@@ -2809,8 +2809,9 @@ export interface BaselineAnalysisPlanAdaptationProjection {
   /**
    * The retry's own turn, found by the span that names this adaptation (Issue #286): the digest of the unit message it
    * submitted, and the gate's digest of its whole payload — which on a single-Session route also holds the turns before
-   * it, so it differs from the first attempt's by construction. `null` until the retry's turn is recorded, and for a
-   * retry recorded before its span named the adaptation.
+   * it, so it differs from the first attempt's by construction. For older records, the one legacy adaptation and the
+   * one legacy second attempt of the same unit and execution attempt may supply the payload digest without a unit-message
+   * digest. `null` until the retry's turn is recorded or when no unambiguous association can be made.
    */
   retry: null | { spanOrdinal: number; unitMessageDigest: string | null; payloadDigest: string | null };
   /**
