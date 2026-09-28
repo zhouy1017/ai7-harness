@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 86 as const;
+export const SERVICE_PROTOCOL_VERSION = 87 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -4660,6 +4660,8 @@ export const MAX_REVIEW_GUIDELINE_FILE_BYTES = 2 * 1024 * 1024;
 export const MAX_GUIDELINE_VERSION_RUNS_SHOWN = 5;
 /** The Books 还在用旧版 names, by title; the page counts the rest (Issue #427 review). */
 export const MAX_GUIDELINE_OLDER_BOOKS_SHOWN = 10;
+/** At most this many versions a document's merged Books were reviewed under and this data never had are named; the rest are counted. */
+export const MAX_GUIDELINE_MERGED_VERSIONS_SHOWN = 10;
 
 /** The file one imported version was read from: its name as picked, how it was read, and its exact bytes. */
 export interface ReviewGuidelineSourceProjection {
@@ -4703,6 +4705,24 @@ export interface ReviewGuidelineVersionProjection {
  */
 export type ReviewGuidelineDocumentUse = 'clauses' | 'leads' | 'factual-kind';
 
+/**
+ * A version of a guideline document that Books merged here were reviewed under, and this data never had (Issue #434 review;
+ * ADR 0079 §1.5): another house's, or another AI7's wording of one. It is the read-only snapshot those Books' Review Runs hold,
+ * as they applied it, and never taken for this data's version of the same number.
+ */
+export interface ReviewGuidelineMergedVersionProjection {
+  readonly ordinal: number;
+  readonly issuer: string;
+  readonly title: string;
+  /** Its numbered clauses, as the Runs applied them. */
+  readonly clauses: ReadonlyArray<{ readonly number: number; readonly text: string }>;
+  /** What tells it apart: the digest of the document as the Runs hold it. */
+  readonly digest: string;
+  readonly usedByCount: number;
+  /** The latest of the Runs that used it, newest first, at most `MAX_GUIDELINE_VERSION_RUNS_SHOWN`. */
+  readonly usedBy: ReadonlyArray<{ readonly bookId: string; readonly bookTitle: string; readonly reviewRunId: string; readonly reviewOrdinal: number; readonly createdAt: string }>;
+}
+
 export interface ReviewGuidelineDocumentProjection {
   readonly documentId: string;
   readonly title: string;
@@ -4716,10 +4736,19 @@ export interface ReviewGuidelineDocumentProjection {
   readonly clauses: ReadonlyArray<ReviewGuidelineClauseProjection>;
   /** Every version, newest first. */
   readonly versions: ReadonlyArray<ReviewGuidelineVersionProjection>;
-  /** How many Books' latest Review Run that used this document used an older version than the current one. */
+  /**
+   * The versions merged Books were reviewed under that this data never had, highest number first, at most
+   * `MAX_GUIDELINE_MERGED_VERSIONS_SHOWN` (Issue #434 review).
+   */
+  readonly mergedVersions: ReadonlyArray<ReviewGuidelineMergedVersionProjection>;
+  readonly mergedVersionCount: number;
+  /**
+   * How many Books' latest Review Run that used this document used an older version than the current one, or a version that
+   * came with the Book when it was merged here.
+   */
   readonly olderVersionBookCount: number;
-  /** Those Books by title, at most `MAX_GUIDELINE_OLDER_BOOKS_SHOWN`. */
-  readonly olderVersionBooks: ReadonlyArray<{ readonly bookId: string; readonly bookTitle: string; readonly ordinal: number }>;
+  /** Those Books by title, at most `MAX_GUIDELINE_OLDER_BOOKS_SHOWN`; `merged` when the version came with the Book. */
+  readonly olderVersionBooks: ReadonlyArray<{ readonly bookId: string; readonly bookTitle: string; readonly ordinal: number; readonly merged: boolean }>;
 }
 
 export interface ReviewGuidelinesProjection {
@@ -5975,7 +6004,7 @@ export interface DatabaseImportBookProjection {
 }
 
 /** What stays behind when a package's Books merge: Series, 资料库 items, the 编辑工作区方案's enablement, a 内部编号 taken here. */
-export type DatabaseMergeNotice = 'series' | 'library-materials' | 'internal-number';
+export type DatabaseMergeNotice = 'series' | 'internal-number';
 
 /**
  * Whether this AI7 can take a package's data: the same Data Version, and a schema revision it knows. A package from a newer
@@ -6011,6 +6040,12 @@ export interface DatabaseImportPreviewProjection {
   /** How many of its Books merging would take as new, leave as already here, or take beside one of the same title. */
   readonly bookCounts: { readonly new: number; readonly present: number; readonly sameTitle: number };
   readonly mergeNotices: ReadonlyArray<DatabaseMergeNotice>;
+  /**
+   * Why merging would be refused over a 资料库 item the Books bring (Issue #434 review; ADR 0079 §1.5), in the editor's words:
+   * the same file here as another item, the same item here with other records, or an item that also belonged to a Book not
+   * merging. `null` when nothing stands in the way.
+   */
+  readonly mergeRefusal: string | null;
 }
 
 /** A replacement or a merge prepared and waiting for AI7's next start, with the backup made of the data it changes. */
@@ -6057,7 +6092,7 @@ export interface DatabaseReplacementRecordProjection {
 }
 
 /** Why a replacement failed, as its record says. */
-export type DatabaseReplacementFailure = 'unopenable' | 'changed' | 'interrupted';
+export type DatabaseReplacementFailure = 'unopenable' | 'changed' | 'interrupted' | 'conflict';
 
 /** 替换本机全部数据: the replacement waiting for AI7's next start, if any, and the replacements this data records. */
 export interface DatabaseReplacementsProjection {

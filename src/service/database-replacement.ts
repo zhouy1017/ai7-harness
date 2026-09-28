@@ -198,7 +198,7 @@ type MergePhase = 'saving-store' | 'merging' | 'opening-merge' | 'merge-applied'
 const PHASES: ReadonlyArray<string> = ['moving-out', 'moving-in', 'opening', 'applied', 'discarding', 'restoring', 'restored', 'refused',
   'saving-store', 'merging', 'opening-merge', 'merge-applied', 'restoring-store', 'store-restored'];
 const ORIGINS: ReadonlyArray<string> = ['database-export', 'scheduled-backup', 'pre-replace-backup', 'pre-merge-backup', 'pre-upgrade-backup'];
-const MERGE_NOTICES: ReadonlyArray<string> = ['series', 'library-materials', 'internal-number'];
+const MERGE_NOTICES: ReadonlyArray<string> = ['series', 'internal-number'];
 const BOOK_STATUSES: ReadonlyArray<string> = ['new', 'present', 'same-title'];
 
 function isBook(value: unknown): value is DatabaseImportBookProjection {
@@ -653,9 +653,12 @@ async function applyPendingMerge<T>(
       mergeIntoStoreFile(dataRoot, join(staging, 'incoming'), books, (db) => writeMergeReceipt(db, intent, new Date()));
       phase = 'opening-merge';
     } catch (error) {
-      // A list of its Books no longer the one the preparation wrote is what waited having changed, not data that would not open.
+      // A list of its Books no longer the one the preparation wrote is what waited having changed, not data that would not open;
+      // a merge the rules refuse over what this data holds now conflicts with it (Issue #434 review).
       if (error instanceof DatabaseMergeError && error.code === 'DATABASE_MERGE_BOOKS_CHANGED') {
         await writeAtomic(join(staging, REFUSAL_NOTE), JSON.stringify('changed'));
+      } else if (error instanceof DatabaseMergeError && MERGE_CONFLICTS.has(error.code)) {
+        await writeAtomic(join(staging, REFUSAL_NOTE), JSON.stringify('conflict'));
       }
       phase = 'restoring-store';
     }
@@ -699,18 +702,26 @@ const PACKAGE_STORE_JOURNALS: ReadonlySet<string> = new Set(STORE_JOURNALS.map((
 const REFUSAL_NOTE = 'refused.json';
 
 /** Why a resumed apply put the data back, as its note says; `null` when none was written, or what is there is not one. */
-async function refusalOf(staging: string): Promise<'changed' | 'interrupted' | null> {
+async function refusalOf(staging: string): Promise<'changed' | 'interrupted' | 'conflict' | null> {
   try {
     // Read only within its bound (Issue #434 review). A note there that is not AI7's — not a file, larger than any AI7 writes,
     // or saying something else — still tells a refusal from data that would not open: what waited had changed.
     const text = await readSmallFile(join(staging, REFUSAL_NOTE), MAX_REFUSAL_NOTE_BYTES);
     if (text === null) return null;
     const noted: unknown = JSON.parse(text);
-    return noted === 'changed' || noted === 'interrupted' ? noted : 'changed';
+    return noted === 'changed' || noted === 'interrupted' || noted === 'conflict' ? noted : 'changed';
   } catch {
     return 'changed';
   }
 }
+
+/**
+ * What a merge the rules refuse at its apply was refused for (Issue #434 review): a Book here already, or a record of the Books
+ * that conflicts with what this data holds now — a 资料库 item's, or a reference to a Book not merging. Recorded as `conflict`.
+ */
+const MERGE_CONFLICTS: ReadonlySet<string> = new Set([
+  'DATABASE_MERGE_BOOK_PRESENT', 'DATABASE_MERGE_CROSS_BOOK', 'DATABASE_MERGE_LIBRARY_DUPLICATE', 'DATABASE_MERGE_LIBRARY_CONFLICT',
+]);
 
 /** No refusal note AI7 writes comes near this: `"interrupted"` is thirteen bytes. */
 const MAX_REFUSAL_NOTE_BYTES = 64;
@@ -819,7 +830,7 @@ export class DatabaseReplacements {
       try {
         plan = this.#plan(copy);
       } catch {
-        plan = { books: [], counts: { new: 0, present: 0, sameTitle: 0 }, notices: [] };
+        plan = { books: [], counts: { new: 0, present: 0, sameTitle: 0 }, notices: [], refusal: null };
       }
     } finally {
       await handle?.close().catch(() => undefined);
@@ -845,6 +856,7 @@ export class DatabaseReplacements {
       books: plan.books,
       bookCounts: plan.counts,
       mergeNotices: plan.notices,
+      mergeRefusal: plan.refusal?.message ?? null,
     };
   }
 
@@ -880,6 +892,9 @@ export class DatabaseReplacements {
         throw error;
       }
       requireReplacement(merging.count > 0, 'DATABASE_MERGE_NOTHING', '这个文件里的图书本机都已经有了。');
+      // A 资料库 item the Books bring that could not come as it is refuses the merge now, before anything is backed up
+      // (Issue #434 review); the merge asks again as it applies, over the data as it is then.
+      if (plan.refusal !== null) throw new DatabaseReplacementError(plan.refusal.code, plan.refusal.message);
       const packageMembersSha256 = await writeReplacementMembers(this.#dataRoot, await stagedMembers(incoming));
       const backup = await this.#backUp(now, 'pre-merge-backup');
       await writeReplacementIntent(this.#dataRoot, {
@@ -1247,7 +1262,8 @@ export class DatabaseReplacements {
 /** Why a stored replacement or merge failed, as its record names it: only on one that failed, and only a reason AI7 gives. */
 function failureOf(record: Record<string, unknown>, outcome: string): DatabaseReplacementFailure | undefined {
   const failure = record.failure;
-  requireReplacement(failure === undefined || (outcome === 'failed' && (failure === 'unopenable' || failure === 'changed' || failure === 'interrupted')),
+  requireReplacement(failure === undefined || (outcome === 'failed' && (failure === 'unopenable' || failure === 'changed' || failure === 'interrupted' ||
+    failure === 'conflict')),
     'DATABASE_REPLACEMENT_RECORD_INVALID', INVALID);
   return failure as DatabaseReplacementFailure | undefined;
 }

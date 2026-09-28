@@ -47,6 +47,7 @@ const preview: DatabaseImportPreviewProjection = {
   books: [],
   bookCounts: { new: 0, present: 0, sameTitle: 0 },
   mergeNotices: [],
+  mergeRefusal: null,
 };
 
 const record: DatabaseReplacementRecordProjection = {
@@ -177,7 +178,6 @@ describe('导入数据库\'s words', () => {
     ]);
     expect(DATABASE_MERGE_NOTICE_LINES).toEqual({
       series: '书系关系与书系知识不随图书合并。',
-      'library-materials': '资料库的条目不随图书合并。',
       'internal-number': '内部编号已被本机其他图书使用的，合并后不带内部编号。',
     });
     // The count is every Book the merge takes, however few it lists (Issue #434 review).
@@ -193,11 +193,14 @@ describe('导入数据库\'s words', () => {
       // A merge of more Books than its record names says 等; one refused because what waited had changed says so.
       databaseReplacementRecordLine({ ...merged, mergedCount: 12 }, instant),
       databaseReplacementRecordLine({ ...merged, outcome: 'failed', failure: 'changed' }, instant),
+      // One the rules refused at its apply, over what this data held then, says the records conflict (Issue #434 review).
+      databaseReplacementRecordLine({ ...merged, outcome: 'failed', failure: 'conflict' }, instant),
     ]).toEqual([
       '〔09-25T02:05〕 · 已从「AI7 数据库.ai7db」合并 2 本图书：《山河故人》、《空白之书》 · 合并前备份「AI7 合并前备份 1.ai7db」',
       '〔09-25T02:05〕 · 未能从「AI7 数据库.ai7db」合并图书：本机数据保持原样 · 合并前备份「AI7 合并前备份 1.ai7db」（文件不在备份位置）',
       '〔09-25T02:05〕 · 已从「AI7 数据库.ai7db」合并 12 本图书：《山河故人》、《空白之书》 等 · 合并前备份「AI7 合并前备份 1.ai7db」',
       '〔09-25T02:05〕 · 未能从「AI7 数据库.ai7db」合并图书：准备好的文件已不完整或被改动，本机数据保持原样 · 合并前备份「AI7 合并前备份 1.ai7db」',
+      '〔09-25T02:05〕 · 未能从「AI7 数据库.ai7db」合并图书：它的记录与本机现在的数据冲突，本机数据保持原样 · 合并前备份「AI7 合并前备份 1.ai7db」',
     ]);
     expect([databaseImportMoreBooksLine(50, 50), databaseImportMoreBooksLine(50, 73)]).toEqual([null, '…以及另外 23 本']);
     expect([DATABASE_IMPORT_STATUS_LINES.preparingMerge, DATABASE_IMPORT_STATUS_LINES.mergePrepared, DATABASE_IMPORT_STATUS_LINES.mergeFailed])

@@ -186,7 +186,9 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
       else if (chosen === 'merge') void merge(file.previewId);
     });
     confirm.disabled = true;
-    const mergeable = file.bookCounts.new + file.bookCounts.sameTitle > 0;
+    // A package whose Books are all here offers nothing to merge; one whose 资料库 items could not come as they are says why
+    // before anything is chosen (Issue #434 review).
+    const mergeable = file.bookCounts.new + file.bookCounts.sameTitle > 0 && file.mergeRefusal === null;
     const shown: HTMLElement[] = [];
     const option = (value: 'replace' | 'merge', text: string, details: HTMLElement): HTMLLabelElement => {
       const radio = el('input');
@@ -228,7 +230,8 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
       option('replace', DATABASE_IMPORT_CHOICES.replace, replaceDetails), replaceDetails,
       option('merge', DATABASE_IMPORT_CHOICES.merge, mergeDetails), mergeDetails,
     );
-    if (!mergeable) choices.append(el('p', 'field-note database-merge-nothing', DATABASE_MERGE_NOTHING));
+    if (file.mergeRefusal !== null) choices.append(el('p', 'attention-note database-merge-refusal', file.mergeRefusal));
+    else if (!mergeable) choices.append(el('p', 'field-note database-merge-nothing', DATABASE_MERGE_NOTHING));
     buttons.append(confirm, cancel);
     preview.replaceChildren(rows, choices, buttons);
     choices.querySelector<HTMLInputElement>('input[name="database-import-choice"]')?.focus();
