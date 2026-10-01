@@ -2294,7 +2294,7 @@ async function main() {
     at('publication-actuals');
     // 录入定价与首印 (Issue #430, plan slice S82; EVAL-010, EVAL-014): 交付物's line for the current 发稿版本 says 尚未录入 with
     // 录入… beside it, which opens 设置 › 评估校准与预测 with this Book's entry open at 定价; a price that is not one is refused
-    // in place; 45 元 and 3,000 册 are recorded for 第 2 次发稿版本 and count one published Book toward the prediction's thirty;
+    // in place; 45 元 and 3,000 册 are recorded for 第 33 次发稿版本 and count one published Book toward the prediction's thirty;
     // and 交付物's line then states them, with 修改….
     await click(renderer, '返回', 'actuals-knowledge-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'actuals-landing');
@@ -2304,7 +2304,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { const prompt = window.__j07.block().querySelector('.publication-actuals-prompt'); const enter = window.__j07.block().querySelector('[data-publication-action="actuals"]'); return prompt?.textContent === ${JSON.stringify(ACTUALS_PROMPT)} && prompt.dataset.actualsState === 'missing' && enter instanceof HTMLButtonElement && enter.textContent === '录入…'; })()`, 'actuals-prompt-missing');
     await clickSelector(renderer, '[data-screen="book-deliverables"] [data-publication-action="actuals"]', 'actuals-enter');
     const actualsForm = await readCalibration(renderer, (page) => page.books.some(([id, , , open]) => id === bookId && open) && page.focus === 'price', 'actuals-form');
-    requireJourney(JSON.stringify(actualsForm.books) === JSON.stringify([[bookId, 'missing', '第 2 次发稿版本 · 尚未录入', true]]) &&
+    requireJourney(JSON.stringify(actualsForm.books) === JSON.stringify([[bookId, 'missing', '第 33 次发稿版本 · 尚未录入', true]]) &&
       actualsForm.prediction === '已录入实际数据的已发稿图书 0 / 30 本 · 满 30 本后才能打开', 'actuals-form-words', actualsForm);
     const writeField = (field, value) => renderer.evaluate(`(() => { const input = document.querySelector('[data-screen="evaluation-calibration"] [data-calibration-field="${field}"]'); if (!(input instanceof HTMLInputElement)) return false; input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
     requireJourney(await writeField('price', '四十五'), 'actuals-price-invalid-write');
@@ -2316,10 +2316,10 @@ async function main() {
     await clickSelector(renderer, '[data-screen="evaluation-calibration"] [data-calibration-action="save"]', 'actuals-save');
     await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent === '定价与首印已录入。'`, 'actuals-saved-status');
     const saved = await readCalibration(renderer, (page) => page.books[0]?.[1] === 'recorded', 'actuals-saved');
-    requireJourney(JSON.stringify(saved.books) === JSON.stringify([[bookId, 'recorded', '第 2 次发稿版本 · 定价 ¥45.00 · 首印 3,000 册', false]]) &&
+    requireJourney(JSON.stringify(saved.books) === JSON.stringify([[bookId, 'recorded', '第 33 次发稿版本 · 定价 ¥45.00 · 首印 3,000 册', false]]) &&
       saved.prediction === '已录入实际数据的已发稿图书 1 / 30 本 · 满 30 本后才能打开' && saved.focus === 'open' && saved.refusal === null, 'actuals-saved-words', saved);
     const actualsService = await renderer.evaluate(`window.ai7.inspectEvaluationCalibration().then((answer) => answer.books.map((book) => [book.bookId, book.publicationOrdinal, book.actuals?.priceFen ?? null, book.actuals?.firstPrint ?? null, book.actuals?.current ?? null, book.entries]))`);
-    requireJourney(JSON.stringify(actualsService) === JSON.stringify([[bookId, 2, 4500, 3000, true, 1]]), 'actuals-service', actualsService);
+    requireJourney(JSON.stringify(actualsService) === JSON.stringify([[bookId, 33, 4500, 3000, true, 1]]), 'actuals-service', actualsService);
     await click(renderer, '返回', 'actuals-settings-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'actuals-landing-again');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(bookId)}]`, 'actuals-book-again');
