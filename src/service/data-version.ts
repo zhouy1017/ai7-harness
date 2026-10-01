@@ -67,6 +67,9 @@ export interface DataVersionUpgrade {
   readonly fromSchemaRevision: number;
   /** The software that last opened the data before the upgrade; `null` for data from before its versions were recorded. */
   readonly fromSoftwareVersion: string | null;
+  /** A compatible earlier backup when the immediate predecessor left an intermediate Data Version. */
+  readonly rollback?: { readonly softwareVersion: string | null; readonly dataVersion: number; readonly schemaRevision: number;
+    readonly backup: DataVersionUpgrade['backup'] };
   readonly changes: ReadonlyArray<string>;
   readonly backup: { readonly fileName: string; readonly byteLength: number; readonly sha256: string };
 }
@@ -213,7 +216,7 @@ const MAX_UPGRADE_CHANGE_CHARACTERS = 200;
  */
 export function readUpgrade(value: unknown, dataVersion: number): DataVersionUpgrade {
   const keys = ['backup', 'changes', 'fromDataVersion', 'fromSchemaRevision', 'fromSoftwareVersion'];
-  requireDataVersion(isRecord(value) && Object.keys(value).sort().join(',') === keys.join(','), 'STORE_VERSION_RECORD_INVALID', INVALID);
+  requireDataVersion(isRecord(value) && Object.keys(value).filter((key) => key !== 'rollback').sort().join(',') === keys.join(','), 'STORE_VERSION_RECORD_INVALID', INVALID);
   const { fromDataVersion, fromSchemaRevision, fromSoftwareVersion, changes, backup } = value;
   requireDataVersion(typeof fromDataVersion === 'number' && Number.isSafeInteger(fromDataVersion) && fromDataVersion >= 1 && fromDataVersion < dataVersion &&
     typeof fromSchemaRevision === 'number' && Number.isSafeInteger(fromSchemaRevision) && fromSchemaRevision >= 1 &&
@@ -225,12 +228,27 @@ export function readUpgrade(value: unknown, dataVersion: number): DataVersionUpg
     typeof backup.byteLength === 'number' && Number.isSafeInteger(backup.byteLength) && backup.byteLength > 0 &&
     typeof backup.sha256 === 'string' && DIGEST.test(backup.sha256),
   'STORE_VERSION_RECORD_INVALID', INVALID);
+  let rollback: DataVersionUpgrade['rollback'];
+  if (Object.hasOwn(value, 'rollback')) {
+    const prior = value.rollback;
+    requireDataVersion(isRecord(prior) && Object.keys(prior).sort().join(',') === 'backup,dataVersion,schemaRevision,softwareVersion' &&
+      typeof prior.dataVersion === 'number' && Number.isSafeInteger(prior.dataVersion) && prior.dataVersion >= 1 && prior.dataVersion <= fromDataVersion &&
+      typeof prior.schemaRevision === 'number' && Number.isSafeInteger(prior.schemaRevision) && prior.schemaRevision >= 1 && prior.schemaRevision <= fromSchemaRevision &&
+      (prior.softwareVersion === null || (typeof prior.softwareVersion === 'string' && SOFTWARE_VERSION.test(prior.softwareVersion))) &&
+      isRecord(prior.backup) && Object.keys(prior.backup).sort().join(',') === 'byteLength,fileName,sha256' &&
+      typeof prior.backup.fileName === 'string' && PRE_UPGRADE_BACKUP_NAME.test(prior.backup.fileName) &&
+      typeof prior.backup.byteLength === 'number' && Number.isSafeInteger(prior.backup.byteLength) && prior.backup.byteLength > 0 &&
+      typeof prior.backup.sha256 === 'string' && DIGEST.test(prior.backup.sha256), 'STORE_VERSION_RECORD_INVALID', INVALID);
+    rollback = { softwareVersion: prior.softwareVersion, dataVersion: prior.dataVersion, schemaRevision: prior.schemaRevision,
+      backup: { fileName: prior.backup.fileName, byteLength: prior.backup.byteLength, sha256: prior.backup.sha256 } };
+  }
   return {
     fromDataVersion,
     fromSchemaRevision,
     fromSoftwareVersion,
     changes: [...(changes as string[])],
     backup: { fileName: backup.fileName, byteLength: backup.byteLength, sha256: backup.sha256 },
+    ...(rollback === undefined ? {} : { rollback }),
   };
 }
 

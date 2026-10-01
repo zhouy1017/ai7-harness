@@ -42,10 +42,19 @@ function tableExists(db: DatabaseSync, table: string): boolean {
 }
 
 /** The software that last opened the data, as its version records say; `null` for a store from before they were kept. */
-function lastSoftwareVersion(db: DatabaseSync): string | null {
-  if (!tableExists(db, 'store_versions')) return null;
-  const row = db.prepare('SELECT software_version FROM store_versions ORDER BY ordinal DESC LIMIT 1').get() as SqlRow | undefined;
-  return row === undefined ? null : String(row.software_version);
+function predecessor(db: DatabaseSync, revision: number, dataVersion: number, earlier: ReadonlyArray<EarlierUpgrade>): {
+  softwareVersion: string | null; rollback?: NonNullable<DataVersionUpgrade['rollback']>;
+} {
+  const row = tableExists(db, 'store_versions')
+    ? db.prepare('SELECT software_version, schema_revision, data_version FROM store_versions ORDER BY ordinal DESC LIMIT 1').get() : undefined;
+  if (row?.schema_revision === revision && row.data_version === dataVersion) return { softwareVersion: String(row.software_version) };
+  const carried = earlier.findLast((entry) => entry.schemaRevision === revision && entry.dataVersion === dataVersion);
+  if (carried !== undefined) return { softwareVersion: carried.softwareVersion,
+    ...(carried.compatibleWithBackup !== false ? {} : { rollback: carried.upgrade.rollback ?? {
+      softwareVersion: carried.upgrade.fromSoftwareVersion, dataVersion: carried.upgrade.fromDataVersion,
+      schemaRevision: carried.upgrade.fromSchemaRevision, backup: carried.upgrade.backup,
+    } }) };
+  return { softwareVersion: row === undefined ? null : String(row.software_version) };
 }
 
 async function absent(path: string): Promise<boolean> {
@@ -87,6 +96,8 @@ interface PendingUpgrade {
  */
 export interface EarlierUpgrade extends UpgradeTarget {
   readonly upgrade: DataVersionUpgrade;
+  /** A partial migration must not advertise its writer as able to import the intermediate Data Version. */
+  readonly compatibleWithBackup?: boolean;
 }
 
 /** Whether a note is this software's own: the same software, bringing the store to the same revision and Data Version. */
@@ -139,10 +150,12 @@ async function readPendingUpgrade(dataRoot: string): Promise<PendingUpgrade | nu
 }
 
 function readEarlier(value: unknown): EarlierUpgrade {
-  if (!isRecord(value) || Object.keys(value).length !== 4) throw unreadableNote();
-  const { upgrade, ...target } = value;
+  if (!isRecord(value) || Object.keys(value).length !== (Object.hasOwn(value, 'compatibleWithBackup') ? 5 : 4) ||
+      (Object.hasOwn(value, 'compatibleWithBackup') && typeof value.compatibleWithBackup !== 'boolean')) throw unreadableNote();
+  const { upgrade, compatibleWithBackup, ...target } = value;
   const read = readTarget(target);
-  return { ...read, upgrade: readUpgrade(upgrade, read.dataVersion) };
+  return { ...read, upgrade: readUpgrade(upgrade, read.dataVersion),
+    ...(compatibleWithBackup === undefined ? {} : { compatibleWithBackup: compatibleWithBackup as boolean }) };
 }
 
 /**
@@ -207,6 +220,7 @@ export async function backUpBeforeUpgrade(
         softwareVersion: pending.target.softwareVersion,
         dataVersion: dataVersionAt(revision, options.classes),
         schemaRevision: revision,
+        compatibleWithBackup: revision === pending.target.schemaRevision && dataVersionAt(revision, options.classes) === pending.target.dataVersion,
         upgrade: { ...pending.upgrade, changes },
       }];
     }
@@ -217,7 +231,8 @@ export async function backUpBeforeUpgrade(
   if (earlier.length > MAX_CARRIED_UPGRADES) {
     throw new DataVersionError('UPGRADE_NOTE_FULL', '这份数据此前有多次升级没有记下，AI7 无法再记下这一次：AI7 没有升级这份数据，也没有打开它。升级前的数据仍在备份位置。');
   }
-  const fromSoftwareVersion = lastSoftwareVersion(db);
+  const previous = predecessor(db, revision, fromDataVersion, earlier);
+  const fromSoftwareVersion = previous.softwareVersion;
   const fileName = preUpgradeBackupFileName(options.now);
   let partial: string | null = null;
   try {
@@ -246,6 +261,7 @@ export async function backUpBeforeUpgrade(
       fromSoftwareVersion,
       changes: breakingChanges(revision, options.terminalRevision, options.classes),
       backup: { fileName, byteLength: written.bytes, sha256: written.sha256 },
+      ...(previous.rollback === undefined ? {} : { rollback: previous.rollback }),
     };
     // Noted before anything migrates the store, with what it is for and the earlier upgrades it carries on: from here on, an
     // open that stops still records them the next time.

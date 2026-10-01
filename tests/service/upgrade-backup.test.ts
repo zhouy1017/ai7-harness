@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { strFromU8, unzipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
-import { DATA_VERSION_TRIGGER_SQL, PRE_UPGRADE_BACKUP_NAME, type ClassifiedSchemaRevision, type DataVersionUpgrade } from '../../src/service/data-version.js';
+import { DATA_VERSION_TRIGGER_SQL, DataVersionLedger, PRE_UPGRADE_BACKUP_NAME, type ClassifiedSchemaRevision, type DataVersionUpgrade } from '../../src/service/data-version.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { DATABASE_MERGE_SCHEMA_VERSION, DATABASE_REPLACEMENT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { backUpBeforeUpgrade, preUpgradeBackupFileName, writePendingUpgrade } from '../../src/service/upgrade-backup.js';
@@ -410,7 +410,7 @@ describe('升级前备份 over the real store', () => {
       expect(version.upgrades[0]!.backupFileName).toMatch(PRE_UPGRADE_BACKUP_NAME);
       expect(version.upgrades[0]!.fromSoftwareVersion).toBe('0.0.10');
       const backedUp = unzipSync(await readFile(join(backups(), version.upgrades[0]!.backupFileName)));
-      expect(parseCanonicalJson(strFromU8(backedUp['manifest.json']!))).toMatchObject({ softwareVersion: '0.0.10', dataVersion: 2 });
+      expect(parseCanonicalJson(strFromU8(backedUp['manifest.json']!))).toMatchObject({ softwareVersion: '0.0.10', dataVersion: 2, schemaRevision: DATABASE_REPLACEMENT_SCHEMA_VERSION });
       expect(await upgradeBackups()).toEqual([version.upgrades[0]!.backupFileName]);
       store.markCleanShutdown();
     } finally {
@@ -429,6 +429,7 @@ describe('升级前备份 over the real store', () => {
     const store = await open(BOTH);
     try {
       expect(upgradesOf(store)).toEqual([[software, 2, 3, [CHANGE]], ['0.0.10', 1, 2, ['替换记录']]]);
+      expect(store.inspectDataVersion().upgrades[0]!.fromSoftwareVersion).toBe('0.0.10');
       expect(historyOf(store)).toEqual([
         [software, 3, DATABASE_MERGE_SCHEMA_VERSION],
         ['0.0.10', 2, DATABASE_REPLACEMENT_SCHEMA_VERSION],
@@ -542,10 +543,30 @@ describe('升级前备份 over the real store', () => {
     const store = await open(THREE);
     try {
       expect(upgradesOf(store)).toEqual([[software, 3, 4, [CHANGE]], ['0.0.10', 1, 3, ['定时备份', '替换记录']]]);
+      expect(store.inspectDataVersion().upgrades[0]!.rollback).toMatchObject({
+        softwareVersion: '0.0.9', dataVersion: 1, backupFileName: 'AI7 升级前备份 2026-09-26 09-00-00.ai7db', backupPresent: false,
+      });
       store.markCleanShutdown();
     } finally {
       store.close();
     }
+  }, 180_000);
+
+  it('prefers a later committed software at the actual backed-up tuple over a stale carried predecessor', async () => {
+    await storeBeforeUpgrade();
+    await writePendingUpgrade(roots.dataRoot, THEIRS, THEIR_TARGET);
+    const db = new DatabaseSync(storePath());
+    try {
+      new DataVersionLedger(db).recordOpen({ softwareVersion: '0.0.12', dataVersion: 2, schemaRevision: DATABASE_REPLACEMENT_SCHEMA_VERSION });
+    } finally { db.close(); }
+    const store = await open(BOTH);
+    try {
+      const upgraded = store.inspectDataVersion().upgrades[0]!;
+      expect(upgraded.fromSoftwareVersion).toBe('0.0.12');
+      expect(upgraded.rollback).toBeUndefined();
+      const archive = unzipSync(await readFile(join(backups(), upgraded.backupFileName)));
+      expect(parseCanonicalJson(strFromU8(archive['manifest.json']!))).toMatchObject({ softwareVersion: '0.0.12', dataVersion: 2 });
+    } finally { store.close(); }
   }, 180_000);
 
   it('records no upgrade for an open that stopped having crossed only revisions that keep the Data Version (Issue #433 review)', async () => {

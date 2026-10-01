@@ -11565,6 +11565,11 @@ export class EditorialStore {
           fromDataVersion: entry.upgrade!.fromDataVersion,
           toDataVersion: entry.dataVersion,
           fromSoftwareVersion: entry.upgrade!.fromSoftwareVersion,
+          ...(entry.upgrade!.rollback === undefined ? {} : { rollback: {
+            softwareVersion: entry.upgrade!.rollback.softwareVersion, dataVersion: entry.upgrade!.rollback.dataVersion,
+            backupFileName: entry.upgrade!.rollback.backup.fileName,
+            backupPresent: existsSync(join(location, entry.upgrade!.rollback.backup.fileName)),
+          } }),
           softwareVersion: entry.softwareVersion,
           changes: entry.upgrade!.changes,
           backupFileName: entry.upgrade!.backup.fileName,

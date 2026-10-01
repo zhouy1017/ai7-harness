@@ -133,6 +133,13 @@ describe('数据版本 words', () => {
       ],
     });
     expect(dataVersionRollbackSteps({ ...upgrade, fromSoftwareVersion: null }, places).steps[1]).toBe('安装并启动升级前的 AI7：它以空白数据启动。');
+    const rollback = { softwareVersion: '0.0.9', dataVersion: 1, backupFileName: 'AI7 升级前备份 2026-09-26 09-00-00.ai7db', backupPresent: true };
+    const partial = dataVersionRollbackSteps({ ...upgrade, fromSoftwareVersion: '0.0.10', rollback }, places);
+    expect(partial.lead).toContain('未完成升级的中间状态');
+    expect(partial.steps[1]).toContain('0.0.9');
+    expect(partial.steps[2]).toContain(rollback.backupFileName);
+    expect(dataVersionRollbackSteps({ ...upgrade, rollback: { ...rollback, backupPresent: false } }, places).steps).toEqual([]);
+    expect(dataVersionRollbackSteps({ ...upgrade, rollback: { ...rollback, softwareVersion: null } }, places).steps[1]).toBe('安装并启动升级前的 AI7：它以空白数据启动。');
   });
 
   it('says what the latest software update did to the Data Version, and writes each record', () => {

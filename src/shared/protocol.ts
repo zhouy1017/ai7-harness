@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 87 as const;
+export const SERVICE_PROTOCOL_VERSION = 88 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -5850,6 +5850,7 @@ export interface DataVersionUpgradeProjection {
   readonly toDataVersion: number;
   /** The software that last opened the data before; `null` for data from before its versions were recorded. */
   readonly fromSoftwareVersion: string | null;
+  readonly rollback?: { readonly softwareVersion: string | null; readonly dataVersion: number; readonly backupFileName: string; readonly backupPresent: boolean };
   readonly softwareVersion: string;
   readonly changes: ReadonlyArray<string>;
   readonly backupFileName: string;
