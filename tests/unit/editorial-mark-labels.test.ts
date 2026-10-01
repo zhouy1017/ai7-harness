@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DECISION_REASON_ADD,
   DECISION_REASON_CHIPS,
+  DECISION_REASON_DISMISS,
+  DECISION_REASON_OWN,
+  DECISION_REASON_PROMPTS,
+  DECISION_REASON_REVISE,
+  DECISION_REASON_STATUS,
+  decisionReasonLine,
   INSERTION_CONVERT_REASON,
   MARK_KIND_LABELS,
   RESOLVE_CONFLICT_LABEL,
@@ -34,7 +41,7 @@ function suggestionState(disposition: 'rejected' | 'accepted-with-edit' | null):
       atomicGroupId: null,
       application: null,
       decision: disposition === null ? null : {
-        decisionId: 'decision', disposition, editedText: disposition === 'rejected' ? null : '改后二', reason: null, reasonSource: null, recordedAt: '2026-09-21T00:00:00.000Z',
+        decisionId: 'decision', disposition, editedText: disposition === 'rejected' ? null : '改后二', reason: null, reasonSource: null, reasonState: 'none', feedbackEntries: 0, reasonRevisedAt: null, recordedAt: '2026-09-21T00:00:00.000Z',
       },
     },
   };
@@ -138,6 +145,23 @@ describe('the wording of the Mark surface', () => {
     expect(selectionMenuReason('none')).toContain('先选中');
     expect(selectionMenuReason('multiple-blocks')).toContain('同一段落');
     expect(selectionMenuReason('unsettled')).toContain('修订日志');
+  });
+
+  it('asks why once after each kind of decision, with the editor’s own words beside the chips and 不说明 to end it (Issue #61, S26a)', () => {
+    expect(DECISION_REASON_PROMPTS).toEqual({ accepted: '为什么接受？（可选）', rejected: '为什么拒绝？（可选）', 'accepted-with-edit': '为什么这样改？（可选）' });
+    for (const chips of Object.values(DECISION_REASON_CHIPS)) {
+      expect(chips.length).toBeGreaterThanOrEqual(2);
+      expect(chips.length).toBeLessThanOrEqual(3);
+      expect(chips.some((chip) => chip.includes('AI7'))).toBe(false);
+    }
+    expect([DECISION_REASON_OWN, DECISION_REASON_DISMISS, DECISION_REASON_ADD, DECISION_REASON_REVISE]).toEqual(['其他 / 自行输入', '不说明', '补充原因…', '改原因…']);
+    // What each record says back — none of it a celebration, and 不说明 no more than that.
+    expect(DECISION_REASON_STATUS).toEqual({
+      recorded: '已记下你的原因。', revised: '已改好原因；原来的原因仍留在记录里。', dismissed: '已记下：这次不说明原因。', failed: '原因未能记录。',
+    });
+    const instant = (iso: string): string => `〔${iso.slice(0, 10)}〕`;
+    expect(decisionReasonLine('证据不足', null, instant)).toBe('你的原因：证据不足');
+    expect(decisionReasonLine('其实是篇幅所限', '2026-09-25T05:00:00.000Z', instant)).toBe('你的原因：其实是篇幅所限（〔2026-09-25〕 改过）');
   });
 
   it('writes a time the way the manuscript surface does, and nothing for a time it cannot read', () => {

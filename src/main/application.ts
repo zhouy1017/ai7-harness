@@ -1887,6 +1887,19 @@ function registerRendererHandlers(
         });
       }),
   );
+  // 不说明 and 改原因 after a decision (Issue #61, S26a) are the same window's record of the same mark, gated the same way.
+  ipcMain.handle(
+    IPC_CHANNELS.recordProposalDecisionFeedback,
+    (event, input: ServiceOperationMap['recordProposalDecisionFeedback']['input']) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          requireManuscriptCapability(owned, input);
+          return service.call('recordProposalDecisionFeedback', input);
+        });
+      }),
+  );
   // AI7 Apply (Issue #408) writes the manuscript, so it is gated as a journal write is and serialized
   // with every other effect; the window's capability is re-read from the window the Apply answers with.
   ipcMain.handle(IPC_CHANNELS.applyChangeSuggestion, (event, input: ServiceOperationMap['applyChangeSuggestion']['input']) =>

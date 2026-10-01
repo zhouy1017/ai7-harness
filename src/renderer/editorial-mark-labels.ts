@@ -21,12 +21,40 @@ export const MARK_KIND_LABELS: Readonly<Record<EditorialMarkKind, string>> = {
 /** The three personal colors carry no meaning of their own (V2-UX-MARK-001); the names only tell them apart. */
 export const HIGHLIGHT_COLOR_LABELS: Readonly<Record<PersonalHighlightColor, string>> = { 1: '黄', 2: '橙', 3: '绿' };
 
-/** The optional reason chips of V2-UX-PDEC-009; none is ever preselected, and 自行输入 stands beside them. */
+/** The optional reason chips of V2-UX-PDEC-009; none is ever preselected, and `其他 / 自行输入` stands beside them. */
 export const DECISION_REASON_CHIPS: Readonly<Record<ProposalItemDisposition, ReadonlyArray<string>>> = {
   accepted: ['语言更准确', '保持作者风格'],
   rejected: ['证据不足', '方向不合适', '保持作者风格'],
   'accepted-with-edit': ['语言更准确', '保持作者风格'],
 };
+
+/**
+ * The Contextual Feedback Prompt of a Proposal Decision (Issue #61, S26a; FDBK-001 to FDBK-007, PDEC-009, MARK-005): one
+ * compact row under `你的处理`, asked once, right after the decision. It asks only why — the decision already says what —
+ * and `不说明` ends it, recording only that no reason was given. Afterwards the card offers the reason of the editor's own
+ * accord: `补充原因…`, or `改原因…` once one stands.
+ */
+export const DECISION_REASON_PROMPTS: Readonly<Record<ProposalItemDisposition, string>> = {
+  accepted: '为什么接受？（可选）',
+  rejected: '为什么拒绝？（可选）',
+  'accepted-with-edit': '为什么这样改？（可选）',
+};
+export const DECISION_REASON_OWN = '其他 / 自行输入';
+export const DECISION_REASON_DISMISS = '不说明';
+export const DECISION_REASON_ADD = '补充原因…';
+export const DECISION_REASON_REVISE = '改原因…';
+export const DECISION_REASON_CANCEL = '取消';
+export const DECISION_REASON_STATUS = {
+  recorded: '已记下你的原因。',
+  revised: '已改好原因；原来的原因仍留在记录里。',
+  dismissed: '已记下：这次不说明原因。',
+  failed: '原因未能记录。',
+} as const;
+
+/** The reason as the card reads it; a reason changed after it was given says when. */
+export function decisionReasonLine(reason: string, revisedAt: string | null, instant: (iso: string) => string): string {
+  return revisedAt === null ? `你的原因：${reason}` : `你的原因：${reason}（${instant(revisedAt)} 改过）`;
+}
 
 /**
  * ADR 0085 §2 beside an available 接受并应用: the paragraph changed elsewhere after the suggestion was made,

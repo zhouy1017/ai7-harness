@@ -9,7 +9,7 @@ import {
   type PackageReviewRunReading,
 } from '../../src/service/book-delivery-packages.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { ANALYSIS_FEEDBACK_SCHEMA_VERSION, PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { DECISION_FEEDBACK_SCHEMA_VERSION, PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { PUBLICATION_FORBIDDEN_WORDS, type BookDeliveryPackageProjection } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, type SourceSpan } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -269,6 +269,7 @@ describe('图书交付包 (S67a)', () => {
     try {
       planted.exec('PRAGMA foreign_keys = OFF');
       planted.exec(`BEGIN IMMEDIATE;
+        DROP TABLE proposal_decision_feedback;
         DROP TABLE analysis_feedback_signals;
         DROP TABLE evaluation_record_entries;
         DROP TABLE evaluation_records;
@@ -299,7 +300,7 @@ describe('图书交付包 (S67a)', () => {
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(ANALYSIS_FEEDBACK_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DECISION_FEEDBACK_SCHEMA_VERSION);
       expect((after.prepare('SELECT count(*) count FROM book_delivery_package_versions').get() as { count: number }).count).toBe(0);
     } finally {
       after.close();
