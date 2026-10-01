@@ -2216,12 +2216,13 @@ async function main() {
     await readLearning(renderer, (page) => page.card?.material === 'proposal-decision', 'learning-source-proposal-ready');
     await clickSelector(renderer, '[data-learning-action="source"]', 'learning-source-proposal');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(thirdId)}]') && document.querySelector('.editorial-mark-card')`, 'learning-source-mark-open', 120_000);
-    await assertRenderer(renderer, `document.querySelector('.editorial-mark-card')?.textContent.includes(${JSON.stringify('证据不足')}) === true`, 'learning-source-mark-reason');
+    await assertRenderer(renderer, `document.querySelector('.editorial-mark-card')?.textContent.includes(${JSON.stringify('交接后的新说明')}) === true`, 'learning-source-mark-reason');
     await click(renderer, '返回图书工作概览', 'learning-source-overview');
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'learning-source-overview-ready');
     await click(renderer, '返回图书列表', 'learning-source-books');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'learning-source-landing');
     await click(renderer, '质量与学习', 'learning-source-learning');
+    await clickSelector(renderer, '#quality-tab-learning', 'learning-source-learning-tab');
     await readLearning(renderer, (page) => page.books.length === 1, 'learning-source-page');
     await clickSelector(renderer, `${learningRow('analysis-feedback')} [data-learning-action="open"]`, 'learning-source-analysis-card');
     await readLearning(renderer, (page) => page.card?.material === 'analysis-feedback', 'learning-source-analysis-ready');
@@ -2241,6 +2242,7 @@ async function main() {
     await click(learningOtherRenderer, '返回图书列表', 'learning-source-other-books');
     await waitFor(learningOtherRenderer, `document.querySelector('[data-screen="landing"]')`, 'learning-source-other-landing');
     await click(learningOtherRenderer, '质量与学习', 'learning-source-other-learning');
+    await clickSelector(learningOtherRenderer, '#quality-tab-learning', 'learning-source-other-learning-tab');
     await readLearning(learningOtherRenderer, (page) => page.books.length === 1, 'learning-source-other-page');
     await clickSelector(learningOtherRenderer, `${learningRow('proposal-decision')} [data-learning-action="open"]`, 'learning-source-other-card');
     await readLearning(learningOtherRenderer, (page) => page.card?.material === 'proposal-decision', 'learning-source-other-card-ready');
@@ -2250,7 +2252,7 @@ async function main() {
       document.querySelector('[data-learning-action="source"]').click();
       return Array.from(document.querySelectorAll('.learning-card input, .learning-card textarea, .learning-card button')).every((control) => control.disabled);
     })()`, 'learning-source-pending-disabled');
-    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(thirdId)}]') && document.querySelector('.editorial-mark-card')?.textContent.includes('证据不足')`, 'learning-source-existing-window-exact', 120_000);
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(thirdId)}]') && document.querySelector('.editorial-mark-card')?.textContent.includes('交接后的新说明')`, 'learning-source-existing-window-exact', 120_000);
     await waitFor(learningOtherRenderer, `document.querySelector('.learning-choices input[value="house"]')?.checked === true &&
       document.querySelector('[data-learning-field="note"]')?.value === '保留未提交说明' &&
       document.querySelector('[data-learning-action="record"]')?.disabled === false &&
@@ -2279,6 +2281,7 @@ async function main() {
     await click(learningOtherRenderer, '返回', 'learning-pages-back');
     await waitFor(learningOtherRenderer, `document.querySelector('[data-screen="landing"]')`, 'learning-pages-landing');
     await click(learningOtherRenderer, '质量与学习', 'learning-pages-open');
+    await clickSelector(learningOtherRenderer, '#quality-tab-learning', 'learning-pages-open-tab');
     await waitFor(learningOtherRenderer, `document.querySelectorAll('.learning-material').length === 40`, 'learning-pages-first');
     await clickSelector(learningOtherRenderer, '[data-learning-action="open"]', 'learning-pages-card');
     await fill(learningOtherRenderer, '[data-learning-field="note"]', '翻页前保留', 'learning-pages-draft');
