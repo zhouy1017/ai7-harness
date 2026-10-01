@@ -179,12 +179,20 @@ describe('学习准入 over the real store', () => {
 
       // The reason changed after the decision: the material is decided again; the decision it had stays on record.
       store.recordProposalDecisionFeedback({ ...binding, markId: rejectedMark, decisionId: rejected.decisionId, expectedFeedback: 0, action: 'revise', reason: '方向不合适', reasonSource: 'suggested' });
-      const changed = store.inspectLearningMaterials(book.bookId).books[0]!.materials.find((entry) => entry.materialKey === reasoned.materialKey)!;
+      let changed = store.inspectLearningMaterials(book.bookId).books[0]!.materials.find((entry) => entry.materialKey === reasoned.materialKey)!;
       expect([changed.state, changed.decision?.choice, changed.decisions, changed.digest === reasoned.digest, changed.excerpt.at(-1)]).toEqual(['changed', 'book', 1, false, '你的原因：方向不合适']);
       // A later reason never moves a material on the page (Issue #61 review): the order is the order the decisions were made in.
       expect(store.inspectLearningMaterials(book.bookId).books[0]!.materials.map((entry) => entry.materialKey)).toEqual([reasoned.materialKey, edited.materialKey]);
       expect(attention(store)[0]?.[1]).toBe('learning-materials-pending');
       expect(refusal(() => choose(decided, {}))).toBe('LEARNING_MATERIAL_CHANGED:这条材料在你打开后改过；请看过现在的内容再定。');
+      // Returning to the same words is still a new immutable reason version, never renewed consent to learning.
+      store.recordProposalDecisionFeedback({ ...binding, markId: rejectedMark, decisionId: rejected.decisionId, expectedFeedback: 1, action: 'revise', reason: '证据不足', reasonSource: 'suggested' });
+      const reverted = store.inspectLearningMaterial(book.bookId, reasoned.materialKey);
+      expect([reverted.state, reverted.digest === reasoned.digest, reverted.decisions]).toEqual(['changed', false, 1]);
+      expect(attention(store)[0]?.[1]).toBe('learning-materials-pending');
+      expect(refusal(() => choose(decided, { choice: 'house' }))).toBe('LEARNING_MATERIAL_CHANGED:这条材料在你打开后改过；请看过现在的内容再定。');
+      store.recordProposalDecisionFeedback({ ...binding, markId: rejectedMark, decisionId: rejected.decisionId, expectedFeedback: 2, action: 'revise', reason: '方向不合适', reasonSource: 'suggested' });
+      changed = store.inspectLearningMaterial(book.bookId, reasoned.materialKey);
       const house = choose(changed, { choice: 'house' });
       expect([house.state, house.decision?.choice, house.decisions]).toEqual(['decided', 'house', 2]);
       const excluded = choose(deferred, { choice: 'excluded', note: '不代表我的一贯做法' });
