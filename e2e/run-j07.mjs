@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect } from './controller.mjs';
 import { openRemainingPackageExport } from './package-export-readiness.mjs';
 
 // J-07 (Issue #414, plan slice S65): ⑥ 发稿. An editor saves Milestone Versions of the manuscript — each
@@ -629,7 +629,7 @@ async function importDraftAsSource(renderer, bookId) {
 
 /** 交付物 from the manuscript: the 工作 group holds 审阅 and then 交付物, and leaving settles the manuscript first. */
 async function openDeliverables(renderer, name) {
-  await assertRenderer(renderer, `(() => { const group = document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const entries = Array.from(group?.querySelectorAll('button[data-work-destination]') ?? []).map((item) => item.dataset.workDestination + ':' + item.textContent); const open = group?.querySelector('button[data-work-destination="deliverables"]'); if (entries.join('|') !== 'review:审阅|deliverables:交付物' || !(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, `${name}-entry`);
+  await assertRenderer(renderer, `(() => { const group = document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const entries = Array.from(group?.querySelectorAll('button[data-work-destination]') ?? []).map((item) => item.dataset.workDestination + ':' + item.textContent); const open = group?.querySelector('button[data-work-destination="deliverables"]'); if (entries.join('|') !== 'review:审阅|evaluation:评估|deliverables:交付物' || !(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, `${name}-entry`);
   await waitForDeliverables(renderer, name);
 }
 async function waitForDeliverables(renderer, name) {
@@ -2303,4 +2303,4 @@ async function main() {
   }
 }
 
-main().catch((error) => reportJourneyFailure('J-07', location, error));
+main().catch((error) => reportJourneyFailure('J-07', j07PackageExportFailureLocation(location, error), error));

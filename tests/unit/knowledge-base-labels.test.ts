@@ -40,7 +40,7 @@ import type { LibraryMaterialProjection, ReviewGuidelineVersionProjection } from
 describe('知识库', () => {
   it('names its seven classes in the specification\'s order, and says which arrive later', () => {
     expect(KNOWLEDGE_BASE_TAB_VIEWS.map((view) => view.label)).toEqual(['审阅规范文件', '评估方案', '工序与规则', '社级编辑记忆', '范例', '资料库', '外部来源留存']);
-    expect(KNOWLEDGE_BASE_TAB_VIEWS.filter((view) => view.pending === null).map((view) => view.tab)).toEqual(['guidelines', 'rules', 'exemplars', 'library']);
+    expect(KNOWLEDGE_BASE_TAB_VIEWS.filter((view) => view.pending === null).map((view) => view.tab)).toEqual(['guidelines', 'evaluation', 'rules', 'exemplars', 'library']);
     for (const view of KNOWLEDGE_BASE_TAB_VIEWS) {
       expect(view.holds.length).toBeGreaterThan(0);
       if (view.pending !== null) expect(view.pending.startsWith('尚未提供')).toBe(true);
