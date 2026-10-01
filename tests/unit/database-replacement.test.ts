@@ -62,11 +62,11 @@ async function otherPackage(): Promise<{ path: string; sha256: string }> {
   writeFileSync(join(other, 'objects', 'only-in-package.txt'), 'new');
   const database = new DatabaseSync(':memory:');
   try {
-    database.exec("CREATE TABLE marker (value TEXT) STRICT; INSERT INTO marker VALUES ('package'); PRAGMA user_version = 57;");
+    database.exec("CREATE TABLE marker (value TEXT) STRICT; INSERT INTO marker VALUES ('package'); PRAGMA user_version = 1;");
     packages += 1;
     const path = join(root, `AI7 数据库 ${packages}.ai7db`);
     const written = await writeDatabasePackage(database, other, path, () => ({
-      dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 57, createdAt: T.toISOString(), origin: 'database-export',
+      dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 1, createdAt: T.toISOString(), origin: 'database-export',
     }));
     return { path, sha256: written.sha256 };
   } finally {

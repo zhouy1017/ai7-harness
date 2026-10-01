@@ -571,7 +571,7 @@ describe('定期自动备份 over the real store', () => {
     try {
       initializeScheduledBackupSchema(db);
       const backups = new ScheduledBackups(db, dataRoot, {
-        facts: () => ({ dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: DATABASE_REPLACEMENT_SCHEMA_VERSION }),
+        facts: () => ({ dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 1 }),
       });
       backups.setEnabled(true, 0);
       // A write asked while a check runs starts only once that check has made its backup.

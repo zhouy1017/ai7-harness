@@ -301,7 +301,7 @@ export async function extractReplacement(dataRoot: string, packagePath: string, 
   const incoming = join(staging, 'incoming');
   let current: FileHandle | undefined;
   try {
-    const verified = await verifyDatabasePackage(packagePath, {
+    const verified = await verifyDatabasePackage(packagePath, { dataRoot, expectedSha256 }, {
       begin: async (member) => {
         const target = join(incoming, ...member.path.split('/'));
         await mkdir(dirname(target), { recursive: true });
@@ -617,7 +617,7 @@ export class DatabaseReplacements {
   async preview(source: string): Promise<DatabaseImportPreviewProjection> {
     requireReplacement(isAbsolute(source), 'DATABASE_IMPORT_SOURCE_INVALID', '所选的文件不可用。');
     this.#preview = null;
-    const verified = await verifyDatabasePackage(source);
+    const verified = await verifyDatabasePackage(source, { dataRoot: this.#dataRoot });
     const facts = this.#sources.facts();
     const previewId = randomUUID();
     this.#preview = { previewId, source, sha256: verified.sha256, manifest: verified.manifest };

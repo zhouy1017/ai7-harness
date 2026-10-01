@@ -302,7 +302,7 @@ function contentsOfCopy(path: string): DatabaseExportContentsProjection {
  * into an incomplete backup. Compare every frozen reference with the bytes actually packed, retaining only the already
  * bounded member index. Rows stream, and cancellation/service requests get a turn between bounded batches.
  */
-async function verifyCopiedPayloads(path: string, members: ReadonlyArray<DatabasePackageMember>, schemaRevision: number, signal?: AbortSignal): Promise<void> {
+export async function verifyCopiedPayloads(path: string, members: ReadonlyArray<DatabasePackageMember>, schemaRevision: number, signal?: AbortSignal): Promise<void> {
   const incomplete = (): never => { throw new DatabaseExportError('DATABASE_PACKAGE_INCOMPLETE', '数据文件在打包期间发生变化或已损坏；没有生成完整备份，请重试。'); };
   const copy = new DatabaseSync(path, { readOnly: true });
   const packed = new Map(members.map((member) => [member.path, member]));

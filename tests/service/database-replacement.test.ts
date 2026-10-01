@@ -28,7 +28,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
   const open: typeof actual.open = async (...args) => {
     const handle = await actual.open(...args);
-    if (args[0] === sourceRead.path && args[1] === 'r') {
+    if (args[0] === sourceRead.path) {
       const read = handle.read.bind(handle);
       handle.read = ((...readArgs: Parameters<typeof read>) => read(...readArgs).then(async (result) => {
         if (result.bytesRead === 0) await sourceRead.atEnd?.();
@@ -88,9 +88,14 @@ async function exported(store: EditorialStore, name: string): Promise<string> {
 async function handmade(name: string, dataVersion: number, schemaRevision: number): Promise<string> {
   const other = join(roots.inputRoot, `${name}-data`);
   mkdirSync(join(other, 'objects'), { recursive: true });
-  const database = new DatabaseSync(':memory:');
+  if (schemaRevision >= 55) {
+    const store = await EditorialStore.open(other, roots.codeRoot);
+    store.close();
+  }
+  const database = new DatabaseSync(schemaRevision >= 55 ? join(other, 'store', 'ai7.sqlite') : ':memory:');
   try {
-    database.exec(`CREATE TABLE marker (value TEXT) STRICT; PRAGMA user_version = ${schemaRevision};`);
+    if (schemaRevision < 55) database.exec('CREATE TABLE marker (value TEXT) STRICT;');
+    database.exec(`PRAGMA user_version = ${schemaRevision};`);
     const path = join(roots.inputRoot, name);
     await writeDatabasePackage(database, other, path, () => ({
       dataVersion, softwareVersion: '0.1.0', schemaRevision, createdAt: T.toISOString(), origin: 'database-export', contents,
@@ -290,7 +295,7 @@ describe('导入数据库 over the real store', () => {
       expect(titles(store)).toEqual(['甲书']);
       expect((await store.inspectDatabaseReplacements()).total).toBe(0);
       // A package whose data is no store: its manifest fits, so the replacement is prepared, and the next open refuses it.
-      const broken = await handmade('坏数据库.ai7db', 1, DATABASE_REPLACEMENT_SCHEMA_VERSION);
+      const broken = await handmade('坏数据库.ai7db', 1, 1);
       const preview = await store.inspectDatabaseImport(broken);
       expect(preview.compatibility).toBe('compatible');
       await store.prepareDatabaseReplacement(preview.previewId, LATER);
