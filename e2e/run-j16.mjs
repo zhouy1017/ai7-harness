@@ -939,6 +939,19 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.task-result-window') === null && ${blockInView(target)} && ${CHIP} !== null`, 'result-jumped', 60_000);
     const chip = await renderer.evaluate(`(() => { const chip = ${CHIP}; return chip === null ? null : { blockId: chip.dataset.returnChip ?? null, words: chip.textContent.startsWith('回到') && chip.textContent.length > 2, title: chip.title }; })()`);
     requireJourney(typeof chip?.blockId === 'string' && chip.blockId !== target && chip.words === true && chip.title === '回到跳转前的位置', 'result-jump-chip', { found: chip !== null, same: chip?.blockId === target });
+    const railTarget = await renderer.evaluate(`(async () => {
+      const overview = await window.ai7.getBookOverview({ bookId: ${JSON.stringify(bookId)}, historyCursor: null });
+      const anchor = overview.manuscriptAnchor;
+      const current = await window.ai7.getManuscriptWindowAt({ manuscriptId: anchor.manuscriptId, branchId: anchor.branchId,
+        target: { kind: 'block', blockId: ${JSON.stringify(target)} } });
+      const block = current.blocks.find((item) => item.blockId === ${JSON.stringify(target)}) ?? current.blocks.find((item) => item.kind === 'paragraph');
+      const first = [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(block.text)][0].segment;
+      await window.ai7.createEditorialMark({ manuscriptId: current.manuscriptId, branchId: current.branchId, windowStartBlockId: current.blocks[0].blockId,
+        clientMarkId: crypto.randomUUID(), baseRevisionId: current.revisionId, expectedJournalSequence: current.journalSequence,
+        blockId: block.blockId, baseBlockDigest: block.digest, fromGrapheme: 0, toGrapheme: 1, selectedText: first,
+        kind: 'annotation', highlightColor: null, body: '位置返回测试', proposedText: null, rationale: null });
+      return block.blockId;
+    })()`);
 
     at('chip-persists');
     // Until it is used the chip stays: across 导航, and across leaving the manuscript and coming back.
@@ -949,11 +962,86 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'chip-overview', 60_000);
     await click(renderer, '打开稿件', 'chip-reopen');
     await waitFor(renderer, `${CHIP} !== null && ${CHIP}.dataset.returnChip === ${JSON.stringify(chip.blockId)}`, 'chip-still-there', 60_000);
+    // The exact-key navigation hint survives a renderer restart without reconstructing every Book's positions.
+    await closeOwnedBrowser();
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'chip-restart-ready');
+    await openManuscriptOf(renderer, bookId, 'chip-restart');
+    await waitFor(renderer, `${CHIP}?.dataset.returnChip === ${JSON.stringify(chip.blockId)}`, 'chip-restart-retained');
 
     at('chip-return');
     // 回到<位置>: the manuscript is back where the editor was reading before the jump, and the chip is gone.
+    await renderer.evaluate(`(() => {
+      const original = window.requestAnimationFrame;
+      const held = [];
+      globalThis.__j16ReleaseFrames = () => {
+        window.requestAnimationFrame = original;
+        for (const callback of held) original.call(window, callback);
+        delete globalThis.__j16ReleaseFrames;
+      };
+      window.requestAnimationFrame = (callback) => { held.push(callback); return 1; };
+      const rail = document.querySelector('#manuscript-position');
+      rail.value = '500000';
+      rail.dispatchEvent(new Event('change'));
+    })()`);
+    // The real navigation sets its guard synchronously, before awaiting the window read.
     await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'chip-use');
-    await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)} && (document.querySelector('#persistence-status')?.textContent ?? '').startsWith('已回到')`, 'chip-returned', 60_000);
+    await renderer.evaluate(`globalThis.__j16ReleaseFrames()`);
+    try {
+      await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)} && (document.querySelector('#persistence-status')?.textContent ?? '').startsWith('已回到')`, 'chip-returned', 60_000);
+    } catch (error) {
+      // Failure-only closed state: never emit manuscript text, identifiers or arbitrary status words.
+      const state = await renderer.evaluate(`(() => { const chip = ${CHIP}; return {
+        present: chip !== null, disabled: chip?.disabled === true, target: ${blockInView(chip.blockId)},
+        arrived: (document.querySelector('#persistence-status')?.textContent ?? '').startsWith('已回到'),
+      }; })()`).catch(() => null);
+      if (state === null) at('chip-return-state-unavailable');
+      else if (state.present && state.disabled) at('chip-return-retained-busy');
+      else if (state.present) at('chip-return-retained-ready');
+      else if (!state.target) at('chip-return-target-missing');
+      else if (!state.arrived) at('chip-return-status-replaced');
+      else at('chip-return-late-completion');
+      throw error;
+    }
+    await waitFor(renderer, `document.querySelector('.rail-marker[data-rail-kind="annotation"]') !== null`, 'mark-rail-ready');
+    // A storage failure must refuse the jump, rather than lose the editor's way back.
+    await renderer.evaluate(`(() => {
+      globalThis.__j16Transaction = IDBDatabase.prototype.transaction;
+      IDBDatabase.prototype.transaction = function(names, mode, options) {
+        if (this.name === 'ai7-reading-return' && mode === 'readwrite') throw new DOMException('', 'QuotaExceededError');
+        return globalThis.__j16Transaction.call(this, names, mode, options);
+      };
+    })()`);
+    await clickSelector(renderer, '.rail-marker[data-rail-kind="annotation"]', 'mark-rail-storage-failure');
+    await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '').startsWith('无法保存或读取返回位置')`, 'mark-rail-storage-refused');
+    await assertRenderer(renderer, `${CHIP} === null && ${blockInView(chip.blockId)}`, 'mark-rail-storage-keeps-position');
+    await renderer.evaluate(`(() => { IDBDatabase.prototype.transaction = globalThis.__j16Transaction; delete globalThis.__j16Transaction; })()`);
+    // Hold the real committed storage completion, replace the editor, then release the old click.
+    await renderer.evaluate(`(() => {
+      const original = IDBDatabase.prototype.transaction;
+      IDBDatabase.prototype.transaction = function(names, mode, options) {
+        const transaction = original.call(this, names, mode, options);
+        if (this.name === 'ai7-reading-return' && mode === 'readwrite') {
+          IDBDatabase.prototype.transaction = original;
+          Object.defineProperty(transaction, 'oncomplete', { set(callback) {
+            transaction.addEventListener('complete', (event) => { globalThis.__j16ReleaseReturn = () => callback.call(transaction, event); });
+          } });
+        }
+        return transaction;
+      };
+    })()`);
+    await clickSelector(renderer, '.rail-marker[data-rail-kind="annotation"]', 'mark-rail-delayed-storage');
+    await waitFor(renderer, `typeof globalThis.__j16ReleaseReturn === 'function'`, 'mark-rail-storage-held');
+    await click(renderer, '返回图书工作概览', 'mark-rail-held-leave');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'mark-rail-held-overview');
+    await click(renderer, '打开稿件', 'mark-rail-held-reopen');
+    await waitFor(renderer, `${blockInView(chip.blockId)} && ${CHIP} !== null`, 'mark-rail-replacement-editor');
+    await renderer.evaluate(`(() => { globalThis.__j16ReleaseReturn(); delete globalThis.__j16ReleaseReturn; return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); })()`);
+    await assertRenderer(renderer, `${blockInView(chip.blockId)}`, 'mark-rail-old-click-cannot-move-replacement');
+    await clickSelector(renderer, '.rail-marker[data-rail-kind="annotation"]', 'mark-rail-jump');
+    await waitFor(renderer, `${blockInView(railTarget)} && ${CHIP}?.dataset.returnChip === ${JSON.stringify(chip.blockId)}`, 'mark-rail-return-chip', 60_000);
+    await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'mark-rail-return');
+    await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)}`, 'mark-rail-returned', 60_000);
     // A way out of 查看结果's window leaves the manuscript as its own ways out do (Issue #423 review): words typed a moment
     // before 在分析中打开 are written first, and the manuscript opened again from ②A holds them where they were typed.
     await openPanel(renderer, 'leave');
@@ -969,7 +1057,7 @@ async function main() {
     })()`, 'leave-typed');
     // At once, well inside the half second before the words would write themselves.
     await assertRenderer(renderer, `(() => { const open = document.querySelector('.task-result-window [data-task-result-action="open"]'); if (!(open instanceof HTMLButtonElement)) return false; open.click(); return true; })()`, 'leave-open-analysis');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card')`, 'leave-analysis', 60_000);
+    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card')?.dataset.inspectedRevisionOrdinal === '1'`, 'leave-analysis-exact-historical-result', 60_000);
     await click(renderer, '打开稿件', 'leave-reopen');
     await waitFor(renderer, `(document.querySelector(${JSON.stringify(`[data-screen="editor"] .ProseMirror [data-block-id="${chip.blockId}"]`)})?.textContent ?? '').endsWith(${JSON.stringify(LEAVE_WORDS)})`, 'leave-words-kept', 60_000);
 

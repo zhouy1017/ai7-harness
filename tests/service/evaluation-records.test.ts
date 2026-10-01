@@ -49,11 +49,48 @@ function scored(scores: ReadonlyArray<number | string | null>, overrides: Partia
 }
 
 const RISKS = (legal: 'low' | 'medium' | 'high', reviewed = false): EvaluationContent['risks'] => [
-  { riskId: 'facts-and-sources', level: 'low', statement: null, reviewed: false },
+  { riskId: 'facts-and-sources', level: 'low', statement: '已核对事实和来源，未发现未解决问题。', reviewed: false },
   { riskId: 'law-rights-ethics-policy', level: legal, statement: '书中写到真实人物，需要法务看过。', reviewed },
 ];
 
 describe('②C 评估 over the real store', () => {
+  it('keeps save chains and version pages bounded while every version and comparison stays readable', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importSample1Book(store, roots.codeRoot, '评估分页');
+      let firstId = '';
+      for (let ordinal = 1; ordinal <= 13; ordinal += 1) {
+        let record = store.startEvaluation(book.bookId).record!;
+        if (ordinal === 1) firstId = record.recordId;
+        for (let save = 0; save < (ordinal === 1 ? 24 : 1); save += 1) {
+          record = store.saveEvaluation({ bookId: book.bookId, recordId: record.recordId, expectedEntries: record.entries,
+            content: scored([10, 11, 12, 13, 14], { risks: RISKS('low'), verdict: `评估保存 ${save}`, conclusion: 'revise' }), finalize: false }).record!;
+        }
+        store.saveEvaluation({ bookId: book.bookId, recordId: record.recordId, expectedEntries: record.entries, content: record.content, finalize: true });
+      }
+      let page = store.inspectEvaluation(book.bookId, null);
+      const ordinals: number[] = [];
+      for (;;) {
+        expect(page.records.length).toBeLessThanOrEqual(10);
+        expect(page.recordCount).toBe(13);
+        expect(page.record?.ordinal).toBe(13);
+        ordinals.push(...page.records.map((record) => record.ordinal));
+        if (page.recordsNext === null) break;
+        page = store.inspectEvaluation(book.bookId, null, page.recordsNext);
+      }
+      expect(ordinals).toEqual(Array.from({ length: 13 }, (_, index) => 13 - index));
+      expect(store.inspectEvaluation(book.bookId, firstId, 4).record).toMatchObject({ ordinal: 1, entries: 26, comparison: null });
+      const second = page.records.find((record) => record.ordinal === 2)!;
+      expect(store.inspectEvaluation(book.bookId, second.recordId).record?.comparison?.previousOrdinal).toBe(1);
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        db.exec('DROP TRIGGER evaluation_record_entries_no_update');
+        db.prepare('UPDATE evaluation_record_entries SET sha256 = ? WHERE record_id = ? AND ordinal = 2').run('0'.repeat(64), firstId);
+      } finally { db.close(); }
+      expect(() => store.inspectEvaluation(book.bookId, null)).toThrowError('评估记录已损坏');
+    } finally { store.close(); }
+  }, 120_000);
+
   it('binds a version to the revision, scores it as the editor writes it, closes it at 定稿, and compares the next with it', async () => {
     await requireExactSample1(roots.codeRoot);
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -98,24 +135,29 @@ describe('②C 评估 over the real store', () => {
 
       // 保存评估: 66.5 out of the 80 still rated, one item 不评; the conclusion the editor chose.
       const saved = save(1, scored([18, 16.5, 15, 17, '市场资料不足'], {
-        risks: RISKS('high'), readiness: ['第三章结尾需要重写', ''], strengths: ['人物鲜明'], weaknesses: ['节奏偏慢'], verdict: '整体可用，需修改。', conclusion: 'revise',
+        risks: RISKS('high').map((risk, index) => index === 0 ? { ...risk, statement: null } : risk), readiness: ['第三章结尾需要重写', ''], strengths: ['人物鲜明'], weaknesses: ['节奏偏慢'], verdict: '整体可用，需修改。', conclusion: 'revise',
       })).record!;
       expect(saved).toMatchObject({ state: 'editing', entries: 2, total: { score: 66.5, fullMarks: 80, notRated: 1, unscored: 0 }, conclusion: 'revise', recommendationBlocked: true });
       expect(saved.content.readiness).toEqual(['第三章结尾需要重写']);
+      expect(saved.content.risks[0]?.statement).toBeNull();
       expect(await refusal(() => save(2, saved.content))).toBe('EVALUATION_UNCHANGED:评估没有变化。');
       expect(await refusal(() => save(1, scored([18])))).toBe('EVALUATION_MOVED:这一版评估刚在另一个窗口保存过；请看过最新的再改。');
       // A version belongs to its Book.
       expect(await refusal(() => store.saveEvaluation({ bookId: empty, recordId: first.recordId, expectedEntries: 2, content: saved.content, finalize: false })))
         .toBe('EVALUATION_NOT_FOUND:这个评估版本不属于当前图书。');
 
-      // 定稿 asks for every item, every risk, the statements of 中 and 高, and a conclusion.
+      // Every rating needs its explanation at finalization, including low; incomplete drafts remain permitted.
       expect(await refusal(() => save(2, scored([18, 16.5, 15, 17, null], { risks: RISKS('high'), conclusion: 'revise' }), true)))
         .toBe('EVALUATION_ITEM_UNSCORED:定稿前，「读者与市场潜力」要打分或写明不评的理由。');
       expect(await refusal(() => save(2, scored([18, 16.5, 15, 17, 12], { conclusion: 'revise' }), true)))
         .toBe('EVALUATION_RISK_UNRATED:定稿前，要给「事实与来源」定风险等级。');
-      expect(await refusal(() => save(2, scored([18, 16.5, 15, 17, 12], {
-        risks: [{ riskId: 'facts-and-sources', level: 'medium', statement: null, reviewed: false }, RISKS('low')[1]!], conclusion: 'revise',
-      }), true))).toBe('EVALUATION_RISK_STATEMENT:「事实与来源」为中或高时，要写明风险说明。');
+      for (const level of ['low', 'medium', 'high'] as const) {
+        for (const missingIndex of [0, 1]) {
+          const risks = RISKS('low').map((risk, index) => index === missingIndex ? { ...risk, level, statement: null } : risk);
+          expect(await refusal(() => save(2, scored([18, 16.5, 15, 17, 12], { risks, conclusion: 'revise' }), true)))
+            .toContain('EVALUATION_RISK_STATEMENT:');
+        }
+      }
       expect(await refusal(() => save(2, scored([18, 16.5, 15, 17, 12], { risks: RISKS('low') }), true))).toBe('EVALUATION_CONCLUSION_REQUIRED:定稿前要选定结论。');
 
       // Reviewed by a person, 推荐出版 is open; 定稿 closes the version with the actor and the time.
@@ -202,7 +244,7 @@ describe('②C 评估 over the real store', () => {
     }
     const plant = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      plant.exec(`DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; DROP TABLE learning_eligibility_decisions; DROP TABLE proposal_decision_feedback; DROP TABLE analysis_feedback_signals; DROP TABLE evaluation_record_entries; DROP TABLE evaluation_records; PRAGMA user_version = ${LIBRARY_MATERIAL_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; DROP TABLE learning_eligibility_decisions; DROP TABLE proposal_decision_feedback; DROP TABLE analysis_feedback_signals; DROP TABLE evaluation_record_entries; DROP TABLE evaluation_records; PRAGMA user_version = ${LIBRARY_MATERIAL_SCHEMA_VERSION};`);
     } finally {
       plant.close();
     }

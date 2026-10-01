@@ -110,10 +110,10 @@ export class DecisionFeedbackLedger {
   }
 
   /** The entries after one decision, in order, each verified: its digest, its record against its row, and its place. */
-  entries(decisionId: string): DecisionFeedbackEntry[] {
-    const rows = this.#db.prepare('SELECT * FROM proposal_decision_feedback WHERE decision_id = ? ORDER BY ordinal').all(decisionId) as SqlRow[];
+  *#entries(decisionId: string): IterableIterator<DecisionFeedbackEntry> {
+    const rows = this.#db.prepare('SELECT * FROM proposal_decision_feedback WHERE decision_id = ? ORDER BY ordinal').iterate(decisionId) as IterableIterator<SqlRow>;
     let before: DecisionFeedbackEntry | null = null;
-    return rows.map((row) => {
+    for (const row of rows) {
       const json = String(row.canonical_json);
       requireFeedback(sha256Hex(json) === String(row.sha256), 'DECISION_FEEDBACK_RECORD_INVALID', '处理原因的记录已损坏。');
       const record = JSON.parse(json) as unknown;
@@ -138,8 +138,8 @@ export class DecisionFeedbackLedger {
         recordedAt: String(row.recorded_at),
       };
       before = entry;
-      return entry;
-    });
+      yield entry;
+    }
   }
 
   /**
@@ -147,19 +147,31 @@ export class DecisionFeedbackLedger {
    * dismissal records only that no reason was given; a reason given afterwards, of the editor's own accord, stands.
    */
   standing(decisionId: string, first: { readonly reason: string; readonly source: 'reason-field' | 'suggested' | 'free-text' } | null): DecisionReasonStanding {
-    const entries = this.entries(decisionId);
-    const revised = entries.filter((entry) => entry.kind === 'revised').at(-1);
-    if (revised !== undefined) {
-      return { reason: revised.reason!.text, reasonSource: revised.reason!.source, reasonState: 'given', feedbackEntries: entries.length, reasonRevisedAt: revised.recordedAt };
+    return this.#readStanding(decisionId, first).standing;
+  }
+
+  #readStanding(decisionId: string, first: { readonly reason: string; readonly source: 'reason-field' | 'suggested' | 'free-text' } | null):
+    { standing: DecisionReasonStanding; last: DecisionFeedbackEntry | null } {
+    let last: DecisionFeedbackEntry | null = null;
+    let revised: DecisionFeedbackEntry | null = null;
+    let dismissed = false;
+    for (const entry of this.#entries(decisionId)) {
+      last = entry;
+      if (entry.kind === 'revised') revised = entry;
+      else dismissed = true;
     }
-    if (first !== null) return { reason: first.reason, reasonSource: first.source, reasonState: 'given', feedbackEntries: entries.length, reasonRevisedAt: null };
-    return {
+    const feedbackEntries = last?.ordinal ?? 0;
+    if (revised !== null) {
+      return { last, standing: { reason: revised.reason!.text, reasonSource: revised.reason!.source, reasonState: 'given', feedbackEntries, reasonRevisedAt: revised.recordedAt } };
+    }
+    if (first !== null) return { last, standing: { reason: first.reason, reasonSource: first.source, reasonState: 'given', feedbackEntries, reasonRevisedAt: null } };
+    return { last, standing: {
       reason: null,
       reasonSource: null,
-      reasonState: entries.some((entry) => entry.kind === 'dismissed') ? 'dismissed' : 'none',
-      feedbackEntries: entries.length,
+      reasonState: dismissed ? 'dismissed' : 'none',
+      feedbackEntries,
       reasonRevisedAt: null,
-    };
+    } };
   }
 
   /**
@@ -175,9 +187,8 @@ export class DecisionFeedbackLedger {
     readonly reason: { readonly text: string; readonly source: 'suggested' | 'free-text' } | null;
     readonly first: { readonly reason: string; readonly source: 'reason-field' | 'suggested' | 'free-text' } | null;
   }): void {
-    const entries = this.entries(input.decisionId);
-    requireFeedback(entries.length === input.expectedFeedback, 'DECISION_FEEDBACK_MOVED', '这次处理的原因刚被改过；请看过现在的原因再改。');
-    const standing = this.standing(input.decisionId, input.first);
+    const { standing, last } = this.#readStanding(input.decisionId, input.first);
+    requireFeedback(standing.feedbackEntries === input.expectedFeedback, 'DECISION_FEEDBACK_MOVED', '这次处理的原因刚被改过；请看过现在的原因再改。');
     if (input.action === 'dismiss') {
       requireFeedback(standing.reasonState !== 'given', 'DECISION_FEEDBACK_INVALID', '这次处理已经说明了原因。');
       requireFeedback(standing.reasonState !== 'dismissed', 'DECISION_FEEDBACK_UNCHANGED', '已经记下「不说明」。');
@@ -187,9 +198,8 @@ export class DecisionFeedbackLedger {
       requireFeedback(input.reason !== null, 'DECISION_FEEDBACK_INVALID', '请选一个原因或写下原因。');
       requireFeedback(input.reason.text !== standing.reason, 'DECISION_FEEDBACK_UNCHANGED', '原因没有变化。');
     }
-    const last = entries.at(-1) ?? null;
     const feedbackId = randomUUID();
-    const ordinal = entries.length + 1;
+    const ordinal = standing.feedbackEntries + 1;
     const kind = input.action === 'dismiss' ? 'dismissed' : 'revised';
     const recordedAt = new Date().toISOString();
     const record = canonicalRecord({

@@ -5,6 +5,8 @@ import type {
   ProductionDocumentProjection,
   ProductionDocumentSourceProjection,
 } from '../shared/protocol.js';
+import { MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS } from '../shared/protocol.js';
+import { publicationCharacterCount, publicationTextState } from './deliverables-labels.js';
 
 /**
  * Every word of 交付 · 生产文档 (Issue #415, plan slice S66; editor-surfaces §9; V2-UX-DELIV-001, DELIV-002,
@@ -223,6 +225,17 @@ export const DOCUMENT_PHASE_REASON_TEXT_LABEL = '说明（选「自行输入」�
 export const DOCUMENT_PHASE_CANCEL = '取消';
 export const DOCUMENT_PHASE_REASON_NEEDED = '请先选一个原因。';
 export const DOCUMENT_PHASE_CUSTOM_NEEDED = '选了「自行输入」，请写下原因。';
+
+/**
+ * What the reason's own words still lack, in the words the 发稿 fields use (Issue #626): too long for the one limit the service
+ * holds them to, counted after trimming, or holding a character that cannot be saved; `null` when they can be recorded.
+ */
+export function phaseReasonTextProblem(words: string): string | null {
+  const state = publicationTextState(words, MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS);
+  if (state === 'too-long') return `说明最多 ${MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS} 个字符，现在 ${publicationCharacterCount(words)} 个。`;
+  if (state === 'ill-formed') return '说明含有无法保存的字符。';
+  return null;
+}
 export const DOCUMENT_PHASE_SHOW_REASON = '查看原因';
 export const DOCUMENT_PHASE_MOVING = '正在记录…';
 export const DOCUMENT_PHASE_MOVE_FAILED = '无法记录这一步。';

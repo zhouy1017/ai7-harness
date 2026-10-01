@@ -93,7 +93,7 @@ export const PACKAGE_EXPORT_OPTIONS_NOTE = '这两项只改变写出的 DOCX 文
 export function packageExportFidelitySummary(degraded: boolean): string {
   return degraded ? '导出保真审阅 · △ 有降级导出或无法导出的内容' : '导出保真审阅';
 }
-export const PACKAGE_EXPORT_FILES_TRUNCATED = '其余文件也一并写入，这里只列出前面的。';
+export const PACKAGE_EXPORT_FILES_TRUNCATED = '还有其他文件，可以翻页查看并另行选择导出。';
 export const PACKAGE_EXPORT_FORMAT_NAMES = { docx: 'DOCX', pdf: 'PDF', markdown: 'Markdown' } as const;
 
 /** `「书名 · 一审稿.docx」 · DOCX`. */
