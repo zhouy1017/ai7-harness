@@ -1413,6 +1413,7 @@ async function main() {
     await waitFor(renderer, `typeof window.__j11HeldFeedbackFollow?.release==='function'`, 'feedback-pending-follow-held');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'feedback-pending-close-plan');
     await clickSelector(renderer, '#analysis-tab-synopsis', 'feedback-pending-synopsis');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${feedbackItem('synopsis')} [data-analysis-action="open-feedback"]`)})?.disabled===false`, 'feedback-pending-card-ready');
     await clickSelector(renderer, `${feedbackItem('synopsis')} [data-analysis-action="open-feedback"]`, 'feedback-pending-card');
     await tick(renderer, `${feedbackItem('synopsis')} .analysis-feedback-judgments input[value="accurate"]`, 'feedback-pending-accurate');
     await assertRenderer(renderer, `(() => {
