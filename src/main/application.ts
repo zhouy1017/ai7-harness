@@ -2890,7 +2890,7 @@ function registerRendererHandlers(
       requireAuthority();
       const route = owned.route;
       requireDesktop(route === null || (route.kind === 'book' && route.bookId === input.bookId), 'AI7_RENDERER_BOUNDARY_INVALID');
-      const result = await service.call('inspectBookSeries', { bookId: input.bookId });
+      const result = await service.call('inspectBookSeries', { bookId: input.bookId, membershipsAfter: input.membershipsAfter ?? null });
       requireDesktop(result.bookId === input.bookId, 'AI7_SERVICE_ROUTE_INVALID');
       return result;
     }),

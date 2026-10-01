@@ -851,8 +851,11 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'inspectBookSeries': {
-      const input = requireInput(value.input, ['bookId'], tentativeId);
-      if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId'], ['membershipsAfter'], tentativeId);
+      if (!validUuid(input.bookId) || !optionalOrNull(input, 'membershipsAfter', (after) =>
+        isRecord(after) && hasExactKeys(after, ['title', 'seriesId']) && isBoundedString(after.title, 80) && validUuid(after.seriesId))) {
+        throw new ProtocolError(tentativeId);
+      }
       break;
     }
     // 书系's further pages (Issue #63 review): each starts after one item, and 查找 names at most a line of words.

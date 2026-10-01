@@ -1407,6 +1407,8 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'changeSeriesMembership', input: change },
       { op: 'changeSeriesMembership', input: { ...change, kind: 'remove' } },
       { op: 'inspectBookSeries', input: { bookId } },
+      { op: 'inspectBookSeries', input: { bookId, membershipsAfter: null } },
+      { op: 'inspectBookSeries', input: { bookId, membershipsAfter: { title: '书系', seriesId } } },
       { op: 'listBooks', input: { after: null, filter: { field: 'series', text: '星河' } } },
     ];
     for (const { op, input } of inputs) {
@@ -1442,6 +1444,9 @@ describe('decodeRequest rejects malformed frames', () => {
       ['changeSeriesMembership', { seriesId, bookId, kind: 'add' }],
       ['changeSeriesMembership', { ...change, bookId: 'book' }],
       ['inspectBookSeries', { bookId, seriesId }],
+      ['inspectBookSeries', { bookId, membershipsAfter: { title: '', seriesId } }],
+      ['inspectBookSeries', { bookId, membershipsAfter: { title: '书系', seriesId: 'bad-id' } }],
+      ['inspectBookSeries', { bookId, membershipsAfter: { title: '书系', seriesId, extra: true } }],
       ['listBooks', { after: null, filter: { field: 'imprint', text: '星河' } }],
     ] as const) {
       expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);

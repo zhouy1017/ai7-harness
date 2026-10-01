@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 85 as const;
+export const SERVICE_PROTOCOL_VERSION = 86 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -5974,10 +5974,16 @@ export interface SeriesMembershipChangeResultProjection {
  * A Book's side of 书系 (SER-009): the Series it is in now, by name — at most `MAX_BOOK_SERIES_MEMBERSHIPS`, with how many in
  * all — and the first page of its membership changes, newest first, with how many there are and where the next page starts.
  */
+export interface InspectBookSeriesInput {
+  readonly bookId: string;
+  readonly membershipsAfter?: SeriesListCursor | null;
+}
+
 export interface BookSeriesProjection {
   readonly bookId: string;
   readonly memberships: ReadonlyArray<{ readonly seriesId: string; readonly title: string; readonly joinedAt: string }>;
   readonly membershipCount: number;
+  readonly membershipsNext: SeriesListCursor | null;
   readonly history: ReadonlyArray<SeriesMembershipChangeProjection>;
   readonly historyCount: number;
   readonly historyNext: SeriesHistoryCursor | null;
@@ -8416,7 +8422,7 @@ export interface ServiceOperationMap {
   inspectSeries: { input: { seriesId: string }; output: SeriesProjection };
   previewSeriesMembershipChange: { input: PreviewSeriesMembershipChangeInput; output: SeriesMembershipPreviewProjection };
   changeSeriesMembership: { input: ChangeSeriesMembershipInput; output: SeriesMembershipChangeResultProjection };
-  inspectBookSeries: { input: { bookId: string }; output: BookSeriesProjection };
+  inspectBookSeries: { input: InspectBookSeriesInput; output: BookSeriesProjection };
   inspectSeriesMembers: { input: { seriesId: string; after: SeriesMembersCursor | null }; output: SeriesMembersPageProjection };
   inspectSeriesCandidates: { input: { seriesId: string; text: string; after: SeriesCandidatesCursor | null }; output: SeriesCandidatesProjection };
   /** Exactly one of a Series and a Book. */
@@ -8771,7 +8777,7 @@ export interface RendererApi {
   inspectSeries(input: { seriesId: string }): Promise<SeriesProjection>;
   previewSeriesMembershipChange(input: PreviewSeriesMembershipChangeInput): Promise<SeriesMembershipPreviewProjection>;
   changeSeriesMembership(input: ChangeSeriesMembershipInput): Promise<SeriesMembershipChangeResultProjection>;
-  inspectBookSeries(input: { bookId: string }): Promise<BookSeriesProjection>;
+  inspectBookSeries(input: InspectBookSeriesInput): Promise<BookSeriesProjection>;
   inspectSeriesMembers(input: { seriesId: string; after: SeriesMembersCursor | null }): Promise<SeriesMembersPageProjection>;
   inspectSeriesCandidates(input: { seriesId: string; text: string; after: SeriesCandidatesCursor | null }): Promise<SeriesCandidatesProjection>;
   inspectSeriesHistory(input: { seriesId: string | null; bookId: string | null; after: SeriesHistoryCursor | null }): Promise<SeriesHistoryPageProjection>;

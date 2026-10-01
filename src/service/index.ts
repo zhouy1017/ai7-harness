@@ -570,7 +570,7 @@ async function dispatch(
     case 'changeSeriesMembership':
       return { id: request.id, ok: true, op: request.op, result: store.changeSeriesMembership(request.input) };
     case 'inspectBookSeries':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectBookSeries(request.input.bookId) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectBookSeries(request.input.bookId, request.input.membershipsAfter ?? null) };
     case 'inspectSeriesMembers':
       return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesMembers(request.input.seriesId, request.input.after) };
     case 'inspectSeriesCandidates':

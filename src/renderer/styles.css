@@ -1450,3 +1450,9 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .proposal-conflict-path:has(input:checked) { box-shadow: none; border-width: 3px; }
   .proposal-conflict textarea:focus-visible, .proposal-conflict [tabindex="-1"]:focus-visible { outline-color: Highlight; }
 }
+.knowledge-series-choices {
+  display: grid;
+  gap: 0.4rem;
+  max-height: 18rem;
+  overflow: auto;
+}
