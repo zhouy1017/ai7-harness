@@ -1397,12 +1397,12 @@ async function main() {
     await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'feedback-pending-plan-ready');
     await assertRenderer(renderer, `(() => {
       const original=window.setTimeout;
-      const held={original,release:null}; window.__j11HeldFeedbackFollow=held;
+      const held={original,timers:[],release:null}; window.__j11HeldFeedbackFollow=held;
       window.setTimeout=function(callback,delay,...args) {
-        if(delay===250 && typeof callback==='function' && callback.toString().includes('#follow')) {
-          window.setTimeout=original;
+        if(delay===250 && typeof callback==='function') {
           const timer=original(()=>{},60000);
-          held.release=()=>{clearTimeout(timer);callback(...args);};
+          held.timers.push(()=>{clearTimeout(timer);callback(...args);});
+          held.release=()=>{window.setTimeout=original;for(const fire of held.timers.splice(0))fire();};
           return timer;
         }
         return original(callback,delay,...args);
