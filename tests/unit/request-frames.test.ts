@@ -74,6 +74,14 @@ describe('decodeRequest accepts well-formed frames', () => {
       input: { kind: 'revision', revisionId: randomUUID() },
     };
     expect(decodeRequest(frameOf(bookRoute))).toEqual(bookRoute);
+    const feedbackRoute = { ...bookRoute, input: { ...bookRoute.input, feedbackEntryId: `proposal-decision:${randomUUID()}` } };
+    expect(decodeRequest(frameOf(feedbackRoute))).toEqual(feedbackRoute);
+    for (const input of [
+      { ...feedbackRoute.input, feedbackEntryId: 'x'.repeat(161) },
+      { ...feedbackRoute.input, feedbackEntryId: null },
+      { ...feedbackRoute.input, target: { kind: 'mark' } },
+      { ...revisionRoute.input, feedbackEntryId: feedbackRoute.input.feedbackEntryId },
+    ]) expect(() => decodeRequest(frameOf({ ...bookRoute, input }))).toThrow(ProtocolError);
     const materialRoute = { ...bookRoute, input: { ...bookRoute.input, learningMaterialKey: `proposal-decision:${randomUUID()}` } };
     expect(decodeRequest(frameOf(materialRoute))).toEqual(materialRoute);
     for (const input of [
@@ -1219,6 +1227,14 @@ describe('decodeRequest rejects malformed frames', () => {
       ['inspectLearningMaterials', { bookId, after: null }],
       ['inspectLearningMaterials', { bookId: null, after: { bookTitle: '学习之书', bookId, orderedAt: '2026-09-26T01:02:03.004Z', materialKey: `proposal-decision:${randomUUID()}` } }],
       ['inspectLearningMaterial', { bookId, materialKey: `review-disposition:${randomUUID()}/rvf_${'9c'.repeat(12)}` }],
+      ['inspectFeedbackHistory', {}],
+      ['inspectFeedbackHistory', { bookId, origin: 'analysis-feedback', author: '周一', editor: null, after: null }],
+      ['inspectFeedbackHistory', { bookId, origin: 'analysis-feedback', dimension: '人物与名称', recordedFrom: '2026-09-25T16:00:00.000Z', recordedBefore: '2026-09-26T16:00:00.000Z' }],
+      ['inspectFeedbackHistory', { dimension: null, recordedFrom: null, recordedBefore: null }],
+      ['inspectFeedbackHistory', { signal: '修改后接受', origin: 'proposal-decision' }],
+      ['inspectFeedbackHistory', { signal: '准确', dimension: '人物与名称' }],
+      ['inspectFeedbackHistory', { signal: null }],
+      ['inspectFeedbackHistory', { after: { recordedAt: '2026-09-26T01:02:03.004Z', entryId: `proposal-decision:${randomUUID()}` } }],
       ['decideLearningMaterial', decision],
       ['decideLearningMaterial', { ...decision, materialKey: `analysis-feedback:${randomUUID()}/entities/12`, expectedDecisions: 3, choice: 'deferred', note: '以后再说' }],
       ['decideLearningMaterial', { ...decision, materialKey: `analysis-feedback:${randomUUID()}/synopsis`, choice: 'house' }],
@@ -1240,6 +1256,19 @@ describe('decodeRequest rejects malformed frames', () => {
       ['decideLearningMaterial', { ...decision, materialKey: `review-disposition:${randomUUID()}/finding-7` }],
       ['decideLearningMaterial', { ...decision, materialKey: `proposal-decision:${randomUUID()}/entities/1` }],
       ['decideLearningMaterial', { ...decision, materialKey: `analysis-feedback:${randomUUID()}/chapters/1` }],
+      ['inspectFeedbackHistory', { bookId: 'invalid' }],
+      ['inspectFeedbackHistory', { origin: 'unknown' }],
+      ['inspectFeedbackHistory', { author: 'a'.repeat(201) }],
+      ['inspectFeedbackHistory', { dimension: 'a'.repeat(201) }],
+      ['inspectFeedbackHistory', { dimension: 7 }],
+      ['inspectFeedbackHistory', { signal: '稍后决定' }],
+      ['inspectFeedbackHistory', { signal: 7 }],
+      ['inspectFeedbackHistory', { recordedFrom: '2026-02-30T00:00:00.000Z' }],
+      ['inspectFeedbackHistory', { recordedBefore: '2026-09-26' }],
+      ['inspectFeedbackHistory', { recordedFrom: '2026-09-27T00:00:00.000Z', recordedBefore: '2026-09-26T00:00:00.000Z' }],
+      ['inspectFeedbackHistory', { recordedFrom: '2026-09-26T00:00:00.000Z', recordedBefore: '2026-09-26T00:00:00.000Z' }],
+      ['inspectFeedbackHistory', { after: { recordedAt: 'yesterday', entryId: `proposal-decision:${randomUUID()}` } }],
+      ['inspectFeedbackHistory', { after: { recordedAt: '2026-09-26T01:02:03.004Z', entryId: 'unknown' } }],
       ['decideLearningMaterial', { ...decision, choice: 'series' }],
       ['decideLearningMaterial', { ...decision, choice: null }],
       ['decideLearningMaterial', { ...decision, materialKey: 'library:x' }],

@@ -1,5 +1,7 @@
 # Current checkpoint
 
+Prepared dependent #576 (S26c, 2026-10-01): passive feedback history now supplies all required filters and grouping, including date, dimension and exact disposition/judgment. A captured pre-existing patch is reviewed in an isolated checkout; its original dirty worktree remains unchanged. Guest regressions reproduced the missing signal filter and skipped-midnight DST cutoff; both repairs passed scoped check/unit/service/build/J11. The prepared restack retains bounded history readers, exact learning and history source routes, parent consent/version and pending-save fixes, schema50/protocol81/API145. History paging uses reasonless decisions before learning paging adds its own reasoned materials, retaining both coverage sets. Final integration remains pending the parent and complete exact-head review/guest/hosted Gates.
+
 Prepared dependent #575 (S26b, 2026-10-01): Book-first learning decisions bind the exact material version at schema50/protocol78. Monotonic immutable reason-feedback revisions enter the material digest, so reverting A to B and back to A cannot renew an earlier inclusion decision or admit a stale card. The real-store regression was red before repair and green after it. Historical Review Task provenance reads the existing Run state without materializing all findings. Source routes preserve both immutable analysis revision links and exact judged-item arrival. Targeted guest check/unit/service/build/J11 passed on the prepared parent restack; integration remains pending its parent and complete exact-final-head verification.
 
 Current landing route (2026-10-01): #570, #573 and #574 are integrated into dev; #574 landed at 84867d1a after all14 guest Journeys and both full-platform/Windows PR Gates passed at 721fe1f0. The dependent #575 candidate preserves the parent fixes and awaits complete exact-head review, guest ladder and hosted Gates before integration. Later children remain Draft until their own serial restack and complete verification.
@@ -152,3 +154,5 @@ Live Provider calls are authorized unattended under ADR 0070, bounded by the tra
 
 Do not touch export, publication, release, distribution, or main. Under ADR 0058 do not query or consider Actions usage.
 ```
+
+PR #576 is now prepared on integrated dev@84b5fc6c. Its explicit decision/date/dimension filters, grouping, exact source navigation, bounded history pages and local-midnight cutoff are repaired; protocol/readiness81 and schema50. Final full guest and hosted verification are pending at the merge candidate. The original worktree's pre-existing uncommitted edits remain preserved; review and testing use the isolated copy.

@@ -220,6 +220,22 @@ export class BookPeople {
     };
   }
 
+  /** Exact historical attribution with complete chain validation and one retained match. */
+  at(bookId: string, recordedAt: string): { version: number; authors: ReadonlyArray<string>; editors: ReadonlyArray<string> } | null {
+    let found: VerifiedPeopleVersion | null = null;
+    for (const entry of this.#verified(bookId)) {
+      if (found === null || entry.recordedAt <= recordedAt) found = entry;
+    }
+    return found === null ? null : { version: found.version, authors: found.people.authors, editors: found.people.editors };
+  }
+
+  /** One exact version for a displayed entry; later versions are still validated. */
+  version(bookId: string, version: number): { version: number; authors: ReadonlyArray<string>; editors: ReadonlyArray<string> } | null {
+    let found: VerifiedPeopleVersion | null = null;
+    for (const entry of this.#verified(bookId)) if (entry.version === version) found = entry;
+    return found === null ? null : { version: found.version, authors: found.people.authors, editors: found.people.editors };
+  }
+
   /** The card's lines in 书库. */
   summary(bookId: string): BookSummaryProjection['people'] {
     const people = this.current(bookId);

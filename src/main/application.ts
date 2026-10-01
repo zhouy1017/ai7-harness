@@ -2794,6 +2794,14 @@ function registerRendererHandlers(
       return service.call('inspectLearningMaterial', { bookId: input.bookId, materialKey: input.materialKey });
     }),
   );
+  ipcMain.handle(IPC_CHANNELS.inspectFeedbackHistory, (event, input: ServiceOperationMap['inspectFeedbackHistory']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return service.call('inspectFeedbackHistory', input);
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.decideLearningMaterial, (event, input: ServiceOperationMap['decideLearningMaterial']['input']) =>
     envelope(async () => {
       requireSender(event);

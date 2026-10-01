@@ -111,6 +111,9 @@ import type {
   RecordChangeSuggestionDecisionInput,
   RecordProposalDecisionFeedbackInput,
   DecideLearningMaterialInput,
+  FeedbackHistoryEntryProjection,
+  FeedbackHistoryInput,
+  FeedbackHistoryProjection,
   LearningMaterialCursor,
   LearningMaterialProjection,
   LearningMaterialTarget,
@@ -313,10 +316,16 @@ import { EvaluationError, EvaluationRecords, initializeEvaluationRecordSchema } 
 import { AnalysisFeedbackError, AnalysisFeedbackLedger, analysisFeedbackItems, initializeAnalysisFeedbackSchema } from './analysis-feedback.js';
 import { DecisionFeedbackError, DecisionFeedbackLedger, initializeDecisionFeedbackSchema } from './decision-feedback.js';
 import {
+  DIMENSION_LABELS,
+  DISPOSITION_LABELS,
+  JUDGMENT_LABELS,
   LEARNING_ELIGIBILITY_BASIS,
   LearningEligibilityError,
+  analysisReasonLabel,
   LearningEligibilityLedger,
   analysisFeedbackCandidate,
+  feedbackHistoryPage,
+  feedbackReasonExcerpt,
   initializeLearningEligibilitySchema,
   learningMaterialDigest,
   learningMaterialOrder,
@@ -325,6 +334,7 @@ import {
   type LearningMaterialCandidate,
 } from './learning-eligibility.js';
 import { reviewCategoryEntry } from './review/category-configuration.js';
+import { MAX_FEEDBACK_HISTORY_ENTRIES } from '../shared/protocol.js';
 import { readExemplars } from './exemplars.js';
 import { readKnowledgeProcedures } from './knowledge-procedures.js';
 import {
@@ -5849,6 +5859,132 @@ export class EditorialStore {
     return this.inspectLearningMaterial(input.bookId, input.materialKey);
   }
 
+  /**
+   * 质量与学习 › 反馈历史 (Issue #61, plan slice S26c; FDBK-009, FDBK-010, FDBK-013): the editor's feedback, newest first — each
+   * 修改建议's current decision with its reason as it stands, each analysis item's latest judgment, each 审阅 finding's latest
+   * 忽略 — with where it opens and the Book's people it is attributed to: the version in force when it was given, or the first
+   * saved after it (Issue #61 review). One answer holds what `feedbackHistoryPage` admits, each reason bounded. Passive
+   * history: a read, asking nothing.
+   */
+  inspectFeedbackHistory(input: FeedbackHistoryInput = {}): FeedbackHistoryProjection {
+    return this.#readFeedbackHistory(input);
+  }
+
+  #readFeedbackHistory(input: FeedbackHistoryInput, exactEntryId: string | null = null): FeedbackHistoryProjection {
+    return this.#learningCall(() => {
+      type Entry = Omit<FeedbackHistoryEntryProjection, 'peopleVersion'>;
+      // Keep only the newest response-sized candidates plus one lookahead, regardless of ledger depth or Book count.
+      const entries: Entry[] = [];
+      const newest = (a: Pick<Entry, 'recordedAt' | 'entryId'>, b: Pick<Entry, 'recordedAt' | 'entryId'>): number => a.recordedAt > b.recordedAt ? -1 : a.recordedAt < b.recordedAt ? 1 : a.entryId < b.entryId ? -1 : a.entryId > b.entryId ? 1 : 0;
+      const consider = (entry: Entry): void => {
+        if (exactEntryId !== null && entry.entryId !== exactEntryId) return;
+        if ((input.bookId != null && entry.bookId !== input.bookId) || (input.origin != null && entry.origin !== input.origin) ||
+            (input.recordedFrom != null && entry.recordedAt < input.recordedFrom) ||
+            (input.recordedBefore != null && entry.recordedAt >= input.recordedBefore) ||
+            (Object.hasOwn(input, 'dimension') && entry.dimension !== input.dimension) ||
+            (input.signal != null && entry.signal !== input.signal) ||
+            (input.after != null && newest(entry, input.after) <= 0)) return;
+        if (input.author != null || input.editor != null) {
+          const people = this.#bookPeople.at(entry.bookId, entry.recordedAt);
+          if ((input.author != null && !people?.authors.includes(input.author)) ||
+              (input.editor != null && !people?.editors.includes(input.editor))) return;
+        }
+        const at = entries.findIndex((held) => newest(entry, held) < 0);
+        entries.splice(at < 0 ? entries.length : at, 0, entry);
+        if (entries.length > MAX_FEEDBACK_HISTORY_ENTRIES + 1) entries.pop();
+      };
+      const reasons = new DecisionFeedbackLedger(this.#authority);
+      const decisions = this.#authority.prepare(
+        `SELECT m.book_id, m.mark_id, m.manuscript_id, m.branch_id, m.block_id, m.anchor_state, m.source_origin, m.source_label,
+                d.decision_id, d.disposition, d.recorded_at, r.reason, r.reason_source, r.recorded_at AS reason_recorded_at,
+                (SELECT f.recorded_at FROM proposal_decision_feedback f WHERE f.decision_id = d.decision_id
+                 ORDER BY f.ordinal DESC LIMIT 1) AS feedback_recorded_at
+         FROM editorial_marks m
+         JOIN proposal_change_items i ON i.mark_id = m.mark_id
+         JOIN proposal_item_decisions d ON d.item_id = i.item_id
+         LEFT JOIN proposal_decision_reasons r ON r.decision_id = d.decision_id
+         WHERE m.status IN ('open', 'resolved', 'applied') AND d.disposition <> 'withdrawn'
+           AND d.ordinal = (SELECT max(latest.ordinal) FROM proposal_item_decisions latest WHERE latest.item_id = i.item_id)`,
+      ).iterate() as IterableIterator<SqlRow>;
+      for (const row of decisions) {
+        const decisionId = asString(row.decision_id);
+        const first = row.reason === null || row.reason === undefined
+          ? null
+          : { reason: asString(row.reason), source: asString(row.reason_source) as 'reason-field' | 'suggested' | 'free-text' };
+        const standing = reasons.standing(decisionId, first);
+        const bookId = asString(row.book_id);
+        consider({
+          entryId: `proposal-decision:${decisionId}`,
+          origin: 'proposal-decision',
+          bookId,
+          // A 修改建议 a 审阅 category made is about that category (Issue #61 review); one the editor or a Task made names none.
+          dimension: row.source_origin === 'review-category' ? asString(row.source_label) : null,
+          signal: DISPOSITION_LABELS[asString(row.disposition)] ?? asString(row.disposition),
+          reason: feedbackReasonExcerpt(standing.reason),
+          reasonState: standing.reasonState,
+          // Attribute the displayed current feedback to when it was given, not the older business decision.
+          recordedAt: standing.reasonRevisedAt ?? (row.reason_recorded_at == null
+            ? row.feedback_recorded_at == null ? asString(row.recorded_at) : asString(row.feedback_recorded_at)
+            : asString(row.reason_recorded_at)),
+          target: {
+            kind: 'mark', bookId, manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id), blockId: asString(row.block_id),
+            markId: asString(row.mark_id), detached: row.anchor_state === 'detached',
+          },
+        });
+      }
+      for (const book of this.#authority.prepare('SELECT book_id FROM books').iterate() as IterableIterator<SqlRow>) {
+        const bookId = asString(book.book_id);
+        for (const signal of this.#analysisFeedback.latestEntries(bookId)) {
+          const reason = [analysisReasonLabel(signal), signal.correction === null ? null : `修正：${signal.correction}`].filter((part) => part !== null).join(' · ');
+          consider({
+            entryId: `analysis-feedback:${signal.revisionId}/${signal.itemKey}`,
+            origin: 'analysis-feedback',
+            bookId,
+            dimension: DIMENSION_LABELS[signal.dimension],
+            signal: JUDGMENT_LABELS[signal.judgment],
+            reason: feedbackReasonExcerpt(reason.length === 0 ? null : reason),
+            reasonState: reason.length === 0 ? 'none' : 'given',
+            recordedAt: signal.recordedAt,
+            target: { kind: 'analysis', bookId, revisionId: signal.revisionId, itemKey: signal.itemKey, dimension: signal.dimension },
+          });
+        }
+      }
+      const ignored = this.#authority.prepare(
+        `SELECT book_id, review_run_id, finding_id, category_id, reason, recorded_at FROM quality_signals q
+         WHERE kind = 'review-finding-ignored'
+           AND recorded_at = (SELECT max(latest.recorded_at) FROM quality_signals latest
+                              WHERE latest.review_run_id = q.review_run_id AND latest.finding_id = q.finding_id)`,
+      ).iterate() as IterableIterator<SqlRow>;
+      for (const row of ignored) {
+        const bookId = asString(row.book_id);
+        const categoryId = asString(row.category_id);
+        consider({
+          entryId: `review-disposition:${asString(row.review_run_id)}/${asString(row.finding_id)}`,
+          origin: 'review-disposition',
+          bookId,
+          dimension: reviewCategoryEntry(categoryId)?.label ?? categoryId,
+          signal: '忽略',
+          reason: feedbackReasonExcerpt(asString(row.reason)),
+          reasonState: 'given',
+          recordedAt: asString(row.recorded_at),
+          target: { kind: 'review', bookId, reviewRunId: asString(row.review_run_id), findingId: asString(row.finding_id) },
+        });
+      }
+      // Each entry is attributed to the Book's people as they stood when it was given, or as first saved after it.
+      const attributed: FeedbackHistoryEntryProjection[] = entries.map((entry) => ({
+        ...entry, peopleVersion: this.#bookPeople.at(entry.bookId, entry.recordedAt)?.version ?? 0,
+      }));
+      return feedbackHistoryPage(
+        attributed,
+        (bookId) => {
+          const people = this.#bookPeople.current(bookId);
+          return { bookId, title: this.#evaluationBookTitle(bookId), authors: people.authors, editors: people.editors };
+        },
+        (bookId, version) => this.#bookPeople.version(bookId, version),
+      );
+    });
+  }
+
   /** A Book's heading on the page: its title, its people, and how many materials it has in all. */
   #learningBookOf(bookId: string, title: string): Omit<LearningMaterialsBookProjection, 'materials'> {
     const people = this.#bookPeople.current(bookId);
@@ -10246,12 +10382,22 @@ export class EditorialStore {
   resolveBookWorkbenchRoute(route: BookWorkbenchRoute): ResolvedBookWorkbenchRoute {
     return this.#boundedCall(() => {
       const resolved = this.#bounded.resolveBookWorkbenchRoute(route);
-      if (route.kind !== 'book' || route.learningMaterialKey === undefined) return resolved;
-      const material = this.inspectLearningMaterial(route.bookId, route.learningMaterialKey);
-      requireStore(resolved.kind === 'book', 'LEARNING_MATERIAL_NOT_FOUND', '无法打开学习材料的来源记录。');
-      requireStore(material.target.kind !== 'mark' || !material.target.detached,
-        'LEARNING_SOURCE_DETACHED', '来源修改建议所在的段落已不在稿件中。');
-      return { ...resolved, learningMaterialTarget: material.target };
+      if (route.kind !== 'book') return resolved;
+      if (route.feedbackEntryId !== undefined) {
+        const entry = this.#readFeedbackHistory({ bookId: route.bookId }, route.feedbackEntryId).entries[0];
+        requireStore(resolved.kind === 'book' && entry !== undefined, 'FEEDBACK_SOURCE_NOT_FOUND', '这条反馈的来源记录不存在。');
+        requireStore(entry.target.kind !== 'mark' || !entry.target.detached,
+          'FEEDBACK_SOURCE_DETACHED', '这条修改建议所在的段落已不在稿件中。');
+        return { ...resolved, feedbackTarget: entry.target };
+      }
+      if (route.learningMaterialKey !== undefined) {
+        const material = this.inspectLearningMaterial(route.bookId, route.learningMaterialKey);
+        requireStore(resolved.kind === 'book', 'LEARNING_MATERIAL_NOT_FOUND', '无法打开学习材料的来源记录。');
+        requireStore(material.target.kind !== 'mark' || !material.target.detached,
+          'LEARNING_SOURCE_DETACHED', '来源修改建议所在的段落已不在稿件中。');
+        return { ...resolved, learningMaterialTarget: material.target };
+      }
+      return resolved;
     });
   }
 

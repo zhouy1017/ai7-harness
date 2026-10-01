@@ -1,6 +1,7 @@
 import { isAbsolute } from 'node:path';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
+  FEEDBACK_HISTORY_SIGNALS,
   BASELINE_ANALYSIS_UPDATE_MODES,
   MAX_BLOCK_CODE_UNITS,
   MAX_EDIT_CODE_UNITS,
@@ -329,6 +330,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       const input = value.input;
       const valid = input.kind === 'book'
         ? (hasExactKeys(input, ['kind', 'bookId']) ||
+            (hasExactKeys(input, ['kind', 'bookId', 'feedbackEntryId']) && validLearningMaterialKey(input.feedbackEntryId)) ||
             (hasExactKeys(input, ['kind', 'bookId', 'learningMaterialKey']) && validLearningMaterialKey(input.learningMaterialKey))) &&
           isBoundedString(input.bookId, 36) && UUID_PATTERN.test(input.bookId)
         : input.kind === 'revision' &&
@@ -731,6 +733,26 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           !(input.expectedLatestSignalId === null || validUuid(input.expectedLatestSignalId)) ||
           (input.judgment !== 'accurate' && input.judgment !== 'inaccurate' && input.judgment !== 'incomplete') ||
           !validFeedbackReason(input.reason) || !(input.correction === null || isBoundedString(input.correction, 4_000, true))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // Filter before the bounded history page, with one exclusive cursor.
+    case 'inspectFeedbackHistory': {
+      const input = requireInputWithOptional(value.input, [], ['bookId', 'origin', 'author', 'editor', 'signal', 'recordedFrom', 'recordedBefore', 'dimension', 'after'], tentativeId);
+      const instant = (candidate: unknown): boolean => typeof candidate === 'string' && LEARNING_CURSOR_INSTANT.test(candidate) &&
+        Number.isFinite(Date.parse(candidate)) && new Date(candidate).toISOString() === candidate;
+      if (!optionalOrNull(input, 'bookId', validUuid) ||
+          !optionalOrNull(input, 'origin', (origin) => origin === 'proposal-decision' || origin === 'analysis-feedback' || origin === 'review-disposition') ||
+          !optionalOrNull(input, 'author', (name) => isBoundedString(name, 200)) ||
+          !optionalOrNull(input, 'editor', (name) => isBoundedString(name, 200)) ||
+          !optionalOrNull(input, 'recordedFrom', instant) ||
+          !optionalOrNull(input, 'recordedBefore', instant) ||
+          !optionalOrNull(input, 'dimension', (label) => isBoundedString(label, 200)) ||
+          !optionalOrNull(input, 'signal', (signal) => FEEDBACK_HISTORY_SIGNALS.some((known) => known === signal)) ||
+          (typeof input.recordedFrom === 'string' && typeof input.recordedBefore === 'string' && input.recordedFrom >= input.recordedBefore) ||
+          !optionalOrNull(input, 'after', (after) => isRecord(after) && hasExactKeys(after, ['recordedAt', 'entryId']) &&
+            isBoundedString(after.recordedAt, 40) && LEARNING_CURSOR_INSTANT.test(after.recordedAt) && validLearningMaterialKey(after.entryId))) {
         throw new ProtocolError(tentativeId);
       }
       break;

@@ -80,7 +80,18 @@ import type { AnalysisFeedbackDimension } from '../shared/analysis-feedback.js';
 import { analysisFeedbackEngaged, mountAnalysisFeedback } from './analysis-feedback.js';
 import type { LearningMaterialTarget } from '../shared/protocol.js';
 import { mountLearningMaterials } from './quality-learning.js';
-import { LEARNING_HEADING, LEARNING_STATUS, QUALITY_LEARNING_LEDE, QUALITY_LEARNING_TITLE } from './quality-learning-labels.js';
+import type { FeedbackHistoryTarget } from '../shared/protocol.js';
+import { mountFeedbackHistory } from './feedback-history.js';
+import {
+  FEEDBACK_HISTORY_HEADING,
+  FEEDBACK_HISTORY_STATUS,
+  LEARNING_HEADING,
+  LEARNING_STATUS,
+  QUALITY_LEARNING_LEDE,
+  QUALITY_LEARNING_TABS,
+  QUALITY_LEARNING_TABS_LABEL,
+  QUALITY_LEARNING_TITLE,
+} from './quality-learning-labels.js';
 import {
   EVALUATION_LEDE,
   EVALUATION_STATUS,
@@ -762,7 +773,32 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
       await renderKnowledgeBase('library', false, target.materialId);
       return;
     case 'learning-materials':
-      await renderQualityLearning(target.bookId);
+      await renderQualityLearning('learning', target.bookId);
+      return;
+  }
+}
+
+/**
+ * Where a 反馈历史 entry opens (Issue #61, S26c; FDBK-009): the exact record, in its Book — the manuscript with the
+ * 修改建议's card open, ②A on the revision the judgment was made of, or ②B with the finding in view.
+ */
+async function openFeedbackTarget(target: FeedbackHistoryTarget, entryId: string): Promise<void> {
+  await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId, feedbackEntryId: entryId });
+}
+
+/** The exact feedback source travels with its resolved Book route across windows. */
+async function renderFeedbackTarget(target: FeedbackHistoryTarget, bookTitle: string): Promise<void> {
+  switch (target.kind) {
+    case 'mark': {
+      const opened = await window.ai7.getManuscriptWindowAt({ manuscriptId: target.manuscriptId, branchId: target.branchId, target: { kind: 'block', blockId: target.blockId } });
+      await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId);
+      return;
+    }
+    case 'analysis':
+      renderBookAnalysis(target.bookId, bookTitle, { revisionId: target.revisionId, itemKey: target.itemKey, dimension: target.dimension });
+      return;
+    case 'review':
+      renderBookReview(target.bookId, bookTitle, { reviewRunId: target.reviewRunId, findingId: target.findingId });
       return;
   }
 }
@@ -845,6 +881,10 @@ async function renderResolvedBookWorkbenchRoute(
   recoveryReturn?: RecoveryReturnContext,
 ): Promise<void> {
   if (route.kind === 'book') {
+    if (route.feedbackTarget !== undefined) {
+      await renderFeedbackTarget(route.feedbackTarget, route.bookTitle);
+      return;
+    }
     if (route.learningMaterialTarget !== undefined) {
       await renderLearningMaterialTarget(route.learningMaterialTarget, route.bookTitle);
       return;
@@ -2055,12 +2095,12 @@ function renderBookAnalysis(bookId: string, bookTitle: string, target?: JudgedAn
   };
   // The drawer's bar started this Task or reconfirmed its plan (Issue #420): ②A reads it again.
   taskSurfaceRefresh = { 'baseline-analysis': () => inspect(false) };
-  // The item a 学习材料 entry judged opens on its own tab (Issue #61 review), the tab the card is drawn with.
+  // The item a 反馈历史 entry judged opens on its own tab (Issue #61 review), the tab the card is drawn with.
   if (judged !== undefined) analysisTabChoice.set(bookId, judged.dimension);
   inspect(true);
 }
 
-/** The item of ②A a 学习材料 entry judged: its revision, its place, and the tab it sits on. */
+/** The item of ②A a 反馈历史 entry judged: its revision, its place, and the tab it sits on. */
 interface JudgedAnalysisItem {
   readonly revisionId: string;
   readonly itemKey: string;
@@ -4616,38 +4656,70 @@ function renderExemplars(root: HTMLElement, projection: ExemplarsProjection): vo
 }
 
 /**
- * 质量与学习 (Issue #61, plan slice S26b; LEARN-002, FDBK-010): a house-wide destination beside 知识库, opened from the
- * landing or from a Book's 学习准入待处理 in 待我处理 — then for that Book, with the way to every Book one step away.
+ * 质量与学习 (Issue #61, plan slices S26b and S26c; LEARN-002, FDBK-009, FDBK-010): a house-wide destination beside 知识库 with
+ * two tabs — 反馈历史, the passive history it opens at from the landing, and 学习准入, where a Book's 学习准入待处理 in
+ * 待我处理 opens it, for that Book, with the way to every Book one step away.
  */
-async function renderQualityLearning(bookId: string | null): Promise<void> {
+async function renderQualityLearning(tab: 'feedback' | 'learning', bookId: string | null, tabFocused = false): Promise<void> {
   const content = panel();
   content.classList.add('quality-learning');
+  content.dataset['qualityTab'] = tab;
+  const tabs = element('div', 'knowledge-tabs quality-tabs');
+  tabs.setAttribute('role', 'tablist');
+  tabs.setAttribute('aria-label', QUALITY_LEARNING_TABS_LABEL);
+  QUALITY_LEARNING_TABS.forEach((entry, index) => {
+    const node = button(entry.label, entry.tab === tab ? 'secondary' : 'quiet', () => {
+      if (entry.tab !== tab) void renderQualityLearning(entry.tab, null, true);
+    });
+    node.id = `quality-tab-${entry.tab}`;
+    node.dataset['qualityTab'] = entry.tab;
+    node.setAttribute('role', 'tab');
+    node.setAttribute('aria-selected', String(entry.tab === tab));
+    node.setAttribute('aria-controls', 'quality-panel');
+    node.tabIndex = entry.tab === tab ? 0 : -1;
+    node.addEventListener('keydown', (event) => {
+      const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+      if (step === 0) return;
+      event.preventDefault();
+      const next = QUALITY_LEARNING_TABS[(index + step + QUALITY_LEARNING_TABS.length) % QUALITY_LEARNING_TABS.length]!;
+      void renderQualityLearning(next.tab, null, true);
+    });
+    tabs.append(node);
+  });
   const section = element('section', 'learning-section');
-  section.append(element('h3', undefined, LEARNING_HEADING));
+  section.id = 'quality-panel';
+  section.setAttribute('role', 'tabpanel');
+  section.setAttribute('aria-labelledby', `quality-tab-${tab}`);
+  section.append(element('h3', undefined, tab === 'feedback' ? FEEDBACK_HISTORY_HEADING : LEARNING_HEADING));
   const host = element('div');
   section.append(host);
   const back = element('div', 'button-row');
-  if (bookId !== null) {
-    const all = button('显示全部图书', 'quiet', () => void renderQualityLearning(null));
+  if (tab === 'learning' && bookId !== null) {
+    const all = button('显示全部图书', 'quiet', () => void renderQualityLearning('learning', null));
     all.dataset['learningAction'] = 'all-books';
     back.append(all);
   }
   back.append(button('返回', 'quiet', () => void initializeStartup()));
   content.append(
-    element('p', 'section-label', `${QUALITY_LEARNING_TITLE} · ${LEARNING_HEADING}`),
+    element('p', 'section-label', `${QUALITY_LEARNING_TITLE} · ${tab === 'feedback' ? FEEDBACK_HISTORY_HEADING : LEARNING_HEADING}`),
     element('h2', undefined, QUALITY_LEARNING_TITLE),
     element('p', 'field-note', QUALITY_LEARNING_LEDE),
+    tabs,
     section,
     back,
   );
   replaceScreen('quality-learning', content);
-  setStatus(LEARNING_STATUS.loading, 'busy');
-  const surface = mountLearningMaterials({ root: host, bookId, api: window.ai7, openSource: openLearningMaterialSource, setStatus, errorMessage: rendererErrorMessage, technicalDetails });
+  if (tabFocused) content.querySelector<HTMLElement>(`#quality-tab-${tab}`)?.focus();
+  const status = tab === 'feedback' ? FEEDBACK_HISTORY_STATUS : LEARNING_STATUS;
+  setStatus(status.loading, 'busy');
+  const surface = tab === 'feedback'
+    ? mountFeedbackHistory({ root: host, api: window.ai7, open: openFeedbackTarget, setStatus, errorMessage: rendererErrorMessage })
+    : mountLearningMaterials({ root: host, bookId, api: window.ai7, openSource: openLearningMaterialSource, setStatus, errorMessage: rendererErrorMessage, technicalDetails });
   try {
     await surface.load();
-    if (content.isConnected) setStatus(LEARNING_STATUS.opened);
+    if (content.isConnected) setStatus(status.opened);
   } catch (error) {
-    setStatus(rendererErrorMessage(error, LEARNING_STATUS.unavailable), 'error');
+    setStatus(rendererErrorMessage(error, status.unavailable), 'error');
   }
 }
 
@@ -5095,7 +5167,7 @@ function renderLanding(
   const knowledgeBase = button('知识库', 'secondary', () => renderKnowledgeBase('guidelines'));
   knowledgeBase.dataset['settingsRoute'] = 'knowledge-base';
   // 质量与学习 (Issue #61, S26b): 学习准入, the house's record of what may teach and where.
-  const qualityLearning = button(QUALITY_LEARNING_TITLE, 'secondary', () => void renderQualityLearning(null));
+  const qualityLearning = button(QUALITY_LEARNING_TITLE, 'secondary', () => void renderQualityLearning('feedback', null));
   qualityLearning.dataset['settingsRoute'] = 'quality-learning';
   const landingActions = element('div', 'button-row');
   landingActions.append(importButton, createBook, dataAndStorage, modelService, knowledgeBase, qualityLearning);
