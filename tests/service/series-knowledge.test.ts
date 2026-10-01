@@ -1,8 +1,9 @@
+import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { SERIES_KNOWLEDGE_PAGE_BYTES, SERIES_KNOWLEDGE_SCHEMA_SQL, SERIES_KNOWLEDGE_TRIGGER_SQL } from '../../src/service/series-knowledge.js';
+import { SeriesKnowledgeLedger, SERIES_KNOWLEDGE_PAGE_BYTES, SERIES_KNOWLEDGE_SCHEMA_SQL, SERIES_KNOWLEDGE_TRIGGER_SQL } from '../../src/service/series-knowledge.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { STORE_VERSION_SCHEMA_VERSION, SERIES_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
@@ -115,6 +116,195 @@ const wire = (value: unknown): number => Buffer.byteLength(JSON.stringify(value)
 const later = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 3));
 
 describe('书系知识 over the real store', () => {
+  it('refuses membership and review pages after a governing candidate changes without changing the displayed counts', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const seriesId = store.createSeries({ title: '相关记录版本', note: '' }).seriesId;
+      const creation = store.prepareBookCreation('预览图书', null);
+      const bookId = store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
+      const target = { kind: 'new' as const, subject: '版本条目', knowledgeClass: 'canon' as const };
+      const candidate = store.proposeSeriesKnowledge({ seriesId, target, content: '第一版说明', span: null });
+      const rival = store.proposeSeriesKnowledge({ seriesId, target, content: '另一个说明', span: null });
+      const membership = { seriesId, bookId, kind: 'add' as const };
+      const preview = store.previewSeriesMembershipChange(membership);
+      const reviewInput = { seriesId, candidateId: candidate.candidateId };
+      const review = store.inspectSeriesKnowledgeReview(reviewInput);
+      store.editSeriesKnowledgeCandidate({ seriesId, candidateId: rival.candidateId, expectedVersion: 1, target, content: '改过的说明' });
+      expect(store.previewSeriesMembershipChange(membership).groups).toEqual(preview.groups);
+      expect(refusal(() => store.changeSeriesMembership({ ...membership, previewDigest: preview.previewDigest }))).toMatch(/^SERIES_PREVIEW_STALE:/);
+      expect(refusal(() => store.inspectSeriesKnowledgeReview({ ...reviewInput,
+        conflictsPage: { after: 0, candidateVersion: review.candidate.version, reviewDigest: review.reviewDigest } }))).toMatch(/^SERIES_KNOWLEDGE_REVIEW_STALE:/);
+      expect(store.inspectBookSeries(bookId).historyCount).toBe(0);
+      const fresh = store.previewSeriesMembershipChange(membership);
+      store.changeSeriesMembership({ ...membership, previewDigest: fresh.previewDigest });
+      expect(store.inspectBookSeries(bookId).historyCount).toBe(1);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
+  it('returns a bounded promotion response when the editor preserves thousands of disclosed conflicts', async () => {
+    let saved: { seriesId: string; itemId: string; revisionId: string } | null = null;
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const seriesId = store.createSeries({ title: '冲突分页', note: '' }).seriesId;
+      const subject = '同名条目'.repeat(10);
+      const proposed = store.proposeSeriesKnowledge({ seriesId, target: { kind: 'new', subject, knowledgeClass: 'canon' }, content: '保留冲突的条目', span: null });
+      // Setup uses the same canonical ledger writer in one transaction; the asserted operation is the real store promotion.
+      const database = new DatabaseSync(databasePath());
+      try {
+        const ledger = new SeriesKnowledgeLedger(database);
+        database.exec('BEGIN IMMEDIATE');
+        for (let index = 0; index < 2500; index += 1) ledger.propose({ seriesId,
+          target: { kind: 'new', subject, knowledgeClass: 'canon' }, content: '另一个候选项', provenance: null });
+        database.exec('COMMIT');
+      } finally { database.close(); }
+      const review = store.inspectSeriesKnowledgeReview({ seriesId, candidateId: proposed.candidate.candidateId });
+      expect(review.conflictCount).toBe(2500);
+      const cursor = { candidateVersion: review.candidate.version, reviewDigest: review.reviewDigest, after: 50 };
+      const pageInput = { seriesId, candidateId: proposed.candidate.candidateId };
+      const second = store.inspectSeriesKnowledgeReview({ ...pageInput, conflictsPage: cursor });
+      expect([second.conflictsAfter, second.conflictsNextAfter, second.conflicts.length]).toEqual([50, 100, 50]);
+      expect(second.reviewDigest).toBe(review.reviewDigest);
+      const last = store.inspectSeriesKnowledgeReview({ ...pageInput, conflictsPage: { ...cursor, after: 2450 } });
+      expect([last.conflictsAfter, last.conflictsNextAfter, last.conflicts.length]).toEqual([2450, null, 50]);
+      expect(last.reviewDigest).toBe(review.reviewDigest);
+      expect(wire(last)).toBeLessThan(MAX_FRAME_BYTES);
+      expect(store.inspectSeriesKnowledgeReview({ ...pageInput, conflictsPage: { ...cursor, after: 0 } })).toEqual(review);
+      expect(refusal(() => store.inspectSeriesKnowledgeReview({ ...pageInput, conflictsPage: { ...cursor, candidateVersion: 2 } }))).toMatch(/^SERIES_KNOWLEDGE_REVIEW_STALE:/);
+      expect(refusal(() => store.inspectSeriesKnowledgeReview({ ...pageInput, conflictsPage: { ...cursor, reviewDigest: '0'.repeat(64) } }))).toMatch(/^SERIES_KNOWLEDGE_REVIEW_STALE:/);
+      expect(refusal(() => store.inspectSeriesKnowledgeReview({ ...pageInput, conflictsPage: { ...cursor, after: 2501 } }))).toMatch(/^SERIES_CURSOR_INVALID:/);
+      const promoted = store.promoteSeriesKnowledge({ seriesId, candidateId: proposed.candidate.candidateId, candidateVersion: 1,
+        reviewDigest: review.reviewDigest, reuseScope: 'series-tasks', conflictDisposition: 'preserved' });
+      expect(wire(promoted)).toBeLessThan(MAX_FRAME_BYTES);
+      expect(promoted.item.current.conflictCount).toBe(2500);
+      expect(promoted.item.current.conflicts).toHaveLength(50);
+      saved = { seriesId, itemId: promoted.itemId, revisionId: promoted.revisionId };
+      let after: number | null = 0;
+      let read = 0;
+      while (after !== null) {
+        const page = store.inspectSeriesKnowledgeConflicts({ ...saved, after });
+        expect(wire(page)).toBeLessThan(SERIES_KNOWLEDGE_PAGE_BYTES + 1024);
+        expect(page.conflicts).toHaveLength(50);
+        expect(page.total).toBe(2500);
+        read += page.conflicts.length;
+        after = page.nextAfter;
+      }
+      expect(read).toBe(2500);
+      const other = store.createSeries({ title: '另一个书系', note: '' });
+      expect(refusal(() => store.inspectSeriesKnowledgeConflicts({ ...saved!, seriesId: other.seriesId, after: 0 }))).toMatch(/^SERIES_KNOWLEDGE_ITEM_NOT_FOUND:/);
+      expect(refusal(() => store.inspectSeriesKnowledgeConflicts({ ...saved!, revisionId: randomUUID(), after: 0 }))).toMatch(/^SERIES_KNOWLEDGE_ITEM_NOT_FOUND:/);
+      expect(refusal(() => store.inspectSeriesKnowledgeConflicts({ ...saved!, after: 2501 }))).toMatch(/^SERIES_CURSOR_INVALID:/);
+      const next = store.proposeSeriesKnowledge({ seriesId, target: { kind: 'existing', itemId: promoted.itemId }, content: '后来的版本', span: null });
+      const nextReview = store.inspectSeriesKnowledgeReview({ seriesId, candidateId: next.candidate.candidateId });
+      const updated = store.promoteSeriesKnowledge({ seriesId, candidateId: next.candidate.candidateId, candidateVersion: 1,
+        reviewDigest: nextReview.reviewDigest, reuseScope: 'series-tasks', conflictDisposition: 'preserved' });
+      expect(updated.revisionId).not.toBe(saved.revisionId);
+      expect(wire(store.inspectSeriesKnowledgeRevisions(seriesId, promoted.itemId, null))).toBeLessThan(MAX_FRAME_BYTES);
+      expect(store.inspectSeriesKnowledgeConflicts({ ...saved, after: 2450 }).conflicts).toHaveLength(50);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const old = reopened.inspectSeriesKnowledgeConflicts({ ...saved!, after: 2450 });
+      expect([old.revisionId, old.total, old.conflicts.length, old.nextAfter]).toEqual([saved!.revisionId, 2500, 50, null]);
+      reopened.markCleanShutdown();
+    } finally { reopened.close(); }
+    const database = new DatabaseSync(databasePath());
+    try {
+      const row = database.prepare('SELECT canonical_json FROM series_knowledge_revisions WHERE revision_id = ?').get(saved!.revisionId) as { canonical_json: string };
+      const record = JSON.parse(row.canonical_json) as Record<string, unknown>;
+      expect([record.conflictCount, record.conflicts]).toEqual([2500, undefined]);
+      expect(Buffer.byteLength(row.canonical_json)).toBeLessThan(4096);
+      expect(database.prepare('SELECT count(*) total FROM series_knowledge_conflicts WHERE revision_id = ?').get(saved!.revisionId)?.total).toBe(2500);
+      // An old, off-page row is still checked, even if its own digest is recomputed: the revision binds the complete ordered set.
+      database.exec('DROP TRIGGER series_knowledge_conflicts_no_update');
+      const child = database.prepare('SELECT canonical_json FROM series_knowledge_conflicts WHERE revision_id = ? AND ordinal = 2400').get(saved!.revisionId) as { canonical_json: string };
+      const changed = canonicalRecord({ ...JSON.parse(child.canonical_json), line: '改写的冲突行' });
+      database.prepare('UPDATE series_knowledge_conflicts SET line = ?, canonical_json = ?, sha256 = ? WHERE revision_id = ? AND ordinal = 2400')
+        .run('改写的冲突行', changed.json, changed.digest, saved!.revisionId);
+      database.exec(SERIES_KNOWLEDGE_TRIGGER_SQL.series_knowledge_conflicts_no_update!);
+    } finally { database.close(); }
+    const tampered = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(refusal(() => tampered.inspectSeriesKnowledgeConflicts({ ...saved!, after: 0 }))).toMatch(/^SERIES_KNOWLEDGE_RECORD_INVALID:/);
+      tampered.markCleanShutdown();
+    } finally { tampered.close(); }
+  }, 180_000);
+
+  it('rolls conflict rows back with a refused promotion and enforces their immutable parent binding', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const seriesId = store.createSeries({ title: '原子纳入', note: '' }).seriesId;
+      const input = { seriesId, target: { kind: 'new' as const, subject: '同名', knowledgeClass: 'canon' as const }, content: '候选内容', span: null };
+      const proposed = store.proposeSeriesKnowledge(input);
+      store.proposeSeriesKnowledge(input);
+      const review = store.inspectSeriesKnowledgeReview({ seriesId, candidateId: proposed.candidateId });
+      const database = new DatabaseSync(databasePath());
+      try { database.exec("CREATE TRIGGER refuse_test_promotion BEFORE INSERT ON series_knowledge_promotions BEGIN SELECT RAISE(ABORT, 'TEST_REFUSAL'); END"); }
+      finally { database.close(); }
+      const promotion = { seriesId, candidateId: proposed.candidateId, candidateVersion: 1, reviewDigest: review.reviewDigest,
+        reuseScope: 'series-tasks' as const, conflictDisposition: 'preserved' as const };
+      expect(() => store.promoteSeriesKnowledge(promotion)).toThrow();
+      expect(counts()).toMatchObject({ series_knowledge_items: 0, series_knowledge_revisions: 0, series_knowledge_conflicts: 0, series_knowledge_promotions: 0 });
+      const retry = new DatabaseSync(databasePath());
+      try { retry.exec('DROP TRIGGER refuse_test_promotion'); } finally { retry.close(); }
+      expect(store.promoteSeriesKnowledge(promotion).item.current.conflictCount).toBe(1);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+    const database = new DatabaseSync(databasePath());
+    try {
+      database.exec('PRAGMA foreign_keys = ON; BEGIN IMMEDIATE');
+      database.prepare('INSERT INTO series_knowledge_conflicts(revision_id, ordinal, kind, line, canonical_json, sha256) VALUES (?, 1, ?, ?, ?, ?)')
+        .run(randomUUID(), 'existing-item', '孤立冲突', '{}', 'f'.repeat(64));
+      expect(() => database.exec('COMMIT')).toThrow();
+      database.exec('ROLLBACK');
+      expect(() => database.exec('DELETE FROM series_knowledge_conflicts')).toThrowError(/SERIES_KNOWLEDGE_LEDGER_IMMUTABLE/u);
+    } finally { database.close(); }
+  }, 120_000);
+
+  it('keeps saved-revision provenance checkpoint-relative across later edits, saves and restart', async () => {
+    let seriesId: string;
+    let savedId: string;
+    let dirtyId: string;
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const member = await importBook(store, MEMBER);
+      seriesId = store.createSeries({ title: '来源边界', note: '' }).seriesId;
+      join2(store, seriesId, member.bookId, 'add');
+      const edit = () => {
+        const window = store.getManuscriptWindow(member.manuscriptId, member.branchId, null);
+        const block = window.blocks.find((entry) => entry.kind === 'paragraph')!;
+        store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: member.manuscriptId, branchId: member.branchId,
+          baseRevisionId: window.revisionId, expectedJournalSequence: window.journalSequence,
+          windowStartBlockId: window.blocks[0]!.blockId, blockId: block.blockId, baseBlockDigest: block.digest,
+          fromGrapheme: 0, toGrapheme: 0, insertText: '〔修改〕' });
+      };
+      edit();
+      const dirty = store.proposeSeriesKnowledge({ seriesId, target: { kind: 'new', subject: '日志来源', knowledgeClass: 'canon' },
+        content: '日志时提议', span: span(store, member) });
+      dirtyId = dirty.candidate.candidateId;
+      expect(dirty.candidate.provenance?.uncheckpointed).toBe(true);
+      await store.saveMilestone(member.manuscriptId, member.branchId, '来源修订', 'stage-archive', null, '');
+      const saved = store.proposeSeriesKnowledge({ seriesId, target: { kind: 'new', subject: '已存来源', knowledgeClass: 'canon' },
+        content: '保存后提议', span: span(store, member) });
+      savedId = saved.candidate.candidateId;
+      expect(saved.candidate.provenance!.journalSequence).toBeGreaterThan(0);
+      expect(saved.candidate.provenance!.uncheckpointed).toBe(false);
+      edit();
+      // An edit after the citation does not make the already saved citation unsaved.
+      expect(store.inspectSeriesKnowledgeReview({ seriesId, candidateId: savedId }).candidate.provenance?.uncheckpointed).toBe(false);
+      await store.saveMilestone(member.manuscriptId, member.branchId, '再存修订', 'stage-archive', null, '');
+      // A later save does not erase the journal suffix the older dirty citation actually named.
+      expect(store.inspectSeriesKnowledgeReview({ seriesId, candidateId: dirtyId }).candidate.provenance?.uncheckpointed).toBe(true);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(reopened.inspectSeriesKnowledgeReview({ seriesId: seriesId!, candidateId: savedId! }).candidate.provenance?.uncheckpointed).toBe(false);
+      expect(reopened.inspectSeriesKnowledgeReview({ seriesId: seriesId!, candidateId: dirtyId! }).candidate.provenance?.uncheckpointed).toBe(true);
+      reopened.markCleanShutdown();
+    } finally { reopened.close(); }
+  }, 180_000);
+
   it('takes in candidates from the editor\'s words and a member\'s manuscript through review, conflicts disclosed and kept or resolved', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
@@ -136,7 +326,7 @@ describe('书系知识 over the real store', () => {
       ] as const) {
         expect(refusal(() => store.proposeSeriesKnowledge({ seriesId, ...(input as Omit<Parameters<EditorialStore['proposeSeriesKnowledge']>[0], 'seriesId'>) }))).toBe(expected);
       }
-      expect(counts()).toEqual({ series_knowledge_items: 0, series_knowledge_candidates: 0, series_knowledge_revisions: 0, series_knowledge_promotions: 0 });
+      expect(counts()).toEqual({ series_knowledge_items: 0, series_knowledge_candidates: 0, series_knowledge_revisions: 0, series_knowledge_conflicts: 0, series_knowledge_promotions: 0 });
 
       // One candidate cites the member's manuscript, one is the editor's own words; both propose 林默, so each discloses the other.
       const cited = span(store, member);
@@ -225,7 +415,7 @@ describe('书系知识 over the real store', () => {
       // Rejoining makes it reviewable again, and the preview says so.
       expect(store.previewSeriesMembershipChange({ seriesId, bookId: member.bookId, kind: 'add' }).groups[2]!.changes)
         .toEqual(['来自《书系成员》稿件、尚未纳入的 1 个书系知识候选项重新可以审阅纳入。']);
-      expect(counts()).toEqual({ series_knowledge_items: 1, series_knowledge_candidates: 6, series_knowledge_revisions: 3, series_knowledge_promotions: 3 });
+      expect(counts()).toEqual({ series_knowledge_items: 1, series_knowledge_candidates: 6, series_knowledge_revisions: 3, series_knowledge_conflicts: 2, series_knowledge_promotions: 3 });
       store.markCleanShutdown();
     } finally {
       store.close();
@@ -303,7 +493,7 @@ describe('书系知识 over the real store', () => {
       expect(after.filter((entry) => !/^(series_knowledge|store_versions)/u.test(entry.name))).toEqual(before!);
       expect(after.filter((entry) => TABLES.includes(entry.name)).map((entry) => entry.sql))
         .toEqual(TABLES.slice().sort().map((table) => SERIES_KNOWLEDGE_SCHEMA_SQL[table as keyof typeof SERIES_KNOWLEDGE_SCHEMA_SQL]));
-      expect(counts()).toEqual({ series_knowledge_items: 0, series_knowledge_candidates: 0, series_knowledge_revisions: 0, series_knowledge_promotions: 0 });
+      expect(counts()).toEqual({ series_knowledge_items: 0, series_knowledge_candidates: 0, series_knowledge_revisions: 0, series_knowledge_conflicts: 0, series_knowledge_promotions: 0 });
     } finally {
       database.close();
     }
@@ -391,4 +581,62 @@ describe('书系知识 over the real store', () => {
       store.close();
     }
   }, 300_000);
+  it('streams deep candidate and revision chains while retaining exact historical targets and pages across restart', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let seriesId = '';
+    let itemId = '';
+    let pendingId = '';
+    let sourceId = '';
+    try {
+      seriesId = store.createSeries({ title: '深层版本书系', note: '' }).seriesId;
+      const first = store.proposeSeriesKnowledge({ seriesId, target: { kind: 'new', subject: '沿革', knowledgeClass: 'canon' }, content: '初始候选', span: null });
+      sourceId = first.candidateId;
+      for (let version = 1; version < 66; version += 1) {
+        store.editSeriesKnowledgeCandidate({ seriesId, candidateId: sourceId, expectedVersion: version,
+          target: { kind: 'new', subject: '沿革', knowledgeClass: 'canon' }, content: '候选版本' + (version + 1) });
+      }
+      const firstReview = store.inspectSeriesKnowledgeReview({ seriesId, candidateId: sourceId });
+      expect(firstReview.candidate.version).toBe(66);
+      itemId = store.promoteSeriesKnowledge({ seriesId, candidateId: sourceId, candidateVersion: 66,
+        reviewDigest: firstReview.reviewDigest, reuseScope: 'series-tasks', conflictDisposition: 'none' }).itemId;
+      pendingId = store.proposeSeriesKnowledge({ seriesId, target: { kind: 'existing', itemId }, content: '基于第一版的待审候选', span: null }).candidateId;
+      for (let ordinal = 2; ordinal <= 66; ordinal += 1) {
+        const next = store.proposeSeriesKnowledge({ seriesId, target: { kind: 'existing', itemId }, content: '条目版本' + ordinal, span: null });
+        const review = store.inspectSeriesKnowledgeReview({ seriesId, candidateId: next.candidateId });
+        store.promoteSeriesKnowledge({ seriesId, candidateId: next.candidateId, candidateVersion: 1,
+          reviewDigest: review.reviewDigest, reuseScope: 'series-tasks', conflictDisposition: 'preserved' });
+      }
+      expect(store.inspectSeriesKnowledgeReview({ seriesId, candidateId: pendingId }).candidate.target.baseRevisionOrdinal).toBe(1);
+      const ordinals: number[] = [];
+      let before: number | null = null;
+      do {
+        const page = store.inspectSeriesKnowledgeRevisions(seriesId, itemId, before);
+        expect(page.revisions.length).toBeLessThanOrEqual(MAX_SERIES_KNOWLEDGE_REVISIONS_PAGE);
+        ordinals.push(...page.revisions.map((revision) => revision.ordinal));
+        before = page.nextBefore;
+      } while (before !== null);
+      expect(ordinals).toEqual(Array.from({ length: 66 }, (_, index) => 66 - index));
+      store.markCleanShutdown();
+    } finally { store.close(); }
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const item = reopened.inspectSeriesKnowledgeItems(seriesId, '', null).items[0]!;
+      expect([item.current.ordinal, item.revisionCount]).toEqual([66, 66]);
+      const review = reopened.inspectSeriesKnowledgeReview({ seriesId, candidateId: pendingId });
+      expect([review.candidate.target.baseRevisionOrdinal, review.current?.ordinal]).toEqual([1, 66]);
+      reopened.markCleanShutdown();
+    } finally { reopened.close(); }
+    const database = new DatabaseSync(databasePath());
+    try {
+      database.exec('DROP TRIGGER series_knowledge_candidates_no_update');
+      database.prepare('UPDATE series_knowledge_candidates SET content = ? WHERE candidate_id = ? AND version = 2').run('旧版本损坏', sourceId);
+      database.exec(SERIES_KNOWLEDGE_TRIGGER_SQL.series_knowledge_candidates_no_update!);
+    } finally { database.close(); }
+    const tampered = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(refusal(() => tampered.inspectSeriesKnowledgeReview({ seriesId, candidateId: sourceId }))).toBe('SERIES_KNOWLEDGE_RECORD_INVALID:书系知识记录已损坏。');
+      tampered.markCleanShutdown();
+    } finally { tampered.close(); }
+  }, 300_000);
+
 });

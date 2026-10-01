@@ -283,6 +283,45 @@ const J01_LAUNCH_LOCATIONS = Object.freeze(
   ]),
 );
 
+// Failure-only classification of J07's package-export assertions. Only these closed runner
+// names can reach hosted output; exception detail, paths and renderer values remain excluded.
+const J07_PACKAGE_EXPORT_ASSERTIONS = Object.freeze([
+  'package-export-open', 'package-export-reviewed', 'package-export-lists-the-files',
+  'package-export-service-review', 'package-export-fidelity-and-switches',
+  'package-export-annotations-off', 'package-export-reviewed-without-annotations',
+  'package-export-annotations-on', 'package-export-reviewed-with-annotations',
+  'package-export-select-member', 'package-export-choose', 'package-export-prepared',
+  'package-export-bound-to-the-folder', 'package-export-prepared-writes-nothing',
+  'package-export-approve', 'package-export-written', 'package-export-history',
+  'package-export-selected-subset-only', 'package-export-subset-close',
+  'package-export-remaining-open', 'package-export-remaining-reviewed',
+  'package-export-remaining-choose', 'package-export-remaining-prepared',
+  'package-export-one-prepared-member', 'package-export-remaining-approve',
+  'package-export-remaining-written', 'package-export-two-subset-receipts',
+  'package-export-folder-files', 'package-export-docx-publication',
+  'package-export-manifest-words', 'package-export-not-in-export-records',
+  'package-export-close', 'package-export-closed', 'package-export-without-forbidden-words',
+]);
+const J07_PACKAGE_EXPORT_FAILURES = new Map([
+  ...J07_PACKAGE_EXPORT_ASSERTIONS.map((name) => ['J-07/' + name, name]),
+  ['J-07/package-export-docx-document:news-release', 'package-export-docx-news-release'],
+  ['J-07/renderer-evaluate', 'package-export-renderer-evaluate'],
+]);
+const J07_PACKAGE_EXPORT_IO = Object.freeze({
+  ENOENT: 'package-export-io-absent', EEXIST: 'package-export-io-exists',
+  EACCES: 'package-export-io-access', EPERM: 'package-export-io-permission',
+  EBUSY: 'package-export-io-busy',
+});
+const J07_PACKAGE_EXPORT_FAILURE_LOCATIONS = Object.freeze([
+  ...J07_PACKAGE_EXPORT_FAILURES.values(), ...Object.values(J07_PACKAGE_EXPORT_IO),
+]);
+
+export function j07PackageExportFailureLocation(location, error) {
+  if (location !== 'package-export' || !(error instanceof Error)) return location;
+  return J07_PACKAGE_EXPORT_FAILURES.get(error.message) ??
+    (typeof error.code === 'string' && Object.hasOwn(J07_PACKAGE_EXPORT_IO, error.code) ? J07_PACKAGE_EXPORT_IO[error.code] : location);
+}
+
 export const JOURNEY_LOCATIONS = Object.freeze({
   'J-01': Object.freeze([
     'entry',
@@ -400,6 +439,12 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'renderer-ready-flag',
     'renderer-ready-landing',
     'import-stage',
+    // Where staging stood when its bound passed (#621).
+    'import-stage-reading',
+    'import-stage-parsing',
+    'import-stage-recording',
+    'import-stage-screen',
+    'import-stage-unreadable',
     'import-review',
     'import-commit',
     'import-editor-open',
@@ -423,6 +468,30 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'milestone-form',
     'milestone-save-dispatch',
     'milestone-r2-resolution',
+    'milestone-r2-ipc-diagnostic-unavailable-recovery-object-absent',
+    'milestone-r2-ipc-diagnostic-unavailable-partial-object-present',
+    'milestone-r2-ipc-diagnostic-unavailable-promoted-object-present',
+    'milestone-r2-no-flush-invoke-recovery-object-absent',
+    'milestone-r2-no-flush-invoke-partial-object-present',
+    'milestone-r2-no-flush-invoke-promoted-object-present',
+    'milestone-r2-flush-pending-recovery-object-absent',
+    'milestone-r2-flush-pending-partial-object-present',
+    'milestone-r2-flush-pending-promoted-object-present',
+    'milestone-r2-flush-error-recovery-object-absent',
+    'milestone-r2-flush-error-partial-object-present',
+    'milestone-r2-flush-error-promoted-object-present',
+    'milestone-r2-flush-result-no-save-invoke-recovery-object-absent',
+    'milestone-r2-flush-result-no-save-invoke-partial-object-present',
+    'milestone-r2-flush-result-no-save-invoke-promoted-object-present',
+    'milestone-r2-save-pending-recovery-object-absent',
+    'milestone-r2-save-pending-partial-object-present',
+    'milestone-r2-save-pending-promoted-object-present',
+    'milestone-r2-save-error-recovery-object-absent',
+    'milestone-r2-save-error-partial-object-present',
+    'milestone-r2-save-error-promoted-object-present',
+    'milestone-r2-save-result-renderer-not-r2-recovery-object-absent',
+    'milestone-r2-save-result-renderer-not-r2-partial-object-present',
+    'milestone-r2-save-result-renderer-not-r2-promoted-object-present',
     'milestone-save-ipc-order',
     'milestone-search-state-stale',
     'milestone-authoritative-ready',
@@ -486,7 +555,9 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-keyboard-focus-keeps-window-paged',
     // Issue #604: what the focus found when nothing was revealed.
     'j14-keyboard-focus-keeps-window-no-reveal-window-unfocused',
-    'j14-keyboard-focus-keeps-window-no-reveal-caret-not-at-start',
+    'j14-keyboard-focus-keeps-window-no-reveal-caret-elsewhere',
+    'j14-keyboard-focus-keeps-window-no-reveal-caret-outside',
+    'j14-keyboard-focus-keeps-window-no-reveal-caret-none',
     'j14-keyboard-focus-keeps-window-no-reveal-moved-back',
     'j14-keyboard-focus-keeps-window-no-reveal',
     'j14-top-edge-pages-back-once',
@@ -580,6 +651,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'knowledge-library-attention',
     'knowledge-library-decide',
     'j14-library-reflow-forced-colors',
+    'knowledge-library-bounded-readers',
     'zero-activity',
   ]),
   'J-03': Object.freeze([
@@ -866,6 +938,18 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'document-edit-and-version',
     // Issue #415 (S66c): the document's Deliverable Workflow — 开始, 完成, 跳过 and 重新打开 with their reasons.
     'document-workflow',
+    'document-workflow-start',
+    'document-workflow-start-focus',
+    'document-workflow-complete',
+    'document-workflow-skip-open',
+    'document-workflow-skip-focus',
+    'document-workflow-skip-unreasoned',
+    'document-workflow-skip-reason',
+    'document-workflow-skip-confirm',
+    'document-workflow-reopen-open',
+    'document-workflow-reopen-words',
+    'document-workflow-reopen-confirm',
+    'document-workflow-summary',
     'document-card-after-version',
     'document-not-for-this-book',
     // Issue #415 (S66b): 交付 — a Delivery Record of one saved version, its export, 交付后有修改 and 再交付….
@@ -880,6 +964,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'package-v2',
     // Issue #416 (S67b): v2 exported into a chosen folder, file by file with receipts, and its history.
     'package-export',
+    ...J07_PACKAGE_EXPORT_FAILURE_LOCATIONS,
     // Issue #426 (S68a): 维护事项 — a 勘误 recorded, written and concluded, and 撤回 of the current designation.
     'maintenance-cases',
     // Issue #426 (S68b): 维护事项待处理 — a waiting 替代 in 待我处理, opened back at its case, and cleared by an 归档.
@@ -1033,6 +1118,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'evaluation-open',
     'evaluation-start',
     'evaluation-score',
+    'evaluation-pending-submit',
+    'evaluation-submitted-values',
     'evaluation-finalize',
     // Issue #429 review: 评估 is reached from the manuscript's 工作 group, between 审阅 and 交付物.
     'evaluation-from-manuscript',
@@ -1066,8 +1153,16 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-learning-reflow-forced-colors',
     'learning-restart',
     'feedback-history',
+    'feedback-history-grouping',
+    'feedback-history-time-dimension',
     'feedback-history-attribution',
     'feedback-history-open',
+    'feedback-history-pages',
+    'feedback-history-filtered-pages',
+    'feedback-source-windows',
+    'learning-source-records',
+    'learning-material-pages',
+    'feedback-pending-submit',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',
@@ -1095,6 +1190,12 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'result-jump',
     'chip-persists',
     'chip-return',
+    'chip-return-state-unavailable',
+    'chip-return-retained-busy',
+    'chip-return-retained-ready',
+    'chip-return-target-missing',
+    'chip-return-status-replaced',
+    'chip-return-late-completion',
     'analysis-jump-chip',
     'j14-panel-keyboard',
     'j14-panel-zoom-200-reflow',
@@ -1121,6 +1222,9 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'book-series-records',
     'membership-remove',
     'series-restart',
+    'series-bounded-pages',
+    'series-bounded-seed',
+    'series-bounded-navigation',
     'j14-series-keyboard',
     'j14-series-reflow-forced-colors',
     // Issue #63 (S28b): 书系知识 — a candidate from a member Book's manuscript and one of the editor's own words, a conflict
@@ -1132,6 +1236,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'knowledge-review-edit',
     'j14-knowledge-keyboard',
     'knowledge-restart',
+    'knowledge-bounded-pages',
     'zero-activity',
   ]),
 });

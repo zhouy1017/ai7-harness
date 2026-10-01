@@ -16,6 +16,7 @@ import type { DatabaseSync } from 'node:sqlite';
  */
 export const PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER: ReadonlyArray<string> = [
   'store_versions',
+  'series_knowledge_conflicts',
   'series_knowledge_promotions',
   'series_knowledge_revisions',
   'series_knowledge_candidates',

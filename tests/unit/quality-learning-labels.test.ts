@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import {
   FEEDBACK_HISTORY_DETACHED,
@@ -6,6 +7,8 @@ import {
   FEEDBACK_HISTORY_STATUS,
   QUALITY_LEARNING_TABS,
   feedbackAttributionLine,
+  feedbackDateBounds,
+  feedbackDateValue,
   feedbackEntryLine,
   feedbackReasonLine,
   LEARNING_CHOICES,
@@ -32,6 +35,13 @@ import {
 // nothing else. Every text is the suite's own.
 
 const instant = (iso: string): string => `〔${iso.slice(0, 10)}〕`;
+
+it('ends an inclusive calendar day at the next midnight after a midnight DST gap', () => {
+  const module = new URL('../../src/renderer/quality-learning-labels.ts', import.meta.url).href;
+  const script = `const { feedbackDateBounds } = await import(${JSON.stringify(module)}); process.stdout.write(JSON.stringify(feedbackDateBounds('', '2026-03-08')));`;
+  const result = execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { TZ: 'America/Havana' }, encoding: 'utf8' });
+  expect(JSON.parse(result)).toEqual({ recordedFrom: null, recordedBefore: '2026-03-09T04:00:00.000Z' });
+});
 
 describe('学习准入 words', () => {
   it('offers the choices in their fixed order, Book first, with what each would mean', () => {
@@ -68,6 +78,19 @@ describe('学习准入 words', () => {
 });
 
 describe('反馈历史 words (Issue #61, S26c)', () => {
+  it('uses inclusive local calendar days for time filtering and the same days for grouping', () => {
+    const start = new Date(2026, 2, 8);
+    const next = new Date(2026, 2, 9);
+    expect(feedbackDateBounds('2026-03-08', '2026-03-08')).toEqual({ recordedFrom: start.toISOString(), recordedBefore: next.toISOString() });
+    expect(feedbackDateValue(new Date(2026, 2, 8, 23, 59, 59).toISOString())).toBe('2026-03-08');
+    expect(feedbackDateBounds('', '')).toEqual({ recordedFrom: null, recordedBefore: null });
+    expect(feedbackDateBounds('2026-03-08', '')).toEqual({ recordedFrom: start.toISOString(), recordedBefore: null });
+    expect(feedbackDateBounds('', '2026-03-08')).toEqual({ recordedFrom: null, recordedBefore: next.toISOString() });
+    expect(feedbackDateBounds('2026-03-09', '2026-03-08')).toBeNull();
+    expect(feedbackDateBounds('2026-02-30', '')).toBeNull();
+    expect(feedbackDateBounds('', 'not-a-date')).toBeNull();
+  });
+
   it('opens at the history, says what it is not, and reads each entry by origin, dimension, verdict and reason', () => {
     // The view is named as the spec names it: 反馈历史 (Issue #61, S26c review).
     expect(QUALITY_LEARNING_TABS.map((entry) => [entry.tab, entry.label])).toEqual([['feedback', '反馈历史'], ['learning', '学习准入']]);
@@ -89,7 +112,7 @@ describe('反馈历史 words (Issue #61, S26c)', () => {
 describe('学习准入 candidates', () => {
   const decision = {
     decisionId: '00000000-0000-4000-8000-000000000001', disposition: 'rejected', currentText: '原来的说法', proposedText: '建议的说法',
-    editedText: null, reason: '证据不足', reasonSource: 'suggested', recordedAt: '2026-09-25T06:00:00.000Z', decidedAt: '2026-09-25T05:00:00.000Z',
+    editedText: null, reason: '证据不足', reasonSource: 'suggested', feedbackEntries: 0, recordedAt: '2026-09-25T06:00:00.000Z', decidedAt: '2026-09-25T05:00:00.000Z',
   } as const;
 
   it('reads a decided 修改建议 as what was suggested, what the editor did, and why', () => {

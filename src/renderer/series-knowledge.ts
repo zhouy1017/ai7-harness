@@ -3,6 +3,7 @@ import {
   SERIES_KNOWLEDGE_CLASS_LABELS,
   type RendererApi,
   type SeriesKnowledgeCandidateProjection,
+  type SeriesKnowledgeConflictsProjection,
   type SeriesKnowledgeClass,
   type SeriesKnowledgeItemProjection,
   type SeriesKnowledgeProjection,
@@ -45,7 +46,6 @@ import {
   KNOWLEDGE_SUBJECT_LABEL,
   KNOWLEDGE_TARGET_LEGEND,
   KNOWLEDGE_TARGET_NEW,
-  knowledgeConflictsMoreLine,
   knowledgeItemLine,
   knowledgeKeptConflictsLine,
   knowledgePromoteWaits,
@@ -110,18 +110,21 @@ interface Draft {
   content: string;
 }
 
-/** One item's 历次版本 as far as it has been read, and whether the editor has it open. */
+/** One bounded page of a visible item's 历次版本, and whether it is open. */
 interface History {
   open: boolean;
   revisions: SeriesKnowledgeRevisionProjection[] | null;
   nextBefore: number | null;
+  later: boolean;
+  failed: boolean;
+  retryFresh: boolean;
 }
 
 export interface MountSeriesKnowledgeOptions {
   readonly root: HTMLElement;
   readonly seriesId: string;
   readonly api: Pick<RendererApi, 'inspectSeries' | 'proposeSeriesKnowledge' | 'inspectSeriesKnowledgeReview' | 'editSeriesKnowledgeCandidate' |
-    'promoteSeriesKnowledge' | 'inspectSeriesKnowledgeItems' | 'inspectSeriesKnowledgeCandidates' | 'inspectSeriesKnowledgeRevisions'>;
+    'promoteSeriesKnowledge' | 'inspectSeriesKnowledgeItems' | 'inspectSeriesKnowledgeCandidates' | 'inspectSeriesKnowledgeRevisions' | 'inspectSeriesKnowledgeConflicts'>;
   readonly setStatus: Status;
   readonly errorMessage: (error: unknown, fallback: string) => string;
   /** The page's own read, when a write here has read the Series again. */
@@ -141,16 +144,23 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
   let reuse: SeriesKnowledgeReuseScope | null = null;
   let edit: Draft | null = null;
   let busy = false;
+  let reviewPageRefusal: { after: number; message: string } | null = null;
   /** The words the items were searched for, and those typed since. */
   let searched = '';
   let searchText = '';
   const histories = new Map<string, History>();
+  let historyEpoch = 0;
+  let itemsLater = false;
+  let candidatesLater = false;
+  let conflictReader: { page: SeriesKnowledgeConflictsProjection; ordinal: number; after: number; requestedAfter: number; failed: boolean } | null = null;
 
   const paint = (focus: string | null): void => {
     if (knowledge === null) return;
     root.dataset['knowledgeItems'] = String(knowledge.items.length);
     root.dataset['knowledgeCandidates'] = String(knowledge.candidates.length);
-    const nodes: HTMLElement[] = [el('h3', undefined, KNOWLEDGE_HEADING), el('p', 'field-note knowledge-note', KNOWLEDGE_NOTE)];
+    const heading = el('h3', 'knowledge-heading', KNOWLEDGE_HEADING);
+    heading.tabIndex = -1;
+    const nodes: HTMLElement[] = [heading, el('p', 'field-note knowledge-note', KNOWLEDGE_NOTE)];
     const toolbar = el('div', 'button-row');
     const open = action(KNOWLEDGE_PROPOSE_OPEN, 'secondary', 'propose-open', () => {
       if (busy) return;
@@ -173,6 +183,8 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       nodes.push(list);
     }
     if (knowledge.itemsNext !== null) nodes.push(moreRow(KNOWLEDGE_ITEMS_MORE, 'items-more', () => void loadItems(false)));
+    if (itemsLater) nodes.push(moreRow('回到首批条目', 'items-reset', () => void loadItems(true, true)));
+    if (conflictReader !== null) nodes.push(conflictReaderNode());
     nodes.push(el('h4', undefined, KNOWLEDGE_CANDIDATES_HEADING));
     if (knowledge.candidates.length === 0) nodes.push(el('p', 'field-note knowledge-candidates-empty', KNOWLEDGE_CANDIDATES_EMPTY));
     else {
@@ -180,10 +192,15 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       for (const candidate of knowledge.candidates) list.append(candidateNode(candidate));
       nodes.push(list);
     }
-    if (knowledge.candidatesNext !== null) nodes.push(moreRow(KNOWLEDGE_CANDIDATES_MORE, 'candidates-more', () => void loadCandidates()));
+    if (knowledge.candidatesNext !== null) nodes.push(moreRow(KNOWLEDGE_CANDIDATES_MORE, 'candidates-more', () => void loadCandidates(false)));
+    if (candidatesLater) nodes.push(moreRow('回到首批候选项', 'candidates-reset', () => void loadCandidates(true)));
     if (reviewing !== null) nodes.push(reviewNode());
     root.replaceChildren(...nodes);
-    if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();
+    if (focus !== null) {
+      const target = root.querySelector<HTMLElement>(focus);
+      const enabled = target !== null && !target.matches(':disabled') ? target : heading;
+      enabled.focus();
+    }
   };
 
   const moreRow = (label: string, name: string, run: () => void): HTMLElement => {
@@ -225,8 +242,8 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     title.tabIndex = -1;
     node.append(title, el('p', 'knowledge-item-content', current.content),
       el('p', 'field-note knowledge-item-provenance', knowledgeProvenanceLine(current.provenance)), el('p', 'field-note knowledge-item-reuse', knowledgeReuseLine(current)));
-    const kept = knowledgeKeptConflictsLine(current.conflicts.length);
-    if (kept !== null) node.append(el('p', 'field-note knowledge-item-conflicts', kept));
+    const kept = knowledgeKeptConflictsLine(current.conflictCount);
+    if (kept !== null) node.append(el('p', 'field-note knowledge-item-conflicts', kept), conflictButton(item.itemId, current));
     const forItem = action(KNOWLEDGE_PROPOSE_FOR_ITEM, 'quiet', 'propose-item', () => {
       if (busy) return;
       propose = { target: item.itemId, targetLabel: `「${item.subject}」（${item.classLabel}）`, subject: '', knowledgeClass: '', content: '' };
@@ -242,56 +259,146 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
 
   /** 历次版本: read the first time the editor opens it, newest first, with `更早的版本…` for the rest (Issue #63 review). */
   const historyNode = (item: SeriesKnowledgeItemProjection): HTMLElement => {
-    const state = histories.get(item.itemId) ?? { open: false, revisions: null, nextBefore: null };
+    const state = histories.get(item.itemId) ?? { open: false, revisions: null, nextBefore: null, later: false, failed: false, retryFresh: true };
     const details = el('details', 'knowledge-item-history');
     details.open = state.open;
     details.append(el('summary', undefined, knowledgeRevisionsSummary(item.revisionCount)));
     if (state.revisions === null) {
-      if (state.open) details.append(el('p', 'field-note', KNOWLEDGE_STATUS.loadingMore));
+      if (state.open && !state.failed) details.append(el('p', 'field-note', KNOWLEDGE_STATUS.loadingMore));
     } else {
       const list = el('ol');
-      for (const revision of state.revisions) list.append(el('li', undefined, knowledgeRevisionLine(revision)));
+      for (const revision of state.revisions) {
+        const row = el('li', undefined, knowledgeRevisionLine(revision));
+        if (revision.conflictCount > 0) row.append(conflictButton(item.itemId, revision));
+        list.append(row);
+      }
       details.append(list);
       if (state.nextBefore !== null) details.append(moreRow(KNOWLEDGE_REVISIONS_MORE, 'revisions-more', () => void loadRevisions(item.itemId, false)));
+      if (state.later) details.append(moreRow('回到最新版本', 'revisions-reset', () => void loadRevisions(item.itemId, true)));
+    }
+    if (state.failed) {
+      details.append(el('p', 'field-note', '历次版本未能读取。可以重试；已有页面保留。'));
+      details.append(moreRow('重试读取版本', 'revisions-retry', () => void loadRevisions(item.itemId, state.retryFresh)));
     }
     details.addEventListener('toggle', () => {
-      const known = histories.get(item.itemId) ?? { open: false, revisions: null, nextBefore: null };
+      if (!details.isConnected) return;
+      const known = histories.get(item.itemId) ?? { open: false, revisions: null, nextBefore: null, later: false, failed: false, retryFresh: true };
+      if (busy) { details.open = known.open; return; }
+      const opening = details.open && !known.open;
       known.open = details.open;
       histories.set(item.itemId, known);
-      if (details.open && known.revisions === null) void loadRevisions(item.itemId, true);
+      if (opening && known.revisions === null) void loadRevisions(item.itemId, true);
     });
     return details;
   };
 
+  /** One reader names an immutable revision; paging replaces its page and never follows the latest revision. */
+  const conflictButton = (itemId: string, revision: SeriesKnowledgeRevisionProjection): HTMLButtonElement => {
+    const button = action('查看第 ' + revision.ordinal + ' 版保留的冲突（' + revision.conflictCount + '）', 'quiet', 'conflicts-read', () => {
+      if (busy) return;
+      conflictReader = { page: { itemId, revisionId: revision.revisionId, conflicts: [], total: revision.conflictCount, nextAfter: null },
+        ordinal: revision.ordinal, after: 0, requestedAfter: 0, failed: false };
+      void loadConflicts(0);
+    });
+    button.dataset['revisionId'] = revision.revisionId;
+    button.disabled = busy;
+    return button;
+  };
+
+  const conflictReaderNode = (): HTMLElement => {
+    const reader = conflictReader!;
+    const section = el('section', 'knowledge-conflicts-reader');
+    const title = el('h4', 'knowledge-conflicts-heading', '第 ' + reader.ordinal + ' 版保留的冲突（共 ' + reader.page.total + ' 项）');
+    title.tabIndex = -1;
+    const list = el('ol', 'knowledge-conflicts-page');
+    list.start = reader.after + 1;
+    for (const entry of reader.page.conflicts) list.append(el('li', undefined, entry.line));
+    section.append(title, list);
+    if (reader.failed) {
+      section.append(el('p', 'field-note', '冲突未能读取。已有页面保留，可以重试。'));
+      section.append(moreRow('重试读取冲突', 'conflicts-retry', () => void loadConflicts(reader.requestedAfter)));
+    }
+    if (reader.page.nextAfter !== null) section.append(moreRow('下一批冲突', 'conflicts-more', () => void loadConflicts(reader.page.nextAfter!)));
+    if (reader.after > 0) section.append(moreRow('回到首批冲突', 'conflicts-reset', () => void loadConflicts(0)));
+    section.append(moreRow('关闭冲突', 'conflicts-close', () => {
+      conflictReader = null;
+      paint('[data-knowledge-action="conflicts-read"][data-revision-id="' + reader.page.revisionId + '"]');
+    }));
+    return section;
+  };
+
+  const loadConflicts = async (after: number): Promise<void> => {
+    if (busy || conflictReader === null) return;
+    const reader = conflictReader;
+    const epoch = historyEpoch;
+    reader.requestedAfter = after;
+    reader.failed = false;
+    busy = true;
+    paint(null);
+    try {
+      const page = await api.inspectSeriesKnowledgeConflicts({ seriesId: options.seriesId,
+        itemId: reader.page.itemId, revisionId: reader.page.revisionId, after });
+      busy = false;
+      if (!root.isConnected) return;
+      if (epoch !== historyEpoch || conflictReader !== reader) { paint('.knowledge-heading'); return; }
+      reader.page = page;
+      reader.after = after;
+      paint('.knowledge-conflicts-heading');
+    } catch (error) {
+      busy = false;
+      if (!root.isConnected) return;
+      if (epoch === historyEpoch && conflictReader === reader) reader.failed = true;
+      setStatus(errorMessage(error, KNOWLEDGE_STATUS.failed), 'error');
+      paint('.knowledge-conflicts-heading');
+    }
+  };
+
   const loadRevisions = async (itemId: string, fresh: boolean): Promise<void> => {
-    const state = histories.get(itemId) ?? { open: true, revisions: null, nextBefore: null };
+    if (busy || !knowledge?.items.some((item) => item.itemId === itemId)) return;
+    const state = histories.get(itemId) ?? { open: true, revisions: null, nextBefore: null, later: false, failed: false, retryFresh: true };
+    const epoch = historyEpoch;
+    state.failed = false;
+    state.retryFresh = fresh;
+    busy = true;
+    paint(null);
     try {
       const page = await api.inspectSeriesKnowledgeRevisions({ seriesId: options.seriesId, itemId, before: fresh ? null : state.nextBefore });
-      state.revisions = [...(fresh ? [] : state.revisions ?? []), ...page.revisions];
+      busy = false;
+      if (!root.isConnected) return;
+      if (epoch !== historyEpoch) { paint('#knowledge-search'); return; }
+      state.revisions = [...page.revisions];
       state.nextBefore = page.nextBefore;
+      state.later = !fresh;
       histories.set(itemId, state);
-      if (!busy && root.isConnected) paint(null);
+      paint('[data-item-id="' + itemId + '"] .knowledge-item-history summary');
     } catch (error) {
+      busy = false;
+      if (!root.isConnected) return;
+      if (epoch === historyEpoch) { state.failed = true; histories.set(itemId, state); }
       setStatus(errorMessage(error, KNOWLEDGE_STATUS.failed), 'error');
+      paint('[data-item-id="' + itemId + '"] .knowledge-item-history summary');
     }
   };
 
   /** 查找条目 or `更多条目…`: the first page for the words searched, or the next page after those shown. */
-  const loadItems = async (fresh: boolean): Promise<void> => {
+  const loadItems = async (fresh: boolean, keepSearch = false): Promise<void> => {
     if (busy || knowledge === null) return;
     const shown = knowledge;
-    const words = fresh ? searchText.trim() : searched;
+    const words = fresh && !keepSearch ? searchText.trim() : searched;
     busy = true;
     paint(null);
     setStatus(KNOWLEDGE_STATUS.loadingMore, 'busy');
     try {
       const page = await api.inspectSeriesKnowledgeItems({ seriesId: options.seriesId, text: words, after: fresh ? null : shown.itemsNext });
-      const known = new Set(fresh ? [] : shown.items.map((item) => item.itemId));
-      const added = page.items.filter((item) => !known.has(item.itemId));
-      knowledge = { ...shown, items: [...(fresh ? [] : shown.items), ...added], itemsNext: page.nextCursor };
+      if (!root.isConnected) return;
+      knowledge = { ...shown, items: [...page.items], itemsNext: page.nextCursor };
+      histories.clear();
+      conflictReader = null;
+      historyEpoch += 1;
+      itemsLater = !fresh;
       searched = words;
       busy = false;
-      paint(added[0] === undefined ? '#knowledge-search' : `[data-item-id="${added[0].itemId}"] .knowledge-item-title`);
+      paint(page.items[0] === undefined ? '#knowledge-search' : `[data-item-id="${page.items[0].itemId}"] .knowledge-item-title`);
       setStatus(KNOWLEDGE_HEADING);
     } catch (error) {
       busy = false;
@@ -301,23 +408,23 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
   };
 
   /** `更多候选项…`: the next page of candidates waiting for review, oldest proposed first. */
-  const loadCandidates = async (): Promise<void> => {
-    if (busy || knowledge?.candidatesNext == null) return;
+  const loadCandidates = async (fresh: boolean): Promise<void> => {
+    if (busy || knowledge === null || (!fresh && knowledge.candidatesNext === null)) return;
     const shown = knowledge;
     busy = true;
     paint(null);
     setStatus(KNOWLEDGE_STATUS.loadingMore, 'busy');
     try {
-      const page = await api.inspectSeriesKnowledgeCandidates({ seriesId: options.seriesId, after: shown.candidatesNext });
-      const known = new Set(shown.candidates.map((candidate) => candidate.candidateId));
-      const added = page.candidates.filter((candidate) => !known.has(candidate.candidateId));
-      knowledge = { ...shown, candidates: [...shown.candidates, ...added], candidatesNext: page.nextCursor };
+      const page = await api.inspectSeriesKnowledgeCandidates({ seriesId: options.seriesId, after: fresh ? null : shown.candidatesNext });
+      if (!root.isConnected) return;
+      knowledge = { ...shown, candidates: [...page.candidates], candidatesNext: page.nextCursor };
+      candidatesLater = !fresh;
       busy = false;
-      paint(added[0] === undefined ? null : `[data-candidate-id="${added[0].candidateId}"] [data-knowledge-action="review"]`);
+      paint(page.candidates[0] === undefined ? '[data-knowledge-action="propose-open"]' : `[data-candidate-id="${page.candidates[0].candidateId}"] [data-knowledge-action="review"]`);
       setStatus(KNOWLEDGE_HEADING);
     } catch (error) {
       busy = false;
-      paint('[data-knowledge-action="candidates-more"]');
+      paint(fresh ? '[data-knowledge-action="candidates-reset"]' : '[data-knowledge-action="candidates-more"]');
       setStatus(errorMessage(error, KNOWLEDGE_STATUS.failed), 'error');
     }
   };
@@ -328,7 +435,11 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     knowledge = series.knowledge;
     searched = '';
     searchText = '';
+    itemsLater = false;
+    candidatesLater = false;
+    historyEpoch += 1;
     histories.clear();
+    conflictReader = null;
     options.seriesChanged(series);
   };
 
@@ -367,6 +478,8 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       radio.addEventListener('change', () => {
         if (!radio.checked) return;
         draft.target = value;
+        if (value === 'new') delete draft.targetLabel;
+        else draft.targetLabel = label;
         paint(`input[name="knowledge-target"][value="${value}"]`);
       });
       choice.append(radio, el('span', undefined, label));
@@ -482,8 +595,18 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
           list.append(line);
         }
         conflicts.append(list);
-        const more = knowledgeConflictsMoreLine(review.conflicts.length, review.conflictCount);
-        if (more !== null) conflicts.append(el('p', 'field-note knowledge-conflicts-more', more));
+        conflicts.append(el('p', 'field-note knowledge-conflicts-range',
+          `第 ${review.conflictsAfter + 1}–${review.conflictsAfter + review.conflicts.length} 处 / 共 ${review.conflictCount} 处冲突`));
+        const paging = el('div', 'button-row');
+        if (review.conflictsNextAfter !== null) paging.append(action('更多冲突…', 'quiet', 'review-conflicts-next',
+          () => void readReviewConflicts(review!.conflictsNextAfter!)));
+        if (review.conflictsAfter > 0) paging.append(action('返回首批冲突', 'quiet', 'review-conflicts-first', () => void readReviewConflicts(0)));
+        if (reviewPageRefusal !== null) {
+          conflicts.append(alertNode(reviewPageRefusal.message));
+          paging.append(action('重试读取冲突', 'secondary', 'review-conflicts-retry', () => void readReviewConflicts(reviewPageRefusal!.after)));
+        }
+        for (const button of paging.querySelectorAll('button')) button.disabled = busy || edit !== null;
+        conflicts.append(paging);
         const choices = el('div', 'button-row knowledge-dispositions');
         const editButton = action(KNOWLEDGE_EDIT, 'secondary', 'edit', () => openEdit());
         const keep = action(KNOWLEDGE_PRESERVE, 'secondary', 'preserve', () => {
@@ -522,7 +645,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       const waits = knowledgePromoteWaits(review, reuse !== null, preserved);
       const buttons = el('div', 'button-row');
       const promote = action(review.actionLabel, 'primary', 'promote', () => void submitPromote());
-      promote.disabled = busy || waits !== null || edit !== null;
+      promote.disabled = busy || waits !== null || edit !== null || reviewPageRefusal !== null;
       buttons.append(promote);
       if (review.conflictLabel === null) {
         const close = action(KNOWLEDGE_CANCEL, 'secondary', 'review-cancel', () => closeReview());
@@ -550,6 +673,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     const candidateId = reviewing;
     reviewing = null;
     review = null;
+    reviewPageRefusal = null;
     reviewRefusal = null;
     edit = null;
     preserved = false;
@@ -563,6 +687,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     busy = true;
     reviewing = candidateId;
     reviewRefusal = null;
+    reviewPageRefusal = null;
     edit = null;
     preserved = false;
     reuse = null;
@@ -581,11 +706,45 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     }
   };
 
+  /** Replace one conflict page without changing the editor's choices under this same complete review. */
+  const readReviewConflicts = async (after: number): Promise<void> => {
+    if (busy || review === null || reviewing === null || edit !== null) return;
+    const read = review;
+    const candidateId = reviewing;
+    busy = true;
+    reviewPageRefusal = null;
+    paint(null);
+    try {
+      const next = await api.inspectSeriesKnowledgeReview({ seriesId: options.seriesId, candidateId,
+        conflictsPage: { after, candidateVersion: read.candidate.version, reviewDigest: read.reviewDigest } });
+      if (!root.isConnected || reviewing !== candidateId || review !== read) return;
+      review = next;
+      busy = false;
+      paint('.knowledge-review-heading');
+    } catch (error) {
+      if (!root.isConnected || reviewing !== candidateId || review !== read) return;
+      busy = false;
+      const message = errorMessage(error, KNOWLEDGE_STATUS.failed);
+      const stale = typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'SERIES_KNOWLEDGE_REVIEW_STALE';
+      if (stale) {
+        review = null;
+        preserved = false;
+        reuse = null;
+        reviewRefusal = { message, stale: true, where: 'promote' };
+      } else {
+        reviewPageRefusal = { after, message };
+      }
+      paint(stale ? '[data-knowledge-action="review-refresh"]' : '[data-knowledge-action="review-conflicts-retry"]');
+      setStatus(message, 'error');
+    }
+  };
+
   const openEdit = (): void => {
     if (busy || review === null) return;
     const { candidate } = review;
     edit = {
       target: candidate.target.kind === 'new' ? 'new' : candidate.target.itemId,
+      targetLabel: '「' + candidate.target.subject + '」（' + candidate.target.classLabel + '）',
       subject: candidate.target.kind === 'new' ? candidate.target.subject : '',
       knowledgeClass: candidate.target.kind === 'new' ? candidate.target.knowledgeClass : '',
       content: candidate.content,
@@ -609,6 +768,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       preserved = false;
       reuse = null;
       reviewRefusal = null;
+      reviewPageRefusal = null;
       paint('.knowledge-review-heading');
       setStatus(KNOWLEDGE_STATUS.edited, 'success');
     } catch (error) {
@@ -636,6 +796,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       });
       reviewing = null;
       review = null;
+      reviewPageRefusal = null;
       preserved = false;
       reuse = null;
       // The item stands whatever the read after it meets; it heads the list when it is on the first page.
@@ -647,7 +808,12 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       busy = false;
       const stale = typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'SERIES_KNOWLEDGE_REVIEW_STALE';
       reviewRefusal = { message: errorMessage(error, KNOWLEDGE_STATUS.failed), stale, where: 'promote' };
-      if (stale) review = null;
+      if (stale) {
+        review = null;
+        preserved = false;
+        reuse = null;
+        reviewPageRefusal = null;
+      }
       paint(stale ? '[data-knowledge-action="review-refresh"]' : '[data-knowledge-action="promote"]');
       setStatus(reviewRefusal.message, 'error');
     }
@@ -658,7 +824,11 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       knowledge = next;
       searched = '';
       searchText = '';
+      itemsLater = false;
+      candidatesLater = false;
+      historyEpoch += 1;
       histories.clear();
+      conflictReader = null;
       if (!busy) paint(focus);
     },
   };

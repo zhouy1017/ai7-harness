@@ -249,9 +249,9 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectDefaultExecutionRules']['output']>(IPC_CHANNELS.inspectDefaultExecutionRules),
   deactivateDefaultExecutionRule: (input: ServiceOperationMap['deactivateDefaultExecutionRule']['input']) =>
     invoke<ServiceOperationMap['deactivateDefaultExecutionRule']['output']>(IPC_CHANNELS.deactivateDefaultExecutionRule, input),
-  inspectReviewGuidelines: () =>
-    invoke<ServiceOperationMap['inspectReviewGuidelines']['output']>(IPC_CHANNELS.inspectReviewGuidelines),
-  previewReviewGuidelineVersion: (input: { documentId: string }) =>
+  inspectReviewGuidelines: (input?: ServiceOperationMap['inspectReviewGuidelines']['input']) =>
+    invoke<ServiceOperationMap['inspectReviewGuidelines']['output']>(IPC_CHANNELS.inspectReviewGuidelines, input ?? {}),
+  previewReviewGuidelineVersion: (input: { documentId: string; previewId?: string; clausePage?: number }) =>
     invoke<ServiceOperationMap['previewReviewGuidelineVersion']['output'] | null>(IPC_CHANNELS.previewReviewGuidelineVersion, input),
   importReviewGuidelineVersion: (input: ServiceOperationMap['importReviewGuidelineVersion']['input']) =>
     invoke<ServiceOperationMap['importReviewGuidelineVersion']['output']>(IPC_CHANNELS.importReviewGuidelineVersion, input),
@@ -262,6 +262,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectLibraryMaterials']['output']>(IPC_CHANNELS.inspectLibraryMaterials, input ?? { after: null }),
   inspectLibraryMaterial: (input: ServiceOperationMap['inspectLibraryMaterial']['input']) =>
     invoke<ServiceOperationMap['inspectLibraryMaterial']['output']>(IPC_CHANNELS.inspectLibraryMaterial, input),
+  readLibraryDecisionReason: (input: ServiceOperationMap['readLibraryDecisionReason']['input']) =>
+    invoke<ServiceOperationMap['readLibraryDecisionReason']['output']>(IPC_CHANNELS.readLibraryDecisionReason, input),
   previewLibraryMaterial: () =>
     invoke<ServiceOperationMap['previewLibraryMaterial']['output'] | null>(IPC_CHANNELS.previewLibraryMaterial),
   addLibraryMaterial: (input: ServiceOperationMap['addLibraryMaterial']['input']) =>
@@ -269,7 +271,7 @@ const api: RendererApi = Object.freeze({
   decideLibraryMaterial: (input: ServiceOperationMap['decideLibraryMaterial']['input']) =>
     invoke<ServiceOperationMap['decideLibraryMaterial']['output']>(IPC_CHANNELS.decideLibraryMaterial, input),
   inspectEvaluationProfiles: () => invoke<ServiceOperationMap['inspectEvaluationProfiles']['output']>(IPC_CHANNELS.inspectEvaluationProfiles),
-  inspectEvaluation: (input: { recordId: string | null }) =>
+  inspectEvaluation: (input: { recordId: string | null; recordsBefore?: number | null }) =>
     invoke<ServiceOperationMap['inspectEvaluation']['output']>(IPC_CHANNELS.inspectEvaluation, input),
   startEvaluation: () => invoke<ServiceOperationMap['startEvaluation']['output']>(IPC_CHANNELS.startEvaluation),
   saveEvaluation: (input: Omit<ServiceOperationMap['saveEvaluation']['input'], 'bookId'>) =>
@@ -343,10 +345,10 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectLearningMaterial']['output']>(IPC_CHANNELS.inspectLearningMaterial, input),
   decideLearningMaterial: (input: ServiceOperationMap['decideLearningMaterial']['input']) =>
     invoke<ServiceOperationMap['decideLearningMaterial']['output']>(IPC_CHANNELS.decideLearningMaterial, input),
-  inspectFeedbackHistory: () =>
-    invoke<ServiceOperationMap['inspectFeedbackHistory']['output']>(IPC_CHANNELS.inspectFeedbackHistory, {}),
-  inspectEvaluationCalibration: () =>
-    invoke<ServiceOperationMap['inspectEvaluationCalibration']['output']>(IPC_CHANNELS.inspectEvaluationCalibration, {}),
+  inspectFeedbackHistory: (input = {}) =>
+    invoke<ServiceOperationMap['inspectFeedbackHistory']['output']>(IPC_CHANNELS.inspectFeedbackHistory, input),
+  inspectEvaluationCalibration: (input: ServiceOperationMap['inspectEvaluationCalibration']['input'] = { after: null, focusBookId: null }) =>
+    invoke<ServiceOperationMap['inspectEvaluationCalibration']['output']>(IPC_CHANNELS.inspectEvaluationCalibration, input),
   recordPublicationActuals: (input: ServiceOperationMap['recordPublicationActuals']['input']) =>
     invoke<ServiceOperationMap['recordPublicationActuals']['output']>(IPC_CHANNELS.recordPublicationActuals, input),
   setEvaluationPreferences: (input: ServiceOperationMap['setEvaluationPreferences']['input']) =>
@@ -382,6 +384,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectSeriesKnowledgeItems']['output']>(IPC_CHANNELS.inspectSeriesKnowledgeItems, input),
   inspectSeriesKnowledgeCandidates: (input: ServiceOperationMap['inspectSeriesKnowledgeCandidates']['input']) =>
     invoke<ServiceOperationMap['inspectSeriesKnowledgeCandidates']['output']>(IPC_CHANNELS.inspectSeriesKnowledgeCandidates, input),
+  inspectSeriesKnowledgeConflicts: (input: ServiceOperationMap['inspectSeriesKnowledgeConflicts']['input']) =>
+    invoke<ServiceOperationMap['inspectSeriesKnowledgeConflicts']['output']>(IPC_CHANNELS.inspectSeriesKnowledgeConflicts, input),
   inspectSeriesKnowledgeRevisions: (input: ServiceOperationMap['inspectSeriesKnowledgeRevisions']['input']) =>
     invoke<ServiceOperationMap['inspectSeriesKnowledgeRevisions']['output']>(IPC_CHANNELS.inspectSeriesKnowledgeRevisions, input),
   applyChangeSuggestion: (input: ServiceOperationMap['applyChangeSuggestion']['input']) =>
@@ -445,6 +449,8 @@ const api: RendererApi = Object.freeze({
     invoke<Awaited<ReturnType<RendererApi['reviewBookDeliveryPackageExport']>>>(IPC_CHANNELS.reviewBookDeliveryPackageExport, input),
   chooseBookDeliveryPackageExportFolder: (input: Parameters<RendererApi['chooseBookDeliveryPackageExportFolder']>[0]) =>
     invoke<Awaited<ReturnType<RendererApi['chooseBookDeliveryPackageExportFolder']>>>(IPC_CHANNELS.chooseBookDeliveryPackageExportFolder, input),
+  cancelBookDeliveryPackageExport: (input: Parameters<RendererApi['cancelBookDeliveryPackageExport']>[0]) =>
+    invoke<boolean>(IPC_CHANNELS.cancelBookDeliveryPackageExport, input),
   approveBookDeliveryPackageExport: (input: Parameters<RendererApi['approveBookDeliveryPackageExport']>[0]) =>
     invoke<Awaited<ReturnType<RendererApi['approveBookDeliveryPackageExport']>>>(IPC_CHANNELS.approveBookDeliveryPackageExport, input),
   inspectMaintenanceCase: (input: Parameters<RendererApi['inspectMaintenanceCase']>[0]) =>
