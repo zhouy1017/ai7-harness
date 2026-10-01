@@ -11357,7 +11357,7 @@ export class EditorialStore {
     requireStore(typeof span === 'object' && span !== null, 'SERIES_KNOWLEDGE_SPAN_INVALID', '所选文字无效。');
     const verified = this.#markCall(() => this.#editorialMarks.verifySpan(span));
     const bookTitle = this.#evaluationBookTitle(verified.bookId);
-    requireStore(this.#series.seriesOf(verified.bookId).some((entry) => entry.seriesId === series.seriesId), 'SERIES_KNOWLEDGE_NOT_MEMBER',
+    requireStore(this.#series.latest(series.seriesId, verified.bookId)?.kind === 'add', 'SERIES_KNOWLEDGE_NOT_MEMBER',
       `《${bookTitle}》不在书系「${series.title}」中；只有成员图书的稿件可以提议为书系知识。`);
     return {
       kind: 'manuscript-revision',
@@ -11388,7 +11388,7 @@ export class EditorialStore {
     const target = candidate.target;
     const current = target.kind === 'existing' ? this.#seriesKnowledge.item(target.itemId)?.current ?? null : null;
     // A provenance-bound candidate cites a member Book's manuscript: once the Book has left the Series it cannot be taken in.
-    const blocked = candidate.provenance !== null && !this.#series.seriesOf(candidate.provenance.bookId).some((entry) => entry.seriesId === series.seriesId)
+    const blocked = candidate.provenance !== null && this.#series.latest(series.seriesId, candidate.provenance.bookId)?.kind !== 'add'
       ? `《${this.#evaluationBookTitle(candidate.provenance.bookId)}》已不在书系「${series.title}」中；来自它的候选项不能纳入。`
       : null;
     const summary = seriesKnowledgeReviewSummary({ seriesId: series.seriesId, candidateVersionId: candidate.versionId, currentRevisionId: current?.revisionId ?? null, conflicts: conflicts(), blocked, after });
