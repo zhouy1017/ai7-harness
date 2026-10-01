@@ -1134,6 +1134,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-feedback-reflow-forced-colors',
     'feedback-silence-is-not-approval',
     'feedback-restart',
+    'feedback-pending-submit',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',

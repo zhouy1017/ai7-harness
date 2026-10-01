@@ -1385,6 +1385,65 @@ async function main() {
     await clickSelector(renderer, '[data-evaluation-action="save"]', 'evaluation-pages-save-input');
     await readEvaluation(renderer, (page) => page.record?.entries === '2' && page.record.items[0][2] === '17.5', 'evaluation-pages-saved-input');
 
+    at('feedback-pending-submit');
+    // Hold an actual follower timer, then the actual feedback response, so a changed analysis answer crosses a pending save.
+    await click(renderer, '打开稿件', 'feedback-pending-manuscript');
+    await waitFor(renderer, `document.querySelector('.editor-shell')`, 'feedback-pending-manuscript-ready');
+    await clickSelector(renderer, '.editor-shell [data-records-destination="analysis"]', 'feedback-pending-analysis');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'feedback-pending-analysis-ready');
+    await clickSelector(renderer, '[data-analysis-tab="history"]', 'feedback-pending-history');
+    await click(renderer, '重新分析全书', 'feedback-pending-mode');
+    await clickSelector(renderer, '[data-analysis-action="reanalyze-book"]', 'feedback-pending-prepare');
+    await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'feedback-pending-plan-ready');
+    await assertRenderer(renderer, `(() => {
+      const original=window.setTimeout;
+      const held={original,release:null}; window.__j11HeldFeedbackFollow=held;
+      window.setTimeout=function(callback,delay,...args) {
+        if(delay===250 && typeof callback==='function' && callback.toString().includes('#follow')) {
+          window.setTimeout=original;
+          const timer=original(()=>{},60000);
+          held.release=()=>{clearTimeout(timer);callback(...args);};
+          return timer;
+        }
+        return original(callback,delay,...args);
+      };
+      document.querySelector('#task-drawer [data-task-drawer-control="start"]').click();
+      return true;
+    })()`, 'feedback-pending-hold-follow');
+    await waitFor(renderer, `typeof window.__j11HeldFeedbackFollow?.release==='function'`, 'feedback-pending-follow-held');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'feedback-pending-close-plan');
+    await clickSelector(renderer, '#analysis-tab-synopsis', 'feedback-pending-synopsis');
+    await clickSelector(renderer, `${feedbackItem('synopsis')} [data-analysis-action="open-feedback"]`, 'feedback-pending-card');
+    await tick(renderer, `${feedbackItem('synopsis')} .analysis-feedback-judgments input[value="accurate"]`, 'feedback-pending-accurate');
+    await assertRenderer(renderer, `(() => {
+      const original=Promise.prototype.then;
+      const held={release:null,node:null}; window.__j11HeldFeedbackSave=held;
+      try {
+        Promise.prototype.then=function(success,failure) {
+          Promise.prototype.then=original;
+          return original.call(this,
+            (value)=>new Promise(resolve=>{held.release=()=>resolve(success(value));}),
+            (error)=>new Promise((_resolve,reject)=>{held.release=()=>reject(error);}));
+        };
+        document.querySelector(${JSON.stringify(`${feedbackItem('synopsis')} [data-analysis-action="record-feedback"]`)}).click();
+        held.node=document.querySelector('.analysis-feedback-card');
+      } finally { Promise.prototype.then=original; }
+      return held.node!==null && [...held.node.querySelectorAll('input,textarea,button')].every(control=>control.disabled);
+    })()`, 'feedback-pending-hold-save');
+    await waitFor(renderer, `typeof window.__j11HeldFeedbackSave?.release==='function'`, 'feedback-pending-save-held');
+    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then(projection=>projection.state==='settled')`, 'feedback-pending-run-settled');
+    await assertRenderer(renderer, `(() => { window.__j11HeldFeedbackFollow.release(); return true; })()`, 'feedback-pending-release-follow');
+    // A real changed follower read has time to settle. Pending work, rather than focus, must retain this exact disabled card.
+    await new Promise(resolveWait=>setTimeout(resolveWait,750));
+    await assertRenderer(renderer, `document.querySelector('.analysis-feedback-card')===window.__j11HeldFeedbackSave.node && [...window.__j11HeldFeedbackSave.node.querySelectorAll('input,textarea,button')].every(control=>control.disabled)`, 'feedback-pending-keeps-card');
+    await assertRenderer(renderer, `(() => {
+      window.__j11HeldFeedbackSave.release();
+      window.setTimeout=window.__j11HeldFeedbackFollow.original;
+      delete window.__j11HeldFeedbackSave; delete window.__j11HeldFeedbackFollow;
+      return true;
+    })()`, 'feedback-pending-release-save');
+    await waitFor(renderer, `document.querySelector('.analysis-feedback-card')===null && document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'feedback-pending-finished');
+
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
 

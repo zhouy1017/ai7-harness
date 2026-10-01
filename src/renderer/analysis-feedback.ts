@@ -238,7 +238,7 @@ export function mountAnalysisFeedback(options: MountAnalysisFeedbackOptions): { 
     paint(null);
     setStatus(ANALYSIS_FEEDBACK_STATUS.recording, 'busy');
     try {
-      projection = await api.recordAnalysisFeedback({
+      await api.recordAnalysisFeedback({
         revisionId,
         itemKey: item.itemKey,
         itemDigest: item.digest,
@@ -246,11 +246,13 @@ export function mountAnalysisFeedback(options: MountAnalysisFeedbackOptions): { 
         judgment,
         reason: judgment === 'accurate' || draft.choice === null ? null : { choice: draft.choice, text: draft.choice === ANALYSIS_FEEDBACK_OTHER ? draft.other : null },
         correction: judgment === 'accurate' || draft.correction.trim().length === 0 ? null : draft.correction,
+      }).then((next) => {
+        projection = next;
+        busy = false;
+        if (open?.key === draftKey(item.itemKey)) open = null;
+        paint(`${itemSelector(item.itemKey)} [data-analysis-action="open-feedback"]`);
+        setStatus(ANALYSIS_FEEDBACK_STATUS.recorded, 'success');
       });
-      busy = false;
-      if (open?.key === draftKey(item.itemKey)) open = null;
-      paint(`${itemSelector(item.itemKey)} [data-analysis-action="open-feedback"]`);
-      setStatus(ANALYSIS_FEEDBACK_STATUS.recorded, 'success');
     } catch (error) {
       busy = false;
       const message = errorMessage(error, ANALYSIS_FEEDBACK_STATUS.failed);
