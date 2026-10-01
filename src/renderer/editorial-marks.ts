@@ -875,6 +875,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       const reason = el('p', 'muted', decisionReasonLine(decision.reason, decision.reasonRevisedAt, markTimeLabel));
       reason.dataset['markReason'] = decision.reasonSource ?? '';
       nodes.push(reason);
+      const source = el('p', 'muted', decision.reasonSource === 'suggested' ? '原因来源：你选择的选项' : '原因来源：你自行输入的文字');
+      source.dataset['markReasonSource'] = decision.reasonSource ?? '';
+      nodes.push(source);
     }
     if (asking !== null) {
       nodes.push(reasonChips(card, decision, asking));
@@ -941,6 +944,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       : actionButton('reason-cancel', DECISION_REASON_CANCEL, 'quiet', () => {
           promptFor = null;
           showCard(card);
+          floating?.querySelector<HTMLElement>(`[data-mark-action="${mode === 'revise' ? 'reason-revise' : 'reason-add'}"]`)?.focus({ preventScroll: true });
         }));
     wrap.append(row);
     return wrap;

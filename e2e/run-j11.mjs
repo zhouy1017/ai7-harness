@@ -721,6 +721,7 @@ const READ_DECISION = `(() => {
       end: row.querySelector('[data-mark-action="reason-dismiss"], [data-mark-action="reason-cancel"]')?.textContent ?? null,
     },
     reason: reason === null ? null : [reason.dataset.markReason ?? null, reason.textContent],
+    reasonSource: card.querySelector('[data-mark-reason-source]')?.textContent ?? null,
     later: card.querySelector('[data-mark-action="reason-add"], [data-mark-action="reason-revise"]')?.textContent ?? null,
     focus: active instanceof HTMLElement && card.contains(active) ? (active.dataset.markReasonChip ?? active.dataset.markAction ?? active.tagName) : null,
   };
@@ -1477,18 +1478,26 @@ async function main() {
     await assertRenderer(renderer, `window.__j11.act('reason-add')`, 'decision-add');
     const adding = await readDecision(renderer, (card) => card.prompt?.mode === 'add', 'decision-adding');
     requireJourney(adding.prompt.end === '取消' && adding.prompt.chips.every(([, pressed]) => pressed === false), 'decision-adding-words', adding);
+    await assertRenderer(renderer, `window.__j11.act('reason-cancel')`, 'decision-add-cancel');
+    await readDecision(renderer, (card) => card.prompt === null && card.focus === 'reason-add', 'decision-add-cancel-focus');
+    await assertRenderer(renderer, `window.__j11.act('reason-add')`, 'decision-add-again');
     await assertRenderer(renderer, `window.__j11.act('reason-own')`, 'decision-own');
     await waitFor(renderer, `window.__j11.card()?.querySelector('[data-mark-form="decision-reason"] [data-mark-field="reason"]') !== null`, 'decision-own-form');
     await assertRenderer(renderer, `window.__j11.write('reason', ${JSON.stringify(OWN_REASON)}) && window.__j11.act('submit')`, 'decision-own-submit');
     await waitFor(renderer, `${status} === '已记下你的原因。'`, 'decision-own-status');
     const own = await readDecision(renderer, (card) => card.state === 'given', 'decision-own-recorded');
     requireJourney(JSON.stringify(own.reason) === JSON.stringify(['free-text', `你的原因：${OWN_REASON}`]) && own.later === '改原因…' && own.prompt === null, 'decision-own-words', own);
+    requireJourney(own.reasonSource === '原因来源：你自行输入的文字', 'decision-own-source', own.reasonSource);
     await assertRenderer(renderer, `window.__j11.act('reason-revise')`, 'decision-revise');
     await readDecision(renderer, (card) => card.prompt?.mode === 'revise', 'decision-revising');
+    await assertRenderer(renderer, `window.__j11.act('reason-cancel')`, 'decision-revise-cancel');
+    await readDecision(renderer, (card) => card.prompt === null && card.focus === 'reason-revise', 'decision-revise-cancel-focus');
+    await assertRenderer(renderer, `window.__j11.act('reason-revise')`, 'decision-revise-again');
     await assertRenderer(renderer, `(() => { const chip = window.__j11.card()?.querySelector('[data-mark-reason-chip="证据不足"]'); if (!(chip instanceof HTMLButtonElement)) return false; chip.click(); return true; })()`, 'decision-revise-chip');
     await waitFor(renderer, `${status} === '已改好原因；原来的原因仍留在记录里。'`, 'decision-revise-status');
     const revisedCard = await readDecision(renderer, (card) => card.reason?.[0] === 'suggested', 'decision-revised');
     requireJourney(revisedCard.reason[1].startsWith('你的原因：证据不足（') && revisedCard.reason[1].endsWith(' 改过）') && revisedCard.later === '改原因…', 'decision-revised-words', revisedCard);
+    requireJourney(revisedCard.reasonSource === '原因来源：你选择的选项', 'decision-revised-source', revisedCard.reasonSource);
     await pressEscape(renderer);
     await waitFor(renderer, `window.__j11.card() === null`, 'decision-revised-closed');
 
