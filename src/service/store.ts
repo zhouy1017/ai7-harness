@@ -5,6 +5,7 @@ import { basename, extname, isAbsolute, posix, relative, resolve, sep } from 'no
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { J03_TASK_GOAL, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
+  ServiceOperationMap,
   InspectTaskPlanInput,
   TaskPlanProjection,
   GlobalAttentionProjection,
@@ -54,6 +55,7 @@ import type {
   RecordAnalysisFeedbackInput,
   ExemplarsProjection,
   KnowledgeProceduresProjection,
+  ReviewGuidelinesPage,
   AppendMaintenanceCaseRevisionInput,
   InspectMaintenanceCaseInput,
   ListMaintenanceCasesInput,
@@ -5502,8 +5504,12 @@ export class EditorialStore {
   }
 
   /** 知识库 › 审阅规范文件 (Issue #427, S79a; KB-001 to KB-003): every guideline document with its versions and their use. */
-  inspectReviewGuidelines(): ReviewGuidelinesProjection {
-    return this.#guidelineCall(() => this.#reviewGuidelines.projection());
+  inspectReviewGuidelines(page?: ReviewGuidelinesPage): ReviewGuidelinesProjection {
+    return this.#guidelineCall(() => this.#reviewGuidelines.projection(page));
+  }
+
+  readReviewGuidelinePreview(documentId: string, previewId: string, page?: number): ReviewGuidelinePreviewProjection {
+    return this.#guidelineCall(() => this.#reviewGuidelines.readPreview(documentId, previewId, page));
   }
 
   /**
@@ -5514,12 +5520,12 @@ export class EditorialStore {
     if (after !== null) {
       requireStore(UUID_PATTERN.test(after.bookId) && after.title === safeTitle(after.title), 'EXEMPLAR_CURSOR_INVALID', '范例列表位置无效。');
     }
-    return this.#publicationCall(() => readExemplars({
+    return this.#documentCall(() => this.#publicationCall(() => readExemplars({
       books: (cursor, limit) => this.#publicationVersions.designatedBooks(cursor, limit),
-      designations: (bookId) => this.#publicationVersions.history(bookId),
-      documents: (bookId) => this.#documentCall(() => this.#productionDocuments.deliveryReadings(bookId)),
+      archive: (bookId) => this.#publicationVersions.exemplarArchive(bookId),
+      documents: (bookId) => this.#productionDocuments.deliveryReadings(bookId),
       people: (bookId) => this.#peopleCall(() => this.#bookPeople.current(bookId)),
-    }, after));
+    }, after)));
   }
 
   /**
@@ -5532,8 +5538,9 @@ export class EditorialStore {
   }
 
   /** 导入新版本's first step: the picked file's clauses as the next version of one document would read them; nothing is recorded. */
-  async previewReviewGuidelineVersion(documentId: string, path: string): Promise<ReviewGuidelinePreviewProjection> {
+  async previewReviewGuidelineVersion(documentId: string, path: string | undefined): Promise<ReviewGuidelinePreviewProjection> {
     this.#assertAvailable();
+    if (typeof path !== 'string' || path.length === 0) throw new StoreError('REVIEW_GUIDELINE_FILE_UNREADABLE', '请重新选择文件。');
     let read: Awaited<ReturnType<typeof readGuidelineFile>>;
     try {
       read = await readGuidelineFile(path);
@@ -5561,6 +5568,10 @@ export class EditorialStore {
   /** One 资料库 item as its card reads it. */
   inspectLibraryMaterial(materialId: string): LibraryMaterialProjection {
     return this.#libraryCall(() => this.#libraryMaterials.item(materialId));
+  }
+
+  readLibraryDecisionReason(input: ServiceOperationMap['readLibraryDecisionReason']['input']): ServiceOperationMap['readLibraryDecisionReason']['output'] {
+    return this.#libraryCall(() => this.#libraryMaterials.reasonPage(input.materialId, input.ordinal, input.offset));
   }
 
   /** 放入资料…'s first step: the picked file identified, measured and digested as it would arrive; nothing is kept. */
@@ -5606,8 +5617,8 @@ export class EditorialStore {
   }
 
   /** ②C 评估 of one Book (Issue #429, S81a; EVAL-001, EVAL-012): its versions, one on show, and whether one can begin. */
-  inspectEvaluation(bookId: string, recordId: string | null): EvaluationWorkspaceProjection {
-    return this.#evaluationCall(() => this.#evaluations.workspace(bookId, this.#evaluationBookTitle(bookId), recordId));
+  inspectEvaluation(bookId: string, recordId: string | null, recordsBefore?: number | null): EvaluationWorkspaceProjection {
+    return this.#evaluationCall(() => this.#evaluations.workspace(bookId, this.#evaluationBookTitle(bookId), recordId, recordsBefore));
   }
 
   /** 开始评估 or 重新评估: a new version bound to the manuscript's current revision, and the page with it on show. */
@@ -10474,8 +10485,8 @@ export class EditorialStore {
   }
 
   /** `按上述方式导出`: each file approved and written in turn with its receipt, and the package as it stands. */
-  async approveBookDeliveryPackageExport(input: ApproveBookDeliveryPackageExportInput, available: boolean): Promise<BookDeliveryPackageExportResultProjection> {
-    const exported = await this.#packageExportCall(() => this.#packageExports.approve(input, available));
+  async approveBookDeliveryPackageExport(input: ApproveBookDeliveryPackageExportInput, available: boolean, beforeWrite?: () => void): Promise<BookDeliveryPackageExportResultProjection> {
+    const exported = await this.#packageExportCall(() => this.#packageExports.approve(input, available, beforeWrite));
     return { bookId: input.bookId, export: exported, package: this.inspectBookDeliveryPackage(input.bookId) };
   }
 

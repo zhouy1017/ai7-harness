@@ -97,6 +97,11 @@ export interface ClarificationFacts {
   readonly requestDigest: string;
   readonly failure: { readonly code: string; readonly failureClass: string; readonly status: number | null; readonly reason: string };
   readonly firstPayloadDigest: string | null;
+  /**
+   * The digest of the unit message the first attempt submitted, which a retry must repeat byte for byte (Issue #286);
+   * `null` on a request recorded before it was kept.
+   */
+  readonly firstUnitMessageDigest: string | null;
   readonly firstUsage: { readonly inputTokens: number; readonly outputTokens: number } | null;
   /** How long the first attempt took, so the unit's wall time counts it once it settles. */
   readonly firstWallMs: number;
