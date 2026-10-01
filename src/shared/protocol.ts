@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 82 as const;
+export const SERVICE_PROTOCOL_VERSION = 84 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -91,6 +91,7 @@ export const IPC_CHANNELS = {
   saveEvaluation: 'ai7:j11:save-evaluation',
   inspectAnalysisFeedback: 'ai7:j11:inspect-analysis-feedback',
   recordAnalysisFeedback: 'ai7:j11:record-analysis-feedback',
+  readLibraryDecisionReason: 'ai7:j15:read-library-decision-reason',
   inspectReviewWorkspace: 'ai7:j04:inspect-review-workspace',
   prepareReviewRun: 'ai7:j04:prepare-review-run',
   authorizeReviewRun: 'ai7:j04:authorize-review-run',
@@ -179,6 +180,7 @@ export const IPC_CHANNELS = {
   recordMaintenanceCase: 'ai7:j07:record-maintenance-case',
   appendMaintenanceCaseRevision: 'ai7:j07:append-maintenance-case-revision',
   saveMaintenanceErrata: 'ai7:j07:save-maintenance-errata',
+  cancelBookDeliveryPackageExport: 'ai7:j07:cancel-book-delivery-package-export',
   createProductionDocument: 'ai7:j07:create-production-document',
   decideProductionDocumentType: 'ai7:j07:decide-production-document-type',
   saveProductionDocumentVersion: 'ai7:j07:save-production-document-version',
@@ -1613,12 +1615,14 @@ export interface ManuscriptEntryPositionProjection {
 }
 
 export type BookWorkbenchRoute =
-  | { kind: 'book'; bookId: string }
+  | { kind: 'book'; bookId: string; feedbackEntryId?: string; learningMaterialKey?: string }
   | { kind: 'revision'; revisionId: string };
 
 export type ResolvedBookWorkbenchRoute =
   | {
       kind: 'book';
+      feedbackTarget?: FeedbackHistoryTarget;
+      learningMaterialTarget?: LearningMaterialTarget;
       bookId: string;
       bookTitle: string;
     }
@@ -2852,11 +2856,33 @@ export interface BaselineAnalysisPlanAdaptationProjection {
   failureStatus: number | null;
   requestDigest: string;
   firstPayloadDigest: string | null;
+  /**
+   * The digest of the unit message the first attempt submitted — the range's manuscript text as the model reads it —
+   * which the retry must repeat byte for byte (Issue #286). `null` on an adaptation recorded before it was kept.
+   */
+  firstUnitMessageDigest: string | null;
   planEnvelopeDigest: string;
   bindingDigest: string;
   recordedAt: string;
+  /**
+   * The retry's own turn, found by the span that names this adaptation (Issue #286): the digest of the unit message it
+   * submitted, and the gate's digest of its whole payload — which on a single-Session route also holds the turns before
+   * it, so it differs from the first attempt's by construction. For older records, the one legacy adaptation and the
+   * one legacy second attempt of the same unit and execution attempt may supply the payload digest without a unit-message
+   * digest. `null` until the retry's turn is recorded or when no unambiguous association can be made.
+   */
+  retry: null | { spanOrdinal: number; unitMessageDigest: string | null; payloadDigest: string | null };
+  /**
+   * Whether the retry repeated the first attempt's unit message byte for byte, the one property `safe-retry` promises
+   * (Issue #286): `byte-identical`; `differs`, a violation the label names; or `unrecorded` when either digest was not
+   * kept — an adaptation recorded before them, or a retry not yet recorded.
+   */
+  repetition: SafeRetryRepetition;
   label: string;
 }
+
+/** How a safe retry's unit message compares with its first attempt's (Issue #286). */
+export type SafeRetryRepetition = 'byte-identical' | 'differs' | 'unrecorded';
 
 export interface BaselineAnalysisExecutionBindingProjection {
   attemptId: string;
@@ -3199,7 +3225,20 @@ export interface BaselineAnalysisProjection {
       startedAt: string;
       credentialReadinessCheck: { slot: CredentialSlotId; readiness: 'present' | 'missing'; valueReleased: false };
       executionBinding: BaselineAnalysisExecutionBindingProjection | null;
-      spans: ReadonlyArray<{ ordinal: number; harnessSessionId: string; startSeq: number; endSeq: number; unitOrdinal: number | null; attemptIndex: number; payloadDigest: string | null }>;
+      /**
+       * Each technical turn by reference. `unitMessageDigest` is the digest of the unit message the turn submitted (Issue
+       * #286), `null` on a turn recorded before it was kept.
+       */
+      spans: ReadonlyArray<{
+        ordinal: number;
+        harnessSessionId: string;
+        startSeq: number;
+        endSeq: number;
+        unitOrdinal: number | null;
+        attemptIndex: number;
+        payloadDigest: string | null;
+        unitMessageDigest: string | null;
+      }>;
     };
   };
   /** The latest revision of the Book's Result Set; the current truth candidate, never an older one. */
@@ -4701,8 +4740,14 @@ export interface ReviewGuidelineDocumentProjection {
   readonly appliedBy: ReadonlyArray<{ readonly categoryId: string; readonly label: string }>;
   /** The clauses of the version that applies now. */
   readonly clauses: ReadonlyArray<ReviewGuidelineClauseProjection>;
+  readonly clauseCount: number;
+  readonly clausePage: number;
+  readonly clausePages: number;
   /** Every version, newest first. */
   readonly versions: ReadonlyArray<ReviewGuidelineVersionProjection>;
+  readonly versionCount: number;
+  readonly versionsBefore: number | null;
+  readonly versionsNext: number | null;
   /** How many Books' latest Review Run that used this document used an older version than the current one. */
   readonly olderVersionBookCount: number;
   /** Those Books by title, at most `MAX_GUIDELINE_OLDER_BOOKS_SHOWN`. */
@@ -4711,6 +4756,12 @@ export interface ReviewGuidelineDocumentProjection {
 
 export interface ReviewGuidelinesProjection {
   readonly documents: ReadonlyArray<ReviewGuidelineDocumentProjection>;
+}
+
+export interface ReviewGuidelinesPage {
+  readonly documentId: string;
+  readonly versionsBefore?: number | null;
+  readonly clausePage?: number;
 }
 
 /** 导入新版本 before it is confirmed: the clauses the file holds, as the document's next version would read them. */
@@ -4723,6 +4774,9 @@ export interface ReviewGuidelinePreviewProjection {
   readonly currentOrdinal: number;
   readonly source: ReviewGuidelineSourceProjection;
   readonly clauses: ReadonlyArray<{ readonly clauseId: string; readonly number: number; readonly text: string }>;
+  readonly clauseCount: number;
+  readonly clausePage: number;
+  readonly clausePages: number;
   /** How the clauses differ from the current version's, by number. */
   readonly changes: { readonly changed: number; readonly added: number; readonly removed: number };
 }
@@ -4892,7 +4946,7 @@ export interface LibraryMaterialDecisionProjection {
   readonly decision:
     | { readonly kind: 'attribution'; readonly scope: 'book'; readonly bookId: string; readonly bookTitle: string }
     | { readonly kind: 'attribution'; readonly scope: 'house' }
-    | { readonly kind: 'eligibility'; readonly choice: LearningEligibilityChoice; readonly bookTitle: string | null; readonly reason: string | null };
+    | { readonly kind: 'eligibility'; readonly choice: LearningEligibilityChoice; readonly bookTitle: string | null; readonly reason: string | null; readonly reasonHasMore: boolean };
 }
 
 /** One 资料库 item: what arrived, where it belongs, whether it may teach, and whose Tasks may list it under 允许参考. */
@@ -4914,6 +4968,8 @@ export interface LibraryMaterialProjection {
     readonly choice: LearningEligibilityChoice;
     readonly bookTitle: string | null;
     readonly reason: string | null;
+    readonly reasonHasMore: boolean;
+    readonly ordinal: number;
     readonly decidedAt: string;
   };
   /** A decision made under an earlier attribution, which changing the attribution set aside: it is decided again. */
@@ -5053,6 +5109,9 @@ export interface EvaluationWorkspaceProjection {
   /** The profile a new version would snapshot. */
   readonly profile: EvaluationProfileProjection;
   readonly records: ReadonlyArray<EvaluationRecordSummaryProjection>;
+  readonly recordCount: number;
+  readonly recordsBefore: number | null;
+  readonly recordsNext: number | null;
   readonly record: EvaluationRecordProjection | null;
   /** `开始评估` or `重新评估`, or why neither can begin now. */
   readonly start: { readonly allowed: true; readonly kind: 'first' | 'again' } | { readonly allowed: false; readonly reason: string };
@@ -5171,8 +5230,33 @@ export interface LearningMaterialCursor {
  */
 export type LearningMaterialState = 'pending' | 'changed' | 'deferred' | 'decided';
 
+/** The exact source record reached from a Learning Material review (LEARN-003). */
+export type LearningMaterialTarget =
+  | {
+    readonly kind: 'mark';
+    readonly bookId: string;
+    readonly manuscriptId: string;
+    readonly branchId: string;
+    readonly blockId: string;
+    readonly markId: string;
+    /** Whether the paragraph it was made on is gone from the manuscript, so there is nowhere to open it (Issue #61 review). */
+    readonly detached: boolean;
+  }
+  | {
+    readonly kind: 'analysis';
+    readonly bookId: string;
+    readonly revisionId: string;
+    /** The item judged, and the tab of ②A it sits on (Issue #61 review). */
+    readonly itemKey: string;
+    readonly dimension: AnalysisFeedbackDimension;
+  }
+  | { readonly kind: 'review'; readonly bookId: string; readonly reviewRunId: string; readonly findingId: string };
+
 /** One Learning Material as its Review Card shows it (LEARN-003). */
 export interface LearningMaterialProjection {
+  readonly target: LearningMaterialTarget;
+  /** The exact originating Task, when the source record has one (LEARN-003); editor-authored material has none. */
+  readonly sourceTask: null | { readonly taskIntentId: string; readonly label: string };
   /** The material's place: its kind and the record it comes from. */
   readonly materialKey: string;
   readonly kind: LearningMaterialKind;
@@ -5258,6 +5342,23 @@ export type FeedbackHistoryTarget =
   }
   | { readonly kind: 'review'; readonly bookId: string; readonly reviewRunId: string; readonly findingId: string };
 
+/** Service-side filters and an exclusive newest-first page cursor. Omitted fields mean all. */
+export const FEEDBACK_HISTORY_SIGNALS = ['接受', '修改后接受', '拒绝', '准确', '不准确', '不完整', '忽略'] as const;
+export interface FeedbackHistoryInput {
+  readonly bookId?: string | null;
+  readonly origin?: LearningMaterialKind | null;
+  readonly author?: string | null;
+  readonly editor?: string | null;
+  /** Exact projected disposition or judgment; omitted or null means all. */
+  readonly signal?: string | null;
+  /** Inclusive lower and exclusive upper UTC instants; calendar days are resolved in the editor's local time. */
+  readonly recordedFrom?: string | null;
+  readonly recordedBefore?: string | null;
+  /** Omitted means every dimension; null selects only feedback without an Editorial Dimension. */
+  readonly dimension?: string | null;
+  readonly after?: { readonly recordedAt: string; readonly entryId: string } | null;
+}
+
 /** One piece of the editor's feedback as the history lists it. */
 export interface FeedbackHistoryEntryProjection {
   readonly entryId: string;
@@ -5341,6 +5442,12 @@ export interface EvaluationCalibrationBookProjection {
  * 设置 › 评估校准与预测 (EVAL-014): calibration's progress toward its threshold and whether it applies, the prediction switch
  * and what it waits for, and every Book with a 发稿版本 with its actuals.
  */
+export const MAX_EVALUATION_CALIBRATION_BOOKS = 20;
+export interface EvaluationCalibrationCursor { readonly title: string; readonly bookId: string }
+export interface InspectEvaluationCalibrationInput {
+  readonly after: EvaluationCalibrationCursor | null;
+  readonly focusBookId: string | null;
+}
 export interface EvaluationCalibrationProjection {
   readonly calibration: {
     /** The editor's adjustments of AI7's starting scores; AI7's 初评 arrives with S81b, so there are none yet. */
@@ -5363,6 +5470,9 @@ export interface EvaluationCalibrationProjection {
   /** How many changes of the two switches the house holds: the count the next one names. */
   readonly preferenceEntries: number;
   readonly books: ReadonlyArray<EvaluationCalibrationBookProjection>;
+  readonly nextCursor: EvaluationCalibrationCursor | null;
+  /** One exact Book opened from Deliverables or still being edited, independent of the bounded list page. */
+  readonly focusedBook: EvaluationCalibrationBookProjection | null;
 }
 
 export interface RecordPublicationActualsInput {
@@ -5838,6 +5948,14 @@ export interface BookSeriesProjection {
   readonly history: ReadonlyArray<SeriesMembershipChangeProjection>;
   readonly historyCount: number;
   readonly historyNext: SeriesHistoryCursor | null;
+}
+
+/** One bounded fragment of an immutable eligibility decision's complete note. */
+export const LIBRARY_REASON_PAGE_UNITS = 1024;
+export interface LibraryDecisionReasonPage {
+  readonly text: string;
+  readonly nextOffset: number | null;
+  readonly previousOffset: number | null;
 }
 
 /** The drawer's `设为快速开始默认…` for one plan, and the rule that started its Task, when one did. */
@@ -6411,6 +6529,8 @@ export interface MaintenanceCaseProjection {
   nextStep: MaintenanceNextStep | null;
   revisions: ReadonlyArray<MaintenanceCaseRevisionProjection>;
   revisionsTotal: number;
+  revisionsBefore: number | null;
+  inspectedErrata: null | { errataVersionId: string; version: number; body: string; recordedAt: string };
   /** The newest 勘误 version, with how many there are; `null` before the first. */
   errata: null | { errataVersionId: string; version: number; body: string; recordedAt: string };
   /**
@@ -6422,6 +6542,7 @@ export interface MaintenanceCaseProjection {
   choices: {
     proposals: ReadonlyArray<{ markId: string; label: string; stateLabel: string; createdAt: string }>;
     publications: ReadonlyArray<{ publicationVersionId: string; label: string }>;
+    publicationsAfter: number | null;
   };
   /** The revision the editor read: the next step names it, and a step against another is refused. */
   expectedRevision: number;
@@ -6440,6 +6561,9 @@ export interface RecordMaintenanceCaseInput {
 export interface InspectMaintenanceCaseInput {
   bookId: string;
   caseId: string;
+  beforeRevision?: number;
+  afterPublicationOrdinal?: number;
+  errataVersionId?: string;
 }
 
 /** `更早的维护事项…`: the older cases of one designation of the route's Book, before the oldest one shown. */
@@ -6929,7 +7053,7 @@ export interface BookDeliveryPackageResultProjection {
 
 /** At most this many exports of one package version are listed, newest first; the count says how many there were. */
 export const MAX_BOOK_DELIVERY_PACKAGE_EXPORTS_LISTED = 2;
-/** At most this many files of one export are listed; an export of more says how many it wrote. */
+/** A review page and one explicitly selected export batch contain at most this many files. */
 export const MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED = 40;
 
 /** One file a package export writes: what it holds, its file name and its format. */
@@ -6970,9 +7094,11 @@ export interface BookDeliveryPackageExportReviewProjection {
   options: BookDeliveryPackageExportOptions;
   /** At most `MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED`, in the order they are written. */
   files: ReadonlyArray<BookDeliveryPackageExportReviewFileProjection>;
-  /** More files than the review lists: they are written too. */
+  /** More candidate files can be reviewed on the next page; none are implicitly selected. */
   filesTruncated: boolean;
-  /** Some file is degraded, listed or not. */
+  offset: number;
+  nextOffset: number | null;
+  /** Some file on this page is degraded. */
   degraded: boolean;
   /** EXP-014 and EXP-015: the files go to a folder the editor chooses, and nothing is sent anywhere. */
   statement: string;
@@ -7028,6 +7154,7 @@ export interface BookDeliveryPackageExportSummaryProjection {
 
 /** `导出…` of one version of the route's Book's package, under the options chosen. */
 export interface ReviewBookDeliveryPackageExportInput {
+  offset?: number;
   bookId: string;
   packageVersionId: string;
   options: BookDeliveryPackageExportOptions;
@@ -7035,6 +7162,8 @@ export interface ReviewBookDeliveryPackageExportInput {
 
 /** `选择位置…`: the folder the system dialog returned, bound to the review the editor read and its options. */
 export interface PrepareBookDeliveryPackageExportInput {
+  offset?: number;
+  memberKeys: ReadonlyArray<string>;
   bookId: string;
   packageVersionId: string;
   options: BookDeliveryPackageExportOptions;
@@ -7628,11 +7757,11 @@ export interface ServiceJobProjection {
    * job's result is the 审阅 workspace with the prepared Run open.
    */
   kind: 'search' | 'replacement' | 'reimport-preparation' | 'reimport-resolution' | 'reimport-commit' |
-    'task-authorization-preparation' | 'baseline-analysis-preparation' | 'review-run-preparation';
+    'task-authorization-preparation' | 'baseline-analysis-preparation' | 'review-run-preparation' | 'package-export';
   state: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   progress: { completed: number; total: number; label: string };
   result: SearchSummaryProjection | ReplacementPreviewProjection | ReviewBeforeManuscriptReimportProjection |
-    ManuscriptReimportCommitProjection | TaskAuthorizationProjection | BaselineAnalysisProjection | ReviewWorkspaceProjection | null;
+    ManuscriptReimportCommitProjection | TaskAuthorizationProjection | BaselineAnalysisProjection | ReviewWorkspaceProjection | BookDeliveryPackageExportResultProjection | null;
   failure: null | { code: string; message: string };
 }
 
@@ -8048,12 +8177,12 @@ export interface ServiceOperationMap {
   };
   /** 知识库 › 审阅规范文件 (Issue #427, S79a): every guideline document the review categories apply, with its versions. */
   inspectReviewGuidelines: {
-    input: Record<string, never>;
+    input: { page?: ReviewGuidelinesPage };
     output: ReviewGuidelinesProjection;
   };
   /** 导入新版本's reading of the file main's picker returned: nothing is recorded until it is confirmed. */
   previewReviewGuidelineVersion: {
-    input: { documentId: string; path: string };
+    input: { documentId: string; path?: string; previewId?: string; clausePage?: number };
     output: ReviewGuidelinePreviewProjection;
   };
   /** 确认导入: the previewed clauses become the document's next version, issued by the house. */
@@ -8081,6 +8210,10 @@ export interface ServiceOperationMap {
     input: { materialId: string };
     output: LibraryMaterialProjection;
   };
+  readLibraryDecisionReason: {
+    input: { materialId: string; ordinal: number; offset: number };
+    output: LibraryDecisionReasonPage;
+  };
   /** 放入资料…: the absolute path main's picker returned, read as it would arrive; nothing is kept. */
   previewLibraryMaterial: {
     input: { path: string };
@@ -8103,7 +8236,7 @@ export interface ServiceOperationMap {
   };
   /** ②C 评估 of the route's Book (Issue #429, S81a): one version by its identity, or the latest when `null`. */
   inspectEvaluation: {
-    input: { bookId: string; recordId: string | null };
+    input: { bookId: string; recordId: string | null; recordsBefore?: number | null };
     output: EvaluationWorkspaceProjection;
   };
   /** 开始评估 or 重新评估: a new version bound to the manuscript's current revision. */
@@ -8241,8 +8374,8 @@ export interface ServiceOperationMap {
   inspectLearningMaterial: { input: { bookId: string; materialKey: string }; output: LearningMaterialProjection };
   /** 记录学习准入决定, answered with the one material it decided. */
   decideLearningMaterial: { input: DecideLearningMaterialInput; output: LearningMaterialProjection };
-  inspectFeedbackHistory: { input: Record<string, never>; output: FeedbackHistoryProjection };
-  inspectEvaluationCalibration: { input: Record<string, never>; output: EvaluationCalibrationProjection };
+  inspectFeedbackHistory: { input: FeedbackHistoryInput; output: FeedbackHistoryProjection };
+  inspectEvaluationCalibration: { input: InspectEvaluationCalibrationInput; output: EvaluationCalibrationProjection };
   recordPublicationActuals: { input: RecordPublicationActualsInput; output: EvaluationCalibrationProjection };
   setEvaluationPreferences: { input: SetEvaluationPreferencesInput; output: EvaluationCalibrationProjection };
   inspectSeriesList: { input: { after: SeriesListCursor | null }; output: SeriesListProjection };
@@ -8351,7 +8484,8 @@ export interface ServiceOperationMap {
   /** The folder the main process's dialog returned: one preparation per file, recorded together; nothing is written. */
   prepareBookDeliveryPackageExport: { input: PrepareBookDeliveryPackageExportInput; output: BookDeliveryPackageExportProjection };
   /** `按上述方式导出`: each file approved and written in turn, with its receipt; a file that stops it stops the rest. */
-  approveBookDeliveryPackageExport: { input: ApproveBookDeliveryPackageExportInput; output: BookDeliveryPackageExportResultProjection };
+  approveBookDeliveryPackageExport: { input: ApproveBookDeliveryPackageExportInput; output: ServiceJobProjection };
+  cancelBookDeliveryPackageExport: { input: { jobId: string }; output: boolean };
   inspectMaintenanceCase: { input: InspectMaintenanceCaseInput; output: MaintenanceCaseProjection };
   listMaintenanceCases: { input: ListMaintenanceCasesInput; output: MaintenanceCasePageProjection };
   recordMaintenanceCase: { input: RecordMaintenanceCaseInput; output: MaintenanceCaseResultProjection };
@@ -8524,9 +8658,9 @@ export interface RendererApi {
   inspectDefaultExecutionRules(): Promise<DefaultExecutionRulesProjection>;
   deactivateDefaultExecutionRule(input: { ruleId: string }): Promise<DefaultExecutionRuleProjection>;
   /** 知识库 › 审阅规范文件 (Issue #427, S79a): names no Book; it reads every Book's Review Runs to say who used which version. */
-  inspectReviewGuidelines(): Promise<ReviewGuidelinesProjection>;
+  inspectReviewGuidelines(input?: { page?: ReviewGuidelinesPage }): Promise<ReviewGuidelinesProjection>;
   /** 导入新版本: the native picker, then the file's clauses as the next version would read them; `null` when the picker was cancelled. */
-  previewReviewGuidelineVersion(input: { documentId: string }): Promise<ReviewGuidelinePreviewProjection | null>;
+  previewReviewGuidelineVersion(input: { documentId: string; previewId?: string; clausePage?: number }): Promise<ReviewGuidelinePreviewProjection | null>;
   importReviewGuidelineVersion(input: { previewId: string }): Promise<ReviewGuidelinesProjection>;
   /** 知识库 › 范例 (Issue #427, S79b): names no Book; it reads the published Books' delivered documents, a page at a time. */
   inspectExemplars(input?: { after: ExemplarBookCursor | null }): Promise<ExemplarsProjection>;
@@ -8536,6 +8670,7 @@ export interface RendererApi {
   inspectLibraryMaterials(input?: { after: LibraryMaterialCursor | null }): Promise<LibraryMaterialsProjection>;
   /** One 资料库 item, by its identity. */
   inspectLibraryMaterial(input: { materialId: string }): Promise<LibraryMaterialProjection>;
+  readLibraryDecisionReason(input: ServiceOperationMap['readLibraryDecisionReason']['input']): Promise<LibraryDecisionReasonPage>;
   /** 放入资料…: the native picker, then the file as it would arrive; `null` when the picker was cancelled. */
   previewLibraryMaterial(): Promise<LibraryMaterialPreviewProjection | null>;
   addLibraryMaterial(input: { previewId: string; title: string; kind: LibraryMaterialKind }): Promise<LibraryMaterialProjection>;
@@ -8543,7 +8678,7 @@ export interface RendererApi {
   /** 知识库 › 评估方案 (Issue #429, S81a): names no Book. */
   inspectEvaluationProfiles(): Promise<EvaluationProfilesProjection>;
   /** ②C 评估 of the Book the window is showing (Issue #429, S81a); the renderer never names the Book. */
-  inspectEvaluation(input: { recordId: string | null }): Promise<EvaluationWorkspaceProjection>;
+  inspectEvaluation(input: { recordId: string | null; recordsBefore?: number | null }): Promise<EvaluationWorkspaceProjection>;
   startEvaluation(): Promise<EvaluationWorkspaceProjection>;
   saveEvaluation(input: { recordId: string; expectedEntries: number; content: EvaluationContent; finalize: boolean }): Promise<EvaluationWorkspaceProjection>;
   /** ②A 分析反馈 of the Book the window is showing (Issue #94, S38); the renderer never names the Book. */
@@ -8593,8 +8728,8 @@ export interface RendererApi {
   inspectLearningMaterials(input: { bookId: string | null; after?: LearningMaterialCursor | null }): Promise<LearningMaterialsProjection>;
   inspectLearningMaterial(input: { bookId: string; materialKey: string }): Promise<LearningMaterialProjection>;
   decideLearningMaterial(input: DecideLearningMaterialInput): Promise<LearningMaterialProjection>;
-  inspectFeedbackHistory(): Promise<FeedbackHistoryProjection>;
-  inspectEvaluationCalibration(): Promise<EvaluationCalibrationProjection>;
+  inspectFeedbackHistory(input?: FeedbackHistoryInput): Promise<FeedbackHistoryProjection>;
+  inspectEvaluationCalibration(input?: InspectEvaluationCalibrationInput): Promise<EvaluationCalibrationProjection>;
   recordPublicationActuals(input: RecordPublicationActualsInput): Promise<EvaluationCalibrationProjection>;
   setEvaluationPreferences(input: SetEvaluationPreferencesInput): Promise<EvaluationCalibrationProjection>;
   inspectSeriesList(input?: { after?: SeriesListCursor | null }): Promise<SeriesListProjection>;
@@ -8670,6 +8805,7 @@ export interface RendererApi {
   appendMaintenanceCaseRevision(input: Omit<AppendMaintenanceCaseRevisionInput, 'bookId'>): Promise<MaintenanceCaseResultProjection>;
   /** `保存勘误版本`. */
   saveMaintenanceErrata(input: Omit<SaveMaintenanceErrataInput, 'bookId'>): Promise<MaintenanceCaseResultProjection>;
+  cancelBookDeliveryPackageExport(input: Omit<ApproveBookDeliveryPackageExportInput, 'bookId'>): Promise<boolean>;
   /** 从来源材料创建 (Issue #415): a document of one house type of that Book, from one of its source-only materials. */
   createProductionDocument(input: Omit<CreateProductionDocumentInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 本书不做 or 恢复 for one house type of that Book. */

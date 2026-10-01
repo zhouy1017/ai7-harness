@@ -116,6 +116,31 @@ const wire = (value: unknown): number => Buffer.byteLength(JSON.stringify(value)
 const later = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 3));
 
 describe('书系知识 over the real store', () => {
+  it('refuses membership and review pages after a governing candidate changes without changing the displayed counts', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const seriesId = store.createSeries({ title: '相关记录版本', note: '' }).seriesId;
+      const creation = store.prepareBookCreation('预览图书', null);
+      const bookId = store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
+      const target = { kind: 'new' as const, subject: '版本条目', knowledgeClass: 'canon' as const };
+      const candidate = store.proposeSeriesKnowledge({ seriesId, target, content: '第一版说明', span: null });
+      const rival = store.proposeSeriesKnowledge({ seriesId, target, content: '另一个说明', span: null });
+      const membership = { seriesId, bookId, kind: 'add' as const };
+      const preview = store.previewSeriesMembershipChange(membership);
+      const reviewInput = { seriesId, candidateId: candidate.candidateId };
+      const review = store.inspectSeriesKnowledgeReview(reviewInput);
+      store.editSeriesKnowledgeCandidate({ seriesId, candidateId: rival.candidateId, expectedVersion: 1, target, content: '改过的说明' });
+      expect(store.previewSeriesMembershipChange(membership).groups).toEqual(preview.groups);
+      expect(refusal(() => store.changeSeriesMembership({ ...membership, previewDigest: preview.previewDigest }))).toMatch(/^SERIES_PREVIEW_STALE:/);
+      expect(refusal(() => store.inspectSeriesKnowledgeReview({ ...reviewInput,
+        conflictsPage: { after: 0, candidateVersion: review.candidate.version, reviewDigest: review.reviewDigest } }))).toMatch(/^SERIES_KNOWLEDGE_REVIEW_STALE:/);
+      expect(store.inspectBookSeries(bookId).historyCount).toBe(0);
+      const fresh = store.previewSeriesMembershipChange(membership);
+      store.changeSeriesMembership({ ...membership, previewDigest: fresh.previewDigest });
+      expect(store.inspectBookSeries(bookId).historyCount).toBe(1);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
   it('returns a bounded promotion response when the editor preserves thousands of disclosed conflicts', async () => {
     let saved: { seriesId: string; itemId: string; revisionId: string } | null = null;
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);

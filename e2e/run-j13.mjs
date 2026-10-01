@@ -1082,6 +1082,91 @@ async function main() {
     await waitFor(renderer, `document.querySelectorAll('.knowledge-conflicts-page li').length === 50 && document.querySelector('[data-knowledge-action="conflicts-close"]')?.disabled === false`, 'knowledge-conflicts-reset-ready');
     await clickSelector(renderer, '[data-knowledge-action="conflicts-close"]', 'knowledge-conflicts-close');
     await waitFor(renderer, `document.querySelector('.knowledge-conflicts-reader') === null && document.activeElement === document.querySelector(${JSON.stringify(olderConflict)})`, 'knowledge-conflicts-closed-focus');
+    at('series-bounded-pages');
+    // Real membership changes beyond one Book's history page, followed through the visible controls.
+    requireJourney(await renderer.evaluate(`(async () => {
+      for (let index = 0; index < 10; index += 1) for (const kind of ['add', 'remove']) {
+        const input = { seriesId: ${JSON.stringify(seriesId)}, bookId: ${JSON.stringify(first)}, kind };
+        const preview = await window.ai7.previewSeriesMembershipChange(input);
+        await window.ai7.changeSeriesMembership({ ...input, previewDigest: preview.previewDigest });
+      }
+      return true;
+    })()`), 'history-seed');
+    await leaveSeries(renderer, 'history-pages');
+    await bookSide(renderer, first, 'history-pages');
+    await readBookSeries(renderer, (page) => page.history.length === 20, 'history-page-ready');
+    await assertRenderer(renderer, `(() => { document.querySelector('details.book-series-history').open = true; return true; })()`, 'history-expand');
+    for (let repeat = 0; repeat < 2; repeat += 1) {
+      await clickSelector(renderer, '[data-series-action="book-history-more"]', 'book-history-next');
+      await waitFor(renderer, `document.querySelectorAll('details.book-series-history li.series-change').length === 2 && document.activeElement?.tagName === 'SUMMARY'`, 'book-history-bounded');
+      await clickSelector(renderer, '[data-series-action="book-history-first"]', 'book-history-reset');
+      await waitFor(renderer, `document.querySelectorAll('details.book-series-history li.series-change').length === 20`, 'book-history-first-page');
+    }
+    await backToLibrary(renderer, 'history-pages');
+    // Empty runner-authored Books and Series through the real service; no fixture database or mocked page response.
+    at('series-bounded-seed');
+    requireJourney(await renderer.evaluate(`(async () => {
+      for (let index = 0; index < 51; index += 1) {
+        await window.ai7.createSeries({ title: '分页书系' + String(index).padStart(3, '0'), note: '' });
+      }
+      return true;
+    })()`), 'page-series-created');
+    const pageBooks = [];
+    for (let index = 0; index < 51; index += 1) {
+      // Creation binds this window to that Book. The real return action releases the route before the next creation.
+      pageBooks.push(await createEmptyBook(renderer, '分页图书' + String(index).padStart(3, '0')));
+      await backToLibrary(renderer, 'page-book-created');
+    }
+    requireJourney(pageBooks.length === 51 && new Set(pageBooks).size === 51 && pageBooks.every((id) => UUID_PATTERN.test(id)), 'page-books-created');
+    at('series-bounded-navigation');
+    await click(renderer, '书系', 'paged-series-list');
+    await readSeriesList(renderer, (page) => page.items.length === 50, 'list-first-page');
+    for (let repeat = 0; repeat < 2; repeat += 1) {
+      await clickSelector(renderer, '[data-series-action="list-more"]', 'list-next');
+      await readSeriesList(renderer, (page) => page.items.length === 4 && page.focus === 'open', 'list-bounded');
+      await clickSelector(renderer, '[data-series-action="list-first"]', 'list-reset');
+      await readSeriesList(renderer, (page) => page.items.length === 50 && page.focus === 'open', 'list-reset-bounded');
+    }
+    await clickSelector(renderer, '[data-series-action="list-more"]', 'list-target-page');
+    await readSeriesList(renderer, (page) => page.items.some(([id]) => id === seriesId), 'list-target-visible');
+    await clickSelector(renderer, `[data-series-id="${seriesId}"] [data-series-action="open"]`, 'paged-series-open');
+    await readSeries(renderer, (page) => page.seriesId === seriesId, 'paged-series-ready');
+    await clickSelector(renderer, '[data-series-action="add-open"]', 'paged-chooser');
+    await readSeries(renderer, (page) => page.chooser?.length === 50, 'chooser-first-page');
+    await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[name="series-add-book"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'chooser-select');
+    await clickSelector(renderer, '[data-series-action="add-more"]', 'chooser-next');
+    await readSeries(renderer, (page) => page.chooser?.length === 4 && page.chooser.filter(([, checked]) => checked).length === 1 && page.lookDisabled === false, 'chooser-bounded-selection');
+    await clickSelector(renderer, '[data-series-action="add-first"]', 'chooser-reset');
+    await readSeries(renderer, (page) => page.chooser?.length === 50 && page.chooser.every(([, checked]) => !checked), 'chooser-reset-bounded');
+    await clickSelector(renderer, '[data-series-action="add-more"]', 'chooser-next-again');
+    await readSeries(renderer, (page) => page.chooser?.length === 3, 'chooser-last-page');
+    await clickSelector(renderer, '[data-series-action="add-cancel"]', 'chooser-close');
+    requireJourney(await renderer.evaluate(`(async () => {
+      for (const bookId of ${JSON.stringify(pageBooks)}) {
+        const input = { seriesId: ${JSON.stringify(seriesId)}, bookId, kind: 'add' };
+        const preview = await window.ai7.previewSeriesMembershipChange(input);
+        await window.ai7.changeSeriesMembership({ ...input, previewDigest: preview.previewDigest });
+      }
+      return true;
+    })()`), 'member-pages-seed');
+    await click(renderer, '返回书系', 'members-reload-list');
+    await readSeriesList(renderer, (page) => page.items.length === 50, 'members-reload-first');
+    await clickSelector(renderer, '[data-series-action="list-more"]', 'members-reload-target');
+    await readSeriesList(renderer, (page) => page.items.some(([id]) => id === seriesId), 'members-target-visible');
+    await clickSelector(renderer, `[data-series-id="${seriesId}"] [data-series-action="open"]`, 'members-reload');
+    await readSeries(renderer, (page) => page.members.length === 50 && page.history.length === 20, 'members-first');
+    for (let repeat = 0; repeat < 2; repeat += 1) {
+      await clickSelector(renderer, '[data-series-action="members-more"]', 'members-next');
+      await readSeries(renderer, (page) => page.members.length === 3 && page.focus === 'remove-open', 'members-bounded');
+      await clickSelector(renderer, '[data-series-action="members-first"]', 'members-reset');
+      await readSeries(renderer, (page) => page.members.length === 50, 'members-reset-bounded');
+      for (let next = 0; next < 3; next += 1) {
+        await clickSelector(renderer, '[data-series-action="history-more"]', 'series-history-next');
+        await waitFor(renderer, `document.querySelectorAll('ol.series-history > li').length === ${next === 2 ? 16 : 20} && document.activeElement?.matches('.series-history-section h3')`, 'series-history-bounded');
+      }
+      await clickSelector(renderer, '[data-series-action="history-first"]', 'series-history-reset');
+      await readSeries(renderer, (page) => page.history.length === 20, 'series-history-reset-bounded');
+    }
 
     at('zero-activity');
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key))`, 'exact-service-readiness-remained-zero');

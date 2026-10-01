@@ -58,11 +58,11 @@ let open: { readonly key: string; readonly draft: Draft } | null = null;
 let composing = false;
 
 /**
- * Whether the editor is inside an open 分析反馈 card of `root` — its focus there, or text still being composed — so ②A
+ * Whether an open 分析反馈 card of `root` has pending work, focus, or text still being composed, so ②A
  * holds a follow-up draw that would replace the card under them (Issue #94 review; FDBK-005).
  */
 export function analysisFeedbackEngaged(root: HTMLElement): boolean {
-  if (composing) return true;
+  if (composing || root.querySelector('.analysis-feedback-card[data-analysis-feedback-pending="true"]') !== null) return true;
   const active = document.activeElement;
   return active instanceof HTMLElement && root.contains(active) && active.closest('.analysis-feedback-card') !== null;
 }
@@ -162,6 +162,7 @@ export function mountAnalysisFeedback(options: MountAnalysisFeedbackOptions): { 
   const cardNode = (item: AnalysisFeedbackItemProjection, draft: Draft, name: string): HTMLElement => {
     composing = false;
     const box = el('div', 'analysis-feedback-card');
+    box.dataset['analysisFeedbackPending'] = String(busy);
     box.setAttribute('role', 'group');
     box.setAttribute('aria-label', `${ANALYSIS_FEEDBACK_HEADING}：${name}`);
     const judgments = el('fieldset', 'analysis-feedback-judgments');
@@ -238,7 +239,7 @@ export function mountAnalysisFeedback(options: MountAnalysisFeedbackOptions): { 
     paint(null);
     setStatus(ANALYSIS_FEEDBACK_STATUS.recording, 'busy');
     try {
-      projection = await api.recordAnalysisFeedback({
+      await api.recordAnalysisFeedback({
         revisionId,
         itemKey: item.itemKey,
         itemDigest: item.digest,
@@ -246,11 +247,13 @@ export function mountAnalysisFeedback(options: MountAnalysisFeedbackOptions): { 
         judgment,
         reason: judgment === 'accurate' || draft.choice === null ? null : { choice: draft.choice, text: draft.choice === ANALYSIS_FEEDBACK_OTHER ? draft.other : null },
         correction: judgment === 'accurate' || draft.correction.trim().length === 0 ? null : draft.correction,
+      }).then((next) => {
+        projection = next;
+        busy = false;
+        if (open?.key === draftKey(item.itemKey)) open = null;
+        paint(`${itemSelector(item.itemKey)} [data-analysis-action="open-feedback"]`);
+        setStatus(ANALYSIS_FEEDBACK_STATUS.recorded, 'success');
       });
-      busy = false;
-      if (open?.key === draftKey(item.itemKey)) open = null;
-      paint(`${itemSelector(item.itemKey)} [data-analysis-action="open-feedback"]`);
-      setStatus(ANALYSIS_FEEDBACK_STATUS.recorded, 'success');
     } catch (error) {
       busy = false;
       const message = errorMessage(error, ANALYSIS_FEEDBACK_STATUS.failed);
