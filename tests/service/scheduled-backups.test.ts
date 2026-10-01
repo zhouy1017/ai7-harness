@@ -4,13 +4,23 @@ import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { strFromU8, unzipSync } from 'fflate';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
 import { writeDatabasePackage } from '../../src/service/database-exports.js';
 import { SCHEDULED_BACKUP_TRIGGER_SQL, backupFailureReason, backupFileName } from '../../src/service/scheduled-backups.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { DATABASE_EXPORT_SCHEMA_VERSION, SCHEDULED_BACKUP_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+const payloadWalk = vi.hoisted(() => ({ root: null as string | null, pause: null as (() => Promise<void>) | null }));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  const opendir: typeof actual.opendir = async (...args) => {
+    if (args[0] === payloadWalk.root) await payloadWalk.pause?.();
+    return actual.opendir(...args);
+  };
+  return { ...actual, opendir, default: { ...actual, opendir } };
+});
 
 // Service-integration suite (L2) for 定期自动备份 (Issue #434, plan slice S86b; V2-UX-DSTO-018; ADR 0079 §1.4, §1.7) over the real
 // store, on clocks the cases name: the switch off by default; turning it on answers at once and backs up on the background check
@@ -65,6 +75,36 @@ function code(error: unknown): unknown {
 }
 
 describe('定期自动备份 over the real store', () => {
+  it('withdraws an in-flight backup when the editor turns the switch off', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let walking = false;
+    payloadWalk.root = roots.dataRoot;
+    payloadWalk.pause = async () => { walking = true; await held; };
+    try {
+      await store.setScheduledBackup({ enabled: true, expectedOrdinal: 0 }, T);
+      const old = store.runScheduledBackupIfDue(T).catch(() => false);
+      const deadline = Date.now() + 30_000;
+      while (!walking) {
+        if (Date.now() > deadline) throw new Error('backup payload walk did not start');
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      const off = await store.setScheduledBackup({ enabled: false, expectedOrdinal: 1 }, T);
+      expect([off.enabled, off.ordinal]).toEqual([false, 2]);
+      release();
+      expect(await old).toBe(false);
+      expect(store.inspectScheduledBackups(T)).toMatchObject({ enabled: false, total: 0, backingUp: false, lastFailure: null });
+      expect(await readdir(`${roots.dataRoot}-backups`)).toEqual([]);
+    } finally {
+      release();
+      payloadWalk.root = null;
+      payloadWalk.pause = null;
+      await store.stopScheduledBackups();
+      store.close();
+    }
+  }, 60_000);
+
   it('backs up once a day while the switch is on, keeps fourteen days, and removes nothing when it is turned off', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
