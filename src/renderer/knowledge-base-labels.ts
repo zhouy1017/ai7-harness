@@ -163,7 +163,7 @@ export function guidelineMergedVersionsSummary(count: number): string {
 export function guidelineMergedVersionLine(version: ReviewGuidelineMergedVersionProjection): string {
   const named = version.usedBy.map((run) => `《${run.bookTitle}》第 ${run.reviewOrdinal} 次审阅`).join('、');
   const used = version.usedByCount > version.usedBy.length ? `用于 ${version.usedByCount} 次审阅，最近：${named}` : `用于 ${named}`;
-  return `第 ${version.ordinal} 版 · ${version.issuer} · ${version.clauses.length} 条 · 随图书带来 · ${used}`;
+  return `第 ${version.ordinal} 版 · ${version.issuer} · ${version.clauseCount} 条 · 随图书带来 · ${used}`;
 }
 
 /** When more such versions exist than are named. */

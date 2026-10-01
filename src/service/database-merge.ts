@@ -267,6 +267,7 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   series: 'house',
   series_knowledge_items: 'house',
   series_knowledge_promotions: 'house',
+  series_knowledge_conflicts: 'house',
   evaluation_preferences: 'house',
   store_versions: 'house',
   database_export_preparations: 'house',

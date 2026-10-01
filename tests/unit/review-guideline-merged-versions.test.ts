@@ -142,7 +142,7 @@ describe('知识库 › 审阅规范文件 after a merge', () => {
     const db = store();
     try {
       book(db, 'many', '合并来的书', 'applied');
-      const long = 'a\u0301'.repeat(1800);
+      const long = 'a' + '\u0301'.repeat(8000);
       for (let index = 1; index <= 25; index += 1) run(db, `r-many-${String(index).padStart(2, '0')}`, 'many', index,
         { version: '2', issuer: '本社', clauses: [long] });
       for (let index = 0; index < 12; index += 1) {
