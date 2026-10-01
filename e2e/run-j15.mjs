@@ -374,6 +374,7 @@ async function constructPredecessorV12(dataRoot, bookId) {
       DROP TABLE database_export_approvals;
       DROP TABLE database_export_preparations;
       DROP TABLE store_versions;
+      DROP TABLE series_knowledge_conflicts;
       DROP TABLE series_knowledge_promotions;
       DROP TABLE series_knowledge_revisions;
       DROP TABLE series_knowledge_candidates;
