@@ -155,3 +155,5 @@ Live Provider calls are authorized unattended under ADR 0070, bounded by the tra
 
 Do not touch export, publication, release, distribution, or main. Under ADR 0058 do not query or consider Actions usage.
 ```
+
+PR #576 is now prepared on integrated dev@84b5fc6c. Its explicit decision/date/dimension filters, grouping, exact source navigation, bounded history pages and local-midnight cutoff are repaired; protocol/readiness81 and schema50. Final full guest and hosted verification are pending at the merge candidate. The original worktree's pre-existing uncommitted edits remain preserved; review and testing use the isolated copy.
