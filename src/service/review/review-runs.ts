@@ -1086,7 +1086,7 @@ export class ReviewRunStore {
    */
   planFacts(bookId: string, reviewRunId: string): ReviewRunPlanFacts {
     const snapshot = this.#runOfBook(bookId, reviewRunId);
-    const view = this.#runView(snapshot);
+    const view = this.#runStateView(snapshot);
     const categories = view.categories.map((categoryView) => {
       const { category } = categoryView;
       const frozen = category.task === null ? null : this.#ledgers.ledgerOf(category.entry).frozenPlan(category.task.taskIntentId, category.task.planEnvelopeDigest);
@@ -1986,7 +1986,7 @@ export class ReviewRunStore {
   #unavailableReason(bookId: string, entry: ReviewCategoryConfigurationEntry): string {
     if (entry.categoryId === 'series-consistency') {
       const series = new SeriesLedger(this.#db).seriesOf(bookId);
-      if (series.length > 0) return seriesConsistencyWaitingReason(series.map((entry) => entry.title));
+      if (series.count > 0) return seriesConsistencyWaitingReason(series.memberships.map((entry) => entry.title), series.count);
     }
     return entry.unavailableReason ?? '这一类暂不可用。';
   }

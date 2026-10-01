@@ -25,6 +25,11 @@ const PARTIAL_NAME_PATTERN = /^\.partial-[0-9a-f-]{36}$/i;
 const WRITE_BATCH = 256;
 const MAX_OBJECT_LINE_BYTES = MAX_BLOCK_CODE_UNITS * 6 + 2_048;
 
+/** The immutable file identity shared by live recovery reads and frozen database packages. */
+export function isRecoveryObjectKey(objectDigest: string, manifestDigest: string, key: string): boolean {
+  return DIGEST_PATTERN.test(objectDigest) && DIGEST_PATTERN.test(manifestDigest) && key === posix.join('v1', `${objectDigest}.snapshot`);
+}
+
 function compareCanonicalKeys(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
@@ -242,8 +247,7 @@ export class RecoveryObjectStore {
   }
 
   async #locate(record: RecoverySnapshotRecord): Promise<string | null> {
-    if (!DIGEST_PATTERN.test(record.objectDigest) || !DIGEST_PATTERN.test(record.manifestDigest) ||
-        record.objectRelativeKey !== posix.join('v1', `${record.objectDigest}.snapshot`)) return null;
+    if (!isRecoveryObjectKey(record.objectDigest, record.manifestDigest, record.objectRelativeKey)) return null;
     const inspected = await inspectCanonicalDataFile(this.#dataRoot, this.#root, `${record.objectDigest}.snapshot`);
     return inspected.exists ? inspected.path : null;
   }

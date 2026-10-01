@@ -13,6 +13,11 @@ import {
 } from '../shared/protocol.js';
 import { fixedArchiveTime } from '../shared/archive-time.js';
 import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
+import { isManuscriptObjectKey } from './manuscript-format.js';
+import { isRecoveryObjectKey } from './recovery-objects.js';
+import { LIBRARY_OBJECT_DIRECTORY, readLibraryMaterialRecord } from './library-materials.js';
+import { EDITORIAL_WORKSPACE_PROFILE_BYTES, EDITORIAL_WORKSPACE_PROFILE_DIGEST, EDITORIAL_WORKSPACE_PROFILE_RETAINED_KEY } from './editorial-workspace-profile.js';
+import { DATABASE_EXPORT_SCHEMA_VERSION } from './task-authorization.js';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
 import {
   EXPORT_DISPOSITION_LABELS,
@@ -289,6 +294,55 @@ function contentsOfCopy(path: string): DatabaseExportContentsProjection {
 }
 
 /**
+ * The database copy is the authority for external files: a live deletion after copying must not turn a self-consistent ZIP
+ * into an incomplete backup. Compare every frozen reference with the bytes actually packed, retaining only the already
+ * bounded member index. Rows stream, and cancellation/service requests get a turn between bounded batches.
+ */
+async function verifyCopiedPayloads(path: string, members: ReadonlyArray<DatabasePackageMember>, schemaRevision: number, signal?: AbortSignal): Promise<void> {
+  const incomplete = (): never => { throw new DatabaseExportError('DATABASE_PACKAGE_INCOMPLETE', '数据文件在打包期间发生变化或已损坏；没有生成完整备份，请重试。'); };
+  const copy = new DatabaseSync(path, { readOnly: true });
+  const packed = new Map(members.map((member) => [member.path, member]));
+  let checked = 0;
+  const compare = async (key: string, digest: SQLOutputValue | undefined, bytes: SQLOutputValue | undefined): Promise<void> => {
+    signal?.throwIfAborted();
+    const member = packed.get(key);
+    if (typeof digest !== 'string' || !DIGEST_PATTERN.test(digest) || typeof bytes !== 'number' || !Number.isSafeInteger(bytes) || bytes <= 0 ||
+        member === undefined || member.sha256 !== digest || member.bytes !== bytes) incomplete();
+    checked += 1;
+    if (checked % 128 === 0) await new Promise<void>((resolve) => setImmediate(resolve));
+  };
+  const present = (table: string): boolean => {
+    const exists = copy.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) !== undefined;
+    // Minimal builder fixtures predate external-file relations; every production package must have all four authorities.
+    if (!exists && schemaRevision >= DATABASE_EXPORT_SCHEMA_VERSION) incomplete();
+    return exists;
+  };
+  try {
+    if (present('content_objects')) for (const row of copy.prepare('SELECT object_digest, relative_key, byte_length FROM content_objects').iterate()) {
+      if (typeof row.object_digest !== 'string' || typeof row.relative_key !== 'string' || !isManuscriptObjectKey(row.object_digest, row.relative_key)) incomplete();
+      await compare(`objects/${row.relative_key}`, row.object_digest, row.byte_length);
+    }
+    if (present('recovery_snapshots')) for (const row of copy.prepare('SELECT object_digest, manifest_digest, object_relative_key, byte_length FROM recovery_snapshots').iterate()) {
+      if (typeof row.object_digest !== 'string' || typeof row.manifest_digest !== 'string' || typeof row.object_relative_key !== 'string' ||
+          !isRecoveryObjectKey(row.object_digest, row.manifest_digest, row.object_relative_key)) incomplete();
+      await compare(`recovery-objects/${row.object_relative_key}`, row.object_digest, row.byte_length);
+    }
+    if (present('library_materials')) for (const row of copy.prepare('SELECT material_id, object_sha256, recorded_at, canonical_json, sha256 FROM library_materials').iterate()) {
+      const material = (() => { try { return readLibraryMaterialRecord(row); } catch { return incomplete(); } })();
+      await compare(`${LIBRARY_OBJECT_DIRECTORY}/${material.objectKey}`, material.source.sha256, material.source.bytes);
+    }
+    let installations = 0;
+    if (present('native_artifact_installations')) for (const row of copy.prepare('SELECT retained_key, content_sha256, byte_length FROM native_artifact_installations').iterate()) {
+      installations += 1;
+      if (installations > 1 || row.retained_key !== EDITORIAL_WORKSPACE_PROFILE_RETAINED_KEY ||
+          row.content_sha256 !== EDITORIAL_WORKSPACE_PROFILE_DIGEST || row.byte_length !== EDITORIAL_WORKSPACE_PROFILE_BYTES) incomplete();
+      await compare(`native-artifacts/${row.retained_key}`, row.content_sha256, row.byte_length);
+    }
+    signal?.throwIfAborted();
+  } finally { copy.close(); }
+}
+
+/**
  * How far writing a package has come (Issue #434 review): while the store is `copying`, the bytes of its pages copied of all of
  * them; then, `packing`, the bytes read of the files it carries, the store's copy among them.
  */
@@ -403,6 +457,7 @@ export async function writeDatabasePackage(
     };
     await add(DATABASE_PACKAGE_STORE_MEMBER, snapshotPath, true);
     for (const source of sources) await add(source.member, source.path, false);
+    await verifyCopiedPayloads(snapshotPath, members, packageFacts.schemaRevision, signal);
     signal?.throwIfAborted();
     const manifest = canonicalRecord({
       schema: DATABASE_PACKAGE_SCHEMA,

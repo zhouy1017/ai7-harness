@@ -11,8 +11,9 @@ const controller = (await import(new URL('../../e2e/controller.mjs', import.meta
   ADMITTED_JOURNEYS: readonly string[];
   JOURNEY_LOCATIONS: JourneyLocations;
   createJ01CompletionLocation: (scenario: string) => (phase: string) => string;
+  j07PackageExportFailureLocation: (location: string, error: unknown) => string;
 };
-const { ADMITTED_JOURNEYS, JOURNEY_LOCATIONS, createJ01CompletionLocation } = controller;
+const { ADMITTED_JOURNEYS, JOURNEY_LOCATIONS, createJ01CompletionLocation, j07PackageExportFailureLocation } = controller;
 
 const E2E_ROOT = fileURLToPath(new URL('../../e2e/', import.meta.url));
 
@@ -35,9 +36,10 @@ const RUNNER_FILES: Readonly<Record<string, string>> = Object.freeze({
 });
 
 /*
- * Every one of the seven runners shares one failure-reporting mechanism, confirmed by reading each
- * runner's terminal `main().catch(...)` handler: it always calls `reportJourneyFailure(journey,
- * <the module-level variable at() last set>, error)`. `requireJourney`, `assertRenderer`, `waitFor`
+ * The runners share one failure-reporting mechanism, confirmed by reading each terminal
+ * `main().catch(...)` handler. J07 additionally classifies package-export failures through a closed
+ * helper, tested below. Other locations use the module-level variable at() last set.
+ * `requireJourney`, `assertRenderer`, `waitFor`
  * and `clickExactButton` only build the thrown `Error`'s message from their own `name`/`location`
  * argument; none of them calls `at()`, so that argument never reaches `reportJourneyFailure` and is
  * not a candidate location. Only `at(...)` arguments are ever reportable, in three source forms:
@@ -260,5 +262,29 @@ describe('extraction catches an unlisted at() location, one fixture per form', (
     `;
     const violations = subsetViolations(source, admitted);
     expect(violations).toEqual([`'unlisted-branch-stage' is not listed`]);
+  });
+});
+
+describe('J07 package export failures expose only closed locations', () => {
+  it('classifies existing assertion names without exposing exception detail', () => {
+    for (const name of ['package-export-history', 'package-export-prepared', 'package-export-closed']) {
+      const error = Object.assign(new Error('J-07/' + name), { detail: { text: 'private-value', path: 'private-path' } });
+      expect(j07PackageExportFailureLocation('package-export', error)).toBe(name);
+      expect(JOURNEY_LOCATIONS['J-07']).toContain(name);
+    }
+    expect(j07PackageExportFailureLocation('package-export', new Error('J-07/package-export-docx-document:news-release'))).toBe('package-export-docx-news-release');
+    expect(j07PackageExportFailureLocation('package-export', new Error('J-07/renderer-evaluate'))).toBe('package-export-renderer-evaluate');
+  });
+
+  it('uses closed IO categories and preserves unknown or unrelated failure locations', () => {
+    for (const [code, name] of [['ENOENT', 'absent'], ['EEXIST', 'exists'], ['EACCES', 'access'], ['EPERM', 'permission'], ['EBUSY', 'busy']]) {
+      const location = j07PackageExportFailureLocation('package-export', Object.assign(new Error('private-value'), { code }));
+      expect(location).toBe('package-export-io-' + name);
+      expect(JOURNEY_LOCATIONS['J-07']).toContain(location);
+    }
+    for (const error of [new Error('private-value'), new Error('J-07/package-export-history/private-value'), Object.assign(new Error('private-value'), { code: 'private-code' }), { message: 'J-07/package-export-history' }, null]) {
+      expect(j07PackageExportFailureLocation('package-export', error)).toBe('package-export');
+    }
+    expect(j07PackageExportFailureLocation('documents-restart', new Error('J-07/package-export-history'))).toBe('documents-restart');
   });
 });
