@@ -11073,6 +11073,15 @@ export class EditorialStore {
       governing.update(canonicalJson({ materialKey: material.materialKey, digest: material.digest, decisions: material.decisions }));
       governing.update('\n');
     }
+    // Knowledge versions govern the same preview even when a revision or candidate edit leaves every count unchanged.
+    for (const item of this.#seriesKnowledge.items(series.seriesId)) {
+      governing.update(canonicalJson({ kind: 'series-knowledge', itemId: item.itemId, revisionId: item.current.revisionId }));
+      governing.update('\n');
+    }
+    for (const candidate of this.#seriesKnowledge.open(series.seriesId)) {
+      governing.update(canonicalJson({ kind: 'series-candidate', candidateId: candidate.candidateId, versionId: candidate.versionId }));
+      governing.update('\n');
+    }
     const groups = seriesMembershipImpact(input.kind, {
       seriesTitle: series.title,
       bookTitle,
