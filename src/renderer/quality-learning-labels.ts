@@ -1,4 +1,5 @@
 import type {
+  FeedbackHistoryInput,
   LearningEligibilityChoice,
   LearningMaterialProjection,
   LearningMaterialState,
@@ -119,18 +120,40 @@ export const FEEDBACK_HISTORY_HEADING = '反馈历史';
 export const FEEDBACK_HISTORY_NOTE = '这里只是记录你给过的反馈：不会催你补充原因，也不会把没有说明当作认可。';
 export const FEEDBACK_HISTORY_EMPTY = '还没有反馈记录。你对修改建议、分析结果和审阅发现的处理与原因，会记在这里。';
 export const FEEDBACK_HISTORY_NONE_MATCH = '没有符合的反馈记录。';
-export const FEEDBACK_HISTORY_TRUNCATED = '只列出最近的记录。';
+export const FEEDBACK_HISTORY_TRUNCATED = '还有更早的记录，可继续查看。';
 export const FEEDBACK_HISTORY_OPEN = '打开…';
 /** In place of 打开… when the paragraph a 修改建议 was made on is gone from the manuscript (Issue #61 review). */
 export const FEEDBACK_HISTORY_DETACHED = '这条修改建议所在的段落已不在稿件中。';
 export const FEEDBACK_HISTORY_ALL = '全部';
-export const FEEDBACK_HISTORY_FILTERS = { book: '图书', origin: '来源', author: '作者', editor: '责编' } as const;
+export const FEEDBACK_HISTORY_FILTERS = { book: '图书', origin: '来源', signal: '处理 / 判断', author: '作者', editor: '责编', dimension: '编辑维度', from: '起始日期', to: '截止日期' } as const;
+export const FEEDBACK_HISTORY_GROUPS = { book: '图书', origin: '来源', time: '时间', dimension: '编辑维度' } as const;
+export const FEEDBACK_HISTORY_UNCLASSIFIED = '未分类';
+
+/** A calendar-day key shared by local-time grouping and the inclusive date controls. */
+export function feedbackDateValue(instant: string): string {
+  const date = new Date(instant);
+  return `${String(date.getFullYear()).padStart(4, '0')}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+/** Calendar arithmetic keeps the last day inclusive even when a local day is not 24 hours long. */
+export function feedbackDateBounds(from: string, to: string): Pick<FeedbackHistoryInput, 'recordedFrom' | 'recordedBefore'> | null {
+  if ([from, to].some((value) => value !== '' && !/^\d{4}-\d{2}-\d{2}$/u.test(value))) return null;
+  const start = from === '' ? null : new Date(`${from}T00:00:00`);
+  const end = to === '' ? null : new Date(`${to}T00:00:00`);
+  if ((start !== null && (!Number.isFinite(start.getTime()) || feedbackDateValue(start.toISOString()) !== from)) ||
+      (end !== null && (!Number.isFinite(end.getTime()) || feedbackDateValue(end.toISOString()) !== to)) ||
+      (from !== '' && to !== '' && from > to)) return null;
+  // Resolve tomorrow's midnight independently: today's midnight may have normalized to 01:00 in a DST gap.
+  const before = end === null ? null : new Date(end.getFullYear(), end.getMonth(), end.getDate() + 1, 0, 0, 0, 0);
+  return { recordedFrom: start?.toISOString() ?? null, recordedBefore: before?.toISOString() ?? null };
+}
 export const FEEDBACK_HISTORY_STATUS = {
   loading: '正在读取反馈历史…',
   opened: '反馈历史已打开',
   unavailable: '无法读取反馈历史。',
   opening: '正在打开这条反馈所在的记录…',
   openFailed: '无法打开这条反馈所在的记录。',
+  invalidDates: '请填写有效日期，截止日期不能早于起始日期。',
 } as const;
 
 export const FEEDBACK_ORIGIN_LABELS: Readonly<Record<'proposal-decision' | 'analysis-feedback' | 'review-disposition', string>> = {

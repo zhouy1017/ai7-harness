@@ -1086,7 +1086,7 @@ export class ReviewRunStore {
    */
   planFacts(bookId: string, reviewRunId: string): ReviewRunPlanFacts {
     const snapshot = this.#runOfBook(bookId, reviewRunId);
-    const view = this.#runView(snapshot);
+    const view = this.#runStateView(snapshot);
     const categories = view.categories.map((categoryView) => {
       const { category } = categoryView;
       const frozen = category.task === null ? null : this.#ledgers.ledgerOf(category.entry).frozenPlan(category.task.taskIntentId, category.task.planEnvelopeDigest);

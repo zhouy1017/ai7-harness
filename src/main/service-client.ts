@@ -61,7 +61,8 @@ interface PendingRequest {
   readonly operation: ServiceOperation;
   readonly resolve: (value: unknown) => void;
   readonly reject: (error: Error) => void;
-  readonly timeout: NodeJS.Timeout;
+  readonly timeoutMs: number;
+  timeout: NodeJS.Timeout | undefined;
 }
 
 export class ServiceCallError extends Error {
@@ -129,7 +130,7 @@ function serviceEnvironment(
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 79 &&
+    value.protocolVersion === 83 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&
@@ -248,18 +249,15 @@ export class ServiceClient {
     frame.writeUInt32BE(payload.length, 0);
     payload.copy(frame, 4);
     return new Promise<ServiceOperationMap[Operation]['output']>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.#pending.delete(id);
-        reject(new ServiceCallError('SERVICE_TIMEOUT', '本地业务服务响应超时。'));
-        this.#fault();
-      }, requestTimeoutMs(operation));
-      timeout.unref();
+      const timeoutMs = requestTimeoutMs(operation);
       this.#pending.set(id, {
         operation,
         resolve: (value) => resolve(value as ServiceOperationMap[Operation]['output']),
         reject,
-        timeout,
+        timeoutMs,
+        timeout: undefined,
       });
+      this.#armFirstDeadline();
       this.#child.stdin.write(frame, (error) => {
         if (!error) return;
         const pending = this.#pending.get(id);
@@ -270,6 +268,20 @@ export class ServiceClient {
         this.#fault();
       });
     });
+  }
+
+  /** The service dispatches serially: queued time is not the next operation's execution time. */
+  #armFirstDeadline(): void {
+    const first = this.#pending.entries().next().value;
+    if (first === undefined) return;
+    const [id, pending] = first;
+    if (pending.timeout !== undefined) return;
+    pending.timeout = setTimeout(() => {
+      this.#pending.delete(id);
+      pending.reject(new ServiceCallError('SERVICE_TIMEOUT', '本地业务服务响应超时。'));
+      this.#fault();
+    }, pending.timeoutMs);
+    pending.timeout.unref();
   }
 
   async stop(): Promise<void> {
@@ -315,7 +327,7 @@ export class ServiceClient {
         return;
       }
       const pending = this.#pending.get(response.id);
-      if (!pending) {
+      if (!pending || this.#pending.keys().next().value !== response.id) {
         this.#fault();
         return;
       }
@@ -326,9 +338,11 @@ export class ServiceClient {
       } else if (response.op !== pending.operation) {
         pending.reject(new ServiceCallError('SERVICE_RESPONSE_INVALID', '本地业务服务响应不匹配。'));
         this.#fault();
+        return;
       } else {
         pending.resolve(response.result);
       }
+      this.#armFirstDeadline();
     }
   }
 
