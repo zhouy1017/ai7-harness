@@ -5,6 +5,7 @@ import { basename, extname, isAbsolute, posix, relative, resolve, sep } from 'no
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { J03_TASK_GOAL, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
+  InspectSeriesKnowledgeReviewInput,
   InspectTaskPlanInput,
   TaskPlanProjection,
   GlobalAttentionProjection,
@@ -11056,8 +11057,16 @@ export class EditorialStore {
   }
 
   /** 书系知识纳入审阅 (SER-015, SER-016, SER-019) of one open candidate as it stands now. A read. */
-  inspectSeriesKnowledgeReview(input: { seriesId: string; candidateId: string }): SeriesKnowledgeReviewProjection {
-    return this.#seriesCall(() => this.#seriesKnowledgeReview(input.seriesId, input.candidateId).projection);
+  inspectSeriesKnowledgeReview(input: InspectSeriesKnowledgeReviewInput): SeriesKnowledgeReviewProjection {
+    return this.#seriesCall(() => {
+      const page = input.conflictsPage;
+      requireStore(page === undefined || (Number.isSafeInteger(page.after) && page.after >= 0), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      const review = this.#seriesKnowledgeReview(input.seriesId, input.candidateId, page?.after ?? 0);
+      requireStore(page === undefined || (review.candidate.version === page.candidateVersion && review.projection.reviewDigest === page.reviewDigest),
+        'SERIES_KNOWLEDGE_REVIEW_STALE', '候选项、条目或冲突在审阅之后有了变化；请重新审阅。');
+      requireStore((page?.after ?? 0) <= review.projection.conflictCount, 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      return review.projection;
+    });
   }
 
   /** 编辑候选项 (SER-015): the candidate's next version, read again in review against the item as it stands now. */
@@ -11216,7 +11225,7 @@ export class EditorialStore {
     };
   }
 
-  #seriesKnowledgeReview(seriesId: string, candidateId: string): {
+  #seriesKnowledgeReview(seriesId: string, candidateId: string, after = 0): {
     readonly projection: SeriesKnowledgeReviewProjection;
     readonly candidate: StoredCandidate;
     readonly conflicts: () => IterableIterator<FoundConflict>;
@@ -11233,7 +11242,9 @@ export class EditorialStore {
     const blocked = candidate.provenance !== null && !this.#series.seriesOf(candidate.provenance.bookId).some((entry) => entry.seriesId === series.seriesId)
       ? `《${this.#evaluationBookTitle(candidate.provenance.bookId)}》已不在书系「${series.title}」中；来自它的候选项不能纳入。`
       : null;
-    const summary = seriesKnowledgeReviewSummary({ seriesId: series.seriesId, candidateVersionId: candidate.versionId, currentRevisionId: current?.revisionId ?? null, conflicts: conflicts(), blocked });
+    const summary = seriesKnowledgeReviewSummary({ seriesId: series.seriesId, candidateVersionId: candidate.versionId, currentRevisionId: current?.revisionId ?? null, conflicts: conflicts(), blocked, after });
+    const { page } = weighedPage(summary.preview.map((entry) => ({ kind: entry.kind, line: entry.line })),
+      MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN, SERIES_KNOWLEDGE_PAGE_BYTES);
     return {
       candidate,
       conflicts,
@@ -11242,8 +11253,10 @@ export class EditorialStore {
         seriesTitle: series.title,
         candidate: this.#knowledgeCandidateProjection(candidate, summary.count),
         current: current === null ? null : this.#knowledgeRevisionProjection(current),
-        conflicts: summary.preview.map((entry) => ({ kind: entry.kind, line: entry.line })),
+        conflicts: page,
         conflictCount: summary.count,
+        conflictsAfter: after,
+        conflictsNextAfter: after + page.length < summary.count ? after + page.length : null,
         conflictLabel: summary.count === 0 ? null : SERIES_KNOWLEDGE_CONFLICT_LABEL,
         reuseScopes: SERIES_KNOWLEDGE_REUSE_SCOPES.map((scope) => ({ scope, label: SERIES_KNOWLEDGE_REUSE_LABELS[scope] })),
         blocked,

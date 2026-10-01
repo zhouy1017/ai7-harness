@@ -847,8 +847,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'inspectSeriesKnowledgeReview': {
-      const input = requireInput(value.input, ['seriesId', 'candidateId'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['seriesId', 'candidateId'], ['conflictsPage'], tentativeId);
       if (!validUuid(input.seriesId) || !validUuid(input.candidateId)) throw new ProtocolError(tentativeId);
+      const page = input.conflictsPage;
+      if (page !== undefined && (!isRecord(page) || !hasExactKeys(page, ['candidateVersion', 'reviewDigest', 'after']) ||
+          !isSafeInteger(page.candidateVersion, 1) || !isSafeInteger(page.after, 0) ||
+          !isBoundedString(page.reviewDigest, 64) || !HEX_DIGEST_PATTERN.test(page.reviewDigest))) throw new ProtocolError(tentativeId);
       break;
     }
     case 'editSeriesKnowledgeCandidate': {

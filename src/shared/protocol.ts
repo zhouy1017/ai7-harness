@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 81 as const;
+export const SERVICE_PROTOCOL_VERSION = 82 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -5750,12 +5750,21 @@ export interface SeriesKnowledgeReviewProjection {
   /** At most `MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN` of them, with how many there are in all. */
   readonly conflicts: ReadonlyArray<SeriesKnowledgeConflictProjection>;
   readonly conflictCount: number;
+  readonly conflictsAfter: number;
+  readonly conflictsNextAfter: number | null;
   readonly conflictLabel: typeof SERIES_KNOWLEDGE_CONFLICT_LABEL | null;
   readonly reuseScopes: ReadonlyArray<{ readonly scope: SeriesKnowledgeReuseScope; readonly label: string }>;
   /** Why the candidate cannot be taken in at all now, or `null`. */
   readonly blocked: string | null;
   readonly reviewDigest: string;
   readonly actionLabel: '纳入书系知识';
+}
+
+/** Every page remains bound to the candidate and complete conflict set the editor reviewed. */
+export interface InspectSeriesKnowledgeReviewInput {
+  readonly seriesId: string;
+  readonly candidateId: string;
+  readonly conflictsPage?: { readonly candidateVersion: number; readonly reviewDigest: string; readonly after: number };
 }
 
 export interface EditSeriesKnowledgeCandidateInput {
@@ -8247,7 +8256,7 @@ export interface ServiceOperationMap {
   /** Exactly one of a Series and a Book. */
   inspectSeriesHistory: { input: { seriesId: string | null; bookId: string | null; after: SeriesHistoryCursor | null }; output: SeriesHistoryPageProjection };
   proposeSeriesKnowledge: { input: ProposeSeriesKnowledgeInput; output: SeriesKnowledgeProposalProjection };
-  inspectSeriesKnowledgeReview: { input: { seriesId: string; candidateId: string }; output: SeriesKnowledgeReviewProjection };
+  inspectSeriesKnowledgeReview: { input: InspectSeriesKnowledgeReviewInput; output: SeriesKnowledgeReviewProjection };
   editSeriesKnowledgeCandidate: { input: EditSeriesKnowledgeCandidateInput; output: SeriesKnowledgeReviewProjection };
   promoteSeriesKnowledge: { input: PromoteSeriesKnowledgeInput; output: SeriesKnowledgePromotionProjection };
   inspectSeriesKnowledgeItems: { input: { seriesId: string; text: string; after: SeriesKnowledgeItemsCursor | null }; output: SeriesKnowledgeItemsPageProjection };
@@ -8598,7 +8607,7 @@ export interface RendererApi {
   inspectSeriesCandidates(input: { seriesId: string; text: string; after: SeriesCandidatesCursor | null }): Promise<SeriesCandidatesProjection>;
   inspectSeriesHistory(input: { seriesId: string | null; bookId: string | null; after: SeriesHistoryCursor | null }): Promise<SeriesHistoryPageProjection>;
   proposeSeriesKnowledge(input: ProposeSeriesKnowledgeInput): Promise<SeriesKnowledgeProposalProjection>;
-  inspectSeriesKnowledgeReview(input: { seriesId: string; candidateId: string }): Promise<SeriesKnowledgeReviewProjection>;
+  inspectSeriesKnowledgeReview(input: InspectSeriesKnowledgeReviewInput): Promise<SeriesKnowledgeReviewProjection>;
   editSeriesKnowledgeCandidate(input: EditSeriesKnowledgeCandidateInput): Promise<SeriesKnowledgeReviewProjection>;
   promoteSeriesKnowledge(input: PromoteSeriesKnowledgeInput): Promise<SeriesKnowledgePromotionProjection>;
   inspectSeriesKnowledgeItems(input: { seriesId: string; text: string; after: SeriesKnowledgeItemsCursor | null }): Promise<SeriesKnowledgeItemsPageProjection>;

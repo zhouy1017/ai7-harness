@@ -134,6 +134,19 @@ describe('书系知识 over the real store', () => {
       } finally { database.close(); }
       const review = store.inspectSeriesKnowledgeReview({ seriesId, candidateId: proposed.candidate.candidateId });
       expect(review.conflictCount).toBe(2500);
+      const cursor = { candidateVersion: review.candidate.version, reviewDigest: review.reviewDigest, after: 50 };
+      const pageInput = { seriesId, candidateId: proposed.candidate.candidateId };
+      const second = store.inspectSeriesKnowledgeReview({ ...pageInput, conflictsPage: cursor });
+      expect([second.conflictsAfter, second.conflictsNextAfter, second.conflicts.length]).toEqual([50, 100, 50]);
+      expect(second.reviewDigest).toBe(review.reviewDigest);
+      const last = store.inspectSeriesKnowledgeReview({ ...pageInput, conflictsPage: { ...cursor, after: 2450 } });
+      expect([last.conflictsAfter, last.conflictsNextAfter, last.conflicts.length]).toEqual([2450, null, 50]);
+      expect(last.reviewDigest).toBe(review.reviewDigest);
+      expect(wire(last)).toBeLessThan(MAX_FRAME_BYTES);
+      expect(store.inspectSeriesKnowledgeReview({ ...pageInput, conflictsPage: { ...cursor, after: 0 } })).toEqual(review);
+      expect(refusal(() => store.inspectSeriesKnowledgeReview({ ...pageInput, conflictsPage: { ...cursor, candidateVersion: 2 } }))).toMatch(/^SERIES_KNOWLEDGE_REVIEW_STALE:/);
+      expect(refusal(() => store.inspectSeriesKnowledgeReview({ ...pageInput, conflictsPage: { ...cursor, reviewDigest: '0'.repeat(64) } }))).toMatch(/^SERIES_KNOWLEDGE_REVIEW_STALE:/);
+      expect(refusal(() => store.inspectSeriesKnowledgeReview({ ...pageInput, conflictsPage: { ...cursor, after: 2501 } }))).toMatch(/^SERIES_CURSOR_INVALID:/);
       const promoted = store.promoteSeriesKnowledge({ seriesId, candidateId: proposed.candidate.candidateId, candidateVersion: 1,
         reviewDigest: review.reviewDigest, reuseScope: 'series-tasks', conflictDisposition: 'preserved' });
       expect(wire(promoted)).toBeLessThan(MAX_FRAME_BYTES);

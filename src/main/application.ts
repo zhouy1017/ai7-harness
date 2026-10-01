@@ -2935,7 +2935,7 @@ function registerRendererHandlers(
       requireSender(event);
       requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
       requireAuthority();
-      return service.call('inspectSeriesKnowledgeReview', { seriesId: input.seriesId, candidateId: input.candidateId });
+      return service.call('inspectSeriesKnowledgeReview', input);
     }),
   );
   ipcMain.handle(IPC_CHANNELS.editSeriesKnowledgeCandidate, (event, input: ServiceOperationMap['editSeriesKnowledgeCandidate']['input']) =>

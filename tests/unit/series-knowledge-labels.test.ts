@@ -116,6 +116,10 @@ it('keeps the review digest byte-identical while consuming a single-pass conflic
   expect(summary.digest).toBe(sha256Hex(canonicalJson({ ...base, schema: 'ai7.series-knowledge-review/1', conflicts: conflicts.map(({ kind, ref }) => ({ kind, ref })) })));
   expect(summary.count).toBe(73);
   expect(summary.preview).toEqual(conflicts.slice(0, 50));
+  const last = seriesKnowledgeReviewSummary({ ...base, after: 50, conflicts: conflicts.values() });
+  expect(last.digest).toBe(summary.digest);
+  expect(last.count).toBe(73);
+  expect(last.preview).toEqual(conflicts.slice(50));
 });
 
 describe('书系知识 words', () => {

@@ -46,7 +46,6 @@ import {
   KNOWLEDGE_SUBJECT_LABEL,
   KNOWLEDGE_TARGET_LEGEND,
   KNOWLEDGE_TARGET_NEW,
-  knowledgeConflictsMoreLine,
   knowledgeItemLine,
   knowledgeKeptConflictsLine,
   knowledgePromoteWaits,
@@ -145,6 +144,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
   let reuse: SeriesKnowledgeReuseScope | null = null;
   let edit: Draft | null = null;
   let busy = false;
+  let reviewPageRefusal: { after: number; message: string } | null = null;
   /** The words the items were searched for, and those typed since. */
   let searched = '';
   let searchText = '';
@@ -595,8 +595,18 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
           list.append(line);
         }
         conflicts.append(list);
-        const more = knowledgeConflictsMoreLine(review.conflicts.length, review.conflictCount);
-        if (more !== null) conflicts.append(el('p', 'field-note knowledge-conflicts-more', more));
+        conflicts.append(el('p', 'field-note knowledge-conflicts-range',
+          `第 ${review.conflictsAfter + 1}–${review.conflictsAfter + review.conflicts.length} 处 / 共 ${review.conflictCount} 处冲突`));
+        const paging = el('div', 'button-row');
+        if (review.conflictsNextAfter !== null) paging.append(action('更多冲突…', 'quiet', 'review-conflicts-next',
+          () => void readReviewConflicts(review!.conflictsNextAfter!)));
+        if (review.conflictsAfter > 0) paging.append(action('返回首批冲突', 'quiet', 'review-conflicts-first', () => void readReviewConflicts(0)));
+        if (reviewPageRefusal !== null) {
+          conflicts.append(alertNode(reviewPageRefusal.message));
+          paging.append(action('重试读取冲突', 'secondary', 'review-conflicts-retry', () => void readReviewConflicts(reviewPageRefusal!.after)));
+        }
+        for (const button of paging.querySelectorAll('button')) button.disabled = busy || edit !== null;
+        conflicts.append(paging);
         const choices = el('div', 'button-row knowledge-dispositions');
         const editButton = action(KNOWLEDGE_EDIT, 'secondary', 'edit', () => openEdit());
         const keep = action(KNOWLEDGE_PRESERVE, 'secondary', 'preserve', () => {
@@ -635,7 +645,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       const waits = knowledgePromoteWaits(review, reuse !== null, preserved);
       const buttons = el('div', 'button-row');
       const promote = action(review.actionLabel, 'primary', 'promote', () => void submitPromote());
-      promote.disabled = busy || waits !== null || edit !== null;
+      promote.disabled = busy || waits !== null || edit !== null || reviewPageRefusal !== null;
       buttons.append(promote);
       if (review.conflictLabel === null) {
         const close = action(KNOWLEDGE_CANCEL, 'secondary', 'review-cancel', () => closeReview());
@@ -663,6 +673,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     const candidateId = reviewing;
     reviewing = null;
     review = null;
+    reviewPageRefusal = null;
     reviewRefusal = null;
     edit = null;
     preserved = false;
@@ -676,6 +687,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     busy = true;
     reviewing = candidateId;
     reviewRefusal = null;
+    reviewPageRefusal = null;
     edit = null;
     preserved = false;
     reuse = null;
@@ -691,6 +703,39 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       reviewing = null;
       setStatus(errorMessage(error, KNOWLEDGE_STATUS.failed), 'error');
       paint(null);
+    }
+  };
+
+  /** Replace one conflict page without changing the editor's choices under this same complete review. */
+  const readReviewConflicts = async (after: number): Promise<void> => {
+    if (busy || review === null || reviewing === null || edit !== null) return;
+    const read = review;
+    const candidateId = reviewing;
+    busy = true;
+    reviewPageRefusal = null;
+    paint(null);
+    try {
+      const next = await api.inspectSeriesKnowledgeReview({ seriesId: options.seriesId, candidateId,
+        conflictsPage: { after, candidateVersion: read.candidate.version, reviewDigest: read.reviewDigest } });
+      if (!root.isConnected || reviewing !== candidateId || review !== read) return;
+      review = next;
+      busy = false;
+      paint('.knowledge-review-heading');
+    } catch (error) {
+      if (!root.isConnected || reviewing !== candidateId || review !== read) return;
+      busy = false;
+      const message = errorMessage(error, KNOWLEDGE_STATUS.failed);
+      const stale = typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'SERIES_KNOWLEDGE_REVIEW_STALE';
+      if (stale) {
+        review = null;
+        preserved = false;
+        reuse = null;
+        reviewRefusal = { message, stale: true, where: 'promote' };
+      } else {
+        reviewPageRefusal = { after, message };
+      }
+      paint(stale ? '[data-knowledge-action="review-refresh"]' : '[data-knowledge-action="review-conflicts-retry"]');
+      setStatus(message, 'error');
     }
   };
 
@@ -723,6 +768,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       preserved = false;
       reuse = null;
       reviewRefusal = null;
+      reviewPageRefusal = null;
       paint('.knowledge-review-heading');
       setStatus(KNOWLEDGE_STATUS.edited, 'success');
     } catch (error) {
@@ -750,6 +796,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       });
       reviewing = null;
       review = null;
+      reviewPageRefusal = null;
       preserved = false;
       reuse = null;
       // The item stands whatever the read after it meets; it heads the list when it is on the first page.
@@ -761,7 +808,12 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       busy = false;
       const stale = typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'SERIES_KNOWLEDGE_REVIEW_STALE';
       reviewRefusal = { message: errorMessage(error, KNOWLEDGE_STATUS.failed), stale, where: 'promote' };
-      if (stale) review = null;
+      if (stale) {
+        review = null;
+        preserved = false;
+        reuse = null;
+        reviewPageRefusal = null;
+      }
       paint(stale ? '[data-knowledge-action="review-refresh"]' : '[data-knowledge-action="promote"]');
       setStatus(reviewRefusal.message, 'error');
     }

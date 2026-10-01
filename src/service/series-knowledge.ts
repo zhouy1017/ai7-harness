@@ -329,6 +329,7 @@ export function seriesKnowledgeReviewSummary(input: {
   readonly currentRevisionId: string | null;
   readonly conflicts: Iterable<FoundConflict>;
   readonly blocked: string | null;
+  readonly after?: number;
 }): { readonly digest: string; readonly count: number; readonly preview: FoundConflict[] } {
   const hash = createHash('sha256');
   hash.update('{"blocked":' + canonicalJson(input.blocked) + ',"candidateVersionId":' + canonicalJson(input.candidateVersionId) + ',"conflicts":[');
@@ -338,7 +339,7 @@ export function seriesKnowledgeReviewSummary(input: {
     if (count > 0) hash.update(',');
     hash.update(canonicalJson({ kind: conflict.kind, ref: conflict.ref }));
     count += 1;
-    if (preview.length < MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN) preview.push(conflict);
+    if (count > (input.after ?? 0) && preview.length < MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN) preview.push(conflict);
   }
   hash.update('],"currentRevisionId":' + canonicalJson(input.currentRevisionId) + ',"schema":' + canonicalJson(REVIEW_SCHEMA) + ',"seriesId":' + canonicalJson(input.seriesId) + '}');
   return { digest: hash.digest('hex'), count, preview };
