@@ -5948,6 +5948,7 @@ export class EditorialStore {
         editedText: row.edited_text === null ? null : asString(row.edited_text),
         reason: standing.reason,
         reasonSource: standing.reasonSource,
+        feedbackEntries: standing.feedbackEntries,
         recordedAt: standing.reasonRevisedAt ?? asString(row.recorded_at),
         decidedAt: asString(row.recorded_at),
       }, withExcerpt);

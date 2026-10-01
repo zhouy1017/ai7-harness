@@ -197,6 +197,7 @@ export function proposalDecisionCandidate(decision: {
   readonly editedText: string | null;
   readonly reason: string | null;
   readonly reasonSource: string | null;
+  readonly feedbackEntries: number;
   readonly recordedAt: string;
   /** When the decision was made, whatever reason came later. */
   readonly decidedAt: string;
@@ -223,6 +224,7 @@ export function proposalDecisionCandidate(decision: {
       editedText: decision.editedText,
       reason: decision.reason,
       reasonSource: decision.reasonSource,
+      feedbackEntries: decision.feedbackEntries,
     },
     excerpt,
     rationale: decision.reason !== null
