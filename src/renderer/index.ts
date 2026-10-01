@@ -76,7 +76,11 @@ import { mountBookPeople } from './book-people.js';
 import { mountReviewGuidelines } from './review-guidelines.js';
 import { mountLibraryMaterials } from './library-materials.js';
 import { mountEvaluation } from './evaluation.js';
+import type { AnalysisFeedbackDimension } from '../shared/analysis-feedback.js';
 import { analysisFeedbackEngaged, mountAnalysisFeedback } from './analysis-feedback.js';
+import type { LearningMaterialTarget } from '../shared/protocol.js';
+import { mountLearningMaterials } from './quality-learning.js';
+import { LEARNING_HEADING, LEARNING_STATUS, QUALITY_LEARNING_LEDE, QUALITY_LEARNING_TITLE } from './quality-learning-labels.js';
 import {
   EVALUATION_LEDE,
   EVALUATION_STATUS,
@@ -757,6 +761,30 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
     case 'library-material':
       await renderKnowledgeBase('library', false, target.materialId);
       return;
+    case 'learning-materials':
+      await renderQualityLearning(target.bookId);
+      return;
+  }
+}
+
+async function openLearningMaterialSource(bookId: string, materialKey: string): Promise<void> {
+  await requestBookWorkbenchRoute({ kind: 'book', bookId, learningMaterialKey: materialKey });
+}
+
+/** The service-owned arrival travels with the route to whichever workbench owns the Book. */
+async function renderLearningMaterialTarget(target: LearningMaterialTarget, bookTitle: string): Promise<void> {
+  switch (target.kind) {
+    case 'mark': {
+      const opened = await window.ai7.getManuscriptWindowAt({ manuscriptId: target.manuscriptId, branchId: target.branchId, target: { kind: 'block', blockId: target.blockId } });
+      await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId);
+      return;
+    }
+    case 'analysis':
+      renderBookAnalysis(target.bookId, bookTitle, { revisionId: target.revisionId, itemKey: target.itemKey, dimension: target.dimension });
+      return;
+    case 'review':
+      renderBookReview(target.bookId, bookTitle, { reviewRunId: target.reviewRunId, findingId: target.findingId });
+      return;
   }
 }
 
@@ -817,6 +845,10 @@ async function renderResolvedBookWorkbenchRoute(
   recoveryReturn?: RecoveryReturnContext,
 ): Promise<void> {
   if (route.kind === 'book') {
+    if (route.learningMaterialTarget !== undefined) {
+      await renderLearningMaterialTarget(route.learningMaterialTarget, route.bookTitle);
+      return;
+    }
     const overview = await window.ai7.getBookOverview({ bookId: route.bookId, historyCursor: null });
     const anchor = overview.manuscriptAnchor;
     if (anchor === null) {
@@ -1956,7 +1988,9 @@ async function renderBookWorkbenchChooser(
  * The way back to the manuscript and to the overview sits in a persistent region, because a settled
  * result set is the longest thing this product renders and its way out must survive it (LAYER-005).
  */
-function renderBookAnalysis(bookId: string, bookTitle: string, revisionId?: string): void {
+function renderBookAnalysis(bookId: string, bookTitle: string, target?: JudgedAnalysisItem | string): void {
+  const judged = typeof target === 'string' ? undefined : target;
+  const revisionId = typeof target === 'string' ? target : undefined;
   const content = panel();
   content.classList.add('book-analysis');
   content.dataset['bookId'] = bookId;
@@ -1993,9 +2027,15 @@ function renderBookAnalysis(bookId: string, bookTitle: string, revisionId?: stri
   replaceScreen('book-analysis', content);
   setStatus('分析已打开');
   const inspect = (first: boolean): void => {
-    void window.ai7.inspectBaselineAnalysis(revisionId === undefined ? undefined : { revisionId }).then(
+    // A 学习材料 entry opens ②A on the revision it judged (Issue #61, S26b): read-only when that is no longer the current one.
+    const read = first && judged !== undefined
+      ? window.ai7.inspectBaselineAnalysis().then((current) => current.resultSetRevision?.revisionId === judged.revisionId ? current : window.ai7.inspectBaselineAnalysis({ revisionId: judged.revisionId }))
+      : window.ai7.inspectBaselineAnalysis(revisionId === undefined ? undefined : { revisionId });
+    void read.then(
       (projection) => {
-        if (host.isConnected && projection.bookId === host.dataset['analysisBookId']) renderBaselineAnalysis(host, projection, bookTitle);
+        if (!host.isConnected || projection.bookId !== host.dataset['analysisBookId']) return;
+        renderBaselineAnalysis(host, projection, bookTitle);
+        if (first && judged !== undefined) showJudgedAnalysisItem(host, judged.itemKey);
       },
       (error) => {
         if (!host.isConnected) return;
@@ -2015,7 +2055,28 @@ function renderBookAnalysis(bookId: string, bookTitle: string, revisionId?: stri
   };
   // The drawer's bar started this Task or reconfirmed its plan (Issue #420): ②A reads it again.
   taskSurfaceRefresh = { 'baseline-analysis': () => inspect(false) };
+  // The item a 学习材料 entry judged opens on its own tab (Issue #61 review), the tab the card is drawn with.
+  if (judged !== undefined) analysisTabChoice.set(bookId, judged.dimension);
   inspect(true);
+}
+
+/** The item of ②A a 学习材料 entry judged: its revision, its place, and the tab it sits on. */
+interface JudgedAnalysisItem {
+  readonly revisionId: string;
+  readonly itemKey: string;
+  readonly dimension: AnalysisFeedbackDimension;
+}
+
+/**
+ * The judged item in view (Issue #61 review): its tab already chosen, the item is scrolled to and takes focus, so the
+ * judgment 打开… led to is what the editor sees and a screen reader reads first.
+ */
+function showJudgedAnalysisItem(host: HTMLElement, itemKey: string): void {
+  const item = host.querySelector<HTMLElement>(`[data-analysis-item-key="${CSS.escape(itemKey)}"]`);
+  if (item === null) return;
+  item.tabIndex = -1;
+  item.scrollIntoView({ block: 'center' });
+  item.focus({ preventScroll: true });
 }
 
 /**
@@ -4555,6 +4616,42 @@ function renderExemplars(root: HTMLElement, projection: ExemplarsProjection): vo
 }
 
 /**
+ * 质量与学习 (Issue #61, plan slice S26b; LEARN-002, FDBK-010): a house-wide destination beside 知识库, opened from the
+ * landing or from a Book's 学习准入待处理 in 待我处理 — then for that Book, with the way to every Book one step away.
+ */
+async function renderQualityLearning(bookId: string | null): Promise<void> {
+  const content = panel();
+  content.classList.add('quality-learning');
+  const section = element('section', 'learning-section');
+  section.append(element('h3', undefined, LEARNING_HEADING));
+  const host = element('div');
+  section.append(host);
+  const back = element('div', 'button-row');
+  if (bookId !== null) {
+    const all = button('显示全部图书', 'quiet', () => void renderQualityLearning(null));
+    all.dataset['learningAction'] = 'all-books';
+    back.append(all);
+  }
+  back.append(button('返回', 'quiet', () => void initializeStartup()));
+  content.append(
+    element('p', 'section-label', `${QUALITY_LEARNING_TITLE} · ${LEARNING_HEADING}`),
+    element('h2', undefined, QUALITY_LEARNING_TITLE),
+    element('p', 'field-note', QUALITY_LEARNING_LEDE),
+    section,
+    back,
+  );
+  replaceScreen('quality-learning', content);
+  setStatus(LEARNING_STATUS.loading, 'busy');
+  const surface = mountLearningMaterials({ root: host, bookId, api: window.ai7, openSource: openLearningMaterialSource, setStatus, errorMessage: rendererErrorMessage, technicalDetails });
+  try {
+    await surface.load();
+    if (content.isConnected) setStatus(LEARNING_STATUS.opened);
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, LEARNING_STATUS.unavailable), 'error');
+  }
+}
+
+/**
  * 知识库's page on screen: its heading, the seven classes as a tab list — arrow keys move between them — and the chosen
  * class's panel, which says what the class holds and, for a class a later slice brings, why it shows nothing yet.
  */
@@ -4997,8 +5094,11 @@ function renderLanding(
   // 知识库 (Issue #427, S79a): its seven classes, opening at 审阅规范文件.
   const knowledgeBase = button('知识库', 'secondary', () => renderKnowledgeBase('guidelines'));
   knowledgeBase.dataset['settingsRoute'] = 'knowledge-base';
+  // 质量与学习 (Issue #61, S26b): 学习准入, the house's record of what may teach and where.
+  const qualityLearning = button(QUALITY_LEARNING_TITLE, 'secondary', () => void renderQualityLearning(null));
+  qualityLearning.dataset['settingsRoute'] = 'quality-learning';
   const landingActions = element('div', 'button-row');
-  landingActions.append(importButton, createBook, dataAndStorage, modelService, knowledgeBase);
+  landingActions.append(importButton, createBook, dataAndStorage, modelService, knowledgeBase, qualityLearning);
   copy.append(landingActions);
   const note = element('aside', 'hero-note', '所有导入都要求先明确选择图书目标；系统不会自动选择已有图书或稿件关系。');
   content.append(copy, note);

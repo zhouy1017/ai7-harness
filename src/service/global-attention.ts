@@ -202,6 +202,19 @@ export interface MaintenanceAttentionReading {
   readonly publicationOrdinal: number;
 }
 
+/**
+ * One Book's Learning Material that waits for the editor (Issue #61, S26b): how many wait for a decision — or changed since
+ * the one they had — and how many were left for later; the Book is one item, however many there are (LEARN-002).
+ */
+export interface LearningMaterialsAttentionReading {
+  readonly bookId: string;
+  readonly bookTitle: string;
+  readonly pending: number;
+  readonly deferred: number;
+  /** When the newest of them was recorded. */
+  readonly at: string;
+}
+
 export interface GlobalAttentionReadings {
   readonly imports: ReadonlyArray<ImportAttentionReading>;
   readonly recoveries: ReadonlyArray<RecoveryAttentionReading>;
@@ -216,6 +229,8 @@ export interface GlobalAttentionReadings {
   readonly maintenance: ReadonlyArray<MaintenanceAttentionReading>;
   /** Every 资料库 item still waiting for its attribution or Learning Eligibility (Issue #427, S79c; ATTN-009). */
   readonly libraryMaterials: ReadonlyArray<LibraryMaterialAttentionReading>;
+  /** Every Book whose Learning Material waits for the editor (Issue #61, S26b; LEARN-002). */
+  readonly learningMaterials: ReadonlyArray<LearningMaterialsAttentionReading>;
   /** Whether Runs hold every place of the execution owner's governor now (Issue #49, S14). */
   readonly busy: boolean;
   /**
@@ -634,6 +649,27 @@ function libraryMaterialItem(reading: LibraryMaterialAttentionReading): GlobalAt
   });
 }
 
+/**
+ * A Book's Learning Material in 等待你的决定 (Issue #61, S26b; LEARN-002, ATTN-009): one item for the Book, while any waits
+ * for a decision, else while any was left for later. It stops no other work, so it never blocks.
+ */
+function learningMaterialsItem(reading: LearningMaterialsAttentionReading): GlobalAttentionItemProjection {
+  return item('decisions', reading.pending > 0 ? 'learning-materials-pending' : 'learning-materials-deferred', {
+    itemId: `learning-materials:${reading.bookId}`,
+    blocked: false,
+    at: reading.at,
+    book: { bookId: reading.bookId, title: reading.bookTitle },
+    object: { kind: 'learning-materials', pending: reading.pending, deferred: reading.deferred },
+    nextStep: 'decide-learning-materials',
+    target: { kind: 'learning-materials', bookId: reading.bookId },
+    technical: [
+      { key: 'learning-materials-book', label: '图书', value: reading.bookId },
+      { key: 'learning-materials-counts', label: '学习材料', value: `待定 ${reading.pending} · 稍后决定 ${reading.deferred}` },
+      { key: 'state-at', label: '状态开始时间', value: reading.at },
+    ],
+  });
+}
+
 // ---- ordering ------------------------------------------------------------------------------------------
 
 /** Code-point order, the same on every host; a missing title sorts first. */
@@ -692,6 +728,7 @@ export function composeGlobalAttention(readings: GlobalAttentionReadings, now: D
       .map(reviewCompletionItem),
     ...readings.maintenance.map(maintenanceItem),
     ...readings.libraryMaterials.map(libraryMaterialItem),
+    ...readings.learningMaterials.map(learningMaterialsItem),
   ];
   // One record is one item: a Review Run read both as a Book's latest and as a completion is listed once.
   const unique = Array.from(new Map(all.map((entry) => [`${entry.group}\n${entry.itemId}`, entry] as const)).values());

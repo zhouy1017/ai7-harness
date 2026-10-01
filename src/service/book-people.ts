@@ -146,6 +146,14 @@ interface PeopleSet {
   related: Array<{ roleId: string; name: string }>;
 }
 
+interface VerifiedPeopleVersion {
+  version: number;
+  people: PeopleSet;
+  roles: BookPeopleRoleList | null;
+  recordedAt: string;
+  digest: string;
+}
+
 const roleLabel = (list: BookPeopleRoleList | null, roleId: string): string | undefined => list?.roles.find((role) => role.roleId === roleId)?.label;
 
 function peopleRecord(
@@ -285,19 +293,24 @@ export class BookPeople {
     return { where: `(${title} OR ${newest('authors_text')} OR ${newest('editors_text')})`, parameters: [text, text, text] };
   }
 
+  /** The Book's newest version. */
+  #latest(bookId: string): VerifiedPeopleVersion | undefined {
+    let latest: VerifiedPeopleVersion | undefined;
+    for (const entry of this.#verified(bookId)) latest = entry;
+    return latest;
+  }
+
   /**
-   * The Book's newest version, each version's record verified against its digest, its columns and the role list it pinned
-   * — whichever shipped list that was, never only today's.
+   * The Book's versions, oldest first, each version's record verified against its digest, its columns and the role list it
+   * pinned — whichever shipped list that was, never only today's.
    */
-  #latest(bookId: string): { version: number; people: PeopleSet; roles: BookPeopleRoleList | null; recordedAt: string; digest: string } | undefined {
-    if (this.#db.prepare(TABLE_PRESENT).get() === undefined) return undefined;
-    const rows = this.#db.prepare('SELECT * FROM book_people_versions WHERE book_id = ? ORDER BY version').iterate(bookId);
-    let version = 0;
+  *#verified(bookId: string): IterableIterator<VerifiedPeopleVersion> {
+    if (this.#db.prepare(TABLE_PRESENT).get() === undefined) return;
+    const rows = this.#db.prepare('SELECT * FROM book_people_versions WHERE book_id = ? ORDER BY version').iterate(bookId) as IterableIterator<SqlRow>;
     let prior: string | null = null;
-    let latest: { version: number; people: PeopleSet; roles: BookPeopleRoleList | null; recordedAt: string; digest: string } | undefined;
+    let index = 0;
     for (const row of rows) {
-      version += 1;
-      requirePeople(typeof row.version_id === 'string' && typeof row.version === 'number' && row.version === version &&
+      requirePeople(typeof row.version_id === 'string' && typeof row.version === 'number' && row.version === index + 1 &&
         typeof row.recorded_at === 'string' && typeof row.canonical_json === 'string' && typeof row.sha256 === 'string' &&
         typeof row.authors_text === 'string' && typeof row.editors_text === 'string' && typeof row.related_json === 'string' &&
         typeof row.role_configuration_version === 'string' && typeof row.role_configuration_digest === 'string',
@@ -319,8 +332,8 @@ export class BookPeople {
         row.related_json === canonicalJson(people.related) && (roles === null || people.related.every((person) => roleLabel(roles, person.roleId) !== undefined)),
       'BOOK_PEOPLE_RECORD_INVALID', '图书人员记录与其摘要不一致。');
       prior = row.sha256;
-      latest = { version: row.version, people, roles, recordedAt: row.recorded_at, digest: row.sha256 };
+      index += 1;
+      yield { version: row.version, people, roles, recordedAt: row.recorded_at, digest: row.sha256 };
     }
-    return latest;
   }
 }

@@ -304,6 +304,26 @@ export class AnalysisFeedbackLedger {
   }
 
   /**
+   * Each item's latest judgment in one Book that says why — a reason or a correction — streamed by revision and item: what 学习准入 may ask
+   * about (Issue #61, S26b). A bare verdict, or a judgment an editor has since changed, is not among them.
+   */
+  *latestWithWords(bookId: string): IterableIterator<AnalysisFeedbackSignalProjection & { readonly revisionId: string; readonly itemKey: string; readonly dimension: AnalysisFeedbackDimension }> {
+    for (const signal of this.latestEntries(bookId)) {
+      if (signal.reason !== null || signal.correction !== null) yield signal;
+    }
+  }
+
+  /** Stream one latest judgment per item, validating every predecessor without retaining the history. */
+  *latestEntries(bookId: string): IterableIterator<StoredSignal> {
+    let last: StoredSignal | null = null;
+    for (const signal of this.#signals('book_id = ?', bookId)) {
+      if (last !== null && (last.revisionId !== signal.revisionId || last.itemKey !== signal.itemKey)) yield last;
+      last = signal;
+    }
+    if (last !== null) yield last;
+  }
+
+  /**
    * The Analysis Quality Metric of one Book (ANALYSIS-024): each judged item's latest judgment once, over every revision of
    * the Book, counted by dimension, with the digest of exactly the signals it counted. No other Book's signals enter it.
    */

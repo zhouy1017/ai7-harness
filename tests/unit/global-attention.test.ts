@@ -44,6 +44,7 @@ const NONE: GlobalAttentionReadings = {
   reviewCompletions: [],
   maintenance: [],
   libraryMaterials: [],
+  learningMaterials: [],
   busy: false,
   waitingFor: 'admitting',
 };

@@ -74,6 +74,14 @@ describe('decodeRequest accepts well-formed frames', () => {
       input: { kind: 'revision', revisionId: randomUUID() },
     };
     expect(decodeRequest(frameOf(bookRoute))).toEqual(bookRoute);
+    const materialRoute = { ...bookRoute, input: { ...bookRoute.input, learningMaterialKey: `proposal-decision:${randomUUID()}` } };
+    expect(decodeRequest(frameOf(materialRoute))).toEqual(materialRoute);
+    for (const input of [
+      { ...materialRoute.input, learningMaterialKey: 'x'.repeat(161) },
+      { ...materialRoute.input, learningMaterialKey: null },
+      { ...materialRoute.input, target: { kind: 'mark' } },
+      { ...revisionRoute.input, learningMaterialKey: materialRoute.input.learningMaterialKey },
+    ]) expect(() => decodeRequest(frameOf({ ...bookRoute, input }))).toThrow(ProtocolError);
     expect(decodeRequest(frameOf(revisionRoute))).toEqual(revisionRoute);
   });
 
@@ -1196,6 +1204,50 @@ describe('decodeRequest rejects malformed frames', () => {
       ['saveEvaluation', { bookId, recordId, expectedEntries: 1, content: { ...content, conclusion: 'publish' }, finalize: false }],
       ['saveEvaluation', { bookId, recordId, expectedEntries: 1, content: { ...content, items: [{ itemId: 'x', score: '18', notRated: null, comment: null }] }, finalize: false }],
       ['saveEvaluation', { bookId, recordId, expectedEntries: 1, content: { ...content, risks: [{ riskId: 'x', level: 'severe', statement: null, reviewed: false }] }, finalize: false }],
+    ] as const) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
+  it('accepts 学习准入: every Book or one, and a decision of the closed choices on an exact version (Issue #61, S26b)', () => {
+    const bookId = randomUUID();
+    const decision = {
+      bookId, materialKey: `proposal-decision:${randomUUID()}`, materialDigest: 'b'.repeat(64), expectedDecisions: 0, choice: 'book', note: null,
+    };
+    for (const [op, input] of [
+      ['inspectLearningMaterials', { bookId: null, after: null }],
+      ['inspectLearningMaterials', { bookId, after: null }],
+      ['inspectLearningMaterials', { bookId: null, after: { bookTitle: '学习之书', bookId, orderedAt: '2026-09-26T01:02:03.004Z', materialKey: `proposal-decision:${randomUUID()}` } }],
+      ['inspectLearningMaterial', { bookId, materialKey: `review-disposition:${randomUUID()}/rvf_${'9c'.repeat(12)}` }],
+      ['decideLearningMaterial', decision],
+      ['decideLearningMaterial', { ...decision, materialKey: `analysis-feedback:${randomUUID()}/entities/12`, expectedDecisions: 3, choice: 'deferred', note: '以后再说' }],
+      ['decideLearningMaterial', { ...decision, materialKey: `analysis-feedback:${randomUUID()}/synopsis`, choice: 'house' }],
+      // A 审阅 finding's own identity, underscore and all (Issue #61 review).
+      ['decideLearningMaterial', { ...decision, materialKey: `review-disposition:${randomUUID()}/rvf_${'9c'.repeat(12)}`, choice: 'excluded' }],
+    ] as const) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    for (const [op, input] of [
+      ['inspectLearningMaterials', {}],
+      ['inspectLearningMaterials', { bookId: null }],
+      ['inspectLearningMaterials', { bookId: 'book', after: null }],
+      ['inspectLearningMaterials', { bookId: null, after: { bookTitle: '学习之书', bookId, orderedAt: 'yesterday', materialKey: `proposal-decision:${randomUUID()}` } }],
+      ['inspectLearningMaterials', { bookId: null, after: { bookTitle: '学习之书', bookId, orderedAt: '2026-09-26T01:02:03.004Z', materialKey: 'library:x' } }],
+      ['inspectLearningMaterial', { bookId, materialKey: `review-disposition:${randomUUID()}/finding-7` }],
+      ['inspectLearningMaterial', { materialKey: `proposal-decision:${randomUUID()}` }],
+      // Each kind's own shape: a place that another kind would carry is none.
+      ['decideLearningMaterial', { ...decision, materialKey: `review-disposition:${randomUUID()}/finding-7` }],
+      ['decideLearningMaterial', { ...decision, materialKey: `proposal-decision:${randomUUID()}/entities/1` }],
+      ['decideLearningMaterial', { ...decision, materialKey: `analysis-feedback:${randomUUID()}/chapters/1` }],
+      ['decideLearningMaterial', { ...decision, choice: 'series' }],
+      ['decideLearningMaterial', { ...decision, choice: null }],
+      ['decideLearningMaterial', { ...decision, materialKey: 'library:x' }],
+      ['decideLearningMaterial', { ...decision, materialKey: 'proposal-decision:' }],
+      ['decideLearningMaterial', { ...decision, materialDigest: 'B'.repeat(64) }],
+      ['decideLearningMaterial', { ...decision, expectedDecisions: -1 }],
+      ['decideLearningMaterial', { ...decision, note: 7 }],
+      ['decideLearningMaterial', { ...decision, scope: 'house' }],
     ] as const) {
       expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
     }
