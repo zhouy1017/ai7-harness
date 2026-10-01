@@ -82,13 +82,47 @@ export function followSpanEdit(range: GraphemeRange, edit: GraphemeEdit): Graphe
   return { fromGrapheme, toGrapheme: Math.max(fromGrapheme, toGrapheme), touched: true };
 }
 
+/** The block's text before and after a span that was derived from them, which is where a derived span may stand instead. */
+export interface DerivedSpanTexts {
+  readonly current: ReadonlyArray<string>;
+  readonly next: ReadonlyArray<string>;
+}
+
+/**
+ * A span derived from two texts matches their longest common prefix first, so words that begin with the grapheme after them
+ * are found one grapheme on (Issue #568). An undo that restores `，我们走吧` at the point before `，好吗` is read as `我们走吧，`
+ * written one grapheme on, and the redo that removes it again as removing `我们走吧，`. Slid left over equal graphemes, a pure
+ * insertion that reaches the point was as much written at it as after it, and a pure deletion that reaches what the point
+ * covers removes exactly that as much as the words one on: each is taken so. One that cannot reach stays where it is, and a
+ * replacement is never slid, since only pure insertions and deletions are ambiguous this way.
+ */
+function slideToMark(range: GraphemeRange, edit: GraphemeEdit, texts: DerivedSpanTexts): GraphemeEdit {
+  const width = edit.toGrapheme - edit.fromGrapheme;
+  if (width === 0 && edit.insertedGraphemes > 0 && edit.fromGrapheme > range.toGrapheme) {
+    let from = edit.fromGrapheme;
+    while (from > range.toGrapheme && texts.next[from - 1] === texts.next[from - 1 + edit.insertedGraphemes]) from -= 1;
+    return from === range.toGrapheme ? { fromGrapheme: from, toGrapheme: from, insertedGraphemes: edit.insertedGraphemes } : edit;
+  }
+  if (width > 0 && edit.insertedGraphemes === 0 && edit.fromGrapheme > range.fromGrapheme) {
+    let from = edit.fromGrapheme;
+    while (from > range.fromGrapheme && texts.current[from - 1] === texts.current[from - 1 + width]) from -= 1;
+    return from === range.fromGrapheme && from + width === range.toGrapheme ? { fromGrapheme: from, toGrapheme: from + width, insertedGraphemes: 0 } : edit;
+  }
+  return edit;
+}
+
 /**
  * Follow a point that cannot say which side of text written at it it belongs on (Issue #533): a pending insertion whose
  * point already drifted, or any point among several standing at one place. Text written at it or into what it covers
  * joins what it covers, so the editor places the point among those words; text written wholly before it moves it, and
  * text wholly after it leaves it. It is `drifted` from then on, as a point never proves its place again.
+ *
+ * `derived` is given only for a span found from the block's two texts: an undo's or a redo's, or the renderer's flush. Words
+ * that span placed one grapheme on are then taken as written at the point, or removed from what it covers (Issue #568). An
+ * Apply's or a replacement's span says where its words go, and is followed as it is.
  */
-export function coverSpanEdit(range: GraphemeRange, edit: GraphemeEdit, length: number): FollowedAnchor {
+export function coverSpanEdit(range: GraphemeRange, given: GraphemeEdit, length: number, derived?: DerivedSpanTexts): FollowedAnchor {
+  const edit = derived === undefined ? given : slideToMark(range, given, derived);
   const delta = edit.insertedGraphemes - (edit.toGrapheme - edit.fromGrapheme);
   let fromGrapheme: number;
   let toGrapheme: number;

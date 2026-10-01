@@ -220,12 +220,20 @@ export class BookPeople {
     };
   }
 
-  /**
-   * Every version of the Book's people, oldest first, each verified as `current` verifies the newest: what 反馈历史
-   * attributes each piece of feedback by — the version in force when it was given (Issue #61 review).
-   */
-  versions(bookId: string): Array<{ readonly version: number; readonly authors: ReadonlyArray<string>; readonly editors: ReadonlyArray<string>; readonly recordedAt: string }> {
-    return this.#verified(bookId).map((entry) => ({ version: entry.version, authors: entry.people.authors, editors: entry.people.editors, recordedAt: entry.recordedAt }));
+  /** Exact historical attribution with complete chain validation and one retained match. */
+  at(bookId: string, recordedAt: string): { version: number; authors: ReadonlyArray<string>; editors: ReadonlyArray<string> } | null {
+    let found: VerifiedPeopleVersion | null = null;
+    for (const entry of this.#verified(bookId)) {
+      if (found === null || entry.recordedAt <= recordedAt) found = entry;
+    }
+    return found === null ? null : { version: found.version, authors: found.people.authors, editors: found.people.editors };
+  }
+
+  /** One exact version for a displayed entry; later versions are still validated. */
+  version(bookId: string, version: number): { version: number; authors: ReadonlyArray<string>; editors: ReadonlyArray<string> } | null {
+    let found: VerifiedPeopleVersion | null = null;
+    for (const entry of this.#verified(bookId)) if (entry.version === version) found = entry;
+    return found === null ? null : { version: found.version, authors: found.people.authors, editors: found.people.editors };
   }
 
   /** The card's lines in 书库. */
@@ -303,19 +311,21 @@ export class BookPeople {
 
   /** The Book's newest version. */
   #latest(bookId: string): VerifiedPeopleVersion | undefined {
-    return this.#verified(bookId).at(-1);
+    let latest: VerifiedPeopleVersion | undefined;
+    for (const entry of this.#verified(bookId)) latest = entry;
+    return latest;
   }
 
   /**
    * The Book's versions, oldest first, each version's record verified against its digest, its columns and the role list it
    * pinned — whichever shipped list that was, never only today's.
    */
-  #verified(bookId: string): VerifiedPeopleVersion[] {
-    if (this.#db.prepare(TABLE_PRESENT).get() === undefined) return [];
-    const rows = this.#db.prepare('SELECT * FROM book_people_versions WHERE book_id = ? ORDER BY version').all(bookId) as SqlRow[];
+  *#verified(bookId: string): IterableIterator<VerifiedPeopleVersion> {
+    if (this.#db.prepare(TABLE_PRESENT).get() === undefined) return;
+    const rows = this.#db.prepare('SELECT * FROM book_people_versions WHERE book_id = ? ORDER BY version').iterate(bookId) as IterableIterator<SqlRow>;
     let prior: string | null = null;
-    const verified: VerifiedPeopleVersion[] = [];
-    for (const [index, row] of rows.entries()) {
+    let index = 0;
+    for (const row of rows) {
       requirePeople(typeof row.version_id === 'string' && typeof row.version === 'number' && row.version === index + 1 &&
         typeof row.recorded_at === 'string' && typeof row.canonical_json === 'string' && typeof row.sha256 === 'string' &&
         typeof row.authors_text === 'string' && typeof row.editors_text === 'string' && typeof row.related_json === 'string' &&
@@ -338,8 +348,8 @@ export class BookPeople {
         row.related_json === canonicalJson(people.related) && (roles === null || people.related.every((person) => roleLabel(roles, person.roleId) !== undefined)),
       'BOOK_PEOPLE_RECORD_INVALID', '图书人员记录与其摘要不一致。');
       prior = row.sha256;
-      verified.push({ version: row.version, people, roles, recordedAt: row.recorded_at, digest: row.sha256 });
+      index += 1;
+      yield { version: row.version, people, roles, recordedAt: row.recorded_at, digest: row.sha256 };
     }
-    return verified;
   }
 }

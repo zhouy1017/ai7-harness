@@ -5,6 +5,7 @@ import { basename, extname, isAbsolute, posix, relative, resolve, sep } from 'no
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { J03_TASK_GOAL, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
+  ServiceOperationMap,
   InspectTaskPlanInput,
   TaskPlanProjection,
   GlobalAttentionProjection,
@@ -54,6 +55,7 @@ import type {
   RecordAnalysisFeedbackInput,
   ExemplarsProjection,
   KnowledgeProceduresProjection,
+  ReviewGuidelinesPage,
   AppendMaintenanceCaseRevisionInput,
   InspectMaintenanceCaseInput,
   ListMaintenanceCasesInput,
@@ -115,9 +117,11 @@ import type {
   EvaluationCalibrationProjection,
   RecordPublicationActualsInput,
   SetEvaluationPreferencesInput,
+  FeedbackHistoryInput,
   FeedbackHistoryProjection,
   LearningMaterialCursor,
   LearningMaterialProjection,
+  LearningMaterialTarget,
   LearningMaterialsBookProjection,
   LearningMaterialsProjection,
   RecordProposalDecisionReasonInput,
@@ -5595,8 +5599,12 @@ export class EditorialStore {
   }
 
   /** 知识库 › 审阅规范文件 (Issue #427, S79a; KB-001 to KB-003): every guideline document with its versions and their use. */
-  inspectReviewGuidelines(): ReviewGuidelinesProjection {
-    return this.#guidelineCall(() => this.#reviewGuidelines.projection());
+  inspectReviewGuidelines(page?: ReviewGuidelinesPage): ReviewGuidelinesProjection {
+    return this.#guidelineCall(() => this.#reviewGuidelines.projection(page));
+  }
+
+  readReviewGuidelinePreview(documentId: string, previewId: string, page?: number): ReviewGuidelinePreviewProjection {
+    return this.#guidelineCall(() => this.#reviewGuidelines.readPreview(documentId, previewId, page));
   }
 
   /**
@@ -5607,12 +5615,12 @@ export class EditorialStore {
     if (after !== null) {
       requireStore(UUID_PATTERN.test(after.bookId) && after.title === safeTitle(after.title), 'EXEMPLAR_CURSOR_INVALID', '范例列表位置无效。');
     }
-    return this.#publicationCall(() => readExemplars({
+    return this.#documentCall(() => this.#publicationCall(() => readExemplars({
       books: (cursor, limit) => this.#publicationVersions.designatedBooks(cursor, limit),
-      designations: (bookId) => this.#publicationVersions.history(bookId),
-      documents: (bookId) => this.#documentCall(() => this.#productionDocuments.deliveryReadings(bookId)),
+      archive: (bookId) => this.#publicationVersions.exemplarArchive(bookId),
+      documents: (bookId) => this.#productionDocuments.deliveryReadings(bookId),
       people: (bookId) => this.#peopleCall(() => this.#bookPeople.current(bookId)),
-    }, after));
+    }, after)));
   }
 
   /**
@@ -5625,8 +5633,9 @@ export class EditorialStore {
   }
 
   /** 导入新版本's first step: the picked file's clauses as the next version of one document would read them; nothing is recorded. */
-  async previewReviewGuidelineVersion(documentId: string, path: string): Promise<ReviewGuidelinePreviewProjection> {
+  async previewReviewGuidelineVersion(documentId: string, path: string | undefined): Promise<ReviewGuidelinePreviewProjection> {
     this.#assertAvailable();
+    if (typeof path !== 'string' || path.length === 0) throw new StoreError('REVIEW_GUIDELINE_FILE_UNREADABLE', '请重新选择文件。');
     let read: Awaited<ReturnType<typeof readGuidelineFile>>;
     try {
       read = await readGuidelineFile(path);
@@ -5654,6 +5663,10 @@ export class EditorialStore {
   /** One 资料库 item as its card reads it. */
   inspectLibraryMaterial(materialId: string): LibraryMaterialProjection {
     return this.#libraryCall(() => this.#libraryMaterials.item(materialId));
+  }
+
+  readLibraryDecisionReason(input: ServiceOperationMap['readLibraryDecisionReason']['input']): ServiceOperationMap['readLibraryDecisionReason']['output'] {
+    return this.#libraryCall(() => this.#libraryMaterials.reasonPage(input.materialId, input.ordinal, input.offset));
   }
 
   /** 放入资料…'s first step: the picked file identified, measured and digested as it would arrive; nothing is kept. */
@@ -5699,8 +5712,8 @@ export class EditorialStore {
   }
 
   /** ②C 评估 of one Book (Issue #429, S81a; EVAL-001, EVAL-012): its versions, one on show, and whether one can begin. */
-  inspectEvaluation(bookId: string, recordId: string | null): EvaluationWorkspaceProjection {
-    return this.#evaluationCall(() => this.#evaluations.workspace(bookId, this.#evaluationBookTitle(bookId), recordId));
+  inspectEvaluation(bookId: string, recordId: string | null, recordsBefore?: number | null): EvaluationWorkspaceProjection {
+    return this.#evaluationCall(() => this.#evaluations.workspace(bookId, this.#evaluationBookTitle(bookId), recordId, recordsBefore));
   }
 
   /** 开始评估 or 重新评估: a new version bound to the manuscript's current revision, and the page with it on show. */
@@ -5784,37 +5797,50 @@ export class EditorialStore {
       'LEARNING_CURSOR_INVALID', '学习准入列表位置无效。');
       const rows = (bookId === null
         ? after === null
-          ? this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').all()
+          ? this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').iterate()
           : this.#authority.prepare('SELECT book_id, title FROM books WHERE title > ? OR (title = ? AND book_id >= ?) ORDER BY title, book_id')
-            .all(after.bookTitle, after.bookTitle, after.bookId)
-        : this.#authority.prepare('SELECT book_id, title FROM books WHERE book_id = ?').all(bookId)) as SqlRow[];
+            .iterate(after.bookTitle, after.bookTitle, after.bookId)
+        : this.#authority.prepare('SELECT book_id, title FROM books WHERE book_id = ?').iterate(bookId)) as IterableIterator<SqlRow>;
       // Up to one material beyond the page, so the page knows whether another follows.
       const collected: Array<{ bookId: string; title: string; material: LearningMaterialProjection; orderedAt: string }> = [];
+      let namedTitle: string | null = null;
       for (const row of rows) {
         const id = asString(row.book_id);
         const title = asString(row.title);
-        const materials = this.#learningMaterialsOf(id, true)
-          .filter((entry) => after === null || id !== after.bookId || learningMaterialOrder({ materialKey: entry.material.materialKey, orderedAt: entry.orderedAt }, after) > 0);
+        if (bookId !== null) namedTitle = title;
+        const materials = this.#learningMaterialsPage(id, id === after?.bookId ? after : null,
+          MAX_LEARNING_MATERIALS_PAGE + 1 - collected.length);
         for (const { material, orderedAt } of materials) {
           collected.push({ bookId: id, title, material, orderedAt });
           if (collected.length > MAX_LEARNING_MATERIALS_PAGE) break;
         }
         if (collected.length > MAX_LEARNING_MATERIALS_PAGE) break;
       }
-      const shown = collected.slice(0, MAX_LEARNING_MATERIALS_PAGE);
+      const shown: typeof collected = [];
       const books: LearningMaterialsBookProjection[] = [];
-      for (const entry of shown) {
+      let bytes = 4_096; // Basis, final cursor and envelope punctuation, beyond the weighed Books and materials.
+      let more = collected.length > MAX_LEARNING_MATERIALS_PAGE;
+      for (const entry of collected.slice(0, MAX_LEARNING_MATERIALS_PAGE)) {
         const book = books.at(-1);
+        const heading = book?.bookId === entry.bookId ? null : this.#learningBookOf(entry.bookId, entry.title);
+        const weight = Buffer.byteLength(JSON.stringify(entry.material), 'utf8') + 1 +
+          (heading === null ? 0 : Buffer.byteLength(JSON.stringify({ ...heading, materials: [] }), 'utf8') + 1);
+        if (shown.length > 0 && bytes + weight > MAX_FRAME_BYTES / 2) {
+          more = true;
+          break;
+        }
         if (book !== undefined && book.bookId === entry.bookId) (book.materials as LearningMaterialProjection[]).push(entry.material);
-        else books.push({ ...this.#learningBookOf(entry.bookId, entry.title), materials: [entry.material] });
+        else books.push({ ...heading!, materials: [entry.material] });
+        shown.push(entry);
+        bytes += weight;
       }
       // A Book named by itself is shown even while it has no material.
-      if (bookId !== null && after === null && books.length === 0 && rows.length === 1) books.push({ ...this.#learningBookOf(bookId, asString(rows[0]!.title)), materials: [] });
+      if (bookId !== null && after === null && books.length === 0 && namedTitle !== null) books.push({ ...this.#learningBookOf(bookId, namedTitle), materials: [] });
       const last = shown.at(-1);
       return {
         basis: LEARNING_ELIGIBILITY_BASIS,
         books,
-        nextCursor: collected.length > MAX_LEARNING_MATERIALS_PAGE && last !== undefined
+        nextCursor: more && last !== undefined
           ? { bookTitle: last.title, bookId: last.bookId, orderedAt: last.orderedAt, materialKey: last.material.materialKey }
           : null,
       };
@@ -5825,9 +5851,9 @@ export class EditorialStore {
   inspectLearningMaterial(bookId: string, materialKey: string): LearningMaterialProjection {
     return this.#learningCall(() => {
       requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
-      const found = this.#learningMaterialsOf(bookId, true).find((entry) => entry.material.materialKey === materialKey);
-      requireStore(found !== undefined, 'LEARNING_MATERIAL_NOT_FOUND', '这条材料已经不在学习准入之列。');
-      return found.material;
+      const candidate = this.#learningCandidateOf(bookId, materialKey, true);
+      requireStore(candidate !== null, 'LEARNING_MATERIAL_NOT_FOUND', '这条材料已经不在学习准入之列。');
+      return { ...this.#learningEligibility.project(bookId, [candidate])[0]!, ...this.#learningMaterialSource(bookId, candidate) };
     });
   }
 
@@ -5836,8 +5862,8 @@ export class EditorialStore {
     this.#learningCall(() => {
       requireStore(UUID_PATTERN.test(input.bookId), 'BOOK_INVALID', '图书标识无效。');
       this.#transaction(this.#authority, () => {
-        const candidate = this.#learningCandidates(input.bookId, false).find((entry) => entry.materialKey === input.materialKey);
-        requireStore(candidate !== undefined, 'LEARNING_MATERIAL_NOT_FOUND', '这条材料已经不在学习准入之列。');
+        const candidate = this.#learningCandidateOf(input.bookId, input.materialKey, false);
+        requireStore(candidate !== null, 'LEARNING_MATERIAL_NOT_FOUND', '这条材料已经不在学习准入之列。');
         requireStore(learningMaterialDigest(candidate) === input.materialDigest, 'LEARNING_MATERIAL_CHANGED', '这条材料在你打开后改过；请看过现在的内容再定。');
         const people = this.#bookPeople.current(input.bookId);
         this.#learningEligibility.decide({
@@ -5861,20 +5887,46 @@ export class EditorialStore {
    * saved after it (Issue #61 review). One answer holds what `feedbackHistoryPage` admits, each reason bounded. Passive
    * history: a read, asking nothing.
    */
-  inspectFeedbackHistory(): FeedbackHistoryProjection {
+  inspectFeedbackHistory(input: FeedbackHistoryInput = {}): FeedbackHistoryProjection {
+    return this.#readFeedbackHistory(input);
+  }
+
+  #readFeedbackHistory(input: FeedbackHistoryInput, exactEntryId: string | null = null): FeedbackHistoryProjection {
     return this.#learningCall(() => {
-      const entries: Array<Omit<FeedbackHistoryEntryProjection, 'peopleVersion'>> = [];
+      type Entry = Omit<FeedbackHistoryEntryProjection, 'peopleVersion'>;
+      // Keep only the newest response-sized candidates plus one lookahead, regardless of ledger depth or Book count.
+      const entries: Entry[] = [];
+      const newest = (a: Pick<Entry, 'recordedAt' | 'entryId'>, b: Pick<Entry, 'recordedAt' | 'entryId'>): number => a.recordedAt > b.recordedAt ? -1 : a.recordedAt < b.recordedAt ? 1 : a.entryId < b.entryId ? -1 : a.entryId > b.entryId ? 1 : 0;
+      const consider = (entry: Entry): void => {
+        if (exactEntryId !== null && entry.entryId !== exactEntryId) return;
+        if ((input.bookId != null && entry.bookId !== input.bookId) || (input.origin != null && entry.origin !== input.origin) ||
+            (input.recordedFrom != null && entry.recordedAt < input.recordedFrom) ||
+            (input.recordedBefore != null && entry.recordedAt >= input.recordedBefore) ||
+            (Object.hasOwn(input, 'dimension') && entry.dimension !== input.dimension) ||
+            (input.signal != null && entry.signal !== input.signal) ||
+            (input.after != null && newest(entry, input.after) <= 0)) return;
+        if (input.author != null || input.editor != null) {
+          const people = this.#bookPeople.at(entry.bookId, entry.recordedAt);
+          if ((input.author != null && !people?.authors.includes(input.author)) ||
+              (input.editor != null && !people?.editors.includes(input.editor))) return;
+        }
+        const at = entries.findIndex((held) => newest(entry, held) < 0);
+        entries.splice(at < 0 ? entries.length : at, 0, entry);
+        if (entries.length > MAX_FEEDBACK_HISTORY_ENTRIES + 1) entries.pop();
+      };
       const reasons = new DecisionFeedbackLedger(this.#authority);
       const decisions = this.#authority.prepare(
         `SELECT m.book_id, m.mark_id, m.manuscript_id, m.branch_id, m.block_id, m.anchor_state, m.source_origin, m.source_label,
-                d.decision_id, d.disposition, d.recorded_at, r.reason, r.reason_source
+                d.decision_id, d.disposition, d.recorded_at, r.reason, r.reason_source, r.recorded_at AS reason_recorded_at,
+                (SELECT f.recorded_at FROM proposal_decision_feedback f WHERE f.decision_id = d.decision_id
+                 ORDER BY f.ordinal DESC LIMIT 1) AS feedback_recorded_at
          FROM editorial_marks m
          JOIN proposal_change_items i ON i.mark_id = m.mark_id
          JOIN proposal_item_decisions d ON d.item_id = i.item_id
          LEFT JOIN proposal_decision_reasons r ON r.decision_id = d.decision_id
          WHERE m.status IN ('open', 'resolved', 'applied') AND d.disposition <> 'withdrawn'
            AND d.ordinal = (SELECT max(latest.ordinal) FROM proposal_item_decisions latest WHERE latest.item_id = i.item_id)`,
-      ).all() as SqlRow[];
+      ).iterate() as IterableIterator<SqlRow>;
       for (const row of decisions) {
         const decisionId = asString(row.decision_id);
         const first = row.reason === null || row.reason === undefined
@@ -5882,7 +5934,7 @@ export class EditorialStore {
           : { reason: asString(row.reason), source: asString(row.reason_source) as 'reason-field' | 'suggested' | 'free-text' };
         const standing = reasons.standing(decisionId, first);
         const bookId = asString(row.book_id);
-        entries.push({
+        consider({
           entryId: `proposal-decision:${decisionId}`,
           origin: 'proposal-decision',
           bookId,
@@ -5891,18 +5943,21 @@ export class EditorialStore {
           signal: DISPOSITION_LABELS[asString(row.disposition)] ?? asString(row.disposition),
           reason: feedbackReasonExcerpt(standing.reason),
           reasonState: standing.reasonState,
-          recordedAt: asString(row.recorded_at),
+          // Attribute the displayed current feedback to when it was given, not the older business decision.
+          recordedAt: standing.reasonRevisedAt ?? (row.reason_recorded_at == null
+            ? row.feedback_recorded_at == null ? asString(row.recorded_at) : asString(row.feedback_recorded_at)
+            : asString(row.reason_recorded_at)),
           target: {
             kind: 'mark', bookId, manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id), blockId: asString(row.block_id),
             markId: asString(row.mark_id), detached: row.anchor_state === 'detached',
           },
         });
       }
-      for (const book of this.#authority.prepare('SELECT book_id FROM books').all() as SqlRow[]) {
+      for (const book of this.#authority.prepare('SELECT book_id FROM books').iterate() as IterableIterator<SqlRow>) {
         const bookId = asString(book.book_id);
-        for (const signal of this.#analysisFeedback.latest(bookId)) {
+        for (const signal of this.#analysisFeedback.latestEntries(bookId)) {
           const reason = [analysisReasonLabel(signal), signal.correction === null ? null : `修正：${signal.correction}`].filter((part) => part !== null).join(' · ');
-          entries.push({
+          consider({
             entryId: `analysis-feedback:${signal.revisionId}/${signal.itemKey}`,
             origin: 'analysis-feedback',
             bookId,
@@ -5920,11 +5975,11 @@ export class EditorialStore {
          WHERE kind = 'review-finding-ignored'
            AND recorded_at = (SELECT max(latest.recorded_at) FROM quality_signals latest
                               WHERE latest.review_run_id = q.review_run_id AND latest.finding_id = q.finding_id)`,
-      ).all() as SqlRow[];
+      ).iterate() as IterableIterator<SqlRow>;
       for (const row of ignored) {
         const bookId = asString(row.book_id);
         const categoryId = asString(row.category_id);
-        entries.push({
+        consider({
           entryId: `review-disposition:${asString(row.review_run_id)}/${asString(row.finding_id)}`,
           origin: 'review-disposition',
           bookId,
@@ -5937,31 +5992,16 @@ export class EditorialStore {
         });
       }
       // Each entry is attributed to the Book's people as they stood when it was given, or as first saved after it.
-      const versions = new Map<string, ReturnType<BookPeople['versions']>>();
-      const versionsOf = (bookId: string): ReturnType<BookPeople['versions']> => {
-        let found = versions.get(bookId);
-        if (found === undefined) {
-          found = this.#bookPeople.versions(bookId);
-          versions.set(bookId, found);
-        }
-        return found;
-      };
-      const attributed: FeedbackHistoryEntryProjection[] = entries.map((entry) => {
-        const all = versionsOf(entry.bookId);
-        const inForce = all.filter((version) => version.recordedAt <= entry.recordedAt).at(-1) ?? all[0];
-        return { ...entry, peopleVersion: inForce?.version ?? 0 };
-      });
-      attributed.sort((a, b) => (a.recordedAt > b.recordedAt ? -1 : a.recordedAt < b.recordedAt ? 1 : a.entryId < b.entryId ? -1 : 1));
+      const attributed: FeedbackHistoryEntryProjection[] = entries.map((entry) => ({
+        ...entry, peopleVersion: this.#bookPeople.at(entry.bookId, entry.recordedAt)?.version ?? 0,
+      }));
       return feedbackHistoryPage(
         attributed,
         (bookId) => {
           const people = this.#bookPeople.current(bookId);
           return { bookId, title: this.#evaluationBookTitle(bookId), authors: people.authors, editors: people.editors };
         },
-        (bookId, version) => {
-          const found = versionsOf(bookId).find((entry) => entry.version === version);
-          return found === undefined ? null : { version: found.version, authors: found.authors, editors: found.editors };
-        },
+        (bookId, version) => this.#bookPeople.version(bookId, version),
       );
     });
   }
@@ -5969,13 +6009,75 @@ export class EditorialStore {
   /** A Book's heading on the page: its title, its people, and how many materials it has in all. */
   #learningBookOf(bookId: string, title: string): Omit<LearningMaterialsBookProjection, 'materials'> {
     const people = this.#bookPeople.current(bookId);
-    return { bookId, title, authors: people.authors, editors: people.editors, materialCount: this.#learningCandidates(bookId, false).length };
+    let materialCount = 0;
+    for (const _candidate of this.#learningCandidates(bookId, false)) materialCount += 1;
+    return { bookId, title, authors: people.authors, editors: people.editors, materialCount };
   }
 
-  /** A Book's Learning Material as the page orders it — by kind, then by when each came to be, then by place — with that time. */
-  #learningMaterialsOf(bookId: string, withExcerpt: boolean): Array<{ material: LearningMaterialProjection; orderedAt: string }> {
-    const candidates = this.#learningCandidates(bookId, withExcerpt).sort((a, b) => learningMaterialOrder(a, b));
-    return this.#learningEligibility.project(bookId, candidates).map((material, index) => ({ material, orderedAt: candidates[index]!.orderedAt }));
+  /** Scan every candidate, retaining only the next bounded page in its stable display order. */
+  #learningMaterialsPage(bookId: string, after: LearningMaterialCursor | null, limit: number): Array<{ material: LearningMaterialProjection; orderedAt: string }> {
+    const candidates: LearningMaterialCandidate[] = [];
+    for (const candidate of this.#learningCandidates(bookId, true)) {
+      if (after !== null && learningMaterialOrder(candidate, after) <= 0) continue;
+      const index = candidates.findIndex((entry) => learningMaterialOrder(candidate, entry) < 0);
+      if (index < 0) {
+        if (candidates.length < limit) candidates.push(candidate);
+      } else {
+        candidates.splice(index, 0, candidate);
+        if (candidates.length > limit) candidates.pop();
+      }
+    }
+    return this.#learningEligibility.project(bookId, candidates).map((material, index) => ({
+      material: { ...material, ...this.#learningMaterialSource(bookId, candidates[index]!) },
+      orderedAt: candidates[index]!.orderedAt,
+    }));
+  }
+
+  /** Exact lookup still exhausts source-chain validation; it never keeps the other candidates. */
+  #learningCandidateOf(bookId: string, materialKey: string, withExcerpt: boolean): LearningMaterialCandidate | null {
+    let found: LearningMaterialCandidate | null = null;
+    for (const candidate of this.#learningCandidates(bookId, withExcerpt)) {
+      if (candidate.materialKey === materialKey) found = candidate;
+    }
+    return found;
+  }
+
+  /** Resolve the exact source and its originating Task; neither display fact changes the material digest or eligibility. */
+  #learningMaterialSource(bookId: string, candidate: LearningMaterialCandidate): Pick<LearningMaterialProjection, 'target' | 'sourceTask'> {
+    const source = candidate.source;
+    if (source.kind === 'analysis') {
+      // The judged revision owns this Task, even after a newer analysis becomes current.
+      const row = one(this.#authority.prepare(
+        `SELECT t.task_intent_id, t.goal FROM analysis_result_set_revisions r
+         JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
+         JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id
+         WHERE r.revision_id = ? AND s.book_id = ? AND t.book_id = ?`,
+      ).all(source.revisionId, bookId, bookId) as SqlRow[], 'LEARNING_MATERIAL_NOT_FOUND', '这份学习材料的来源任务不存在。');
+      return { target: { ...source, bookId }, sourceTask: { taskIntentId: asString(row.task_intent_id), label: asString(row.goal) } };
+    }
+    if (source.kind === 'review') {
+      // A finding can have no mark. Its own category in the frozen Review Run still identifies its Task.
+      const row = one(this.#authority.prepare(
+        'SELECT category_id FROM review_findings WHERE review_run_id = ? AND finding_id = ?',
+      ).all(source.reviewRunId, source.findingId) as SqlRow[], 'LEARNING_MATERIAL_NOT_FOUND', '这份学习材料的来源发现不存在。');
+      const facts = this.#reviewCall(() => this.#reviewRuns.planFacts(bookId, source.reviewRunId));
+      const category = facts.categories.find((entry) => entry.categoryId === asString(row.category_id));
+      requireStore(category !== undefined, 'LEARNING_MATERIAL_NOT_FOUND', '这份学习材料的来源审阅类别不存在。');
+      return {
+        target: { ...source, bookId },
+        sourceTask: category.task === null ? null : { taskIntentId: category.task.taskIntentId, label: `${category.label} · ${category.task.modeLabel}` },
+      };
+    }
+    const row = one(this.#authority.prepare(
+      `SELECT m.mark_id, m.manuscript_id, m.branch_id, m.block_id, m.anchor_state, m.source_task_id, m.source_label
+       FROM proposal_item_decisions d JOIN proposal_change_items i ON i.item_id = d.item_id
+       JOIN editorial_marks m ON m.mark_id = i.mark_id WHERE d.decision_id = ? AND m.book_id = ?`,
+    ).all(source.decisionId, bookId) as SqlRow[], 'LEARNING_MATERIAL_NOT_FOUND', '这份学习材料的来源记录不存在。');
+    return {
+      target: { kind: 'mark', bookId, manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id),
+        blockId: asString(row.block_id), markId: asString(row.mark_id), detached: row.anchor_state === 'detached' },
+      sourceTask: row.source_task_id === null ? null : { taskIntentId: asString(row.source_task_id), label: asString(row.source_label) },
+    };
   }
 
   /**
@@ -5983,8 +6085,7 @@ export class EditorialStore {
    * carries the editor's reason or their own wording, each analysis item whose latest judgment says why, and each 审阅
    * finding the editor last ignored with a reason. Nothing is asked of the editor to find them.
    */
-  #learningCandidates(bookId: string, withExcerpt: boolean): LearningMaterialCandidate[] {
-    const candidates: LearningMaterialCandidate[] = [];
+  *#learningCandidates(bookId: string, withExcerpt: boolean): IterableIterator<LearningMaterialCandidate> {
     const reasons = new DecisionFeedbackLedger(this.#authority);
     const decisions = this.#authority.prepare(
       `SELECT i.current_text, i.proposed_text, d.decision_id, d.disposition, d.edited_text, d.recorded_at, r.reason, r.reason_source
@@ -5995,7 +6096,7 @@ export class EditorialStore {
        WHERE m.book_id = ? AND m.status IN ('open', 'resolved', 'applied') AND d.disposition <> 'withdrawn'
          AND d.ordinal = (SELECT max(latest.ordinal) FROM proposal_item_decisions latest WHERE latest.item_id = i.item_id)
        ORDER BY d.recorded_at, d.decision_id`,
-    ).all(bookId) as SqlRow[];
+    ).iterate(bookId) as IterableIterator<SqlRow>;
     for (const row of decisions) {
       const decisionId = asString(row.decision_id);
       const first = row.reason === null || row.reason === undefined
@@ -6007,7 +6108,7 @@ export class EditorialStore {
       // 保留当前稿件 resolved a conflict with a rejection whose reason AI7 wrote (Issue #57): the editor judged no suggestion
       // by it, so it is material only once they give a reason of their own.
       if (standing.reasonRevisedAt === null && decisionResolvesConflict(this.#authority, decisionId)) continue;
-      candidates.push(proposalDecisionCandidate({
+      yield proposalDecisionCandidate({
         decisionId,
         disposition,
         currentText: asString(row.current_text),
@@ -6015,21 +6116,24 @@ export class EditorialStore {
         editedText: row.edited_text === null ? null : asString(row.edited_text),
         reason: standing.reason,
         reasonSource: standing.reasonSource,
+        feedbackEntries: standing.feedbackEntries,
         recordedAt: standing.reasonRevisedAt ?? asString(row.recorded_at),
         decidedAt: asString(row.recorded_at),
-      }, withExcerpt));
+      }, withExcerpt);
     }
-    const labels = new Map<string, BaselineAnalysisResultSetRevisionProjection | null>();
+    let labeledRevision: string | null = null;
+    let labels: BaselineAnalysisResultSetRevisionProjection | null = null;
     for (const signal of this.#analysisFeedback.latestWithWords(bookId)) {
       let label: string | null = null;
       if (withExcerpt) {
-        if (!labels.has(signal.revisionId)) {
+        if (labeledRevision !== signal.revisionId) {
           const inspected = this.inspectBaselineAnalysis(bookId, undefined, signal.revisionId);
-          labels.set(signal.revisionId, inspected.inspectedRevision?.revision ?? inspected.resultSetRevision);
+          labels = inspected.inspectedRevision?.revision ?? inspected.resultSetRevision;
+          labeledRevision = signal.revisionId;
         }
-        label = analysisItemLabel(labels.get(signal.revisionId) ?? null, signal.itemKey);
+        label = analysisItemLabel(labels, signal.itemKey);
       }
-      candidates.push(analysisFeedbackCandidate(signal, withExcerpt ? label ?? '' : null));
+      yield analysisFeedbackCandidate(signal, withExcerpt ? label ?? '' : null);
     }
     const ignored = this.#authority.prepare(
       `SELECT signal_id, review_run_id, finding_id, category_id, reason, recorded_at FROM quality_signals q
@@ -6037,32 +6141,36 @@ export class EditorialStore {
          AND recorded_at = (SELECT max(latest.recorded_at) FROM quality_signals latest
                             WHERE latest.review_run_id = q.review_run_id AND latest.finding_id = q.finding_id)
        ORDER BY recorded_at, signal_id`,
-    ).all(bookId) as SqlRow[];
+    ).iterate(bookId) as IterableIterator<SqlRow>;
     for (const row of ignored) {
       const categoryId = asString(row.category_id);
-      candidates.push(reviewDispositionCandidate({
+      yield reviewDispositionCandidate({
         signalId: asString(row.signal_id),
         reviewRunId: asString(row.review_run_id),
         findingId: asString(row.finding_id),
         categoryLabel: reviewCategoryEntry(categoryId)?.label ?? categoryId,
         reason: asString(row.reason),
         recordedAt: asString(row.recorded_at),
-      }, withExcerpt));
+      }, withExcerpt);
     }
-    return candidates;
   }
 
   /** Each Book whose Learning Material waits: how many wait for a decision or changed since one, and how many were deferred. */
   #learningAttention(limit: number): LearningMaterialsAttentionReading[] {
     const readings: LearningMaterialsAttentionReading[] = [];
-    for (const row of this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').all() as SqlRow[]) {
+    for (const row of this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').iterate() as IterableIterator<SqlRow>) {
       const bookId = asString(row.book_id);
-      const materials = this.#learningEligibility.project(bookId, this.#learningCandidates(bookId, false));
-      const waiting = materials.filter((material) => material.state === 'pending' || material.state === 'changed');
-      const deferred = materials.filter((material) => material.state === 'deferred');
-      if (waiting.length === 0 && deferred.length === 0) continue;
-      const at = [...waiting, ...deferred].map((material) => material.recordedAt).sort().at(-1)!;
-      readings.push({ bookId, bookTitle: asString(row.title), pending: waiting.length, deferred: deferred.length, at });
+      let pending = 0;
+      let deferred = 0;
+      let at = '';
+      for (const material of this.#learningEligibility.projectEntries(bookId, this.#learningCandidates(bookId, false))) {
+        if (material.state === 'pending' || material.state === 'changed') pending += 1;
+        else if (material.state === 'deferred') deferred += 1;
+        else continue;
+        if (material.recordedAt > at) at = material.recordedAt;
+      }
+      if (pending === 0 && deferred === 0) continue;
+      readings.push({ bookId, bookTitle: asString(row.title), pending, deferred, at });
       if (readings.length >= limit) break;
     }
     return readings;
@@ -10293,7 +10401,25 @@ export class EditorialStore {
   }
 
   resolveBookWorkbenchRoute(route: BookWorkbenchRoute): ResolvedBookWorkbenchRoute {
-    return this.#boundedCall(() => this.#bounded.resolveBookWorkbenchRoute(route));
+    return this.#boundedCall(() => {
+      const resolved = this.#bounded.resolveBookWorkbenchRoute(route);
+      if (route.kind !== 'book') return resolved;
+      if (route.feedbackEntryId !== undefined) {
+        const entry = this.#readFeedbackHistory({ bookId: route.bookId }, route.feedbackEntryId).entries[0];
+        requireStore(resolved.kind === 'book' && entry !== undefined, 'FEEDBACK_SOURCE_NOT_FOUND', '这条反馈的来源记录不存在。');
+        requireStore(entry.target.kind !== 'mark' || !entry.target.detached,
+          'FEEDBACK_SOURCE_DETACHED', '这条修改建议所在的段落已不在稿件中。');
+        return { ...resolved, feedbackTarget: entry.target };
+      }
+      if (route.learningMaterialKey !== undefined) {
+        const material = this.inspectLearningMaterial(route.bookId, route.learningMaterialKey);
+        requireStore(resolved.kind === 'book', 'LEARNING_MATERIAL_NOT_FOUND', '无法打开学习材料的来源记录。');
+        requireStore(material.target.kind !== 'mark' || !material.target.detached,
+          'LEARNING_SOURCE_DETACHED', '来源修改建议所在的段落已不在稿件中。');
+        return { ...resolved, learningMaterialTarget: material.target };
+      }
+      return resolved;
+    });
   }
 
   getHistoricalRevision(revisionId: string, cursor: string | null): HistoricalRevisionProjection {
@@ -11016,8 +11142,8 @@ export class EditorialStore {
   }
 
   /** `按上述方式导出`: each file approved and written in turn with its receipt, and the package as it stands. */
-  async approveBookDeliveryPackageExport(input: ApproveBookDeliveryPackageExportInput, available: boolean): Promise<BookDeliveryPackageExportResultProjection> {
-    const exported = await this.#packageExportCall(() => this.#packageExports.approve(input, available));
+  async approveBookDeliveryPackageExport(input: ApproveBookDeliveryPackageExportInput, available: boolean, beforeWrite?: () => void): Promise<BookDeliveryPackageExportResultProjection> {
+    const exported = await this.#packageExportCall(() => this.#packageExports.approve(input, available, beforeWrite));
     return { bookId: input.bookId, export: exported, package: this.inspectBookDeliveryPackage(input.bookId) };
   }
 

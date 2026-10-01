@@ -12,6 +12,7 @@ import {
   MAX_MARK_BODY_CODE_UNITS,
   MAX_MILESTONE_PURPOSE_CODE_UNITS,
   MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS,
+  MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS,
   MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS,
   MAX_PROPOSAL_CONFLICT_UNITS,
   MAX_PUBLICATION_BASIS_CHARACTERS,
@@ -73,6 +74,22 @@ describe('decodeRequest accepts well-formed frames', () => {
       input: { kind: 'revision', revisionId: randomUUID() },
     };
     expect(decodeRequest(frameOf(bookRoute))).toEqual(bookRoute);
+    const feedbackRoute = { ...bookRoute, input: { ...bookRoute.input, feedbackEntryId: `proposal-decision:${randomUUID()}` } };
+    expect(decodeRequest(frameOf(feedbackRoute))).toEqual(feedbackRoute);
+    for (const input of [
+      { ...feedbackRoute.input, feedbackEntryId: 'x'.repeat(161) },
+      { ...feedbackRoute.input, feedbackEntryId: null },
+      { ...feedbackRoute.input, target: { kind: 'mark' } },
+      { ...revisionRoute.input, feedbackEntryId: feedbackRoute.input.feedbackEntryId },
+    ]) expect(() => decodeRequest(frameOf({ ...bookRoute, input }))).toThrow(ProtocolError);
+    const materialRoute = { ...bookRoute, input: { ...bookRoute.input, learningMaterialKey: `proposal-decision:${randomUUID()}` } };
+    expect(decodeRequest(frameOf(materialRoute))).toEqual(materialRoute);
+    for (const input of [
+      { ...materialRoute.input, learningMaterialKey: 'x'.repeat(161) },
+      { ...materialRoute.input, learningMaterialKey: null },
+      { ...materialRoute.input, target: { kind: 'mark' } },
+      { ...revisionRoute.input, learningMaterialKey: materialRoute.input.learningMaterialKey },
+    ]) expect(() => decodeRequest(frameOf({ ...bookRoute, input }))).toThrow(ProtocolError);
     expect(decodeRequest(frameOf(revisionRoute))).toEqual(revisionRoute);
   });
 
@@ -325,6 +342,28 @@ describe('decodeRequest accepts well-formed frames', () => {
     }
   });
 
+  it('takes a workflow move\'s reason within the one bound the service holds it to, and refuses one past it (Issue #626)', () => {
+    const move = { bookId: randomUUID(), documentId: randomUUID(), phaseId: 'drafting', action: 'skip', expectedTransitions: 3 };
+    const taken: ReadonlyArray<unknown> = [
+      { ...move, reason: { choice: 'custom', text: '𠀀'.repeat(MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS) } },
+      { ...move, reason: { choice: 'later', text: null } },
+      { ...move, action: 'start', reason: null },
+    ];
+    for (const input of taken) {
+      const request = { id: randomUUID(), op: 'transitionProductionDocumentPhase', input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    const refused: ReadonlyArray<unknown> = [
+      { ...move, reason: { choice: 'custom', text: '字'.repeat(MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS + 1) } },
+      { ...move, reason: { choice: 'Custom Reason', text: null } },
+      { ...move, reason: { choice: 'later' } },
+      { ...move, reason: 'later' },
+    ];
+    for (const input of refused) {
+      expect(() => decodeRequest(frameOf({ id: randomUUID(), op: 'transitionProductionDocumentPhase', input }))).toThrowError(ProtocolError);
+    }
+  });
+
   it('rejects a 生产文档 read or command whose type, identities, decision, recipient, note or key set is wrong', () => {
     const id = randomUUID();
     const bookId = randomUUID();
@@ -425,11 +464,11 @@ describe('decodeRequest accepts well-formed frames', () => {
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
       { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options } },
       { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options: { includeAnnotations: false, includeSuggestions: true } } },
-      { op: 'prepareBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options, reviewDigest: 'a'.repeat(64), folder } },
+      { op: 'prepareBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options, memberKeys: ['manifest'], reviewDigest: 'a'.repeat(64), folder } },
       {
         op: 'prepareBookDeliveryPackageExport',
         input: {
-          bookId, packageVersionId: randomUUID(), options, reviewDigest: 'b'.repeat(64),
+          bookId, packageVersionId: randomUUID(), options, memberKeys: ['manifest'], reviewDigest: 'b'.repeat(64),
           folder: `${folder}${'径'.repeat(MAX_EXPORT_DESTINATION_CODE_UNITS - folder.length)}`,
         },
       },
@@ -486,6 +525,7 @@ describe('decodeRequest accepts well-formed frames', () => {
     const bookId = randomUUID();
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
       { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID() } },
+      { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID(), beforeRevision: 61, afterPublicationOrdinal: 30, errataVersionId: randomUUID() } },
       { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 22 } },
       { op: 'recordMaintenanceCase', input: { bookId, publicationVersionId: randomUUID(), classification: 'errata', reason: '读者来信指出有误', evidence: null } },
       { op: 'recordMaintenanceCase', input: { bookId, publicationVersionId: randomUUID(), classification: 'withdrawal', reason: '𠀀'.repeat(500), evidence: '质检单' } },
@@ -508,6 +548,9 @@ describe('decodeRequest accepts well-formed frames', () => {
     const refused: ReadonlyArray<{ op: string; input: unknown }> = [
       { op: 'inspectMaintenanceCase', input: { bookId } },
       { op: 'inspectMaintenanceCase', input: { bookId, caseId: 'first' } },
+      ...[0, -1, 1.5, '2'].map((beforeRevision) => ({ op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID(), beforeRevision } })),
+      { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID(), afterPublicationOrdinal: -1 } },
+      { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID(), errataVersionId: 'first' } },
       { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID() } },
       { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 0 } },
       { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 2.5 } },
@@ -538,8 +581,10 @@ describe('decodeRequest accepts well-formed frames', () => {
     const id = randomUUID();
     const bookId = randomUUID();
     const options = { includeAnnotations: true, includeSuggestions: true };
-    const prepare = { bookId, packageVersionId: randomUUID(), options, reviewDigest: 'a'.repeat(64), folder: resolve('交付包导出') };
+    const prepare = { bookId, packageVersionId: randomUUID(), options, memberKeys: ['manifest'], reviewDigest: 'a'.repeat(64), folder: resolve('交付包导出') };
     const refused: ReadonlyArray<{ op: string; input: unknown }> = [
+      ...[-1, 0.5, Number.MAX_SAFE_INTEGER, null].map((offset) => ({ op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: prepare.packageVersionId, options, offset } })),
+      ...[undefined, [], ['manifest', 'manifest'], Array(41).fill('manifest'), ['x'.repeat(81)], [false]].map((memberKeys) => ({ op: 'prepareBookDeliveryPackageExport', input: { ...prepare, memberKeys } })),
       { op: 'reviewBookDeliveryPackageExport', input: { bookId } },
       { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID() } },
       { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: 'v2', options } },
@@ -555,7 +600,7 @@ describe('decodeRequest accepts well-formed frames', () => {
       { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, reviewDigest: 'a'.repeat(63) } },
       { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, folder: '交付包导出' } },
       { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, folder: `${prepare.folder}${'径'.repeat(MAX_EXPORT_DESTINATION_CODE_UNITS)}` } },
-      { op: 'prepareBookDeliveryPackageExport', input: { bookId, packageVersionId: prepare.packageVersionId, options, reviewDigest: prepare.reviewDigest } },
+      { op: 'prepareBookDeliveryPackageExport', input: { bookId, packageVersionId: prepare.packageVersionId, options, memberKeys: ['manifest'], reviewDigest: prepare.reviewDigest } },
       { op: 'prepareBookDeliveryPackageExport', input: { ...prepare, fileNames: ['交付包清单.md'] } },
       { op: 'approveBookDeliveryPackageExport', input: { bookId, exportId: 'last' } },
       { op: 'approveBookDeliveryPackageExport', input: { bookId, exportId: randomUUID(), folder: prepare.folder } },
@@ -1083,6 +1128,9 @@ describe('decodeRequest rejects malformed frames', () => {
   it('accepts 知识库 › 审阅规范文件: the read naming nothing, a preview by document and absolute path, a confirmation by preview (Issue #427)', () => {
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
       { op: 'inspectReviewGuidelines', input: {} },
+      { op: 'inspectReviewGuidelines', input: { page: { documentId: 'ai7-builtin/typos-and-usage', versionsBefore: 9, clausePage: 2 } } },
+      { op: 'inspectReviewGuidelines', input: { page: { documentId: 'ai7-builtin/typos-and-usage', versionsBefore: null } } },
+      { op: 'previewReviewGuidelineVersion', input: { documentId: 'ai7-builtin/typos-and-usage', previewId: randomUUID(), clausePage: 3 } },
       { op: 'previewReviewGuidelineVersion', input: { documentId: 'ai7-builtin/typos-and-usage', path: `${process.cwd()}/规范/文字.docx` } },
       { op: 'importReviewGuidelineVersion', input: { previewId: randomUUID() } },
     ];
@@ -1093,6 +1141,12 @@ describe('decodeRequest rejects malformed frames', () => {
     const absolute = `${process.cwd()}/规范/文字.docx`;
     for (const [op, input] of [
       ['inspectReviewGuidelines', { bookId: randomUUID() }],
+      ['inspectReviewGuidelines', { page: { documentId: 'ai7-builtin/typos-and-usage', versionsBefore: 1 } }],
+      ['inspectReviewGuidelines', { page: { documentId: 'ai7-builtin/typos-and-usage', clausePage: -1 } }],
+      ['inspectReviewGuidelines', { page: { documentId: 'ai7-builtin/typos-and-usage', clausePage: null } }],
+      ['inspectReviewGuidelines', { page: { documentId: 'ai7-builtin/typos-and-usage', clauses: [] } }],
+      ['previewReviewGuidelineVersion', { documentId: 'ai7-builtin/typos-and-usage', previewId: randomUUID(), path: absolute }],
+      ['previewReviewGuidelineVersion', { documentId: 'ai7-builtin/typos-and-usage', previewId: randomUUID(), clausePage: -1 }],
       ['previewReviewGuidelineVersion', { documentId: 'ai7-builtin/typos-and-usage' }],
       ['previewReviewGuidelineVersion', { documentId: 'ai7-builtin/typos-and-usage', path: '规范/文字.docx' }],
       ['previewReviewGuidelineVersion', { documentId: '../escape', path: absolute }],
@@ -1133,6 +1187,8 @@ describe('decodeRequest rejects malformed frames', () => {
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
       { op: 'inspectEvaluationProfiles', input: {} },
       { op: 'inspectEvaluation', input: { bookId, recordId: null } },
+      { op: 'inspectEvaluation', input: { bookId, recordId: null, recordsBefore: 11 } },
+      { op: 'inspectEvaluation', input: { bookId, recordId: null, recordsBefore: null } },
       { op: 'inspectEvaluation', input: { bookId, recordId } },
       { op: 'startEvaluation', input: { bookId } },
       { op: 'saveEvaluation', input: { bookId, recordId, expectedEntries: 1, content, finalize: false } },
@@ -1145,6 +1201,9 @@ describe('decodeRequest rejects malformed frames', () => {
     for (const [op, input] of [
       ['inspectEvaluationProfiles', { bookId }],
       ['inspectEvaluation', { bookId }],
+      ['inspectEvaluation', { bookId, recordId: null, recordsBefore: 1 }],
+      ['inspectEvaluation', { bookId, recordId: null, recordsBefore: 2.5 }],
+      ['inspectEvaluation', { bookId, recordId: null, recordsBefore: '11' }],
       ['inspectEvaluation', { bookId: 'book', recordId: null }],
       ['startEvaluation', { bookId, recordId }],
       ['saveEvaluation', { bookId, recordId, expectedEntries: 0, content, finalize: false }],
@@ -1169,6 +1228,13 @@ describe('decodeRequest rejects malformed frames', () => {
       ['inspectLearningMaterials', { bookId: null, after: { bookTitle: '学习之书', bookId, orderedAt: '2026-09-26T01:02:03.004Z', materialKey: `proposal-decision:${randomUUID()}` } }],
       ['inspectLearningMaterial', { bookId, materialKey: `review-disposition:${randomUUID()}/rvf_${'9c'.repeat(12)}` }],
       ['inspectFeedbackHistory', {}],
+      ['inspectFeedbackHistory', { bookId, origin: 'analysis-feedback', author: '周一', editor: null, after: null }],
+      ['inspectFeedbackHistory', { bookId, origin: 'analysis-feedback', dimension: '人物与名称', recordedFrom: '2026-09-25T16:00:00.000Z', recordedBefore: '2026-09-26T16:00:00.000Z' }],
+      ['inspectFeedbackHistory', { dimension: null, recordedFrom: null, recordedBefore: null }],
+      ['inspectFeedbackHistory', { signal: '修改后接受', origin: 'proposal-decision' }],
+      ['inspectFeedbackHistory', { signal: '准确', dimension: '人物与名称' }],
+      ['inspectFeedbackHistory', { signal: null }],
+      ['inspectFeedbackHistory', { after: { recordedAt: '2026-09-26T01:02:03.004Z', entryId: `proposal-decision:${randomUUID()}` } }],
       ['decideLearningMaterial', decision],
       ['decideLearningMaterial', { ...decision, materialKey: `analysis-feedback:${randomUUID()}/entities/12`, expectedDecisions: 3, choice: 'deferred', note: '以后再说' }],
       ['decideLearningMaterial', { ...decision, materialKey: `analysis-feedback:${randomUUID()}/synopsis`, choice: 'house' }],
@@ -1190,7 +1256,19 @@ describe('decodeRequest rejects malformed frames', () => {
       ['decideLearningMaterial', { ...decision, materialKey: `review-disposition:${randomUUID()}/finding-7` }],
       ['decideLearningMaterial', { ...decision, materialKey: `proposal-decision:${randomUUID()}/entities/1` }],
       ['decideLearningMaterial', { ...decision, materialKey: `analysis-feedback:${randomUUID()}/chapters/1` }],
-      ['inspectFeedbackHistory', { bookId }],
+      ['inspectFeedbackHistory', { bookId: 'invalid' }],
+      ['inspectFeedbackHistory', { origin: 'unknown' }],
+      ['inspectFeedbackHistory', { author: 'a'.repeat(201) }],
+      ['inspectFeedbackHistory', { dimension: 'a'.repeat(201) }],
+      ['inspectFeedbackHistory', { dimension: 7 }],
+      ['inspectFeedbackHistory', { signal: '稍后决定' }],
+      ['inspectFeedbackHistory', { signal: 7 }],
+      ['inspectFeedbackHistory', { recordedFrom: '2026-02-30T00:00:00.000Z' }],
+      ['inspectFeedbackHistory', { recordedBefore: '2026-09-26' }],
+      ['inspectFeedbackHistory', { recordedFrom: '2026-09-27T00:00:00.000Z', recordedBefore: '2026-09-26T00:00:00.000Z' }],
+      ['inspectFeedbackHistory', { recordedFrom: '2026-09-26T00:00:00.000Z', recordedBefore: '2026-09-26T00:00:00.000Z' }],
+      ['inspectFeedbackHistory', { after: { recordedAt: 'yesterday', entryId: `proposal-decision:${randomUUID()}` } }],
+      ['inspectFeedbackHistory', { after: { recordedAt: '2026-09-26T01:02:03.004Z', entryId: 'unknown' } }],
       ['decideLearningMaterial', { ...decision, choice: 'series' }],
       ['decideLearningMaterial', { ...decision, choice: null }],
       ['decideLearningMaterial', { ...decision, materialKey: 'library:x' }],
@@ -1310,6 +1388,8 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'inspectLibraryMaterials', input: { after: null } },
       { op: 'inspectLibraryMaterials', input: { after: { recordedAt: '2026-09-26T01:02:03.004Z', materialId: randomUUID() } } },
       { op: 'inspectLibraryMaterial', input: { materialId } },
+      { op: 'readLibraryDecisionReason', input: { materialId, ordinal: 2, offset: 1024 } },
+      { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'house', reason: '👨‍👩‍👧‍👦'.repeat(300) } } },
       { op: 'previewLibraryMaterial', input: { path: `${process.cwd()}/资料/样书.pdf` } },
       { op: 'addLibraryMaterial', input: { previewId: randomUUID(), title: '样书一', kind: 'book' } },
       { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId: randomUUID() } } } },
@@ -1330,6 +1410,11 @@ describe('decodeRequest rejects malformed frames', () => {
       ['inspectLibraryMaterials', { after: { recordedAt: '2026-09-26T01:02:03.004Z' } }],
       ['inspectLibraryMaterial', { materialId: 'first' }],
       ['inspectLibraryMaterial', {}],
+      ['readLibraryDecisionReason', { materialId, ordinal: 0, offset: 0 }],
+      ['readLibraryDecisionReason', { materialId, ordinal: 2, offset: -1024 }],
+      ['readLibraryDecisionReason', { materialId, ordinal: 2, offset: 1 }],
+      ['readLibraryDecisionReason', { materialId: 'first', ordinal: 2, offset: 0 }],
+      ['readLibraryDecisionReason', { materialId, ordinal: 2, offset: 0, extra: true }],
       ['previewLibraryMaterial', { path: '资料/样书.pdf' }],
       ['previewLibraryMaterial', {}],
       ['addLibraryMaterial', { previewId: randomUUID(), title: '样书一', kind: 'magazine' }],
