@@ -58,11 +58,11 @@ let open: { readonly key: string; readonly draft: Draft } | null = null;
 let composing = false;
 
 /**
- * Whether the editor is inside an open 分析反馈 card of `root` — its focus there, or text still being composed — so ②A
+ * Whether an open 分析反馈 card of `root` has pending work, focus, or text still being composed, so ②A
  * holds a follow-up draw that would replace the card under them (Issue #94 review; FDBK-005).
  */
 export function analysisFeedbackEngaged(root: HTMLElement): boolean {
-  if (composing) return true;
+  if (composing || root.querySelector('.analysis-feedback-card[data-analysis-feedback-pending="true"]') !== null) return true;
   const active = document.activeElement;
   return active instanceof HTMLElement && root.contains(active) && active.closest('.analysis-feedback-card') !== null;
 }
@@ -162,6 +162,7 @@ export function mountAnalysisFeedback(options: MountAnalysisFeedbackOptions): { 
   const cardNode = (item: AnalysisFeedbackItemProjection, draft: Draft, name: string): HTMLElement => {
     composing = false;
     const box = el('div', 'analysis-feedback-card');
+    box.dataset['analysisFeedbackPending'] = String(busy);
     box.setAttribute('role', 'group');
     box.setAttribute('aria-label', `${ANALYSIS_FEEDBACK_HEADING}：${name}`);
     const judgments = el('fieldset', 'analysis-feedback-judgments');

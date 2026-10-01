@@ -1418,13 +1418,13 @@ async function main() {
     await tick(renderer, `${feedbackItem('synopsis')} .analysis-feedback-judgments input[value="accurate"]`, 'feedback-pending-accurate');
     await assertRenderer(renderer, `(() => {
       const original=Promise.prototype.then;
-      const held={release:null,node:null}; window.__j11HeldFeedbackSave=held;
+      const held={release:null,node:null,outcome:null}; window.__j11HeldFeedbackSave=held;
       try {
         Promise.prototype.then=function(success,failure) {
           Promise.prototype.then=original;
           return original.call(this,
-            (value)=>new Promise(resolve=>{held.release=()=>resolve(success(value));}),
-            (error)=>new Promise((_resolve,reject)=>{held.release=()=>reject(error);}));
+            (value)=>new Promise(resolve=>{held.outcome='success';held.release=()=>resolve(success(value));}),
+            (error)=>new Promise((_resolve,reject)=>{held.outcome='failure';held.release=()=>reject(error);}));
         };
         document.querySelector(${JSON.stringify(`${feedbackItem('synopsis')} [data-analysis-action="record-feedback"]`)}).click();
         held.node=document.querySelector('.analysis-feedback-card');
@@ -1432,6 +1432,7 @@ async function main() {
       return held.node!==null && [...held.node.querySelectorAll('input,textarea,button')].every(control=>control.disabled);
     })()`, 'feedback-pending-hold-save');
     await waitFor(renderer, `typeof window.__j11HeldFeedbackSave?.release==='function'`, 'feedback-pending-save-held');
+    await assertRenderer(renderer, `window.__j11HeldFeedbackSave.outcome==='success'`, 'feedback-pending-save-accepted');
     await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then(projection=>projection.state==='settled')`, 'feedback-pending-run-settled');
     await assertRenderer(renderer, `(() => { window.__j11HeldFeedbackFollow.release(); return true; })()`, 'feedback-pending-release-follow');
     // A real changed follower read has time to settle. Pending work, rather than focus, must retain this exact disabled card.
