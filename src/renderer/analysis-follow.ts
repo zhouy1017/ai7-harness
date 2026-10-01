@@ -15,11 +15,19 @@ export interface AnalysisFollowStep<T> {
   unchanged(next: T): boolean;
   /** How long until the next read when nothing changed, or `null` to stop following. */
   again(): number | null;
+  /**
+   * Whether the editor is inside what a draw would replace — an open 分析反馈 card with its focus, or text still being
+   * composed there (Issue #94 review; FDBK-005). A changed answer then waits, and the card reads again shortly.
+   */
+  held?(): boolean;
   /** Draw the answer; that draw follows the card from there. */
   draw(next: T): void;
   /** The read failed while this draw was still the card's, or the draw of its answer failed. */
   failed(error: unknown): void;
 }
+
+/** How soon a held answer is read again when the state itself would not be followed. */
+export const HELD_FOLLOW_DELAY_MS = 500;
 
 export interface AnalysisFollowClock {
   setTimeout(callback: () => void, delayMs: number): number;
@@ -77,6 +85,12 @@ export class AnalysisFollower<Host extends object> {
       }
     } catch (error) {
       if (this.current(host, generation) && step.belongs(null)) step.failed(error);
+      return;
+    }
+    // The editor is inside what the draw would replace: nothing is drawn under them, and the card reads again shortly,
+    // drawing once they leave it (Issue #94 review).
+    if (step.held?.() === true) {
+      this.later(host, generation, step.again() ?? HELD_FOLLOW_DELAY_MS, step);
       return;
     }
     // The draw is this answer's own, and it begins the card's next draw before it can fail, so a failed draw is said

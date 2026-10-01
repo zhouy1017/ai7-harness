@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BOOK_PEOPLE_ROLE_LISTS, BOOK_PEOPLE_TRIGGER_SQL, BUILTIN_BOOK_PEOPLE_ROLES } from '../../src/service/book-people.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { EVALUATION_RECORD_SCHEMA_VERSION, MAINTENANCE_CASE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { ANALYSIS_FEEDBACK_SCHEMA_VERSION, MAINTENANCE_CASE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, type ComposedManuscriptRequest } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
@@ -198,6 +198,7 @@ describe('作者 · 责编 · 相关人 (S83)', () => {
     const planted = new DatabaseSync(path);
     try {
       planted.exec(`BEGIN IMMEDIATE;
+        DROP TABLE analysis_feedback_signals;
         DROP TABLE evaluation_record_entries;
         DROP TABLE evaluation_records;
         DROP TABLE library_material_decisions;
@@ -218,7 +219,7 @@ describe('作者 · 责编 · 相关人 (S83)', () => {
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EVALUATION_RECORD_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(ANALYSIS_FEEDBACK_SCHEMA_VERSION);
       expect((after.prepare('SELECT count(*) count FROM book_people_versions').get() as { count: number }).count).toBe(0);
     } finally {
       after.close();

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AnalysisFollower, type AnalysisFollowStep } from '../../src/renderer/analysis-follow.js';
+import { AnalysisFollower, HELD_FOLLOW_DELAY_MS, type AnalysisFollowStep } from '../../src/renderer/analysis-follow.js';
 
 // ②A's follow-up reads (Issue #502; Issue #539), on fake timers: the card is a plain object, and each read answers when the
 // case says so. What the card draws is recorded, not rendered.
@@ -141,5 +141,37 @@ describe('②A follows one draw at a time', () => {
     drawOf(other, { bookId: 'c', revision: 1 }, [], { reads: 0, drawn: [], failed: [] });
     await vi.advanceTimersByTimeAsync(250);
     expect(mine.reads).toBe(1);
+  });
+});
+
+describe('②A holds a draw while the editor is inside what it would replace (Issue #94 review)', () => {
+  it('draws nothing under an open 分析反馈 card, reads again shortly, and draws once the editor leaves it', async () => {
+    const host = {};
+    let engaged = true;
+    const drawn: Answer[] = [];
+    let reads = 0;
+    const generation = follower.drawn(host);
+    const step: AnalysisFollowStep<Answer> = {
+      belongs: () => true,
+      read: async () => {
+        reads += 1;
+        return { bookId: 'b', revision: 6 };
+      },
+      unchanged: () => false,
+      // A settled state would not be followed; a held answer is read again all the same.
+      again: () => null,
+      held: () => engaged,
+      draw: (next) => { drawn.push(next); },
+      failed: () => undefined,
+    };
+    follower.later(host, generation, 250, step);
+    await vi.advanceTimersByTimeAsync(250);
+    expect([reads, drawn]).toEqual([1, []]);
+    await vi.advanceTimersByTimeAsync(HELD_FOLLOW_DELAY_MS);
+    expect([reads, drawn]).toEqual([2, []]);
+    // The editor leaves the card: the next read draws.
+    engaged = false;
+    await vi.advanceTimersByTimeAsync(HELD_FOLLOW_DELAY_MS);
+    expect([reads, drawn]).toEqual([3, [{ bookId: 'b', revision: 6 }]]);
   });
 });
