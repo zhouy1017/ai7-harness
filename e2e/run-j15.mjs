@@ -367,6 +367,7 @@ async function constructPredecessorV12(dataRoot, bookId) {
       PRAGMA foreign_keys = OFF;
       BEGIN IMMEDIATE;
       DROP TABLE store_versions;
+      DROP TABLE series_knowledge_conflicts;
       DROP TABLE series_knowledge_promotions;
       DROP TABLE series_knowledge_revisions;
       DROP TABLE series_knowledge_candidates;
