@@ -95,6 +95,7 @@ describe('知识库', () => {
     expect(guidelineMergedVersionsSummary(2)).toBe('随合并的图书带来的版本（2，只读）');
     expect(guidelineMergedVersionLine({
       ordinal: 3, issuer: '本社', title: '文字规范条款', clauses: [{ number: 1, text: '一' }, { number: 2, text: '二' }], digest: 'd'.repeat(64),
+      clauseCount: 2, clausePage: 0, clausePages: 1,
       usedByCount: 1, usedBy: [{ bookId: 'z', bookTitle: '丙书', reviewRunId: 'r', reviewOrdinal: 1, createdAt: '2026-09-25T00:00:00.000Z' }],
     })).toBe('第 3 版 · 本社 · 2 条 · 随图书带来 · 用于 《丙书》第 1 次审阅');
     expect(guidelineMergedVersionsMore(10, 12)).toBe('只列出 10 个，共 12 个。');

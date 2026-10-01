@@ -599,7 +599,8 @@ export class ReviewGuidelineLedger {
       const mergedNextRow = mergedRows.length > MAX_GUIDELINE_MERGED_VERSIONS_SHOWN ? mergedRows[MAX_GUIDELINE_MERGED_VERSIONS_SHOWN - 1] : undefined;
       const mergedVersions: ReviewGuidelineMergedVersionProjection[] = mergedRows.slice(0, MAX_GUIDELINE_MERGED_VERSIONS_SHOWN).map((row) => {
         const clauses = JSON.parse(String(row.clauses_json)) as ReviewGuidelineClause[];
-        const fragment = clausePage(clauses, selected?.mergedClause?.digest === row.content ? selected.mergedClause.page : 0, 128, 4);
+        const mergedClause = selected?.mergedClause;
+        const fragment = clausePage(clauses, mergedClause !== undefined && mergedClause.digest === row.content ? mergedClause.page : 0, 128, 4);
         const usedByCount = integer(this.#db.prepare('SELECT COUNT(*) AS count FROM temp.guideline_uses WHERE document_id=? AND content=? AND snapshot=1').get(builtin.documentId, row.content!)!.count);
         const references = this.#db.prepare(`SELECT * FROM temp.guideline_uses WHERE document_id=? AND content=? AND snapshot=1
           ORDER BY created_at DESC, review_run_id DESC LIMIT ?`).all(builtin.documentId, row.content!, MAX_GUIDELINE_VERSION_RUNS_SHOWN);
