@@ -4056,7 +4056,7 @@ export class EditorialStore {
       // What an interrupted 放入资料库 left beside the kept originals (Issue #427 review).
       await store.#libraryMaterials.sweep();
       // A database package staged and never approved, or cut off mid-write, is a whole copy of the data (Issue #434 review).
-      await store.#databaseExports.sweep();
+      await store.#databaseExports.sweep(true);
       store.#boundedCall(() => store.#boundedAuthority.startServiceLifetime(lifetimeId, new Date().toISOString()));
       // Every store records the versions that open it (Issue #433, S85a; DSTO-016): a new record only when one changed.
       store.#softwareVersion = softwareVersion;

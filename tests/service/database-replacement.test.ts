@@ -172,6 +172,24 @@ describe('导入数据库 over the real store', () => {
     } finally { store.close(); }
   });
 
+  it('keeps a reader copy while an export is prepared, and reclaims abandoned reader files at startup', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      createBook(store, '并行读取');
+      const packagePath = await exported(store, '已选择.ai7db');
+      sourceRead.path = packagePath;
+      sourceRead.atEnd = async () => { sourceRead.atEnd = null; await exported(store, '另一次导出.ai7db'); };
+      expect((await store.inspectDatabaseImport(packagePath)).contents.books).toBe(1);
+      const staging = join(roots.dataRoot, 'export-staging');
+      expect((await readdir(staging)).filter((name) => name.startsWith('.'))).toEqual([]);
+      store.close();
+      const abandoned = `.${randomUUID()}.ai7db`;
+      for (const suffix of ['', '.store', '.store-wal', '.store-shm', '.store-journal']) await writeFile(join(staging, `${abandoned}${suffix}`), 'abandoned');
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect((await readdir(staging)).filter((name) => name.startsWith('.'))).toEqual([]);
+    } finally { store.close(); }
+  });
+
   it('previews a package, replaces the data after backing it up, and rolls back to that backup', async () => {
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let replacementId: string;

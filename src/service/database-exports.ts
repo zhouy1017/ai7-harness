@@ -864,9 +864,14 @@ export class DatabaseExports {
    * cancelled, or cut off mid-write — is a whole copy of the data, so none is kept. Its preparation's record stays, and an
    * approval of it is refused as stale and prepares again.
    */
-  async sweep(): Promise<void> {
+  async sweep(includePrivateReads = false): Promise<void> {
     const staging = await this.#stagingDirectory();
     for (const entry of await readdir(staging)) {
+      // Reader-owned copies may be in use beside an export. Only startup reclaims abandoned copies and SQLite sidecars.
+      if (/^\.[0-9a-f-]{36}\.ai7db(?:\.store(?:-wal|-shm|-journal)?)?$/u.test(entry)) {
+        if (includePrivateReads) await rm(join(staging, entry), { force: true });
+        continue;
+      }
       if (entry.endsWith(DATABASE_PACKAGE_EXTENSION) || entry.endsWith(`${DATABASE_PACKAGE_EXTENSION}.store`)) {
         await rm(join(staging, entry), { force: true });
       }

@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { writeDatabasePackage } from '../../src/service/database-exports.js';
 import { MAX_MANIFEST_BYTES } from '../../src/service/database-package-reader.js';
+import { sha256Hex } from '../../src/service/analysis/canonical.js';
 import {
   DatabaseReplacementError,
   completeReplacement,
@@ -369,7 +370,7 @@ describe('applying a replacement of the local data', () => {
     await expect(extractReplacement(dataRoot, path, 'a'.repeat(64))).rejects.toMatchObject({ code: 'DATABASE_REPLACEMENT_STALE' });
     expect(existsSync(staging())).toBe(false);
     writeFileSync(join(root, 'not-a-package.ai7db'), 'words');
-    await expect(extractReplacement(dataRoot, join(root, 'not-a-package.ai7db'), 'a'.repeat(64))).rejects.toMatchObject({ code: 'DATABASE_PACKAGE_INVALID' });
+    await expect(extractReplacement(dataRoot, join(root, 'not-a-package.ai7db'), sha256Hex('words'))).rejects.toMatchObject({ code: 'DATABASE_PACKAGE_INVALID' });
     expect(existsSync(staging())).toBe(false);
   });
 
