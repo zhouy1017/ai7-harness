@@ -176,7 +176,7 @@ describe('the reason after a Proposal Decision', () => {
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_EXPORT_SCHEMA_VERSION);
-      expect((database.prepare('SELECT count(*) count FROM proposal_decision_feedback').get() as { count: number }).count).toBe(4);
+      expect((database.prepare('SELECT count(*) count FROM proposal_decision_feedback').get() as { count: number }).count).toBe(68);
       expect((database.prepare("SELECT group_concat(reason, '|') reasons FROM (SELECT reason FROM proposal_decision_reasons ORDER BY reason)").get() as { reasons: string }).reasons)
         .toBe('更贴近作者的语气|证据不足');
       expect(() => database.exec("UPDATE proposal_decision_feedback SET kind = 'dismissed'")).toThrowError(/DECISION_FEEDBACK_LEDGER_IMMUTABLE/u);
