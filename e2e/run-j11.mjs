@@ -539,6 +539,41 @@ async function readEvaluation(renderer, predicate, name) {
   error.detail = page;
   throw error;
 }
+/** Check pending input in the click's own turn, before the awaited save can repaint or refuse. */
+async function submitEvaluationWithPendingInput(renderer, action, name) {
+  at('evaluation-pending-submit');
+  await assertRenderer(renderer, `(() => {
+    const record = document.querySelector('.evaluation-record');
+    const button = record?.querySelector('[data-evaluation-action="${action}"]');
+    if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+    const before = Array.from(record.querySelectorAll('input, select, textarea'), (control) => [control.value, control.checked ?? null, control.disabled]);
+    window.__j11EvaluationSubmit = { before };
+    button.click();
+    // This synchronous turn cannot run the save's await continuation, including an immediate refusal.
+    const controls = Array.from(record.querySelectorAll('input, select, textarea, button'));
+    const score = record.querySelector('[data-evaluation-field="score"]');
+    score.focus();
+    record.querySelector('input[type="radio"]')?.click();
+    document.execCommand('insertText', false, '9');
+    const values = Array.from(record.querySelectorAll('input, select, textarea'), (control) => [control.value, control.checked ?? null]);
+    return controls.length > 0 && controls.every((control) => control.disabled) && document.activeElement !== score &&
+      JSON.stringify(values) === JSON.stringify(before.map((entry) => entry.slice(0, 2)));
+  })()`, `${name}-pending-input-blocked`);
+}
+
+/** A response keeps the submitted values; a save or refusal also restores each field's prior availability. */
+async function assertSubmittedEvaluation(renderer, restoreDisabled, name) {
+  at('evaluation-submitted-values');
+  await assertRenderer(renderer, `(() => {
+    const submitted = window.__j11EvaluationSubmit;
+    const after = Array.from(document.querySelectorAll('.evaluation-record input, .evaluation-record select, .evaluation-record textarea'), (control) => [control.value, control.checked ?? null, control.disabled]);
+    const same = JSON.stringify(after.map((entry) => entry.slice(0, 2))) === JSON.stringify(submitted.before.map((entry) => entry.slice(0, 2)));
+    const restored = ${JSON.stringify(restoreDisabled)} === false || JSON.stringify(after.map((entry) => entry[2])) === JSON.stringify(submitted.before.map((entry) => entry[2]));
+    delete window.__j11EvaluationSubmit;
+    return same && restored;
+  })()`, name);
+}
+
 /** Click a checkbox or a radio of the form, as a pointer would. */
 async function tick(renderer, selector, name) {
   await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement) || input.disabled) return false; input.click(); return true; })()`, name);
@@ -759,6 +794,7 @@ const READ_DECISION = `(() => {
       end: row.querySelector('[data-mark-action="reason-dismiss"], [data-mark-action="reason-cancel"]')?.textContent ?? null,
     },
     reason: reason === null ? null : [reason.dataset.markReason ?? null, reason.textContent],
+    reasonSource: card.querySelector('[data-mark-reason-source]')?.textContent ?? null,
     later: card.querySelector('[data-mark-action="reason-add"], [data-mark-action="reason-revise"]')?.textContent ?? null,
     focus: active instanceof HTMLElement && card.contains(active) ? (active.dataset.markReasonChip ?? active.dataset.markAction ?? active.tagName) : null,
   };
@@ -1250,6 +1286,38 @@ async function main() {
     await clickSelector(renderer, '[data-book-filter-action="clear"]', 'search-clear');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work')?.dataset.bookFilter === 'none' && document.querySelectorAll('[data-screen="landing"] section.recent-work article.book-summary-item').length === 2 && ${status} === '已显示全部图书'`, 'search-cleared');
 
+    // Hold the real request's completion callback until later navigation has acquired user input.
+    // The Promise hook exists only during the synchronous click and is restored before any other work.
+    for (const action of ['find', 'clear']) {
+      if (action === 'clear') await search(renderer, 'author', '吴二', 'late-clear-setup');
+      else await fill(renderer, '#book-filter-text', '吴二', 'late-find-words');
+      await assertRenderer(renderer, `(() => {
+        const original = Promise.prototype.then;
+        const held = { release: null };
+        window.__j11HeldSearch = held;
+        try {
+          Promise.prototype.then = function (success, failure) {
+            Promise.prototype.then = original;
+            return original.call(this,
+              (value) => { held.release = () => success(value); },
+              (error) => { held.release = () => failure(error); });
+          };
+          document.querySelector('[data-book-filter-action="${action}"]').click();
+        } finally { Promise.prototype.then = original; }
+        return true;
+      })()`, `late-${action}-hold`);
+      await waitFor(renderer, `typeof window.__j11HeldSearch?.release === 'function'`, `late-${action}-response-held`);
+      await click(renderer, '新建图书', `late-${action}-navigate`);
+      await fill(renderer, '#empty-book-title', '保留输入', `late-${action}-draft`);
+      await assertRenderer(renderer, `(() => {
+        window.__j11HeldSearch.release();
+        delete window.__j11HeldSearch;
+        return document.querySelector('[data-screen="book-create"] #empty-book-title')?.value === '保留输入';
+      })()`, `late-${action}-keeps-destination`);
+      await click(renderer, '取消', `late-${action}-cancel`);
+      await waitFor(renderer, `document.querySelector('[data-screen="landing"] form.book-filter')`, `late-${action}-landing`);
+    }
+
     at('restart-keeps-people');
     // A restart moves nothing: the cards and the 工作概览 read the people exactly as saved.
     const booksBefore = await renderer.evaluate(`window.ai7.listBooks({ after: null }).then((page) => JSON.stringify(page))`);
@@ -1313,16 +1381,23 @@ async function main() {
     requireJourney(reviewed.record.conclusions[0][2] === false, 'evaluation-recommend-open', reviewed.record.conclusions);
     await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', 'evaluation-conclusion');
     await fill(renderer, '[data-screen="book-evaluation"] .evaluation-lists [data-evaluation-field="readiness"]', '第三章结尾需要重写', 'evaluation-readiness');
-    await clickSelector(renderer, '[data-evaluation-action="save"]', 'evaluation-save');
+    await submitEvaluationWithPendingInput(renderer, 'save', 'evaluation-save');
     await waitFor(renderer, `${status} === '评估已保存。'`, 'evaluation-saved-status');
+    await assertSubmittedEvaluation(renderer, true, 'evaluation-save-keeps-submitted-draft');
     const savedPage = await readEvaluation(renderer, (page) => page.record?.entries === '2', 'evaluation-saved');
     requireJourney(JSON.stringify(savedPage.versions) === JSON.stringify(['第 1 版 · 编辑评分中 · 修订版 r1 · 总分 66.5 / 80 · 优秀（1 项不评） · 修改后再议']) &&
       savedPage.record.conclusions[1][1] === true && savedPage.focus === 'save', 'evaluation-saved-words', savedPage);
 
     at('evaluation-finalize');
+    await submitEvaluationWithPendingInput(renderer, 'finalize', 'evaluation-missing-low-statement');
+    await waitFor(renderer, `${status} === '定稿前，要写明「事实与来源」的风险说明。'`, 'evaluation-low-statement-refused');
+    await assertSubmittedEvaluation(renderer, true, 'evaluation-refusal-restores-draft-controls');
+    await readEvaluation(renderer, (page) => page.record?.state === 'editing' && page.record.entries === '2', 'evaluation-refusal-keeps-draft');
+    await fill(renderer, `${risk('facts-and-sources')} [data-evaluation-field="statement"]`, '已核对事实和来源，未发现未解决问题。', 'evaluation-low-risk-statement');
     // 定稿: the version reads as it was, with the actor and the time, and 重新评估 begins the next.
-    await clickSelector(renderer, '[data-evaluation-action="finalize"]', 'evaluation-finalize');
+    await submitEvaluationWithPendingInput(renderer, 'finalize', 'evaluation-finalize');
     await waitFor(renderer, `${status} === '第 1 版评估已定稿。'`, 'evaluation-finalized-status');
+    await assertSubmittedEvaluation(renderer, false, 'evaluation-finalize-keeps-submitted-draft');
     const finalizedPage = await readEvaluation(renderer, (page) => page.record?.state === 'finalized', 'evaluation-finalized');
     requireJourney(finalizedPage.record.heading === '第 1 版 · 定稿' && (finalizedPage.record.finalized ?? '').startsWith('定稿 · 本机编辑 · ') &&
       finalizedPage.record.allDisabled === true && finalizedPage.record.actions.length === 0 && finalizedPage.start === '重新评估' &&
@@ -1587,6 +1662,46 @@ async function main() {
     const feedbackAfter = await readFeedback(renderer, (page) => page.metric?.judged === '2' && page.items.every(([, judgment]) => judgment !== null), 'feedback-restart-after');
     requireJourney(JSON.stringify(feedbackAfter.items) === JSON.stringify(feedbackBefore.items) && JSON.stringify(feedbackAfter.metric) === JSON.stringify(feedbackBefore.metric),
       'feedback-restart-unmoved', { before: feedbackBefore.items, after: feedbackAfter.items });
+    await click(renderer, '工作概览', 'evaluation-pages-overview');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'evaluation-pages-overview-ready');
+    at('evaluation-reevaluate');
+    await click(renderer, '返回图书列表', 'evaluation-pages-return');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'evaluation-pages-library');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id="${thirdId}"]`, 'evaluation-pages-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell [data-work-destination="evaluation"]')`, 'evaluation-pages-manuscript');
+    await clickSelector(renderer, '.editor-shell [data-work-destination="evaluation"]', 'evaluation-pages-open');
+    await readEvaluation(renderer, (page) => page.record?.heading === '第 2 版 · 编辑评分中', 'evaluation-pages-second');
+    for (let ordinal = 2; ordinal <= 12; ordinal += 1) {
+      await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', 'evaluation-pages-conclusion');
+      await clickSelector(renderer, '[data-evaluation-action="finalize"]', 'evaluation-pages-finalize');
+      await readEvaluation(renderer, (page) => page.record?.heading === `第 ${ordinal} 版 · 定稿`, 'evaluation-pages-finalized');
+      await clickSelector(renderer, '[data-evaluation-action="start"]', 'evaluation-pages-next');
+      await readEvaluation(renderer, (page) => page.record?.heading === `第 ${ordinal + 1} 版 · 编辑评分中`, 'evaluation-pages-started');
+    }
+    await tick(renderer, `${risk('law-rights-ethics-policy')} input[value="low"]`, 'evaluation-pages-low-risk');
+    await assertRenderer(renderer, `(() => {
+      const original=Promise.prototype.then;
+      const held={release:null}; window.__j11HeldEvaluationPage=held;
+      try {
+        Promise.prototype.then=function(success,failure) {
+          Promise.prototype.then=original;
+          return original.call(this,
+            (value)=>new Promise((resolve)=>{held.release=()=>resolve(success(value));}),
+            (error)=>new Promise((_resolve,reject)=>{held.release=()=>reject(error);}));
+        };
+        document.querySelector('[data-evaluation-action="versions-older"]').click();
+      } finally { Promise.prototype.then=original; }
+      return true;
+    })()`, 'evaluation-pages-hold-completion');
+    await waitFor(renderer, `typeof window.__j11HeldEvaluationPage?.release==='function'`, 'evaluation-pages-completion-held');
+    await fill(renderer, `${item('literary-quality')} [data-evaluation-field="score"]`, '17.5', 'evaluation-pages-unsaved');
+    await assertRenderer(renderer, `(() => { window.__j11HeldEvaluationPage.release(); delete window.__j11HeldEvaluationPage; return true; })()`, 'evaluation-pages-release');
+    await waitFor(renderer, `document.querySelectorAll('.evaluation-version-list li').length===3 && document.querySelector('.evaluation-version-list button')?.textContent.startsWith('第 3 版') && document.activeElement===document.querySelector('.evaluation-versions h3')`, 'evaluation-pages-oldest');
+    await assertRenderer(renderer, `document.querySelector(${JSON.stringify(`${item('literary-quality')} [data-evaluation-field="score"]`)})?.value==='17.5' && document.querySelector('.evaluation-record')?.dataset.entries==='1' && document.querySelector('.evaluation-conclusion [data-conclusion="recommend"] input')?.disabled===false`, 'evaluation-pages-kept-input');
+    await clickSelector(renderer, '[data-evaluation-action="versions-latest"]', 'evaluation-pages-latest');
+    await waitFor(renderer, `document.querySelectorAll('.evaluation-version-list li').length===10 && document.querySelector('.evaluation-version-list button')?.textContent.startsWith('第 13 版') && document.activeElement===document.querySelector('.evaluation-versions h3')`, 'evaluation-pages-latest-focus');
+    await clickSelector(renderer, '[data-evaluation-action="save"]', 'evaluation-pages-save-input');
+    await readEvaluation(renderer, (page) => page.record?.entries === '2' && page.record.items[0][2] === '17.5', 'evaluation-pages-saved-input');
 
     // ---- 就地反馈轻问 after a Proposal Decision (Issue #61, plan slice S26a; FDBK-001 to FDBK-007, PDEC-009, MARK-005) -------
     at('decision-feedback-suggestions');
@@ -1631,18 +1746,26 @@ async function main() {
     await assertRenderer(renderer, `window.__j11.act('reason-add')`, 'decision-add');
     const adding = await readDecision(renderer, (card) => card.prompt?.mode === 'add', 'decision-adding');
     requireJourney(adding.prompt.end === '取消' && adding.prompt.chips.every(([, pressed]) => pressed === false), 'decision-adding-words', adding);
+    await assertRenderer(renderer, `window.__j11.act('reason-cancel')`, 'decision-add-cancel');
+    await readDecision(renderer, (card) => card.prompt === null && card.focus === 'reason-add', 'decision-add-cancel-focus');
+    await assertRenderer(renderer, `window.__j11.act('reason-add')`, 'decision-add-again');
     await assertRenderer(renderer, `window.__j11.act('reason-own')`, 'decision-own');
     await waitFor(renderer, `window.__j11.card()?.querySelector('[data-mark-form="decision-reason"] [data-mark-field="reason"]') !== null`, 'decision-own-form');
     await assertRenderer(renderer, `window.__j11.write('reason', ${JSON.stringify(OWN_REASON)}) && window.__j11.act('submit')`, 'decision-own-submit');
     await waitFor(renderer, `${status} === '已记下你的原因。'`, 'decision-own-status');
     const own = await readDecision(renderer, (card) => card.state === 'given', 'decision-own-recorded');
     requireJourney(JSON.stringify(own.reason) === JSON.stringify(['free-text', `你的原因：${OWN_REASON}`]) && own.later === '改原因…' && own.prompt === null, 'decision-own-words', own);
+    requireJourney(own.reasonSource === '原因来源：你自行输入的文字', 'decision-own-source', own.reasonSource);
     await assertRenderer(renderer, `window.__j11.act('reason-revise')`, 'decision-revise');
     await readDecision(renderer, (card) => card.prompt?.mode === 'revise', 'decision-revising');
+    await assertRenderer(renderer, `window.__j11.act('reason-cancel')`, 'decision-revise-cancel');
+    await readDecision(renderer, (card) => card.prompt === null && card.focus === 'reason-revise', 'decision-revise-cancel-focus');
+    await assertRenderer(renderer, `window.__j11.act('reason-revise')`, 'decision-revise-again');
     await assertRenderer(renderer, `(() => { const chip = window.__j11.card()?.querySelector('[data-mark-reason-chip="证据不足"]'); if (!(chip instanceof HTMLButtonElement)) return false; chip.click(); return true; })()`, 'decision-revise-chip');
     await waitFor(renderer, `${status} === '已改好原因；原来的原因仍留在记录里。'`, 'decision-revise-status');
     const revisedCard = await readDecision(renderer, (card) => card.reason?.[0] === 'suggested', 'decision-revised');
     requireJourney(revisedCard.reason[1].startsWith('你的原因：证据不足（') && revisedCard.reason[1].endsWith(' 改过）') && revisedCard.later === '改原因…', 'decision-revised-words', revisedCard);
+    requireJourney(revisedCard.reasonSource === '原因来源：你选择的选项', 'decision-revised-source', revisedCard.reasonSource);
     await pressEscape(renderer);
     await waitFor(renderer, `window.__j11.card() === null`, 'decision-revised-closed');
 
@@ -1723,6 +1846,7 @@ async function main() {
     requireJourney(learningCard.card.heading === '修改建议 · 拒绝' && JSON.stringify(learningCard.card.excerptHeads) === JSON.stringify(['原文', '建议', '你的原因']) &&
       learningCard.card.excerptTail === '你的原因：证据不足' && learningCard.card.facts.rationale === '你说明了为什么这样处理：它可以帮 AI7 以后的建议更接近你的判断。' &&
       learningCard.card.facts.basis === LEARNING_BASIS && learningCard.card.facts.influence === LEARNING_INFLUENCE && learningCard.card.facts.decision === '还没有决定。' &&
+      learningCard.card.facts.task === undefined &&
       JSON.stringify(learningCard.card.choices) === JSON.stringify([['book', false, false], ['series', false, true], ['house', false, false], ['excluded', false, false], ['deferred', false, false]]) &&
       learningCard.card.recommended === 'book' && learningCard.card.seriesReason === '还没有书系：书系接通后，才能把材料纳入书系。' &&
       learningCard.card.consequence === null && learningCard.card.record === 'disabled' && JSON.stringify(learningCard.focus) === JSON.stringify(['proposal-decision', 'H4']),
@@ -1752,8 +1876,10 @@ async function main() {
     // Book once, as left for later.
     await clickSelector(renderer, `${learningRow('analysis-feedback')} [data-learning-action="open"]`, 'learning-open-analysis');
     const analysisCard = await readLearning(renderer, (page) => page.card?.material === 'analysis-feedback', 'learning-analysis-card');
+    const analysisSourceTask = await renderer.evaluate(`window.ai7.inspectLearningMaterials({ bookId: ${JSON.stringify(thirdId)} }).then((projection) => projection.books[0].materials.find((material) => material.kind === 'analysis-feedback')?.sourceTask ?? null)`);
     requireJourney(analysisCard.card.heading === '分析反馈 · 全书梗概' && JSON.stringify(analysisCard.card.excerptHeads) === JSON.stringify(['全书梗概', '你的判断']) &&
-      analysisCard.card.excerptTail === `你的判断：不完整 · ${SYNOPSIS_REASON}`, 'learning-analysis-card-words', analysisCard.card);
+      analysisCard.card.excerptTail === `你的判断：不完整 · ${SYNOPSIS_REASON}` && analysisSourceTask !== null &&
+      analysisCard.card.facts.task === `${analysisSourceTask.label} · ${analysisSourceTask.taskIntentId}`, 'learning-analysis-card-words', analysisCard.card);
     await tick(renderer, `${learningRow('analysis-feedback')} .learning-choices input[value="deferred"]`, 'learning-choose-deferred');
     await clickSelector(renderer, `${learningRow('analysis-feedback')} [data-learning-action="record"]`, 'learning-defer-record');
     const learningDeferred = await readLearning(renderer, (page) => page.card === null && page.books[0]?.materials[1]?.[1] === 'deferred', 'learning-deferred');
@@ -2007,7 +2133,7 @@ async function main() {
           baseBlockDigest: block.digest, fromGrapheme: 0, toGrapheme: 1, selectedText: selected,
           kind: 'change-suggestion', highlightColor: null, body: '', proposedText: '分页建议' + index, rationale: '分页检查' });
         await window.ai7.recordChangeSuggestionDecision({ ...binding, markId: mark.markId, clientDecisionId: crypto.randomUUID(),
-          disposition: 'rejected', editedText: null, reason: '分页原因' + index });
+          disposition: 'rejected', editedText: null, reason: null });
       }
       return true;
     })()`);
@@ -2077,6 +2203,155 @@ async function main() {
     await waitFor(otherRenderer, `document.querySelector('#feedback-filter-origin')?.value === 'analysis-feedback' &&
       document.querySelector('#feedback-filter-origin')?.disabled === false &&
       document.activeElement === document.querySelector('[data-entry-id$="/entities/0"] [data-feedback-action="open"]')`, 'history-requester-focus-restored');
+
+    await close();
+    cancellation.throwIfRequested();
+    await launch();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'learning-source-restart-ready');
+    await click(renderer, '质量与学习', 'learning-source-quality');
+    await clickSelector(renderer, '#quality-tab-learning', 'learning-source-tab');
+    await readLearning(renderer, (page) => page.books.length === 1, 'learning-source-page');
+    at('learning-source-records');
+    await clickSelector(renderer, `${learningRow('proposal-decision')} [data-learning-action="open"]`, 'learning-source-proposal-card');
+    await readLearning(renderer, (page) => page.card?.material === 'proposal-decision', 'learning-source-proposal-ready');
+    await clickSelector(renderer, '[data-learning-action="source"]', 'learning-source-proposal');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(thirdId)}]') && document.querySelector('.editorial-mark-card')`, 'learning-source-mark-open', 120_000);
+    await assertRenderer(renderer, `document.querySelector('.editorial-mark-card')?.textContent.includes(${JSON.stringify('证据不足')}) === true`, 'learning-source-mark-reason');
+    await click(renderer, '返回图书工作概览', 'learning-source-overview');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'learning-source-overview-ready');
+    await click(renderer, '返回图书列表', 'learning-source-books');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'learning-source-landing');
+    await click(renderer, '质量与学习', 'learning-source-learning');
+    await readLearning(renderer, (page) => page.books.length === 1, 'learning-source-page');
+    await clickSelector(renderer, `${learningRow('analysis-feedback')} [data-learning-action="open"]`, 'learning-source-analysis-card');
+    await readLearning(renderer, (page) => page.card?.material === 'analysis-feedback', 'learning-source-analysis-ready');
+    await clickSelector(renderer, '[data-learning-action="source"]', 'learning-source-analysis');
+    await waitFor(renderer, `(() => {
+      const card = document.querySelector('.baseline-analysis-card');
+      const item = document.querySelector('[data-analysis-item-key="synopsis"]');
+      return card?.dataset.resultRevisionId === ${JSON.stringify(revisionId)} && card.dataset.analysisTab === 'synopsis' &&
+        item instanceof HTMLElement && item.getClientRects().length > 0 && document.activeElement === item;
+    })()`, 'learning-source-analysis-exact', 60_000);
+
+    // A separate workbench opens the same exact source in the window that already owns its Book.
+    const learningOtherOpened = await renderer.evaluate(`window.ai7.openBookWorkbench({ kind: 'book', bookId: ${JSON.stringify(firstId)} }).then((opened) => opened.target === 'new-window')`);
+    requireJourney(learningOtherOpened === true, 'learning-source-other-window');
+    const learningOtherRenderer = await attachRenderer(browser, renderer.targetId);
+    await waitFor(learningOtherRenderer, `document.querySelector('[data-screen="book-overview"]')`, 'learning-source-other-ready', 120_000);
+    await click(learningOtherRenderer, '返回图书列表', 'learning-source-other-books');
+    await waitFor(learningOtherRenderer, `document.querySelector('[data-screen="landing"]')`, 'learning-source-other-landing');
+    await click(learningOtherRenderer, '质量与学习', 'learning-source-other-learning');
+    await readLearning(learningOtherRenderer, (page) => page.books.length === 1, 'learning-source-other-page');
+    await clickSelector(learningOtherRenderer, `${learningRow('proposal-decision')} [data-learning-action="open"]`, 'learning-source-other-card');
+    await readLearning(learningOtherRenderer, (page) => page.card?.material === 'proposal-decision', 'learning-source-other-card-ready');
+    await tick(learningOtherRenderer, '.learning-choices input[value="house"]', 'learning-source-draft-choice');
+    await fill(learningOtherRenderer, '[data-learning-field="note"]', '保留未提交说明', 'learning-source-draft-note');
+    await assertRenderer(learningOtherRenderer, `(() => {
+      document.querySelector('[data-learning-action="source"]').click();
+      return Array.from(document.querySelectorAll('.learning-card input, .learning-card textarea, .learning-card button')).every((control) => control.disabled);
+    })()`, 'learning-source-pending-disabled');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(thirdId)}]') && document.querySelector('.editorial-mark-card')?.textContent.includes('证据不足')`, 'learning-source-existing-window-exact', 120_000);
+    await waitFor(learningOtherRenderer, `document.querySelector('.learning-choices input[value="house"]')?.checked === true &&
+      document.querySelector('[data-learning-field="note"]')?.value === '保留未提交说明' &&
+      document.querySelector('[data-learning-action="record"]')?.disabled === false &&
+      document.activeElement === document.querySelector('[data-learning-action="source"]')`, 'learning-source-draft-restored');
+
+    at('learning-material-pages');
+    const learningSeeded = await renderer.evaluate(`(async () => {
+      const materials = await window.ai7.inspectLearningMaterials({ bookId: ${JSON.stringify(thirdId)}, after: null });
+      const target = materials.books[0].materials.find((entry) => entry.target.kind === 'mark').target;
+      const view = await window.ai7.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null });
+      const block = view.blocks.find((candidate) => candidate.kind === 'paragraph' && candidate.text.length > 0);
+      const selected = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(block.text)[Symbol.iterator]().next().value.segment;
+      const binding = { manuscriptId: target.manuscriptId, branchId: target.branchId, windowStartBlockId: view.blocks[0].blockId };
+      for (let index = 0; index < 40; index += 1) {
+        const mark = await window.ai7.createEditorialMark({ ...binding, clientMarkId: crypto.randomUUID(),
+          baseRevisionId: view.revisionId, expectedJournalSequence: view.journalSequence, blockId: block.blockId,
+          baseBlockDigest: block.digest, fromGrapheme: 0, toGrapheme: 1, selectedText: selected,
+          kind: 'change-suggestion', highlightColor: null, body: '', proposedText: '分页建议' + index, rationale: '分页检查' });
+        await window.ai7.recordChangeSuggestionDecision({ ...binding, markId: mark.markId, clientDecisionId: crypto.randomUUID(),
+          disposition: 'rejected', editedText: null, reason: '分页原因' + index });
+      }
+      return true;
+    })()`);
+    requireJourney(learningSeeded === true, 'learning-pages-seeded');
+    await clickSelector(learningOtherRenderer, '[data-learning-action="cancel"]', 'learning-pages-close-draft');
+    await click(learningOtherRenderer, '返回', 'learning-pages-back');
+    await waitFor(learningOtherRenderer, `document.querySelector('[data-screen="landing"]')`, 'learning-pages-landing');
+    await click(learningOtherRenderer, '质量与学习', 'learning-pages-open');
+    await waitFor(learningOtherRenderer, `document.querySelectorAll('.learning-material').length === 40`, 'learning-pages-first');
+    await clickSelector(learningOtherRenderer, '[data-learning-action="open"]', 'learning-pages-card');
+    await fill(learningOtherRenderer, '[data-learning-field="note"]', '翻页前保留', 'learning-pages-draft');
+    await assertRenderer(learningOtherRenderer, `document.querySelector('[data-learning-action="more"]')?.disabled === true && document.querySelector('[data-learning-field="note"]')?.value === '翻页前保留'`, 'learning-pages-open-protected');
+    await clickSelector(learningOtherRenderer, '[data-learning-action="cancel"]', 'learning-pages-close');
+    for (let pass = 0; pass < 2; pass += 1) {
+      await clickSelector(learningOtherRenderer, '[data-learning-action="more"]', 'learning-pages-next');
+      await waitFor(learningOtherRenderer, `document.querySelectorAll('.learning-material').length === 2 && document.querySelector('[data-learning-action="more"]') === null && document.querySelector('[data-learning-action="reset"]')?.disabled === false && document.activeElement === document.querySelector('[data-learning-action="open"]')`, 'learning-pages-last');
+      await clickSelector(learningOtherRenderer, '[data-learning-action="reset"]', 'learning-pages-reset');
+      await waitFor(learningOtherRenderer, `document.querySelectorAll('.learning-material').length === 40 && document.querySelector('[data-learning-action="reset"]') === null && document.querySelector('[data-learning-action="more"]')?.disabled === false && document.activeElement === document.querySelector('[data-learning-action="open"]')`, 'learning-pages-reset-ready');
+    }
+    at('feedback-pending-submit');
+    // Hold an actual follower timer, then the actual feedback response, so a changed analysis answer crosses a pending save.
+    await close();
+    cancellation.throwIfRequested();
+    await launch();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'feedback-pending-restart-ready');
+    await openAnalysisOf(renderer, thirdId, 'feedback-pending');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'feedback-pending-analysis-ready');
+    await clickSelector(renderer, '[data-analysis-tab="history"]', 'feedback-pending-history');
+    await click(renderer, '重新分析全书', 'feedback-pending-mode');
+    await clickSelector(renderer, '[data-analysis-action="reanalyze-book"]', 'feedback-pending-prepare');
+    await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'feedback-pending-plan-ready');
+    await assertRenderer(renderer, `(() => {
+      const original=window.setTimeout;
+      const held={original,timers:[],release:null}; window.__j11HeldFeedbackFollow=held;
+      window.setTimeout=function(callback,delay,...args) {
+        if(delay===250 && typeof callback==='function') {
+          const timer=original(()=>{},60000);
+          held.timers.push(()=>{clearTimeout(timer);callback(...args);});
+          held.release=()=>{window.setTimeout=original;for(const fire of held.timers.splice(0))fire();};
+          return timer;
+        }
+        return original(callback,delay,...args);
+      };
+      document.querySelector('#task-drawer [data-task-drawer-control="start"]').click();
+      return true;
+    })()`, 'feedback-pending-hold-follow');
+    await waitFor(renderer, `typeof window.__j11HeldFeedbackFollow?.release==='function'`, 'feedback-pending-follow-held');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'feedback-pending-close-plan');
+    await clickSelector(renderer, '#analysis-tab-synopsis', 'feedback-pending-synopsis');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${feedbackItem('synopsis')} [data-analysis-action="open-feedback"]`)})?.disabled===false`, 'feedback-pending-card-ready');
+    await clickSelector(renderer, `${feedbackItem('synopsis')} [data-analysis-action="open-feedback"]`, 'feedback-pending-card');
+    await tick(renderer, `${feedbackItem('synopsis')} .analysis-feedback-judgments input[value="accurate"]`, 'feedback-pending-accurate');
+    await assertRenderer(renderer, `(() => {
+      const original=Promise.prototype.then;
+      const held={release:null,node:null,outcome:null}; window.__j11HeldFeedbackSave=held;
+      try {
+        Promise.prototype.then=function(success,failure) {
+          Promise.prototype.then=original;
+          return original.call(this,
+            (value)=>new Promise(resolve=>{held.outcome='success';held.release=()=>resolve(success(value));}),
+            (error)=>new Promise((_resolve,reject)=>{held.outcome='failure';held.release=()=>reject(error);}));
+        };
+        document.querySelector(${JSON.stringify(`${feedbackItem('synopsis')} [data-analysis-action="record-feedback"]`)}).click();
+        held.node=document.querySelector('.analysis-feedback-card');
+      } finally { Promise.prototype.then=original; }
+      return held.node!==null && [...held.node.querySelectorAll('input,textarea,button')].every(control=>control.disabled);
+    })()`, 'feedback-pending-hold-save');
+    await waitFor(renderer, `typeof window.__j11HeldFeedbackSave?.release==='function'`, 'feedback-pending-save-held');
+    await assertRenderer(renderer, `window.__j11HeldFeedbackSave.outcome==='success'`, 'feedback-pending-save-accepted');
+    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then(projection=>projection.state==='settled')`, 'feedback-pending-run-settled');
+    await assertRenderer(renderer, `(() => { window.__j11HeldFeedbackFollow.release(); return true; })()`, 'feedback-pending-release-follow');
+    // A real changed follower read has time to settle. Pending work, rather than focus, must retain this exact disabled card.
+    await new Promise(resolveWait=>setTimeout(resolveWait,750));
+    await assertRenderer(renderer, `document.querySelector('.analysis-feedback-card')===window.__j11HeldFeedbackSave.node && [...window.__j11HeldFeedbackSave.node.querySelectorAll('input,textarea,button')].every(control=>control.disabled)`, 'feedback-pending-keeps-card');
+    await assertRenderer(renderer, `(() => {
+      window.__j11HeldFeedbackSave.release();
+      window.setTimeout=window.__j11HeldFeedbackFollow.original;
+      delete window.__j11HeldFeedbackSave; delete window.__j11HeldFeedbackFollow;
+      return true;
+    })()`, 'feedback-pending-release-save');
+    await waitFor(renderer, `document.querySelector('.analysis-feedback-card')===null && document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'feedback-pending-finished');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

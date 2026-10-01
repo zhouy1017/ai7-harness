@@ -11,6 +11,7 @@ interface JobRecord {
   subjectId: string;
   cancelRequested: boolean;
   scheduled: boolean;
+  writeStarted?: boolean;
 }
 
 interface TerminalReceipt {
@@ -23,6 +24,7 @@ export class CooperativeJobOwner {
   readonly #jobs = new Map<string, JobRecord>();
   readonly #polledTerminalReceipts = new Map<string, TerminalReceipt>();
   #disposed = false;
+  readonly #exportWork = new Set<Promise<void>>();
 
   constructor(store: EditorialStore) {
     this.#store = store;
@@ -266,6 +268,41 @@ export class CooperativeJobOwner {
     return structuredClone(job.projection);
   }
 
+  /** Export runs off the frame loop, so a cancellation frame can reach its pre-write boundary. */
+  startPackageExport(input: Parameters<EditorialStore['approveBookDeliveryPackageExport']>[0], available: boolean): ServiceJobProjection {
+    this.#requireCapacity();
+    if (this.#exportWork.size > 0) throw new StoreError('SERVICE_BUSY', '另一次交付包导出尚未结束。');
+    const job: JobRecord = {
+      subjectId: input.exportId, cancelRequested: false, scheduled: false, writeStarted: false,
+      projection: { jobId: randomUUID(), kind: 'package-export', state: 'running',
+        progress: { completed: 0, total: 1, label: '正在检查导出文件…' }, result: null, failure: null },
+    };
+    this.#jobs.set(job.projection.jobId, job);
+    const work = this.#store.approveBookDeliveryPackageExport(input, available, () => {
+      if (job.cancelRequested) throw new StoreError('EXPORT_CANCELLED', '已取消导出，没有写入任何文件。');
+      job.writeStarted = true;
+    }).then((result) => {
+      job.projection = { ...job.projection, state: 'completed', result,
+        progress: { completed: 1, total: 1, label: result.export.summary } };
+    }, (error: unknown) => {
+      if (error instanceof StoreFatalError) { setImmediate(() => { throw error; }); return; }
+      const failure = error instanceof StoreError ? { code: error.code, message: error.message }
+        : { code: 'SERVICE_JOB_FAILED', message: '交付包导出未完成。' };
+      job.projection = { ...job.projection, state: job.cancelRequested ? 'cancelled' : 'failed',
+        failure: job.cancelRequested ? null : failure };
+    }).finally(() => { this.#exportWork.delete(work); });
+    this.#exportWork.add(work);
+    return structuredClone(job.projection);
+  }
+
+  cancelPackageExport(jobId: string): boolean {
+    const job = this.#requireJob(jobId);
+    if (job.projection.kind !== 'package-export' || job.writeStarted ||
+        (job.projection.state !== 'queued' && job.projection.state !== 'running')) return false;
+    job.cancelRequested = true;
+    return true;
+  }
+
   poll(jobId: string): ServiceJobProjection {
     const job = this.#requireJob(jobId);
     const projection = structuredClone(job.projection);
@@ -295,6 +332,10 @@ export class CooperativeJobOwner {
         }
       }
       return structuredClone(receipt.projection);
+    }
+    if (job.projection.kind === 'package-export') {
+      this.cancelPackageExport(jobId);
+      return structuredClone(job.projection);
     }
     if (job.projection.kind === 'replacement' && job.projection.state !== 'cancelled' && job.projection.state !== 'failed') {
       const cancelled = this.#store.cancelReplacement(job.subjectId);
@@ -359,10 +400,14 @@ export class CooperativeJobOwner {
     return structuredClone(job.projection);
   }
 
-  dispose(): void {
+  async dispose(): Promise<void> {
     this.#disposed = true;
     for (const job of this.#jobs.values()) {
       if (job.projection.state === 'queued' || job.projection.state === 'running') {
+        if (job.projection.kind === 'package-export') {
+          if (!job.writeStarted) job.cancelRequested = true;
+          continue;
+        }
         job.cancelRequested = true;
         if (job.projection.kind === 'search') this.#store.cancelSearch(job.subjectId);
         else if (job.projection.kind === 'replacement') this.#store.cancelReplacement(job.subjectId);
@@ -382,6 +427,7 @@ export class CooperativeJobOwner {
         job.projection = { ...job.projection, state: 'cancelled' };
       }
     }
+    await Promise.all(this.#exportWork);
     this.#jobs.clear();
     this.#polledTerminalReceipts.clear();
   }

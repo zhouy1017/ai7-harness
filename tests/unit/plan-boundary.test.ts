@@ -7,6 +7,7 @@ import {
   NO_PARTICIPATION_STATEMENT,
   PLAN_ADAPTATION_CLASSES,
   PLAN_REVISION_REQUIRED_REASON,
+  SAFE_RETRY_REPETITION_DIFFERS,
   buildPlanAdaptationRecord,
   diffMaterialPlanInputs,
   materialPlanInputsOfComponents,
@@ -111,7 +112,12 @@ describe('material plan drift', () => {
   it('labels a revision by its versions and changed fields and an adaptation by unit and classified reason', () => {
     expect(planRevisionLabel(1, 2, ['selectedRange', 'reusePlan.counts'])).toBe('计划修订 · 版本 1 → 2 · selectedRange、reusePlan.counts');
     expect(planRevisionLabel(3, null, ['providerBinding.credentialReference'])).toBe('计划修订 · 版本 3 → 4（待重新确认） · providerBinding.credentialReference');
-    expect(planAdaptationLabel(5, '适配器失败（PROVIDER_ERROR · 503）。')).toBe('计划内调整 · 单元 5 安全重试 1 次 · 适配器失败（PROVIDER_ERROR · 503）。');
+    expect(planAdaptationLabel(5, '适配器失败（PROVIDER_ERROR · 503）。', 'byte-identical')).toBe('计划内调整 · 单元 5 安全重试 1 次 · 适配器失败（PROVIDER_ERROR · 503）。');
+    // A retry recorded before its digests were kept reads as it always did; one that did not repeat its unit message says so (Issue #286).
+    expect(planAdaptationLabel(5, '适配器失败（PROVIDER_ERROR · 503）。', 'unrecorded')).toBe(planAdaptationLabel(5, '适配器失败（PROVIDER_ERROR · 503）。', 'byte-identical'));
+    expect(planAdaptationLabel(5, '适配器失败（PROVIDER_ERROR · 503）。', 'differs'))
+      .toBe(`计划内调整 · 单元 5 安全重试 1 次 · 适配器失败（PROVIDER_ERROR · 503）。 · ${SAFE_RETRY_REPETITION_DIFFERS}`);
+    expect(SAFE_RETRY_REPETITION_DIFFERS).toBe('重试发出的稿件与第 1 次不同');
     expect(PLAN_REVISION_REQUIRED_REASON).toBe('plan-revision-required');
   });
 
@@ -223,6 +229,7 @@ describe('plan adaptation record', () => {
     failureStatus: 503,
     requestDigest: '1'.repeat(64),
     firstPayloadDigest: '2'.repeat(64),
+    firstUnitMessageDigest: '5'.repeat(64),
     planEnvelopeDigest: '3'.repeat(64),
     bindingDigest: '4'.repeat(64),
     recordedAt: '2026-09-06T00:00:00.000Z',
@@ -235,12 +242,17 @@ describe('plan adaptation record', () => {
     expect(built.digest).toBe(sha256Hex(built.json));
     expect(JSON.parse(built.json)).toEqual(built.record);
     expect(buildPlanAdaptationRecord({ ...input(), firstPayloadDigest: null }).record.firstPayloadDigest).toBeNull();
+    // The first attempt's unit-message digest is part of the record (Issue #286), and a retry answered on a question
+    // recorded before it was kept names none.
+    expect(built.record.firstUnitMessageDigest).toBe('5'.repeat(64));
+    expect(buildPlanAdaptationRecord({ ...input(), firstUnitMessageDigest: null }).record.firstUnitMessageDigest).toBeNull();
   });
 
   it('refuses a malformed record: a second retry, a bad ordinal, or a bad digest', () => {
     expect(() => buildPlanAdaptationRecord({ ...input(), attemptIndex: 3 })).toThrowError(AnalysisError);
     expect(() => buildPlanAdaptationRecord({ ...input(), ordinal: 0 })).toThrowError(AnalysisError);
     expect(() => buildPlanAdaptationRecord({ ...input(), bindingDigest: 'short' })).toThrowError(AnalysisError);
+    expect(() => buildPlanAdaptationRecord({ ...input(), firstUnitMessageDigest: 'short' })).toThrowError(AnalysisError);
     expect(() => buildPlanAdaptationRecord({ ...input(), attemptId: 'not-a-uuid' })).toThrowError(AnalysisError);
   });
 });

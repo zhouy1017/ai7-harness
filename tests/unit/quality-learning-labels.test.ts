@@ -112,7 +112,7 @@ describe('反馈历史 words (Issue #61, S26c)', () => {
 describe('学习准入 candidates', () => {
   const decision = {
     decisionId: '00000000-0000-4000-8000-000000000001', disposition: 'rejected', currentText: '原来的说法', proposedText: '建议的说法',
-    editedText: null, reason: '证据不足', reasonSource: 'suggested', recordedAt: '2026-09-25T06:00:00.000Z', decidedAt: '2026-09-25T05:00:00.000Z',
+    editedText: null, reason: '证据不足', reasonSource: 'suggested', feedbackEntries: 0, recordedAt: '2026-09-25T06:00:00.000Z', decidedAt: '2026-09-25T05:00:00.000Z',
   } as const;
 
   it('reads a decided 修改建议 as what was suggested, what the editor did, and why', () => {
