@@ -23,6 +23,7 @@ export const PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER: ReadonlyArray<string> = [
   'database_export_approvals',
   'database_export_preparations',
   'store_versions',
+  'series_knowledge_conflicts',
   'series_knowledge_promotions',
   'series_knowledge_revisions',
   'series_knowledge_candidates',

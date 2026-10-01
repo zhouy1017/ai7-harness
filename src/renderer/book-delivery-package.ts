@@ -1,5 +1,6 @@
 import {
   MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS,
+  MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED,
   publicationText,
   type BookDeliveryPackageConditionProjection,
   type BookDeliveryPackageExportFileOutcomeProjection,
@@ -75,7 +76,7 @@ export interface MountBookDeliveryPackageOptions {
   root: HTMLElement;
   bookId: string;
   api: Pick<RendererApi, 'inspectBookDeliveryPackage' | 'prepareBookDeliveryPackage' | 'reviewBookDeliveryPackageExport' |
-    'chooseBookDeliveryPackageExportFolder' | 'approveBookDeliveryPackageExport' | 'revealManuscriptExport'>;
+    'chooseBookDeliveryPackageExportFolder' | 'approveBookDeliveryPackageExport' | 'cancelBookDeliveryPackageExport' | 'revealManuscriptExport'>;
   technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
@@ -116,6 +117,8 @@ interface ExportState {
   options: BookDeliveryPackageExportOptions;
   /** The files whose fidelity review the editor opened, or closed when it opened by itself. */
   disclosed: Map<string, boolean>;
+  selected: Set<string>;
+  offset: number;
   review: BookDeliveryPackageExportReviewProjection | null;
   prepared: BookDeliveryPackageExportProjection | null;
   result: BookDeliveryPackageExportProjection | null;
@@ -180,6 +183,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       node.tagName,
       node.dataset['packageAction'] ?? '',
       node.dataset['packageField'] ?? '',
+      node.dataset['packageMember'] ?? '',
       node.dataset['packageRoute'] ?? '',
       node.closest<HTMLElement>('ol.package-condition-list > li')?.dataset['conditionId'] ?? '',
       node.closest<HTMLElement>('ol.package-version-list > li')?.dataset['packageVersionId'] ?? '',
@@ -453,6 +457,28 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
         list.append(exportFile(file, review.files.find((entry) => entry.key === file.key) ?? null, current));
       }
       panel.append(label, list);
+      if (shown === null) {
+        panel.append(el('p', 'field-note', '勾选本次要导出的文件，每次最多选择本页的 40 个。翻页会清除选择；其他文件不会一并导出。'));
+        const pages = el('div', 'button-row');
+        for (const [name, offset] of [['上一页', review.offset > 0 ? Math.max(0, review.offset - MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED) : null], ['下一页', review.nextOffset]] as const) {
+          const button = el('button', 'quiet', name);
+          button.type = 'button';
+          button.dataset['packageAction'] = name === '上一页' ? 'export-previous' : 'export-next';
+          button.disabled = inFlight || offset === null;
+          button.addEventListener('click', () => {
+            if (exporting !== current || offset === null || exportWorking()) return;
+            current.offset = offset;
+            current.selected.clear();
+            current.disclosed.clear();
+            current.review = null;
+            current.phase = 'reviewing';
+            draw('keep');
+            reviewExport(current, 'export-heading');
+          });
+          pages.append(button);
+        }
+        panel.append(pages);
+      }
       if ((shown?.filesTruncated ?? review.filesTruncated) === true) panel.append(el('p', 'field-note', PACKAGE_EXPORT_FILES_TRUNCATED));
       // EXP-008: what is degraded or cannot be written is said above; the approval accepts it for this export only.
       if (review.degraded) panel.append(el('p', 'export-degraded-note attention-note', EXPORT_DEGRADED_NOTE));
@@ -463,7 +489,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     if (current.result === null) {
       const choose = exportButton(current.prepared === null ? 'choose' : 'chooseAgain', 'secondary', () => void chooseFolder());
       choose.dataset['packageAction'] = 'export-choose';
-      choose.disabled = inFlight || current.review === null;
+      choose.disabled = inFlight || current.review === null || current.selected.size === 0;
       folder.append(choose);
     }
     panel.append(folder);
@@ -473,7 +499,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     panel.append(alert);
     panel.append(current.result === null ? renderExportActions(current, inFlight) : renderExportResult(current.result));
     panel.addEventListener('keydown', (event) => {
-      if (event.key !== 'Escape' || exportWorking()) return;
+      if (event.key !== 'Escape' || (exportWorking() && current.phase !== 'writing')) return;
       event.preventDefault();
       closeExport(current.result === null);
     });
@@ -516,6 +542,22 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     const item = el('li');
     item.dataset['packageExportFile'] = file.key;
     item.dataset['packageExportFormat'] = file.format;
+    if (current.prepared === null && current.result === null) {
+      const label = el('label');
+      const box = el('input');
+      box.type = 'checkbox';
+      box.dataset['packageMember'] = file.key;
+      box.checked = current.selected.has(file.key);
+      box.disabled = exportWorking();
+      box.addEventListener('change', () => {
+        if (exporting !== current || exportWorking()) return;
+        if (box.checked) current.selected.add(file.key);
+        else current.selected.delete(file.key);
+        draw('keep');
+      });
+      label.append(box, el('span', undefined, `选择：${file.label}`));
+      item.append(label);
+    }
     item.append(el('span', 'package-export-file-label', file.label), el('span', 'field-note package-export-file-name', packageExportFileName(file.fileName, file.format)));
     if ('outcome' in file) {
       item.dataset['packageExportOutcome'] = file.outcome;
@@ -545,7 +587,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     approve.disabled = inFlight || current.prepared === null;
     approve.setAttribute('aria-describedby', reason.id);
     const cancel = exportButton('cancel', 'quiet', () => closeExport(true));
-    cancel.disabled = inFlight;
+    cancel.disabled = inFlight && current.phase !== 'writing';
     row.append(approve, cancel, reason);
     return row;
   }
@@ -574,6 +616,8 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       versionLabel: version.label,
       options: { includeAnnotations: true, includeSuggestions: true },
       disclosed: new Map(),
+      selected: new Set(),
+      offset: 0,
       review: null,
       prepared: null,
       result: null,
@@ -581,7 +625,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       problem: null,
     };
     draw('export-heading');
-    reviewExport(exporting, 'export-choose');
+    reviewExport(exporting, 'export-heading');
   }
 
   /** A switch changed: the files are reviewed again under it, and the folder bound to the review before is let go. */
@@ -600,11 +644,11 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     const request = ++exportTicket;
     const asked = current.options;
     options.setStatus(PACKAGE_EXPORT_STATUS_LINES.reviewing, 'busy');
-    void api.reviewBookDeliveryPackageExport({ packageVersionId: current.packageVersionId, options: asked }).then(
+    void api.reviewBookDeliveryPackageExport({ packageVersionId: current.packageVersionId, options: asked, offset: current.offset }).then(
       (next) => {
         if (destroyed || exporting !== current || request !== exportTicket) return;
         current.phase = 'ready';
-        if (next.bookId !== bookId || next.packageVersionId !== current.packageVersionId ||
+        if (next.bookId !== bookId || next.packageVersionId !== current.packageVersionId || next.offset !== current.offset ||
             next.options.includeAnnotations !== asked.includeAnnotations || next.options.includeSuggestions !== asked.includeSuggestions) {
           // A review that answers for other switches is none: nothing is bound until one answers for these.
           current.review = null;
@@ -632,6 +676,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
   async function chooseFolder(): Promise<void> {
     const current = exporting;
     if (destroyed || current === null || busy() || current.review === null || current.result !== null) return;
+    if (current.selected.size === 0) return;
     const reviewed = current.review;
     const request = ++exportTicket;
     current.phase = 'choosing';
@@ -643,6 +688,8 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
         packageVersionId: current.packageVersionId,
         options: reviewed.options,
         reviewDigest: reviewed.reviewDigest,
+        offset: reviewed.offset,
+        memberKeys: [...current.selected],
       });
       if (destroyed || exporting !== current || request !== exportTicket) return;
       if (chosen.outcome === 'cancelled') {
@@ -701,7 +748,24 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
   /** Close the card; focus returns to the version's `导出…`. Only a card that wrote nothing says so. */
   function closeExport(announce: boolean): void {
     const current = exporting;
-    if (current === null || exportWorking()) return;
+    if (current === null) return;
+    if (current.phase === 'writing' && current.prepared !== null) {
+      void api.cancelBookDeliveryPackageExport({ exportId: current.prepared.exportId }).then((accepted) => {
+        if (destroyed || exporting !== current) return;
+        if (accepted) {
+          exporting = null;
+          exportTicket += 1;
+          draw({ opener: current.packageVersionId });
+          options.setStatus(PACKAGE_EXPORT_STATUS_LINES.closed);
+        } else if (current.phase === 'writing') {
+          options.setStatus('文件已开始写入，正在等待导出结果。', 'busy');
+        }
+      }, (error) => {
+        if (!destroyed && exporting === current) options.setStatus(options.errorMessage(error, '未能取消导出。'), 'error');
+      });
+      return;
+    }
+    if (exportWorking()) return;
     exporting = null;
     exportTicket += 1;
     draw({ opener: current.packageVersionId });

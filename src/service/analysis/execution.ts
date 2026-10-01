@@ -27,7 +27,7 @@ import {
   parseAssuranceSamplingResult,
   type AssuranceSamplingParseFailureCode,
 } from './assurance-sampling-contract.js';
-import { canonicalRecord } from './canonical.js';
+import { canonicalRecord, sha256Hex } from './canonical.js';
 import { CARRIED_STAGES, SAMPLE1_SOURCE_DIGEST, type BaselineAnalysisStore, type CarriedStages, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitCheckpoint, type UnitResultRecord } from './baseline-analysis-store.js';
 import type { BaselineUnitResult } from './contract.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
@@ -117,9 +117,13 @@ export { ExecutionAdmissionError };
  * flight, so a launch there holds one.
  */
 export const EXECUTION_RUN_CAPACITY = 2;
+/** A bounded waiting set; excess starts are recorded as refused before dispatch, never silently dropped. */
+export const EXECUTION_WAITING_CAPACITY = 64;
 export { remapReusedResult } from './reused-result.js';
 
 export interface ExecutionOwnerDependencies {
+  /** Trusted composition may lower, but never exceed, the fixed waiting-memory bound. */
+  readonly waitingCapacity?: number;
   /** The baseline kind's ledger: the one a dispatch that names no ledger runs against. */
   readonly ledger: BaselineAnalysisStore;
   /** How many Runs execute at once; `EXECUTION_RUN_CAPACITY` under development-ci and one under developer-live when absent. */
@@ -293,6 +297,11 @@ type LiveInterruption = keyof typeof LIVE_INTERRUPTIONS;
 export const BUDGET_REACHED_NEXT_ACTION = '点「调整预算并重做」：在新任务的计划里提高或去掉预算上限，沿用这次已读完的阅读范围接着读其余的；这次运行不能续行或重试。' as const;
 /** A safe retry the spent ceiling stopped (Issue #51, S16a): the unit's first failure is its gap, and nothing more is sent. */
 export const SAFE_RETRY_BUDGET_REACHED = '任务运行预算已达上限，没有再试一次' as const;
+/**
+ * A safe retry that would not repeat its first attempt's unit message byte for byte (Issue #286): it is not a safe retry, so
+ * it is not sent, and the unit's first failure is its gap.
+ */
+export const SAFE_RETRY_NOT_REPEATED = '要重发的稿件与第 1 次发出的不同，没有再试一次' as const;
 /** The reduction and the sample a ceiling reached after the last unit stops, in the Run's own words. */
 export const CROSS_UNIT_BUDGET_REACHED = '任务运行预算上限已达到；跨单元归纳未派发。' as const;
 export const ASSURANCE_SAMPLING_BUDGET_REACHED = '任务运行预算上限已达到，保证抽样未发起。' as const;
@@ -372,12 +381,13 @@ export class BaselineAnalysisExecutionOwner {
   readonly #deps: ExecutionOwnerDependencies;
   readonly #broker: CredentialBroker;
   readonly #capacity: number;
+  readonly #waitingCapacity: number;
   /** The Runs executing now, by Run Record (Issue #49, S14): never more than `#capacity`. */
   readonly #active = new Map<string, ActiveRun>();
   /**
    * The Runs authorized and waiting on the governor (Issue #49, S14; CONC-007), in the order they were started: each is
    * admitted, in its turn, as a place frees. Their ledger records them `authorized` until then, so a service that
-   * stops keeps the queue, and the next start queues them again in the same order.
+   * stops leaves those records recoverable; restart blocks them before dispatch and requires a fresh explicit start.
    */
   readonly #queued: Array<{ runRecordId: string; ledger: BaselineAnalysisStore }> = [];
   #disposed = false;
@@ -404,6 +414,11 @@ export class BaselineAnalysisExecutionOwner {
       throw new ExecutionAdmissionError('EXECUTION_CAPACITY_INVALID', '运行名额设置无效。');
     }
     this.#capacity = capacity;
+    const waitingCapacity = deps.waitingCapacity ?? EXECUTION_WAITING_CAPACITY;
+    if (!Number.isSafeInteger(waitingCapacity) || waitingCapacity < 1 || waitingCapacity > EXECUTION_WAITING_CAPACITY) {
+      throw new ExecutionAdmissionError('EXECUTION_CAPACITY_INVALID', '等待运行的名额设置无效。');
+    }
+    this.#waitingCapacity = waitingCapacity;
   }
 
   progressFor(runRecordId: string): RunProgress | null {
@@ -443,7 +458,7 @@ export class BaselineAnalysisExecutionOwner {
    * no Run waits before it, else queued — `authorized` in its ledger, read as 等待运行名额 — and admitted in its turn.
    */
   admitOrQueue(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): 'admitted' | 'queued' {
-    // AI7 is closing: the start stays `authorized`, and the next launch queues it again.
+    // AI7 is closing: the start stays `authorized`; restart recovery requires a fresh explicit start.
     if (this.#disposed) throw new ExecutionAdmissionError('EXECUTION_STOPPING', '本地业务服务正在停止。');
     if (this.#active.has(runRecordId)) return 'admitted';
     if (this.#queued.some((entry) => entry.runRecordId === runRecordId)) return 'queued';
@@ -453,7 +468,12 @@ export class BaselineAnalysisExecutionOwner {
     }
     // A start this launch could never admit — no route for it, a plan frozen under another route, a Book it may not
     // transmit — is blocked now with the reason, never left reading 等待运行名额 for a turn it cannot take (Issue #49 review).
-    this.#blockOnRefusal(runRecordId, ledger, () => this.#requireStartable(runRecordId, ledger));
+    this.#blockOnRefusal(runRecordId, ledger, () => {
+      this.#requireStartable(runRecordId, ledger);
+      if (this.#queued.length >= this.#waitingCapacity) {
+        throw new ExecutionAdmissionError('EXECUTION_WAITING_QUEUE_FULL', `等待运行的队列已满（最多 ${this.#waitingCapacity} 项）；没有开始这项任务。请等已有任务开始或取消后，再重新准备并开始。`);
+      }
+    });
     this.#queued.push({ runRecordId, ledger });
     return 'queued';
   }
@@ -1275,6 +1295,7 @@ export class BaselineAnalysisExecutionOwner {
         readonly requestDigest: string;
         readonly failure: ClarificationFacts['failure'];
         readonly firstPayloadDigest: string | null;
+        readonly firstUnitMessageDigest: string | null;
         readonly attempts: number;
         readonly usage: { inputTokens: number; outputTokens: number } | null;
         readonly wallMs: number;
@@ -1285,7 +1306,7 @@ export class BaselineAnalysisExecutionOwner {
         if (unit === undefined || checkpointed.has(unit.ordinal)) continue;
         waiting.set(unit.ordinal, {
           unit, requestDigest: request.requestDigest, failure: request.failure, firstPayloadDigest: request.firstPayloadDigest,
-          attempts: 1, usage: request.firstUsage, wallMs: request.firstWallMs,
+          firstUnitMessageDigest: request.firstUnitMessageDigest, attempts: 1, usage: request.firstUsage, wallMs: request.firstWallMs,
         });
         usage.requests += 1;
         stageUsage.units.requests += 1;
@@ -1299,15 +1320,18 @@ export class BaselineAnalysisExecutionOwner {
         }
       }
       const remainingUnits = submittedUnits.filter((unit) => !checkpointed.has(unit.ordinal) && !waiting.has(unit.ordinal));
-      // One technical turn for one unit attempt: the span is recorded by reference with the attempt index
-      // and the admitted payload digest, and every attempt's usage counts toward the Run.
-      const submitAttempt = async (unit: CoverageManifestUnitProjection, attemptIndex: number, attemptState: RunAttemptState) => {
+      // One technical turn for one unit attempt: the span is recorded by reference with the attempt index, the admitted
+      // payload digest and the digest of the unit message it submitted — and a safe retry's, the adaptation it carries out
+      // (Issue #286) — and every attempt's usage counts toward the Run.
+      const submitAttempt = async (unit: CoverageManifestUnitProjection, attemptIndex: number, attemptState: RunAttemptState, adaptationId: string | null = null) => {
         admittedPayloadDigest = null;
         // The baseline this attempt's `awaiting-response` is derived against, taken before the harness
         // can enter the transport, so the reading belongs to this attempt and not the previous one.
         active.transmissionsAtDispatch = active.transmissions?.() ?? 0;
         active.progress.attemptState = attemptState;
-        const turn = await harness.submitUnit(unitMessages.get(unit.ordinal)!);
+        const message = unitMessages.get(unit.ordinal)!;
+        const unitMessageDigest = sha256Hex(message);
+        const turn = await harness.submitUnit(message);
         // Read before anything else can start a turn: the adapter clears this at the start of every
         // stream, so it is this attempt's result or nothing.
         const canonical = liveAdapter.instance?.lastCanonicalResult ?? null;
@@ -1316,14 +1340,14 @@ export class BaselineAnalysisExecutionOwner {
         const payloadDigest = admittedPayloadDigest;
         spanOrdinal += 1;
         spans.push(turn.span);
-        ledger.recordSpan(attemptId, spanOrdinal, turn.span, unit.ordinal, { attemptIndex, payloadDigest });
+        ledger.recordSpan(attemptId, spanOrdinal, turn.span, unit.ordinal, { attemptIndex, payloadDigest, unitMessageDigest, adaptationId });
         const usageSignal = turn.signals.find((signal) => signal.kind === 'usage');
         const unitUsage = usageSignal?.kind === 'usage' ? { inputTokens: usageSignal.usage.inputTokens, outputTokens: usageSignal.usage.outputTokens } : null;
         countTurn('units', unitUsage);
         // One model turn came back. It counts whether it transmitted, replayed from the Provider Result
         // Cache, or read the deterministic fixture: what the reader learns is that the Run is moving.
         active.progress.completedAttempts += 1;
-        return { turn, unitUsage, payloadDigest, canonical };
+        return { turn, unitUsage, payloadDigest, unitMessageDigest, canonical };
       };
       type SubmittedAttempt = Awaited<ReturnType<typeof submitAttempt>>;
       // The continuation point (CONT-015): a unit is kept the moment it settles, as its revision will hold it, and the
@@ -1437,17 +1461,18 @@ export class BaselineAnalysisExecutionOwner {
       /**
        * The `safe-retry` Plan Adaptation: recorded before the retry is dispatched, inside the unchanged envelope and Execution
        * Binding; the retry repeats the byte-identical unit message once. The Run makes it on its own, or — moved into 先问你
-       * (Issue #422, S76d) — once the editor answered 再试一次, and then the record names that answer.
+       * (Issue #422, S76d) — once the editor answered 再试一次, and then the record names that answer. The record names the
+       * first attempt's digests, and the retry's span names the record (Issue #286).
        */
       const safeRetry = async (
         unit: CoverageManifestUnitProjection,
         requestDigest: string,
         failure: { readonly reason: string; readonly code: string; readonly failureClass: string; readonly status: number | null },
-        firstPayloadDigest: string | null,
+        first: { readonly payloadDigest: string | null; readonly unitMessageDigest: string | null },
         answerId: string | null,
       ): Promise<SubmittedAttempt> => {
         adaptationOrdinal += 1;
-        ledger.recordAdaptation({
+        const adaptation = ledger.recordAdaptation({
           attemptId,
           runRecordId: facts.runRecordId,
           taskIntentId: facts.taskIntentId,
@@ -1458,14 +1483,15 @@ export class BaselineAnalysisExecutionOwner {
           failureClass: failure.failureClass,
           failureStatus: failure.status,
           requestDigest,
-          firstPayloadDigest,
+          firstPayloadDigest: first.payloadDigest,
+          firstUnitMessageDigest: first.unitMessageDigest,
           planEnvelopeDigest: facts.planEnvelopeDigest,
           bindingDigest,
           ...(answerId === null ? {} : { clarificationAnswerId: answerId }),
         });
         adaptedUnitOrdinals.push(unit.ordinal);
         if (currentBindingDigest !== bindingDigest) throw new ExecutionAdmissionError('EXECUTION_BINDING_DIGEST_DRIFT', '计划内调整期间执行绑定发生变化。');
-        return submitAttempt(unit, 2, 'retrying');
+        return submitAttempt(unit, 2, 'retrying', adaptation.adaptationId);
       };
       /**
        * An answer the editor gave, applied at a unit boundary (CLAR-006): 再试一次 makes the safe retry now, inside the
@@ -1508,8 +1534,18 @@ export class BaselineAnalysisExecutionOwner {
             keepSettled(w.unit, w.wallMs);
             continue;
           }
+          // The retry repeats what the first attempt sent, byte for byte, or is not sent (Issue #286): a Run continued where
+          // the unit's message now reads otherwise — a later AI7 building it differently — settles the unit as the gap it
+          // is, and records no adaptation. Within one execution the message is the one the first attempt sent.
+          if (w.firstUnitMessageDigest !== null && sha256Hex(unitMessages.get(w.unit.ordinal)!) !== w.firstUnitMessageDigest) {
+            settleGap(w.unit, w.requestDigest, { unitOrdinal: w.unit.ordinal, attempts: w.attempts, wallMs: w.wallMs, usage: w.usage },
+              'adapter-failure', `${w.failure.reason}（${w.failure.code}）；${SAFE_RETRY_NOT_REPEATED}`);
+            keepSettled(w.unit, w.wallMs);
+            continue;
+          }
           const startedAtMs = Date.now();
-          const attempt = await safeRetry(w.unit, w.requestDigest, w.failure, w.firstPayloadDigest, entry.answer!.answerId);
+          const attempt = await safeRetry(w.unit, w.requestDigest, w.failure,
+            { payloadDigest: w.firstPayloadDigest, unitMessageDigest: w.firstUnitMessageDigest }, entry.answer!.answerId);
           // AI7 stopping under the retry cut it off: the unit is not settled, and 续行 applies the answer again.
           if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) return 'stopped';
           const settled = settleFromTurn({
@@ -1587,10 +1623,14 @@ export class BaselineAnalysisExecutionOwner {
                 requestDigest,
                 failure,
                 firstPayloadDigest: attempt.payloadDigest,
+                firstUnitMessageDigest: attempt.unitMessageDigest,
                 firstUsage: attempt.unitUsage,
                 firstWallMs: wallMs,
               });
-              waiting.set(unit.ordinal, { unit, requestDigest, failure, firstPayloadDigest: attempt.payloadDigest, attempts: 1, usage: attempt.unitUsage, wallMs });
+              waiting.set(unit.ordinal, {
+                unit, requestDigest, failure, firstPayloadDigest: attempt.payloadDigest, firstUnitMessageDigest: attempt.unitMessageDigest,
+                attempts: 1, usage: attempt.unitUsage, wallMs,
+              });
               active.progress.currentUnitOrdinal = null;
               active.progress.currentUnitStartedAt = null;
               active.progress.attemptState = null;
@@ -1598,7 +1638,7 @@ export class BaselineAnalysisExecutionOwner {
             }
             if (withheld === null && mode === 'automatic') {
               firstFailure = failed.failure;
-              attempt = await safeRetry(unit, requestDigest, failed.failure, attempt.payloadDigest, null);
+              attempt = await safeRetry(unit, requestDigest, failed.failure, attempt, null);
               if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) break;
               attempts = 2;
               // Both attempts cost the Run, so the unit's row carries what the unit cost, not what its

@@ -5,6 +5,7 @@ import { basename, extname, posix, resolve } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   LIBRARY_MATERIAL_KINDS,
+  LIBRARY_REASON_PAGE_UNITS,
   MAX_LEARNING_ELIGIBILITY_REASON_GRAPHEMES,
   MAX_LIBRARY_MATERIAL_BYTES,
   MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN,
@@ -12,6 +13,7 @@ import {
   MAX_LIBRARY_MATERIALS_PAGE,
   type LearningEligibilityChoice,
   type LibraryMaterialCursor,
+  type LibraryDecisionReasonPage,
   type LibraryMaterialDecisionInput,
   type LibraryMaterialDecisionProjection,
   type LibraryMaterialFormat,
@@ -110,6 +112,16 @@ const MAX_PREVIEWS = 16;
 const CONTROL_CHARACTER = /[\p{Cc}\p{Zl}\p{Zp}]/u;
 const REASON_CONTROL_CHARACTER = /[\p{Zl}\p{Zp}]|(?![\n])\p{Cc}/u;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
+const REASON_PREVIEW_UNITS = 128;
+
+/** Shift both adjacent fixed-window boundaries left at a split surrogate, preserving every character exactly once. */
+function reasonFragment(text: string, offset: number, units: number): string {
+  let start = offset;
+  let end = Math.min(text.length, offset + units);
+  if (start > 0 && /[\uDC00-\uDFFF]/u.test(text.charAt(start))) start -= 1;
+  if (end < text.length && /[\uDC00-\uDFFF]/u.test(text.charAt(end))) end -= 1;
+  return text.slice(start, end);
+}
 
 const OBJECT_EXTENSIONS: Readonly<Record<LibraryMaterialFormat, string>> = {
   DOCX: '.docx',
@@ -248,6 +260,29 @@ interface StoredMaterial {
   readonly sha256: string;
 }
 
+/** Read the immutable original's row binding without following any recorded source path. */
+export function readLibraryMaterialRecord(row: SqlRow): StoredMaterial {
+  const json = String(row.canonical_json);
+  requireLibrary(sha256Hex(json) === String(row.sha256), 'LIBRARY_MATERIAL_RECORD_INVALID', '资料库的记录已损坏。');
+  const record = JSON.parse(json) as unknown;
+  requireLibrary(isRecord(record) && record.schema === RECORD_SCHEMA && record.materialId === row.material_id &&
+    record.recordedAt === row.recorded_at && isRecord(record.source) && record.source.sha256 === row.object_sha256 &&
+    typeof record.title === 'string' && LIBRARY_MATERIAL_KINDS.includes(record.kind as LibraryMaterialKind) && typeof record.objectKey === 'string',
+  'LIBRARY_MATERIAL_RECORD_INVALID', '资料库的记录已损坏。');
+  const format = record.source.format;
+  const objectDigest = record.source.sha256;
+  requireLibrary(typeof format === 'string' && Object.hasOwn(OBJECT_EXTENSIONS, format) &&
+    typeof objectDigest === 'string' && DIGEST_PATTERN.test(objectDigest) &&
+    Number.isSafeInteger(record.source.bytes) && Number(record.source.bytes) > 0 &&
+    record.objectKey === posix.join('sha256', objectDigest.slice(0, 2), `${objectDigest}${OBJECT_EXTENSIONS[format as LibraryMaterialFormat]}`),
+  'LIBRARY_MATERIAL_RECORD_INVALID', '资料库的记录已损坏。');
+  return {
+    materialId: String(row.material_id), title: record.title, kind: record.kind as LibraryMaterialKind,
+    source: record.source as unknown as LibraryMaterialSourceProjection, objectKey: record.objectKey,
+    recordedAt: String(row.recorded_at), sha256: String(row.sha256),
+  };
+}
+
 type StoredDecision =
   | { readonly ordinal: number; readonly recordedAt: string; readonly sha256: string; readonly kind: 'attribution'; readonly scope: 'book'; readonly bookId: string }
   | { readonly ordinal: number; readonly recordedAt: string; readonly sha256: string; readonly kind: 'attribution'; readonly scope: 'house' }
@@ -292,10 +327,19 @@ function integer(value: SQLOutputValue | undefined): number {
  * Where an item stands: the latest attribution, and the latest eligibility decided under it. A new attribution sets the
  * eligibility decided before it aside — the editor decides it again for where the item now belongs, and nothing carries over.
  */
-function standing(decisions: ReadonlyArray<StoredDecision>): Standing {
+function standing(decisions: Iterable<StoredDecision>): Standing & { count: number; last: StoredDecision | null; recent: StoredDecision[] } {
   let attribution: Standing['attribution'] = null;
   let eligibility: Standing['eligibility'] = null;
+  let hadEligibility = false;
+  let count = 0;
+  let last: StoredDecision | null = null;
+  const recent: StoredDecision[] = [];
   for (const decision of decisions) {
+    count += 1;
+    last = decision;
+    recent.push(decision);
+    if (recent.length > MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN) recent.shift();
+    if (decision.kind === 'eligibility') hadEligibility = true;
     if (decision.kind === 'attribution') {
       attribution = decision;
       eligibility = null;
@@ -303,10 +347,8 @@ function standing(decisions: ReadonlyArray<StoredDecision>): Standing {
       eligibility = decision;
     }
   }
-  const since = attribution?.ordinal ?? 0;
-  const eligibilityReset = attribution !== null && eligibility === null &&
-    decisions.some((decision) => decision.kind === 'eligibility' && decision.ordinal < since);
-  return { attribution, eligibility, eligibilityReset };
+  const eligibilityReset = attribution !== null && eligibility === null && hadEligibility;
+  return { attribution, eligibility, eligibilityReset, count, last, recent };
 }
 
 export class LibraryMaterialLedger {
@@ -320,40 +362,26 @@ export class LibraryMaterialLedger {
   }
 
   /** Every item, oldest first, each verified: its digest and its record's agreement with its row. */
-  #materials(): StoredMaterial[] {
-    const rows = this.#db.prepare('SELECT * FROM library_materials ORDER BY recorded_at, material_id').all() as SqlRow[];
-    return rows.map((row) => this.#material(row));
+  *#materials(): IterableIterator<StoredMaterial> {
+    const rows = this.#db.prepare('SELECT * FROM library_materials ORDER BY recorded_at, material_id').iterate() as IterableIterator<SqlRow>;
+    for (const row of rows) yield this.#material(row);
   }
 
   #material(row: SqlRow): StoredMaterial {
-    const json = String(row.canonical_json);
-    requireLibrary(sha256Hex(json) === String(row.sha256), 'LIBRARY_MATERIAL_RECORD_INVALID', '资料库的记录已损坏。');
-    const record = JSON.parse(json) as unknown;
-    requireLibrary(isRecord(record) && record.schema === RECORD_SCHEMA && record.materialId === row.material_id &&
-      record.recordedAt === row.recorded_at && isRecord(record.source) && record.source.sha256 === row.object_sha256 &&
-      typeof record.title === 'string' && LIBRARY_MATERIAL_KINDS.includes(record.kind as LibraryMaterialKind) && typeof record.objectKey === 'string',
-    'LIBRARY_MATERIAL_RECORD_INVALID', '资料库的记录已损坏。');
-    return {
-      materialId: String(row.material_id),
-      title: record.title,
-      kind: record.kind as LibraryMaterialKind,
-      source: record.source as unknown as LibraryMaterialSourceProjection,
-      objectKey: record.objectKey,
-      recordedAt: String(row.recorded_at),
-      sha256: String(row.sha256),
-    };
+    return readLibraryMaterialRecord(row);
   }
 
   /** One item's decisions, oldest first, each verified against its row and chained to the one before. */
-  #decisions(material: StoredMaterial): StoredDecision[] {
-    const rows = this.#db.prepare('SELECT * FROM library_material_decisions WHERE material_id = ? ORDER BY ordinal').all(material.materialId) as SqlRow[];
+  *#decisions(material: StoredMaterial): IterableIterator<StoredDecision> {
+    const rows = this.#db.prepare('SELECT * FROM library_material_decisions WHERE material_id = ? ORDER BY ordinal').iterate(material.materialId) as IterableIterator<SqlRow>;
     let previous = material.sha256;
     let attributionOrdinal: number | null = null;
-    return rows.map((row, index) => {
+    let index = 0;
+    for (const row of rows) {
       const json = String(row.canonical_json);
       requireLibrary(sha256Hex(json) === String(row.sha256), 'LIBRARY_MATERIAL_DECISION_INVALID', '资料库的决定记录已损坏。');
       const record = JSON.parse(json) as unknown;
-      const ordinal = index + 1;
+      const ordinal = ++index;
       requireLibrary(isRecord(record) && record.schema === DECISION_SCHEMA && record.decisionId === row.decision_id &&
         record.materialId === material.materialId && record.materialSha256 === material.sha256 && record.ordinal === ordinal &&
         integer(row.ordinal) === ordinal && record.kind === row.kind && record.previousSha256 === previous &&
@@ -366,15 +394,16 @@ export class LibraryMaterialLedger {
         attributionOrdinal = ordinal;
         requireLibrary((record.scope === 'book' && typeof record.bookId === 'string') || (record.scope === 'house' && record.bookId === undefined),
           'LIBRARY_MATERIAL_DECISION_INVALID', '资料库的决定记录已损坏。');
-        return record.scope === 'book'
+        yield record.scope === 'book'
           ? { ...base, kind: 'attribution' as const, scope: 'book' as const, bookId: String(record.bookId) }
           : { ...base, kind: 'attribution' as const, scope: 'house' as const };
+        continue;
       }
       requireLibrary(record.kind === 'eligibility' && ELIGIBILITY_CHOICES.has(record.choice as LearningEligibilityChoice) &&
         record.basis === LEARNING_ELIGIBILITY_BASIS && record.attributionOrdinal === attributionOrdinal &&
         (record.choice === 'book') === (typeof record.bookId === 'string') && (record.reason === null || typeof record.reason === 'string'),
       'LIBRARY_MATERIAL_DECISION_INVALID', '资料库的决定记录已损坏。');
-      return {
+      yield {
         ...base,
         kind: 'eligibility' as const,
         choice: record.choice as LearningEligibilityChoice,
@@ -382,7 +411,7 @@ export class LibraryMaterialLedger {
         reason: record.reason as string | null,
         attributionOrdinal: attributionOrdinal!,
       };
-    });
+    }
   }
 
   #bookTitle(bookId: string): string {
@@ -480,7 +509,7 @@ export class LibraryMaterialLedger {
    */
   async sweep(): Promise<void> {
     if (this.#db.prepare(TABLE_PRESENT).get() === undefined) return;
-    const recorded = new Set((this.#db.prepare('SELECT object_sha256 FROM library_materials').all() as SqlRow[]).map((row) => String(row.object_sha256)));
+    const recorded = this.#db.prepare('SELECT 1 FROM library_materials WHERE object_sha256 = ?');
     let prefixes: Awaited<ReturnType<typeof opendir>>;
     try {
       prefixes = await opendir(resolve(this.#dataRoot, LIBRARY_OBJECT_DIRECTORY, 'sha256'));
@@ -494,7 +523,7 @@ export class LibraryMaterialLedger {
       for await (const entry of await opendir(directory)) {
         if (!entry.isFile()) continue;
         const object = OBJECT_NAME.exec(entry.name);
-        if (PARTIAL_NAME.test(entry.name) || (object !== null && !recorded.has(object[1]!))) {
+        if (PARTIAL_NAME.test(entry.name) || (object !== null && recorded.get(object[1]!) === undefined)) {
           await rm((await inspectCanonicalDataFile(this.#dataRoot, directory, entry.name)).path, { force: true });
         }
       }
@@ -541,8 +570,8 @@ export class LibraryMaterialLedger {
     requireLibrary(row !== undefined, 'LIBRARY_MATERIAL_NOT_FOUND', '资料库里没有这份资料。');
     const material = this.#material(row);
     const decisions = this.#decisions(material);
-    requireLibrary(decisions.length === expectedDecisions, 'LIBRARY_MATERIAL_MOVED', '这份资料的归属或学习准入刚被改过；请看过现在的决定再定。');
     const current = standing(decisions);
+    requireLibrary(current.count === expectedDecisions, 'LIBRARY_MATERIAL_MOVED', '这份资料的归属或学习准入刚被改过；请看过现在的决定再定。');
     const fields: Record<string, unknown> = {};
     let bookId: string | null = null;
     if (decision.kind === 'attribution') {
@@ -572,8 +601,8 @@ export class LibraryMaterialLedger {
       }, bookId === null ? {} : { bookId });
     }
     const decisionId = randomUUID();
-    const ordinal = decisions.length + 1;
-    const previousSha256 = decisions.at(-1)?.sha256 ?? material.sha256;
+    const ordinal = current.count + 1;
+    const previousSha256 = current.last?.sha256 ?? material.sha256;
     const recordedAt = new Date().toISOString();
     const record = canonicalRecord({
       schema: DECISION_SCHEMA,
@@ -624,6 +653,23 @@ export class LibraryMaterialLedger {
     return this.#view(this.#material(row), new Map());
   }
 
+  /** Read the exact immutable note, validating its entire chain, without returning the other notes. */
+  reasonPage(materialId: string, ordinal: number, offset: number): LibraryDecisionReasonPage {
+    requireLibrary(UUID_PATTERN.test(materialId) && Number.isSafeInteger(ordinal) && ordinal > 0 &&
+      Number.isSafeInteger(offset) && offset >= 0 && offset % LIBRARY_REASON_PAGE_UNITS === 0,
+    'LIBRARY_MATERIAL_CURSOR_INVALID', '资料说明页码无效。');
+    const row = this.#db.prepare('SELECT * FROM library_materials WHERE material_id = ?').get(materialId) as SqlRow | undefined;
+    requireLibrary(row !== undefined, 'LIBRARY_MATERIAL_NOT_FOUND', '资料库里没有这份资料。');
+    let reason: string | null = null;
+    for (const decision of this.#decisions(this.#material(row))) {
+      if (decision.ordinal === ordinal && decision.kind === 'eligibility') reason = decision.reason;
+    }
+    requireLibrary(reason !== null && offset < reason.length, 'LIBRARY_MATERIAL_CURSOR_INVALID', '资料说明页码无效。');
+    return { text: reasonFragment(reason, offset, LIBRARY_REASON_PAGE_UNITS),
+      nextOffset: offset + LIBRARY_REASON_PAGE_UNITS < reason.length ? offset + LIBRARY_REASON_PAGE_UNITS : null,
+      previousOffset: offset === 0 ? null : offset - LIBRARY_REASON_PAGE_UNITS };
+  }
+
   /** An item's card: where it stands, whether a Task may list it, and its decisions — how many, and the latest of them. */
   #view(material: StoredMaterial, titles: Map<string, string>): LibraryMaterialProjection {
     const title = (bookId: string): string => {
@@ -643,7 +689,9 @@ export class LibraryMaterialLedger {
       : {
         choice: now.eligibility.choice,
         bookTitle: now.eligibility.bookId === null ? null : title(now.eligibility.bookId),
-        reason: now.eligibility.reason,
+        reason: now.eligibility.reason === null ? null : reasonFragment(now.eligibility.reason, 0, REASON_PREVIEW_UNITS),
+        reasonHasMore: (now.eligibility.reason?.length ?? 0) > REASON_PREVIEW_UNITS,
+        ordinal: now.eligibility.ordinal,
         decidedAt: now.eligibility.recordedAt,
       };
     const reference: LibraryMaterialProjection['reference'] = attribution === null || eligibility === null || eligibility.choice === 'deferred'
@@ -662,15 +710,17 @@ export class LibraryMaterialLedger {
       eligibility,
       eligibilityReset: now.eligibilityReset,
       reference,
-      decisionCount: decisions.length,
-      decisions: decisions.slice(-MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN).map((entry): LibraryMaterialDecisionProjection => ({
+      decisionCount: now.count,
+      decisions: now.recent.map((entry): LibraryMaterialDecisionProjection => ({
         ordinal: entry.ordinal,
         recordedAt: entry.recordedAt,
         decision: entry.kind === 'attribution'
           ? entry.scope === 'book'
             ? { kind: 'attribution', scope: 'book', bookId: entry.bookId, bookTitle: title(entry.bookId) }
             : { kind: 'attribution', scope: 'house' }
-          : { kind: 'eligibility', choice: entry.choice, bookTitle: entry.bookId === null ? null : title(entry.bookId), reason: entry.reason },
+          : { kind: 'eligibility', choice: entry.choice, bookTitle: entry.bookId === null ? null : title(entry.bookId),
+            reason: entry.reason === null ? null : reasonFragment(entry.reason, 0, REASON_PREVIEW_UNITS),
+            reasonHasMore: (entry.reason?.length ?? 0) > REASON_PREVIEW_UNITS },
       })),
     };
   }
@@ -680,7 +730,9 @@ export class LibraryMaterialLedger {
    * decided under the attribution it has, or whose eligibility was left for later — at most `limit`, oldest wait first.
    */
   attentionReadings(limit: number): LibraryMaterialAttentionReading[] {
+    requireLibrary(Number.isSafeInteger(limit) && limit >= 0, 'LIBRARY_MATERIAL_CURSOR_INVALID', '资料库列表数量无效。');
     const readings: LibraryMaterialAttentionReading[] = [];
+    const compare = (a: LibraryMaterialAttentionReading, b: LibraryMaterialAttentionReading): number => a.at < b.at ? -1 : a.at > b.at ? 1 : a.materialId < b.materialId ? -1 : 1;
     for (const material of this.#materials()) {
       const now = standing(this.#decisions(material));
       const scope = now.attribution === null ? 'none' as const : now.attribution.scope;
@@ -689,7 +741,9 @@ export class LibraryMaterialLedger {
       if (now.attribution === null) readings.push({ ...base, state: 'library-attribution-pending', at: material.recordedAt });
       else if (now.eligibility === null) readings.push({ ...base, state: 'learning-eligibility-pending', at: now.attribution.recordedAt });
       else if (now.eligibility.choice === 'deferred') readings.push({ ...base, state: 'learning-eligibility-deferred', at: now.eligibility.recordedAt });
+      readings.sort(compare);
+      if (readings.length > limit) readings.pop();
     }
-    return readings.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.materialId < b.materialId ? -1 : 1)).slice(0, limit);
+    return readings;
   }
 }

@@ -545,9 +545,11 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectDefaultExecutionRules() };
     // 知识库 › 审阅规范文件 (Issue #427, S79a).
     case 'inspectReviewGuidelines':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectReviewGuidelines() };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectReviewGuidelines(request.input.page) };
     case 'previewReviewGuidelineVersion':
-      return { id: request.id, ok: true, op: request.op, result: await store.previewReviewGuidelineVersion(request.input.documentId, request.input.path) };
+      return { id: request.id, ok: true, op: request.op, result: request.input.previewId !== undefined
+        ? store.readReviewGuidelinePreview(request.input.documentId, request.input.previewId, request.input.clausePage)
+        : await store.previewReviewGuidelineVersion(request.input.documentId, request.input.path) };
     case 'importReviewGuidelineVersion':
       return { id: request.id, ok: true, op: request.op, result: store.importReviewGuidelineVersion(request.input.previewId) };
     // 知识库 › 范例 (Issue #427, S79b).
@@ -559,6 +561,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterials(request.input.after) };
     case 'inspectLibraryMaterial':
       return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterial(request.input.materialId) };
+    case 'readLibraryDecisionReason':
+      return { id: request.id, ok: true, op: request.op, result: store.readLibraryDecisionReason(request.input) };
     case 'previewLibraryMaterial':
       return { id: request.id, ok: true, op: request.op, result: await store.previewLibraryMaterial(request.input.path) };
     case 'addLibraryMaterial':
@@ -572,9 +576,9 @@ async function dispatch(
     case 'decideLearningMaterial':
       return { id: request.id, ok: true, op: request.op, result: store.decideLearningMaterial(request.input) };
     case 'inspectFeedbackHistory':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectFeedbackHistory() };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectFeedbackHistory(request.input) };
     case 'inspectEvaluationCalibration':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluationCalibration() };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluationCalibration(request.input) };
     case 'recordPublicationActuals':
       return { id: request.id, ok: true, op: request.op, result: store.recordPublicationActuals(request.input) };
     case 'setEvaluationPreferences':
@@ -590,7 +594,7 @@ async function dispatch(
     case 'changeSeriesMembership':
       return { id: request.id, ok: true, op: request.op, result: store.changeSeriesMembership(request.input) };
     case 'inspectBookSeries':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectBookSeries(request.input.bookId) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectBookSeries(request.input.bookId, request.input.membershipsAfter ?? null) };
     case 'inspectSeriesMembers':
       return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesMembers(request.input.seriesId, request.input.after) };
     case 'inspectSeriesCandidates':
@@ -646,12 +650,14 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeItems(request.input.seriesId, request.input.text, request.input.after) };
     case 'inspectSeriesKnowledgeCandidates':
       return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeCandidates(request.input.seriesId, request.input.after) };
+    case 'inspectSeriesKnowledgeConflicts':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeConflicts(request.input) };
     case 'inspectSeriesKnowledgeRevisions':
       return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeRevisions(request.input.seriesId, request.input.itemId, request.input.before) };
     case 'inspectEvaluationProfiles':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluationProfiles() };
     case 'inspectEvaluation':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluation(request.input.bookId, request.input.recordId) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluation(request.input.bookId, request.input.recordId, request.input.recordsBefore) };
     case 'startEvaluation':
       return { id: request.id, ok: true, op: request.op, result: store.startEvaluation(request.input.bookId) };
     case 'saveEvaluation':
@@ -1017,10 +1023,12 @@ async function dispatch(
         id: request.id, ok: true, op: request.op,
         result: await store.prepareBookDeliveryPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
       };
+    case 'cancelBookDeliveryPackageExport':
+      return { id: request.id, ok: true, op: request.op, result: jobs.cancelPackageExport(request.input.jobId) };
     case 'approveBookDeliveryPackageExport':
       return {
         id: request.id, ok: true, op: request.op,
-        result: await store.approveBookDeliveryPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
+        result: jobs.startPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
       };
     case 'inspectMaintenanceCase':
       return { id: request.id, ok: true, op: request.op, result: store.inspectMaintenanceCase(request.input) };
@@ -1463,7 +1471,7 @@ async function run(): Promise<void> {
       const backupsStopped = store?.stopScheduledBackups();
       // A database export under way stops as 取消导出 stops it, and leaves no package it was writing (Issue #434 review).
       const exportsStopped = store?.stopDatabaseExports();
-      jobs?.dispose();
+      await jobs?.dispose();
       // The Review Run loop stops first and starts no further category; the owner then interrupts the
       // Run in flight, and the loop records what that Run came to before the store closes.
       const reviewRunsStopped = reviewRuns?.dispose();

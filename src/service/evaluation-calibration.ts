@@ -126,11 +126,11 @@ export class EvaluationCalibrationLedger {
     this.#db = db;
   }
 
-  /** One Book's entries in order, each verified: its digest, its record against its row, and its place in the chain. */
-  actuals(bookId: string): StoredActuals[] {
-    const rows = this.#db.prepare('SELECT * FROM publication_actuals WHERE book_id = ? ORDER BY ordinal').all(bookId) as SqlRow[];
+  /** Validate every entry in order, retaining only the Book's latest actuals and their ordinal. */
+  latestActuals(bookId: string): StoredActuals | null {
+    const rows = this.#db.prepare('SELECT * FROM publication_actuals WHERE book_id = ? ORDER BY ordinal').iterate(bookId) as IterableIterator<SqlRow>;
     let before: StoredActuals | null = null;
-    return rows.map((row) => {
+    for (const row of rows) {
       const json = String(row.canonical_json);
       requireCalibration(sha256Hex(json) === String(row.sha256), 'ACTUALS_RECORD_INVALID', '定价与首印的记录已损坏。');
       const record = JSON.parse(json) as unknown;
@@ -152,8 +152,8 @@ export class EvaluationCalibrationLedger {
         recordedAt: String(row.recorded_at),
       };
       before = entry;
-      return entry;
-    });
+    }
+    return before;
   }
 
   /** How many Books carry any actuals: what the prediction switch waits on (EVAL-010). */
@@ -163,22 +163,24 @@ export class EvaluationCalibrationLedger {
 
   /** The house's preferences as the newest entry records them, or the defaults, with the chain's length; verified. */
   preferences(): { readonly entries: number; readonly predictionEnabled: boolean; readonly calibrationEnabled: boolean } {
-    const rows = this.#db.prepare('SELECT * FROM evaluation_preferences ORDER BY ordinal').all() as SqlRow[];
+    const rows = this.#db.prepare('SELECT * FROM evaluation_preferences ORDER BY ordinal').iterate() as IterableIterator<SqlRow>;
     let before: string | null = null;
+    let entries = 0;
     let current: { predictionEnabled: boolean; calibrationEnabled: boolean } = DEFAULT_PREFERENCES;
-    rows.forEach((row, index) => {
+    for (const row of rows) {
       const json = String(row.canonical_json);
       requireCalibration(sha256Hex(json) === String(row.sha256), 'PREFERENCES_RECORD_INVALID', '评估设置的记录已损坏。');
       const record = JSON.parse(json) as unknown;
       requireCalibration(isRecord(record) && record.schema === PREFERENCES_SCHEMA && record.preferenceId === row.preference_id &&
-        record.ordinal === index + 1 && Number(row.ordinal) === index + 1 && record.predictionEnabled === (Number(row.prediction_enabled) === 1) &&
+        record.ordinal === entries + 1 && Number(row.ordinal) === entries + 1 && record.predictionEnabled === (Number(row.prediction_enabled) === 1) &&
         record.calibrationEnabled === (Number(row.calibration_enabled) === 1) && record.recordedAt === row.recorded_at && record.actor === ACTOR &&
         (record.supersedes ?? null) === (row.supersedes_preference_id ?? null) && (record.supersedes ?? null) === before,
       'PREFERENCES_RECORD_INVALID', '评估设置的记录已损坏。');
       before = String(row.preference_id);
       current = { predictionEnabled: record.predictionEnabled as boolean, calibrationEnabled: record.calibrationEnabled as boolean };
-    });
-    return { entries: rows.length, ...current };
+      entries += 1;
+    }
+    return { entries, ...current };
   }
 
   /**
@@ -197,13 +199,13 @@ export class EvaluationCalibrationLedger {
       'ACTUALS_INVALID', '定价要是大于 0 的金额，最多两位小数。');
     requireCalibration(Number.isSafeInteger(input.firstPrint) && input.firstPrint >= 1 && input.firstPrint <= MAX_FIRST_PRINT,
       'ACTUALS_INVALID', '首印要是大于 0 的册数。');
-    const chain = this.actuals(input.bookId);
-    requireCalibration(chain.length === input.expectedEntries, 'ACTUALS_MOVED', '这本书的定价与首印刚被改过；请看过现在的数据再改。');
-    const latest = chain.at(-1) ?? null;
+    const latest = this.latestActuals(input.bookId);
+    const entries = latest?.ordinal ?? 0;
+    requireCalibration(entries === input.expectedEntries, 'ACTUALS_MOVED', '这本书的定价与首印刚被改过；请看过现在的数据再改。');
     requireCalibration(latest === null || latest.publicationVersionId !== input.publicationVersionId || latest.priceFen !== input.priceFen ||
       latest.firstPrint !== input.firstPrint, 'ACTUALS_UNCHANGED', '定价与首印没有变化。');
     const actualId = randomUUID();
-    const ordinal = chain.length + 1;
+    const ordinal = entries + 1;
     const recordedAt = new Date().toISOString();
     const record = canonicalRecord({
       schema: ACTUALS_SCHEMA,

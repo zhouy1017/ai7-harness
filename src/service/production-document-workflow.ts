@@ -16,7 +16,7 @@ import {
   type ProductionDocumentWorkflowProjection,
   type TransitionProductionDocumentPhaseInput,
 } from '../shared/protocol.js';
-import { canonicalRecord } from './analysis/canonical.js';
+import { canonicalRecord, isRecord, parseCanonicalJson } from './analysis/canonical.js';
 
 /**
  * A Production Document's Deliverable Workflow (Issue #415, plan slice S66c; V2-UX-WORK-001 to 009, WORK-011; editor-surfaces
@@ -161,7 +161,7 @@ export function initializeProductionDocumentWorkflowSchema(db: DatabaseSync, pro
   try {
     for (const sql of Object.values(PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_SQL)) db.exec(sql);
     for (const sql of Object.values(PRODUCTION_DOCUMENT_WORKFLOW_TRIGGER_SQL)) db.exec(sql);
-    const documents = db.prepare('SELECT document_id, created_at FROM production_documents ORDER BY created_at, rowid').all() as SqlRow[];
+    const documents = db.prepare('SELECT document_id, created_at FROM production_documents ORDER BY created_at, rowid').iterate();
     for (const row of documents) insertInstance(db, text(row.document_id), profile, text(row.created_at));
     db.exec('COMMIT');
   } catch (error) {
@@ -191,6 +191,7 @@ function reasonLabel(action: ProductionDocumentPhaseAction, choice: string): str
 export interface ProductionDocumentWorkflowFacts {
   readonly changedSinceVersion: boolean;
   readonly delivered: boolean;
+  readonly deliveryExported: boolean;
   readonly changedSinceDelivery: boolean;
   readonly openSuggestions: number;
 }
@@ -201,6 +202,7 @@ function waitingOn(phaseId: ProductionDocumentPhaseId, facts: ProductionDocument
     if (facts.changedSinceVersion) return '有修改尚未保存为版本';
     if (!facts.delivered) return '尚未交付';
     if (facts.changedSinceDelivery) return '交付后有修改';
+    if (!facts.deliveryExported) return '交付文件尚未导出';
   }
   return null;
 }
@@ -212,9 +214,14 @@ interface TransitionFacts {
   fromState: ProductionDocumentPhaseState;
   toState: ProductionDocumentPhaseState;
   reasonChoice: string | null;
+  /** The reason's words as the move recorded them, or, for a move recorded before its words were, the key's words now. */
+  reasonLabel: string | null;
   reasonText: string | null;
   recordedAt: string;
 }
+
+/** The longest words a recorded reason may carry: its choice's label, never the editor's own text. */
+const MAX_REASON_LABEL_CHARACTERS = 40;
 
 export class ProductionDocumentWorkflow {
   readonly #db: DatabaseSync;
@@ -235,15 +242,15 @@ export class ProductionDocumentWorkflow {
     const instance = this.#instance(documentId);
     const transitions = this.#transitions(documentId);
     const phases = PRODUCTION_DOCUMENT_PHASE_IDS.map((phaseId): ProductionDocumentPhaseProjection => {
-      const own = transitions.filter((move) => move.phaseId === phaseId);
-      const state: ProductionDocumentPhaseState = own.at(-1)?.toState ?? 'not-started';
+      const own = transitions.phases.get(phaseId);
+      const state: ProductionDocumentPhaseState = own?.latest.toState ?? 'not-started';
       const waiting = OPEN_STATES.has(state) ? waitingOn(phaseId, facts) : null;
-      const last = own.at(-1);
+      const last = own?.latest;
       const latest: ProductionDocumentPhaseTransitionProjection | null = last === undefined ? null : {
         action: last.action,
         fromState: last.fromState,
         toState: last.toState,
-        reason: last.reasonChoice === null ? null : { choice: last.reasonChoice, label: reasonLabel(last.action, last.reasonChoice)!, text: last.reasonText },
+        reason: last.reasonChoice === null ? null : { choice: last.reasonChoice, label: last.reasonLabel!, text: last.reasonText },
         recordedAt: last.recordedAt,
       };
       return {
@@ -254,7 +261,7 @@ export class ProductionDocumentWorkflow {
         waiting,
         actions: (Object.keys(MOVES) as ProductionDocumentPhaseAction[]).filter((action) => MOVES[action].from.includes(state)),
         latest,
-        moves: own.length,
+        moves: own?.moves ?? 0,
       };
     });
     const open = phases.filter((phase) => OPEN_STATES.has(phase.state));
@@ -269,7 +276,7 @@ export class ProductionDocumentWorkflow {
         ...open.filter((phase) => phase.waiting === null).map((phase) => ({ phaseId: phase.phaseId, text: `${phase.label} · ${phase.stateLabel}` })),
       ],
       phases,
-      transitions: transitions.length,
+      transitions: transitions.count,
     };
   }
 
@@ -283,15 +290,15 @@ export class ProductionDocumentWorkflow {
     'PRODUCTION_DOCUMENT_PHASE_INVALID', '工作流程操作无效。');
     this.#instance(input.documentId);
     const transitions = this.#transitions(input.documentId);
-    requireWorkflow(transitions.length === input.expectedTransitions, 'PRODUCTION_DOCUMENT_WORKFLOW_CHANGED',
+    requireWorkflow(transitions.count === input.expectedTransitions, 'PRODUCTION_DOCUMENT_WORKFLOW_CHANGED',
       '工作流程在你查看后有了变化，请看过新的状态再操作。');
-    const fromState: ProductionDocumentPhaseState = transitions.filter((move) => move.phaseId === input.phaseId).at(-1)?.toState ?? 'not-started';
+    const fromState: ProductionDocumentPhaseState = transitions.phases.get(input.phaseId)?.latest.toState ?? 'not-started';
     const move = MOVES[input.action];
     requireWorkflow(move.from.includes(fromState), 'PRODUCTION_DOCUMENT_PHASE_INVALID',
       `「${PRODUCTION_DOCUMENT_PHASE_LABELS[input.phaseId]}」现在是${PRODUCTION_DOCUMENT_PHASE_STATE_LABELS[fromState]}，不能这样操作。`);
     const reason = this.#reason(input);
     const transitionId = randomUUID();
-    const ordinal = transitions.length + 1;
+    const ordinal = transitions.count + 1;
     const record = canonicalRecord({
       schema: TRANSITION_SCHEMA,
       transitionId,
@@ -314,8 +321,11 @@ export class ProductionDocumentWorkflow {
       reason?.choice ?? null, reason?.text ?? null, ACTOR, recordedAt, record.json, record.digest);
   }
 
-  /** A skip's or a reopen's reason as it will be recorded, or `null` for 开始 and 完成 — which take none. */
-  #reason(input: TransitionProductionDocumentPhaseInput): { choice: string; text: string | null } | null {
+  /**
+   * A skip's or a reopen's reason as it will be recorded, or `null` for 开始 and 完成 — which take none. The move records the
+   * choice's words as the editor read them (WORK-009; Issue #626), so a later relabel never rewrites what a past move says.
+   */
+  #reason(input: TransitionProductionDocumentPhaseInput): { choice: string; label: string; text: string | null } | null {
     if (input.action !== 'skip' && input.action !== 'reopen') {
       requireWorkflow(input.reason === null, 'PRODUCTION_DOCUMENT_PHASE_INVALID', '开始和完成不需要原因。');
       return null;
@@ -328,7 +338,7 @@ export class ProductionDocumentWorkflow {
       'PRODUCTION_DOCUMENT_PHASE_REASON_INVALID', `原因最多 ${MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS} 个字。`);
     const kept = words === null || words.length === 0 ? null : words;
     requireWorkflow(input.reason.choice !== 'custom' || kept !== null, 'PRODUCTION_DOCUMENT_PHASE_REASON_REQUIRED', '选了「自行输入」，请写下原因。');
-    return { choice: input.reason.choice, text: kept };
+    return { choice: input.reason.choice, label: reasonLabel(input.action, input.reason.choice)!, text: kept };
   }
 
   #instance(documentId: string): { profile: WorkflowProfilePin; activatedAt: string } {
@@ -342,9 +352,12 @@ export class ProductionDocumentWorkflow {
     return { profile, activatedAt };
   }
 
-  #transitions(documentId: string): TransitionFacts[] {
-    const rows = this.#db.prepare('SELECT * FROM production_document_phase_transitions WHERE document_id = ? ORDER BY ordinal').all(documentId) as SqlRow[];
-    return rows.map((row, index) => {
+  /** Validate the ledger as a stream, retaining only one latest move and count per phase. */
+  #transitions(documentId: string): { count: number; phases: Map<ProductionDocumentPhaseId, { moves: number; latest: TransitionFacts }> } {
+    const rows = this.#db.prepare('SELECT * FROM production_document_phase_transitions WHERE document_id = ? ORDER BY ordinal').iterate(documentId);
+    const phases = new Map<ProductionDocumentPhaseId, { moves: number; latest: TransitionFacts }>();
+    let count = 0;
+    for (const row of rows) {
       const facts: TransitionFacts = {
         ordinal: integer(row.ordinal),
         phaseId: text(row.phase_id) as ProductionDocumentPhaseId,
@@ -352,9 +365,18 @@ export class ProductionDocumentWorkflow {
         fromState: text(row.from_state) as ProductionDocumentPhaseState,
         toState: text(row.to_state) as ProductionDocumentPhaseState,
         reasonChoice: nullableText(row.reason_choice),
+        reasonLabel: null,
         reasonText: nullableText(row.reason_text),
         recordedAt: text(row.recorded_at),
       };
+      // The words a move recorded with its reason are read back from its own record, which its digest covers (Issue #626).
+      const stored = parseCanonicalJson(text(row.canonical_json));
+      const storedReason = isRecord(stored) && isRecord(stored.reason) ? stored.reason : null;
+      const recordedLabel = storedReason !== null && 'label' in storedReason ? storedReason.label : undefined;
+      requireWorkflow(recordedLabel === undefined || (typeof recordedLabel === 'string' && recordedLabel.length >= 1 &&
+        [...recordedLabel].length <= MAX_REASON_LABEL_CHARACTERS), 'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档的工作流程记录与其内容不一致。');
+      facts.reasonLabel = facts.reasonChoice === null ? null
+        : typeof recordedLabel === 'string' ? recordedLabel : reasonLabel(facts.action, facts.reasonChoice) ?? null;
       const record = canonicalRecord({
         schema: TRANSITION_SCHEMA,
         transitionId: text(row.transition_id),
@@ -364,14 +386,21 @@ export class ProductionDocumentWorkflow {
         action: facts.action,
         fromState: facts.fromState,
         toState: facts.toState,
-        reason: facts.reasonChoice === null ? null : { choice: facts.reasonChoice, text: facts.reasonText },
+        reason: facts.reasonChoice === null ? null
+          : typeof recordedLabel === 'string' ? { choice: facts.reasonChoice, label: recordedLabel, text: facts.reasonText }
+            : { choice: facts.reasonChoice, text: facts.reasonText },
         actor: text(row.actor),
         recordedAt: facts.recordedAt,
       });
-      requireWorkflow(facts.ordinal === index + 1 && record.json === text(row.canonical_json) && record.digest === text(row.sha256) &&
-        (facts.reasonChoice === null || reasonLabel(facts.action, facts.reasonChoice) !== undefined),
+      // A reason reads when its words were recorded with it, or, for a move recorded before they were, when its key still
+      // names a reason — which is why no shipped key is ever removed (the unit suite holds them).
+      requireWorkflow(PRODUCTION_DOCUMENT_PHASE_IDS.includes(facts.phaseId) && facts.ordinal === count + 1 &&
+        record.json === text(row.canonical_json) && record.digest === text(row.sha256) &&
+        (facts.reasonChoice === null || facts.reasonLabel !== null),
       'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档的工作流程记录与其内容不一致。');
-      return facts;
-    });
+      phases.set(facts.phaseId, { moves: (phases.get(facts.phaseId)?.moves ?? 0) + 1, latest: facts });
+      count += 1;
+    }
+    return { count, phases };
   }
 }

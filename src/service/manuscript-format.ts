@@ -108,6 +108,12 @@ export function manuscriptObjectExtension(format: SourceFormat): string {
   return OBJECT_EXTENSIONS[format];
 }
 
+/** A retained original or working representation uses its identified format and digest as its entire key. */
+export function isManuscriptObjectKey(digest: string, key: string): boolean {
+  return /^[0-9a-f]{64}$/u.test(digest) && Object.values(OBJECT_EXTENSIONS)
+    .some((extension) => key === `sha256/${digest.slice(0, 2)}/${digest}${extension}`);
+}
+
 /**
  * The routing table of ADR 0072 §1: a DOCX is read natively, a format with a converter is read
  * through the DOCX working representation that converter produces, and every other format states

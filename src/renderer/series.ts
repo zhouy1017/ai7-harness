@@ -146,6 +146,7 @@ export function mountSeriesList(options: MountSeriesListOptions): { load(): Prom
   const { root, api, setStatus, errorMessage } = options;
   root.classList.add('series-list-page');
   let projection: SeriesListProjection | null = null;
+  let listLater = false;
   let form: { title: string; note: string } | null = null;
   let refusal: string | null = null;
   let busy = false;
@@ -186,33 +187,40 @@ export function mountSeriesList(options: MountSeriesListOptions): { load(): Prom
       row.append(more);
       nodes.push(row);
     }
+    if (listLater) {
+      const reset = action('回到开头', 'secondary', 'list-first', () => void loadMore(true));
+      reset.disabled = busy;
+      nodes.push(reset);
+    }
     root.replaceChildren(...nodes);
     if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();
   };
 
   /** `更多书系…`: the next page by name, a Series already shown (one just created) never twice. */
-  const loadMore = async (): Promise<void> => {
-    if (busy || projection?.nextCursor == null) return;
+  const loadMore = async (fresh = false): Promise<void> => {
+    if (busy || projection === null || (!fresh && projection.nextCursor === null)) return;
     busy = true;
     paint(null);
     setStatus(SERIES_STATUS.loadingMore, 'busy');
     try {
-      const page = await api.inspectSeriesList({ after: projection.nextCursor });
-      const known = new Set(projection.series.map((entry) => entry.seriesId));
-      const added = page.series.filter((entry) => !known.has(entry.seriesId));
-      projection = { series: [...projection.series, ...added], nextCursor: page.nextCursor };
+      const page = await api.inspectSeriesList({ after: fresh ? null : projection.nextCursor });
+      if (!root.isConnected) return;
+      const added = page.series;
+      projection = page;
+      listLater = !fresh;
       busy = false;
-      paint(added[0] === undefined ? null : `[data-series-id="${added[0].seriesId}"] [data-series-action="open"]`);
+      paint(added[0] === undefined ? '[data-series-action="create-open"]' : `[data-series-id="${added[0].seriesId}"] [data-series-action="open"]`);
       setStatus(SERIES_STATUS.opened);
     } catch (error) {
       busy = false;
-      paint('[data-series-action="list-more"]');
+      paint(fresh ? '[data-series-action="list-first"]' : '[data-series-action="list-more"]');
       setStatus(errorMessage(error, SERIES_STATUS.unavailable), 'error');
     }
   };
 
   /** The new Series in its place by name among those shown: the answer carries it alone (Issue #63 review). */
   const withCreated = (series: ReadonlyArray<SeriesSummaryProjection>, created: SeriesSummaryProjection): SeriesSummaryProjection[] => {
+    if (series.some((entry) => entry.seriesId === created.seriesId)) return [...series];
     const at = series.findIndex((entry) => entry.title > created.title);
     return at < 0 ? [...series, created] : [...series.slice(0, at), created, ...series.slice(at)];
   };
@@ -263,7 +271,11 @@ export function mountSeriesList(options: MountSeriesListOptions): { load(): Prom
     setStatus(SERIES_STATUS.creating, 'busy');
     try {
       const created = await api.createSeries({ title: form.title, note: form.note });
-      projection = projection === null ? { series: [created.series], nextCursor: null } : { ...projection, series: withCreated(projection.series, created.series) };
+      // Refresh one bounded page; retain at most the exact new Series beyond it, never every earlier creation.
+      try { projection = await api.inspectSeriesList({ after: null }); } catch { projection = { series: [], nextCursor: null }; }
+      if (!root.isConnected) return;
+      projection = { ...projection, series: withCreated(projection.series, created.series) };
+      listLater = true;
       busy = false;
       form = null;
       paint(`[data-series-id="${created.seriesId}"] [data-series-action="open"]`);
@@ -291,7 +303,7 @@ export interface MountSeriesOptions {
   readonly api: Pick<RendererApi, 'inspectSeries' | 'inspectSeriesMembers' | 'inspectSeriesCandidates' | 'inspectSeriesHistory' |
     'previewSeriesMembershipChange' | 'changeSeriesMembership' | 'proposeSeriesKnowledge' | 'inspectSeriesKnowledgeReview' |
     'editSeriesKnowledgeCandidate' | 'promoteSeriesKnowledge' | 'inspectSeriesKnowledgeItems' | 'inspectSeriesKnowledgeCandidates' |
-    'inspectSeriesKnowledgeRevisions'>;
+    'inspectSeriesKnowledgeRevisions' | 'inspectSeriesKnowledgeConflicts'>;
   readonly setStatus: Status;
   readonly errorMessage: (error: unknown, fallback: string) => string;
 }
@@ -308,14 +320,18 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
   const { root, api, setStatus, errorMessage } = options;
   root.classList.add('series-page');
   let projection: SeriesProjection | null = null;
+  let membersLater = false;
+  let historyLater = false;
   /**
-   * 加入书系…'s chooser while it is open: the Book chosen, the words searched for, the Books read so far — `null` while the
+   * 加入书系…'s chooser while it is open: the Book chosen, the words searched for, one page — `null` while the
    * first page is on its way — and where the next page starts.
    */
   let chooser: {
     bookId: string | null;
+    selected: { readonly bookId: string; readonly title: string } | null;
+    later: boolean;
     text: string;
-    candidates: Array<{ readonly bookId: string; readonly title: string }> | null;
+    candidates: ReadonlyArray<{ readonly bookId: string; readonly title: string }> | null;
     next: SeriesCandidatesCursor | null;
   } | null = null;
   let preview: SeriesMembershipPreviewProjection | null = null;
@@ -354,10 +370,15 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       row.append(more);
       members.append(row);
     }
+    if (membersLater) {
+      const reset = action('回到开头', 'secondary', 'members-first', () => void loadMembers(true));
+      reset.disabled = busy;
+      members.append(reset);
+    }
     const addRow = el('div', 'button-row series-add-row');
     const addOpen = action(SERIES_ADD_OPEN, 'secondary', 'add-open', () => {
       if (busy) return;
-      chooser = { bookId: null, text: '', candidates: null, next: null };
+      chooser = { bookId: null, selected: null, later: false, text: '', candidates: null, next: null };
       preview = null;
       refusal = null;
       void loadCandidates(true);
@@ -372,7 +393,9 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
     if (preview !== null || (refusal !== null && asked !== null)) members.append(previewNode());
 
     const history = el('section', 'series-history-section');
-    history.append(el('h3', undefined, SERIES_HISTORY_HEADING));
+    const historyHeading = el('h3', undefined, SERIES_HISTORY_HEADING);
+    historyHeading.tabIndex = -1;
+    history.append(historyHeading);
     if (projection.history.length === 0) history.append(el('p', 'field-note series-history-empty', SERIES_HISTORY_EMPTY));
     else {
       const list = el('ol', 'series-history');
@@ -385,6 +408,11 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       more.disabled = busy;
       row.append(more);
       history.append(row);
+    }
+    if (historyLater) {
+      const reset = action('回到最新记录', 'secondary', 'history-first', () => void loadHistory(true));
+      reset.disabled = busy;
+      history.append(reset);
     }
     membersBox.replaceChildren(members);
     historyBox.replaceChildren(history);
@@ -459,7 +487,10 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
     const candidates = chooser?.candidates ?? null;
     if (candidates === null) box.append(el('p', 'field-note', SERIES_STATUS.loading));
     else if (candidates.length === 0) box.append(el('p', 'field-note series-add-no-match', (chooser?.text.trim() ?? '') === '' ? SERIES_ADD_NONE : SERIES_ADD_NO_MATCH));
-    for (const candidate of candidates ?? []) {
+    const visible = [...(candidates ?? [])];
+    const selected = chooser?.selected;
+    if (selected && !visible.some((entry) => entry.bookId === selected.bookId)) visible.push(selected);
+    for (const candidate of visible) {
       const label = el('label', 'series-add-choice');
       const radio = el('input');
       radio.type = 'radio';
@@ -470,6 +501,7 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       radio.addEventListener('change', () => {
         if (chooser === null || !radio.checked) return;
         chooser.bookId = candidate.bookId;
+        chooser.selected = candidate;
         look.disabled = busy;
       });
       label.append(radio, el('span', undefined, `《${candidate.title}》`));
@@ -481,6 +513,11 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       more.disabled = busy;
       row.append(more);
       box.append(row);
+    }
+    if (chooser?.later) {
+      const reset = action('回到开头', 'secondary', 'add-first', () => void loadCandidates(true));
+      reset.disabled = busy;
+      box.append(reset);
     }
     const look = action(SERIES_PREVIEW_ACTION, 'primary', 'preview', () => {
       if (chooser?.bookId) void ask(chooser.bookId, 'add');
@@ -549,15 +586,16 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       open.candidates = null;
       open.next = null;
       open.bookId = null;
+      open.selected = null;
     }
     paint(null);
     try {
       const page = await api.inspectSeriesCandidates({ seriesId: projection.seriesId, text: open.text, after: fresh ? null : open.next });
       busy = false;
-      if (chooser !== open) return;
-      const known = new Set((open.candidates ?? []).map((entry) => entry.bookId));
-      const added = page.candidates.filter((entry) => !known.has(entry.bookId));
-      open.candidates = [...(open.candidates ?? []), ...added];
+      if (!root.isConnected || chooser !== open) return;
+      const added = page.candidates;
+      open.candidates = added;
+      open.later = !fresh;
       open.next = page.nextCursor;
       paint(added[0] === undefined ? '#series-add-search' : `input[name="series-add-book"][value="${added[0].bookId}"]`);
     } catch (error) {
@@ -569,44 +607,46 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
   };
 
   /** `更多成员…`: the next page of members, newest joined first. */
-  const loadMembers = async (): Promise<void> => {
-    if (busy || projection?.membersNext == null) return;
+  const loadMembers = async (fresh = false): Promise<void> => {
+    if (busy || projection === null || (!fresh && projection.membersNext === null)) return;
     const shown = projection;
     busy = true;
     paint(null);
     setStatus(SERIES_STATUS.loadingMore, 'busy');
     try {
-      const page = await api.inspectSeriesMembers({ seriesId: shown.seriesId, after: shown.membersNext });
-      const known = new Set(shown.members.map((member) => member.bookId));
-      const added = page.members.filter((member) => !known.has(member.bookId));
-      projection = { ...shown, members: [...shown.members, ...added], membersNext: page.nextCursor };
+      const page = await api.inspectSeriesMembers({ seriesId: shown.seriesId, after: fresh ? null : shown.membersNext });
+      if (!root.isConnected) return;
+      const added = page.members;
+      projection = { ...shown, members: added, membersNext: page.nextCursor };
+      membersLater = !fresh;
       busy = false;
-      paint(added[0] === undefined ? null : `tr[data-book-id="${added[0].bookId}"] [data-series-action="remove-open"]`);
+      paint(added[0] === undefined ? '[data-series-action="members-first"]' : `tr[data-book-id="${added[0].bookId}"] [data-series-action="remove-open"]`);
       setStatus(SERIES_STATUS.opened);
     } catch (error) {
       busy = false;
-      paint('[data-series-action="members-more"]');
+      paint(fresh ? '[data-series-action="members-first"]' : '[data-series-action="members-more"]');
       setStatus(errorMessage(error, SERIES_STATUS.unavailable), 'error');
     }
   };
 
   /** `更早的记录…`: the next page of the Series' change records, newest first. */
-  const loadHistory = async (): Promise<void> => {
-    if (busy || projection?.historyNext == null) return;
+  const loadHistory = async (fresh = false): Promise<void> => {
+    if (busy || projection === null || (!fresh && projection.historyNext === null)) return;
     const shown = projection;
     busy = true;
     paint(null);
     setStatus(SERIES_STATUS.loadingMore, 'busy');
     try {
-      const page = await api.inspectSeriesHistory({ seriesId: shown.seriesId, bookId: null, after: shown.historyNext });
-      const known = new Set(shown.history.map((change) => change.changeId));
-      projection = { ...shown, history: [...shown.history, ...page.history.filter((change) => !known.has(change.changeId))], historyNext: page.nextCursor };
+      const page = await api.inspectSeriesHistory({ seriesId: shown.seriesId, bookId: null, after: fresh ? null : shown.historyNext });
+      if (!root.isConnected) return;
+      projection = { ...shown, history: page.history, historyNext: page.nextCursor };
+      historyLater = !fresh;
       busy = false;
-      paint(projection.historyNext === null ? null : '[data-series-action="history-more"]');
+      paint('.series-history-section h3');
       setStatus(SERIES_STATUS.opened);
     } catch (error) {
       busy = false;
-      paint('[data-series-action="history-more"]');
+      paint(fresh ? '[data-series-action="history-first"]' : '[data-series-action="history-more"]');
       setStatus(errorMessage(error, SERIES_STATUS.unavailable), 'error');
     }
   };
@@ -629,7 +669,7 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       busy = false;
       preview = null;
       refusal = { message: errorMessage(error, SERIES_STATUS.failed), stale: false };
-      try { projection = await api.inspectSeries({ seriesId: projection.seriesId }); } catch { /* the page keeps what it had */ }
+      try { projection = await api.inspectSeries({ seriesId: projection.seriesId }); membersLater = false; historyLater = false; } catch { /* the page keeps what it had */ }
       paint('[data-series-action="preview-cancel"]');
       setStatus(refusal.message, 'error');
     }
@@ -646,7 +686,7 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       const result = await api.changeSeriesMembership({ seriesId: shown.seriesId, bookId: shown.bookId, kind: shown.kind, previewDigest: shown.previewDigest });
       // The answer is the record alone (Issue #63 review): the Series is read again, its first pages newest first, so a Book
       // just added heads the member table. The change stands whatever that read meets.
-      try { projection = await api.inspectSeries({ seriesId: shown.seriesId }); } catch { /* the page keeps what it had */ }
+      try { projection = await api.inspectSeries({ seriesId: shown.seriesId }); membersLater = false; historyLater = false; } catch { /* the page keeps what it had */ }
       busy = false;
       preview = null;
       asked = null;
@@ -658,7 +698,7 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       refusal = { message: errorMessage(error, SERIES_STATUS.failed), stale };
       // A stale preview is withdrawn: the editor reads the consequence again before any commit (SER-010).
       preview = null;
-      try { projection = await api.inspectSeries({ seriesId: shown.seriesId }); } catch { /* the page keeps what it had */ }
+      try { projection = await api.inspectSeries({ seriesId: shown.seriesId }); membersLater = false; historyLater = false; } catch { /* the page keeps what it had */ }
       paint(stale ? '[data-series-action="refresh"]' : '[data-series-action="preview-cancel"]');
       setStatus(refusal.message, 'error');
     }
@@ -707,23 +747,33 @@ export function mountBookSeries(options: MountBookSeriesOptions): void {
         // The summary counts every record; `更早的记录…` reads those past the first page (Issue #63 review).
         details.append(el('summary', undefined, `${BOOK_SERIES_HISTORY}（${projection.historyCount}）`), list);
         let next = projection.historyNext;
-        if (next !== null) {
-          const more = action(SERIES_HISTORY_MORE, 'secondary', 'book-history-more', () => {
-            if (next === null || more.disabled) return;
-            more.disabled = true;
-            void options.api.inspectSeriesHistory({ seriesId: null, bookId: options.bookId, after: next }).then(
-              (page) => {
-                if (!root.isConnected) return;
-                for (const change of page.history) list.append(renderChange(change, bookSeriesChangeLine(change)));
-                next = page.nextCursor;
-                if (next === null) more.remove();
-                else more.disabled = false;
-              },
-              () => { more.disabled = false; },
-            );
-          });
-          details.append(more);
-        }
+        let loading = false;
+        const loadPage = async (fresh: boolean): Promise<void> => {
+          if (loading || (!fresh && next === null)) return;
+          loading = true;
+          more.disabled = true;
+          reset.disabled = true;
+          try {
+            const page = await options.api.inspectSeriesHistory({ seriesId: null, bookId: options.bookId, after: fresh ? null : next });
+            if (!root.isConnected) return;
+            list.replaceChildren(...page.history.map((change) => renderChange(change, bookSeriesChangeLine(change))));
+            next = page.nextCursor;
+            more.hidden = next === null;
+            reset.hidden = fresh;
+            (list.querySelector('summary') ?? details.querySelector('summary'))?.focus();
+          } catch {
+            if (root.isConnected) details.querySelector('summary')?.focus();
+          } finally {
+            loading = false;
+            more.disabled = false;
+            reset.disabled = false;
+          }
+        };
+        const more = action(SERIES_HISTORY_MORE, 'secondary', 'book-history-more', () => void loadPage(false));
+        more.hidden = next === null;
+        const reset = action('回到最新记录', 'secondary', 'book-history-first', () => void loadPage(true));
+        reset.hidden = true;
+        details.append(more, reset);
         nodes.push(details);
       }
       root.replaceChildren(...nodes);

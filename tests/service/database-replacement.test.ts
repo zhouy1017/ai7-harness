@@ -20,6 +20,7 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { DATABASE_REPLACEMENT_SCHEMA_VERSION, SCHEDULED_BACKUP_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { MAX_DATABASE_REPLACEMENTS_LISTED } from '../../src/shared/protocol.js';
+import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
 
 const sourceRead = vi.hoisted(() => ({ path: null as string | null, atEnd: null as (() => Promise<void>) | null }));
@@ -112,10 +113,10 @@ describe('导入数据库 over the real store', () => {
       const entries = unzipSync(original);
       const manifest = parseCanonicalJson(strFromU8(entries['manifest.json']!)) as Record<string, unknown>;
       entries['manifest.json'] = Buffer.from(canonicalRecord({ ...manifest, softwareVersion: '9.9.9' }).json);
-      const replacement = zipSync(entries, { level: 0 });
+      const replacement = zipSync(entries, { level: 0, mtime: fixedArchiveTime() });
       // Store both equally sized archives uncompressed so the overwrite changes no size checks.
       entries['manifest.json'] = Buffer.from(canonicalRecord(manifest).json);
-      const selected = zipSync(entries, { level: 0 });
+      const selected = zipSync(entries, { level: 0, mtime: fixedArchiveTime() });
       expect(replacement.byteLength).toBe(selected.byteLength);
       await writeFile(packagePath, selected);
       await store.inspectDatabaseImport(packagePath);
@@ -155,7 +156,7 @@ describe('导入数据库 over the real store', () => {
       }
       entries['manifest.json'] = Buffer.from(canonicalRecord(manifest).json);
       const damaged = join(roots.inputRoot, `${damage}.ai7db`);
-      await writeFile(damaged, zipSync(entries));
+      await writeFile(damaged, zipSync(entries, { mtime: fixedArchiveTime() }));
       const before = titles(store);
       expect(code(await store.inspectDatabaseImport(damaged).catch((error: unknown) => error))).toBe('DATABASE_PACKAGE_DAMAGED');
       expect(titles(store)).toEqual(before);
