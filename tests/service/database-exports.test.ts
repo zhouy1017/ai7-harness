@@ -118,7 +118,8 @@ describe('导出数据库 over the real store', () => {
       const copy = new DatabaseSync(join(roots.dataRoot, 'export-staging', snapshot!), { readOnly: true });
       try {
         expect(copy.prepare('SELECT 1 FROM import_drafts WHERE draft_id = ?').get(draft.draftId)).toBeDefined();
-        expect(copy.prepare('SELECT count(*) AS count FROM content_objects').get()).toMatchObject({ count: 1 });
+        expect(copy.prepare('SELECT 1 FROM content_objects c JOIN import_drafts d ON d.object_digest = c.object_digest WHERE d.draft_id = ?')
+          .get(draft.draftId)).toBeDefined();
       } finally { copy.close(); }
       await store.abandonImportDraft(draft.draftId, draft.draftVersion);
       releaseWalk();
