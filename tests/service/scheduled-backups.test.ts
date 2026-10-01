@@ -13,6 +13,16 @@ import { DATABASE_EXPORT_SCHEMA_VERSION, SCHEDULED_BACKUP_SCHEMA_VERSION } from 
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 const payloadWalk = vi.hoisted(() => ({ root: null as string | null, pause: null as (() => Promise<void>) | null }));
+const packedBackup = vi.hoisted(() => ({ pause: null as ((signal: AbortSignal | undefined) => Promise<void>) | null }));
+vi.mock('../../src/service/database-exports.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/service/database-exports.js')>();
+  const writeDatabasePackage: typeof actual.writeDatabasePackage = async (...args) => {
+    const written = await actual.writeDatabasePackage(...args);
+    await packedBackup.pause?.(args[4]?.signal);
+    return written;
+  };
+  return { ...actual, writeDatabasePackage };
+});
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
   const opendir: typeof actual.opendir = async (...args) => {
@@ -75,6 +85,55 @@ function code(error: unknown): unknown {
 }
 
 describe('定期自动备份 over the real store', () => {
+  it.each([false, true])('queues a new enable decision after cancelled staging, superseded again=%s', async (superseded) => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const signals: Array<AbortSignal | undefined> = [];
+    let releaseFirst!: () => void;
+    let releaseSecond!: () => void;
+    const first = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const second = new Promise<void>((resolve) => { releaseSecond = resolve; });
+    packedBackup.pause = async (signal) => { signals.push(signal); await (signals.length === 1 ? first : second); };
+    const until = async (ready: () => boolean): Promise<void> => {
+      const deadline = Date.now() + 30_000;
+      while (!ready()) {
+        if (Date.now() > deadline) throw new Error('scheduled backup writer did not reach its gate');
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+    };
+    try {
+      await store.setScheduledBackup({ enabled: true, expectedOrdinal: 0 }, T);
+      const old = store.runScheduledBackupIfDue(T).catch(() => false);
+      await until(() => signals.length === 1);
+      await store.setScheduledBackup({ enabled: false, expectedOrdinal: 1 }, T);
+      expect(signals[0]?.aborted).toBe(true);
+      await store.setScheduledBackup({ enabled: true, expectedOrdinal: 2 }, T);
+      if (superseded) await store.setScheduledBackup({ enabled: false, expectedOrdinal: 3 }, T);
+      releaseFirst();
+      expect(await old).toBe(false);
+      if (superseded) {
+        await store.runScheduledBackupIfDue(T);
+        expect(signals.length).toBe(1);
+        expect(store.inspectScheduledBackups(T)).toMatchObject({ enabled: false, total: 0, backingUp: false, lastFailure: null });
+        expect(await readdir(`${roots.dataRoot}-backups`)).toEqual([]);
+      } else {
+        // The setting's own queued request starts this writer, before any explicit check below joins it.
+        await until(() => signals.length === 2);
+        expect(signals[1]).not.toBe(signals[0]);
+        expect(signals[1]?.aborted).toBe(false);
+        releaseSecond();
+        expect(await store.runScheduledBackupIfDue(T)).toBe(true);
+        expect(store.inspectScheduledBackups(T)).toMatchObject({ enabled: true, total: 1, backingUp: false, lastFailure: null });
+        expect(await readdir(`${roots.dataRoot}-backups`)).toEqual([backupFileName(T)]);
+      }
+    } finally {
+      releaseFirst();
+      releaseSecond();
+      packedBackup.pause = null;
+      await store.stopScheduledBackups();
+      store.close();
+    }
+  }, 60_000);
+
   it('withdraws an in-flight backup when the editor turns the switch off', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let release!: () => void;

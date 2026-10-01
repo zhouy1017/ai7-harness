@@ -304,7 +304,10 @@ export class ScheduledBackups {
       `INSERT INTO backup_preferences(preference_id, ordinal, enabled, supersedes_preference_id, recorded_at, canonical_json, sha256)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     ).run(preferenceId, ordinal, enabled ? 1 : 0, supersedes, recordedAt, record.json, record.digest);
-    if (!enabled) this.#lastFailure = null;
+    if (!enabled) {
+      this.#lastFailure = null;
+      this.#controller?.abort();
+    }
   }
 
   /**
@@ -315,7 +318,17 @@ export class ScheduledBackups {
    */
   runIfDue(now: Date): Promise<boolean> {
     if (this.#stopped) return Promise.resolve(false);
-    if (this.#inFlight !== null) return this.#inFlight;
+    if (this.#inFlight !== null) {
+      if (!this.#controller?.signal.aborted) return this.#inFlight;
+      const pending = this.#inFlight;
+      const requested = this.preference();
+      const restart = (): Promise<boolean> | boolean => {
+        if (this.#stopped || !requested.enabled) return false;
+        const current = this.preference();
+        return current.enabled && current.ordinal === requested.ordinal ? this.runIfDue(now) : false;
+      };
+      return pending.then(restart, restart);
+    }
     const controller = new AbortController();
     const run = this.#run(now, controller.signal).finally(() => {
       this.#inFlight = null;
