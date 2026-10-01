@@ -107,6 +107,41 @@ function attention(store: EditorialStore): Array<[string, GlobalAttentionItemPro
 }
 
 describe('学习准入 over the real store', () => {
+  it('refuses a Series membership preview after an eligibility change even when all displayed counts stay the same', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const markId = store.createEditorialMark(suggestion(book, window, 2, 6, '书系预览示例')).markId;
+      store.recordChangeSuggestionDecision({
+        manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId,
+        markId, clientDecisionId: randomUUID(), disposition: 'rejected', editedText: null, reason: '书系预览原因',
+      });
+      const choose = (material: LearningMaterialProjection, choice: 'book' | 'house') => store.decideLearningMaterial({
+        bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest,
+        expectedDecisions: material.decisions, choice, note: null,
+      });
+      const material = store.inspectLearningMaterials(book.bookId).books[0]!.materials[0]!;
+      const decided = choose(material, 'book');
+      const seriesId = store.createSeries({ title: '预览版本书系', note: '' }).seriesId;
+      const input = { seriesId, bookId: book.bookId, kind: 'add' as const };
+      const preview = store.previewSeriesMembershipChange(input);
+      const house = choose(decided, 'house');
+      expect(store.previewSeriesMembershipChange(input).groups).toEqual(preview.groups);
+      const stale = () => refusal(() => store.changeSeriesMembership({ ...input, previewDigest: preview.previewDigest }));
+      expect(stale()).toBe('SERIES_PREVIEW_STALE:预览之后，书系成员或相关记录有了变化；请重新查看影响，再决定。');
+      choose(house, 'book');
+      expect(store.previewSeriesMembershipChange(input).groups).toEqual(preview.groups);
+      expect(stale()).toBe('SERIES_PREVIEW_STALE:预览之后，书系成员或相关记录有了变化；请重新查看影响，再决定。');
+      expect(store.inspectBookSeries(book.bookId).historyCount).toBe(0);
+      const fresh = store.previewSeriesMembershipChange(input);
+      store.changeSeriesMembership({ ...input, previewDigest: fresh.previewDigest });
+      expect(store.inspectBookSeries(book.bookId).historyCount).toBe(1);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  });
   it('finds the material quietly, waits for the editor’s decision on each exact version, and decides again what changed', async () => {
     let book: Imported;
     let rejectedMark: string;
