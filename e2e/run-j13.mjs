@@ -1184,6 +1184,9 @@ async function main() {
       return (await window.ai7.inspectBookSeries({ bookId: ${JSON.stringify(member)} })).membershipCount === 52;
     })()`), 'knowledge-member-series-seed');
     await leaveSeries(renderer, 'knowledge-member-series');
+    await fill(renderer, '#book-filter-text', MEMBER, 'knowledge-member-series-find-text');
+    await clickSelector(renderer, '[data-book-filter-action="find"]', 'knowledge-member-series-find');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]')`, 'knowledge-member-series-found');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]`, 'knowledge-member-series-book');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(member)}]') && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'knowledge-member-series-editor', 120_000);
     await assertRenderer(renderer, MARK_HELPERS, 'knowledge-member-series-helpers');
