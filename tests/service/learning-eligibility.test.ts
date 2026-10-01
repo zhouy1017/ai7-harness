@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { MAX_FRAME_BYTES } from '../../src/shared/protocol.js';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
