@@ -1231,6 +1231,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     // kept, 编辑候选项 onto the item, two revisions, and a restart.
     'knowledge-member-book',
     'knowledge-from-manuscript',
+    'knowledge-member-series-pages',
     'knowledge-editor-authored',
     'knowledge-review-conflict',
     'knowledge-review-edit',
