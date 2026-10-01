@@ -81,7 +81,6 @@ import { analysisFeedbackEngaged, mountAnalysisFeedback } from './analysis-feedb
 import type { LearningMaterialTarget } from '../shared/protocol.js';
 import { mountLearningMaterials } from './quality-learning.js';
 import type { FeedbackHistoryTarget } from '../shared/protocol.js';
-import type { AnalysisFeedbackDimension } from '../shared/analysis-feedback.js';
 import { mountFeedbackHistory } from './feedback-history.js';
 import {
   FEEDBACK_HISTORY_HEADING,
