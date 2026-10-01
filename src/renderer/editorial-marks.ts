@@ -1343,7 +1343,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       },
       aiTaskGroup(),
       // 书系 (Issue #63, S28b): only for a Book in a Series, one entry per Series.
-      ...(options.seriesOf === undefined || options.proposeSeriesKnowledge === undefined ? [] : [{
+      ...(options.seriesOf === undefined || options.proposeSeriesKnowledge === undefined || inSeries.length === 0 ? [] : [{
         label: KNOWLEDGE_MENU_GROUP,
         note: why ?? KNOWLEDGE_MENU_NOTE,
         items: [...inSeries.map((series): MenuItem => ({
