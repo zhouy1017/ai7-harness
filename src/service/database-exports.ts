@@ -328,8 +328,7 @@ async function verifyCopiedPayloads(path: string, members: ReadonlyArray<Databas
       await compare(`recovery-objects/${row.object_relative_key}`, row.object_digest, row.byte_length);
     }
     if (present('library_materials')) for (const row of copy.prepare('SELECT material_id, object_sha256, recorded_at, canonical_json, sha256 FROM library_materials').iterate()) {
-      let material;
-      try { material = readLibraryMaterialRecord(row); } catch { incomplete(); }
+      const material = (() => { try { return readLibraryMaterialRecord(row); } catch { return incomplete(); } })();
       await compare(`${LIBRARY_OBJECT_DIRECTORY}/${material.objectKey}`, material.source.sha256, material.source.bytes);
     }
     let installations = 0;
