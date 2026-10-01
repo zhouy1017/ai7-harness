@@ -95,7 +95,7 @@ describe('the Series Membership Impact Preview', () => {
 
   it('moves its digest with the change, the chain it follows and any line it shows', () => {
     const groups = seriesMembershipImpact('add', facts);
-    const base = { seriesId: 'series', bookId: 'book', kind: 'add' as const, chainHead: null, groups };
+    const base = { seriesId: 'series', bookId: 'book', kind: 'add' as const, chainHead: null, governingDigest: 'governing', groups };
     const digest = seriesPreviewDigest(base);
     expect(digest).toMatch(/^[0-9a-f]{64}$/u);
     expect(seriesPreviewDigest({ ...base })).toBe(digest);

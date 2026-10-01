@@ -10860,6 +10860,13 @@ export class EditorialStore {
     requireStore(input.kind !== 'add' || !member, 'SERIES_MEMBER_ALREADY', seriesMemberAlready(bookTitle, series.title));
     requireStore(input.kind !== 'remove' || member, 'SERIES_MEMBER_ABSENT', seriesMemberAbsent(bookTitle, series.title));
     const materials = this.#learningEligibility.project(input.bookId, this.#learningCandidates(input.bookId, false));
+    // Counts alone cannot detect a new eligibility decision (including a change back to the old choice).
+    // Hash each exact material and its immutable decision ordinal without retaining another collection.
+    const governing = createHash('sha256');
+    for (const material of materials) {
+      governing.update(canonicalJson({ materialKey: material.materialKey, digest: material.digest, decisions: material.decisions }));
+      governing.update('\n');
+    }
     const groups = seriesMembershipImpact(input.kind, {
       seriesTitle: series.title,
       bookTitle,
@@ -10875,7 +10882,8 @@ export class EditorialStore {
       kind: input.kind,
       actionLabel: input.kind === 'add' ? '加入书系' : '移出书系',
       groups,
-      previewDigest: seriesPreviewDigest({ seriesId: series.seriesId, bookId: input.bookId, kind: input.kind, chainHead: latest?.changeId ?? null, groups }),
+      previewDigest: seriesPreviewDigest({ seriesId: series.seriesId, bookId: input.bookId, kind: input.kind,
+        chainHead: latest?.changeId ?? null, governingDigest: governing.digest('hex'), groups }),
     };
   }
 

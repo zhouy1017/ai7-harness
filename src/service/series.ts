@@ -244,12 +244,13 @@ export function seriesMembershipImpact(kind: SeriesMembershipChangeKind, facts: 
   ];
 }
 
-/** The digest a preview carries: the change, the chain it follows and every line it shows, so a commit can tell it moved. */
+/** The digest a preview carries: the change, governing versions, the chain it follows and every line it shows. */
 export function seriesPreviewDigest(input: {
   readonly seriesId: string;
   readonly bookId: string;
   readonly kind: SeriesMembershipChangeKind;
   readonly chainHead: string | null;
+  readonly governingDigest: string;
   readonly groups: ReadonlyArray<SeriesImpactGroupProjection>;
 }): string {
   return sha256Hex(canonicalJson({ schema: PREVIEW_SCHEMA, ...input }));
