@@ -408,6 +408,9 @@ describe('升级前备份 over the real store', () => {
         ['0.0.10', 1, 2, ['替换记录']],
       ]);
       expect(version.upgrades[0]!.backupFileName).toMatch(PRE_UPGRADE_BACKUP_NAME);
+      expect(version.upgrades[0]!.fromSoftwareVersion).toBe('0.0.10');
+      const backedUp = unzipSync(await readFile(join(backupLocationFor(roots.dataRoot), version.upgrades[0]!.backupFileName)));
+      expect(parseCanonicalJson(strFromU8(backedUp['manifest.json']!))).toMatchObject({ softwareVersion: '0.0.10', dataVersion: 2 });
       expect(await upgradeBackups()).toEqual([version.upgrades[0]!.backupFileName]);
       store.markCleanShutdown();
     } finally {
