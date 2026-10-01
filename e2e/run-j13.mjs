@@ -1189,17 +1189,17 @@ async function main() {
     await assertRenderer(renderer, MARK_HELPERS, 'knowledge-member-series-helpers');
     await openSelectionMenu(renderer, blockId, 2, 8, 'knowledge-member-series-menu');
     await assertRenderer(renderer, `(() => { const item = window.__j13.item('choose-knowledge-series'); if (!(item instanceof HTMLButtonElement) || item.disabled) return false; item.click(); return true; })()`, 'knowledge-member-series-choose');
-    const chooser = '[data-mark-composer="choose-knowledge-series"]';
-    await waitFor(renderer, `document.querySelectorAll('${chooser} .knowledge-series-choices button').length === 50`, 'knowledge-member-series-first');
+    const knowledgeChooser = '[data-mark-composer="choose-knowledge-series"]';
+    await waitFor(renderer, `document.querySelectorAll('${knowledgeChooser} .knowledge-series-choices button').length === 50`, 'knowledge-member-series-first');
     for (let pass = 0; pass < 2; pass += 1) {
       await click(renderer, '下一页书系', 'knowledge-member-series-next');
-      await waitFor(renderer, `document.querySelectorAll('${chooser} .knowledge-series-choices button').length === 2`, 'knowledge-member-series-tail');
+      await waitFor(renderer, `document.querySelectorAll('${knowledgeChooser} .knowledge-series-choices button').length === 2`, 'knowledge-member-series-tail');
       await click(renderer, '回到第一页', 'knowledge-member-series-reset');
-      await waitFor(renderer, `document.querySelectorAll('${chooser} .knowledge-series-choices button').length === 50`, 'knowledge-member-series-reset-ready');
+      await waitFor(renderer, `document.querySelectorAll('${knowledgeChooser} .knowledge-series-choices button').length === 50`, 'knowledge-member-series-reset-ready');
     }
     await click(renderer, '下一页书系', 'knowledge-member-series-next-final');
-    await waitFor(renderer, `document.querySelectorAll('${chooser} .knowledge-series-choices button').length === 2`, 'knowledge-member-series-tail-final');
-    const offPage = await renderer.evaluate(`(() => { const item = Array.from(document.querySelectorAll('${chooser} .knowledge-series-choices button')).find((node) => node.textContent === '分页书系050'); if (!(item instanceof HTMLButtonElement)) return null; const id = item.dataset.seriesId; item.click(); return id; })()`);
+    await waitFor(renderer, `document.querySelectorAll('${knowledgeChooser} .knowledge-series-choices button').length === 2`, 'knowledge-member-series-tail-final');
+    const offPage = await renderer.evaluate(`(() => { const item = Array.from(document.querySelectorAll('${knowledgeChooser} .knowledge-series-choices button')).find((node) => node.textContent === '分页书系050'); if (!(item instanceof HTMLButtonElement)) return null; const id = item.dataset.seriesId; item.click(); return id; })()`);
     requireJourney(UUID_PATTERN.test(offPage ?? ''), 'knowledge-member-series-tail-identity');
     await waitFor(renderer, `window.__j13.composer()?.dataset.markComposer === 'propose-series-knowledge'`, 'knowledge-member-series-composer');
     await assertRenderer(renderer, `window.__j13.composer().querySelector('[data-mark-quote]').textContent === ${JSON.stringify(quote)} && window.__j13.write('subject', '分页原文提议') && window.__j13.write('knowledgeClass', 'canon') && window.__j13.act('submit')`, 'knowledge-member-series-submit');
