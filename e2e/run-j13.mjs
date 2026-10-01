@@ -1014,25 +1014,63 @@ async function main() {
     const conflictSeed = await renderer.evaluate(`(async () => {
       const seriesId = (await window.ai7.createSeries({ title: '冲突读取书系', note: '' })).seriesId;
       let first;
+      let last;
       for (let index = 0; index < 52; index += 1) {
         const candidate = await window.ai7.proposeSeriesKnowledge({ seriesId,
           target: { kind: 'new', subject: '同名冲突条目', knowledgeClass: 'canon' }, content: '候选内容' + index, span: null });
         first ??= candidate;
+        last = candidate;
       }
-      const review = await window.ai7.inspectSeriesKnowledgeReview({ seriesId, candidateId: first.candidateId });
-      const promoted = await window.ai7.promoteSeriesKnowledge({ seriesId, candidateId: first.candidateId, candidateVersion: 1,
-        reviewDigest: review.reviewDigest, reuseScope: 'series-tasks', conflictDisposition: 'preserved' });
+      return { seriesId, candidateId: first.candidateId, offPageCandidateId: last.candidateId };
+    })()`);
+    requireJourney(typeof conflictSeed?.seriesId === 'string' && typeof conflictSeed?.candidateId === 'string', 'knowledge-conflicts-seeded');
+    await leaveSeries(renderer, 'knowledge-conflicts-leave');
+    await openSeries(renderer, conflictSeed.seriesId, 'knowledge-conflicts-open');
+    await clickSelector(renderer, `[data-candidate-id="${conflictSeed.candidateId}"] [data-knowledge-action="review"]`, 'knowledge-conflicts-review');
+    await waitFor(renderer, `document.querySelectorAll('.knowledge-review-conflicts li').length === 50`, 'knowledge-conflicts-review-first');
+    await clickSelector(renderer, '[data-knowledge-action="preserve"]', 'knowledge-conflicts-review-preserve');
+    await clickSelector(renderer, 'input[name="knowledge-reuse"][value="series-tasks"]', 'knowledge-conflicts-review-reuse');
+    for (let pass = 0; pass < 2; pass += 1) {
+      await clickSelector(renderer, '[data-knowledge-action="review-conflicts-next"]', 'knowledge-conflicts-review-next');
+      await waitFor(renderer, `document.querySelectorAll('.knowledge-review-conflicts li').length === 1 &&
+        document.querySelector('.knowledge-conflicts-range')?.textContent === '第 51–51 处 / 共 51 处冲突' &&
+        document.activeElement === document.querySelector('.knowledge-review-heading') &&
+        document.querySelector('[data-knowledge-action="preserve"]')?.getAttribute('aria-pressed') === 'true' &&
+        document.querySelector('input[name="knowledge-reuse"][value="series-tasks"]')?.checked`, 'knowledge-conflicts-review-last');
+      await clickSelector(renderer, '[data-knowledge-action="review-conflicts-first"]', 'knowledge-conflicts-review-reset');
+      await waitFor(renderer, `document.querySelectorAll('.knowledge-review-conflicts li').length === 50 &&
+        document.activeElement === document.querySelector('.knowledge-review-heading')`, 'knowledge-conflicts-review-reset-ready');
+    }
+    // Change the off-page governing record without changing the conflict count: the page must refuse the old review.
+    await assertRenderer(renderer, `window.ai7.editSeriesKnowledgeCandidate({ seriesId: ${JSON.stringify(conflictSeed.seriesId)},
+      candidateId: ${JSON.stringify(conflictSeed.offPageCandidateId)}, expectedVersion: 1,
+      target: { kind: 'new', subject: '同名冲突条目', knowledgeClass: 'canon' }, content: '改过的候选内容' }).then(() => true)`, 'knowledge-conflicts-review-drift');
+    await clickSelector(renderer, '[data-knowledge-action="review-conflicts-next"]', 'knowledge-conflicts-review-stale');
+    await waitFor(renderer, `document.querySelector('[data-knowledge-action="review-refresh"]') && !document.querySelector('[data-knowledge-action="promote"]') &&
+      document.activeElement === document.querySelector('[data-knowledge-action="review-refresh"]')`, 'knowledge-conflicts-review-stale-refused');
+    await clickSelector(renderer, '[data-knowledge-action="review-refresh"]', 'knowledge-conflicts-review-refresh');
+    await waitFor(renderer, `document.querySelectorAll('.knowledge-review-conflicts li').length === 50 &&
+      document.querySelector('[data-knowledge-action="preserve"]')?.getAttribute('aria-pressed') === 'false' &&
+      !document.querySelector('input[name="knowledge-reuse"]:checked') && document.querySelector('[data-knowledge-action="promote"]')?.disabled`, 'knowledge-conflicts-review-refresh-unchosen');
+    await clickSelector(renderer, '[data-knowledge-action="preserve"]', 'knowledge-conflicts-review-preserve-again');
+    await clickSelector(renderer, 'input[name="knowledge-reuse"][value="series-tasks"]', 'knowledge-conflicts-review-reuse-again');
+    await clickSelector(renderer, '[data-knowledge-action="promote"]', 'knowledge-conflicts-review-promote');
+    await waitFor(renderer, `document.querySelector('.knowledge-review') === null && document.querySelector('.knowledge-item')`, 'knowledge-conflicts-review-promoted');
+    const conflictRevision = await renderer.evaluate(`(async () => {
+      const seriesId = ${JSON.stringify(conflictSeed.seriesId)};
+      const item = (await window.ai7.inspectSeries({ seriesId })).knowledge.items[0];
+      const promoted = { itemId: item.itemId, revisionId: item.current.revisionId };
       const candidate = await window.ai7.proposeSeriesKnowledge({ seriesId, target: { kind: 'existing', itemId: promoted.itemId }, content: '后来的冲突版本', span: null });
       const next = await window.ai7.inspectSeriesKnowledgeReview({ seriesId, candidateId: candidate.candidateId });
       await window.ai7.promoteSeriesKnowledge({ seriesId, candidateId: candidate.candidateId, candidateVersion: 1,
         reviewDigest: next.reviewDigest, reuseScope: 'series-tasks', conflictDisposition: 'preserved' });
       return { seriesId, revisionId: promoted.revisionId };
     })()`);
-    requireJourney(typeof conflictSeed?.seriesId === 'string' && typeof conflictSeed?.revisionId === 'string', 'knowledge-conflicts-seeded');
+    requireJourney(typeof conflictRevision?.revisionId === 'string', 'knowledge-conflicts-revision');
     await leaveSeries(renderer, 'knowledge-conflicts-leave');
     await openSeries(renderer, conflictSeed.seriesId, 'knowledge-conflicts-open');
     await clickSelector(renderer, '.knowledge-item-history summary', 'knowledge-conflicts-history');
-    const olderConflict = '[data-knowledge-action="conflicts-read"][data-revision-id="' + conflictSeed.revisionId + '"]';
+    const olderConflict = '[data-knowledge-action="conflicts-read"][data-revision-id="' + conflictRevision.revisionId + '"]';
     await waitFor(renderer, `document.querySelector(${JSON.stringify(olderConflict)})?.disabled === false`, 'knowledge-conflicts-old-ready');
     await clickSelector(renderer, olderConflict, 'knowledge-conflicts-old');
     for (let pass = 0; pass < 2; pass += 1) {
