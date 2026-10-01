@@ -19,7 +19,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     if (args[0] === payloadWalk.root) await payloadWalk.pause?.();
     return actual.opendir(...args);
   };
-  return { ...actual, opendir, default: { ...actual.default, opendir } };
+  return { ...actual, opendir, default: { ...actual, opendir } };
 });
 
 // Service-integration suite (L2) for 导出数据库 (Issue #434, plan slice S86a; V2-UX-DSTO-017; ADR 0079 §1.4, §1.6, §1.7) over
