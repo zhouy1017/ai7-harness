@@ -4,7 +4,7 @@ import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { PUBLICATION_VERSION_SCHEMA_SQL } from '../../src/service/publication-versions.js';
-import { EDITORIAL_REVIEW_SCHEMA_VERSION, CLARIFICATION_SCHEMA_VERSION, LEARNING_ELIGIBILITY_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { EDITORIAL_REVIEW_SCHEMA_VERSION, CLARIFICATION_SCHEMA_VERSION, EVALUATION_CALIBRATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
   PUBLICATION_ACTUALS_PROMPT_LABEL,
   PUBLICATION_ACTUALS_PROMPT_STATE,
@@ -372,6 +372,8 @@ describe('⑥ 发稿: Milestone Versions and 设为发稿版本', () => {
         label: PUBLICATION_ACTUALS_PROMPT_LABEL,
         stateLabel: PUBLICATION_ACTUALS_PROMPT_STATE,
         recordedAt: recorded.version.created_at,
+        // Nothing entered yet in 设置 › 评估校准与预测 (Issue #430, S82).
+        actuals: null,
       });
       expect(deliverables.publication.changeNotice).toBeNull();
       expect(deliverables).toEqual(store.inspectDeliverables(book.bookId));
@@ -567,7 +569,7 @@ describe('⑥ 发稿: Milestone Versions and 设为发稿版本', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LEARNING_ELIGIBILITY_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EVALUATION_CALIBRATION_SCHEMA_VERSION);
       const truthAfter = relationTruth(database);
       // Exactly the relations revisions 25 and 26 add appear, each empty; no relation the revision-24 store
       // held changed shape, and the only content that moved is the service lifetime every open appends.

@@ -45,6 +45,7 @@ import {
   milestoneRelationLine,
   milestonesTruncatedLine,
   publicationActualsPromptLine,
+  PUBLICATION_ACTUALS_ACTIONS,
   publicationBasisLine,
   publicationChangeNoticeDetail,
   publicationCountLine,
@@ -149,6 +150,8 @@ export interface MountDeliverablesOptions {
   openDocument(document: ProductionDocumentProjection, type: { typeId: string; label: string }, notice?: string | null): Promise<void>;
   /** 前往审阅 from 图书交付包's work records (Issue #416): the destination is left for 审阅. */
   openReview(): void;
+  /** 录入定价与首印… (Issue #430, S82): the destination is left for 设置 › 评估校准与预测, with this Book's entry open. */
+  openActuals?(bookId: string): void;
 }
 
 /** 从来源材料创建…'s inline form while it is open: the type it creates and the material chosen, if any. */
@@ -413,10 +416,21 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     }
     section.append(renderMilestones(next), renderDesignate(next), renderHistory(next), renderExports(next));
     if (publication.actualsPrompt !== null) {
-      // Recorded with the designation and pending until the evaluation features take it up: no action yet.
+      // Recorded with the designation (EVAL-010); 录入… opens the one central entry in 设置 › 评估校准与预测 (Issue #430, S82).
+      const actualsRow = el('div', 'button-row publication-actuals-row');
       const prompt = el('p', 'publication-actuals-prompt', publicationActualsPromptLine(publication.actualsPrompt));
       prompt.dataset['publicationVersionId'] = publication.actualsPrompt.publicationVersionId;
-      section.append(prompt);
+      prompt.dataset['actualsState'] = publication.actualsPrompt.actuals === null ? 'missing' : 'recorded';
+      actualsRow.append(prompt);
+      if (options.openActuals !== undefined) {
+        const open = options.openActuals;
+        const enter = el('button', 'quiet', publication.actualsPrompt.actuals === null ? PUBLICATION_ACTUALS_ACTIONS.enter : PUBLICATION_ACTUALS_ACTIONS.change);
+        enter.type = 'button';
+        enter.dataset['publicationAction'] = 'actuals';
+        enter.addEventListener('click', () => open(next.bookId));
+        actualsRow.append(enter);
+      }
+      section.append(actualsRow);
     }
     if (next.manuscript !== null) {
       const manuscript = next.manuscript;
