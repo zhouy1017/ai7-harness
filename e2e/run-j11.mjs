@@ -1891,6 +1891,12 @@ async function main() {
       page.entries.every((entry) => entry[0] === 'proposal-decision') && page.focus === 'feedback-filter-unclassified', 'history-unclassified-ready');
     await toggleHistoryUnclassified(renderer, 'history-unclassified-clear');
     await readHistory(renderer, (page) => !page.unclassified && !page.dimensionDisabled && page.entries.length === 4, 'history-unclassified-clear-ready');
+    await choose(renderer, '#feedback-filter-signal', '拒绝', 'history-signal-rejected');
+    await readHistory(renderer, (page) => page.entries.length === 1 && page.entries[0][1].endsWith(' · 拒绝') && page.focus === 'feedback-filter-signal', 'history-signal-rejected-ready');
+    await choose(renderer, '#feedback-filter-signal', '不准确', 'history-signal-empty');
+    await readHistory(renderer, (page) => page.entries.length === 0 && page.focus === 'feedback-filter-signal', 'history-signal-empty-ready');
+    await choose(renderer, '#feedback-filter-signal', '', 'history-signal-clear');
+    await readHistory(renderer, (page) => page.entries.length === 4, 'history-signal-clear-ready');
 
     at('feedback-history-attribution');
     // The Book's 作者 and 责编, set on its 工作概览, attribute its feedback (FDBK-013): 作者 冯五 keeps all four, 责编 郑三 with it
@@ -2018,6 +2024,12 @@ async function main() {
     await choose(renderer, '#feedback-filter-origin', '', 'history-pages-all');
     await readHistory(renderer, (page) => page.entries.length === 300, 'history-pages-all-ready');
     at('feedback-history-filtered-pages');
+    // A signal whose only entry is older than the unfiltered 300-entry page remains reachable.
+    await choose(renderer, '#feedback-filter-signal', '准确', 'history-offpage-signal');
+    await readHistory(renderer, (page) => page.entries.length === 1 && page.entries[0][1] === '分析反馈 · 人物与名称 · 准确' &&
+      !page.next && !page.reset && page.focus === 'feedback-filter-signal', 'history-offpage-signal-found');
+    await choose(renderer, '#feedback-filter-signal', '', 'history-offpage-signal-clear');
+    await readHistory(renderer, (page) => page.entries.length === 300 && page.next, 'history-offpage-signal-cleared');
     // The first page has no classified feedback; typing its exact dimension must still reach the older analysis.
     await assertRenderer(renderer, `!Array.from(document.querySelectorAll('#feedback-dimensions option')).some((option) => option.value === '人物与名称')`, 'history-offpage-dimension-absent');
     await changeHistoryInput(renderer, 'dimension', '人物与名称', 'history-offpage-dimension');

@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 80 as const;
+export const SERVICE_PROTOCOL_VERSION = 81 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -5239,11 +5239,14 @@ export type FeedbackHistoryTarget =
   | { readonly kind: 'review'; readonly bookId: string; readonly reviewRunId: string; readonly findingId: string };
 
 /** Service-side filters and an exclusive newest-first page cursor. Omitted fields mean all. */
+export const FEEDBACK_HISTORY_SIGNALS = ['接受', '修改后接受', '拒绝', '准确', '不准确', '不完整', '忽略'] as const;
 export interface FeedbackHistoryInput {
   readonly bookId?: string | null;
   readonly origin?: LearningMaterialKind | null;
   readonly author?: string | null;
   readonly editor?: string | null;
+  /** Exact projected disposition or judgment; omitted or null means all. */
+  readonly signal?: string | null;
   /** Inclusive lower and exclusive upper UTC instants; calendar days are resolved in the editor's local time. */
   readonly recordedFrom?: string | null;
   readonly recordedBefore?: string | null;

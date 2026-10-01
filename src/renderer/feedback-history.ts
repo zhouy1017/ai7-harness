@@ -1,4 +1,5 @@
 import type { FeedbackHistoryInput, FeedbackHistoryEntryProjection, FeedbackHistoryPeopleVersion, FeedbackHistoryProjection, FeedbackHistoryTarget, RendererApi } from '../shared/protocol.js';
+import { FEEDBACK_HISTORY_SIGNALS } from '../shared/protocol.js';
 import {
   FEEDBACK_HISTORY_ALL,
   FEEDBACK_HISTORY_DETACHED,
@@ -55,7 +56,7 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
   root.classList.add('feedback-history');
   let projection: FeedbackHistoryProjection | null = null;
   /** The filters as the editor set them; `''` is 全部. They outlive a repaint, never the page. */
-  let chosen: Record<Filter, string> = { book: '', origin: '', author: '', editor: '', dimension: '', from: '', to: '' };
+  let chosen: Record<Filter, string> = { book: '', origin: '', signal: '', author: '', editor: '', dimension: '', from: '', to: '' };
   let groupBy: Group = 'book';
   let opening = false;
   let loading = false;
@@ -64,7 +65,7 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
 
   const peopleOf = (entry: FeedbackHistoryEntryProjection): FeedbackHistoryPeopleVersion | null =>
     projection?.books.find((book) => book.bookId === entry.bookId)?.peopleVersions.find((version) => version.version === entry.peopleVersion) ?? null;
-  const select = (filter: 'book' | 'origin' | 'author' | 'editor', choices: ReadonlyArray<readonly [string, string]>): HTMLLabelElement => {
+  const select = (filter: 'book' | 'origin' | 'signal' | 'author' | 'editor', choices: ReadonlyArray<readonly [string, string]>): HTMLLabelElement => {
     const wrapper = el('label', 'feedback-filter');
     const control = el('select');
     control.id = `feedback-filter-${filter}`;
@@ -155,6 +156,7 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
     filters.append(
       select('book', projection.books.map((book) => [book.bookId, `《${book.title}》`] as const)),
       select('origin', (Object.keys(FEEDBACK_ORIGIN_LABELS) as Array<keyof typeof FEEDBACK_ORIGIN_LABELS>).map((origin) => [origin, FEEDBACK_ORIGIN_LABELS[origin]] as const)),
+      select('signal', FEEDBACK_HISTORY_SIGNALS.map((signal) => [signal, signal] as const)),
       select('author', authors.map((name) => [name, name] as const)),
       select('editor', editors.map((name) => [name, name] as const)),
       dimensionFilter(),
@@ -284,6 +286,7 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
         origin: filters.origin === 'proposal-decision' || filters.origin === 'analysis-feedback' || filters.origin === 'review-disposition' ? filters.origin : null,
         author: filters.author || null,
         editor: filters.editor || null,
+        signal: filters.signal || null,
         ...bounds,
         ...(filters.dimension === '' ? {} : { dimension: JSON.parse(filters.dimension) as string | null }),
         after: cursor ?? null });

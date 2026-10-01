@@ -5857,6 +5857,7 @@ export class EditorialStore {
             (input.recordedFrom != null && entry.recordedAt < input.recordedFrom) ||
             (input.recordedBefore != null && entry.recordedAt >= input.recordedBefore) ||
             (Object.hasOwn(input, 'dimension') && entry.dimension !== input.dimension) ||
+            (input.signal != null && entry.signal !== input.signal) ||
             (input.after != null && newest(entry, input.after) <= 0)) return;
         if (input.author != null || input.editor != null) {
           const people = this.#bookPeople.at(entry.bookId, entry.recordedAt);
