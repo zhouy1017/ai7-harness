@@ -1,6 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, writeFileSync } from 'node:fs';
-import * as filesystem from 'node:fs/promises';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -12,6 +11,16 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { DATABASE_EXPORT_SCHEMA_VERSION, STORE_VERSION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+const payloadWalk = vi.hoisted(() => ({ root: null as string | null, pause: null as (() => Promise<void>) | null }));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  const opendir: typeof actual.opendir = async (...args) => {
+    if (args[0] === payloadWalk.root) await payloadWalk.pause?.();
+    return actual.opendir(...args);
+  };
+  return { ...actual, opendir, default: { ...actual.default, opendir } };
+});
 
 // Service-integration suite (L2) for 导出数据库 (Issue #434, plan slice S86a; V2-UX-DSTO-017; ADR 0079 §1.4, §1.6, §1.7) over
 // the real store: the package (a consistent copy of the store, every other data file, and a manifest that states the Data
@@ -94,19 +103,13 @@ describe('导出数据库 over the real store', () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let releaseWalk!: () => void;
     const held = new Promise<void>((resolve) => { releaseWalk = resolve; });
-    const originalOpenDirectory = filesystem.opendir;
     let walking = false;
-    const walk = vi.spyOn(filesystem, 'opendir').mockImplementation(async (...args) => {
-      if (args[0] === roots.dataRoot) {
-        walking = true;
-        await held;
-      }
-      return originalOpenDirectory(...args);
-    });
     try {
       const path = join(roots.inputRoot, 'abandoned-draft.docx');
       await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '导出期间放弃', paragraphs: [{ runs: [{ text: { block: 21 } }] }] });
       const draft = await store.stageSelectedManuscript(randomUUID(), path);
+      payloadWalk.root = roots.dataRoot;
+      payloadWalk.pause = async () => { walking = true; await held; };
       const destination = join(roots.inputRoot, 'incomplete.ai7db');
       const preparing = store.prepareDatabaseExport(destination, true).catch((error: unknown) => error);
       await until(() => walking, 'the completed snapshot before its payload walk');
@@ -131,7 +134,8 @@ describe('导出数据库 over the real store', () => {
       } finally { database.close(); }
     } finally {
       releaseWalk();
-      walk.mockRestore();
+      payloadWalk.root = null;
+      payloadWalk.pause = null;
       store.close();
     }
   });
