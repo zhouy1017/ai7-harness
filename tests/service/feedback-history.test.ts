@@ -116,6 +116,12 @@ describe('反馈历史 over the real store (Issue #61, S26c review)', () => {
 
       const history = store.inspectFeedbackHistory();
       expect(history.truncated).toBe(false);
+      const editedOnly = { bookId: book.bookId, signal: '修改后接受' };
+      expect(store.inspectFeedbackHistory(editedOnly).entries.map((entry) => entry.entryId))
+        .toEqual([history.entries.find((entry) => entry.signal === '修改后接受')!.entryId]);
+      const rejectedByEarlierEditor = { bookId: book.bookId, signal: '拒绝', editor: '郑三' };
+      expect(store.inspectFeedbackHistory(rejectedByEarlierEditor).entries.map((entry) => entry.entryId))
+        .toEqual(history.entries.filter((entry) => entry.signal === '拒绝' && entry.peopleVersion === 1).map((entry) => entry.entryId));
       expect(history.entries.map((entry) => [entry.target.kind === 'mark' ? entry.target.markId : null, entry.signal, entry.reasonState, entry.peopleVersion])).toEqual([
         [fourth, '拒绝', 'given', 2], [third, '修改后接受', 'none', 2], [second, '拒绝', 'given', 1], [first, '拒绝', 'given', 1],
       ]);
