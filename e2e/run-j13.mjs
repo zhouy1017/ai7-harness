@@ -1162,7 +1162,7 @@ async function main() {
       await readSeries(renderer, (page) => page.members.length === 50, 'members-reset-bounded');
       for (let next = 0; next < 3; next += 1) {
         await clickSelector(renderer, '[data-series-action="history-more"]', 'series-history-next');
-        await waitFor(renderer, `document.querySelectorAll('ol.series-history > li').length === ${next === 2 ? 16 : 20} && document.activeElement?.matches('.series-history-section h3')`, 'series-history-bounded');
+        await waitFor(renderer, `document.querySelectorAll('ol.series-history > li').length === ${next === 2 ? 17 : 20} && document.activeElement?.matches('.series-history-section h3')`, 'series-history-bounded');
       }
       await clickSelector(renderer, '[data-series-action="history-first"]', 'series-history-reset');
       await readSeries(renderer, (page) => page.history.length === 20, 'series-history-reset-bounded');
