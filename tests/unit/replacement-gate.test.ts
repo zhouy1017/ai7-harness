@@ -10,6 +10,7 @@ describe('what the service takes while a replacement waits (Issue #434 review)',
     for (const operation of [
       'ready', 'shutdown', 'getStartup', 'getManuscriptWindow', 'inspectBaselineAnalysis', 'inspectDatabaseReplacements', 'listBooks',
       'pollServiceJob', 'previewLibraryMaterial', 'cancelDatabaseReplacement', 'startSearch', 'cancelServiceJob', 'resolveBookWorkbenchRoute',
+      'readLibraryDecisionReason',
     ]) expect([operation, takenWhileReplacementWaits(operation)]).toEqual([operation, true]);
     for (const operation of [
       'flushJournalEdit', 'createEditorialMark', 'authorizeBaselineAnalysis', 'runReconnectPreflight', 'recordManuscriptEntryPosition',
