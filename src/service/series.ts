@@ -6,6 +6,7 @@ import {
   MAX_BOOK_SERIES_MEMBERSHIPS,
   publicationText,
   type SeriesImpactGroupProjection,
+  type SeriesListCursor,
   type SeriesMembershipChangeKind,
   type SeriesHistoryCursor,
 } from '../shared/protocol.js';
@@ -410,18 +411,32 @@ export class SeriesLedger {
   }
 
   /** The Series a Book is in now, by name, with when it joined each. */
-  seriesOf(bookId: string): { memberships: Array<{ readonly seriesId: string; readonly title: string; readonly joinedAt: string }>; count: number } {
+  seriesOf(bookId: string, after: SeriesListCursor | null = null): {
+    memberships: Array<{ readonly seriesId: string; readonly title: string; readonly joinedAt: string }>;
+    count: number;
+    nextCursor: SeriesListCursor | null;
+  } {
     const memberships: Array<{ seriesId: string; title: string; joinedAt: string }> = [];
     let count = 0;
-    if (this.#db.prepare(TABLE_PRESENT).get() === undefined) return { memberships, count };
-    for (const row of this.#db.prepare(`SELECT s.series_id, s.title, c.recorded_at FROM series_membership_changes c JOIN series s ON s.series_id = c.series_id
+    if (this.#db.prepare(TABLE_PRESENT).get() === undefined) return { memberships, count, nextCursor: null };
+    for (const _change of this.#verified(this.#db.prepare('SELECT * FROM series_membership_changes WHERE book_id = ? ORDER BY series_id, ordinal').iterate(bookId))) {
+      // Validate every chain, including removed pairs and rows outside this page, without retaining history.
+    }
+    for (const row of this.#db.prepare(`SELECT s.*, c.recorded_at AS joined_at,
+        CASE WHEN ? IS NULL OR s.title > ? OR (s.title = ? AND s.series_id > ?) THEN 1 ELSE 0 END AS after_cursor
+      FROM series_membership_changes c LEFT JOIN series s ON s.series_id = c.series_id
       WHERE c.book_id = ? AND c.kind = 'add' AND c.ordinal = (
         SELECT max(d.ordinal) FROM series_membership_changes d WHERE d.series_id = c.series_id AND d.book_id = c.book_id)
-      ORDER BY s.title, s.series_id`).iterate(bookId)) {
+      ORDER BY s.title, s.series_id`).iterate(after?.title ?? null, after?.title ?? null, after?.title ?? null, after?.seriesId ?? null, bookId)) {
+      const series = this.#series(row);
       count += 1;
-      if (memberships.length < MAX_BOOK_SERIES_MEMBERSHIPS) memberships.push({ seriesId: String(row.series_id), title: String(row.title), joinedAt: String(row.recorded_at) });
+      if (Number(row.after_cursor) === 1 && memberships.length < MAX_BOOK_SERIES_MEMBERSHIPS + 1) {
+        memberships.push({ seriesId: series.seriesId, title: series.title, joinedAt: String(row.joined_at) });
+      }
     }
-    return { memberships, count };
+    const { page, more } = weighedPage(memberships, MAX_BOOK_SERIES_MEMBERSHIPS);
+    const last = page.at(-1);
+    return { memberships: page, count, nextCursor: more && last !== undefined ? { title: last.title, seriesId: last.seriesId } : null };
   }
 
   /** How many Books this exact Series holds now, without building a house-wide map. */

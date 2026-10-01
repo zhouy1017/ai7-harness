@@ -145,7 +145,7 @@ describe('书系 over the real store', () => {
       const firstSide = store.inspectBookSeries(first);
       expect([firstSide.memberships.map((entry) => entry.title), firstSide.history.map((change) => [change.label, change.seriesTitle, change.changeId])])
         .toEqual([['星河三部曲'], [['加入书系', '星河三部曲', added.changeId]]]);
-      expect(store.inspectBookSeries(second)).toEqual({ bookId: second, memberships: [], membershipCount: 0, history: [], historyCount: 0, historyNext: null });
+      expect(store.inspectBookSeries(second)).toEqual({ bookId: second, memberships: [], membershipCount: 0, membershipsNext: null, history: [], historyCount: 0, historyNext: null });
       expect(refusal(() => store.previewSeriesMembershipChange({ seriesId, bookId: first, kind: 'add' }))).toBe('SERIES_MEMBER_ALREADY:《星河之一》已经在书系「星河三部曲」中。');
       expect(refusal(() => store.changeSeriesMembership({ seriesId, bookId: first, kind: 'add', previewDigest: preview.previewDigest })))
         .toBe('SERIES_MEMBER_ALREADY:《星河之一》已经在书系「星河三部曲」中。');
@@ -420,6 +420,15 @@ describe('书系 over the real store', () => {
       for (const entry of [...firstList.series, ...secondList.series].slice(1)) add(store, entry.seriesId, books[0]!);
       const many = store.inspectBookSeries(books[0]!);
       expect([many.memberships.length, many.membershipCount, many.historyCount]).toEqual([MAX_BOOK_SERIES_MEMBERSHIPS, 52, 52]);
+      expect(many.membershipsNext).toEqual({ title: many.memberships.at(-1)!.title, seriesId: many.memberships.at(-1)!.seriesId });
+      const remaining = store.inspectBookSeries(books[0]!, many.membershipsNext);
+      expect(remaining.memberships.map((entry) => entry.title)).toEqual(['书系050', '书系051']);
+      expect([remaining.membershipCount, remaining.membershipsNext]).toEqual([52, null]);
+      expect(new Set([...many.memberships, ...remaining.memberships].map((entry) => entry.seriesId)).size).toBe(52);
+      expect(store.inspectBookSeries(books[0]!, null)).toEqual(many);
+      expect(remaining.history).toEqual(many.history);
+      expect(refusal(() => store.inspectBookSeries(books[0]!, { title: '', seriesId: many.memberships[0]!.seriesId })))
+        .toBe('SERIES_CURSOR_INVALID:书系列表位置无效。');
       const reason = store.inspectReviewWorkspace(books[0]!, null).categories.find((entry) => entry.categoryId === 'series-consistency')!.unavailableReason;
       expect(reason).toContain('已加入 52 个书系，包括');
       expect(reason).not.toContain('书系051');

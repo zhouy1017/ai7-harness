@@ -11031,15 +11031,19 @@ export class EditorialStore {
    * A Book's side of 书系 (SER-009): the Series it is in now — at most `MAX_BOOK_SERIES_MEMBERSHIPS`, with how many in all —
    * and the first page of its membership changes, newest first. A read.
    */
-  inspectBookSeries(bookId: string): BookSeriesProjection {
+  inspectBookSeries(bookId: string, after: SeriesListCursor | null = null): BookSeriesProjection {
     return this.#seriesCall(() => {
       this.#evaluationBookTitle(bookId);
-      const memberships = this.#series.seriesOf(bookId);
+      requireStore(after === null || (typeof after.title === 'string' && after.title.isWellFormed() &&
+        after.title.length >= 1 && after.title.length <= 2 * MAX_SERIES_TITLE_CHARACTERS &&
+        typeof after.seriesId === 'string' && UUID_PATTERN.test(after.seriesId)), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      const memberships = this.#series.seriesOf(bookId, after);
       const history = this.#seriesHistoryPage({ bookId }, null);
       return {
         bookId,
         memberships: memberships.memberships,
         membershipCount: memberships.count,
+        membershipsNext: memberships.nextCursor,
         history: history.history,
         historyCount: history.count,
         historyNext: history.nextCursor,
