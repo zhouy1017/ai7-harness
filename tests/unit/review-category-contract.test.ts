@@ -55,7 +55,7 @@ describe('the built-in review categories', () => {
     expect(by((category) => category.executor === 'baseline-leads')).toEqual(['plot-consistency']);
     expect(by((category) => category.executor === 'factual-review-kind')).toEqual(['factual-review']);
     expect(by((category) => category.executor === 'unavailable')).toEqual(['series-consistency', 'cross-deliverable-consistency']);
-    expect(entry('series-consistency').unavailableReason).toBe('这本书不在任何书系中，也还没有书系知识；加入书系后才能选。');
+    expect(entry('series-consistency').unavailableReason).toBe('这本书不在任何书系中，也还没有书系知识；加入书系、且书系知识接入审阅后才能选。');
     expect(entry('cross-deliverable-consistency').unavailableReason).toBe('这本书还没有编辑交付物；有了交付物后才能选。');
     expect(BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.filter((category) => category.executor !== 'unavailable')
       .every((category) => category.unavailableReason === null)).toBe(true);

@@ -102,6 +102,7 @@ import {
   DECISION_FEEDBACK_SCHEMA_VERSION,
   LEARNING_ELIGIBILITY_SCHEMA_VERSION,
   EVALUATION_CALIBRATION_SCHEMA_VERSION,
+  SERIES_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -174,6 +175,7 @@ import { ANALYSIS_FEEDBACK_FOREIGN_KEYS, ANALYSIS_FEEDBACK_SCHEMA_SQL, ANALYSIS_
 import { DECISION_FEEDBACK_FOREIGN_KEYS, DECISION_FEEDBACK_SCHEMA_SQL, DECISION_FEEDBACK_TRIGGER_SQL } from './decision-feedback.js';
 import { LEARNING_ELIGIBILITY_FOREIGN_KEYS, LEARNING_ELIGIBILITY_SCHEMA_SQL, LEARNING_ELIGIBILITY_TRIGGER_SQL } from './learning-eligibility.js';
 import { EVALUATION_CALIBRATION_FOREIGN_KEYS, EVALUATION_CALIBRATION_SCHEMA_SQL, EVALUATION_CALIBRATION_TRIGGER_SQL } from './evaluation-calibration.js';
+import { SERIES_FOREIGN_KEYS, SERIES_SCHEMA_SQL, SERIES_TRIGGER_SQL } from './series.js';
 import {
   MANUSCRIPT_EFFECT_FOREIGN_KEYS,
   MANUSCRIPT_EFFECT_SCHEMA_SQL,
@@ -1887,6 +1889,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...DECISION_FEEDBACK_FOREIGN_KEYS,
   ...LEARNING_ELIGIBILITY_FOREIGN_KEYS,
   ...EVALUATION_CALIBRATION_FOREIGN_KEYS,
+  ...SERIES_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2509,6 +2512,7 @@ function requireManuscriptReimportTargetSchema(
   includeDecisionFeedbackTables = false,
   includeLearningEligibilityTables = false,
   includeEvaluationCalibrationTables = false,
+  includeSeriesTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2547,6 +2551,7 @@ function requireManuscriptReimportTargetSchema(
   includeDecisionFeedbackTables ||= committed(DECISION_FEEDBACK_SCHEMA_SQL);
   includeLearningEligibilityTables ||= committed(LEARNING_ELIGIBILITY_SCHEMA_SQL);
   includeEvaluationCalibrationTables ||= committed(EVALUATION_CALIBRATION_SCHEMA_SQL);
+  includeSeriesTables ||= committed(SERIES_SCHEMA_SQL);
   requireExactSchema(
     db,
     {
@@ -2643,6 +2648,8 @@ function requireManuscriptReimportTargetSchema(
       ...(includeLearningEligibilityTables ? LEARNING_ELIGIBILITY_SCHEMA_SQL : {}),
       // Revision 51 (Issue #430, S82) adds each Book's 定价与首印 and the house's evaluation preferences.
       ...(includeEvaluationCalibrationTables ? EVALUATION_CALIBRATION_SCHEMA_SQL : {}),
+      // Revision 52 (Issue #63, S28a) adds the house's Series and their membership changes.
+      ...(includeSeriesTables ? SERIES_SCHEMA_SQL : {}),
     },
     // The partial index that keeps one primary Manuscript per Book stands with the rebuilt relation, whatever the version.
     {
@@ -2682,6 +2689,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeDecisionFeedbackTables ? DECISION_FEEDBACK_TRIGGER_SQL : {}),
       ...(includeLearningEligibilityTables ? LEARNING_ELIGIBILITY_TRIGGER_SQL : {}),
       ...(includeEvaluationCalibrationTables ? EVALUATION_CALIBRATION_TRIGGER_SQL : {}),
+      ...(includeSeriesTables ? SERIES_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5412,6 +5420,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeDecisionFeedbackTables = false,
   includeLearningEligibilityTables = false,
   includeEvaluationCalibrationTables = false,
+  includeSeriesTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5449,6 +5458,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeDecisionFeedbackTables,
     includeLearningEligibilityTables,
     includeEvaluationCalibrationTables,
+    includeSeriesTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5532,7 +5542,8 @@ export function initializeBoundedSchema(
       version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
       version === DECISION_FEEDBACK_SCHEMA_VERSION ||
       version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
-      version === EVALUATION_CALIBRATION_SCHEMA_VERSION,
+      version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
+      version === SERIES_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5566,9 +5577,10 @@ export function initializeBoundedSchema(
       version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
       version === DECISION_FEEDBACK_SCHEMA_VERSION ||
       version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
-      version === EVALUATION_CALIBRATION_SCHEMA_VERSION) {
+      version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
+      version === SERIES_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== EVALUATION_CALIBRATION_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== SERIES_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5606,6 +5618,7 @@ export function initializeBoundedSchema(
           version >= DECISION_FEEDBACK_SCHEMA_VERSION,
           version >= LEARNING_ELIGIBILITY_SCHEMA_VERSION,
           version >= EVALUATION_CALIBRATION_SCHEMA_VERSION,
+          version >= SERIES_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);

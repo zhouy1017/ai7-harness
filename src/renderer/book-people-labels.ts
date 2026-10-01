@@ -77,7 +77,7 @@ export function bookCardRelatedLine(people: BookSummaryProjection['people']): st
 }
 
 export const BOOK_FILTER_LEGEND = '查找图书';
-export const BOOK_FILTER_FIELDS: Readonly<Record<BookSummaryFilter['field'], string>> = { all: '全部', title: '书名', author: '作者', editor: '责编' };
+export const BOOK_FILTER_FIELDS: Readonly<Record<BookSummaryFilter['field'], string>> = { all: '全部', title: '书名', author: '作者', editor: '责编', series: '书系' };
 export const BOOK_FILTER_FIELD_LABEL = '查找范围';
 export const BOOK_FILTER_TEXT_LABEL = '字词';
 export const BOOK_FILTER_ACTIONS = { find: '查找', clear: '显示全部图书' } as const;
@@ -85,7 +85,7 @@ export const BOOK_FILTER_NONE = '没有找到符合的图书。';
 
 /** What the list shows now: `按作者查找「吴二」`. */
 export function bookFilterLine(filter: BookSummaryFilter): string {
-  return filter.field === 'all' ? `按书名、作者或责编查找「${filter.text}」` : `按${BOOK_FILTER_FIELDS[filter.field]}查找「${filter.text}」`;
+  return filter.field === 'all' ? `按书名、作者、责编或书系查找「${filter.text}」` : `按${BOOK_FILTER_FIELDS[filter.field]}查找「${filter.text}」`;
 }
 
 export const BOOK_FILTER_STATUS_LINES = {

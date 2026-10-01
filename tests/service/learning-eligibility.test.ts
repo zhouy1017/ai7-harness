@@ -13,7 +13,7 @@ import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
-import { DECISION_FEEDBACK_SCHEMA_VERSION, EVALUATION_CALIBRATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { DECISION_FEEDBACK_SCHEMA_VERSION, SERIES_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE } from '../../src/shared/protocol.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type {
@@ -107,6 +107,41 @@ function attention(store: EditorialStore): Array<[string, GlobalAttentionItemPro
 }
 
 describe('学习准入 over the real store', () => {
+  it('refuses a Series membership preview after an eligibility change even when all displayed counts stay the same', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const markId = store.createEditorialMark(suggestion(book, window, 2, 6, '书系预览示例')).markId;
+      store.recordChangeSuggestionDecision({
+        manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId,
+        markId, clientDecisionId: randomUUID(), disposition: 'rejected', editedText: null, reason: '书系预览原因',
+      });
+      const choose = (material: LearningMaterialProjection, choice: 'book' | 'house') => store.decideLearningMaterial({
+        bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest,
+        expectedDecisions: material.decisions, choice, note: null,
+      });
+      const material = store.inspectLearningMaterials(book.bookId).books[0]!.materials[0]!;
+      const decided = choose(material, 'book');
+      const seriesId = store.createSeries({ title: '预览版本书系', note: '' }).seriesId;
+      const input = { seriesId, bookId: book.bookId, kind: 'add' as const };
+      const preview = store.previewSeriesMembershipChange(input);
+      const house = choose(decided, 'house');
+      expect(store.previewSeriesMembershipChange(input).groups).toEqual(preview.groups);
+      const stale = () => refusal(() => store.changeSeriesMembership({ ...input, previewDigest: preview.previewDigest }));
+      expect(stale()).toBe('SERIES_PREVIEW_STALE:预览之后，书系成员或相关记录有了变化；请重新查看影响，再决定。');
+      choose(house, 'book');
+      expect(store.previewSeriesMembershipChange(input).groups).toEqual(preview.groups);
+      expect(stale()).toBe('SERIES_PREVIEW_STALE:预览之后，书系成员或相关记录有了变化；请重新查看影响，再决定。');
+      expect(store.inspectBookSeries(book.bookId).historyCount).toBe(0);
+      const fresh = store.previewSeriesMembershipChange(input);
+      store.changeSeriesMembership({ ...input, previewDigest: fresh.previewDigest });
+      expect(store.inspectBookSeries(book.bookId).historyCount).toBe(1);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  });
   it('finds the material quietly, waits for the editor’s decision on each exact version, and decides again what changed', async () => {
     let book: Imported;
     let rejectedMark: string;
@@ -239,7 +274,7 @@ describe('学习准入 over the real store', () => {
     }
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EVALUATION_CALIBRATION_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SERIES_SCHEMA_VERSION);
       const records = (database.prepare('SELECT canonical_json FROM learning_eligibility_decisions ORDER BY recorded_at').all() as Array<{ canonical_json: string }>)
         .map((row) => JSON.parse(row.canonical_json) as { attribution: unknown; basis: unknown; choice: string });
       expect(records).toHaveLength(68);
@@ -296,7 +331,7 @@ describe('学习准入 over the real store', () => {
     }
     const plant = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      plant.exec(`DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; DROP TABLE learning_eligibility_decisions; PRAGMA user_version = ${DECISION_FEEDBACK_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; DROP TABLE learning_eligibility_decisions; PRAGMA user_version = ${DECISION_FEEDBACK_SCHEMA_VERSION};`);
     } finally {
       plant.close();
     }
@@ -308,7 +343,7 @@ describe('学习准入 over the real store', () => {
     }
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EVALUATION_CALIBRATION_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SERIES_SCHEMA_VERSION);
       expect((database.prepare('SELECT count(*) count FROM learning_eligibility_decisions').get() as { count: number }).count).toBe(0);
     } finally {
       database.close();
