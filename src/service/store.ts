@@ -251,6 +251,7 @@ import {
   MANUSCRIPT_FORMAT_HEAD_BYTES,
   editableImport,
   identifyManuscriptFormat,
+  isManuscriptObjectKey,
   manuscriptObjectExtension,
 } from './manuscript-format.js';
 import {
@@ -13041,9 +13042,7 @@ export class EditorialStore {
     requireStore(/^[0-9a-f]{64}$/.test(objectDigest), 'OBJECT_PATH_INVALID', '对象摘要无效。');
     // The retained original keeps the extension of the format it was identified as, so the key is
     // checked against every admitted one rather than against DOCX alone (ADR 0072 §2).
-    const expectedKeys = SOURCE_FORMATS.map((format) =>
-      posix.join('sha256', objectDigest.slice(0, 2), `${objectDigest}${manuscriptObjectExtension(format)}`));
-    requireStore(expectedKeys.includes(relativeKey), 'OBJECT_PATH_INVALID', '对象相对路径无效。');
+    requireStore(isManuscriptObjectKey(objectDigest, relativeKey), 'OBJECT_PATH_INVALID', '对象相对路径无效。');
     const path = resolve(this.#objectsRoot, ...relativeKey.split('/'));
     requireStore(isInside(this.#objectsRoot, path), 'OBJECT_PATH_INVALID', '对象路径越界。');
     return path;
