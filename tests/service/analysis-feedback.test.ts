@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ANALYSIS_FEEDBACK_TRIGGER_SQL } from '../../src/service/analysis-feedback.js';
+import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -141,6 +142,13 @@ describe('②A 分析反馈 over the real store', () => {
       const changed = judge({ expectedLatestSignalId: firstSignal, judgment: 'accurate' });
       expect(item(changed, 'entities/0')).toMatchObject({ signals: 2, latest: { judgment: 'accurate', reason: null, correction: null, supersedes: firstSignal } });
       expect(changed.metric).toMatchObject({ judged: 1, accurate: 1, inaccurate: 0, incomplete: 0 });
+      let revised = changed;
+      for (let index = 0; index < 64; index += 1) {
+        revised = judge({ expectedLatestSignalId: item(revised, 'entities/0').latest!.signalId,
+          judgment: index % 2 === 0 ? 'inaccurate' : 'accurate' });
+      }
+      expect(item(revised, 'entities/0').signals).toBe(66);
+      expect(revised.metric).toMatchObject({ judged: 1, accurate: 1, inaccurate: 0, incomplete: 0 });
 
       // An event 不完整 for the editor's own reason, and the synopsis 准确 when there is one.
       const event = item(changed, 'events/0');
@@ -152,6 +160,17 @@ describe('②A 分析反馈 over the real store', () => {
       expect(withEvent.metric).toMatchObject({ judged: 2, accurate: 1, inaccurate: 0, incomplete: 1 });
       // Reading it twice answers the same, and writes nothing.
       expect(store.inspectAnalysisFeedback(bookId, revisionId)).toEqual(withEvent);
+      // The incremental hash remains byte-identical to the established canonical lineage object.
+      const lineageDatabase = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        const rows = lineageDatabase.prepare('SELECT signal_id, sha256, revision_id, item_key FROM analysis_feedback_signals WHERE book_id = ? ORDER BY ordinal').all(bookId);
+        const latest = new Map(rows.map((row) => [`${String(row.revision_id)}\n${String(row.item_key)}`, { signalId: String(row.signal_id), sha256: String(row.sha256) }]));
+        const signals = [...latest.values()].sort((a, b) => a.signalId < b.signalId ? -1 : a.signalId > b.signalId ? 1 : 0);
+        expect(withEvent.metric.lineageDigest).toBe(sha256Hex(canonicalJson({ schema: 'ai7.analysis-quality-metric-lineage/1',
+          definition: withEvent.metric.definition, bookId, signals })));
+      } finally {
+        lineageDatabase.close();
+      }
       // Another Book cannot read or judge this Book's revision — one analysed as well, so the refusal is the ownership
       // check's own, never an absent analysis.
       const other = (await importSample1Book(store, roots.codeRoot, '另一本分析之书')).bookId;
@@ -175,7 +194,7 @@ describe('②A 分析反馈 over the real store', () => {
     const reopened = await openSession();
     try {
       const kept = reopened.store.inspectAnalysisFeedback(bookId!, revisionId!);
-      expect([item(kept, 'entities/0').signals, item(kept, 'events/0').latest?.judgment, kept.metric.judged]).toEqual([2, 'incomplete', 2]);
+      expect([item(kept, 'entities/0').signals, item(kept, 'events/0').latest?.judgment, kept.metric.judged]).toEqual([66, 'incomplete', 2]);
     } finally {
       await closeSession(reopened);
     }
@@ -186,7 +205,7 @@ describe('②A 分析反馈 over the real store', () => {
       expect(() => database.exec('DELETE FROM analysis_feedback_signals')).toThrowError(/ANALYSIS_FEEDBACK_LEDGER_IMMUTABLE/u);
       // Rewritten by hand behind the triggers' back, the signal no longer reads, and the page says so rather than guess.
       database.exec('DROP TRIGGER analysis_feedback_signals_no_update');
-      database.exec("UPDATE analysis_feedback_signals SET canonical_json = replace(canonical_json, '漏了事件的起因', '改过')");
+      database.exec("UPDATE analysis_feedback_signals SET canonical_json = replace(canonical_json, '应为另一名称', '改过')");
       database.exec(ANALYSIS_FEEDBACK_TRIGGER_SQL.analysis_feedback_signals_no_update!);
     } finally {
       database.close();

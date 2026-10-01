@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
 import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 
@@ -470,7 +471,28 @@ async function choosePurpose(renderer, kind, location) {
   );
 }
 
-async function importAndOpen(renderer) {
+/**
+ * Where staging stood when its bound passed (#621), read from the store the service writes: still reading the archive
+ * (no block parsed yet), parsing it into blocks (the parse commits them in batches, so their count shows how far it had
+ * come), recording the draft (every block parsed, the draft not yet written), or done with the target screen not shown.
+ * `unreadable` when the store could not be read at that moment.
+ */
+function importStagePhase(dataRoot) {
+  let database;
+  try {
+    database = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    const count = (sql) => Number(database.prepare(sql).get()?.total ?? 0);
+    if (count('SELECT count(*) AS total FROM import_drafts') > 0) return { phase: 'screen', blocks: BLOCK_COUNT };
+    const blocks = count('SELECT count(*) AS total FROM import_ingest_blocks');
+    return { phase: blocks >= BLOCK_COUNT ? 'recording' : blocks > 0 ? 'parsing' : 'reading', blocks };
+  } catch {
+    return { phase: 'unreadable', blocks: null };
+  } finally {
+    database?.close();
+  }
+}
+
+async function importAndOpen(renderer, dataRoot) {
   at('renderer-ready');
   await waitForRendererReady(renderer);
   await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined'`, 'renderer-isolation');
@@ -480,7 +502,16 @@ async function importAndOpen(renderer) {
   // (the queue run of 2026-09-19 lost 240 s here on Windows). Each wait now has its own stage (#474).
   at('import-stage');
   await clickButton(renderer, '导入稿件', 'stage-click');
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'stage-target', IMPORT_STAGE_TIMEOUT);
+  try {
+    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'stage-target', IMPORT_STAGE_TIMEOUT);
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== 'J-02/stage-target') throw error;
+    // A hosted run prints only the location (#621), so the stage names where staging stood when its bound passed.
+    const stood = importStagePhase(dataRoot);
+    if (localDebugEnabled()) recordDebugDetail('J-02', `import stage at the bound ${JSON.stringify(stood)}`);
+    at(`import-stage-${stood.phase}`);
+    throw error;
+  }
   await assertRenderer(renderer, `document.querySelector('.source-card')?.textContent.includes('${BLOCK_COUNT} 个可编辑内容块')`, 'exact-block-count');
   await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="新建图书"]'); if (!radio) return false; radio.click(); return true; })()`, 'target-select');
   await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!radio || radio.checked) return false; radio.click(); return true; })()`, 'relationship-select');
@@ -997,6 +1028,8 @@ async function runWorkspaceJourney(renderer, dataRoot) {
     if (!(error instanceof Error) || error.message !== 'J-02/milestone-r2') throw error;
     const ipcCategory = await milestoneIpcTimeoutCategory(renderer, milestoneDrainObservation);
     const objectCategory = await milestoneObjectTimeoutCategory(dataRoot);
+    // Both categories are closed literals; expose no IPC payload, file name or manuscript text.
+    at(`milestone-r2-${ipcCategory}-${objectCategory}`);
     throw new Error(`J-02/milestone-r2-${ipcCategory}-${objectCategory}`);
   }
   at('milestone-save-ipc-order');
@@ -1124,9 +1157,15 @@ async function runAccessibilityJourney(renderer) {
   // without moving anything, so the one Tab below is the only thing that can move the pane. The document's
   // selection is cleared first: a selection the steps before left inside the text is restored on focus
   // without a reveal, and where they leave it varies from run to run, which left this step with nothing
-  // to prove (#493). With none, the focus that enters the text puts the caret at the window's start.
+  // to prove (#493). The editor keeps a selection of its own, too, and writes it back into the page when it
+  // takes focus whatever the page's selection says, so one left mid-text by the steps before could still
+  // meet the focus there (#619). The caret is therefore put at the window's start through the editor itself
+  // first: the text takes focus without scrolling, the page's caret is set at its start, and the editor
+  // reads it as it reads a caret the reader places. ProseMirror treats a DOM caret at the start within 200 ms
+  // of focus as a browser reset and restores its old selection, so wait past that pinned guard first. Blur,
+  // clear and refocus then prove that the editor itself restores the start before the Tab being tested.
   const windowProbe = `(() => { const pane = document.querySelector('.editor-window'); const editor = document.querySelector('[data-testid="manuscript-editor"]'); return { top: Math.round(pane.scrollTop), first: editor?.firstElementChild?.dataset.blockId ?? null, position: Number(document.querySelector('#manuscript-position')?.value), inText: document.activeElement === editor }; })()`;
-  const stopBeforeText = await renderer.evaluate(`(async () => { const pane = document.querySelector('.editor-window'); const editor = document.querySelector('[data-testid="manuscript-editor"]'); const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); document.getSelection().removeAllRanges(); await frames(); pane.scrollTop = Math.floor((pane.scrollHeight - pane.clientHeight) / 2); await frames(); const stops = Array.from(document.querySelectorAll('button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]')).filter((stop) => stop === editor || (!stop.disabled && stop.tabIndex >= 0 && stop.offsetParent !== null)); const index = stops.indexOf(editor); for (let before = index - 1; before >= 0; before -= 1) { stops[before].focus({ preventScroll: true }); if (document.activeElement === stops[before]) return true; } return { index, stops: stops.length }; })()`);
+  const stopBeforeText = await renderer.evaluate(`(async () => { const pane = document.querySelector('.editor-window'); const editor = document.querySelector('[data-testid="manuscript-editor"]'); const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); editor.focus({ preventScroll: true }); await new Promise((resolve) => setTimeout(resolve, 250)); const start = document.createRange(); start.setStart(document.createTreeWalker(editor, NodeFilter.SHOW_TEXT).nextNode() ?? editor, 0); start.collapse(true); document.getSelection().removeAllRanges(); document.getSelection().addRange(start); await frames(); editor.blur(); document.getSelection().removeAllRanges(); editor.focus({ preventScroll: true }); await frames(); const restored = document.getSelection(); const before = document.createRange(); before.setStart(editor, 0); if (!restored?.isCollapsed || !editor.contains(restored.anchorNode)) return { caretAtStart: false }; before.setEnd(restored.anchorNode, restored.anchorOffset); if (before.toString().length !== 0) return { caretAtStart: false }; document.getSelection().removeAllRanges(); await frames(); pane.scrollTop = Math.floor((pane.scrollHeight - pane.clientHeight) / 2); await frames(); const stops = Array.from(document.querySelectorAll('button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]')).filter((stop) => stop === editor || (!stop.disabled && stop.tabIndex >= 0 && stop.offsetParent !== null)); const index = stops.indexOf(editor); for (let before = index - 1; before >= 0; before -= 1) { stops[before].focus({ preventScroll: true }); if (document.activeElement === stops[before]) return true; } return { index, stops: stops.length }; })()`);
   const beforeFocus = await renderer.evaluate(windowProbe);
   if (stopBeforeText !== true || !(beforeFocus?.top > 0) || !(beforeFocus?.position > 0) || beforeFocus.inText !== false) {
     at('j14-keyboard-focus-keeps-window-precondition');
@@ -1169,7 +1208,10 @@ async function runAccessibilityJourney(renderer) {
     // location (#604), so it tells the facts apart: the window without focus, a caret the focus found away from the
     // text's start, or a pane that moved and came back; the plain name is left for none of them.
     if (entered?.hasFocus !== true) at('j14-keyboard-focus-keeps-window-no-reveal-window-unfocused');
-    else if (entered.caret !== 'at-start') at('j14-keyboard-focus-keeps-window-no-reveal-caret-not-at-start');
+    // Where the caret stood, told apart at the hosted marker too (#619): elsewhere in the text, outside it, or absent.
+    else if (entered.caret === 'elsewhere') at('j14-keyboard-focus-keeps-window-no-reveal-caret-elsewhere');
+    else if (entered.caret === 'outside') at('j14-keyboard-focus-keeps-window-no-reveal-caret-outside');
+    else if (entered.caret !== 'at-start') at('j14-keyboard-focus-keeps-window-no-reveal-caret-none');
     else if (Array.isArray(scrolled) && scrolled.some((top) => top !== beforeFocus.top)) at('j14-keyboard-focus-keeps-window-no-reveal-moved-back');
     else at('j14-keyboard-focus-keeps-window-no-reveal');
     requireJourney(false, 'keyboard-focus-reveal', { beforeFocus, afterFocus, entered, scrolled });
@@ -1280,7 +1322,7 @@ async function main() {
       return attachRendererTarget(browser, launchScenario);
     };
     let renderer = await launch('initial');
-    await importAndOpen(renderer);
+    await importAndOpen(renderer, dataRoot);
     await runWorkspaceJourney(renderer, dataRoot);
     at('restart-browser-close');
     await browser.close();
