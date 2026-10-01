@@ -1,10 +1,11 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, writeFileSync } from 'node:fs';
+import * as filesystem from 'node:fs/promises';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { strFromU8, unzipSync } from 'fflate';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
 import { DATABASE_EXPORT_TRIGGER_SQL, copyStore, databasePackageSources, writeDatabasePackage, type DatabasePackageBounds } from '../../src/service/database-exports.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
@@ -89,6 +90,52 @@ function staging(): string[] {
 }
 
 describe('导出数据库 over the real store', () => {
+  it('refuses a snapshot whose unshared draft object is abandoned before payload capture', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let releaseWalk!: () => void;
+    const held = new Promise<void>((resolve) => { releaseWalk = resolve; });
+    const originalOpenDirectory = filesystem.opendir;
+    let walking = false;
+    const walk = vi.spyOn(filesystem, 'opendir').mockImplementation(async (...args) => {
+      if (args[0] === roots.dataRoot) {
+        walking = true;
+        await held;
+      }
+      return originalOpenDirectory(...args);
+    });
+    try {
+      const path = join(roots.inputRoot, 'abandoned-draft.docx');
+      await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '导出期间放弃', paragraphs: [{ runs: [{ text: { block: 21 } }] }] });
+      const draft = await store.stageSelectedManuscript(randomUUID(), path);
+      const destination = join(roots.inputRoot, 'incomplete.ai7db');
+      const preparing = store.prepareDatabaseExport(destination, true).catch((error: unknown) => error);
+      await until(() => walking, 'the completed snapshot before its payload walk');
+      const snapshot = staged().find((name) => name.endsWith('.store'));
+      expect(snapshot).toBeDefined();
+      const copy = new DatabaseSync(join(roots.dataRoot, 'export-staging', snapshot!), { readOnly: true });
+      try {
+        expect(copy.prepare('SELECT 1 FROM import_drafts WHERE draft_id = ?').get(draft.draftId)).toBeDefined();
+        expect(copy.prepare('SELECT count(*) AS count FROM content_objects').get()).toMatchObject({ count: 1 });
+      } finally { copy.close(); }
+      await store.abandonImportDraft(draft.draftId, draft.draftVersion);
+      releaseWalk();
+      expect(code(await preparing)).toBe('DATABASE_PACKAGE_INCOMPLETE');
+      expect(staged()).toEqual([]);
+      expect(existsSync(destination)).toBe(false);
+      expect(store.inspectDatabaseExports().exports).toEqual([]);
+      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        for (const table of ['database_export_preparations', 'database_export_approvals', 'database_export_receipts']) {
+          expect(database.prepare(`SELECT count(*) AS count FROM ${table}`).get()).toMatchObject({ count: 0 });
+        }
+      } finally { database.close(); }
+    } finally {
+      releaseWalk();
+      walk.mockRestore();
+      store.close();
+    }
+  });
+
   it('stages one package on preparation, writes it on the one approval, and says what it came to', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
