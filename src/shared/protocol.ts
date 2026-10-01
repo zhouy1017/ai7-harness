@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 79 as const;
+export const SERVICE_PROTOCOL_VERSION = 80 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -5244,6 +5244,11 @@ export interface FeedbackHistoryInput {
   readonly origin?: LearningMaterialKind | null;
   readonly author?: string | null;
   readonly editor?: string | null;
+  /** Inclusive lower and exclusive upper UTC instants; calendar days are resolved in the editor's local time. */
+  readonly recordedFrom?: string | null;
+  readonly recordedBefore?: string | null;
+  /** Omitted means every dimension; null selects only feedback without an Editorial Dimension. */
+  readonly dimension?: string | null;
   readonly after?: { readonly recordedAt: string; readonly entryId: string } | null;
 }
 

@@ -6,6 +6,8 @@ import {
   FEEDBACK_HISTORY_STATUS,
   QUALITY_LEARNING_TABS,
   feedbackAttributionLine,
+  feedbackDateBounds,
+  feedbackDateValue,
   feedbackEntryLine,
   feedbackReasonLine,
   LEARNING_CHOICES,
@@ -68,6 +70,19 @@ describe('学习准入 words', () => {
 });
 
 describe('反馈历史 words (Issue #61, S26c)', () => {
+  it('uses inclusive local calendar days for time filtering and the same days for grouping', () => {
+    const start = new Date(2026, 2, 8);
+    const next = new Date(2026, 2, 9);
+    expect(feedbackDateBounds('2026-03-08', '2026-03-08')).toEqual({ recordedFrom: start.toISOString(), recordedBefore: next.toISOString() });
+    expect(feedbackDateValue(new Date(2026, 2, 8, 23, 59, 59).toISOString())).toBe('2026-03-08');
+    expect(feedbackDateBounds('', '')).toEqual({ recordedFrom: null, recordedBefore: null });
+    expect(feedbackDateBounds('2026-03-08', '')).toEqual({ recordedFrom: start.toISOString(), recordedBefore: null });
+    expect(feedbackDateBounds('', '2026-03-08')).toEqual({ recordedFrom: null, recordedBefore: next.toISOString() });
+    expect(feedbackDateBounds('2026-03-09', '2026-03-08')).toBeNull();
+    expect(feedbackDateBounds('2026-02-30', '')).toBeNull();
+    expect(feedbackDateBounds('', 'not-a-date')).toBeNull();
+  });
+
   it('opens at the history, says what it is not, and reads each entry by origin, dimension, verdict and reason', () => {
     // The view is named as the spec names it: 反馈历史 (Issue #61, S26c review).
     expect(QUALITY_LEARNING_TABS.map((entry) => [entry.tab, entry.label])).toEqual([['feedback', '反馈历史'], ['learning', '学习准入']]);

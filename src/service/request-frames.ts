@@ -717,11 +717,17 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // Filter before the bounded history page, with one exclusive cursor.
     case 'inspectFeedbackHistory': {
-      const input = requireInputWithOptional(value.input, [], ['bookId', 'origin', 'author', 'editor', 'after'], tentativeId);
+      const input = requireInputWithOptional(value.input, [], ['bookId', 'origin', 'author', 'editor', 'recordedFrom', 'recordedBefore', 'dimension', 'after'], tentativeId);
+      const instant = (candidate: unknown): boolean => typeof candidate === 'string' && LEARNING_CURSOR_INSTANT.test(candidate) &&
+        Number.isFinite(Date.parse(candidate)) && new Date(candidate).toISOString() === candidate;
       if (!optionalOrNull(input, 'bookId', validUuid) ||
           !optionalOrNull(input, 'origin', (origin) => origin === 'proposal-decision' || origin === 'analysis-feedback' || origin === 'review-disposition') ||
           !optionalOrNull(input, 'author', (name) => isBoundedString(name, 200)) ||
           !optionalOrNull(input, 'editor', (name) => isBoundedString(name, 200)) ||
+          !optionalOrNull(input, 'recordedFrom', instant) ||
+          !optionalOrNull(input, 'recordedBefore', instant) ||
+          !optionalOrNull(input, 'dimension', (label) => isBoundedString(label, 200)) ||
+          (typeof input.recordedFrom === 'string' && typeof input.recordedBefore === 'string' && input.recordedFrom >= input.recordedBefore) ||
           !optionalOrNull(input, 'after', (after) => isRecord(after) && hasExactKeys(after, ['recordedAt', 'entryId']) &&
             isBoundedString(after.recordedAt, 40) && LEARNING_CURSOR_INSTANT.test(after.recordedAt) && validLearningMaterialKey(after.entryId))) {
         throw new ProtocolError(tentativeId);

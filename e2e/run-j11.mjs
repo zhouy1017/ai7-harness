@@ -406,6 +406,26 @@ async function pressEscape(renderer) {
 async function choose(renderer, selector, value, name) {
   await assertRenderer(renderer, `(() => { const select = document.querySelector(${JSON.stringify(selector)}); if (!(select instanceof HTMLSelectElement)) return false; select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change', { bubbles: true })); return select.value === ${JSON.stringify(value)}; })()`, name);
 }
+/** Commit a date or exact-dimension filter as leaving the field does; input alone does not submit these filters. */
+async function changeHistoryInput(renderer, filter, value, name) {
+  await assertRenderer(renderer, `(() => {
+    const input = document.querySelector(${JSON.stringify(`#feedback-filter-${filter}`)});
+    if (!(input instanceof HTMLInputElement) || input.disabled) return false;
+    input.focus();
+    input.value = ${JSON.stringify(value)};
+    if (input.value !== ${JSON.stringify(value)}) return false;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  })()`, name);
+}
+async function toggleHistoryUnclassified(renderer, name) {
+  await assertRenderer(renderer, `(() => {
+    const input = document.querySelector('#feedback-filter-unclassified');
+    if (!(input instanceof HTMLInputElement) || input.type !== 'checkbox' || input.disabled) return false;
+    input.focus(); input.click(); return true;
+  })()`, name);
+}
 const status = `(document.querySelector('#persistence-status')?.textContent ?? '')`;
 const peopleSection = '[data-screen="book-overview"] .book-people-slot > section.book-people';
 
@@ -838,10 +858,19 @@ const READ_HISTORY = `(() => {
     note: root.querySelector('.feedback-history-note')?.textContent ?? null,
     none: root.querySelector('.feedback-history-none')?.textContent ?? null,
     books: Array.from(root.querySelectorAll('.feedback-book'), (book) => [book.querySelector('h3')?.textContent ?? null, book.querySelector('.feedback-people')?.textContent ?? null]),
+    grouping: root.dataset.feedbackGrouping ?? null,
+    groups: Array.from(root.querySelectorAll('.feedback-group'), (group) => [group.querySelector('h3')?.textContent ?? null, group.querySelectorAll('li.feedback-entry').length]),
+    entryBooks: Array.from(root.querySelectorAll('li.feedback-entry'), (item) => item.querySelector('.feedback-entry-book')?.textContent ?? null),
     entries: Array.from(root.querySelectorAll('li.feedback-entry'), (item) => [item.dataset.feedbackOrigin ?? null, item.querySelector('.feedback-entry-line')?.textContent ?? null, item.querySelector('.feedback-entry-reason')?.textContent ?? null]),
     people: Array.from(root.querySelectorAll('li.feedback-entry'), (item) => item.querySelector('.feedback-entry-people')?.textContent ?? null),
     loading: root.querySelector('select[data-feedback-filter]')?.disabled ?? false,
     filters: Object.fromEntries(Array.from(root.querySelectorAll('select[data-feedback-filter]'), (select) => [select.dataset.feedbackFilter, [select.value, Array.from(select.options, (option) => option.textContent)]])),
+    inputs: Object.fromEntries(['dimension', 'from', 'to'].map((name) => [name, root.querySelector('#feedback-filter-' + name)?.value ?? null])),
+    unclassified: root.querySelector('#feedback-filter-unclassified')?.checked ?? false,
+    dimensionDisabled: root.querySelector('#feedback-filter-dimension')?.disabled ?? false,
+    dimensions: Array.from(root.querySelectorAll('#feedback-dimensions option'), (option) => option.value),
+    next: root.querySelector('[data-feedback-action="next"]')?.disabled === false,
+    reset: root.querySelector('[data-feedback-action="reset"]')?.disabled === false,
     focus: active instanceof HTMLElement && root.contains(active) ? (active.id || active.dataset.feedbackAction || active.tagName) : null,
   };
 })()`;
@@ -1806,6 +1835,63 @@ async function main() {
     await choose(renderer, '#feedback-filter-origin', '', 'feedback-filter-origin-all');
     await readHistory(renderer, (page) => page.entries.length === 4, 'feedback-filter-origin-cleared');
 
+    at('feedback-history-grouping');
+    await choose(renderer, '#feedback-group-by', 'origin', 'history-group-origin');
+    const byOrigin = await readHistory(renderer, (page) => page.grouping === 'origin', 'history-group-origin-ready');
+    requireJourney(JSON.stringify(byOrigin.groups) === JSON.stringify([['修改建议 · 2 条', 2], ['分析反馈 · 2 条', 2]]) &&
+      byOrigin.entryBooks.every((line) => line === `《${THIRD.title}》 · 作者与责编：尚未填写`) && byOrigin.focus === 'feedback-group-by',
+      'history-group-origin-words');
+    await choose(renderer, '#feedback-group-by', 'dimension', 'history-group-dimension');
+    const byDimension = await readHistory(renderer, (page) => page.grouping === 'dimension', 'history-group-dimension-ready');
+    requireJourney(JSON.stringify(byDimension.groups) === JSON.stringify([['未分类 · 2 条', 2], ['人物与名称 · 1 条', 1], ['全书梗概 · 1 条', 1]]) &&
+      byDimension.entries.length === 4 && byDimension.focus === 'feedback-group-by', 'history-group-dimension-words');
+    await choose(renderer, '#feedback-group-by', 'time', 'history-group-time');
+    const byTime = await readHistory(renderer, (page) => page.grouping === 'time', 'history-group-time-ready');
+    requireJourney(byTime.groups.every(([heading]) => /^\d{4}-\d{2}-\d{2} · \d+ 条$/u.test(heading)) &&
+      byTime.groups.reduce((total, [, count]) => total + count, 0) === 4 && byTime.focus === 'feedback-group-by', 'history-group-time-words');
+    await choose(renderer, '#feedback-group-by', 'book', 'history-group-book');
+    await readHistory(renderer, (page) => page.grouping === 'book' && JSON.stringify(page.books) === JSON.stringify(history.books), 'history-group-book-ready');
+
+    at('feedback-history-time-dimension');
+    // Only calendar bounds leave this expression; no feedback text or manuscript payload is returned.
+    const historyDays = await renderer.evaluate(`(async () => {
+      const projection = await window.ai7.inspectFeedbackHistory();
+      const day = (date) => String(date.getFullYear()).padStart(4, '0') + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
+      const dates = projection.entries.map((entry) => new Date(entry.recordedAt)).sort((a, b) => a - b);
+      const first = dates[0], last = dates.at(-1);
+      const before = new Date(first), after = new Date(last);
+      before.setDate(before.getDate() - 1); after.setDate(after.getDate() + 1);
+      return { first: day(first), last: day(last), before: day(before), after: day(after) };
+    })()`);
+    await changeHistoryInput(renderer, 'from', historyDays.first, 'history-date-from');
+    await readHistory(renderer, (page) => page.inputs.from === historyDays.first && page.entries.length === 4, 'history-date-from-ready');
+    await changeHistoryInput(renderer, 'to', historyDays.last, 'history-date-to');
+    await readHistory(renderer, (page) => page.inputs.to === historyDays.last && page.entries.length === 4 && page.focus === 'feedback-filter-to', 'history-date-inclusive');
+    await changeHistoryInput(renderer, 'from', historyDays.after, 'history-date-invalid');
+    await waitFor(renderer, `${status} === '请填写有效日期，截止日期不能早于起始日期。'`, 'history-date-invalid-said');
+    await readHistory(renderer, (page) => page.inputs.from === historyDays.first && page.inputs.to === historyDays.last &&
+      page.entries.length === 4 && page.focus === 'feedback-filter-from', 'history-date-invalid-preserved');
+    await changeHistoryInput(renderer, 'from', '', 'history-date-clear-from');
+    await readHistory(renderer, (page) => page.inputs.from === '' && page.entries.length === 4, 'history-date-clear-from-ready');
+    await changeHistoryInput(renderer, 'to', historyDays.before, 'history-date-before');
+    await readHistory(renderer, (page) => page.entries.length === 0 && page.none === '没有符合的反馈记录。' && page.focus === 'feedback-filter-to', 'history-date-before-empty');
+    await changeHistoryInput(renderer, 'to', '', 'history-date-clear-to');
+    await readHistory(renderer, (page) => page.inputs.to === '' && page.entries.length === 4, 'history-date-clear-to-ready');
+    await changeHistoryInput(renderer, 'from', historyDays.after, 'history-date-after');
+    await readHistory(renderer, (page) => page.entries.length === 0 && page.focus === 'feedback-filter-from', 'history-date-after-empty');
+    await changeHistoryInput(renderer, 'from', '', 'history-date-reset');
+    await readHistory(renderer, (page) => page.entries.length === 4 && page.inputs.from === '', 'history-date-reset-ready');
+    await changeHistoryInput(renderer, 'dimension', '人物与名称', 'history-dimension-entity');
+    await readHistory(renderer, (page) => page.entries.length === 1 && page.entries[0][1] === '分析反馈 · 人物与名称 · 准确' &&
+      page.inputs.dimension === '人物与名称' && page.focus === 'feedback-filter-dimension', 'history-dimension-entity-ready');
+    await changeHistoryInput(renderer, 'dimension', '', 'history-dimension-clear');
+    await readHistory(renderer, (page) => page.entries.length === 4 && page.inputs.dimension === '', 'history-dimension-clear-ready');
+    await toggleHistoryUnclassified(renderer, 'history-unclassified');
+    await readHistory(renderer, (page) => page.unclassified && page.dimensionDisabled && page.entries.length === 2 &&
+      page.entries.every((entry) => entry[0] === 'proposal-decision') && page.focus === 'feedback-filter-unclassified', 'history-unclassified-ready');
+    await toggleHistoryUnclassified(renderer, 'history-unclassified-clear');
+    await readHistory(renderer, (page) => !page.unclassified && !page.dimensionDisabled && page.entries.length === 4, 'history-unclassified-clear-ready');
+
     at('feedback-history-attribution');
     // The Book's 作者 and 责编, set on its 工作概览, attribute its feedback (FDBK-013): 作者 冯五 keeps all four, 责编 郑三 with it
     // too, and with 来源 审阅 — the Book gave none — nothing is left, and the page says so.
@@ -1931,6 +2017,23 @@ async function main() {
     await readHistory(renderer, (page) => page.entries.length === 2 && page.entries.every((entry) => entry[0] === 'analysis-feedback'), 'history-pages-analysis-found');
     await choose(renderer, '#feedback-filter-origin', '', 'history-pages-all');
     await readHistory(renderer, (page) => page.entries.length === 300, 'history-pages-all-ready');
+    at('feedback-history-filtered-pages');
+    // The first page has no classified feedback; typing its exact dimension must still reach the older analysis.
+    await assertRenderer(renderer, `!Array.from(document.querySelectorAll('#feedback-dimensions option')).some((option) => option.value === '人物与名称')`, 'history-offpage-dimension-absent');
+    await changeHistoryInput(renderer, 'dimension', '人物与名称', 'history-offpage-dimension');
+    await readHistory(renderer, (page) => page.entries.length === 1 && page.entries[0][1] === '分析反馈 · 人物与名称 · 准确' &&
+      !page.next && !page.reset && page.focus === 'feedback-filter-dimension', 'history-offpage-dimension-found');
+    await changeHistoryInput(renderer, 'dimension', '', 'history-offpage-dimension-clear');
+    await readHistory(renderer, (page) => page.entries.length === 300 && page.inputs.dimension === '' && page.next, 'history-offpage-dimension-cleared');
+    await toggleHistoryUnclassified(renderer, 'history-unclassified-pages');
+    await readHistory(renderer, (page) => page.entries.length === 300 && page.unclassified && page.next, 'history-unclassified-pages-ready');
+    await clickSelector(renderer, '[data-feedback-action="next"]', 'history-unclassified-next');
+    await readHistory(renderer, (page) => page.entries.length === 7 && page.entries.every((entry) => entry[0] === 'proposal-decision') &&
+      page.unclassified && page.reset && !page.next && page.focus === 'reset', 'history-unclassified-older');
+    await toggleHistoryUnclassified(renderer, 'history-filter-resets-page');
+    await readHistory(renderer, (page) => page.entries.length === 300 && !page.unclassified && page.next && !page.reset &&
+      page.focus === 'feedback-filter-unclassified', 'history-filter-reset-ready');
+    at('feedback-history-pages');
     for (let repeat = 0; repeat < 2; repeat += 1) {
       await clickSelector(renderer, '[data-feedback-action="next"]', 'history-pages-next');
       await readHistory(renderer, (page) => page.entries.length === 9 && page.focus === 'reset', 'history-pages-older');

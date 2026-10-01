@@ -5854,6 +5854,9 @@ export class EditorialStore {
       const consider = (entry: Entry): void => {
         if (exactEntryId !== null && entry.entryId !== exactEntryId) return;
         if ((input.bookId != null && entry.bookId !== input.bookId) || (input.origin != null && entry.origin !== input.origin) ||
+            (input.recordedFrom != null && entry.recordedAt < input.recordedFrom) ||
+            (input.recordedBefore != null && entry.recordedAt >= input.recordedBefore) ||
+            (Object.hasOwn(input, 'dimension') && entry.dimension !== input.dimension) ||
             (input.after != null && newest(entry, input.after) <= 0)) return;
         if (input.author != null || input.editor != null) {
           const people = this.#bookPeople.at(entry.bookId, entry.recordedAt);

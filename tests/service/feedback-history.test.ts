@@ -232,6 +232,21 @@ describe('反馈历史 over the real store (Issue #61, S26c review)', () => {
       const priorEditor = store.inspectFeedbackHistory({ editor: '编辑65' });
       expect(priorEditor.entries.map((entry) => [entry.reason, entry.peopleVersion])).toEqual([['修订原因65', 66]]);
       expect(priorEditor.truncated).toBe(false);
+      // Time and dimension filters run before the response bound, together with the historic people and exclusive cursor.
+      const oldInstant = priorEditor.entries[0]!.recordedAt;
+      const oldBounds = { recordedFrom: oldInstant, recordedBefore: new Date(Date.parse(oldInstant) + 1).toISOString() };
+      const oldFiltered = store.inspectFeedbackHistory({ ...oldBounds, dimension: null, editor: '编辑65' });
+      expect(oldFiltered.entries.map((entry) => entry.entryId)).toEqual([priorEditor.entries[0]!.entryId]);
+      expect(oldFiltered.truncated).toBe(false);
+      expect(store.inspectFeedbackHistory({ ...oldBounds, dimension: '人物与名称' }).entries).toEqual([]);
+      expect(store.inspectFeedbackHistory({ ...oldBounds, dimension: null, editor: '编辑65',
+        after: { recordedAt: oldInstant, entryId: priorEditor.entries[0]!.entryId } }).entries).toEqual([]);
+      const bounded = store.inspectFeedbackHistory({ recordedFrom: decisions.at(-1)!.recordedAt, dimension: null });
+      const boundary = bounded.entries.at(-1)!;
+      const boundedOlder = store.inspectFeedbackHistory({ recordedFrom: decisions.at(-1)!.recordedAt, dimension: null,
+        after: { recordedAt: boundary.recordedAt, entryId: boundary.entryId } });
+      expect([...bounded.entries, ...boundedOlder.entries].map((entry) => entry.entryId)).toEqual(decisions.map((entry) => entry.entryId));
+      expect(store.inspectFeedbackHistory({ recordedBefore: oldInstant }).entries).toEqual([]);
       expect(store.inspectFeedbackHistory({ origin: 'analysis-feedback' }).entries).toEqual([]);
       expect(store.inspectFeedbackHistory()).toEqual(expected);
       expect(expected.entries.every((entry) => entry.peopleVersion === 67)).toBe(true);
