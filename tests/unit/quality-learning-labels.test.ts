@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import {
   FEEDBACK_HISTORY_DETACHED,
@@ -34,6 +35,13 @@ import {
 // nothing else. Every text is the suite's own.
 
 const instant = (iso: string): string => `〔${iso.slice(0, 10)}〕`;
+
+it('ends an inclusive calendar day at the next midnight after a midnight DST gap', () => {
+  const module = new URL('../../src/renderer/quality-learning-labels.ts', import.meta.url).href;
+  const script = `const { feedbackDateBounds } = await import(${JSON.stringify(module)}); process.stdout.write(JSON.stringify(feedbackDateBounds('', '2026-03-08')));`;
+  const result = execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { TZ: 'America/Havana' }, encoding: 'utf8' });
+  expect(JSON.parse(result)).toEqual({ recordedFrom: null, recordedBefore: '2026-03-09T04:00:00.000Z' });
+});
 
 describe('学习准入 words', () => {
   it('offers the choices in their fixed order, Book first, with what each would mean', () => {
