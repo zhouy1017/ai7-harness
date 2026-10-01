@@ -501,6 +501,41 @@ async function readEvaluation(renderer, predicate, name) {
   error.detail = page;
   throw error;
 }
+/** Check pending input in the click's own turn, before the awaited save can repaint or refuse. */
+async function submitEvaluationWithPendingInput(renderer, action, name) {
+  at('evaluation-pending-submit');
+  await assertRenderer(renderer, `(() => {
+    const record = document.querySelector('.evaluation-record');
+    const button = record?.querySelector('[data-evaluation-action="${action}"]');
+    if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+    const before = Array.from(record.querySelectorAll('input, select, textarea'), (control) => [control.value, control.checked ?? null, control.disabled]);
+    window.__j11EvaluationSubmit = { before };
+    button.click();
+    // This synchronous turn cannot run the save's await continuation, including an immediate refusal.
+    const controls = Array.from(record.querySelectorAll('input, select, textarea, button'));
+    const score = record.querySelector('[data-evaluation-field="score"]');
+    score.focus();
+    record.querySelector('input[type="radio"]')?.click();
+    document.execCommand('insertText', false, '9');
+    const values = Array.from(record.querySelectorAll('input, select, textarea'), (control) => [control.value, control.checked ?? null]);
+    return controls.length > 0 && controls.every((control) => control.disabled) && document.activeElement !== score &&
+      JSON.stringify(values) === JSON.stringify(before.map((entry) => entry.slice(0, 2)));
+  })()`, `${name}-pending-input-blocked`);
+}
+
+/** A response keeps the submitted values; a save or refusal also restores each field's prior availability. */
+async function assertSubmittedEvaluation(renderer, restoreDisabled, name) {
+  at('evaluation-submitted-values');
+  await assertRenderer(renderer, `(() => {
+    const submitted = window.__j11EvaluationSubmit;
+    const after = Array.from(document.querySelectorAll('.evaluation-record input, .evaluation-record select, .evaluation-record textarea'), (control) => [control.value, control.checked ?? null, control.disabled]);
+    const same = JSON.stringify(after.map((entry) => entry.slice(0, 2))) === JSON.stringify(submitted.before.map((entry) => entry.slice(0, 2)));
+    const restored = ${JSON.stringify(restoreDisabled)} === false || JSON.stringify(after.map((entry) => entry[2])) === JSON.stringify(submitted.before.map((entry) => entry[2]));
+    delete window.__j11EvaluationSubmit;
+    return same && restored;
+  })()`, name);
+}
+
 /** Click a checkbox or a radio of the form, as a pointer would. */
 async function tick(renderer, selector, name) {
   await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement) || input.disabled) return false; input.click(); return true; })()`, name);
@@ -1101,6 +1136,38 @@ async function main() {
     await clickSelector(renderer, '[data-book-filter-action="clear"]', 'search-clear');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work')?.dataset.bookFilter === 'none' && document.querySelectorAll('[data-screen="landing"] section.recent-work article.book-summary-item').length === 2 && ${status} === '已显示全部图书'`, 'search-cleared');
 
+    // Hold the real request's completion callback until later navigation has acquired user input.
+    // The Promise hook exists only during the synchronous click and is restored before any other work.
+    for (const action of ['find', 'clear']) {
+      if (action === 'clear') await search(renderer, 'author', '吴二', 'late-clear-setup');
+      else await fill(renderer, '#book-filter-text', '吴二', 'late-find-words');
+      await assertRenderer(renderer, `(() => {
+        const original = Promise.prototype.then;
+        const held = { release: null };
+        window.__j11HeldSearch = held;
+        try {
+          Promise.prototype.then = function (success, failure) {
+            Promise.prototype.then = original;
+            return original.call(this,
+              (value) => { held.release = () => success(value); },
+              (error) => { held.release = () => failure(error); });
+          };
+          document.querySelector('[data-book-filter-action="${action}"]').click();
+        } finally { Promise.prototype.then = original; }
+        return true;
+      })()`, `late-${action}-hold`);
+      await waitFor(renderer, `typeof window.__j11HeldSearch?.release === 'function'`, `late-${action}-response-held`);
+      await click(renderer, '新建图书', `late-${action}-navigate`);
+      await fill(renderer, '#empty-book-title', '保留输入', `late-${action}-draft`);
+      await assertRenderer(renderer, `(() => {
+        window.__j11HeldSearch.release();
+        delete window.__j11HeldSearch;
+        return document.querySelector('[data-screen="book-create"] #empty-book-title')?.value === '保留输入';
+      })()`, `late-${action}-keeps-destination`);
+      await click(renderer, '取消', `late-${action}-cancel`);
+      await waitFor(renderer, `document.querySelector('[data-screen="landing"] form.book-filter')`, `late-${action}-landing`);
+    }
+
     at('restart-keeps-people');
     // A restart moves nothing: the cards and the 工作概览 read the people exactly as saved.
     const booksBefore = await renderer.evaluate(`window.ai7.listBooks({ after: null }).then((page) => JSON.stringify(page))`);
@@ -1164,16 +1231,23 @@ async function main() {
     requireJourney(reviewed.record.conclusions[0][2] === false, 'evaluation-recommend-open', reviewed.record.conclusions);
     await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', 'evaluation-conclusion');
     await fill(renderer, '[data-screen="book-evaluation"] .evaluation-lists [data-evaluation-field="readiness"]', '第三章结尾需要重写', 'evaluation-readiness');
-    await clickSelector(renderer, '[data-evaluation-action="save"]', 'evaluation-save');
+    await submitEvaluationWithPendingInput(renderer, 'save', 'evaluation-save');
     await waitFor(renderer, `${status} === '评估已保存。'`, 'evaluation-saved-status');
+    await assertSubmittedEvaluation(renderer, true, 'evaluation-save-keeps-submitted-draft');
     const savedPage = await readEvaluation(renderer, (page) => page.record?.entries === '2', 'evaluation-saved');
     requireJourney(JSON.stringify(savedPage.versions) === JSON.stringify(['第 1 版 · 编辑评分中 · 修订版 r1 · 总分 66.5 / 80 · 优秀（1 项不评） · 修改后再议']) &&
       savedPage.record.conclusions[1][1] === true && savedPage.focus === 'save', 'evaluation-saved-words', savedPage);
 
     at('evaluation-finalize');
+    await submitEvaluationWithPendingInput(renderer, 'finalize', 'evaluation-missing-low-statement');
+    await waitFor(renderer, `${status} === '定稿前，要写明「事实与来源」的风险说明。'`, 'evaluation-low-statement-refused');
+    await assertSubmittedEvaluation(renderer, true, 'evaluation-refusal-restores-draft-controls');
+    await readEvaluation(renderer, (page) => page.record?.state === 'editing' && page.record.entries === '2', 'evaluation-refusal-keeps-draft');
+    await fill(renderer, `${risk('facts-and-sources')} [data-evaluation-field="statement"]`, '已核对事实和来源，未发现未解决问题。', 'evaluation-low-risk-statement');
     // 定稿: the version reads as it was, with the actor and the time, and 重新评估 begins the next.
-    await clickSelector(renderer, '[data-evaluation-action="finalize"]', 'evaluation-finalize');
+    await submitEvaluationWithPendingInput(renderer, 'finalize', 'evaluation-finalize');
     await waitFor(renderer, `${status} === '第 1 版评估已定稿。'`, 'evaluation-finalized-status');
+    await assertSubmittedEvaluation(renderer, false, 'evaluation-finalize-keeps-submitted-draft');
     const finalizedPage = await readEvaluation(renderer, (page) => page.record?.state === 'finalized', 'evaluation-finalized');
     requireJourney(finalizedPage.record.heading === '第 1 版 · 定稿' && (finalizedPage.record.finalized ?? '').startsWith('定稿 · 本机编辑 · ') &&
       finalizedPage.record.allDisabled === true && finalizedPage.record.actions.length === 0 && finalizedPage.start === '重新评估' &&
@@ -1434,6 +1508,46 @@ async function main() {
     const feedbackAfter = await readFeedback(renderer, (page) => page.metric?.judged === '2' && page.items.every(([, judgment]) => judgment !== null), 'feedback-restart-after');
     requireJourney(JSON.stringify(feedbackAfter.items) === JSON.stringify(feedbackBefore.items) && JSON.stringify(feedbackAfter.metric) === JSON.stringify(feedbackBefore.metric),
       'feedback-restart-unmoved', { before: feedbackBefore.items, after: feedbackAfter.items });
+    await click(renderer, '工作概览', 'evaluation-pages-overview');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'evaluation-pages-overview-ready');
+    at('evaluation-reevaluate');
+    await click(renderer, '返回图书列表', 'evaluation-pages-return');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'evaluation-pages-library');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id="${thirdId}"]`, 'evaluation-pages-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell [data-work-destination="evaluation"]')`, 'evaluation-pages-manuscript');
+    await clickSelector(renderer, '.editor-shell [data-work-destination="evaluation"]', 'evaluation-pages-open');
+    await readEvaluation(renderer, (page) => page.record?.heading === '第 2 版 · 编辑评分中', 'evaluation-pages-second');
+    for (let ordinal = 2; ordinal <= 12; ordinal += 1) {
+      await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', 'evaluation-pages-conclusion');
+      await clickSelector(renderer, '[data-evaluation-action="finalize"]', 'evaluation-pages-finalize');
+      await readEvaluation(renderer, (page) => page.record?.heading === `第 ${ordinal} 版 · 定稿`, 'evaluation-pages-finalized');
+      await clickSelector(renderer, '[data-evaluation-action="start"]', 'evaluation-pages-next');
+      await readEvaluation(renderer, (page) => page.record?.heading === `第 ${ordinal + 1} 版 · 编辑评分中`, 'evaluation-pages-started');
+    }
+    await tick(renderer, `${risk('law-rights-ethics-policy')} input[value="low"]`, 'evaluation-pages-low-risk');
+    await assertRenderer(renderer, `(() => {
+      const original=Promise.prototype.then;
+      const held={release:null}; window.__j11HeldEvaluationPage=held;
+      try {
+        Promise.prototype.then=function(success,failure) {
+          Promise.prototype.then=original;
+          return original.call(this,
+            (value)=>new Promise((resolve)=>{held.release=()=>resolve(success(value));}),
+            (error)=>new Promise((_resolve,reject)=>{held.release=()=>reject(error);}));
+        };
+        document.querySelector('[data-evaluation-action="versions-older"]').click();
+      } finally { Promise.prototype.then=original; }
+      return true;
+    })()`, 'evaluation-pages-hold-completion');
+    await waitFor(renderer, `typeof window.__j11HeldEvaluationPage?.release==='function'`, 'evaluation-pages-completion-held');
+    await fill(renderer, `${item('literary-quality')} [data-evaluation-field="score"]`, '17.5', 'evaluation-pages-unsaved');
+    await assertRenderer(renderer, `(() => { window.__j11HeldEvaluationPage.release(); delete window.__j11HeldEvaluationPage; return true; })()`, 'evaluation-pages-release');
+    await waitFor(renderer, `document.querySelectorAll('.evaluation-version-list li').length===3 && document.querySelector('.evaluation-version-list button')?.textContent.startsWith('第 3 版') && document.activeElement===document.querySelector('.evaluation-versions h3')`, 'evaluation-pages-oldest');
+    await assertRenderer(renderer, `document.querySelector(${JSON.stringify(`${item('literary-quality')} [data-evaluation-field="score"]`)})?.value==='17.5' && document.querySelector('.evaluation-record')?.dataset.entries==='1' && document.querySelector('.evaluation-conclusion [data-conclusion="recommend"] input')?.disabled===false`, 'evaluation-pages-kept-input');
+    await clickSelector(renderer, '[data-evaluation-action="versions-latest"]', 'evaluation-pages-latest');
+    await waitFor(renderer, `document.querySelectorAll('.evaluation-version-list li').length===10 && document.querySelector('.evaluation-version-list button')?.textContent.startsWith('第 13 版') && document.activeElement===document.querySelector('.evaluation-versions h3')`, 'evaluation-pages-latest-focus');
+    await clickSelector(renderer, '[data-evaluation-action="save"]', 'evaluation-pages-save-input');
+    await readEvaluation(renderer, (page) => page.record?.entries === '2' && page.record.items[0][2] === '17.5', 'evaluation-pages-saved-input');
 
     // ---- 就地反馈轻问 after a Proposal Decision (Issue #61, plan slice S26a; FDBK-001 to FDBK-007, PDEC-009, MARK-005) -------
     at('decision-feedback-suggestions');
@@ -1548,6 +1662,65 @@ async function main() {
     const keptApplied = await readDecision(renderer, (card) => card.applied && card.state === 'none', 'decision-restart-applied-read');
     requireJourney(keptApplied.prompt === null && keptApplied.later === '补充原因…', 'decision-restart-applied-not-asked', keptApplied);
     await pressEscape(renderer);
+
+    at('feedback-pending-submit');
+    // Hold an actual follower timer, then the actual feedback response, so a changed analysis answer crosses a pending save.
+    await clickSelector(renderer, '.editor-shell [data-records-destination="analysis"]', 'feedback-pending-analysis');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'feedback-pending-analysis-ready');
+    await clickSelector(renderer, '[data-analysis-tab="history"]', 'feedback-pending-history');
+    await click(renderer, '重新分析全书', 'feedback-pending-mode');
+    await clickSelector(renderer, '[data-analysis-action="reanalyze-book"]', 'feedback-pending-prepare');
+    await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'feedback-pending-plan-ready');
+    await assertRenderer(renderer, `(() => {
+      const original=window.setTimeout;
+      const held={original,timers:[],release:null}; window.__j11HeldFeedbackFollow=held;
+      window.setTimeout=function(callback,delay,...args) {
+        if(delay===250 && typeof callback==='function') {
+          const timer=original(()=>{},60000);
+          held.timers.push(()=>{clearTimeout(timer);callback(...args);});
+          held.release=()=>{window.setTimeout=original;for(const fire of held.timers.splice(0))fire();};
+          return timer;
+        }
+        return original(callback,delay,...args);
+      };
+      document.querySelector('#task-drawer [data-task-drawer-control="start"]').click();
+      return true;
+    })()`, 'feedback-pending-hold-follow');
+    await waitFor(renderer, `typeof window.__j11HeldFeedbackFollow?.release==='function'`, 'feedback-pending-follow-held');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'feedback-pending-close-plan');
+    await clickSelector(renderer, '#analysis-tab-synopsis', 'feedback-pending-synopsis');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${feedbackItem('synopsis')} [data-analysis-action="open-feedback"]`)})?.disabled===false`, 'feedback-pending-card-ready');
+    await clickSelector(renderer, `${feedbackItem('synopsis')} [data-analysis-action="open-feedback"]`, 'feedback-pending-card');
+    await tick(renderer, `${feedbackItem('synopsis')} .analysis-feedback-judgments input[value="accurate"]`, 'feedback-pending-accurate');
+    await assertRenderer(renderer, `(() => {
+      const original=Promise.prototype.then;
+      const held={release:null,node:null,outcome:null}; window.__j11HeldFeedbackSave=held;
+      try {
+        Promise.prototype.then=function(success,failure) {
+          Promise.prototype.then=original;
+          return original.call(this,
+            (value)=>new Promise(resolve=>{held.outcome='success';held.release=()=>resolve(success(value));}),
+            (error)=>new Promise((_resolve,reject)=>{held.outcome='failure';held.release=()=>reject(error);}));
+        };
+        document.querySelector(${JSON.stringify(`${feedbackItem('synopsis')} [data-analysis-action="record-feedback"]`)}).click();
+        held.node=document.querySelector('.analysis-feedback-card');
+      } finally { Promise.prototype.then=original; }
+      return held.node!==null && [...held.node.querySelectorAll('input,textarea,button')].every(control=>control.disabled);
+    })()`, 'feedback-pending-hold-save');
+    await waitFor(renderer, `typeof window.__j11HeldFeedbackSave?.release==='function'`, 'feedback-pending-save-held');
+    await assertRenderer(renderer, `window.__j11HeldFeedbackSave.outcome==='success'`, 'feedback-pending-save-accepted');
+    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then(projection=>projection.state==='settled')`, 'feedback-pending-run-settled');
+    await assertRenderer(renderer, `(() => { window.__j11HeldFeedbackFollow.release(); return true; })()`, 'feedback-pending-release-follow');
+    // A real changed follower read has time to settle. Pending work, rather than focus, must retain this exact disabled card.
+    await new Promise(resolveWait=>setTimeout(resolveWait,750));
+    await assertRenderer(renderer, `document.querySelector('.analysis-feedback-card')===window.__j11HeldFeedbackSave.node && [...window.__j11HeldFeedbackSave.node.querySelectorAll('input,textarea,button')].every(control=>control.disabled)`, 'feedback-pending-keeps-card');
+    await assertRenderer(renderer, `(() => {
+      window.__j11HeldFeedbackSave.release();
+      window.setTimeout=window.__j11HeldFeedbackFollow.original;
+      delete window.__j11HeldFeedbackSave; delete window.__j11HeldFeedbackFollow;
+      return true;
+    })()`, 'feedback-pending-release-save');
+    await waitFor(renderer, `document.querySelector('.analysis-feedback-card')===null && document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'feedback-pending-finished');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

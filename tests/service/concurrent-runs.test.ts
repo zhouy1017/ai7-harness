@@ -73,7 +73,7 @@ function openWithRoute(route: ResolvedModelFixture = fixture): Promise<Editorial
 function ownerOf(
   store: EditorialStore,
   hold: UnitHold | null,
-  options: { capacity?: number; route?: boolean; fixture?: ResolvedModelFixture } = {},
+  options: { capacity?: number; waitingCapacity?: number; route?: boolean; fixture?: ResolvedModelFixture } = {},
 ): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
     ledger: store.baselineAnalysisLedger,
@@ -82,6 +82,7 @@ function ownerOf(
     secretResolver: { resolve: async () => null },
     unitHold: hold,
     ...(options.capacity === undefined ? {} : { capacity: options.capacity }),
+    ...(options.waitingCapacity === undefined ? {} : { waitingCapacity: options.waitingCapacity }),
   });
 }
 
@@ -154,6 +155,42 @@ function active(projection: GlobalAttentionProjection): Array<[string | null, st
 }
 
 describe('the execution owner\'s concurrency governor over the real store on exact sample1', () => {
+  it('refuses overflow without an attempt, preserves admitted waiting starts and reuses a cancelled waiting place', async () => {
+    const gate = sharedHold();
+    const store = await openWithRoute();
+    const owner = ownerOf(store, gate.hold, { capacity: 1, waitingCapacity: 1 });
+    try {
+      const running = await preparedBook(store, 'L2 有界运行', true);
+      const waiting = await preparedBook(store, 'L2 有界等待', false);
+      const overflow = await preparedBook(store, 'L2 有界拒绝', false);
+      const activeRun = start(store, owner, running);
+      const queuedRun = start(store, owner, waiting);
+      const refused = store.authorizeBaselineAnalysis(overflow.bookId, overflow.taskIntentId, overflow.planEnvelopeDigest);
+      expect(() => owner.admitOrQueue(refused.dispatchRunRecordId!)).toThrowError(/等待运行的队列已满/u);
+      expect(owner.queuePosition(refused.dispatchRunRecordId!)).toBeNull();
+      expect(owner.queuePosition(queuedRun.runRecordId)).toBe(1);
+      expect(owner.admitOrQueue(queuedRun.runRecordId)).toBe('queued');
+      const blocked = store.inspectBaselineAnalysis(overflow.bookId);
+      expect(blocked.run).toMatchObject({ state: 'blocked-before-dispatch', attempt: null });
+      expect(blocked.run?.blockedReasons?.join()).toContain('重新准备并开始');
+      store.cancelWaitingBaselineAnalysis(waiting.bookId, waiting.taskIntentId);
+      expect(owner.dequeue(queuedRun.runRecordId)).toBe(true);
+      const prepared = prepare(store, overflow.bookId);
+      const retry = start(store, owner, { ...overflow, taskIntentId: prepared.taskIntent!.taskIntentId, planEnvelopeDigest: prepared.planEnvelope!.digest });
+      expect(retry.admission).toBe('queued');
+      expect(owner.queuePosition(retry.runRecordId)).toBe(1);
+      gate.allow(SAMPLE1_UNITS);
+      await owner.whenIdle();
+      expect(store.inspectBaselineAnalysis(running.bookId).state).toBe('settled');
+      expect(store.inspectBaselineAnalysis(overflow.bookId).state).toBe('settled');
+      expect(owner.queuePosition(activeRun.runRecordId)).toBeNull();
+      store.markCleanShutdown();
+    } finally {
+      await owner.dispose();
+      store.close();
+    }
+  }, 300_000);
+
   it('runs two Books at once, holds a third at 等待运行名额 until a place frees, and keeps every Run to its own Book', async () => {
     const gate = sharedHold();
     const store = await openWithRoute();

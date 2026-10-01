@@ -68,7 +68,7 @@ const CHANGE_SUGGESTION_APPLY_MEMBERS = ['applyChangeSuggestion', 'applyChangeSu
 // the system dialog chose, approved per file.
 const EXPORT_MEMBERS = [
   'reviewManuscriptExport', 'chooseManuscriptExportDestination', 'approveManuscriptExport', 'revealManuscriptExport',
-  'reviewBookDeliveryPackageExport', 'chooseBookDeliveryPackageExportFolder', 'approveBookDeliveryPackageExport',
+  'reviewBookDeliveryPackageExport', 'chooseBookDeliveryPackageExportFolder', 'approveBookDeliveryPackageExport', 'cancelBookDeliveryPackageExport',
 ];
 // Synchronized delta with Issue #417: 审阅's seven members. None is named like an execution, effect,
 // apply or export member, so the two pins below hold them without an exception.
@@ -2396,11 +2396,16 @@ async function main() {
       JSON.stringify(retrySpans.map((span) => [span.unitOrdinal, span.attemptIndex])) === JSON.stringify([[2, 1], [5, 1], [5, 2], [6, 1]]) &&
       retrySpans.every((span) => DIGEST_PATTERN.test(span.payloadDigest) && span.harnessSessionId === attemptRetry.executionBinding.harnessSessionId) &&
       retrySpans[1].payloadDigest !== retrySpans[2].payloadDigest &&
+      // Issue #286: the payloads differ by construction on the one Session, and the unit message repeats byte for byte.
+      retrySpans.every((span) => DIGEST_PATTERN.test(span.unitMessageDigest)) && retrySpans[1].unitMessageDigest === retrySpans[2].unitMessageDigest &&
       settledRetry.run.adaptations?.length === 1 && adaptation?.unitOrdinal === 5 && adaptation.adaptationClass === 'safe-retry' && adaptation.attemptIndex === 2 && adaptation.ordinal === 1 &&
       adaptation.failureCode === 'PROVIDER_ERROR' && adaptation.failureStatus === 503 && adaptation.failureClass === 'adapter-failure' && adaptation.classifiedReason.includes('PROVIDER_ERROR') &&
       adaptation.label === `计划内调整 · 单元 5 安全重试 1 次 · ${adaptation.classifiedReason}` &&
       adaptation.planEnvelopeDigest === preparedRetry.planEnvelope.digest && adaptation.bindingDigest === attemptRetry.executionBinding.bindingDigest &&
       adaptation.attemptId === attemptRetry.attemptId && adaptation.runRecordId === settledRetry.run.runRecordId && adaptation.firstPayloadDigest === retrySpans[1].payloadDigest &&
+      adaptation.firstUnitMessageDigest === retrySpans[1].unitMessageDigest && adaptation.repetition === 'byte-identical' &&
+      adaptation.retry?.spanOrdinal === retrySpans[2].ordinal && adaptation.retry.unitMessageDigest === retrySpans[2].unitMessageDigest &&
+      adaptation.retry.payloadDigest === retrySpans[2].payloadDigest &&
       UUID_PATTERN.test(adaptation.adaptationId) && DIGEST_PATTERN.test(adaptation.requestDigest) && typeof adaptation.recordedAt === 'string' &&
       // Synchronized delta (#274, #275): three recomputed units, unit 5's safe retry, the reduction's
       // turn, and the sample's.
