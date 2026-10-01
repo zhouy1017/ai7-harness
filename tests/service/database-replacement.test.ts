@@ -1,13 +1,15 @@
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { copyFile, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { strFromU8, unzipSync } from 'fflate';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { strFromU8, unzipSync, zipSync } from 'fflate';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalRecord, parseCanonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { writeDatabasePackage } from '../../src/service/database-exports.js';
 import {
   DATABASE_REPLACEMENT_TRIGGER_SQL,
+  extractReplacement,
   preReplaceBackupFileName,
   readPendingReplacement,
   replacementStagingFor,
@@ -18,6 +20,24 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { DATABASE_REPLACEMENT_SCHEMA_VERSION, SCHEDULED_BACKUP_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { MAX_DATABASE_REPLACEMENTS_LISTED } from '../../src/shared/protocol.js';
+import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
+
+const sourceRead = vi.hoisted(() => ({ path: null as string | null, atEnd: null as (() => Promise<void>) | null }));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  const open: typeof actual.open = async (...args) => {
+    const handle = await actual.open(...args);
+    if (args[0] === sourceRead.path && args[1] === 'r') {
+      const read = handle.read.bind(handle);
+      handle.read = ((...readArgs: Parameters<typeof read>) => read(...readArgs).then(async (result) => {
+        if (result.bytesRead === 0) await sourceRead.atEnd?.();
+        return result;
+      })) as typeof handle.read;
+    }
+    return handle;
+  };
+  return { ...actual, open, default: { ...actual, open } };
+});
 
 // Service-integration suite (L2) for 导入数据库 and 替换本机全部数据 (Issue #434, plan slice S86c; V2-UX-DSTO-017; ADR 0079 §1.3,
 // §1.4) over the real store: the preview of a package the store exported — origin, versions, contents, every member verified —
@@ -33,6 +53,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  sourceRead.path = null;
+  sourceRead.atEnd = null;
   await roots.dispose();
 });
 
@@ -81,6 +103,69 @@ async function handmade(name: string, dataVersion: number, schemaRevision: numbe
 const backups = (): string => `${roots.dataRoot}-backups`;
 
 describe('导入数据库 over the real store', () => {
+  it('extracts the reviewed archive bytes when the selected file changes after its hash pass', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      createBook(store, '绑定文件');
+      const packagePath = await exported(store, '绑定文件.ai7db');
+      const original = await readFile(packagePath);
+      const entries = unzipSync(original);
+      const manifest = parseCanonicalJson(strFromU8(entries['manifest.json']!)) as Record<string, unknown>;
+      entries['manifest.json'] = Buffer.from(canonicalRecord({ ...manifest, softwareVersion: '9.9.9' }).json);
+      const replacement = zipSync(entries, { level: 0 });
+      // Store both equally sized archives uncompressed so the overwrite changes no size checks.
+      entries['manifest.json'] = Buffer.from(canonicalRecord(manifest).json);
+      const selected = zipSync(entries, { level: 0 });
+      expect(replacement.byteLength).toBe(selected.byteLength);
+      await writeFile(packagePath, selected);
+      await store.inspectDatabaseImport(packagePath);
+      sourceRead.path = packagePath;
+      sourceRead.atEnd = async () => { sourceRead.atEnd = null; await writeFile(packagePath, replacement); };
+      const extracted = await extractReplacement(roots.dataRoot, packagePath, sha256Hex(selected));
+      expect(extracted.manifest.softwareVersion).toBe(manifest.softwareVersion);
+      expect(extracted.sha256).toBe(sha256Hex(selected));
+    } finally { store.close(); }
+  });
+
+  it.each(['missing', 'corrupt'] as const)('refuses a manifest-consistent package with a %s referenced Book payload', async (damage) => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const input = join(roots.inputRoot, '来源.docx');
+      await composeRevisedDocx(input, { source: ADMITTED_BASELINE_DOCX, title: '来源检查', paragraphs: [{ runs: [{ text: { block: 21 } }] }] });
+      const staged = await store.stageSelectedManuscript(randomUUID(), input);
+      const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+        { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false);
+      const commitId = randomUUID();
+      await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest!, commitId });
+      await store.acknowledgeImportCompletion(commitId);
+      const packagePath = await exported(store, '完整文件.ai7db');
+      const positive = await store.inspectDatabaseImport(packagePath);
+      expect(positive.compatibility).toBe('compatible');
+      const entries = unzipSync(await readFile(packagePath));
+      const manifest = parseCanonicalJson(strFromU8(entries['manifest.json']!)) as { members: { path: string; bytes: number; sha256: string }[] };
+      const payload = manifest.members.find((member) => member.path.startsWith('objects/'))!;
+      expect(payload).toBeDefined();
+      if (damage === 'missing') {
+        delete entries[payload.path];
+        manifest.members = manifest.members.filter((member) => member.path !== payload.path);
+      } else {
+        entries[payload.path] = Buffer.from('invalid referenced bytes');
+        payload.bytes = entries[payload.path]!.byteLength;
+        payload.sha256 = sha256Hex(entries[payload.path]!);
+      }
+      entries['manifest.json'] = Buffer.from(canonicalRecord(manifest).json);
+      const damaged = join(roots.inputRoot, `${damage}.ai7db`);
+      await writeFile(damaged, zipSync(entries));
+      const before = titles(store);
+      expect(code(await store.inspectDatabaseImport(damaged).catch((error: unknown) => error))).toBe('DATABASE_PACKAGE_DAMAGED');
+      expect(titles(store)).toEqual(before);
+      expect((await store.inspectDatabaseReplacements()).pending).toBeNull();
+      expect(existsSync(backups())).toBe(false);
+      expect(existsSync(replacementStagingFor(roots.dataRoot))).toBe(false);
+      expect((await readdir(join(roots.dataRoot, 'export-staging'))).filter((name) => name.startsWith('.'))).toEqual([]);
+    } finally { store.close(); }
+  });
+
   it('previews a package, replaces the data after backing it up, and rolls back to that backup', async () => {
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let replacementId: string;
