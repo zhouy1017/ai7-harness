@@ -531,7 +531,7 @@ describe('定期自动备份 over the real store', () => {
       db.exec('CREATE TABLE kept(value TEXT)');
       const packagePath = join(roots.inputRoot, 'cut.ai7db');
       const facts = {
-        dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: SCHEDULED_BACKUP_SCHEMA_VERSION, createdAt: T.toISOString(),
+        dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 1, createdAt: T.toISOString(),
         origin: 'scheduled-backup' as const, contents: { books: 0, sourceVersions: 0, libraryMaterials: 0, series: 0 },
       };
       const leftBehind = (): boolean[] => [existsSync(packagePath), existsSync(`${packagePath}.store`)];
