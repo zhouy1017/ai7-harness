@@ -569,7 +569,7 @@ async function dispatch(
     case 'changeSeriesMembership':
       return { id: request.id, ok: true, op: request.op, result: store.changeSeriesMembership(request.input) };
     case 'inspectBookSeries':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectBookSeries(request.input.bookId) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectBookSeries(request.input.bookId, request.input.membershipsAfter ?? null) };
     case 'inspectSeriesMembers':
       return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesMembers(request.input.seriesId, request.input.after) };
     case 'inspectSeriesCandidates':
@@ -579,6 +579,22 @@ async function dispatch(
         id: request.id, ok: true, op: request.op,
         result: store.inspectSeriesHistory({ seriesId: request.input.seriesId, bookId: request.input.bookId }, request.input.after),
       };
+    case 'proposeSeriesKnowledge':
+      return { id: request.id, ok: true, op: request.op, result: store.proposeSeriesKnowledge(request.input) };
+    case 'inspectSeriesKnowledgeReview':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeReview(request.input) };
+    case 'editSeriesKnowledgeCandidate':
+      return { id: request.id, ok: true, op: request.op, result: store.editSeriesKnowledgeCandidate(request.input) };
+    case 'promoteSeriesKnowledge':
+      return { id: request.id, ok: true, op: request.op, result: store.promoteSeriesKnowledge(request.input) };
+    case 'inspectSeriesKnowledgeItems':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeItems(request.input.seriesId, request.input.text, request.input.after) };
+    case 'inspectSeriesKnowledgeCandidates':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeCandidates(request.input.seriesId, request.input.after) };
+    case 'inspectSeriesKnowledgeConflicts':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeConflicts(request.input) };
+    case 'inspectSeriesKnowledgeRevisions':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeRevisions(request.input.seriesId, request.input.itemId, request.input.before) };
     case 'inspectEvaluationProfiles':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluationProfiles() };
     case 'inspectEvaluation':

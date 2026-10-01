@@ -1,3 +1,14 @@
+import { SERIES_KNOWLEDGE_CLASSES, SERIES_KNOWLEDGE_CLASS_LABELS } from '../shared/protocol.js';
+import type { BookSeriesProjection, ProposeSeriesKnowledgeInput, SeriesKnowledgeClass, SeriesKnowledgeProposalProjection, SeriesListCursor } from '../shared/protocol.js';
+import {
+  KNOWLEDGE_CLASS_LABEL,
+  KNOWLEDGE_CONTENT_LABEL,
+  KNOWLEDGE_MENU_GROUP,
+  KNOWLEDGE_MENU_NOTE,
+  KNOWLEDGE_PROPOSE,
+  KNOWLEDGE_SUBJECT_LABEL,
+  knowledgeMenuLabel,
+} from './series-knowledge-labels.js';
 import type { BoundedEditor } from './editor.js';
 import type {
   EditorClipboardCommand,
@@ -80,6 +91,12 @@ interface MountOptions {
    * Without it, the entry is not offered.
    */
   openConflict?(markId: string): void;
+  /**
+   * The Series the Book is in now (Issue #63, S28b): for each, the selection menu offers 提议为书系「…」的知识… on the selected
+   * words. Without it — a Production Document, or a Book in no Series — the menu offers nothing of 书系.
+   */
+  seriesOf?(after: SeriesListCursor | null): Promise<Pick<BookSeriesProjection, 'memberships' | 'membershipsNext' | 'membershipCount'>>;
+  proposeSeriesKnowledge?(input: ProposeSeriesKnowledgeInput): Promise<SeriesKnowledgeProposalProjection>;
   busy(): boolean;
   /** The set of marks changed: whatever counts them elsewhere on the surface reads again. */
   marksChanged?(): void;
@@ -94,11 +111,13 @@ interface MountOptions {
 }
 
 interface FormField {
-  name: 'body' | 'proposedText' | 'rationale' | 'reason';
+  name: 'body' | 'proposedText' | 'rationale' | 'reason' | 'subject' | 'knowledgeClass';
   label: string;
   value: string;
   required: boolean;
   hint?: string;
+  /** A closed choice, drawn as a select with none chosen (Issue #63, S28b). */
+  options?: ReadonlyArray<{ readonly value: string; readonly label: string }>;
 }
 
 interface FormConfig {
@@ -185,6 +204,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   let promptFor: { readonly markId: string; readonly decisionId: string; readonly mode: 'prompt' | 'add' | 'revise' } | null = null;
   let collapsedBeforeContextClick = true;
   let working = false;
+  /** The Series the Book is in, as last read: the next menu offers each (Issue #63, S28b). */
+  let inSeries: ReadonlyArray<{ readonly seriesId: string; readonly title: string }> = [];
+  const readSeries = (): void => {
+    void options.seriesOf?.(null).then((page) => { if (!destroyed) inSeries = page.memberships; }, () => undefined);
+  };
+  readSeries();
   let closedAt: { top: number } | undefined;
 
   const binding = (): { manuscriptId: string; branchId: string; windowStartBlockId: string } => {
@@ -271,13 +296,27 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       quote.dataset['markQuote'] = 'pinned';
       form.append(quote);
     }
-    const inputs = new Map<FormField['name'], HTMLTextAreaElement>();
+    const inputs = new Map<FormField['name'], HTMLTextAreaElement | HTMLSelectElement>();
     for (const field of config.fields) {
       const label = el('label', 'editorial-mark-field');
       label.append(el('span', undefined, field.label));
-      const input = el('textarea');
+      let input: HTMLTextAreaElement | HTMLSelectElement;
+      if (field.options !== undefined) {
+        const select = el('select');
+        const none = el('option', undefined, '请选择');
+        none.value = '';
+        select.append(none, ...field.options.map((option) => {
+          const node = el('option', undefined, option.label);
+          node.value = option.value;
+          return node;
+        }));
+        input = select;
+      } else {
+        const area = el('textarea');
+        area.rows = field.name === 'subject' ? 1 : field.name === 'rationale' || field.name === 'reason' ? 2 : 3;
+        input = area;
+      }
       input.name = field.name;
-      input.rows = field.name === 'rationale' || field.name === 'reason' ? 2 : 3;
       input.value = field.value;
       input.required = field.required;
       input.dataset['markField'] = field.name;
@@ -307,7 +346,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     form.append(problem, row);
     form.addEventListener('submit', (event) => {
       event.preventDefault();
-      const values = { body: '', proposedText: '', rationale: '', reason: '' };
+      const values = { body: '', proposedText: '', rationale: '', reason: '', subject: '', knowledgeClass: '' };
       for (const [name, input] of inputs) values[name] = input.value;
       const missing = config.fields.find((field) => field.required && values[field.name].trim().length === 0);
       if (missing) {
@@ -372,6 +411,66 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (range.kind === 'range') return range;
     options.setStatus(selectionMenuReason(range.kind), 'error');
     return null;
+  };
+
+  /**
+   * 提议为书系「…」的知识… (Issue #63, S28b; SER-013): the selected words of this member Book's manuscript become a candidate
+   * for a new item of the Series, citing the exact span at the revision and journal position they stand at now. The manuscript
+   * is not changed, and nothing is Series Knowledge until the candidate is taken in by review on the Series' page.
+   */
+  const composeKnowledge = async (series: { readonly seriesId: string; readonly title: string }, pinnedRange?: Extract<ReturnType<BoundedEditor['selectedRange']>, { kind: 'range' }>): Promise<void> => {
+    if (refuseWhileBusy() || options.proposeSeriesKnowledge === undefined) return;
+    const propose = options.proposeSeriesKnowledge;
+    const range = pinnedRange ?? await settledRange();
+    if (range === null) return;
+    openComposer(range.blockId, {
+      id: 'propose-series-knowledge',
+      title: knowledgeMenuLabel(series.title).replace('…', ''),
+      quote: range.text,
+      fields: [
+        { name: 'subject', label: KNOWLEDGE_SUBJECT_LABEL, value: '', required: true },
+        {
+          name: 'knowledgeClass',
+          label: KNOWLEDGE_CLASS_LABEL,
+          value: '',
+          required: true,
+          options: SERIES_KNOWLEDGE_CLASSES.map((knowledgeClass) => ({ value: knowledgeClass, label: SERIES_KNOWLEDGE_CLASS_LABELS[knowledgeClass] })),
+        },
+        { name: 'body', label: KNOWLEDGE_CONTENT_LABEL, value: range.text, required: true },
+      ],
+      submitLabel: KNOWLEDGE_PROPOSE,
+      note: KNOWLEDGE_MENU_NOTE,
+      submit: async (values) => {
+        try {
+          await editor.flush();
+          const current = editor.currentWindow();
+          const result = await propose({
+            seriesId: series.seriesId,
+            target: { kind: 'new', subject: values.subject, knowledgeClass: values.knowledgeClass as SeriesKnowledgeClass },
+            content: values.body,
+            span: {
+              ...binding(),
+              baseRevisionId: current.revisionId,
+              expectedJournalSequence: current.journalSequence,
+              blockId: range.blockId,
+              baseBlockDigest: range.blockDigest,
+              fromGrapheme: range.fromGrapheme,
+              toGrapheme: range.toGrapheme,
+              selectedText: range.text,
+            },
+          });
+          options.setStatus(result.completionLabel, 'success');
+          closeFloating();
+          editor.focus();
+        } catch (error) {
+          options.setStatus(options.errorMessage(error, '无法提议为书系知识。'), 'error');
+        }
+      },
+      cancel: () => {
+        closeFloating();
+        editor.focus();
+      },
+    });
   };
 
   const composeNewMark = async (kind: 'annotation' | 'editor-note' | 'change-suggestion'): Promise<void> => {
@@ -1126,6 +1225,83 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     ],
   });
 
+  /** Select any current member Series, one bounded page at a time, keeping the exact settled manuscript selection. */
+  const chooseKnowledgeSeries = async (): Promise<void> => {
+    if (refuseWhileBusy() || options.seriesOf === undefined) return;
+    const read = options.seriesOf;
+    const range = await settledRange();
+    if (range === null || destroyed) return;
+    close();
+    const chooser = el('section', 'editorial-mark-composer');
+    chooser.dataset['markComposer'] = 'choose-knowledge-series';
+    chooser.setAttribute('role', 'dialog');
+    chooser.setAttribute('aria-label', '选择书系并提议知识');
+    chooser.append(el('h4', undefined, '选择书系并提议知识'), el('blockquote', 'editorial-mark-quote', range.text));
+    const list = el('div', 'knowledge-series-choices');
+    const status = el('p', 'muted');
+    status.setAttribute('aria-live', 'polite');
+    const row = el('div', 'button-row');
+    const next = el('button', 'quiet', '下一页书系');
+    const reset = el('button', 'quiet', '回到第一页');
+    const retry = el('button', 'quiet', '重试读取书系');
+    const cancel = el('button', 'quiet', '取消');
+    for (const control of [next, reset, retry, cancel]) control.type = 'button';
+    row.append(next, reset, retry, cancel);
+    chooser.append(status, list, row);
+    layer.append(chooser);
+    floating = chooser;
+    floatingBlockId = range.blockId;
+    placeBelowBlock(chooser, range.blockId);
+    let after: SeriesListCursor | null = null;
+    let nextAfter: SeriesListCursor | null = null;
+    let failedAfter: SeriesListCursor | null = null;
+    let failed = false;
+    let loading = false;
+    const active = (): boolean => !destroyed && floating === chooser && chooser.isConnected;
+    const load = async (cursor: SeriesListCursor | null): Promise<void> => {
+      if (loading || !active()) return;
+      loading = true;
+      for (const control of chooser.querySelectorAll<HTMLButtonElement>('button')) if (control !== cancel) control.disabled = true;
+      status.textContent = '正在读取书系…';
+      try {
+        const page = await read(cursor);
+        if (!active()) return;
+        after = cursor;
+        nextAfter = page.membershipsNext;
+        failed = false;
+        list.replaceChildren(...page.memberships.map((series) => {
+          const select = el('button', 'quiet', series.title);
+          select.type = 'button';
+          select.dataset['seriesId'] = series.seriesId;
+          select.addEventListener('click', () => { if (!loading && active()) void composeKnowledge(series, range); });
+          return select;
+        }));
+        status.textContent = `共 ${page.membershipCount} 个书系 · 本页 ${page.memberships.length} 个`;
+      } catch (error) {
+        if (!active()) return;
+        failed = true;
+        failedAfter = cursor;
+        status.textContent = options.errorMessage(error, '无法读取书系；可以重试。');
+      } finally {
+        loading = false;
+        if (active()) {
+          for (const control of chooser.querySelectorAll<HTMLButtonElement>('button')) control.disabled = false;
+          next.disabled = nextAfter === null;
+          reset.disabled = after === null;
+          retry.hidden = !failed;
+          (failed ? retry : list.querySelector<HTMLButtonElement>('button') ?? cancel).focus();
+        }
+      }
+    };
+    next.addEventListener('click', () => { if (nextAfter !== null) void load(nextAfter); });
+    reset.addEventListener('click', () => void load(null));
+    retry.addEventListener('click', () => void load(failedAfter));
+    cancel.addEventListener('click', () => { closeFloating(); editor.focus(); });
+    chooser.addEventListener('keydown', (event) => { if (event.key === 'Escape') { event.preventDefault(); closeFloating(); editor.focus(); } });
+    chooser.scrollIntoView({ block: 'nearest' });
+    await load(null);
+  };
+
   const showSelectionMenu = (at: { x: number; y: number }): void => {
     const range = editor.selectedRange();
     const markable = range.kind === 'range' || range.kind === 'unsettled';
@@ -1166,7 +1342,21 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         ],
       },
       aiTaskGroup(),
+      // 书系 (Issue #63, S28b): only for a Book in a Series, one entry per Series.
+      ...(options.seriesOf === undefined || options.proposeSeriesKnowledge === undefined || inSeries.length === 0 ? [] : [{
+        label: KNOWLEDGE_MENU_GROUP,
+        note: why ?? KNOWLEDGE_MENU_NOTE,
+        items: [...inSeries.map((series): MenuItem => ({
+          action: 'propose-series-knowledge',
+          label: knowledgeMenuLabel(series.title),
+          ...(why ? { disabledReason: why } : { run: () => void composeKnowledge(series) }),
+        })), {
+          action: 'choose-knowledge-series', label: '选择书系并提议知识…',
+          ...(why ? { disabledReason: why } : { run: () => void chooseKnowledgeSeries() }),
+        }],
+      }]),
     ], at);
+    readSeries();
   };
 
   const showMarkMenu = (mark: EditorialMarkAnchorProjection, at: { x: number; y: number }): void => {
