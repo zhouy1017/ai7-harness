@@ -3,16 +3,17 @@ import { readFile, stat } from 'node:fs/promises';
 import { basename } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
-  MAX_GUIDELINE_MERGED_VERSIONS_SHOWN,
   MAX_GUIDELINE_OLDER_BOOKS_SHOWN,
+  MAX_GUIDELINE_MERGED_VERSIONS_SHOWN,
   MAX_GUIDELINE_VERSION_RUNS_SHOWN,
   MAX_REVIEW_GUIDELINE_FILE_BYTES,
   type ReviewGuidelineDocumentProjection,
-  type ReviewGuidelineDocumentUse,
   type ReviewGuidelineMergedVersionProjection,
+  type ReviewGuidelineDocumentUse,
   type ReviewGuidelinePreviewProjection,
   type ReviewGuidelineSourceProjection,
   type ReviewGuidelinesProjection,
+  type ReviewGuidelinesPage,
   type ReviewGuidelineVersionProjection,
 } from '../shared/protocol.js';
 import { UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
@@ -82,8 +83,6 @@ function requireGuideline(condition: unknown, code: string, message: string): as
   if (!condition) throw new ReviewGuidelineError(code, message);
 }
 
-type SqlRow = Record<string, SQLOutputValue>;
-
 const RECORD_SCHEMA = 'ai7.review-guideline-version/1';
 const BUILTIN_SCHEMA = 'ai7.review-guideline-builtin/1';
 /** Who issues an imported version: the house, whatever AI7 issued before it (KB-003 keeps that provenance in the chain). */
@@ -94,6 +93,29 @@ export const MAX_GUIDELINE_CLAUSES = 40;
 export const MAX_GUIDELINE_CLAUSE_GRAPHEMES = 300;
 /** Previews wait in memory for their confirmation; a service that restarts forgets them, and the editor chooses again. */
 const MAX_PREVIEWS = 16;
+const VERSION_PAGE_SIZE = 5;
+const CLAUSE_PAGE_SIZE = 8;
+const CLAUSE_FRAGMENT_UNITS = 1024;
+
+/** Fixed-size text fragments keep even a long combining sequence inside the IPC frame bound. */
+function clausePage(clauses: ReadonlyArray<ReviewGuidelineClause>, requested = 0, fragmentUnits = CLAUSE_FRAGMENT_UNITS, pageSize = CLAUSE_PAGE_SIZE) {
+  requireGuideline(Number.isSafeInteger(requested) && requested >= 0, 'REVIEW_GUIDELINE_PAGE_INVALID', '条款页码无效。');
+  let count = 0;
+  const items: Array<{ clauseId: string; number: number; text: string }> = [];
+  for (let index = 0; index < clauses.length; index += 1) {
+    const clause = clauses[index]!;
+    for (let offset = 0; offset < clause.text.length;) {
+      let end = Math.min(offset + fragmentUnits, clause.text.length);
+      if (end < clause.text.length && /[\uD800-\uDBFF]/u.test(clause.text[end - 1]!)) end -= 1;
+      if (Math.floor(count / pageSize) === requested) items.push({ clauseId: clause.clauseId, number: index + 1, text: clause.text.slice(offset, end) });
+      count += 1;
+      offset = end;
+    }
+  }
+  const pages = Math.max(1, Math.ceil(count / pageSize));
+  requireGuideline(requested < pages, 'REVIEW_GUIDELINE_PAGE_INVALID', '条款页码已失效，请重新打开。');
+  return { clauses: items, clauseCount: clauses.length, clausePage: requested, clausePages: pages };
+}
 const CONTROL_CHARACTER = /[\p{Cc}\p{Zl}\p{Zp}]/u;
 /** `1.`, `1、`, `1．`, `1)` or `1）`, in half- or full-width digits — and `第1条` or `第一条` — open a clause; any other paragraph continues it. */
 const ARABIC_CLAUSE = /^\s*([0-9０-９]{1,3})\s*[.、．)）]\s*(.*)$/u;
@@ -281,37 +303,6 @@ function clauseChanges(current: ReadonlyArray<ReviewGuidelineClause>, next: Read
   return { changed, added: Math.max(0, next.length - current.length), removed: Math.max(0, current.length - next.length) };
 }
 
-/**
- * A guideline document as a Review Run applies it, told apart by its content (Issue #434 review): its number, who issued it,
- * its title and its clauses, as the Run's snapshot holds them and as this data's own version of that number reads.
- */
-function documentContent(document: { readonly documentId: unknown; readonly title: unknown; readonly issuer: unknown; readonly version: unknown; readonly clauses: unknown }): string {
-  return sha256Hex(canonicalJson({ documentId: document.documentId, title: document.title, issuer: document.issuer, version: document.version, clauses: document.clauses }));
-}
-
-/** One guideline document as a Run applied it. */
-interface AppliedDocument {
-  readonly version: number;
-  readonly categoryIds: string[];
-  readonly content: string;
-  readonly title: string;
-  readonly issuer: string;
-  readonly clauses: ReadonlyArray<ReviewGuidelineClause>;
-}
-
-/** What a Review Run's snapshot says about the guideline documents its categories applied, and at which version. */
-interface RunReading {
-  readonly reviewRunId: string;
-  readonly bookId: string;
-  readonly bookTitle: string;
-  readonly ordinal: number;
-  readonly createdAt: string;
-  /** Whether its Book came here by 只导入其中的图书 (Issue #434 review): its versions may be another house's. */
-  readonly merged: boolean;
-  /** documentId → version, and the categories of this Run that applied it. */
-  readonly documents: ReadonlyMap<string, AppliedDocument>;
-}
-
 function integer(value: SQLOutputValue | undefined): number {
   return typeof value === 'bigint' ? Number(value) : Number(value);
 }
@@ -329,10 +320,11 @@ export class ReviewGuidelineLedger {
    * chain's root is the built-in version the house's first import followed, as that import recorded it, so a later build
    * that rewords a built-in clause leaves every version the house imported readable (Issue #427 review).
    */
-  #versions(document: ReviewGuidelineDocument): StoredVersion[] {
-    const rows = this.#db.prepare('SELECT * FROM review_guideline_versions WHERE document_id = ? ORDER BY ordinal').all(document.documentId) as SqlRow[];
+  *#versions(document: ReviewGuidelineDocument): Generator<StoredVersion> {
+    const rows = this.#db.prepare('SELECT * FROM review_guideline_versions WHERE document_id = ? ORDER BY ordinal').iterate(document.documentId);
     let previous: string | null = null;
-    return rows.map((row, index) => {
+    let index = 0;
+    for (const row of rows) {
       const json = String(row.canonical_json);
       requireGuideline(sha256Hex(json) === String(row.sha256), 'REVIEW_GUIDELINE_RECORD_INVALID', '审阅规范文件的版本记录已损坏。');
       const record = JSON.parse(json) as unknown;
@@ -343,7 +335,7 @@ export class ReviewGuidelineLedger {
         Array.isArray(record.clauses) && isRecord(record.source),
       'REVIEW_GUIDELINE_RECORD_INVALID', '审阅规范文件的版本记录已损坏。');
       previous = String(row.sha256);
-      return {
+      yield {
         versionId: String(row.version_id),
         documentId: document.documentId,
         ordinal: index + 2,
@@ -355,12 +347,14 @@ export class ReviewGuidelineLedger {
         recordedAt: String(row.recorded_at),
         sha256: String(row.sha256),
       };
-    });
+      index += 1;
+    }
   }
 
   /** A document as it now applies: its latest imported version, or the built-in first. */
-  #current(document: ReviewGuidelineDocument, versions: ReadonlyArray<StoredVersion> = this.#versions(document)): { document: ReviewGuidelineDocument; digest: string } {
-    const latest = versions.at(-1);
+  #current(document: ReviewGuidelineDocument): { document: ReviewGuidelineDocument; digest: string } {
+    let latest: StoredVersion | undefined;
+    for (const version of this.#versions(document)) latest = version;
     return latest === undefined
       ? { document, digest: builtinDigest(document) }
       : {
@@ -394,7 +388,6 @@ export class ReviewGuidelineLedger {
     requireGuideline(known !== undefined, 'REVIEW_GUIDELINE_UNKNOWN', '没有这份审阅规范文件。');
     requireGuideline(known.use === 'clauses', 'REVIEW_GUIDELINE_FIXED', `《${known.document.title}》是 AI7 的固定说明，不能导入新版本。`);
     const builtin = known.document;
-    const versions = this.#versions(builtin);
     const current = this.#current(builtin);
     const clauses = parseGuidelineClauses(read.paragraphs, clausePrefix(builtin));
     requireGuideline(!sameClauses(clauses, current.document.clauses), 'REVIEW_GUIDELINE_UNCHANGED',
@@ -402,7 +395,7 @@ export class ReviewGuidelineLedger {
     const preview: Preview = {
       previewId: randomUUID(),
       documentId,
-      ordinal: versions.length + 2,
+      ordinal: Number(current.document.version) + 1,
       previousSha256: current.digest,
       clauses,
       source: read.source,
@@ -416,9 +409,20 @@ export class ReviewGuidelineLedger {
       ordinal: preview.ordinal,
       currentOrdinal: Number(current.document.version),
       source: read.source,
-      clauses: clauses.map((clause, index) => ({ clauseId: clause.clauseId, number: index + 1, text: clause.text })),
+      ...clausePage(clauses),
       changes: clauseChanges(current.document.clauses, clauses),
     };
+  }
+
+  readPreview(documentId: string, previewId: string, page = 0): ReviewGuidelinePreviewProjection {
+    const preview = this.#previews.get(previewId);
+    requireGuideline(preview !== undefined && preview.documentId === documentId, 'REVIEW_GUIDELINE_PREVIEW_EXPIRED', '这次导入的预览已经失效；请重新选择文件。');
+    const builtin = builtinDocuments().find((entry) => entry.document.documentId === documentId)!.document;
+    const current = this.#current(builtin);
+    requireGuideline(current.digest === preview.previousSha256, 'REVIEW_GUIDELINE_MOVED', '预览后版本已改变，请重新选择文件。');
+    return { previewId, documentId, title: builtin.title, ordinal: preview.ordinal,
+      currentOrdinal: Number(current.document.version), source: preview.source,
+      ...clausePage(preview.clauses, page), changes: clauseChanges(current.document.clauses, preview.clauses) };
   }
 
   /**
@@ -431,7 +435,7 @@ export class ReviewGuidelineLedger {
     requireGuideline(preview !== undefined, 'REVIEW_GUIDELINE_PREVIEW_EXPIRED', '这次导入的预览已经失效；请重新选择文件。');
     const builtin = builtinDocuments().find((entry) => entry.document.documentId === preview.documentId)!.document;
     const current = this.#current(builtin);
-    requireGuideline(current.digest === preview.previousSha256 && this.#versions(builtin).length + 2 === preview.ordinal,
+    requireGuideline(current.digest === preview.previousSha256 && Number(current.document.version) + 1 === preview.ordinal,
       'REVIEW_GUIDELINE_MOVED', '这份审阅规范文件在预览之后又有了新版本；请重新选择文件。');
     const versionId = randomUUID();
     const recordedAt = new Date().toISOString();
@@ -453,192 +457,170 @@ export class ReviewGuidelineLedger {
     this.#previews.delete(previewId);
   }
 
-  /**
-   * What each Review Run used: every guideline document of its categories that formed their findings, at the version its
-   * snapshot applied. A category only prepared, refused or failed has used nothing (Issue #427 review).
-   */
-  #runReadings(): RunReading[] {
-    const materialized = new Set((this.#db.prepare(
-      "SELECT DISTINCT review_run_id, category_id FROM review_run_category_events WHERE state = 'materialized'",
-    ).all() as SqlRow[]).map((row) => `${String(row.review_run_id)}\n${String(row.category_id)}`));
-    // A Book an applied merge took (Issue #434 review), asked of the merge ledger where the store has one.
-    const ledgered = this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'database_merge_books'").get() !== undefined;
-    const merged = ledgered
-      ? `EXISTS (SELECT 1 FROM database_merge_books mb JOIN database_merges m ON m.merge_id = mb.merge_id
-           WHERE mb.book_id = r.book_id AND m.outcome = 'applied')`
-      : '0';
-    const rows = this.#db.prepare(
-      `SELECT r.review_run_id, r.book_id, r.ordinal, r.created_at, r.canonical_json, b.title, ${merged} AS merged
-       FROM review_runs r JOIN books b ON b.book_id = r.book_id
-       ORDER BY r.created_at, r.review_run_id`,
-    ).all() as SqlRow[];
-    return rows.map((row) => {
-      const snapshot = JSON.parse(String(row.canonical_json)) as unknown;
-      const documents = new Map<string, AppliedDocument>();
-      const categories = isRecord(snapshot) && Array.isArray(snapshot.categories) ? snapshot.categories : [];
-      for (const category of categories) {
-        if (!isRecord(category) || !isRecord(category.entry) || !Array.isArray(category.entry.guidelineDocuments)) continue;
-        if (!materialized.has(`${String(row.review_run_id)}\n${String(category.categoryId)}`)) continue;
-        for (const document of category.entry.guidelineDocuments) {
-          if (!isRecord(document) || typeof document.documentId !== 'string') continue;
-          const version = Number(document.version);
-          const known = documents.get(document.documentId) ?? {
-            version,
-            categoryIds: [],
-            content: documentContent({
-              documentId: document.documentId, title: document.title, issuer: document.issuer, version: document.version, clauses: document.clauses,
-            }),
-            title: String(document.title),
-            issuer: String(document.issuer),
-            clauses: Array.isArray(document.clauses) ? document.clauses as ReviewGuidelineClause[] : [],
-          };
-          known.categoryIds.push(String(category.categoryId));
-          documents.set(document.documentId, known);
-        }
-      }
-      return {
-        reviewRunId: String(row.review_run_id),
-        bookId: String(row.book_id),
-        bookTitle: String(row.title),
-        ordinal: integer(row.ordinal),
-        createdAt: String(row.created_at),
-        merged: integer(row.merged) === 1,
-        documents,
-      };
-    });
+  /** The exact document identity a merged Run brings; its original version representation is part of that identity. */
+  #content(document: { documentId: unknown; title: unknown; issuer: unknown; version: unknown; clauses: unknown }): string {
+    return sha256Hex(canonicalJson({ documentId: document.documentId, title: document.title, issuer: document.issuer,
+      version: document.version, clauses: document.clauses }));
   }
 
-  /**
-   * 知识库 › 审阅规范文件 (KB-001 to KB-003): each document with its current version, how its categories read it and which
-   * apply it; its clauses, each with how many findings of the Runs that used this version cite it; every version with how
-   * many Review Runs used it and the latest of them; and the Books whose latest Review Run using it used an older version.
-   * What grows with the house's work — Runs and Books — is counted, and only the latest few named (Issue #427 review).
-   */
-  projection(): ReviewGuidelinesProjection {
-    const runs = this.#runReadings();
-    const runsById = new Map(runs.map((run) => [run.reviewRunId, run] as const));
-    const citations = this.#db.prepare(
-      'SELECT review_run_id, category_id, clause_ref, kind_ref FROM review_findings WHERE clause_ref IS NOT NULL',
-    ).all() as SqlRow[];
-    const documents: ReviewGuidelineDocumentProjection[] = builtinDocuments().map(({ document: builtin, appliedBy, use }) => {
-      // A document AI7 fixes is never imported, so it reads only as AI7 issued it.
-      const stored = use === 'clauses' ? this.#versions(builtin) : [];
-      const current = this.#current(builtin, stored);
+  #dropUsage(): void {
+    this.#db.exec(`DROP TABLE IF EXISTS temp.guideline_own; DROP TABLE IF EXISTS temp.guideline_uses;
+      DROP TABLE IF EXISTS temp.guideline_categories; DROP TABLE IF EXISTS temp.guideline_snapshots;`);
+  }
+
+  /** Disk-backed grouping retains one applied document at a time, including complete foreign snapshot histories. */
+  #materializeUsage(known: ReturnType<typeof builtinDocuments>): void {
+    this.#dropUsage();
+    this.#db.exec(`
+      CREATE TEMP TABLE guideline_own(document_id TEXT, version INTEGER, content TEXT, PRIMARY KEY(document_id, version)) WITHOUT ROWID;
+      CREATE TEMP TABLE guideline_uses(document_id TEXT, review_run_id TEXT, book_id TEXT, book_title TEXT, title_order BLOB,
+        ordinal INTEGER, created_at TEXT, version INTEGER, content TEXT, snapshot INTEGER, PRIMARY KEY(document_id, review_run_id)) WITHOUT ROWID;
+      CREATE TEMP TABLE guideline_categories(document_id TEXT, review_run_id TEXT, category_id TEXT,
+        PRIMARY KEY(document_id, review_run_id, category_id)) WITHOUT ROWID;
+      CREATE TEMP TABLE guideline_snapshots(document_id TEXT, content TEXT, version INTEGER, title TEXT, issuer TEXT, clauses_json TEXT,
+        PRIMARY KEY(document_id, content)) WITHOUT ROWID;
+    `);
+    const own = this.#db.prepare('INSERT INTO temp.guideline_own VALUES (?, ?, ?)');
+    for (const { document, use } of known) {
+      own.run(document.documentId, 1, this.#content(document));
+      if (use === 'clauses') for (const version of this.#versions(document)) {
+        own.run(document.documentId, version.ordinal, this.#content({ documentId: document.documentId,
+          title: version.title, issuer: version.issuer, version: String(version.ordinal), clauses: version.clauses }));
+      }
+    }
+    const ledgered = this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='database_merge_books'").get() !== undefined;
+    const merged = ledgered ? `EXISTS (SELECT 1 FROM database_merge_books mb JOIN database_merges m ON m.merge_id=mb.merge_id
+      WHERE mb.book_id=r.book_id AND m.outcome='applied')` : '0';
+    const rows = this.#db.prepare(`SELECT r.review_run_id, r.book_id, b.title, r.ordinal, r.created_at,
+      json_extract(c.value, '$.categoryId') AS category_id, d.value AS document_json, ${merged} AS merged
+      FROM review_runs r JOIN books b ON b.book_id=r.book_id,
+        json_each(r.canonical_json, '$.categories') c, json_each(c.value, '$.entry.guidelineDocuments') d
+      WHERE EXISTS (SELECT 1 FROM review_run_category_events e WHERE e.review_run_id=r.review_run_id
+        AND e.category_id=json_extract(c.value, '$.categoryId') AND e.state='materialized')
+      ORDER BY r.created_at, r.review_run_id, c.key, d.key`).iterate();
+    const ownContent = this.#db.prepare('SELECT content FROM temp.guideline_own WHERE document_id=? AND version=?');
+    const use = this.#db.prepare('INSERT OR IGNORE INTO temp.guideline_uses VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const category = this.#db.prepare('INSERT OR IGNORE INTO temp.guideline_categories VALUES (?, ?, ?)');
+    const snapshot = this.#db.prepare('INSERT OR IGNORE INTO temp.guideline_snapshots VALUES (?, ?, ?, ?, ?, ?)');
+    for (const row of rows) {
+      const document: unknown = JSON.parse(String(row.document_json));
+      if (!isRecord(document) || typeof document.documentId !== 'string' || !known.some(({ document: item }) => item.documentId === document.documentId)) continue;
+      const content = this.#content({ documentId: document.documentId, title: document.title, issuer: document.issuer,
+        version: document.version, clauses: document.clauses });
+      const version = Number(document.version);
+      const foreign = integer(row.merged) === 1 && ownContent.get(document.documentId, version)?.content !== content;
+      const inserted = use.run(document.documentId, row.review_run_id!, row.book_id!, row.title!,
+        Buffer.from(String(row.title), 'utf16le').swap16(), row.ordinal!, row.created_at!, version, content, foreign ? 1 : 0);
+      category.run(document.documentId, row.review_run_id!, row.category_id!);
+      // The first applied document in a Run is its representative, as before; duplicate categories add only usage.
+      if (foreign && Number(inserted.changes) > 0) snapshot.run(document.documentId, content, version,
+        String(document.title), String(document.issuer), canonicalJson(Array.isArray(document.clauses) ? document.clauses : []));
+    }
+  }
+
+  /** SQLite owns growing usage sets; each caller retains only counts and a bounded display page. */
+  #usageSql(): string {
+    return `WITH used AS (
+      SELECT u.*, c.category_id FROM temp.guideline_uses u JOIN temp.guideline_categories c
+        ON c.document_id=u.document_id AND c.review_run_id=u.review_run_id WHERE u.document_id=?
+    ), runs AS (
+      SELECT DISTINCT review_run_id, book_id, book_title, title_order, ordinal, created_at, version, content, snapshot FROM used
+    ) `;
+  }
+
+  #usedBy(documentId: string, ordinal: number): Pick<ReviewGuidelineVersionProjection, 'usedByCount' | 'usedBy'> {
+    const sql = this.#usageSql();
+    const count = this.#db.prepare(sql + 'SELECT COUNT(*) AS count FROM runs WHERE version = ? AND snapshot=0').get(documentId, ordinal)!;
+    const rows = this.#db.prepare(sql + `SELECT * FROM runs WHERE version = ? AND snapshot=0
+      ORDER BY created_at DESC, review_run_id DESC LIMIT ?`).all(documentId, ordinal, MAX_GUIDELINE_VERSION_RUNS_SHOWN);
+    return { usedByCount: integer(count.count), usedBy: rows.map((row) => ({
+      bookId: String(row.book_id), bookTitle: String(row.book_title), reviewRunId: String(row.review_run_id),
+      reviewOrdinal: integer(row.ordinal), createdAt: String(row.created_at),
+    })) };
+  }
+
+  /** Full chain validation streams; history pages, clause fragments and usage displays have fixed bounds. */
+  projection(page?: ReviewGuidelinesPage): ReviewGuidelinesProjection {
+    const known = builtinDocuments();
+    requireGuideline(page === undefined || (isRecord(page) && known.some(({ document }) => document.documentId === page.documentId)),
+      'REVIEW_GUIDELINE_PAGE_INVALID', '没有这份审阅规范文件。');
+    try {
+    this.#materializeUsage(known);
+    const documents: ReviewGuidelineDocumentProjection[] = known.map(({ document: builtin, appliedBy, use }) => {
+      const selected = page?.documentId === builtin.documentId ? page : undefined;
+      const before = selected?.versionsBefore ?? null;
+      requireGuideline(before === null || (Number.isSafeInteger(before) && before > 1), 'REVIEW_GUIDELINE_PAGE_INVALID', '版本页码无效。');
+      const current = use === 'clauses' ? this.#current(builtin) : { document: builtin, digest: builtinDigest(builtin) };
       const currentOrdinal = Number(current.document.version);
-      // What this data's own version of each number says (Issue #434 review). A Run of a Book merged here that applied a version
-      // whose content is not this data's version of that number — another house's, or another AI7's wording — applied the
-      // snapshot its Run holds (ADR 0079 §1.5): read-only, and never taken for this data's version of the same number.
-      const own = new Map<number, string>([
-        [1, documentContent(builtin)],
-        ...stored.map((version) => [version.ordinal, documentContent({
-          documentId: builtin.documentId, title: version.title, issuer: version.issuer, version: String(version.ordinal), clauses: version.clauses,
-        })] as const),
-      ]);
-      const snapshotted = (run: RunReading, applied: AppliedDocument): boolean => run.merged && own.get(applied.version) !== applied.content;
-      // The Runs that used each version, oldest first as they were read, and those that used a merged Book's own.
-      const byVersion = new Map<number, RunReading[]>();
-      const bySnapshot = new Map<string, { applied: AppliedDocument; used: RunReading[] }>();
-      for (const run of runs) {
-        const applied = run.documents.get(builtin.documentId);
-        if (applied === undefined) continue;
-        if (snapshotted(run, applied)) {
-          const known = bySnapshot.get(applied.content) ?? { applied, used: [] };
-          known.used.push(run);
-          bySnapshot.set(applied.content, known);
-          continue;
-        }
-        const used = byVersion.get(applied.version) ?? [];
-        used.push(run);
-        byVersion.set(applied.version, used);
+      const versions: ReviewGuidelineVersionProjection[] = [];
+      const keep = (version: Omit<ReviewGuidelineVersionProjection, 'usedByCount' | 'usedBy'>): void => {
+        if (before !== null && version.ordinal >= before) return;
+        versions.push({ ...version, usedByCount: 0, usedBy: [] });
+        if (versions.length > VERSION_PAGE_SIZE) versions.shift();
+      };
+      keep({ ordinal: 1, issuer: builtin.issuer, versionId: null, recordedAt: null, source: null,
+        clauseCount: builtin.clauses.length, digest: builtinDigest(builtin) });
+      if (use === 'clauses') for (const version of this.#versions(builtin)) {
+        keep({ ordinal: version.ordinal, issuer: version.issuer, versionId: version.versionId,
+          recordedAt: version.recordedAt, source: version.source, clauseCount: version.clauses.length, digest: version.sha256 });
       }
-      const usedByOf = (used: ReadonlyArray<RunReading>): Pick<ReviewGuidelineVersionProjection, 'usedByCount' | 'usedBy'> => ({
-        usedByCount: used.length,
-        usedBy: used.slice(-MAX_GUIDELINE_VERSION_RUNS_SHOWN).reverse()
-          .map((run) => ({ bookId: run.bookId, bookTitle: run.bookTitle, reviewRunId: run.reviewRunId, reviewOrdinal: run.ordinal, createdAt: run.createdAt })),
+      versions.reverse();
+      for (let index = 0; index < versions.length; index += 1) {
+        const version = versions[index]!;
+        versions[index] = { ...version, ...this.#usedBy(builtin.documentId, version.ordinal) };
+      }
+      const sql = this.#usageSql();
+      const olderSql = sql + `, ranked AS (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY book_id ORDER BY ordinal DESC, review_run_id DESC) AS rank FROM runs
+      ) `;
+      const olderCount = this.#db.prepare(olderSql + 'SELECT COUNT(*) AS count FROM ranked WHERE rank = 1 AND (version < ? OR snapshot=1)')
+        .get(builtin.documentId, currentOrdinal)!;
+      const older = this.#db.prepare(olderSql + `SELECT book_id, book_title, version, snapshot FROM ranked
+        WHERE rank = 1 AND (version < ? OR snapshot=1) ORDER BY title_order, book_id LIMIT ?`)
+        .all(builtin.documentId, currentOrdinal, MAX_GUIDELINE_OLDER_BOOKS_SHOWN);
+      const fragment = clausePage(current.document.clauses, selected?.clausePage);
+      const counts = new Map<string, number>();
+      for (const clause of fragment.clauses) {
+        if (counts.has(clause.clauseId)) continue;
+        const row = this.#db.prepare(sql + `SELECT COUNT(*) AS count FROM (
+          SELECT DISTINCT u.book_id, f.category_id, f.kind_ref FROM review_findings f JOIN used u
+            ON u.review_run_id = f.review_run_id AND u.category_id = f.category_id
+          WHERE u.version = ? AND u.snapshot=0 AND f.clause_ref = ?
+        )`).get(builtin.documentId, currentOrdinal, clause.clauseId)!;
+        counts.set(clause.clauseId, integer(row.count));
+      }
+      const oldest = versions.at(-1)?.ordinal ?? 1;
+      const mergedBefore = selected?.mergedVersionsBefore ?? null;
+      const mergedCount = integer(this.#db.prepare('SELECT COUNT(*) AS count FROM temp.guideline_snapshots WHERE document_id=?').get(builtin.documentId)!.count);
+      const mergedRows = this.#db.prepare(`SELECT * FROM temp.guideline_snapshots WHERE document_id=?
+        AND (? IS NULL OR version < ? OR (version=? AND content>?)) ORDER BY version DESC, content LIMIT ?`)
+        .all(builtin.documentId, mergedBefore?.ordinal ?? null, mergedBefore?.ordinal ?? 0, mergedBefore?.ordinal ?? 0,
+          mergedBefore?.digest ?? '', MAX_GUIDELINE_MERGED_VERSIONS_SHOWN + 1);
+      const mergedNextRow = mergedRows.length > MAX_GUIDELINE_MERGED_VERSIONS_SHOWN ? mergedRows[MAX_GUIDELINE_MERGED_VERSIONS_SHOWN - 1] : undefined;
+      const mergedVersions: ReviewGuidelineMergedVersionProjection[] = mergedRows.slice(0, MAX_GUIDELINE_MERGED_VERSIONS_SHOWN).map((row) => {
+        const clauses = JSON.parse(String(row.clauses_json)) as ReviewGuidelineClause[];
+        const fragment = clausePage(clauses, selected?.mergedClause?.digest === row.content ? selected.mergedClause.page : 0, 128, 4);
+        const usedByCount = integer(this.#db.prepare('SELECT COUNT(*) AS count FROM temp.guideline_uses WHERE document_id=? AND content=? AND snapshot=1').get(builtin.documentId, row.content!)!.count);
+        const references = this.#db.prepare(`SELECT * FROM temp.guideline_uses WHERE document_id=? AND content=? AND snapshot=1
+          ORDER BY created_at DESC, review_run_id DESC LIMIT ?`).all(builtin.documentId, row.content!, MAX_GUIDELINE_VERSION_RUNS_SHOWN);
+        return { ordinal: integer(row.version), issuer: String(row.issuer), title: String(row.title), digest: String(row.content),
+          ...fragment, clauses: fragment.clauses.map(({ number, text }) => ({ number, text })), usedByCount,
+          usedBy: references.map((ref) => ({ bookId: String(ref.book_id), bookTitle: String(ref.book_title), reviewRunId: String(ref.review_run_id), reviewOrdinal: integer(ref.ordinal), createdAt: String(ref.created_at) })) };
       });
-      // A finding cites a clause of the version its Run applied. The same finding found again by a later Run of its Book —
-      // the same category's finding of the same words, which keeps its mark — counts once (Issue #427 review).
-      const citing = new Map<string, Set<string>>();
-      for (const row of citations) {
-        const run = runsById.get(String(row.review_run_id));
-        const applied = run?.documents.get(builtin.documentId);
-        if (run === undefined || applied === undefined || snapshotted(run, applied) || applied.version !== currentOrdinal ||
-          !applied.categoryIds.includes(String(row.category_id))) continue;
-        const clauseId = String(row.clause_ref);
-        const findings = citing.get(clauseId) ?? new Set<string>();
-        findings.add(`${run.bookId}\n${String(row.category_id)}\n${String(row.kind_ref)}`);
-        citing.set(clauseId, findings);
-      }
-      const versions: ReviewGuidelineVersionProjection[] = [
-        {
-          ordinal: 1,
-          issuer: builtin.issuer,
-          versionId: null,
-          recordedAt: null,
-          source: null,
-          clauseCount: builtin.clauses.length,
-          digest: builtinDigest(builtin),
-          ...usedByOf(byVersion.get(1) ?? []),
-        },
-        ...stored.map((version) => ({
-          ordinal: version.ordinal,
-          issuer: version.issuer,
-          versionId: version.versionId,
-          recordedAt: version.recordedAt,
-          source: version.source,
-          clauseCount: version.clauses.length,
-          digest: version.sha256,
-          ...usedByOf(byVersion.get(version.ordinal) ?? []),
-        })),
-      ].reverse();
-      // The versions merged Books were reviewed under and this data never had, highest number first.
-      const merged: ReviewGuidelineMergedVersionProjection[] = Array.from(bySnapshot.values())
-        .sort((a, b) => b.applied.version - a.applied.version || (a.applied.content < b.applied.content ? -1 : 1))
-        .map(({ applied, used }) => ({
-          ordinal: applied.version,
-          issuer: applied.issuer,
-          title: applied.title,
-          clauses: applied.clauses.map((clause, index) => ({ number: index + 1, text: String(clause.text) })),
-          digest: applied.content,
-          ...usedByOf(used),
-        }));
-      // A Book's latest Review Run that used this document names the version it still reads under.
-      const latestByBook = new Map<string, RunReading>();
-      for (const run of runs) {
-        if (!run.documents.has(builtin.documentId)) continue;
-        const known = latestByBook.get(run.bookId);
-        if (known === undefined || run.ordinal > known.ordinal) latestByBook.set(run.bookId, run);
-      }
-      // One that applied a version the Book brought with it when it was merged here is not on the current one either.
-      const olderVersionBooks = Array.from(latestByBook.values())
-        .filter((run) => snapshotted(run, run.documents.get(builtin.documentId)!) || run.documents.get(builtin.documentId)!.version < currentOrdinal)
-        .map((run) => ({
-          bookId: run.bookId,
-          bookTitle: run.bookTitle,
-          ordinal: run.documents.get(builtin.documentId)!.version,
-          merged: snapshotted(run, run.documents.get(builtin.documentId)!),
-        }))
-        .sort((a, b) => (a.bookTitle < b.bookTitle ? -1 : a.bookTitle > b.bookTitle ? 1 : a.bookId < b.bookId ? -1 : 1));
+      requireGuideline(selected?.mergedClause === undefined || mergedVersions.some((version) => version.digest === selected.mergedClause!.digest),
+        'REVIEW_GUIDELINE_PAGE_INVALID', '随图书带来的条款页已失效，请重新打开。');
       return {
-        documentId: builtin.documentId,
-        title: current.document.title,
-        issuer: current.document.issuer,
-        currentOrdinal,
-        use,
-        appliedBy,
-        clauses: current.document.clauses.map((clause, index) => ({
-          clauseId: clause.clauseId,
-          number: index + 1,
-          text: clause.text,
-          citations: citing.get(clause.clauseId)?.size ?? 0,
-        })),
-        versions,
-        mergedVersions: merged.slice(0, MAX_GUIDELINE_MERGED_VERSIONS_SHOWN),
-        mergedVersionCount: merged.length,
-        olderVersionBookCount: olderVersionBooks.length,
-        olderVersionBooks: olderVersionBooks.slice(0, MAX_GUIDELINE_OLDER_BOOKS_SHOWN),
+        documentId: builtin.documentId, title: current.document.title, issuer: current.document.issuer,
+        currentOrdinal, use, appliedBy, ...fragment,
+        clauses: fragment.clauses.map((clause) => ({ ...clause, citations: counts.get(clause.clauseId) ?? 0 })),
+        versions, versionCount: currentOrdinal, versionsBefore: before, versionsNext: oldest > 1 ? oldest : null,
+        mergedVersions, mergedVersionCount: mergedCount, mergedVersionsBefore: mergedBefore,
+        mergedVersionsNext: mergedNextRow === undefined ? null : { ordinal: integer(mergedNextRow.version), digest: String(mergedNextRow.content) },
+        olderVersionBookCount: integer(olderCount.count),
+        olderVersionBooks: older.map((row) => ({ bookId: String(row.book_id), bookTitle: String(row.book_title), ordinal: integer(row.version), merged: integer(row.snapshot) === 1 })),
       };
     });
     return { documents };
+    } finally { this.#dropUsage(); }
   }
 }

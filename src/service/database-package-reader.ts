@@ -1,5 +1,10 @@
-import { createHash } from 'node:crypto';
-import { lstat, open, type FileHandle } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { constants } from 'node:fs';
+import { basename } from 'node:path';
+import { lstat, open, rm, type FileHandle } from 'node:fs/promises';
+import { DatabaseSync } from 'node:sqlite';
+import { ensureCanonicalDataDirectory, inspectCanonicalDataFile } from '../shared/data-root.js';
+import { EXPORT_STAGING_DIRECTORY } from './manuscript-export.js';
 import { Inflate, strFromU8 } from 'fflate';
 import type { DatabaseExportContentsProjection } from '../shared/protocol.js';
 import { DIGEST_PATTERN, isRecord, parseCanonicalJson } from './analysis/canonical.js';
@@ -8,6 +13,7 @@ import {
   DATABASE_PACKAGE_MANIFEST_MEMBER,
   DATABASE_PACKAGE_SCHEMA,
   DATABASE_PACKAGE_STORE_MEMBER,
+  verifyCopiedPayloads,
   type DatabasePackageMember,
   type DatabasePackageOrigin,
 } from './database-exports.js';
@@ -248,6 +254,12 @@ export interface VerifiedDatabasePackage {
   readonly manifest: DatabasePackageManifest;
 }
 
+export interface DatabasePackageReadOptions {
+  readonly dataRoot: string;
+  readonly expectedSha256?: string;
+  readonly signal?: AbortSignal;
+}
+
 /**
  * Verify the package at `path`: a regular file, a ZIP whose entries are exactly its manifest and the members it names, each
  * member's size and digest as named. `visit` receives each member's bytes as they are verified, so a caller can take them
@@ -255,6 +267,7 @@ export interface VerifiedDatabasePackage {
  */
 export async function verifyDatabasePackage(
   path: string,
+  options: DatabasePackageReadOptions,
   visit?: { begin(member: DatabasePackageMember): Promise<void>; data(chunk: Uint8Array): Promise<void>; end(): Promise<void> },
 ): Promise<VerifiedDatabasePackage> {
   let info;
@@ -264,24 +277,49 @@ export async function verifyDatabasePackage(
     throw new DatabasePackageError('DATABASE_PACKAGE_UNREADABLE', '无法读取所选的数据库文件。');
   }
   requireShape(info.isFile() && !info.isSymbolicLink() && info.size > 0 && info.size <= 0xffffffff);
-  let handle: FileHandle;
+  let source: FileHandle;
   try {
-    handle = await open(path, 'r');
+    source = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   } catch {
     throw new DatabasePackageError('DATABASE_PACKAGE_UNREADABLE', '无法读取所选的数据库文件。');
   }
+  let copy: FileHandle | undefined;
+  let handle: FileHandle | undefined;
+  let sqlite: FileHandle | undefined;
+  let archivePath: string | undefined;
+  let sqlitePath: string | undefined;
+  const { signal } = options;
   try {
+    signal?.throwIfAborted();
+    const held = await source.stat();
+    requireShape(held.isFile() && held.size > 0 && held.size <= 0xffffffff);
+    const staging = await ensureCanonicalDataDirectory(options.dataRoot, EXPORT_STAGING_DIRECTORY);
+    const owned = await inspectCanonicalDataFile(options.dataRoot, staging, `.${randomUUID()}.ai7db`);
+    requireShape(!owned.exists);
+    copy = await open(owned.path, 'wx', 0o600);
+    archivePath = owned.path;
     const whole = createHash('sha256');
     const buffer = Buffer.allocUnsafe(CHUNK_BYTES);
     let position = 0;
     for (;;) {
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
+      signal?.throwIfAborted();
+      const { bytesRead } = await source.read(buffer, 0, buffer.length, position);
       if (bytesRead === 0) break;
+      requireIntact(position + bytesRead <= held.size && position + bytesRead <= 0xffffffff);
       whole.update(buffer.subarray(0, bytesRead));
+      await copy.writeFile(buffer.subarray(0, bytesRead));
       position += bytesRead;
     }
-    requireIntact(position === info.size);
-    const entries = await readDirectory(handle, info.size);
+    requireIntact(position === held.size);
+    const sha256 = whole.digest('hex');
+    if (options.expectedSha256 !== undefined && sha256 !== options.expectedSha256) {
+      throw new DatabasePackageError('DATABASE_REPLACEMENT_STALE', '所选的数据库文件在预览之后变了，请重新选择。');
+    }
+    await copy.close();
+    copy = undefined;
+    await source.close();
+    handle = await open(archivePath, 'r');
+    const entries = await readDirectory(handle, position);
     const manifestEntry = entries.find((entry) => entry.name === DATABASE_PACKAGE_MANIFEST_MEMBER);
     requireShape(manifestEntry !== undefined && manifestEntry.size <= MAX_MANIFEST_BYTES);
     const manifestChunks: Uint8Array[] = [];
@@ -290,19 +328,46 @@ export async function verifyDatabasePackage(
     const byName = new Map(entries.filter((entry) => entry !== manifestEntry).map((entry) => [entry.name, entry]));
     requireShape(byName.size === manifest.members.length && manifest.members.every((member) => byName.get(member.path)?.size === member.bytes));
     for (const member of manifest.members) {
+      signal?.throwIfAborted();
       const hash = createHash('sha256');
       let bytes = 0;
+      if (member.path === DATABASE_PACKAGE_STORE_MEMBER) {
+        const ownedStore = await inspectCanonicalDataFile(options.dataRoot, staging, `${basename(owned.path)}.store`);
+        requireShape(!ownedStore.exists);
+        sqlite = await open(ownedStore.path, 'wx', 0o600);
+        sqlitePath = ownedStore.path;
+      }
       await visit?.begin(member);
       await streamEntry(handle, byName.get(member.path)!, async (chunk) => {
+        signal?.throwIfAborted();
         hash.update(chunk);
         bytes += chunk.byteLength;
+        if (member.path === DATABASE_PACKAGE_STORE_MEMBER) await sqlite!.writeFile(chunk);
         await visit?.data(chunk);
       });
       requireIntact(bytes === member.bytes && hash.digest('hex') === member.sha256);
+      if (member.path === DATABASE_PACKAGE_STORE_MEMBER) {
+        await sqlite!.close();
+        sqlite = undefined;
+      }
       await visit?.end();
     }
-    return { bytes: info.size, sha256: whole.digest('hex'), manifest };
+    try {
+      const database = new DatabaseSync(sqlitePath!, { readOnly: true });
+      try {
+        requireIntact(database.prepare('PRAGMA user_version').get()?.user_version === manifest.schemaRevision);
+      } finally { database.close(); }
+      await verifyCopiedPayloads(sqlitePath!, manifest.members, manifest.schemaRevision, signal);
+    } catch {
+      signal?.throwIfAborted();
+      requireIntact(false);
+    }
+    return { bytes: position, sha256, manifest };
   } finally {
-    await handle.close();
+    await Promise.allSettled([source.close(), copy?.close(), handle?.close(), sqlite?.close()]);
+    if (sqlitePath !== undefined) {
+      await Promise.all(['', '-wal', '-shm', '-journal'].map((suffix) => rm(`${sqlitePath}${suffix}`, { force: true })));
+    }
+    if (archivePath !== undefined) await rm(archivePath, { force: true });
   }
 }

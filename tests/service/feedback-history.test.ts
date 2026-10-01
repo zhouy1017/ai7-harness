@@ -6,6 +6,7 @@ import { EditorialStore } from '../../src/service/store.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import {
   MAX_FEEDBACK_HISTORY_REASON_GRAPHEMES,
+  MAX_FEEDBACK_HISTORY_ENTRIES,
   MAX_FRAME_BYTES,
   MAX_MARK_BODY_CODE_UNITS,
   type CreateEditorialMarkInput,
@@ -71,7 +72,7 @@ function decider(store: EditorialStore, book: Imported) {
   const binding = { manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId };
   let at = 0;
   return {
-    make: (): string => store.createEditorialMark(suggestion(book, window, at++, `改${at}`)).markId,
+    make: (): string => store.createEditorialMark(suggestion(book, window, at++ % 60, `改${at}`)).markId,
     decide: (markId: string, disposition: 'rejected' | 'accepted-with-edit' | 'withdrawn', editedText: string | null, reason: string | null) =>
       store.recordChangeSuggestionDecision({ ...binding, markId, clientDecisionId: randomUUID(), disposition, editedText, reason }),
   };
@@ -115,6 +116,12 @@ describe('反馈历史 over the real store (Issue #61, S26c review)', () => {
 
       const history = store.inspectFeedbackHistory();
       expect(history.truncated).toBe(false);
+      const editedOnly = { bookId: book.bookId, signal: '修改后接受' };
+      expect(store.inspectFeedbackHistory(editedOnly).entries.map((entry) => entry.entryId))
+        .toEqual([history.entries.find((entry) => entry.signal === '修改后接受')!.entryId]);
+      const rejectedByEarlierEditor = { bookId: book.bookId, signal: '拒绝', editor: '郑三' };
+      expect(store.inspectFeedbackHistory(rejectedByEarlierEditor).entries.map((entry) => entry.entryId))
+        .toEqual(history.entries.filter((entry) => entry.signal === '拒绝' && entry.peopleVersion === 1).map((entry) => entry.entryId));
       expect(history.entries.map((entry) => [entry.target.kind === 'mark' ? entry.target.markId : null, entry.signal, entry.reasonState, entry.peopleVersion])).toEqual([
         [fourth, '拒绝', 'given', 2], [third, '修改后接受', 'none', 2], [second, '拒绝', 'given', 1], [first, '拒绝', 'given', 1],
       ]);
@@ -147,6 +154,129 @@ describe('反馈历史 over the real store (Issue #61, S26c review)', () => {
     } finally {
       reopened.close();
     }
+  }, 180_000);
+
+  it('dates and attributes the current reason or dismissal to its own event, including after reopening', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let before: ReturnType<EditorialStore['inspectFeedbackHistory']>;
+    try {
+      const book = await importBook(store);
+      const { make, decide } = decider(store, book);
+      store.updateBookPeople({ bookId: book.bookId, expectedVersion: 0, authors: ['周一'], editors: ['郑三'], related: [] });
+      const revisedMark = make();
+      const addedMark = make();
+      const dismissedMark = make();
+      const revised = decide(revisedMark, 'rejected', null, '原原因').card!.suggestion!.decision!;
+      const added = decide(addedMark, 'rejected', null, null).card!.suggestion!.decision!;
+      const dismissed = decide(dismissedMark, 'rejected', null, null).card!.suggestion!.decision!;
+      const old = store.inspectFeedbackHistory();
+      expect(old.entries.every((entry) => entry.peopleVersion === 1)).toBe(true);
+      await later();
+      store.updateBookPeople({ bookId: book.bookId, expectedVersion: 1, authors: ['周一'], editors: ['王五'], related: [] });
+      await later();
+      const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const binding = { manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId };
+      const updated = store.recordProposalDecisionFeedback({ ...binding, markId: revisedMark, decisionId: revised.decisionId,
+        expectedFeedback: 0, action: 'revise', reason: '新原因', reasonSource: 'free-text' }).card!.suggestion!.decision!;
+      await later();
+      store.recordProposalDecisionReason({ ...binding, markId: addedMark, decisionId: added.decisionId, reason: '后来说明', reasonSource: 'free-text' });
+      await later();
+      store.recordProposalDecisionFeedback({ ...binding, markId: dismissedMark, decisionId: dismissed.decisionId,
+        expectedFeedback: 0, action: 'dismiss', reason: null, reasonSource: null });
+      before = store.inspectFeedbackHistory();
+      expect(before.entries.map((entry) => [entry.reasonState, entry.reason, entry.peopleVersion])).toEqual([
+        ['dismissed', null, 2], ['given', '后来说明', 2], ['given', '新原因', 2],
+      ]);
+      expect(before.entries[2]!.recordedAt).toBe(updated.reasonRevisedAt);
+      expect(before.entries.every((entry) => entry.recordedAt > old.entries[0]!.recordedAt)).toBe(true);
+      expect(before.books[0]!.peopleVersions).toEqual([{ version: 2, authors: ['周一'], editors: ['王五'] }]);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(reopened.inspectFeedbackHistory()).toEqual(before!);
+      reopened.markCleanShutdown();
+    } finally { reopened.close(); }
+  }, 180_000);
+
+  it('keeps the newest bounded entries across deep validated feedback and People histories', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let expected: ReturnType<EditorialStore['inspectFeedbackHistory']>;
+    try {
+      const book = await importBook(store);
+      const { make, decide } = decider(store, book);
+      const decisions: Array<{ entryId: string; recordedAt: string }> = [];
+      const firstMark = make();
+      const first = decide(firstMark, 'rejected', null, '初次原因').card!.suggestion!.decision!;
+      const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const binding = { manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId };
+      for (let index = 0; index < 66; index += 1) {
+        store.updateBookPeople({ bookId: book.bookId, expectedVersion: index, authors: ['周一'], editors: [`编辑${index}`], related: [] });
+        store.recordProposalDecisionFeedback({ ...binding, markId: firstMark, decisionId: first.decisionId,
+          expectedFeedback: index, action: 'revise', reason: `修订原因${index}`, reasonSource: 'free-text' });
+      }
+      store.updateBookPeople({ bookId: book.bookId, expectedVersion: 66, authors: ['周一'], editors: ['接任编辑'], related: [] });
+      for (let index = 0; index < MAX_FEEDBACK_HISTORY_ENTRIES + 5; index += 1) {
+        const decision = decide(make(), 'rejected', null, `原因${index}`).card!.suggestion!.decision!;
+        decisions.push({ entryId: `proposal-decision:${decision.decisionId}`, recordedAt: decision.recordedAt });
+      }
+      decisions.sort((a, b) => a.recordedAt > b.recordedAt ? -1 : a.recordedAt < b.recordedAt ? 1 : a.entryId < b.entryId ? -1 : 1);
+      expected = store.inspectFeedbackHistory();
+      expect(expected.entries.map((entry) => entry.entryId)).toEqual(decisions.slice(0, MAX_FEEDBACK_HISTORY_ENTRIES).map((entry) => entry.entryId));
+      expect(expected.truncated).toBe(true);
+      const last = expected.entries.at(-1)!;
+      const older = store.inspectFeedbackHistory({ after: { recordedAt: last.recordedAt, entryId: last.entryId } });
+      expect(older.entries).toHaveLength(6);
+      expect(older.truncated).toBe(false);
+      const oldRoute = store.resolveBookWorkbenchRoute({ kind: 'book', bookId: book.bookId,
+        feedbackEntryId: `proposal-decision:${first.decisionId}` });
+      expect(oldRoute).toMatchObject({ kind: 'book', bookId: book.bookId,
+        feedbackTarget: { kind: 'mark', markId: firstMark, detached: false } });
+      expect(() => store.resolveBookWorkbenchRoute({ kind: 'book', bookId: book.bookId,
+        feedbackEntryId: `proposal-decision:${randomUUID()}` })).toThrow();
+      expect(new Set([...expected.entries, ...older.entries].map((entry) => entry.entryId)).size).toBe(MAX_FEEDBACK_HISTORY_ENTRIES + 6);
+      const priorEditor = store.inspectFeedbackHistory({ editor: '编辑65' });
+      expect(priorEditor.entries.map((entry) => [entry.reason, entry.peopleVersion])).toEqual([['修订原因65', 66]]);
+      expect(priorEditor.truncated).toBe(false);
+      // Time and dimension filters run before the response bound, together with the historic people and exclusive cursor.
+      const oldInstant = priorEditor.entries[0]!.recordedAt;
+      const oldBounds = { recordedFrom: oldInstant, recordedBefore: new Date(Date.parse(oldInstant) + 1).toISOString() };
+      const oldFiltered = store.inspectFeedbackHistory({ ...oldBounds, dimension: null, editor: '编辑65' });
+      expect(oldFiltered.entries.map((entry) => entry.entryId)).toEqual([priorEditor.entries[0]!.entryId]);
+      expect(oldFiltered.truncated).toBe(false);
+      expect(store.inspectFeedbackHistory({ ...oldBounds, dimension: '人物与名称' }).entries).toEqual([]);
+      expect(store.inspectFeedbackHistory({ ...oldBounds, dimension: null, editor: '编辑65',
+        after: { recordedAt: oldInstant, entryId: priorEditor.entries[0]!.entryId } }).entries).toEqual([]);
+      const bounded = store.inspectFeedbackHistory({ recordedFrom: decisions.at(-1)!.recordedAt, dimension: null });
+      const boundary = bounded.entries.at(-1)!;
+      const boundedOlder = store.inspectFeedbackHistory({ recordedFrom: decisions.at(-1)!.recordedAt, dimension: null,
+        after: { recordedAt: boundary.recordedAt, entryId: boundary.entryId } });
+      expect([...bounded.entries, ...boundedOlder.entries].map((entry) => entry.entryId)).toEqual(decisions.map((entry) => entry.entryId));
+      expect(store.inspectFeedbackHistory({ recordedBefore: oldInstant }).entries).toEqual([]);
+      expect(store.inspectFeedbackHistory({ origin: 'analysis-feedback' }).entries).toEqual([]);
+      expect(store.inspectFeedbackHistory()).toEqual(expected);
+      expect(expected.entries.every((entry) => entry.peopleVersion === 67)).toBe(true);
+      expect(wire(expected)).toBeLessThan(MAX_FRAME_BYTES);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(reopened.inspectFeedbackHistory()).toEqual(expected!);
+      reopened.markCleanShutdown();
+    } finally { reopened.close(); }
+    // A corrupted old, undisplayed predecessor must still fail the read rather than hide behind the response bound.
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      const trigger = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND name = 'proposal_decision_feedback_no_update'").get()!;
+      db.exec('DROP TRIGGER proposal_decision_feedback_no_update');
+      db.exec("UPDATE proposal_decision_feedback SET canonical_json = '{}' WHERE ordinal = 1");
+      db.exec(String(trigger.sql));
+    } finally { db.close(); }
+    const damaged = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(() => damaged.inspectFeedbackHistory()).toThrow('处理原因的记录已损坏');
+      damaged.markCleanShutdown();
+    } finally { damaged.close(); }
   }, 180_000);
 
   it('answers well inside a frame however long the reasons are', async () => {

@@ -1,7 +1,8 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   MAX_SERIES_KNOWLEDGE_CONTENT_CHARACTERS,
+  MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN,
   MAX_SERIES_KNOWLEDGE_QUOTE_GRAPHEMES,
   MAX_SERIES_KNOWLEDGE_SUBJECT_CHARACTERS,
   SERIES_KNOWLEDGE_CLASSES,
@@ -25,8 +26,8 @@ import { graphemesOf } from '../shared/mark-anchor.js';
  *
  * Conflicts are found by identity only — the same item, or the same name — never by what the words mean.
  *
- * Schema revision 53 owns four relations, ledgers like the others: each candidate's versions, the items, their revisions,
- * and the promotion decisions. Each record is canonical and digested, appended once and never rewritten.
+ * Schema revision 53 owns five relations, ledgers like the others: each candidate's versions, the items, their revisions,
+ * the promotion decisions, and individually retained conflicts. Each record is canonical and digested, appended once and never rewritten.
  */
 
 const CLASS_CHECK = SERIES_KNOWLEDGE_CLASSES.map((entry) => `'${entry}'`).join(', ');
@@ -75,6 +76,15 @@ export const SERIES_KNOWLEDGE_SCHEMA_SQL = {
   CHECK((ordinal = 1) = (supersedes_revision_id IS NULL)),
   UNIQUE(item_id, ordinal)
 ) STRICT`,
+  series_knowledge_conflicts: `CREATE TABLE series_knowledge_conflicts (
+  revision_id TEXT NOT NULL REFERENCES series_knowledge_revisions(revision_id) DEFERRABLE INITIALLY DEFERRED,
+  ordinal INTEGER NOT NULL CHECK(ordinal >= 1),
+  kind TEXT NOT NULL CHECK(kind IN ('existing-item', 'competing-candidate', 'item-updated')),
+  line TEXT NOT NULL,
+  canonical_json TEXT NOT NULL,
+  sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
+  PRIMARY KEY(revision_id, ordinal)
+) STRICT`,
   series_knowledge_promotions: `CREATE TABLE series_knowledge_promotions (
   decision_id TEXT PRIMARY KEY,
   candidate_id TEXT NOT NULL UNIQUE,
@@ -119,6 +129,7 @@ export const SERIES_KNOWLEDGE_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArra
     'source_book_id>books.book_id:NO ACTION/NO ACTION/NONE',
     'supersedes_revision_id>series_knowledge_revisions.revision_id:NO ACTION/NO ACTION/NONE',
   ],
+  series_knowledge_conflicts: ['revision_id>series_knowledge_revisions.revision_id:NO ACTION/NO ACTION/NONE'],
   series_knowledge_promotions: [
     'candidate_version_id>series_knowledge_candidates.version_id:NO ACTION/NO ACTION/NONE',
     'revision_id>series_knowledge_revisions.revision_id:NO ACTION/NO ACTION/NONE',
@@ -140,14 +151,15 @@ type SqlRow = Record<string, SQLOutputValue>;
 
 const CANDIDATE_SCHEMA = 'ai7.series-knowledge-candidate/1';
 const ITEM_SCHEMA = 'ai7.series-knowledge-item/1';
-const REVISION_SCHEMA = 'ai7.series-knowledge-revision/1';
+const REVISION_SCHEMA = 'ai7.series-knowledge-revision/2';
+const CONFLICT_SCHEMA = 'ai7.series-knowledge-conflict/1';
 const PROMOTION_SCHEMA = 'ai7.series-knowledge-promotion/1';
 const REVIEW_SCHEMA = 'ai7.series-knowledge-review/1';
 const ACTOR = '本机编辑';
 const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'series_knowledge_items'";
 const INVALID = '书系知识记录已损坏。';
 
-/** Revision 53's relations, created once: a store that predates them gains four empty relations and nothing existing moves. */
+/** Revision 53's relations, created once: a store that predates them gains five empty relations and nothing existing moves. */
 export function initializeSeriesKnowledgeSchema(db: DatabaseSync): void {
   if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
   db.exec('BEGIN IMMEDIATE');
@@ -237,7 +249,10 @@ export interface StoredRevision {
   readonly content: string;
   readonly authoring: 'editor' | 'manuscript-revision';
   readonly provenance: StoredProvenance | null;
+  /** Bounded preview; the immutable conflict ledger retains every entry. */
   readonly conflicts: ReadonlyArray<SeriesKnowledgeConflictProjection>;
+  readonly conflictCount: number;
+  readonly conflictsDigest: string;
   readonly reuseScope: SeriesKnowledgeReuseScope;
   readonly candidateVersionId: string;
   readonly decisionId: string;
@@ -251,8 +266,9 @@ export interface StoredItem {
   readonly subject: string;
   readonly knowledgeClass: SeriesKnowledgeClass;
   readonly createdAt: string;
-  /** Oldest first; the last is the item's current revision. */
-  readonly revisions: ReadonlyArray<StoredRevision>;
+  /** Current revision after complete history validation, with its exact total. */
+  readonly current: StoredRevision;
+  readonly revisionCount: number;
 }
 
 /** A disclosed conflict with what it points at, so a review can tell when it moved. */
@@ -267,10 +283,6 @@ function isProvenance(value: unknown): value is StoredProvenance {
     Number.isSafeInteger(value.toGrapheme) && typeof value.quote === 'string' && value.quote.length > 0;
 }
 
-function isConflicts(value: unknown): value is SeriesKnowledgeConflictProjection[] {
-  return Array.isArray(value) && value.every((entry) => isRecord(entry) &&
-    (entry.kind === 'existing-item' || entry.kind === 'competing-candidate' || entry.kind === 'item-updated') && typeof entry.line === 'string');
-}
 
 /**
  * The conflicts a review discloses for a candidate (SER-016), by identity alone: for a new item, an item of the Series with the
@@ -278,56 +290,66 @@ function isConflicts(value: unknown): value is SeriesKnowledgeConflictProjection
  * the same item or the same name. Each line names the item or the candidate and its version, never their words (Issue #63
  * review), so a review stays small however many there are.
  */
-export function seriesKnowledgeConflicts(
+export function* seriesKnowledgeConflicts(
   candidate: Pick<StoredCandidate, 'candidateId' | 'target'>,
-  items: ReadonlyArray<StoredItem>,
-  open: ReadonlyArray<Pick<StoredCandidate, 'candidateId' | 'versionId' | 'version' | 'target'>>,
-): FoundConflict[] {
+  items: Iterable<StoredItem>,
+  open: Iterable<Pick<StoredCandidate, 'candidateId' | 'versionId' | 'version' | 'target'>>,
+): IterableIterator<FoundConflict> {
   const key = seriesKnowledgeSubjectKey(candidate.target.subject);
-  const found: FoundConflict[] = [];
   if (candidate.target.kind === 'new') {
     for (const item of items) {
       if (seriesKnowledgeSubjectKey(item.subject) !== key) continue;
-      const current = item.revisions.at(-1)!;
-      found.push({
+      const current = item.current;
+      yield {
         kind: 'existing-item',
         ref: current.revisionId,
         line: `书系知识里已有「${item.subject}」（${SERIES_KNOWLEDGE_CLASS_LABELS[item.knowledgeClass]}）第 ${current.ordinal} 版。`,
-      });
+      };
     }
   } else {
     const target = candidate.target;
-    const item = items.find((entry) => entry.itemId === target.itemId);
-    const current = item?.revisions.at(-1);
-    if (item !== undefined && current !== undefined && current.revisionId !== target.baseRevisionId) {
-      found.push({ kind: 'item-updated', ref: current.revisionId, line: `「${item.subject}」在提议之后已更新为第 ${current.ordinal} 版。` });
+    for (const item of items) {
+      if (item.itemId === target.itemId && item.current.revisionId !== target.baseRevisionId) {
+        yield { kind: 'item-updated', ref: item.current.revisionId, line: `「${item.subject}」在提议之后已更新为第 ${item.current.ordinal} 版。` };
+      }
     }
   }
   for (const other of open) {
     if (other.candidateId === candidate.candidateId) continue;
     const sameItem = candidate.target.kind === 'existing' && other.target.kind === 'existing' && other.target.itemId === candidate.target.itemId;
     if (!sameItem && seriesKnowledgeSubjectKey(other.target.subject) !== key) continue;
-    found.push({ kind: 'competing-candidate', ref: other.versionId, line: `另一个候选项也在提议「${other.target.subject}」（第 ${other.version} 版）。` });
+    yield { kind: 'competing-candidate', ref: other.versionId, line: `另一个候选项也在提议「${other.target.subject}」（第 ${other.version} 版）。` };
   }
-  return found;
 }
 
-/** The digest a review carries: the candidate's version, the item's current revision, the conflicts and any blocker. */
-export function seriesKnowledgeReviewDigest(input: {
+/** Stream the complete identity list into its existing canonical digest, retaining only the disclosed preview and count. */
+export function seriesKnowledgeReviewSummary(input: {
   readonly seriesId: string;
   readonly candidateVersionId: string;
   readonly currentRevisionId: string | null;
-  readonly conflicts: ReadonlyArray<Pick<FoundConflict, 'kind' | 'ref'>>;
+  readonly conflicts: Iterable<FoundConflict>;
   readonly blocked: string | null;
-}): string {
-  return sha256Hex(canonicalJson({
-    schema: REVIEW_SCHEMA,
-    seriesId: input.seriesId,
-    candidateVersionId: input.candidateVersionId,
-    currentRevisionId: input.currentRevisionId,
-    conflicts: input.conflicts.map((entry) => ({ kind: entry.kind, ref: entry.ref })),
-    blocked: input.blocked,
-  }));
+  readonly after?: number;
+}): { readonly digest: string; readonly count: number; readonly preview: FoundConflict[] } {
+  const hash = createHash('sha256');
+  hash.update('{"blocked":' + canonicalJson(input.blocked) + ',"candidateVersionId":' + canonicalJson(input.candidateVersionId) + ',"conflicts":[');
+  let count = 0;
+  const preview: FoundConflict[] = [];
+  for (const conflict of input.conflicts) {
+    if (count > 0) hash.update(',');
+    hash.update(canonicalJson({ kind: conflict.kind, ref: conflict.ref }));
+    count += 1;
+    if (count > (input.after ?? 0) && preview.length < MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN) preview.push(conflict);
+  }
+  hash.update('],"currentRevisionId":' + canonicalJson(input.currentRevisionId) + ',"schema":' + canonicalJson(REVIEW_SCHEMA) + ',"seriesId":' + canonicalJson(input.seriesId) + '}');
+  return { digest: hash.digest('hex'), count, preview };
+}
+
+/** Candidate list badges need only the exact count, never the complete conflict list. */
+export function countSeriesKnowledgeConflicts(conflicts: Iterable<FoundConflict>): number {
+  let count = 0;
+  for (const _conflict of conflicts) count += 1;
+  return count;
 }
 
 export class SeriesKnowledgeLedger {
@@ -338,9 +360,9 @@ export class SeriesKnowledgeLedger {
   }
 
   /** Every item of a Series, by name, with its revisions verified oldest first and each one's decision. */
-  items(seriesId: string): StoredItem[] {
-    const rows = this.#db.prepare('SELECT * FROM series_knowledge_items WHERE series_id = ? ORDER BY subject, item_id').all(seriesId) as SqlRow[];
-    return rows.map((row) => this.#item(row));
+  *items(seriesId: string): IterableIterator<StoredItem> {
+    const rows = this.#db.prepare('SELECT * FROM series_knowledge_items WHERE series_id = ? ORDER BY subject, item_id').iterate(seriesId) as IterableIterator<SqlRow>;
+    for (const row of rows) yield this.#item(row);
   }
 
   /**
@@ -375,27 +397,29 @@ export class SeriesKnowledgeLedger {
       record.subject === row.subject && record.knowledgeClass === row.knowledge_class && isSeriesKnowledgeClass(record.knowledgeClass) &&
       record.createdAt === row.created_at && record.actor === ACTOR, 'SERIES_KNOWLEDGE_RECORD_INVALID', INVALID);
     const itemId = String(row.item_id);
-    const revisions = this.#revisions(itemId);
-    requireKnowledge(revisions.length > 0, 'SERIES_KNOWLEDGE_RECORD_INVALID', INVALID);
+    let current: StoredRevision | null = null;
+    for (const revision of this.#revisions(itemId)) current = revision;
+    requireKnowledge(current !== null, 'SERIES_KNOWLEDGE_RECORD_INVALID', INVALID);
     return {
       itemId,
       seriesId: String(row.series_id),
       subject: String(row.subject),
       knowledgeClass: record.knowledgeClass as SeriesKnowledgeClass,
       createdAt: String(row.created_at),
-      revisions,
+      current,
+      revisionCount: current.ordinal,
     };
   }
 
-  #revisions(itemId: string): StoredRevision[] {
+  *#revisions(itemId: string): IterableIterator<StoredRevision> {
     const rows = this.#db.prepare(`SELECT r.*, p.decision_id, p.canonical_json decision_json, p.sha256 decision_sha256, p.outcome, p.conflict_disposition,
         p.reuse_scope, p.review_digest, p.candidate_id, p.recorded_at decision_recorded_at, p.candidate_version_id decision_version_id
       FROM series_knowledge_revisions r JOIN series_knowledge_promotions p ON p.revision_id = r.revision_id
-      WHERE r.item_id = ? ORDER BY r.ordinal`).all(itemId) as SqlRow[];
-    requireKnowledge(rows.length === (this.#db.prepare('SELECT count(*) count FROM series_knowledge_revisions WHERE item_id = ?').get(itemId) as SqlRow).count,
-      'SERIES_KNOWLEDGE_RECORD_INVALID', INVALID);
+      WHERE r.item_id = ? ORDER BY r.ordinal`).iterate(itemId) as IterableIterator<SqlRow>;
+    const expected = Number((this.#db.prepare('SELECT count(*) count FROM series_knowledge_revisions WHERE item_id = ?').get(itemId) as SqlRow).count);
+    let count = 0;
     let before: StoredRevision | null = null;
-    return rows.map((row) => {
+    for (const row of rows) {
       const json = String(row.canonical_json);
       requireKnowledge(sha256Hex(json) === String(row.sha256) && sha256Hex(String(row.decision_json)) === String(row.decision_sha256),
         'SERIES_KNOWLEDGE_RECORD_INVALID', INVALID);
@@ -406,7 +430,8 @@ export class SeriesKnowledgeLedger {
         record.ordinal === ordinal && record.content === row.content && (record.authoring === 'editor' || record.authoring === 'manuscript-revision') &&
         (record.authoring === 'editor' ? record.provenance === null : isProvenance(record.provenance)) &&
         (record.provenance === null ? row.source_book_id === null : (record.provenance as StoredProvenance).bookId === row.source_book_id) &&
-        isConflicts(record.conflicts) && isSeriesKnowledgeReuseScope(record.reuseScope) && record.candidateVersionId === row.candidate_version_id &&
+        Number.isSafeInteger(record.conflictCount) && Number(record.conflictCount) >= 0 &&
+        typeof record.conflictsDigest === 'string' && /^[a-f0-9]{64}$/u.test(record.conflictsDigest) && isSeriesKnowledgeReuseScope(record.reuseScope) && record.candidateVersionId === row.candidate_version_id &&
         record.recordedAt === row.recorded_at && record.actor === ACTOR &&
         (record.supersedes ?? null) === (row.supersedes_revision_id ?? null) && (record.supersedes ?? null) === (before?.revisionId ?? null) &&
         ordinal === (before?.ordinal ?? 0) + 1,
@@ -416,7 +441,7 @@ export class SeriesKnowledgeLedger {
         decision.candidateVersionId === row.decision_version_id && decision.candidateVersionId === row.candidate_version_id &&
         decision.outcome === row.outcome && decision.outcome === (ordinal === 1 ? 'created' : 'updated') &&
         decision.conflictDisposition === row.conflict_disposition &&
-        decision.conflictDisposition === ((record.conflicts as unknown[]).length === 0 ? 'none' : 'preserved') &&
+        decision.conflictDisposition === (record.conflictCount === 0 ? 'none' : 'preserved') &&
         decision.reuseScope === row.reuse_scope && decision.reuseScope === record.reuseScope && decision.reviewDigest === row.review_digest &&
         decision.recordedAt === row.decision_recorded_at && decision.actor === ACTOR,
       'SERIES_KNOWLEDGE_RECORD_INVALID', INVALID);
@@ -427,7 +452,9 @@ export class SeriesKnowledgeLedger {
         content: String(row.content),
         authoring: record.authoring as 'editor' | 'manuscript-revision',
         provenance: (record.provenance ?? null) as StoredProvenance | null,
-        conflicts: record.conflicts as SeriesKnowledgeConflictProjection[],
+        conflicts: this.conflictsPage(String(row.revision_id), Number(record.conflictCount), String(record.conflictsDigest), 0, MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN),
+        conflictCount: Number(record.conflictCount),
+        conflictsDigest: String(record.conflictsDigest),
         reuseScope: record.reuseScope as SeriesKnowledgeReuseScope,
         candidateVersionId: String(row.candidate_version_id),
         decisionId: String(row.decision_id),
@@ -435,14 +462,56 @@ export class SeriesKnowledgeLedger {
         recordedAt: String(row.recorded_at),
       };
       before = entry;
-      return entry;
-    });
+      count += 1;
+      yield entry;
+    }
+    requireKnowledge(count === expected, 'SERIES_KNOWLEDGE_RECORD_INVALID', INVALID);
+  }
+
+  /** Validate the complete immutable conflict ledger while retaining one requested page. */
+  conflictsPage(revisionId: string, total: number, digest: string, after: number, limit: number): SeriesKnowledgeConflictProjection[] {
+    const page: SeriesKnowledgeConflictProjection[] = [];
+    const hash = createHash('sha256').update('[');
+    let count = 0;
+    for (const row of this.#db.prepare('SELECT * FROM series_knowledge_conflicts WHERE revision_id = ? ORDER BY ordinal').iterate(revisionId)) {
+      const json = String(row.canonical_json);
+      requireKnowledge(sha256Hex(json) === row.sha256, 'SERIES_KNOWLEDGE_RECORD_INVALID', INVALID);
+      const record = JSON.parse(json) as unknown;
+      requireKnowledge(isRecord(record) && record.schema === CONFLICT_SCHEMA && record.revisionId === revisionId &&
+        record.ordinal === count + 1 && record.ordinal === row.ordinal && record.kind === row.kind && record.line === row.line &&
+        (record.kind === 'existing-item' || record.kind === 'competing-candidate' || record.kind === 'item-updated') && typeof record.line === 'string',
+      'SERIES_KNOWLEDGE_RECORD_INVALID', INVALID);
+      const conflict = { kind: record.kind, line: record.line } as SeriesKnowledgeConflictProjection;
+      if (count > 0) hash.update(',');
+      hash.update(canonicalJson(conflict));
+      count += 1;
+      if (count > after && page.length < limit) page.push(conflict);
+    }
+    requireKnowledge(count === total && hash.update(']').digest('hex') === digest, 'SERIES_KNOWLEDGE_RECORD_INVALID', INVALID);
+    return page;
+  }
+
+  /** Exact immutable revision, with all predecessors and successors still validated. */
+  revision(itemId: string, revisionId: string): StoredRevision | null {
+    let found: StoredRevision | null = null;
+    for (const revision of this.#revisions(itemId)) if (revision.revisionId === revisionId) found = revision;
+    return found;
+  }
+
+  /** Newest-first bounded history page; validation always reaches the end of the ledger. */
+  revisionsPage(itemId: string, before: number | null, limit: number): StoredRevision[] {
+    const page: StoredRevision[] = [];
+    for (const revision of this.#revisions(itemId)) {
+      if (before !== null && revision.ordinal >= before) continue;
+      page.unshift(revision);
+      if (page.length > limit) page.pop();
+    }
+    return page;
   }
 
   /** One candidate's newest version, verified with its whole chain, and whether it was taken in; `null` when there is none. */
   candidate(candidateId: string): StoredCandidate | null {
-    const rows = this.#db.prepare('SELECT * FROM series_knowledge_candidates WHERE candidate_id = ? ORDER BY version').all(candidateId) as SqlRow[];
-    if (rows.length === 0) return null;
+    const rows = this.#db.prepare('SELECT * FROM series_knowledge_candidates WHERE candidate_id = ? ORDER BY version').iterate(candidateId) as IterableIterator<SqlRow>;
     let before: StoredCandidate | null = null;
     for (const row of rows) before = this.#candidate(row, before);
     return before;
@@ -481,11 +550,11 @@ export class SeriesKnowledgeLedger {
   }
 
   /** The candidates of a Series not yet taken in, each at its newest version, oldest first. */
-  open(seriesId: string): StoredCandidate[] {
-    const ids = (this.#db.prepare(`SELECT candidate_id, min(recorded_at) first FROM series_knowledge_candidates WHERE series_id = ?
+  *open(seriesId: string): IterableIterator<StoredCandidate> {
+    const rows = this.#db.prepare(`SELECT candidate_id, min(recorded_at) first FROM series_knowledge_candidates WHERE series_id = ?
       AND candidate_id NOT IN (SELECT candidate_id FROM series_knowledge_promotions) GROUP BY candidate_id ORDER BY first, candidate_id`)
-      .all(seriesId) as SqlRow[]).map((row) => String(row.candidate_id));
-    return ids.map((candidateId) => this.candidate(candidateId)!);
+      .iterate(seriesId) as IterableIterator<SqlRow>;
+    for (const row of rows) yield this.candidate(String(row.candidate_id))!;
   }
 
   /**
@@ -585,13 +654,28 @@ export class SeriesKnowledgeLedger {
    */
   promote(input: {
     readonly candidate: StoredCandidate;
-    readonly conflicts: ReadonlyArray<SeriesKnowledgeConflictProjection>;
+    readonly conflicts: Iterable<SeriesKnowledgeConflictProjection>;
     readonly reuseScope: SeriesKnowledgeReuseScope;
     readonly reviewDigest: string;
   }): { readonly itemId: string; readonly revisionId: string; readonly decisionId: string; readonly outcome: 'created' | 'updated' } {
     const { candidate } = input;
     requireKnowledge(!candidate.promoted, 'SERIES_KNOWLEDGE_ALREADY_PROMOTED', '这个候选项已经纳入书系知识。');
     const recordedAt = new Date().toISOString();
+    const revisionId = randomUUID();
+    const conflictHash = createHash('sha256').update('[');
+    let conflictCount = 0;
+    // Consume the live review before creating the item or revision changes its inputs. The deferred
+    // parent key and caller transaction keep these rows atomic with the promotion, even on failure.
+    const appendConflict = this.#db.prepare('INSERT INTO series_knowledge_conflicts(revision_id, ordinal, kind, line, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)');
+    for (const entry of input.conflicts) {
+      const conflict = { kind: entry.kind, line: entry.line };
+      if (conflictCount > 0) conflictHash.update(',');
+      conflictHash.update(canonicalJson(conflict));
+      conflictCount += 1;
+      const record = canonicalRecord({ schema: CONFLICT_SCHEMA, revisionId, ordinal: conflictCount, ...conflict });
+      appendConflict.run(revisionId, conflictCount, conflict.kind, conflict.line, record.json, record.digest);
+    }
+    const conflictsDigest = conflictHash.update(']').digest('hex');
     let itemId: string;
     let before: StoredRevision | null = null;
     if (candidate.target.kind === 'new') {
@@ -611,9 +695,8 @@ export class SeriesKnowledgeLedger {
       const existing = this.item(candidate.target.itemId);
       requireKnowledge(existing !== null && existing.seriesId === candidate.seriesId, 'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识条目不存在。');
       itemId = existing.itemId;
-      before = existing.revisions.at(-1)!;
+      before = existing.current;
     }
-    const revisionId = randomUUID();
     const ordinal = (before?.ordinal ?? 0) + 1;
     const outcome = ordinal === 1 ? 'created' as const : 'updated' as const;
     const revision = canonicalRecord({
@@ -624,7 +707,8 @@ export class SeriesKnowledgeLedger {
       content: candidate.content,
       authoring: candidate.authoring,
       provenance: candidate.provenance,
-      conflicts: input.conflicts.map((entry) => ({ kind: entry.kind, line: entry.line })),
+      conflictCount,
+      conflictsDigest,
       reuseScope: input.reuseScope,
       candidateVersionId: candidate.versionId,
       supersedes: before?.revisionId ?? null,
@@ -637,7 +721,7 @@ export class SeriesKnowledgeLedger {
     ).run(revisionId, itemId, ordinal, candidate.content, candidate.versionId, candidate.provenance?.bookId ?? null, before?.revisionId ?? null, recordedAt,
       revision.json, revision.digest);
     const decisionId = randomUUID();
-    const conflictDisposition = input.conflicts.length === 0 ? 'none' : 'preserved';
+    const conflictDisposition = conflictCount === 0 ? 'none' : 'preserved';
     const decision = canonicalRecord({
       schema: PROMOTION_SCHEMA,
       decisionId,

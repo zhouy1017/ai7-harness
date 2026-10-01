@@ -353,7 +353,7 @@ export async function extractReplacement(dataRoot: string, packagePath: string, 
   const incoming = join(staging, 'incoming');
   let current: FileHandle | undefined;
   try {
-    const verified = await verifyDatabasePackage(packagePath, {
+    const verified = await verifyDatabasePackage(packagePath, { dataRoot, expectedSha256 }, {
       begin: async (member) => {
         const target = join(incoming, ...member.path.split('/'));
         await mkdir(dirname(target), { recursive: true });
@@ -813,7 +813,7 @@ export class DatabaseReplacements {
     let plan: MergePlan;
     let verified: Awaited<ReturnType<typeof verifyDatabasePackage>>;
     try {
-      verified = await verifyDatabasePackage(source, {
+      verified = await verifyDatabasePackage(source, { dataRoot: this.#dataRoot }, {
         begin: async (member) => {
           if (member.path === DATABASE_PACKAGE_STORE_MEMBER) handle = await open(copy, 'wx');
         },

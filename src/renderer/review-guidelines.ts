@@ -58,13 +58,24 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
   let preview: ReviewGuidelinePreviewProjection | null = null;
   let refusal: { documentId: string; message: string } | null = null;
   let projection: ReviewGuidelinesProjection | null = null;
+  let request = 0;
 
   const paint = (focus: string | null): void => {
+    const opened = new Set(Array.from(root.querySelectorAll<HTMLDetailsElement>('details[open]'), (node) =>
+      `${node.closest<HTMLElement>('[data-guideline-document]')?.dataset['guidelineDocument']}/${node.className}`));
     const list = el('div', 'guideline-list');
     for (const document of projection?.documents ?? []) list.append(card(document));
+    for (const node of list.querySelectorAll<HTMLDetailsElement>('details')) {
+      node.open = opened.has(`${node.closest<HTMLElement>('[data-guideline-document]')?.dataset['guidelineDocument']}/${node.className}`);
+    }
     root.replaceChildren(list);
     root.dataset['guidelineCount'] = String(projection?.documents.length ?? 0);
-    if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();
+    if (focus !== null) {
+      const target = root.querySelector<HTMLElement>(focus);
+      if (target instanceof HTMLButtonElement && target.disabled) {
+        (target.closest('details')?.querySelector('summary') ?? target.closest('section')?.querySelector('h4'))?.focus();
+      } else target?.focus();
+    }
   };
 
   const card = (document: ReviewGuidelineDocumentProjection): HTMLElement => {
@@ -88,7 +99,7 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     if (fixed !== null) node.append(el('p', 'field-note guideline-fixed', fixed));
     // The clauses of the version that applies now, each with how often findings cite it.
     const clauses = el('details', 'guideline-clauses');
-    clauses.append(el('summary', undefined, guidelineClausesSummary(document.clauses.length)));
+    clauses.append(el('summary', undefined, guidelineClausesSummary(document.clauseCount)));
     const list = el('ol', 'guideline-clause-list');
     for (const clause of document.clauses) {
       const item = el('li');
@@ -99,9 +110,10 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
       list.append(item);
     }
     clauses.append(list);
+    if (document.clausePages > 1) clauses.append(clauseControls(document, false));
     // Every version, newest first, with the reviews that used it.
     const versions = el('details', 'guideline-versions');
-    versions.append(el('summary', undefined, guidelineVersionsSummary(document.versions.length)));
+    versions.append(el('summary', undefined, guidelineVersionsSummary(document.versionCount)));
     const rows = el('ul', 'guideline-version-list');
     for (const version of document.versions) {
       const row = el('li', undefined, guidelineVersionLine(version, localInstantLabel));
@@ -112,6 +124,15 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     versions.append(rows, technicalDetails('guideline-facts',
       el('dt', undefined, '文件'), el('dd', 'technical-identity', document.documentId),
       el('dt', undefined, '各版本摘要'), el('dd', 'technical-identity', document.versions.map((version) => `第 ${version.ordinal} 版 ${version.digest}`).join('；'))));
+    if (document.versionCount > document.versions.length) {
+      const controls = el('div', 'button-row');
+      const latest = action('最新版本', 'quiet', 'versions-latest', () => void turn(document, null, document.clausePage, 'versions-latest'));
+      const older = action('更早版本', 'secondary', 'versions-older', () => void turn(document, document.versionsNext, document.clausePage, 'versions-older'));
+      latest.disabled = busy || preview !== null || document.versionsBefore === null;
+      older.disabled = busy || preview !== null || document.versionsNext === null;
+      controls.append(latest, older);
+      versions.append(controls);
+    }
     node.append(clauses, versions);
     // The versions merged Books were reviewed under and this data never had, each with its clauses: read-only (Issue #434
     // review; ADR 0079 §1.5).
@@ -130,9 +151,32 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
           mergedClauses.append(item);
         }
         row.append(mergedClauses);
+        if (version.clausePages > 1) {
+          const controls = el('div', 'button-row');
+          controls.append(el('span', 'field-note', `条款第 ${version.clausePage + 1} / ${version.clausePages} 页；较长条款分段显示。`));
+          for (const [label, step] of [['上一页条款', -1], ['下一页条款', 1]] as const) {
+            const name = `merged-clause-${version.digest}-${step}`;
+            const button = action(label, 'quiet', name, () => void turnMerged(document, document.mergedVersionsBefore,
+              { digest: version.digest, page: version.clausePage + step }, name));
+            button.disabled = busy || preview !== null || version.clausePage + step < 0 || version.clausePage + step >= version.clausePages;
+            controls.append(button);
+          }
+          row.append(controls);
+        }
         mergedRows.append(row);
       }
       merged.append(mergedRows);
+      if (document.mergedVersionsBefore !== null || document.mergedVersionsNext !== null) {
+        const controls = el('div', 'button-row');
+        for (const [label, cursor, name] of [
+          ['最新随书版本', null, 'merged-latest'], ['更早随书版本', document.mergedVersionsNext, 'merged-older'],
+        ] as const) {
+          const button = action(label, 'quiet', name, () => void turnMerged(document, cursor, undefined, name));
+          button.disabled = busy || preview !== null || (name === 'merged-latest' ? document.mergedVersionsBefore === null : cursor === null);
+          controls.append(button);
+        }
+        merged.append(controls);
+      }
       if (document.mergedVersionCount > document.mergedVersions.length) {
         merged.append(el('p', 'field-note', guidelineMergedVersionsMore(document.mergedVersions.length, document.mergedVersionCount)));
       }
@@ -176,7 +220,87 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     cancel.disabled = busy;
     actions.append(confirm, cancel);
     section.append(heading, el('p', 'field-note guideline-preview-changes', guidelinePreviewChanges(shown)), list, actions);
+    if (shown.clausePages > 1) section.insertBefore(clauseControls(shown, true), actions);
     return section;
+  };
+
+  const clauseControls = (shown: ReviewGuidelineDocumentProjection | ReviewGuidelinePreviewProjection, isPreview: boolean): HTMLElement => {
+    const row = el('div', 'button-row');
+    row.append(el('span', 'field-note', `第 ${shown.clausePage + 1} / ${shown.clausePages} 页；较长条款分段显示。`));
+    for (const [step, label, name] of [[-1, '上一页', 'clauses-previous'], [1, '下一页', 'clauses-next']] as const) {
+      const button = action(label, 'secondary', name, () => {
+        if (isPreview && 'previewId' in shown) void turnPreview(shown, shown.clausePage + step, name);
+        else if ('versionsBefore' in shown) void turn(shown, shown.versionsBefore, shown.clausePage + step, name);
+      });
+      button.disabled = busy || (!isPreview && preview !== null) || shown.clausePage + step < 0 || shown.clausePage + step >= shown.clausePages;
+      row.append(button);
+    }
+    return row;
+  };
+
+  const turn = async (shown: ReviewGuidelineDocumentProjection, versionsBefore: number | null, clausePage: number, focus: string): Promise<void> => {
+    if (busy || preview !== null) return;
+    const ticket = ++request;
+    busy = true;
+    paint(null);
+    try {
+      const next = await api.inspectReviewGuidelines({ page: { documentId: shown.documentId, versionsBefore, clausePage,
+        mergedVersionsBefore: shown.mergedVersionsBefore } });
+      if (!root.isConnected || ticket !== request) return;
+      projection = next;
+      refusal = null;
+    } catch (error) {
+      if (!root.isConnected || ticket !== request) return;
+      refusal = { documentId: shown.documentId, message: errorMessage(error, GUIDELINE_STATUS.failed) };
+    } finally {
+      if (root.isConnected && ticket === request) {
+        busy = false;
+        paint(`[data-guideline-document="${shown.documentId}"] [data-guideline-action="${focus}"]`);
+      }
+    }
+  };
+
+  const turnMerged = async (shown: ReviewGuidelineDocumentProjection, cursor: ReviewGuidelineDocumentProjection['mergedVersionsBefore'],
+    clause: { digest: string; page: number } | undefined, focus: string): Promise<void> => {
+    if (busy || preview !== null) return;
+    const ticket = ++request;
+    busy = true;
+    paint(null);
+    try {
+      const next = await api.inspectReviewGuidelines({ page: { documentId: shown.documentId, versionsBefore: shown.versionsBefore,
+        clausePage: shown.clausePage, mergedVersionsBefore: cursor, ...(clause === undefined ? {} : { mergedClause: clause }) } });
+      if (!root.isConnected || ticket !== request) return;
+      projection = next;
+      refusal = null;
+    } catch (error) {
+      if (!root.isConnected || ticket !== request) return;
+      refusal = { documentId: shown.documentId, message: errorMessage(error, GUIDELINE_STATUS.failed) };
+    } finally {
+      if (root.isConnected && ticket === request) {
+        busy = false;
+        paint(`[data-guideline-document="${shown.documentId}"] [data-guideline-action="${focus}"]`);
+      }
+    }
+  };
+
+  const turnPreview = async (shown: ReviewGuidelinePreviewProjection, clausePage: number, focus: string): Promise<void> => {
+    if (busy) return;
+    const ticket = ++request;
+    busy = true;
+    paint(null);
+    try {
+      const next = await api.previewReviewGuidelineVersion({ documentId: shown.documentId, previewId: shown.previewId, clausePage });
+      if (!root.isConnected || ticket !== request) return;
+      preview = next;
+    } catch (error) {
+      if (!root.isConnected || ticket !== request) return;
+      refusal = { documentId: shown.documentId, message: errorMessage(error, GUIDELINE_STATUS.failed) };
+    } finally {
+      if (root.isConnected && ticket === request) {
+        busy = false;
+        paint(`[data-guideline-document="${shown.documentId}"] .guideline-preview [data-guideline-action="${focus}"]`);
+      }
+    }
   };
 
   const choose = async (documentId: string): Promise<void> => {

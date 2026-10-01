@@ -17,6 +17,7 @@ import {
   type LearningEligibilityChoice,
   type LearningMaterialKind,
   type LearningMaterialProjection,
+  type LearningMaterialTarget,
 } from '../shared/protocol.js';
 import { graphemesOf } from '../shared/mark-anchor.js';
 import { canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
@@ -141,6 +142,7 @@ export function initializeLearningEligibilitySchema(db: DatabaseSync): void {
 
 /** A Learning Material as the store identifies it; the ledger decides nothing about it but its eligibility. */
 export interface LearningMaterialCandidate {
+  readonly source: { readonly kind: 'decision'; readonly decisionId: string } | Omit<Extract<LearningMaterialTarget, { kind: 'analysis' }>, 'bookId'> | Omit<Extract<LearningMaterialTarget, { kind: 'review' }>, 'bookId'>;
   readonly materialKey: string;
   readonly kind: LearningMaterialKind;
   readonly originLabel: string;
@@ -227,8 +229,15 @@ export function learningMaterialDigest(candidate: Pick<LearningMaterialCandidate
 }
 
 function bounded(text: string): string {
-  const graphemes = Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(text.replace(/\s+/gu, ' ').trim()), (part) => part.segment);
-  return graphemes.length <= EXCERPT_GRAPHEMES ? graphemes.join('') : `${graphemes.slice(0, EXCERPT_GRAPHEMES).join('')}…`;
+  let excerpt = '';
+  let count = 0;
+  for (const { segment } of new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(text.replace(/\s+/gu, ' ').trim())) {
+    // One grapheme may contain arbitrarily many combining marks. A preview must also fit the service frame.
+    if (count === EXCERPT_GRAPHEMES || excerpt.length + segment.length > 1_024) return `${excerpt}…`;
+    excerpt += segment;
+    count += 1;
+  }
+  return excerpt;
 }
 
 /** A 修改建议's decision in the editor's words, as 学习准入 and 反馈历史 both say it. */
@@ -246,6 +255,7 @@ export function proposalDecisionCandidate(decision: {
   readonly editedText: string | null;
   readonly reason: string | null;
   readonly reasonSource: string | null;
+  readonly feedbackEntries: number;
   readonly recordedAt: string;
   /** When the decision was made, whatever reason came later. */
   readonly decidedAt: string;
@@ -259,6 +269,7 @@ export function proposalDecisionCandidate(decision: {
     if (decision.reason !== null) excerpt.push(`你的原因：${bounded(decision.reason)}`);
   }
   return {
+    source: { kind: 'decision', decisionId: decision.decisionId },
     materialKey: `proposal-decision:${decision.decisionId}`,
     kind: 'proposal-decision',
     originLabel: `修改建议 · ${DISPOSITION_LABELS[decision.disposition] ?? decision.disposition}`,
@@ -271,6 +282,7 @@ export function proposalDecisionCandidate(decision: {
       editedText: decision.editedText,
       reason: decision.reason,
       reasonSource: decision.reasonSource,
+      feedbackEntries: decision.feedbackEntries,
     },
     excerpt,
     rationale: decision.reason !== null
@@ -318,6 +330,7 @@ export function analysisFeedbackCandidate(signal: {
     if (signal.correction !== null) excerpt.push(`你的修正：${bounded(signal.correction)}`);
   }
   return {
+    source: { kind: 'analysis', revisionId: signal.revisionId, itemKey: signal.itemKey, dimension: signal.dimension },
     materialKey: `analysis-feedback:${signal.revisionId}/${signal.itemKey}`,
     kind: 'analysis-feedback',
     originLabel: `分析反馈 · ${DIMENSION_LABELS[signal.dimension]}`,
@@ -339,6 +352,7 @@ export function reviewDispositionCandidate(signal: {
   readonly recordedAt: string;
 }, withExcerpt: boolean): LearningMaterialCandidate {
   return {
+    source: { kind: 'review', reviewRunId: signal.reviewRunId, findingId: signal.findingId },
     materialKey: `review-disposition:${signal.reviewRunId}/${signal.findingId}`,
     kind: 'review-disposition',
     originLabel: `审阅 · ${signal.categoryLabel}`,
@@ -387,24 +401,30 @@ export class LearningEligibilityLedger {
   }
 
   /** One Book's decisions, by material, each chain verified: its digests, its records against their rows, and its order. */
-  chains(bookId: string): Map<string, StoredDecision[]> {
-    const rows = this.#db.prepare('SELECT * FROM learning_eligibility_decisions WHERE book_id = ? ORDER BY material_key, ordinal').all(bookId) as SqlRow[];
-    const chains = new Map<string, StoredDecision[]>();
+  *#entries(bookId: string, onlyMaterial: string | null = null): IterableIterator<StoredDecision> {
+    const rows = (onlyMaterial === null
+      ? this.#db.prepare('SELECT * FROM learning_eligibility_decisions WHERE book_id = ? ORDER BY material_key, ordinal').iterate(bookId)
+      : this.#db.prepare('SELECT * FROM learning_eligibility_decisions WHERE book_id = ? AND material_key = ? ORDER BY ordinal').iterate(bookId, onlyMaterial)) as IterableIterator<SqlRow>;
+    let previousMaterial: string | null = null;
+    let previousId: string | null = null;
+    let previousOrdinal = 0;
     for (const row of rows) {
       const json = String(row.canonical_json);
       requireLearning(sha256Hex(json) === String(row.sha256), 'LEARNING_ELIGIBILITY_RECORD_INVALID', '学习准入记录已损坏。');
       const record = JSON.parse(json) as unknown;
       const materialKey = String(row.material_key);
-      const chain = chains.get(materialKey) ?? [];
-      const before = chain.at(-1) ?? null;
+      if (materialKey !== previousMaterial) {
+        previousId = null;
+        previousOrdinal = 0;
+      }
       const ordinal = Number(row.ordinal);
       requireLearning(isRecord(record) && record.schema === DECISION_SCHEMA && record.decisionId === row.decision_id && record.bookId === bookId &&
         record.materialKey === materialKey && record.materialDigest === row.material_digest && record.ordinal === ordinal &&
         record.choice === row.choice && record.recordedAt === row.recorded_at && record.actor === ACTOR && knownBasis(record.basis) &&
-        (record.supersedes ?? null) === (row.supersedes_decision_id ?? null) && (record.supersedes ?? null) === (before?.decisionId ?? null) &&
-        ordinal === (before?.ordinal ?? 0) + 1 && (record.note === null || typeof record.note === 'string'),
+        (record.supersedes ?? null) === (row.supersedes_decision_id ?? null) && (record.supersedes ?? null) === previousId &&
+        ordinal === previousOrdinal + 1 && (record.note === null || typeof record.note === 'string'),
       'LEARNING_ELIGIBILITY_RECORD_INVALID', '学习准入记录已损坏。');
-      chain.push({
+      const entry: StoredDecision = {
         decisionId: String(row.decision_id),
         materialKey,
         materialDigest: String(row.material_digest),
@@ -412,20 +432,36 @@ export class LearningEligibilityLedger {
         choice: String(row.choice) as LearningEligibilityChoice,
         note: record.note as string | null,
         recordedAt: String(row.recorded_at),
-      });
-      chains.set(materialKey, chain);
+      };
+      previousMaterial = materialKey;
+      previousId = entry.decisionId;
+      previousOrdinal = ordinal;
+      yield entry;
     }
-    return chains;
+  }
+
+  #validateBook(bookId: string): void {
+    for (const _entry of this.#entries(bookId)) { /* Exhaust validation without retaining history. */ }
+  }
+
+  #latest(bookId: string, materialKey: string): StoredDecision | null {
+    let latest: StoredDecision | null = null;
+    for (const entry of this.#entries(bookId, materialKey)) latest = entry;
+    return latest;
   }
 
   /** Each candidate as its Review Card shows it, and where it stands. */
-  project(bookId: string, candidates: ReadonlyArray<LearningMaterialCandidate>): LearningMaterialProjection[] {
-    const chains = this.chains(bookId);
-    return candidates.map((candidate) => {
-      const chain = chains.get(candidate.materialKey) ?? [];
-      const latest = chain.at(-1) ?? null;
+  project(bookId: string, candidates: ReadonlyArray<LearningMaterialCandidate>): Array<Omit<LearningMaterialProjection, 'target' | 'sourceTask'>> {
+    return Array.from(this.projectEntries(bookId, candidates));
+  }
+
+  /** Stream current standings after validating the complete Book ledger, retaining one candidate at a time. */
+  *projectEntries(bookId: string, candidates: Iterable<LearningMaterialCandidate>): IterableIterator<Omit<LearningMaterialProjection, 'target' | 'sourceTask'>> {
+    this.#validateBook(bookId);
+    for (const candidate of candidates) {
+      const latest = this.#latest(bookId, candidate.materialKey);
       const digest = learningMaterialDigest(candidate);
-      return {
+      yield {
         materialKey: candidate.materialKey,
         kind: candidate.kind,
         digest,
@@ -435,9 +471,9 @@ export class LearningEligibilityLedger {
         rationale: candidate.rationale,
         state: latest === null ? 'pending' : latest.materialDigest !== digest ? 'changed' : latest.choice === 'deferred' ? 'deferred' : 'decided',
         decision: latest === null ? null : { choice: latest.choice, note: latest.note, decidedAt: latest.recordedAt },
-        decisions: chain.length,
+        decisions: latest?.ordinal ?? 0,
       };
-    });
+    }
   }
 
   /**
@@ -454,14 +490,15 @@ export class LearningEligibilityLedger {
   }): void {
     requireLearning(CHOICES.includes(input.choice), 'LEARNING_ELIGIBILITY_INVALID', '学习准入的选择无效。');
     const note = noteOf(input.note);
-    const chain = this.chains(input.bookId).get(input.candidate.materialKey) ?? [];
-    requireLearning(chain.length === input.expectedDecisions, 'LEARNING_ELIGIBILITY_MOVED', '这条材料的学习准入刚被改过；请看过现在的决定再定。');
+    this.#validateBook(input.bookId);
+    const latest = this.#latest(input.bookId, input.candidate.materialKey);
+    const count = latest?.ordinal ?? 0;
+    requireLearning(count === input.expectedDecisions, 'LEARNING_ELIGIBILITY_MOVED', '这条材料的学习准入刚被改过；请看过现在的决定再定。');
     const digest = learningMaterialDigest(input.candidate);
-    const latest = chain.at(-1) ?? null;
     requireLearning(latest === null || latest.materialDigest !== digest || latest.choice !== input.choice || latest.note !== note,
       'LEARNING_ELIGIBILITY_UNCHANGED', '学习准入没有变化。');
     const decisionId = randomUUID();
-    const ordinal = chain.length + 1;
+    const ordinal = count + 1;
     const recordedAt = new Date().toISOString();
     const record = canonicalRecord({
       schema: DECISION_SCHEMA,
