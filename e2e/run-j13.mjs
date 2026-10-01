@@ -1168,6 +1168,50 @@ async function main() {
       await readSeries(renderer, (page) => page.history.length === 20, 'series-history-reset-bounded');
     }
 
+    at('knowledge-member-series-pages');
+    // The same manuscript Book belongs to all fifty-one runner-authored Series: proposal selection must reach the tail.
+    requireJourney(await renderer.evaluate(`(async () => {
+      let after = null;
+      do {
+        const page = await window.ai7.inspectSeriesList({ after });
+        for (const series of page.series) if (series.title.startsWith('分页书系')) {
+          const input = { seriesId: series.seriesId, bookId: ${JSON.stringify(member)}, kind: 'add' };
+          const preview = await window.ai7.previewSeriesMembershipChange(input);
+          await window.ai7.changeSeriesMembership({ ...input, previewDigest: preview.previewDigest });
+        }
+        after = page.nextCursor;
+      } while (after !== null);
+      return (await window.ai7.inspectBookSeries({ bookId: ${JSON.stringify(member)} })).membershipCount === 52;
+    })()`), 'knowledge-member-series-seed');
+    await leaveSeries(renderer, 'knowledge-member-series');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]`, 'knowledge-member-series-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(member)}]') && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'knowledge-member-series-editor', 120_000);
+    await assertRenderer(renderer, MARK_HELPERS, 'knowledge-member-series-helpers');
+    await openSelectionMenu(renderer, blockId, 2, 8, 'knowledge-member-series-menu');
+    await assertRenderer(renderer, `(() => { const item = window.__j13.item('choose-knowledge-series'); if (!(item instanceof HTMLButtonElement) || item.disabled) return false; item.click(); return true; })()`, 'knowledge-member-series-choose');
+    const chooser = '[data-mark-composer="choose-knowledge-series"]';
+    await waitFor(renderer, `document.querySelectorAll('${chooser} .knowledge-series-choices button').length === 50`, 'knowledge-member-series-first');
+    for (let pass = 0; pass < 2; pass += 1) {
+      await click(renderer, '下一页书系', 'knowledge-member-series-next');
+      await waitFor(renderer, `document.querySelectorAll('${chooser} .knowledge-series-choices button').length === 2`, 'knowledge-member-series-tail');
+      await click(renderer, '回到第一页', 'knowledge-member-series-reset');
+      await waitFor(renderer, `document.querySelectorAll('${chooser} .knowledge-series-choices button').length === 50`, 'knowledge-member-series-reset-ready');
+    }
+    await click(renderer, '下一页书系', 'knowledge-member-series-next-final');
+    await waitFor(renderer, `document.querySelectorAll('${chooser} .knowledge-series-choices button').length === 2`, 'knowledge-member-series-tail-final');
+    const offPage = await renderer.evaluate(`(() => { const item = Array.from(document.querySelectorAll('${chooser} .knowledge-series-choices button')).find((node) => node.textContent === '分页书系050'); if (!(item instanceof HTMLButtonElement)) return null; const id = item.dataset.seriesId; item.click(); return id; })()`);
+    requireJourney(UUID_PATTERN.test(offPage ?? ''), 'knowledge-member-series-tail-identity');
+    await waitFor(renderer, `window.__j13.composer()?.dataset.markComposer === 'propose-series-knowledge'`, 'knowledge-member-series-composer');
+    await assertRenderer(renderer, `window.__j13.composer().querySelector('[data-mark-quote]').textContent === ${JSON.stringify(quote)} && window.__j13.write('subject', '分页原文提议') && window.__j13.write('knowledgeClass', 'canon') && window.__j13.act('submit')`, 'knowledge-member-series-submit');
+    await waitFor(renderer, `window.__j13.composer() === null && ${status} === '已提议为书系「分页书系050」的知识候选项'`, 'knowledge-member-series-proposed');
+    requireJourney(await renderer.evaluate(`(async () => {
+      const page = await window.ai7.inspectSeriesKnowledgeCandidates({ seriesId: ${JSON.stringify(offPage)}, after: null });
+      const candidate = page.candidates[0];
+      const source = candidate?.provenance;
+      return page.candidates.length === 1 && candidate.authoring === 'manuscript-revision' && source?.bookId === ${JSON.stringify(member)} &&
+        source.blockId === ${JSON.stringify(blockId)} && source.fromGrapheme === 2 && source.toGrapheme === 8 && source.quote === ${JSON.stringify(quote)};
+    })()`), 'knowledge-member-series-provenance');
+
     at('zero-activity');
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key))`, 'exact-service-readiness-remained-zero');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-network-provider-session');
