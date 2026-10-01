@@ -557,7 +557,9 @@ describe('升级前备份 over the real store', () => {
     await writePendingUpgrade(roots.dataRoot, THEIRS, THEIR_TARGET);
     const db = new DatabaseSync(storePath());
     try {
-      new DataVersionLedger(db).recordOpen({ softwareVersion: '0.0.12', dataVersion: 2, schemaRevision: DATABASE_REPLACEMENT_SCHEMA_VERSION });
+      const ledger = new DataVersionLedger(db);
+      ledger.recordOpen({ ...THEIR_TARGET, upgrade: THEIRS });
+      ledger.recordOpen({ softwareVersion: '0.0.12', dataVersion: 2, schemaRevision: DATABASE_REPLACEMENT_SCHEMA_VERSION });
     } finally { db.close(); }
     const store = await open(BOTH);
     try {
