@@ -1123,7 +1123,7 @@ async function main() {
     await readSeriesList(renderer, (page) => page.items.length === 50, 'list-first-page');
     for (let repeat = 0; repeat < 2; repeat += 1) {
       await clickSelector(renderer, '[data-series-action="list-more"]', 'list-next');
-      await readSeriesList(renderer, (page) => page.items.length === 4 && page.focus === 'open', 'list-bounded');
+      await readSeriesList(renderer, (page) => page.items.length === 3 && page.focus === 'open', 'list-bounded');
       await clickSelector(renderer, '[data-series-action="list-first"]', 'list-reset');
       await readSeriesList(renderer, (page) => page.items.length === 50 && page.focus === 'open', 'list-reset-bounded');
     }
