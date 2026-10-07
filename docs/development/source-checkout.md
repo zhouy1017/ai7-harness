@@ -367,6 +367,8 @@ When an open finds the store at a lower Data Version than this software's:
 2. Install and start the earlier AI7, which starts with empty data.
 3. In its 导入数据库, choose the backup from the backup location, which stays beside the renamed folder's original name, and replace.
 
+When the upgrade began from the middle state an unfinished earlier upgrade left, which no AI7 can import, its record names the earlier complete backup (`rollback`) and the steps go back to that one, shown while it is in the backup location even if this upgrade's own backup is not.
+
 The suites open stores with their own classification (`StoreControl.schemaRevisionClasses`) and stop an open just before or after its version record (`StoreControl.interruptUpgradeAt`); the service entry sets neither.
 
 

@@ -71,7 +71,7 @@ export function dataVersionRollbackSteps(
 ): { readonly lead: string; readonly steps: ReadonlyArray<string> } {
   const rollback = upgrade.rollback;
   if (rollback !== undefined && !rollback.backupPresent) return {
-    lead: `本次升级前是一次未完成升级留下的中间状态，不能导入它的旧版 AI7。可回退的较早备份「${rollback.backupFileName}」（数据版本 ${rollback.dataVersion}）已不在备份位置，无法按此记录回退。`, steps: [],
+    lead: `本次升级前是一次未完成升级留下的中间状态，它的旧版 AI7 不能导入这份备份。可回退的较早备份「${rollback.backupFileName}」（数据版本 ${rollback.dataVersion}）已不在备份位置，无法按此记录回退。`, steps: [],
   };
   const version = rollback === undefined ? upgrade.fromSoftwareVersion : rollback.softwareVersion;
   const earlier = version === null ? '升级前的 AI7' : `升级前的 AI7（${version}）`;

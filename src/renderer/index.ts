@@ -4541,7 +4541,9 @@ async function renderDataAndStorage(): Promise<void> {
           element('p', undefined, dataVersionUpgradeLine(upgraded, localInstantLabel)),
           element('p', 'field-note', dataVersionUpgradeBackupLine(upgraded)),
         );
-        if (upgraded.backupPresent) {
+        // Going back uses the earlier complete backup when this upgrade began from an unfinished one's middle state, so the steps
+        // stand while that backup does, whatever became of this upgrade's own (Issue #433 review).
+        if (upgraded.rollback?.backupPresent ?? upgraded.backupPresent) {
           const rollback = dataVersionRollbackSteps(upgraded, { dataRoot: projection.canonicalRoot, backupLocation: version.backupLocation });
           const steps = element('ol', 'data-version-rollback');
           for (const step of rollback.steps) steps.append(element('li', 'field-note', step));
