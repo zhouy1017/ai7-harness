@@ -281,7 +281,7 @@ The reader holds every entry to the size its central directory declares (Issue #
 
 The backup before a replacement or a merge and the 定期自动备份 check write into the same backup location, with the same `.<uuid>.ai7db.partial` files, so they never write at once. The backup waits for a check under way, and no check starts until it is written. A check's sweep therefore never takes a file the backup is making, and still removes one a cut-off backup left.
 
-只导入其中的图书 (Issue #434, S86d; ADR 0079 §1.5) is service protocol version 86 and schema revision 58. `src/service/database-merge.ts` merges a Book with every record it owns, read from the store's own foreign keys over a policy that every relation has, and that a test pins against the store's catalogue:
+只导入其中的图书 (Issue #434, S86d; ADR 0079 §1.5) is service protocol version 90 and schema revision 58. `src/service/database-merge.ts` merges a Book with every record it owns, read from the store's own foreign keys over a policy that every relation has, and that a test pins against the store's catalogue:
 - `seed`: `books`, fixed to the Books chosen. A reference to another Book is refused.
 - `owned`: a row that references an owned row, or that an owned row references.
 - `dependent`: an import draft a committed import names.
@@ -289,6 +289,8 @@ The backup before a replacement or a merge and the 定期自动备份 check writ
 - `excluded`: said as a notice — Series membership and Series knowledge.
 - `transient` and `house`: never taken.
 - `derived`: the search index, filled for the working text taken.
+
+The files a merge takes (content objects, recovery objects, 资料库 originals and a 方案's retained carrier) are each read against the digest and length their package row records, written into `<data root>-replacing/copying/`, synced, and only then renamed onto their digest name; a file already at that name is kept only when it reads as its name says, and is otherwise replaced, so a copy an interrupted merge cut short never stands. A file that does not match its row refuses the merge with `DATABASE_MERGE_FILE_INVALID`, and every file the merge put at a name that held none is removed when its transaction does not commit. The store's copy saved before a merge is synced, and its `saved` mark is written and synced last.
 
 A few references the store keeps by value — each import record's commit, each journal entry's lifetime — are followed as if they were foreign keys. The relations go in one transaction, in any order: foreign keys are checked at commit, and the store's insert triggers look only for a conflicting row, never for a parent. The rows of each relation go in the order they were written, which is what the one trigger comparing rows of its own relation asks for: a Book's 方案 pins, Revision 1 before Revision 2. The stored files they name are copied first. A Book whose 内部编号 is another Book's here merges without one.
 

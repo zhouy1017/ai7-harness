@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
-import { closeSync, constants, copyFileSync, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readSync, rmSync, writeFileSync, writeSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { closeSync, constants, copyFileSync, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { DIGEST_PATTERN, canonicalJson, isRecord, parseCanonicalJson } from './analysis/canonical.js';
@@ -652,30 +652,134 @@ const CONTENT_KEY = /^sha256\/[0-9a-f]{2}\/[0-9a-f]{64}\.[a-z0-9]+$/u;
 const RECOVERY_KEY = /^v1\/[0-9a-f]{64}\.snapshot$/u;
 const RETAINED_CARRIER_KEY = /^sha256\/[0-9a-f]{2}\/[0-9a-f]{64}\/package\.json$/u;
 
-/** Copy a stored file the merge takes, unless this data already has it: its name is its content's digest. */
-function copyStoredFile(sourceRoot: string, targetRoot: string, place: string, key: string, pattern: RegExp): boolean {
+/** What a stored file must be: the digest and length its row records. */
+interface StoredFileExpectation {
+  readonly sha256: string;
+  readonly bytes: number;
+}
+
+const COPY_CHUNK_BYTES = 1 << 20;
+
+/** The SHA-256 and length of the file at `path`, read a chunk at a time; `null` when it is not a regular file there. */
+function digestOfFile(path: string): StoredFileExpectation | null {
+  let fd: number;
+  try {
+    fd = openSync(path, 'r');
+  } catch {
+    return null;
+  }
+  try {
+    if (!fstatSync(fd).isFile()) return null;
+    const hash = createHash('sha256');
+    const buffer = Buffer.allocUnsafe(COPY_CHUNK_BYTES);
+    let bytes = 0;
+    for (;;) {
+      const read = readSync(fd, buffer, 0, buffer.length, null);
+      if (read === 0) break;
+      hash.update(buffer.subarray(0, read));
+      bytes += read;
+    }
+    return { sha256: hash.digest('hex'), bytes };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function sameFile(found: StoredFileExpectation | null, expected: StoredFileExpectation): boolean {
+  return found !== null && found.sha256 === expected.sha256 && found.bytes === expected.bytes;
+}
+
+/** Make what was written under `directory` survive a power loss, where the system lets a directory be synced. */
+function syncDirectory(directory: string): void {
+  let fd: number | null = null;
+  try {
+    fd = openSync(directory, 'r');
+    fsyncSync(fd);
+  } catch {
+    // Windows opens no directory for syncing; NTFS keeps a rename's metadata in its own journal.
+  } finally {
+    if (fd !== null) closeSync(fd);
+  }
+}
+
+/**
+ * Copy a stored file the merge takes, unless this data already holds it whole: its name is its content's digest, and both the
+ * file already here and the package's copy are read against the digest and length its row records (Issue #434 review). A file
+ * here that is not what its name says (a copy an interrupted merge cut short, or one damaged since) is replaced. The copy is
+ * written beside the merge as `copying/`, synced, checked, and only then renamed onto its name, so no file under a digest name
+ * is ever partial. Answers whether a file was put at a name that held none, which a merge that does not commit removes again.
+ */
+function copyStoredFile(
+  roots: MergeRoots,
+  place: string,
+  key: string,
+  pattern: RegExp,
+  expected: StoredFileExpectation,
+): 'placed' | 'repaired' | 'present' {
   requireMerge(pattern.test(key), 'DATABASE_MERGE_FILE_INVALID', '合并所需的文件名无效。');
-  const target = join(targetRoot, place, ...key.split('/'));
-  if (existsSync(target)) return false;
-  const source = join(sourceRoot, place, ...key.split('/'));
+  requireMerge(DIGEST_PATTERN.test(expected.sha256) && Number.isSafeInteger(expected.bytes) && expected.bytes > 0,
+    'DATABASE_MERGE_FILE_INVALID', '合并所需文件的记录无效。');
+  const target = join(roots.target, place, ...key.split('/'));
+  const existed = existsSync(target);
+  if (existed && sameFile(digestOfFile(target), expected)) return 'present';
+  const source = join(roots.source, place, ...key.split('/'));
   requireMerge(existsSync(source), 'DATABASE_MERGE_FILE_MISSING', '数据库文件里缺少合并所需的文件。');
-  mkdirSync(dirname(target), { recursive: true });
-  copyFileSync(source, target);
-  return true;
+  mkdirSync(roots.copying, { recursive: true });
+  const partial = join(roots.copying, `${randomUUID()}.partial`);
+  try {
+    const input = openSync(source, 'r');
+    try {
+      const output = openSync(partial, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL);
+      try {
+        const hash = createHash('sha256');
+        const buffer = Buffer.allocUnsafe(COPY_CHUNK_BYTES);
+        let bytes = 0;
+        for (;;) {
+          const read = readSync(input, buffer, 0, buffer.length, null);
+          if (read === 0) break;
+          hash.update(buffer.subarray(0, read));
+          bytes += read;
+          requireMerge(bytes <= expected.bytes, 'DATABASE_MERGE_FILE_INVALID', '数据库文件里合并所需的文件与它的记录不符。');
+          let written = 0;
+          while (written < read) written += writeSync(output, buffer, written, read - written);
+        }
+        requireMerge(sameFile({ sha256: hash.digest('hex'), bytes }, expected),
+          'DATABASE_MERGE_FILE_INVALID', '数据库文件里合并所需的文件与它的记录不符。');
+        fsyncSync(output);
+      } finally {
+        closeSync(output);
+      }
+    } finally {
+      closeSync(input);
+    }
+    mkdirSync(dirname(target), { recursive: true });
+    renameSync(partial, target);
+  } finally {
+    rmSync(partial, { force: true });
+  }
+  syncDirectory(dirname(target));
+  return existed ? 'repaired' : 'placed';
+}
+
+/** Where a merge reads the package's files, where it puts them, and where a copy waits until it is whole. */
+interface MergeRoots {
+  readonly source: string;
+  readonly target: string;
+  readonly copying: string;
 }
 
 /**
  * Merge the Books `bookIds` of the store attached as `src` into `main`, with every record they own, in one transaction —
- * all of it or none. The stored files their records name are copied from `roots.source` into `roots.target` first; a file
- * the transaction then does not keep is removed by the store's own sweep at its next open. Both stores must be at the same
- * schema revision.
+ * all of it or none. The stored files their records name are copied from `roots.source` into `roots.target` first, each held
+ * to the digest and length its row records; a file put at a name that held none is removed again when the transaction does not
+ * commit (Issue #434 review). Both stores must be at the same schema revision.
  */
 export function mergeBooks(db: DatabaseSync, bookIds: Iterable<string>, roots: { readonly source: string; readonly target: string }): MergeCounts {
   const count = listBooks(db, (function* books(): Generator<MergeBookPlan> {
     for (const bookId of bookIds) yield { bookId, title: '', status: 'new', internalNumberCleared: false };
   })());
   try {
-    return mergeListedBooks(db, count, roots);
+    return mergeListedBooks(db, count, { ...roots, copying: join(dirname(roots.source), 'copying') });
   } finally {
     db.exec('DROP TABLE IF EXISTS temp.merge_books');
   }
@@ -715,7 +819,7 @@ function listBooks(db: DatabaseSync, books: Iterable<MergeBookPlan>): number {
 function mergeListedBooks(
   db: DatabaseSync,
   count: number,
-  roots: { readonly source: string; readonly target: string },
+  roots: MergeRoots,
   receipt?: (db: DatabaseSync) => void,
 ): MergeCounts {
   const version = (schema: 'main' | 'src'): number => Number((db.prepare(`PRAGMA ${schema}.user_version`).get() as SqlRow).user_version);
@@ -725,6 +829,8 @@ function mergeListedBooks(
   const policy = (table: string): MergeTablePolicy => MERGE_TABLE_POLICY[table]!;
   db.exec('PRAGMA foreign_keys = ON');
   db.exec('BEGIN IMMEDIATE');
+  // The files this merge put at names that held none: a merge that does not commit takes them away again (Issue #434 review).
+  const placed: string[] = [];
   try {
     // Every foreign key is checked when the merge commits, and the store's insert triggers look only for a conflicting row,
     // never for a parent, so the relations go in whatever order they are listed. The rows of one relation go in the order they
@@ -787,28 +893,42 @@ function mergeListedBooks(
     // installing it writes them, not only the one the Book pinned. Data that has installed it keeps its own.
     pull('editorial_workspace_profile_sidecar_revisions',
       `x.native_artifact_id IN (SELECT i.artifact_id FROM src.native_artifact_installations i ${owned('native_artifact_installations', 'i')})`);
-    // The stored files first: the content objects and the milestones' recovery objects the rows name, each read as it is copied.
+    // The stored files first: the content objects and the milestones' recovery objects the rows name, each read as it is copied
+    // and held to the digest and length its row records.
     let files = 0;
-    for (const row of db.prepare(`SELECT x.relative_key AS k FROM src.content_objects x ${owned('content_objects', 'x')}`).iterate() as Iterable<SqlRow>) {
-      if (copyStoredFile(roots.source, roots.target, 'objects', String(row.k), CONTENT_KEY)) files += 1;
+    const take = (place: string, key: string, pattern: RegExp, expected: StoredFileExpectation): void => {
+      const outcome = copyStoredFile(roots, place, key, pattern, expected);
+      if (outcome === 'present') return;
+      files += 1;
+      if (outcome === 'placed') placed.push(join(roots.target, place, ...key.split('/')));
+    };
+    const expectation = (sha256: SQLOutputValue | undefined, bytes: SQLOutputValue | undefined): StoredFileExpectation =>
+      ({ sha256: String(sha256), bytes: Number(bytes) });
+    for (const row of db.prepare(
+      `SELECT x.relative_key AS k, x.object_digest AS d, x.byte_length AS n FROM src.content_objects x ${owned('content_objects', 'x')}`,
+    ).iterate() as Iterable<SqlRow>) {
+      take('objects', String(row.k), CONTENT_KEY, expectation(row.d, row.n));
     }
-    for (const row of db.prepare(`SELECT x.object_relative_key AS k FROM src.recovery_snapshots x ${owned('recovery_snapshots', 'x')}`).iterate() as Iterable<SqlRow>) {
-      if (copyStoredFile(roots.source, roots.target, 'recovery-objects', String(row.k), RECOVERY_KEY)) files += 1;
+    for (const row of db.prepare(
+      `SELECT x.object_relative_key AS k, x.object_digest AS d, x.byte_length AS n FROM src.recovery_snapshots x ${owned('recovery_snapshots', 'x')}`,
+    ).iterate() as Iterable<SqlRow>) {
+      take('recovery-objects', String(row.k), RECOVERY_KEY, expectation(row.d, row.n));
     }
     // The originals of the 资料库 items the Books bring, each under its content's digest, as its arrival record names it.
     for (const row of db.prepare(
-      `SELECT json_extract(x.canonical_json, '$.objectKey') AS k, x.object_sha256 AS digest FROM src.library_materials x ${owned('library_materials', 'x')}`,
+      `SELECT json_extract(x.canonical_json, '$.objectKey') AS k, x.object_sha256 AS digest, json_extract(x.canonical_json, '$.source.bytes') AS n
+       FROM src.library_materials x ${owned('library_materials', 'x')}`,
     ).iterate() as Iterable<SqlRow>) {
       const key = LIBRARY_OBJECT_KEY.exec(String(row.k));
       requireMerge(key !== null && key[2] === String(row.digest) && key[1] === key[2]!.slice(0, 2), 'DATABASE_MERGE_FILE_INVALID', '合并所需的文件名无效。');
-      if (copyStoredFile(roots.source, roots.target, LIBRARY_OBJECT_DIRECTORY, key[0], LIBRARY_OBJECT_KEY)) files += 1;
+      take(LIBRARY_OBJECT_DIRECTORY, key[0], LIBRARY_OBJECT_KEY, expectation(row.digest, row.n));
     }
     // And the carrier a 方案 installed here by the merge keeps, as installing it retains it.
     for (const row of db.prepare(
-      `SELECT x.retained_key AS k FROM src.native_artifact_installations x ${owned('native_artifact_installations', 'x')}
+      `SELECT x.retained_key AS k, x.content_sha256 AS d, x.byte_length AS n FROM src.native_artifact_installations x ${owned('native_artifact_installations', 'x')}
        WHERE x.artifact_id NOT IN (SELECT artifact_id FROM main.native_artifact_installations)`,
     ).iterate() as Iterable<SqlRow>) {
-      if (copyStoredFile(roots.source, roots.target, 'native-artifacts', String(row.k), RETAINED_CARRIER_KEY)) files += 1;
+      take('native-artifacts', String(row.k), RETAINED_CARRIER_KEY, expectation(row.d, row.n));
     }
     // The rows. A Book whose 内部编号 is already another Book's here merges without one; a house row this store already has
     // stays as it is.
@@ -843,6 +963,7 @@ function mergeListedBooks(
   } catch (error) {
     try { db.exec('ROLLBACK'); } catch { /* the transaction is already gone */ }
     try { db.exec('DROP TABLE IF EXISTS temp.merge_rows'); } catch { /* nothing to drop */ }
+    for (const path of placed) rmSync(path, { force: true });
     if (error instanceof DatabaseMergeError) throw error;
     throw new DatabaseMergeError('DATABASE_MERGE_FAILED', `合并未能完成：${error instanceof Error ? error.message : String(error)}`);
   }
@@ -854,16 +975,34 @@ const STORE_KEPT = ['ai7.sqlite', 'ai7.sqlite-wal'] as const;
 const STORE_SIDECARS = ['ai7.sqlite-wal', 'ai7.sqlite-shm', 'ai7.sqlite-journal'] as const;
 const SAVED_WHOLE = 'saved';
 
-/** The store's own files, copied aside whole before a merge touches them: the store and any journal it left. */
+/** Sync the file at `path` to the disk. */
+function syncFile(path: string): void {
+  const fd = openSync(path, 'r+');
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * The store's own files, copied aside whole before a merge touches them: the store and any journal it left. Each copy is synced
+ * before the mark that says the copy is whole is written and synced, so a power loss never leaves the mark beside a copy cut
+ * short (Issue #434 review).
+ */
 export function saveStoreFiles(dataRoot: string, into: string): void {
   rmSync(into, { recursive: true, force: true });
   mkdirSync(into, { recursive: true });
   for (const name of STORE_KEPT) {
     const path = join(dataRoot, 'store', name);
-    if (existsSync(path)) copyFileSync(path, join(into, name));
+    if (!existsSync(path)) continue;
+    copyFileSync(path, join(into, name));
+    syncFile(join(into, name));
   }
   // Written last: without it the copy is not whole and nothing is put back from it.
   writeFileSync(join(into, SAVED_WHOLE), '');
+  syncFile(join(into, SAVED_WHOLE));
+  syncDirectory(into);
 }
 
 /** Whether a whole copy of the store's files waits at `from`. */
@@ -905,7 +1044,7 @@ export function mergeIntoStoreFile(
     requireMerge(present === 0, 'DATABASE_MERGE_BOOK_PRESENT', '要合并的图书已有一部分在本机。');
     db.prepare('ATTACH DATABASE ? AS src').run(join(packageRoot, 'store', 'ai7.sqlite'));
     try {
-      mergeListedBooks(db, count, { source: packageRoot, target: dataRoot }, receipt);
+      mergeListedBooks(db, count, { source: packageRoot, target: dataRoot, copying: join(dirname(packageRoot), 'copying') }, receipt);
     } finally {
       db.exec('DETACH DATABASE src');
     }

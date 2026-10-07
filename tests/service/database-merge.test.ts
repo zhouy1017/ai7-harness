@@ -292,6 +292,72 @@ describe('合并图书 over two real stores', () => {
   }, 180_000);
 });
 
+/** Every file under `root`, by its path there; none when there is no `root`. */
+async function filesUnder(root: string): Promise<string[]> {
+  if (!existsSync(root)) return [];
+  const entries = await readdir(root, { recursive: true, withFileTypes: true });
+  return entries.filter((entry) => entry.isFile()).map((entry) => join(entry.parentPath, entry.name)).sort();
+}
+
+describe('the files a merge takes (Issue #434 review)', () => {
+  it('replaces a file cut short at a merged file\'s name, and leaves no copy in progress', async () => {
+    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let book: { bookId: string; manuscriptId: string; branchId: string };
+    try {
+      book = await importBook(source, await compose(TITLE, [1, 2]));
+    } finally {
+      source.close();
+    }
+    (await EditorialStore.open(otherRoot, roots.codeRoot)).close();
+    // An interrupted merge left the first half of a content object under its digest name.
+    const row = withAttached(otherRoot, roots.dataRoot, (db) =>
+      db.prepare('SELECT relative_key, object_digest FROM src.content_objects ORDER BY rowid LIMIT 1').get() as { relative_key: string; object_digest: string });
+    const whole = await readFile(join(roots.dataRoot, 'objects', ...row.relative_key.split('/')));
+    const planted = join(otherRoot, 'objects', ...row.relative_key.split('/'));
+    await mkdir(dirname(planted), { recursive: true });
+    await writeFile(planted, whole.subarray(0, Math.floor(whole.byteLength / 2)));
+    const counts = withAttached(otherRoot, roots.dataRoot, (db) => mergeBooks(db, [book.bookId], { source: roots.dataRoot, target: otherRoot }));
+    expect(counts.books).toBe(1);
+    expect(sha256Hex(await readFile(planted))).toBe(row.object_digest);
+    expect(await filesUnder(join(dirname(roots.dataRoot), 'copying'))).toEqual([]);
+    const target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      expect(titles(target)).toEqual([TITLE]);
+    } finally {
+      target.close();
+    }
+  }, 180_000);
+
+  it('refuses a package file that is not what its row records, and takes away every file it had put', async () => {
+    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let book: { bookId: string; manuscriptId: string; branchId: string };
+    try {
+      book = await richBook(source);
+    } finally {
+      source.close();
+    }
+    (await EditorialStore.open(otherRoot, roots.codeRoot)).close();
+    const before = await filesUnder(otherRoot);
+    // The milestone's recovery object is copied after every content object, so the merge has put files when it meets it.
+    const key = withAttached(otherRoot, roots.dataRoot, (db) =>
+      (db.prepare('SELECT object_relative_key FROM src.recovery_snapshots ORDER BY rowid DESC LIMIT 1').get() as { object_relative_key: string }).object_relative_key);
+    const recovery = join(roots.dataRoot, 'recovery-objects', ...key.split('/'));
+    const bytes = await readFile(recovery);
+    bytes[0] = bytes[0]! ^ 0xff;
+    await writeFile(recovery, bytes);
+    expect(() => withAttached(otherRoot, roots.dataRoot, (db) => mergeBooks(db, [book.bookId], { source: roots.dataRoot, target: otherRoot })))
+      .toThrowError(expect.objectContaining({ code: 'DATABASE_MERGE_FILE_INVALID' }));
+    expect(await filesUnder(otherRoot)).toEqual(before);
+    expect(await filesUnder(join(dirname(roots.dataRoot), 'copying'))).toEqual([]);
+    const target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      expect(titles(target)).toEqual([]);
+    } finally {
+      target.close();
+    }
+  }, 180_000);
+});
+
 const T = new Date(2026, 8, 26, 10, 0, 0);
 const LATER = new Date(2026, 8, 26, 11, 0, 0);
 const LATEST = new Date(2026, 8, 26, 12, 0, 0);
@@ -615,7 +681,7 @@ describe('what a merge refuses, puts back and brings forward', () => {
     }
   }, 180_000);
 
-  it('previews a file whose store does not read, offering no Book to merge', async () => {
+  it('refuses to preview a file whose store does not read, as damaged, and stages nothing', async () => {
     const store = 'not a database';
     const manifest = canonicalRecord({
       schema: 'ai7.database-package/1', dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 58, createdAt: T.toISOString(),
@@ -626,9 +692,8 @@ describe('what a merge refuses, puts back and brings forward', () => {
     await writeFile(packagePath, zipSync({ 'store/ai7.sqlite': strToU8(store), 'manifest.json': strToU8(manifest.json) }, { mtime: fixedArchiveTime() }));
     const target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
-      const preview = await target.inspectDatabaseImport(packagePath);
-      expect([preview.compatibility, preview.books, preview.mergeNotices]).toEqual(['compatible', [], []]);
-      await expect(target.prepareDatabaseMerge(preview.previewId, T)).rejects.toBeInstanceOf(Error);
+      // The preview reads the package's store before offering anything (#620's review), so no plan is made of it.
+      await expect(target.inspectDatabaseImport(packagePath)).rejects.toMatchObject({ code: 'DATABASE_PACKAGE_DAMAGED' });
       expect(existsSync(replacementStagingFor(otherRoot))).toBe(false);
     } finally {
       target.close();
