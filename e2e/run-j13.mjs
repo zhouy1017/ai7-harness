@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 // J-13 (Issue #63, plan slice S28a; V2-UX-SER-001 to SER-012): 书系 as a stable global destination. Three empty Books; 新建书系
 // with a name refused past its bound; one Series' 成员与共享范围; 加入书系 through the four-part Series Membership Impact Preview
@@ -43,7 +43,7 @@ function at(next) {
 }
 function requireJourney(condition, name, detail) {
   if (condition) return;
-  const error = new Error(`J-13/${name}`);
+  const error = journeyCheckFailure('J-13', name);
   if (detail !== undefined) error.detail = detail;
   throw error;
 }
@@ -92,7 +92,7 @@ async function createLoopbackSentinel() {
   });
   server.on('error', () => { runtimeFault = true; });
   await new Promise((resolveListen, rejectListen) => {
-    server.once('error', () => rejectListen(new Error('J-13/loopback-listen')));
+    server.once('error', () => rejectListen(journeyCheckFailure('J-13', 'loopback-listen')));
     server.listen(0, '127.0.0.1', resolveListen);
   });
   const address = server.address();
@@ -125,7 +125,7 @@ async function createRendererManager(browser) {
     const completion = pending.get(key);
     if (!completion) return;
     pending.delete(key);
-    if (response.error) completion.reject(new Error('J-13/renderer-cdp-response'));
+    if (response.error) completion.reject(journeyCheckFailure('J-13', 'renderer-cdp-response'));
     else completion.resolve(response.result);
   });
   const attach = async (target) => {
@@ -137,7 +137,7 @@ async function createRendererManager(browser) {
       const response = new Promise((resolveResponse, rejectResponse) => {
         const timeout = setTimeout(() => {
           pending.delete(key);
-          rejectResponse(new Error('J-13/renderer-cdp-timeout'));
+          rejectResponse(journeyCheckFailure('J-13', 'renderer-cdp-timeout'));
         }, 60_000);
         timeout.unref();
         pending.set(key, {
@@ -174,7 +174,7 @@ async function waitFor(renderer, expression, name, timeout = 60_000) {
     if (await renderer.evaluate(`Boolean(${expression})`).catch(() => false)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  throw new Error(`J-13/${name}`);
+  throw journeyCheckFailure('J-13', name);
 }
 
 async function waitForRenderer(manager, name) {
@@ -184,7 +184,7 @@ async function waitForRenderer(manager, name) {
     if (renderers.length === 1) return renderers[0];
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  throw new Error(`J-13/${name}`);
+  throw journeyCheckFailure('J-13', name);
 }
 
 async function assertRenderer(renderer, expression, name) {
@@ -322,7 +322,7 @@ async function readUntil(renderer, reader, predicate, name) {
     if (page !== null && predicate(page)) return page;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  const error = new Error(`J-13/${name}`);
+  const error = journeyCheckFailure('J-13', name);
   error.detail = page;
   throw error;
 }
@@ -454,7 +454,7 @@ async function openSelectionMenu(renderer, blockId, from, to, name) {
     await press(renderer, 'Escape');
     await new Promise((resolveWait) => setTimeout(resolveWait, 120));
   }
-  throw new Error(`J-13/${name}`);
+  throw journeyCheckFailure('J-13', name);
 }
 
 /** 书系知识 on the Series page as the editor reads it: items, candidates, the propose form, the review, and focus. */

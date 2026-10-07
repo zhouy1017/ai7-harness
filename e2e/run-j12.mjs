@@ -9,7 +9,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { DatabaseSync } from 'node:sqlite';
 import { strFromU8, unzipSync } from 'fflate';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -20,13 +20,13 @@ const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
 const LOOPBACK_CLOSE_TIMEOUT_MS = 5_000;
 const CREDENTIAL_CLEANUP_TIMEOUT_MS = 15_000;
 const FORCE_EXIT_TIMEOUT_MS = 5_000;
-const BROWSER_CLOSE_TIMEOUT = new Error('J-12/browser-close-timeout');
-const BROWSER_DISCONNECTED = new Error('J-12/browser-disconnected');
-const RENDERER_CDP_FAILURE = new Error('J-12/renderer-cdp-response');
-const RENDERER_CDP_TIMEOUT = new Error('J-12/renderer-cdp-timeout');
-const RENDERER_SESSION_CLOSED = new Error('J-12/renderer-session-closed');
-const LOOPBACK_CLOSE_TIMEOUT = new Error('J-12/loopback-close-timeout');
-const CREDENTIAL_CLEANUP_TIMEOUT = new Error('J-12/credential-cleanup-timeout');
+const BROWSER_CLOSE_TIMEOUT = journeyCheckFailure('J-12', 'browser-close-timeout');
+const BROWSER_DISCONNECTED = journeyCheckFailure('J-12', 'browser-disconnected');
+const RENDERER_CDP_FAILURE = journeyCheckFailure('J-12', 'renderer-cdp-response');
+const RENDERER_CDP_TIMEOUT = journeyCheckFailure('J-12', 'renderer-cdp-timeout');
+const RENDERER_SESSION_CLOSED = journeyCheckFailure('J-12', 'renderer-session-closed');
+const LOOPBACK_CLOSE_TIMEOUT = journeyCheckFailure('J-12', 'loopback-close-timeout');
+const CREDENTIAL_CLEANUP_TIMEOUT = journeyCheckFailure('J-12', 'credential-cleanup-timeout');
 let location = 'entry';
 let Zip;
 let ZipPassThrough;
@@ -39,7 +39,7 @@ function at(next) {
 }
 function requireJourney(condition, name, detail) {
   if (condition) return;
-  const error = new Error(`J-12/${name}`);
+  const error = journeyCheckFailure('J-12', name);
   if (detail !== undefined) error.detail = detail;
   throw error;
 }
@@ -108,7 +108,7 @@ async function createLoopbackSentinel() {
   });
   server.on('error', () => { runtimeFault = true; });
   await new Promise((resolveListen, rejectListen) => {
-    server.once('error', () => rejectListen(new Error('J-12/loopback-listen')));
+    server.once('error', () => rejectListen(journeyCheckFailure('J-12', 'loopback-listen')));
     server.listen(0, '127.0.0.1', resolveListen);
   });
   const address = server.address();
@@ -274,7 +274,7 @@ async function waitFor(renderer, expression, name, timeout = 60_000) {
     if (await renderer.evaluate(`Boolean(${expression})`).catch(() => false)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  throw new Error(`J-12/${name}`);
+  throw journeyCheckFailure('J-12', name);
 }
 
 async function waitForRendererCount(manager, count, name) {
@@ -284,7 +284,7 @@ async function waitForRendererCount(manager, count, name) {
     if (renderers.length === count) return renderers;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  throw new Error(`J-12/${name}`);
+  throw journeyCheckFailure('J-12', name);
 }
 
 async function findRenderer(manager, expression, name) {
@@ -295,7 +295,7 @@ async function findRenderer(manager, expression, name) {
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  throw new Error(`J-12/${name}`);
+  throw journeyCheckFailure('J-12', name);
 }
 
 async function assertRenderer(renderer, expression, name) {
@@ -312,7 +312,7 @@ async function tabUntil(renderer, expression, name, maximumTabs = 12) {
     await dispatchTab(renderer);
     if (await renderer.evaluate(`Boolean(${expression})`).catch(() => false)) return;
   }
-  throw new Error(`J-12/${name}`);
+  throw journeyCheckFailure('J-12', name);
 }
 
 async function assertSecretsAbsentFromDataRoot(root, secrets, name) {
@@ -436,7 +436,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     metadata = await lstat(databasePath);
   } catch (error) {
     if (hasErrorCode(error, 'ENOENT')) return { kind: 'not-started' };
-    throw new Error('J-12/credential-cleanup-metadata');
+    throw journeyCheckFailure('J-12', 'credential-cleanup-metadata');
   }
   requireJourney(metadata.isFile() && !metadata.isSymbolicLink(), 'credential-cleanup-metadata-file');
   requireJourney((await realpath(databasePath)) === databasePath, 'credential-cleanup-metadata-file');
@@ -444,7 +444,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
   try {
     database = new DatabaseSync(databasePath, { readOnly: true });
   } catch {
-    throw new Error('J-12/credential-cleanup-metadata');
+    throw journeyCheckFailure('J-12', 'credential-cleanup-metadata');
   }
   try {
     database.exec('PRAGMA query_only = ON;');
@@ -492,7 +492,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
       : { kind: 'reference', credentialReference: row.credential_reference };
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('J-12/')) throw error;
-    throw new Error('J-12/credential-cleanup-metadata');
+    throw journeyCheckFailure('J-12', 'credential-cleanup-metadata');
   } finally {
     database.close();
   }
@@ -600,7 +600,7 @@ async function readCalibration(renderer, predicate, name) {
     if (page !== null && predicate(page)) return page;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  const error = new Error(`J-12/${name}`);
+  const error = journeyCheckFailure('J-12', name);
   error.detail = page;
   throw error;
 }
@@ -776,7 +776,7 @@ async function main() {
         }
       }
       if (credentialMutationReached && !productCredentialCleanupSucceeded) {
-        throw credentialCleanupFailure ?? new Error('J-12/credential-cleanup-failed');
+        throw credentialCleanupFailure ?? journeyCheckFailure('J-12', 'credential-cleanup-failed');
       }
       if (cleanupFailure !== undefined) throw cleanupFailure;
     })();

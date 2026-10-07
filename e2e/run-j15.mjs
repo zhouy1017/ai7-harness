@@ -5,7 +5,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PROFILE_DIGEST = 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d';
@@ -24,7 +24,7 @@ function at(next) {
 }
 function requireJourney(condition, name, detail) {
   if (condition) return;
-  const error = new Error(`J-15/${name}`);
+  const error = journeyCheckFailure('J-15', name);
   if (detail !== undefined) error.detail = detail;
   throw error;
 }
@@ -73,7 +73,7 @@ async function createLoopbackSentinel() {
   });
   server.on('error', () => { runtimeFault = true; });
   await new Promise((resolveListen, rejectListen) => {
-    server.once('error', () => rejectListen(new Error('J-15/loopback-listen')));
+    server.once('error', () => rejectListen(journeyCheckFailure('J-15', 'loopback-listen')));
     server.listen(0, '127.0.0.1', resolveListen);
   });
   const address = server.address();
@@ -106,7 +106,7 @@ async function createRendererManager(browser) {
     const completion = pending.get(key);
     if (!completion) return;
     pending.delete(key);
-    if (response.error) completion.reject(new Error('J-15/renderer-cdp-response'));
+    if (response.error) completion.reject(journeyCheckFailure('J-15', 'renderer-cdp-response'));
     else completion.resolve(response.result);
   });
   const attach = async (target) => {
@@ -118,7 +118,7 @@ async function createRendererManager(browser) {
       const response = new Promise((resolveResponse, rejectResponse) => {
         const timeout = setTimeout(() => {
           pending.delete(key);
-          rejectResponse(new Error('J-15/renderer-cdp-timeout'));
+          rejectResponse(journeyCheckFailure('J-15', 'renderer-cdp-timeout'));
         }, 60_000);
         timeout.unref();
         pending.set(key, {
@@ -155,7 +155,7 @@ async function waitFor(renderer, expression, name, timeout = 60_000) {
     if (await renderer.evaluate(`Boolean(${expression})`).catch(() => false)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  throw new Error(`J-15/${name}`);
+  throw journeyCheckFailure('J-15', name);
 }
 
 async function waitForRenderer(manager, name) {
@@ -165,7 +165,7 @@ async function waitForRenderer(manager, name) {
     if (renderers.length === 1) return renderers[0];
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  throw new Error(`J-15/${name}`);
+  throw journeyCheckFailure('J-15', name);
 }
 
 async function assertRenderer(renderer, expression, name) {
@@ -244,7 +244,7 @@ async function readKnowledge(renderer, predicate, name) {
     if (page !== null && predicate(page)) return page;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  const error = new Error(`J-15/${name}`);
+  const error = journeyCheckFailure('J-15', name);
   error.detail = page;
   throw error;
 }
@@ -305,7 +305,7 @@ async function readLibrary(renderer, predicate, name) {
     if (page !== null && predicate(page)) return page;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  const error = new Error(`J-15/${name}`);
+  const error = journeyCheckFailure('J-15', name);
   error.detail = page;
   throw error;
 }
@@ -325,7 +325,7 @@ async function focusAction(renderer, action, name) {
     await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab' });
     if (await renderer.evaluate(`document.activeElement?.dataset.nativeArtifactAction===${JSON.stringify(action)} && document.activeElement.matches(':focus-visible')`).catch(() => false)) return;
   }
-  throw new Error(`J-15/${name}`);
+  throw journeyCheckFailure('J-15', name);
 }
 
 async function activateFocused(renderer, key) {

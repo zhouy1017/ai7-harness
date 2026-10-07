@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect } from './controller.mjs';
 import { openRemainingPackageExport } from './package-export-readiness.mjs';
 
 // J-07 (Issue #414, plan slice S65): ⑥ 发稿. An editor saves Milestone Versions of the manuscript — each
@@ -166,7 +166,7 @@ function at(next) {
 }
 function requireJourney(condition, name, detail) {
   if (condition) return;
-  const error = new Error(`J-07/${name}`);
+  const error = journeyCheckFailure('J-07', name);
   if (detail !== undefined) error.detail = detail;
   throw error;
 }
@@ -214,14 +214,14 @@ async function createLoopbackSentinel() {
   });
   server.on('error', () => { runtimeFault = true; });
   await new Promise((resolveListen, rejectListen) => {
-    server.once('error', () => rejectListen(new Error('J-07/loopback-listen')));
+    server.once('error', () => rejectListen(journeyCheckFailure('J-07', 'loopback-listen')));
     server.listen(0, '127.0.0.1', resolveListen);
   });
   const address = server.address();
   if (!(address !== null && typeof address === 'object' && address.address === '127.0.0.1' &&
       Number.isSafeInteger(address.port) && address.port > 0)) {
     await new Promise((resolveClose) => server.close(() => resolveClose()));
-    throw new Error('J-07/loopback-address');
+    throw journeyCheckFailure('J-07', 'loopback-address');
   }
   server.unref();
   return {
@@ -232,7 +232,7 @@ async function createLoopbackSentinel() {
       if (closed) return;
       closed = true;
       await new Promise((resolveClose, rejectClose) => {
-        server.close((error) => error ? rejectClose(new Error('J-07/loopback-close')) : resolveClose());
+        server.close((error) => error ? rejectClose(journeyCheckFailure('J-07', 'loopback-close')) : resolveClose());
       });
       requireJourney(!runtimeFault, 'loopback-runtime');
     },
@@ -262,13 +262,13 @@ async function attachRenderer(browser) {
     const completion = pending.get(response.id);
     if (!completion) return;
     pending.delete(response.id);
-    if (response.error) completion.reject(new Error('J-07/renderer-cdp-response'));
+    if (response.error) completion.reject(journeyCheckFailure('J-07', 'renderer-cdp-response'));
     else completion.resolve(response.result);
   });
   const send = async (method, params = {}) => {
     const id = nextId++;
     const response = new Promise((resolveResponse, rejectResponse) => {
-      const timeout = setTimeout(() => { pending.delete(id); rejectResponse(new Error('J-07/renderer-cdp-timeout')); }, 60_000);
+      const timeout = setTimeout(() => { pending.delete(id); rejectResponse(journeyCheckFailure('J-07', 'renderer-cdp-timeout')); }, 60_000);
       timeout.unref();
       pending.set(id, {
         resolve: (value) => { clearTimeout(timeout); resolveResponse(value); },
@@ -295,7 +295,7 @@ async function waitFor(renderer, expression, name, timeout = 60_000) {
     if (await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  throw new Error(`J-07/${name}`);
+  throw journeyCheckFailure('J-07', name);
 }
 async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`), name);
@@ -484,7 +484,7 @@ async function openSelectionMenu(renderer, position, from, to, name) {
     await press(renderer, 'Escape');
     await new Promise((resolveWait) => setTimeout(resolveWait, 120));
   }
-  throw new Error(`J-07/${name}`);
+  throw journeyCheckFailure('J-07', name);
 }
 
 /** Press a control of the open export card by its action, refusing one that is missing or disabled. */
@@ -737,7 +737,7 @@ async function readCalibration(renderer, predicate, name) {
     if (page !== null && predicate(page)) return page;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  const error = new Error(`J-07/${name}`);
+  const error = journeyCheckFailure('J-07', name);
   error.detail = page;
   throw error;
 }

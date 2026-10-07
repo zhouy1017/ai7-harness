@@ -1,5 +1,6 @@
 import {
   classifyJourneyResult,
+  collectJourneyCheck,
   collectReadinessTrace,
   debugArtifactLabel,
   isAdmittedJourney,
@@ -27,6 +28,8 @@ if (localDebugRefused()) {
   if (result.spawnError || result.code !== 0 || result.signal !== null || result.controllerSignal !== null) {
     const failure = classifyJourneyResult(result, journey);
     console.error(`LOCAL_DEBUG/${journey}/fail/${failure.location}/${failure.errorClass}/${seconds}s`);
+    const check = collectJourneyCheck(result, journey, failure);
+    if (check !== null) console.error(`LOCAL_DEBUG/${journey}/fail/${failure.location}/check/${check}`);
     const readiness = collectReadinessTrace(result, journey);
     if (readiness !== null) console.error(`LOCAL_DEBUG/${journey}/readiness/${readiness}`);
     console.error(`LOCAL_DEBUG/${journey}/artifacts/${artifacts}`);

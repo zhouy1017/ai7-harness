@@ -17,7 +17,7 @@ import {
   IMPORTED_MARKS_RECIPE,
   IMPORTED_MARKS_REJECTED_BLOCKS,
 } from './composed-docx.mjs';
-import { attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, discloseJourneySkip, installJourneyCancellationCleanup, LOCAL_ONLY_DOC, localDebugEnabled, localManuscriptAvailable, localManuscriptPath, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, discloseJourneySkip, installJourneyCancellationCleanup, journeyCheckFailure, LOCAL_ONLY_DOC, localDebugEnabled, localManuscriptAvailable, localManuscriptPath, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 import { createLaunchTrace, formatReadinessTrace, readBrowserLog } from './readiness-trace.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -46,12 +46,12 @@ const PRODUCT_READY_TIMEOUT_MS = 60_000;
 // outer race gives up on it — the relationship this pair has always had.
 const BROWSER_LAUNCH_TIMEOUT_MS = PRODUCT_READY_TIMEOUT_MS + 5_000;
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
-const BROWSER_LAUNCH_TIMEOUT = new Error('J-01/browser-launch-timeout');
-const BROWSER_CLOSE_TIMEOUT = new Error('J-01/browser-close-timeout');
-const BROWSER_DISCONNECTED = new Error('J-01/browser-disconnected');
-const RENDERER_CDP_FAILURE = new Error('J-01/renderer-cdp-response');
-const RENDERER_CDP_TIMEOUT = new Error('J-01/renderer-cdp-timeout');
-const RENDERER_SESSION_CLOSED = new Error('J-01/renderer-session-closed');
+const BROWSER_LAUNCH_TIMEOUT = journeyCheckFailure('J-01', 'browser-launch-timeout');
+const BROWSER_CLOSE_TIMEOUT = journeyCheckFailure('J-01', 'browser-close-timeout');
+const BROWSER_DISCONNECTED = journeyCheckFailure('J-01', 'browser-disconnected');
+const RENDERER_CDP_FAILURE = journeyCheckFailure('J-01', 'renderer-cdp-response');
+const RENDERER_CDP_TIMEOUT = journeyCheckFailure('J-01', 'renderer-cdp-timeout');
+const RENDERER_SESSION_CLOSED = journeyCheckFailure('J-01', 'renderer-session-closed');
 let diagnosticLocation = 'entry';
 // The launch in flight (Issue #518): its scenario, when it began and whether its renderer target attached. What the
 // product reported while J-01 waited is read from Playwright's `browser` log, whose file this run keeps in its run root.
@@ -118,7 +118,7 @@ function fidelityRowsExpression(expected) {
 
 function requireJourney(condition, location, detail) {
   if (condition) return;
-  const error = new Error(`J-01/${location}`);
+  const error = journeyCheckFailure('J-01', location);
   if (detail !== undefined) error.detail = detail;
   throw error;
 }
@@ -391,9 +391,9 @@ async function attachRendererTarget(browser, onTarget = () => undefined) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   if (latestCarrierError !== undefined) {
-    throw new Error('J-01/renderer-carrier-timeout', { cause: latestCarrierError });
+    throw journeyCheckFailure('J-01', 'renderer-carrier-timeout', { cause: latestCarrierError });
   }
-  throw new Error('J-01/renderer-carrier-timeout');
+  throw journeyCheckFailure('J-01', 'renderer-carrier-timeout');
 }
 
 async function createRendererManager(browser) {
@@ -504,9 +504,9 @@ async function createRendererManager(browser) {
         await new Promise((resolveWait) => setTimeout(resolveWait, 50));
       }
       if (latestCarrierError !== undefined) {
-        throw new Error('J-01/renderer-carrier-timeout', { cause: latestCarrierError });
+        throw journeyCheckFailure('J-01', 'renderer-carrier-timeout', { cause: latestCarrierError });
       }
-      throw new Error('J-01/renderer-carrier-timeout');
+      throw journeyCheckFailure('J-01', 'renderer-carrier-timeout');
     })();
     renderers.set(target.targetId, attached);
     try {
@@ -537,7 +537,7 @@ async function waitForRendererCount(manager, count, location) {
     if (renderers.length === count) return renderers;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  throw new Error(`J-01/${location}`);
+  throw journeyCheckFailure('J-01', location);
 }
 
 async function waitFor(renderer, expression, location) {
@@ -563,9 +563,9 @@ async function waitFor(renderer, expression, location) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   if (latestEvaluationError !== undefined) {
-    throw new Error(`J-01/${location}`, { cause: latestEvaluationError });
+    throw journeyCheckFailure('J-01', location, { cause: latestEvaluationError });
   }
-  throw new Error(`J-01/${location}`);
+  throw journeyCheckFailure('J-01', location);
 }
 
 async function waitForTransientControl(renderer, expression, location) {
@@ -574,7 +574,7 @@ async function waitForTransientControl(renderer, expression, location) {
     if (await renderer.evaluate(`Boolean(${expression})`)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 2));
   }
-  throw new Error(`J-01/${location}`);
+  throw journeyCheckFailure('J-01', location);
 }
 
 async function assertRenderer(renderer, expression, location) {

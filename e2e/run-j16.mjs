@@ -7,7 +7,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 
 // J-16 (Issue #423, plan slice S77a): the 任务 panel — the Book's Tasks beside the manuscript (editor-surfaces §1 任务面,
@@ -48,8 +48,8 @@ const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL'
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
 const CREDENTIAL_CLEANUP_TIMEOUT_MS = 15_000;
 const FORCE_EXIT_TIMEOUT_MS = 5_000;
-const BROWSER_CLOSE_TIMEOUT = new Error('J-16/browser-close-timeout');
-const CREDENTIAL_CLEANUP_TIMEOUT = new Error('J-16/credential-cleanup-timeout');
+const BROWSER_CLOSE_TIMEOUT = journeyCheckFailure('J-16', 'browser-close-timeout');
+const CREDENTIAL_CLEANUP_TIMEOUT = journeyCheckFailure('J-16', 'credential-cleanup-timeout');
 
 let location = 'entry';
 let runnerLifecycleIncomplete = false;
@@ -60,7 +60,7 @@ function at(next) {
 }
 function requireJourney(condition, name, detail) {
   if (condition) return;
-  const error = new Error(`J-16/${name}`);
+  const error = journeyCheckFailure('J-16', name);
   if (detail !== undefined) error.detail = detail;
   throw error;
 }
@@ -223,7 +223,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     metadata = await lstat(databasePath);
   } catch (error) {
     if (hasErrorCode(error, 'ENOENT')) return { kind: 'not-started' };
-    throw new Error('J-16/credential-cleanup-metadata');
+    throw journeyCheckFailure('J-16', 'credential-cleanup-metadata');
   }
   requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && (await realpath(databasePath)) === databasePath,
     'credential-cleanup-metadata-file');
@@ -231,7 +231,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
   try {
     database = new DatabaseSync(databasePath, { readOnly: true });
   } catch {
-    throw new Error('J-16/credential-cleanup-metadata');
+    throw journeyCheckFailure('J-16', 'credential-cleanup-metadata');
   }
   try {
     database.exec('PRAGMA query_only = ON;');
@@ -259,7 +259,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
       : { kind: 'reference', credentialReference: row.credential_reference };
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('J-16/')) throw error;
-    throw new Error('J-16/credential-cleanup-metadata');
+    throw journeyCheckFailure('J-16', 'credential-cleanup-metadata');
   } finally {
     database.close();
   }
@@ -279,13 +279,13 @@ async function createLoopbackSentinel() {
   });
   server.on('error', () => { runtimeFault = true; });
   await new Promise((resolveListen, rejectListen) => {
-    server.once('error', () => rejectListen(new Error('J-16/loopback-listen')));
+    server.once('error', () => rejectListen(journeyCheckFailure('J-16', 'loopback-listen')));
     server.listen(0, '127.0.0.1', resolveListen);
   });
   const address = server.address();
   if (!(address !== null && typeof address === 'object' && address.address === '127.0.0.1' && Number.isSafeInteger(address.port) && address.port > 0)) {
     await new Promise((resolveClose) => server.close(() => resolveClose()));
-    throw new Error('J-16/loopback-address');
+    throw journeyCheckFailure('J-16', 'loopback-address');
   }
   server.unref();
   return {
@@ -323,13 +323,13 @@ async function attachRenderer(browser) {
     const completion = pending.get(response.id);
     if (!completion) return;
     pending.delete(response.id);
-    if (response.error) completion.reject(new Error('J-16/renderer-cdp-response'));
+    if (response.error) completion.reject(journeyCheckFailure('J-16', 'renderer-cdp-response'));
     else completion.resolve(response.result);
   });
   const send = async (method, params = {}) => {
     const id = nextId++;
     const response = new Promise((resolveResponse, rejectResponse) => {
-      const timeout = setTimeout(() => { pending.delete(id); rejectResponse(new Error('J-16/renderer-cdp-timeout')); }, 60_000);
+      const timeout = setTimeout(() => { pending.delete(id); rejectResponse(journeyCheckFailure('J-16', 'renderer-cdp-timeout')); }, 60_000);
       timeout.unref();
       pending.set(id, {
         resolve: (value) => { clearTimeout(timeout); resolveResponse(value); },
@@ -356,7 +356,7 @@ async function waitFor(renderer, expression, name, timeout = 60_000) {
     if (await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`).catch(() => false)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  throw new Error(`J-16/${name}`);
+  throw journeyCheckFailure('J-16', name);
 }
 async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`), name);
@@ -580,7 +580,7 @@ async function main() {
     if (ownedBrowser.isConnected()) {
       browserCloseRejected = true;
       runnerLifecycleIncomplete = true;
-      throw new Error('J-16/browser-close-unconfirmed');
+      throw journeyCheckFailure('J-16', 'browser-close-unconfirmed');
     }
   };
   const closeOwnedBrowser = async () => {
@@ -633,7 +633,7 @@ async function main() {
     return true;
   };
   const cleanup = () => (cleanupPromise ??= (async () => {
-    if (browserCloseRejected) throw cleanupFailure ?? new Error('J-16/browser-cleanup-failed');
+    if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-16', 'browser-cleanup-failed');
     if (credentialMutationReached && !credentialRemoved) {
       try {
         await removeCredentialThroughProduct();
@@ -642,7 +642,7 @@ async function main() {
       }
       if (!credentialRemoved && launchForCleanup !== undefined) {
         const closedForRetry = await closeOwnedBrowserForCleanup();
-        if (browserCloseRejected) throw cleanupFailure ?? new Error('J-16/browser-cleanup-failed');
+        if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-16', 'browser-cleanup-failed');
         if (closedForRetry) {
           try {
             await launchForCleanup({ forCleanup: true });
@@ -654,9 +654,9 @@ async function main() {
         }
       }
       if (!credentialRemoved) {
-        if (browserCloseRejected) throw cleanupFailure ?? new Error('J-16/browser-cleanup-failed');
+        if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-16', 'browser-cleanup-failed');
         const closedForFallback = await closeOwnedBrowserForCleanup();
-        if (browserCloseRejected) throw cleanupFailure ?? new Error('J-16/browser-cleanup-failed');
+        if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-16', 'browser-cleanup-failed');
         if (closedForFallback && credentialReferenceForCleanup === undefined && dataRoot !== undefined && runRoot !== undefined) {
           try {
             const recovered = await recoverSyntheticCredentialCleanupState(dataRoot, runRoot);
@@ -677,14 +677,14 @@ async function main() {
         }
       }
     }
-    if (browserCloseRejected) throw cleanupFailure ?? new Error('J-16/browser-cleanup-failed');
+    if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-16', 'browser-cleanup-failed');
     const browserClosed = await closeOwnedBrowserForCleanup();
-    if (!browserClosed) throw cleanupFailure ?? new Error('J-16/browser-cleanup-failed');
+    if (!browserClosed) throw cleanupFailure ?? journeyCheckFailure('J-16', 'browser-cleanup-failed');
     const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
     try { await ownedLoopback?.close(); } catch (error) { cleanupFailure ??= error; }
     loopback = undefined;
     if (credentialMutationReached && !credentialRemoved) {
-      throw credentialCleanupFailure ?? new Error('J-16/credential-cleanup-failed');
+      throw credentialCleanupFailure ?? journeyCheckFailure('J-16', 'credential-cleanup-failed');
     }
     const ownedRoot = runRoot ?? (runRootAcquisition === undefined ? undefined : await runRootAcquisition.catch(() => undefined));
     if (ownedRoot !== undefined) {
