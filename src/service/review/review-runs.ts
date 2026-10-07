@@ -61,7 +61,6 @@ import { EXECUTION_SLOT_BUSY, EXECUTION_SLOT_BUSY_REASON } from '../analysis/exe
 import { graphemeCount, sliceGraphemes } from '../analysis/factual-review-contract.js';
 import type { PackageReviewRunReading } from '../book-delivery-packages.js';
 import type { EditorialMarkStore, ProducedEditorialMarkInput } from '../editorial-marks.js';
-import { SeriesLedger, seriesConsistencyWaitingReason } from '../series.js';
 import type { ReviewRunAttentionReading } from '../global-attention.js';
 import {
   BUILTIN_REVIEW_CATEGORY_CONFIGURATION,
@@ -73,6 +72,7 @@ import {
   type ReviewCategoryExecutor,
 } from './category-configuration.js';
 import { reviewLeadBody, reviewLeadsOf } from './review-leads.js';
+import { resolveSeriesConsistency, seriesConsistencyEntry, seriesKnowledgePinsCurrent } from './series-consistency.js';
 import { buildReviewReport, reportQuote, reviewFindingCounts } from './review-report.js';
 import {
   REVIEW_RUN_CATEGORY_STATE_LABELS,
@@ -396,6 +396,11 @@ const INTERRUPTED_DETAIL = '服务在这一类运行期间停止；继续审阅�
 const FAILED_UNRECORDED_DETAIL = '这一类的运行失败了；继续审阅时记下这一结果，再接着审其余类别。' as const;
 export const HOUSE_GUIDELINE_NOT_TRANSMITTABLE = 'REVIEW_GUIDELINE_NOT_TRANSMITTABLE' as const;
 
+/** Why a prepared 书系一致性 plan is no longer approvable: the Book's Series or their knowledge moved since (Issue #64, S29a). */
+function seriesKnowledgeMovedReason(label: string): string {
+  return `「${label}」所依据的书系或书系知识在准备之后有了变化；请重新准备这次审阅。`;
+}
+
 /**
  * Under developer-live, a category whose guideline clauses the house imported is refused before any dispatch (Issue #427,
  * S79a review): those clauses would enter the category's prompt, and the active Provider Processing policy admits only
@@ -404,6 +409,11 @@ export const HOUSE_GUIDELINE_NOT_TRANSMITTABLE = 'REVIEW_GUIDELINE_NOT_TRANSMITT
  */
 export function houseGuidelineRefusal(entry: ReviewCategoryConfigurationEntry, live: boolean): string | null {
   if (!live || entry.executor !== 'review-category-contract') return null;
+  // 书系一致性's clauses are the house's own Series Knowledge (Issue #64, S29a), held back exactly as imported guidelines are.
+  if (entry.seriesKnowledge !== undefined) {
+    const named = Array.from(new Set(entry.guidelineDocuments.map((document) => document.issuer))).join('、');
+    return `这一类以${named}的书系知识审阅；开发者实时模式下，本社的书系知识在获准发给模型之前不会发出，这一类暂不能开始。`;
+  }
   const house = houseGuidelineDocuments(entry);
   if (house.length === 0) return null;
   const named = house.map((document) => `《${document.title}》第 ${document.version} 版`).join('、');
@@ -821,8 +831,10 @@ export class ReviewRunStore {
     requireReview(!this.#bookIsDriving(bookId), 'REVIEW_RUN_ACTIVE', RUN_ACTIVE_REASON);
     // Two preparations of one Book would prepare the same category ledgers' Tasks under each other.
     requireReview(!Array.from(this.#work.values()).some((work) => work.bookId === bookId), 'REVIEW_RUN_PREPARING', '这本书有一次审阅正在准备计划；准备完成后再新建。');
-    // The configuration a preparation starts under is the one its Run snapshots, whatever is imported meanwhile (REV-012).
-    const configuration = this.#configuration();
+    // The configuration a preparation starts under is the one its Run snapshots, whatever is imported meanwhile (REV-012);
+    // its 书系一致性 is this Book's, with the Series Knowledge revisions it would use pinned (Issue #64, S29a).
+    const house = this.#configuration();
+    const configuration = this.#forBook(bookId, house);
     requireReview(Array.isArray(input.categoryIds) && input.categoryIds.length >= 1 && input.categoryIds.length <= configuration.categories.length &&
       new Set(input.categoryIds).size === input.categoryIds.length, 'REVIEW_CATEGORIES_INVALID', '请选择至少一个审阅类别，且不要重复。');
     for (const categoryId of input.categoryIds) {
@@ -844,7 +856,7 @@ export class ReviewRunStore {
     const work: PreparationWork = {
       workId: randomUUID(),
       bookId,
-      configuration,
+      configuration: house,
       launchPolicy: structuredClone(input.launchPolicy),
       scope,
       planned,
@@ -1032,6 +1044,7 @@ export class ReviewRunStore {
       requireReview(projection.taskIntent?.taskIntentId === category.task!.taskIntentId && projection.state === 'prepared' &&
         projection.actions.canAuthorize && projection.planEnvelope?.digest === category.task!.planEnvelopeDigest,
       'REVIEW_PLAN_CHANGED', `「${category.entry.label}」的计划已经变化；请重新准备这次审阅。`);
+      requireReview(!this.#seriesKnowledgeMoved(bookId, category), 'REVIEW_PLAN_CHANGED', seriesKnowledgeMovedReason(category.entry.label));
     }
     requireReview(!slotBusy, EXECUTION_SLOT_BUSY, EXECUTION_SLOT_BUSY_REASON);
     const authorizedAt = new Date().toISOString();
@@ -1130,6 +1143,8 @@ export class ReviewRunStore {
           if (current === null || current.taskIntent?.taskIntentId !== category.task.taskIntentId || current.state !== 'prepared' ||
               !current.actions.canAuthorize || current.planEnvelope?.digest !== category.task.planEnvelopeDigest) {
             staleReasons.push(`「${category.entry.label}」的计划已经变化；请重新准备这次审阅。`);
+          } else if (this.#seriesKnowledgeMoved(bookId, category)) {
+            staleReasons.push(seriesKnowledgeMovedReason(category.entry.label));
           }
         }
       }
@@ -1860,8 +1875,8 @@ export class ReviewRunStore {
     requireReview(validFindingPage(page), 'REVIEW_PAGE_INVALID', '发现的分页或筛选无效。');
     const head = this.#head(bookId);
     const baseline = head === null ? { revision: null, error: null } : this.#readBaseline(bookId);
-    const configuration = this.#configuration();
-    const readings = configuration.categories.map((entry) => this.#readCategory(bookId, head, entry, baseline, progress));
+    const house = this.#configuration();
+    const readings = this.#forBook(bookId, house).categories.map((entry) => this.#readCategory(bookId, head, entry, baseline, progress));
     const chapters = head === null ? { basis: 'outline' as const, chapters: [] } : this.#chapterOptions(bookId, head);
     // The 审阅记录 lists the newest Runs only; a Run beyond them is still opened when it is named.
     const rows = this.#db.prepare('SELECT * FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC LIMIT ?')
@@ -1880,7 +1895,7 @@ export class ReviewRunStore {
     const workspace: ReviewWorkspaceProjection = {
       bookId,
       manuscript: head,
-      configuration: this.#configurationPin(configuration),
+      configuration: this.#configurationPin(house),
       categories: readings.map((reading) => this.#workspaceCategory(reading, chapters)),
       coverage: this.#coverage(bookId, head, readings, baseline),
       scopeOptions: this.#scopeOptions(head, chapters),
@@ -1980,21 +1995,50 @@ export class ReviewRunStore {
   }
 
   /**
-   * Why a category no executor serves cannot be chosen. A Book already in a Series is told so (Issue #63, S28a): 书系一致性
-   * still waits for Series Knowledge to reach review.
+   * The configuration as it applies to one Book: the house's, with 书系一致性 resolved from the Series Knowledge of the Series
+   * the Book is in now (Issue #64, S29a). The house's own digest still names the configuration a Run was prepared under.
    */
-  #unavailableReason(bookId: string, entry: ReviewCategoryConfigurationEntry): string {
-    if (entry.categoryId === 'series-consistency') {
-      const series = new SeriesLedger(this.#db).seriesOf(bookId);
-      if (series.count > 0) return seriesConsistencyWaitingReason(series.memberships.map((entry) => entry.title), series.count);
-    }
-    return entry.unavailableReason ?? '这一类暂不可用。';
+  #forBook(bookId: string, house: ReviewCategoryConfiguration): ReviewCategoryConfiguration {
+    if (!house.categories.some((entry) => entry.executor === 'series-knowledge')) return house;
+    const resolution = resolveSeriesConsistency(this.#db, bookId);
+    return {
+      ...house,
+      categories: house.categories.map((entry) => entry.executor === 'series-knowledge' ? seriesConsistencyEntry(entry, resolution) : entry),
+    };
+  }
+
+  /**
+   * Whether a Run's 书系一致性 still reads what the Book would be given now: the same Series and exactly the same revisions.
+   * A revision taken in or a membership changed after preparation leaves the frozen plan approvable by nobody.
+   */
+  #seriesKnowledgeMoved(bookId: string, category: SnapshotCategory): boolean {
+    const pins = category.entry.seriesKnowledge;
+    return pins !== undefined && !seriesKnowledgePinsCurrent(pins, resolveSeriesConsistency(this.#db, bookId));
+  }
+
+  /**
+   * 书系一致性 of one member Book as the 书系 page's 成员与共享范围 states it (Issue #64, S29a; editor-surfaces §8.3): why it
+   * cannot be chosen now, `null` when it can, and when its findings were last put on the manuscript.
+   */
+  seriesConsistencyState(bookId: string): { readonly unavailableReason: string | null; readonly reviewedAt: string | null } {
+    const entry = this.#forBook(bookId, this.#configuration()).categories.find((candidate) => candidate.categoryId === 'series-consistency');
+    const last = this.#db.prepare(
+      `SELECT max(e.recorded_at) reviewed_at FROM review_run_category_events e JOIN review_runs r ON r.review_run_id = e.review_run_id
+       WHERE r.book_id = ? AND e.category_id = 'series-consistency' AND e.state = 'materialized'`,
+    ).get(bookId) as SqlRow;
+    const unavailableReason = entry === undefined
+      ? '这一类暂不可用。'
+      : entry.executor === 'unavailable' ? entry.unavailableReason ?? '这一类暂不可用。' : this.#head(bookId) === null ? NO_MANUSCRIPT_REASON : null;
+    return { unavailableReason, reviewedAt: nullableText(last.reviewed_at) };
   }
 
   /** What one category can do now: from its own ledger for a Task-backed one, from the baseline for the leads. */
   #readCategory(bookId: string, head: ManuscriptHead | null, entry: ReviewCategoryConfigurationEntry, baseline: BaselineReading, progress: ProgressReader | undefined): CategoryReading {
     const none: ReviewCategoryLedgerFacts = { hasRevision: false, stale: false, syncUnavailableReason: null, baselineRevision: baseline.revision !== null };
-    if (entry.executor === 'unavailable') return { entry, unavailableReason: this.#unavailableReason(bookId, entry), facts: none, projection: null };
+    // The house's 书系一致性 is never read unresolved; were it, it could not run.
+    if (entry.executor === 'unavailable' || entry.executor === 'series-knowledge') {
+      return { entry, unavailableReason: entry.unavailableReason ?? '这一类暂不可用。', facts: none, projection: null };
+    }
     if (head === null) return { entry, unavailableReason: NO_MANUSCRIPT_REASON, facts: none, projection: null };
     if (entry.executor === 'baseline-leads') {
       return { entry, unavailableReason: baseline.error ?? (baseline.revision === null ? LEADS_ABSENT_REASON : null), facts: none, projection: null };

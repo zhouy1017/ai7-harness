@@ -11344,14 +11344,16 @@ export class EditorialStore {
       if (members.length >= MAX_SERIES_MEMBERS_PAGE + 1 || (after !== null &&
         (entry.joinedAt > after.joinedAt || (entry.joinedAt === after.joinedAt && entry.bookId >= after.bookId)))) continue;
       const people = this.#bookPeople.current(entry.bookId);
+      const consistency = this.#reviewRuns.seriesConsistencyState(entry.bookId);
       members.push({
         bookId: entry.bookId,
         title: this.#evaluationBookTitle(entry.bookId),
         authors: people.authors,
         editors: people.editors,
         joinedAt: entry.joinedAt,
-        // 书系一致性 stays unavailable until Series Knowledge reaches review (Issue #64, S29), so no member has had one.
-        seriesConsistencyReview: null,
+        // 书系一致性 for this member (Issue #64, S29a): when its findings last reached the manuscript, and why not now.
+        seriesConsistencyReview: consistency.reviewedAt === null ? null : { reviewedAt: consistency.reviewedAt },
+        seriesConsistencyUnavailableReason: consistency.unavailableReason,
       });
     }
     const { page, more } = weighedPage(members, MAX_SERIES_MEMBERS_PAGE);

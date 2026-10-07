@@ -1,8 +1,10 @@
-import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { createHash, randomBytes } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import { lstat, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
@@ -16,7 +18,14 @@ import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabl
 // the launch control `--j13-picker-path`, and joins the Series. Its selected words become a Series Knowledge Candidate from
 // the manuscript's selection menu; an editor-authored candidate for the same name discloses a conflict; 书系知识纳入审阅 keeps
 // it by `保留已披露冲突` and `纳入书系知识` creates the item; 编辑候选项 retargets the other candidate to that item, which is
-// taken in as its second revision. No credential, no Provider.
+// taken in as its second revision.
+//
+// Since S29a (Issue #64; V2-UX-REV-013, SER-018) the member Book offers 书系一致性 in 审阅, its basis naming that second
+// revision. The Review Run executes on the J-04 model adapter through the authored fixture
+// `sample1-series-consistency-authored`, bound to every launch with `--j04-model-adapter`; its findings arrive as 批注 on the
+// manuscript, and the Series page's 书系一致性审阅 column says when. Its prerequisites are the product's own setup, as J-11
+// makes them: the editorial workspace profile at Revision 2, and one Main Editorial Role connection whose synthetic
+// credential is saved and removed again, so only its reference is recorded. No Provider, no transmission.
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -35,6 +44,12 @@ const MEMBER = '星河之三';
 const PLACE = '海边小城';
 const EDITOR_WORDS = '三部曲里海边小城的地名，以第一部的写法为准。';
 const KNOWLEDGE_NOTE = '书系知识只有经过纳入审阅才会成为书系可以选用的知识；候选项不会被任何任务读取，纳入也不会授权读取、发送或改动稿件。';
+const FIXTURE_IDENTITY = 'sample1-series-consistency-authored';
+const NO_KNOWLEDGE = `书系「${SERIES}」还没有纳入可用于一致性审阅的书系知识；在书系中纳入后才能选。`;
+const CONSISTENCY_BASIS = `依据：书系「${SERIES}」的书系知识：地点「${PLACE}」第 2 版 · 工序：书系一致性检查（第 1 版） · 不使用搜索引擎`;
+const CREDENTIAL_CLEANUP_TIMEOUT_MS = 15_000;
+const FORCE_EXIT_TIMEOUT_MS = 5_000;
+const CREDENTIAL_CLEANUP_TIMEOUT = new Error('J-13/credential-cleanup-timeout');
 let location = 'entry';
 
 function at(next) {
@@ -79,6 +94,170 @@ function productEnvironment(executable) {
     selected.PATH = [dirname(executable), '/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(delimiter);
   }
   return selected;
+}
+
+async function awaitFixedOperation(operation, timeoutMs, timeoutError) {
+  operation.catch(() => undefined);
+  let timeout;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(timeoutError), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// ---- the one synthetic credential, and its cleanup (J-03 and J-04's ownership, as J-11 carries it) ------------------
+
+async function assertSecretsAbsentFromDataRoot(root, secrets) {
+  const needles = secrets.flatMap((secret) => {
+    const digest = createHash('sha256').update(secret, 'utf8').digest();
+    return [
+      Buffer.from(secret, 'utf8'),
+      Buffer.from(secret, 'utf16le'),
+      digest,
+      Buffer.from(digest.toString('hex'), 'utf8'),
+      Buffer.from(digest.toString('base64'), 'utf8'),
+      Buffer.from(digest.toString('base64url'), 'utf8'),
+    ];
+  });
+  const visit = async (directory) => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = resolve(directory, entry.name);
+      const metadata = await lstat(path);
+      requireJourney(!metadata.isSymbolicLink(), 'cleanup-data-symlink');
+      if (metadata.isDirectory()) await visit(path);
+      else if (metadata.isFile()) {
+        const bytes = await readFile(path);
+        requireJourney(!needles.some((needle) => bytes.includes(needle)), 'secret-absent-from-product-data');
+      }
+    }
+  };
+  await visit(root);
+}
+
+const CREDENTIAL_CLEANUP_SCRIPT = `
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => {
+  input += chunk;
+  if (input.length > 128) process.exit(2);
+});
+process.stdin.once('end', async () => {
+  try {
+    const value = JSON.parse(input);
+    if (value === null || typeof value !== 'object' ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.credentialReference)) {
+      process.exit(2);
+    }
+    const { pathToFileURL } = require('node:url');
+    const { resolve } = require('node:path');
+    const denial = await import(pathToFileURL(resolve('dist/shared/network-denial.mjs')).href);
+    denial.installNodeNetworkDenial();
+    const { AsyncEntry } = require('@napi-rs/keyring');
+    const removed = await new AsyncEntry(
+      'io.github.zhouy1017.ai7.model-service',
+      'credential-reference:' + value.credentialReference,
+    ).deleteCredential();
+    process.exit(removed === true ? 0 : 3);
+  } catch {
+    process.exit(4);
+  }
+});
+`;
+
+async function removeSyntheticCredentialWithElectron(executable, credentialReference) {
+  requireJourney(isAbsolute(executable), 'credential-direct-cleanup-executable');
+  requireJourney(UUID_PATTERN.test(credentialReference), 'credential-direct-cleanup-reference');
+  requireJourney(
+    process.env.NAPI_RS_NATIVE_LIBRARY_PATH === undefined && process.env.NAPI_RS_FORCE_WASI === undefined,
+    'credential-direct-cleanup-override',
+  );
+  const child = spawn(executable, ['-e', CREDENTIAL_CLEANUP_SCRIPT], {
+    cwd: ROOT,
+    env: { ...productEnvironment(executable), ELECTRON_RUN_AS_NODE: '1' },
+    stdio: ['pipe', 'ignore', 'ignore'],
+    windowsHide: true,
+  });
+  child.stdin.on('error', () => undefined);
+  const terminal = new Promise((resolveTerminal, rejectTerminal) => {
+    child.once('error', rejectTerminal);
+    child.once('exit', (code, signal) => resolveTerminal({ code, signal }));
+  });
+  terminal.catch(() => undefined);
+  child.stdin.end(JSON.stringify({ credentialReference }));
+  let result;
+  try {
+    result = await awaitFixedOperation(terminal, CREDENTIAL_CLEANUP_TIMEOUT_MS, CREDENTIAL_CLEANUP_TIMEOUT);
+  } catch (error) {
+    try { child.kill('SIGKILL'); } catch {
+      // The bounded terminal observation below remains authoritative.
+    }
+    try {
+      await awaitFixedOperation(terminal, FORCE_EXIT_TIMEOUT_MS, CREDENTIAL_CLEANUP_TIMEOUT);
+    } catch {
+      child.unref();
+    }
+    throw error;
+  }
+  requireJourney(result.code === 0 && result.signal === null, 'credential-direct-cleanup-unconfirmed');
+}
+
+function hasErrorCode(error, code) {
+  return error !== null && typeof error === 'object' && 'code' in error && error.code === code;
+}
+
+async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
+  requireJourney(dataRoot === resolve(runRoot, 'data') && inside(runRoot, dataRoot), 'credential-cleanup-metadata-root');
+  const databasePath = resolve(dataRoot, 'store', 'ai7.sqlite');
+  let metadata;
+  try {
+    metadata = await lstat(databasePath);
+  } catch (error) {
+    if (hasErrorCode(error, 'ENOENT')) return { kind: 'not-started' };
+    throw new Error('J-13/credential-cleanup-metadata');
+  }
+  requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && (await realpath(databasePath)) === databasePath,
+    'credential-cleanup-metadata-file');
+  let database;
+  try {
+    database = new DatabaseSync(databasePath, { readOnly: true });
+  } catch {
+    throw new Error('J-13/credential-cleanup-metadata');
+  }
+  try {
+    database.exec('PRAGMA query_only = ON;');
+    // The terminal version the service stamps, as J-11 reads it; this pin moves with whatever revision a later slice takes.
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 58, 'credential-cleanup-metadata-version');
+    const rows = database.prepare(
+      `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
+              approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
+       FROM model_service_connections LIMIT 2`,
+    ).all();
+    requireJourney(rows.length <= 1, 'credential-cleanup-metadata-cardinality');
+    if (rows.length === 0) return { kind: 'not-started' };
+    const row = rows[0];
+    requireJourney(
+      row.connection_id === 'main-editorial-deepseek-v4-pro' && row.role_id === 'main-editorial' &&
+      row.provider_id === 'deepseek-open-platform' && row.model_id === 'deepseek-v4-pro' &&
+      row.adapter_revision === 1 && row.configuration_revision === 1 && row.approved_fallback_chain === '[]' &&
+      row.credential_slot === 'deepseek-api-key' && typeof row.credential_reference === 'string' &&
+      UUID_PATTERN.test(row.credential_reference) && ['ready', 'missing', 'needs-attention'].includes(row.credential_operation_state),
+      'credential-cleanup-metadata-binding',
+    );
+    return row.credential_operation_state === 'missing'
+      ? { kind: 'removed' }
+      : { kind: 'reference', credentialReference: row.credential_reference };
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('J-13/')) throw error;
+    throw new Error('J-13/credential-cleanup-metadata');
+  } finally {
+    database.close();
+  }
 }
 
 async function createLoopbackSentinel() {
@@ -509,8 +688,17 @@ async function main() {
   let runRoot;
   let runRootAcquisition;
   let tempParent;
+  let dataRoot;
+  let electronExecutableForCleanup;
   let cleanupPromise;
   let finalCleanupRequested = false;
+  // 书系一致性's Review Run needs a Main Editorial Role connection (Issue #64, S29a), so J-13 owns the one synthetic credential
+  // and its cleanup as J-11 does: through the product while it answers, and directly by its reference as the last resort.
+  let credentialRenderer;
+  let credentialMutationReached = false;
+  let credentialRemoved = false;
+  let credentialReferenceForCleanup;
+  let syntheticSecret;
   const closeBrowser = async () => {
     let owned = browser;
     if (owned === undefined && browserAcquisition !== undefined) owned = await browserAcquisition.catch(() => undefined);
@@ -518,18 +706,56 @@ async function main() {
     browser = undefined;
     browserAcquisition = undefined;
   };
+  const READ_CONNECTION = `window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection??null)`;
+  const removeCredentialThroughProduct = async () => {
+    if (credentialRenderer === undefined || browser === undefined || !browser.isConnected()) return;
+    const state = await credentialRenderer.evaluate(READ_CONNECTION);
+    if (UUID_PATTERN.test(state?.credentialReference ?? '')) credentialReferenceForCleanup = state.credentialReference;
+    if (state === null || state.credentialOperationState === 'missing') {
+      credentialRemoved = true;
+      return;
+    }
+    await credentialRenderer.evaluate(`window.ai7.removeModelServiceCredential()`);
+    const after = await credentialRenderer.evaluate(READ_CONNECTION);
+    credentialRemoved = after === null || after.credentialOperationState === 'missing';
+  };
   const cleanup = () => {
     cleanupPromise ??= (async () => {
+      let failure;
+      if (credentialMutationReached && !credentialRemoved) {
+        try { await removeCredentialThroughProduct(); } catch (error) { failure ??= error; }
+      }
       await closeBrowser();
+      if (credentialMutationReached && !credentialRemoved) {
+        try {
+          if (credentialReferenceForCleanup === undefined && dataRoot !== undefined && runRoot !== undefined) {
+            const recovered = await recoverSyntheticCredentialCleanupState(dataRoot, runRoot);
+            if (recovered.kind === 'not-started' || recovered.kind === 'removed') credentialRemoved = true;
+            else credentialReferenceForCleanup = recovered.credentialReference;
+          }
+          if (!credentialRemoved && credentialReferenceForCleanup !== undefined) {
+            requireJourney(electronExecutableForCleanup !== undefined, 'credential-direct-cleanup-executable');
+            await removeSyntheticCredentialWithElectron(electronExecutableForCleanup, credentialReferenceForCleanup);
+            credentialRemoved = true;
+          }
+        } catch (error) {
+          failure ??= error;
+        }
+      }
       const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
       await ownedLoopback?.close().catch(() => undefined);
       loopback = undefined;
+      if (credentialMutationReached && !credentialRemoved) throw failure ?? new Error('J-13/credential-cleanup-failed');
       const ownedRoot = runRoot ?? (runRootAcquisition === undefined ? undefined : await runRootAcquisition.catch(() => undefined));
       if (ownedRoot !== undefined) {
+        if (syntheticSecret !== undefined && dataRoot !== undefined) {
+          try { await assertSecretsAbsentFromDataRoot(dataRoot, [syntheticSecret]); } catch (error) { failure ??= error; }
+        }
         requireJourney(tempParent !== undefined && dirname(ownedRoot) === tempParent && basename(ownedRoot).startsWith('ai7-j13-e2e-') && (await realpath(ownedRoot)) === ownedRoot, 'cleanup-target');
         await rm(ownedRoot, { recursive: true, force: true });
         runRoot = undefined;
       }
+      if (failure !== undefined) throw failure;
     })();
     return cleanupPromise;
   };
@@ -555,9 +781,10 @@ async function main() {
     runRootAcquisition = mkdtemp(join(tempParent, 'ai7-j13-e2e-'));
     runRoot = await runRootAcquisition;
     requireJourney(dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j13-e2e-'), 'temp-root');
-    const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
+    dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
+    electronExecutableForCleanup = executable;
     const sample1Bytes = await readFile(SAMPLE1_PATH);
     const sample1 = { sha256: createHash('sha256').update(sample1Bytes).digest('hex'), bytes: sample1Bytes.length };
     requireJourney(sample1.sha256 === 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' && sample1.bytes === 29_550, 'exact-sample1');
@@ -568,6 +795,8 @@ async function main() {
         resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
         // J-13's picker imports the member Book whose words become a Series Knowledge Candidate (Issue #63, S28b).
         '--j13-picker-path', SAMPLE1_PATH,
+        // Its 书系一致性 Review Run executes on the J-04 model adapter (Issue #64, S29a).
+        '--j04-model-adapter', FIXTURE_IDENTITY,
       ];
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       cancellation.throwIfRequested();
@@ -659,7 +888,7 @@ async function main() {
     const added = await readSeries(renderer, (read) => read.members.length === 1 && read.preview === null, 'added');
     requireJourney(JSON.stringify(added.columns) === JSON.stringify(['图书', '作者', '责编', '加入时间', '书系一致性审阅', '操作']) &&
       added.members[0][0] === first && added.members[0][1] === `《${FIRST}》` && added.members[0][2] === '未填写' && added.members[0][3] === '未填写' &&
-      added.members[0][4].length > 0 && added.members[0][5] === '尚未审阅' && added.members[0][6] === '移出书系…' && added.focus === 'remove-open' &&
+      added.members[0][4].length > 0 && added.members[0][5] === `尚未审阅 · 暂不能审阅：${NO_KNOWLEDGE}` && added.members[0][6] === '移出书系…' && added.focus === 'remove-open' &&
       JSON.stringify(added.history) === JSON.stringify([['add', first, `加入书系 · 《${FIRST}》`, 4]]), 'added-words', added);
     const addedService = await renderer.evaluate(`Promise.all([window.ai7.inspectSeries({ seriesId: ${JSON.stringify(seriesId)} }), window.ai7.inspectBookSeries({ bookId: ${JSON.stringify(first)} })])
       .then(([series, side]) => [series.members.map((member) => member.bookId), series.history.map((change) => [change.kind, change.bookId, change.priorMember, change.newMember, change.impact.length]),
@@ -958,6 +1187,100 @@ async function main() {
     await openSeries(renderer, seriesId, 'knowledge-restart-series');
     const restarted = await readKnowledge(renderer, (read) => read.items.length === 1, 'knowledge-restarted');
     requireJourney(restarted.items[0][1] === `「${PLACE}」 · 地点 · 第 2 版` && restarted.items[0][6] === '历次版本（2）' && restarted.candidatesEmpty === '没有待审阅的候选项。', 'knowledge-restarted-words', restarted);
+
+    // ---- 书系一致性 (Issue #64, plan slice S29a; V2-UX-REV-013, SER-018) ------------------------------------------------
+    at('consistency-prerequisites');
+    // The Review Run's prerequisites through the product's own setup, as J-11 makes them: the editorial workspace profile at
+    // Revision 2 for the member Book, and one Main Editorial Role connection whose synthetic credential is saved and removed
+    // again, so only its reference is recorded — the J-04 adapter's route sends nothing and needs no credential.
+    await leaveSeries(renderer, 'consistency-leave');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]`, 'consistency-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(member)}]')`, 'consistency-manuscript', 120_000);
+    await click(renderer, '返回图书工作概览', 'consistency-overview');
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="install-disabled"]')`, 'consistency-artifact-install-ready');
+    await click(renderer, '获取并安装（保持停用）', 'consistency-artifact-install');
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'consistency-artifact-enable-ready');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'consistency-artifact-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'consistency-artifact-enabled');
+    await backToLibrary(renderer, 'consistency-model');
+    await click(renderer, '模型服务', 'consistency-model-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'consistency-model-ready');
+    cancellation.throwIfRequested();
+    syntheticSecret = randomBytes(48).toString('base64url');
+    credentialRenderer = renderer;
+    await fill(renderer, '#main-editorial-connection-name', 'J-13 主编辑连接', 'consistency-model-name');
+    await fill(renderer, '#main-editorial-credential', syntheticSecret, 'consistency-model-secret');
+    cancellation.throwIfRequested();
+    credentialMutationReached = true;
+    await click(renderer, '保护并保存', 'consistency-model-save');
+    at('model-credential-saved');
+    await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('[data-credential-state="ready"]')`, 'consistency-model-saved');
+    const readyConnection = await renderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
+    requireJourney(UUID_PATTERN.test(readyConnection?.credentialReference ?? '') && readyConnection?.credentialOperationState === 'ready', 'consistency-model-ready-reference');
+    credentialReferenceForCleanup = readyConnection.credentialReference;
+    await click(renderer, '移除', 'consistency-model-remove');
+    at('model-credential-removed');
+    await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'consistency-model-removed');
+    credentialRemoved = true;
+    await click(renderer, '返回', 'consistency-model-back');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work article.book-summary-item')`, 'consistency-model-library');
+
+    at('consistency-offered');
+    // The member's row says 书系一致性 can be chosen now; in 审阅 the category is offered, its basis naming the Series and the
+    // exact revision of its knowledge — the second, the editor's words — and nothing else is chosen for the editor.
+    await openSeries(renderer, seriesId, 'consistency-series');
+    const offered = await readSeries(renderer, (read) => read.members.some(([id]) => id === member), 'consistency-member-row');
+    requireJourney(offered.members.find(([id]) => id === member)?.[5] === '尚未审阅 · 可以审阅', 'consistency-member-offered', offered.members);
+    await leaveSeries(renderer, 'consistency-series-leave');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]`, 'consistency-review-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(member)}]')`, 'consistency-review-manuscript', 120_000);
+    await assertRenderer(renderer, `(() => { const group=document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const button=group?.querySelector('button[data-work-destination="review"]'); if(!(button instanceof HTMLButtonElement)||button.disabled||button.textContent!=='审阅')return false; button.click(); return true; })()`, 'consistency-review-entry');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card')`, 'consistency-review-card');
+    await assertRenderer(renderer, `document.querySelector('table.review-coverage tbody tr[data-review-category="series-consistency"]')?.dataset.coverage==='never'`, 'consistency-coverage-never');
+    await clickSelector(renderer, '[data-review-action="new-review"]', 'consistency-new-review');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'consistency-sheet-open');
+    const sheet = await renderer.evaluate(`(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); const label=sheet.querySelector('[data-review-category-option="series-consistency"]'); return { enabled: box instanceof HTMLInputElement && !box.disabled && !box.checked, basis: label?.querySelector('.review-category-basis')?.textContent ?? null, checked: Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), (input) => input.value) }; })()`);
+    requireJourney(sheet?.enabled === true && sheet.basis === CONSISTENCY_BASIS && sheet.checked.length === 0, 'consistency-sheet-offered', sheet);
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'consistency-prepare');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared' && document.querySelector('section.review-plans')?.dataset.reviewCategories==='series-consistency'`, 'consistency-prepared', 120_000);
+    const prepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
+    requireJourney(prepared?.state === 'prepared' && UUID_PATTERN.test(prepared.reviewRunId) && prepared.categories.length === 1 &&
+      prepared.categories[0].categoryId === 'series-consistency' && prepared.categories[0].basisStatement === CONSISTENCY_BASIS &&
+      (prepared.categories[0].planEnvelopeDigest ?? '').length === 64, 'consistency-prepared-run', prepared?.categories);
+
+    at('consistency-review-run');
+    // The one approval is the drawer's 开始任务; the Run executes on the J-04 adapter through the authored fixture, and its
+    // three findings — place names to check against the first book's writing, citing the one clause — become 批注.
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(prepared.reviewRunId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='ready'`, 'consistency-drawer');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'consistency-start');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'consistency-settled', 180_000);
+    const reviewed = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
+    const findings = reviewed?.findings ?? [];
+    requireJourney(reviewed?.state === 'settled' && reviewed.categories.length === 1 && reviewed.categories[0].state === 'settled' &&
+      reviewed.categories[0].findingsCount === 3 && reviewed.categories[0].excludedCount === 0 && reviewed.categories[0].basisStatement === CONSISTENCY_BASIS &&
+      findings.length === 3 && findings.every((finding) => finding.categoryId === 'series-consistency' && finding.output === 'annotation' &&
+        finding.markId !== null && finding.status === 'pending' && finding.anchorState === 'exact' && finding.clauseRefs.length === 1 &&
+        finding.clauseRefs[0].clauseId === 'series-knowledge/1' && finding.clauseRefs[0].documentTitle === `地点「${PLACE}」` &&
+        finding.clauseRefs[0].text === `地点「${PLACE}」：${EDITOR_WORDS}`),
+    'consistency-run-settled', { state: reviewed?.state, categories: reviewed?.categories, findings: findings.map((finding) => [finding.status, finding.anchorState, finding.clauseRefs]) });
+    await assertRenderer(renderer, `document.querySelector('table.review-coverage tbody tr[data-review-category="series-consistency"]')?.dataset.coverage==='current' && document.querySelectorAll('section.review-group[data-review-category="series-consistency"] article.review-finding').length===3`, 'consistency-results');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'consistency-drawer-close');
+    await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'consistency-drawer-closed');
+
+    at('consistency-marks-on-manuscript');
+    // A finding is the mark on the manuscript: 回到原文 opens the text at it, its card naming the category.
+    await clickSelector(renderer, `article.review-finding[data-finding-id="${findings[0].findingId}"] [data-review-action="go-to-text"]`, 'consistency-go-to-text');
+    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${findings[0].markId}"]')?.dataset.markSource==='ai7' && (document.querySelector('[data-mark-card]')?.textContent??'').includes('AI7 · 审阅「书系一致性」')`, 'consistency-mark-and-card', 30_000);
+
+    at('consistency-member-reviewed');
+    // The Series page's 书系一致性审阅 column says when the member's findings reached its manuscript.
+    await click(renderer, '返回图书工作概览', 'consistency-reviewed-overview');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview')?.dataset.bookId===${JSON.stringify(member)}`, 'consistency-reviewed-overview-ready');
+    await backToLibrary(renderer, 'consistency-reviewed');
+    await openSeries(renderer, seriesId, 'consistency-reviewed-series');
+    const reviewedRow = await readSeries(renderer, (read) => read.members.some(([id]) => id === member), 'consistency-reviewed-row');
+    const reviewedLine = reviewedRow.members.find(([id]) => id === member)?.[5] ?? '';
+    requireJourney(reviewedLine.startsWith('审阅于 ') && reviewedLine.endsWith(' · 可以审阅'), 'consistency-member-reviewed-line', reviewedLine);
 
     at('knowledge-bounded-pages');
     const pagesSeeded = await renderer.evaluate(`(async () => {
