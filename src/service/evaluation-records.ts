@@ -16,7 +16,7 @@ import {
   type EvaluationTotalProjection,
   type EvaluationWorkspaceProjection,
 } from '../shared/protocol.js';
-import { evaluationTotal, recommendationBlocked, validEvaluationScore } from '../shared/evaluation-scoring.js';
+import { EVALUATION_FINALIZE_NEEDS_SCORE, evaluationTotal, finalizationNeedsScore, recommendationBlocked, validEvaluationScore } from '../shared/evaluation-scoring.js';
 import { UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
 import { graphemeCount } from './analysis/factual-review-contract.js';
 
@@ -202,7 +202,7 @@ function lines(value: unknown, what: string): string[] {
 /**
  * The editor's content held to the profile it scores under: exactly its items and risks, each score a whole or half point
  * within its 满分, `不评` only with a reason, `推荐出版` never while a `高` risk is unreviewed — and, to finalize, every item
- * scored or `不评`, every risk rated with a statement, and a conclusion chosen.
+ * scored or `不评` and at least one scored (Issue #638), every risk rated with a statement, and a conclusion chosen.
  */
 export function evaluationContent(input: unknown, profile: Pick<Profile, 'items' | 'risks'>, finalize: boolean): EvaluationContent {
   requireEvaluation(isRecord(input) && Array.isArray(input.items) && Array.isArray(input.risks), 'EVALUATION_CONTENT_INVALID', '评估内容无效。');
@@ -223,6 +223,9 @@ export function evaluationContent(input: unknown, profile: Pick<Profile, 'items'
     const comment = text(given.comment, MAX_EVALUATION_COMMENT_GRAPHEMES, 'EVALUATION_COMMENT_TOO_LONG', `评语要在 ${MAX_EVALUATION_COMMENT_GRAPHEMES} 字以内。`, true);
     return { itemId: item.itemId, score: score as number | null, notRated, comment };
   });
+  // Every item 不评 scores nothing, and such a version is not finalized (Issue #638; the Owner's answer of 2026-10-07).
+  requireEvaluation(!finalize || !finalizationNeedsScore(items.map((item) => ({ score: item.score, notRated: item.notRated !== null }))),
+    'EVALUATION_NOTHING_SCORED', EVALUATION_FINALIZE_NEEDS_SCORE);
   const risks = profile.risks.map((risk, index) => {
     const given = givenRisks[index];
     requireEvaluation(isRecord(given) && given.riskId === risk.riskId, 'EVALUATION_CONTENT_INVALID', '评估内容与评估方案不一致。');

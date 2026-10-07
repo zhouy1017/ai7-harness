@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { BUILTIN_EVALUATION_PROFILE, EVALUATION_RECORD_TRIGGER_SQL, emptyEvaluationContent } from '../../src/service/evaluation-records.js';
+import { BUILTIN_EVALUATION_PROFILE, EVALUATION_RECORD_TRIGGER_SQL, emptyEvaluationContent, evaluationContent } from '../../src/service/evaluation-records.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { DATABASE_MERGE_SCHEMA_VERSION, LIBRARY_MATERIAL_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import type { EvaluationContent, EvaluationWorkspaceProjection } from '../../src/shared/protocol.js';
@@ -159,6 +159,11 @@ describe('②C 评估 over the real store', () => {
         }
       }
       expect(await refusal(() => save(2, scored([18, 16.5, 15, 17, 12], { risks: RISKS('low') }), true))).toBe('EVALUATION_CONCLUSION_REQUIRED:定稿前要选定结论。');
+      // Every item 不评 leaves nothing scored: such a version cannot be finalized (Issue #638; the Owner's answer of 2026-10-07),
+      // though it may still be saved as a draft. The refusal appends nothing.
+      const nothingScored = scored(['资料不足', '资料不足', '资料不足', '资料不足', '资料不足'], { risks: RISKS('low'), conclusion: 'defer' });
+      expect(await refusal(() => save(2, nothingScored, true))).toBe('EVALUATION_NOTHING_SCORED:至少要给一项打分才能定稿。');
+      expect(evaluationContent(nothingScored, BUILTIN_EVALUATION_PROFILE, false).items.every((item) => item.notRated === '资料不足')).toBe(true);
 
       // Reviewed by a person, 推荐出版 is open; 定稿 closes the version with the actor and the time.
       const finalized = save(2, { ...saved.content, risks: RISKS('high', true), conclusion: 'recommend' }, true).record!;

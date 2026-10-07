@@ -21,6 +21,8 @@ export const EVALUATION_AI7_PENDING = 'AI7 初评尚未接通：这一版由你�
 export const EVALUATION_START = { first: '开始评估', again: '重新评估' } as const;
 export const EVALUATION_SAVE = '保存评估';
 export const EVALUATION_FINALIZE = '定稿';
+/** 定稿 waits while every item is 不评 (Issue #638): the service's own words for its refusal. */
+export { EVALUATION_FINALIZE_NEEDS_SCORE } from '../shared/evaluation-scoring.js';
 export const EVALUATION_STATE_LABELS: Readonly<Record<EvaluationRecordSummaryProjection['state'], string>> = { editing: '编辑评分中', finalized: '定稿' };
 export const EVALUATION_NOT_RATED = '不评';
 export const EVALUATION_NOT_RATED_REASON = '不评的理由';
@@ -51,6 +53,23 @@ export const EVALUATION_STATUS = {
   finalizing: '正在定稿…',
   failed: '无法保存评估。',
 } as const;
+
+/** A typed score the scale does not admit (Issue #638): it shows no band and leaves the total, and the page says so. */
+export function evaluationScoreInvalidLine(fullMarks: number): string {
+  return `得分要在 0 到 ${fullMarks} 之间，按整分或半分填写；这个得分不计入总分，也不能保存。`;
+}
+
+/**
+ * Another version asked for while the open one has unsaved edits (Issue #638): what opening it would lose, with the way to
+ * stay first and the discard named.
+ */
+export const EVALUATION_STAY = '留在这一版';
+export function evaluationUnsavedLine(open: number, next: number): string {
+  return `第 ${open} 版有未保存的修改；打开第 ${next} 版会放弃这些修改。`;
+}
+export function evaluationDiscardAndOpen(next: number): string {
+  return `放弃修改并打开第 ${next} 版`;
+}
 
 export function evaluationStarted(ordinal: number): string {
   return `已开始第 ${ordinal} 版评估。`;

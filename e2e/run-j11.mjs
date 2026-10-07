@@ -1359,10 +1359,19 @@ async function main() {
     await waitFor(renderer, `${status} === '已开始第 1 版评估。'`, 'evaluation-started-status', 10_000);
 
     at('evaluation-score');
+    // A score the scale does not admit shows no band, counts for nothing and says why until it is corrected (Issue #638).
+    const literaryScore = `${item('literary-quality')} [data-evaluation-field="score"]`;
+    const literaryInvalid = `document.querySelector(${JSON.stringify(`${item('literary-quality')} .evaluation-score-invalid`)})`;
+    await fill(renderer, literaryScore, '25', 'evaluation-score-inadmissible');
+    const inadmissible = await readEvaluation(renderer, (page) => page.record?.items[0]?.[2] === '25', 'evaluation-score-inadmissible-read');
+    requireJourney(inadmissible.record.items[0][3] === null && inadmissible.record.total === '总分 0 / 100 · 还有 5 项没有打分' &&
+      await renderer.evaluate(`${literaryInvalid}?.hidden === false && ${literaryInvalid}.textContent === '得分要在 0 到 20 之间，按整分或半分填写；这个得分不计入总分，也不能保存。' && document.querySelector(${JSON.stringify(literaryScore)})?.getAttribute('aria-invalid') === 'true'`),
+      'evaluation-score-inadmissible-words', inadmissible.record);
     // Four items scored, half points allowed; the fifth 不评 with its reason, leaving the total out of 80; each band shown.
     for (const [itemId, score] of [['literary-quality', '18'], ['theme-and-context', '16.5'], ['structure-and-coherence', '15'], ['chinese-language', '17']]) {
       await fill(renderer, `${item(itemId)} [data-evaluation-field="score"]`, score, `evaluation-score-${itemId}`);
     }
+    await assertRenderer(renderer, `${literaryInvalid}?.hidden === true && !document.querySelector(${JSON.stringify(literaryScore)})?.hasAttribute('aria-invalid')`, 'evaluation-score-corrected');
     await tick(renderer, `${item('readers-and-market')} [data-evaluation-field="not-rated"]`, 'evaluation-not-rated');
     await fill(renderer, `${item('readers-and-market')} [data-evaluation-field="not-rated-reason"]`, '市场资料尚未收集。', 'evaluation-not-rated-reason');
     const scoredPage = await readEvaluation(renderer, (page) => page.record?.total === '总分 66.5 / 80 · 优秀（1 项不评）', 'evaluation-total');
@@ -1424,6 +1433,19 @@ async function main() {
     const compared = await readEvaluation(renderer, (page) => page.record?.entries === '2' && page.record.comparison?.length === 4, 'evaluation-compared');
     requireJourney(JSON.stringify(compared.record.comparison) === JSON.stringify(['与第 1 版相比', '文学品质与作者声音：18 → 19', '总分：66.5 / 80 → 67.5 / 80', '结论：修改后再议 → 结论未定']) &&
       compared.versions.length === 2 && compared.versions[1] === '第 1 版 · 定稿 · 修订版 r1 · 总分 66.5 / 80 · 优秀（1 项不评） · 修改后再议', 'evaluation-compared-words', compared);
+    // Version 1 asked for with an unsaved score keeps it: 留在这一版 comes first, and only the named discard opens it (Issue #638).
+    const openVersion = (nth) => `[data-screen="book-evaluation"] .evaluation-version-list li:nth-child(${nth}) [data-evaluation-action="open-version"]`;
+    await fill(renderer, `${item('literary-quality')} [data-evaluation-field="score"]`, '20', 'evaluation-unsaved-score');
+    await clickSelector(renderer, openVersion(2), 'evaluation-unsaved-open-first');
+    await waitFor(renderer, `document.querySelector('.evaluation-unsaved p')?.textContent === '第 2 版有未保存的修改；打开第 1 版会放弃这些修改。' && document.activeElement?.dataset.evaluationAction === 'stay' && document.querySelector('[data-evaluation-action="discard-and-open"]')?.textContent === '放弃修改并打开第 1 版'`, 'evaluation-unsaved-asks', 10_000);
+    await clickSelector(renderer, '[data-evaluation-action="stay"]', 'evaluation-unsaved-stay');
+    const stayed = await readEvaluation(renderer, (page) => page.record?.heading === '第 2 版 · 编辑评分中' && page.record.items[0][2] === '20', 'evaluation-unsaved-stayed');
+    requireJourney(await renderer.evaluate(`document.querySelector('.evaluation-unsaved') === null && document.activeElement === document.querySelector('.evaluation-record h3')`), 'evaluation-unsaved-kept', stayed.record.items);
+    await clickSelector(renderer, openVersion(2), 'evaluation-unsaved-open-again');
+    await clickSelector(renderer, '[data-evaluation-action="discard-and-open"]', 'evaluation-unsaved-discard');
+    await readEvaluation(renderer, (page) => page.record?.heading === '第 1 版 · 定稿', 'evaluation-discarded-opens-first');
+    await clickSelector(renderer, openVersion(1), 'evaluation-back-to-second');
+    await readEvaluation(renderer, (page) => page.record?.heading === '第 2 版 · 编辑评分中' && page.record.items[0][2] === '19', 'evaluation-discard-left-saved');
 
     at('j14-evaluation-reflow-forced-colors');
     // At 200% the version, its items and risks reflow into the width; under forced colours each keeps its border.
