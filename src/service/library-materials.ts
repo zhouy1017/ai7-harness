@@ -260,6 +260,29 @@ interface StoredMaterial {
   readonly sha256: string;
 }
 
+/** Read the immutable original's row binding without following any recorded source path. */
+export function readLibraryMaterialRecord(row: SqlRow): StoredMaterial {
+  const json = String(row.canonical_json);
+  requireLibrary(sha256Hex(json) === String(row.sha256), 'LIBRARY_MATERIAL_RECORD_INVALID', '资料库的记录已损坏。');
+  const record = JSON.parse(json) as unknown;
+  requireLibrary(isRecord(record) && record.schema === RECORD_SCHEMA && record.materialId === row.material_id &&
+    record.recordedAt === row.recorded_at && isRecord(record.source) && record.source.sha256 === row.object_sha256 &&
+    typeof record.title === 'string' && LIBRARY_MATERIAL_KINDS.includes(record.kind as LibraryMaterialKind) && typeof record.objectKey === 'string',
+  'LIBRARY_MATERIAL_RECORD_INVALID', '资料库的记录已损坏。');
+  const format = record.source.format;
+  const objectDigest = record.source.sha256;
+  requireLibrary(typeof format === 'string' && Object.hasOwn(OBJECT_EXTENSIONS, format) &&
+    typeof objectDigest === 'string' && DIGEST_PATTERN.test(objectDigest) &&
+    Number.isSafeInteger(record.source.bytes) && Number(record.source.bytes) > 0 &&
+    record.objectKey === posix.join('sha256', objectDigest.slice(0, 2), `${objectDigest}${OBJECT_EXTENSIONS[format as LibraryMaterialFormat]}`),
+  'LIBRARY_MATERIAL_RECORD_INVALID', '资料库的记录已损坏。');
+  return {
+    materialId: String(row.material_id), title: record.title, kind: record.kind as LibraryMaterialKind,
+    source: record.source as unknown as LibraryMaterialSourceProjection, objectKey: record.objectKey,
+    recordedAt: String(row.recorded_at), sha256: String(row.sha256),
+  };
+}
+
 type StoredDecision =
   | { readonly ordinal: number; readonly recordedAt: string; readonly sha256: string; readonly kind: 'attribution'; readonly scope: 'book'; readonly bookId: string }
   | { readonly ordinal: number; readonly recordedAt: string; readonly sha256: string; readonly kind: 'attribution'; readonly scope: 'house' }
@@ -345,22 +368,7 @@ export class LibraryMaterialLedger {
   }
 
   #material(row: SqlRow): StoredMaterial {
-    const json = String(row.canonical_json);
-    requireLibrary(sha256Hex(json) === String(row.sha256), 'LIBRARY_MATERIAL_RECORD_INVALID', '资料库的记录已损坏。');
-    const record = JSON.parse(json) as unknown;
-    requireLibrary(isRecord(record) && record.schema === RECORD_SCHEMA && record.materialId === row.material_id &&
-      record.recordedAt === row.recorded_at && isRecord(record.source) && record.source.sha256 === row.object_sha256 &&
-      typeof record.title === 'string' && LIBRARY_MATERIAL_KINDS.includes(record.kind as LibraryMaterialKind) && typeof record.objectKey === 'string',
-    'LIBRARY_MATERIAL_RECORD_INVALID', '资料库的记录已损坏。');
-    return {
-      materialId: String(row.material_id),
-      title: record.title,
-      kind: record.kind as LibraryMaterialKind,
-      source: record.source as unknown as LibraryMaterialSourceProjection,
-      objectKey: record.objectKey,
-      recordedAt: String(row.recorded_at),
-      sha256: String(row.sha256),
-    };
+    return readLibraryMaterialRecord(row);
   }
 
   /** One item's decisions, oldest first, each verified against its row and chained to the one before. */

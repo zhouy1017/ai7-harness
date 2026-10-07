@@ -765,9 +765,25 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'inspectDatabaseExports':
     case 'inspectDataVersion':
       requireInput(value.input, [], tentativeId);
       break;
+    case 'prepareDatabaseExport': {
+      const input = requireInput(value.input, ['destination'], tentativeId);
+      if (!isBoundedString(input.destination, MAX_EXPORT_DESTINATION_CODE_UNITS) || !isAbsolute(input.destination)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'approveDatabaseExport': {
+      const input = requireInput(value.input, ['preparationId'], tentativeId);
+      if (!validUuid(input.preparationId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'cancelDatabaseExport': {
+      const input = requireInput(value.input, ['activityId'], tentativeId);
+      if (!validUuid(input.activityId)) throw new ProtocolError(tentativeId);
+      break;
+    }
     // Filter before the bounded history page, with one exclusive cursor.
     case 'inspectFeedbackHistory': {
       const input = requireInputWithOptional(value.input, [], ['bookId', 'origin', 'author', 'editor', 'signal', 'recordedFrom', 'recordedBefore', 'dimension', 'after'], tentativeId);
