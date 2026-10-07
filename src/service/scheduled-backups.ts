@@ -193,6 +193,8 @@ export function backupFailureReason(error: unknown): ScheduledBackupFailureReaso
       return 'location-unavailable';
     case 'DATABASE_PACKAGE_TOO_LARGE':
       return 'too-large';
+    case 'DATABASE_SOURCE_DAMAGED':
+      return 'source-damaged';
     default:
       return 'other';
   }

@@ -141,6 +141,34 @@ describe('导出数据库 over the real store', () => {
     }
   });
 
+  it.each([
+    ['missing', async (path: string) => { await rm(path); }],
+    ['changed', async (path: string) => { await writeFile(path, randomBytes(64)); }],
+  ] as const)('names a manuscript file %s before the export as damaged, not as a retry, and leaves nothing staged', async (_, damage) => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      await importBook(store);
+      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      const objects = (() => {
+        try {
+          return database.prepare('SELECT relative_key FROM content_objects ORDER BY relative_key').all() as Array<{ relative_key: string }>;
+        } finally { database.close(); }
+      })();
+      expect(objects.length).toBeGreaterThan(0);
+      await damage(join(roots.dataRoot, 'objects', objects[0]!.relative_key));
+      const destination = join(roots.inputRoot, 'damaged.ai7db');
+      const error = await store.prepareDatabaseExport(destination, true).catch((caught: unknown) => caught);
+      expect(code(error)).toBe('DATABASE_SOURCE_DAMAGED');
+      expect((error as Error).message).toContain('稿件文件 1 个');
+      expect((error as Error).message).not.toContain('请重试');
+      expect(staged()).toEqual([]);
+      expect(existsSync(destination)).toBe(false);
+      expect(store.inspectDatabaseExports().exports).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
   it('stages one package on preparation, writes it on the one approval, and says what it came to', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {

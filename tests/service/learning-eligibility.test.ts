@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { MAX_FRAME_BYTES } from '../../src/shared/protocol.js';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -15,7 +14,7 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { DECISION_FEEDBACK_SCHEMA_VERSION, SCHEDULED_BACKUP_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
-import { MAX_LEARNING_MATERIALS_PAGE } from '../../src/shared/protocol.js';
+import { MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE } from '../../src/shared/protocol.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type {
   CreateEditorialMarkInput,

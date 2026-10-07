@@ -47,12 +47,13 @@ describe('定期自动备份\'s words', () => {
   it('states a backup being made, and one that could not be, in its own words (Issue #434 review)', () => {
     expect([SCHEDULED_BACKUP_RUNNING, SCHEDULED_BACKUP_STATUS_LINES.backingUp]).toEqual(['正在备份…', '已打开定期自动备份，正在做今天的备份…']);
     const instant = (iso: string): string => `〔${iso.slice(5, 10)}〕`;
-    const reasons = ['no-space', 'not-writable', 'location-unavailable', 'too-large', 'other'] as const;
+    const reasons = ['no-space', 'not-writable', 'location-unavailable', 'too-large', 'source-damaged', 'other'] as const;
     expect(reasons.map((reason) => scheduledBackupFailureLine({ at: '2026-09-25T02:00:00.000Z', reason }, instant))).toEqual([
       '最近一次自动备份没有完成（〔09-25〕）：备份位置的空间不足。AI7 会在一小时后再试。',
       '最近一次自动备份没有完成（〔09-25〕）：AI7 无法写入备份位置。AI7 会在一小时后再试。',
       '最近一次自动备份没有完成（〔09-25〕）：备份位置不可用。AI7 会在一小时后再试。',
       '最近一次自动备份没有完成（〔09-25〕）：数据超过 4 GB 或文件过多，暂时无法打包成一个文件。AI7 会在一小时后再试。',
+      '最近一次自动备份没有完成（〔09-25〕）：有数据文件在备份之前就已缺失或损坏，备份不能补齐它们。AI7 会在一小时后再试。',
       '最近一次自动备份没有完成（〔09-25〕）：备份没有写完。AI7 会在一小时后再试。',
     ]);
   });
@@ -79,10 +80,10 @@ describe('a backup\'s name, place and cadence', () => {
 
   it('tells why a backup was not made by the refusal\'s code alone, never its words (Issue #434 review)', () => {
     const coded = (code: string): Error => Object.assign(new Error('C:\\Users\\编辑\\private'), { code });
-    const codes = ['ENOSPC', 'EDQUOT', 'EACCES', 'EPERM', 'EROFS', 'BACKUP_LOCATION_INVALID', 'EEXIST', 'ENOTDIR', 'DATABASE_PACKAGE_TOO_LARGE', 'EIO'];
+    const codes = ['ENOSPC', 'EDQUOT', 'EACCES', 'EPERM', 'EROFS', 'BACKUP_LOCATION_INVALID', 'EEXIST', 'ENOTDIR', 'DATABASE_PACKAGE_TOO_LARGE', 'DATABASE_SOURCE_DAMAGED', 'DATABASE_PACKAGE_INCOMPLETE', 'EIO'];
     expect(codes.map((code) => backupFailureReason(coded(code)))).toEqual([
       'no-space', 'no-space', 'not-writable', 'not-writable', 'not-writable',
-      'location-unavailable', 'location-unavailable', 'location-unavailable', 'too-large', 'other',
+      'location-unavailable', 'location-unavailable', 'location-unavailable', 'too-large', 'source-damaged', 'other', 'other',
     ]);
     expect([backupFailureReason(new Error('x')), backupFailureReason('ENOSPC'), backupFailureReason(null)]).toEqual(['other', 'other', 'other']);
   });
