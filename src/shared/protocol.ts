@@ -6034,7 +6034,7 @@ export interface ScheduledBackupProjection {
 }
 
 /** Why the service's last check made no backup, as the section states it (Issue #434 review). */
-export type ScheduledBackupFailureReason = 'no-space' | 'not-writable' | 'location-unavailable' | 'too-large' | 'other';
+export type ScheduledBackupFailureReason = 'no-space' | 'not-writable' | 'location-unavailable' | 'too-large' | 'source-damaged' | 'other';
 
 export interface ScheduledBackupFailureProjection {
   /** When the check that made no backup ran. */

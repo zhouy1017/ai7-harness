@@ -795,7 +795,6 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectDataVersion':
       requireInput(value.input, [], tentativeId);
       break;
-    // Filter before the bounded history page, with one exclusive cursor.
     case 'setScheduledBackup': {
       const input = requireInput(value.input, ['enabled', 'expectedOrdinal'], tentativeId);
       if (typeof input.enabled !== 'boolean' || !Number.isSafeInteger(input.expectedOrdinal) || (input.expectedOrdinal as number) < 0) throw new ProtocolError(tentativeId);
@@ -816,6 +815,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validUuid(input.activityId)) throw new ProtocolError(tentativeId);
       break;
     }
+    // Filter before the bounded history page, with one exclusive cursor.
     case 'inspectFeedbackHistory': {
       const input = requireInputWithOptional(value.input, [], ['bookId', 'origin', 'author', 'editor', 'signal', 'recordedFrom', 'recordedBefore', 'dimension', 'after'], tentativeId);
       const instant = (candidate: unknown): boolean => typeof candidate === 'string' && CURSOR_INSTANT.test(candidate) &&
