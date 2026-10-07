@@ -123,7 +123,7 @@ Exit criterion: 知识库 holds the seven classes with versions and selection sn
 
 | Order | Slice | Issue | Class | Journey | Outcome | Depends on | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 4.1 | S79 | #427 | T3 | J-15 | ⑤ 知识库: seven classes, versions, selection snapshots, attribution, eligibility; 范例 auto-archived at 发稿 (B21) | S75, S65 | S79a (PR #564, `dev@2de1042`), S79b (PR #565, `dev@b2f3fc3`), S79d's first piece (PR #566, `dev@828ca35`) and S79c (PR #567, `dev@84b0353`) integrated; the rest follows with S81 and S70 |
+| 4.1 | S79 | #427 | T3 | J-15 | ⑤ 知识库: seven classes, versions, selection snapshots, attribution, eligibility; 范例 auto-archived at 发稿 (B21) | S75, S65 | S79a (PR #564, `dev@2de1042`), S79b (PR #565, `dev@b2f3fc3`), S79d's first piece (PR #566, `dev@828ca35`) and S79c (PR #567, `dev@84b0353`) integrated; S79d's remainder (评估方案, 社级编辑记忆, 外部来源留存 after S70) and the 范例 import remain |
 | 4.2 | S80 | #428 | T3 | J-15 | ⑤ The five-layer Material Index with local similarity vectors (B22) | S79 | planned (a local dependency needs the Owner) |
 | 4.3 | S81 | #429 | T3 | J-11 | ②C 评估 and 审稿意见: Evaluation Records, the 100-point model, risk items, the prediction block, the fixed task (B7) | S79, S72, S65 | S81a integrated (PR #570, `dev@3cd7bd8`); S81b and S81c remain |
 | 4.4 | S82 | #430 | T2 | J-12 | ⑤ 设置 › 评估校准与预测 (B23) | S81, S65 | integrated (PR #577, `dev@1b6464a`) |
@@ -132,7 +132,7 @@ Exit criterion: 知识库 holds the seven classes with versions and selection sn
 | 4.7 | S26 | #61 | T3 | J-11 | Optional feedback capture and Book-first learning eligibility (范例 auto-inclusion excepted, KB-008) | S38, S83 | S26a (PR #574, `dev@84867d1`), S26b (PR #575, `dev@84b5fc6`) and S26c (PR #576, `dev@d8c985c`) integrated |
 | 4.8 | S27 | #62 | T3 | J-11 | Learning Lineage, exclusion, remediation | S26 | planned |
 | 4.9 | S28 | #63 | T3 | J-13 | Series membership with impact previews and versioned Series Knowledge (B20) | Phase 2 | S28a (PR #578, `dev@22d4cd9`) and S28b (PR #585, `dev@f418284`) integrated; admits J-13 |
-| 4.10 | S29 | #64 | T3 | J-13 | Series and Cross-project scope pins and immediate retrieval exclusions (B20) | S28, S69 | planned |
+| 4.10 | S29 | #64 | T3 | J-13 | Series and Cross-project scope pins and immediate retrieval exclusions (B20) | S28, S69 | S29a in flight (draft PR #645); S29b (retrieval exclusions) follows |
 
 ## Phase 5 — ecosystem, dialogue and writing
 
