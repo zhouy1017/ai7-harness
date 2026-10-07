@@ -150,7 +150,7 @@ describe('定期自动备份 over the real store', () => {
         await new Promise<void>((resolve) => setImmediate(resolve));
       }
       const off = await store.setScheduledBackup({ enabled: false, expectedOrdinal: 1 }, T);
-      expect([off.enabled, off.ordinal]).toEqual([false, 2]);
+      expect([off.enabled, off.ordinal, off.backingUp]).toEqual([false, 2, false]);
       release();
       expect(await old).toBe(false);
       expect(store.inspectScheduledBackups(T)).toMatchObject({ enabled: false, total: 0, backingUp: false, lastFailure: null });

@@ -413,8 +413,10 @@ export class ScheduledBackups {
       nextDueAt: !preference.enabled ? null
         : latest === null ? now.toISOString()
           : new Date(Math.max(now.getTime(), Date.parse(latest.createdAt) + BACKUP_INTERVAL_MS)).toISOString(),
-      // The check under way is writing the backup, or will once it has removed those whose days passed.
-      backingUp: this.#inFlight !== null && (this.#writing || (preference.enabled && !this.#madeWithinDay(latest, now))),
+      // The check under way is writing the backup, or will once it has removed those whose days passed. A write the switch
+      // withdrew is only cleaning up, and is not a backup being made (Issue #434 review).
+      backingUp: this.#inFlight !== null &&
+        ((this.#writing && this.#controller?.signal.aborted !== true) || (preference.enabled && !this.#madeWithinDay(latest, now))),
       lastFailure: this.#lastFailure,
     };
   }
