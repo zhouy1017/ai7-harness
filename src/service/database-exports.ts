@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, open, opendir, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { DatabaseSync, backup, type SQLOutputValue } from 'node:sqlite';
+import { DatabaseSync, backup, type SQLInputValue, type SQLOutputValue } from 'node:sqlite';
 import { Zip, ZipDeflate, ZipPassThrough, strToU8 } from 'fflate';
 import {
   MAX_DATABASE_EXPORTS_LISTED,
@@ -301,20 +301,43 @@ function contentsOfCopy(path: string): DatabaseExportContentsProjection {
  * The database copy is the authority for external files: a live deletion after copying must not turn a self-consistent ZIP
  * into an incomplete backup. Compare every frozen reference with the bytes actually packed, retaining only the already
  * bounded member index. Rows stream, and cancellation/service requests get a turn between bounded batches.
+ *
+ * A reference whose bytes are not packed as frozen is told apart by the live store (Issue #434 review): when the live store no
+ * longer holds it, it went while the package was made and a retry makes a whole package (`DATABASE_PACKAGE_INCOMPLETE`);
+ * when the live store still holds it, the file was missing or changed before the export began, a retry would fail the same
+ * way, and the refusal says so and what kind of file it is (`DATABASE_SOURCE_DAMAGED`). Without a live store, every such
+ * reference is refused as incomplete.
  */
-export async function verifyCopiedPayloads(path: string, members: ReadonlyArray<DatabasePackageMember>, schemaRevision: number, signal?: AbortSignal): Promise<void> {
+export async function verifyCopiedPayloads(
+  path: string,
+  members: ReadonlyArray<DatabasePackageMember>,
+  schemaRevision: number,
+  signal?: AbortSignal,
+  live?: DatabaseSync,
+): Promise<void> {
   const incomplete = (): never => { throw new DatabaseExportError('DATABASE_PACKAGE_INCOMPLETE', '数据文件在打包期间发生变化或已损坏；没有生成完整备份，请重试。'); };
   const copy = new DatabaseSync(path, { readOnly: true });
   const packed = new Map(members.map((member) => [member.path, member]));
+  const damaged: Record<DamagedPayloadKind, number> = { manuscript: 0, recovery: 0, library: 0, profile: 0 };
   let checked = 0;
-  const compare = async (key: string, digest: SQLOutputValue | undefined, bytes: SQLOutputValue | undefined): Promise<void> => {
+  const compare = async (
+    key: string,
+    digest: SQLOutputValue | undefined,
+    bytes: SQLOutputValue | undefined,
+    kind: DamagedPayloadKind,
+    stillHeld: () => boolean,
+  ): Promise<void> => {
     signal?.throwIfAborted();
     const member = packed.get(key);
-    if (typeof digest !== 'string' || !DIGEST_PATTERN.test(digest) || typeof bytes !== 'number' || !Number.isSafeInteger(bytes) || bytes <= 0 ||
-        member === undefined || member.sha256 !== digest || member.bytes !== bytes) incomplete();
+    if (typeof digest !== 'string' || !DIGEST_PATTERN.test(digest) || typeof bytes !== 'number' || !Number.isSafeInteger(bytes) || bytes <= 0) incomplete();
+    if (member === undefined || member.sha256 !== digest || member.bytes !== bytes) {
+      if (!stillHeld()) incomplete();
+      damaged[kind] += 1;
+    }
     checked += 1;
     if (checked % 128 === 0) await new Promise<void>((resolve) => setImmediate(resolve));
   };
+  const held = (sql: string, ...values: SQLInputValue[]): boolean => live !== undefined && live.prepare(sql).get(...values) !== undefined;
   const present = (table: string): boolean => {
     const exists = copy.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) !== undefined;
     // Minimal builder fixtures predate external-file relations; every production package must have all four authorities.
@@ -324,27 +347,50 @@ export async function verifyCopiedPayloads(path: string, members: ReadonlyArray<
   try {
     if (present('content_objects')) for (const row of copy.prepare('SELECT object_digest, relative_key, byte_length FROM content_objects').iterate()) {
       if (typeof row.object_digest !== 'string' || typeof row.relative_key !== 'string' || !isManuscriptObjectKey(row.object_digest, row.relative_key)) incomplete();
-      await compare(`objects/${row.relative_key}`, row.object_digest, row.byte_length);
+      const { object_digest: digest, relative_key: key } = row;
+      await compare(`objects/${key}`, digest, row.byte_length, 'manuscript',
+        () => held('SELECT 1 FROM content_objects WHERE relative_key = ? AND object_digest = ?', key as SQLInputValue, digest as SQLInputValue));
     }
     if (present('recovery_snapshots')) for (const row of copy.prepare('SELECT object_digest, manifest_digest, object_relative_key, byte_length FROM recovery_snapshots').iterate()) {
       if (typeof row.object_digest !== 'string' || typeof row.manifest_digest !== 'string' || typeof row.object_relative_key !== 'string' ||
           !isRecoveryObjectKey(row.object_digest, row.manifest_digest, row.object_relative_key)) incomplete();
-      await compare(`recovery-objects/${row.object_relative_key}`, row.object_digest, row.byte_length);
+      const { object_digest: digest, object_relative_key: key } = row;
+      await compare(`recovery-objects/${key}`, digest, row.byte_length, 'recovery',
+        () => held('SELECT 1 FROM recovery_snapshots WHERE object_relative_key = ? AND object_digest = ?', key as SQLInputValue, digest as SQLInputValue));
     }
     if (present('library_materials')) for (const row of copy.prepare('SELECT material_id, object_sha256, recorded_at, canonical_json, sha256 FROM library_materials').iterate()) {
       const material = (() => { try { return readLibraryMaterialRecord(row); } catch { return incomplete(); } })();
-      await compare(`${LIBRARY_OBJECT_DIRECTORY}/${material.objectKey}`, material.source.sha256, material.source.bytes);
+      const { material_id: materialId, sha256 } = row;
+      await compare(`${LIBRARY_OBJECT_DIRECTORY}/${material.objectKey}`, material.source.sha256, material.source.bytes, 'library',
+        () => held('SELECT 1 FROM library_materials WHERE material_id = ? AND sha256 = ?', materialId as SQLInputValue, sha256 as SQLInputValue));
     }
     let installations = 0;
     if (present('native_artifact_installations')) for (const row of copy.prepare('SELECT retained_key, content_sha256, byte_length FROM native_artifact_installations').iterate()) {
       installations += 1;
       if (installations > 1 || row.retained_key !== EDITORIAL_WORKSPACE_PROFILE_RETAINED_KEY ||
           row.content_sha256 !== EDITORIAL_WORKSPACE_PROFILE_DIGEST || row.byte_length !== EDITORIAL_WORKSPACE_PROFILE_BYTES) incomplete();
-      await compare(`native-artifacts/${row.retained_key}`, row.content_sha256, row.byte_length);
+      const { retained_key: key, content_sha256: digest } = row;
+      await compare(`native-artifacts/${key}`, digest, row.byte_length, 'profile',
+        () => held('SELECT 1 FROM native_artifact_installations WHERE retained_key = ? AND content_sha256 = ?', key as SQLInputValue, digest as SQLInputValue));
     }
     signal?.throwIfAborted();
   } finally { copy.close(); }
+  const parts = DAMAGED_PAYLOAD_KINDS.filter((kind) => damaged[kind] > 0).map((kind) => `${DAMAGED_PAYLOAD_LABELS[kind]} ${damaged[kind]} 个`);
+  if (parts.length > 0) {
+    throw new DatabaseExportError('DATABASE_SOURCE_DAMAGED',
+      `有数据文件在导出之前就已缺失或损坏（${parts.join('、')}），导出不能补齐它们，所以没有生成备份。若刚放弃过一次导入，重新启动 AI7 后再试；仍然如此，说明这些文件已经损坏。`);
+  }
 }
+
+/** The kinds of external file a package carries, as a refusal names them (Issue #434 review). */
+type DamagedPayloadKind = 'manuscript' | 'recovery' | 'library' | 'profile';
+const DAMAGED_PAYLOAD_KINDS: ReadonlyArray<DamagedPayloadKind> = ['manuscript', 'recovery', 'library', 'profile'];
+const DAMAGED_PAYLOAD_LABELS: Readonly<Record<DamagedPayloadKind, string>> = {
+  manuscript: '稿件文件',
+  recovery: '恢复快照',
+  library: '资料库原件',
+  profile: '编辑工作区方案',
+};
 
 /**
  * How far writing a package has come (Issue #434 review): while the store is `copying`, the bytes of its pages copied of all of
@@ -461,7 +507,7 @@ export async function writeDatabasePackage(
     };
     await add(DATABASE_PACKAGE_STORE_MEMBER, snapshotPath, true);
     for (const source of sources) await add(source.member, source.path, false);
-    await verifyCopiedPayloads(snapshotPath, members, packageFacts.schemaRevision, signal);
+    await verifyCopiedPayloads(snapshotPath, members, packageFacts.schemaRevision, signal, db);
     signal?.throwIfAborted();
     const manifest = canonicalRecord({
       schema: DATABASE_PACKAGE_SCHEMA,

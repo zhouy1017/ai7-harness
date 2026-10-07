@@ -36,6 +36,7 @@ export const SCHEDULED_BACKUP_FAILURE_REASONS: Readonly<Record<ScheduledBackupFa
   'not-writable': 'AI7 无法写入备份位置',
   'location-unavailable': '备份位置不可用',
   'too-large': '数据超过 4 GB 或文件过多，暂时无法打包成一个文件',
+  'source-damaged': '有数据文件在备份之前就已缺失或损坏，备份不能补齐它们',
   other: '备份没有写完',
 };
 
