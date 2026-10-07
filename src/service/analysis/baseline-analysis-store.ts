@@ -605,13 +605,13 @@ function firstBaselineCounts(unitCount: number): AnalysisReusePlanCounts {
  * editor cancels it to prepare another (Issue #502, OFF-010); a cancelling one still holds the slot until it has
  * stopped (Issue #422).
  */
-function runIsActive(state: BaselineAnalysisRunState | null): boolean {
+export function runIsActive(state: BaselineAnalysisRunState | null): boolean {
   return state === 'authorized' || state === 'awaiting-connectivity' || state === 'admitted' || state === 'executing' ||
     state === 'cancelling' || state === 'pausing' || state === 'paused' || state === 'resumable' || state === 'awaiting-clarification';
 }
 
 /** Why an active Run blocks a new Task, in the words of its state: a waiting Run is never said to be under way. */
-function activeRunReason(state: BaselineAnalysisRunState | null): string {
+export function activeRunReason(state: BaselineAnalysisRunState | null): string {
   return state === 'awaiting-connectivity' ? WAITING_RUN_REASON : state === 'authorized' ? QUEUED_RUN_REASON : ACTIVE_RUN_REASON;
 }
 

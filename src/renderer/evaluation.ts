@@ -1,12 +1,38 @@
 import type {
+  EvaluationAdjustment,
+  EvaluationAdjustmentReasonId,
   EvaluationConclusion,
   EvaluationContent,
   EvaluationRecordProjection,
   EvaluationWorkspaceProjection,
   RendererApi,
+  ServiceJobProjection,
 } from '../shared/protocol.js';
-import { evaluationTotal, recommendationBlocked, type EvaluationRiskLevel } from '../shared/evaluation-scoring.js';
 import {
+  EVALUATION_ADJUSTMENT_REASONS,
+  evaluationItemAdjusted,
+  evaluationTotal,
+  recommendationBlocked,
+  type EvaluationRiskLevel,
+} from '../shared/evaluation-scoring.js';
+import {
+  EVALUATION_ADJUSTMENT_LEGEND,
+  EVALUATION_ADJUSTMENT_NOTE,
+  EVALUATION_ADJUSTMENT_REASON_LABELS,
+  EVALUATION_AI7_HEADING,
+  EVALUATION_AI7_LEDE,
+  EVALUATION_AI7_NONE,
+  EVALUATION_AI7_OPEN_PLAN,
+  EVALUATION_AI7_OPEN_TASK,
+  EVALUATION_AI7_PREPARE,
+  EVALUATION_AI7_STATUS,
+  EVALUATION_AI7_SUGGESTED,
+  EVALUATION_START_FROM_INITIAL,
+  evaluationAi7ConclusionLine,
+  evaluationAi7ItemLine,
+  evaluationAi7LatestLine,
+  evaluationAi7RecordLine,
+  evaluationAi7TaskLine,
   EVALUATION_AI7_PENDING,
   EVALUATION_COMMENT,
   EVALUATION_CONCLUSION_LEGEND,
@@ -51,11 +77,20 @@ import { localInstantLabel } from './plan-preview-labels.js';
  */
 export interface MountEvaluationOptions {
   readonly root: HTMLElement;
-  readonly api: Pick<RendererApi, 'inspectEvaluation' | 'startEvaluation' | 'saveEvaluation'>;
+  readonly api: Pick<RendererApi, 'inspectEvaluation' | 'startEvaluation' | 'saveEvaluation' | 'prepareInitialEvaluation'>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
   readonly technicalDetails: (key: string, ...rows: HTMLElement[]) => HTMLElement;
+  /** The shell's own follow of a cooperative job: AI7 初评's preparation (Issue #429, S81b1). */
+  readonly awaitServiceJob: (initial: ServiceJobProjection, onProgress: (job: ServiceJobProjection) => void) => Promise<ServiceJobProjection>;
+  /** Open AI7 初评's plan in the Task Drawer, whose bar starts it. */
+  readonly openPlan: (taskIntentId: string) => void;
 }
+
+/** The states in which AI7's 初评 is still under way or waiting: 评估 reads it again until it settles. */
+const INITIAL_UNDER_WAY: ReadonlySet<string> = new Set(['waiting', 'admitted', 'executing', 'cancelling', 'pausing', 'queued']);
+/** How often 评估 reads a 初评 under way again. */
+const INITIAL_POLL_MS = 1000;
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -98,18 +133,99 @@ function radio(name: string, value: string, label: string, checked: boolean, dis
   return wrapper;
 }
 
-export function mountEvaluation(options: MountEvaluationOptions): { load(): Promise<void> } {
+export function mountEvaluation(options: MountEvaluationOptions): { load(): Promise<void>; refresh(): void } {
   const { root, api, setStatus, errorMessage, technicalDetails } = options;
   root.classList.add('evaluation');
   let busy = false;
   let workspace: EvaluationWorkspaceProjection | null = null;
   let refusal: string | null = null;
+  let poll: number | null = null;
+
+  /**
+   * AI7's 初评 (Issue #429, S81b1): its Task and what it can do now, and the latest that settled — each item's score with its
+   * 依据充分度, the strengths, the weaknesses, the next step and the conclusion it would suggest, said as AI7's.
+   */
+  const initialNode = (page: EvaluationWorkspaceProjection): HTMLElement => {
+    const initial = page.initial;
+    const section = el('section', 'evaluation-initial');
+    section.dataset['initialState'] = initial.task?.state ?? 'none';
+    const heading = el('h3', undefined, EVALUATION_AI7_HEADING);
+    heading.tabIndex = -1;
+    section.append(heading, el('p', 'field-note', EVALUATION_AI7_LEDE));
+    if (initial.task !== null) section.append(el('p', 'evaluation-initial-task', evaluationAi7TaskLine(initial.task)));
+    const latest = initial.latest;
+    if (latest === null) {
+      section.append(el('p', 'field-note evaluation-initial-none', EVALUATION_AI7_NONE));
+    } else {
+      section.dataset['initialRevision'] = latest.revisionId;
+      section.dataset['initialCurrent'] = String(latest.current);
+      section.append(el('p', 'evaluation-initial-latest', evaluationAi7LatestLine(page.profile, latest)));
+      const items = el('ul', 'evaluation-initial-items');
+      for (const item of page.profile.items) {
+        const ai7 = latest.items.find((entry) => entry.itemId === item.itemId);
+        if (ai7 === undefined) continue;
+        const line = el('li', undefined, `${item.label}：${evaluationAi7ItemLine(ai7, item.fullMarks)}`);
+        line.dataset['itemId'] = item.itemId;
+        line.dataset['sufficiency'] = ai7.sufficiency;
+        items.append(line);
+      }
+      section.append(items);
+      const lists = el('dl', 'evaluation-initial-lists');
+      for (const [label, value] of [
+        ['主要优点', latest.strengths.join('；')],
+        ['主要问题', latest.weaknesses.join('；')],
+        ['下一步建议', latest.nextStep ?? ''],
+      ] as const) {
+        if (value.length === 0) continue;
+        lists.append(el('dt', undefined, label), el('dd', undefined, value));
+      }
+      section.append(lists, el('p', 'field-note evaluation-initial-conclusion', evaluationAi7ConclusionLine(page.profile, latest.suggestedConclusion)));
+    }
+    const row = el('div', 'button-row evaluation-initial-actions');
+    const task = initial.task;
+    if (task !== null && task.state === 'prepared') {
+      const open = action(EVALUATION_AI7_OPEN_PLAN, 'primary', 'open-initial-plan', () => options.openPlan(task.taskIntentId));
+      open.disabled = busy;
+      open.setAttribute('aria-controls', 'task-drawer');
+      row.append(open);
+    } else {
+      if (initial.prepare.allowed) {
+        const prepare = action(EVALUATION_AI7_PREPARE[initial.prepare.mode], latest === null ? 'primary' : 'secondary', 'prepare-initial', () => void prepareInitial());
+        prepare.disabled = busy;
+        row.append(prepare);
+      } else {
+        row.append(el('p', 'field-note evaluation-initial-reason', initial.prepare.reason));
+      }
+      if (task !== null) {
+        const open = action(EVALUATION_AI7_OPEN_TASK, 'quiet', 'open-initial-task', () => options.openPlan(task.taskIntentId));
+        open.disabled = busy;
+        open.setAttribute('aria-controls', 'task-drawer');
+        row.append(open);
+      }
+    }
+    section.append(row);
+    return section;
+  };
+
+  /** While AI7's 初评 is under way, 评估 reads it again — and keeps the form the editor is filling in as it is. */
+  const follow = (): void => {
+    if (poll !== null || workspace === null || !INITIAL_UNDER_WAY.has(workspace.initial.task?.state ?? '')) return;
+    poll = window.setTimeout(() => {
+      poll = null;
+      if (!root.isConnected || busy || workspace === null) return;
+      void api.inspectEvaluation({ recordId: workspace.record?.recordId ?? null, recordsBefore: workspace.recordsBefore }).then((page) => {
+        if (!root.isConnected || workspace === null || busy) return;
+        workspace = { ...page, record: workspace.record };
+        paint(null, true);
+      }).catch(() => undefined).finally(() => follow());
+    }, INITIAL_POLL_MS);
+  };
 
   const paint = (focus: string | null, preserveForm = false): void => {
     if (workspace === null) return;
     const keptForm = preserveForm ? root.querySelector<HTMLElement>('.evaluation-record') : null;
     root.dataset['evaluationRecords'] = String(workspace.recordCount);
-    const parts: HTMLElement[] = [];
+    const parts: HTMLElement[] = [initialNode(workspace)];
     // The versions, newest first; each opens as it was recorded.
     if (workspace.records.length > 0) {
       const versions = el('section', 'evaluation-versions');
@@ -143,7 +259,14 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     }
     const start = el('div', 'button-row evaluation-start');
     if (workspace.start.allowed) {
-      const begin = action(EVALUATION_START[workspace.start.kind], workspace.start.kind === 'first' ? 'primary' : 'secondary', 'start', () => void begin_());
+      // 从 AI7 初评开始 leads once AI7's latest 初评 read the text as it stands (EVAL-001, EVAL-006); the editor may still begin alone.
+      const fromInitial = workspace.start.fromInitial;
+      if (fromInitial !== null) {
+        const seeded = action(EVALUATION_START_FROM_INITIAL, 'primary', 'start-from-initial', () => void begin_(true));
+        seeded.disabled = busy;
+        start.append(seeded);
+      }
+      const begin = action(EVALUATION_START[workspace.start.kind], workspace.start.kind === 'first' && fromInitial === null ? 'primary' : 'secondary', 'start', () => void begin_(false));
       begin.disabled = busy;
       start.append(begin);
     } else {
@@ -155,10 +278,51 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       note.setAttribute('role', 'alert');
       parts.push(note);
     }
-    if (workspace.record !== null) parts.push(keptForm ?? recordNode(workspace.record));
-    root.replaceChildren(...parts);
+    if (keptForm !== null && workspace.record !== null && keptForm.parentElement === root) {
+      // The form the editor is filling in never leaves the page — a 初评 read again while they type keeps their focus and
+      // their place — and everything around it is drawn anew.
+      for (const child of Array.from(root.children)) if (child !== keptForm) child.remove();
+      keptForm.before(...parts);
+    } else {
+      if (workspace.record !== null) parts.push(keptForm ?? recordNode(workspace.record));
+      root.replaceChildren(...parts);
+    }
     if (keptForm !== null && workspace.record !== null) refresh(keptForm, workspace.record);
     if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();
+    follow();
+  };
+
+  /** 准备 AI7 初评: the Task's plan prepared as one cooperative job, then opened in the Task Drawer, whose bar starts it. */
+  const prepareInitial = async (): Promise<void> => {
+    if (busy || workspace === null) return;
+    busy = true;
+    refusal = null;
+    setStatus(EVALUATION_AI7_STATUS.preparing, 'busy');
+    paint(null, true);
+    try {
+      const job = await api.prepareInitialEvaluation();
+      const completed = await options.awaitServiceJob(job, (next) => setStatus(next.progress.label, 'busy'));
+      busy = false;
+      if (completed.state === 'cancelled') {
+        setStatus(EVALUATION_AI7_STATUS.cancelled, 'success');
+        paint('[data-evaluation-action="prepare-initial"]', true);
+        return;
+      }
+      const result = completed.result;
+      if (completed.kind !== 'initial-evaluation-preparation' || result === null || !('initial' in result) || result.bookId !== workspace?.bookId) {
+        throw new Error(EVALUATION_AI7_STATUS.failed);
+      }
+      workspace = { ...result, record: workspace.record };
+      setStatus(EVALUATION_AI7_STATUS.prepared, 'success');
+      paint(null, true);
+      const ref = result.initial.task?.taskIntentId ?? null;
+      if (ref !== null) options.openPlan(ref);
+    } catch (error) {
+      busy = false;
+      refusal = errorMessage(error, EVALUATION_AI7_STATUS.failed);
+      setStatus(refusal, 'error');
+      paint('.evaluation-initial h3', true);
+    }
   };
 
   const turn = async (recordsBefore: number | null): Promise<void> => {
@@ -179,6 +343,40 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     });
   };
 
+  /** 调分原因 of one item (EVAL-006): the five, none ticked until the editor ticks one, `自行输入` with their own words. */
+  const adjustmentNode = (record: EvaluationRecordProjection, itemId: string, adjustment: EvaluationAdjustment | null, readOnly: boolean): HTMLElement => {
+    const set = el('fieldset', 'evaluation-adjustment');
+    set.dataset['itemId'] = itemId;
+    set.append(el('legend', undefined, EVALUATION_ADJUSTMENT_LEGEND));
+    const choices = el('div', 'evaluation-adjustment-reasons');
+    for (const reason of EVALUATION_ADJUSTMENT_REASONS) {
+      const wrapper = el('label', 'evaluation-choice');
+      const input = el('input');
+      input.type = 'checkbox';
+      input.value = reason;
+      input.checked = adjustment?.reasons.includes(reason) ?? false;
+      input.disabled = readOnly;
+      input.dataset['evaluationField'] = 'adjustment-reason';
+      wrapper.append(input, el('span', undefined, EVALUATION_ADJUSTMENT_REASON_LABELS[reason]));
+      choices.append(wrapper);
+    }
+    const note = el('input');
+    note.type = 'text';
+    note.value = adjustment?.note ?? '';
+    note.disabled = readOnly;
+    note.dataset['evaluationField'] = 'adjustment-note';
+    note.id = `evaluation-adjustment-note-${record.recordId}-${itemId}`;
+    const noteField = field(EVALUATION_ADJUSTMENT_NOTE, note);
+    noteField.hidden = !(adjustment?.reasons.includes('own') ?? false);
+    choices.addEventListener('change', () => {
+      const own = choices.querySelector<HTMLInputElement>('input[value="own"]')!.checked;
+      noteField.hidden = !own;
+      if (own) note.focus();
+    });
+    set.append(choices, noteField);
+    return set;
+  };
+
   const recordNode = (record: EvaluationRecordProjection): HTMLElement => {
     const profile = record.profile;
     const readOnly = record.state === 'finalized' || busy;
@@ -191,7 +389,9 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     node.append(heading, el('p', 'field-note evaluation-revision', evaluationRevisionLine(record)));
     const finalized = evaluationFinalizedLine(record, localInstantLabel);
     if (finalized !== null) node.append(el('p', 'evaluation-finalized', finalized));
-    node.append(el('p', 'field-note evaluation-ai7', EVALUATION_AI7_PENDING));
+    const initial = record.initial;
+    node.dataset['initial'] = String(initial !== null);
+    node.append(el('p', 'field-note evaluation-ai7', initial === null ? EVALUATION_AI7_PENDING : evaluationAi7RecordLine(initial)));
     const total = el('p', 'evaluation-total', evaluationTotalLine(profile, record.total));
     total.setAttribute('aria-live', 'polite');
     node.append(total);
@@ -237,7 +437,17 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       scoreRow.append(field(`${EVALUATION_SCORE}（0 – ${item.fullMarks}）`, score), band, notRatedLabel);
       const reasonField = field(EVALUATION_NOT_RATED_REASON, reason);
       reasonField.hidden = content.notRated === null;
-      set.append(scoreRow, reasonField, field(EVALUATION_COMMENT, textarea(content.comment ?? '', 'comment')));
+      // AI7's score beside the editor's (EVAL-006): the record keeps the editor's, and where they differ the editor may say why.
+      const ai7 = initial?.items.find((entry) => entry.itemId === item.itemId) ?? null;
+      const beside: HTMLElement[] = [];
+      if (ai7 !== null) {
+        const line = el('p', 'evaluation-item-ai7', evaluationAi7ItemLine(ai7, item.fullMarks));
+        line.dataset['sufficiency'] = ai7.sufficiency;
+        beside.push(line);
+        if (ai7.comment !== null) beside.push(el('p', 'field-note evaluation-item-ai7-comment', `AI7 评语：${ai7.comment}`));
+        beside.push(adjustmentNode(record, item.itemId, content.adjustment ?? null, readOnly));
+      }
+      set.append(scoreRow, ...beside, reasonField, field(EVALUATION_COMMENT, textarea(content.comment ?? '', 'comment')));
       set.querySelector<HTMLTextAreaElement>('[data-evaluation-field="comment"]')!.disabled = readOnly;
       score.addEventListener('input', () => {
         const value = score.value === '' ? null : Number(score.value);
@@ -311,13 +521,16 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     for (const option of record.profile.conclusions) {
       const choice = radio(`evaluation-conclusion-${record.recordId}`, option.conclusion, option.label, record.content.conclusion === option.conclusion, readOnly);
       choice.dataset['conclusion'] = option.conclusion;
+      // AI7's suggestion is marked as AI7's and never chosen for the editor (EVAL-007).
+      if (initial?.suggestedConclusion === option.conclusion) choice.append(el('span', 'status-pill evaluation-ai7-suggested', EVALUATION_AI7_SUGGESTED));
       conclusion.append(choice);
     }
+    if (initial !== null) conclusion.append(el('p', 'field-note evaluation-ai7-conclusion', evaluationAi7ConclusionLine(record.profile, initial.suggestedConclusion)));
     const blocked = el('p', 'field-note evaluation-recommend-blocked', EVALUATION_RECOMMEND_BLOCKED);
     blocked.id = `evaluation-blocked-${record.recordId}`;
     conclusion.append(blocked);
     node.append(conclusion);
-    if (record.state === 'editing') {
+    if (record.state !== 'finalized') {
       const row = el('div', 'button-row evaluation-actions');
       const saveButton = action(EVALUATION_SAVE, 'secondary', 'save', () => void save(record, false));
       const finalize = action(EVALUATION_FINALIZE, 'primary', 'finalize', () => void save(record, true));
@@ -334,6 +547,20 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     return node;
   };
 
+  /** AI7's score of one item in the version on show; `null` when the version began without AI7's 初评 or AI7 gave none. */
+  const ai7ScoreOf = (record: EvaluationRecordProjection, itemId: string): number | null =>
+    record.initial?.items.find((entry) => entry.itemId === itemId)?.score ?? null;
+
+  /** The reasons ticked for one item, kept only while the editor's score departs from AI7's. */
+  const adjustmentOf = (set: HTMLElement, record: EvaluationRecordProjection, itemId: string, score: number | null, notRated: boolean): EvaluationAdjustment | null => {
+    const group = set.querySelector<HTMLElement>('.evaluation-adjustment');
+    if (group === null || !evaluationItemAdjusted({ score: score !== null && Number.isFinite(score) ? score : null, notRated }, ai7ScoreOf(record, itemId))) return null;
+    const reasons = Array.from(group.querySelectorAll<HTMLInputElement>('[data-evaluation-field="adjustment-reason"]:checked'), (input) => input.value as EvaluationAdjustmentReasonId);
+    if (reasons.length === 0) return null;
+    const note = group.querySelector<HTMLInputElement>('[data-evaluation-field="adjustment-note"]')!.value.trim();
+    return { reasons, note: reasons.includes('own') && note.length > 0 ? note : null };
+  };
+
   /** What the form holds now, in the record's shape. */
   const collect = (node: HTMLElement, record: EvaluationRecordProjection): EvaluationContent => {
     const lines = (name: string): string[] =>
@@ -344,11 +571,13 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         const set = node.querySelector<HTMLElement>(`.evaluation-item[data-item-id="${item.itemId}"]`)!;
         const notRated = set.querySelector<HTMLInputElement>('[data-evaluation-field="not-rated"]')!.checked;
         const raw = set.querySelector<HTMLInputElement>('[data-evaluation-field="score"]')!.value;
+        const score = notRated || raw === '' ? null : Number(raw);
         return {
           itemId: item.itemId,
-          score: notRated || raw === '' ? null : Number(raw),
+          score,
           notRated: notRated ? set.querySelector<HTMLInputElement>('[data-evaluation-field="not-rated-reason"]')!.value : null,
           comment: optional(set.querySelector<HTMLTextAreaElement>('[data-evaluation-field="comment"]')!.value),
+          adjustment: adjustmentOf(set, record, item.itemId, score, notRated),
         };
       }),
       risks: record.profile.risks.map((risk) => {
@@ -378,6 +607,14 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       notRated: content.items[index]!.notRated !== null,
     })));
     node.querySelector('.evaluation-total')!.textContent = evaluationTotalLine(record.profile, total);
+    // 调分原因 is offered only while the editor's score departs from AI7's (EVAL-006).
+    record.profile.items.forEach((item, index) => {
+      const group = node.querySelector<HTMLElement>(`.evaluation-item[data-item-id="${item.itemId}"] .evaluation-adjustment`);
+      if (group === null) return;
+      const entry = content.items[index]!;
+      const score = entry.score !== null && Number.isFinite(entry.score) ? entry.score : null;
+      group.hidden = !evaluationItemAdjusted({ score, notRated: entry.notRated !== null }, ai7ScoreOf(record, item.itemId));
+    });
     const blocked = recommendationBlocked(content.risks);
     const recommend = node.querySelector<HTMLInputElement>('.evaluation-conclusion [data-conclusion="recommend"] input');
     const note = node.querySelector<HTMLElement>('.evaluation-recommend-blocked');
@@ -408,14 +645,14 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     }
   };
 
-  const begin_ = async (): Promise<void> => {
+  const begin_ = async (fromInitial: boolean): Promise<void> => {
     if (busy) return;
     busy = true;
     refusal = null;
-    setStatus(EVALUATION_STATUS.starting, 'busy');
+    setStatus(fromInitial ? EVALUATION_AI7_STATUS.startingFromInitial : EVALUATION_STATUS.starting, 'busy');
     paint(null);
     try {
-      workspace = await api.startEvaluation();
+      workspace = await api.startEvaluation({ fromInitial });
       busy = false;
       setStatus(evaluationStarted(workspace.record?.ordinal ?? 1), 'success');
       paint('.evaluation-record h3');
@@ -423,7 +660,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       busy = false;
       refusal = errorMessage(error, EVALUATION_STATUS.failed);
       setStatus(refusal, 'error');
-      paint('[data-evaluation-action="start"]');
+      paint(fromInitial ? '[data-evaluation-action="start-from-initial"]' : '[data-evaluation-action="start"]');
     }
   };
 
@@ -459,6 +696,16 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
   };
 
   return {
+    /** The drawer's bar started AI7's 初评: read it again now, keeping the form the editor is filling in. */
+    refresh(): void {
+      if (busy || workspace === null || !root.isConnected) return;
+      const current = workspace;
+      void api.inspectEvaluation({ recordId: current.record?.recordId ?? null, recordsBefore: current.recordsBefore }).then((page) => {
+        if (!root.isConnected || workspace === null || busy) return;
+        workspace = { ...page, record: workspace.record };
+        paint(null, true);
+      }).catch(() => undefined);
+    },
     async load(): Promise<void> {
       root.dataset['evaluation'] = 'loading';
       try {

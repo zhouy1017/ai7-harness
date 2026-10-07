@@ -129,6 +129,17 @@ function optionalText(value: unknown): boolean {
 }
 
 /**
+ * Why the editor departs from AI7's 初评 of one item (Issue #429, S81b1): absent, `null`, or reasons from the closed five with
+ * the editor's words; the store holds them to the item and the version.
+ */
+function validEvaluationAdjustment(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  return isRecord(value) && hasExactKeys(value, ['reasons', 'note']) && Array.isArray(value.reasons) && value.reasons.length <= 5 &&
+    value.reasons.every((reason) => reason === 'too-high' || reason === 'too-low' || reason === 'insufficient-basis' || reason === 'missed-aspect' || reason === 'own') &&
+    optionalText(value.note);
+}
+
+/**
  * One 评估 version's content (Issue #429, S81a): its items, risks and lists of their closed shapes, each field present; the
  * store holds them to the profile, the scale and the bounds.
  */
@@ -136,8 +147,9 @@ function validEvaluationContent(value: unknown): boolean {
   if (!isRecord(value) || !hasExactKeys(value, ['items', 'risks', 'readiness', 'strengths', 'weaknesses', 'verdict', 'conclusion'])) return false;
   const lines = (list: unknown): boolean => Array.isArray(list) && list.length <= 64 && list.every((line) => isBoundedString(line, 2_000, true));
   return Array.isArray(value.items) && value.items.length <= 32 && value.items.every((item) => isRecord(item) &&
-      hasExactKeys(item, ['itemId', 'score', 'notRated', 'comment']) && isBoundedString(item.itemId, 64) &&
-      (item.score === null || (typeof item.score === 'number' && Number.isFinite(item.score))) && optionalText(item.notRated) && optionalText(item.comment)) &&
+      hasExactKeys(item, ['itemId', 'score', 'notRated', 'comment', ...('adjustment' in item ? ['adjustment'] : [])]) && isBoundedString(item.itemId, 64) &&
+      (item.score === null || (typeof item.score === 'number' && Number.isFinite(item.score))) && optionalText(item.notRated) && optionalText(item.comment) &&
+      validEvaluationAdjustment(item.adjustment)) &&
     Array.isArray(value.risks) && value.risks.length <= 16 && value.risks.every((risk) => isRecord(risk) &&
       hasExactKeys(risk, ['riskId', 'level', 'statement', 'reviewed']) && isBoundedString(risk.riskId, 64) &&
       (risk.level === null || risk.level === 'low' || risk.level === 'medium' || risk.level === 'high') && optionalText(risk.statement) &&
@@ -736,9 +748,24 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           !optionalOrNull(input, 'recordsBefore', (before) => isSafeInteger(before, 2))) throw new ProtocolError(tentativeId);
       break;
     }
+    // 开始评估 or 重新评估, alone or from AI7's latest 初评 (Issue #429, S81b1).
     case 'startEvaluation': {
+      const input = requireInput(value.input, ['bookId', 'fromInitial'], tentativeId);
+      if (!validUuid(input.bookId) || typeof input.fromInitial !== 'boolean') throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 准备 AI7 初评: the route's Book; the mode is the service's to decide from the Book's 初评 so far.
+    case 'prepareInitialEvaluation': {
       const input = requireInput(value.input, ['bookId'], tentativeId);
       if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'authorizeInitialEvaluation': {
+      const input = requireInput(value.input, ['bookId', 'taskIntentId', 'planEnvelopeDigest'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.taskIntentId) || !isBoundedString(input.planEnvelopeDigest, 64) ||
+          !/^[0-9a-f]{64}$/u.test(input.planEnvelopeDigest)) {
+        throw new ProtocolError(tentativeId);
+      }
       break;
     }
     // 保存评估 or 定稿: the version, how many entries the editor saw, and content of the closed shape; the store holds it to the

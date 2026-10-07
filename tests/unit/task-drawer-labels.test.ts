@@ -210,7 +210,7 @@ describe('the drawer', () => {
   });
 
   it('stays beside the manuscript, 工作概览 (also right after an import), ②A and ②B only (D3)', () => {
-    expect(TASK_DRAWER_SCREENS).toEqual(['editor', 'book-overview', 'imported', 'book-analysis', 'book-review']);
+    expect(TASK_DRAWER_SCREENS).toEqual(['editor', 'book-overview', 'imported', 'book-analysis', 'book-review', 'book-evaluation']);
   });
 
   it('gives every state a tone and a shape, so the pill never speaks by colour alone', () => {
@@ -354,8 +354,8 @@ describe('the authorization bar (S74a)', () => {
       'needs-connection': '模型未连接：这份计划要发送到模型服务，所需的凭据还没有就绪；连接好之后才能开始',
       offline: '离线：这份计划要连到模型服务，而这台设备现在没有网络。联网后开始任务会先记录这次授权，联网后自动开始；在此之前不会发送任何内容',
     });
-    expect(TASK_BAR_OUTCOMES).toEqual({ 'fixed-task': '一条运行记录（不派发）', 'baseline-analysis': '一份基线分析', 'review-run': '审阅发现与审阅报告' });
-    expect(TASK_BAR_RUN_LINKS).toEqual({ 'fixed-task': '查看运行记录', 'baseline-analysis': '查看运行', 'review-run': '查看审阅' });
+    expect(TASK_BAR_OUTCOMES).toEqual({ 'fixed-task': '一条运行记录（不派发）', 'baseline-analysis': '一份基线分析', 'review-run': '审阅发现与审阅报告', 'initial-evaluation': 'AI7 初评' });
+    expect(TASK_BAR_RUN_LINKS).toEqual({ 'fixed-task': '查看运行记录', 'baseline-analysis': '查看运行', 'review-run': '查看审阅', 'initial-evaluation': '查看评估' });
   });
 
   it('sums the plan up in one line: 书 · 范围 · 计划版本 · 模型角色 · 预算上限 · 产出 · 不改稿 (AUTH-001)', () => {

@@ -154,6 +154,24 @@ export type UnitResultParseOutcome =
 export interface CrossUnitContractBinding {
   readonly promptContractDigest: string;
   readonly resultSchema: string;
+  /**
+   * A kind whose one book-level step is not the baseline's cross-unit reduction brings its own (Issue #429, S81b1): the name
+   * its gaps read under, how few closed units it needs, the message, its request digest and its parser. The baseline kind
+   * declares none of these and runs exactly the reduction it always ran.
+   */
+  readonly step?: CrossUnitStep;
+}
+
+/** One kind's own book-level step: the same one turn, one attempt and one admitted message as the baseline reduction. */
+export interface CrossUnitStep {
+  /** What the step is called in its gap readings, as `跨单元归纳` names the baseline's. */
+  readonly label: string;
+  readonly minimumClosedUnits: number;
+  /** Why it did not run with fewer closed units than it needs. */
+  readonly notEnoughReason: string;
+  buildMessage(closed: ReadonlyArray<ClosedUnitOutcome<unknown>>, totalUnits: number): string;
+  requestDigest(closed: ReadonlyArray<ClosedUnitOutcome<unknown>>): string;
+  parse(text: string, closed: ReadonlyArray<ClosedUnitOutcome<unknown>>): { ok: true; result: unknown } | { ok: false; code: string; detail: string };
 }
 
 /**

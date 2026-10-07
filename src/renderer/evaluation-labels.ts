@@ -1,6 +1,11 @@
 import type {
+  EvaluationAdjustmentReasonId,
   EvaluationComparisonProjection,
   EvaluationConclusion,
+  EvaluationInitialDraftProjection,
+  EvaluationInitialProjection,
+  InitialEvaluationSufficiency,
+  InitialEvaluationTaskMode,
   EvaluationProfileProjection,
   EvaluationRecordProjection,
   EvaluationRecordSummaryProjection,
@@ -17,11 +22,12 @@ import { evaluationBand, type EvaluationRiskLevel } from '../shared/evaluation-s
 
 export const EVALUATION_TITLE = '评估';
 export const EVALUATION_LEDE = '按本社评估方案打分：总分 100，每一项只看满分与得分，可以给半分；风险项不计入总分，只影响结论。';
-export const EVALUATION_AI7_PENDING = 'AI7 初评尚未接通：这一版由你打分。';
+/** Said of a version the editor began alone: AI7's 初评 took no part in it. */
+export const EVALUATION_AI7_PENDING = '这一版不是从 AI7 初评开始的：由你打分。';
 export const EVALUATION_START = { first: '开始评估', again: '重新评估' } as const;
 export const EVALUATION_SAVE = '保存评估';
 export const EVALUATION_FINALIZE = '定稿';
-export const EVALUATION_STATE_LABELS: Readonly<Record<EvaluationRecordSummaryProjection['state'], string>> = { editing: '编辑评分中', finalized: '定稿' };
+export const EVALUATION_STATE_LABELS: Readonly<Record<EvaluationRecordSummaryProjection['state'], string>> = { draft: 'AI7 初稿', editing: '编辑评分中', finalized: '定稿' };
 export const EVALUATION_NOT_RATED = '不评';
 export const EVALUATION_NOT_RATED_REASON = '不评的理由';
 export const EVALUATION_SCORE = '得分';
@@ -151,4 +157,66 @@ export function evaluationBandLine(band: EvaluationProfileProjection['bands'][nu
 
 export function evaluationProfileUse(profile: { records: number; books: number }): string {
   return profile.records === 0 ? '还没有评估用过' : `已用于 ${profile.books} 本书的 ${profile.records} 版评估`;
+}
+
+// ---- AI7 初评 (Issue #429, plan slice S81b1; V2-UX-EVAL-001, EVAL-005 to EVAL-007) --------------------------------------
+
+export const EVALUATION_AI7_HEADING = 'AI7 初评';
+export const EVALUATION_AI7_LEDE = 'AI7 按本社评估方案通读全书，给每一项一个初评分数和评语，供你打分时参考；记录保存的是你的评分，结论由你选定。';
+export const EVALUATION_AI7_NONE = 'AI7 还没有为这本书做初评。';
+export const EVALUATION_AI7_PREPARE: Readonly<Record<InitialEvaluationTaskMode, string>> = { 'evaluation-first': '准备 AI7 初评', 'evaluation-again': '重新初评' };
+export const EVALUATION_AI7_OPEN_PLAN = '查看计划并开始';
+export const EVALUATION_AI7_OPEN_TASK = '查看任务';
+export const EVALUATION_START_FROM_INITIAL = '从 AI7 初评开始';
+export const EVALUATION_AI7_SUFFICIENCY: Readonly<Record<InitialEvaluationSufficiency, string>> = { sufficient: '充分', fair: '一般', insufficient: '不足' };
+export const EVALUATION_AI7_SUGGESTED = 'AI7 建议';
+export const EVALUATION_ADJUSTMENT_LEGEND = '调分原因（可多选，不预先勾选）';
+export const EVALUATION_ADJUSTMENT_REASON_LABELS: Readonly<Record<EvaluationAdjustmentReasonId, string>> = {
+  'too-high': '打分偏高',
+  'too-low': '打分偏低',
+  'insufficient-basis': '依据不足',
+  'missed-aspect': '未考虑某方面',
+  own: '自行输入',
+};
+export const EVALUATION_ADJUSTMENT_NOTE = '自行输入的原因';
+export const EVALUATION_AI7_STATUS = {
+  preparing: '正在准备 AI7 初评的任务计划…',
+  prepared: 'AI7 初评的任务计划已准备：在任务计划里看过再开始。',
+  cancelled: 'AI7 初评的任务计划准备已取消。',
+  failed: '无法准备 AI7 初评。',
+  startingFromInitial: '正在从 AI7 初评开始…',
+} as const;
+
+/** The Book's 初评 Task in one line: its state as the drawer names it. */
+export function evaluationAi7TaskLine(task: NonNullable<EvaluationInitialProjection['task']>): string {
+  return `${EVALUATION_AI7_HEADING} · ${task.label}`;
+}
+
+/** The latest 初评 that settled: which one, what it read, its total and band, and whether the manuscript moved since. */
+export function evaluationAi7LatestLine(profile: Pick<EvaluationProfileProjection, 'bands'>, latest: NonNullable<EvaluationInitialProjection['latest']>): string {
+  const total = latest.complete ? evaluationTotalLine(profile, latest.total) : '全书综合没有给出分数';
+  const moved = latest.current ? '' : '（稿件此后改过：重新初评后才能从初评开始）';
+  return `第 ${latest.ordinal} 次初评 · 读的是修订版 ${latest.revisionLabel} · ${total}${moved}`;
+}
+
+/** 依据充分度 of one item (EVAL-005), with what it rests on. */
+export function evaluationAi7SufficiencyLine(item: Pick<EvaluationInitialDraftProjection['items'][number], 'sufficiency' | 'citedBlocks' | 'unitsCited'>): string {
+  const label = `依据充分度 ${EVALUATION_AI7_SUFFICIENCY[item.sufficiency]}`;
+  return item.citedBlocks === 0 ? `${label}（没有引用内容块）` : `${label}（引用 ${item.citedBlocks} 个段落，分布在 ${item.unitsCited} 个阅读范围）`;
+}
+
+/** AI7's score of one item beside the editor's (EVAL-006). */
+export function evaluationAi7ItemLine(item: Pick<EvaluationInitialDraftProjection['items'][number], 'score' | 'sufficiency' | 'citedBlocks' | 'unitsCited'>, fullMarks: number): string {
+  const score = item.score === null ? '没有给出分数' : `${evaluationScore(item.score)} / ${fullMarks}`;
+  return `AI7 初评 ${score} · ${evaluationAi7SufficiencyLine(item)}`;
+}
+
+/** What a version begun from AI7's 初评 says it began from. */
+export function evaluationAi7RecordLine(initial: Pick<EvaluationInitialDraftProjection, 'ordinal' | 'revisionLabel'>): string {
+  return `这一版从 AI7 第 ${initial.ordinal} 次初评开始（读的是修订版 ${initial.revisionLabel}）：AI7 的分数列在每一项旁边，记录保存的是你的评分。`;
+}
+
+/** The conclusion AI7 would suggest, said as AI7's (EVAL-007). */
+export function evaluationAi7ConclusionLine(profile: Pick<EvaluationProfileProjection, 'conclusions'>, conclusion: EvaluationConclusion | null): string {
+  return conclusion === null ? 'AI7 没有给出建议结论。' : `AI7 建议的结论：${evaluationConclusionLabel(profile, conclusion)}（由你选定）`;
 }

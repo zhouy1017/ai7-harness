@@ -661,9 +661,25 @@ async function dispatch(
     case 'inspectEvaluation':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluation(request.input.bookId, request.input.recordId, request.input.recordsBefore) };
     case 'startEvaluation':
-      return { id: request.id, ok: true, op: request.op, result: store.startEvaluation(request.input.bookId) };
+      return { id: request.id, ok: true, op: request.op, result: store.startEvaluation(request.input.bookId, request.input.fromInitial) };
     case 'saveEvaluation':
       return { id: request.id, ok: true, op: request.op, result: store.saveEvaluation(request.input) };
+    // AI7 初评 (Issue #429, S81b1): prepared as a cooperative job whose plan the Task Drawer opens, and started from its bar
+    // through the governor exactly as the baseline analysis is — admitted while a place is free, else waiting for one.
+    case 'prepareInitialEvaluation':
+      return { id: request.id, ok: true, op: request.op, result: jobs.startInitialEvaluationPreparation(request.input.bookId, launchPolicy) };
+    case 'authorizeInitialEvaluation': {
+      const authorized = store.authorizeInitialEvaluation(request.input.bookId, request.input.taskIntentId, request.input.planEnvelopeDigest);
+      if (authorized.dispatchRunRecordId !== null) {
+        try {
+          analysisExecution.admitOrQueue(authorized.dispatchRunRecordId, store.initialEvaluationLedger);
+        } catch (error) {
+          const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
+          throw new StoreErrorClass(code, error instanceof Error ? error.message : '运行未能进入调度。');
+        }
+      }
+      return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluation(request.input.bookId, null) };
+    }
     case 'inspectAnalysisFeedback':
       return { id: request.id, ok: true, op: request.op, result: store.inspectAnalysisFeedback(request.input.bookId, request.input.revisionId) };
     case 'recordAnalysisFeedback':
@@ -1339,6 +1355,8 @@ async function run(): Promise<void> {
     // owner executes only under the launch it froze its plans for. The review-category ledgers are made
     // when first asked for and take the baseline ledger's binding then, which is this one.
     store.factualReviewLedger.bindLaunch(launch);
+    // AI7 初评 (Issue #429, S81b1) is the evaluation kind's own ledger, which the one owner executes under the same launch.
+    store.initialEvaluationLedger.bindLaunch(launch);
     harness = await mountDormantHarness();
     jobs = new CooperativeJobOwner(store);
     analysisExecution = new BaselineAnalysisExecutionOwner({

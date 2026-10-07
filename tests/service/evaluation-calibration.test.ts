@@ -10,7 +10,7 @@ import {
   initializeEvaluationCalibrationSchema,
 } from '../../src/service/evaluation-calibration.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { DATABASE_MERGE_SCHEMA_VERSION, LEARNING_ELIGIBILITY_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { INITIAL_EVALUATION_SCHEMA_VERSION, LEARNING_ELIGIBILITY_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { MAX_FIRST_PRINT, MAX_PRICE_FEN } from '../../src/shared/evaluation-calibration.js';
 import { PUBLICATION_FORBIDDEN_WORDS, type DesignatePublicationVersionInput, type EvaluationCalibrationProjection } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, type ComposedManuscriptRequest } from '../support/composed-fixture.js';
@@ -112,7 +112,7 @@ describe('设置 › 评估校准与预测 over the real store', () => {
     try {
       // Before any Book: calibration waits on adjustments the editor cannot make yet, the prediction is closed, nothing listed.
       expect(store.inspectEvaluationCalibration()).toEqual({
-        calibration: { adjustments: 0, initialScoresConnected: false, threshold: 10, enabled: true, active: false },
+        calibration: { adjustments: 0, initialScoresConnected: true, threshold: 10, enabled: true, active: false },
         prediction: { booksWithActuals: 0, threshold: 30, enabled: false, available: false },
         preferenceEntries: 0,
         books: [],
@@ -207,7 +207,7 @@ describe('设置 › 评估校准与预测 over the real store', () => {
     }
     const database = new DatabaseSync(databasePath());
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_MERGE_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(INITIAL_EVALUATION_SCHEMA_VERSION);
       const records = (database.prepare('SELECT canonical_json FROM publication_actuals ORDER BY ordinal').all() as Array<{ canonical_json: string }>)
         .map((row) => JSON.parse(row.canonical_json) as { schema: string; priceFen: number; publicationOrdinal: number; supersedes: string | null; actor: string });
       expect(records).toHaveLength(67);
@@ -243,7 +243,7 @@ describe('设置 › 评估校准与预测 over the real store', () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       const off = store.setEvaluationPreferences({ expectedEntries: 0, predictionEnabled: false, calibrationEnabled: false });
-      expect([off.calibration, off.preferenceEntries]).toEqual([{ adjustments: 0, initialScoresConnected: false, threshold: 10, enabled: false, active: false }, 1]);
+      expect([off.calibration, off.preferenceEntries]).toEqual([{ adjustments: 0, initialScoresConnected: true, threshold: 10, enabled: false, active: false }, 1]);
       expect(refusal(() => store.setEvaluationPreferences({ expectedEntries: 0, predictionEnabled: false, calibrationEnabled: true })))
         .toBe('PREFERENCES_MOVED:评估设置刚被改过；请看过现在的设置再改。');
       expect(refusal(() => store.setEvaluationPreferences({ expectedEntries: 1, predictionEnabled: false, calibrationEnabled: false })))
@@ -375,7 +375,7 @@ describe('设置 › 评估校准与预测 over the real store', () => {
     const plant = new DatabaseSync(databasePath());
     let before: Array<{ name: string; sql: string }>;
     try {
-      plant.exec(`DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; PRAGMA user_version = ${LEARNING_ELIGIBILITY_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; PRAGMA user_version = ${LEARNING_ELIGIBILITY_SCHEMA_VERSION};`);
       before = tablesOf(plant);
     } finally {
       plant.close();
@@ -391,10 +391,10 @@ describe('设置 › 评估校准与预测 over the real store', () => {
     }
     const database = new DatabaseSync(databasePath(), { readOnly: true });
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_MERGE_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(INITIAL_EVALUATION_SCHEMA_VERSION);
       const after = tablesOf(database);
       // Revision 52's Series relations (Issue #63, S28a) return with it, as the planted store lacked them too.
-      expect(after.filter((entry) => !/^(publication_actuals|evaluation_preferences|series|store_versions|database_export_|backup_preferences|scheduled_backup|database_replacements|database_merge)/u.test(entry.name))).toEqual(before!);
+      expect(after.filter((entry) => !/^(publication_actuals|evaluation_preferences|series|store_versions|database_export_|backup_preferences|scheduled_backup|database_replacements|database_merge|evaluation_initial_drafts)/u.test(entry.name))).toEqual(before!);
       expect(after.filter((entry) => ACTUALS_TABLES.includes(entry.name)).map((entry) => entry.sql))
         .toEqual(ACTUALS_TABLES.slice().sort().map((table) => EVALUATION_CALIBRATION_SCHEMA_SQL[table as keyof typeof EVALUATION_CALIBRATION_SCHEMA_SQL]));
       expect(counts()).toEqual({ publication_actuals: 0, evaluation_preferences: 0 });
