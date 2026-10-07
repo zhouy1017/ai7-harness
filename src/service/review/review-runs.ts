@@ -75,11 +75,12 @@ import {
 import { reviewLeadBody, reviewLeadsOf } from './review-leads.js';
 import { buildReviewReport, reportQuote, reviewFindingCounts } from './review-report.js';
 import {
-  REVIEW_RUN_CATEGORY_STATE_LABELS,
+  REVIEW_CATEGORY_PLACE_WAIT_DETAIL,
   TERMINAL_CATEGORY_EVENTS,
   reviewFindingStatus,
   newestSuggestionVersion,
   reviewRunCategoryState,
+  reviewRunCategoryStateLabel,
   reviewRunState,
   reviewRunStateLabel,
   type ReviewLedgerRunOutcome,
@@ -637,6 +638,7 @@ interface CategoryView {
   readonly category: SnapshotCategory;
   readonly events: ReadonlyArray<CategoryEvent>;
   readonly state: ReviewRunCategoryState;
+  readonly stateLabel: string;
   readonly detail: string | null;
   readonly pending: boolean;
   readonly materialized: CategoryEvent | null;
@@ -778,6 +780,7 @@ export class ReviewRunStore {
   readonly #work = new Map<string, PreparationWork>();
   /** The Review Runs being driven in this service lifetime, with the Book each belongs to. */
   readonly #driving = new Map<string, string>();
+  readonly #placeWaits = new Map<string, string>();
 
   constructor(
     db: DatabaseSync,
@@ -1100,7 +1103,7 @@ export class ReviewRunStore {
         procedure: { title: category.entry.procedure.title, version: category.entry.procedure.version },
         guidelineDocuments: category.entry.guidelineDocuments.map((document) => ({ title: document.title, issuer: document.issuer, version: document.version })),
         state: categoryView.state,
-        stateLabel: REVIEW_RUN_CATEGORY_STATE_LABELS[categoryView.state],
+        stateLabel: categoryView.stateLabel,
         detail: categoryView.detail,
         task: category.task === null || frozen === null ? null : {
           taskIntentId: category.task.taskIntentId,
@@ -1254,6 +1257,16 @@ export class ReviewRunStore {
 
   endDrive(reviewRunId: string): void {
     this.#driving.delete(reviewRunId);
+    this.#placeWaits.delete(reviewRunId);
+  }
+
+  /**
+   * The category of a driven Run whose turn came while every place of the governor is taken, or `null` once it has one
+   * (Issue #632). Kept for this lifetime only, as the drive itself is: a Run read while it waits names that wait.
+   */
+  waitingForPlace(reviewRunId: string, categoryId: string | null): void {
+    if (categoryId === null) this.#placeWaits.delete(reviewRunId);
+    else this.#placeWaits.set(reviewRunId, categoryId);
   }
 
   isDriving(reviewRunId: string): boolean {
@@ -1794,7 +1807,7 @@ export class ReviewRunStore {
         configuration: snapshot.configuration,
         categories: view.categories.map((categoryView) => {
           const { category, materialized } = categoryView;
-          const stateLabel = REVIEW_RUN_CATEGORY_STATE_LABELS[categoryView.state];
+          const stateLabel = categoryView.stateLabel;
           const pin = materialized?.record.adapterPin;
           return {
             categoryId: category.categoryId,
@@ -2153,6 +2166,7 @@ export class ReviewRunStore {
         }
       }
       const { state, pending } = reviewRunCategoryState({ authorized: authorization !== null, driving, lastEvent: last?.state ?? null, ledgerRun });
+      const waitingForPlace = driving && state === 'waiting' && this.#placeWaits.get(snapshot.reviewRunId) === category.categoryId;
       const derived = !driving && pending && authorization !== null
         ? state === 'interrupted' ? INTERRUPTED_DETAIL
           : state === 'failed' ? FAILED_UNRECORDED_DETAIL
@@ -2162,7 +2176,8 @@ export class ReviewRunStore {
         category,
         events,
         state,
-        detail: derived ?? (last === null || last.state === 'dispatched' ? null : last.detail),
+        stateLabel: reviewRunCategoryStateLabel(state, waitingForPlace),
+        detail: waitingForPlace ? REVIEW_CATEGORY_PLACE_WAIT_DETAIL : derived ?? (last === null || last.state === 'dispatched' ? null : last.detail),
         pending,
         materialized: events.find((event) => event.state === 'materialized') ?? null,
       };
@@ -2251,6 +2266,7 @@ export class ReviewRunStore {
             categoryId: category.category.categoryId,
             label: category.category.entry.label,
             state: category.state,
+            stateLabel: category.stateLabel,
             pending: category.pending,
             detail: category.detail,
             progress: dispatched === null ? null : progress(dispatched),
@@ -2424,7 +2440,7 @@ export class ReviewRunStore {
         batchApply: category.entry.batchApply,
         basisStatement: category.basisStatement,
         state: categoryView.state,
-        stateLabel: REVIEW_RUN_CATEGORY_STATE_LABELS[categoryView.state],
+        stateLabel: categoryView.stateLabel,
         detail: categoryView.detail,
         taskIntentId: category.task?.taskIntentId ?? null,
         planEnvelopeDigest: category.task?.planEnvelopeDigest ?? null,

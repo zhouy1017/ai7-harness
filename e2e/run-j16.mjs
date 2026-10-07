@@ -427,7 +427,7 @@ async function openAnalysisOf(renderer, bookId, name) {
 
 /**
  * 开始基线稿件分析 prepares the Task and opens its plan in the drawer (the card's 查看计划并开始 opens it when it
- * does not); the bar's 开始任务 records the Run — and, with a route, hands it to the one slot.
+ * does not); the bar's 开始任务 records the Run — and, with a route, hands it to the execution owner's governor.
  */
 async function startFirstBaseline(renderer, readiness, name) {
   await prepareFirstBaseline(renderer, readiness, name);
