@@ -72,7 +72,7 @@ import {
   type ReviewCategoryExecutor,
 } from './category-configuration.js';
 import { reviewLeadBody, reviewLeadsOf } from './review-leads.js';
-import { resolveSeriesConsistency, seriesConsistencyEntry, seriesKnowledgePinsCurrent } from './series-consistency.js';
+import { resolveSeriesConsistency, seriesConsistencyEntry, seriesKnowledgePinsCurrent, type SeriesKnowledgeReadings } from './series-consistency.js';
 import { buildReviewReport, reportQuote, reviewFindingCounts } from './review-report.js';
 import {
   REVIEW_RUN_CATEGORY_STATE_LABELS,
@@ -1998,9 +1998,9 @@ export class ReviewRunStore {
    * The configuration as it applies to one Book: the house's, with 书系一致性 resolved from the Series Knowledge of the Series
    * the Book is in now (Issue #64, S29a). The house's own digest still names the configuration a Run was prepared under.
    */
-  #forBook(bookId: string, house: ReviewCategoryConfiguration): ReviewCategoryConfiguration {
+  #forBook(bookId: string, house: ReviewCategoryConfiguration, readings?: SeriesKnowledgeReadings): ReviewCategoryConfiguration {
     if (!house.categories.some((entry) => entry.executor === 'series-knowledge')) return house;
-    const resolution = resolveSeriesConsistency(this.#db, bookId);
+    const resolution = resolveSeriesConsistency(this.#db, bookId, readings);
     return {
       ...house,
       categories: house.categories.map((entry) => entry.executor === 'series-knowledge' ? seriesConsistencyEntry(entry, resolution) : entry),
@@ -2018,17 +2018,21 @@ export class ReviewRunStore {
 
   /**
    * 书系一致性 of one member Book as the 书系 page's 成员与共享范围 states it (Issue #64, S29a; editor-surfaces §8.3): why it
-   * cannot be chosen now, `null` when it can, and when its findings were last put on the manuscript.
+   * cannot be chosen now, `null` when it can, and when its findings were last put on the manuscript. `readings` is shared by
+   * the members of one page, so each Series is read once for them all (Issue #64 review). The reasons are 审阅's own,
+   * developer-live's refusal of the house's text included, so the two never disagree.
    */
-  seriesConsistencyState(bookId: string): { readonly unavailableReason: string | null; readonly reviewedAt: string | null } {
-    const entry = this.#forBook(bookId, this.#configuration()).categories.find((candidate) => candidate.categoryId === 'series-consistency');
+  seriesConsistencyState(bookId: string, readings?: SeriesKnowledgeReadings): { readonly unavailableReason: string | null; readonly reviewedAt: string | null } {
+    const entry = this.#forBook(bookId, this.#configuration(), readings).categories.find((candidate) => candidate.categoryId === 'series-consistency');
     const last = this.#db.prepare(
       `SELECT max(e.recorded_at) reviewed_at FROM review_run_category_events e JOIN review_runs r ON r.review_run_id = e.review_run_id
        WHERE r.book_id = ? AND e.category_id = 'series-consistency' AND e.state = 'materialized'`,
     ).get(bookId) as SqlRow;
     const unavailableReason = entry === undefined
       ? '这一类暂不可用。'
-      : entry.executor === 'unavailable' ? entry.unavailableReason ?? '这一类暂不可用。' : this.#head(bookId) === null ? NO_MANUSCRIPT_REASON : null;
+      : entry.executor === 'unavailable'
+        ? entry.unavailableReason ?? '这一类暂不可用。'
+        : this.#head(bookId) === null ? NO_MANUSCRIPT_REASON : houseGuidelineRefusal(entry, this.#ledgers.baseline().launch.live !== null);
     return { unavailableReason, reviewedAt: nullableText(last.reviewed_at) };
   }
 

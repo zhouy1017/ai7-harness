@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
@@ -7,8 +7,14 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
+import type { LaunchBinding } from '../../src/service/analysis/baseline-analysis-store.js';
+import { SERIES_KNOWLEDGE_TRIGGER_SQL, SeriesKnowledgeLedger } from '../../src/service/series-knowledge.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
-import { SERIES_CONSISTENCY_NO_SERIES_REASON } from '../../src/service/review/series-consistency.js';
+import {
+  SERIES_CONSISTENCY_NO_SERIES_REASON,
+  SERIES_CONSISTENCY_TOO_MANY_REASON,
+  SERIES_CONSISTENCY_UNREADABLE_REASON,
+} from '../../src/service/review/series-consistency.js';
 import type { LaunchPolicyProjection, ReviewRunProjection, ReviewWorkspaceCategoryProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
@@ -34,6 +40,19 @@ const FIXTURE = 'sample1-series-consistency-authored';
 const WHOLE = { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null } as const;
 const NO_KNOWLEDGE = `书系「${J13_SERIES_TITLE}」还没有纳入可用于一致性审阅的书系知识；在书系中纳入后才能选。`;
 const MOVED = '「书系一致性」所依据的书系或书系知识在准备之后有了变化；请重新准备这次审阅。';
+/** A developer-live launch for the refusal it causes; nothing is ever transmitted to it. */
+const LIVE: LaunchBinding = {
+  operationalScope: 'developer-live',
+  live: {
+    route: 'opencode-go',
+    model: 'deepseek-v4-flash',
+    endpoint: 'https://example.invalid/v1/chat/completions',
+    credentialSlot: 'opencode-go',
+    credentialReference: randomUUID(),
+    runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 240_000 },
+  },
+};
+const WITHHELD = `这一类以书系「${J13_SERIES_TITLE}」的书系知识审阅；开发者实时模式下，本社的书系知识在获准发给模型之前不会发出，这一类暂不能开始。`;
 
 let roots: ServiceTestRoots;
 let launchPolicy: LaunchPolicyProjection;
@@ -49,7 +68,7 @@ afterEach(async () => {
 
 interface Session { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; driver: ReviewRunDriver }
 
-async function withSession(body: (session: Session, bookId: string) => Promise<void>): Promise<void> {
+async function withSession(body: (session: Session, bookId: string) => Promise<void>, existingBookId?: string): Promise<void> {
   await requireExactSample1(roots.codeRoot);
   const fixture = await loadModelFixture(FIXTURES_ROOT, FIXTURE);
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
@@ -63,9 +82,12 @@ async function withSession(body: (session: Session, bookId: string) => Promise<v
   const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
   try {
-    const { bookId } = await importSample1Book(store, roots.codeRoot, '星河之三');
-    await pinEditorialWorkspaceProfileRevision2(store, bookId);
-    recordMissingCredentialConnection(store, 'S29 主编辑连接');
+    let bookId = existingBookId;
+    if (bookId === undefined) {
+      bookId = (await importSample1Book(store, roots.codeRoot, '星河之三')).bookId;
+      await pinEditorialWorkspaceProfileRevision2(store, bookId);
+      recordMissingCredentialConnection(store, 'S29 主编辑连接');
+    }
     await body({ store, owner, driver }, bookId);
   } finally {
     const stopped = driver.dispose();
@@ -157,13 +179,93 @@ describe('书系一致性 over a Book\'s Series Knowledge', () => {
         takeInNewItem(store, crowded, { subject: `人物${String(index).padStart(2, '0')}`, knowledgeClass: 'characters', content: `第 ${index} 个人物的设定。`, reuseScope: 'series-tasks' });
       }
       joinSeries(store, crowded, bookId);
-      expect(category(store, bookId).unavailableReason)
-        .toBe('这本书所在书系的书系知识折成 41 条审阅依据，超过一次审阅能带的 40 条，暂不能选；请在书系中合并或精简这些书系知识。');
-      expect(memberState(store, crowded, bookId)[1]).toContain('折成 41 条审阅依据');
+      expect(category(store, bookId).unavailableReason).toBe(SERIES_CONSISTENCY_TOO_MANY_REASON);
+      expect(memberState(store, crowded, bookId)[1]).toBe(SERIES_CONSISTENCY_TOO_MANY_REASON);
       leaveSeries(store, crowded, bookId);
       expect(category(store, bookId).available).toBe(true);
       expect(refusal(() => prepare(store, empty))).toBe('REVIEW_MANUSCRIPT_ABSENT:这本书还没有稿件；导入稿件后才能审阅。');
+
+      // Under developer-live the Series page says what 审阅 says: the house's own knowledge is held back from a live model.
+      store.baselineAnalysisLedger.bindLaunch(LIVE);
+      expect([category(store, bookId).available, category(store, bookId).unavailableReason]).toEqual([false, WITHHELD]);
+      expect(memberState(store, seriesId, bookId)).toEqual([null, WITHHELD]);
+      store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null });
+      expect(memberState(store, seriesId, bookId)).toEqual([null, null]);
     });
+  }, 300_000);
+
+  it('reads no further than one review carries, and verifies only the items its reuse scope admits', async () => {
+    let member: string | undefined;
+    let crowded: string | undefined;
+    let revised: string | undefined;
+    await withSession(async ({ store }, bookId) => {
+      member = bookId;
+      // An item whose first revision was for this review alone and whose current one is for every Series-scope Task.
+      revised = store.createSeries({ title: '版本谱', note: '' }).seriesId;
+      const itemId = takeInNewItem(store, revised, { subject: J13_PLACE, knowledgeClass: 'places', content: '第一版。', reuseScope: 'consistency-review' });
+      takeInRevision(store, revised, itemId, '第二版。', 'series-tasks');
+      crowded = store.createSeries({ title: '人物谱', note: '' }).seriesId;
+      for (let index = 0; index < 42; index += 1) {
+        takeInNewItem(store, crowded, { subject: `人物${String(index).padStart(2, '0')}`, knowledgeClass: 'characters', content: `第 ${index} 个人物的设定。`, reuseScope: 'consistency-review' });
+      }
+      joinSeries(store, crowded, bookId);
+      expect(category(store, bookId).unavailableReason).toBe(SERIES_CONSISTENCY_TOO_MANY_REASON);
+    });
+    // The last item by name, the forty-second clause, no longer reads.
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      database.exec('DROP TRIGGER series_knowledge_revisions_no_update');
+      const row = database.prepare(`SELECT r.revision_id, r.canonical_json FROM series_knowledge_revisions r JOIN series_knowledge_items i ON i.item_id = r.item_id
+        WHERE i.subject = '人物41'`).get() as { revision_id: string; canonical_json: string };
+      const rewritten = row.canonical_json.replace('第 41 个人物的设定。', '改过的设定。');
+      expect(rewritten).not.toBe(row.canonical_json);
+      database.prepare('UPDATE series_knowledge_revisions SET canonical_json = ?, sha256 = ? WHERE revision_id = ?').run(rewritten, sha256(rewritten), row.revision_id);
+      database.exec(SERIES_KNOWLEDGE_TRIGGER_SQL.series_knowledge_revisions_no_update!);
+      // Filtered in SQL: a scope no item was taken in under verifies nothing, so the damaged item is never read.
+      const ledger = new SeriesKnowledgeLedger(database);
+      expect(Array.from(ledger.itemsCurrentlyFor(crowded!, ['series-tasks']))).toEqual([]);
+      // The filter reads the current revision's scope, never an earlier one's.
+      expect(Array.from(ledger.itemsCurrentlyFor(revised!, ['consistency-review']))).toEqual([]);
+      expect(Array.from(ledger.itemsCurrentlyFor(revised!, ['series-tasks']), (item) => [item.subject, item.current.ordinal, item.current.content])).toEqual([[J13_PLACE, 2, '第二版。']]);
+    } finally {
+      database.close();
+    }
+    await withSession(async ({ store }, bookId) => {
+      // Reading stopped at the forty-first clause, before the damaged one: the reason is the bound, not the damage.
+      expect(category(store, bookId).unavailableReason).toBe(SERIES_CONSISTENCY_TOO_MANY_REASON);
+    }, member);
+  }, 300_000);
+
+  it('makes only 书系一致性 unavailable when a Series record no longer reads, and leaves the rest of 审阅 preparable', async () => {
+    let member: string | undefined;
+    await withSession(async ({ store }, bookId) => {
+      member = bookId;
+      const seriesId = store.createSeries({ title: J13_SERIES_TITLE, note: '' }).seriesId;
+      joinSeries(store, seriesId, bookId);
+      takeInNewItem(store, seriesId, { subject: J13_PLACE, knowledgeClass: 'places', content: J13_EDITOR_WORDS, reuseScope: 'consistency-review' });
+      expect(category(store, bookId).available).toBe(true);
+    });
+    // A revision's record rewritten beside the closed store, with a digest that matches: it no longer agrees with itself.
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      database.exec('DROP TRIGGER series_knowledge_revisions_no_update');
+      const row = database.prepare('SELECT revision_id, canonical_json FROM series_knowledge_revisions').get() as { revision_id: string; canonical_json: string };
+      const rewritten = row.canonical_json.replace(JSON.stringify(J13_EDITOR_WORDS), JSON.stringify('改过的书系知识。'));
+      expect(rewritten).not.toBe(row.canonical_json);
+      database.prepare('UPDATE series_knowledge_revisions SET canonical_json = ?, sha256 = ? WHERE revision_id = ?').run(rewritten, sha256(rewritten), row.revision_id);
+      database.exec(SERIES_KNOWLEDGE_TRIGGER_SQL.series_knowledge_revisions_no_update!);
+    } finally {
+      database.close();
+    }
+    await withSession(async ({ store }, bookId) => {
+      // The category says why; every other category stays as it was, and 错别字 is prepared as ever.
+      expect([category(store, bookId).available, category(store, bookId).unavailableReason]).toEqual([false, SERIES_CONSISTENCY_UNREADABLE_REASON]);
+      expect(store.inspectReviewWorkspace(bookId, null).categories.find((entry) => entry.categoryId === 'typos-and-usage')!.available).toBe(true);
+      let progress = store.createReviewRunPreparationWork(bookId, ['typos-and-usage'], WHOLE, launchPolicy);
+      while (!progress.done) progress = store.advanceReviewRunPreparationWork(progress.workId!);
+      expect(progress.projection!.run!.state).toBe('prepared');
+      expect(refusal(() => prepare(store, bookId))).toBe(`REVIEW_CATEGORY_UNAVAILABLE:「书系一致性」：${SERIES_CONSISTENCY_UNREADABLE_REASON}`);
+    }, member);
   }, 300_000);
 
   it('pins the revisions it used, refuses an approval once they or the Book\'s Series moved, and puts its findings on the manuscript', async () => {

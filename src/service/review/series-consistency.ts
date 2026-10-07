@@ -1,9 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { SERIES_KNOWLEDGE_CLASS_LABELS, type SeriesKnowledgeClass } from '../../shared/protocol.js';
+import { SERIES_KNOWLEDGE_CLASS_LABELS, type SeriesKnowledgeClass, type SeriesKnowledgeReuseScope } from '../../shared/protocol.js';
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { graphemeCount, sliceGraphemes } from '../analysis/factual-review-contract.js';
-import { SeriesLedger } from '../series.js';
-import { SeriesKnowledgeLedger, type StoredItem } from '../series-knowledge.js';
+import { SeriesError, SeriesLedger } from '../series.js';
+import { SeriesKnowledgeError, SeriesKnowledgeLedger } from '../series-knowledge.js';
 import type { ReviewCategoryConfigurationEntry, ReviewGuidelineDocument, SeriesKnowledgePins } from './category-configuration.js';
 
 /**
@@ -33,7 +33,7 @@ const FOLDED = /[\s\p{Cc}\p{Zl}\p{Zp}]+/gu;
  * The reuse scopes a revision may be taken into a consistency review under. `series-tasks` is the wider of the two — every
  * later Series-scope Task may use it — so it covers this review as well; `consistency-review` is only this review.
  */
-const CONSISTENCY_REUSE_SCOPES: ReadonlySet<string> = new Set(['consistency-review', 'series-tasks']);
+const CONSISTENCY_REUSE_SCOPES: ReadonlyArray<SeriesKnowledgeReuseScope> = ['consistency-review', 'series-tasks'];
 
 /** One Series' knowledge as the clauses are built from it: its name and the current revision of each eligible item. */
 export interface SeriesKnowledgeSource {
@@ -92,17 +92,22 @@ export function seriesConsistencyNoKnowledgeReason(titles: ReadonlyArray<string>
   return `${which}${total === 1 ? '' : '都'}还没有纳入可用于一致性审阅的书系知识；在书系中纳入后才能选。`;
 }
 
-/** Why the review cannot carry the knowledge whole: it folds into more clauses than one review may carry. */
-export function seriesConsistencyTooManyReason(count: number): string {
-  return `这本书所在书系的书系知识折成 ${count} 条审阅依据，超过一次审阅能带的 ${MAX_SERIES_KNOWLEDGE_CLAUSES} 条，暂不能选；请在书系中合并或精简这些书系知识。`;
-}
+/**
+ * Why the review cannot carry the knowledge whole: it folds into more clauses than one review may carry. The reader stops
+ * counting once the bound is passed (Issue #64 review), so the reason says that and not how many.
+ */
+export const SERIES_CONSISTENCY_TOO_MANY_REASON =
+  `这本书所在书系的书系知识超过 ${MAX_SERIES_KNOWLEDGE_CLAUSES} 条审阅依据，一次审阅带不下，暂不能选；请在书系中合并或精简这些书系知识。`;
+
+/** Why a Series' records could not be read: the category waits rather than taking the rest of 审阅 with it. */
+export const SERIES_CONSISTENCY_UNREADABLE_REASON = '这本书所在书系的记录读取失败，书系一致性暂不能选；其余审阅类别不受影响。' as const;
 
 /** How many Series a reason names before it gives the count. */
 const NAMED_SERIES = 3;
 
 /**
  * The documents and pins of one Book's knowledge, or why there are none. Pure over what was read, so a test can state the
- * clauses an authored fixture answers without a store.
+ * clauses an authored fixture answers without a store. An item whose words fold to nothing gives no clause and is left out.
  */
 export function seriesConsistencyFromSources(memberships: ReadonlyArray<{ readonly seriesId: string; readonly title: string }>,
   sources: ReadonlyArray<SeriesKnowledgeSource>): SeriesConsistencyResolution {
@@ -116,7 +121,9 @@ export function seriesConsistencyFromSources(memberships: ReadonlyArray<{ readon
     for (const item of items) {
       const ordinal = revisions.length + 1;
       const built = seriesKnowledgeItemClauses(ordinal, item);
+      if (built.length === 0) continue;
       clauses += built.length;
+      if (clauses > MAX_SERIES_KNOWLEDGE_CLAUSES) return { kind: 'unavailable', reason: SERIES_CONSISTENCY_TOO_MANY_REASON };
       revisions.push({ seriesId: series.seriesId, itemId: item.itemId, revisionId: item.revisionId, ordinal: item.ordinal, digest: sha256Hex(item.content) });
       documents.push({
         documentId: `${SERIES_KNOWLEDGE_CLAUSE_PREFIX}/${item.itemId}`,
@@ -131,7 +138,6 @@ export function seriesConsistencyFromSources(memberships: ReadonlyArray<{ readon
     const titles = [...memberships].sort((left, right) => compare(left.title, right.title)).map((series) => series.title);
     return { kind: 'unavailable', reason: seriesConsistencyNoKnowledgeReason(titles.slice(0, NAMED_SERIES), titles.length) };
   }
-  if (clauses > MAX_SERIES_KNOWLEDGE_CLAUSES) return { kind: 'unavailable', reason: seriesConsistencyTooManyReason(clauses) };
   const series = [...memberships].sort((left, right) => compare(left.title, right.title) || compare(left.seriesId, right.seriesId))
     .map((entry) => ({ seriesId: entry.seriesId, title: entry.title }));
   return { kind: 'available', documents, pins: { series, revisions } };
@@ -155,29 +161,76 @@ function membershipsOf(db: DatabaseSync, bookId: string): Array<{ seriesId: stri
   return all;
 }
 
-/** The current revision of each item that may be read by a consistency review. */
-function eligible(item: StoredItem): boolean {
-  return CONSISTENCY_REUSE_SCOPES.has(item.current.reuseScope);
+/**
+ * One Series' knowledge as a consistency review may read it, kept for the readings that share it: the items read, and whether
+ * reading stopped because they alone already passed what one review carries.
+ */
+interface SeriesKnowledgeReading {
+  readonly items: SeriesKnowledgeSource['items'];
+  readonly overflow: boolean;
 }
 
-/** One Book's 书系一致性 as it stands in the database now. */
-export function resolveSeriesConsistency(db: DatabaseSync, bookId: string): SeriesConsistencyResolution {
-  const memberships = membershipsOf(db, bookId);
-  if (memberships.length === 0) return seriesConsistencyFromSources(memberships, []);
-  const knowledge = new SeriesKnowledgeLedger(db);
-  const sources = memberships.map((series): SeriesKnowledgeSource => ({
-    seriesId: series.seriesId,
-    title: series.title,
-    items: Array.from(knowledge.items(series.seriesId)).filter(eligible).map((item) => ({
+/**
+ * Readings of each Series, shared by the Books resolved together — one member page of a Series reads each Series once — and
+ * by nothing else, so a later reading never sees knowledge older than its own call (Issue #64 review).
+ */
+export type SeriesKnowledgeReadings = Map<string, SeriesKnowledgeReading>;
+
+export function newSeriesKnowledgeReadings(): SeriesKnowledgeReadings {
+  return new Map();
+}
+
+/**
+ * One Series' eligible items, filtered in SQL and verified one by one, stopping as soon as their clauses alone pass the bound:
+ * a Series of hundreds of items costs at most the items one review could carry.
+ */
+function readSeries(knowledge: SeriesKnowledgeLedger, seriesId: string): SeriesKnowledgeReading {
+  const items: Array<SeriesKnowledgeSource['items'][number]> = [];
+  let clauses = 0;
+  for (const item of knowledge.itemsCurrentlyFor(seriesId, CONSISTENCY_REUSE_SCOPES)) {
+    const count = seriesKnowledgeItemClauses(1, { subject: item.subject, knowledgeClass: item.knowledgeClass, content: item.current.content }).length;
+    if (count === 0) continue;
+    clauses += count;
+    if (clauses > MAX_SERIES_KNOWLEDGE_CLAUSES) return { items: [], overflow: true };
+    items.push({
       itemId: item.itemId,
       subject: item.subject,
       knowledgeClass: item.knowledgeClass,
       revisionId: item.current.revisionId,
       ordinal: item.current.ordinal,
       content: item.current.content,
-    })),
-  }));
-  return seriesConsistencyFromSources(memberships, sources);
+    });
+  }
+  return { items, overflow: false };
+}
+
+/**
+ * One Book's 书系一致性 as it stands in the database now. A Series record that no longer reads makes only this category
+ * unavailable, with a reason, and never the Book's whole 审阅 (Issue #64 review).
+ */
+export function resolveSeriesConsistency(db: DatabaseSync, bookId: string, readings: SeriesKnowledgeReadings = newSeriesKnowledgeReadings()): SeriesConsistencyResolution {
+  try {
+    const memberships = membershipsOf(db, bookId);
+    if (memberships.length === 0) return seriesConsistencyFromSources(memberships, []);
+    const knowledge = new SeriesKnowledgeLedger(db);
+    const sources: SeriesKnowledgeSource[] = [];
+    let clauses = 0;
+    for (const series of memberships) {
+      let reading = readings.get(series.seriesId);
+      if (reading === undefined) {
+        reading = readSeries(knowledge, series.seriesId);
+        readings.set(series.seriesId, reading);
+      }
+      if (reading.overflow) return { kind: 'unavailable', reason: SERIES_CONSISTENCY_TOO_MANY_REASON };
+      for (const item of reading.items) clauses += seriesKnowledgeItemClauses(1, item).length;
+      if (clauses > MAX_SERIES_KNOWLEDGE_CLAUSES) return { kind: 'unavailable', reason: SERIES_CONSISTENCY_TOO_MANY_REASON };
+      sources.push({ seriesId: series.seriesId, title: series.title, items: reading.items });
+    }
+    return seriesConsistencyFromSources(memberships, sources);
+  } catch (error) {
+    if (error instanceof SeriesKnowledgeError || error instanceof SeriesError) return { kind: 'unavailable', reason: SERIES_CONSISTENCY_UNREADABLE_REASON };
+    throw error;
+  }
 }
 
 /**

@@ -11,6 +11,7 @@ import { houseGuidelineRefusal } from '../../src/service/review/review-runs.js';
 import {
   MAX_SERIES_KNOWLEDGE_CLAUSES,
   SERIES_CONSISTENCY_NO_SERIES_REASON,
+  SERIES_CONSISTENCY_TOO_MANY_REASON,
   foldSeriesKnowledgeContent,
   seriesConsistencyEntry,
   seriesConsistencyFromSources,
@@ -96,9 +97,21 @@ describe('one Book\'s 书系一致性', () => {
     const items = (count: number): Array<[string, string]> => Array.from({ length: count }, (_value, index) => [`条目${String(index).padStart(2, '0')}`, `内容${index}`]);
     expect(entryOf([source('a', '甲', items(MAX_SERIES_KNOWLEDGE_CLAUSES))]).executor).toBe('review-category-contract');
     expect(entryOf([source('a', '甲', items(MAX_SERIES_KNOWLEDGE_CLAUSES + 1))]).unavailableReason)
-      .toBe('这本书所在书系的书系知识折成 41 条审阅依据，超过一次审阅能带的 40 条，暂不能选；请在书系中合并或精简这些书系知识。');
+      .toBe('这本书所在书系的书系知识超过 40 条审阅依据，一次审阅带不下，暂不能选；请在书系中合并或精简这些书系知识。');
     // One long item counts every piece it is cut into.
-    expect(entryOf([source('a', '甲', [...items(38), ['长', '长'.repeat(600)]])]).unavailableReason).toContain('折成 41 条审阅依据');
+    expect(entryOf([source('a', '甲', [...items(38), ['长', '长'.repeat(600)]])]).unavailableReason).toBe(SERIES_CONSISTENCY_TOO_MANY_REASON);
+    expect(entryOf([source('a', '甲', [...items(37), ['长', '长'.repeat(600)]])]).executor).toBe('review-category-contract');
+  });
+
+  it('leaves out an item whose words fold to nothing, and gives no clause number to it', () => {
+    // C0 controls only: the folded words are empty, so the item has no clause to give the review.
+    expect(seriesKnowledgeItemClauses(1, { subject: '空', knowledgeClass: 'canon', content: '\u0001\u0002\u0007' })).toEqual([]);
+    const alone = entryOf([source('a', '星河三部曲', [['空', '\u0001\u0002']])]);
+    expect([alone.executor, alone.unavailableReason]).toEqual(['unavailable', '书系「星河三部曲」还没有纳入可用于一致性审阅的书系知识；在书系中纳入后才能选。']);
+    const beside = entryOf([source('a', '甲', [['吴', '吴的设定。'], ['空', '\u0001'], ['王', '王的设定。']])]);
+    expect(reviewCategoryContractInput(beside).clauses.map((clause) => clause.clauseId)).toEqual(['series-knowledge/1', 'series-knowledge/2']);
+    expect(beside.seriesKnowledge!.revisions.map((revision) => revision.itemId)).toEqual(['a-item-0', 'a-item-2']);
+    expect(() => reviewCategoryContract(reviewCategoryContractInput(beside))).not.toThrow();
   });
 
   it('pins each Series and revision it used, and is current only while exactly those stand', () => {
