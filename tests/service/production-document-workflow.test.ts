@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
 import { PRODUCTION_DOCUMENT_WORKFLOW_TRIGGER_SQL } from '../../src/service/production-document-workflow.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION, SERIES_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION, SERIES_KNOWLEDGE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
   DEFAULT_MANUSCRIPT_EXPORT_OPTIONS,
   MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS,
@@ -304,6 +304,10 @@ describe('the Deliverable Workflow of a Production Document (Issue #415, S66c)',
     try {
       planted.exec('PRAGMA foreign_keys = OFF');
       planted.exec(`BEGIN IMMEDIATE;
+        DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions;
+        DROP TABLE series_knowledge_revisions;
+        DROP TABLE series_knowledge_candidates;
+        DROP TABLE series_knowledge_items;
         DROP TABLE series_membership_changes;
         DROP TABLE series;
         DROP TABLE evaluation_preferences;
@@ -343,7 +347,7 @@ describe('the Deliverable Workflow of a Production Document (Issue #415, S66c)',
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SERIES_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SERIES_KNOWLEDGE_SCHEMA_VERSION);
       expect((after.prepare('SELECT count(*) count FROM production_document_workflow_instances').get() as { count: number }).count).toBe(1);
       expect((after.prepare('SELECT count(*) count FROM production_document_phase_transitions').get() as { count: number }).count).toBe(0);
     } finally {

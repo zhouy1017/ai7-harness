@@ -10,6 +10,8 @@ import {
   MAX_MILESTONE_PURPOSE_CODE_UNITS,
   MAX_PROPOSAL_CONFLICT_UNITS,
   MAX_SERIES_CANDIDATE_QUERY_CHARACTERS,
+  MAX_SERIES_KNOWLEDGE_SUBJECT_CHARACTERS,
+  MAX_SERIES_KNOWLEDGE_QUERY_CHARACTERS,
   MAX_PUBLICATION_BASIS_CHARACTERS,
   MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS,
   MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS,
@@ -50,6 +52,8 @@ import {
   TASK_PLAN_KINDS,
   isReviewCategoryId,
   publicationText,
+  SERIES_KNOWLEDGE_CLASSES,
+  SERIES_KNOWLEDGE_REUSE_SCOPES,
   type BaselineAnalysisUpdateMode,
   type MilestonePurposeKind,
   type ReviewFindingSeverity,
@@ -159,6 +163,28 @@ function validLibraryDecision(value: unknown): boolean {
   return value.kind === 'eligibility' && hasExactKeys(value, ['kind', 'choice', 'reason']) &&
     (value.choice === 'book' || value.choice === 'house' || value.choice === 'excluded' || value.choice === 'deferred') &&
     (value.reason === null || isBoundedString(value.reason, MAX_FRAME_BYTES, true));
+}
+
+/** A Series Knowledge Candidate's item (Issue #63, S28b): a new one by name and class, or one existing item by identity. */
+function validKnowledgeTarget(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (value.kind === 'new') {
+    return hasExactKeys(value, ['kind', 'subject', 'knowledgeClass']) && isBoundedString(value.subject, 400) &&
+      (SERIES_KNOWLEDGE_CLASSES as readonly unknown[]).includes(value.knowledgeClass);
+  }
+  return value.kind === 'existing' && hasExactKeys(value, ['kind', 'itemId']) && validUuid(value.itemId);
+}
+
+/** The manuscript span a candidate cites, as a mark names its range, or `null` for the editor's own words. */
+function validKnowledgeSpan(value: unknown): boolean {
+  if (value === null) return true;
+  return isRecord(value) && hasExactKeys(value, [
+    'manuscriptId', 'branchId', 'windowStartBlockId', 'baseRevisionId', 'expectedJournalSequence', 'blockId', 'baseBlockDigest', 'fromGrapheme',
+    'toGrapheme', 'selectedText',
+  ]) && validMarkBinding(value) && isBoundedString(value.baseRevisionId, 36) && UUID_PATTERN.test(value.baseRevisionId) &&
+    isSafeInteger(value.expectedJournalSequence, 0) && isBoundedString(value.blockId, 28) && MARK_BLOCK_PATTERN.test(value.blockId) &&
+    isBoundedString(value.baseBlockDigest, 64) && HEX_DIGEST_PATTERN.test(value.baseBlockDigest) && isSafeInteger(value.fromGrapheme, 0) &&
+    isSafeInteger(value.toGrapheme, 1) && isBoundedString(value.selectedText, MAX_BLOCK_CODE_UNITS);
 }
 
 function validMarkBinding(input: Record<string, unknown>): boolean {
@@ -822,8 +848,11 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'inspectBookSeries': {
-      const input = requireInput(value.input, ['bookId'], tentativeId);
-      if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId'], ['membershipsAfter'], tentativeId);
+      if (!validUuid(input.bookId) || !optionalOrNull(input, 'membershipsAfter', (after) =>
+        isRecord(after) && hasExactKeys(after, ['title', 'seriesId']) && isBoundedString(after.title, 80) && validUuid(after.seriesId))) {
+        throw new ProtocolError(tentativeId);
+      }
       break;
     }
     // 书系's further pages (Issue #63 review): each starts after one item, and 查找 names at most a line of words.
@@ -855,6 +884,72 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
             Number.isSafeInteger(after.ordinal) && (after.ordinal as number) >= 1))) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    // 书系知识 (Issue #63, S28b): a candidate names its Series, a new item by name and class or an existing one, its words and —
+    // when it cites a member Book's manuscript — the exact span as a mark names one; a review and a promotion name the candidate.
+    case 'proposeSeriesKnowledge': {
+      const input = requireInput(value.input, ['seriesId', 'target', 'content', 'span'], tentativeId);
+      if (!validUuid(input.seriesId) || !validKnowledgeTarget(input.target) || !isBoundedString(input.content, 8_000) || !validKnowledgeSpan(input.span)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'inspectSeriesKnowledgeReview': {
+      const input = requireInputWithOptional(value.input, ['seriesId', 'candidateId'], ['conflictsPage'], tentativeId);
+      if (!validUuid(input.seriesId) || !validUuid(input.candidateId)) throw new ProtocolError(tentativeId);
+      const page = input.conflictsPage;
+      if (page !== undefined && (!isRecord(page) || !hasExactKeys(page, ['candidateVersion', 'reviewDigest', 'after']) ||
+          !isSafeInteger(page.candidateVersion, 1) || !isSafeInteger(page.after, 0) ||
+          !isBoundedString(page.reviewDigest, 64) || !HEX_DIGEST_PATTERN.test(page.reviewDigest))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'editSeriesKnowledgeCandidate': {
+      const input = requireInput(value.input, ['seriesId', 'candidateId', 'expectedVersion', 'target', 'content'], tentativeId);
+      if (!validUuid(input.seriesId) || !validUuid(input.candidateId) || !isSafeInteger(input.expectedVersion, 1) || !validKnowledgeTarget(input.target) ||
+          !isBoundedString(input.content, 8_000)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'promoteSeriesKnowledge': {
+      const input = requireInput(value.input, ['seriesId', 'candidateId', 'candidateVersion', 'reviewDigest', 'reuseScope', 'conflictDisposition'], tentativeId);
+      if (!validUuid(input.seriesId) || !validUuid(input.candidateId) || !isSafeInteger(input.candidateVersion, 1) ||
+          !isBoundedString(input.reviewDigest, 64) || !HEX_DIGEST_PATTERN.test(input.reviewDigest) ||
+          !(SERIES_KNOWLEDGE_REUSE_SCOPES as readonly unknown[]).includes(input.reuseScope) ||
+          (input.conflictDisposition !== 'none' && input.conflictDisposition !== 'preserved')) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // 书系知识's further pages (Issue #63 review): each starts after one item of its own list, and 查找条目 names a line of words.
+    case 'inspectSeriesKnowledgeItems': {
+      const input = requireInput(value.input, ['seriesId', 'text', 'after'], tentativeId);
+      const after = input.after;
+      if (!validUuid(input.seriesId) || !isBoundedString(input.text, 2 * MAX_SERIES_KNOWLEDGE_QUERY_CHARACTERS, true) || /[\r\n]/u.test(input.text) ||
+          !(after === null || (isRecord(after) && hasExactKeys(after, ['subject', 'itemId']) && isBoundedString(after.subject, 2 * MAX_SERIES_KNOWLEDGE_SUBJECT_CHARACTERS) &&
+            validUuid(after.itemId)))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'inspectSeriesKnowledgeCandidates': {
+      const input = requireInput(value.input, ['seriesId', 'after'], tentativeId);
+      const after = input.after;
+      if (!validUuid(input.seriesId) || !(after === null || (isRecord(after) && hasExactKeys(after, ['firstAt', 'candidateId']) &&
+          isBoundedString(after.firstAt, 40) && CURSOR_INSTANT.test(after.firstAt) && validUuid(after.candidateId)))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'inspectSeriesKnowledgeConflicts': {
+      const input = requireInput(value.input, ['seriesId', 'itemId', 'revisionId', 'after'], tentativeId);
+      if (!validUuid(input.seriesId) || !validUuid(input.itemId) || !validUuid(input.revisionId) || !isSafeInteger(input.after, 0)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'inspectSeriesKnowledgeRevisions': {
+      const input = requireInput(value.input, ['seriesId', 'itemId', 'before'], tentativeId);
+      if (!validUuid(input.seriesId) || !validUuid(input.itemId) || !(input.before === null || isSafeInteger(input.before, 1))) throw new ProtocolError(tentativeId);
       break;
     }
     // 质量与学习 › 学习准入 (Issue #61, S26b): every Book's Learning Material, or one Book's.
