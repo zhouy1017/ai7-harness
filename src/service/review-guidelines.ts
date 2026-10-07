@@ -4,9 +4,11 @@ import { basename } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   MAX_GUIDELINE_OLDER_BOOKS_SHOWN,
+  MAX_GUIDELINE_MERGED_VERSIONS_SHOWN,
   MAX_GUIDELINE_VERSION_RUNS_SHOWN,
   MAX_REVIEW_GUIDELINE_FILE_BYTES,
   type ReviewGuidelineDocumentProjection,
+  type ReviewGuidelineMergedVersionProjection,
   type ReviewGuidelineDocumentUse,
   type ReviewGuidelinePreviewProjection,
   type ReviewGuidelineSourceProjection,
@@ -96,21 +98,21 @@ const CLAUSE_PAGE_SIZE = 8;
 const CLAUSE_FRAGMENT_UNITS = 1024;
 
 /** Fixed-size text fragments keep even a long combining sequence inside the IPC frame bound. */
-function clausePage(clauses: ReadonlyArray<ReviewGuidelineClause>, requested = 0) {
+function clausePage(clauses: ReadonlyArray<ReviewGuidelineClause>, requested = 0, fragmentUnits = CLAUSE_FRAGMENT_UNITS, pageSize = CLAUSE_PAGE_SIZE) {
   requireGuideline(Number.isSafeInteger(requested) && requested >= 0, 'REVIEW_GUIDELINE_PAGE_INVALID', '条款页码无效。');
   let count = 0;
   const items: Array<{ clauseId: string; number: number; text: string }> = [];
   for (let index = 0; index < clauses.length; index += 1) {
     const clause = clauses[index]!;
     for (let offset = 0; offset < clause.text.length;) {
-      let end = Math.min(offset + CLAUSE_FRAGMENT_UNITS, clause.text.length);
+      let end = Math.min(offset + fragmentUnits, clause.text.length);
       if (end < clause.text.length && /[\uD800-\uDBFF]/u.test(clause.text[end - 1]!)) end -= 1;
-      if (Math.floor(count / CLAUSE_PAGE_SIZE) === requested) items.push({ clauseId: clause.clauseId, number: index + 1, text: clause.text.slice(offset, end) });
+      if (Math.floor(count / pageSize) === requested) items.push({ clauseId: clause.clauseId, number: index + 1, text: clause.text.slice(offset, end) });
       count += 1;
       offset = end;
     }
   }
-  const pages = Math.max(1, Math.ceil(count / CLAUSE_PAGE_SIZE));
+  const pages = Math.max(1, Math.ceil(count / pageSize));
   requireGuideline(requested < pages, 'REVIEW_GUIDELINE_PAGE_INVALID', '条款页码已失效，请重新打开。');
   return { clauses: items, clauseCount: clauses.length, clausePage: requested, clausePages: pages };
 }
@@ -455,28 +457,81 @@ export class ReviewGuidelineLedger {
     this.#previews.delete(previewId);
   }
 
+  /** The exact document identity a merged Run brings; its original version representation is part of that identity. */
+  #content(document: { documentId: unknown; title: unknown; issuer: unknown; version: unknown; clauses: unknown }): string {
+    return sha256Hex(canonicalJson({ documentId: document.documentId, title: document.title, issuer: document.issuer,
+      version: document.version, clauses: document.clauses }));
+  }
+
+  #dropUsage(): void {
+    this.#db.exec(`DROP TABLE IF EXISTS temp.guideline_own; DROP TABLE IF EXISTS temp.guideline_uses;
+      DROP TABLE IF EXISTS temp.guideline_categories; DROP TABLE IF EXISTS temp.guideline_snapshots;`);
+  }
+
+  /** Disk-backed grouping retains one applied document at a time, including complete foreign snapshot histories. */
+  #materializeUsage(known: ReturnType<typeof builtinDocuments>): void {
+    this.#dropUsage();
+    this.#db.exec(`
+      CREATE TEMP TABLE guideline_own(document_id TEXT, version INTEGER, content TEXT, PRIMARY KEY(document_id, version)) WITHOUT ROWID;
+      CREATE TEMP TABLE guideline_uses(document_id TEXT, review_run_id TEXT, book_id TEXT, book_title TEXT, title_order BLOB,
+        ordinal INTEGER, created_at TEXT, version INTEGER, content TEXT, snapshot INTEGER, PRIMARY KEY(document_id, review_run_id)) WITHOUT ROWID;
+      CREATE TEMP TABLE guideline_categories(document_id TEXT, review_run_id TEXT, category_id TEXT,
+        PRIMARY KEY(document_id, review_run_id, category_id)) WITHOUT ROWID;
+      CREATE TEMP TABLE guideline_snapshots(document_id TEXT, content TEXT, version INTEGER, title TEXT, issuer TEXT, clauses_json TEXT,
+        PRIMARY KEY(document_id, content)) WITHOUT ROWID;
+    `);
+    const own = this.#db.prepare('INSERT INTO temp.guideline_own VALUES (?, ?, ?)');
+    for (const { document, use } of known) {
+      own.run(document.documentId, 1, this.#content(document));
+      if (use === 'clauses') for (const version of this.#versions(document)) {
+        own.run(document.documentId, version.ordinal, this.#content({ documentId: document.documentId,
+          title: version.title, issuer: version.issuer, version: String(version.ordinal), clauses: version.clauses }));
+      }
+    }
+    const ledgered = this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='database_merge_books'").get() !== undefined;
+    const merged = ledgered ? `EXISTS (SELECT 1 FROM database_merge_books mb JOIN database_merges m ON m.merge_id=mb.merge_id
+      WHERE mb.book_id=r.book_id AND m.outcome='applied')` : '0';
+    const rows = this.#db.prepare(`SELECT r.review_run_id, r.book_id, b.title, r.ordinal, r.created_at,
+      json_extract(c.value, '$.categoryId') AS category_id, d.value AS document_json, ${merged} AS merged
+      FROM review_runs r JOIN books b ON b.book_id=r.book_id,
+        json_each(r.canonical_json, '$.categories') c, json_each(c.value, '$.entry.guidelineDocuments') d
+      WHERE EXISTS (SELECT 1 FROM review_run_category_events e WHERE e.review_run_id=r.review_run_id
+        AND e.category_id=json_extract(c.value, '$.categoryId') AND e.state='materialized')
+      ORDER BY r.created_at, r.review_run_id, c.key, d.key`).iterate();
+    const ownContent = this.#db.prepare('SELECT content FROM temp.guideline_own WHERE document_id=? AND version=?');
+    const use = this.#db.prepare('INSERT OR IGNORE INTO temp.guideline_uses VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const category = this.#db.prepare('INSERT OR IGNORE INTO temp.guideline_categories VALUES (?, ?, ?)');
+    const snapshot = this.#db.prepare('INSERT OR IGNORE INTO temp.guideline_snapshots VALUES (?, ?, ?, ?, ?, ?)');
+    for (const row of rows) {
+      const document: unknown = JSON.parse(String(row.document_json));
+      if (!isRecord(document) || typeof document.documentId !== 'string' || !known.some(({ document: item }) => item.documentId === document.documentId)) continue;
+      const content = this.#content({ documentId: document.documentId, title: document.title, issuer: document.issuer,
+        version: document.version, clauses: document.clauses });
+      const version = Number(document.version);
+      const foreign = integer(row.merged) === 1 && ownContent.get(document.documentId, version)?.content !== content;
+      const inserted = use.run(document.documentId, row.review_run_id!, row.book_id!, row.title!,
+        Buffer.from(String(row.title), 'utf16le').swap16(), row.ordinal!, row.created_at!, version, content, foreign ? 1 : 0);
+      category.run(document.documentId, row.review_run_id!, row.category_id!);
+      // The first applied document in a Run is its representative, as before; duplicate categories add only usage.
+      if (foreign && Number(inserted.changes) > 0) snapshot.run(document.documentId, content, version,
+        String(document.title), String(document.issuer), canonicalJson(Array.isArray(document.clauses) ? document.clauses : []));
+    }
+  }
+
   /** SQLite owns growing usage sets; each caller retains only counts and a bounded display page. */
   #usageSql(): string {
     return `WITH used AS (
-      SELECT DISTINCT r.review_run_id, r.book_id, b.title AS book_title, r.ordinal, r.created_at,
-        CAST(json_extract(d.value, '$.version') AS INTEGER) AS version,
-        json_extract(c.value, '$.categoryId') AS category_id
-      FROM review_runs r JOIN books b ON b.book_id = r.book_id,
-        json_each(r.canonical_json, '$.categories') c,
-        json_each(c.value, '$.entry.guidelineDocuments') d
-      WHERE json_extract(d.value, '$.documentId') = ? AND EXISTS (
-        SELECT 1 FROM review_run_category_events e WHERE e.review_run_id = r.review_run_id
-          AND e.category_id = json_extract(c.value, '$.categoryId') AND e.state = 'materialized'
-      )
+      SELECT u.*, c.category_id FROM temp.guideline_uses u JOIN temp.guideline_categories c
+        ON c.document_id=u.document_id AND c.review_run_id=u.review_run_id WHERE u.document_id=?
     ), runs AS (
-      SELECT DISTINCT review_run_id, book_id, book_title, ordinal, created_at, version FROM used
+      SELECT DISTINCT review_run_id, book_id, book_title, title_order, ordinal, created_at, version, content, snapshot FROM used
     ) `;
   }
 
   #usedBy(documentId: string, ordinal: number): Pick<ReviewGuidelineVersionProjection, 'usedByCount' | 'usedBy'> {
     const sql = this.#usageSql();
-    const count = this.#db.prepare(sql + 'SELECT COUNT(*) AS count FROM runs WHERE version = ?').get(documentId, ordinal)!;
-    const rows = this.#db.prepare(sql + `SELECT * FROM runs WHERE version = ?
+    const count = this.#db.prepare(sql + 'SELECT COUNT(*) AS count FROM runs WHERE version = ? AND snapshot=0').get(documentId, ordinal)!;
+    const rows = this.#db.prepare(sql + `SELECT * FROM runs WHERE version = ? AND snapshot=0
       ORDER BY created_at DESC, review_run_id DESC LIMIT ?`).all(documentId, ordinal, MAX_GUIDELINE_VERSION_RUNS_SHOWN);
     return { usedByCount: integer(count.count), usedBy: rows.map((row) => ({
       bookId: String(row.book_id), bookTitle: String(row.book_title), reviewRunId: String(row.review_run_id),
@@ -489,6 +544,8 @@ export class ReviewGuidelineLedger {
     const known = builtinDocuments();
     requireGuideline(page === undefined || (isRecord(page) && known.some(({ document }) => document.documentId === page.documentId)),
       'REVIEW_GUIDELINE_PAGE_INVALID', '没有这份审阅规范文件。');
+    try {
+    this.#materializeUsage(known);
     const documents: ReviewGuidelineDocumentProjection[] = known.map(({ document: builtin, appliedBy, use }) => {
       const selected = page?.documentId === builtin.documentId ? page : undefined;
       const before = selected?.versionsBefore ?? null;
@@ -516,10 +573,10 @@ export class ReviewGuidelineLedger {
       const olderSql = sql + `, ranked AS (
         SELECT *, ROW_NUMBER() OVER (PARTITION BY book_id ORDER BY ordinal DESC, review_run_id DESC) AS rank FROM runs
       ) `;
-      const olderCount = this.#db.prepare(olderSql + 'SELECT COUNT(*) AS count FROM ranked WHERE rank = 1 AND version < ?')
+      const olderCount = this.#db.prepare(olderSql + 'SELECT COUNT(*) AS count FROM ranked WHERE rank = 1 AND (version < ? OR snapshot=1)')
         .get(builtin.documentId, currentOrdinal)!;
-      const older = this.#db.prepare(olderSql + `SELECT book_id, book_title, version FROM ranked
-        WHERE rank = 1 AND version < ? ORDER BY book_title COLLATE BINARY, book_id LIMIT ?`)
+      const older = this.#db.prepare(olderSql + `SELECT book_id, book_title, version, snapshot FROM ranked
+        WHERE rank = 1 AND (version < ? OR snapshot=1) ORDER BY title_order, book_id LIMIT ?`)
         .all(builtin.documentId, currentOrdinal, MAX_GUIDELINE_OLDER_BOOKS_SHOWN);
       const fragment = clausePage(current.document.clauses, selected?.clausePage);
       const counts = new Map<string, number>();
@@ -528,20 +585,43 @@ export class ReviewGuidelineLedger {
         const row = this.#db.prepare(sql + `SELECT COUNT(*) AS count FROM (
           SELECT DISTINCT u.book_id, f.category_id, f.kind_ref FROM review_findings f JOIN used u
             ON u.review_run_id = f.review_run_id AND u.category_id = f.category_id
-          WHERE u.version = ? AND f.clause_ref = ?
+          WHERE u.version = ? AND u.snapshot=0 AND f.clause_ref = ?
         )`).get(builtin.documentId, currentOrdinal, clause.clauseId)!;
         counts.set(clause.clauseId, integer(row.count));
       }
       const oldest = versions.at(-1)?.ordinal ?? 1;
+      const mergedBefore = selected?.mergedVersionsBefore ?? null;
+      const mergedCount = integer(this.#db.prepare('SELECT COUNT(*) AS count FROM temp.guideline_snapshots WHERE document_id=?').get(builtin.documentId)!.count);
+      const mergedRows = this.#db.prepare(`SELECT * FROM temp.guideline_snapshots WHERE document_id=?
+        AND (? IS NULL OR version < ? OR (version=? AND content>?)) ORDER BY version DESC, content LIMIT ?`)
+        .all(builtin.documentId, mergedBefore?.ordinal ?? null, mergedBefore?.ordinal ?? 0, mergedBefore?.ordinal ?? 0,
+          mergedBefore?.digest ?? '', MAX_GUIDELINE_MERGED_VERSIONS_SHOWN + 1);
+      const mergedNextRow = mergedRows.length > MAX_GUIDELINE_MERGED_VERSIONS_SHOWN ? mergedRows[MAX_GUIDELINE_MERGED_VERSIONS_SHOWN - 1] : undefined;
+      const mergedVersions: ReviewGuidelineMergedVersionProjection[] = mergedRows.slice(0, MAX_GUIDELINE_MERGED_VERSIONS_SHOWN).map((row) => {
+        const clauses = JSON.parse(String(row.clauses_json)) as ReviewGuidelineClause[];
+        const mergedClause = selected?.mergedClause;
+        const fragment = clausePage(clauses, mergedClause !== undefined && mergedClause.digest === row.content ? mergedClause.page : 0, 128, 4);
+        const usedByCount = integer(this.#db.prepare('SELECT COUNT(*) AS count FROM temp.guideline_uses WHERE document_id=? AND content=? AND snapshot=1').get(builtin.documentId, row.content!)!.count);
+        const references = this.#db.prepare(`SELECT * FROM temp.guideline_uses WHERE document_id=? AND content=? AND snapshot=1
+          ORDER BY created_at DESC, review_run_id DESC LIMIT ?`).all(builtin.documentId, row.content!, MAX_GUIDELINE_VERSION_RUNS_SHOWN);
+        return { ordinal: integer(row.version), issuer: String(row.issuer), title: String(row.title), digest: String(row.content),
+          ...fragment, clauses: fragment.clauses.map(({ number, text }) => ({ number, text })), usedByCount,
+          usedBy: references.map((ref) => ({ bookId: String(ref.book_id), bookTitle: String(ref.book_title), reviewRunId: String(ref.review_run_id), reviewOrdinal: integer(ref.ordinal), createdAt: String(ref.created_at) })) };
+      });
+      requireGuideline(selected?.mergedClause === undefined || mergedVersions.some((version) => version.digest === selected.mergedClause!.digest),
+        'REVIEW_GUIDELINE_PAGE_INVALID', '随图书带来的条款页已失效，请重新打开。');
       return {
         documentId: builtin.documentId, title: current.document.title, issuer: current.document.issuer,
         currentOrdinal, use, appliedBy, ...fragment,
         clauses: fragment.clauses.map((clause) => ({ ...clause, citations: counts.get(clause.clauseId) ?? 0 })),
         versions, versionCount: currentOrdinal, versionsBefore: before, versionsNext: oldest > 1 ? oldest : null,
+        mergedVersions, mergedVersionCount: mergedCount, mergedVersionsBefore: mergedBefore,
+        mergedVersionsNext: mergedNextRow === undefined ? null : { ordinal: integer(mergedNextRow.version), digest: String(mergedNextRow.content) },
         olderVersionBookCount: integer(olderCount.count),
-        olderVersionBooks: older.map((row) => ({ bookId: String(row.book_id), bookTitle: String(row.book_title), ordinal: integer(row.version) })),
+        olderVersionBooks: older.map((row) => ({ bookId: String(row.book_id), bookTitle: String(row.book_title), ordinal: integer(row.version), merged: integer(row.snapshot) === 1 })),
       };
     });
     return { documents };
+    } finally { this.#dropUsage(); }
   }
 }

@@ -664,10 +664,16 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectReviewGuidelines': {
       const input = requireInputWithOptional(value.input, [], ['page'], tentativeId);
       if (Object.hasOwn(input, 'page')) {
-        const page = requireInputWithOptional(input.page, ['documentId'], ['versionsBefore', 'clausePage'], tentativeId);
+        const page = requireInputWithOptional(input.page, ['documentId'], ['versionsBefore', 'clausePage', 'mergedVersionsBefore', 'mergedClause'], tentativeId);
         if (!isBoundedString(page.documentId, 64) || !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/u.test(page.documentId) ||
             !optionalOrNull(page, 'versionsBefore', (cursor) => isSafeInteger(cursor, 2)) ||
             (Object.hasOwn(page, 'clausePage') && !isSafeInteger(page.clausePage))) throw new ProtocolError(tentativeId);
+        const cursor = page.mergedVersionsBefore;
+        if (cursor !== undefined && cursor !== null && (!isRecord(cursor) || !hasExactKeys(cursor, ['ordinal', 'digest']) ||
+            !isSafeInteger(cursor.ordinal, 1) || typeof cursor.digest !== 'string' || !HEX_DIGEST_PATTERN.test(cursor.digest))) throw new ProtocolError(tentativeId);
+        const clause = page.mergedClause;
+        if (clause !== undefined && (!isRecord(clause) || !hasExactKeys(clause, ['digest', 'page']) ||
+            !isSafeInteger(clause.page) || typeof clause.digest !== 'string' || !HEX_DIGEST_PATTERN.test(clause.digest))) throw new ProtocolError(tentativeId);
       }
       break;
     }
@@ -779,8 +785,9 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
-    // 替换本机全部数据: the one preview it takes the package of.
-    case 'prepareDatabaseReplacement': {
+    // 替换本机全部数据, and 只导入其中的图书 (Issue #434, S86d): the one preview each takes the package of.
+    case 'prepareDatabaseReplacement':
+    case 'prepareDatabaseMerge': {
       const input = requireInput(value.input, ['previewId'], tentativeId);
       if (!validUuid(input.previewId)) throw new ProtocolError(tentativeId);
       break;

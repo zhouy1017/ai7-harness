@@ -11,7 +11,7 @@ import {
   MAX_STORE_VERSIONS_LISTED,
 } from '../../src/service/data-version.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { SERIES_KNOWLEDGE_SCHEMA_VERSION, DATABASE_REPLACEMENT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { SERIES_KNOWLEDGE_SCHEMA_VERSION, DATABASE_MERGE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2) for 数据版本 (Issue #433, plan slice S85a; V2-UX-DSTO-016; ADR 0079 §1) over the real store:
@@ -65,9 +65,9 @@ describe('数据版本 over the real store', () => {
       softwareVersion: version,
       dataVersion: 1,
       frozen: false,
-      schemaRevision: DATABASE_REPLACEMENT_SCHEMA_VERSION,
+      schemaRevision: DATABASE_MERGE_SCHEMA_VERSION,
       update: null,
-      history: [{ softwareVersion: version, dataVersion: 1, schemaRevision: DATABASE_REPLACEMENT_SCHEMA_VERSION, recordedAt: first.history[0]!.recordedAt }],
+      history: [{ softwareVersion: version, dataVersion: 1, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION, recordedAt: first.history[0]!.recordedAt }],
       historyTruncated: false,
     });
     // The same software opening the same data again records nothing.
@@ -82,10 +82,10 @@ describe('数据版本 over the real store', () => {
       const recordedAt = '2026-09-01T00:00:00.000Z';
       const earlier = canonicalRecord({
         schema: 'ai7.store-version/1', recordId: '00000000-0000-4000-8000-000000000001', ordinal: 1, softwareVersion: '0.0.9', dataVersion: 1,
-        schemaRevision: DATABASE_REPLACEMENT_SCHEMA_VERSION, supersedes: null, recordedAt,
+        schemaRevision: DATABASE_MERGE_SCHEMA_VERSION, supersedes: null, recordedAt,
       });
       database.prepare(`INSERT INTO store_versions(record_id, ordinal, software_version, data_version, schema_revision, supersedes_record_id, recorded_at, canonical_json, sha256)
-        VALUES (?, 1, '0.0.9', 1, ?, NULL, ?, ?, ?)`).run('00000000-0000-4000-8000-000000000001', DATABASE_REPLACEMENT_SCHEMA_VERSION, recordedAt, earlier.json, earlier.digest);
+        VALUES (?, 1, '0.0.9', 1, ?, NULL, ?, ?, ?)`).run('00000000-0000-4000-8000-000000000001', DATABASE_MERGE_SCHEMA_VERSION, recordedAt, earlier.json, earlier.digest);
     } finally {
       database.close();
     }
@@ -191,7 +191,7 @@ describe('数据版本 over the real store', () => {
       const store = new DatabaseSync(databasePath());
       try {
         const ledger = new DataVersionLedger(store);
-        for (let patch = from; patch <= to; patch += 1) ledger.recordOpen({ softwareVersion: `0.0.${patch}`, dataVersion: 1, schemaRevision: DATABASE_REPLACEMENT_SCHEMA_VERSION });
+        for (let patch = from; patch <= to; patch += 1) ledger.recordOpen({ softwareVersion: `0.0.${patch}`, dataVersion: 1, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION });
       } finally {
         store.close();
       }
@@ -235,15 +235,15 @@ describe('数据版本 over the real store', () => {
     await reopened(() => undefined);
     const plant = new DatabaseSync(databasePath());
     try {
-      plant.exec(`DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; PRAGMA user_version = ${SERIES_KNOWLEDGE_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; PRAGMA user_version = ${SERIES_KNOWLEDGE_SCHEMA_VERSION};`);
     } finally {
       plant.close();
     }
     const migrated = await reopened((store) => store.inspectDataVersion());
-    expect([migrated.schemaRevision, migrated.history.length, migrated.update]).toEqual([DATABASE_REPLACEMENT_SCHEMA_VERSION, 1, null]);
+    expect([migrated.schemaRevision, migrated.history.length, migrated.update]).toEqual([DATABASE_MERGE_SCHEMA_VERSION, 1, null]);
     const database = new DatabaseSync(databasePath(), { readOnly: true });
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_REPLACEMENT_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_MERGE_SCHEMA_VERSION);
     } finally {
       database.close();
     }

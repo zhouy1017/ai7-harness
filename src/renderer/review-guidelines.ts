@@ -9,6 +9,9 @@ import {
   guidelineClausesSummary,
   guidelineFixedStatement,
   guidelineImported,
+  guidelineMergedVersionLine,
+  guidelineMergedVersionsMore,
+  guidelineMergedVersionsSummary,
   guidelineOlderBooks,
   guidelinePreviewChanges,
   guidelinePreviewHeading,
@@ -131,6 +134,54 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
       versions.append(controls);
     }
     node.append(clauses, versions);
+    // The versions merged Books were reviewed under and this data never had, each with its clauses: read-only (Issue #434
+    // review; ADR 0079 §1.5).
+    if (document.mergedVersionCount > 0) {
+      const merged = el('details', 'guideline-merged-versions');
+      merged.append(el('summary', undefined, guidelineMergedVersionsSummary(document.mergedVersionCount)));
+      const mergedRows = el('ul', 'guideline-version-list');
+      for (const version of document.mergedVersions) {
+        const row = el('li', undefined, guidelineMergedVersionLine(version));
+        row.dataset['guidelineMergedVersion'] = String(version.ordinal);
+        row.dataset['guidelineUsedBy'] = String(version.usedByCount);
+        const mergedClauses = el('ol', 'guideline-clause-list');
+        for (const clause of version.clauses) {
+          const item = el('li', 'guideline-clause-text', clause.text);
+          item.value = clause.number;
+          mergedClauses.append(item);
+        }
+        row.append(mergedClauses);
+        if (version.clausePages > 1) {
+          const controls = el('div', 'button-row');
+          controls.append(el('span', 'field-note', `条款第 ${version.clausePage + 1} / ${version.clausePages} 页；较长条款分段显示。`));
+          for (const [label, step] of [['上一页条款', -1], ['下一页条款', 1]] as const) {
+            const name = `merged-clause-${version.digest}-${step}`;
+            const button = action(label, 'quiet', name, () => void turnMerged(document, document.mergedVersionsBefore,
+              { digest: version.digest, page: version.clausePage + step }, name));
+            button.disabled = busy || preview !== null || version.clausePage + step < 0 || version.clausePage + step >= version.clausePages;
+            controls.append(button);
+          }
+          row.append(controls);
+        }
+        mergedRows.append(row);
+      }
+      merged.append(mergedRows);
+      if (document.mergedVersionsBefore !== null || document.mergedVersionsNext !== null) {
+        const controls = el('div', 'button-row');
+        for (const [label, cursor, name] of [
+          ['最新随书版本', null, 'merged-latest'], ['更早随书版本', document.mergedVersionsNext, 'merged-older'],
+        ] as const) {
+          const button = action(label, 'quiet', name, () => void turnMerged(document, cursor, undefined, name));
+          button.disabled = busy || preview !== null || (name === 'merged-latest' ? document.mergedVersionsBefore === null : cursor === null);
+          controls.append(button);
+        }
+        merged.append(controls);
+      }
+      if (document.mergedVersionCount > document.mergedVersions.length) {
+        merged.append(el('p', 'field-note', guidelineMergedVersionsMore(document.mergedVersions.length, document.mergedVersionCount)));
+      }
+      node.append(merged);
+    }
     if (refusal?.documentId === document.documentId) {
       const note = el('p', 'attention-note guideline-refusal', refusal.message);
       note.setAttribute('role', 'alert');
@@ -193,7 +244,31 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     busy = true;
     paint(null);
     try {
-      const next = await api.inspectReviewGuidelines({ page: { documentId: shown.documentId, versionsBefore, clausePage } });
+      const next = await api.inspectReviewGuidelines({ page: { documentId: shown.documentId, versionsBefore, clausePage,
+        mergedVersionsBefore: shown.mergedVersionsBefore } });
+      if (!root.isConnected || ticket !== request) return;
+      projection = next;
+      refusal = null;
+    } catch (error) {
+      if (!root.isConnected || ticket !== request) return;
+      refusal = { documentId: shown.documentId, message: errorMessage(error, GUIDELINE_STATUS.failed) };
+    } finally {
+      if (root.isConnected && ticket === request) {
+        busy = false;
+        paint(`[data-guideline-document="${shown.documentId}"] [data-guideline-action="${focus}"]`);
+      }
+    }
+  };
+
+  const turnMerged = async (shown: ReviewGuidelineDocumentProjection, cursor: ReviewGuidelineDocumentProjection['mergedVersionsBefore'],
+    clause: { digest: string; page: number } | undefined, focus: string): Promise<void> => {
+    if (busy || preview !== null) return;
+    const ticket = ++request;
+    busy = true;
+    paint(null);
+    try {
+      const next = await api.inspectReviewGuidelines({ page: { documentId: shown.documentId, versionsBefore: shown.versionsBefore,
+        clausePage: shown.clausePage, mergedVersionsBefore: cursor, ...(clause === undefined ? {} : { mergedClause: clause }) } });
       if (!root.isConnected || ticket !== request) return;
       projection = next;
       refusal = null;

@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 89 as const;
+export const SERVICE_PROTOCOL_VERSION = 90 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -155,6 +155,7 @@ export const IPC_CHANNELS = {
   cancelDatabaseReplacement: 'ai7:j12:cancel-database-replacement',
   inspectDatabaseReplacements: 'ai7:j12:inspect-database-replacements',
   rollBackDatabaseReplacement: 'ai7:j12:roll-back-database-replacement',
+  prepareDatabaseMerge: 'ai7:j12:prepare-database-merge',
   quitApplication: 'ai7:j12:quit-application',
   cancelDatabaseExport: 'ai7:j12:cancel-database-export',
   inspectSeriesKnowledgeConflicts: 'ai7:j13:inspect-series-knowledge-conflicts',
@@ -4699,6 +4700,8 @@ export const MAX_REVIEW_GUIDELINE_FILE_BYTES = 2 * 1024 * 1024;
 export const MAX_GUIDELINE_VERSION_RUNS_SHOWN = 5;
 /** The Books 还在用旧版 names, by title; the page counts the rest (Issue #427 review). */
 export const MAX_GUIDELINE_OLDER_BOOKS_SHOWN = 10;
+/** At most this many versions a document's merged Books were reviewed under and this data never had are named; the rest are counted. */
+export const MAX_GUIDELINE_MERGED_VERSIONS_SHOWN = 10;
 
 /** The file one imported version was read from: its name as picked, how it was read, and its exact bytes. */
 export interface ReviewGuidelineSourceProjection {
@@ -4742,6 +4745,27 @@ export interface ReviewGuidelineVersionProjection {
  */
 export type ReviewGuidelineDocumentUse = 'clauses' | 'leads' | 'factual-kind';
 
+/**
+ * A version of a guideline document that Books merged here were reviewed under, and this data never had (Issue #434 review;
+ * ADR 0079 §1.5): another house's, or another AI7's wording of one. It is the read-only snapshot those Books' Review Runs hold,
+ * as they applied it, and never taken for this data's version of the same number.
+ */
+export interface ReviewGuidelineMergedVersionProjection {
+  readonly ordinal: number;
+  readonly issuer: string;
+  readonly title: string;
+  /** Its numbered clauses, as the Runs applied them. */
+  readonly clauses: ReadonlyArray<{ readonly number: number; readonly text: string }>;
+  readonly clauseCount: number;
+  readonly clausePage: number;
+  readonly clausePages: number;
+  /** What tells it apart: the digest of the document as the Runs hold it. */
+  readonly digest: string;
+  readonly usedByCount: number;
+  /** The latest of the Runs that used it, newest first, at most `MAX_GUIDELINE_VERSION_RUNS_SHOWN`. */
+  readonly usedBy: ReadonlyArray<{ readonly bookId: string; readonly bookTitle: string; readonly reviewRunId: string; readonly reviewOrdinal: number; readonly createdAt: string }>;
+}
+
 export interface ReviewGuidelineDocumentProjection {
   readonly documentId: string;
   readonly title: string;
@@ -4762,9 +4786,21 @@ export interface ReviewGuidelineDocumentProjection {
   readonly versionsBefore: number | null;
   readonly versionsNext: number | null;
   /** How many Books' latest Review Run that used this document used an older version than the current one. */
+  /**
+   * The versions merged Books were reviewed under that this data never had, highest number first, at most
+   * `MAX_GUIDELINE_MERGED_VERSIONS_SHOWN` (Issue #434 review).
+   */
+  readonly mergedVersions: ReadonlyArray<ReviewGuidelineMergedVersionProjection>;
+  readonly mergedVersionCount: number;
+  readonly mergedVersionsBefore: ReviewGuidelineMergedCursor | null;
+  readonly mergedVersionsNext: ReviewGuidelineMergedCursor | null;
+  /**
+   * How many Books' latest Review Run that used this document used an older version than the current one, or a version that
+   * came with the Book when it was merged here.
+   */
   readonly olderVersionBookCount: number;
-  /** Those Books by title, at most `MAX_GUIDELINE_OLDER_BOOKS_SHOWN`. */
-  readonly olderVersionBooks: ReadonlyArray<{ readonly bookId: string; readonly bookTitle: string; readonly ordinal: number }>;
+  /** Those Books by title, at most `MAX_GUIDELINE_OLDER_BOOKS_SHOWN`; `merged` when the version came with the Book. */
+  readonly olderVersionBooks: ReadonlyArray<{ readonly bookId: string; readonly bookTitle: string; readonly ordinal: number; readonly merged: boolean }>;
 }
 
 export interface ReviewGuidelinesProjection {
@@ -4775,6 +4811,13 @@ export interface ReviewGuidelinesPage {
   readonly documentId: string;
   readonly versionsBefore?: number | null;
   readonly clausePage?: number;
+  readonly mergedVersionsBefore?: ReviewGuidelineMergedCursor | null;
+  readonly mergedClause?: { readonly digest: string; readonly page: number };
+}
+
+export interface ReviewGuidelineMergedCursor {
+  readonly ordinal: number;
+  readonly digest: string;
 }
 
 /** 导入新版本 before it is confirmed: the clauses the file holds, as the document's next version would read them. */
@@ -6069,8 +6112,24 @@ export interface SetScheduledBackupInput {
 
 // ---- 设置 › 数据与存储 › 导入数据库 (Issue #434, plan slice S86c; V2-UX-DSTO-017; ADR 0079 §1.3, §1.4) --------------------
 
-/** Why a database package was made: 导出数据库 (S86a), a 定期自动备份 (S86b), or the backup made before a replacement (S86c). */
-export type DatabasePackageOrigin = 'database-export' | 'scheduled-backup' | 'pre-replace-backup';
+/**
+ * Why a database package was made: 导出数据库 (S86a), a 定期自动备份 (S86b), the backup made before a replacement (S86c), or the
+ * one made before a merge (S86d).
+ */
+export type DatabasePackageOrigin = 'database-export' | 'scheduled-backup' | 'pre-replace-backup' | 'pre-merge-backup';
+
+/** One Book of a previewed package, as `只导入其中的图书` would take it (Issue #434, S86d; ADR 0079 §1.5). */
+export interface DatabaseImportBookProjection {
+  readonly bookId: string;
+  readonly title: string;
+  /** `new` merges; `present` is this very Book, already here, and is not taken again; `same-title` merges beside it. */
+  readonly status: 'new' | 'present' | 'same-title';
+  /** Its 内部编号 is already another Book's here, so it merges without one. */
+  readonly internalNumberCleared: boolean;
+}
+
+/** What stays behind when a package's Books merge: Series, 资料库 items, the 编辑工作区方案's enablement, a 内部编号 taken here. */
+export type DatabaseMergeNotice = 'series' | 'internal-number';
 
 /**
  * Whether this AI7 can take a package's data: the same Data Version, and a schema revision it knows. A package from a newer
@@ -6101,24 +6160,43 @@ export interface DatabaseImportPreviewProjection {
   readonly contents: DatabaseExportContentsProjection;
   /** How many files the package holds, each verified. */
   readonly members: number;
+  /** Its first Books, as merging would take them (S86d), at most fifty; the rest are counted (Issue #434 review). */
+  readonly books: ReadonlyArray<DatabaseImportBookProjection>;
+  /** How many of its Books merging would take as new, leave as already here, or take beside one of the same title. */
+  readonly bookCounts: { readonly new: number; readonly present: number; readonly sameTitle: number };
+  readonly mergeNotices: ReadonlyArray<DatabaseMergeNotice>;
+  /**
+   * Why merging would be refused over a 资料库 item the Books bring (Issue #434 review; ADR 0079 §1.5), in the editor's words:
+   * the same file here as another item, the same item here with other records, or an item that also belonged to a Book not
+   * merging. `null` when nothing stands in the way.
+   */
+  readonly mergeRefusal: string | null;
 }
 
-/** A replacement prepared and waiting for AI7's next start, with the backup made of the data it replaces. */
+/** A replacement or a merge prepared and waiting for AI7's next start, with the backup made of the data it changes. */
 export interface DatabasePendingReplacementProjection {
   readonly replacementId: string;
-  readonly kind: 'replace' | 'roll-back';
+  readonly kind: 'replace' | 'roll-back' | 'merge';
   readonly packageFileName: string;
   readonly packageCreatedAt: string;
   readonly packageOrigin: DatabasePackageOrigin;
   readonly contents: DatabaseExportContentsProjection;
   readonly backupFileName: string;
   readonly preparedAt: string;
+  /** A merge's first Books: the ones it takes, each with how (S86d), at most fifty; `null` for a replacement. */
+  readonly mergeBooks: ReadonlyArray<DatabaseImportBookProjection> | null;
+  /** How many Books the merge takes; `null` for a replacement. */
+  readonly mergeBooksTotal: number | null;
+  readonly mergeNotices: ReadonlyArray<DatabaseMergeNotice>;
 }
 
-/** One replacement as the data open now records it: applied, in the data it brought in; failed, in the data it spared. */
+/**
+ * One replacement or merge as the data open now records it: an applied replacement in the data it brought in, a failed one in
+ * the data it spared; a merge in the data it merged into.
+ */
 export interface DatabaseReplacementRecordProjection {
   readonly replacementId: string;
-  readonly kind: 'replace' | 'roll-back';
+  readonly kind: 'replace' | 'roll-back' | 'merge';
   readonly outcome: 'applied' | 'failed';
   readonly packageFileName: string;
   readonly backupFileName: string;
@@ -6126,6 +6204,10 @@ export interface DatabaseReplacementRecordProjection {
   readonly recordedAt: string;
   /** Whether its backup is still in the backup location. */
   readonly backupPresent: boolean;
+  /** The first titles of the Books a merge took, at most ten; `null` for a replacement. */
+  readonly mergedTitles: ReadonlyArray<string> | null;
+  /** How many Books a merge took; `null` for a replacement. */
+  readonly mergedCount: number | null;
   /**
    * Why one that failed failed: its data would not open; what waited was no longer the package the preparation verified; or
    * an open of the data it moved in was interrupted, which leaves nothing to tell that data from what was verified (Issue #434
@@ -6135,7 +6217,7 @@ export interface DatabaseReplacementRecordProjection {
 }
 
 /** Why a replacement failed, as its record says. */
-export type DatabaseReplacementFailure = 'unopenable' | 'changed' | 'interrupted';
+export type DatabaseReplacementFailure = 'unopenable' | 'changed' | 'interrupted' | 'conflict';
 
 /** 替换本机全部数据: the replacement waiting for AI7's next start, if any, and the replacements this data records. */
 export interface DatabaseReplacementsProjection {
@@ -8675,6 +8757,8 @@ export interface ServiceOperationMap {
   inspectDatabaseReplacements: { input: Record<string, never>; output: DatabaseReplacementsProjection };
   /** `回退到替换前的数据`: the latest replacement's backup prepared to replace the local data, itself backed up first. */
   rollBackDatabaseReplacement: { input: { replacementId: string }; output: DatabaseReplacementsProjection };
+  /** `只导入其中的图书` (Issue #434, S86d): the local data backed up, and the previewed package's new Books merging at the next start. */
+  prepareDatabaseMerge: { input: { previewId: string }; output: DatabaseReplacementsProjection };
   /** 取消导出: stops the export under way until it begins putting the file in place. */
   cancelDatabaseExport: { input: { activityId: string }; output: DatabaseExportActivityProjection };
   /**
@@ -9046,6 +9130,7 @@ export interface RendererApi {
   cancelDatabaseReplacement(input: { replacementId: string }): Promise<DatabaseReplacementsProjection>;
   inspectDatabaseReplacements(): Promise<DatabaseReplacementsProjection>;
   rollBackDatabaseReplacement(input: { replacementId: string }): Promise<DatabaseReplacementsProjection>;
+  prepareDatabaseMerge(input: { previewId: string }): Promise<DatabaseReplacementsProjection>;
   /** `现在关闭 AI7`: AI7 closes, unless a window holds changes not yet saved; a prepared replacement completes at the next start. */
   quitApplication(): Promise<{ outcome: 'quitting' } | { outcome: 'blocked' }>;
   cancelDatabaseExport(input: { activityId: string }): Promise<DatabaseExportActivityProjection>;
