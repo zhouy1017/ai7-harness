@@ -547,7 +547,7 @@ const NO_HARD_LINKS = new Set(['EPERM', 'EACCES', 'EINVAL', 'EISDIR', 'EMLINK', 
  * then write over or delete a file this export never made. There the export is refused instead. The staged file
  * stays the caller's to discard.
  */
-async function takeFreeName(staged: string, destination: string): Promise<'taken' | 'exists' | 'unsupported' | 'failed'> {
+export async function takeFreeName(staged: string, destination: string): Promise<'taken' | 'exists' | 'unsupported' | 'failed'> {
   try {
     await link(staged, destination);
     return 'taken';

@@ -766,9 +766,15 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'inspectDatabaseExports':
+    case 'inspectScheduledBackups':
     case 'inspectDataVersion':
       requireInput(value.input, [], tentativeId);
       break;
+    case 'setScheduledBackup': {
+      const input = requireInput(value.input, ['enabled', 'expectedOrdinal'], tentativeId);
+      if (typeof input.enabled !== 'boolean' || !Number.isSafeInteger(input.expectedOrdinal) || (input.expectedOrdinal as number) < 0) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'prepareDatabaseExport': {
       const input = requireInput(value.input, ['destination'], tentativeId);
       if (!isBoundedString(input.destination, MAX_EXPORT_DESTINATION_CODE_UNITS) || !isAbsolute(input.destination)) throw new ProtocolError(tentativeId);
