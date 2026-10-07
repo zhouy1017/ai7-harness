@@ -368,7 +368,7 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
       return '模型连接缺少凭据：到设置连接模型服务后，任务会在联网时开始。';
     case 'analysis-waiting-slot':
       // It holds no place in the queue of starts waiting for one, and says so (Issue #632).
-      return '已经联网，但运行名额已满：有名额空出时，AI7 先核对计划再开始。它不在等待运行名额的队列里，之后开始的任务可能先用上名额；现在什么都没有运行。';
+      return '已经联网，但运行名额已满：有名额空出时，AI7 先核对计划再开始；之后开始的任务可能先开始。现在什么都没有运行。';
     case 'analysis-waiting-capacity':
       return '运行名额已满：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送。';
     case 'analysis-waiting-admission':
