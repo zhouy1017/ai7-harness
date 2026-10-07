@@ -1169,7 +1169,16 @@ async function main() {
     }
 
     at('knowledge-member-series-pages');
-    // The same manuscript Book belongs to all fifty-one runner-authored Series: proposal selection must reach the tail.
+    // The same manuscript Book joins all fifty-one runner-authored Series while its editor is open (Issue #642): the first
+    // selection menu after that shows the one Series the editor knew, then is drawn again with the first fifty. Proposal
+    // selection must reach the tail.
+    await leaveSeries(renderer, 'knowledge-member-series');
+    await fill(renderer, '#book-filter-text', MEMBER, 'knowledge-member-series-find-text');
+    await clickSelector(renderer, '[data-book-filter-action="find"]', 'knowledge-member-series-find');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]')`, 'knowledge-member-series-found');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]`, 'knowledge-member-series-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(member)}]') && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'knowledge-member-series-editor', 120_000);
+    await assertRenderer(renderer, MARK_HELPERS, 'knowledge-member-series-helpers');
     requireJourney(await renderer.evaluate(`(async () => {
       let after = null;
       do {
@@ -1183,14 +1192,8 @@ async function main() {
       } while (after !== null);
       return (await window.ai7.inspectBookSeries({ bookId: ${JSON.stringify(member)} })).membershipCount === 52;
     })()`), 'knowledge-member-series-seed');
-    await leaveSeries(renderer, 'knowledge-member-series');
-    await fill(renderer, '#book-filter-text', MEMBER, 'knowledge-member-series-find-text');
-    await clickSelector(renderer, '[data-book-filter-action="find"]', 'knowledge-member-series-find');
-    await waitFor(renderer, `document.querySelector('[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]')`, 'knowledge-member-series-found');
-    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]`, 'knowledge-member-series-book');
-    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(member)}]') && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'knowledge-member-series-editor', 120_000);
-    await assertRenderer(renderer, MARK_HELPERS, 'knowledge-member-series-helpers');
     await openSelectionMenu(renderer, blockId, 2, 8, 'knowledge-member-series-menu');
+    await waitFor(renderer, `window.__j13.menu()?.querySelectorAll('[data-mark-action="propose-series-knowledge"]').length === 50`, 'knowledge-member-series-menu-follows', 15_000);
     await assertRenderer(renderer, `(() => { const item = window.__j13.item('choose-knowledge-series'); if (!(item instanceof HTMLButtonElement) || item.disabled) return false; item.click(); return true; })()`, 'knowledge-member-series-choose');
     const knowledgeChooser = '[data-mark-composer="choose-knowledge-series"]';
     await waitFor(renderer, `document.querySelectorAll('${knowledgeChooser} .knowledge-series-choices button').length === 50`, 'knowledge-member-series-first');
