@@ -1,8 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { canonicalJson } from '../../src/service/analysis/canonical.js';
 import { ReviewGuidelineLedger, initializeReviewGuidelineSchema } from '../../src/service/review-guidelines.js';
-import { MAX_GUIDELINE_MERGED_VERSIONS_SHOWN, type ReviewGuidelineDocumentProjection } from '../../src/shared/protocol.js';
+import { MAX_GUIDELINE_MERGED_VERSIONS_SHOWN, MAX_FRAME_BYTES, type ReviewGuidelineDocumentProjection } from '../../src/shared/protocol.js';
 
 // Unit suite for the guideline versions a merged Book brings (Issue #434 review; ADR 0079 §1.5; V2-UX-KB-002): a Review Run
 // snapshots each guideline document it applies, clauses included, so a Book merged here brings the exact versions it was
@@ -56,7 +56,7 @@ function run(db: DatabaseSync, reviewRunId: string, bookId: string, ordinal: num
   };
   const snapshot = { categories: [{ categoryId: TYPOS, entry: { categoryId: TYPOS, guidelineDocuments: [document] } }] };
   db.prepare('INSERT INTO review_runs (review_run_id, book_id, ordinal, created_at, canonical_json) VALUES (?, ?, ?, ?, ?)')
-    .run(reviewRunId, bookId, ordinal, `2026-09-2${ordinal}T00:00:00.000Z`, canonicalJson(snapshot));
+    .run(reviewRunId, bookId, ordinal, new Date(Date.UTC(2026, 8, 20 + ordinal)).toISOString(), canonicalJson(snapshot));
   db.prepare("INSERT INTO review_run_category_events (review_run_id, category_id, state) VALUES (?, ?, 'materialized')").run(reviewRunId, TYPOS);
 }
 
@@ -84,6 +84,7 @@ describe('知识库 › 审阅规范文件 after a merge', () => {
       issuer: '本社',
       title: '文字规范条款',
       clauses: THEIRS.map((text, index) => ({ number: index + 1, text })),
+      clauseCount: 3, clausePage: 0, clausePages: 1,
       digest: expect.stringMatching(/^[0-9a-f]{64}$/u),
       usedByCount: 1,
       usedBy: [{ bookId: 'b-merged', bookTitle: '合并来的书', reviewRunId: 'r-merged', reviewOrdinal: 1, createdAt: '2026-09-21T00:00:00.000Z' }],
@@ -135,5 +136,60 @@ describe('知识库 › 审阅规范文件 after a merge', () => {
     expect(document.mergedVersionCount).toBe(MAX_GUIDELINE_MERGED_VERSIONS_SHOWN + 1);
     expect(document.mergedVersions.map((version) => version.ordinal))
       .toEqual(Array.from({ length: MAX_GUIDELINE_MERGED_VERSIONS_SHOWN }, (_, index) => MAX_GUIDELINE_MERGED_VERSIONS_SHOWN + 3 - index));
+  });
+
+  it('streams equal-number snapshots, counts every use, and pages all versions and exact clause fragments', () => {
+    const db = store();
+    try {
+      book(db, 'many', '合并来的书', 'applied');
+      const long = 'a' + '\u0301'.repeat(8000);
+      for (let index = 1; index <= 25; index += 1) run(db, `r-many-${String(index).padStart(2, '0')}`, 'many', index,
+        { version: '2', issuer: '本社', clauses: [long] });
+      for (let index = 0; index < 12; index += 1) {
+        book(db, `other-${index}`, `其他书${index}`, 'applied');
+        run(db, `r-other-${index}`, `other-${index}`, 1, { version: '2', issuer: '本社', clauses: [`其他说法${index}`] });
+      }
+      db.prepare("INSERT INTO review_run_category_events VALUES ('r-many-25', ?, 'materialized')").run(TYPOS);
+      const prepare = db.prepare.bind(db);
+      const guard = vi.spyOn(db, 'prepare').mockImplementation((sql) => {
+        const statement = prepare(sql);
+        return new Proxy(statement, { get(target, name) {
+          if (name === 'all' && /FROM\s+(?:review_runs|review_run_category_events|review_findings)\b/iu.test(sql) && !/\bLIMIT\b/iu.test(sql)) {
+            return () => { throw new Error('unbounded review history read'); };
+          }
+          const value: unknown = Reflect.get(target, name);
+          return typeof value === 'function' ? value.bind(target) : value;
+        } });
+      });
+      const ledger = new ReviewGuidelineLedger(db);
+      const first = ledger.projection();
+      expect(Buffer.byteLength(JSON.stringify(first))).toBeLessThan(MAX_FRAME_BYTES);
+      let document = first.documents.find((item) => item.documentId === TYPOS_DOCUMENT)!;
+      expect(document.mergedVersionCount).toBe(13);
+      const all = [...document.mergedVersions];
+      expect(document.mergedVersions.map((item) => item.digest)).toEqual(document.mergedVersions.map((item) => item.digest).sort());
+      while (document.mergedVersionsNext !== null) {
+        document = ledger.projection({ documentId: TYPOS_DOCUMENT, mergedVersionsBefore: document.mergedVersionsNext })
+          .documents.find((item) => item.documentId === TYPOS_DOCUMENT)!;
+        all.push(...document.mergedVersions);
+      }
+      expect(new Set(all.map((item) => item.digest)).size).toBe(13);
+      const version = all.find((item) => item.usedByCount === 25)!;
+      expect(version.usedBy.map((item) => item.reviewRunId)).toEqual(['r-many-25', 'r-many-24', 'r-many-23', 'r-many-22', 'r-many-21']);
+      const reset = ledger.projection().documents.find((item) => item.documentId === TYPOS_DOCUMENT)!;
+      const cursor = reset.mergedVersions.some((item) => item.digest === version.digest) ? null : reset.mergedVersionsNext;
+      let recovered = '';
+      for (let page = 0; page < version.clausePages; page += 1) {
+        const shown = ledger.projection({ documentId: TYPOS_DOCUMENT, mergedVersionsBefore: cursor, mergedClause: { digest: version.digest, page } })
+          .documents.find((item) => item.documentId === TYPOS_DOCUMENT)!.mergedVersions.find((item) => item.digest === version.digest)!;
+        expect(shown.clausePage).toBe(page);
+        recovered += shown.clauses.map((clause) => clause.text).join('');
+      }
+      expect(recovered === long).toBe(true);
+      expect(() => ledger.projection({ documentId: TYPOS_DOCUMENT, mergedClause: { digest: '0'.repeat(64), page: 0 } })).toThrow();
+      expect(db.prepare("SELECT name FROM sqlite_temp_schema WHERE name LIKE 'guideline_%'").all()).toEqual([]);
+      expect(ledger.projection().documents.find((item) => item.documentId === TYPOS_DOCUMENT)!.mergedVersionCount).toBe(13);
+      guard.mockRestore();
+    } finally { db.close(); }
   });
 });

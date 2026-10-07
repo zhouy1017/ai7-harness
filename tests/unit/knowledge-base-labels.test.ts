@@ -59,15 +59,15 @@ describe('知识库', () => {
     expect(guidelineAppliedBy({ appliedBy: [{ categoryId: 'a', label: '错别字与规范用语' }, { categoryId: 'b', label: '体例与格式' }] })).toBe('用于：错别字与规范用语、体例与格式');
     expect(guidelineOlderBooks({ olderVersionBooks: [], olderVersionBookCount: 0, currentOrdinal: 2 })).toBeNull();
     expect(guidelineOlderBooks({ olderVersionBooks: [{ bookId: 'x', bookTitle: '甲书', ordinal: 1, merged: false }], olderVersionBookCount: 1, currentOrdinal: 3 }))
-      .toBe('还在用旧版：《甲书》第 1 版；这些书下次审阅会按第 3 版。');
+      .toBe('还在用旧版：《甲书》第 1 版；这些书新准备的审阅会按第 3 版；已准备的审阅仍用原版本。');
     // Past the Books it names, the line says how many there are.
     expect(guidelineOlderBooks({
       olderVersionBooks: [{ bookId: 'x', bookTitle: '甲书', ordinal: 1, merged: false }, { bookId: 'y', bookTitle: '乙书', ordinal: 2, merged: false }],
       olderVersionBookCount: 14, currentOrdinal: 3,
-    })).toBe('还在用旧版：《甲书》第 1 版、《乙书》第 2 版 等 14 本书；这些书下次审阅会按第 3 版。');
+    })).toBe('还在用旧版：《甲书》第 1 版、《乙书》第 2 版 等 14 本书；这些书新准备的审阅会按第 3 版；已准备的审阅仍用原版本。');
     // A Book merged here that was reviewed under a version it brought says so (Issue #434 review).
     expect(guidelineOlderBooks({ olderVersionBooks: [{ bookId: 'z', bookTitle: '丙书', ordinal: 4, merged: true }], olderVersionBookCount: 1, currentOrdinal: 2 }))
-      .toBe('还在用旧版：《丙书》随图书带来的第 4 版；这些书下次审阅会按第 2 版。');
+      .toBe('还在用旧版：《丙书》随图书带来的第 4 版；这些书新准备的审阅会按第 2 版；已准备的审阅仍用原版本。');
     // A document AI7 fixes says why it takes no house version; one whose clauses the categories read says nothing.
     expect(guidelineFixedStatement({ use: 'clauses', appliedBy: [{ categoryId: 'a', label: '错别字与规范用语' }] })).toBeNull();
     expect(guidelineFixedStatement({ use: 'leads', appliedBy: [{ categoryId: 'p', label: '情节逻辑与前后一致' }] }))
@@ -95,15 +95,16 @@ describe('知识库', () => {
     expect(guidelineMergedVersionsSummary(2)).toBe('随合并的图书带来的版本（2，只读）');
     expect(guidelineMergedVersionLine({
       ordinal: 3, issuer: '本社', title: '文字规范条款', clauses: [{ number: 1, text: '一' }, { number: 2, text: '二' }], digest: 'd'.repeat(64),
+      clauseCount: 2, clausePage: 0, clausePages: 1,
       usedByCount: 1, usedBy: [{ bookId: 'z', bookTitle: '丙书', reviewRunId: 'r', reviewOrdinal: 1, createdAt: '2026-09-25T00:00:00.000Z' }],
     })).toBe('第 3 版 · 本社 · 2 条 · 随图书带来 · 用于 《丙书》第 1 次审阅');
     expect(guidelineMergedVersionsMore(10, 12)).toBe('只列出 10 个，共 12 个。');
     expect(guidelinePreviewHeading({ ordinal: 2, title: '文字规范条款' })).toBe('将导入为《文字规范条款》第 2 版');
     expect(guidelinePreviewChanges({
       source: { displayName: '规范.txt', format: 'text', sha256: 'c'.repeat(64), bytes: 3 }, currentOrdinal: 1,
-      changes: { changed: 2, added: 1, removed: 0 }, clauses: [{ clauseId: 'a/1', number: 1, text: '一' }],
+      changes: { changed: 2, added: 1, removed: 0 }, clauseCount: 1,
     })).toBe('规范.txt · 1 条 · 与第 1 版相比：改动 2 条，新增 1 条，删去 0 条');
-    expect(guidelineImported('文字规范条款', 2)).toBe('已导入《文字规范条款》第 2 版；之后的审阅按第 2 版。');
+    expect(guidelineImported('文字规范条款', 2)).toBe('已导入《文字规范条款》第 2 版；新准备的审阅按第 2 版；已准备的审阅仍用原版本。');
   });
 });
 
@@ -155,19 +156,19 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
     expect([libraryAttributionLine(pending), libraryEligibilityLine(pending), libraryReferenceLine(pending)])
       .toEqual(['尚未定归属', '尚未定', '定了归属与学习准入，任务才能把它列进「允许参考」。']);
     const book = { ...pending, attribution: { scope: 'book' as const, bookId: 'b', bookTitle: '甲书', decidedAt: '2026-09-25T02:00:00.000Z' } };
-    const deferred = { ...book, eligibility: { choice: 'deferred' as const, bookTitle: null, reason: null, decidedAt: '2026-09-25T03:00:00.000Z' } };
+    const deferred = { ...book, eligibility: { reasonHasMore: false, ordinal: 2, choice: 'deferred' as const, bookTitle: null, reason: null, decidedAt: '2026-09-25T03:00:00.000Z' } };
     expect([libraryAttributionLine(book), libraryEligibilityLine(deferred), libraryReferenceLine(deferred)])
       .toEqual(['《甲书》', '稍后决定', '学习准入记为稍后决定：决定之前，任务还不能把它列进「允许参考」。']);
     const own = {
       ...book,
-      eligibility: { choice: 'book' as const, bookTitle: '甲书', reason: '责编确认', decidedAt: '2026-09-25T03:00:00.000Z' },
+      eligibility: { reasonHasMore: false, ordinal: 2, choice: 'book' as const, bookTitle: '甲书', reason: '责编确认', decidedAt: '2026-09-25T03:00:00.000Z' },
       reference: { state: 'available' as const, scope: 'book' as const, bookTitle: '甲书' },
     };
     expect([libraryEligibilityLine(own), libraryReferenceLine(own)]).toEqual(['仅纳入《甲书》（说明：责编确认）', '《甲书》的任务可以把它列进「允许参考」。']);
     const house = {
       ...pending,
       attribution: { scope: 'house' as const, decidedAt: '2026-09-25T02:00:00.000Z' },
-      eligibility: { choice: 'house' as const, bookTitle: null, reason: null, decidedAt: '2026-09-25T03:00:00.000Z' },
+      eligibility: { reasonHasMore: false, ordinal: 2, choice: 'house' as const, bookTitle: null, reason: null, decidedAt: '2026-09-25T03:00:00.000Z' },
       reference: { state: 'available' as const, scope: 'house' as const },
     };
     expect([libraryAttributionLine(house), libraryEligibilityLine(house), libraryReferenceLine(house)])
@@ -180,7 +181,7 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
     // Each decision on record, by its ordinal, what it decided, who and when.
     expect(libraryDecisionLine({ ordinal: 1, recordedAt: '2026-09-25T02:00:00.000Z', decision: { kind: 'attribution', scope: 'book', bookId: 'b', bookTitle: '甲书' } }, instant))
       .toBe('第 1 条 · 归属：《甲书》 · 本机编辑 · 〔2026-09-25〕');
-    expect(libraryDecisionLine({ ordinal: 2, recordedAt: '2026-09-25T03:00:00.000Z', decision: { kind: 'eligibility', choice: 'excluded', bookTitle: null, reason: '版权未清' } }, instant))
+    expect(libraryDecisionLine({ ordinal: 2, recordedAt: '2026-09-25T03:00:00.000Z', decision: { kind: 'eligibility', reasonHasMore: false, choice: 'excluded', bookTitle: null, reason: '版权未清' } }, instant))
       .toBe('第 2 条 · 学习准入：明确排除（说明：版权未清） · 本机编辑 · 〔2026-09-25〕');
   });
 });

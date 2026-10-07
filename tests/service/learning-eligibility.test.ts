@@ -14,7 +14,7 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { DECISION_FEEDBACK_SCHEMA_VERSION, DATABASE_MERGE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
-import { MAX_LEARNING_MATERIALS_PAGE } from '../../src/shared/protocol.js';
+import { MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE } from '../../src/shared/protocol.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type {
   CreateEditorialMarkInput,
@@ -107,6 +107,41 @@ function attention(store: EditorialStore): Array<[string, GlobalAttentionItemPro
 }
 
 describe('学习准入 over the real store', () => {
+  it('refuses a Series membership preview after an eligibility change even when all displayed counts stay the same', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const markId = store.createEditorialMark(suggestion(book, window, 2, 6, '书系预览示例')).markId;
+      store.recordChangeSuggestionDecision({
+        manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId,
+        markId, clientDecisionId: randomUUID(), disposition: 'rejected', editedText: null, reason: '书系预览原因',
+      });
+      const choose = (material: LearningMaterialProjection, choice: 'book' | 'house') => store.decideLearningMaterial({
+        bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest,
+        expectedDecisions: material.decisions, choice, note: null,
+      });
+      const material = store.inspectLearningMaterials(book.bookId).books[0]!.materials[0]!;
+      const decided = choose(material, 'book');
+      const seriesId = store.createSeries({ title: '预览版本书系', note: '' }).seriesId;
+      const input = { seriesId, bookId: book.bookId, kind: 'add' as const };
+      const preview = store.previewSeriesMembershipChange(input);
+      const house = choose(decided, 'house');
+      expect(store.previewSeriesMembershipChange(input).groups).toEqual(preview.groups);
+      const stale = () => refusal(() => store.changeSeriesMembership({ ...input, previewDigest: preview.previewDigest }));
+      expect(stale()).toBe('SERIES_PREVIEW_STALE:预览之后，书系成员或相关记录有了变化；请重新查看影响，再决定。');
+      choose(house, 'book');
+      expect(store.previewSeriesMembershipChange(input).groups).toEqual(preview.groups);
+      expect(stale()).toBe('SERIES_PREVIEW_STALE:预览之后，书系成员或相关记录有了变化；请重新查看影响，再决定。');
+      expect(store.inspectBookSeries(book.bookId).historyCount).toBe(0);
+      const fresh = store.previewSeriesMembershipChange(input);
+      store.changeSeriesMembership({ ...input, previewDigest: fresh.previewDigest });
+      expect(store.inspectBookSeries(book.bookId).historyCount).toBe(1);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  });
   it('finds the material quietly, waits for the editor’s decision on each exact version, and decides again what changed', async () => {
     let book: Imported;
     let rejectedMark: string;
@@ -139,7 +174,14 @@ describe('学习准入 over the real store', () => {
       const found = store.inspectLearningMaterials(null);
       expect(found.books.map((entry) => [entry.bookId, entry.authors, entry.editors, entry.materials.length])).toEqual([[book.bookId, ['周一'], ['郑三'], 2]]);
       const [reasoned, edited] = found.books[0]!.materials as [LearningMaterialProjection, LearningMaterialProjection];
+      expect([reasoned.sourceTask, edited.sourceTask]).toEqual([null, null]);
       expect([reasoned.kind, reasoned.originLabel, reasoned.state, reasoned.decision, reasoned.decisions]).toEqual(['proposal-decision', '修改建议 · 拒绝', 'pending', null, 0]);
+      expect(reasoned.target).toMatchObject({ kind: 'mark', bookId: book.bookId, manuscriptId: book.manuscriptId,
+        branchId: book.branchId, markId: rejectedMark, detached: false });
+      const sourceRoute = store.resolveBookWorkbenchRoute({ kind: 'book', bookId: book.bookId, learningMaterialKey: reasoned.materialKey });
+      expect(sourceRoute).toMatchObject({ kind: 'book', bookId: book.bookId, learningMaterialTarget: reasoned.target });
+      expect(() => store.resolveBookWorkbenchRoute({ kind: 'book', bookId: book.bookId,
+        learningMaterialKey: `proposal-decision:${randomUUID()}` })).toThrow();
       expect(reasoned.excerpt.map((line) => line.split('：')[0])).toEqual(['原文', '建议', '你的原因']);
       expect(reasoned.excerpt.at(-1)).toBe('你的原因：证据不足');
       expect(reasoned.rationale).toBe('你说明了为什么这样处理：它可以帮 AI7 以后的建议更接近你的判断。');
@@ -172,12 +214,20 @@ describe('学习准入 over the real store', () => {
 
       // The reason changed after the decision: the material is decided again; the decision it had stays on record.
       store.recordProposalDecisionFeedback({ ...binding, markId: rejectedMark, decisionId: rejected.decisionId, expectedFeedback: 0, action: 'revise', reason: '方向不合适', reasonSource: 'suggested' });
-      const changed = store.inspectLearningMaterials(book.bookId).books[0]!.materials.find((entry) => entry.materialKey === reasoned.materialKey)!;
+      let changed = store.inspectLearningMaterials(book.bookId).books[0]!.materials.find((entry) => entry.materialKey === reasoned.materialKey)!;
       expect([changed.state, changed.decision?.choice, changed.decisions, changed.digest === reasoned.digest, changed.excerpt.at(-1)]).toEqual(['changed', 'book', 1, false, '你的原因：方向不合适']);
       // A later reason never moves a material on the page (Issue #61 review): the order is the order the decisions were made in.
       expect(store.inspectLearningMaterials(book.bookId).books[0]!.materials.map((entry) => entry.materialKey)).toEqual([reasoned.materialKey, edited.materialKey]);
       expect(attention(store)[0]?.[1]).toBe('learning-materials-pending');
       expect(refusal(() => choose(decided, {}))).toBe('LEARNING_MATERIAL_CHANGED:这条材料在你打开后改过；请看过现在的内容再定。');
+      // Returning to the same words is still a new immutable reason version, never renewed consent to learning.
+      store.recordProposalDecisionFeedback({ ...binding, markId: rejectedMark, decisionId: rejected.decisionId, expectedFeedback: 1, action: 'revise', reason: '证据不足', reasonSource: 'suggested' });
+      const reverted = store.inspectLearningMaterial(book.bookId, reasoned.materialKey);
+      expect([reverted.state, reverted.digest === reasoned.digest, reverted.decisions]).toEqual(['changed', false, 1]);
+      expect(attention(store)[0]?.[1]).toBe('learning-materials-pending');
+      expect(refusal(() => choose(decided, { choice: 'house' }))).toBe('LEARNING_MATERIAL_CHANGED:这条材料在你打开后改过；请看过现在的内容再定。');
+      store.recordProposalDecisionFeedback({ ...binding, markId: rejectedMark, decisionId: rejected.decisionId, expectedFeedback: 2, action: 'revise', reason: '方向不合适', reasonSource: 'suggested' });
+      changed = store.inspectLearningMaterial(book.bookId, reasoned.materialKey);
       const house = choose(changed, { choice: 'house' });
       expect([house.state, house.decision?.choice, house.decisions]).toEqual(['decided', 'house', 2]);
       const excluded = choose(deferred, { choice: 'excluded', note: '不代表我的一贯做法' });
@@ -191,14 +241,20 @@ describe('学习准入 over the real store', () => {
       }]);
       expect(history.truncated).toBe(false);
       expect(history.entries.map((entry) => [entry.origin, entry.dimension, entry.signal, entry.reason, entry.reasonState, entry.peopleVersion])).toEqual([
+        ['proposal-decision', null, '拒绝', '方向不合适', 'given', 1],
         ['proposal-decision', null, '拒绝', null, 'dismissed', 1],
         ['proposal-decision', null, '拒绝', null, 'none', 1],
         ['proposal-decision', null, '修改后接受', null, 'none', 1],
-        ['proposal-decision', null, '拒绝', '方向不合适', 'given', 1],
       ]);
-      expect(history.entries[3]!.target).toEqual({
+      expect(history.entries[0]!.target).toEqual({
         kind: 'mark', bookId: book.bookId, manuscriptId: book.manuscriptId, branchId: book.branchId, blockId: expect.stringMatching(/^blk_/u), markId: rejectedMark, detached: false,
       });
+      let latestEligibility = house;
+      for (let index = 0; index < 64; index += 1) {
+        latestEligibility = choose(latestEligibility, { choice: index % 2 === 0 ? 'book' : 'house' });
+      }
+      expect(latestEligibility.decisions).toBe(66);
+      expect(refusal(() => choose(house, { choice: 'book' }))).toBe('LEARNING_ELIGIBILITY_MOVED:这条材料的学习准入刚被改过；请看过现在的决定再定。');
       // Deciding changes nothing it came from: the decision and its reason read as they were.
       expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, rejectedMark).suggestion!.decision).toMatchObject({ disposition: 'rejected', reason: '方向不合适', reasonState: 'given' });
       store.markCleanShutdown();
@@ -210,7 +266,7 @@ describe('学习准入 over the real store', () => {
     const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       expect(reopened.inspectLearningMaterials(book!.bookId).books[0]!.materials.map((entry) => [entry.state, entry.decision?.choice, entry.decisions])).toEqual([
-        ['decided', 'house', 2], ['decided', 'excluded', 2],
+        ['decided', 'house', 66], ['decided', 'excluded', 2],
       ]);
       reopened.markCleanShutdown();
     } finally {
@@ -221,7 +277,8 @@ describe('学习准入 over the real store', () => {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_MERGE_SCHEMA_VERSION);
       const records = (database.prepare('SELECT canonical_json FROM learning_eligibility_decisions ORDER BY recorded_at').all() as Array<{ canonical_json: string }>)
         .map((row) => JSON.parse(row.canonical_json) as { attribution: unknown; basis: unknown; choice: string });
-      expect(records.map((record) => record.choice)).toEqual(['book', 'deferred', 'house', 'excluded']);
+      expect(records).toHaveLength(68);
+      expect(records.slice(0, 4).map((record) => record.choice)).toEqual(['book', 'deferred', 'house', 'excluded']);
       // Each names the policy it was made under by identity, mode and version, with its words (Issue #61 review).
       for (const record of records) {
         expect(record.basis).toEqual(LEARNING_ELIGIBILITY_POLICY_BASIS);
@@ -274,7 +331,7 @@ describe('学习准入 over the real store', () => {
     }
     const plant = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      plant.exec(`DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; DROP TABLE learning_eligibility_decisions; PRAGMA user_version = ${DECISION_FEEDBACK_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; DROP TABLE learning_eligibility_decisions; PRAGMA user_version = ${DECISION_FEEDBACK_SCHEMA_VERSION};`);
     } finally {
       plant.close();
     }
@@ -336,6 +393,44 @@ describe('学习准入 over the real store', () => {
     }
   }, 300_000);
 
+  it('pages accepted long notes below the frame bound without losing a material', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBookOf(store, '长说明分页', 1, '长说明分页');
+      const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const binding = { manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId };
+      const note = '👨‍👩‍👧‍👦'.repeat(350);
+      for (let index = 0; index < MAX_LEARNING_MATERIALS_PAGE; index += 1) {
+        const markId = store.createEditorialMark(suggestion(book, window, index, index + 1, `改${index}`)).markId;
+        store.recordChangeSuggestionDecision({ ...binding, markId, clientDecisionId: randomUUID(), disposition: 'rejected', editedText: null, reason: '保留原文' });
+      }
+      for (const material of store.inspectLearningMaterials(book.bookId).books[0]!.materials) {
+        const input = { bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: 0, choice: 'book' as const, note };
+        const frame = { id: randomUUID(), op: 'decideLearningMaterial', input };
+        expect(decodeRequest(new TextEncoder().encode(JSON.stringify(frame)))).toEqual(frame);
+        store.decideLearningMaterial(input);
+      }
+      let page = store.inspectLearningMaterials(book.bookId);
+      expect(page.nextCursor).not.toBeNull();
+      const keys: string[] = [];
+      for (let count = 0; count < MAX_LEARNING_MATERIALS_PAGE; count += 1) {
+        expect(Buffer.byteLength(JSON.stringify(page), 'utf8')).toBeLessThan(MAX_FRAME_BYTES / 2);
+        for (const material of page.books.flatMap((entry) => entry.materials)) {
+          expect(material.decision?.note).toBe(note);
+          keys.push(material.materialKey);
+        }
+        if (page.nextCursor === null) break;
+        page = store.inspectLearningMaterials(book.bookId, page.nextCursor);
+      }
+      expect(page.nextCursor).toBeNull();
+      expect(keys).toHaveLength(MAX_LEARNING_MATERIALS_PAGE);
+      expect(new Set(keys).size).toBe(MAX_LEARNING_MATERIALS_PAGE);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 300_000);
+
   it('decides a 审阅 finding the editor ignored with a reason, by its own rvf_ identity, through the frame as through the store', async () => {
     await requireExactSample1(roots.codeRoot);
     const launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
@@ -365,6 +460,10 @@ describe('学习准入 over the real store', () => {
       store.recordReviewFindingDisposition(bookId, run.reviewRunId, finding.findingId, '本书体例允许这种写法');
       const material = store.inspectLearningMaterials(bookId).books[0]!.materials.find((entry) => entry.kind === 'review-disposition')!;
       expect(material.materialKey).toBe(`review-disposition:${run.reviewRunId}/${finding.findingId}`);
+      expect(material.target).toEqual({ kind: 'review', bookId, reviewRunId: run.reviewRunId, findingId: finding.findingId });
+      const sourceCategory = run.categories.find((category) => category.categoryId === finding.categoryId)!;
+      expect(sourceCategory.taskIntentId).not.toBeNull();
+      expect(material.sourceTask).toEqual({ taskIntentId: sourceCategory.taskIntentId, label: `${sourceCategory.label} · ${sourceCategory.modeLabel}` });
       // The frame the page sends is accepted as it is, underscore and all (Issue #61 review), and the store records it.
       const input = { bookId, materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: 0, choice: 'excluded' as const, note: null };
       const request = { id: randomUUID(), op: 'decideLearningMaterial', input };
@@ -386,6 +485,11 @@ describe('学习准入 over the real store', () => {
         ['review-disposition', '错别字与规范用语', '忽略', '本书体例允许这种写法', 'given'],
       ]);
       expect(history[1]!.target).toEqual({ kind: 'review', bookId, reviewRunId: run.reviewRunId, findingId: finding.findingId });
+      // A newer Task must not replace the historical finding's provenance or invalidate its eligibility decision.
+      let newer = store.createReviewRunPreparationWork(bookId, [TYPOS_AND_USAGE.categoryId], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, launchPolicy);
+      while (!newer.done) newer = store.advanceReviewRunPreparationWork(newer.workId!);
+      expect(newer.projection!.run!.categories[0]!.taskIntentId).not.toBe(sourceCategory.taskIntentId);
+      expect(store.inspectLearningMaterial(bookId, material.materialKey)).toEqual(decided);
       store.markCleanShutdown();
     } finally {
       const stopped = driver.dispose();

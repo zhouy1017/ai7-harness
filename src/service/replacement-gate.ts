@@ -12,6 +12,7 @@ export function takenWhileReplacementWaits(operation: string): boolean {
 
 const TAKEN_WHILE_WAITING: ReadonlySet<string> = new Set([
   'ready', 'shutdown', 'cancelDatabaseReplacement', 'startSearch', 'cancelServiceJob', 'resolveBookWorkbenchRoute',
+  'readLibraryDecisionReason',
 ]);
 
 /** What a change asked for while a replacement waits is told. */

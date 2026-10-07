@@ -194,6 +194,8 @@ export function backupFailureReason(error: unknown): ScheduledBackupFailureReaso
       return 'location-unavailable';
     case 'DATABASE_PACKAGE_TOO_LARGE':
       return 'too-large';
+    case 'DATABASE_SOURCE_DAMAGED':
+      return 'source-damaged';
     default:
       return 'other';
   }
@@ -307,7 +309,10 @@ export class ScheduledBackups {
       `INSERT INTO backup_preferences(preference_id, ordinal, enabled, supersedes_preference_id, recorded_at, canonical_json, sha256)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     ).run(preferenceId, ordinal, enabled ? 1 : 0, supersedes, recordedAt, record.json, record.digest);
-    if (!enabled) this.#lastFailure = null;
+    if (!enabled) {
+      this.#lastFailure = null;
+      this.#controller?.abort();
+    }
   }
 
   /**
@@ -318,7 +323,17 @@ export class ScheduledBackups {
    */
   runIfDue(now: Date): Promise<boolean> {
     if (this.#stopped || this.#held > 0) return Promise.resolve(false);
-    if (this.#inFlight !== null) return this.#inFlight;
+    if (this.#inFlight !== null) {
+      if (!this.#controller?.signal.aborted) return this.#inFlight;
+      const pending = this.#inFlight;
+      const requested = this.preference();
+      const restart = (): Promise<boolean> | boolean => {
+        if (this.#stopped || !requested.enabled) return false;
+        const current = this.preference();
+        return current.enabled && current.ordinal === requested.ordinal ? this.runIfDue(now) : false;
+      };
+      return pending.then(restart, restart);
+    }
     const controller = new AbortController();
     const run = this.#run(now, controller.signal).finally(() => {
       this.#inFlight = null;
@@ -416,8 +431,10 @@ export class ScheduledBackups {
       nextDueAt: !preference.enabled ? null
         : latest === null ? now.toISOString()
           : new Date(Math.max(now.getTime(), Date.parse(latest.createdAt) + BACKUP_INTERVAL_MS)).toISOString(),
-      // The check under way is writing the backup, or will once it has removed those whose days passed.
-      backingUp: this.#inFlight !== null && (this.#writing || (preference.enabled && !this.#madeWithinDay(latest, now))),
+      // The check under way is writing the backup, or will once it has removed those whose days passed. A write the switch
+      // withdrew is only cleaning up, and is not a backup being made (Issue #434 review).
+      backingUp: this.#inFlight !== null &&
+        ((this.#writing && this.#controller?.signal.aborted !== true) || (preference.enabled && !this.#madeWithinDay(latest, now))),
       lastFailure: this.#lastFailure,
     };
   }

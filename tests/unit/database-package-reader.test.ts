@@ -34,10 +34,10 @@ async function writtenPackage(): Promise<string> {
   writeFileSync(join(dataRoot, 'objects', 'sha256', 'one.docx'), 'a stored manuscript object');
   const database = new DatabaseSync(':memory:');
   try {
-    database.exec('CREATE TABLE books (book_id TEXT PRIMARY KEY) STRICT; INSERT INTO books VALUES (\'b\'); PRAGMA user_version = 55;');
+    database.exec('CREATE TABLE books (book_id TEXT PRIMARY KEY) STRICT; INSERT INTO books VALUES (\'b\'); PRAGMA user_version = 1;');
     const path = join(root, 'written.ai7db');
     await writeDatabasePackage(database, dataRoot, path, () => ({
-      dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 55, createdAt: '2026-09-25T02:00:00.000Z', origin: 'database-export',
+      dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 1, createdAt: '2026-09-25T02:00:00.000Z', origin: 'database-export',
     }));
     return path;
   } finally {
@@ -48,7 +48,7 @@ async function writtenPackage(): Promise<string> {
 /** A package made by hand: the given members and a manifest naming `named` (by default, exactly them). */
 function craftedPackage(members: Record<string, Uint8Array>, named?: Array<{ path: string; bytes: number; sha256: string }>): string {
   const manifest = canonicalRecord({
-    schema: 'ai7.database-package/1', dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 55, createdAt: '2026-09-25T02:00:00.000Z',
+    schema: 'ai7.database-package/1', dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 1, createdAt: '2026-09-25T02:00:00.000Z',
     origin: 'database-export', contents, credentials: 'excluded',
     members: named ?? Object.entries(members).map(([path, bytes]) => ({ path, bytes: bytes.byteLength, sha256: digest(bytes) })),
   });
@@ -75,7 +75,7 @@ function declaring(file: string, path: string, size: number): void {
 }
 
 async function refusal(path: string): Promise<unknown> {
-  return verifyDatabasePackage(path).then(() => null, (error: unknown) => (error as { code?: string }).code ?? error);
+  return verifyDatabasePackage(path, { dataRoot: root }).then(() => null, (error: unknown) => (error as { code?: string }).code ?? error);
 }
 
 describe('reading a database package', () => {
@@ -83,14 +83,14 @@ describe('reading a database package', () => {
     const path = await writtenPackage();
     const visited: Array<{ path: string; bytes: number }> = [];
     let current: { path: string; bytes: number } | null = null;
-    const verified = await verifyDatabasePackage(path, {
+    const verified = await verifyDatabasePackage(path, { dataRoot: root }, {
       begin: async (member) => { current = { path: member.path, bytes: 0 }; },
       data: async (chunk) => { current!.bytes += chunk.byteLength; },
       end: async () => { visited.push(current!); },
     });
     // What it holds is what the writer counted in its own copy of the store: the one Book, and none of the relations it lacks.
     expect(verified.manifest).toMatchObject({
-      dataVersion: 1, schemaRevision: 55, origin: 'database-export', contents: { books: 1, sourceVersions: 0, libraryMaterials: 0, series: 0 },
+      dataVersion: 1, schemaRevision: 1, origin: 'database-export', contents: { books: 1, sourceVersions: 0, libraryMaterials: 0, series: 0 },
     });
     expect(verified.sha256).toBe(digest(readFileSync(path)));
     expect(visited.map((member) => member.path)).toEqual(['store/ai7.sqlite', 'objects/sha256/one.docx']);
@@ -135,7 +135,7 @@ describe('reading a database package', () => {
     expect(await refusal(craftedPackage({ 'store/ai7.sqlite': store, 'objects/A.docx': strToU8('a'), 'objects/a.docx': strToU8('b') })))
       .toBe('DATABASE_PACKAGE_INVALID');
     // A crafted package that is whole is read.
-    expect((await verifyDatabasePackage(craftedPackage({ 'store/ai7.sqlite': store }))).manifest.members).toHaveLength(1);
+    expect((await verifyDatabasePackage(craftedPackage({ 'store/ai7.sqlite': unzipSync(readFileSync(await writtenPackage()))['store/ai7.sqlite']! }), { dataRoot: root })).manifest.members).toHaveLength(1);
   });
 
   it('holds every entry to the size it declares, and takes nothing past it (Issue #434 review)', async () => {
@@ -155,7 +155,7 @@ describe('reading a database package', () => {
       data: async (chunk: Uint8Array) => { if (member === 'objects/large.bin') handed += chunk.byteLength; },
       end: async () => undefined,
     };
-    expect(await verifyDatabasePackage(over, visit).then(() => null, (error: unknown) => (error as { code?: string }).code)).toBe('DATABASE_PACKAGE_DAMAGED');
+    expect(await verifyDatabasePackage(over, { dataRoot: root }, visit).then(() => null, (error: unknown) => (error as { code?: string }).code)).toBe('DATABASE_PACKAGE_DAMAGED');
     expect(handed).toBeLessThanOrEqual(100);
     // One that ends short of what it declares is damage too.
     const under = craftedPackage({ 'store/ai7.sqlite': store, 'objects/large.bin': large }, named(large.byteLength + 1));
@@ -173,7 +173,7 @@ describe('reading a database package', () => {
     // A stored entry whose two sizes differ is not one a package holds.
     const stored = join(root, 'stored.ai7db');
     const storedManifest = canonicalRecord({
-      schema: 'ai7.database-package/1', dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 55, createdAt: '2026-09-25T02:00:00.000Z',
+      schema: 'ai7.database-package/1', dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 1, createdAt: '2026-09-25T02:00:00.000Z',
       origin: 'database-export', contents, credentials: 'excluded', members: [{ path: 'store/ai7.sqlite', bytes: 3, sha256: digest(store) }],
     });
     writeFileSync(stored, zipSync({ 'store/ai7.sqlite': [store, { level: 0 }], 'manifest.json': strToU8(storedManifest.json) }, { mtime: fixedArchiveTime() }));
