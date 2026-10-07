@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
   FACTUAL_REVIEW_SCHEMA_VERSION,
-  CLARIFICATION_SCHEMA_VERSION, SERIES_KNOWLEDGE_SCHEMA_VERSION,
+  CLARIFICATION_SCHEMA_VERSION, STORE_VERSION_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import { MAX_WINDOW_BLOCKS } from '../../src/shared/protocol.js';
 import {
@@ -25,7 +25,7 @@ import { DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER } from '../support/default-
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js';
 import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
-import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
+import { OPENING_RECORD_RELATIONS, PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
 import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
 
 // Service-integration suite (L2). It drives the real `EditorialStore` on a temporary Agent Data Root
@@ -642,7 +642,7 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
       expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
-        .toBe(SERIES_KNOWLEDGE_SCHEMA_VERSION);
+        .toBe(STORE_VERSION_SCHEMA_VERSION);
       const truthAfter = relationTruth(after);
       // Exactly the relations revisions 21 to 28 add appear, and each appears empty.
       const added = [
@@ -658,7 +658,7 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
         ...EXPORT_LEDGER_RELATIONS_DROP_ORDER,
       ];
       expect([...truthAfter.keys()]).toEqual([...truthBefore.keys(), ...added].sort());
-      for (const relation of added) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);
+      for (const relation of added.filter((name) => !OPENING_RECORD_RELATIONS.includes(name))) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);
       // The only relations the revision-20 store held that changed shape are the three kind-coupled
       // analysis relations revision 24 rebuilds for the review-category kind family (Issue #417), and
       // the only one whose content moved is the one every open appends to — the rebuild copies every

@@ -765,6 +765,9 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'inspectDataVersion':
+      requireInput(value.input, [], tentativeId);
+      break;
     // Filter before the bounded history page, with one exclusive cursor.
     case 'inspectFeedbackHistory': {
       const input = requireInputWithOptional(value.input, [], ['bookId', 'origin', 'author', 'editor', 'signal', 'recordedFrom', 'recordedBefore', 'dimension', 'after'], tentativeId);
