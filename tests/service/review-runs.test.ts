@@ -156,7 +156,11 @@ function approvals(run: ReviewRunProjection): Array<{ categoryId: string; planEn
 /** 授权并开始审阅: the one approval, then the drive loop to its end. */
 async function authorizeAndDrive(session: Session, book: Book, run: ReviewRunProjection): Promise<ReviewRunProjection> {
   session.store.authorizeReviewRun(book.bookId, run.reviewRunId, approvals(run));
-  await session.driver.drive(run.reviewRunId);
+  const loop = session.driver.drive(run.reviewRunId);
+  // Driven until its loop ends (Issue #434 review: a replacement waits for this).
+  expect(session.driver.driving).toBe(true);
+  await loop;
+  expect(session.driver.driving).toBe(false);
   return workspace(session, book, run.reviewRunId).run!;
 }
 
@@ -831,11 +835,14 @@ describe('a Review Run over the real store on exact sample1', () => {
 async function settleJob(jobs: CooperativeJobOwner, started: ServiceJobProjection): Promise<ServiceJobProjection[]> {
   const trail = [started];
   let job = started;
+  // A job under way keeps the owner busy (Issue #434 review: a replacement waits for it), and one ended does not.
+  expect(jobs.busy).toBe(started.state === 'queued' || started.state === 'running');
   while (job.state === 'queued' || job.state === 'running') {
     await new Promise((resolve) => setTimeout(resolve, 10));
     job = jobs.poll(job.jobId);
     trail.push(job);
   }
+  expect(jobs.busy).toBe(false);
   return trail;
 }
 

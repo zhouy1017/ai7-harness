@@ -117,6 +117,7 @@ function preflight(store: EditorialStore, execution: BaselineAnalysisExecutionOw
     credentialReadiness: () => execution.liveCredentialReadiness(),
     slotBusy: () => execution.busy,
     admit: (runRecordId) => execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { afterReconnectPreflight: true }),
+    frozen: () => store.replacementFrozen(),
   });
 }
 

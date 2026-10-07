@@ -27,6 +27,11 @@ export interface ReconnectPreflightDependencies {
   slotBusy(): boolean;
   /** Admit the Run to the slot and dispatch it, through the execution owner; throws its admission error. */
   admit(runRecordId: string): void;
+  /**
+   * Whether nothing may be admitted or blocked now (Issue #434 review): a replacement of the local data is being prepared or
+   * waits, and what a Run wrote would be lost with the data it replaces. Every waiting Run then waits.
+   */
+  frozen(): boolean;
 }
 
 /** Admission refusals that are only a matter of time: the slot is held, or the service is stopping. */
@@ -63,10 +68,16 @@ export async function reconnectPreflight(deps: ReconnectPreflightDependencies): 
   const outcome = { admitted: 0, blocked: 0, waiting: 0 };
   const runs = deps.waitingRuns();
   if (runs.length === 0) return outcome;
+  if (deps.frozen()) return { ...outcome, waiting: runs.length };
   const offline = deps.reachesNetwork && deps.connectivity() === 'offline';
   const credential = offline ? null : await deps.credentialReadiness();
   for (const run of runs) {
-    // Read again after the await: the editor may have cancelled, or another preflight admitted, meanwhile.
+    // Read again after the await: the editor may have cancelled, or another preflight admitted, meanwhile — or a replacement
+    // may have begun, which nothing admitted or blocked may cross (Issue #434 review).
+    if (deps.frozen()) {
+      outcome.waiting += 1;
+      continue;
+    }
     if (!deps.stillWaiting(run.runRecordId)) continue;
     if (offline || credential === 'missing') {
       outcome.waiting += 1;

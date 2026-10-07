@@ -10,6 +10,7 @@ import {
   type DatabaseExportPreparationProjection,
   type DatabaseExportReceiptProjection,
   type DatabaseExportsProjection,
+  type DatabasePackageOrigin,
 } from '../shared/protocol.js';
 import { fixedArchiveTime } from '../shared/archive-time.js';
 import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
@@ -174,8 +175,11 @@ export function initializeDatabaseExportSchema(db: DatabaseSync): void {
 
 // ---- the package --------------------------------------------------------------------------------------
 
-/** Why a package was made: the editor's own export (S86a), or a 定期自动备份 (S86b). S85b writes the same package. */
-export type DatabasePackageOrigin = 'database-export' | 'scheduled-backup';
+/**
+ * Why a package was made: the editor's own export (S86a), a 定期自动备份 (S86b), or the backup AI7 makes before it replaces
+ * the local data with another package (S86c). S85b writes the same package.
+ */
+export type { DatabasePackageOrigin };
 
 export interface DatabasePackageFacts {
   readonly dataVersion: number;
@@ -304,7 +308,7 @@ function contentsOfCopy(path: string): DatabaseExportContentsProjection {
  * way, and the refusal says so and what kind of file it is (`DATABASE_SOURCE_DAMAGED`). Without a live store, every such
  * reference is refused as incomplete.
  */
-async function verifyCopiedPayloads(
+export async function verifyCopiedPayloads(
   path: string,
   members: ReadonlyArray<DatabasePackageMember>,
   schemaRevision: number,
@@ -906,9 +910,14 @@ export class DatabaseExports {
    * cancelled, or cut off mid-write — is a whole copy of the data, so none is kept. Its preparation's record stays, and an
    * approval of it is refused as stale and prepares again.
    */
-  async sweep(): Promise<void> {
+  async sweep(includePrivateReads = false): Promise<void> {
     const staging = await this.#stagingDirectory();
     for (const entry of await readdir(staging)) {
+      // Reader-owned copies may be in use beside an export. Only startup reclaims abandoned copies and SQLite sidecars.
+      if (/^\.[0-9a-f-]{36}\.ai7db(?:\.store(?:-wal|-shm|-journal)?)?$/u.test(entry)) {
+        if (includePrivateReads) await rm(join(staging, entry), { force: true });
+        continue;
+      }
       if (entry.endsWith(DATABASE_PACKAGE_EXTENSION) || entry.endsWith(`${DATABASE_PACKAGE_EXTENSION}.store`)) {
         await rm(join(staging, entry), { force: true });
       }

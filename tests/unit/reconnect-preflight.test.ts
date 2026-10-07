@@ -22,6 +22,9 @@ interface World {
   blocked: Array<{ runRecordId: string; reasons: ReadonlyArray<string>; cause: 'plan-moved' | 'launch' }>;
   settledElsewhere: Set<string>;
   reachesNetwork: boolean;
+  frozen: boolean;
+  /** Set while the credential is read: a replacement asked for while a preflight waits on it (Issue #434 review). */
+  freezeDuringCredentialRead: boolean;
 }
 
 function world(overrides: Partial<World> = {}): World {
@@ -36,6 +39,8 @@ function world(overrides: Partial<World> = {}): World {
     blocked: [],
     settledElsewhere: new Set(),
     reachesNetwork: true,
+    frozen: false,
+    freezeDuringCredentialRead: false,
     ...overrides,
   };
 }
@@ -50,7 +55,10 @@ function dependencies(state: World): ReconnectPreflightDependencies {
     },
     reachesNetwork: state.reachesNetwork,
     connectivity: () => state.connectivity,
-    credentialReadiness: async () => state.credential,
+    credentialReadiness: async () => {
+      if (state.freezeDuringCredentialRead) state.frozen = true;
+      return state.credential;
+    },
     slotBusy: () => state.busy,
     admit: (runRecordId) => {
       const error = state.admitThrows[runRecordId];
@@ -58,6 +66,7 @@ function dependencies(state: World): ReconnectPreflightDependencies {
       state.admitted.push(runRecordId);
       state.busy = true;
     },
+    frozen: () => state.frozen,
   };
 }
 
@@ -120,5 +129,18 @@ describe('Reconnect Preflight', () => {
     const state = world({ waiting: ['run-a', 'run-b'], settledElsewhere: new Set(['run-a']) });
     expect(await reconnectPreflight(dependencies(state))).toEqual({ admitted: 1, blocked: 0, waiting: 0 });
     expect(state.admitted).toEqual(['run-b']);
+  });
+
+  it('admits and blocks nothing while a replacement of the local data is prepared or waits, even one begun while it looked (Issue #434 review)', async () => {
+    // Frozen before the look: every Run waits, and the credential is not even read.
+    const before = world({ waiting: ['run-a', 'run-b'], drift: { 'run-b': ['稿件'] }, frozen: true, freezeDuringCredentialRead: false });
+    let read = false;
+    const deps = dependencies(before);
+    expect(await reconnectPreflight({ ...deps, credentialReadiness: async () => { read = true; return null; } })).toEqual({ admitted: 0, blocked: 0, waiting: 2 });
+    expect([read, before.admitted, before.blocked]).toEqual([false, [], []]);
+    // A replacement asked for while the look awaited the credential: nothing is admitted or blocked after it.
+    const during = world({ waiting: ['run-a', 'run-b'], drift: { 'run-b': ['稿件'] }, freezeDuringCredentialRead: true });
+    expect(await reconnectPreflight(dependencies(during))).toEqual({ admitted: 0, blocked: 0, waiting: 2 });
+    expect([during.frozen, during.admitted, during.blocked]).toEqual([true, [], []]);
   });
 });
