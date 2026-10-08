@@ -26,7 +26,7 @@ import {
   readSoftwareVersion,
   type StoredVersion,
 } from '../../src/service/data-version.js';
-import { DIALOGUE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { READERS_REPORT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { preUpgradeBackupFileName } from '../../src/service/upgrade-backup.js';
 
 // Unit suite for 数据版本 (Issue #433, plan slice S85a; V2-UX-DSTO-016; ADR 0079 §1): the Data Version this software reads,
@@ -47,12 +47,12 @@ describe('数据版本', () => {
     expect([DATA_VERSION_BASELINE_REVISION, SCHEMA_REVISION_CLASSES]).toEqual([null, []]);
     // The software's Data Version is always the classification's at its terminal revision: a breaking revision added to the
     // list without raising DATA_VERSION, or DATA_VERSION raised without one, fails here.
-    expect(DATA_VERSION).toBe(dataVersionAt(DIALOGUE_SCHEMA_VERSION));
+    expect(DATA_VERSION).toBe(dataVersionAt(READERS_REPORT_SCHEMA_VERSION));
     // Classified entries lie after the baseline, one per revision, in order, and a breaking one says what it changes.
     const revisions = SCHEMA_REVISION_CLASSES.map((entry) => entry.revision);
     expect(revisions).toEqual([...new Set(revisions)].sort((left, right) => left - right));
     expect(SCHEMA_REVISION_CLASSES.every((entry) => DATA_VERSION_BASELINE_REVISION !== null && entry.revision > DATA_VERSION_BASELINE_REVISION &&
-      entry.revision <= DIALOGUE_SCHEMA_VERSION && (entry.class === 'additive' || (entry.change ?? '').length > 0))).toBe(true);
+      entry.revision <= READERS_REPORT_SCHEMA_VERSION && (entry.class === 'additive' || (entry.change ?? '').length > 0))).toBe(true);
     // Additive revisions stay inside a Data Version; each breaking one raises it by one, and says what changed.
     const classes = [
       { revision: 60, class: 'additive' as const },

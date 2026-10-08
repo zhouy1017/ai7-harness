@@ -233,7 +233,10 @@ import type {
   FactualReviewGoal,
   FactualReviewProjection,
   EvaluationInitialProjection,
+  EvaluationReadersReportProjection,
   InitialEvaluationProjection,
+  ReadersReportProjection,
+  ReadersReportTemplate,
   ReviewCategoryGoal,
   ReviewCategoryProjection,
   ReviewCategoryTaskRequest,
@@ -241,8 +244,27 @@ import type {
   ReviewRunScopeRequest,
   ReviewWorkspaceProjection,
 } from '../shared/protocol.js';
-import { INITIAL_EVALUATION_MODE_GOALS } from '../shared/protocol.js';
+import {
+  INITIAL_EVALUATION_MODE_GOALS,
+  READERS_REPORT_LIVE_UNAVAILABLE,
+  READERS_REPORT_MODE_GOALS,
+  READERS_REPORT_NO_EXEMPLAR,
+  READERS_REPORT_TEMPLATE_LABELS,
+  READERS_REPORT_TEMPLATES,
+} from '../shared/protocol.js';
 import { INITIAL_EVALUATION_LIVE_UNAVAILABLE, initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
+import { readersReportKindDefinition } from './evaluation/readers-report-kind.js';
+import { readersReportExemplarLine, type ReadersReportContractInput } from './evaluation/readers-report-contract.js';
+import {
+  READERS_REPORT_NEEDS_FINALIZED,
+  ReadersReportError,
+  ReadersReports,
+  initializeReadersReportSchema,
+  readersReportBlockLength,
+  readersReportContractInput,
+  readersReportDraftBlocks,
+  type StoredReadersReportTask,
+} from './readers-reports.js';
 import {
   AnalysisError,
   BaselineAnalysisStore,
@@ -301,6 +323,8 @@ import {
   baselineAnalysisPlan,
   initialEvaluationPlan,
   analysisTaskStateLabel,
+  readersReportPlan,
+  readersReportTaskStateLabel,
   defaultRuleBindingRows,
   fixedTaskPlan,
   noDefaultRule,
@@ -387,6 +411,7 @@ import {
   evaluationProfileDigest,
   initializeEvaluationInitialDraftSchema,
   initializeEvaluationRecordSchema,
+  type FinalizedEvaluation,
   type InitialEvaluationFacts,
 } from './evaluation-records.js';
 import { AnalysisFeedbackError, AnalysisFeedbackLedger, analysisFeedbackItems, initializeAnalysisFeedbackSchema } from './analysis-feedback.js';
@@ -476,6 +501,47 @@ import {
 } from './database-replacement.js';
 import { DatabaseMergeError, initializeDatabaseMergeSchema } from './database-merge.js';
 import {
+  SeriesExclusionError,
+  SeriesExclusionLedger,
+  initializeSeriesRetrievalExclusionSchema,
+  isSeriesExclusionAction,
+  isSeriesExclusionTargetKind,
+  coveringExclusions,
+  seriesExclusionCovers,
+  seriesExclusionImpact,
+  seriesExclusionPreviewDigest,
+  seriesExclusionReason,
+  seriesExclusionTarget,
+  type SeriesKnowledgeMaterial,
+  type StoredExclusion,
+  type StoredExclusionRevision,
+} from './series-exclusions.js';
+import {
+  MAX_SERIES_EXCLUSIONS,
+  MAX_SERIES_EXCLUSION_HISTORY_PAGE,
+  MAX_SERIES_EXCLUSION_REASON_CHARACTERS,
+  MAX_SERIES_EXCLUSION_TARGETS_PAGE,
+  SERIES_EXCLUSION_ACTION_LABELS,
+  SERIES_KNOWLEDGE_CLASSES,
+  type InspectSeriesExclusionHistoryInput,
+  type InspectSeriesExclusionTargetsInput,
+  type PreviewSeriesExclusionInput,
+  type RecordSeriesExclusionInput,
+  type SeriesExclusionHistoryCursor,
+  type SeriesExclusionHistoryPageProjection,
+  type SeriesExclusionPreviewProjection,
+  type SeriesExclusionProjection,
+  type SeriesExclusionResultProjection,
+  type SeriesExclusionRevisionProjection,
+  type SeriesExclusionTargetKind,
+  type SeriesExclusionTargetProjection,
+  type SeriesExclusionTargetsProjection,
+  type SeriesExclusionsProjection,
+} from '../shared/protocol.js';
+/** How many items or Runs one line of an exclusion's impact preview names before it gives the count. */
+const NAMED_EXCLUSION_ENTRIES = 5;
+import { isRecord } from './analysis/canonical.js';
+import {
   DIALOGUE_BASIS_QUOTE_CHARACTERS,
   DIALOGUE_MARK_SOURCE_LABEL,
   DialogueError,
@@ -530,7 +596,13 @@ import {
   PRODUCTION_DOCUMENTS_NEED_MANUSCRIPT, ProductionDocumentError, ProductionDocuments, productionDocumentMarksNotCarried,
 } from './production-documents.js';
 import type { WaitingRunBlockCause } from './reconnect-preflight.js';
-import { productionDocumentType } from './production-document-types.js';
+import {
+  READERS_REPORT_DOCUMENT_TYPES,
+  READERS_REPORT_DOCUMENT_TYPES_DIGEST,
+  productionDocumentType,
+  readersReportDocumentType,
+  readersReportDocumentTypeId,
+} from './production-document-types.js';
 import { REIMPORT_GROUP_VERBS, groupReimportMappings, reimportGroupResolutions, reimportGroupVerbs } from './reimport-groups.js';
 import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
 import { reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './review/category-configuration.js';
@@ -625,6 +697,8 @@ import {
   DATABASE_MERGE_SCHEMA_VERSION,
   INITIAL_EVALUATION_SCHEMA_VERSION,
   DIALOGUE_SCHEMA_VERSION,
+  SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
+  READERS_REPORT_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1861,7 +1935,9 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       currentVersion === DATABASE_MERGE_SCHEMA_VERSION ||
       currentVersion === INITIAL_EVALUATION_SCHEMA_VERSION ||
-      currentVersion === DIALOGUE_SCHEMA_VERSION,
+      currentVersion === DIALOGUE_SCHEMA_VERSION ||
+      currentVersion === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
+      currentVersion === READERS_REPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1917,7 +1993,9 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       currentVersion === DATABASE_MERGE_SCHEMA_VERSION ||
       currentVersion === INITIAL_EVALUATION_SCHEMA_VERSION ||
-      currentVersion === DIALOGUE_SCHEMA_VERSION
+      currentVersion === DIALOGUE_SCHEMA_VERSION ||
+      currentVersion === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
+      currentVersion === READERS_REPORT_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2287,7 +2365,9 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
-      version === DIALOGUE_SCHEMA_VERSION,
+      version === DIALOGUE_SCHEMA_VERSION ||
+      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
+      version === READERS_REPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2332,7 +2412,9 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
-      version === DIALOGUE_SCHEMA_VERSION) return;
+      version === DIALOGUE_SCHEMA_VERSION ||
+      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
+      version === READERS_REPORT_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2469,7 +2551,9 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
-      version === DIALOGUE_SCHEMA_VERSION,
+      version === DIALOGUE_SCHEMA_VERSION ||
+      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
+      version === READERS_REPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2513,7 +2597,9 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
-      version === DIALOGUE_SCHEMA_VERSION) return;
+      version === DIALOGUE_SCHEMA_VERSION ||
+      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
+      version === READERS_REPORT_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2806,7 +2892,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== DIALOGUE_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== READERS_REPORT_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2853,6 +2939,8 @@ function validateModelServiceSchema(
       version >= DATABASE_MERGE_SCHEMA_VERSION,
       version >= INITIAL_EVALUATION_SCHEMA_VERSION,
       version >= DIALOGUE_SCHEMA_VERSION,
+      version >= SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
+      version >= READERS_REPORT_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2924,7 +3012,9 @@ function initializeModelServiceSchema(
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
-      version === DIALOGUE_SCHEMA_VERSION,
+      version === DIALOGUE_SCHEMA_VERSION ||
+      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
+      version === READERS_REPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2968,7 +3058,9 @@ function initializeModelServiceSchema(
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
-      version === DIALOGUE_SCHEMA_VERSION) {
+      version === DIALOGUE_SCHEMA_VERSION ||
+      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
+      version === READERS_REPORT_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3816,6 +3908,11 @@ export class EditorialStore {
   readonly #reviewCategoryLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
   /** The kind definition of each configured category a Review Run snapshotted, by its contract input; bounded (#649). */
   readonly #reviewCategoryDefinitions = new RecentCache<AnalysisKindDefinition>(REVIEW_CATEGORY_CACHE_CAPACITY);
+  /** 审稿意见 (Issue #429, S81c): one ledger per frozen reader's report contract, made when first asked for. */
+  readonly #readersReportLedgers = new Map<string, BaselineAnalysisStore>();
+  /** The ledger each 审稿意见 preparation in flight belongs to, by its work. */
+  readonly #readersReportWork = new Map<string, BaselineAnalysisStore>();
+  #readersReports!: ReadersReports;
   readonly #editorialMarks: EditorialMarkStore;
   readonly #manuscriptApply: ManuscriptApplyStore;
   readonly #reviewRuns: ReviewRunStore;
@@ -3829,6 +3926,8 @@ export class EditorialStore {
   readonly #evaluationCalibration: EvaluationCalibrationLedger;
   readonly #series: SeriesLedger;
   readonly #seriesKnowledge: SeriesKnowledgeLedger;
+  /** 书系检索排除 (Issue #64, S29b): each Series' Retrieval Exclusions and their revisions. */
+  readonly #seriesExclusions: SeriesExclusionLedger;
   readonly #dataVersions: DataVersionLedger;
   /** 导出数据库 (Issue #434, S86a): the package's preparations, approvals and receipts. */
   readonly #databaseExports: DatabaseExports;
@@ -3911,17 +4010,18 @@ export class EditorialStore {
     this.#evaluationCalibration = new EvaluationCalibrationLedger(authority);
     this.#series = new SeriesLedger(authority);
     this.#seriesKnowledge = new SeriesKnowledgeLedger(authority);
+    this.#seriesExclusions = new SeriesExclusionLedger(authority);
     this.#dialogues = new DialogueLedger(authority);
     this.#dialogueHistory = harnessHistoryReader(join(dataRoot, HARNESS_SESSION_LOG_DIRECTORY));
     this.#dataVersions = new DataVersionLedger(authority);
     this.#databaseExports = new DatabaseExports(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: DIALOGUE_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: READERS_REPORT_SCHEMA_VERSION }),
     });
     this.#scheduledBackups = new ScheduledBackups(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: DIALOGUE_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: READERS_REPORT_SCHEMA_VERSION }),
     });
     this.#databaseReplacements = new DatabaseReplacements(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: DIALOGUE_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: READERS_REPORT_SCHEMA_VERSION }),
       // A package's data opens as a store of its own, with no launch control: brought to this revision and checked whole.
       openPackage: async (root) => {
         const opened = await EditorialStore.open(root, this.#codeRoot, {
@@ -3936,9 +4036,12 @@ export class EditorialStore {
         opened.close();
       },
     });
+    this.#readersReports = new ReadersReports(authority);
     this.#evaluations = new EvaluationRecords(authority, { current: (bookId) => this.#evaluationManuscript(bookId) }, {
       latest: (bookId) => this.#initialEvaluationFacts(bookId),
       task: (bookId) => this.#initialEvaluationTask(bookId),
+    }, {
+      workspace: (bookId, basis, unreadable) => this.#readersReportWorkspace(bookId, basis, unreadable),
     });
     this.#analysisFeedback = new AnalysisFeedbackLedger(authority);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
@@ -4067,7 +4170,7 @@ export class EditorialStore {
       // the backup location before anything migrates it, and a backup that cannot be made opens nothing.
       const classes = control.schemaRevisionClasses ?? SCHEMA_REVISION_CLASSES;
       const { upgrade, earlier } = await backUpBeforeUpgrade(authority, dataRoot, {
-        terminalRevision: DIALOGUE_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
+        terminalRevision: READERS_REPORT_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
       }).catch((error: unknown) => {
         if (error instanceof DataVersionError) throw new StoreError(error.code, error.message);
         throw error;
@@ -4141,7 +4244,7 @@ export class EditorialStore {
       // (Issue #434, S86b) the scheduled backups; revision 57 (Issue #434, S86c) the replacements of the local data; and revision
       // 58 (Issue #434, S86d) the merges of a package's Books. Revision 59 (Issue #429, S81b1) adds the AI7 初评 each Evaluation
       // Record version began from, and `initializeTaskAuthorizationSchema` rebuilds the kind-coupled analysis relations for it;
-      // revision 60 (Issue #52, S17a) adds the dialogue Tasks.
+      // revision 60 (Issue #52, S17a) adds the dialogue Tasks, and revision 61 (Issue #64, S29b) the Series Retrieval Exclusions.
       initializeBookPeopleSchema(authority);
       initializeReviewGuidelineSchema(authority);
       initializeLibraryMaterialSchema(authority);
@@ -4159,6 +4262,9 @@ export class EditorialStore {
       initializeDatabaseMergeSchema(authority);
       initializeEvaluationInitialDraftSchema(authority);
       initializeDialogueSchema(authority);
+      initializeSeriesRetrievalExclusionSchema(authority);
+      // Revision 62 (Issue #429, S81c): which 定稿 version each 审稿意见 Task drafts from, and which result became a draft.
+      initializeReadersReportSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -4206,7 +4312,7 @@ export class EditorialStore {
       // Every store records the versions that open it (Issue #433, S85a; DSTO-016): a new record only when one changed.
       store.#softwareVersion = softwareVersion;
       store.#codeRoot = codeRoot;
-      store.#dataVersion = dataVersionAt(DIALOGUE_SCHEMA_VERSION, classes);
+      store.#dataVersion = dataVersionAt(READERS_REPORT_SCHEMA_VERSION, classes);
       if (control.interruptUpgradeAt === 'before-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在记录版本之前停止。');
       // The open that raised the Data Version records the upgrade it made with the backup (S85b), and only then clears the note
       // that let an open stopped before this record it (Issue #433 review).
@@ -4214,7 +4320,7 @@ export class EditorialStore {
         // Upgrades other opens made and never recorded go first, oldest first, as those opens would have recorded them; one a
         // record already holds is not recorded again (Issue #433 review).
         for (const carried of earlier) store.#dataVersions.recordCarried(carried);
-        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: DIALOGUE_SCHEMA_VERSION, upgrade });
+        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: READERS_REPORT_SCHEMA_VERSION, upgrade });
       }));
       if (control.interruptUpgradeAt === 'after-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在清除升级记录之前停止。');
       await completeUpgrade(dataRoot).catch(() => undefined);
@@ -4611,6 +4717,27 @@ export class EditorialStore {
       // What the Run asked the editor, and the answers (Issue #422, S76d).
       const clarifications = projection.run === null ? [] : this.#analysisCall(() => this.#baselineAnalysis.clarificationsOf(projection.run!.runRecordId));
       const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, defaultRule, clarifications, ...(stopped === null ? {} : { stopped }) }));
+      return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+    }
+    if (input.kind === 'readers-report') {
+      // 审稿意见 (Issue #429, S81c): the reader's report kind's latest Task, on the ledger of the contract its plan froze.
+      const latest = this.#latestReadersReport(input.bookId, progress);
+      const projection = latest?.projection ?? null;
+      const checkpoint = projection?.checkpoint ?? null;
+      requireStore(latest !== null && projection !== null && projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', '审稿意见还没有准备计划。');
+      current(projection.taskIntent.taskIntentId);
+      const blocks = this.#analysisCall(() => latest.ledger.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
+      const plan = this.#taskPlanCall(() => readersReportPlan({
+        projection,
+        bookTitle,
+        blocks,
+        task: {
+          template: latest.task.template,
+          recordOrdinal: this.#evaluationRecordOrdinal(latest.task.recordId),
+          profile: latest.task.input.record.profile,
+          exemplars: readersReportExemplarLine(latest.task.input.exemplars),
+        },
+      }));
       return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     if (input.kind === 'initial-evaluation') {
@@ -5150,6 +5277,8 @@ export class EditorialStore {
     this.#factualReview.prepare({ phase: 'cancel-all' });
     this.#initialEvaluation.prepare({ phase: 'cancel-all' });
     for (const ledger of this.#reviewCategoryLedgers.values()) ledger.prepare({ phase: 'cancel-all' });
+    for (const ledger of this.#readersReportLedgers.values()) ledger.prepare({ phase: 'cancel-all' });
+    this.#readersReportWork.clear();
     for (const workId of Array.from(this.#reimportPreparationWork.keys())) {
       this.cancelManuscriptReimportPreparationWork(workId);
     }
@@ -6306,6 +6435,327 @@ export class EditorialStore {
         ? { allowed: false, reason: activeRunReason(runState) }
         : { allowed: true, mode: projection.resultSetRevision === null ? 'evaluation-first' : 'evaluation-again' },
     };
+  }
+
+  // ---- 审稿意见 (Issue #429, plan slice S81c; V2-UX-EVAL-013; editor-surfaces §5 ②C) -------------------------------------
+
+  /**
+   * The reader's report ledger of one frozen contract — a template and one 定稿 version's words — made when first asked for and
+   * kept: a ledger holds the preparations in flight, so the same contract keeps finding the same ledger, as a review category's
+   * does. It takes the launch the baseline ledger was bound to.
+   */
+  #readersReportLedger(input: ReadersReportContractInput): BaselineAnalysisStore {
+    const definition = this.#analysisCall(() => readersReportKindDefinition(input));
+    let ledger = this.#readersReportLedgers.get(definition.promptContractDigest);
+    if (ledger === undefined) {
+      ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
+      ledger.bindLaunch(this.#baselineAnalysis.launch);
+      this.#readersReportLedgers.set(definition.promptContractDigest, ledger);
+    }
+    return ledger;
+  }
+
+  #readersReportCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof ReadersReportError || error instanceof AnalysisError || error instanceof EvaluationError) {
+        throw new StoreError(error.code, error.message);
+      }
+      throw error;
+    }
+  }
+
+  /** One Task's 定稿 version and template — the one its frozen plan names when it froze one. */
+  #readersReportTaskOf(taskIntentId: string): { task: StoredReadersReportTask; ledger: BaselineAnalysisStore } | null {
+    let task = this.#readersReportCall(() => this.#readersReports.task(taskIntentId));
+    if (task === null) return null;
+    let ledger = this.#readersReportLedger(task.input);
+    const planContract = this.#readersReportCall(() => this.#readersReports.planContract(taskIntentId));
+    if (planContract !== null && planContract !== task.promptContractSha256) {
+      task = this.#readersReportCall(() => this.#readersReports.task(taskIntentId, planContract));
+      requireStore(task !== null, 'READERS_REPORT_RECORD_INVALID', '审稿意见任务的计划与它的记录不一致。');
+      ledger = this.#readersReportLedger(task.input);
+    }
+    return { task, ledger };
+  }
+
+  /** The Book's latest 审稿意见 Task with its ledger and projection; `null` before the first, or for one no record names. */
+  #latestReadersReport(bookId: string, progress?: ProgressReader): { task: StoredReadersReportTask; ledger: BaselineAnalysisStore; projection: ReadersReportProjection } | null {
+    const intentId = this.#readersReportCall(() => this.#readersReports.latestTaskIntentId(bookId));
+    if (intentId === null) return null;
+    const found = this.#readersReportTaskOf(intentId);
+    if (found === null) return null;
+    const projection = this.#analysisCall(() => found.ledger.inspect(bookId, progress)) as ReadersReportProjection;
+    return { ...found, projection };
+  }
+
+  /** The Book's latest 审稿意见 Task as its ledger reads it, or `null`; `progress` is the execution owner's reader. */
+  inspectReadersReport(bookId: string, progress?: ProgressReader): ReadersReportProjection | null {
+    this.#assertAvailable();
+    return this.#latestReadersReport(bookId, progress)?.projection ?? null;
+  }
+
+  #evaluationRecordOrdinal(recordId: string): number {
+    const row = this.#authority.prepare('SELECT ordinal FROM evaluation_records WHERE record_id = ?').get(recordId) as SqlRow | undefined;
+    requireStore(row !== undefined, 'READERS_REPORT_RECORD_INVALID', '审稿意见所依据的评估版本缺失。');
+    return asNumber(row.ordinal);
+  }
+
+  /**
+   * 审稿意见 runs only where it may be sent (EVAL-013, as 初评): under a live scope no Provider Processing policy names it, so
+   * nothing is prepared or started there, and 评估 says why. The provider-free scope is unaffected.
+   */
+  #requireReadersReportScope(): void {
+    this.#assertAvailable();
+    if (this.#baselineAnalysis.launch.live !== null) throw new StoreError('READERS_REPORT_UNAVAILABLE', READERS_REPORT_LIVE_UNAVAILABLE);
+  }
+
+  /**
+   * The house's 审稿意见 among its 范例 that seed a draft. None can be there yet: a draft is never delivered in this slice, and
+   * only delivered documents come into 范例 — so every plan says 「本社暂无审稿意见范例，本次不参考范例」 and the draft is written
+   * without one (the Owner's answer of 2026-10-07).
+   */
+  #readersReportExemplars(): [] {
+    return [];
+  }
+
+  /**
+   * 起草审稿意见 (EVAL-013): the reader's report kind's Task, drafted from the Book's latest 定稿 version under one template, in
+   * the mode that applies — the first draft, or another once one settled. Refused under a live scope, while no version is
+   * 定稿, or once the template has its draft document. Its plan opens in the Task Drawer.
+   */
+  createReadersReportPreparationWork(bookId: string, template: ReadersReportTemplate, launchPolicy: LaunchPolicyProjection): AnalysisPreparationResult<ReadersReportProjection> {
+    this.#requireReadersReportScope();
+    requireStore(UUID_PATTERN.test(bookId) && READERS_REPORT_TEMPLATES.includes(template), 'READERS_REPORT_INVALID', '审稿意见参数无效。');
+    const basis = this.#evaluationCall(() => this.#evaluations.latestFinalized(bookId));
+    requireStore(basis !== null, 'READERS_REPORT_NEEDS_FINALIZED', READERS_REPORT_NEEDS_FINALIZED);
+    requireStore(this.#documentCall(() => this.#productionDocuments.documentOfType(bookId, readersReportDocumentTypeId(template))) === undefined,
+      'READERS_REPORT_DRAFT_EXISTS', `这本书已经有「${READERS_REPORT_TEMPLATE_LABELS[template]}」的草稿；请打开它继续修改。`);
+    const input = this.#readersReportCall(() => readersReportContractInput(template, basis, this.#readersReportExemplars()));
+    const ledger = this.#readersReportLedger(input);
+    const latest = this.#latestReadersReport(bookId);
+    const mode = latest === null || latest.projection.resultSetRevision === null ? 'readers-report-first' : 'readers-report-again';
+    const result = this.#analysisCall(() => ledger.prepare({
+      phase: 'start',
+      bookId,
+      goal: READERS_REPORT_MODE_GOALS[mode],
+      update: mode === 'readers-report-first' ? null : { mode, selectedRange: null },
+      reconfirm: false,
+      launchPolicy,
+    }));
+    // Which 定稿 version and template the Task drafts from, recorded once for it and this contract.
+    const taskIntentId = this.#readersReportCall(() => this.#readersReports.latestTaskIntentId(bookId));
+    requireStore(taskIntentId !== null, 'READERS_REPORT_RECORD_INVALID', '审稿意见任务没有准备出来。');
+    this.#readersReportCall(() => this.#transaction(this.#authority, () => this.#readersReports.recordTask({
+      taskIntentId,
+      bookId,
+      recordId: basis.recordId,
+      finalizedEntrySha256: basis.entrySha256,
+      contract: input,
+      promptContractSha256: ledger.definition.promptContractDigest,
+    })));
+    if (result.workId !== null) this.#readersReportWork.set(result.workId, ledger);
+    return { ...result, projection: result.projection as ReadersReportProjection | null };
+  }
+
+  advanceReadersReportPreparationWork(workId: string): AnalysisPreparationResult<ReadersReportProjection> {
+    const ledger = this.#readersReportWork.get(workId);
+    requireStore(ledger !== undefined, 'ANALYSIS_PREPARATION_NOT_FOUND', '审稿意见的计划准备已不存在。');
+    const result = this.#analysisCall(() => ledger.prepare({ phase: 'advance', workId }));
+    if (result.done) this.#readersReportWork.delete(workId);
+    return { ...result, projection: result.projection as ReadersReportProjection | null };
+  }
+
+  cancelReadersReportPreparationWork(workId: string): boolean {
+    const ledger = this.#readersReportWork.get(workId);
+    if (ledger === undefined) return false;
+    this.#readersReportWork.delete(workId);
+    this.#analysisCall(() => ledger.prepare({ phase: 'cancel', workId }));
+    return true;
+  }
+
+  /** 开始任务 in the drawer's bar: the Run Authorization and the Run on the ledger of the plan's contract, for the owner. */
+  authorizeReadersReport(bookId: string, taskIntentId: string, planEnvelopeDigest: string): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
+    this.#requireReadersReportScope();
+    const latest = this.#latestReadersReport(bookId);
+    requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT',
+      '这项任务已不是这本书当前的任务；请从它所在的位置重新打开计划。');
+    const authorized = this.#analysisCall(() => latest.ledger.authorize(bookId, taskIntentId, planEnvelopeDigest));
+    return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger: latest.ledger };
+  }
+
+  /**
+   * Startup reconciliation of the reader's report kind (as 初评's): a draft left admitted or executing has nothing running it and
+   * cannot resume, so it ends 已中断 with its outcome; a start the governor had not admitted is blocked before dispatch with
+   * why. The kind's Runs are reconciled by kind, so any of its ledgers does it.
+   */
+  reconcileStoppedReadersReportRuns(): { settled: number } {
+    this.#assertAvailable();
+    const any = this.#readersReportCall(() => this.#readersReports.anyTask());
+    if (any === null) return { settled: 0 };
+    return { settled: this.#analysisCall(() => this.#readersReportLedger(any.input).reconcileStoppedRuns()).settled };
+  }
+
+  /**
+   * 审稿意见 on ②C (EVAL-013): the 定稿 version a new one drafts from, the Book's latest Task, and per template whether it can be
+   * drafted, its newest result not yet opened, and its draft document.
+   */
+  #readersReportWorkspace(bookId: string, basis: FinalizedEvaluation | null, unreadable: string | null): EvaluationReadersReportProjection {
+    const exemplars = this.#readersReportExemplars();
+    let latest: { task: StoredReadersReportTask; ledger: BaselineAnalysisStore; projection: ReadersReportProjection } | null = null;
+    let unavailable: string | null = unreadable;
+    try {
+      latest = this.#latestReadersReport(bookId);
+    } catch (error) {
+      if (!(error instanceof StoreError)) throw error;
+      unavailable = `审稿意见暂不可用：${error.message}`;
+    }
+    const runState = latest?.projection.run?.state ?? null;
+    const drafts = this.#readersReportCall(() => this.#readersReports.drafts(bookId));
+    const revisions = this.#readersReportCall(() => this.#readersReports.revisions(bookId));
+    const templates = READERS_REPORT_TEMPLATES.map((template) => {
+      const label = READERS_REPORT_TEMPLATE_LABELS[template];
+      const typeId = readersReportDocumentTypeId(template);
+      const stored = drafts.find((draft) => draft.template === template);
+      const row = stored === undefined ? undefined : this.#documentCall(() => this.#productionDocuments.documentById(bookId, stored.documentId));
+      const draft = stored === undefined || row === undefined ? null : {
+        typeId,
+        typeLabel: readersReportDocumentType(typeId)!.label,
+        recordOrdinal: this.#evaluationRecordOrdinal(stored.recordId),
+        document: this.#documentCall(() => this.#productionDocuments.document(row)),
+      };
+      // The newest result of this template whose synthesis wrote the draft, while the template has no draft document yet.
+      let drafted: { revisionId: string; recordOrdinal: number; createdAt: string } | null = null;
+      if (draft === null && unavailable === null) {
+        for (const revision of revisions) {
+          const found = this.#readersReportTaskOf(revision.taskIntentId);
+          if (found === null || found.task.template !== template) continue;
+          const inspected = this.#analysisCall(() => found.ledger.inspect(bookId, undefined, revision.revisionId)) as ReadersReportProjection;
+          if (inspected.inspectedRevision?.revision.readersReport.sections !== null) {
+            drafted = { revisionId: revision.revisionId, recordOrdinal: this.#evaluationRecordOrdinal(found.task.recordId), createdAt: revision.createdAt };
+          }
+          break;
+        }
+      }
+      const prepare: EvaluationReadersReportProjection['templates'][number]['prepare'] =
+        this.#baselineAnalysis.launch.live !== null ? { allowed: false, reason: READERS_REPORT_LIVE_UNAVAILABLE }
+        : unavailable !== null ? { allowed: false, reason: unavailable }
+        : basis === null ? { allowed: false, reason: READERS_REPORT_NEEDS_FINALIZED }
+        : draft !== null ? { allowed: false, reason: `这本书已经有「${label}」的草稿；请打开它继续修改。` }
+        : runIsActive(runState) ? { allowed: false, reason: activeRunReason(runState) }
+        : { allowed: true, mode: latest === null || latest.projection.resultSetRevision === null ? 'readers-report-first' : 'readers-report-again' };
+      return { template, label, prepare, drafted, draft };
+    });
+    const task = latest?.projection.taskIntent ?? null;
+    return {
+      basis: basis === null ? null : { recordId: basis.recordId, ordinal: basis.ordinal, revisionLabel: basis.revisionLabel, finalizedAt: basis.finalizedAt },
+      exemplars: { count: exemplars.length, statement: readersReportExemplarLine(exemplars) },
+      task: latest === null || task === null ? null : {
+        taskIntentId: task.taskIntentId,
+        template: latest.task.template,
+        state: latest.projection.state,
+        label: readersReportTaskStateLabel(latest.projection),
+      },
+      templates,
+    };
+  }
+
+  /**
+   * 打开草稿 (EVAL-013): one drafted result made its template's draft document — an Editorial Artifact in the same block store
+   * as a Production Document, edited on the manuscript surface with the same marks, saved as `版本 N` and exported as DOCX —
+   * in one transaction with the record of which result and which 定稿 version it was made from. Once per template of a Book:
+   * the draft is then edited in place. It is a draft: nothing is delivered or sent, and the Evaluation Record is unchanged.
+   */
+  createReadersReportDraft(bookId: string, revisionId: string): EvaluationWorkspaceProjection {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(revisionId), 'READERS_REPORT_INVALID', '审稿意见参数无效。');
+    const revision = this.#readersReportCall(() => this.#readersReports.revisions(bookId)).find((entry) => entry.revisionId === revisionId);
+    requireStore(revision !== undefined, 'READERS_REPORT_NOT_FOUND', '这本书没有这一次起草的审稿意见。');
+    const found = this.#readersReportTaskOf(revision.taskIntentId);
+    requireStore(found !== null, 'READERS_REPORT_RECORD_INVALID', '这一次起草没有记下它依据的评估版本。');
+    const inspected = this.#analysisCall(() => found.ledger.inspect(bookId, undefined, revisionId)) as ReadersReportProjection;
+    const sections = inspected.inspectedRevision?.revision.readersReport.sections ?? null;
+    requireStore(sections !== null, 'READERS_REPORT_NOT_DRAFTED', '这一次起草没有写出审稿意见，不能打开草稿。');
+    const template = found.task.template;
+    const typeId = readersReportDocumentTypeId(template);
+    const type = readersReportDocumentType(typeId)!;
+    const book = this.#authority.prepare('SELECT title FROM books WHERE book_id = ?').get(bookId) as SqlRow | undefined;
+    requireStore(book !== undefined, 'BOOK_NOT_FOUND', '图书不存在。');
+    // Every revision names a Source Version; a draft's names the manuscript file its 定稿 version evaluated (the export writes
+    // the draft fresh from its own words, never from that file).
+    const source = this.#authority.prepare(
+      `SELECT mr.source_version_id FROM evaluation_records er JOIN manuscript_revisions mr ON mr.revision_id = er.revision_id
+       WHERE er.record_id = ? AND er.book_id = ?`,
+    ).get(found.task.recordId, bookId) as SqlRow | undefined;
+    requireStore(source !== undefined, 'READERS_REPORT_RECORD_INVALID', '审稿意见所依据的评估版本缺失。');
+    const sourceVersionId = asString(source.source_version_id);
+    const blocks = readersReportDraftBlocks(asString(book.title), template, sections).map((block) => ({
+      ...block,
+      digest: sha256(canonicalJson({ kind: block.kind, level: block.level, text: block.text })),
+      graphemeLength: readersReportBlockLength(block.text),
+    }));
+    const now = new Date().toISOString();
+    const documentId = randomUUID();
+    const branchId = randomUUID();
+    const draftRevisionId = randomUUID();
+    const characterCount = blocks.reduce((total, block) => total + block.graphemeLength, 0);
+    const revisionDigest = ReadersReports.draftRevisionDigest(documentId, revisionId, blocks.map(({ kind, level, text }) => ({ kind, level, text })));
+    this.#documentCall(() => this.#readersReportCall(() => this.#transaction(this.#authority, () => {
+      // The checks again, inside the transaction that writes: a second 打开草稿 of the template refuses this one.
+      requireStore(this.#productionDocuments.documentOfType(bookId, typeId) === undefined, 'READERS_REPORT_DRAFT_EXISTS',
+        `这本书已经有「${READERS_REPORT_TEMPLATE_LABELS[template]}」的草稿；请打开它继续修改。`);
+      this.#authority.prepare("INSERT INTO manuscripts(manuscript_id, book_id, role, created_at) VALUES (?, ?, 'production-document', ?)")
+        .run(documentId, bookId, now);
+      this.#authority.prepare('INSERT INTO manuscript_branches(branch_id, manuscript_id, name, created_at) VALUES (?, ?, ?, ?)')
+        .run(branchId, documentId, type.label, now);
+      this.#authority.prepare(
+        `INSERT INTO manuscript_revisions(
+           revision_id, manuscript_id, branch_id, ordinal, revision_label, parent_revision_id,
+           source_version_id, revision_digest, created_at
+         ) VALUES (?, ?, ?, 1, 'r1', NULL, ?, ?, ?)`,
+      ).run(draftRevisionId, documentId, branchId, sourceVersionId, revisionDigest, now);
+      this.#authority.prepare('UPDATE manuscript_branches SET base_revision_id = ? WHERE branch_id = ?').run(draftRevisionId, branchId);
+      const insertBlock = this.#authority.prepare('INSERT INTO manuscript_blocks(block_id, manuscript_id, created_revision_id) VALUES (?, ?, ?)');
+      const insertVersion = this.#authority.prepare(
+        `INSERT INTO manuscript_block_versions(
+           revision_id, block_id, position, kind, level, text, digest, start_offset, grapheme_length
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      const insertWorking = this.#authority.prepare(
+        `INSERT INTO working_blocks(branch_id, block_id, position, kind, level, text, digest, grapheme_length)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      let offset = 0;
+      blocks.forEach((block, index) => {
+        const position = index + 1;
+        const blockId = `blk_${sha256(`${draftRevisionId}\u0000${position}\u0000${block.digest}`).slice(0, 24)}`;
+        insertBlock.run(blockId, documentId, draftRevisionId);
+        insertVersion.run(draftRevisionId, blockId, position, block.kind, block.level, block.text, block.digest, offset, block.graphemeLength);
+        insertWorking.run(branchId, blockId, position, block.kind, block.level, block.text, block.digest, block.graphemeLength);
+        offset += block.graphemeLength;
+      });
+      this.#authority.prepare(
+        `INSERT INTO branch_working_state(
+           branch_id, manuscript_id, base_revision_id, journal_sequence, working_digest,
+           total_graphemes, history_sequence, last_checkpoint_sequence
+         ) VALUES (?, ?, ?, 0, ?, ?, 0, 0)`,
+      ).run(branchId, documentId, draftRevisionId, revisionDigest, characterCount);
+      requireStore(
+        this.#boundedCall(() => this.#boundedAuthority.initializeImportedBranch(branchId)) === characterCount,
+        'READERS_REPORT_INVALID', '审稿意见草稿的索引无法由它的文字精确建立。',
+      );
+      this.#productionDocuments.record({
+        documentId, bookId, typeId, originSourceVersionId: sourceVersionId, parserIdentity: 'ai7.readers-report-draft/1', createdAt: now,
+      }, { types: READERS_REPORT_DOCUMENT_TYPES, digest: READERS_REPORT_DOCUMENT_TYPES_DIGEST });
+      this.#documentWorkflow.recordInstance(documentId, now);
+      this.#productionDocuments.recordVersion(documentId, draftRevisionId, revisionDigest, 'created');
+      this.#readersReports.recordDraft({
+        documentId, bookId, template, analysisRevisionId: revisionId, taskIntentId: revision.taskIntentId, recordId: found.task.recordId, recordedAt: now,
+      });
+    })));
+    return this.inspectEvaluation(bookId, null);
   }
 
   /** 保存评估 or 定稿: the editor's content appended to the version's chain, and the page as it now reads. */
@@ -11595,6 +12045,7 @@ export class EditorialStore {
       historyCount: history.count,
       historyNext: history.nextCursor,
       knowledge: this.#seriesKnowledgeProjection(series.seriesId),
+      exclusions: this.#seriesExclusionsProjection(series.seriesId),
     };
   }
 
@@ -11664,6 +12115,311 @@ export class EditorialStore {
       actor: '本机编辑',
       recordedAt: change.recordedAt,
       impact: change.impact,
+    };
+  }
+
+  // ---- 书系检索排除 (Issue #64, plan slice S29b; V2-UX-SER-020 to SER-029; ADR 0037) -----------------------------------
+
+  /**
+   * 添加检索排除…'s choices (SER-020): a page of what one kind of target may name in this Series — its knowledge items by name,
+   * the eight classes, its member Books newest joined first, or its members' Source Versions newest first — each saying whether
+   * an exclusion in force names it already. A read.
+   */
+  inspectSeriesExclusionTargets(input: InspectSeriesExclusionTargetsInput): SeriesExclusionTargetsProjection {
+    return this.#seriesCall(() => {
+      const series = this.#requireSeries(input.seriesId);
+      requireStore(isSeriesExclusionTargetKind(input.kind), 'SERIES_EXCLUSION_TARGET_INVALID', '检索排除的对象无效。');
+      const after = input.after;
+      requireStore(after === null || (isRecord(after) && typeof after.key === 'string' && after.key.length <= 400 && typeof after.id === 'string' &&
+        after.id.length >= 1 && after.id.length <= 64), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      const effective = this.#seriesExclusions.effective(series.seriesId);
+      const excluded = (kind: SeriesExclusionTargetKind, id: string): boolean => effective.some((entry) => entry.target.kind === kind && entry.target.id === id);
+      const rows: Array<{ target: SeriesExclusionTargetProjection; key: string }> = [];
+      const limit = MAX_SERIES_EXCLUSION_TARGETS_PAGE + 1;
+      if (input.kind === 'knowledge-item') {
+        for (const item of this.#seriesKnowledge.itemsPage(series.seriesId, '', after === null ? null : { subject: after.key, itemId: after.id }, limit)) {
+          rows.push({ key: item.subject, target: seriesExclusionTarget('knowledge-item', item.itemId, { subject: item.subject, knowledgeClass: item.knowledgeClass }) });
+        }
+      } else if (input.kind === 'knowledge-class') {
+        for (const knowledgeClass of SERIES_KNOWLEDGE_CLASSES) rows.push({ key: knowledgeClass, target: seriesExclusionTarget('knowledge-class', knowledgeClass, {}) });
+      } else if (input.kind === 'book') {
+        for (const member of this.#series.members(series.seriesId)) {
+          if (after !== null && (member.joinedAt > after.key || (member.joinedAt === after.key && member.bookId >= after.id))) continue;
+          rows.push({ key: member.joinedAt, target: seriesExclusionTarget('book', member.bookId, { bookTitle: this.#evaluationBookTitle(member.bookId) }) });
+          if (rows.length >= limit) break;
+        }
+      } else {
+        for (const row of this.#authority.prepare(
+          `SELECT sv.source_version_id, sv.display_name, sv.created_at, b.title FROM source_versions sv JOIN books b ON b.book_id = sv.book_id
+           WHERE EXISTS (SELECT 1 FROM series_membership_changes c WHERE c.series_id = ? AND c.book_id = sv.book_id AND c.kind = 'add'
+               AND c.ordinal = (SELECT max(d.ordinal) FROM series_membership_changes d WHERE d.series_id = c.series_id AND d.book_id = c.book_id))
+             AND (? IS NULL OR sv.created_at < ? OR (sv.created_at = ? AND sv.source_version_id < ?))
+           ORDER BY sv.created_at DESC, sv.source_version_id DESC LIMIT ?`,
+        ).all(series.seriesId, after?.key ?? null, after?.key ?? null, after?.key ?? null, after?.id ?? null, limit) as SqlRow[]) {
+          rows.push({ key: asString(row.created_at), target: seriesExclusionTarget('source-version', asString(row.source_version_id),
+            { displayName: asString(row.display_name), bookTitle: asString(row.title) }) });
+        }
+      }
+      const { page, more } = weighedPage(rows, MAX_SERIES_EXCLUSION_TARGETS_PAGE);
+      const last = page.at(-1);
+      return {
+        kind: input.kind,
+        targets: page.map((row) => ({ ...row.target, excluded: excluded(row.target.kind, row.target.id) })),
+        nextCursor: more && last !== undefined ? { key: last.key, id: last.target.id } : null,
+      };
+    });
+  }
+
+  /** `更早的排除记录…`: the next page of one Series' exclusion revisions, newest first. A read. */
+  inspectSeriesExclusionHistory(input: InspectSeriesExclusionHistoryInput): SeriesExclusionHistoryPageProjection {
+    return this.#seriesCall(() => {
+      const series = this.#requireSeries(input.seriesId);
+      requireStore(isRecord(input.after) && typeof input.after.recordedAt === 'string' && !Number.isNaN(Date.parse(input.after.recordedAt)) &&
+        typeof input.after.revisionId === 'string' && UUID_PATTERN.test(input.after.revisionId), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      const read = this.#seriesExclusionHistoryPage(series.seriesId, input.after);
+      return { history: read.history, nextCursor: read.nextCursor };
+    });
+  }
+
+  /**
+   * 书系检索排除影响预览 (SER-021, SER-022) for 添加检索排除, 修改检索排除 or 停止此排除. A read: nothing is recorded until the
+   * editor commits the exclusion against this preview's digest.
+   */
+  previewSeriesExclusion(input: PreviewSeriesExclusionInput): SeriesExclusionPreviewProjection {
+    return this.#seriesCall(() => this.#seriesExclusionPreview(input).preview);
+  }
+
+  /**
+   * 添加检索排除, 修改检索排除 or 停止此排除 (SER-020 to SER-027): the preview is recomputed inside the transaction and a stale one
+   * is refused; the revision keeps what the preview showed. An exclusion takes effect as it is recorded: an approved Run whose
+   * reading of the excluded material has not begun stops in the same transaction, and one reading now stops at the guard
+   * before its next range. Ending one restores nothing it stopped.
+   */
+  recordSeriesExclusion(input: RecordSeriesExclusionInput): SeriesExclusionResultProjection {
+    return this.#seriesCall(() => {
+      const { revision, stoppedRuns } = this.#transaction(this.#authority, () => {
+        const { preview, prior, reach } = this.#seriesExclusionPreview(input);
+        requireStore(typeof input.previewDigest === 'string' && preview.previewDigest === input.previewDigest, 'SERIES_EXCLUSION_PREVIEW_STALE',
+          '预览之后，检索排除、书系知识或相关任务有了变化；请重新查看影响，再决定。');
+        const stored = this.#seriesExclusions.record({
+          seriesId: preview.seriesId,
+          action: preview.action,
+          prior,
+          target: preview.target,
+          reason: preview.reason,
+          previewDigest: preview.previewDigest,
+          impact: preview.groups,
+        });
+        let stopped = 0;
+        if (preview.action === 'add') {
+          for (const run of reach.active) {
+            if (!run.started && this.#reviewRuns.stopForSeriesScope(run.reviewRunId, run.categoryId)) stopped += 1;
+          }
+        }
+        return { revision: stored, stoppedRuns: stopped };
+      });
+      return {
+        exclusionId: revision.exclusionId,
+        revisionId: revision.revisionId,
+        completionLabel: revision.action === 'add' ? '书系检索排除已生效' : revision.action === 'change' ? '检索排除已修改' : '已停止此排除',
+        stoppedRuns,
+        revision: this.#seriesExclusionRevision(revision),
+      };
+    });
+  }
+
+  /**
+   * The current-read guard the execution owner asks before each reading range of a Run (Issue #64, S29b; SER-023): what an
+   * exclusion in force reaches of the Series material the Run froze, or `null`. A record it cannot read stops the Run rather
+   * than let it read past a restriction it could not check.
+   */
+  seriesReadGuard(runRecordId: string): string | null {
+    this.#assertAvailable();
+    try {
+      return this.#reviewRuns.seriesReadGuard(runRecordId);
+    } catch (error) {
+      if (error instanceof ReviewRunError || error instanceof SeriesExclusionError) return '无法读取的书系检索排除记录';
+      throw error;
+    }
+  }
+
+  /**
+   * 取消任务 of a Review Run an exclusion stopped (SER-024): it then reads 已取消 and offers nothing more; what it put on the
+   * manuscript stays as it is. The answer is the Book's 审阅 with the Run open.
+   */
+  cancelReviewRun(bookId: string, reviewRunId: string, progress?: ProgressReader): ReviewWorkspaceProjection {
+    return this.#reviewCall(() => {
+      this.#reviewRuns.cancelStoppedRun(bookId, reviewRunId);
+      return this.#reviewRuns.workspace(bookId, reviewRunId, progress);
+    });
+  }
+
+  /** What an exclusion target names now, read from the records that own it; refused when this Series cannot name it. */
+  #seriesExclusionTargetOf(series: StoredSeries, input: unknown): SeriesExclusionTargetProjection {
+    requireStore(isRecord(input) && isSeriesExclusionTargetKind(input.kind) && typeof input.id === 'string', 'SERIES_EXCLUSION_TARGET_INVALID', '检索排除的对象无效。');
+    const id = input.id;
+    switch (input.kind) {
+      case 'knowledge-item': {
+        const item = UUID_PATTERN.test(id) ? this.#seriesKnowledge.item(id) : null;
+        requireStore(item !== null && item.seriesId === series.seriesId, 'SERIES_EXCLUSION_TARGET_NOT_FOUND', `书系「${series.title}」没有这个书系知识条目。`);
+        return seriesExclusionTarget('knowledge-item', id, { subject: item.subject, knowledgeClass: item.knowledgeClass });
+      }
+      case 'knowledge-class':
+        requireStore(isSeriesKnowledgeClass(id), 'SERIES_EXCLUSION_TARGET_NOT_FOUND', '没有这个知识类别。');
+        return seriesExclusionTarget('knowledge-class', id, {});
+      case 'book': {
+        requireStore(UUID_PATTERN.test(id), 'SERIES_EXCLUSION_TARGET_INVALID', '检索排除的对象无效。');
+        const bookTitle = this.#evaluationBookTitle(id);
+        requireStore(this.#series.latest(series.seriesId, id)?.kind === 'add', 'SERIES_EXCLUSION_NOT_MEMBER',
+          `《${bookTitle}》不在书系「${series.title}」中；检索排除只针对这个书系的成员图书。`);
+        return seriesExclusionTarget('book', id, { bookTitle });
+      }
+      case 'source-version': {
+        const row = UUID_PATTERN.test(id)
+          ? this.#authority.prepare('SELECT sv.book_id, sv.display_name, b.title FROM source_versions sv JOIN books b ON b.book_id = sv.book_id WHERE sv.source_version_id = ?').get(id) as SqlRow | undefined
+          : undefined;
+        requireStore(row !== undefined, 'SERIES_EXCLUSION_TARGET_NOT_FOUND', '没有这个来源版本。');
+        requireStore(this.#series.latest(series.seriesId, asString(row.book_id))?.kind === 'add', 'SERIES_EXCLUSION_NOT_MEMBER',
+          `《${asString(row.title)}》不在书系「${series.title}」中；检索排除只针对这个书系成员图书的来源版本。`);
+        return seriesExclusionTarget('source-version', id, { displayName: asString(row.display_name), bookTitle: asString(row.title) });
+      }
+    }
+  }
+
+  #seriesExclusionPreview(input: PreviewSeriesExclusionInput): {
+    preview: SeriesExclusionPreviewProjection;
+    prior: StoredExclusion | null;
+    reach: ReturnType<ReviewRunStore['seriesExclusionReach']>;
+  } {
+    const series = this.#requireSeries(input.seriesId);
+    requireStore(isSeriesExclusionAction(input.action), 'SERIES_EXCLUSION_INVALID', '检索排除只有添加、修改和停止。');
+    const reason = seriesExclusionReason(input.reason);
+    requireStore(reason !== null, 'SERIES_EXCLUSION_REASON_INVALID', `排除理由最多 ${MAX_SERIES_EXCLUSION_REASON_CHARACTERS} 个字，写在一行里。`);
+    const effective = this.#seriesExclusions.effective(series.seriesId);
+    let prior: StoredExclusion | null = null;
+    let target: SeriesExclusionTargetProjection;
+    if (input.action === 'add') {
+      requireStore(input.exclusionId === null && input.target !== null, 'SERIES_EXCLUSION_INVALID', '添加检索排除要指定一个对象。');
+      target = this.#seriesExclusionTargetOf(series, input.target);
+      requireStore(!effective.some((entry) => entry.target.kind === target.kind && entry.target.id === target.id), 'SERIES_EXCLUSION_ALREADY',
+        `${target.label}已经排除在书系「${series.title}」的检索之外。`);
+      requireStore(effective.length < MAX_SERIES_EXCLUSIONS, 'SERIES_EXCLUSION_LIMIT',
+        `书系「${series.title}」已有 ${MAX_SERIES_EXCLUSIONS} 条检索排除在生效；先停止不再需要的，再添加。`);
+    } else {
+      requireStore(typeof input.exclusionId === 'string' && UUID_PATTERN.test(input.exclusionId) && input.target === null, 'SERIES_EXCLUSION_INVALID',
+        '要指定修改或停止哪一条检索排除。');
+      prior = this.#seriesExclusions.exclusion(series.seriesId, input.exclusionId);
+      requireStore(prior !== null, 'SERIES_EXCLUSION_NOT_FOUND', '这条检索排除不存在。');
+      requireStore(prior.effective, 'SERIES_EXCLUSION_ENDED', '这条检索排除已经停止；以后的检索已经可以读取它。');
+      requireStore(input.action !== 'change' || reason !== prior.current.reason, 'SERIES_EXCLUSION_UNCHANGED', '排除理由没有变化。');
+      target = prior.target;
+    }
+    const covers = (material: SeriesKnowledgeMaterial): boolean => seriesExclusionCovers(series.seriesId, target, material);
+    // What the target reaches of the Series' knowledge now, and every version governing the preview, hashed one by one.
+    const governing = createHash('sha256');
+    const itemsNamed: string[] = [];
+    let itemCount = 0;
+    // 停止此排除 reopens only what no other exclusion in force still reaches (Issue #64 review).
+    const others = prior === null ? [] : effective.filter((entry) => entry.exclusionId !== prior!.exclusionId);
+    const stillNamed: string[] = [];
+    let stillCount = 0;
+    for (const item of this.#seriesKnowledge.items(series.seriesId)) {
+      const material = { seriesId: series.seriesId, itemId: item.itemId, knowledgeClass: item.knowledgeClass, sourceBookId: item.current.provenance?.bookId ?? null };
+      if (!covers(material)) continue;
+      itemCount += 1;
+      if (itemsNamed.length < NAMED_EXCLUSION_ENTRIES) itemsNamed.push(`「${item.subject}」`);
+      if (coveringExclusions(others, material).length > 0) {
+        stillCount += 1;
+        if (stillNamed.length < NAMED_EXCLUSION_ENTRIES) stillNamed.push(`「${item.subject}」`);
+      }
+      governing.update(canonicalJson({ kind: 'item', itemId: item.itemId, revisionId: item.current.revisionId }));
+      governing.update('\n');
+    }
+    for (const entry of effective) {
+      governing.update(canonicalJson({ kind: 'exclusion', exclusionId: entry.exclusionId, revisionId: entry.current.revisionId }));
+      governing.update('\n');
+    }
+    const reach = input.action === 'add' ? this.#reviewRuns.seriesExclusionReach(covers) : { active: [], prepared: 0, completed: [] };
+    governing.update(canonicalJson({ kind: 'runs', active: reach.active, prepared: reach.prepared, completed: reach.completed }));
+    // One entry per Review Run, even where two Books share a title (Issue #64 review).
+    const routes = (runs: ReadonlyArray<{ readonly reviewRunId: string; readonly route: string }>): string[] =>
+      [...new Map(runs.map((run) => [run.reviewRunId, run.route] as const)).values()];
+    const runRoutes = routes(reach.active);
+    const completedRoutes = routes(reach.completed);
+    const groups = seriesExclusionImpact(input.action, {
+      seriesTitle: series.title,
+      target,
+      reason,
+      priorReason: prior?.current.reason ?? null,
+      itemsNamed,
+      itemCount,
+      stillNamed,
+      stillCount,
+      runsNamed: runRoutes.slice(0, NAMED_EXCLUSION_ENTRIES),
+      runCount: runRoutes.length,
+      preparedCount: reach.prepared,
+      completedNamed: completedRoutes.slice(0, NAMED_EXCLUSION_ENTRIES),
+      completedCount: completedRoutes.length,
+    });
+    const preview: SeriesExclusionPreviewProjection = {
+      seriesId: series.seriesId,
+      seriesTitle: series.title,
+      action: input.action,
+      actionLabel: SERIES_EXCLUSION_ACTION_LABELS[input.action],
+      exclusionId: prior?.exclusionId ?? null,
+      target,
+      reason,
+      scope: `只限书系「${series.title}」的书系检索`,
+      effectiveTime: '记录后立即生效',
+      actor: '本机编辑',
+      groups,
+      previewDigest: seriesExclusionPreviewDigest({
+        seriesId: series.seriesId,
+        action: input.action,
+        exclusionId: prior?.exclusionId ?? null,
+        target,
+        reason,
+        chainHead: prior?.current.revisionId ?? null,
+        governingDigest: governing.digest('hex'),
+        groups,
+      }),
+    };
+    return { preview, prior, reach };
+  }
+
+  /** A Series' 检索排除 as its page opens: every exclusion in force, and the first page of revisions. */
+  #seriesExclusionsProjection(seriesId: string): SeriesExclusionsProjection {
+    const effective = this.#seriesExclusions.effective(seriesId).map((entry): SeriesExclusionProjection => ({
+      exclusionId: entry.exclusionId,
+      target: entry.target,
+      reason: entry.current.reason,
+      effectiveSince: entry.since,
+      revision: entry.current.revision,
+    }));
+    const history = this.#seriesExclusionHistoryPage(seriesId, null);
+    return { effective, history: history.history, historyCount: history.count, historyNext: history.nextCursor };
+  }
+
+  #seriesExclusionHistoryPage(seriesId: string, after: SeriesExclusionHistoryCursor | null):
+  SeriesExclusionHistoryPageProjection & { count: number } {
+    const { entries, count } = this.#seriesExclusions.historyPage(seriesId, after, MAX_SERIES_EXCLUSION_HISTORY_PAGE + 1);
+    const { page, more } = weighedPage(entries.map((entry) => this.#seriesExclusionRevision(entry)), MAX_SERIES_EXCLUSION_HISTORY_PAGE);
+    const last = page.at(-1);
+    return { history: page, nextCursor: more && last !== undefined ? { recordedAt: last.recordedAt, revisionId: last.revisionId } : null, count };
+  }
+
+  #seriesExclusionRevision(entry: StoredExclusionRevision): SeriesExclusionRevisionProjection {
+    return {
+      revisionId: entry.revisionId,
+      exclusionId: entry.exclusionId,
+      revision: entry.revision,
+      action: entry.action,
+      actionLabel: SERIES_EXCLUSION_ACTION_LABELS[entry.action],
+      target: entry.target,
+      reason: entry.reason,
+      actor: '本机编辑',
+      recordedAt: entry.recordedAt,
+      impact: entry.impact,
     };
   }
 
@@ -12244,7 +13000,8 @@ export class EditorialStore {
       return operation();
     } catch (error) {
       if (error instanceof SeriesError || error instanceof SeriesKnowledgeError || error instanceof LearningEligibilityError ||
-          error instanceof DecisionFeedbackError || error instanceof AnalysisFeedbackError) {
+          error instanceof DecisionFeedbackError || error instanceof AnalysisFeedbackError || error instanceof SeriesExclusionError ||
+          error instanceof ReviewRunError) {
         throw new StoreError(error.code, error.message);
       }
       throw error;
@@ -12471,6 +13228,8 @@ export class EditorialStore {
     'PRODUCTION_DOCUMENT_INVALID', '生产文档参数无效。');
     const row = this.#documentCall(() => this.#productionDocuments.documentById(input.bookId, input.documentId));
     requireStore(row !== undefined, 'PRODUCTION_DOCUMENT_NOT_FOUND', '这本书没有这份生产文档。');
+    // A 审稿意见 draft (Issue #429, S81c) is a draft, never a delivery.
+    requireStore(readersReportDocumentType(row.typeId) === undefined, 'READERS_REPORT_NOT_DELIVERABLE', '审稿意见草稿不能在这里交付；它只在稿件编辑面上修改并导出。');
     // Who and the note are checked first: a refused delivery saves no version either.
     const party = this.#documentCall(() => this.#productionDocuments.deliveryParty(input.recipient, input.note));
     if (version.kind === 'saved') {
@@ -12541,8 +13300,12 @@ export class EditorialStore {
 
   #productionDocumentResult(bookId: string, typeId: string, notice: string | null = null): ProductionDocumentResultProjection {
     const documents = this.inspectProductionDocuments(bookId);
+    // A 审稿意见 draft (Issue #429, S81c) is saved as a version and moves its phases exactly as a house type's document does.
     const card = documents.types.find((type) => type.typeId === typeId);
-    return { bookId, documents, typeId, document: card?.document ?? null, notice };
+    const draft = card === undefined && readersReportDocumentType(typeId) !== undefined
+      ? this.#documentCall(() => this.#productionDocuments.documentOfType(bookId, typeId))
+      : undefined;
+    return { bookId, documents, typeId, document: draft !== undefined ? this.#documentCall(() => this.#productionDocuments.document(draft)) : card?.document ?? null, notice };
   }
 
   /**
@@ -16214,7 +16977,7 @@ export class EditorialStore {
       // A guideline version that no longer reads refuses the review's configuration in its own words (Issue #427 review).
       // So does a Series record that no longer reads (Issue #64 review), should one reach here past 书系一致性's own reading.
       if (error instanceof ReviewRunError || error instanceof AnalysisError || error instanceof EditorialMarkError || error instanceof ProposalConflictError ||
-        error instanceof ReviewGuidelineError || error instanceof SeriesError || error instanceof SeriesKnowledgeError) {
+        error instanceof ReviewGuidelineError || error instanceof SeriesError || error instanceof SeriesKnowledgeError || error instanceof SeriesExclusionError) {
         throw new StoreError(error.code, error.message);
       }
       if (error instanceof BoundedStoreFatalError) {

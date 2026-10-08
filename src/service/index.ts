@@ -664,6 +664,15 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeConflicts(request.input) };
     case 'inspectSeriesKnowledgeRevisions':
       return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeRevisions(request.input.seriesId, request.input.itemId, request.input.before) };
+    // 书系检索排除 (Issue #64, S29b).
+    case 'inspectSeriesExclusionTargets':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesExclusionTargets(request.input) };
+    case 'inspectSeriesExclusionHistory':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesExclusionHistory(request.input) };
+    case 'previewSeriesExclusion':
+      return { id: request.id, ok: true, op: request.op, result: store.previewSeriesExclusion(request.input) };
+    case 'recordSeriesExclusion':
+      return { id: request.id, ok: true, op: request.op, result: store.recordSeriesExclusion(request.input) };
     case 'inspectEvaluationProfiles':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluationProfiles() };
     case 'inspectEvaluation':
@@ -688,6 +697,24 @@ async function dispatch(
       }
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluation(request.input.bookId, null) };
     }
+    // 审稿意见 (Issue #429, S81c): drafted from the Book's latest 定稿 version, prepared as a cooperative job whose plan the Task
+    // Drawer opens, and started from its bar through the governor on the ledger of the plan's contract, as 初评 is.
+    case 'prepareReadersReport':
+      return { id: request.id, ok: true, op: request.op, result: jobs.startReadersReportPreparation(request.input.bookId, request.input.template, launchPolicy) };
+    case 'authorizeReadersReport': {
+      const authorized = store.authorizeReadersReport(request.input.bookId, request.input.taskIntentId, request.input.planEnvelopeDigest);
+      if (authorized.dispatchRunRecordId !== null) {
+        try {
+          analysisExecution.admitOrQueue(authorized.dispatchRunRecordId, authorized.ledger);
+        } catch (error) {
+          const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
+          throw new StoreErrorClass(code, error instanceof Error ? error.message : '运行未能进入调度。');
+        }
+      }
+      return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluation(request.input.bookId, null) };
+    }
+    case 'createReadersReportDraft':
+      return { id: request.id, ok: true, op: request.op, result: store.createReadersReportDraft(request.input.bookId, request.input.revisionId) };
     case 'inspectAnalysisFeedback':
       return { id: request.id, ok: true, op: request.op, result: store.inspectAnalysisFeedback(request.input.bookId, request.input.revisionId) };
     case 'recordAnalysisFeedback':
@@ -760,6 +787,9 @@ async function dispatch(
         op: request.op,
         result: store.generateReviewReport(request.input.bookId, request.input.reviewRunId, analysisProgress),
       };
+    // 取消任务 of a Review Run a Series Retrieval Exclusion stopped (Issue #64, S29b): nothing of it is driven, so it is recorded.
+    case 'cancelReviewRun':
+      return { id: request.id, ok: true, op: request.op, result: store.cancelReviewRun(request.input.bookId, request.input.reviewRunId, analysisProgress) };
     case 'inspectReviewFindingOfMark': {
       // A mark of another Book answers exactly as a mark no Review Run produced.
       const found = store.reviewFindingOfMark(request.input.markId);
@@ -1280,8 +1310,10 @@ function parseArguments(argv: string[]): {
         (process.env.AI7_E2E_JOURNEY !== 'J-04' && process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' &&
           process.env.AI7_E2E_JOURNEY !== 'J-16' && process.env.AI7_E2E_JOURNEY !== 'J-11' && process.env.AI7_E2E_JOURNEY !== 'J-13'))) ||
     (connectivityPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-04' || !isAbsolute(connectivityPath))) ||
-    (unitHoldPath !== undefined && ((process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' && process.env.AI7_E2E_JOURNEY !== 'J-16' &&
-      process.env.AI7_E2E_JOURNEY !== 'J-11') ||
+    // J-11 keeps a Run under way while ②A's follower is held (#641); J-13 holds a 书系一致性 Run while a Series Retrieval
+    // Exclusion is recorded (Issue #64, S29b).
+    (unitHoldPath !== undefined && ((process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' &&
+      process.env.AI7_E2E_JOURNEY !== 'J-11' && process.env.AI7_E2E_JOURNEY !== 'J-13' && process.env.AI7_E2E_JOURNEY !== 'J-16') ||
       !isAbsolute(unitHoldPath))) ||
     (answerHoldPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-16' || !isAbsolute(answerHoldPath))) ||
     [importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length > 1 ||
@@ -1422,6 +1454,7 @@ async function run(): Promise<void> {
     store.initialEvaluationLedger.bindLaunch(launch);
     harness = await mountDormantHarness();
     jobs = new CooperativeJobOwner(store);
+    const guardedStore = store;
     analysisExecution = new BaselineAnalysisExecutionOwner({
       ledger: store.baselineAnalysisLedger,
       launchPolicy,
@@ -1429,6 +1462,8 @@ async function run(): Promise<void> {
       secretResolver: createKeyringSecretResolver(),
       developerLive,
       unitHold: unitHoldPath === undefined ? null : controlledUnitHold(unitHoldPath),
+      // The current-read guard over Series material (Issue #64, S29b; SER-023): asked before each reading range of every Run.
+      readGuard: (runRecordId) => guardedStore.seriesReadGuard(runRecordId),
     });
     // Startup reconciliation (Issue #422, S76b; CONT-014): a baseline Run this service's predecessor left under way has
     // nothing running it now. It settles 已暂停 or 任务已中断 · 可续行 before any request is read; one left cancelling is
@@ -1459,6 +1494,13 @@ async function run(): Promise<void> {
     // A Review Run's category left authorized sent nothing and is 继续审阅's to dispatch, the editor's own choice.
     store.reconcileStoppedFactualReviewRuns();
     store.reconcileStoppedReviewCategoryRuns();
+    // 审稿意见 has no 续行 either (Issue #429, S81c): reconciled by kind exactly as 初评 is. A damaged record of it never stops the
+    // service starting: its Run stays as it was and 评估 says 审稿意见 is unavailable, with why.
+    try {
+      store.reconcileStoppedReadersReportRuns();
+    } catch {
+      // Reported where the 审稿意见 is read.
+    }
     // A Review Run's categories take a place of the one owner's governor one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);
     // Interactive Editorial Dialogue (Issue #52, S17a): its answers persist their Session logs — the Harness Session Ledger —

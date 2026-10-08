@@ -18,7 +18,7 @@ import {
   ANALYSIS_LEDGER_TRIGGER_SQL,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
-  CLARIFICATION_SCHEMA_VERSION, DIALOGUE_SCHEMA_VERSION,
+  CLARIFICATION_SCHEMA_VERSION, READERS_REPORT_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
 } from '../../src/service/task-authorization.js';
@@ -607,7 +607,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     // drift or a retry-safe failure leaves the Plan Revision and Plan Adaptation relations empty.
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DIALOGUE_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(READERS_REPORT_SCHEMA_VERSION);
       const expectedEmpty = new Set(['analysis_plan_revisions', 'analysis_plan_adaptations']);
       for (const table of Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL)) {
         const total = (database.prepare(`SELECT count(*) total FROM ${table}`).get() as { total: number }).total;
@@ -626,6 +626,36 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(database.prepare('SELECT plan_version FROM analysis_plan_records GROUP BY plan_version').all()).toEqual([{ plan_version: 1 }]);
     } finally {
       database.close();
+    }
+  }, 300_000);
+
+  it('ends the ranges once the current-read guard keeps a safe retry back, and sends no range after it (Issue #64 review)', async () => {
+    await requireExactSample1(roots.codeRoot);
+    const transient = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry');
+    const store = await openWithRoute(roots.dataRoot, transient);
+    // The guard answers nothing for the five range checks, and turns from the sixth call on — unit 5's retry check.
+    let calls = 0;
+    const owner = new BaselineAnalysisExecutionOwner({
+      ledger: store.baselineAnalysisLedger, launchPolicy, fixture: transient, secretResolver: fakeSecretResolver(),
+      readGuard: () => (++calls >= 6 ? '书系知识条目「海边小城」（地点）' : null),
+    });
+    try {
+      const bookId = (await importSample1Book(store, roots.codeRoot, 'L2 sample1 检索排除挡住重试')).bookId;
+      await pinEditorialWorkspaceProfileRevision2(store, bookId);
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      const prepared = prepare(store, bookId);
+      const authorized = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+      owner.admitAndDispatch(authorized.dispatchRunRecordId!);
+      const settled = await settle(owner, store, bookId);
+      expect(settled.run?.state).toBe('interrupted');
+      // Units 1 to 5 once each: the retry was kept back, and no range after unit 5 was sent.
+      expect(settled.run!.attempt!.spans.map((span) => [span.unitOrdinal, span.attemptIndex])).toEqual([[1, 1], [2, 1], [3, 1], [4, 1], [5, 1]]);
+      expect(settled.run!.adaptations).toEqual([]);
+      expect([settled.taskOutcome?.classification, settled.taskOutcome?.safeNextAction]).toEqual(['interrupted', '修改计划并重新授权，或取消任务；这次运行不能续行、重试，也不会改用别的材料。']);
+      store.markCleanShutdown();
+    } finally {
+      await owner.dispose();
+      store.close();
     }
   }, 300_000);
 
@@ -1427,7 +1457,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       try {
         const after = new DatabaseSync(databasePath, { readOnly: true });
         try {
-          expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DIALOGUE_SCHEMA_VERSION);
+          expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(READERS_REPORT_SCHEMA_VERSION);
           for (const table of j03Tables) expect(tableRows(after, table)).toEqual(j03Before[table]);
           for (const table of analysisTables) {
             expect(tableRows(after, table, table === 'analysis_task_intents' ? REVISION_15_INTENT_COLUMNS : '*')).toEqual(analysisBefore[table]);
@@ -1512,7 +1542,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     try {
       const after = new DatabaseSync(databasePath, { readOnly: true });
       try {
-        expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DIALOGUE_SCHEMA_VERSION);
+        expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(READERS_REPORT_SCHEMA_VERSION);
         for (const table of j03Tables) expect(tableRows(after, table)).toEqual(j03Before[table]);
         for (const table of analysisTables) expect(tableRows(after, table)).toEqual(analysisBefore[table]);
         // The widened CHECKs are in place: the second kind is admissible where it was not before.
@@ -1558,7 +1588,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     }
     const verify = new DatabaseSync(databasePath);
     try {
-      expect((verify.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DIALOGUE_SCHEMA_VERSION);
+      expect((verify.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(READERS_REPORT_SCHEMA_VERSION);
       for (const table of Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL)) {
         expect((verify.prepare(`SELECT count(*) total FROM ${table}`).get() as { total: number }).total).toBe(0);
       }

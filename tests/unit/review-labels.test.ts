@@ -119,6 +119,11 @@ describe('the words of the 审阅 destination', () => {
       'open-manuscript': '打开稿件',
       'open-review': '打开审阅',
       'view-plan': '查看计划',
+      // A Run a Series Retrieval Exclusion stopped (Issue #64, S29b; SER-024).
+      'scope-redo': '修改计划并重新授权',
+      'scope-cancel': '取消任务',
+      'scope-cancel-confirm': '确认取消任务',
+      'scope-cancel-keep': '不取消',
     });
     expect(reviewGenerateReportLabel(null)).toBe('生成报告');
     expect(reviewGenerateReportLabel(2)).toBe('生成新版本');
@@ -286,7 +291,7 @@ describe('the words of the 审阅 destination', () => {
   });
 
   it('reads 审阅 in one line on 工作概览', () => {
-    const summary = { reviewRunId: 'run', ordinal: 2, label: '第 2 次', createdAt: '', scopeLabel: '全书', categoryLabels: ['错别字与规范用语'], state: 'settled' as const, stateLabel: '已完成', findingCounts: counts, reportVersion: null };
+    const summary = { reviewRunId: 'run', ordinal: 2, label: '第 2 次', createdAt: '', scopeLabel: '全书', categoryLabels: ['错别字与规范用语'], state: 'settled' as const, stateLabel: '已完成', findingCounts: counts, reportVersion: null, historicalMarker: null };
     const row = (state: 'current' | 'needs-review') => ({ categoryId: 'x', label: 'x', state, stateLabel: '', lastRunOrdinal: 2, lastReviewedRevisionLabel: 'r1', changedBlocks: 0, unavailableReason: null });
     expect(reviewOverviewLine({ runs: [], coverage: [] })).toBe('审阅 · 还没有审阅记录');
     expect(reviewOverviewLine({ runs: [summary], coverage: [row('current')] })).toBe('审阅 · 最近一次是第 2 次（已完成），待处理 6 条');

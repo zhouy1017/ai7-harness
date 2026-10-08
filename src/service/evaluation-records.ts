@@ -16,6 +16,7 @@ import {
   type EvaluationInitialProjection,
   type EvaluationProfileProjection,
   type EvaluationProfilesProjection,
+  type EvaluationReadersReportProjection,
   type EvaluationRecordProjection,
   type EvaluationRecordSummaryProjection,
   type EvaluationTotalProjection,
@@ -49,6 +50,9 @@ import { graphemeCount } from './analysis/factual-review-contract.js';
  * record keeps the editor's scores; where one departs from AI7's, the editor may say why (entry content v2 carries it), and a
  * Book with such a departure in a 定稿 version counts once toward calibration. AI7 drafts no risk level and chooses no
  * conclusion: its suggestion is shown as AI7's.
+ *
+ * 审稿意见 (S81c; EVAL-013) is drafted from a 定稿 version: this owner says which version that is and hands its finalized words —
+ * with the 初评 it began from — to `readers-reports.ts`, which owns the drafts. A version is never changed by one.
  */
 
 export const EVALUATION_RECORD_SCHEMA_SQL = {
@@ -414,6 +418,33 @@ export interface InitialEvaluationReader {
   task(bookId: string): Pick<EvaluationInitialProjection, 'task' | 'prepare'>;
 }
 
+/** One 定稿 version as 审稿意见 drafts from it (S81c): its words, the entry that closed it, and the 初评 it began from. */
+export interface FinalizedEvaluation {
+  readonly recordId: string;
+  readonly bookId: string;
+  readonly ordinal: number;
+  readonly revisionId: string;
+  readonly revisionLabel: string;
+  readonly profile: EvaluationProfileProjection;
+  readonly content: EvaluationContent;
+  readonly total: EvaluationTotalProjection;
+  /** The `finalized` entry's digest and time. */
+  readonly entrySha256: string;
+  readonly finalizedAt: string;
+  readonly initial: EvaluationInitialDraftProjection | null;
+}
+
+/** What 评估 reads of a Book's 审稿意见 (S81c), given the 定稿 version a new one would draft from. */
+export interface ReadersReportReader {
+  /** `unreadable` says why the 定稿 version could not be read, when one could not; `basis` is then `null`. */
+  workspace(bookId: string, basis: FinalizedEvaluation | null, unreadable: string | null): EvaluationReadersReportProjection;
+}
+
+/** A Book whose 审稿意见 is not wired: nothing drafted, nothing to prepare. The store wires the real one. */
+const NO_READERS_REPORT: ReadersReportReader = {
+  workspace: () => ({ basis: null, exemplars: { count: 0, statement: '' }, task: null, templates: [] }),
+};
+
 /** A Book whose 初评 is not wired: nothing settled, nothing to prepare. The store wires the real one. */
 const NO_INITIAL_EVALUATION: InitialEvaluationReader = {
   latest: () => null,
@@ -452,11 +483,18 @@ export class EvaluationRecords {
   readonly #db: DatabaseSync;
   readonly #manuscripts: EvaluationManuscriptReader;
   readonly #initial: InitialEvaluationReader;
+  readonly #readersReport: ReadersReportReader;
 
-  constructor(db: DatabaseSync, manuscripts: EvaluationManuscriptReader, initial: InitialEvaluationReader = NO_INITIAL_EVALUATION) {
+  constructor(
+    db: DatabaseSync,
+    manuscripts: EvaluationManuscriptReader,
+    initial: InitialEvaluationReader = NO_INITIAL_EVALUATION,
+    readersReport: ReadersReportReader = NO_READERS_REPORT,
+  ) {
     this.#db = db;
     this.#manuscripts = manuscripts;
     this.#initial = initial;
+    this.#readersReport = readersReport;
   }
 
   /** The profile a new version snapshots: AI7's built-in one until a house's own is managed in 知识库. */
@@ -629,6 +667,44 @@ export class EvaluationRecords {
     }
     this.#append(stored, stored.sha256, 1, 'draft', seed);
     return recordId;
+  }
+
+  /** One version's 定稿 as 审稿意见 reads it, verified; `null` while the version is not 定稿. */
+  #finalized(record: StoredRecord): FinalizedEvaluation | null {
+    const latest = this.#entries(record).latest;
+    if (latest.kind !== 'finalized') return null;
+    return {
+      recordId: record.recordId,
+      bookId: record.bookId,
+      ordinal: record.ordinal,
+      revisionId: record.revisionId,
+      revisionLabel: record.revisionLabel,
+      profile: record.profile,
+      content: latest.content,
+      total: totalOf(record.profile, latest.content),
+      entrySha256: latest.sha256,
+      finalizedAt: latest.recordedAt,
+      initial: this.#initialDraft(record),
+    };
+  }
+
+  /**
+   * The 定稿 version a new 审稿意见 drafts from (S81c; EVAL-013): the Book's latest version that is 定稿, whether or not a later
+   * one is still being scored; `null` while none is.
+   */
+  latestFinalized(bookId: string): FinalizedEvaluation | null {
+    let found: StoredRecord | null = null;
+    for (const record of this.#records(bookId)) {
+      if (this.#entries(record).latest.kind === 'finalized') found = record;
+    }
+    return found === null ? null : this.#finalized(found);
+  }
+
+  /** One exact 定稿 version of the Book, as a 审稿意见 Task drafted from it reads it again; `null` when it is not one. */
+  finalizedOf(bookId: string, recordId: string): FinalizedEvaluation | null {
+    if (!UUID_PATTERN.test(recordId)) return null;
+    const row = this.#db.prepare('SELECT * FROM evaluation_records WHERE record_id = ? AND book_id = ?').get(recordId, bookId) as SqlRow | undefined;
+    return row === undefined ? null : this.#finalized(this.#record(row));
   }
 
   /** The AI7 初评 one version began from, verified against its row; `null` for a version the editor began alone. */
@@ -813,6 +889,16 @@ export class EvaluationRecords {
           };
     const latestInitial = this.#initial.latest(bookId);
     const initialTask = this.#initial.task(bookId);
+    // A 定稿 version that cannot be read takes 审稿意见 with it, and only it: 评估 still opens and says so there.
+    let basis: FinalizedEvaluation | null = null;
+    let unreadable: string | null = null;
+    try {
+      basis = this.latestFinalized(bookId);
+    } catch (error) {
+      if (!(error instanceof EvaluationError)) throw error;
+      unreadable = `审稿意见暂不可用：${error.message}`;
+    }
+    const readersReport = this.#readersReport.workspace(bookId, basis, unreadable);
     return {
       bookId,
       bookTitle,
@@ -828,6 +914,7 @@ export class EvaluationRecords {
         ...initialTask,
         latest: latestInitial === null ? null : { ...latestInitial.draft, total: totalOfScores(profile, latestInitial.draft.items), current: latestInitial.current },
       },
+      readersReport,
     };
   }
 

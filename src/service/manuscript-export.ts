@@ -27,7 +27,7 @@ import {
 import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
 import { reportExportLabel } from '../shared/report-wording.js';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
-import { productionDocumentType } from './production-document-types.js';
+import { documentTypeLabel, readersReportDocumentType } from './production-document-types.js';
 import type { ManuscriptCheckpointBinding, ManuscriptCheckpointProgress, ManuscriptCheckpointPurpose } from './bounded-manuscript.js';
 import {
   DOCX_EXPORT_WRITER_IDENTITY,
@@ -1327,7 +1327,7 @@ export class ManuscriptExportStore {
     const revisionDigest = text(row.revision_digest);
     requireExport(DIGEST_PATTERN.test(revisionDigest), 'EXPORT_RECORD_INVALID', '文档版本摘要无效。');
     const typeId = text(row.type_id);
-    const typeLabel = productionDocumentType(typeId)?.label ?? typeId;
+    const typeLabel = documentTypeLabel(typeId);
     const versionLabel = `版本 ${integer(row.version)}`;
     return {
       kind: 'document', targetKind: 'production-document-version', targetId: revisionId, milestoneId: null, milestoneLabel: null,
@@ -1466,7 +1466,11 @@ export class ManuscriptExportStore {
     const converter = nullableText(source.converter_identity);
     let exportSource: DocxExportSource;
     let mapping: DocxExportSourceRow[] = [];
-    if (converter !== null) {
+    if (target.document !== null && readersReportDocumentType(target.document.typeId) !== undefined) {
+      // A 审稿意见 draft (Issue #429, S81c) was written from a finalized Evaluation Record, not from a file: its revision names
+      // the manuscript file it reviews only because every revision names one, and nothing of that file belongs in it.
+      exportSource = { kind: 'fresh', reason: 'no-mapping', scan: null, converter: null };
+    } else if (converter !== null) {
       const working = nullableText(source.working_object_digest);
       exportSource = { kind: 'fresh', reason: 'converted', scan: working === null ? null : await this.#environment.readObject(working), converter };
     } else if (text(source.format) !== 'DOCX' || source.parser_identity === null) {

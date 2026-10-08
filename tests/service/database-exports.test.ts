@@ -21,7 +21,7 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
   ANALYSIS_LEDGER_REVISION_58_SQL,
   DATABASE_EXPORT_SCHEMA_VERSION,
-  DIALOGUE_SCHEMA_VERSION,
+  READERS_REPORT_SCHEMA_VERSION,
   STORE_VERSION_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
@@ -221,7 +221,7 @@ describe('导出数据库 over the real store', () => {
         schema: 'ai7.database-package/1',
         dataVersion: 1,
         softwareVersion: version,
-        schemaRevision: DIALOGUE_SCHEMA_VERSION,
+        schemaRevision: READERS_REPORT_SCHEMA_VERSION,
         origin: 'database-export',
         credentials: 'excluded',
         contents: { books: 1, sourceVersions: 1, libraryMaterials: 0, series: 0 },
@@ -236,7 +236,7 @@ describe('导出数据库 over the real store', () => {
       writeFileSync(copyPath, packaged['store/ai7.sqlite']!);
       const copy = new DatabaseSync(copyPath, { readOnly: true });
       try {
-        expect((copy.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DIALOGUE_SCHEMA_VERSION);
+        expect((copy.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(READERS_REPORT_SCHEMA_VERSION);
         expect((copy.prepare('SELECT count(*) count FROM books').get() as { count: number }).count).toBe(1);
       } finally {
         copy.close();
@@ -386,7 +386,7 @@ describe('导出数据库 over the real store', () => {
         first.close();
         const plant = new DatabaseSync(join(other.dataRoot, 'store', 'ai7.sqlite'));
         try {
-          plant.exec(`DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; PRAGMA user_version = ${STORE_VERSION_SCHEMA_VERSION};`);
+          plant.exec(`DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; PRAGMA user_version = ${STORE_VERSION_SCHEMA_VERSION};`);
           downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
         } finally {
           plant.close();
@@ -400,7 +400,7 @@ describe('导出数据库 over the real store', () => {
         }
         const check = new DatabaseSync(join(other.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
         try {
-          expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DIALOGUE_SCHEMA_VERSION);
+          expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(READERS_REPORT_SCHEMA_VERSION);
         } finally {
           check.close();
         }
@@ -799,16 +799,16 @@ describe('the payload check of a package, for every kind of file it carries (Iss
     expect(index).toBeGreaterThanOrEqual(0);
     const live = new DatabaseSync(storePath(), { readOnly: true });
     try {
-      expect(await refusedWith(verifyCopiedPayloads(storePath(), members, DIALOGUE_SCHEMA_VERSION, undefined, live))).toBe('no-error');
+      expect(await refusedWith(verifyCopiedPayloads(storePath(), members, READERS_REPORT_SCHEMA_VERSION, undefined, live))).toBe('no-error');
       const target = members[index]!;
       const otherDigest = target.sha256 === 'f'.repeat(64) ? '0'.repeat(64) : 'f'.repeat(64);
       for (const changed of [{ ...target, sha256: otherDigest }, { ...target, bytes: target.bytes + 1 }]) {
         const packed = members.map((member, at) => (at === index ? changed : member));
-        const damaged = await refusedWith(verifyCopiedPayloads(storePath(), packed, DIALOGUE_SCHEMA_VERSION, undefined, live));
+        const damaged = await refusedWith(verifyCopiedPayloads(storePath(), packed, READERS_REPORT_SCHEMA_VERSION, undefined, live));
         expect(damaged).toMatchObject({ code: 'DATABASE_SOURCE_DAMAGED' });
         expect((damaged as { message: string }).message).toContain(`${label} 1 个`);
         // Without the live store to tell the two apart, it is a package that did not come out whole.
-        expect(await refusedWith(verifyCopiedPayloads(storePath(), packed, DIALOGUE_SCHEMA_VERSION)))
+        expect(await refusedWith(verifyCopiedPayloads(storePath(), packed, READERS_REPORT_SCHEMA_VERSION)))
           .toMatchObject({ code: 'DATABASE_PACKAGE_INCOMPLETE' });
       }
     } finally {
