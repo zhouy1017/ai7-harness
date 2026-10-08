@@ -3,7 +3,7 @@ import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSyn
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { CAPTURED_PROCEDURE_SCOPE_SLOTS, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
+import { CAPTURED_PROCEDURE_SCOPE_SLOTS, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
   InspectSeriesKnowledgeReviewInput,
   ServiceOperationMap,
@@ -185,6 +185,15 @@ import type {
   LearningMaterialTarget,
   LearningMaterialsBookProjection,
   LearningMaterialsProjection,
+  LearningAuditBookProjection,
+  LearningAuditInput,
+  LearningAuditMaterialProjection,
+  LearningAuditProjection,
+  LearningLineageProjection,
+  LearningRemediationOutcomeProjection,
+  LearningRemediationPreviewProjection,
+  PreviewLearningRemediationInput,
+  RecordLearningRemediationInput,
   RecordProposalDecisionReasonInput,
   ReverseAppliedChangeSuggestionInput,
   UpdateEditorialMarkInput,
@@ -437,8 +446,10 @@ import {
   feedbackHistoryPage,
   feedbackReasonExcerpt,
   initializeLearningEligibilitySchema,
+  learningAuditStanding,
   learningMaterialDigest,
   learningMaterialOrder,
+  learningRemediationPreview,
   proposalDecisionCandidate,
   reviewDispositionCandidate,
   type LearningMaterialCandidate,
@@ -7335,6 +7346,209 @@ export class EditorialStore {
    */
   inspectFeedbackHistory(input: FeedbackHistoryInput = {}): FeedbackHistoryProjection {
     return this.#readFeedbackHistory(input);
+  }
+
+  /**
+   * 质量与学习 › 学习回溯 (Issue #62, plan slice S27a; LAUD-001, LAUD-002, LAUD-012): one page of the Learning Material that
+   * matches the filters, Book by Book — Books by title, a Book's materials as 学习准入 orders them — each with where it
+   * stands and what used it, at most `MAX_LEARNING_AUDIT_PAGE` an answer and half a frame. Every filter runs over every
+   * material before the page is cut. A read: product history, granting nothing.
+   */
+  inspectLearningAudit(input: LearningAuditInput = {}): LearningAuditProjection {
+    return this.#learningCall(() => {
+      const after = input.after ?? null;
+      requireStore(input.bookId == null || UUID_PATTERN.test(input.bookId), 'BOOK_INVALID', '图书标识无效。');
+      requireStore(after === null || (UUID_PATTERN.test(after.bookId) && after.bookTitle === safeTitle(after.bookTitle) &&
+        !Number.isNaN(Date.parse(after.orderedAt)) && LEARNING_MATERIAL_KEY_PATTERN.test(after.materialKey)),
+      'LEARNING_CURSOR_INVALID', '学习回溯列表位置无效。');
+      // A Series filters by the Books it holds now (LAUD-002); it widens nothing the editor may read.
+      const members = input.seriesId == null
+        ? null
+        : new Set(Array.from(this.#series.members(this.#requireSeries(input.seriesId).seriesId), (entry) => entry.bookId));
+      const query = input.query == null ? '' : input.query.trim().toLocaleLowerCase('zh-CN');
+      const matches = (candidate: LearningMaterialCandidate, standing: string): boolean =>
+        (input.kind == null || candidate.kind === input.kind) &&
+        (input.standing == null || standing === input.standing) &&
+        (input.recordedFrom == null || candidate.recordedAt >= input.recordedFrom) &&
+        (input.recordedBefore == null || candidate.recordedAt < input.recordedBefore) &&
+        (query.length === 0 || [candidate.originLabel, ...candidate.excerpt].join('\n').toLocaleLowerCase('zh-CN').includes(query));
+      const rows = (input.bookId != null
+        ? this.#authority.prepare('SELECT book_id, title FROM books WHERE book_id = ?').iterate(input.bookId)
+        : after === null
+          ? this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').iterate()
+          : this.#authority.prepare('SELECT book_id, title FROM books WHERE title > ? OR (title = ? AND book_id >= ?) ORDER BY title, book_id')
+            .iterate(after.bookTitle, after.bookTitle, after.bookId)) as IterableIterator<SqlRow>;
+      // Up to one material beyond the page, so the page knows whether another follows.
+      const collected: Array<{ bookId: string; title: string; material: LearningAuditMaterialProjection; orderedAt: string }> = [];
+      const counts = new Map<string, number>();
+      for (const row of rows) {
+        const id = asString(row.book_id);
+        if (members !== null && !members.has(id)) continue;
+        const title = asString(row.title);
+        const { page, count } = this.#learningAuditPage(id, id === after?.bookId ? after : null, MAX_LEARNING_AUDIT_PAGE + 1 - collected.length, matches);
+        counts.set(id, count);
+        for (const { material, orderedAt } of page) {
+          collected.push({ bookId: id, title, material, orderedAt });
+          if (collected.length > MAX_LEARNING_AUDIT_PAGE) break;
+        }
+        if (collected.length > MAX_LEARNING_AUDIT_PAGE) break;
+      }
+      const shown: typeof collected = [];
+      const books: LearningAuditBookProjection[] = [];
+      let bytes = 4_096; // The final cursor and envelope punctuation, beyond the weighed Books and materials.
+      let more = collected.length > MAX_LEARNING_AUDIT_PAGE;
+      for (const entry of collected.slice(0, MAX_LEARNING_AUDIT_PAGE)) {
+        const book = books.at(-1);
+        let heading: Omit<LearningAuditBookProjection, 'materials'> | null = null;
+        if (book?.bookId !== entry.bookId) {
+          const people = this.#bookPeople.current(entry.bookId);
+          heading = { bookId: entry.bookId, title: entry.title, authors: people.authors, editors: people.editors, materialCount: counts.get(entry.bookId) ?? 0 };
+        }
+        const weight = Buffer.byteLength(JSON.stringify(entry.material), 'utf8') + 1 +
+          (heading === null ? 0 : Buffer.byteLength(JSON.stringify({ ...heading, materials: [] }), 'utf8') + 1);
+        if (shown.length > 0 && bytes + weight > MAX_FRAME_BYTES / 2) {
+          more = true;
+          break;
+        }
+        if (heading === null) (book!.materials as LearningAuditMaterialProjection[]).push(entry.material);
+        else books.push({ ...heading, materials: [entry.material] });
+        shown.push(entry);
+        bytes += weight;
+      }
+      const last = shown.at(-1);
+      return {
+        books,
+        nextCursor: more && last !== undefined
+          ? { bookTitle: last.title, bookId: last.bookId, orderedAt: last.orderedAt, materialKey: last.material.materialKey }
+          : null,
+      };
+    });
+  }
+
+  /** One Book's matching materials after the cursor, the next `limit` in order, and how many match in all. */
+  #learningAuditPage(
+    bookId: string,
+    after: LearningMaterialCursor | null,
+    limit: number,
+    matches: (candidate: LearningMaterialCandidate, standing: string) => boolean,
+  ): { page: Array<{ material: LearningAuditMaterialProjection; orderedAt: string }>; count: number } {
+    const kept: Array<{ candidate: LearningMaterialCandidate; material: LearningAuditMaterialProjection }> = [];
+    let count = 0;
+    for (const [candidate, projection] of this.#learningEligibility.projectCandidates(bookId, this.#learningCandidates(bookId, true))) {
+      const standing = learningAuditStanding(projection);
+      if (!matches(candidate, standing)) continue;
+      count += 1;
+      if (after !== null && learningMaterialOrder(candidate, after) <= 0) continue;
+      const material: LearningAuditMaterialProjection = {
+        materialKey: projection.materialKey,
+        kind: projection.kind,
+        digest: projection.digest,
+        originLabel: projection.originLabel,
+        recordedAt: projection.recordedAt,
+        excerpt: projection.excerpt,
+        standing,
+        decisions: projection.decisions,
+        decidedAt: projection.decision?.decidedAt ?? null,
+        downstreamTasks: 0,
+      };
+      const index = kept.findIndex((entry) => learningMaterialOrder(candidate, entry.candidate) < 0);
+      if (index < 0) {
+        if (kept.length < limit) kept.push({ candidate, material });
+      } else {
+        kept.splice(index, 0, { candidate, material });
+        if (kept.length > limit) kept.pop();
+      }
+    }
+    return { page: kept.map(({ candidate, material }) => ({ material, orderedAt: candidate.orderedAt })), count };
+  }
+
+  /**
+   * A Learning Lineage Explorer (Issue #62, S27a; LAUD-003 to LAUD-005): the material, every decision of its chain — the one
+   * that stands and each it superseded, none rewritten — and what came of it after. No Learning Signal, Memory Candidate,
+   * enabled memory or Task use is made of learning material in AI7 yet, so those stages count none. A read.
+   */
+  inspectLearningLineage(bookId: string, materialKey: string): LearningLineageProjection {
+    return this.#learningCall(() => {
+      const material = this.inspectLearningMaterial(bookId, materialKey);
+      const chain = this.#learningEligibility.history(bookId, materialKey);
+      const shown = chain.slice(-MAX_LEARNING_LINEAGE_DECISIONS);
+      const last = chain.at(-1);
+      return {
+        bookId,
+        bookTitle: this.#evaluationBookTitle(bookId),
+        material,
+        standing: learningAuditStanding(material),
+        decisions: shown.map((entry) => ({
+          decisionId: entry.decisionId,
+          ordinal: entry.ordinal,
+          choice: entry.choice,
+          note: entry.note,
+          recordedAt: entry.recordedAt,
+          superseded: entry !== last,
+          currentVersion: entry.materialDigest === material.digest,
+          via: entry.remediationPreview === null ? 'learning-eligibility' as const : 'learning-audit' as const,
+          attribution: entry.attribution,
+          audit: {
+            materialDigest: entry.materialDigest,
+            supersedes: entry.supersedes,
+            recordDigest: entry.recordDigest,
+            basis: `${entry.basis.policy}@${entry.basis.version} · ${entry.basis.mode}`,
+            remediationPreview: entry.remediationPreview,
+          },
+        })),
+        earlierDecisions: chain.length - shown.length,
+        downstream: { signals: 0, memoryCandidates: 0, activeMemories: 0, tasks: 0 },
+      };
+    });
+  }
+
+  /** 停止今后使用's 学习补救影响预览 (Issue #62, S27a; LAUD-006, LAUD-010, LAUD-011). A read. */
+  previewLearningRemediation(input: PreviewLearningRemediationInput): LearningRemediationPreviewProjection {
+    return this.#learningCall(() => this.#learningRemediation(input).preview);
+  }
+
+  /**
+   * 确认停止今后使用 (Issue #62, S27a; LAUD-007, LAUD-009, LAUD-011): against the exact preview the editor read — refused once
+   * anything it shows moved — each included material gains one `excluded` Learning Eligibility Decision superseding the one
+   * it had, naming the preview, in one transaction; the earlier decision, the material and the record it came from stay as
+   * they were. The answer names each material's own outcome, those left out with why.
+   */
+  recordLearningRemediation(input: RecordLearningRemediationInput): LearningRemediationOutcomeProjection {
+    return this.#learningCall(() => this.#transaction(this.#authority, () => {
+      const { preview, found } = this.#learningRemediation(input);
+      requireStore(preview.previewDigest === input.previewDigest, 'LEARNING_REMEDIATION_PREVIEW_STALE',
+        '预览之后，这些学习材料或它们的准入决定有了变化；请重新查看影响，再决定。');
+      requireStore(preview.included.length > 0, 'LEARNING_REMEDIATION_EMPTY', '所选的学习材料都不能停止今后使用：它们现在都没有纳入学习。');
+      const people = this.#bookPeople.current(input.bookId);
+      for (const entry of preview.included) {
+        this.#learningEligibility.decide({
+          bookId: input.bookId,
+          candidate: found.get(entry.materialKey)!,
+          expectedDecisions: input.items.find((item) => item.materialKey === entry.materialKey)!.expectedDecisions,
+          choice: 'excluded',
+          note: null,
+          attribution: { peopleVersion: people.version, authors: people.authors, editors: people.editors },
+          remediationPreview: preview.previewDigest,
+        });
+      }
+      return { bookId: input.bookId, recorded: preview.included, leftOut: preview.leftOut };
+    }));
+  }
+
+  #learningRemediation(input: PreviewLearningRemediationInput): { preview: LearningRemediationPreviewProjection; found: Map<string, LearningMaterialCandidate> } {
+    requireStore(UUID_PATTERN.test(input.bookId), 'BOOK_INVALID', '图书标识无效。');
+    requireStore(input.items.length >= 1 && input.items.length <= MAX_LEARNING_REMEDIATION_ITEMS, 'LEARNING_REMEDIATION_INVALID',
+      `停止今后使用要选 1 到 ${MAX_LEARNING_REMEDIATION_ITEMS} 条学习材料。`);
+    const title = this.#evaluationBookTitle(input.bookId);
+    const wanted = new Set(input.items.map((item) => item.materialKey));
+    const found = new Map<string, LearningMaterialCandidate>();
+    const standings = new Map<string, { candidate: LearningMaterialCandidate; projection: Omit<LearningMaterialProjection, 'target' | 'sourceTask'> }>();
+    for (const [candidate, projection] of this.#learningEligibility.projectCandidates(input.bookId, this.#learningCandidates(input.bookId, false))) {
+      if (!wanted.has(candidate.materialKey)) continue;
+      found.set(candidate.materialKey, candidate);
+      standings.set(candidate.materialKey, { candidate, projection });
+    }
+    return { preview: learningRemediationPreview({ bookId: input.bookId, title }, input.items, (key) => standings.get(key) ?? null), found };
   }
 
   #readFeedbackHistory(input: FeedbackHistoryInput, exactEntryId: string | null = null): FeedbackHistoryProjection {

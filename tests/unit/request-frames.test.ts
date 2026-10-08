@@ -1300,6 +1300,48 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
+  it('accepts 学习回溯: filters before the page, one lineage, and 停止今后使用 on exact versions (Issue #62, S27a)', () => {
+    const bookId = randomUUID();
+    const item = { materialKey: `proposal-decision:${randomUUID()}`, materialDigest: 'a'.repeat(64), expectedDecisions: 1 };
+    const after = { bookTitle: '回溯之书', bookId, orderedAt: '2026-10-08T01:02:03.004Z', materialKey: `analysis-feedback:${randomUUID()}/synopsis` };
+    for (const [op, input] of [
+      ['inspectLearningAudit', {}],
+      ['inspectLearningAudit', { bookId, seriesId: null, kind: 'review-disposition', standing: 'excluded', query: '原因', after }],
+      ['inspectLearningAudit', { seriesId: randomUUID(), standing: 'pending', recordedFrom: '2026-10-07T16:00:00.000Z', recordedBefore: '2026-10-08T16:00:00.000Z' }],
+      ['inspectLearningAudit', { query: '' }],
+      ['inspectLearningLineage', { bookId, materialKey: item.materialKey }],
+      ['previewLearningRemediation', { bookId, items: [item] }],
+      ['previewLearningRemediation', { bookId, items: Array.from({ length: 40 }, () => item) }],
+      ['recordLearningRemediation', { bookId, items: [item, { ...item, expectedDecisions: 0 }], previewDigest: 'b'.repeat(64) }],
+    ] as const) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    for (const [op, input] of [
+      ['inspectLearningAudit', { standing: 'memory' }],
+      ['inspectLearningAudit', { kind: 'library' }],
+      ['inspectLearningAudit', { seriesId: 'series' }],
+      ['inspectLearningAudit', { query: 'a'.repeat(101) }],
+      ['inspectLearningAudit', { query: 7 }],
+      ['inspectLearningAudit', { downstream: 'used' }],
+      ['inspectLearningAudit', { recordedFrom: '2026-10-08T00:00:00.000Z', recordedBefore: '2026-10-08T00:00:00.000Z' }],
+      ['inspectLearningAudit', { after: { ...after, materialKey: 'library:x' } }],
+      ['inspectLearningLineage', { bookId }],
+      ['inspectLearningLineage', { bookId, materialKey: 'proposal-decision:' }],
+      ['previewLearningRemediation', { bookId, items: [] }],
+      ['previewLearningRemediation', { bookId, items: Array.from({ length: 41 }, () => item) }],
+      ['previewLearningRemediation', { bookId, items: [{ ...item, materialDigest: 'A'.repeat(64) }] }],
+      ['previewLearningRemediation', { bookId, items: [{ ...item, expectedDecisions: -1 }] }],
+      ['previewLearningRemediation', { bookId, items: [{ ...item, choice: 'excluded' }] }],
+      ['previewLearningRemediation', { bookId, items: [item], previewDigest: 'b'.repeat(64) }],
+      ['recordLearningRemediation', { bookId, items: [item] }],
+      ['recordLearningRemediation', { bookId, items: [item], previewDigest: 'b'.repeat(63) }],
+      ['recordLearningRemediation', { bookId: 'book', items: [item], previewDigest: 'b'.repeat(64) }],
+    ] as const) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('accepts 不说明 and 改原因 after a Proposal Decision in their own shapes (Issue #61, S26a)', () => {
     const binding = { manuscriptId: randomUUID(), branchId: randomUUID(), windowStartBlockId: `blk_${'a'.repeat(24)}` };
     const dismiss = { ...binding, markId: randomUUID(), decisionId: randomUUID(), expectedFeedback: 0, action: 'dismiss', reason: null, reasonSource: null };
