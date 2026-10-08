@@ -126,8 +126,9 @@ describe('②C 评估 over the real store', () => {
       const save = (expectedEntries: number, content: EvaluationContent, finalize = false): EvaluationWorkspaceProjection =>
         store.saveEvaluation({ bookId: book.bookId, recordId: first.recordId, expectedEntries, content, finalize });
       // The scale: whole or half points within 满分; 不评 only with its reason.
-      expect(await refusal(() => save(1, scored([20.5])))).toBe('EVALUATION_SCORE_INVALID:「文学品质与作者声音」的得分要在 0 到 20 之间，可以有半分。');
-      expect(await refusal(() => save(1, scored([7.25])))).toBe('EVALUATION_SCORE_INVALID:「文学品质与作者声音」的得分要在 0 到 20 之间，可以有半分。');
+      // The page's words for the scale (Issue #638 review): 按整分或半分填写.
+      expect(await refusal(() => save(1, scored([20.5])))).toBe('EVALUATION_SCORE_INVALID:「文学品质与作者声音」的得分要在 0 到 20 之间，按整分或半分填写。');
+      expect(await refusal(() => save(1, scored([7.25])))).toBe('EVALUATION_SCORE_INVALID:「文学品质与作者声音」的得分要在 0 到 20 之间，按整分或半分填写。');
       expect(await refusal(() => save(1, scored([null, null, null, null, '   '])))).toBe('EVALUATION_NOT_RATED_REASON:「读者与市场潜力」不评时要写明理由。');
       // 推荐出版 waits while a 高 risk is unreviewed.
       expect(await refusal(() => save(1, scored([18, 16.5, 15, 17, '市场资料不足'], { risks: RISKS('high'), conclusion: 'recommend' }))))

@@ -7,7 +7,7 @@ import type {
   EvaluationTotalProjection,
   EvaluationWorkspaceProjection,
 } from '../shared/protocol.js';
-import { evaluationBand, type EvaluationRiskLevel } from '../shared/evaluation-scoring.js';
+import { evaluationBand, provisionalEvaluationScore, type EvaluationRiskLevel } from '../shared/evaluation-scoring.js';
 
 /**
  * ②C 评估's words (Issue #429, plan slice S81a; editor-surfaces §5, V2-UX-EVAL-001 to EVAL-005, EVAL-007, EVAL-012): the
@@ -57,6 +57,17 @@ export const EVALUATION_STATUS = {
 /** A typed score the scale does not admit (Issue #638): it shows no band and leaves the total, and the page says so. */
 export function evaluationScoreInvalidLine(fullMarks: number): string {
   return `得分要在 0 到 ${fullMarks} 之间，按整分或半分填写；这个得分不计入总分，也不能保存。`;
+}
+
+/**
+ * What the score field holds, as typed (Issue #638 review): a number the scale admits counts; another number says why it does
+ * not; and text the number field cannot read at all — it reports an empty value then — says that the item counts as unscored,
+ * which is how it would be saved.
+ */
+export function evaluationScoreFeedback(raw: string, unreadable: boolean, fullMarks: number): { readonly score: number | null; readonly line: string | null } {
+  if (unreadable) return { score: null, line: `这里填的不是数字，这一项按没有打分计；得分要在 0 到 ${fullMarks} 之间，按整分或半分填写。` };
+  const typed = provisionalEvaluationScore(raw, fullMarks);
+  return { score: typed.score, line: typed.invalid ? evaluationScoreInvalidLine(fullMarks) : null };
 }
 
 /**

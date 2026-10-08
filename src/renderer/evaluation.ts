@@ -6,7 +6,7 @@ import type {
   EvaluationWorkspaceProjection,
   RendererApi,
 } from '../shared/protocol.js';
-import { evaluationTotal, finalizationNeedsScore, provisionalEvaluationScore, recommendationBlocked, validEvaluationScore, type EvaluationRiskLevel } from '../shared/evaluation-scoring.js';
+import { evaluationTotal, finalizationNeedsScore, recommendationBlocked, validEvaluationScore, type EvaluationRiskLevel } from '../shared/evaluation-scoring.js';
 import {
   EVALUATION_AI7_PENDING,
   EVALUATION_COMMENT,
@@ -39,6 +39,7 @@ import {
   evaluationHeading,
   evaluationItemLegend,
   evaluationRevisionLine,
+  evaluationScoreFeedback,
   evaluationScoreInvalidLine,
   evaluationStarted,
   evaluationTotalLine,
@@ -274,11 +275,12 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       // Only a score the scale admits reaches a band; any other says why and counts for nothing until it is corrected,
       // while the form keeps it as typed for the service's own refusal (Issue #638).
       const showScore = (): void => {
-        const typed = provisionalEvaluationScore(score.value, item.fullMarks);
+        const typed = evaluationScoreFeedback(score.value, score.validity.badInput, item.fullMarks);
         band.hidden = typed.score === null;
         band.textContent = typed.score === null ? '' : evaluationBandLabel(profile, typed.score, item.fullMarks);
-        invalid.hidden = !typed.invalid;
-        if (typed.invalid) {
+        invalid.hidden = typed.line === null;
+        invalid.textContent = typed.line ?? '';
+        if (typed.line !== null) {
           score.setAttribute('aria-invalid', 'true');
           score.setAttribute('aria-describedby', invalid.id);
         } else {

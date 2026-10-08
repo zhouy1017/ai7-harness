@@ -16,6 +16,7 @@ import {
   evaluationProfileUse,
   evaluationRevisionLine,
   evaluationScore,
+  evaluationScoreFeedback,
   evaluationScoreInvalidLine,
   evaluationTotalLine,
   evaluationUnsavedLine,
@@ -45,6 +46,14 @@ describe('a score as the editor types it (Issue #638)', () => {
       { fullMarks: 80, score: provisionalEvaluationScore('60', 80).score, notRated: false },
     ])).toEqual({ score: 60, fullMarks: 100, notRated: 0, unscored: 1 });
     expect(evaluationScoreInvalidLine(20)).toBe('得分要在 0 到 20 之间，按整分或半分填写；这个得分不计入总分，也不能保存。');
+  });
+
+  it('says what the field holds: a counted score, a number the scale refuses, or text the number field cannot read (Issue #638 review)', () => {
+    expect(evaluationScoreFeedback('', false, 20)).toEqual({ score: null, line: null });
+    expect(evaluationScoreFeedback('16.5', false, 20)).toEqual({ score: 16.5, line: null });
+    expect(evaluationScoreFeedback('25', false, 20)).toEqual({ score: null, line: evaluationScoreInvalidLine(20) });
+    // A type=number field reports "" for text it cannot parse; validity.badInput says it holds some.
+    expect(evaluationScoreFeedback('', true, 20)).toEqual({ score: null, line: '这里填的不是数字，这一项按没有打分计；得分要在 0 到 20 之间，按整分或半分填写。' });
   });
 });
 

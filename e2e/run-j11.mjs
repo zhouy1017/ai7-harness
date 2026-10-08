@@ -1367,6 +1367,13 @@ async function main() {
     requireJourney(inadmissible.record.items[0][3] === null && inadmissible.record.total === '总分 0 / 100 · 还有 5 项没有打分' &&
       await renderer.evaluate(`${literaryInvalid}?.hidden === false && ${literaryInvalid}.textContent === '得分要在 0 到 20 之间，按整分或半分填写；这个得分不计入总分，也不能保存。' && document.querySelector(${JSON.stringify(literaryScore)})?.getAttribute('aria-invalid') === 'true'`),
       'evaluation-score-inadmissible-words', inadmissible.record);
+    // Every item 不评 leaves nothing scored: 定稿 waits and says why, as the Owner answered on #638.
+    const everyItem = ['literary-quality', 'theme-and-context', 'structure-and-coherence', 'chinese-language', 'readers-and-market'];
+    const notRatedBox = (itemId) => `${item(itemId)} [data-evaluation-field="not-rated"]`;
+    for (const itemId of everyItem) await tick(renderer, notRatedBox(itemId), `evaluation-all-not-rated-${itemId}`);
+    await waitFor(renderer, `(() => { const finalize = document.querySelector('[data-screen="book-evaluation"] [data-evaluation-action="finalize"]'); const note = document.querySelector('[data-screen="book-evaluation"] .evaluation-finalize-blocked'); return finalize instanceof HTMLButtonElement && finalize.disabled && note instanceof HTMLElement && !note.hidden && note.textContent === '至少要给一项打分才能定稿。' && finalize.getAttribute('aria-describedby') === note.id; })()`, 'evaluation-all-not-rated-waits', 10_000);
+    for (const itemId of everyItem) await tick(renderer, notRatedBox(itemId), `evaluation-all-not-rated-undo-${itemId}`);
+    await waitFor(renderer, `document.querySelector('[data-screen="book-evaluation"] [data-evaluation-action="finalize"]')?.disabled === false && document.querySelector('[data-screen="book-evaluation"] .evaluation-finalize-blocked')?.hidden === true`, 'evaluation-finalize-open-again', 10_000);
     // Four items scored, half points allowed; the fifth 不评 with its reason, leaving the total out of 80; each band shown.
     for (const [itemId, score] of [['literary-quality', '18'], ['theme-and-context', '16.5'], ['structure-and-coherence', '15'], ['chinese-language', '17']]) {
       await fill(renderer, `${item(itemId)} [data-evaluation-field="score"]`, score, `evaluation-score-${itemId}`);
