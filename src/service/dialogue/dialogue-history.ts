@@ -84,11 +84,6 @@ export function fragmentReading(state: DialogueAnswerState): FragmentReading {
   return state === 'answering' ? 'streaming' : state === 'completed' ? 'settled' : 'cut';
 }
 
-/** Whether an answer is an Incomplete Dialogue Answer (DIALOG-012, 013): stopped, interrupted or failed. */
-export function incompleteAnswer(state: DialogueAnswerState): boolean {
-  return state === 'stopped' || state === 'interrupted' || state === 'failed';
-}
-
 export interface ResolvedAttempt {
   readonly attempt: StoredDialogueAttempt;
   readonly state: DialogueAnswerState;

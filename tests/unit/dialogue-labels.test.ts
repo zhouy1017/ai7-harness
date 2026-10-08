@@ -153,6 +153,19 @@ describe('a dialogue’s attempts and what each allows', () => {
     expect(answering.attempts[0]).toMatchObject({ state: 'answering', source: 'live', fragmentTotal: 1, fragments: [{ text: '一句。', breakAfter: false }] });
     expect(answering.actions).toEqual({ stop: true, continue: false, regenerate: false, convert: false });
     expect(answering.question).toBe(QUESTION);
+    // An end mark that is the last character received still waits: a closing mark may follow it (DIALOG-006).
+    expect(project([first], {}, { [first.attemptId]: '一句。' }).attempts[0]!.fragments).toEqual([]);
+    expect(project([attempt(1, 'ask', 'stopped')], { 1: '一句。' }).attempts[0]!.fragments).toEqual([{ text: '一句。', breakAfter: false }]);
+  });
+
+  it('reads the question from the earliest turn the ledger holds, and asks nothing again of a turn that does not read back', () => {
+    const asked = { ...message, question: '最初的问题？' };
+    const turns: DialogueHistoryReader = { turn: (entry) => ({ message: entry.ordinal === 1 ? asked : message, streamed: '一句。' }) };
+    expect(dialogueProjection(task, resolveAttempts([attempt(1, 'ask', 'stopped'), attempt(2, 'regenerate', 'stopped')], turns, () => null), 0).question).toBe('最初的问题？');
+    const unreadable: DialogueHistoryReader = { turn: () => ({ message: null, streamed: '一句。二' }) };
+    const projection = dialogueProjection(task, resolveAttempts([attempt(1, 'ask', 'stopped')], unreadable, () => null), 0);
+    expect(projection.attempts[0]!.fragmentTotal).toBe(1);
+    expect(projection.actions).toEqual({ stop: false, continue: false, regenerate: false, convert: false });
   });
 
   it('continues only an incomplete answer that kept something, regenerates any settled one, and converts only a completed one', () => {

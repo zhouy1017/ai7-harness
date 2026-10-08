@@ -1577,7 +1577,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (floating !== undefined && !(event.target instanceof Element && event.target.closest('[data-mark-id]'))) closeFloating();
   };
   const onDocumentKeyDown = (event: KeyboardEvent): void => {
-    if (event.key !== 'Escape' || (menu === undefined && floating === undefined)) return;
+    // An Escape that ends an input method's composition belongs to the composition (J-14): the composer stays open.
+    if (event.key !== 'Escape' || event.isComposing || (menu === undefined && floating === undefined)) return;
     event.preventDefault();
     close();
     editor.focus();

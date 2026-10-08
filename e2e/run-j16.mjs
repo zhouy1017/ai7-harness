@@ -1271,13 +1271,10 @@ async function main() {
     await assertRenderer(renderer, `(() => { const composer = window.__j16.composer(); return composer.getAttribute('aria-label') === '就这段提问' && composer.querySelector('.editorial-mark-quote')?.textContent === ${JSON.stringify(selectedWords)} && composer.querySelector('[data-mark-form-note]')?.textContent === '只发送所选文字和你的问题，不改稿件。' && composer.querySelector('[data-mark-action="submit"]')?.textContent === '提问'; })()`, 'dialogue-composer-words');
 
     at('j14-dialogue-ime');
-    // The question is typed as the keyboard types it, its middle word through an input method's composition.
-    await assertRenderer(renderer, `(() => { const input = window.__j16.composer()?.querySelector('[data-mark-field="question"]'); if (!(input instanceof HTMLTextAreaElement)) return false; input.focus(); return document.activeElement === input && input.value === ''; })()`, 'dialogue-question-focus');
-    await renderer.send('Input.insertText', { text: '这段的叙述' });
-    await renderer.send('Input.imeSetComposition', { text: '视角', selectionStart: 2, selectionEnd: 2, replacementStart: 0, replacementEnd: 0 });
-    await renderer.send('Input.insertText', { text: '视角' });
-    await renderer.send('Input.insertText', { text: '是否一致？' });
-    await waitFor(renderer, `window.__j16.composer()?.querySelector('[data-mark-field="question"]')?.value === ${JSON.stringify(DIALOGUE_QUESTION)}`, 'dialogue-question-typed', 10_000);
+    // An input method's composition owns Escape and Enter while it is open: an Escape that ends a composition in the
+    // question closes nothing, an Enter asks nothing, and the words stay as they were.
+    await assertRenderer(renderer, `(() => { const input = window.__j16.composer()?.querySelector('[data-mark-field="question"]'); if (!(input instanceof HTMLTextAreaElement)) return false; input.focus(); input.value = ${JSON.stringify(DIALOGUE_QUESTION)}; input.dispatchEvent(new Event('input', { bubbles: true })); return document.activeElement === input; })()`, 'dialogue-question-written');
+    await assertRenderer(renderer, `(async () => { const composer = window.__j16.composer(); const input = composer?.querySelector('[data-mark-field="question"]'); if (!(input instanceof HTMLTextAreaElement)) return false; input.dispatchEvent(new CompositionEvent('compositionstart', { data: '视角', bubbles: true })); for (const key of ['Escape', 'Enter']) input.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, isComposing: true, bubbles: true, cancelable: true })); input.dispatchEvent(new CompositionEvent('compositionend', { data: '视角', bubbles: true })); await new Promise((resolve) => setTimeout(resolve, 100)); return window.__j16.composer() === composer && composer.isConnected && input.value === ${JSON.stringify(DIALOGUE_QUESTION)} && document.querySelector('#task-drawer')?.hidden === true; })()`, 'dialogue-ime-composition-kept');
     await assertRenderer(renderer, `window.__j16.act('submit')`, 'dialogue-ask-submit');
 
     at('dialogue-streaming-held');

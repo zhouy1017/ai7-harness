@@ -4,7 +4,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DialogueExecutionOwner, dialogueRouteRefusal } from '../../src/service/dialogue/dialogue-execution.js';
-import { DIALOGUE_SCHEMA_SQL } from '../../src/service/dialogue/dialogue-ledger.js';
+import { DIALOGUE_SCHEMA_SQL, DIALOGUE_TRIGGER_SQL } from '../../src/service/dialogue/dialogue-ledger.js';
+import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { HARNESS_SESSION_LOG_DIRECTORY } from '../../src/service/harness/session-log.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
@@ -285,6 +286,89 @@ describe('就这段提问… over the real store and harness', () => {
       expect(store.reconcileDialogueAttempts()).toBe(0);
     } finally {
       await dialogues.dispose().catch(() => undefined);
+      store.close();
+    }
+  });
+
+  it('takes no new attempt while one answers or from an answer that kept nothing, and refuses records that do not hold together', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const stepped = steppedHold();
+    const dialogues = owner(store, stepped.hold);
+    let bookId = '';
+    let dialogueId = '';
+    let stoppedAttempt = '';
+    try {
+      const book = await importSample1Book(store, roots.codeRoot, '记录');
+      bookId = book.bookId;
+      const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
+      dialogueId = turn.dialogueId;
+      stoppedAttempt = turn.attemptId;
+      stepped.allow(1);
+      dialogues.begin(turn);
+      await waitFor(() => stepped.waiting(), (at) => at === 1, 'held at one');
+      expect(dialogues.liveText(turn.attemptId)?.streamed).toBe('这段一直用第三人称');
+      expect(dialogues.liveText('00000000-0000-4000-8000-000000000000')).toBeNull();
+      // An answer in flight takes no next attempt; it is stopped first.
+      expect(refusal(() => store.nextDialogueAttempt(bookId, { dialogueId, attemptId: turn.attemptId }, 'regenerate'))).toBe('DIALOGUE_ANSWERING');
+      await dialogues.stop(turn.attemptId);
+      // Stopped with no complete sentence: nothing to go on from, though it may be asked again.
+      expect(store.inspectDialogue(bookId, dialogueId, 0, () => null).actions).toEqual({ stop: false, continue: false, regenerate: true, convert: false });
+      expect(refusal(() => store.nextDialogueAttempt(bookId, { dialogueId, attemptId: turn.attemptId }, 'continue'))).toBe('DIALOGUE_NOTHING_KEPT');
+      // Asked again and completed, the answer is made a 修改建议.
+      stepped.allow(99);
+      const again = store.nextDialogueAttempt(bookId, { dialogueId, attemptId: turn.attemptId }, 'regenerate');
+      dialogues.begin(again);
+      await waitFor(() => store.inspectDialogue(bookId, dialogueId, 0, () => null), (value) => value.attempts[1]?.state === 'completed', 'completed');
+      store.convertDialogueToChangeSuggestion(bookId, { dialogueId, attemptId: again.attemptId, proposedText: '改过的字', rationale: '' });
+    } finally {
+      await dialogues.dispose();
+      store.close();
+    }
+    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const reseal = (database: DatabaseSync, table: string, schema: string, row: Record<string, unknown>, record: Record<string, unknown>): void => {
+      const json = canonicalJson({ schema, ...record });
+      database.exec(`DROP TRIGGER ${table}_no_update`);
+      database.prepare(`UPDATE ${table} SET ${Object.keys(row).map((key) => `${key} = ?`).join(', ')}, canonical_json = ?, sha256 = ? WHERE attempt_id = ?`)
+        .run(...(Object.values(row) as Array<string | number | null>), json, sha256Hex(json), stoppedAttempt);
+      database.exec(DIALOGUE_TRIGGER_SQL[`${table}_no_update`]!);
+    };
+    // A turn that ends before its span starts, each row sealed as if it were whole, does not read.
+    let database = new DatabaseSync(path);
+    let outcome: { outcome: string; end_seq: number; settled_at: string };
+    let span: { harness_session_id: string; start_seq: number; opened_at: string };
+    try {
+      outcome = database.prepare('SELECT outcome, end_seq, settled_at FROM dialogue_attempt_outcomes WHERE attempt_id = ?').get(stoppedAttempt) as typeof outcome;
+      span = database.prepare('SELECT harness_session_id, start_seq, opened_at FROM dialogue_harness_spans WHERE attempt_id = ?').get(stoppedAttempt) as typeof span;
+      expect([outcome.outcome, outcome.end_seq >= span.start_seq]).toEqual(['stopped', true]);
+      reseal(database, 'dialogue_harness_spans', 'ai7.dialogue-harness-span/1', { start_seq: outcome.end_seq + 1 },
+        { attemptId: stoppedAttempt, harnessSessionId: span.harness_session_id, startSeq: outcome.end_seq + 1, openedAt: span.opened_at });
+    } finally {
+      database.close();
+    }
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(refusal(() => store.inspectDialogue(bookId, dialogueId, 0, () => null))).toBe('DIALOGUE_RECORD_INVALID');
+    } finally {
+      store.close();
+    }
+    // Put it back; then a 修改建议 recorded as made from an incomplete answer does not read either.
+    database = new DatabaseSync(path);
+    try {
+      reseal(database, 'dialogue_harness_spans', 'ai7.dialogue-harness-span/1', { start_seq: span!.start_seq },
+        { attemptId: stoppedAttempt, harnessSessionId: span!.harness_session_id, startSeq: span!.start_seq, openedAt: span!.opened_at });
+      // The conversion moved onto the answer that stopped, sealed as if it were whole.
+      const row = database.prepare('SELECT conversion_id, mark_id, converted_at FROM dialogue_conversions').get() as { conversion_id: string; mark_id: string; converted_at: string };
+      const json = canonicalJson({ schema: 'ai7.dialogue-conversion/1', attemptId: stoppedAttempt, conversionId: row.conversion_id, markId: row.mark_id, convertedAt: row.converted_at });
+      database.exec('DROP TRIGGER dialogue_conversions_no_update');
+      database.prepare('UPDATE dialogue_conversions SET attempt_id = ?, canonical_json = ?, sha256 = ?').run(stoppedAttempt, json, sha256Hex(json));
+      database.exec(DIALOGUE_TRIGGER_SQL.dialogue_conversions_no_update!);
+    } finally {
+      database.close();
+    }
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(refusal(() => store.inspectDialogue(bookId, dialogueId, 0, () => null))).toBe('DIALOGUE_RECORD_INVALID');
+    } finally {
       store.close();
     }
   });

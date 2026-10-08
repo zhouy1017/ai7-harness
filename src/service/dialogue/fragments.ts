@@ -56,14 +56,9 @@ export function splitFragments(text: string, reading: FragmentReading): Dialogue
       index += 1;
       continue;
     }
-    if (asciiStop) {
-      const next = characters[index + 1];
-      if (next === undefined) {
-        if (reading === 'streaming') break;
-      } else if (!isSpace(next)) {
-        index += 1;
-        continue;
-      }
+    if (asciiStop && characters[index + 1] !== undefined && !isSpace(characters[index + 1])) {
+      index += 1;
+      continue;
     }
     // The end mark with every closing mark and further end mark after it.
     let end = index + 1;
@@ -73,7 +68,8 @@ export function splitFragments(text: string, reading: FragmentReading): Dialogue
     while (after < characters.length && SPACES.has(characters[after]!)) after += 1;
     if (after === characters.length && reading === 'streaming') break;
     push(start, end, characters[after] === '\n');
-    index = after < characters.length && characters[after] === '\n' ? after + 1 : end;
+    // The spaces and the line break after it are read on as an empty piece.
+    index = end;
     start = index;
   }
   if (reading === 'settled') push(start, characters.length, false);
