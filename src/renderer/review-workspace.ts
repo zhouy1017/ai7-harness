@@ -24,7 +24,13 @@ import {
 import { reportExportLabel } from '../shared/report-wording.js';
 import { applyOnce } from './manuscript-apply.js';
 import { openProcedureCapture } from './procedure-capture.js';
-import { ProcedureChoiceRequests, procedurePreparationPin } from './procedure-choice.js';
+import {
+  ProcedureChoiceRequests,
+  procedureChoiceAfter,
+  procedureChoiceFocus,
+  procedurePreparationPin,
+  type ProcedureChoiceOutcome,
+} from './procedure-choice.js';
 import {
   CAPTURE_ACTION,
   SHEET_PROCEDURE_LABEL,
@@ -1646,11 +1652,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   async function chooseProcedure(state: SheetState, procedureId: string, versionId: string | null = null): Promise<void> {
     if (projection === null || sheetState !== state) return;
     const ticket = state.requests.ask();
+    let outcome: ProcedureChoiceOutcome;
     if (procedureId === '') {
-      state.requests.settle(ticket);
-      state.procedure = null;
-      state.categories.clear();
-      state.problem = null;
+      outcome = { kind: 'cleared' };
     } else {
       options.setStatus('正在读取所选的可复用工序…', 'busy');
       // Loading: 先看计划 and both selects wait, so nothing is prepared from the choice on screen before its answer.
@@ -1659,26 +1663,27 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         const run = await api.inspectCapturedProcedureRun({ procedureId, versionId });
         // A later choice superseded this one: its answer, not this, fills the sheet.
         if (sheetState !== state || destroyed || !state.requests.current(ticket)) return;
-        state.requests.settle(ticket);
-        state.procedure = run;
-        state.categories.clear();
-        state.problem = run.unavailableReason;
-        if (run.resolved !== null) {
-          for (const step of run.resolved.steps) if (step.available) state.categories.add(step.categoryId);
-          state.scope = run.resolved.scopeSlot;
-          state.from = null;
-          state.to = null;
-        }
+        outcome = { kind: 'answered', run };
         options.setStatus(run.resolved === null ? run.unavailableReason ?? '' : `已按《${run.title}》第 ${run.resolved.version} 版选好类别。`);
       } catch (error) {
         if (sheetState !== state || destroyed || !state.requests.current(ticket)) return;
-        state.requests.settle(ticket);
-        state.procedure = null;
-        state.problem = options.errorMessage(error, '无法读取所选的可复用工序。');
+        // The choice the sheet held stays, its version and categories with it, and the reason is shown (Issue #684).
+        outcome = { kind: 'failed', reason: options.errorMessage(error, '无法读取所选的可复用工序。') };
+        options.setStatus(outcome.reason, 'error');
       }
     }
+    state.requests.settle(ticket);
+    const next = procedureChoiceAfter(state, outcome);
+    state.procedure = next.procedure;
+    state.categories.clear();
+    for (const categoryId of next.categories) state.categories.add(categoryId);
+    state.scope = next.scope;
+    state.from = next.from;
+    state.to = next.to;
+    state.problem = next.problem;
     renderSheet(projection, state);
-    sheet.querySelector<HTMLElement>(versionId === null ? '[data-review-field="procedure"]' : '[data-review-field="procedure-version"]')?.focus();
+    // Back on the selector the editor used, while the sheet still shows it.
+    sheet.querySelector<HTMLElement>(`[data-review-field="${procedureChoiceFocus(versionId !== null, state.procedure)}"]`)?.focus();
   }
 
   function renderSheet(workspace: ReviewWorkspaceProjection, state: SheetState): void {

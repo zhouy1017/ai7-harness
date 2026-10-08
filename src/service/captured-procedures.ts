@@ -794,17 +794,18 @@ export class CapturedProcedures {
     return { ids: rows.slice(0, MAX_CAPTURED_PROCEDURES_SHOWN).map((row) => text(row.procedure_id)), truncated: rows.length > MAX_CAPTURED_PROCEDURES_SHOWN };
   }
 
-  /** The Review Runs that pinned one version, newest first, with how many there are (REUSE-031). */
-  runsOf(versionId: string): { count: number; runs: Array<{ bookId: string; bookTitle: string; reviewRunId: string; ordinal: number; createdAt: string }> } {
-    const count = integer((this.#db.prepare('SELECT count(*) n FROM review_run_procedure_pins WHERE version_id = ?').get(versionId) as SqlRow).n);
-    const runs = (this.#db.prepare(
+  /**
+   * The Review Runs that pinned one version, newest first, at most `MAX_CAPTURED_PROCEDURE_RUNS_SHOWN` (REUSE-031). How many
+   * ran and how many were only prepared is `pinCounts`'s answer, so nothing here counts them a second time (Issue #684).
+   */
+  runsOf(versionId: string): Array<{ bookId: string; bookTitle: string; reviewRunId: string; ordinal: number; createdAt: string }> {
+    return (this.#db.prepare(
       `SELECT r.book_id, b.title, r.review_run_id, r.ordinal, r.created_at FROM review_run_procedure_pins p
        JOIN review_runs r ON r.review_run_id = p.review_run_id JOIN books b ON b.book_id = r.book_id
        WHERE p.version_id = ? ORDER BY r.created_at DESC, r.review_run_id LIMIT ?`,
     ).all(versionId, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN) as SqlRow[]).map((row) => ({
       bookId: text(row.book_id), bookTitle: text(row.title), reviewRunId: text(row.review_run_id), ordinal: integer(row.ordinal), createdAt: text(row.created_at),
     }));
-    return { count, runs };
   }
 
   /** One procedure as 工序与规则's list names it: its newest version's title and state, its count, and whether it runs. */
@@ -843,7 +844,7 @@ export class CapturedProcedures {
       'SELECT * FROM captured_procedure_versions WHERE procedure_id = ? AND (? IS NULL OR version < ?) ORDER BY version DESC LIMIT ?',
     ).all(procedureId, before, before, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE) as SqlRow[]).map((row): CapturedProcedureVersionProjection => {
       const stored = this.#versionOf(row);
-      const { runs } = this.runsOf(stored.versionId);
+      const runs = this.runsOf(stored.versionId);
       const counts = this.pinCounts(stored.versionId);
       return {
         versionId: stored.versionId,

@@ -55,6 +55,7 @@ import {
   proposalSavedLine,
   proposalVersionLine,
 } from './captured-procedure-labels.js';
+import { confirmProcedureStop } from './procedure-choice.js';
 
 /**
  * 知识库 › 工序与规则's 可复用工序 and 开发建议 (Issue #65, plan slice S30; ADR 0087 §3, §5, §6; V2-UX-KB-010, REUSE-029 to
@@ -247,14 +248,12 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     const line = el('p', 'captured-procedure-version-line');
     line.append(pill);
     // 最新可用 (Issue #66, S31; REUSE-043): the version a new use resolves to now.
-    if (latestEligible) {
-      const latest = el('span', 'status-pill captured-procedure-latest-eligible', PROCEDURE_LATEST_ELIGIBLE);
-      // Its meaning in words a keyboard, touch or screen-reader user reaches too (S31 review P3-6), not only in a tooltip.
-      const note = el('span', 'captured-procedure-latest-eligible-note', `（${PROCEDURE_LATEST_ELIGIBLE_NOTE}）`);
-      line.append(' ', latest, note);
-    }
+    if (latestEligible) line.append(' ', el('span', 'status-pill captured-procedure-latest-eligible', PROCEDURE_LATEST_ELIGIBLE));
     line.append(el('span', undefined, ` 《${version.title}》${procedureVersionLine(version).replace(` · ${version.stateLabel}`, '')}`));
     item.append(line);
+    // Its meaning as a visible field note under the line, read in order by a screen reader and seen by everyone else
+    // (S31 review P3-6, Issue #684): never only a tooltip, and never hidden from sighted users.
+    if (latestEligible) item.append(el('p', 'field-note captured-procedure-latest-eligible-note', PROCEDURE_LATEST_ELIGIBLE_NOTE));
     const steps = el('ol', 'captured-procedure-steps');
     for (const step of version.steps) steps.append(el('li', undefined, captureStepLine(step)));
     item.append(steps, el('p', 'field-note captured-procedure-source', `${procedureSourceLine(version)} · 保存于 ${options.localInstantLabel(version.createdAt)}`));
@@ -409,14 +408,13 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
       button(PROCEDURE_ACTIONS.confirmStop, 'primary', 'confirm-stop', () => {
         let stale = false;
         return act('正在停用…', '无法停用。', async () => {
-          try {
-            const result = await api.stopCapturedProcedure({ procedureId: preview.procedureId, versionId: preview.versionId, previewDigest: preview.previewDigest });
+          const confirmation = await confirmProcedureStop(api, preview);
+          if (confirmation.kind === 'stopped') {
             open.stop = null;
-            options.setStatus(procedureStoppedLine(result.title, preview.versionCount), 'success');
-          } catch (error) {
-            // The Runs it touches moved since it was read: read it again, and let the editor look before stopping.
-            if ((error as { code?: unknown } | null)?.code !== 'CAPTURED_PROCEDURE_STOP_PREVIEW_STALE') throw error;
-            open.stop = await api.previewCapturedProcedureStop({ procedureId: preview.procedureId, versionId: preview.versionId });
+            options.setStatus(procedureStoppedLine(confirmation.result.title, preview.versionCount), 'success');
+          } else {
+            // The Runs it touches moved since it was read: it is read again, and the editor looks before stopping.
+            open.stop = confirmation.preview;
             stale = true;
             options.setStatus(PROCEDURE_STOP_STALE, 'error');
           }

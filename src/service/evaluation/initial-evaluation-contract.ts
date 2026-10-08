@@ -3,11 +3,14 @@ import {
   INITIAL_EVALUATION_CONTRACT_VERSION,
   type CoverageManifestUnitProjection,
   type EvaluationConclusion,
+  type InitialEvaluationMarketProjection,
+  type InitialEvaluationPredictionProjection,
 } from '../../shared/protocol.js';
 import { validEvaluationScore } from '../../shared/evaluation-scoring.js';
 import { DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
 import type { ManifestBlockInput } from '../analysis/coverage-manifest.js';
 import { graphemeCount } from '../analysis/factual-review-contract.js';
+import { claimsQuantity } from './claim-guards.js';
 
 /**
  * Evaluation Contract v1 (Issue #429, plan slice S81b1; V2-UX-EVAL-005 to EVAL-007): AI7's 初评 of one Book under the house
@@ -19,14 +22,22 @@ import { graphemeCount } from '../analysis/factual-review-contract.js';
  * weaknesses, a next step and the conclusion AI7 would suggest. A model answer that names an item the profile does not list,
  * leaves one out, or scores outside the scale is refused whole, never trimmed.
  *
+ * The same synthesis writes the market section (Issue #429, plan slice S81b2; EVAL-009): 目标读者, 差异化卖点 and 渠道与策略, and
+ * the `预测 · 低确定性` block's 市场回报 and 评奖可能性 — each a statement with its basis, or `null` for `暂无法预测`. Web search is
+ * not connected (ADR 0080 §7: 未联网核查), so the instruction holds it to what was read in the Book: no sales figure, no award
+ * record, no other house's book. The market section is held apart from the scores: a line or a prediction that states a
+ * quantity (sales, a print run, a price, a share, odds) is set aside with the reason recorded, a market part out of shape
+ * reads as not written, and neither ever costs the 初评 its scores — the market section alone is "refused, never trimmed".
+ *
  * The profile is frozen into the contract: its items, their 满分 and the conclusions. Changing one changes the contract digest,
  * every request digest and the schema digest every revision pins, which is the intent — a 初评 under another profile is
  * another contract. The contract scores; it never decides: the record keeps the editor's scores, and the conclusion is the
  * editor's to choose (EVAL-006, EVAL-007).
  */
 export const INITIAL_EVALUATION_UNIT_RESULT_SCHEMA = 'ai7.evaluation.unit-result/1' as const;
-export const INITIAL_EVALUATION_SYNTHESIS_RESULT_SCHEMA = 'ai7.evaluation.synthesis-result/1' as const;
-export const INITIAL_EVALUATION_PROMPT_CONTRACT_SCHEMA = 'ai7.evaluation.prompt-contract/1' as const;
+/** Since S81b2 the synthesis also writes the market section; `/1`, its first shape, is no longer asked for. */
+export const INITIAL_EVALUATION_SYNTHESIS_RESULT_SCHEMA = 'ai7.evaluation.synthesis-result/2' as const;
+export const INITIAL_EVALUATION_PROMPT_CONTRACT_SCHEMA = 'ai7.evaluation.prompt-contract/2' as const;
 export const INITIAL_EVALUATION_RESULT_SET_REVISION_SCHEMA = 'ai7.evaluation.result-set-revision/1' as const;
 /** The shape that carries scope-plan facts and per-unit lineage: every 初评 after the first. */
 export const INITIAL_EVALUATION_SUCCESSOR_REVISION_SCHEMA = 'ai7.evaluation.result-set-revision/2' as const;
@@ -38,6 +49,9 @@ export const MAX_ITEM_COMMENT_GRAPHEMES = 300;
 export const MAX_SYNTHESIS_LINES = 5;
 export const MAX_SYNTHESIS_LINE_GRAPHEMES = 100;
 export const MAX_NEXT_STEP_GRAPHEMES = 200;
+/** The market section's bounds (S81b2): its three lists as the synthesis's own lines, and each prediction's two parts. */
+export const MAX_PREDICTION_STATEMENT_GRAPHEMES = 150;
+export const MAX_PREDICTION_BASIS_GRAPHEMES = 200;
 /** A line of the frozen prompt and of the model's free text is one line: no control character may break it or hide in it. */
 const CONTROL_CHARACTER = /[\p{Cc}\p{Zl}\p{Zp}]/u;
 const ITEM_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
@@ -72,6 +86,8 @@ export interface InitialEvaluationSynthesisResult {
   readonly weaknesses: ReadonlyArray<string>;
   readonly nextStep: string | null;
   readonly suggestedConclusion: EvaluationConclusion | null;
+  /** The market section (S81b2; EVAL-009), from what was read alone; `null` when the model wrote none. */
+  readonly market: InitialEvaluationMarketProjection | null;
 }
 
 /**
@@ -79,7 +95,10 @@ export interface InitialEvaluationSynthesisResult {
  * the profile does not list; `block-out-of-unit` a cited position past the unit's blocks.
  */
 export type InitialEvaluationUnitParseFailureCode = 'not-json' | 'schema-invalid' | 'unit-mismatch' | 'item-unknown' | 'block-out-of-unit';
-/** Why the synthesis did not parse: `item-unknown`, `items-incomplete` (an item missing or twice) and `score-invalid` are this contract's. */
+/**
+ * Why the synthesis did not parse: `item-unknown`, `items-incomplete` (an item missing or twice) and `score-invalid` are this
+ * contract's. The market section never fails it (S81b2): what in it cannot be used is set aside with its reason.
+ */
 export type InitialEvaluationSynthesisParseFailureCode = 'not-json' | 'schema-invalid' | 'item-unknown' | 'items-incomplete' | 'score-invalid';
 
 export type InitialEvaluationUnitParse =
@@ -140,12 +159,14 @@ function synthesisInstructionOf(profile: InitialEvaluationProfileInput): string 
     '以下是同一部书稿各已闭合阅读范围按评分项记下的依据。只依据这些内容，为每个评分项给出初评分数与评语。',
     '不重读稿件原文、不进行事实核查、不引用外部知识、不调用任何工具、不改写稿件。分数只是供编辑参考的初评，由编辑定分。',
     '只输出一个 JSON 对象，不加说明文字，不加代码围栏。JSON 必须精确包含以下键，且不得多出任何键：',
-    'schema（固定为 "ai7.evaluation.synthesis-result/1"）、items、strengths、weaknesses、nextStep、suggestedConclusion。',
+    'schema（固定为 "ai7.evaluation.synthesis-result/2"）、items、strengths、weaknesses、nextStep、suggestedConclusion、market。',
     `items 为数组，下列每个评分项恰好一项：${profile.items.map((item) => `${item.itemId}（满分 ${item.fullMarks}）`).join('、')}；每项精确包含 itemId、score、comment。`,
     'score 是 0 到该项满分之间的整数或半分（如 15 或 15.5），不得超出满分；comment 不超过 300 字素，说明打分的依据。',
     'strengths 与 weaknesses 是字符串数组，各至多 5 条，每条不超过 100 字素；nextStep 是一句下一步建议（不超过 200 字素），没有时为 null。',
     `suggestedConclusion 取 ${profile.conclusions.map((entry) => `${entry.conclusion}（${entry.label}）`).join('、')} 之一，或为 null；它只是 AI7 的建议，结论由编辑决定。`,
     '依据不足的评分项照常打分，但在 comment 中说明依据不足。',
+    'market 是市场部分，精确包含以下键：readers（目标读者）、sellingPoints（差异化卖点）、channels（渠道与策略），各为字符串数组，至多 5 条，每条不超过 100 字素；marketReturn（市场回报）与 awards（评奖可能性），各为 null 或精确包含 statement（不超过 150 字素）与 basis（不超过 200 字素）两个键的对象。',
+    '市场部分同样只依据上面的依据：没有联网检索，不得声称参考了销量、获奖记录、其他出版社的图书或任何外部数据；市场部分的任何一句都不得给出数量（销量、印数、定价、份额、倍数或概率），给出数量的那一句不会被采用。依据不足以判断时 marketReturn 或 awards 为 null，界面会显示「暂无法预测」；basis 说明这一判断依据的是书稿中的哪些方面。',
   ].join('\n');
 }
 
@@ -247,6 +268,57 @@ function boundedLines(value: unknown): value is string[] {
   return Array.isArray(value) && value.length <= MAX_SYNTHESIS_LINES && value.every((entry) => line(entry, MAX_SYNTHESIS_LINE_GRAPHEMES));
 }
 
+const MARKET_LISTS = [['readers', '目标读者'], ['sellingPoints', '差异化卖点'], ['channels', '渠道与策略']] as const;
+const MARKET_PREDICTIONS = [['marketReturn', '市场回报'], ['awards', '评奖可能性']] as const;
+const MARKET_KEYS = ['readers', 'sellingPoints', 'channels', 'marketReturn', 'awards'] as const;
+
+/**
+ * The market section as AI7 may show it (S81b2; EVAL-009): each part held to its shape, and each line or prediction that
+ * states a quantity set aside. What is set aside is said in `withheld`, one reason a part; a part out of shape reads as not
+ * written (an empty list, `暂无法预测`). `null` when the model wrote no market section at all.
+ */
+function marketOf(value: unknown): InitialEvaluationMarketProjection | null {
+  if (value === undefined) return null;
+  const withheld: string[] = [];
+  if (!isRecord(value) || !hasExactKeys(value, [...MARKET_KEYS])) {
+    return { readers: [], sellingPoints: [], channels: [], marketReturn: null, awards: null, withheld: ['AI7 写出的市场部分不合格式，没有采用。'] };
+  }
+  const lists: Record<string, string[]> = {};
+  for (const [key, label] of MARKET_LISTS) {
+    const candidate = value[key];
+    if (!boundedLines(candidate)) {
+      lists[key] = [];
+      withheld.push(`AI7 写出的${label}不合格式，没有采用。`);
+      continue;
+    }
+    const kept = candidate.filter((entry) => !claimsQuantity(entry));
+    if (kept.length < candidate.length) withheld.push(`AI7 写出的${label}有 ${candidate.length - kept.length} 条给出了数量，没有采用：只依据所读书稿，不能给出销量、印数、定价或概率。`);
+    lists[key] = kept;
+  }
+  const predictions: Record<string, InitialEvaluationPredictionProjection | null> = {};
+  for (const [key, label] of MARKET_PREDICTIONS) {
+    const candidate = value[key];
+    predictions[key] = null;
+    if (candidate === null) continue;
+    if (!isRecord(candidate) || !hasExactKeys(candidate, ['statement', 'basis']) || !line(candidate.statement, MAX_PREDICTION_STATEMENT_GRAPHEMES) ||
+        !line(candidate.basis, MAX_PREDICTION_BASIS_GRAPHEMES)) {
+      withheld.push(`AI7 写出的${label}预测不合格式，没有采用。`);
+      continue;
+    }
+    if (claimsQuantity(candidate.statement) || claimsQuantity(candidate.basis)) {
+      withheld.push(`AI7 写出的${label}预测给出了数量，没有采用：只依据所读书稿，不能给出销量、印数、定价或概率。`);
+      continue;
+    }
+    predictions[key] = { statement: candidate.statement, basis: candidate.basis };
+  }
+  return {
+    readers: lists['readers']!, sellingPoints: lists['sellingPoints']!, channels: lists['channels']!,
+    marketReturn: predictions['marketReturn']!, awards: predictions['awards']!, withheld,
+  };
+}
+
+const SYNTHESIS_KEYS = ['schema', 'items', 'strengths', 'weaknesses', 'nextStep', 'suggestedConclusion'] as const;
+
 /**
  * Admit the synthesis: every scored item of the profile exactly once, each score a whole or half point within its 满分, and
  * nothing the profile does not name. The items are returned in the profile's order whatever order the model wrote them in.
@@ -256,7 +328,8 @@ export function parseInitialEvaluationSynthesis(text: string, profile: Pick<Init
   if (!parsed.ok) return { ok: false, code: 'not-json', detail: '模型输出不是 JSON。' };
   const value = parsed.value;
   const invalid = (detail: string): InitialEvaluationSynthesisParse => ({ ok: false, code: 'schema-invalid', detail });
-  if (!isRecord(value) || !hasExactKeys(value, ['schema', 'items', 'strengths', 'weaknesses', 'nextStep', 'suggestedConclusion'])) {
+  // The market key may be missing: an answer without it keeps its scores and reads as having no market section (S81b2).
+  if (!isRecord(value) || !(hasExactKeys(value, [...SYNTHESIS_KEYS, 'market']) || hasExactKeys(value, [...SYNTHESIS_KEYS]))) {
     return invalid('全书综合的键集合不符合评估契约 v1。');
   }
   if (value.schema !== INITIAL_EVALUATION_SYNTHESIS_RESULT_SCHEMA) return invalid('全书综合 schema 不是评估契约 v1。');
@@ -291,6 +364,7 @@ export function parseInitialEvaluationSynthesis(text: string, profile: Pick<Init
       weaknesses: [...value.weaknesses],
       nextStep: value.nextStep as string | null,
       suggestedConclusion: conclusion as EvaluationConclusion | null,
+      market: marketOf(value.market),
     },
   };
 }

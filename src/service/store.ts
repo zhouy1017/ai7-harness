@@ -258,6 +258,12 @@ import type {
   InitialEvaluationProjection,
   ReadersReportProjection,
   ReadersReportTemplate,
+  EvaluationComparableProjection,
+  EvaluationPricingProjection,
+  EvaluationMarketProjection,
+  EvaluationRewriteDecision,
+  EvaluationRewriteProjection,
+  EvaluationRewriteWorkspaceProjection,
   ReviewCategoryGoal,
   ReviewCategoryProjection,
   ReviewCategoryTaskRequest,
@@ -269,12 +275,28 @@ import {
   INITIAL_EVALUATION_MODE_GOALS,
   READERS_REPORT_LIVE_UNAVAILABLE,
   READERS_REPORT_MODE_GOALS,
+  EVALUATION_REWRITE_LIVE_UNAVAILABLE,
+  EVALUATION_REWRITE_MODE_GOALS,
+  MAX_EVALUATION_COMPARABLES,
+  MIN_SERIES_PREDICTION_BOOKS,
   READERS_REPORT_NO_EXEMPLAR,
   READERS_REPORT_TEMPLATE_LABELS,
   READERS_REPORT_TEMPLATES,
 } from '../shared/protocol.js';
 import { INITIAL_EVALUATION_LIVE_UNAVAILABLE, initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
 import { readersReportKindDefinition } from './evaluation/readers-report-kind.js';
+import { evaluationRewriteKindDefinition } from './evaluation/evaluation-rewrite-kind.js';
+import { evaluationRewriteScoredItems, type EvaluationRewriteContractInput } from './evaluation/evaluation-rewrite-contract.js';
+import { predictionRange } from './evaluation/pricing-prediction.js';
+import {
+  EvaluationRewriteError,
+  EvaluationRewrites,
+  evaluationRewriteContractInput,
+  evaluationRewriteRefusal,
+  initializeEvaluationRewriteSchema,
+  type RewritableEvaluation,
+  type StoredEvaluationRewriteTask,
+} from './evaluation-rewrites.js';
 import { readersReportExemplarLine, type ReadersReportContractInput } from './evaluation/readers-report-contract.js';
 import {
   READERS_REPORT_NEEDS_FINALIZED,
@@ -346,6 +368,8 @@ import {
   analysisTaskStateLabel,
   readersReportPlan,
   readersReportTaskStateLabel,
+  evaluationRewritePlan,
+  evaluationRewriteTaskStateLabel,
   defaultRuleBindingRows,
   fixedTaskPlan,
   noDefaultRule,
@@ -745,6 +769,7 @@ import {
   SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
   READERS_REPORT_SCHEMA_VERSION,
   CAPTURED_PROCEDURE_SCHEMA_VERSION,
+  EVALUATION_REWRITE_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1984,7 +2009,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === DIALOGUE_SCHEMA_VERSION ||
       currentVersion === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       currentVersion === READERS_REPORT_SCHEMA_VERSION ||
-      currentVersion === CAPTURED_PROCEDURE_SCHEMA_VERSION,
+      currentVersion === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
+      currentVersion === EVALUATION_REWRITE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2043,7 +2069,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === DIALOGUE_SCHEMA_VERSION ||
       currentVersion === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       currentVersion === READERS_REPORT_SCHEMA_VERSION ||
-      currentVersion === CAPTURED_PROCEDURE_SCHEMA_VERSION
+      currentVersion === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
+      currentVersion === EVALUATION_REWRITE_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2416,7 +2443,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === DIALOGUE_SCHEMA_VERSION ||
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       version === READERS_REPORT_SCHEMA_VERSION ||
-      version === CAPTURED_PROCEDURE_SCHEMA_VERSION,
+      version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
+      version === EVALUATION_REWRITE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2464,7 +2492,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === DIALOGUE_SCHEMA_VERSION ||
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       version === READERS_REPORT_SCHEMA_VERSION ||
-      version === CAPTURED_PROCEDURE_SCHEMA_VERSION) return;
+      version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
+      version === EVALUATION_REWRITE_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2604,7 +2633,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === DIALOGUE_SCHEMA_VERSION ||
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       version === READERS_REPORT_SCHEMA_VERSION ||
-      version === CAPTURED_PROCEDURE_SCHEMA_VERSION,
+      version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
+      version === EVALUATION_REWRITE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2651,7 +2681,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === DIALOGUE_SCHEMA_VERSION ||
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       version === READERS_REPORT_SCHEMA_VERSION ||
-      version === CAPTURED_PROCEDURE_SCHEMA_VERSION) return;
+      version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
+      version === EVALUATION_REWRITE_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2944,7 +2975,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== CAPTURED_PROCEDURE_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== EVALUATION_REWRITE_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2994,6 +3025,7 @@ function validateModelServiceSchema(
       version >= SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
       version >= READERS_REPORT_SCHEMA_VERSION,
       version >= CAPTURED_PROCEDURE_SCHEMA_VERSION,
+      version >= EVALUATION_REWRITE_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -3068,7 +3100,8 @@ function initializeModelServiceSchema(
       version === DIALOGUE_SCHEMA_VERSION ||
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       version === READERS_REPORT_SCHEMA_VERSION ||
-      version === CAPTURED_PROCEDURE_SCHEMA_VERSION,
+      version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
+      version === EVALUATION_REWRITE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3115,7 +3148,8 @@ function initializeModelServiceSchema(
       version === DIALOGUE_SCHEMA_VERSION ||
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       version === READERS_REPORT_SCHEMA_VERSION ||
-      version === CAPTURED_PROCEDURE_SCHEMA_VERSION) {
+      version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
+      version === EVALUATION_REWRITE_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3969,6 +4003,11 @@ export class EditorialStore {
    */
   readonly #readersReportLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
   #readersReports!: ReadersReports;
+  /** 按我的评分重写评语 (Issue #429, S81b2): one ledger per frozen rewrite contract, made when first asked for; bounded. */
+  readonly #evaluationRewriteLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
+  /** The ledger each rewrite preparation in flight belongs to, by its work. */
+  readonly #evaluationRewriteWork = new Map<string, BaselineAnalysisStore>();
+  #evaluationRewrites!: EvaluationRewrites;
   readonly #editorialMarks: EditorialMarkStore;
   readonly #manuscriptApply: ManuscriptApplyStore;
   readonly #reviewRuns: ReviewRunStore;
@@ -4073,13 +4112,13 @@ export class EditorialStore {
     this.#dialogueHistory = harnessHistoryReader(join(dataRoot, HARNESS_SESSION_LOG_DIRECTORY));
     this.#dataVersions = new DataVersionLedger(authority);
     this.#databaseExports = new DatabaseExports(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: CAPTURED_PROCEDURE_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: EVALUATION_REWRITE_SCHEMA_VERSION }),
     });
     this.#scheduledBackups = new ScheduledBackups(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: CAPTURED_PROCEDURE_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: EVALUATION_REWRITE_SCHEMA_VERSION }),
     });
     this.#databaseReplacements = new DatabaseReplacements(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: CAPTURED_PROCEDURE_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: EVALUATION_REWRITE_SCHEMA_VERSION }),
       // A package's data opens as a store of its own, with no launch control: brought to this revision and checked whole.
       openPackage: async (root) => {
         const opened = await EditorialStore.open(root, this.#codeRoot, {
@@ -4095,11 +4134,16 @@ export class EditorialStore {
       },
     });
     this.#readersReports = new ReadersReports(authority);
+    this.#evaluationRewrites = new EvaluationRewrites(authority);
     this.#evaluations = new EvaluationRecords(authority, { current: (bookId) => this.#evaluationManuscript(bookId) }, {
       latest: (bookId) => this.#initialEvaluationFacts(bookId),
       task: (bookId) => this.#initialEvaluationTask(bookId),
     }, {
       workspace: (bookId, basis, unreadable) => this.#readersReportWorkspace(bookId, basis, unreadable),
+    }, {
+      // The market section's house data and 按我的评分重写评语 of the version on show (Issue #429, S81b2).
+      market: (bookId) => this.#evaluationMarket(bookId),
+      rewrite: (bookId, version) => this.#evaluationRewriteWorkspace(bookId, version),
     });
     this.#analysisFeedback = new AnalysisFeedbackLedger(authority);
     this.#capturedProcedures = new CapturedProcedures(authority);
@@ -4229,7 +4273,7 @@ export class EditorialStore {
       // the backup location before anything migrates it, and a backup that cannot be made opens nothing.
       const classes = control.schemaRevisionClasses ?? SCHEMA_REVISION_CLASSES;
       const { upgrade, earlier } = await backUpBeforeUpgrade(authority, dataRoot, {
-        terminalRevision: CAPTURED_PROCEDURE_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
+        terminalRevision: EVALUATION_REWRITE_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
       }).catch((error: unknown) => {
         if (error instanceof DataVersionError) throw new StoreError(error.code, error.message);
         throw error;
@@ -4326,6 +4370,8 @@ export class EditorialStore {
       // Revision 62 (Issue #429, S81c): which 定稿 version each 审稿意见 Task drafts from, and which result became a draft.
       initializeReadersReportSchema(authority);
       initializeCapturedProcedureSchema(authority);
+      // Revision 64 (Issue #429, S81b2): which version each 按我的评分重写评语 Task rewrites, and the editor's decisions.
+      initializeEvaluationRewriteSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -4373,7 +4419,7 @@ export class EditorialStore {
       // Every store records the versions that open it (Issue #433, S85a; DSTO-016): a new record only when one changed.
       store.#softwareVersion = softwareVersion;
       store.#codeRoot = codeRoot;
-      store.#dataVersion = dataVersionAt(CAPTURED_PROCEDURE_SCHEMA_VERSION, classes);
+      store.#dataVersion = dataVersionAt(EVALUATION_REWRITE_SCHEMA_VERSION, classes);
       if (control.interruptUpgradeAt === 'before-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在记录版本之前停止。');
       // The open that raised the Data Version records the upgrade it made with the backup (S85b), and only then clears the note
       // that let an open stopped before this record it (Issue #433 review).
@@ -4381,7 +4427,7 @@ export class EditorialStore {
         // Upgrades other opens made and never recorded go first, oldest first, as those opens would have recorded them; one a
         // record already holds is not recorded again (Issue #433 review).
         for (const carried of earlier) store.#dataVersions.recordCarried(carried);
-        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: CAPTURED_PROCEDURE_SCHEMA_VERSION, upgrade });
+        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: EVALUATION_REWRITE_SCHEMA_VERSION, upgrade });
       }));
       if (control.interruptUpgradeAt === 'after-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在清除升级记录之前停止。');
       await completeUpgrade(dataRoot).catch(() => undefined);
@@ -4800,6 +4846,27 @@ export class EditorialStore {
           recordOrdinal: this.#evaluationRecordOrdinal(latest.task.recordId),
           profile: latest.task.input.record.profile,
           exemplars: readersReportExemplarLine(latest.task.input.exemplars),
+        },
+      }));
+      return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+    }
+    if (input.kind === 'evaluation-rewrite') {
+      // 按我的评分重写评语 (Issue #429, S81b2): the rewrite kind's latest Task, on the ledger of the contract its plan froze.
+      const latest = this.#latestEvaluationRewrite(input.bookId, progress);
+      const projection = latest?.projection ?? null;
+      const checkpoint = projection?.checkpoint ?? null;
+      requireStore(latest !== null && projection !== null && projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', '按我的评分重写评语还没有准备计划。');
+      current(projection.taskIntent.taskIntentId);
+      const blocks = this.#analysisCall(() => latest.ledger.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
+      const plan = this.#taskPlanCall(() => evaluationRewritePlan({
+        projection,
+        bookTitle,
+        blocks,
+        task: {
+          recordOrdinal: this.#evaluationRecordOrdinal(latest.task.recordId),
+          entryOrdinal: latest.task.entryOrdinal,
+          profile: latest.task.input.profile,
+          scored: evaluationRewriteScoredItems(latest.task.input).map((item) => ({ label: item.label, score: item.score!, fullMarks: item.fullMarks })),
         },
       }));
       return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
@@ -5342,6 +5409,8 @@ export class EditorialStore {
     this.#initialEvaluation.prepare({ phase: 'cancel-all' });
     for (const ledger of this.#reviewCategoryLedgers.values()) ledger.prepare({ phase: 'cancel-all' });
     for (const ledger of this.#readersReportLedgers.values()) ledger.prepare({ phase: 'cancel-all' });
+    for (const ledger of this.#evaluationRewriteLedgers.values()) ledger.prepare({ phase: 'cancel-all' });
+    this.#evaluationRewriteWork.clear();
     for (const workId of Array.from(this.#reimportPreparationWork.keys())) {
       this.cancelManuscriptReimportPreparationWork(workId);
     }
@@ -6949,6 +7018,8 @@ export class EditorialStore {
         // A 初评 that completed with gaps scored without these ranges; every version begun from it says so.
         unitsTotal: revision.coverage.unitsTotal,
         unreadUnits: [...new Set(revision.gaps.map((gap) => gap.unitOrdinal))].sort((left, right) => left - right),
+        // AI7's market section (S81b2; EVAL-009), snapshotted with the draft like everything AI7 wrote.
+        market: evaluation.market,
       },
       manuscriptRevisionId: revision.manuscriptPin.revisionId,
       current: revision.freshness.state === 'current',
@@ -7303,6 +7374,362 @@ export class EditorialStore {
       });
     })));
     return this.inspectEvaluation(bookId, null);
+  }
+
+  // ---- 市场 and 按我的评分重写评语 (Issue #429, plan slice S81b2; V2-UX-EVAL-008 to EVAL-010; editor-surfaces §5 ②C) ----------
+
+  /**
+   * The market section's house data for one Book (EVAL-009, EVAL-010): the 书系 it is in and their other Books as comparables
+   * tagged `书系`, and 定价与首印 — the prediction range over the house's other published Books' actuals, shown only once 设置 ›
+   * 评估校准与预测's switch is on and at least the threshold of other Books carry actuals (the Owner's answer of 2026-10-07:
+   * 「按本社已出版同类书的实际数据统计」), with a 书系 range only over `MIN_SERIES_PREDICTION_BOOKS` or more. The Book itself never
+   * counts toward its own range or the gate it waits on. No model reads any of it, and nothing here comes from the web.
+   *
+   * It reads other Books' entries, so a damaged one anywhere must not take 评估 of this Book down (S81b2 review): a part that
+   * cannot be read this time says so — 暂时读不到本社数据 — and the rest of 评估, a save included, stands.
+   */
+  #evaluationMarket(bookId: string): EvaluationMarketProjection {
+    let memberships: ReadonlyArray<{ seriesId: string; title: string }> = [];
+    const others = new Map<string, string>();
+    let seriesUnreadable = false;
+    try {
+      memberships = this.#seriesCall(() => this.#series.seriesOf(bookId)).memberships;
+      for (const membership of memberships) {
+        for (const member of this.#seriesCall(() => [...this.#series.members(membership.seriesId)])) {
+          if (member.bookId !== bookId && !others.has(member.bookId)) others.set(member.bookId, membership.title);
+        }
+      }
+    } catch (error) {
+      if (!(error instanceof StoreError)) throw error;
+      memberships = [];
+      others.clear();
+      seriesUnreadable = true;
+    }
+    const comparables: EvaluationComparableProjection[] = [];
+    for (const [otherId, seriesTitle] of others) {
+      if (comparables.length >= MAX_EVALUATION_COMPARABLES) break;
+      const row = this.#authority.prepare(
+        'SELECT b.title, EXISTS (SELECT 1 FROM publication_versions p WHERE p.book_id = b.book_id) AS published FROM books b WHERE b.book_id = ?',
+      ).get(otherId) as SqlRow | undefined;
+      if (row === undefined) continue;
+      comparables.push({ bookId: otherId, title: asString(row.title), seriesTitle, published: asNumber(row.published) === 1, source: 'series' });
+    }
+    const unread: EvaluationPricingProjection = {
+      booksWithActuals: 0, otherBooksWithActuals: 0, threshold: PREDICTION_MIN_BOOKS_WITH_ACTUALS, enabled: false, available: false, unreadable: true,
+      house: null, series: null, seriesBooksWithActuals: null, seriesMinimum: MIN_SERIES_PREDICTION_BOOKS,
+    };
+    let pricing = unread;
+    try {
+      pricing = this.#calibrationCall(() => {
+        const preferences = this.#evaluationCalibration.preferences();
+        const booksWithActuals = this.#evaluationCalibration.booksWithActuals();
+        const available = predictionAvailable(booksWithActuals);
+        const asked = preferences.predictionEnabled && available;
+        const actuals = asked ? [...this.#evaluationCalibration.everyLatestActuals()].filter(([otherId]) => otherId !== bookId) : [];
+        const otherBooksWithActuals = asked ? actuals.length
+          : booksWithActuals - (this.#evaluationCalibration.hasActuals(bookId) ? 1 : 0);
+        // The gate counts the Books the range rests on: the others, never this one.
+        const shown = asked && predictionAvailable(otherBooksWithActuals);
+        const inSeries = shown ? actuals.filter(([otherId]) => others.has(otherId)).map(([, entry]) => entry) : [];
+        return {
+          booksWithActuals,
+          otherBooksWithActuals,
+          threshold: PREDICTION_MIN_BOOKS_WITH_ACTUALS,
+          enabled: preferences.predictionEnabled,
+          available,
+          unreadable: false,
+          house: shown ? predictionRange(actuals.map(([, entry]) => entry)) : null,
+          series: shown && inSeries.length >= MIN_SERIES_PREDICTION_BOOKS ? predictionRange(inSeries) : null,
+          seriesBooksWithActuals: shown && memberships.length > 0 ? inSeries.length : null,
+          seriesMinimum: MIN_SERIES_PREDICTION_BOOKS,
+        };
+      });
+    } catch (error) {
+      if (!(error instanceof StoreError)) throw error;
+      pricing = unread;
+    }
+    return {
+      series: memberships.map((membership) => ({ seriesId: membership.seriesId, title: membership.title })),
+      comparables,
+      comparableCount: others.size,
+      seriesUnreadable,
+      pricing,
+    };
+  }
+
+  /**
+   * The rewrite ledger of one frozen contract — one version's words at one saved entry — made when first asked for and kept
+   * while it prepares, as 审稿意见's is. It takes the launch the baseline ledger was bound to.
+   */
+  #evaluationRewriteLedger(input: EvaluationRewriteContractInput): BaselineAnalysisStore {
+    const definition = this.#analysisCall(() => evaluationRewriteKindDefinition(input));
+    return this.#evaluationRewriteLedgers.obtain(definition.promptContractDigest, () => {
+      const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
+      ledger.bindLaunch(this.#baselineAnalysis.launch);
+      return ledger;
+    });
+  }
+
+  #evaluationRewriteCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof EvaluationRewriteError || error instanceof AnalysisError || error instanceof EvaluationError) {
+        throw new StoreError(error.code, error.message);
+      }
+      throw error;
+    }
+  }
+
+  /** One Task's version and entry — the one its frozen plan names when it froze one. */
+  #evaluationRewriteTaskOf(taskIntentId: string): { task: StoredEvaluationRewriteTask; ledger: BaselineAnalysisStore } | null {
+    let task = this.#evaluationRewriteCall(() => this.#evaluationRewrites.task(taskIntentId));
+    if (task === null) return null;
+    let ledger = this.#evaluationRewriteLedger(task.input);
+    const planContract = this.#evaluationRewriteCall(() => this.#evaluationRewrites.planContract(taskIntentId));
+    if (planContract !== null && planContract !== task.promptContractSha256) {
+      task = this.#evaluationRewriteCall(() => this.#evaluationRewrites.task(taskIntentId, planContract));
+      requireStore(task !== null, 'EVALUATION_REWRITE_RECORD_INVALID', '评语重写任务的计划与它的记录不一致。');
+      ledger = this.#evaluationRewriteLedger(task.input);
+    }
+    return { task, ledger };
+  }
+
+  /** The Book's latest rewrite Task with its ledger and projection; `null` before the first, or for one no record names. */
+  #latestEvaluationRewrite(bookId: string, progress?: ProgressReader): { task: StoredEvaluationRewriteTask; ledger: BaselineAnalysisStore; projection: EvaluationRewriteProjection } | null {
+    const intentId = this.#evaluationRewriteCall(() => this.#evaluationRewrites.latestTaskIntentId(bookId));
+    if (intentId === null) return null;
+    const found = this.#evaluationRewriteTaskOf(intentId);
+    if (found === null) return null;
+    const projection = this.#analysisCall(() => found.ledger.inspect(bookId, progress)) as EvaluationRewriteProjection;
+    return { ...found, projection };
+  }
+
+  /** The Book's latest rewrite Task as its ledger reads it, or `null`; `progress` is the execution owner's reader. */
+  inspectEvaluationRewrite(bookId: string, progress?: ProgressReader): EvaluationRewriteProjection | null {
+    this.#assertAvailable();
+    return this.#latestEvaluationRewrite(bookId, progress)?.projection ?? null;
+  }
+
+  /**
+   * 按我的评分重写评语 runs only where it may be sent (EVAL-008, as 初评): under a live scope no Provider Processing policy names it,
+   * so nothing is prepared or started there, and 评估 says why. The provider-free scope is unaffected.
+   */
+  #requireEvaluationRewriteScope(): void {
+    this.#assertAvailable();
+    if (this.#baselineAnalysis.launch.live !== null) throw new StoreError('EVALUATION_REWRITE_UNAVAILABLE', EVALUATION_REWRITE_LIVE_UNAVAILABLE);
+  }
+
+  /**
+   * 按我的评分重写评语 (EVAL-008): the rewrite kind's Task over one version of the Book at its latest saved entry, in the mode that
+   * applies. Refused under a live scope, for a 定稿 version, one begun without AI7's 初评, or one whose saved scores do not depart
+   * from AI7's yet — the 评语 then already speak to them. Its plan opens in the Task Drawer.
+   */
+  createEvaluationRewritePreparationWork(bookId: string, recordId: string, launchPolicy: LaunchPolicyProjection): AnalysisPreparationResult<EvaluationRewriteProjection> {
+    this.#requireEvaluationRewriteScope();
+    requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(recordId), 'EVALUATION_REWRITE_INVALID', '评语重写参数无效。');
+    const version = this.#evaluationCall(() => this.#evaluations.rewritable(bookId, recordId));
+    const refusal = evaluationRewriteRefusal(version);
+    requireStore(refusal === null, 'EVALUATION_REWRITE_UNAVAILABLE', refusal ?? '');
+    const input = this.#evaluationRewriteCall(() => evaluationRewriteContractInput(version));
+    const ledger = this.#evaluationRewriteLedger(input);
+    const latest = this.#latestEvaluationRewrite(bookId);
+    requireStore(!runIsActive(latest?.projection.run?.state ?? null), 'EVALUATION_REWRITE_UNAVAILABLE', activeRunReason(latest?.projection.run?.state ?? null));
+    const mode = latest === null || latest.projection.resultSetRevision === null ? 'evaluation-rewrite-first' : 'evaluation-rewrite-again';
+    const result = this.#analysisCall(() => ledger.prepare({
+      phase: 'start',
+      bookId,
+      goal: EVALUATION_REWRITE_MODE_GOALS[mode],
+      update: mode === 'evaluation-rewrite-first' ? null : { mode, selectedRange: null },
+      reconfirm: false,
+      launchPolicy,
+    }));
+    // Which version and saved entry the Task rewrites, recorded once for it and this contract.
+    const taskIntentId = this.#evaluationRewriteCall(() => this.#evaluationRewrites.latestTaskIntentId(bookId));
+    requireStore(taskIntentId !== null, 'EVALUATION_REWRITE_RECORD_INVALID', '评语重写任务没有准备出来。');
+    this.#evaluationRewriteCall(() => this.#transaction(this.#authority, () => this.#evaluationRewrites.recordTask({
+      taskIntentId,
+      bookId,
+      recordId,
+      entryOrdinal: version.entryOrdinal,
+      entrySha256: version.entrySha256,
+      contract: input,
+      promptContractSha256: ledger.definition.promptContractDigest,
+    })));
+    if (result.workId !== null) this.#evaluationRewriteWork.set(result.workId, ledger);
+    return { ...result, projection: result.projection as EvaluationRewriteProjection | null };
+  }
+
+  advanceEvaluationRewritePreparationWork(workId: string): AnalysisPreparationResult<EvaluationRewriteProjection> {
+    const ledger = this.#evaluationRewriteWork.get(workId);
+    requireStore(ledger !== undefined, 'ANALYSIS_PREPARATION_NOT_FOUND', '评语重写的计划准备已不存在。');
+    const result = this.#analysisCall(() => ledger.prepare({ phase: 'advance', workId }));
+    if (result.done) this.#evaluationRewriteWork.delete(workId);
+    return { ...result, projection: result.projection as EvaluationRewriteProjection | null };
+  }
+
+  cancelEvaluationRewritePreparationWork(workId: string): boolean {
+    const ledger = this.#evaluationRewriteWork.get(workId);
+    if (ledger === undefined) return false;
+    this.#evaluationRewriteWork.delete(workId);
+    this.#analysisCall(() => ledger.prepare({ phase: 'cancel', workId }));
+    return true;
+  }
+
+  /** The version the Book's latest rewrite Task rewrites: what 评估 shows once that Task was prepared or started. */
+  evaluationRewriteRecordOf(bookId: string): string | null {
+    this.#assertAvailable();
+    return this.#latestEvaluationRewrite(bookId)?.task.recordId ?? null;
+  }
+
+  /** 开始任务 in the drawer's bar: the Run Authorization and the Run on the ledger of the plan's contract, for the owner. */
+  authorizeEvaluationRewrite(bookId: string, taskIntentId: string, planEnvelopeDigest: string): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore; recordId: string } {
+    this.#requireEvaluationRewriteScope();
+    const latest = this.#latestEvaluationRewrite(bookId);
+    requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT',
+      '这项任务已不是这本书当前的任务；请从它所在的位置重新打开计划。');
+    // The version may have moved since the plan was prepared — saved again, or 定稿 — while the drawer stayed open: a Run then
+    // would only write words that can never be 采用 (S81b2 review). Refused here, before any Run is spent.
+    const version = this.#evaluationCall(() => this.#evaluations.rewritable(bookId, latest.task.recordId));
+    const refusal = evaluationRewriteRefusal(version);
+    requireStore(refusal === null, 'EVALUATION_REWRITE_UNAVAILABLE', refusal ?? '');
+    requireStore(version.entryOrdinal === latest.task.entryOrdinal && version.entrySha256 === latest.task.entrySha256, 'EVALUATION_REWRITE_STALE',
+      '这一版在准备重写之后又保存过：这份计划依据的是之前的分数；请按现在的评分重新准备重写。');
+    const authorized = this.#analysisCall(() => latest.ledger.authorize(bookId, taskIntentId, planEnvelopeDigest));
+    return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger: latest.ledger, recordId: latest.task.recordId };
+  }
+
+  /**
+   * Startup reconciliation of the rewrite kind (as 初评's and 审稿意见's): a rewrite left admitted or executing has nothing running it
+   * and cannot resume, so it ends 已中断 with its outcome; a start the governor had not admitted is blocked before dispatch with
+   * why. The kind's Runs are reconciled by kind, so any of its ledgers does it.
+   */
+  reconcileStoppedEvaluationRewriteRuns(): { settled: number } {
+    this.#assertAvailable();
+    const any = this.#evaluationRewriteCall(() => this.#evaluationRewrites.anyTask());
+    if (any === null) return { settled: 0 };
+    return { settled: this.#analysisCall(() => this.#evaluationRewriteLedger(any.input).reconcileStoppedRuns()).settled };
+  }
+
+  /** The newest rewritten result of one version, with its Task, words and what it read; `null` while the version has none. */
+  #newestEvaluationRewrite(bookId: string, recordId: string): null | {
+    revision: { revisionId: string; createdAt: string; taskIntentId: string };
+    task: StoredEvaluationRewriteTask;
+    words: NonNullable<NonNullable<EvaluationRewriteProjection['inspectedRevision']>['revision']['rewrite']['words']> | null;
+    observations: NonNullable<EvaluationRewriteProjection['inspectedRevision']>['revision']['rewrite']['observations'];
+    reading: { unitsTotal: number; unitsRead: number };
+  } {
+    for (const revision of this.#evaluationRewriteCall(() => this.#evaluationRewrites.revisions(bookId))) {
+      const found = this.#evaluationRewriteTaskOf(revision.taskIntentId);
+      if (found === null || found.task.recordId !== recordId) continue;
+      const inspected = this.#analysisCall(() => found.ledger.inspect(bookId, undefined, revision.revisionId)) as EvaluationRewriteProjection;
+      const read = inspected.inspectedRevision?.revision ?? null;
+      return {
+        revision,
+        task: found.task,
+        words: read?.rewrite.words ?? null,
+        observations: read?.rewrite.observations ?? [],
+        reading: { unitsTotal: read?.coverage.unitsTotal ?? 0, unitsRead: read?.coverage.unitsClosed ?? 0 },
+      };
+    }
+    return null;
+  }
+
+  /**
+   * 按我的评分重写评语 on ②C for the version on show (EVAL-008): whether it can be asked, the Book's latest rewrite Task, the newest
+   * rewrite of this version still waiting for the editor — its words beside the version's own, the notes they rest on, how much
+   * of the Book it read and what it set aside — and the version's last decision. Every rewrite row it reads is read under one
+   * guard: a damaged one makes the rewrite unavailable with why, never 评估 unreadable (S81b2 review).
+   */
+  #evaluationRewriteWorkspace(bookId: string, version: RewritableEvaluation | null): EvaluationRewriteWorkspaceProjection {
+    let latest: { task: StoredEvaluationRewriteTask; ledger: BaselineAnalysisStore; projection: EvaluationRewriteProjection } | null = null;
+    let unavailable: string | null = null;
+    let proposal: EvaluationRewriteWorkspaceProjection['proposal'] = null;
+    let decided: EvaluationRewriteWorkspaceProjection['decided'] = null;
+    try {
+      latest = this.#latestEvaluationRewrite(bookId);
+      if (version !== null) {
+        const newest = this.#newestEvaluationRewrite(bookId, version.recordId);
+        if (newest !== null && newest.words !== null && this.#evaluationRewriteCall(() => this.#evaluationRewrites.decisionOf(newest.revision.revisionId)) === null) {
+          const words = newest.words;
+          proposal = {
+            revisionId: newest.revision.revisionId,
+            createdAt: newest.revision.createdAt,
+            entryOrdinal: newest.task.entryOrdinal,
+            current: newest.task.entryOrdinal === version.entryOrdinal && newest.task.entrySha256 === version.entrySha256 && version.state !== 'finalized',
+            reading: newest.reading,
+            items: words.items.map((item) => ({
+              itemId: item.itemId,
+              before: version.content.items.find((entry) => entry.itemId === item.itemId)?.comment ?? null,
+              after: item.comment,
+              evidence: newest.observations.filter((observation) => observation.itemId === item.itemId)
+                .map((observation) => ({ unitOrdinal: observation.unitOrdinal, note: observation.note, blockIds: [...observation.blockIds] })),
+            })),
+            verdict: words.verdict === null ? null : { before: version.content.verdict, after: words.verdict },
+            withheld: words.withheld.map((entry) => entry.reason),
+          };
+        }
+        const last = this.#evaluationRewriteCall(() => this.#evaluationRewrites.latestDecision(version.recordId));
+        decided = last === null ? null : { decision: last.decision, entryOrdinal: last.entryOrdinal, decidedAt: last.recordedAt };
+      }
+    } catch (error) {
+      if (!(error instanceof StoreError)) throw error;
+      latest = null;
+      proposal = null;
+      decided = null;
+      unavailable = `按我的评分重写评语暂不可用：${error.message}`;
+    }
+    const runState = latest?.projection.run?.state ?? null;
+    const task = latest === null || latest.projection.taskIntent === null ? null : {
+      taskIntentId: latest.projection.taskIntent.taskIntentId,
+      recordId: latest.task.recordId,
+      recordOrdinal: this.#evaluationRecordOrdinal(latest.task.recordId),
+      entryOrdinal: latest.task.entryOrdinal,
+      state: latest.projection.state,
+      label: evaluationRewriteTaskStateLabel(latest.projection),
+    };
+    const refusal = version === null ? '先打开一版评估。' : evaluationRewriteRefusal(version);
+    const prepare: EvaluationRewriteWorkspaceProjection['prepare'] =
+      this.#baselineAnalysis.launch.live !== null ? { allowed: false, reason: EVALUATION_REWRITE_LIVE_UNAVAILABLE }
+      : unavailable !== null ? { allowed: false, reason: unavailable }
+      : refusal !== null ? { allowed: false, reason: refusal }
+      : runIsActive(runState) ? { allowed: false, reason: activeRunReason(runState) }
+      : { allowed: true, mode: latest === null || latest.projection.resultSetRevision === null ? 'evaluation-rewrite-first' : 'evaluation-rewrite-again' };
+    return { prepare, task, proposal, decided };
+  }
+
+  /**
+   * 采用 or 放弃 one rewrite (EVAL-008): 采用 appends AI7's rewritten 评语 and 总评 to the version as a new entry — every score as the
+   * editor saved it — only while the version still stands at the entry the rewrite read and the rewrite is its newest; 放弃 sets
+   * it aside. Either is recorded once, in the transaction that makes it, and nothing else of the record changes.
+   */
+  decideEvaluationRewrite(bookId: string, revisionId: string, decision: EvaluationRewriteDecision): EvaluationWorkspaceProjection {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(revisionId) && (decision === 'accept' || decision === 'discard'),
+      'EVALUATION_REWRITE_INVALID', '评语重写参数无效。');
+    const revision = this.#evaluationRewriteCall(() => this.#evaluationRewrites.revisions(bookId)).find((entry) => entry.revisionId === revisionId);
+    requireStore(revision !== undefined, 'EVALUATION_REWRITE_NOT_FOUND', '这本书没有这一次重写的评语。');
+    const found = this.#evaluationRewriteTaskOf(revision.taskIntentId);
+    requireStore(found !== null, 'EVALUATION_REWRITE_RECORD_INVALID', '这一次重写没有记下它依据的评估版本。');
+    const inspected = this.#analysisCall(() => found.ledger.inspect(bookId, undefined, revisionId)) as EvaluationRewriteProjection;
+    const words = inspected.inspectedRevision?.revision.rewrite.words ?? null;
+    const recordId = found.task.recordId;
+    this.#evaluationRewriteCall(() => this.#transaction(this.#authority, () => {
+      requireStore(this.#evaluationRewrites.decisionOf(revisionId) === null, 'EVALUATION_REWRITE_DECIDED', '这一次重写已经处理过了。');
+      if (decision === 'discard') {
+        this.#evaluationRewrites.recordDecision({ analysisRevisionId: revisionId, bookId, recordId, taskIntentId: revision.taskIntentId, decision: 'discarded', entryOrdinal: null });
+        return;
+      }
+      requireStore(words !== null, 'EVALUATION_REWRITE_NOT_WRITTEN', '这一次重写没有写出评语，不能采用。');
+      requireStore(this.#newestEvaluationRewrite(bookId, recordId)?.revision.revisionId === revisionId, 'EVALUATION_REWRITE_SUPERSEDED',
+        '这一版评估后来又重写过：请看最新的重写。');
+      requireStore(words.items.length > 0 || words.verdict !== null, 'EVALUATION_REWRITE_NOT_WRITTEN', '这一次重写写出的评语都没有采用的条件，只能放弃。');
+      const entryOrdinal = this.#evaluations.applyRewrite(bookId, recordId, { entryOrdinal: found.task.entryOrdinal, entrySha256: found.task.entrySha256 }, words,
+        { taskIntentId: revision.taskIntentId, analysisRevisionId: revisionId });
+      this.#evaluationRewrites.recordDecision({ analysisRevisionId: revisionId, bookId, recordId, taskIntentId: revision.taskIntentId, decision: 'accepted', entryOrdinal });
+    }));
+    return this.inspectEvaluation(bookId, recordId);
   }
 
   /** 保存评估 or 定稿: the editor's content appended to the version's chain, and the page as it now reads. */

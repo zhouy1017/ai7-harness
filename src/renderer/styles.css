@@ -598,7 +598,6 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .captured-procedure-run select, .review-sheet-procedure select { max-width: 100%; }
 /* 最新可用, 停用…'s preview and a version's linked Runs (Issue #66, S31). */
 .captured-procedure-latest-eligible { border: 2px solid currentColor; font-weight: 600; }
-.captured-procedure-latest-eligible-note { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .captured-procedure-run-link { max-width: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; }
 .captured-procedure-stop { display: grid; gap: .45rem; padding: .8rem; border: 2px solid #8a4b2a; border-radius: 10px; background: #fbf5ef; }
 .captured-procedure-stop h5, .captured-procedure-stop h6 { margin: 0; }
@@ -682,6 +681,18 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .evaluation-adjustment[hidden] { display: none; }
 .evaluation-adjustment-reasons { display: flex; flex-wrap: wrap; gap: .4rem .9rem; }
 .evaluation-ai7-suggested { margin-left: .4rem; }
+/* ②C 评估's market section and 按我的评分重写评语 (Issue #429, S81b2). */
+.evaluation-market, .evaluation-rewrite { display: grid; gap: .5rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
+.evaluation-market h3, .evaluation-market h4, .evaluation-market p, .evaluation-rewrite h3, .evaluation-rewrite p, .evaluation-rewrite dl { margin: 0; overflow-wrap: anywhere; }
+.evaluation-market ul { display: grid; gap: .2rem; margin: 0; padding-left: 1.2rem; overflow-wrap: anywhere; }
+.evaluation-market-lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .6rem; }
+.evaluation-market-list, .evaluation-comparables { display: grid; gap: .3rem; min-width: 0; padding: .6rem .8rem; border: 1px solid #ded9cd; border-radius: 8px; }
+.evaluation-prediction { display: grid; gap: .4rem; min-width: 0; padding: .6rem .8rem; border: 1px dashed #b9b2a2; border-radius: 8px; background: #f6f8f2; }
+.evaluation-prediction-rows, .evaluation-rewrite-items { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .3rem .8rem; margin: 0; }
+.evaluation-prediction-rows dd, .evaluation-rewrite-items dd { display: grid; gap: .2rem; margin: 0; min-width: 0; }
+.evaluation-rewrite-proposal { display: grid; gap: .5rem; min-width: 0; padding: .6rem .8rem; border-left: 3px solid #2c463b; background: #f6f8f2; }
+.evaluation-rewrite-after { font-weight: 600; color: #2c463b; }
+@media (max-width: 720px) { .evaluation-prediction-rows, .evaluation-rewrite-items { grid-template-columns: minmax(0, 1fr); } }
 /* ②A 分析反馈 (S38): the card opens under the item it judges, inside the list, never a modal; the Book's tally under the synopsis. */
 .analysis-feedback { display: grid; gap: .35rem; margin: .3rem 0 .5rem; min-width: 0; }
 .analysis-feedback-line { margin: 0; color: #3f4a44; overflow-wrap: anywhere; }
@@ -1469,7 +1480,8 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .task-plan-default-rule-confirm, .default-rule-card, .guideline-card, .guideline-preview, .exemplar-book, .task-plan-activity, .task-bar-cancel-impact,
   .library-material, .library-preview, .library-chooser, .library-chooser fieldset, .library-kinds,
   .evaluation-record, .evaluation-item, .evaluation-risk, .evaluation-conclusion, .evaluation-comparison, .evaluation-profile,
-  .evaluation-initial, .evaluation-adjustment,
+  .evaluation-initial, .evaluation-adjustment, .evaluation-market, .evaluation-market-list, .evaluation-comparables, .evaluation-prediction,
+  .evaluation-rewrite, .evaluation-rewrite-proposal,
   .analysis-feedback-card, .analysis-feedback-card fieldset,
   .learning-book, .learning-card, .learning-choices, .feedback-book, .calibration-section,
   .learning-audit-batch, .learning-lineage, .learning-lineage-step, .learning-remediation-preview, .learning-remediation-group,
