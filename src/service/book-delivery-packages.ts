@@ -511,6 +511,28 @@ export class BookDeliveryPackages {
     };
   }
 
+  /**
+   * The frozen versions that hold a report of any of `reviewRunIds`, newest first, at most `limit`, and how many there are in
+   * all (Issue #66, S31b; REUSE-031): what a Captured Procedure version's row links through the Runs pinned to it. Only the
+   * packages of those Runs' Books are read, each verified against its digests.
+   */
+  holdingReviewRuns(reviewRunIds: ReadonlyArray<string>, limit: number): { packages: Array<{ bookId: string; packageVersionId: string; version: number; preparedAt: string }>; total: number } {
+    const wanted = new Set(reviewRunIds);
+    if (wanted.size === 0) return { packages: [], total: 0 };
+    const held: Array<{ bookId: string; packageVersionId: string; version: number; preparedAt: string }> = [];
+    const rows = this.#db.prepare(
+      `SELECT v.* FROM book_delivery_package_versions v
+       WHERE v.book_id IN (SELECT r.book_id FROM review_runs r WHERE r.review_run_id IN (SELECT value FROM json_each(?)))
+       ORDER BY v.prepared_at DESC, v.package_version_id`,
+    ).iterate(JSON.stringify([...wanted])) as Iterable<SqlRow>;
+    for (const row of rows) {
+      const { record } = verifiedVersion(row);
+      if (!record.content.reviewReports.some((report) => wanted.has(report.reviewRunId))) continue;
+      held.push({ bookId: record.bookId, packageVersionId: record.packageVersionId, version: record.version, preparedAt: record.preparedAt });
+    }
+    return { packages: held.slice(0, limit), total: held.length };
+  }
+
   /** One frozen version of this Book's package, its record verified against its digest, or `null` when it is none of it. */
   record(bookId: string, packageVersionId: string): { record: PackageVersionRecord; digest: string } | null {
     if (!UUID_PATTERN.test(bookId) || !UUID_PATTERN.test(packageVersionId)) return null;

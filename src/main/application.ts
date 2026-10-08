@@ -2867,6 +2867,20 @@ function registerRendererHandlers(
       return result;
     }),
   );
+  // 按已保存的工序 (Issue #66, S31b): the house's enabled procedures as each applies to the route's Book, which the renderer never names.
+  ipcMain.handle(IPC_CHANNELS.inspectCapturedProcedureApplicability, (event) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectCapturedProcedureApplicability', { bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '工序的适用情况不属于当前图书工作台。');
+      return result;
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.saveDeveloperProposal, (event, input: Parameters<RendererApi['saveDeveloperProposal']>[0]) =>
     envelope(async () => {
       requireSender(event);

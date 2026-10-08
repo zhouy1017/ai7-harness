@@ -67,12 +67,14 @@ import type { PackageReviewRunReading } from '../book-delivery-packages.js';
 import type { EditorialMarkStore, ProducedEditorialMarkInput } from '../editorial-marks.js';
 import type { ReviewRunAttentionReading } from '../global-attention.js';
 import {
+  PROCEDURE_STEP_NOT_CHOSEN,
   capturedVersionStopped,
   procedureCaptureSource,
   procedurePinRefusal,
   readReviewRunProcedurePin,
   recordReviewRunProcedurePin,
   type ProcedureCaptureStep,
+  type ProcedureLeftOutStep,
   type ReviewRunProcedurePinInput,
 } from '../captured-procedures.js';
 import {
@@ -790,7 +792,7 @@ interface PreparationWork {
   /** The Captured Procedure pin the Run records when it is written (Issue #65, S30), with the steps it left out. */
   readonly procedure: null | {
     readonly pin: ReviewRunProcedurePinInput;
-    readonly leftOut: ReadonlyArray<{ categoryId: string; label: string; reason: string }>;
+    readonly leftOut: ReadonlyArray<ProcedureLeftOutStep>;
   };
   index: number;
   /** The category ledger's own preparation in flight for `planned[index]`. */
@@ -930,8 +932,10 @@ export class ReviewRunStore {
   /**
    * A preparation from a Captured Procedure (Issue #65, S30; ADR 0087 §4): the scope is the version's slot, every category asked
    * for is one of its steps, and every step not asked for is one this Book cannot take now — 书系一致性 for a Book in no
-   * Series, the leads without a baseline analysis — recorded with why. A step the Book could take is never quietly dropped,
-   * and nothing beyond its steps is ever added: the Run can do no more than choosing those categories by hand allows.
+   * Series, the leads without a baseline analysis — recorded with why. A step whose Series material the editor chooses apart
+   * (Issue #66, S31b; REUSE-049, REUSE-050) may also be left unchosen, and is recorded as left out by choice. Any other step
+   * the Book could take is never quietly dropped, and nothing beyond its steps is ever added: the Run can do no more than
+   * choosing those categories by hand allows.
    */
   #procedureSelection(
     bookId: string,
@@ -946,7 +950,7 @@ export class ReviewRunStore {
       `按可复用工序《${pin.title}》运行时，审阅范围要按它的设定选「${pin.scope === 'whole' ? '全书' : '选章'}」。`);
     requireReview(categoryIds.every((categoryId) => pin.steps.includes(categoryId)), 'REVIEW_PROCEDURE_STEPS_INVALID',
       `按可复用工序《${pin.title}》运行时，只能审阅它的步骤。`);
-    const leftOut: Array<{ categoryId: string; label: string; reason: string }> = [];
+    const leftOut: ProcedureLeftOutStep[] = [];
     for (const categoryId of pin.steps) {
       if (categoryIds.includes(categoryId)) continue;
       const entry = configuration.categories.find((candidate) => candidate.categoryId === categoryId);
@@ -958,9 +962,13 @@ export class ReviewRunStore {
         const plan = reading.unavailableReason === null ? reviewCategoryScopePlan(entry.executor, entry.unavailableReason, scope, reading.facts) : null;
         reason = reading.unavailableReason ?? (plan !== null && plan.kind === 'refused' ? plan.reason : null);
       }
+      if (reason === null && pin.chosenApart.includes(categoryId)) {
+        leftOut.push({ categoryId, label: entry?.label ?? categoryId, reason: PROCEDURE_STEP_NOT_CHOSEN, byChoice: true });
+        continue;
+      }
       requireReview(reason !== null, 'REVIEW_PROCEDURE_STEP_SKIPPED',
         `「${entry?.label ?? categoryId}」这本书现在可以审阅；按可复用工序运行时不能略过它。`);
-      leftOut.push({ categoryId, label: entry?.label ?? categoryId, reason });
+      leftOut.push({ categoryId, label: entry?.label ?? categoryId, reason, byChoice: false });
     }
     return { pin, leftOut };
   }

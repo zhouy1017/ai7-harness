@@ -18,6 +18,8 @@ import type {
   DialogueProjection,
   CapturedProcedureProjection,
   CapturedProceduresProjection,
+  CapturedProcedureApplicabilityEntryProjection,
+  CapturedProcedureApplicabilityProjection,
   CapturedProcedureRunProjection,
   CapturedProcedureStopPreviewProjection,
   CapturedProcedureStopRunProjection,
@@ -639,6 +641,7 @@ import {
   houseExecutor,
   boundedPage,
   initializeCapturedProcedureSchema,
+  chosenApartSteps,
   resolveProcedureVersions,
   validCapturedProcedureTitle,
   versionEligible,
@@ -6359,7 +6362,11 @@ export class EditorialStore {
     const { eligible } = resolveProcedureVersions(this.#resolvableVersions(this.#capturedProcedures.versions(procedureId)));
     return this.#capturedProcedures.projection(procedureId, this.#capturedStepWords(), (bookId) => this.#evaluationBookTitle(bookId),
       (reviewRunId) => this.#reviewRuns.ordinalOf(reviewRunId), (reviewRunId) => this.#reviewRuns.runStatus(reviewRunId).stateLabel,
-      eligible[0]?.versionId ?? null, before);
+      eligible[0]?.versionId ?? null, before, (reviewRunIds, limit) => {
+        // The 图书交付包 versions that hold a report of a Run pinned to the version (Issue #66, S31b; REUSE-031).
+        const held = this.#bookDeliveryPackages.holdingReviewRuns(reviewRunIds, limit);
+        return { packages: held.packages.map((entry) => ({ ...entry, bookTitle: this.#evaluationBookTitle(entry.bookId) })), total: held.total };
+      });
   }
 
   /**
@@ -6717,6 +6724,7 @@ export class EditorialStore {
     const stored = versions.find((candidate) => candidate.versionId === chosen.versionId)!;
     const validation = this.#capturedValidation(stored);
     const availability = this.#reviewRuns.categoryAvailability(bookId, stored.document.parameters.scope);
+    const chosenApart = chosenApartSteps(stored.document);
     return {
       ineligible: null,
       projection: {
@@ -6731,7 +6739,8 @@ export class EditorialStore {
           scopeSlot: stored.document.parameters.scope,
           steps: validation.steps.map((step) => {
             const reason = availability.has(step.categoryId) ? availability.get(step.categoryId)! : '这一类已不在审阅配置中。';
-            return { categoryId: step.categoryId, label: step.label, available: reason === null, unavailableReason: reason };
+            // Series material is chosen apart at each run (Issue #66, S31b; REUSE-049, REUSE-050).
+            return { categoryId: step.categoryId, label: step.label, available: reason === null, unavailableReason: reason, chosenApart: chosenApart.includes(step.categoryId) };
           }),
           guidelineChanges: validation.steps.flatMap((step) => step.guidelines
             .filter((guideline) => guideline.sourceVersion !== guideline.version)
@@ -6766,7 +6775,45 @@ export class EditorialStore {
       documentSha256: stored.documentSha256,
       scope: stored.document.parameters.scope,
       steps: stored.document.steps.map((step) => step.categoryId),
+      chosenApart: chosenApartSteps(stored.document),
     };
+  }
+
+  /**
+   * 按已保存的工序 on one Book's 新建审阅 (Issue #66, plan slice S31b; REUSE-046, REUSE-053, REUSE-054): every enabled Captured
+   * Procedure of the house, each with the one version a new use takes — its latest eligible — and how many of that version's
+   * steps this Book can take now, the Series steps chosen apart among them, and why each other is left out. Deterministic and
+   * provider-free, and a read: no procedure is recommended (ADR 0087 §4) and none is ruled out — a mismatch is said, and the
+   * editor may still choose it by hand.
+   */
+  inspectCapturedProcedureApplicability(bookId: string): CapturedProcedureApplicabilityProjection {
+    return this.#procedureCall(() => {
+      requireStore(typeof bookId === 'string' && UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+      const { ids, truncated } = this.#capturedProcedures.procedureIds();
+      const procedures: CapturedProcedureApplicabilityEntryProjection[] = [];
+      for (const procedureId of ids) {
+        const summary = this.#capturedProcedures.summary(procedureId);
+        if (!summary.runnable) continue;
+        const { projection } = this.#capturedRunResolution(bookId, procedureId, null);
+        const resolved = projection.resolved;
+        if (resolved === null) {
+          procedures.push({ procedureId, title: projection.title, latestEligible: null, fit: 'no-version', stepCount: 0, availableCount: 0, chosenApart: [], leftOut: [] });
+          continue;
+        }
+        const available = resolved.steps.filter((step) => step.available);
+        procedures.push({
+          procedureId,
+          title: projection.title,
+          latestEligible: { versionId: resolved.versionId, version: resolved.version },
+          fit: available.length === resolved.steps.length ? 'all' : available.length === 0 ? 'none' : 'partial',
+          stepCount: resolved.steps.length,
+          availableCount: available.length,
+          chosenApart: available.filter((step) => step.chosenApart).map((step) => step.label),
+          leftOut: resolved.steps.filter((step) => !step.available).map((step) => ({ label: step.label, reason: step.unavailableReason ?? '' })),
+        });
+      }
+      return { bookId, procedures, truncated };
+    });
   }
 
   /** 保存开发建议 (ADR 0087 §6; REUSE-063, REUSE-064): a new Developer Capability Proposal, or its next version. Sent nowhere. */

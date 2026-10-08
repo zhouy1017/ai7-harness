@@ -4988,6 +4988,16 @@ function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjecti
           setStatus(rendererErrorMessage(error, '无法打开这次审阅。'), 'error');
         }
       },
+      // A 图书交付包 version holding the report of such a Run (Issue #66, S31b; REUSE-031): its Book's 交付物.
+      openDeliverables: async (book) => {
+        setStatus('正在打开这本书的交付物…', 'busy');
+        try {
+          await requestBookWorkbenchRoute({ kind: 'book', bookId: book.bookId }, async (route) =>
+            renderBookDeliverables(route.bookId, route.bookTitle));
+        } catch (error) {
+          setStatus(rendererErrorMessage(error, '无法打开这本书的交付物。'), 'error');
+        }
+      },
     });
     panelNode.append(section, captured, element('h3', undefined, RULES_HEADING));
     void surface.load().catch((error: unknown) => {
