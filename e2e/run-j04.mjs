@@ -647,7 +647,8 @@ async function pressEnter(renderer) {
 /**
  * Start the prepared baseline Task from the drawer's authorization bar (Issue #420, S74a A2): the drawer
  * shows the Task the preparation opened it for, and the card's 查看计划并开始 opens it when it does not. One
- * activation of 开始任务 records the authorization and the Run and hands the Run to the one slot.
+ * activation of 开始任务 records the authorization and the Run and hands the Run to the execution owner, which admits it
+ * to a place of its governor (Issue #49, S14).
  */
 async function startFromBar(renderer, name) {
   const showing = await renderer.evaluate(`(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer==='open' && drawer.dataset.taskPlanKind==='baseline-analysis' && drawer.dataset.taskPlanRef===document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId; })()`);
@@ -1413,7 +1414,7 @@ async function main() {
     at('authorize-dispatch');
     cancellation.throwIfRequested();
     // Synchronized delta with Issue #420 (S74a A2): one activation of the bar's 开始任务 records the
-    // authorization and the Run and hands it to the one slot; ②A beside the drawer follows the Run.
+    // authorization and the Run and hands it to the execution owner's governor; ②A beside the drawer follows the Run.
     await startFromBar(renderer, 'authorize');
     await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, 'run-settled', 180_000);
     await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'run-settled-state');
@@ -2838,7 +2839,7 @@ async function main() {
     at('connectivity-online-dispatch');
     cancellation.throwIfRequested();
     // The network returns. The drawer showing the waiting Run asks Reconnect Preflight on its own clock; the plan it
-    // bound still stands, so the Run enters the one slot and runs to its end (OFF-008).
+    // bound still stands and a place of the governor is free, so the Run is admitted and runs to its end (OFF-008).
     await writeFile(connectivityPath, 'online');
     await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, 'online-settled', 180_000);
     const onlineSettled = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
