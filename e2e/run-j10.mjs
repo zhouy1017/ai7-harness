@@ -19,7 +19,7 @@ import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFai
 // On the first Book: the Task Drawer's activity card names the phase, the range in flight, the time, the attempt,
 // the last update and the milestones, and its bar offers 暂停, 取消任务, 改计划重做 with why it waits, and 查看运行.
 // 暂停 is one click: 正在暂停 holds while the range in flight finishes, and 已暂停 follows with three ranges kept and
-// the slot free. 续行 goes on in the same Run from the fourth range, and with the sixth in flight 取消任务 opens one
+// its place free. 续行 goes on in the same Run from the fourth range, and with the sixth in flight 取消任务 opens one
 // inline Cancellation Impact Summary that records nothing; 继续运行 closes it; confirming — by keyboard alone — records
 // 正在取消, which holds while that range finishes, and 已取消 follows with six ranges kept in a partial Result Set
 // Revision, two named not attempted, and nothing sent after them. 改计划重做 then sits beside 查看运行: it prepares a
@@ -502,7 +502,7 @@ async function openAnalysisOf(renderer, bookId, name) {
 
 /**
  * 开始基线稿件分析 prepares the Task and opens its plan in the drawer (the card's 查看计划并开始 opens it when it
- * does not); the bar's 开始任务 records the Run — and, with a route, hands it to the one slot.
+ * does not); the bar's 开始任务 records the Run — and, with a route, hands it to the execution owner's governor.
  */
 async function startFirstBaseline(renderer, readiness, name) {
   await prepareFirstBaseline(renderer, readiness, name);
@@ -964,7 +964,7 @@ async function main() {
 
     at('paused');
     // The range in flight finishes and is kept; the Run waits at the boundary after it, holding nothing, and reads
-    // 已暂停 with where 续行 will go on — and 续行 is offered, since nothing else holds the slot.
+    // 已暂停 with where 续行 will go on — and 续行 is offered, since a place of the governor is free.
     await writeFile(holdPath, String(FIRST_HOLD + 1), 'utf8');
     await waitForBar(renderer, { state: 'paused', pill: '已暂停', status: '已暂停', note: PAUSED_NOTE, actions: STOPPED_ACTIONS }, 'paused-bar');
     await assertRenderer(renderer, `(() => { const activity=document.querySelector('#task-drawer .task-plan-activity'); return activity?.dataset.taskPlanActivity==='stopped' && activity.dataset.taskPlanActivityProgress===${JSON.stringify(`${FIRST_HOLD + 1}/${SAMPLE1_UNITS}`)} && activity.querySelector('.field-note')?.textContent===${JSON.stringify(PAUSED_NOTE)}; })()`, 'paused-activity');

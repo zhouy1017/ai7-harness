@@ -78,7 +78,7 @@ function review(overrides: Partial<ReviewRunAttentionReading> = {}): ReviewRunAt
     authorizedAt: minutesAgo(60),
     state: 'settled',
     canContinue: false,
-    categories: [{ categoryId: 'typos', label: '错别字与规范用语', state: 'settled', pending: false, detail: null, progress: null }],
+    categories: [{ categoryId: 'typos', label: '错别字与规范用语', state: 'settled', stateLabel: '已完成 · 发现可处理', pending: false, detail: null, progress: null }],
     lastEventAt: minutesAgo(30),
     ...overrides,
   };
@@ -171,8 +171,8 @@ describe('the 任务 panel of one Book (S77a)', () => {
   });
 
   it('lists a 审阅 prepared and not started, one under way, and one on the manuscript, once each', () => {
-    const prepared = review({ state: 'prepared', authorizedAt: null, lastEventAt: null, categories: [{ categoryId: 'typos', label: '错别字与规范用语', state: 'prepared', pending: true, detail: null, progress: null }] });
-    const underWay = review({ state: 'running', ordinal: 2, categories: [{ categoryId: 'typos', label: '错别字与规范用语', state: 'running', pending: true, detail: null, progress: null }] });
+    const prepared = review({ state: 'prepared', authorizedAt: null, lastEventAt: null, categories: [{ categoryId: 'typos', label: '错别字与规范用语', state: 'prepared', stateLabel: '计划已冻结 · 待授权', pending: true, detail: null, progress: null }] });
+    const underWay = review({ state: 'running', ordinal: 2, categories: [{ categoryId: 'typos', label: '错别字与规范用语', state: 'running', stateLabel: '正在审阅', pending: true, detail: null, progress: null }] });
     const done = review({ ordinal: 3 });
     const prepPanel = composeBookTasks(readings({ reviewRuns: [prepared] }));
     expect(states(prepPanel, 'waiting')).toEqual(['review-prepared/view-plan']);

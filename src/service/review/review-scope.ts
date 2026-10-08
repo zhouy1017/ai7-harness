@@ -71,7 +71,7 @@ export function reviewCategoryScopePlan(
   scope: ResolvedReviewScope,
   facts: ReviewCategoryLedgerFacts,
 ): ReviewCategoryScopePlan {
-  if (executor === 'unavailable') return { kind: 'refused', reason: unavailableReason ?? '这一类暂不可用。' };
+  if (executor === 'unavailable' || executor === 'series-knowledge') return { kind: 'refused', reason: unavailableReason ?? '这一类暂不可用。' };
   if (scope.kind === 'selection') return { kind: 'refused', reason: SELECTION_UNAVAILABLE_REASON };
   if (executor === 'baseline-leads') {
     if (!facts.baselineRevision) return { kind: 'refused', reason: LEADS_ABSENT_REASON };
