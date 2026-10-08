@@ -9,7 +9,7 @@
   "entries": [
     {
       "unitOrdinal": 1,
-      "requestDigest": "a7c14773967b6633388994ea0de46f8ed3cf18bcc6bc490b87abe569e64adea7",
+      "requestDigest": "885eef0264c0b1f279ee11445f2e5fb0aa7a49142f8fb40e1482933e0b733006",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.writing.unit-result/1\",\"unitOrdinal\":1,\"passages\":[{\"kind\":\"highlight\",\"note\":\"开篇两句「识时务者为俊杰」「不识时务者为圣贤」对举，定下全书的思辨气质。\",\"blockOrdinals\":[5,6]},{\"kind\":\"character\",\"note\":\"六十五岁的曾本之写信又撕信，心事难以出口。\",\"blockOrdinals\":[7,8]},{\"kind\":\"character\",\"note\":\"郑雄是曾本之的弟子兼女婿，为他操办七十小寿。\",\"blockOrdinals\":[9,14]},{\"kind\":\"theme\",\"note\":\"曾侯乙尊盘被视为青铜重器中的极品，是全书的核心器物。\",\"blockOrdinals\":[11]},{\"kind\":\"highlight\",\"note\":\"八年前另一位弟子被警察带走，从此在曾本之的话语里消失。\",\"blockOrdinals\":[13]}]}",
@@ -21,7 +21,7 @@
     },
     {
       "unitOrdinal": 2,
-      "requestDigest": "1c3408989e54873c3a71677866bcf81807913538aa9d0bbcb63627b46b2c1100",
+      "requestDigest": "14dbe60e0f222f2ac0ae6a2688f1a86701bbbc7384a495224a56c4816447a073",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.writing.unit-result/1\",\"unitOrdinal\":2,\"passages\":[{\"kind\":\"character\",\"note\":\"曾本之仍把写信收信当作日常往来的方式，不打电话，也不发电子邮件。\",\"blockOrdinals\":[2]},{\"kind\":\"highlight\",\"note\":\"曾本之收到一封用甲骨文写的信，写信人早在二十多年前去世。\",\"blockOrdinals\":[6,7]},{\"kind\":\"highlight\",\"note\":\"信封写明他每周一下午独坐的地点，这本是外人不该知道的。\",\"blockOrdinals\":[8,9]},{\"kind\":\"theme\",\"note\":\"当年在随州发掘曾侯乙大墓的往事在他心头浮现。\",\"blockOrdinals\":[11]}]}",
@@ -33,7 +33,7 @@
     },
     {
       "unitOrdinal": 3,
-      "requestDigest": "4dc3930c0008682a651e4de5be3efea8e62d35dd80e34e4bc27e567ebd0f2754",
+      "requestDigest": "49816bea8b1076b383bcf9c91dd10b75415b15a04708b635c9350ab10a1a5f07",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.writing.unit-result/1\",\"unitOrdinal\":3,\"passages\":[{\"kind\":\"highlight\",\"note\":\"甲骨文常在梦中造访，春雷过后的东湖景致静中有动。\",\"blockOrdinals\":[2,3]},{\"kind\":\"highlight\",\"note\":\"邮递员按古怪的地址把信送到他手中，信上只有四个甲骨文字。\",\"blockOrdinals\":[7,10,14]},{\"kind\":\"character\",\"note\":\"曾本之一眼认出那字迹的气韵，熟悉得让他不安。\",\"blockOrdinals\":[15,16]}]}",
@@ -45,7 +45,7 @@
     },
     {
       "unitOrdinal": 4,
-      "requestDigest": "95cb022d786ec9444fe11d73df7e1512d61d4675d920c3d92a3bb340f55c59c7",
+      "requestDigest": "90373177a0523b29694d238514bd7b1a532478bb3307d7597218d70fa9eabe7a",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.writing.unit-result/1\",\"unitOrdinal\":4,\"passages\":[{\"kind\":\"highlight\",\"note\":\"四个甲骨文写的是「拯之承启」，落款的印章是郝嘉。\",\"blockOrdinals\":[6,7]},{\"kind\":\"character\",\"note\":\"郝嘉这个名字，曾本之熟悉的程度仅次于自己的名字。\",\"blockOrdinals\":[8]},{\"kind\":\"character\",\"note\":\"老友马跃之研究丝绸，与曾本之同为楚学院的栋梁。\",\"blockOrdinals\":[14]},{\"kind\":\"theme\",\"note\":\"两位老学者以丝绸和铜臭互相打趣，见出多年的情谊。\",\"blockOrdinals\":[15,16]}]}",
@@ -57,7 +57,7 @@
     },
     {
       "unitOrdinal": 5,
-      "requestDigest": "ab9b02009e41ac5089c23d3a10391e22d72d909b9a0a2e32e1dcbae95a9ba47a",
+      "requestDigest": "0f4dd0037ec7473d851c27a465c7a0453c706b7f025fe2a0779bb4c3341612c7",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.writing.unit-result/1\",\"unitOrdinal\":5,\"passages\":[{\"kind\":\"character\",\"note\":\"安静在电话旁插话打趣，家常里透着温情。\",\"blockOrdinals\":[3]},{\"kind\":\"highlight\",\"note\":\"马跃之约曾本之同去宁波参加一个活动。\",\"blockOrdinals\":[6]},{\"kind\":\"highlight\",\"note\":\"马跃之欲言又止，追问郑雄下午参加的会议。\",\"blockOrdinals\":[9,10]}]}",
@@ -69,7 +69,7 @@
     },
     {
       "unitOrdinal": 6,
-      "requestDigest": "b5f96a95b1ab68e5812009764f0c0e3431f5dc766d891f26b07ed23664d2c92f",
+      "requestDigest": "e4fb75754b56c1e11890ad16f4285bdd55f46092bf58cdf752f5365ae60cc0f3",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.writing.unit-result/1\",\"unitOrdinal\":6,\"passages\":[{\"kind\":\"character\",\"note\":\"郑雄在新省长首次露面的会上把他比作楚庄王。\",\"blockOrdinals\":[3]},{\"kind\":\"theme\",\"note\":\"曾本之对弟子的逢迎既恼又难以发作，学问与官场的张力浮现。\",\"blockOrdinals\":[6]},{\"kind\":\"highlight\",\"note\":\"曾本之决定暂时不向郑雄提起那封甲骨文来信。\",\"blockOrdinals\":[8]}]}",
@@ -81,7 +81,7 @@
     },
     {
       "unitOrdinal": 7,
-      "requestDigest": "28257fe0d5377917567ee826d6a04331266d6358a5d47fc9cfcf88c8d8d20c9e",
+      "requestDigest": "c6b23d01b969edb41933176be6fc02a4e630f17f3e2e60e3a961f9be4c29ad62",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.writing.unit-result/1\",\"unitOrdinal\":7,\"passages\":[{\"kind\":\"theme\",\"note\":\"书房里挂着曾侯乙尊盘出土时拍下的黑白照片，是曾本之最珍爱的。\",\"blockOrdinals\":[2]},{\"kind\":\"character\",\"note\":\"外孙楚楚的童言让一家人笑成一团。\",\"blockOrdinals\":[5,8]},{\"kind\":\"character\",\"note\":\"郑雄回家后，翁婿之间就做学问与做官有一番交锋。\",\"blockOrdinals\":[15,16]}]}",
@@ -93,7 +93,7 @@
     },
     {
       "unitOrdinal": 8,
-      "requestDigest": "ceffa050d4a624e66918ba1257c44614d68d89f885d0e71d9bbf96197a11ec12",
+      "requestDigest": "0f0efd882ac767b67665356cf905222bd4a49379f573cb50c1dfb07b55c9d2cc",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.writing.unit-result/1\",\"unitOrdinal\":8,\"passages\":[{\"kind\":\"character\",\"note\":\"郑雄始终称岳父为先生，从未叫过爸爸。\",\"blockOrdinals\":[4]},{\"kind\":\"highlight\",\"note\":\"夜深人静，曾本之把那封古怪的来信摊开，用放大镜细看良久。\",\"blockOrdinals\":[6]}]}",
@@ -105,7 +105,7 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "91d2a0fc94962236feea79e97e0c9e224270537679886ede6bff4738db350397",
+      "requestDigest": "c9311c5a92b4846f6d67d85b27e51a9308d41049502ae0d59b03ca731148bea3",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.writing.synthesis-result/1\",\"title\":\"一封甲骨文来信，揭开青铜重器背后的心事\",\"sections\":[{\"heading\":\"一封不该存在的信\",\"paragraphs\":[\"六十五岁的曾本之至今仍用书信与人往来。一个周一的下午，他在东湖边独坐时，收到一封用甲骨文写成的信，而写信的人早在二十多年前就已去世。\",\"信上只有四个字：拯之承启。落款的印章，是一个他再熟悉不过的名字。\"]},{\"heading\":\"青铜重器与人心\",\"paragraphs\":[\"曾侯乙尊盘是青铜重器中的极品，也是曾本之一生的牵挂。围绕它，师徒、翁婿与老友之间的情谊和分歧，一点点浮出水面。\",\"弟子兼女婿郑雄在官场如鱼得水，老友马跃之欲言又止；八年前另一位弟子被带走的往事，也在沉默中等待回答。\"]},{\"heading\":\"写给喜欢历史与悬疑的你\",\"paragraphs\":[\"《写作旅程乙》把学问、人情与谜团写在一起：这封甲骨文来信从何而来，四个字又指向哪一段被中断的往事？欢迎在公众号留言，说说你的猜想。\"]}]}",

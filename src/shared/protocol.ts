@@ -4583,6 +4583,8 @@ export interface WritingTaskProjection {
     readonly typeLabel: string;
     readonly state: BaselineAnalysisProjection['state'];
     readonly label: string;
+    /** Why the Task's settled Run wrote no draft — a copy of an exemplar refused, or a synthesis that did not close — or `null`. */
+    readonly refusal: string | null;
   };
   /** 快速开始 is not offered before a writing 默认执行规则 exists (S84b). */
   readonly quickStart: { readonly allowed: false; readonly reason: typeof WRITING_QUICK_START_REASON };

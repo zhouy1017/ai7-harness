@@ -10,6 +10,7 @@ import {
   writingContract,
   writingContractDigest,
   type WritingContractInput,
+  type WritingExemplarInput,
 } from './writing/writing-contract.js';
 
 /**
@@ -121,10 +122,40 @@ export function initializeWritingTaskSchema(db: DatabaseSync): void {
   }
 }
 
-/** One exemplar version a Task's contract read, by identity: which document and which delivered revision of it. */
+/**
+ * One exemplar version a Task's contract read, by reference only (#688 review): which document, which delivered revision of it,
+ * and the digest of the words the contract took from it. Another Book's text never enters this Book's rows: it is read again
+ * from that immutable revision whenever the Task is read, and a Task whose exemplar no longer gives the same words is refused.
+ */
 export interface WritingExemplarSource {
   readonly documentId: string;
   readonly revisionId: string;
+  readonly sha256: string;
+}
+
+/** The digest a reference pins: of the exemplar's words exactly as the contract takes them. */
+export function writingExemplarDigest(exemplar: WritingExemplarInput): string {
+  return sha256Hex(canonicalJson({ schema: 'ai7.writing-exemplar/1', bookTitle: exemplar.bookTitle, version: exemplar.version, text: exemplar.text, excerpt: exemplar.excerpt }));
+}
+
+/**
+ * One exemplar's words as a writing contract takes them (S79b; KB-004), read from its own records: its Book's title, the
+ * document version the revision is, and its blocks' words — the opening when longer than the contract takes. `null` when the
+ * revision is not a document version here, or holds no words.
+ */
+export function readWritingExemplar(db: DatabaseSync, documentId: string, revisionId: string): WritingExemplarInput | null {
+  const row = db.prepare(
+    `SELECT b.title, pv.version FROM production_documents pd
+     JOIN production_document_versions pv ON pv.document_id = pd.document_id AND pv.revision_id = ?
+     JOIN books b ON b.book_id = pd.book_id
+     WHERE pd.document_id = ?`,
+  ).get(revisionId, documentId) as SqlRow | undefined;
+  if (row === undefined || typeof row.title !== 'string') return null;
+  const whole = (db.prepare('SELECT text FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position').all(revisionId) as SqlRow[])
+    .map((block) => String(block.text)).join('\n');
+  const words = writingWords(whole, MAX_EXEMPLAR_GRAPHEMES);
+  if (words.length === 0) return null;
+  return { bookTitle: writingWords(row.title, 200), version: Number(row.version), text: words, excerpt: graphemeLength(whole.trim()) > MAX_EXEMPLAR_GRAPHEMES };
 }
 
 /** One writing Task as its row holds it, verified. */
@@ -188,13 +219,17 @@ export const MAX_WRITING_EXEMPLAR_GRAPHEMES = MAX_EXEMPLAR_GRAPHEMES;
 /** A field the editor writes is one line: no control or separator character. */
 export const WRITING_FIELD_CONTROL = /[\p{Cc}\p{Zl}\p{Zp}]/u;
 export const WRITING_NEEDS_MANUSCRIPT = '这本书还没有稿件：写作任务要读稿件，先导入稿件。' as const;
-/** 会发送 before any plan exists (editor-surfaces §9: 四行后果). */
-export const WRITING_SEND_CONSEQUENCE =
-  '所读的稿件正文、上面列出的参考材料与你写的受众、渠道和要求，发往为写作配置的模型服务；没有连接模型服务时不发送任何内容。' as const;
+/**
+ * 会发送 before any plan exists (editor-surfaces §9: 四行后果), as S84a is (#688 review): a writing Task runs only where nothing
+ * is sent — under a live scope it is refused — so nothing leaves the machine. When a sending route arrives, this line names what
+ * would be sent, 其他图书的范例原文 among it, since that is other Books' text leaving the machine.
+ */
+export const WRITING_SEND_CONSEQUENCE = '不发送任何内容：写作任务目前只在不连接模型服务的运行范围内起草。' as const;
 /** 不会做 in the editor's words; the plan's technical half is in 查看技术详情. */
 export const WRITING_NOT_DO = '不改稿件；不照抄范例；不交付、不发送；草稿由你在稿件编辑面上修改后才用。' as const;
 export const WRITING_COST_BEFORE_PLAN = '先看计划后显示' as const;
-export const WRITING_EXEMPLAR_COPIED = '这份草稿与本社范例有连续相同的文字：范例只参照，不复制，不能打开为文档。' as const;
+/** A Task whose exemplar no longer gives the words its reference pinned: the Run is refused rather than read other words. */
+export const WRITING_EXEMPLAR_MOVED = '写作任务参照的范例已经变化或不在本机，这一次起草不能再读取或开始。' as const;
 
 export function writingDocumentExists(typeLabel: string): string {
   return `这本书已经有「${typeLabel}」；请在交付物中打开它继续修改。`;
@@ -242,10 +277,18 @@ export class WritingTasks {
       stored.recordedAt === row.recorded_at && isRecord(stored.input) && isRecord(stored.input.type) && stored.input.type.typeId === row.type_id &&
       Array.isArray(stored.exemplarSources) && stored.exemplarSources.every((source) => isRecord(source) &&
         typeof source.documentId === 'string' && UUID_PATTERN.test(source.documentId) &&
-        typeof source.revisionId === 'string' && UUID_PATTERN.test(source.revisionId)) &&
-      Array.isArray(stored.input.exemplars) && stored.exemplarSources.length === stored.input.exemplars.length,
+        typeof source.revisionId === 'string' && UUID_PATTERN.test(source.revisionId) &&
+        typeof source.sha256 === 'string' && /^[0-9a-f]{64}$/u.test(source.sha256)) &&
+      Array.isArray(stored.input.exemplars) && stored.input.exemplars.length === 0,
     'WRITING_RECORD_INVALID', CORRUPT);
-    const input = stored.input as unknown as WritingContractInput;
+    // The exemplars' words come back from their own revisions, each the words its reference pinned.
+    const sources = (stored.exemplarSources as WritingExemplarSource[]).map((source) => ({ documentId: source.documentId, revisionId: source.revisionId, sha256: source.sha256 }));
+    const exemplars = sources.map((source) => {
+      const exemplar = readWritingExemplar(this.#db, source.documentId, source.revisionId);
+      requireWriting(exemplar !== null && writingExemplarDigest(exemplar) === source.sha256, 'WRITING_EXEMPLAR_MOVED', WRITING_EXEMPLAR_MOVED);
+      return exemplar;
+    });
+    const input = { ...(stored.input as unknown as WritingContractInput), exemplars };
     // The frozen input is the contract: its digest must be the one the row names.
     let digest: string;
     try {
@@ -261,7 +304,7 @@ export class WritingTasks {
       typeId: text(row.type_id),
       evaluationRecordId: nullableText(row.evaluation_record_id),
       baselineRevisionId: nullableText(row.baseline_revision_id),
-      exemplarSources: (stored.exemplarSources as WritingExemplarSource[]).map((source) => ({ documentId: source.documentId, revisionId: source.revisionId })),
+      exemplarSources: sources,
       input,
       recordedAt: text(row.recorded_at),
     };
@@ -283,7 +326,8 @@ export class WritingTasks {
     requireWriting(UUID_PATTERN.test(input.taskIntentId) && UUID_PATTERN.test(input.bookId) &&
       (input.evaluationRecordId === null || UUID_PATTERN.test(input.evaluationRecordId)) &&
       (input.baselineRevisionId === null || UUID_PATTERN.test(input.baselineRevisionId)) &&
-      input.exemplarSources.length === input.contract.exemplars.length,
+      input.exemplarSources.length === input.contract.exemplars.length &&
+      input.exemplarSources.every((source, index) => source.sha256 === writingExemplarDigest(input.contract.exemplars[index]!)),
     'WRITING_INVALID', '写作任务参数无效。');
     const intent = this.#db.prepare('SELECT book_id, kind FROM analysis_task_intents WHERE task_intent_id = ?').get(input.taskIntentId) as SqlRow | undefined;
     requireWriting(intent !== undefined && intent.book_id === input.bookId && intent.kind === WRITING_KIND, 'WRITING_INVALID', '写作任务无效。');
@@ -299,8 +343,9 @@ export class WritingTasks {
       typeId: input.contract.type.typeId,
       evaluationRecordId: input.evaluationRecordId,
       baselineRevisionId: input.baselineRevisionId,
-      exemplarSources: input.exemplarSources.map((source) => ({ documentId: source.documentId, revisionId: source.revisionId })),
-      input: input.contract,
+      exemplarSources: input.exemplarSources.map((source) => ({ documentId: source.documentId, revisionId: source.revisionId, sha256: source.sha256 })),
+      // Another Book's words are referenced, never stored here: the exemplars travel as references only.
+      input: { ...input.contract, exemplars: [] },
       recordedAt,
     });
     this.#db.prepare(

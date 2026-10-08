@@ -1079,9 +1079,23 @@ export function readersReportPlan(input: {
 
 // ---- 写作任务 (Issue #432, plan slice S84a; V2-UX-DELIV-007) --------------------------------------------------------------
 
+/** A settled writing Task that wrote no draft — its synthesis a gap, a copy of an exemplar refused among them (#688 review). */
+export const WRITING_NOT_DRAFTED_LABEL = '已结束 · 未写出草稿' as const;
+
+/**
+ * A writing Task's state in the drawer's own words. A settled Task reads 已完成 only when its Run completed: one that wrote no
+ * draft says so, and one with gaps says it kept them (#688 review).
+ */
+function writingState(projection: WritingProjection): TaskPlanProjection['state'] {
+  const state = baselineState(projection as unknown as BaselineAnalysisProjection);
+  if (projection.state !== 'settled' || projection.taskOutcome === null || projection.taskOutcome.classification === 'completed') return state;
+  if (projection.resultSetRevision !== null && projection.resultSetRevision.writing.draft === null) return { ...state, label: WRITING_NOT_DRAFTED_LABEL };
+  return { ...state, label: projection.taskOutcome.label };
+}
+
 /** A writing Task's state in the drawer's own words, for 交付物's 新建文档 · 写作任务 beside the drawer. */
 export function writingTaskStateLabel(projection: WritingProjection): string {
-  return baselineState(projection as unknown as BaselineAnalysisProjection).label;
+  return writingState(projection).label;
 }
 
 /** 快速开始 of a writing Task waits for its 默认执行规则 (S84b): until then the plan says so where the rule would be set. */
@@ -1143,7 +1157,7 @@ export function writingPlan(input: {
   const ceiling = provider.runBudgetCeiling;
   const revision = projection.planRevision;
   const boundary = envelope.boundary;
-  const state = baselineState(projection as unknown as BaselineAnalysisProjection);
+  const state = writingState(projection);
   const needsModelConnection = route.kind === 'opencode-go';
   const start: TaskPlanStartProjection = projection.authorization !== null
     ? startedBar(needsModelConnection)
@@ -1165,7 +1179,9 @@ export function writingPlan(input: {
     scope: {
       process: `《${bookTitle}》全书 · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`,
       reference: writingReferenceLines(task),
-      send: live ? `全书各阅读范围的稿件正文（${units} 个）、上面列出的参考材料与你写的受众、渠道和要求，以及汇总时各处段落的说明` : '不发送任何内容',
+      send: live
+        ? `全书各阅读范围的稿件正文（${units} 个）、上面列出的参考材料——其中包括其他图书的范例原文——与你写的受众、渠道和要求，以及汇总时各处段落的说明`
+        : '不发送任何内容',
       notRead: NOT_READ,
     },
     steps: [

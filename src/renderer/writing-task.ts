@@ -12,6 +12,7 @@ import {
   WRITING_EXEMPLAR_PICK_TYPE,
   WRITING_FIELD_HINTS,
   WRITING_FIELD_LABELS,
+  WRITING_FIELD_MOST,
   WRITING_HEADING,
   WRITING_LEDE,
   WRITING_PICK_TYPE,
@@ -20,8 +21,11 @@ import {
   WRITING_STATUS,
   WRITING_TYPE_LEGEND,
   writingDraftedLine,
+  writingFieldTooLong,
   writingTaskLine,
 } from './writing-task-labels.js';
+
+const GRAPHEMES = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
 
 /**
  * 新建文档 · 写作任务 on ⑥ 交付物 (Issue #432, plan slice S84a; editor-surfaces §9; V2-UX-DELIV-007, KB-004): `新建文档…` opens a
@@ -146,12 +150,14 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     if (task !== null) {
       const line = el('p', 'writing-task-line', writingTaskLine(task));
       line.dataset['writingTypeId'] = task.typeId;
+      // Why the Task wrote no draft — a copy of an exemplar refused — said beside its line, with nothing offered to open.
+      const refusal = task.refusal === null ? null : el('p', 'field-note writing-task-refusal', task.refusal);
       const row = el('div', 'button-row');
       const open = action(WRITING_ACTIONS.openTask, task.state === 'prepared' ? 'primary' : 'quiet', 'open-task', () => options.openPlan(task.taskIntentId));
       open.setAttribute('aria-controls', 'task-drawer');
       open.disabled = busy;
       row.append(open);
-      section.append(line, row);
+      section.append(line, ...(refusal === null ? [] : [refusal]), row);
     }
     // Each drafted result not yet made its type's document.
     const drafted = page.types.filter((type): type is WritingTaskTypeProjection & { drafted: NonNullable<WritingTaskTypeProjection['drafted']> } => type.drafted !== null);
@@ -235,11 +241,14 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       const wrapper = el('div', 'writing-field');
       const label = el('label', undefined, WRITING_FIELD_LABELS[key]);
       label.htmlFor = id;
-      const control = key === 'requirements' ? el('textarea') : el('input');
-      if (control instanceof HTMLInputElement) control.type = 'text';
+      // Every field is one line, as the service takes it (#688 review): 其他要求 too.
+      const control = el('input');
+      control.type = 'text';
       control.id = id;
       control.dataset['writingField'] = key;
       control.placeholder = WRITING_FIELD_HINTS[key];
+      // A hard cap on what a paste holds; the exact bound, in characters as the service counts them, is checked on 先看计划.
+      control.maxLength = WRITING_FIELD_MOST[key] * 2;
       control.value = state[key];
       control.disabled = busy;
       control.addEventListener('input', () => {
@@ -290,6 +299,13 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     if (state.typeId === null) {
       state.problem = WRITING_PICK_TYPE;
       paint('legend');
+      return;
+    }
+    const tooLong = (['audience', 'channel', 'requirements'] as const)
+      .find((key) => [...GRAPHEMES.segment(state[key].trim())].length > WRITING_FIELD_MOST[key]);
+    if (tooLong !== undefined) {
+      state.problem = writingFieldTooLong(tooLong);
+      paint(`[data-writing-field="${tooLong}"]`);
       return;
     }
     busy = true;

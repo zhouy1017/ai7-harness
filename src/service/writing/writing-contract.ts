@@ -25,9 +25,8 @@ import { graphemeCount } from '../analysis/factual-review-contract.js';
  * Identities and times are not words, so the same request made again asks the same question.
  *
  * A 范例 is referenced, never copied (KB-004). The instruction says so, and the synthesis is refused whole —
- * `exemplar-copied`, a gap, so AI7 writes no draft — when any {@link EXEMPLAR_COPY_WINDOW} consecutive characters of the draft
- * stand in an exemplar's text and nowhere in the reference set's own words. That bound is the conservative reading of the
- * Issue's stop clause; the Commander decides the bound.
+ * `exemplar-copied`, a gap, so AI7 writes no draft — when the draft copies an exemplar verbatim or nearly, by the bound the
+ * Commander ruled for the Issue's stop clause ({@link exemplarCopied}).
  */
 export const WRITING_UNIT_RESULT_SCHEMA = 'ai7.writing.unit-result/1' as const;
 export const WRITING_SYNTHESIS_RESULT_SCHEMA = 'ai7.writing.synthesis-result/1' as const;
@@ -56,6 +55,9 @@ export const MAX_CHARACTERS = 12;
  * words are a copy, and the draft is refused.
  */
 export const EXEMPLAR_COPY_WINDOW = 12;
+/** The near-copy test (the Commander's ruling (b)): this share or more of a draft's distinct shingles of this length in one exemplar. */
+export const EXEMPLAR_SHINGLE = 8;
+export const EXEMPLAR_SHINGLE_SHARE = 0.25;
 
 /** A line of the frozen prompt and of the model's free text is one line: no control character may break it or hide in it. */
 const CONTROL_CHARACTER = /[\p{Cc}\p{Zl}\p{Zp}]/u;
@@ -312,7 +314,7 @@ function synthesisInstructionOf(input: WritingContractInput): string {
   const exemplarLines = input.exemplars.length === 0
     ? [`${writingExemplarLine(input.type.label, input.exemplars)}。`]
     : [
-        `${writingExemplarLine(input.type.label, input.exemplars)}。只学它们的结构、篇幅与写法，不照抄其中任何句子；与范例相同的连续 ${EXEMPLAR_COPY_WINDOW} 个字以上的文字会让整份草稿被拒绝：`,
+        `${writingExemplarLine(input.type.label, input.exemplars)}。只学它们的结构、篇幅与写法，不照抄其中任何句子；与范例相同的连续 ${EXEMPLAR_COPY_WINDOW} 个字以上的文字，或与一份范例大段近似的写法，都会让整份草稿被拒绝：`,
         ...input.exemplars.map((exemplar) => `《${oneLine(exemplar.bookTitle)}》版本 ${exemplar.version}${exemplar.excerpt ? '（节选开头）' : ''}：${oneLine(exemplar.text)}`),
       ];
   return [
@@ -334,6 +336,8 @@ export interface WritingPromptContract {
   readonly unitResultSchema: typeof WRITING_UNIT_RESULT_SCHEMA;
   readonly synthesisResultSchema: typeof WRITING_SYNTHESIS_RESULT_SCHEMA;
   readonly exemplarCopyWindow: typeof EXEMPLAR_COPY_WINDOW;
+  readonly exemplarShingle: typeof EXEMPLAR_SHINGLE;
+  readonly exemplarShingleShare: typeof EXEMPLAR_SHINGLE_SHARE;
   readonly input: WritingContractInput;
   readonly systemPrompt: string;
   readonly unitMessageHeader: typeof UNIT_MESSAGE_HEADER;
@@ -355,6 +359,8 @@ export function writingContract(input: WritingContractInput): WritingPromptContr
     unitResultSchema: WRITING_UNIT_RESULT_SCHEMA,
     synthesisResultSchema: WRITING_SYNTHESIS_RESULT_SCHEMA,
     exemplarCopyWindow: EXEMPLAR_COPY_WINDOW,
+    exemplarShingle: EXEMPLAR_SHINGLE,
+    exemplarShingleShare: EXEMPLAR_SHINGLE_SHARE,
     input: frozen,
     systemPrompt: systemPromptOf(frozen),
     unitMessageHeader: UNIT_MESSAGE_HEADER,
@@ -384,19 +390,44 @@ function comparable(value: string): string[] {
   return Array.from(SEGMENTER.segment(value.normalize('NFKC').replace(NOT_WORDS, '')), ({ segment }) => segment);
 }
 
-/** Every run of `size` consecutive comparable characters of a text. */
-function windows(value: string, size: number): Set<string> {
-  const characters = comparable(value);
+/** Every run of `size` consecutive characters of one comparable stream. */
+function windowsOf(characters: ReadonlyArray<string>, size: number): Set<string> {
   const found = new Set<string>();
   for (let start = 0; start + size <= characters.length; start += 1) found.add(characters.slice(start, start + size).join(''));
   return found;
 }
 
-/** Every word of the reference set that is not an exemplar's: what the draft may say in the same words. */
+/**
+ * The draft's runs of `size` characters that could be someone's words (the Commander's ruling (c), #688 review): not a run of
+ * digits and ASCII letters only, and not one touching an ISBN-like run — ten or more of digits and X with at least nine digits,
+ * a book number, a phone number, a date written out — wherever in that number the run begins or ends.
+ */
+function wordWindowsOf(characters: ReadonlyArray<string>, size: number): Set<string> {
+  const numbered = characters.map(() => false);
+  let start = 0;
+  for (let index = 0; index <= characters.length; index += 1) {
+    if (index < characters.length && /^[0-9Xx]$/u.test(characters[index]!)) continue;
+    const run = characters.slice(start, index);
+    if (run.length >= 10 && run.filter((character) => /^[0-9]$/u.test(character)).length >= 9) numbered.fill(true, start, index);
+    start = index + 1;
+  }
+  const found = new Set<string>();
+  for (let first = 0; first + size <= characters.length; first += 1) {
+    const window = characters.slice(first, first + size);
+    if (window.every((character) => /^[0-9A-Za-z]$/u.test(character)) || numbered.slice(first, first + size).includes(true)) continue;
+    found.add(window.join(''));
+  }
+  return found;
+}
+
+/**
+ * Every word of the reference set that is the Book's own: what the draft may say in the same words. The editor's 其他要求 are
+ * not among them (the Commander's ruling (d)): words pasted there from an exemplar exempt nothing.
+ */
 function ownWordsOf(input: WritingContractInput): string[] {
   return [
     input.type.label, writingTypeGuidance(input.type.typeId), input.book.title, ...input.book.authors, ...input.book.editors, ...input.book.series,
-    input.audience, input.channel, ...(input.requirements === null ? [] : [input.requirements]),
+    input.audience, input.channel,
     ...(input.synopsis === null ? [] : [input.synopsis.text, ...input.synopsis.characters.flatMap((entry) => [entry.name, entry.note ?? ''])]),
     ...(input.evaluation === null ? [] : [
       input.evaluation.conclusion, ...input.evaluation.strengths,
@@ -405,23 +436,56 @@ function ownWordsOf(input: WritingContractInput): string[] {
   ];
 }
 
+/** How a draft copied an exemplar: a verbatim run, or a near copy whose shingles it shares at the threshold or above. */
+export type ExemplarCopy = { exemplar: number; kind: 'verbatim' } | { exemplar: number; kind: 'near'; share: number };
+
 /**
- * The first exemplar a draft copies, by its position among the contract's exemplars, or `null` when it copies none: a run of
- * {@link EXEMPLAR_COPY_WINDOW} consecutive characters of the draft that stands in the exemplar's text and in none of the
- * reference set's own words. A run the Book's own words share — its title, a character's name — is the Book's, not the
- * exemplar's. Deterministic: no model takes part in it.
+ * The first exemplar a draft copies, by its position among the contract's exemplars, or `null` when it copies none. The
+ * Commander's rulings on the reference bound (#688 review), which the Issue's stop clause leaves to the Commander:
+ *
+ * - (a) The draft is compared as one stream, its title, headings and paragraphs joined as the exemplar's paragraphs are — a
+ *   copy cut at a part's edge is still a copy. Both are compatibility-normalized, without spaces, punctuation or symbols.
+ * - Verbatim: any {@link EXEMPLAR_COPY_WINDOW} consecutive characters of the draft that stand in the exemplar.
+ * - (b) Near copy: {@link EXEMPLAR_SHINGLE_SHARE} or more of the draft's distinct {@link EXEMPLAR_SHINGLE}-character shingles
+ *   stand in one exemplar — an edit every few characters does not hide a copy.
+ * - (c) House boilerplate is no one's copy: a run that stands in the exemplars of two different Books, or one of digits and
+ *   ASCII letters only, or one touching an ISBN-like run of the draft.
+ * - (d) A run the Book's own words share — its title, a character's name, its synopsis — is the Book's; the editor's 其他要求
+ *   exempt nothing.
+ * - (e) 繁体 and 简体 are compared as written: no conversion table is among the dependencies, so a copy re-written in the other
+ *   script is not caught (a known limit).
+ *
+ * Deterministic and linear in the words: no model takes part in it.
  */
-export function exemplarCopied(draft: WritingDraftWordsProjection, input: WritingContractInput): { exemplar: number } | null {
+export function exemplarCopied(draft: WritingDraftWordsProjection, input: WritingContractInput): ExemplarCopy | null {
   if (input.exemplars.length === 0) return null;
-  const own = new Set<string>();
-  for (const words of ownWordsOf(input)) for (const run of windows(words, EXEMPLAR_COPY_WINDOW)) own.add(run);
-  const drafted = new Set<string>();
-  // Each part of the draft on its own: a run never spans a heading and the paragraph after it.
-  for (const words of [draft.title, ...draft.sections.flatMap((section) => [section.heading, ...section.paragraphs])]) {
-    for (const run of windows(words, EXEMPLAR_COPY_WINDOW)) if (!own.has(run)) drafted.add(run);
+  const own12 = new Set<string>();
+  const own8 = new Set<string>();
+  for (const words of ownWordsOf(input)) {
+    const characters = comparable(words);
+    for (const run of windowsOf(characters, EXEMPLAR_COPY_WINDOW)) own12.add(run);
+    for (const run of windowsOf(characters, EXEMPLAR_SHINGLE)) own8.add(run);
   }
-  for (const [index, exemplar] of input.exemplars.entries()) {
-    for (const run of windows(exemplar.text, EXEMPLAR_COPY_WINDOW)) if (drafted.has(run)) return { exemplar: index };
+  const exemplars = input.exemplars.map((exemplar) => {
+    const characters = comparable(exemplar.text);
+    return { book: exemplar.bookTitle, runs: windowsOf(characters, EXEMPLAR_COPY_WINDOW), shingles: windowsOf(characters, EXEMPLAR_SHINGLE) };
+  });
+  // Runs the exemplars of two different Books share are the house's phrasing, not one Book's words.
+  const shared = (pick: (entry: (typeof exemplars)[number]) => Set<string>, run: string): boolean =>
+    new Set(exemplars.filter((entry) => pick(entry).has(run)).map((entry) => entry.book)).size >= 2;
+  const stream = comparable([draft.title, ...draft.sections.flatMap((section) => [section.heading, ...section.paragraphs])].join(''));
+  const runs = [...wordWindowsOf(stream, EXEMPLAR_COPY_WINDOW)].filter((run) => !own12.has(run) && !shared((entry) => entry.runs, run));
+  for (const [index, exemplar] of exemplars.entries()) {
+    if (runs.some((run) => exemplar.runs.has(run))) return { exemplar: index, kind: 'verbatim' };
+  }
+  // The share is of every distinct shingle the draft has, so its own words, numbers and the house's phrasing dilute a copy only
+  // by what they add, never by being skipped.
+  const shingles = windowsOf(stream, EXEMPLAR_SHINGLE);
+  if (shingles.size === 0) return null;
+  const counted = [...wordWindowsOf(stream, EXEMPLAR_SHINGLE)].filter((run) => !own8.has(run) && !shared((entry) => entry.shingles, run));
+  for (const [index, exemplar] of exemplars.entries()) {
+    const share = counted.filter((run) => exemplar.shingles.has(run)).length / shingles.size;
+    if (share >= EXEMPLAR_SHINGLE_SHARE) return { exemplar: index, kind: 'near', share };
   }
   return null;
 }
@@ -475,6 +539,15 @@ export function parseWritingUnitResult(value: string, expected: { unitOrdinal: n
   return { ok: true, result: unit, canonicalJson: canonical, digest: sha256Hex(canonical) };
 }
 
+/** What a refused draft is told: which exemplar it copied, and how. */
+export function exemplarCopyDetail(copied: ExemplarCopy, input: WritingContractInput): string {
+  const exemplar = input.exemplars[copied.exemplar]!;
+  const how = copied.kind === 'verbatim'
+    ? `有连续 ${EXEMPLAR_COPY_WINDOW} 个字以上相同`
+    : `的 ${EXEMPLAR_SHINGLE} 字片段重合达 ${Math.floor(copied.share * 100)}%（不少于 ${EXEMPLAR_SHINGLE_SHARE * 100}% 即算照抄）`;
+  return `草稿与范例《${exemplar.bookTitle}》版本 ${exemplar.version} ${how}；范例只参照，不复制，这份草稿不予采用。`;
+}
+
 /**
  * Admit the synthesis: a title and its sections, each within its bound, and nothing else — and a draft that copies none of the
  * contract's exemplars, since an exemplar is referenced and never copied (KB-004).
@@ -504,14 +577,7 @@ export function parseWritingSynthesis(value: string, input: WritingContractInput
   }
   const draft: WritingSynthesisResult = { schema: WRITING_SYNTHESIS_RESULT_SCHEMA, title: result.title, sections };
   const copied = exemplarCopied(draft, input);
-  if (copied !== null) {
-    const exemplar = input.exemplars[copied.exemplar]!;
-    return {
-      ok: false,
-      code: 'exemplar-copied',
-      detail: `草稿与范例《${exemplar.bookTitle}》版本 ${exemplar.version} 有连续 ${EXEMPLAR_COPY_WINDOW} 个字以上相同；范例只参照，不复制，这份草稿不予采用。`,
-    };
-  }
+  if (copied !== null) return { ok: false, code: 'exemplar-copied', detail: exemplarCopyDetail(copied, input) };
   return { ok: true, result: draft };
 }
 

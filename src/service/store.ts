@@ -324,7 +324,6 @@ import {
   MAX_WRITING_SYNOPSIS_GRAPHEMES,
   WRITING_COST_BEFORE_PLAN,
   WRITING_DRAFT_PARSER_IDENTITY,
-  WRITING_EXEMPLAR_COPIED,
   WRITING_FIELD_CONTROL,
   WRITING_NEEDS_MANUSCRIPT,
   WRITING_NOT_DO,
@@ -332,6 +331,8 @@ import {
   WritingTaskError,
   WritingTasks,
   graphemeLength,
+  readWritingExemplar,
+  writingExemplarDigest,
   initializeWritingTaskSchema,
   writingBlockLength,
   writingDocumentExists,
@@ -343,7 +344,6 @@ import {
 } from './writing-tasks.js';
 import { writingKindDefinition } from './writing/writing-kind.js';
 import {
-  exemplarCopied,
   writingExemplarLine,
   type WritingBookInput,
   type WritingContractInput,
@@ -4062,6 +4062,11 @@ export class EditorialStore {
    */
   readonly #writingLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
   readonly #writingWork = new Map<string, BaselineAnalysisStore>();
+  /**
+   * The house's 范例 each Book's page last read, by type (#688 review): while a writing Task is under way the page is read on
+   * every poll and no type can be drafted, so the scan is not repeated then. Bounded by the Books whose page was read.
+   */
+  readonly #writingExemplarCache = new Map<string, Map<string, Array<{ input: WritingExemplarInput; source: WritingExemplarSource }>>>();
   #writingTasks!: WritingTasks;
   #readersReports!: ReadersReports;
   /** 按我的评分重写评语 (Issue #429, S81b2): one ledger per frozen rewrite contract, made when first asked for; bounded. */
@@ -7606,14 +7611,10 @@ export class EditorialStore {
           if (list.length >= MAX_WRITING_EXEMPLARS) continue;
           const exemplar = book.exemplars.find((entry) => entry.typeId === typeId);
           if (exemplar === undefined) continue;
-          const whole = (this.#authority.prepare('SELECT text FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position')
-            .all(exemplar.revisionId) as SqlRow[]).map((row) => asString(row.text)).join('\n');
-          const words = writingWords(whole, MAX_WRITING_EXEMPLAR_GRAPHEMES);
-          if (words.length === 0) continue;
-          list.push({
-            input: { bookTitle: writingWords(book.bookTitle, 200), version: exemplar.version, text: words, excerpt: graphemeLength(whole.trim()) > MAX_WRITING_EXEMPLAR_GRAPHEMES },
-            source: { documentId: exemplar.documentId, revisionId: exemplar.revisionId },
-          });
+          // Its words as the contract takes them, read from its own revision, and the reference that pins them.
+          const words = readWritingExemplar(this.#authority, exemplar.documentId, exemplar.revisionId);
+          if (words === null) continue;
+          list.push({ input: words, source: { documentId: exemplar.documentId, revisionId: exemplar.revisionId, sha256: writingExemplarDigest(words) } });
         }
       }
       after = page.nextCursor;
@@ -7699,9 +7700,17 @@ export class EditorialStore {
   }
 
   advanceWritingPreparationWork(workId: string): AnalysisPreparationResult<WritingProjection> {
+    this.#assertAvailable();
     const ledger = this.#writingWork.get(workId);
     requireStore(ledger !== undefined, 'ANALYSIS_PREPARATION_NOT_FOUND', '写作任务的计划准备已不存在。');
-    const result = this.#analysisCall(() => ledger.prepare({ phase: 'advance', workId }));
+    let result: AnalysisPreparationResult<unknown>;
+    try {
+      result = this.#analysisCall(() => ledger.prepare({ phase: 'advance', workId }));
+    } catch (error) {
+      // A preparation that failed is over: nothing holds its work any more (#688 review).
+      this.#writingWork.delete(workId);
+      throw error;
+    }
     if (result.done) this.#writingWork.delete(workId);
     return { ...result, projection: result.projection as WritingProjection | null };
   }
@@ -7736,18 +7745,27 @@ export class EditorialStore {
     return { settled: this.#analysisCall(() => this.#writingLedger(any.input).reconcileStoppedRuns()).settled };
   }
 
-  /** The newest drafted result of each type whose document is not made yet: what 打开草稿 can make into it. */
+  /**
+   * The newest drafted result of each type whose document is not made yet: what 打开草稿 can make into it. A newer attempt that
+   * wrote no draft — a refused copy of an exemplar — does not hide an older draft that can still be opened (#688 review).
+   */
   #writingDrafted(bookId: string): Map<string, { revisionId: string; createdAt: string }> {
     const drafted = new Map<string, { revisionId: string; createdAt: string }>();
-    const seen = new Set<string>();
     for (const revision of this.#writingCall(() => this.#writingTasks.revisions(bookId))) {
       const found = this.#writingTaskOf(revision.taskIntentId);
-      if (found === null || seen.has(found.task.typeId)) continue;
-      seen.add(found.task.typeId);
+      if (found === null || drafted.has(found.task.typeId)) continue;
       const inspected = this.#analysisCall(() => found.ledger.inspect(bookId, undefined, revision.revisionId)) as WritingProjection;
       if (inspected.inspectedRevision?.revision.writing.draft !== null) drafted.set(found.task.typeId, { revisionId: revision.revisionId, createdAt: revision.createdAt });
     }
     return drafted;
+  }
+
+  /** Why the Book's latest writing Task wrote no draft: its book-level synthesis's own reason, or `null` when it wrote one. */
+  #writingRefusal(projection: WritingProjection): string | null {
+    const revision = projection.resultSetRevision;
+    if (revision === null || projection.taskOutcome === null || projection.taskOutcome.resultSetRevisionId !== revision.revisionId ||
+        revision.writing.draft !== null) return null;
+    return revision.writing.synthesis.reason;
   }
 
   /**
@@ -7786,15 +7804,22 @@ export class EditorialStore {
       unavailable ??= `写作任务暂不可用：${error.message}`;
     }
     const documents = this.#documentCall(() => this.#productionDocuments.documents(bookId, blocks > 0));
-    // The house's 范例 of every type in one pass; a record that no longer reads says so, as any other part does.
-    let exemplarsByType = new Map<string, Array<{ input: WritingExemplarInput; source: WritingExemplarSource }>>();
-    try {
-      exemplarsByType = this.#writingExemplarsByType(bookId, documents.types.map((type) => type.typeId));
-    } catch (error) {
-      if (!(error instanceof StoreError)) throw error;
-      unavailable ??= `写作任务暂不可用：${error.message}`;
-    }
     const runState = latest?.projection.run?.state ?? null;
+    // The house's 范例 of every type in one pass — read again only when no writing Task is under way; a record that no longer
+    // reads says so, as any other part does.
+    let exemplarsByType = new Map<string, Array<{ input: WritingExemplarInput; source: WritingExemplarSource }>>();
+    const cached = runIsActive(runState) ? this.#writingExemplarCache.get(bookId) : undefined;
+    if (cached !== undefined) exemplarsByType = cached;
+    else {
+      try {
+        exemplarsByType = this.#writingExemplarsByType(bookId, documents.types.map((type) => type.typeId));
+        if (this.#writingExemplarCache.size >= REVIEW_CATEGORY_CACHE_CAPACITY) this.#writingExemplarCache.clear();
+        this.#writingExemplarCache.set(bookId, exemplarsByType);
+      } catch (error) {
+        if (!(error instanceof StoreError)) throw error;
+        unavailable ??= `写作任务暂不可用：${error.message}`;
+      }
+    }
     const named = (list: ReadonlyArray<string>, none: string): string => (list.length === 0 ? none : list.join('、'));
     return {
       bookId,
@@ -7836,6 +7861,7 @@ export class EditorialStore {
         typeLabel: latest.task.input.type.label,
         state: latest.projection.state,
         label: writingTaskStateLabel(latest.projection),
+        refusal: this.#writingRefusal(latest.projection),
       },
       quickStart: { allowed: false, reason: WRITING_QUICK_START_REASON },
     };
@@ -7858,7 +7884,6 @@ export class EditorialStore {
     const inspected = this.#analysisCall(() => found.ledger.inspect(bookId, undefined, revisionId)) as WritingProjection;
     const draft = inspected.inspectedRevision?.revision.writing.draft ?? null;
     requireStore(draft !== null, 'WRITING_NOT_DRAFTED', '这一次起草没有写出文档草稿，不能打开草稿。');
-    requireStore(exemplarCopied(draft, found.task.input) === null, 'WRITING_EXEMPLAR_COPIED', WRITING_EXEMPLAR_COPIED);
     const type = productionDocumentType(found.task.typeId);
     requireStore(type !== undefined, 'WRITING_TYPE_INVALID', '这个文档类型不在本社的类型配置中。');
     // Every revision names a Source Version; a draft's names the manuscript file of the revision the Task read (its export is

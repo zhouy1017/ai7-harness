@@ -13,8 +13,9 @@ import {
   EVALUATION_REWRITE_SCHEMA_VERSION,
   WRITING_TASK_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
-import { WRITING_NO_RULE } from '../../src/service/task-plan.js';
-import { WRITING_TASK_TRIGGER_SQL, writingDraftBlocks } from '../../src/service/writing-tasks.js';
+import { WRITING_NOT_DRAFTED_LABEL, WRITING_NO_RULE } from '../../src/service/task-plan.js';
+import { WRITING_EXEMPLAR_MOVED, WRITING_TASK_TRIGGER_SQL, writingDraftBlocks } from '../../src/service/writing-tasks.js';
+import { WRITING_EXEMPLAR_REFUSAL_PREFIX } from '../../src/service/writing/writing-kind.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
   DEFAULT_MANUSCRIPT_EXPORT_OPTIONS,
@@ -143,7 +144,8 @@ describe('写作任务 over the real store on exact sample1', () => {
           evaluation: '本书尚无定稿的评估，本次不参考评估结论与营销要点',
           book: '《写作旅程乙》 · 作者：未填写 · 责编：未填写 · 书系：不在任何书系中',
         },
-        consequences: { read: '当前稿件的全部 97 个内容块，以及上面列出的参考材料', cost: '先看计划后显示' },
+        // 会发送 as S84a is: a writing Task runs only where nothing is sent.
+        consequences: { read: '当前稿件的全部 97 个内容块，以及上面列出的参考材料', send: '不发送任何内容：写作任务目前只在不连接模型服务的运行范围内起草。', cost: '先看计划后显示' },
         task: null,
         quickStart: { allowed: false, reason: WRITING_QUICK_START_REASON },
       });
@@ -319,12 +321,22 @@ describe('写作任务 over the real store on exact sample1', () => {
         .toEqual({ count: 1, statement: '参照本社 1 份宣传文章范例（只参照，不照抄）：《范例来源书》版本 1' });
       expect(page.types.find((type) => type.typeId === 'news-release')!.exemplars.count).toBe(0);
 
-      // A draft that copies the 范例 is refused whole: a gap, and nothing to open.
-      const copying = prepare(store, bookId);
-      const plan = store.inspectTaskPlan({ bookId, kind: 'writing', ref: copying.taskIntent!.taskIntentId });
+      // Drafted first without a copy: the draft closes, the 范例 referenced in its Task, never stored there.
+      const first = prepare(store, bookId);
+      const plan = store.inspectTaskPlan({ bookId, kind: 'writing', ref: first.taskIntent!.taskIntentId });
       expect(plan.scope.reference[0]).toBe(`基线分析的梗概与 ${people.length} 位人物：${people.map((entity) => entity.name).join('、')}`);
       expect(plan.scope.reference[1]).toMatch(/^定稿评估的结论「修改后再议」与主要优点 \d+ 条，营销要点：目标读者 \d+ 条、差异化卖点 \d+ 条、渠道与策略 \d+ 条$/u);
       expect(plan.scope.reference[2]).toBe('参照本社 1 份宣传文章范例（只参照，不照抄）：《范例来源书》版本 1');
+      answerWriting(entries, first, AUTHORED_WRITING_DRAFT);
+      const drafted = await run(session, bookId, first);
+      expect(drafted.resultSetRevision!.writing.draft).toEqual(DRAFT_WORDS);
+      expect(drafted.taskOutcome!.classification).toBe('completed');
+      const draftedRevision = store.inspectWritingTask(bookId).types.find((type) => type.typeId === 'promotion-article')!.drafted!.revisionId;
+      expect(draftedRevision).toBe(drafted.resultSetRevision!.revisionId);
+
+      // Drafted again, and this time copying the 范例: refused whole — a gap with its own reason, never 已完成, nothing to open.
+      const copying = prepare(store, bookId, { ...WRITING_REQUEST, requirements: '篇幅一千字以内' });
+      expect(copying.taskIntent!.mode).toBe('writing-again');
       const copied = Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(exemplarText), ({ segment }) => segment).slice(0, 16).join('');
       answerWriting(entries, copying, {
         ...AUTHORED_WRITING_DRAFT,
@@ -334,33 +346,78 @@ describe('写作任务 over the real store on exact sample1', () => {
       answerWritingReflection(entries, refused.taskOutcome!.report!.accountingDigest);
       expect(refused.resultSetRevision!.writing.draft).toBeNull();
       expect(refused.resultSetRevision!.writing.synthesis.state).toBe('gap');
-      expect(refused.resultSetRevision!.writing.synthesis.reason).toContain('范例只参照，不复制');
-      expect(store.inspectWritingTask(bookId).types.find((type) => type.typeId === 'promotion-article')!.drafted).toBeNull();
+      expect(refused.resultSetRevision!.writing.synthesis.reason).toMatch(new RegExp(`^${WRITING_EXEMPLAR_REFUSAL_PREFIX}草稿与范例《范例来源书》版本 1 有连续 12 个字以上相同；范例只参照，不复制，这份草稿不予采用。$`, 'u'));
+      expect(refused.resultSetRevision!.writing.synthesis.reason).not.toContain('没有可解析');
+      expect(refused.taskOutcome!.classification).toBe('completed-with-gaps');
+      expect(refused.taskOutcome!.safeNextAction).not.toContain('打开草稿');
+      const refusedPage = store.inspectWritingTask(bookId);
+      expect(refusedPage.task).toMatchObject({ taskIntentId: copying.taskIntent!.taskIntentId, state: 'settled' });
+      expect(refusedPage.task!.label).toBe(WRITING_NOT_DRAFTED_LABEL);
+      expect(store.inspectTaskPlan({ bookId, kind: 'writing', ref: copying.taskIntent!.taskIntentId }).state.label).toBe(WRITING_NOT_DRAFTED_LABEL);
+      expect(refusedPage.task!.refusal).toBe(refused.resultSetRevision!.writing.synthesis.reason);
+      // The refused attempt does not hide the older draft: it is still the one 打开草稿 offers.
+      expect(refusedPage.types.find((type) => type.typeId === 'promotion-article')!.drafted!.revisionId).toBe(draftedRevision);
+      expect(await refusal(() => store.createWritingDraft(bookId, refused.resultSetRevision!.revisionId))).toBe('WRITING_NOT_DRAFTED:这一次起草没有写出文档草稿，不能打开草稿。');
 
-      // Drafted again, in the editor's other words, without the copy: the draft closes and opens, the 范例 named in its Task.
-      const again = prepare(store, bookId, { ...WRITING_REQUEST, requirements: '篇幅一千字以内' });
-      expect(again.taskIntent!.mode).toBe('writing-again');
-      answerWriting(entries, again, AUTHORED_WRITING_DRAFT);
-      const drafted = await run(session, bookId, again);
-      expect(drafted.resultSetRevision!.writing.draft).toEqual(DRAFT_WORDS);
-      const revisionId = store.inspectWritingTask(bookId).types.find((type) => type.typeId === 'promotion-article')!.drafted!.revisionId;
-      expect(store.createWritingDraft(bookId, revisionId).document.origin.drafted).toBe(true);
-      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      // A third attempt is prepared, then its 范例 moves under it (its Book renamed in the file): the Run is refused.
+      const third = prepare(store, bookId, { ...WRITING_REQUEST, requirements: '再写一版' });
+      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
       try {
-        const recorded = database.prepare('SELECT canonical_json, evaluation_record_id, baseline_revision_id FROM writing_tasks WHERE task_intent_id = ?')
-          .get(again.taskIntent!.taskIntentId) as { canonical_json: string; evaluation_record_id: string | null; baseline_revision_id: string | null };
-        const task = JSON.parse(recorded.canonical_json) as { exemplarSources: Array<{ documentId: string }>; input: { exemplars: Array<{ bookTitle: string }> } };
-        expect(task.exemplarSources.map((source) => source.documentId)).toEqual([promotion.documentId]);
-        expect(task.input.exemplars.map((exemplar) => exemplar.bookTitle)).toEqual(['范例来源书']);
+        const rows = database.prepare('SELECT canonical_json FROM writing_tasks').all() as Array<{ canonical_json: string }>;
+        expect(rows).toHaveLength(3);
+        for (const row of rows) {
+          // Another Book's words are referenced, never stored in this Book's rows.
+          const task = JSON.parse(row.canonical_json) as { exemplarSources: Array<{ documentId: string; sha256: string }>; input: { exemplars: unknown[] } };
+          expect(task.exemplarSources).toEqual([{ documentId: promotion.documentId, revisionId: promotion.versions[0]!.revisionId, sha256: expect.stringMatching(/^[0-9a-f]{64}$/u) }]);
+          expect(task.input.exemplars).toEqual([]);
+          expect(row.canonical_json).not.toContain(copied);
+        }
+        const recorded = database.prepare('SELECT evaluation_record_id, baseline_revision_id FROM writing_tasks WHERE task_intent_id = ?')
+          .get(first.taskIntent!.taskIntentId) as { evaluation_record_id: string | null; baseline_revision_id: string | null };
         expect(recorded.evaluation_record_id).not.toBeNull();
         expect(recorded.baseline_revision_id).toBe(store.inspectBaselineAnalysis(bookId).resultSetRevision!.revisionId);
         // The ledgers are append-only.
-        expect(() => database.exec('UPDATE writing_tasks SET recorded_at = recorded_at')).toThrowError(/readonly|WRITING_TASK_LEDGER_IMMUTABLE/u);
+        expect(() => database.exec('UPDATE writing_tasks SET recorded_at = recorded_at')).toThrowError(/WRITING_TASK_LEDGER_IMMUTABLE/u);
+        database.prepare('UPDATE books SET title = ? WHERE book_id = ?').run('范例来源书（改）', other.bookId);
+        expect(await refusal(() => store.authorizeWriting(bookId, third.taskIntent!.taskIntentId, third.planEnvelope!.digest))).toBe(`WRITING_EXEMPLAR_MOVED:${WRITING_EXEMPLAR_MOVED}`);
+        const moved = store.inspectWritingTask(bookId);
+        expect(moved.unavailable).toBe(`写作任务暂不可用：${WRITING_EXEMPLAR_MOVED}`);
+        // With no Task under way the page reads the house's 范例 afresh, never the ones it read before.
+        expect(moved.types.find((type) => type.typeId === 'promotion-article')!.exemplars.statement).toBe('参照本社 1 份宣传文章范例（只参照，不照抄）：《范例来源书（改）》版本 1');
+        // The same words again, and the older draft opens: the Book's 宣传文章, made from the draft.
+        database.prepare('UPDATE books SET title = ? WHERE book_id = ?').run('范例来源书', other.bookId);
       } finally {
         database.close();
       }
+      expect(store.inspectWritingTask(bookId).unavailable).toBeNull();
+      expect(store.createWritingDraft(bookId, draftedRevision).document.origin.drafted).toBe(true);
     });
   }, 600_000);
+
+  it('lets a preparation that failed go: its work is not found again', async () => {
+    const fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
+    await withSession(fixture, async ({ store }) => {
+      const imported = await importSample1Book(store, roots.codeRoot, WRITING_BOOK_TITLE);
+      await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      // An unsaved edit makes the preparation take more than one step; a second edit then moves the manuscript under it.
+      const edit = (): void => {
+        const window = store.getManuscriptWindow(imported.manuscriptId, imported.branchId, null);
+        const block = window.blocks[0]!;
+        store.flushJournalEdit({
+          clientEditId: randomUUID(), manuscriptId: imported.manuscriptId, branchId: imported.branchId, baseRevisionId: window.revisionId,
+          blockId: block.blockId, windowStartBlockId: block.blockId, baseBlockDigest: block.digest,
+          expectedJournalSequence: window.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText: '（编辑）',
+        });
+      };
+      edit();
+      const progress = store.createWritingPreparationWork(imported.bookId, WRITING_REQUEST, launchPolicy);
+      expect(progress.done).toBe(false);
+      edit();
+      expect(await refusal(() => store.advanceWritingPreparationWork(progress.workId!))).toBe('REIMPORT_CHECKPOINT_STALE:建立重新导入安全固定点时稿件已变化。');
+      expect(await refusal(() => store.advanceWritingPreparationWork(progress.workId!))).toBe('ANALYSIS_PREPARATION_NOT_FOUND:写作任务的计划准备已不存在。');
+    });
+  }, 300_000);
 
   it('keeps its ledgers append-only and reads a tampered Task as damaged', async () => {
     const fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);

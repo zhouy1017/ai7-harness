@@ -62,6 +62,8 @@ const EXECUTION_STEPS = ['派生覆盖清单', '逐单元执行写作契约 v1�
 const UPDATE_EXECUTION_STEPS = ['派生覆盖清单并计算重读计划', '逐单元执行写作契约 v1，找出文档可以取用的看点、人物与主题', '全书综合：依据参考材料写出文档的标题与各部分，范例只参照不复制', '追加结果集修订版'] as const;
 const NO_SAMPLE = '写作任务没有保证抽样阶段：草稿由编辑修改后才用。' as const;
 const SYNTHESIS_LABEL = '全书综合' as const;
+/** The reading of a draft refused for copying an exemplar: it parsed, and it was turned away. */
+export const WRITING_EXEMPLAR_REFUSAL_PREFIX = '全书综合写出的草稿被拒绝（exemplar-copied），AI7 没有写出可以打开的草稿：' as const;
 
 /** What a settled writing Task tells its editor to do next: in 交付物, where its draft opens. */
 const SAFE_NEXT_ACTIONS = {
@@ -131,6 +133,9 @@ export function writingKindDefinition(input: WritingContractInput): AnalysisKind
         requestDigest: (closed) => writingSynthesisRequestDigest(promptContractDigest, writingPassageSetDigest(closedUnits(closed))),
         // A draft that copies an exemplar is refused whole, a gap: AI7 then writes no draft (KB-004).
         parse: (text) => parseWritingSynthesis(text, frozen),
+        refusalReason: (code, detail) => (code === 'exemplar-copied' ? `${WRITING_EXEMPLAR_REFUSAL_PREFIX}${detail}` : null),
+        // The draft is the Task's result: a Run that wrote none completed with gaps, never 已完成.
+        requiredForCompletion: true,
       },
     },
     crossUnitAbsentReason: '',

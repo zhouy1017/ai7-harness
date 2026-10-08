@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   EXEMPLAR_COPY_WINDOW,
+  EXEMPLAR_SHINGLE,
+  EXEMPLAR_SHINGLE_SHARE,
   MAX_EXEMPLAR_GRAPHEMES,
   WRITING_SYNTHESIS_RESULT_SCHEMA,
   WRITING_UNIT_RESULT_SCHEMA,
@@ -17,7 +19,7 @@ import {
 } from '../../src/service/writing/writing-contract.js';
 import { writingReferenceLines } from '../../src/service/task-plan.js';
 import { graphemeLength, writingDraftBlocks, writingWords } from '../../src/service/writing-tasks.js';
-import { WRITING_CONSEQUENCE_TERMS, WRITING_REFERENCE_TERMS, writingDraftedLine, writingTaskLine } from '../../src/renderer/writing-task-labels.js';
+import { WRITING_CONSEQUENCE_TERMS, WRITING_REFERENCE_TERMS, writingDraftedLine, writingFieldTooLong, writingTaskLine } from '../../src/renderer/writing-task-labels.js';
 
 // Unit suite for Writing Contract v1 (Issue #432, plan slice S84a; V2-UX-DELIV-007, KB-004): the frozen input, the parsers, the
 // reference bound that refuses a copied exemplar, and the words the plan and the page say. Synthetic words only.
@@ -80,7 +82,7 @@ describe('Writing Contract v1 — the frozen input', () => {
     expect(contract.systemPrompt).toContain('起草一份「宣传文章」');
     expect(contract.systemPrompt).not.toContain(EXEMPLAR);
     expect(contract.synthesisInstruction).toContain(EXEMPLAR);
-    expect(contract.synthesisInstruction).toContain(`与范例相同的连续 ${EXEMPLAR_COPY_WINDOW} 个字以上的文字会让整份草稿被拒绝`);
+    expect(contract.synthesisInstruction).toContain(`与范例相同的连续 ${EXEMPLAR_COPY_WINDOW} 个字以上的文字，或与一份范例大段近似的写法，都会让整份草稿被拒绝`);
     expect(contract.synthesisInstruction).toContain(writingTypeGuidance('promotion-article'));
     const bare = writingContract(input({ synopsis: null, evaluation: null, exemplars: [] }));
     expect(bare.synthesisInstruction).toContain('- 梗概与人物：本书尚无基线分析，本次不参考梗概与人物');
@@ -121,25 +123,64 @@ describe('Writing Contract v1 — the frozen input', () => {
 
 describe('Writing Contract v1 — the reference bound (KB-004)', () => {
   const draft = (paragraph: string) => ({ title: '标题', sections: [{ heading: '一', paragraphs: [paragraph] }] });
+  // Synthetic text with no repeated run: `length` distinct ideographs from `from` on, in a scattered order.
+  const synthetic = (length: number, from = 0x4e00) => Array.from({ length }, (_, index) => String.fromCodePoint(from + ((index * 37) % 2000))).join('');
+  const FRESH = synthetic(240, 0x6000);
 
-  it('refuses a draft holding twelve consecutive characters of an exemplar, and takes eleven', () => {
+  it('refuses a draft holding twelve consecutive characters of an exemplar, and takes eleven among its own words', () => {
     const twelve = Array.from(EXEMPLAR).slice(0, EXEMPLAR_COPY_WINDOW).join('');
     const eleven = Array.from(EXEMPLAR).slice(0, EXEMPLAR_COPY_WINDOW - 1).join('');
-    expect(exemplarCopied(draft(`开头${twelve}结尾`), input())).toEqual({ exemplar: 0 });
-    expect(exemplarCopied(draft(`开头${eleven}结尾`), input())).toBeNull();
+    expect(exemplarCopied(draft(`开头${twelve}结尾`), input())).toEqual({ exemplar: 0, kind: 'verbatim' });
+    expect(exemplarCopied(draft(`${FRESH}${eleven}结尾`), input())).toBeNull();
   });
 
   it('sees through spaces, punctuation and compatibility forms', () => {
     const copied = '一位老学者与一封神秘来信的故事';
     const disguised = '一位 老学者——与一封「神秘」来信的故事';
-    expect(exemplarCopied(draft(copied), input())).toEqual({ exemplar: 0 });
-    expect(exemplarCopied(draft(disguised), input())).toEqual({ exemplar: 0 });
+    expect(exemplarCopied(draft(copied), input())).toEqual({ exemplar: 0, kind: 'verbatim' });
+    expect(exemplarCopied(draft(disguised), input())).toEqual({ exemplar: 0, kind: 'verbatim' });
     // Fullwidth digits read as the exemplar's own digits.
     const numbered = input({ exemplars: [{ bookTitle: '范例书', version: 1, text: '首印一万二千册于2026年发行完毕后加印', excerpt: false }] });
-    expect(exemplarCopied(draft('首印一万二千册于２０２６年发行完毕'), numbered)).toEqual({ exemplar: 0 });
+    expect(exemplarCopied(draft('首印一万二千册于２０２６年发行完毕'), numbered)).toEqual({ exemplar: 0, kind: 'verbatim' });
   });
 
-  it('leaves a run the Book\'s own words share: its title, a character, the editor\'s words', () => {
+  it('(a) compares the draft as one stream: a copy split across paragraphs, a heading or the title is still a copy', () => {
+    expect(exemplarCopied({ title: '标题', sections: [{ heading: '一', paragraphs: ['一位老学者与一', '封神秘来信的故事'] }] }, input())).toEqual({ exemplar: 0, kind: 'verbatim' });
+    expect(exemplarCopied({ title: '标题', sections: [{ heading: '一位老学者与一封', paragraphs: ['神秘来信的故事'] }] }, input())).toEqual({ exemplar: 0, kind: 'verbatim' });
+    expect(exemplarCopied({ title: '一位老学者与一封神秘', sections: [{ heading: '来信的故事', paragraphs: [FRESH] }] }, input())).toEqual({ exemplar: 0, kind: 'verbatim' });
+  });
+
+  it('(b) refuses a near copy: one edit every eleven characters leaves no twelve-character run, and a quarter of the shingles', () => {
+    const source = synthetic(240);
+    const near = Array.from(source).map((character, index) => (index % 11 === 10 ? String.fromCodePoint(0x9f00 + index) : character)).join('');
+    const exemplar = input({ exemplars: [{ bookTitle: '范例书', version: 3, text: source, excerpt: false }] });
+    const copied = exemplarCopied(draft(near), exemplar);
+    expect(copied).toMatchObject({ exemplar: 0, kind: 'near' });
+    expect(copied?.kind === 'near' ? copied.share : 0).toBeGreaterThanOrEqual(EXEMPLAR_SHINGLE_SHARE);
+    // The same edits every eight characters leave no shingle in common: the draft's own words.
+    const rewritten = Array.from(source).map((character, index) => (index % 8 === 7 ? String.fromCodePoint(0x9f00 + index) : character)).join('');
+    expect(exemplarCopied(draft(rewritten), exemplar)).toBeNull();
+    const detail = parseWritingSynthesis(synthesis([near]), exemplar);
+    expect(detail.ok ? '' : detail.detail).toMatch(new RegExp(`^草稿与范例《范例书》版本 3 的 ${EXEMPLAR_SHINGLE} 字片段重合达 \\d+%（不少于 25% 即算照抄）；范例只参照，不复制，这份草稿不予采用。$`, 'u'));
+  });
+
+  it('(c) leaves the house\'s boilerplate: a run in the exemplars of two different Books, letters and digits, an ISBN', () => {
+    const notice = '本书由本社出版发行欢迎各地读者选购';
+    const two = input({ exemplars: [
+      { bookTitle: '范例书', version: 1, text: `${synthetic(40, 0x5000)}${notice}`, excerpt: false },
+      { bookTitle: '另一本书', version: 1, text: `${synthetic(40, 0x5800)}${notice}`, excerpt: false },
+    ] });
+    expect(exemplarCopied(draft(`${FRESH}${notice}`), two)).toBeNull();
+    // Two exemplars of the same Book are not the house's phrasing.
+    const same = input({ exemplars: two.exemplars.map((exemplar) => ({ ...exemplar, bookTitle: '范例书' })) });
+    expect(exemplarCopied(draft(`${FRESH}${notice}`), same)).toEqual({ exemplar: 0, kind: 'verbatim' });
+    const numbers = input({ exemplars: [{ bookTitle: '范例书', version: 1, text: '书号ISBN978-7-02-000220-7，网址WWWEXAMPLECOM。', excerpt: false }] });
+    expect(exemplarCopied(draft(`${FRESH}书号：ISBN 978-7-02-000220-7，${synthetic(30, 0x7000)}WWWEXAMPLECOM。`), numbers)).toBeNull();
+    // The same words with a Book's own phrase beside the address are a copy.
+    expect(exemplarCopied(draft(`${FRESH}网址WWWEXAMPLECOM。`), numbers)).toEqual({ exemplar: 0, kind: 'verbatim' });
+  });
+
+  it('(d) leaves a run the Book\'s own words share — its title, a character — and never the editor\'s 其他要求', () => {
     const shared = '合成书名讲述学者甲的一生故事';
     const own = input({
       book: { title: '合成书名讲述学者甲的一生故事', authors: [], editors: [], series: [] },
@@ -147,13 +188,15 @@ describe('Writing Contract v1 — the reference bound (KB-004)', () => {
     });
     expect(exemplarCopied(draft(`${shared}。`), own)).toBeNull();
     const notOwn = input({ exemplars: own.exemplars });
-    expect(exemplarCopied(draft(`${shared}。`), notOwn)).toEqual({ exemplar: 0 });
+    expect(exemplarCopied(draft(`${shared}。`), notOwn)).toEqual({ exemplar: 0, kind: 'verbatim' });
+    // Words pasted into 其他要求 from an exemplar whitelist nothing.
+    expect(exemplarCopied(draft(EXEMPLAR), input({ requirements: EXEMPLAR }))).toEqual({ exemplar: 0, kind: 'verbatim' });
   });
 
   it('checks every part of the draft and every exemplar, and none when there is no exemplar', () => {
     const second = input({ exemplars: [input().exemplars[0]!, { bookTitle: '第二范例', version: 1, text: '第二份范例写着青铜重器与人心的长篇故事。', excerpt: false }] });
-    expect(exemplarCopied({ title: '青铜重器与人心的长篇故事', sections: [{ heading: '一', paragraphs: ['无关'] }] }, second)).toEqual({ exemplar: 1 });
-    expect(exemplarCopied({ title: '标题', sections: [{ heading: '一', paragraphs: ['无关', '青铜重器与人心的长篇故事。'] }] }, second)).toEqual({ exemplar: 1 });
+    expect(exemplarCopied({ title: '青铜重器与人心的长篇故事', sections: [{ heading: '一', paragraphs: ['无关'] }] }, second)).toEqual({ exemplar: 1, kind: 'verbatim' });
+    expect(exemplarCopied({ title: '标题', sections: [{ heading: '一', paragraphs: ['无关', '青铜重器与人心的长篇故事。'] }] }, second)).toEqual({ exemplar: 1, kind: 'verbatim' });
     expect(exemplarCopied(draft(EXEMPLAR), input({ exemplars: [] }))).toBeNull();
   });
 
@@ -234,7 +277,9 @@ describe('the draft and the page\'s words', () => {
   it('speaks editor-surfaces §9\'s words', () => {
     expect(WRITING_CONSEQUENCE_TERMS).toEqual(['会读取', '会发送', '不会做', '费用']);
     expect(WRITING_REFERENCE_TERMS).toEqual(['梗概与人物', '评估结论与营销要点', '范例', '图书信息']);
-    expect(writingTaskLine({ taskIntentId: 'x', typeId: 'promotion-article', typeLabel: '宣传文章', state: 'settled', label: '已完成' })).toBe('写作任务「宣传文章」：已完成');
+    expect(writingTaskLine({ taskIntentId: 'x', typeId: 'promotion-article', typeLabel: '宣传文章', state: 'settled', label: '已完成', refusal: null })).toBe('写作任务「宣传文章」：已完成');
+    expect(writingFieldTooLong('requirements')).toBe('其他要求最多 300 个字，只能写在一行里。');
+    expect(writingFieldTooLong('audience')).toBe('受众最多 60 个字，只能写在一行里。');
     expect(writingDraftedLine('宣传文章', '10月9日 03:30')).toBe('「宣传文章」的草稿已写好（10月9日 03:30）；打开后成为这本书的宣传文章，处于「起草」阶段。');
   });
 });

@@ -12,8 +12,15 @@ export const WRITING_REFERENCE_HEADING = 'AI7 会参考';
 /** The reference set's rows, in the order editor-surfaces §9 names them. */
 export const WRITING_REFERENCE_TERMS = ['梗概与人物', '评估结论与营销要点', '范例', '图书信息'] as const;
 export const WRITING_EXEMPLAR_PICK_TYPE = '选好类型后显示';
+import { MAX_WRITING_AUDIENCE_GRAPHEMES, MAX_WRITING_CHANNEL_GRAPHEMES, MAX_WRITING_REQUIREMENTS_GRAPHEMES } from '../shared/protocol.js';
+
 export const WRITING_FIELD_LABELS = { audience: '受众', channel: '渠道', requirements: '其他要求（可不填）' } as const;
 export const WRITING_FIELD_HINTS = { audience: '这份文档写给谁看', channel: '会在哪里发布或使用', requirements: '篇幅、语气或必须写到的内容' } as const;
+/** How many characters each field takes, as the service bounds it (#688 review): the service's own words when one is longer. */
+export const WRITING_FIELD_MOST = { audience: MAX_WRITING_AUDIENCE_GRAPHEMES, channel: MAX_WRITING_CHANNEL_GRAPHEMES, requirements: MAX_WRITING_REQUIREMENTS_GRAPHEMES } as const;
+export function writingFieldTooLong(key: keyof typeof WRITING_FIELD_MOST): string {
+  return `${key === 'requirements' ? '其他要求' : WRITING_FIELD_LABELS[key]}最多 ${WRITING_FIELD_MOST[key]} 个字，只能写在一行里。`;
+}
 /** editor-surfaces §9's 四行后果, in the 新建审阅 sheet's terms. */
 export const WRITING_CONSEQUENCE_TERMS = ['会读取', '会发送', '不会做', '费用'] as const;
 export const WRITING_ACTIONS = {

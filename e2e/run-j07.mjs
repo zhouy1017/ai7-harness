@@ -52,7 +52,7 @@ const WRITING_FIXTURE = 'sample1-writing-authored';
 const WRITING_TITLE = '写作旅程乙';
 const WRITING_REQUEST = Object.freeze({ typeId: 'promotion-article', audience: '喜欢历史与悬疑小说的读者', channel: '出版社微信公众号' });
 const WRITING_TYPES = Object.freeze([['news-release', '新闻稿'], ['promotion-article', '宣传文章'], ['review-article', '评论文章'], ['launch-materials', '发布会材料'], ['marketing-points', '营销要点']]);
-const WRITING_SEND = '所读的稿件正文、上面列出的参考材料与你写的受众、渠道和要求，发往为写作配置的模型服务；没有连接模型服务时不发送任何内容。';
+const WRITING_SEND = '不发送任何内容：写作任务目前只在不连接模型服务的运行范围内起草。';
 const WRITING_NOT_DO = '不改稿件；不照抄范例；不交付、不发送；草稿由你在稿件编辑面上修改后才用。';
 const WRITING_QUICK_START_REASON = '写作任务还没有默认执行规则：先看计划，再在计划里开始任务。';
 const READ_CONNECTION = `window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection??null)`;
