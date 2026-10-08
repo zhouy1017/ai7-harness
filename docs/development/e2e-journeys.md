@@ -29,7 +29,7 @@ Since #433 (S85a), after the restart, 数据与存储 also shows `版本`. It gi
 Since #434 (S86a), a stage after the credential is replaced relaunches with `--j12-save-path`, opens 数据与存储 and runs 导出数据库…:
 - The prepared card states the file, the place, `新建文件`, the contents and `数据版本 1`.
 - `按上述方式导出` writes the file and reads `已导出到所选位置`.
-- The runner then opens the package and checks its manifest: Data Version 1, the terminal schema revision (read from `CREDENTIAL_CLEANUP_SCHEMA_VERSION` since #649; 63 since S30), credentials excluded, and the number of Books the card counted.
+- The runner then opens the package and checks its manifest: Data Version 1, the terminal schema revision (read from `CREDENTIAL_CLEANUP_SCHEMA_VERSION` since #649; 64 since S81b2), credentials excluded, and the number of Books the card counted.
 - It finds neither synthetic credential in any member, in UTF-8 or UTF-16.
 
 Since S86b, the same stage checks 定期自动备份:

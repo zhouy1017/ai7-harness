@@ -1,6 +1,6 @@
 # AI7 development plan
 
-Status: **Owner-accepted delivery order under [ADR 0064](../adr/0064-reweight-repository-development-toward-value-first-delivery.md), re-cut on `dev@28cc1dd800cf55b17947cceb64a3bce4d81ccfef` on 2026-09-10 from the backend alignment list of the [editor-facing surface specification](../ui-ux-v2/editor-surfaces.md) §11 ([ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) §7, [ADR 0078](../adr/0078-align-the-remaining-references-the-plan-and-the-tracker-to-the-editor-facing-specification.md)).** This file is the only place the order lives. Status columns were refreshed at `dev@d3c04b3` on 2026-09-17 by the agent-readiness review and since then with each `PROGRESS.md` checkpoint, most recently at `dev@0747067e` on 2026-10-09; no order changed. Root [`PROGRESS.md`](../../PROGRESS.md) names the next slice; every slice Issue carries its plan slot. The order changes only through a Commander pull request that edits this file and states the reason; a change that alters product authority also needs an ADR. The order as it stood before the re-cut is archived at [docs/archive/editor-surfaces-standard-2026-09-10](../archive/editor-surfaces-standard-2026-09-10/INDEX.md).
+Status: **Owner-accepted delivery order under [ADR 0064](../adr/0064-reweight-repository-development-toward-value-first-delivery.md), re-cut on `dev@28cc1dd800cf55b17947cceb64a3bce4d81ccfef` on 2026-09-10 from the backend alignment list of the [editor-facing surface specification](../ui-ux-v2/editor-surfaces.md) §11 ([ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) §7, [ADR 0078](../adr/0078-align-the-remaining-references-the-plan-and-the-tracker-to-the-editor-facing-specification.md)).** This file is the only place the order lives. Status columns were refreshed at `dev@d3c04b3` on 2026-09-17 by the agent-readiness review and since then with each `PROGRESS.md` checkpoint, most recently at `dev@e3c6cb69` on 2026-10-09; no order changed. Root [`PROGRESS.md`](../../PROGRESS.md) names the next slice; every slice Issue carries its plan slot. The order changes only through a Commander pull request that edits this file and states the reason; a change that alters product authority also needs an ADR. The order as it stood before the re-cut is archived at [docs/archive/editor-surfaces-standard-2026-09-10](../archive/editor-surfaces-standard-2026-09-10/INDEX.md).
 
 ## Why this order
 
@@ -125,7 +125,7 @@ Exit criterion: 知识库 holds the seven classes with versions and selection sn
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 4.1 | S79 | #427 | T3 | J-15 | ⑤ 知识库: seven classes, versions, selection snapshots, attribution, eligibility; 范例 auto-archived at 发稿 (B21) | S75, S65 | S79a (PR #564, `dev@2de1042`), S79b (PR #565, `dev@b2f3fc3`), S79d's first piece (PR #566, `dev@828ca35`) and S79c (PR #567, `dev@84b0353`) integrated; S79d's remainder (评估方案, 社级编辑记忆, 外部来源留存 after S70) and the 范例 import remain |
 | 4.2 | S80 | #428 | T3 | J-15 | ⑤ The five-layer Material Index with local similarity vectors (B22) | S79 | planned (a local dependency needs the Owner) |
-| 4.3 | S81 | #429 | T3 | J-11 | ②C 评估 and 审稿意见: Evaluation Records, the 100-point model, risk items, the prediction block, the fixed task (B7) | S79, S72, S65 | S81a (PR #570, `dev@3cd7bd8`), S81b1 (PR #653, `dev@d9b11df`) and S81c (PR #662, `dev@fe8256d`) integrated; S81b2 (the market block and the prediction) being built |
+| 4.3 | S81 | #429 | T3 | J-11 | ②C 评估 and 审稿意见: Evaluation Records, the 100-point model, risk items, the prediction block, the fixed task (B7) | S79, S72, S65 | S81a (PR #570, `dev@3cd7bd8`), S81b1 (PR #653, `dev@d9b11df`), S81b2 (PR #682, `dev@61b2563`) and S81c (PR #662, `dev@fe8256d`) integrated; the EVAL-011 calibration offset and Quality Signals from adjustments remain |
 | 4.4 | S82 | #430 | T2 | J-12 | ⑤ 设置 › 评估校准与预测 (B23) | S81, S65 | integrated (PR #577, `dev@1b6464a`) |
 | 4.5 | S83 | #431 | T2 | J-11 | ⑤ Book People: 作者, 责编, 相关人 and attribution (B19) | — | integrated (PR #561, `dev@6c138f6`); admits J-11 |
 | 4.6 | S38 | #94 | T2 | J-11 | Analysis feedback Quality Signals and the versioned Analysis Quality Metric | S44, S71 | integrated (PR #573, `dev@b17492f`) |
@@ -141,9 +141,9 @@ Exit criterion: 知识库 holds the seven classes with versions and selection sn
 | 5.1 | S17 | #52 | T3 | J-16 | Interactive Editorial Dialogue streaming without authority mutation | S77 | S17a (PR #658, `dev@3a6b73d`) integrated on the local route; S17c, the live route under ADR 0088, follows S87-f3b; S17b waits for S77b's composer |
 | 5.2 | S34 | #90 | T3 | J-16 | Book-bound DSH Agent Workspace | S17 | planned |
 | 5.3 | S30 | #65 | T3 | J-15 | Capture a reusable procedure candidate as a native artifact, a projection or a developer proposal (the Rule branch is S75's) | S75, S79 | integrated (PR #666, `dev@fed7ed6`) under ADR 0087 (PR #664) |
-| 5.4 | S31 | #66 | T3 | J-15 | Resolve, pin, reuse, and retire exact procedure versions | S30 | being built |
+| 5.4 | S31 | #66 | T3 | J-15 | Resolve, pin, reuse, and retire exact procedure versions | S30 | S31a (PR #681, `dev@f862f24`) integrated; S31b remains |
 | 5.5 | S33 | #89 | T2 | J-15 | Reconcile and adopt foreign Skill updates | S31 | planned |
-| 5.6 | S84 | #432 | T3 | J-07 | ⑥ 写作任务 drafting a Production Document from the synopsis, evaluation, exemplars and metadata (B29) | S66, S79, S81, S72 | planned |
+| 5.6 | S84 | #432 | T3 | J-07 | ⑥ 写作任务 drafting a Production Document from the synopsis, evaluation, exemplars and metadata (B29) | S66, S79, S81, S72 | S84a being built (draft PR #688) |
 
 ## Superseded slices
 
